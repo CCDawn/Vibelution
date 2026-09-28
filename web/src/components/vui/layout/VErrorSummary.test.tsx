@@ -55,7 +55,7 @@ describe("VErrorSummary", () => {
     expect(markup).toContain("<details");
     expect(markup).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(markup).toContain('data-slot="error-summary-details"');
-    expect(markup).not.toContain("ml-[26px]");
+    expect(markup).not.toContain("ml-6.5");
     expect(markup).toContain("full stack");
     expect(markup).toContain("详情");
     expect(markup).toContain("provider timeout…");

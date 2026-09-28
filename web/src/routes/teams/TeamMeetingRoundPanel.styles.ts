@@ -7,7 +7,7 @@ const styles: Record<string, string> = {
     "flex items-start justify-between gap-2.5 [&>div]:grid [&>div]:gap-0.5 [&_h3]:[font-size:var(--vui-font-md)] [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
   roundDisplay: "grid min-w-0 gap-3",
   headingActions: "flex shrink-0 flex-wrap items-center justify-end gap-2",
-  messageList: "grid gap-[9px]",
+  messageList: "grid gap-2",
   messageCard:
     "grid gap-1.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-[1.5]",
   messagePreview:
@@ -16,11 +16,11 @@ const styles: Record<string, string> = {
     "m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]",
   messageMeta:
     "flex flex-wrap items-center gap-x-3 gap-y-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
-  digestGrid: "grid min-w-0 gap-[9px]",
+  digestGrid: "grid min-w-0 gap-2",
   digestCard:
     "grid min-w-0 gap-1.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_p]:min-w-0 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:leading-[1.5] [&_p]:[overflow-wrap:anywhere]",
   digestList:
-    "m-0 grid min-w-0 gap-[3px] pl-[18px] [font-size:var(--vui-font-2xs)] leading-[1.5] [&_li]:min-w-0 [&_li]:[overflow-wrap:anywhere]",
+    "m-0 grid min-w-0 gap-1 pl-4 [font-size:var(--vui-font-2xs)] leading-[1.5] [&_li]:min-w-0 [&_li]:[overflow-wrap:anywhere]",
   proposedCandidateList:
     "m-0 grid max-h-[min(48dvh,360px)] min-w-0 list-none gap-1.5 overflow-y-auto overscroll-contain p-0 [scrollbar-gutter:stable]",
   proposedCandidate:

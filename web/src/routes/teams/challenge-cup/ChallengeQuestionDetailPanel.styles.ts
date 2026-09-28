@@ -19,7 +19,7 @@ const styles: Record<string, string> = {
   headerActions: "flex shrink-0 items-center gap-2",
   eyebrow: "[font-size:var(--vui-font-2xs)] font-[650] tracking-[0.02em] text-[var(--fg-secondary)]",
   anchorNav:
-    "grid gap-3 [&_a]:flex [&_a]:min-w-0 [&_a]:items-center [&_a]:gap-[7px] [&_a]:rounded-[var(--vui-radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-surface-panel)] [&_a]:px-2.5 [&_a]:py-[9px] [&_a]:[font-size:var(--vui-font-2xs)] [&_a]:text-inherit [&_a]:no-underline",
+    "grid gap-3 [&_a]:flex [&_a]:min-w-0 [&_a]:items-center [&_a]:gap-2 [&_a]:rounded-[var(--vui-radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-surface-panel)] [&_a]:px-2.5 [&_a]:py-2 [&_a]:[font-size:var(--vui-font-2xs)] [&_a]:text-inherit [&_a]:no-underline",
   // Two-stage anchor directory: zone title row + its anchor links. The archive
   // mode still renders bare links, so link styles stay on the anchorNav
   // descendant selector and cover both layouts.
@@ -36,27 +36,27 @@ const styles: Record<string, string> = {
   section:
     "grid scroll-mt-5 gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-4 [&_h3]:m-0 [&_h4]:m-0 [&_p]:m-0",
   sectionHeading:
-    "flex items-start gap-2.5 [&>span]:pt-[3px] [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_h3]:[font-size:var(--vui-font-md)] [&_p]:mt-0.5 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
+    "flex items-start gap-2.5 [&>span]:pt-1 [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_h3]:[font-size:var(--vui-font-md)] [&_p]:mt-0.5 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
   factGrid:
     "grid grid-cols-2 gap-2 [&_section]:grid [&_section]:gap-1 [&_span]:[font-size:var(--vui-font-2xs)] [&_span]:font-[650] [&_span]:tracking-[0.02em] [&_span]:text-[var(--fg-secondary)]",
   warning:
-    "flex items-start gap-[9px] rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-3 py-2.5 [&_svg]:shrink-0 [&_svg]:text-[var(--state-warning)] [&_p]:mt-0.5 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
+    "flex items-start gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-3 py-2.5 [&_svg]:shrink-0 [&_svg]:text-[var(--state-warning)] [&_p]:mt-0.5 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
   explanation:
-    "grid gap-2.5 [&_dl]:m-0 [&_dl]:grid [&_dl]:grid-cols-1 [&_dl]:gap-2 [&_dl>div]:grid [&_dl>div]:gap-[3px] [&_dt]:[font-size:var(--vui-font-2xs)] [&_dt]:text-[var(--fg-secondary)] [&_dd]:m-0",
-  cardList: "grid gap-[9px]",
+    "grid gap-2.5 [&_dl]:m-0 [&_dl]:grid [&_dl]:grid-cols-1 [&_dl]:gap-2 [&_dl>div]:grid [&_dl>div]:gap-1 [&_dt]:[font-size:var(--vui-font-2xs)] [&_dt]:text-[var(--fg-secondary)] [&_dd]:m-0",
+  cardList: "grid gap-2",
   evidenceCard:
     "rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3",
   cardTopline: "flex items-center justify-between gap-3",
   metadata:
-    "mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&_a]:inline-flex [&_a]:items-center [&_a]:gap-[3px] [&_a]:text-[var(--accent-cool)]",
+    "mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&_a]:inline-flex [&_a]:items-center [&_a]:gap-1 [&_a]:text-[var(--accent-cool)]",
   fact:
-    "mt-2.5 border-l-[3px] border-[var(--accent-cool)] bg-[var(--vui-surface-inset)] px-2.5 py-[9px] [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_p]:mt-[3px]",
+    "mt-2.5 border-l-[3px] border-[var(--accent-cool)] bg-[var(--vui-surface-inset)] px-2.5 py-2 [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_p]:mt-1",
   missing: "[font-size:var(--vui-font-2xs)] text-[var(--state-warning)]",
   missingLine: "mt-1.5 [font-size:var(--vui-font-2xs)] text-[var(--state-warning)]",
-  compactList: "mt-[3px] mb-0 grid gap-[3px] pl-[18px]",
+  compactList: "mt-1 mb-0 grid gap-1 pl-4",
   twoColumn: "grid grid-cols-1 gap-2.5",
   hypothesisCard:
-    "grid gap-2.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_h4]:[font-size:var(--vui-font-sm)] [&_h4]:leading-[1.45] [&_dl]:m-0 [&_dl]:grid [&_dl]:gap-2 [&_dl>div]:grid [&_dl>div]:gap-[3px] [&_dt]:[font-size:var(--vui-font-2xs)] [&_dt]:text-[var(--fg-secondary)] [&_dd]:m-0",
+    "grid gap-2.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_h4]:[font-size:var(--vui-font-sm)] [&_h4]:leading-[1.45] [&_dl]:m-0 [&_dl]:grid [&_dl]:gap-2 [&_dl>div]:grid [&_dl>div]:gap-1 [&_dt]:[font-size:var(--vui-font-2xs)] [&_dt]:text-[var(--fg-secondary)] [&_dd]:m-0",
   hypothesisSummaryList: "grid gap-2",
   hypothesisSummaryCard: "overflow-hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)]",
   hypothesisToggle: "flex w-full items-start justify-between gap-3 px-3 py-3 text-left whitespace-normal hover:bg-[var(--vui-surface-inset)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]",
@@ -64,7 +64,7 @@ const styles: Record<string, string> = {
   hypothesisIndex: "inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-[var(--vui-surface-inset)] [font-size:var(--vui-font-2xs)] font-semibold text-[var(--fg-tertiary)]",
   hypothesisSummaryDetail: "border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] px-4 py-3 [&_dl]:m-0 [&_dl]:grid [&_dl]:gap-2 [&_dl>div]:grid [&_dl>div]:gap-1 [&_dt]:[font-size:var(--vui-font-2xs)] [&_dt]:font-semibold [&_dt]:text-[var(--fg-tertiary)] [&_dd]:m-0 [&_dd]:[font-size:var(--vui-font-sm)] [&_dd]:leading-6 [&_dd]:text-[var(--fg-secondary)]",
   reviewGroups:
-    "grid gap-[9px] [&>article]:grid [&>article]:gap-2 [&>article]:rounded-[var(--vui-radius-panel-soft)] [&>article]:border [&>article]:border-[var(--vui-border-subtle)] [&>article]:bg-[var(--vui-surface-card)] [&>article]:p-3",
+    "grid gap-2 [&>article]:grid [&>article]:gap-2 [&>article]:rounded-[var(--vui-radius-panel-soft)] [&>article]:border [&>article]:border-[var(--vui-border-subtle)] [&>article]:bg-[var(--vui-surface-card)] [&>article]:p-3",
   reviewGrid:
     "grid grid-cols-2 gap-1.5 @min-[400px]:grid-cols-3 [&>div]:grid [&>div]:min-w-0 [&>div]:content-start [&>div]:gap-1 [&>div]:rounded-[var(--vui-radius-control)] [&>div]:bg-[var(--vui-surface-inset)] [&>div]:p-2 [&_span]:[font-size:var(--vui-font-2xs)] [&_span]:text-[var(--fg-secondary)] [&_small]:[font-size:var(--vui-font-2xs)] [&_small]:text-[var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:leading-[1.45]",
   selection:
@@ -78,7 +78,7 @@ const styles: Record<string, string> = {
   workPackage:
     "grid gap-1.25 rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] p-2.5 [&_small]:text-[var(--fg-secondary)]",
   timeline:
-    "grid gap-[9px] [&_article]:grid [&_article]:grid-cols-[76px_1fr] [&_article]:gap-3 [&_article]:rounded-[var(--vui-radius-panel-soft)] [&_article]:border [&_article]:border-[var(--vui-border-subtle)] [&_article]:bg-[var(--vui-surface-card)] [&_article]:p-3 [&_article>span]:font-bold [&_article>span]:text-[var(--accent-cool)] [&_small]:text-[var(--state-warning)]",
+    "grid gap-2 [&_article]:grid [&_article]:grid-cols-[76px_1fr] [&_article]:gap-3 [&_article]:rounded-[var(--vui-radius-panel-soft)] [&_article]:border [&_article]:border-[var(--vui-border-subtle)] [&_article]:bg-[var(--vui-surface-card)] [&_article]:p-3 [&_article>span]:font-bold [&_article>span]:text-[var(--accent-cool)] [&_small]:text-[var(--state-warning)]",
   reviewForm:
     "grid gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3",
   reviewSuccess:

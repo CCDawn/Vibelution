@@ -148,7 +148,7 @@ export function VErrorSummary({
             <span className="hidden group-open/error-summary:inline">{closeLabel}</span>
           </span>
         </summary>
-        <div className={[DETAILS, icon ? "ml-[26px]" : undefined].filter(Boolean).join(" ")} data-slot="error-summary-details">
+        <div className={[DETAILS, icon ? "ml-6" : undefined].filter(Boolean).join(" ")} data-slot="error-summary-details">
           {details}
         </div>
       </details>

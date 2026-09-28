@@ -70,7 +70,7 @@ function HighlightedText({ text, needle }: { text: string; needle: string }) {
     parts.push(
       <mark
         key={key += 1}
-        className="rounded-sm bg-[var(--vui-surface-inset)] px-[1px] text-inherit"
+        className="rounded-sm bg-[var(--vui-surface-inset)] px-0 text-inherit"
       >
         {text.slice(index, index + normalized.length)}
       </mark>,

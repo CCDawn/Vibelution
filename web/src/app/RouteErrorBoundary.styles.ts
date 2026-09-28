@@ -5,18 +5,18 @@ import {
 
 const surfaceClass = [
   "grid min-h-screen place-items-center bg-[image:var(--vui-gradient-route-soft)] p-8 text-vui-fg-primary",
-  "max-[640px]:p-[18px]",
+  "max-[640px]:p-4",
 ].join(" ");
 const panelClass = [
   `w-[min(560px,100%)] ${vuiGlassPanelClass} p-5 shadow-none backdrop-blur-[14px]`,
-  "max-[640px]:p-[18px]",
+  "max-[640px]:p-4",
 ].join(" ");
 const kickerClass = "mb-2 mt-0 [font-size:var(--vui-font-sm)] font-bold text-vui-accent-cool";
 const titleClass = "m-0 text-vui-title leading-[1.25] max-[640px]:text-vui-title";
 const detailClass = "mb-0 mt-3 [font-size:var(--vui-font-chat)] leading-[1.55] text-vui-fg-secondary";
-const actionsClass = "mt-[18px] flex flex-wrap gap-2";
+const actionsClass = "mt-4 flex flex-wrap gap-2";
 const actionButtonClass = "min-w-24";
-const technicalClass = "mt-[18px] border-t border-vui-border-subtle pt-3.5";
+const technicalClass = "mt-4 border-t border-vui-border-subtle pt-3.5";
 const technicalSummaryClass = "cursor-pointer [font-size:var(--vui-font-sm)] font-bold text-vui-fg-tertiary";
 const technicalPreClass = `mt-2.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius-card)] border border-vui-border-subtle ${vuiWorkspaceFillClass} p-3 [font-size:var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary`;
 

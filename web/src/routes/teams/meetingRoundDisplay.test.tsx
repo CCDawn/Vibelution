@@ -352,7 +352,7 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
     renderDraft({ ...draft });
     const fullList = container.querySelector('[data-testid="meeting-proposed-candidates"] ul');
     expect(fullList?.className).not.toContain("overflow-y-auto");
-    expect(fullList?.className).toContain("pl-[18px]");
+    expect(fullList?.className).toContain("pl-4");
     expect(fullList?.querySelectorAll("li")).toHaveLength(2);
   });
 
