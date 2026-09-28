@@ -23,6 +23,8 @@ import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import navigatorStylesSource from "./ConversationTurnNavigator.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
+import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
+import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import { ConversationView } from "./ConversationView";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
@@ -954,6 +956,27 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).not.toMatch(
       /assistantTurnIsStreaming\(message\)\s*\?\s*render\w+ResponseText/,
     );
+  });
+
+  it("threads the session workspace root into every markdown render path", () => {
+    // The route forwards the session summary workspacePath; without a root the
+    // markdown link classifier keeps workspace-file hrefs inert (legacy anchor).
+    expect(conversationViewSource).toContain("sessionWorkspacePath,");
+    expect(chatRouteSource).toContain("sessionWorkspacePath: detail.workspacePath,");
+    // Both markdown surfaces (segment bodies + assistant transcript cell) must
+    // forward the root and the chrome language together (two joined instances;
+    // tool detail surfaces already pass language={lang} separately).
+    expect(conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(2);
+    expect(
+      conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
+    ).toBe(2);
+    // Prop lives on the shared view contract so the composer bridge passes it
+    // through its ConversationViewProps-derived spread.
+    expect(conversationViewTypesSource).toContain("sessionWorkspacePath?: string");
+    // The streaming transcript content threads the root into its stable
+    // markdown subtree (settled answers render through the same renderer).
+    expect(conversationStreamingResponseContentSource).toContain("workspaceRoot={workspaceRoot}");
+    expect(conversationStreamingResponseContentSource).toContain("language={language}");
   });
 
   it("keeps tool detail expansion work off collapsed renders", () => {

@@ -1035,6 +1035,7 @@ export const ConversationView = React.memo(function ConversationView({
   messages,
   activeTurnMessage,
   transcriptPending = false,
+  sessionWorkspacePath,
   className,
   density = "default",
   composerVariant = "compact",
@@ -5973,6 +5974,8 @@ export const ConversationView = React.memo(function ConversationView({
         content={content}
         duplicateImageUrls={duplicateImageUrls}
         renderImage={renderMarkdownImage}
+        workspaceRoot={sessionWorkspacePath}
+        language={lang}
       />
     );
   }
@@ -5995,6 +5998,8 @@ export const ConversationView = React.memo(function ConversationView({
         isStreaming={isStreaming}
         duplicateImageUrls={duplicateImageUrls}
         renderImage={renderMarkdownImage}
+        workspaceRoot={sessionWorkspacePath}
+        language={lang}
       />
     );
   }
