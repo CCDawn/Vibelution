@@ -949,6 +949,7 @@ from core.web.services.session.runtime_glue import (
     has_running_sessions,
     load_session_conversation_events_snapshot,
 )
+from core.web.services.session.export_html import export_session_html
 from core.web.services.session.projection import (
     list_sessions,
     get_session_detail,
