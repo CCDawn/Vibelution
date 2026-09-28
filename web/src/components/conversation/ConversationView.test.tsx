@@ -919,9 +919,13 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(conversationViewSource).not.toContain("MARKDOWN_PARSE_CACHE_LIMIT");
     expect(conversationViewSource).not.toContain("function getCachedMarkdownBlocks(content: string)");
     expect(conversationViewSource).not.toContain("parseConversationMarkdownBlocks");
-    expect(conversationViewSource).not.toContain("renderConversationInlineMarkdown");
-    expect(conversationViewSource).toContain('from "./LazyConversationMarkdownRenderer"');
+    // Answer bodies keep the shared lazy markdown renderer; only group-transcript
+    // chat lines delegate to the pure inline renderer.
     expect(conversationViewSource).toContain("<LazyConversationMarkdownRenderer");
+    expect(conversationViewSource).toContain(
+      "renderConversationInlineMarkdown(assistantFinalAnswerText(message), groupTranscriptInlineClassNames)",
+    );
+    expect(conversationViewSource).toContain('from "./conversationInlineMarkdown"');
     expect(conversationViewSource).not.toContain('from "./ConversationMarkdownRenderer"');
     expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
     expect(conversationViewSource).not.toContain("responseExpanded && !isResponseStreaming");
@@ -2679,5 +2683,77 @@ describe("conversation turn envelope dividers", () => {
     expect(styles.turnDividerRow).toContain("turnDividerRow");
     expect(styles.turnDividerToneWarning).toContain("var(--state-warning)");
     expect(styles.thoughtDuration).toContain("tabular-nums");
+  });
+});
+
+describe("group transcript rich text", () => {
+  const richLine = "看一下 **加粗重点**、`inline_code` 和 [链接文本](https://example.com/docs) 的渲染";
+
+  function settledAssistantTurnItem(id: string, turnId: string, text: string, sequence = 1) {
+    return {
+      id: `${id}-item-answer`,
+      itemId: `${id}-item-answer`,
+      sessionId: "session-1",
+      turnId,
+      version: 3 as const,
+      revision: 1,
+      sequence,
+      type: "agent_message" as const,
+      phase: "final_answer" as const,
+      text,
+      status: "completed" as const,
+      terminal: true,
+    };
+  }
+
+  function groupTranscriptMessage(id: string, text: string): ConversationMessage {
+    return {
+      id,
+      role: "assistant",
+      timestamp: "2026-09-20T05:00:00Z",
+      turnId: `turn-${id}`,
+      status: "completed",
+      turnItems: [settledAssistantTurnItem(id, `turn-${id}`, text)],
+      metadata: { kind: "group_room_transcript", sourceRoomTitle: "团队群聊" },
+    } as ConversationMessage;
+  }
+
+  function plainAssistantMessage(id: string, text: string): ConversationMessage {
+    return {
+      id,
+      role: "assistant",
+      timestamp: "2026-09-20T05:01:00Z",
+      turnId: `turn-${id}`,
+      status: "completed",
+      turnItems: [settledAssistantTurnItem(id, `turn-${id}`, text)],
+    } as ConversationMessage;
+  }
+
+  it("renders group transcript lines through the shared inline renderer", () => {
+    const html = renderConversation([groupTranscriptMessage("message-group-rich", richLine)]);
+
+    // Inline rich text: bold, inline code, safe link.
+    expect(html).toContain("<strong");
+    expect(html).toContain("inlineStrong");
+    expect(html).toContain("加粗重点");
+    expect(html).toContain("<code");
+    expect(html).toContain("inlineCode");
+    expect(html).toContain("inline_code");
+    expect(html).toContain('href="https://example.com/docs"');
+    expect(html).toContain("inlineLink");
+    expect(html).toContain("链接文本");
+    // Inline renderer only: no block markdown wrapper on the group line.
+    expect(html).toContain("groupTranscriptBody");
+    expect(html).not.toContain("markdownBody");
+    // Existing avatar/speaker/timestamp structure stays untouched.
+    expect(html).toContain("群聊同步记录 · 团队群聊");
+  });
+
+  it("keeps ordinary assistant answers on the full markdown renderer", () => {
+    const html = renderConversation([plainAssistantMessage("message-plain-rich", richLine)]);
+
+    expect(html).toContain("markdownBody");
+    expect(html).not.toContain("groupTranscriptBody");
+    expect(html).not.toContain("群聊同步记录");
   });
 });

@@ -7,6 +7,23 @@ export type ConversationFileDelivery = {
   deleted: boolean;
 };
 
+/** Per-turn disk-truth change summary from assistant message metadata (`metadata.changedFiles`). */
+export type ConversationChangedFileSummary = {
+  path: string;
+  additions?: number;
+  deletions?: number;
+  state?: ConversationFileDeliveryState;
+};
+
+export type ConversationFileDeliveryState = "created" | "modified" | "deleted" | string;
+
+/** Delivery row enriched with the disk-truth state and +/- line counts when known. */
+export type ConversationFileDeliveryView = ConversationFileDelivery & {
+  additions?: number;
+  deletions?: number;
+  state?: ConversationFileDeliveryState;
+};
+
 const WRITE_TOOLS = new Set(["write_file_tool", "create_file", "create_file_tool", "write_file"]);
 const PATCH_TOOLS = new Set(["apply_patch_tool", "apply_patch", "apply_patch_edit"]);
 const REPLACE_TOOLS = new Set(["apply_diff_edit_tool", "apply_diff_edit", "edit_file", "edit_local_file"]);
@@ -83,4 +100,63 @@ export function fileDeliveryFollowupDraft(draft: string, path: string, language:
     ? `请继续修改文件 ${JSON.stringify(path)}：`
     : `Please continue editing ${JSON.stringify(path)}: `;
   return draft.trim() ? `${draft}\n\n${request}` : request;
+}
+
+/**
+ * Tool args carry absolute OS paths while the ledger summary carries
+ * project-relative posix paths; compare on slashes/drive/leading-dot noise.
+ */
+function normalizeDeliveryPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "").replace(/^\/+/, "").replace(/^\.\//, "");
+}
+
+function sameDeliveryPath(a: string, b: string): boolean {
+  const left = normalizeDeliveryPath(a);
+  const right = normalizeDeliveryPath(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  // Absolute tool path vs project-relative summary of the same file.
+  return left.endsWith(`/${right}`) || right.endsWith(`/${left}`);
+}
+
+/**
+ * Panels render the turn's file list. When the session detail carries the
+ * ledger's `changedFiles` summary it is the disk-truth authority: it defines
+ * the row set, states and +/- counts, while tool-transcript extras (view
+ * content, patches, continue editing) are matched back per path and
+ * transcript-only rows are kept appended. Without the summary this is exactly
+ * `collectConversationFileDeliveries`.
+ */
+export function mergeConversationFileDeliveries(
+  cells: readonly CodexTranscriptCell[],
+  changedFiles?: readonly ConversationChangedFileSummary[] | null,
+): { files: ConversationFileDeliveryView[]; patches: Array<{ id: string; text: string }> } {
+  const extracted = collectConversationFileDeliveries(cells);
+  const summaries = (changedFiles ?? []).filter(
+    (entry) => entry && typeof entry.path === "string" && entry.path.trim(),
+  );
+  if (!summaries.length) return extracted;
+  const matched = new Set<ConversationFileDelivery>();
+  const files: ConversationFileDeliveryView[] = [];
+  for (const summary of summaries) {
+    const match = extracted.files.find(
+      (entry) => !matched.has(entry) && sameDeliveryPath(entry.path, summary.path),
+    );
+    if (match) matched.add(match);
+    const state = typeof summary.state === "string" && summary.state ? summary.state : undefined;
+    // Disk truth wins for state; a deleted file has nothing to preview.
+    const deleted = state ? state === "deleted" : Boolean(match?.deleted);
+    files.push({
+      path: match?.path ?? summary.path,
+      content: deleted ? undefined : match?.content,
+      deleted,
+      additions: typeof summary.additions === "number" ? summary.additions : undefined,
+      deletions: typeof summary.deletions === "number" ? summary.deletions : undefined,
+      state,
+    });
+  }
+  for (const entry of extracted.files) {
+    if (!matched.has(entry)) files.push(entry);
+  }
+  return { files, patches: extracted.patches };
 }

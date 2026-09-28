@@ -14,7 +14,7 @@
 |------|----------|----------|
 | Windows | 10/11 | — |
 | Python | 3.11+（推荐 3.12） | `py -3.12 --version` 或 `python --version` |
-| Node.js | 18+（含 npm） | `node --version` / `npm --version` |
+| Node.js | 推荐 22.12+（含 npm；Vite 8 要求 20.19+ 的 20.x，或 22.12+） | `node --version` / `npm --version` |
 | Git | 任意近期版 | `git --version` |
 | 浏览器 | Edge（推荐） | — |
 
