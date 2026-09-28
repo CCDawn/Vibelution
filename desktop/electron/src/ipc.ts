@@ -13,7 +13,10 @@ export const IPC_CHANNELS = {
   getLauncherState: "launcher:get-state",
   refreshLauncherState: "launcher:refresh-state",
   launcherStateChanged: "launcher:state-changed",
-  launcherInvoke: "launcher:invoke"
+  launcherInvoke: "launcher:invoke",
+  openExternalUrl: "vui:open-external",
+  openPath: "vui:open-path",
+  showItemInFolder: "vui:show-item-in-folder"
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
