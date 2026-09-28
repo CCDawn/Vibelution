@@ -7,6 +7,10 @@ import {
 } from "../../design/vuiSurfaceRecipes";
 
 const styles = {
+  // ZCode-style two-part tooltip content: strong title line + muted description.
+  tooltipContent: "block",
+  tooltipTitle: "block text-vui-xs font-semibold text-vui-fg-primary",
+  tooltipDescription: "block text-vui-xs text-vui-fg-secondary",
   composerReferenceChip:
     "vui-components-conversationview composerReferenceChip min-w-0 inline-flex min-h-6 w-fit max-w-[min(100%,32rem)] items-start justify-start gap-1.5 overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1.5 text-vui-xs font-semibold leading-none text-[var(--fg-secondary)]",
   composerReferenceCopy:

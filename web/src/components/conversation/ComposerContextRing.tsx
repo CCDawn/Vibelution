@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, X } from "lucide-react";
-import { VButton, VPopover } from "../vui";
+import { VButton, VPopover, VTooltip } from "../vui";
 import type { ComposerContextRingModel } from "../../routes/chat/composerContextModel";
 import { formatTokensPerSecondValue } from "../../routes/chat/composerContextModel";
 import styles from "./ComposerContextRing.styles";
@@ -234,22 +234,20 @@ export function ComposerContextRingPanel({
         }
       >
         <span>{zh ? "生成速度" : "Generation speed"}</span>
-        <span
-          className={
-            model.generationTokensPerSecond != null
-              ? styles.observed
-              : styles.muted
-          }
-          title={
-            model.generationTokensPerSecond != null
-              ? zh
+        {model.generationTokensPerSecond != null ? (
+          <VTooltip
+            width="compact"
+            content={
+              zh
                 ? "基于上次调用（厂商 usage + 耗时）估算"
                 : "Estimated from the last call (provider usage + duration)"
-              : undefined
-          }
-        >
-          {speedLabel}
-        </span>
+            }
+          >
+            <span className={styles.observed}>{speedLabel}</span>
+          </VTooltip>
+        ) : (
+          <span className={styles.muted}>{speedLabel}</span>
+        )}
       </div>
       {detail && (
         <p className={styles.detailNote}>
@@ -312,7 +310,7 @@ function SessionContextRing({
             contentLayout="plain"
             className={styles.trigger}
             aria-label={ringTitle}
-            title={ringTitle}
+            tooltip={ringTitle}
             data-session={sessionId || undefined}
             data-empty={model.empty ? "true" : "false"}
           >

@@ -1,5 +1,6 @@
 import {
   ArrowDown,
+  ArrowLeftRight,
   ArrowUp,
   BookOpen,
   BrainCircuit,
@@ -8,6 +9,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsDownUp,
   CircleDot,
   CircleMinus,
   CirclePlus,
@@ -47,6 +49,7 @@ import type {
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
+import { fetchConfigWorkspace } from "../../api/config";
 import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import { VStateSurface } from "../../components/vui";
@@ -69,6 +72,7 @@ import {
   resolveConversationTurnNavCurrentIndex,
   type ConversationTurnNavEntry,
 } from "./conversationTurnNavigation";
+import { buildConversationModelSwitchBoundaries } from "./conversationModelSwitch";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
 import {
@@ -245,6 +249,8 @@ import {
   imageArtifactForMessage,
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
+  isContextCompressionMarkerMessage,
+  isForkedSessionMarkerMessage,
   isGroupRoomTranscriptMessage,
   isSessionRecoveryResumedMessage,
   isSteerGuidanceMessage,
@@ -673,6 +679,161 @@ function turnNavPreviewText(message: ConversationMessage | undefined): string {
   return assistantFinalAnswerText(message);
 }
 
+/**
+ * Markdown-free single-line preview for the turn rail hover cards: same
+ * extraction as the nav label, then fences/images/links/emphasis/headings
+ * reduced to plain words so the card never shows raw markdown punctuation.
+ */
+function turnNavPlainPreviewText(message: ConversationMessage | undefined): string {
+  const raw = turnNavPreviewText(message);
+  if (!raw) {
+    return "";
+  }
+  return raw
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/\*\*|__|~~|`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Presentation tone of a context-compression checkpoint divider. */
+type ConversationCompressionDividerTone =
+  | "applied"
+  | "skipped_low_savings"
+  | "failed_preserved";
+
+/**
+ * Backend compression statuses spell both ways ("applied" from the ledger
+ * projection, "context_compression_applied" from status turn items); normalize
+ * to one divider tone. Unknown statuses present as the plain applied row.
+ */
+function normalizeCompressionDividerTone(raw: unknown): ConversationCompressionDividerTone {
+  const value = String(raw ?? "").trim().toLowerCase().replace(/^context_compression_/, "");
+  if (value === "skipped_low_savings") {
+    return "skipped_low_savings";
+  }
+  if (value === "failed_preserved") {
+    return "failed_preserved";
+  }
+  return "applied";
+}
+
+/**
+ * Compression checkpoints reach the timeline through two carriers: server
+ * projections with `metadata.kind = "context_compression_marker"` and status
+ * turn items whose diagnosticSummary carries the same kind (the native Codex
+ * transcript shape). Both render as one ZCode-style hairline divider instead
+ * of a generic status cell; the token-saving text never renders.
+ */
+function conversationCompressionDividerTone(
+  message: ConversationMessage,
+): ConversationCompressionDividerTone | null {
+  if (isContextCompressionMarkerMessage(message)) {
+    return normalizeCompressionDividerTone(message.metadata?.status);
+  }
+  if (message.role !== "assistant") {
+    return null;
+  }
+  for (const item of message.turnItems) {
+    if (item.type !== "status") {
+      continue;
+    }
+    const summary = item.diagnosticSummary;
+    if (summary && String(summary.kind ?? "").trim() === "context_compression_marker") {
+      return normalizeCompressionDividerTone(summary.status ?? item.code);
+    }
+  }
+  return null;
+}
+
+function replaceDividerPlaceholder(template: string, token: string, value: string) {
+  return template.split(`{${token}}`).join(value);
+}
+
+const THOUGHT_DURATION_TICK_MS = 1000;
+
+/**
+ * ZCode thought-duration semantics, client clock only: the timer starts at the
+ * unit's first live render, ticks every second while (and only while) the unit
+ * is expanded and live, and freezes when the unit settles. Units that arrive
+ * already settled (history loads) have no honest duration — no server
+ * timestamp — so they render nothing rather than fabricate one.
+ */
+const ThoughtDurationLabel = React.memo(function ThoughtDurationLabel({
+  live,
+  expanded,
+  lastedSecondsTemplate,
+  lastedMomentsLabel,
+}: {
+  live: boolean;
+  expanded: boolean;
+  lastedSecondsTemplate: string;
+  lastedMomentsLabel: string;
+}) {
+  const startedAtRef = useRef<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
+
+  // First live render opens the client-side measurement window.
+  useEffect(() => {
+    if (live && startedAtRef.current === null) {
+      startedAtRef.current = Date.now();
+    }
+  }, [live]);
+
+  // Per-second cadence is tied to visibility: only an expanded live unit ticks.
+  // A self-rescheduling timeout (not an interval) keeps the ticking scoped to
+  // this label and clears with the effect on expand/settle changes.
+  useEffect(() => {
+    if (!live || !expanded || startedAtRef.current === null) {
+      return undefined;
+    }
+    let timer: number | null = null;
+    const syncElapsed = () => {
+      setElapsedSeconds(
+        Math.max(0, Math.round((Date.now() - (startedAtRef.current ?? Date.now())) / THOUGHT_DURATION_TICK_MS)),
+      );
+      timer = window.setTimeout(syncElapsed, THOUGHT_DURATION_TICK_MS);
+    };
+    syncElapsed();
+    return () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [live, expanded]);
+
+  // Freeze once: settle closes the window with the last honest reading.
+  useEffect(() => {
+    if (!live && startedAtRef.current !== null) {
+      setElapsedSeconds(
+        Math.max(0, Math.round((Date.now() - startedAtRef.current) / THOUGHT_DURATION_TICK_MS)),
+      );
+    }
+  }, [live]);
+
+  // Nothing observed live (history unit) or nothing ticked yet (collapsed):
+  // no duration label.
+  if (startedAtRef.current === null || elapsedSeconds === null) {
+    return null;
+  }
+  const frozenLabel = elapsedSeconds < 1
+    ? lastedMomentsLabel
+    : replaceDividerPlaceholder(lastedSecondsTemplate, "seconds", String(elapsedSeconds));
+  return (
+    <span
+      className={styles.thoughtDuration}
+      data-thought-duration={live ? "live" : "settled"}
+    >
+      <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+      {live ? `${elapsedSeconds}s` : frozenLabel}
+    </span>
+  );
+});
+
 type ConversationUserInlineEditorProps = {
   lang: "zh" | "en";
   value: string;
@@ -961,6 +1122,28 @@ export const ConversationView = React.memo(function ConversationView({
   void onInterruptGuidance;
   void onSafeGuidance;
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
+  // Model labels for the turn-envelope switch dividers. Shared cache key with
+  // the config routes; absence of data degrades to the raw model id.
+  const configWorkspaceQuery = useQuery({
+    queryKey: queryKeys.configWorkspace(),
+    queryFn: ({ signal }) => fetchConfigWorkspace({ signal }),
+    staleTime: 30_000,
+  });
+  const modelLabelByModelId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of configWorkspaceQuery.data?.modelOptions ?? []) {
+      const modelId = String(option.model_id ?? "").trim();
+      const label = String(option.label ?? "").trim();
+      if (modelId && label && !map.has(modelId)) {
+        map.set(modelId, label);
+      }
+    }
+    return map;
+  }, [configWorkspaceQuery.data]);
+  const conversationModelLabel = useCallback(
+    (modelId: string) => modelLabelByModelId.get(modelId) ?? modelId,
+    [modelLabelByModelId],
+  );
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineContentRef = useRef<HTMLDivElement | null>(null);
   const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
@@ -1643,7 +1826,19 @@ export const ConversationView = React.memo(function ConversationView({
     [activeTimelineRowIdentities],
   );
   // Turn navigation directory (minimap rail): one entry per conversation
-  // turn, derived from the same row identities the virtualizer keys on.
+  // turn, derived from the same row identities the virtualizer keys on. The
+  // markdown-free preview map feeds the rail's VHoverCard content through the
+  // entries' userPreviewText / assistantPreviewText fields.
+  const timelineTurnNavPreviewTextByRowKey = useMemo(() => {
+    const previewTextByRowKey = new Map<string, string>();
+    activeTimelineRowIdentities.forEach((identity, index) => {
+      const previewText = turnNavPlainPreviewText(activeTimelineMessages[index]);
+      if (previewText) {
+        previewTextByRowKey.set(identity.rowKey, previewText);
+      }
+    });
+    return previewTextByRowKey;
+  }, [activeTimelineRowIdentities, activeTimelineMessages]);
   const timelineTurnNavEntries = useMemo(
     () => buildConversationTurnNavDirectory(
       activeTimelineRowIdentities.map((identity, index) => ({
@@ -1654,9 +1849,18 @@ export const ConversationView = React.memo(function ConversationView({
         fallbackLabel: lang === "zh"
           ? (turnNumber: number) => `第 ${turnNumber} 轮`
           : (turnNumber: number) => `Turn ${turnNumber}`,
+        previewTextByRowKey: timelineTurnNavPreviewTextByRowKey,
       },
     ),
-    [activeTimelineRowIdentities, activeTimelineMessages, lang],
+    [activeTimelineRowIdentities, activeTimelineMessages, lang, timelineTurnNavPreviewTextByRowKey],
+  );
+  // Turn-envelope model-switch boundaries (ZCode parity): the user row that
+  // opens a turn running on a different model than the previous turn-with-model
+  // gets a hairline divider ("using X" / "switched from A to B"). Labels
+  // resolve through conversationModelLabel with the raw id as fallback.
+  const timelineModelSwitchBoundaries = useMemo(
+    () => buildConversationModelSwitchBoundaries(activeTimelineMessages),
+    [activeTimelineMessages],
   );
   // react-virtual keeps measured sizes in an item-size cache keyed by the
   // stable row keys from getItemKey, so measured heights survive index shifts
@@ -1826,6 +2030,39 @@ export const ConversationView = React.memo(function ConversationView({
                   {message.timestamp ? (
                     <span className={styles.cliAgentLifecycleTime}>{formatTimestamp(message.timestamp)}</span>
                   ) : null}
+                </article>
+              );
+            }
+            // Context-compression checkpoints are timeline chrome, not model
+            // answers: one hairline divider per checkpoint, toned by outcome.
+            // The token-saving numbers never render.
+            const compressionTone = conversationCompressionDividerTone(message);
+            if (compressionTone) {
+              const compressionLabel = compressionTone === "applied"
+                ? t("compressionDividerApplied")
+                : compressionTone === "skipped_low_savings"
+                  ? t("compressionDividerSkipped")
+                  : t("compressionDividerFailed");
+              return (
+                <article
+                  key={rowIdentity?.rowKey ?? message.id}
+                  className={[
+                    styles.turnDividerRow,
+                    compressionTone === "applied"
+                      ? styles.turnDividerToneApplied
+                      : compressionTone === "skipped_low_savings"
+                        ? styles.turnDividerToneQuiet
+                        : styles.turnDividerToneWarning,
+                  ].filter(Boolean).join(" ")}
+                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
+                  data-conversation-compression-divider={compressionTone}
+                >
+                  <span className={styles.turnDividerRule} aria-hidden="true" />
+                  <span className={styles.turnDividerIcon} aria-hidden="true">
+                    <ChevronsDownUp size={13} />
+                  </span>
+                  <span className={styles.turnDividerLabel}>{compressionLabel}</span>
+                  <span className={styles.turnDividerRule} aria-hidden="true" />
                 </article>
               );
             }
@@ -2131,9 +2368,62 @@ export const ConversationView = React.memo(function ConversationView({
             const turnWorkHeaderNode = turnWorkSummary ? (
               <ConversationTurnWorkHeader summary={turnWorkSummary} lang={lang} />
             ) : null;
+            // Turn-envelope dividers above the row: model switches ride the
+            // turn-opening user row; the fork-provenance marker is a dormant
+            // hook until the backend projects per-message fork metadata.
+            const modelSwitchBoundary = message.role === "user"
+              ? timelineModelSwitchBoundaries.get(message.id)
+              : undefined;
+            const modelSwitchDividerNode = modelSwitchBoundary ? (
+              <div
+                className={styles.turnDividerRow}
+                data-conversation-model-switch-divider={modelSwitchBoundary.kind}
+              >
+                <span className={styles.turnDividerRule} aria-hidden="true" />
+                <span className={styles.turnDividerIcon} aria-hidden="true">
+                  {modelSwitchBoundary.kind === "initial"
+                    ? <Sparkles size={13} />
+                    : <ArrowLeftRight size={13} />}
+                </span>
+                <span className={styles.turnDividerLabel}>
+                  {modelSwitchBoundary.kind === "initial"
+                    ? replaceDividerPlaceholder(
+                      t("modelSwitchInitialLabel"),
+                      "model",
+                      conversationModelLabel(modelSwitchBoundary.toModelId),
+                    )
+                    : replaceDividerPlaceholder(
+                      replaceDividerPlaceholder(
+                        t("modelSwitchChangeLabel"),
+                        "from",
+                        conversationModelLabel(modelSwitchBoundary.fromModelId),
+                      ),
+                      "to",
+                      conversationModelLabel(modelSwitchBoundary.toModelId),
+                    )}
+                </span>
+                <span className={styles.turnDividerRule} aria-hidden="true" />
+              </div>
+            ) : null;
+            const forkMarkerDividerNode = isForkedSessionMarkerMessage(message) ? (
+              <div
+                className={styles.turnDividerRow}
+                data-conversation-fork-marker-divider="true"
+              >
+                <span className={styles.turnDividerRule} aria-hidden="true" />
+                <span className={styles.turnDividerIcon} aria-hidden="true">
+                  <GitFork size={13} />
+                </span>
+                <span className={styles.turnDividerLabel}>{t("forkedSessionMarkerLabel")}</span>
+                <span className={styles.turnDividerRule} aria-hidden="true" />
+              </div>
+            ) : null;
             return (
-              <AgentMessageTurnView
-                key={rowIdentity.rowKey}
+              <>
+                {modelSwitchDividerNode}
+                {forkMarkerDividerNode}
+                <AgentMessageTurnView
+                  key={rowIdentity.rowKey}
                 rowKey={rowIdentity.rowKey}
                 messageKey={rowIdentity.messageKey}
                 agentMessageId={agentMessage.id}
@@ -2449,6 +2739,7 @@ export const ConversationView = React.memo(function ConversationView({
                   {!answerOnlyProcessMode ? responseSectionNode : null}
                   {turnWorkHeaderNode}
               </AgentMessageTurnView>
+              </>
             );
                 }}
               />
@@ -4233,6 +4524,12 @@ export const ConversationView = React.memo(function ConversationView({
           <span className={styles.codexTranscriptReasoningHeaderBody}>
             <span className={styles.codexTranscriptReasoningTitleRow}>
               <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              <ThoughtDurationLabel
+                live={isLive}
+                expanded={expanded}
+                lastedSecondsTemplate={t("thoughtDurationLastedSeconds")}
+                lastedMomentsLabel={t("thoughtDurationLastedMoments")}
+              />
               {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
             </span>
           </span>
@@ -4811,6 +5108,12 @@ export const ConversationView = React.memo(function ConversationView({
           <span className={styles.timelineCellBody}>
             <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
               <span className={styles.codexTranscriptReasoningTitle}>{thoughtTitle}</span>
+              <ThoughtDurationLabel
+                live={isLive}
+                expanded={expanded}
+                lastedSecondsTemplate={t("thoughtDurationLastedSeconds")}
+                lastedMomentsLabel={t("thoughtDurationLastedMoments")}
+              />
               {!expanded ? <ThoughtStreamingSummary text={item.text} /> : null}
             </span>
           </span>
@@ -6109,9 +6412,9 @@ export const ConversationView = React.memo(function ConversationView({
                   isDisabled={composerPending}
                   onClick={onRetryComposerAttachmentUploads}
                   title={t("retryUpload")}
+                  icon={<RefreshCw size={12} aria-hidden="true" />}
                 >
-                  <RefreshCw size={12} aria-hidden="true" />
-                  <span>{t("retryUpload")}</span>
+                  {t("retryUpload")}
                 </VButton>
               ) : null}
             </p>

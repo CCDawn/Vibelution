@@ -102,9 +102,10 @@ describe("ConversationToolActivity row open persistence", () => {
     const { host, render, unmount } = mountActivity([failedCell]);
     await act(async () => render());
 
-    // Hover language first: the status word tooltip carries the error summary.
+    // Hover language first: the status word carries the VTooltip trigger slot
+    // (error summary mounts on hover; native title is gone by contract).
     const statusPill = host.querySelector('[data-codex-tool-status-pill="true"]')!;
-    expect(statusPill.getAttribute("title")).toContain("HTTP 406");
+    expect(statusPill.getAttribute("data-slot")).toBe("tooltip-trigger");
     expect(host.querySelector('[data-codex-tool-failure-copy="true"]')).toBeNull();
 
     await act(async () => host.querySelector("summary")!.click());

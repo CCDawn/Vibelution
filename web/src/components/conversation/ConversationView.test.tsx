@@ -4,7 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
+import type { ConfigWorkspace } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread";
+import { queryKeys } from "../../api/queryKeys";
 import { dictionary } from "../../i18n/dictionary";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
@@ -18,6 +20,7 @@ import conversationStreamingResponseContentSource from "./ConversationStreamingR
 import conversationStreamingResponseContentStyles from "./ConversationStreamingResponseContent.styles";
 import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent.tsx?raw";
 import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
+import navigatorStylesSource from "./ConversationTurnNavigator.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import { ConversationView } from "./ConversationView";
@@ -135,6 +138,9 @@ function renderConversation(
       command: string;
       description?: string;
     }>;
+    configWorkspace?: {
+      modelOptions: Array<{ model_id: string; label: string }>;
+    };
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -145,6 +151,11 @@ function renderConversation(
     },
   });
   queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
+  if (options.configWorkspace) {
+    queryClient.setQueryData(queryKeys.configWorkspace(), {
+      modelOptions: options.configWorkspace.modelOptions,
+    } as unknown as ConfigWorkspace);
+  }
   const processDisplayProps = options.useDefaultProcessDisplayMode
     ? {}
     : { processDisplayMode: options.processDisplayMode ?? ("trace" as ConversationProcessDisplayMode) };
@@ -2436,6 +2447,20 @@ describe("conversation turn navigator contract", () => {
     expect(navigatorSource).toContain("entries.length < CONVERSATION_TURN_NAV_MIN_TURNS");
     expect(navigatorSource).toContain('data-conversation-turn-navigator="1"');
   });
+
+  it("feeds the rail's hover cards through the markdown-free preview map", () => {
+    expect(conversationViewSource).toContain("timelineTurnNavPreviewTextByRowKey");
+    expect(conversationViewSource).toContain("previewTextByRowKey: timelineTurnNavPreviewTextByRowKey");
+    expect(conversationViewSource).toContain("function turnNavPlainPreviewText");
+    // Previews are markdown-free: fences, images, emphasis markers stripped.
+    expect(conversationViewSource).toContain('.replace(/```[\\s\\S]*?```/g, " ")');
+    expect(navigatorSource).toContain("<VHoverCard");
+    expect(navigatorStylesSource).toContain("line-clamp-2");
+    expect(navigatorStylesSource).toContain("line-clamp-3");
+    // The native title tooltip is replaced by the hover card.
+    expect(navigatorSource).not.toContain("title={entry.label}");
+    expect(navigatorSource).toContain("aria-label={entry.label}");
+  });
 });
 
 describe("composer attachment upload status contract", () => {
@@ -2542,5 +2567,117 @@ describe("composer attachment upload status contract", () => {
   it("wires the retry entry points through the route surface", () => {
     expect(conversationViewSource).toContain("onRetryComposerAttachmentUploads");
     expect(conversationViewSource).toContain("onRetryComposerAttachment(attachment.id)");
+  });
+});
+
+describe("conversation turn envelope dividers", () => {
+  function envelopeSettledAssistantTurnItem(id: string, turnId: string, text: string) {
+    return {
+      id: `${id}-item-answer`,
+      itemId: `${id}-item-answer`,
+      sessionId: "session-1",
+      turnId,
+      version: 3 as const,
+      revision: 1,
+      sequence: 1,
+      type: "agent_message" as const,
+      phase: "final_answer" as const,
+      text,
+      status: "completed" as const,
+      terminal: true,
+    };
+  }
+
+  function envelopeUserMessage(id: string, content: string, timestamp: string): ConversationMessage {
+    return { id, role: "user", content, timestamp };
+  }
+
+  function envelopeSettledAssistant(
+    id: string,
+    turnId: string,
+    text: string,
+    timestamp: string,
+    modelId?: string,
+  ): ConversationMessage {
+    return {
+      id,
+      role: "assistant",
+      timestamp,
+      turnId,
+      status: "completed",
+      turnItems: [envelopeSettledAssistantTurnItem(id, turnId, text)],
+      ...(modelId ? { metadata: { llmUsage: { llmModelId: modelId } } } : {}),
+    } as ConversationMessage;
+  }
+
+  it("opens the first model-bearing turn with an initial divider and labels switches after it", () => {
+    const html = renderConversation([
+      envelopeUserMessage("message-user-1", "第一轮", "2026-09-20T00:00:00Z"),
+      envelopeSettledAssistant("message-assistant-1", "turn-1", "第一轮回答。", "2026-09-20T00:01:00Z", "gpt-x"),
+      envelopeUserMessage("message-user-2", "第二轮", "2026-09-20T01:00:00Z"),
+      envelopeSettledAssistant("message-assistant-2", "turn-2", "第二轮回答。", "2026-09-20T01:01:00Z", "claude-y"),
+      envelopeUserMessage("message-user-3", "第三轮同模型", "2026-09-20T02:00:00Z"),
+      envelopeSettledAssistant("message-assistant-3", "turn-3", "第三轮回答。", "2026-09-20T02:01:00Z", "claude-y"),
+    ], {
+      configWorkspace: {
+        modelOptions: [
+          { model_id: "gpt-x", label: "GPT-X 满血版" },
+          { model_id: "claude-y", label: "Claude-Y" },
+        ],
+      },
+    });
+
+    expect(html.match(/data-conversation-model-switch-divider="initial"/g)?.length).toBe(1);
+    expect(html.match(/data-conversation-model-switch-divider="switch"/g)?.length).toBe(1);
+    expect(html).toContain("使用 GPT-X 满血版");
+    expect(html).toContain("从 GPT-X 满血版 切换到 Claude-Y");
+    // Same-model turns attach nothing.
+    expect(html.match(/data-conversation-model-switch-divider/g)?.length).toBe(2);
+  });
+
+  it("falls back to the raw model id when config options do not know it", () => {
+    const html = renderConversation([
+      envelopeUserMessage("message-user-1", "第一轮", "2026-09-20T00:00:00Z"),
+      envelopeSettledAssistant("message-assistant-1", "turn-1", "第一轮回答。", "2026-09-20T00:01:00Z", "unknown-model"),
+    ]);
+
+    expect(html).toContain('data-conversation-model-switch-divider="initial"');
+    expect(html).toContain("使用 unknown-model");
+  });
+
+  it("renders the dormant fork-provenance marker from synthetic metadata", () => {
+    const html = renderConversation([
+      {
+        id: "message-user-forked",
+        role: "user",
+        content: "分叉后的第一条消息",
+        timestamp: "2026-09-20T03:00:00Z",
+        metadata: { forkedFromSessionId: "session-origin" },
+      },
+      envelopeSettledAssistant("message-assistant-forked", "turn-forked", "分叉后的回答。", "2026-09-20T03:01:00Z"),
+    ]);
+
+    expect(html.match(/data-conversation-fork-marker-divider="true"/g)?.length).toBe(1);
+    expect(html).toContain("已从其他会话分叉");
+    // The message itself still renders — the marker is provenance chrome.
+    expect(html).toContain("分叉后的第一条消息");
+    expect(html).toContain("分叉后的回答。");
+  });
+
+  it("keeps the fork marker silent for messages without fork metadata", () => {
+    const html = renderConversation([
+      envelopeUserMessage("message-user-plain", "普通消息", "2026-09-20T04:00:00Z"),
+      envelopeSettledAssistant("message-assistant-plain", "turn-plain", "普通回答。", "2026-09-20T04:01:00Z"),
+    ]);
+
+    expect(html).not.toContain("data-conversation-fork-marker-divider");
+    expect(html).not.toContain("已从其他会话分叉");
+  });
+
+  it("keeps envelope divider styles on hairline tokens without hardcoded sizes", () => {
+    expect(styles.turnDividerRule).toContain("h-px");
+    expect(styles.turnDividerRow).toContain("turnDividerRow");
+    expect(styles.turnDividerToneWarning).toContain("var(--state-warning)");
+    expect(styles.thoughtDuration).toContain("tabular-nums");
   });
 });

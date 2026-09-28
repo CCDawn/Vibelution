@@ -5,6 +5,8 @@ import {
   imageArtifactForMessage,
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
+  isContextCompressionMarkerMessage,
+  isForkedSessionMarkerMessage,
   isGroupRoomTranscriptMessage,
   isHotRestartResumeMessage,
   isProviderFailureSummaryText,
@@ -51,6 +53,69 @@ describe("conversationMessagePredicates", () => {
       role: "assistant",
       content: "ordinary assistant output",
       metadata: { kind: "session_live_overlay" },
+    }))).toBe(false);
+  });
+
+  it("classifies context compression checkpoints from metadata kind", () => {
+    expect(isContextCompressionMarkerMessage(message({
+      role: "assistant",
+      content: "",
+      metadata: {
+        kind: "context_compression_marker",
+        status: "applied",
+        title: "上下文已压缩",
+        detail: "已把较早的对话折叠为摘要。",
+        coveredEventSeqStart: 1,
+        coveredEventSeqEnd: 12,
+        summaryPreview: "压缩摘要开头",
+      },
+    }))).toBe(true);
+    // Skipped / failed checkpoints stay markers too.
+    expect(isContextCompressionMarkerMessage(message({
+      role: "assistant",
+      content: "",
+      metadata: { kind: "context_compression_marker", status: "skipped_low_savings" },
+    }))).toBe(true);
+    expect(isContextCompressionMarkerMessage(message({
+      role: "assistant",
+      content: "ordinary answer with a model behind it",
+      metadata: { kind: "journal_assistant_message" },
+    }))).toBe(false);
+    expect(isContextCompressionMarkerMessage(message({
+      role: "user",
+      content: "user text mentioning markers",
+      metadata: { kind: "journal_user_message" },
+    }))).toBe(false);
+  });
+
+  it("flags fork provenance markers only when a fork linkage rides on the message", () => {
+    expect(isForkedSessionMarkerMessage(message({
+      role: "user",
+      content: "分叉后的第一条消息",
+      metadata: { kind: "journal_user_message", forkedFromSessionId: "session-src" },
+    }))).toBe(true);
+    // Object form mirrors the backend session record shape (forkedFrom.{sessionId}).
+    expect(isForkedSessionMarkerMessage(message({
+      role: "assistant",
+      content: "分叉后的回答",
+      metadata: { forkedFrom: { sessionId: "session-src", nodeId: "node-7", scope: "visible_path" } },
+    }))).toBe(true);
+    expect(isForkedSessionMarkerMessage(message({
+      role: "assistant",
+      content: "分叉后的回答",
+      metadata: { forkedFrom: { scope: "visible_path" } },
+    }))).toBe(false);
+    // Ordinary rows without any fork linkage stay unmarked — today the
+    // backend copies journal events verbatim with no per-message marker.
+    expect(isForkedSessionMarkerMessage(message({
+      role: "user",
+      content: "普通消息",
+      metadata: { kind: "journal_user_message" },
+    }))).toBe(false);
+    expect(isForkedSessionMarkerMessage(message({
+      role: "assistant",
+      content: "普通回答",
+      metadata: { kind: "context_compression_marker" },
     }))).toBe(false);
   });
 

@@ -3,6 +3,10 @@ import {
 } from "../../design/vuiSurfaceRecipes";
 
 const styles = {
+  // ZCode-style two-part tooltip content: strong title line + muted description.
+  tooltipContent: "block",
+  tooltipTitle: "block text-vui-xs font-semibold text-vui-fg-primary",
+  tooltipDescription: "block text-vui-xs text-vui-fg-secondary",
   imageArtifact:
     "vui-components-conversationview imageArtifact grid min-w-0 gap-2",
   imageArtifactFooter:

@@ -5,6 +5,7 @@ import type {
   AgentAttachmentPart,
   AgentReferencePart,
 } from "../../agent-thread/types";
+import { VTooltip } from "../vui";
 import { attachmentSizeLabel, isImageAttachment } from "./attachmentPresentation";
 import type { AgentMessageContextSection } from "./agentMessageSections";
 import styles from "./AgentContextSectionsView.styles";
@@ -156,15 +157,22 @@ function AgentContextImageAttachment({
       />
       <figcaption className={styles.userAttachmentMeta}>
         <span title={filename}>{filename}</span>
-        <a
-          className={styles.imageDownloadButton}
-          href={attachment.downloadUrl || imageUrl}
-          download={attachment.artifactId || true}
-          title={downloadLabel}
-          aria-label={downloadLabel}
+        <VTooltip
+          width="compact"
+          content={tooltipTitleDescription(
+            downloadLabel,
+            lang === "zh" ? "下载并保存该图片到本地" : "Download and save this image to your device",
+          )}
         >
-          <Download size={14} />
-        </a>
+          <a
+            className={styles.imageDownloadButton}
+            href={attachment.downloadUrl || imageUrl}
+            download={attachment.artifactId || true}
+            aria-label={downloadLabel}
+          >
+            <Download size={14} />
+          </a>
+        </VTooltip>
       </figcaption>
     </figure>
   );
@@ -202,15 +210,22 @@ function renderAgentContextFileCard(
         </span>
       </figcaption>
       {downloadHref ? (
-        <a
-          className={styles.imageDownloadButton}
-          href={downloadHref}
-          download={attachment.artifactId || true}
-          title={downloadLabel}
-          aria-label={downloadLabel}
+        <VTooltip
+          width="compact"
+          content={tooltipTitleDescription(
+            downloadLabel,
+            lang === "zh" ? "下载并保存该文件到本地" : "Download and save this file to your device",
+          )}
         >
-          <Download size={14} />
-        </a>
+          <a
+            className={styles.imageDownloadButton}
+            href={downloadHref}
+            download={attachment.artifactId || true}
+            aria-label={downloadLabel}
+          >
+            <Download size={14} />
+          </a>
+        </VTooltip>
       ) : null}
     </figure>
   );
@@ -254,4 +269,14 @@ function renderAgentContextReferencePart(part: AgentReferencePart, lang: "zh" | 
 
 function isNonNullNode<T extends ReactNode>(node: T | null): node is T {
   return node !== null;
+}
+
+/** ZCode-style two-part tooltip: strong title line + muted description line. */
+function tooltipTitleDescription(title: string, description: string): ReactNode {
+  return (
+    <span className={styles.tooltipContent}>
+      <span className={styles.tooltipTitle}>{title}</span>
+      <span className={styles.tooltipDescription}>{description}</span>
+    </span>
+  );
 }

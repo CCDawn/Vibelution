@@ -46,6 +46,7 @@
 | `VConfirmDialog` | [primitives/feedback.md](./primitives/feedback.md#vconfirmdialog) |
 | `VDropdownMenu` | [primitives/feedback.md](./primitives/feedback.md#vdropdownmenu) |
 | `VPopover` | [primitives/feedback.md](./primitives/feedback.md#vpopover) |
+| `VHoverCard` | [primitives/feedback.md](./primitives/feedback.md#vhovercard) |
 
 ## Forms
 
@@ -128,6 +129,9 @@
 | 用户消息折叠（`AgentUserContentSectionView`） | [product/conversation.md](./product/conversation.md#agentusercontentsectionview-用户消息折叠) |
 | Composer 引用候选（@ type-ahead） | [product/conversation.md](./product/conversation.md#composer-引用候选-type-ahead) |
 | Composer 图片附件上传失败态与重试 | [product/conversation.md](./product/conversation.md#composer-图片附件上传失败态与重试) |
+| 轮次导航 rail 悬停预览 | [product/conversation.md](./product/conversation.md#轮次导航-rail-悬停预览) |
+| 时间线信封分隔线（压缩/模型切换/分叉） | [product/conversation.md](./product/conversation.md#时间线信封分隔线) |
+| 思考耗时（思考中计时） | [product/conversation.md](./product/conversation.md#思考耗时) |
 | 流式行内渲染统一（live tail 与 settled 同源） | [product/conversation.md](./product/conversation.md#流式行内渲染统一live-tail-与-settled-同源) |
 
 ## Product — virtual-human companion

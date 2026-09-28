@@ -14,12 +14,16 @@ function renderConversation(
   processDisplayMode: "answer" | "trace" = "trace",
   companionMode = false,
   overrides: Partial<React.ComponentProps<typeof ConversationView>> = {},
+  dictionarySeed?: { zh: Record<string, string>; en: Record<string, string> },
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
     },
   });
+  if (dictionarySeed) {
+    queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionarySeed);
+  }
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <ConversationView
@@ -667,7 +671,18 @@ describe("ConversationView native Codex transcript surface", () => {
       marker("turn-applied", "context_compression_applied", "上下文已压缩", "节省 5,800 tokens", "completed"),
       marker("turn-skipped", "context_compression_skipped_low_savings", "压缩未应用 · 收益不足", "保留原上下文", "completed"),
       marker("turn-failed", "context_compression_failed_preserved", "压缩失败 · 已保留原上下文", "RuntimeError", "failed"),
-    ]);
+    ], "trace", false, {}, {
+      zh: {
+        compressionDividerApplied: "上下文已压缩",
+        compressionDividerSkipped: "压缩未应用 · 收益不足",
+        compressionDividerFailed: "压缩失败 · 已保留原上下文",
+      },
+      en: {
+        compressionDividerApplied: "Context compacted",
+        compressionDividerSkipped: "Compaction skipped · low savings",
+        compressionDividerFailed: "Compaction failed · original context preserved",
+      },
+    });
 
     const applied = html.indexOf("上下文已压缩");
     const skipped = html.indexOf("压缩未应用 · 收益不足");
@@ -678,6 +693,101 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("context_compression_applied");
     expect(html).not.toContain("context_compression_skipped_low_savings");
     expect(html).not.toContain("context_compression_failed_preserved");
+  });
+
+  it("renders compression checkpoints as hairline dividers without token numbers", () => {
+    const marker = (
+      turnId: string,
+      code: string,
+      status: "completed" | "failed",
+    ): ConversationMessage => ({
+      id: `${turnId}-message`,
+      role: "assistant",
+      timestamp: "2026-08-13T18:00:00Z",
+      turnId,
+      status,
+      turnItems: [{
+        id: `${turnId}-marker:0`,
+        itemId: `${turnId}-marker`,
+        version: 3,
+        sessionId: "session-1",
+        turnId,
+        type: "status",
+        code,
+        title: code,
+        text: "节省 5,800 tokens",
+        status,
+        revision: 0,
+        sequence: 1,
+        terminal: true,
+        diagnosticSummary: { kind: "context_compression_marker", status: code },
+      }],
+    });
+    const html = renderConversation([
+      marker("turn-applied", "context_compression_applied", "completed"),
+      marker("turn-skipped", "context_compression_skipped_low_savings", "completed"),
+      marker("turn-failed", "context_compression_failed_preserved", "failed"),
+    ], "trace", false, {}, {
+      zh: {
+        compressionDividerApplied: "上下文已压缩",
+        compressionDividerSkipped: "压缩未应用 · 收益不足",
+        compressionDividerFailed: "压缩失败 · 已保留原上下文",
+      },
+      en: {
+        compressionDividerApplied: "Context compacted",
+        compressionDividerSkipped: "Compaction skipped · low savings",
+        compressionDividerFailed: "Compaction failed · original context preserved",
+      },
+    });
+
+    // One hairline divider row per checkpoint, toned by outcome.
+    expect(html.match(/data-conversation-compression-divider="applied"/g)?.length).toBe(1);
+    expect(html.match(/data-conversation-compression-divider="skipped_low_savings"/g)?.length).toBe(1);
+    expect(html.match(/data-conversation-compression-divider="failed_preserved"/g)?.length).toBe(1);
+    // Divider chrome: flanking hairline rules plus a centered icon.
+    expect(html.match(/turnDividerRule/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(html).toContain('data-conversation-compression-divider="failed_preserved"');
+    // The token-saving numbers are timeline bookkeeping, never transcript copy.
+    expect(html).not.toContain("节省 5,800 tokens");
+    expect(html).not.toContain("5,800");
+    // Generic status-cell chrome no longer applies to checkpoints.
+    expect(html).not.toContain(">状态</span>");
+  });
+
+  it("reads compression checkpoints from metadata projections too", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-compression-meta",
+        role: "assistant",
+        timestamp: "2026-08-13T18:00:00Z",
+        turnId: "turn-compression-meta",
+        status: "completed",
+        turnItems: [{
+          id: "assistant-compression-meta:0",
+          itemId: "assistant-compression-meta",
+          version: 3,
+          sessionId: "session-1",
+          turnId: "turn-compression-meta",
+          type: "status",
+          code: "context_compression_failed_preserved",
+          text: "",
+          status: "completed",
+          revision: 0,
+          sequence: 1,
+          terminal: true,
+        }],
+        metadata: {
+          kind: "context_compression_marker",
+          status: "failed_preserved",
+        },
+      },
+    ], "trace", false, {}, {
+      zh: { compressionDividerFailed: "压缩失败 · 已保留原上下文" },
+      en: { compressionDividerFailed: "Compaction failed · original context preserved" },
+    });
+
+    expect(html).toContain('data-conversation-compression-divider="failed_preserved"');
+    expect(html).toContain("压缩失败 · 已保留原上下文");
   });
 
   it("keeps reasoning cells collapsed while streaming and after settle, with a rolling summary", () => {

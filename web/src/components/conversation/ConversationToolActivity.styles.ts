@@ -5,6 +5,10 @@ function cx(key: string, ...classNames: string[]) {
 }
 
 const styles = {
+  // ZCode-style two-part tooltip content: strong title line + muted description.
+  tooltipContent: "block",
+  tooltipTitle: "block text-vui-xs font-semibold text-vui-fg-primary",
+  tooltipDescription: "block text-vui-xs text-vui-fg-secondary",
   // Continuous tool rail: no horizontal frame lines; spacing + scroll only.
   activity: cx(
     "activity",

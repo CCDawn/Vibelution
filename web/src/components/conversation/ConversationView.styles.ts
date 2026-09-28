@@ -280,6 +280,25 @@ backToBottomButton:
   cliAgentLifecycleTime:
     `vui-components-conversationview cliAgentLifecycleTime min-w-0 text-vui-xs leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleTurn: `vui-components-conversationview cliAgentLifecycleTurn min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass} !bg-[var(--vui-surface-panel)]`,
+  // Turn-envelope dividers (ZCode alignment): hairlines flanking a small icon
+  // and a short label. Compression checkpoints, model switches and the fork
+  // provenance marker all share the row; only the tone differs.
+  turnDividerRow:
+    "vui-components-conversationview turnDividerRow flex min-w-0 max-w-full items-center gap-2 py-0.5 text-vui-xs leading-tight text-[var(--fg-tertiary)]",
+  turnDividerRule:
+    "vui-components-conversationview turnDividerRule h-px min-w-0 flex-1 bg-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)]",
+  turnDividerIcon:
+    "vui-components-conversationview turnDividerIcon inline-grid shrink-0 place-items-center text-[var(--fg-tertiary)]",
+  turnDividerLabel:
+    "vui-components-conversationview turnDividerLabel min-w-0 max-w-full truncate text-vui-xs leading-tight text-[var(--fg-tertiary)]",
+  turnDividerToneApplied: `vui-components-conversationview turnDividerToneApplied ${vuiStateCoolInfoClass}`,
+  turnDividerToneQuiet:
+    "vui-components-conversationview turnDividerToneQuiet opacity-60",
+  turnDividerToneWarning: `vui-components-conversationview turnDividerToneWarning ${vuiStateWarningSoftClass} text-[var(--state-warning)] [&_.turnDividerRule]:bg-[color-mix(in_srgb,var(--state-warning)_32%,transparent)] [&_.turnDividerIcon]:text-[var(--state-warning)] [&_.turnDividerLabel]:text-[var(--state-warning)]`,
+  // ZCode thought-duration suffix: live counter and frozen settle label share
+  // one quiet tabular slot after the thought title.
+  thoughtDuration:
+    "vui-components-conversationview thoughtDuration inline-flex min-w-0 shrink-0 items-center gap-1 text-vui-xs font-normal leading-tight tabular-nums text-[var(--fg-tertiary)]",
   composer: conversationComposerShell,
   // Pending image cards: a previewable thumbnail, filename/size copy, and a
   // quiet remove affordance — a pill with a 20px thumb read as a broken icon.
