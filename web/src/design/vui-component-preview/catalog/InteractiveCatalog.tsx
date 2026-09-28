@@ -8,6 +8,7 @@ import {
   VContextualHint,
   VDialog,
   VDropdownMenu,
+  VHoverCard,
   VNativeButton,
   VPopover,
   VRouteLinkButton,
@@ -34,6 +35,18 @@ export function InteractiveCatalog() {
         <VTooltip content="知识包">
           <VButton variant="secondary">悬停</VButton>
         </VTooltip>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VHoverCard">
+        <VHoverCard
+          content={
+            <>
+              <p>知识包摘要：近 7 天新增 12 条证据。</p>
+              <p className="mt-2 text-vui-fg-secondary">停留查看关键状态，移开即收起。</p>
+            </>
+          }
+        >
+          <VButton variant="secondary">悬停预览</VButton>
+        </VHoverCard>
       </VuiPreviewCard>
       <VuiPreviewCard name="VContextualHint">
         <VContextualHint label="详情" content="知识包" />

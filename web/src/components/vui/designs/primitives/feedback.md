@@ -281,3 +281,50 @@ import { VPopover, VButton } from "@/components/vui";
 
 ### 反冗余
 - 禁止 cluster + absolute + pointerdown / CSS hover 显隐平行系统。
+
+---
+
+## VHoverCard
+
+### 功能
+悬停展开的富预览卡片：指针停留/键盘聚焦时在触发器旁显示多段内容（标题、摘要、状态等），移开即收起。
+
+### 适用范围
+- **适用**：列表/轨道项的悬停预览（如会话 turn rail 摘要）、图标或短标签的扩展说明。
+- **不适用**：一句话短 tip → `VTooltip`；需要点击交互的面板 → `VPopover`；动作列表 → `VDropdownMenu`；错误阻断说明 → `VErrorSummary`。
+
+| 场景 | 选择 |
+| --- | --- |
+| 悬停富预览（多段内容） | `VHoverCard` |
+| 一句话短释义 | `VTooltip` |
+| 点击展开的面板 | `VPopover` |
+
+### 使用方式
+```tsx
+import { VHoverCard, VButton } from "@/components/vui";
+
+<VHoverCard
+  content={<p>两段式预览正文…</p>}
+  side="right"
+  openDelay={120}
+  closeDelay={80}
+>
+  <VButton variant="ghost">悬停预览</VButton>
+</VHoverCard>
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| `content` | 卡片正文（任意 ReactNode） | 富预览；关键信息勿只藏在卡片里 |
+| `side` / `align` / `sideOffset` | 定位 | 默认 bottom/center/8；轨道场景常用 side |
+| `openDelay` / `closeDelay` | 停留 120ms 才开、离开 80ms 收 | 密集列表必须有延迟，避免扫过即闪 |
+| `width` | `default`（max-w-80）/ `wide`（min(26rem, 100vw-1.5rem)） | 正文两段以内用 default |
+
+### 非职责
+- 不做可交互面板（点击、表单）——那是 `VPopover`；不做纯短 tip。
+
+### 实现落点
+- `primitives/VHoverCard.tsx` → `ShadcnHoverCard`（与 `ShadcnTooltip` 同款 idle intent-mount，密集列表不预挂 Radix 浮层）
+
+### 反冗余
+- 禁止 CSS `:hover` 显隐手写浮层；禁止为预览再建第二套 hover 卡片组件。

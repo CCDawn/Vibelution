@@ -135,7 +135,7 @@ export function ConversationInferenceControl({
             aria-haspopup="listbox"
             aria-expanded={open}
             data-open={open ? "true" : "false"}
-            title={`${model.label || model.model} · ${current.option?.label || current.effort}`}
+            tooltip={`${model.label || model.model} · ${current.option?.label || current.effort}`}
           >
             <span className={styles.triggerModel}>{model.label || model.model}</span>
             <span className={styles.triggerSeparator} aria-hidden="true">·</span>

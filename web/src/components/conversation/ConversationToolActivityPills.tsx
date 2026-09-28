@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 
+import { VTooltip } from "../vui";
 import type {
   CodexToolActivityPillStatusKind,
   CodexToolActivityPills,
@@ -49,7 +50,7 @@ export function ConversationToolActivityPills({
   pills: CodexToolActivityPills;
   leadingIcon?: ReactNode;
   className?: string;
-  /** Error summary revealed on hover of the status word (title tooltip). */
+  /** Error summary revealed on hover of the status word (VTooltip). */
   statusTooltip?: string;
   /**
    * ZCode subagent-name coloring: when the row's subject IS the agent name,
@@ -79,14 +80,25 @@ export function ConversationToolActivityPills({
           {pills.actionLabel}
         </span>
         {showStatusLabel ? (
-          <span
-            className={`${styles.statusLabel} ${styles[`statusLabel_${pills.statusKind}` as keyof typeof styles] || ""}`}
-            data-codex-tool-status-pill="true"
-            data-codex-tool-status-kind={pills.statusKind}
-            title={statusTooltip || undefined}
-          >
-            {pills.statusLabel}
-          </span>
+          statusTooltip ? (
+            <VTooltip width="compact" content={statusTooltip}>
+              <span
+                className={`${styles.statusLabel} ${styles[`statusLabel_${pills.statusKind}` as keyof typeof styles] || ""}`}
+                data-codex-tool-status-pill="true"
+                data-codex-tool-status-kind={pills.statusKind}
+              >
+                {pills.statusLabel}
+              </span>
+            </VTooltip>
+          ) : (
+            <span
+              className={`${styles.statusLabel} ${styles[`statusLabel_${pills.statusKind}` as keyof typeof styles] || ""}`}
+              data-codex-tool-status-pill="true"
+              data-codex-tool-status-kind={pills.statusKind}
+            >
+              {pills.statusLabel}
+            </span>
+          )
         ) : null}
         {pills.subject ? (
           <span className={styles.itemPreview} title={pills.subject} data-codex-tool-subject="true">

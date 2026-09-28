@@ -11,6 +11,15 @@ const styles = {
     "vui-components-conversationview turnNavigatorDotActive !text-[var(--accent-cool)]",
   turnNavigatorDotMark:
     "vui-components-conversationview turnNavigatorDotMark block size-1.5 rounded-full bg-current opacity-60",
+  // HoverCard preview body (VHoverCard content slot; the shadcn renderer owns
+  // the card shell, padding, border and width): user prompt clamped to two
+  // lines stacked over the assistant answer clamped to three.
+  turnNavigatorHoverBody:
+    "vui-components-conversationview turnNavigatorHoverBody grid min-w-0 max-w-full gap-1.5",
+  turnNavigatorHoverUser:
+    "vui-components-conversationview turnNavigatorHoverUser m-0 min-w-0 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] line-clamp-2",
+  turnNavigatorHoverAssistant:
+    "vui-components-conversationview turnNavigatorHoverAssistant m-0 min-w-0 text-vui-xs leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)] line-clamp-3",
 } as const;
 
 export default styles;

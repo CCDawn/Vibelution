@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildConversationTurnNavDirectory,
+  CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS,
   CONVERSATION_TURN_NAV_LABEL_MAX_CHARS,
   CONVERSATION_TURN_NAV_MIN_TURNS,
+  CONVERSATION_TURN_NAV_USER_PREVIEW_MAX_CHARS,
   conversationTurnNavLabel,
   conversationTurnNavRowKind,
   resolveConversationTurnNavCurrentIndex,
@@ -55,6 +57,53 @@ describe("conversationTurnNavigation", () => {
     expect(entries[1]?.label).toBe("第二轮 多行 提问");
     expect(entries[2]?.label).toBe("孤儿回答一");
     expect(entries[3]?.label).toBe("第 4 轮");
+  });
+
+  it("keeps previews empty without a lookup map (backward compatible)", () => {
+    for (const entry of turnDirectory()) {
+      expect(entry.userPreviewText).toBe("");
+      expect(entry.assistantPreviewText).toBe("");
+    }
+  });
+
+  it("carries clamped user and assistant previews when a lookup map is given", () => {
+    const longUserText = "用户长消息 ".repeat(60);
+    const entries = buildConversationTurnNavDirectory(rows(
+      ["lifecycle:boot", "已启动"],
+      ["user-message:u1", "第一轮提问"],
+      ["assistant-turn:t1", "第一轮回答"],
+      ["assistant-turn:t3", "孤儿回答"],
+    ), {
+      fallbackLabel: (turnNumber) => `第 ${turnNumber} 轮`,
+      previewTextByRowKey: new Map([
+        ["user-message:u1", longUserText],
+        ["assistant-turn:t1", "回答\n第二段\t文本"],
+        ["assistant-turn:t3", "   "],
+      ]),
+    });
+    expect(entries[0]?.userPreviewText).toHaveLength(CONVERSATION_TURN_NAV_USER_PREVIEW_MAX_CHARS);
+    expect(entries[0]?.userPreviewText.startsWith("用户长消息")).toBe(true);
+    expect(entries[0]?.assistantPreviewText).toBe("回答 第二段 文本");
+    // Assistant-anchored turn: no user preview; blank lookup stays empty.
+    expect(entries[1]?.userPreviewText).toBe("");
+    expect(entries[1]?.assistantPreviewText).toBe("");
+    // Labels keep coming from the row plan, not the preview map.
+    expect(entries[0]?.label).toBe("第一轮提问");
+  });
+
+  it("clamps assistant previews to their own cap without touching the user cap", () => {
+    const longAssistantText = "x".repeat(CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS + 40);
+    const entries = buildConversationTurnNavDirectory(rows(
+      ["user-message:u1", "问"],
+      ["assistant-turn:t1", "答"],
+    ), {
+      previewTextByRowKey: new Map([
+        ["user-message:u1", "短问"],
+        ["assistant-turn:t1", longAssistantText],
+      ]),
+    });
+    expect(entries[0]?.userPreviewText).toBe("短问");
+    expect(entries[0]?.assistantPreviewText).toHaveLength(CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS);
   });
 
   it("caps labels to a single line of bounded length", () => {

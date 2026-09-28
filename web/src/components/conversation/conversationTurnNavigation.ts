@@ -8,6 +8,10 @@
 
 export const CONVERSATION_TURN_NAV_MIN_TURNS = 6;
 export const CONVERSATION_TURN_NAV_LABEL_MAX_CHARS = 48;
+/** Turn-list user preview cap (tooltip/list rows, not the 48-char label). */
+export const CONVERSATION_TURN_NAV_USER_PREVIEW_MAX_CHARS = 200;
+/** Turn-list assistant preview cap; assistant turns run longer than user ones. */
+export const CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS = 300;
 
 /** Viewport fraction used as the "current turn" probe offset. */
 const CURRENT_TURN_PROBE_VIEWPORT_FRACTION = 0.35;
@@ -32,6 +36,13 @@ export type ConversationTurnNavEntry = {
   userRowKey: string | null;
   assistantRowKey: string | null;
   label: string;
+  /**
+   * Collapsed, length-capped message previews for the turn's user and
+   * assistant rows; empty when unavailable or when no preview lookup was
+   * passed to buildConversationTurnNavDirectory.
+   */
+  userPreviewText: string;
+  assistantPreviewText: string;
 };
 
 /**
@@ -62,18 +73,35 @@ export function conversationTurnNavLabel(previewText: string, fallback: string):
   return singleLine.slice(0, CONVERSATION_TURN_NAV_LABEL_MAX_CHARS);
 }
 
+/** Collapsed, single-line preview clipped to the turn-list cap. */
+function clampTurnNavPreviewText(text: unknown, maxChars: number): string {
+  return String(text ?? "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
+
 /**
  * Groups the timeline row plan into turns: a turn starts at every user row
  * and owns the first assistant row that follows it before the next user row.
  * Assistant rows with no open user row (inbox/group transcripts at the top)
  * form assistant-anchored turns; consecutive assistant rows each get their
  * own turn. Non-turn rows are skipped.
+ *
+ * `previewTextByRowKey` optionally maps row keys (`user-<id>` /
+ * `assistant-<id>` shapes) to message preview text; entries then carry
+ * `userPreviewText` / `assistantPreviewText` for the turn list. Omitting it
+ * keeps those fields empty for backward compatibility.
  */
 export function buildConversationTurnNavDirectory(
   rows: ConversationTurnNavRowInput[],
-  options: { fallbackLabel?: (turnNumber: number) => string } = {},
+  options: {
+    fallbackLabel?: (turnNumber: number) => string;
+    previewTextByRowKey?: ReadonlyMap<string, string>;
+  } = {},
 ): ConversationTurnNavEntry[] {
   const fallbackLabel = options.fallbackLabel ?? ((turnNumber: number) => String(turnNumber));
+  const previewTextByRowKey = options.previewTextByRowKey;
+  const previewFor = (rowKey: string, maxChars: number) => (previewTextByRowKey
+    ? clampTurnNavPreviewText(previewTextByRowKey.get(rowKey), maxChars)
+    : "");
   const entries: ConversationTurnNavEntry[] = [];
   let current: ConversationTurnNavEntry | null = null;
   rows.forEach((row, index) => {
@@ -85,6 +113,8 @@ export function buildConversationTurnNavDirectory(
         userRowKey: row.rowKey,
         assistantRowKey: null,
         label: conversationTurnNavLabel(row.previewText, fallbackLabel(entries.length + 1)),
+        userPreviewText: previewFor(row.rowKey, CONVERSATION_TURN_NAV_USER_PREVIEW_MAX_CHARS),
+        assistantPreviewText: "",
       };
       entries.push(current);
       return;
@@ -94,6 +124,10 @@ export function buildConversationTurnNavDirectory(
       // anything else opens an assistant-anchored turn.
       if (current && current.userRowKey !== null && current.assistantRowKey === null) {
         current.assistantRowKey = row.rowKey;
+        current.assistantPreviewText = previewFor(
+          row.rowKey,
+          CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS,
+        );
         return;
       }
       current = {
@@ -102,6 +136,11 @@ export function buildConversationTurnNavDirectory(
         userRowKey: null,
         assistantRowKey: row.rowKey,
         label: conversationTurnNavLabel(row.previewText, fallbackLabel(entries.length + 1)),
+        userPreviewText: "",
+        assistantPreviewText: previewFor(
+          row.rowKey,
+          CONVERSATION_TURN_NAV_ASSISTANT_PREVIEW_MAX_CHARS,
+        ),
       };
       entries.push(current);
     }
