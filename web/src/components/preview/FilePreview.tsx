@@ -331,7 +331,7 @@ export function FilePreview({
       <div className={styles.editorWrapClass}>
         {showHtml ? (
           <iframe title={file.path} sandbox="" referrerPolicy="no-referrer" srcDoc={safeHtml}
-            className="h-full min-h-0 w-full border-0 bg-white" />
+            className={styles.htmlFrameClass} />
         ) : showStructuredPreview && structuredModel ? (
           <StructuredLogPreview model={structuredModel} severityFilter={severityFilter} />
         ) : (

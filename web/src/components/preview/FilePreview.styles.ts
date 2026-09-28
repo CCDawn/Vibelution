@@ -22,6 +22,7 @@ const editorWrapClass = [
   "[&_.cm-scroller]:overflow-auto",
   "[&_.cm-content]:min-h-full [&_.cm-gutter]:min-h-full",
 ].join(" ");
+const htmlFrameClass = "h-full min-h-0 w-full border-0 bg-white";
 const plainFallbackClass = "m-0 h-full min-h-0 overflow-auto whitespace-pre-wrap break-words bg-[var(--vui-surface-panel)] px-4 py-3.5 font-[var(--font-mono)] [font-size:var(--vui-font-xs)] leading-[1.55] text-vui-fg-primary";
 const footnoteClass = "m-0 border-t border-vui-border-soft px-5 pb-3.5 pt-2.5 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 
@@ -40,6 +41,7 @@ const styles = {
   previewModeButtonClass,
   previewModeButtonActiveClass,
   editorWrapClass,
+  htmlFrameClass,
   plainFallbackClass,
   footnoteClass,
 } as const;
