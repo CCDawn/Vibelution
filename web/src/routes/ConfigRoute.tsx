@@ -2,6 +2,7 @@ import "../design/route-css/config.tailwind.css";
 import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
 import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
+import { ConfigUiFontSettings } from "./ConfigUiFontSettings";
 
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  Fragment,
   lazy,
   Suspense,
   type CSSProperties,
@@ -2027,24 +2029,32 @@ export function ConfigRoute() {
         ) : null}
 
         {showingSettingsIndex || (workspace.schemaVersion === 2 && isSectionVisible("models")) ? null : activeEditorSections.map((section) => (
-          <ConfigSectionEditor
-            key={section.id}
-            section={section}
-            value={getConfigValueAtPath(draftConfig, section.path)}
-            metaMap={editorMeta}
-            lang={currentLanguage}
-            copy={copy}
-            disabled={structuredActionsDisabled}
-            uiState={sectionUiState[section.id] ?? defaultSectionUiState(section.id)}
-            onUiStateChange={updateSectionUiState}
-            onSaveSection={saveConfigSection}
-            onImmediateFieldChange={handleImmediateFieldChange}
-            immediateFieldStatus={immediateFieldStatus}
-            onAvatarImageUpload={handleAvatarImageUpload}
-            onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
-            highlightFieldPath={fieldHighlight?.path ?? ""}
-            saveError={sectionSaveErrors[section.path] ?? ""}
-          />
+          <Fragment key={section.id}>
+            <ConfigSectionEditor
+              section={section}
+              value={getConfigValueAtPath(draftConfig, section.path)}
+              metaMap={editorMeta}
+              lang={currentLanguage}
+              copy={copy}
+              disabled={structuredActionsDisabled}
+              uiState={sectionUiState[section.id] ?? defaultSectionUiState(section.id)}
+              onUiStateChange={updateSectionUiState}
+              onSaveSection={saveConfigSection}
+              onImmediateFieldChange={handleImmediateFieldChange}
+              immediateFieldStatus={immediateFieldStatus}
+              onAvatarImageUpload={handleAvatarImageUpload}
+              onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
+              highlightFieldPath={fieldHighlight?.path ?? ""}
+              saveError={sectionSaveErrors[section.path] ?? ""}
+            />
+            {section.id === "ui" ? (
+              // 界面字号：--vui-font-base 的本地偏好控制行（不进 config.toml），
+              // 渲染在「界面外观」分区卡片之后，VSettingsRow 组卡先例同 ConfigDesktopPetSettings。
+              <VSettingsGroupCard testId="config-ui-font-settings">
+                <ConfigUiFontSettings copy={copy} />
+              </VSettingsGroupCard>
+            ) : null}
+          </Fragment>
         ))}
 
         {isSectionVisible("draft") ? (

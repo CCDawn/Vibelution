@@ -281,11 +281,14 @@ describe("VUI dual-theme foundation", () => {
       expect(tokensSource).toContain(token);
     }
 
-    expect(tokensSource).toContain("--vui-font-xs: 0.875rem;");
-    expect(tokensSource).toContain("--vui-font-sm: 0.9375rem;");
-    expect(tokensSource).toContain("--vui-font-md: 1rem;");
-    expect(tokensSource).toContain("--vui-font-chat: 1.0625rem;");
-    expect(tokensSource).toContain("--vui-font-title: 1.1875rem;");
+    // Main ladder is derived from the single base (1rem = 16px default); the
+    // derived calc() expressions resolve to the legacy rem values at default.
+    expect(tokensSource).toContain("--vui-font-base: 1rem;");
+    expect(tokensSource).toContain("--vui-font-xs: calc(var(--vui-font-base) - 2px);");
+    expect(tokensSource).toContain("--vui-font-sm: calc(var(--vui-font-base) - 1px);");
+    expect(tokensSource).toContain("--vui-font-md: var(--vui-font-base);");
+    expect(tokensSource).toContain("--vui-font-chat: calc(var(--vui-font-base) + 1px);");
+    expect(tokensSource).toContain("--vui-font-title: calc(var(--vui-font-base) + 3px);");
     expect(baseSource).toContain("font-size: var(--vui-type-body-size)");
     expect(tailwindSource).toContain(":where(small)");
     expect(tailwindSource).toContain(".text-xs");

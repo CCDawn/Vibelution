@@ -15,6 +15,7 @@ import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
+import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
 
 export function LauncherShell() {
   const { lang } = useShellI18n({ configEnabled: false });
@@ -52,6 +53,9 @@ export function LauncherShell() {
   useEffect(() => {
     applyWorkbenchDocumentLanguage(document, lang);
     applyWorkbenchDocumentTheme(document, theme);
+    // Same apply point as the theme: the launcher control surface follows the
+    // workbench font-base preference too (read-only; no subscription needed).
+    applyUiFontBasePx(document, readStoredUiFontBasePx());
     document.title = launcherWindowTitle;
   }, [lang, theme, launcherWindowTitle]);
 

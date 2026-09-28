@@ -35,6 +35,28 @@
         // the same value twice is a no-op.
         document.documentElement.setAttribute("data-theme", theme);
         try {
+          // Interface font size base (same early channel as the theme paint):
+          // read the storage key owned by web/src/app/uiFontPreference.ts
+          // (vibelution.workbench.font-base-px, integer 14-18, default 16 =
+          // absent) and set the --vui-font-base custom property BEFORE the
+          // first paint so the derived type ladder never jumps after
+          // hydration. Only the custom property is set; the root font-size
+          // stays untouched. Invalid or out-of-range values are ignored here
+          // (CSS default 1rem applies), matching normalizeUiFontBasePx. The
+          // desktop-pet window opts out (same guard as the body canvas): it is
+          // a constant-dark standalone surface and never tracks the workbench
+          // base size.
+          const rawFontBase = localStorage.getItem("vibelution.workbench.font-base-px");
+          const fontBase = Number(rawFontBase);
+          if (
+            window.location.pathname !== "/desktop-pet" &&
+            Number.isInteger(fontBase) && fontBase >= 14 && fontBase <= 18
+          ) {
+            document.documentElement.style.setProperty("--vui-font-base", `${fontBase}px`);
+          }
+        } catch {
+        }
+        try {
           // Matches base.css `body { background: var(--bg-canvas) }`; the
           // fallback hexes are the exact [data-theme] token values, so the
           // pre-CSS paint is identical to the post-CSS canvas. The desktop-pet
