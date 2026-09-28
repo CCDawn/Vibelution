@@ -175,7 +175,7 @@ macOS / Linux 用户按对应安装指南（[macOS](docs/guides/install-macos.md
 3. 给出研究问题、已有资料和本轮目标，通过会话、团队讨论与研究流程推进任务。
 4. 查看成员通信、阶段产物和评审意见，再决定下一步研究方向。
 
-[Windows 安装说明](docs/guides/install-windows.md) · [macOS 安装说明](docs/guides/install-macos.md) · [Linux 安装说明](docs/guides/install-linux.md) · [开发环境与贡献](CONTRIBUTING.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
+[Windows 安装说明](docs/guides/install-windows.md) · [macOS 安装说明](docs/guides/install-macos.md) · [Linux 安装说明](docs/guides/install-linux.md) · [让 AI 帮你部署（Agent Runbook）](docs/guides/agent-deploy-runbook.md) · [开发环境与贡献](CONTRIBUTING.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
 
 工作台运行在本机，模型由你配置。使用云端模型时，相应请求会发送给所选服务商并可能产生费用；密钥与运行配置保存在仓库之外。
 
