@@ -4257,9 +4257,7 @@ def test_update_agent_chat_room_membership_only_changes_selected_agent(tmp_path,
 
 
 def test_update_agent_chat_room_membership_rejects_unknown_room(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Alpha Agent")
 
     try:
