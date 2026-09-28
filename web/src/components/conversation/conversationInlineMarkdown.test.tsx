@@ -13,9 +13,12 @@ const classNames = {
 };
 
 describe("conversation inline markdown boundary", () => {
-  it("keeps inline markdown rendering out of the heavy ConversationView module", () => {
+  it("keeps inline markdown parsing out of the heavy ConversationView module", () => {
+    // The parser implementation stays in this module; ConversationView only
+    // delegates to it (group-transcript rows). No second parser may appear
+    // inline in the heavy module.
     expect(existsSync(new URL("./conversationInlineMarkdown.tsx", import.meta.url))).toBe(true);
-    expect(conversationViewSource).not.toContain('from "./conversationInlineMarkdown"');
+    expect(conversationViewSource).toContain('from "./conversationInlineMarkdown"');
     expect(conversationViewSource).not.toContain("function renderInlineMarkdown");
     expect(conversationViewSource).not.toContain("const inlinePattern =");
   });

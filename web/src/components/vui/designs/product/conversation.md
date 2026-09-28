@@ -441,6 +441,54 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 - 复用 `VConfirmDialog` + `VSelect`，不新建 `V*` 导出组件。
 - 危险确认走 `VConfirmDialog` danger tone；本弹窗非破坏性（源会话只读），保持 neutral。
 
+## ConversationFileRewindDialog
+
+### 功能
+整轮回退弹窗：把某一轮写入的项目文件恢复到该轮开始前的状态。打开时拉取服务端逐文件预览（分类徽标 + 将执行的动作 + 当前大小），默认 strict 应用整批；服务端 409 时列出被拒文件明细并提供「仍恢复安全文件」force 次按钮；成功与幂等重放都以计数反馈。服务端是唯一安全权威，弹窗只做呈现与转发。
+
+### 适用范围
+- **适用**：直连会话时间线里带磁盘检查点（`metadata.changedFiles` 非空）的已完成助手轮，从「本轮文件」面板头部入口进入。
+- **不适用**：Companion 私聊、群聊 transcript、流式中的轮次、没有 `sessionId`/`turnId` 锚点的渲染（入口直接隐藏）。
+
+### 使用方式
+
+```tsx
+<ConversationFileRewindDialog
+  open={rewindOpen}
+  sessionId={sessionId}
+  turnId={turnId}
+  language={language}
+  onOpenChange={setRewindOpen}
+/>
+```
+
+| 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| 入口 | 面板头部 `VButton` ghost「回退本轮文件」 | 仅 `changedFiles?.length && sessionId && turnId` 齐备时显示 |
+| 预览列表 | 逐文件行：路径 + `VChip` 分类 + 动作说明 + 当前大小 | 分类文案用人话（`external_modified` → 「写入后被其他程序修改」） |
+| 说明行 | 服务端 `capabilityNote` 原文 | 有值才显示 |
+| 确认/force | strict 主按钮；409 后出现 force 次按钮 | pending 时禁用关闭；结果反馈替换动作区 |
+| 结果反馈 | `已恢复 N 个文件；跳过 M 个。` 或幂等重放说明 | alreadyApplied 不显示伪造计数 |
+
+### 非职责
+- 不做逐文件勾选回退（服务端只支持整轮语义 + force）。
+- 不做回退后的会话刷新与缓存失效（接线层职责）。
+- 不内嵌 diff 预览（面板已有「本轮补丁」弹窗）。
+
+### 视觉与状态
+- 加载：`role="status"` 预览加载文案；404 等失败给一行人话错误 + 「重试」。
+- 分类徽标 tone：safe→success、checkpoint_missing→warning、external_modified→danger、其余 neutral。
+- 应用中：确认/force 按钮 `isPending`，取消禁用；结果出现后仅剩「关闭」。
+
+### 实现落点
+- 弹窗：`web/src/components/conversation/ConversationFileRewindDialog.tsx`
+- 入口与渲染：「本轮文件」面板 `web/src/components/conversation/ConversationFileDeliveries.tsx`
+- API：`web/src/api/chat.ts` `previewSessionTurnRewind` / `applySessionTurnRewind` / `sessionRewindUnsafeFilesFromError`
+
+### 反冗余
+- 复用 `VDialog`/`VButton`/`VChip`，不新建 `V*` primitive。
+- 不与 `ConversationForkSessionDialog`（分叉出口）共享状态或入口。
+
 ## ConversationMarkdownCodeBlock
 
 ### 功能
@@ -486,6 +534,128 @@ Settled 消息里 fenced 代码块的头部三件套（对齐 ZCode CodeBlockHea
 ### 反冗余
 - 不新建通用 CodeBlock primitive；本块是 conversation product 组合，头部控件复用 `VNativeButton`。
 - 代码卡边框/圆角复用宿主 `responseSegmentPre`，禁止第二套卡片壳或平行样式 map。
+
+## 轮次导航 rail 悬停预览
+
+### 功能
+时间线 minimap rail（每轮一枚圆点）的悬停预览：带预览的轮次点外包 `VHoverCard`（width 默认、`side="left"`，rail 贴右缘向左展开），内容纵向堆叠两段纯文本预览——用户提问两行截断（line-clamp-2）在上、助手回答三行截断（line-clamp-3）在下。预览由 ConversationView 以 `previewTextByRowKey` 喂入 `buildConversationTurnNavDirectory`，经 `userPreviewText`/`assistantPreviewText` 到点；与既有 label 同源提取，但剥掉 markdown（围栏代码、图片、链接、强调、标题/引用标记），卡片里不出现原始标记。原生 `title` 提示被该卡替换；无预览的轮次保持裸点，不包空卡。
+
+### 适用范围
+- **适用**：`ConversationTurnNavigator` 内达到 6 轮门后渲染的每个轮次点；仅当该轮至少有一段预览。
+- **不适用**：压缩/模型切换/分叉分隔行（无导航点）；空预览轮次（不渲染空 HoverCard）；触屏无悬停（点按仍直接跳转，卡片是增强不是门）。
+
+### 使用方式
+```tsx
+// 生产：ConversationTurnNavigator 的 entries.map 内。
+<VHoverCard key={entry.turnIndex} side="left" content={...}>
+  <VButton contentLayout="plain" aria-label={entry.label} aria-current={...}>…</VButton>
+</VHoverCard>
+```
+
+### 非职责
+- 不改导航跳转语义；卡片纯只读预览，无按钮无操作。
+- 不做第二套 tooltip；原生 title 移除，aria-label 保留供读屏。
+- 懒挂载由 VHoverCard 内建（指针意图 + openDelay 才挂 Radix 树），rail 百级点不预热 overlay。
+
+### 视觉与状态
+- 卡壳（边框/内边距/宽度/阴影）归 shadcn renderer；本组件只带 `turnNavigatorHoverBody/User/Assistant` 三片：纵向 `gap-1.5` 堆叠，`--fg-secondary`（提问）/`--fg-tertiary`（回答）、`text-vui-xs`、line-clamp 截断。
+- 截断是纯 CSS（line-clamp），预览文本自身已在 ConversationView 侧按 200/300 字符上限收敛。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationTurnNavigator.tsx`
+- 样式：`web/src/components/conversation/ConversationTurnNavigator.styles.ts`（`turnNavigatorHover*`）
+- 预览派生：`web/src/components/conversation/ConversationView.tsx`（`turnNavPlainPreviewText` → `previewTextByRowKey`）
+- 纯逻辑：`web/src/components/conversation/conversationTurnNavigation.ts`（`previewTextByRowKey` 选项与 `userPreviewText`/`assistantPreviewText` 字段）
+
+### 反冗余
+- 复用 `VHoverCard` 与 turn-nav 既有预览管线，不新建第二套 tooltip/预览提取。
+- 预览与 label 同源（`turnNavPreviewText`），只多一层剥 markdown；禁止在导航器内再取一次消息文本。
+
+## 时间线信封分隔线
+
+### 功能
+对齐 ZCode 轮次信封的三类轻量分隔行，共用同一结构：两侧细发线（hairline）夹一枚 13px 小图标与一句短标签，占位一行、不打断扫读：
+- **上下文压缩检查点**：assistant 角色的 `context_compression_marker`（metadata 投影或 status turn item 的 `diagnosticSummary` 两种载体都识别）。按结果分三态——applied 正常样式「上下文已压缩」；skipped_low_savings 更安静样式「压缩未应用 · 收益不足」；failed_preserved 警示样式「压缩失败 · 已保留原上下文」。**永不渲染 token 节省数字**——那是簿记，不是转写。
+- **模型切换**：由 `buildConversationModelSwitchBoundaries` 纯派生，挂在开轮 user 行顶部。首个带模型的轮次给 initial「使用 <模型>」，后续换模型给 switch「从 <A> 切换到 <B>」；模型名查 config workspace 的 `modelOptions`，查不到回退原始 modelId；同模型连续轮次不渲染。
+- **分叉来源标记**：`isForkedSessionMarkerMessage` 的休眠钩子——后端目前只在 SESSION 级记 `forkedFrom`，从不投影每条消息的标记；一旦投影，消息行顶部出现「已从其他会话分叉」，消息本体照常渲染。
+
+### 适用范围
+- **适用**：直连会话时间线（含 codex native transcript 投影），与 cliAgentLifecycle 行同一拦截位（turn 渲染入口最前端）。
+- **不适用**：陪伴模式不豁免（压缩/分叉属时间线 chrome，与 lifecycle 行一致照常渲染）；分隔行不承载任何交互，不可点击、不可展开。
+
+### 使用方式
+```tsx
+// 生产：ConversationView renderTurn 入口（lifecycle 行之后、agentMessage 之前）。
+// 压缩：conversationCompressionDividerTone(message) → applied | skipped_low_savings | failed_preserved
+<article data-conversation-compression-divider={tone}>
+  <span rule /><ChevronsDownUp /><span label={t("compressionDividerApplied")} /><span rule />
+</article>
+// 模型切换：timelineModelSwitchBoundaries.get(userMessage.id) → initial | switch
+<div data-conversation-model-switch-divider={kind}>…<Sparkles|ArrowLeftRight />…</div>
+// 分叉：isForkedSessionMarkerMessage(message)
+<div data-conversation-fork-marker-divider="true">…<GitFork />…</div>
+```
+
+### 非职责
+- 不改写 journal、不算模型路由；边界只从已落库消息的 `metadata.llmUsage.llmModelId` 派生。
+- 不显示 token 数字、不显示模型推理强度；压缩检查点的后端文本（含节省 token 数）整行丢弃，标签只走 `dictionaryChat`。
+- 不做第二套压缩状态卡；上下文用量详情仍由 composer 上下文入口承载。
+
+### 视觉与状态
+- 行样式 `turnDividerRow`：flex 居中，两侧 `turnDividerRule` 发线（`--vui-border-subtle` 78% 混合），文字 `--fg-tertiary`、`text-vui-xs`。
+- 三态：applied 挂 cool-info；skipped_low_savings 仅 `opacity-60`；failed_preserved 挂 warning 软态并把发线/图标/文字转到 `--state-warning`。
+- 模型/分叉行复用同一行样式，不区分 tone；时间戳不渲染（行语义是「边界」不是「事件」）。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationView.tsx`（`conversationCompressionDividerTone` / `renderTurn` 信封分隔节点）
+- 纯派生：`web/src/components/conversation/conversationModelSwitch.ts`（`buildConversationModelSwitchBoundaries`）
+- 判定：`web/src/components/conversation/conversationMessagePredicates.ts`（`isContextCompressionMarkerMessage` / `isForkedSessionMarkerMessage`）
+- 样式：`web/src/components/conversation/ConversationView.styles.ts`（`turnDivider*`）
+- 文案：`dictionaryChat.compressionDivider*` / `modelSwitch*Label` / `forkedSessionMarkerLabel`
+
+### 反冗余
+- 三类分隔行共用一套样式切片，禁止每种各开一份样式。
+- 模型标签只读 config workspace 缓存（`queryKeys.configWorkspace()` 共享键），不为时间线单开配置请求通道。
+- 压缩检查点不回退到旧「CircleDot 状态格」；状态格保留给真正的运行状态。
+
+## 思考耗时
+
+### 功能
+思考单元（codex transcript reasoning 与 agent timeline thought 两处）标题旁的耗时标注，ZCode 语义、纯客户端计时：单元**首次 live 渲染**时记起点；仅当「展开且 live」时每秒跳一次（`思考中 · 8s`）；单元落定冻结为「已思考 · 持续了 8 秒」，不足 1 秒显示「已思考 · 持续了几秒」。历史加载即已落定的单元**不显示时长**——没有服务端时间戳，不编造。
+
+### 适用范围
+- **适用**：`renderCodexThoughtScrollCell` 与 `renderThoughtTimelineItem` 两处思考单元标题行。
+- **不适用**：进展（progress）单元、工具单元、mental 快照；折叠且从未展开过的 live 单元不渲染标注（起点照记）。
+
+### 使用方式
+```tsx
+// 生产：思考单元标题行内、标题之后、滚动摘要之前。
+<ThoughtDurationLabel
+  live={isLive}
+  expanded={expanded}
+  lastedSecondsTemplate={t("thoughtDurationLastedSeconds")}
+  lastedMomentsLabel={t("thoughtDurationLastedMoments")}
+/>
+```
+
+### 非职责
+- 不改思考内容的展开/收起协议；耗时只是标题后的只读标注。
+- 不取服务端时间；跨重挂载（整轮落定把行移回虚拟化宿主）不追溯——重挂载后按「历史单元」对待，宁缺勿编。
+- 不做分钟换算：秒级读数与 ZCode 对齐，分钟级思考由「已工作 N 分钟」turn work header 承载。
+
+### 视觉与状态
+- `thoughtDuration` 样式：`--fg-tertiary`、tabular-nums、带 `·` 分隔；live 读数 `<N>s`，落定走 `thoughtDurationLastedSeconds` / `thoughtDurationLastedMoments` 模板。
+- 计时用自续 `setTimeout` 链（禁 `setInterval`，避免打字机缓冲契约误伤），1s 间隔；仅在「展开且 live」时调度。
+- `data-thought-duration="live|settled"` 作测试锚点。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationView.tsx`（`ThoughtDurationLabel`）
+- 样式：`ConversationView.styles.ts` 的 `thoughtDuration`
+- 文案：`dictionaryChat.thoughtDurationLastedSeconds` / `thoughtDurationLastedMoments`
+
+### 反冗余
+- 两处思考单元共用同一组件与字典键，禁止各写一份计时。
+- 不新增第二套「已工作」时长展示；turn 级时长仍归 `ConversationTurnWorkHeader`。
 
 ## 流式行内渲染统一（live tail 与 settled 同源）
 

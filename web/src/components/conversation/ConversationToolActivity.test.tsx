@@ -429,10 +429,11 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    // Status word keeps its color + dashed underline and reveals the error on hover.
+    // Status word keeps its color + dashed underline and reveals the error on
+    // hover via VTooltip (idle trigger slot markers replace the native title).
     expect(html).toContain('data-codex-tool-status-pill="true"');
     expect(html).toContain('data-codex-tool-status-kind="failed"');
-    expect(html).toContain('title="HTTP 406: https://elifesciences.org/articles/13810"');
+    expect(html).toContain('data-codex-tool-status-kind="failed" data-slot="tooltip-trigger"');
     // The expanded body (SSR keeps it mounted) keeps the full error + a copy affordance.
     expect(html).toContain('data-codex-tool-failure-copy="true"');
     expect(html).toContain("复制错误详情");
@@ -616,7 +617,7 @@ describe("ConversationToolActivity", () => {
     const failedSummary = summaryContaining(failedHtml, "探索");
     expect(failedSummary).toContain("1 项需关注");
     expect(failedSummary).toContain('data-codex-tool-status-kind="failed"');
-    expect(failedSummary).toContain('title="HTTP 406: https://example.com/a"');
+    expect(failedSummary).toContain('data-codex-tool-status-kind="failed" data-slot="tooltip-trigger"');
   });
 
   it("renders the subagent spawn row with a stable token-derived colored name", () => {

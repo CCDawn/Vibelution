@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: chat (146 keys). */
+/** Route/domain dictionary slice: chat (190 keys). */
 export const dictionaryChat = {
   zh: {
     navChat: "对话",
@@ -163,6 +163,7 @@ export const dictionaryChat = {
     attachmentUploading: "上传中",
     attachmentUploadFailedRetryHint: "上传失败，可重试",
     retryUpload: "重试上传",
+    composerPastedTextAttachmentNotice: "粘贴的长文本已转为附件：{filename}",
     composerReferenceTrayLabel: "待发送引用",
     composerReferenceRemove: "移除引用",
     composerReferenceKindSession: "会话引用",
@@ -182,6 +183,14 @@ export const dictionaryChat = {
     composerReferenceKnowledgeGroupBases: "知识库",
     composerReferenceKnowledgeGroupItems: "知识条目",
     composerReferenceKnowledgeGroupFiles: "会话文件",
+    compressionDividerApplied: "上下文已压缩",
+    compressionDividerSkipped: "压缩未应用 · 收益不足",
+    compressionDividerFailed: "压缩失败 · 已保留原上下文",
+    modelSwitchInitialLabel: "使用 {model}",
+    modelSwitchChangeLabel: "从 {from} 切换到 {to}",
+    forkedSessionMarkerLabel: "已从其他会话分叉",
+    thoughtDurationLastedSeconds: "持续了 {seconds} 秒",
+    thoughtDurationLastedMoments: "持续了几秒",
   },
   en: {
     navChat: "Chat",
@@ -346,6 +355,7 @@ export const dictionaryChat = {
     attachmentUploading: "Uploading",
     attachmentUploadFailedRetryHint: "Upload failed, retry available",
     retryUpload: "Retry upload",
+    composerPastedTextAttachmentNotice: "Long pasted text converted to an attachment: {filename}",
     composerReferenceTrayLabel: "References to send",
     composerReferenceRemove: "Remove reference",
     composerReferenceKindSession: "Session reference",
@@ -365,5 +375,13 @@ export const dictionaryChat = {
     composerReferenceKnowledgeGroupBases: "Knowledge bases",
     composerReferenceKnowledgeGroupItems: "Knowledge entries",
     composerReferenceKnowledgeGroupFiles: "Session files",
+    compressionDividerApplied: "Context compacted",
+    compressionDividerSkipped: "Compaction skipped · low savings",
+    compressionDividerFailed: "Compaction failed · original context preserved",
+    modelSwitchInitialLabel: "Using {model}",
+    modelSwitchChangeLabel: "Switched from {from} to {to}",
+    forkedSessionMarkerLabel: "Forked from another session",
+    thoughtDurationLastedSeconds: "lasted {seconds}s",
+    thoughtDurationLastedMoments: "lasted a few seconds",
   },
 } as const;

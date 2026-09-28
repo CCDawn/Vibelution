@@ -1,13 +1,24 @@
-import { createContext, useContext, useRef, useState } from "react";
+import { createContext, useContext, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, GripVertical, Paperclip, Pause, Pencil, Play, X } from "lucide-react";
 
-import { VButton, VNativeInput } from "../vui";
+import { VButton, VNativeInput, VTooltip } from "../vui";
 import styles from "./ConversationView.styles";
+import tooltipStyles from "./ConversationFollowupQueueBar.styles";
 import {
   type ComposerQueueItem,
 } from "./composerFollowupQueueModel";
 
 const VISIBLE_QUEUE_ROWS = 4;
+
+/** ZCode-style two-part tooltip: strong title line + muted description line. */
+function tooltipTitleDescription(title: string, description: string): ReactNode {
+  return (
+    <span className={tooltipStyles.tooltipContent}>
+      <span className={tooltipStyles.tooltipTitle}>{title}</span>
+      <span className={tooltipStyles.tooltipDescription}>{description}</span>
+    </span>
+  );
+}
 
 /**
  * Pause/resume reaches the bar without prop drilling through ConversationView
@@ -134,25 +145,33 @@ export function ConversationFollowupQueueBar({
                   ) : null}
                   <span className={styles.followupQueueRowText} title={item.text}>{item.text}</span>
                   {item.attachmentCount ? (
-                    <span
-                      className={styles.followupQueueChip}
-                      title={
+                    <VTooltip
+                      width="compact"
+                      content={
                         lang === "zh"
                           ? `${item.attachmentCount} 个附件`
                           : `${item.attachmentCount} attachment(s)`
                       }
                     >
-                      <Paperclip size={11} />
-                      {item.attachmentCount}
-                    </span>
+                      <span className={styles.followupQueueChip}>
+                        <Paperclip size={11} />
+                        {item.attachmentCount}
+                      </span>
+                    </VTooltip>
                   ) : null}
                   {item.status === "blocked" ? (
-                    <span
-                      className={styles.followupQueueChipBlocked}
-                      title={item.lastError || (lang === "zh" ? "上一条发送失败，编辑后可重试" : "The last attempt failed; edit to retry.")}
+                    <VTooltip
+                      width="compact"
+                      content={tooltipTitleDescription(
+                        lang === "zh" ? "发送失败" : "Send failed",
+                        item.lastError
+                          || (lang === "zh" ? "上一条发送失败，编辑后可重试" : "The last attempt failed; edit to retry."),
+                      )}
                     >
-                      {lang === "zh" ? "发送失败" : "Failed"}
-                    </span>
+                      <span className={styles.followupQueueChipBlocked}>
+                        {lang === "zh" ? "发送失败" : "Failed"}
+                      </span>
+                    </VTooltip>
                   ) : null}
                   {paused ? (
                     <span className={`${styles.followupQueueChip} ${styles.followupQueueChipPaused}`}>

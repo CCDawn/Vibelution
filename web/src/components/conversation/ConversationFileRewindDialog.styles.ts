@@ -1,0 +1,16 @@
+export default {
+  dialog: "!w-[min(96vw,44rem)]",
+  body: "grid min-w-0 gap-2",
+  note: "m-0 text-vui-xs text-vui-fg-tertiary",
+  status: "m-0 text-vui-sm text-vui-fg-secondary",
+  error: "m-0 text-vui-sm text-[var(--state-error)]",
+  list: "m-0 grid max-h-[50dvh] min-w-0 list-none gap-2 overflow-y-auto p-0",
+  row: "flex min-w-0 flex-wrap items-center gap-2 rounded-xl border border-vui-border-soft p-2",
+  rowMeta: "flex min-w-0 flex-wrap items-center gap-2",
+  path: "min-w-0 flex-1 break-all text-vui-sm text-vui-fg-primary",
+  action: "m-0 shrink-0 text-vui-xs text-vui-fg-tertiary",
+  conflict: "grid min-w-0 gap-2 rounded-xl border border-vui-border-soft p-2",
+  conflictTitle: "m-0 text-vui-sm text-vui-fg-primary",
+  result: "m-0 text-vui-sm text-vui-fg-secondary",
+  footer: "flex flex-wrap items-center justify-end gap-2",
+} as const;

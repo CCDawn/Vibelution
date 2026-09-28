@@ -3,7 +3,7 @@ import React from "react";
 
 import type { ImageArtifactMessage } from "./conversationMessagePredicates";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
-import { VButton } from "../vui";
+import { VButton, VTooltip } from "../vui";
 import styles from "./ConversationImageArtifactView.styles";
 
 type ConversationImageArtifactViewProps = {
@@ -35,7 +35,7 @@ export function ConversationImageArtifactView({
           })
         }
         aria-label={previewLabel}
-        title={previewLabel}
+        tooltip={previewLabel}
       >
         <span className={styles.imageArtifactFrame} aria-hidden="true">
           <img className={styles.imagePreview} src={artifact.imageUrl} alt="" loading="lazy" />
@@ -46,15 +46,26 @@ export function ConversationImageArtifactView({
           {artifact.prompt ? <span className={styles.imageArtifactPrompt}>{artifact.prompt}</span> : null}
           {metaItems.length ? <span>{metaItems.join(" · ")}</span> : null}
         </span>
-        <a
-          className={styles.imageDownloadButton}
-          href={artifact.downloadUrl}
-          download={artifact.artifactId || true}
-          title={downloadLabel}
-          aria-label={downloadLabel}
+        <VTooltip
+          width="compact"
+          content={(
+            <span className={styles.tooltipContent}>
+              <span className={styles.tooltipTitle}>{downloadLabel}</span>
+              <span className={styles.tooltipDescription}>
+                {lang === "zh" ? "下载并保存该图片到本地" : "Download and save this image to your device"}
+              </span>
+            </span>
+          )}
         >
-          <Download size={15} aria-hidden="true" />
-        </a>
+          <a
+            className={styles.imageDownloadButton}
+            href={artifact.downloadUrl}
+            download={artifact.artifactId || true}
+            aria-label={downloadLabel}
+          >
+            <Download size={15} aria-hidden="true" />
+          </a>
+        </VTooltip>
       </figcaption>
     </figure>
   );

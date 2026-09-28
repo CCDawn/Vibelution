@@ -280,7 +280,8 @@ describe("ConversationFollowupQueueBar", () => {
       );
     });
 
-    const chip = container.querySelector('[title="2 个附件"]');
+    // Attachment chip is a VTooltip trigger now (no native title attribute).
+    const chip = container.querySelector('[data-slot="tooltip-trigger"]');
     expect(chip).not.toBeNull();
     expect(chip?.textContent).toContain("2");
   });

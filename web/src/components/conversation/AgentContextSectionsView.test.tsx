@@ -58,7 +58,9 @@ describe("AgentContextSectionsView", () => {
     expect(html).toContain("context.png");
     expect(html).toContain("下载图片");
     expect(html).toContain('aria-label="用户上下文附件 context.png"');
-    expect(html).toContain('title="下载图片 context.png"');
+    // Download affordance is a VTooltip trigger now (two-part title+description), not a native title.
+    expect(html).toContain('aria-label="下载图片 context.png"');
+    expect(html).toContain('data-slot="tooltip-trigger"');
     expect(html).toContain("旧会话摘录");
     expect(html).toContain("前端代理");
     expect(html).toContain('aria-label="用户上下文引用 旧会话摘录 前端代理"');

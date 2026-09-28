@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
-import { VNativeButton } from "../vui";
+import { VNativeButton, VTooltip } from "../vui";
 import "./ConversationToolActivity.css";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
@@ -465,15 +465,26 @@ function ToolActivityItem({
           {details ?? <p className={styles.itemDetailsEmpty}>{emptyDetail}</p>}
           {failureDetail ? (
             <div className={styles.itemDetailsActions} data-codex-tool-failure-copy="true">
-              <VNativeButton
-                data-vui="icon-button"
-                className={styles.itemDetailsCopyButton}
-                onClick={handleCopyFailureDetail}
-                aria-label={copyLabel}
-                title={copyLabel}
+              <VTooltip
+                width="compact"
+                content={(
+                  <span className={styles.tooltipContent}>
+                    <span className={styles.tooltipTitle}>{copyLabel}</span>
+                    <span className={styles.tooltipDescription}>
+                      {language === "zh" ? "复制失败详情到剪贴板" : "Copy the failure details to the clipboard"}
+                    </span>
+                  </span>
+                )}
               >
-                {failureCopied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
-              </VNativeButton>
+                <VNativeButton
+                  data-vui="icon-button"
+                  className={styles.itemDetailsCopyButton}
+                  onClick={handleCopyFailureDetail}
+                  aria-label={copyLabel}
+                >
+                  {failureCopied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+                </VNativeButton>
+              </VTooltip>
             </div>
           ) : null}
         </div>
@@ -633,16 +644,29 @@ function ToolActivityCategoryGroup({
           </span>
           <span className={styles.batchCount}>· {countLabel}</span>
           {attentionLabel ? (
-            <span
-              className={`${styles.statusLabel} ${
-                statusKind === "failed" ? styles.statusLabel_failed : styles.statusLabel_attention
-              }`}
-              data-codex-tool-status-pill="true"
-              data-codex-tool-status-kind={statusKind}
-              title={failureDetail || undefined}
-            >
-              {attentionLabel}
-            </span>
+            failureDetail ? (
+              <VTooltip width="compact" content={failureDetail}>
+                <span
+                  className={`${styles.statusLabel} ${
+                    statusKind === "failed" ? styles.statusLabel_failed : styles.statusLabel_attention
+                  }`}
+                  data-codex-tool-status-pill="true"
+                  data-codex-tool-status-kind={statusKind}
+                >
+                  {attentionLabel}
+                </span>
+              </VTooltip>
+            ) : (
+              <span
+                className={`${styles.statusLabel} ${
+                  statusKind === "failed" ? styles.statusLabel_failed : styles.statusLabel_attention
+                }`}
+                data-codex-tool-status-pill="true"
+                data-codex-tool-status-kind={statusKind}
+              >
+                {attentionLabel}
+              </span>
+            )
           ) : null}
         </span>
         <ChevronRight

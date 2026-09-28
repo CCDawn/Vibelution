@@ -44,6 +44,13 @@ export {
   type VTooltipTriggerRender,
   type VTooltipWidth,
 } from "./primitives/VTooltip";
+export {
+  VHoverCard,
+  type VHoverCardAlign,
+  type VHoverCardProps,
+  type VHoverCardSide,
+  type VHoverCardWidth,
+} from "./primitives/VHoverCard";
 export { VDenseTable, type VDenseTableColumn, type VDenseTableProps } from "./display/VDenseTable";
 export { VLoadingValue, type VLoadingValueProps } from "./display/VLoadingValue";
 export { VMetricStrip, type VMetricStripMetric, type VMetricStripProps, type VMetricStripStatus } from "./display/VMetricStrip";

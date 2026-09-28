@@ -138,6 +138,34 @@ export function isCliAgentLifecycleMessage(message: ConversationMessage) {
   return metadataString(message, "kind") === "cli_agent_lifecycle";
 }
 
+// Context compression projects a settled checkpoint into the timeline as an
+// assistant-role message with empty content, metadata.kind
+// "context_compression_marker" and a status such as "applied" /
+// "skipped_low_savings" / "failed_preserved" (core/chat/
+// context_compression_ledger.py). The marker is lifecycle chrome, not a model
+// answer: it carries no llmUsage and must not count as a turn's model.
+export function isContextCompressionMarkerMessage(message: ConversationMessage) {
+  return metadataString(message, "kind") === "context_compression_marker";
+}
+
+// Fork provenance: the backend records the parent at the SESSION level only
+// (conversation["forkedFrom"] = {sessionId, nodeId, scope, forkedAt}, see
+// core/web/services/session/fork_session.py + conversation_index.py); the
+// copied journal events carry no per-message fork marker. This predicate reads
+// the message-metadata spelling a fork marker would use if the backend ever
+// projects one (mirroring the session record shape). Until Wave3 lands that
+// projection, it can only match messages that carry the field explicitly.
+export function isForkedSessionMarkerMessage(message: ConversationMessage) {
+  if (metadataString(message, "forkedFromSessionId")) {
+    return true;
+  }
+  const forkedFrom = message.metadata?.forkedFrom;
+  if (forkedFrom && typeof forkedFrom === "object") {
+    return Boolean(String((forkedFrom as Record<string, unknown>).sessionId ?? "").trim());
+  }
+  return false;
+}
+
 export function isSessionRecoveryResumedMessage(message: ConversationMessage) {
   return message.role === "assistant"
     && metadataString(message, "kind") === "session_recovery_resumed";

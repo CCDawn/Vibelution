@@ -30,14 +30,14 @@
 - 附件 tray 是 React 内存态、不持久化（chatDraftPersistence 头注释「plain
   text only」），reload 后附件消失是产品文档化行为而非缺陷，本文件只断言草稿。
 
-发现的产品缺陷（不修产品）：
-- 主缺陷（test_history_image_renders_as_img 以 strict xfail 钉住）：时间线里的
-  图片附件（上传与生成，同一 ``/api/sessions/{sid}/artifacts/{id}`` URL 形态）
-  永不以 ``<img>`` 渲染：该路由的 GET 在 WebControlGuardMiddleware 下需要
-  control token（d5084a57e 审计收紧），而浏览器原生图片加载无法附带自定义头
-  → 403 → 前端 onError 降级为文件卡。同类问题 47e6149a5 已为 avatar/theme
-  路由开过 ``_SOURCE_ONLY_GET_PATH_PREFIXES`` 放行先例，artifact 路由漏在清单
-  外。因此链路用例钉「附件卡片以原始文件名可见」，img 形态单独 xfail。
+主缺陷已修复（原 strict xfail 已提升为硬断言）：
+- 时间线里的图片附件（上传与生成，同一 ``/api/sessions/{sid}/artifacts/{id}``
+  URL 形态）曾被 WebControlGuardMiddleware 以 control token 拒绝（浏览器原生
+  图片加载无法附带自定义头 → 403 → 前端 onError 降级为文件卡）。修复沿用
+  47e6149a5 的 ``_SOURCE_ONLY_GET_PATH_PREFIXES`` 先例，为会话图片 artifact 开
+  GET-only 窄口（仅图片扩展名 artifact id 放行；文档 artifact 与 mutating
+  方法仍要 token，trusted-source 校验保留），test_history_image_renders_as_img
+  已是硬断言，钉住图片必须以 ``<img>`` 真实加载。
 - 次要缺陷（取证后按事实记录，不作断言）：上传失败批次被拦下后，乐观用户行
   残留在时间线上（submitTurnWithAttachments 失败分支的
   removeOptimisticUserMessage 未生效，截图 + thread count=1 取证），视觉上像
@@ -760,10 +760,8 @@ def assert_context_attachment_present(
 ) -> None:
     """历史消息里该文件名的附件卡片可见（用户上下文附件组 + figure 锚点）。
 
-    当前产品把上传图片以「文件卡」形态渲染（img 403 降级，见模块头缺陷记录），
-    所以链路用例只钉「附件以原始文件名出现在历史消息里」，不钉 img 形态；img
-    形态由 test_history_image_renders_as_img 以 strict xfail 钉住，产品修复后会
-    转 XPASS 强制提升为硬断言。
+    链路用例钉「附件以原始文件名出现在历史消息里」；img 形态（必须以 ``<img>``
+    真实加载）由 test_history_image_renders_as_img 硬断言钉住。
     """
     figure = page.locator(f'figure[data-agent-context-attachment-name="{filename}"]').first
     try:
@@ -958,7 +956,8 @@ def test_composer_upload_send_reply_and_model_sees_image(
     # mock 回复上时间线。
     texts = wait_thread_text(page, IMG_REPLY_MAIN)
     assert IMG_REPLY_MAIN in texts, f"mock 回复未上时间线: {texts[:300]!r}"
-    # 用户消息里图片附件以原始文件名可见（img 形态缺陷见 xfail 用例）。
+    # 用户消息里图片附件以原始文件名可见（img 真实加载由
+    # test_history_image_renders_as_img 硬断言钉住）。
     assert_context_attachment_present(page, "e2e-img-alpha.png")
     group = page.locator(CONTEXT_ATTACHMENT_GROUP).first
     count = _attr(group, "data-agent-context-group-count")
@@ -1116,24 +1115,19 @@ def test_draft_survives_reload(
     print(f"[img_e2e] reload 后附件 tray 可见数={tray_count}（内存态不持久化，产品文档化行为）")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="产品缺陷：/api/sessions/{sid}/artifacts/{id} 的 GET 需要 control token，"
-    "浏览器 <img> 无法附带自定义头 → 403 → onError 降级文件卡，历史图片永不以图片形态"
-    "渲染（取证见用例内输出；修复参照 47e6149a5 把该路由加入 _SOURCE_ONLY_GET_PATH_PREFIXES）",
-)
 def test_history_image_renders_as_img(
     page: Any, e2e_instance: Any, img_mock: ImageMockHandle, img_agent: dict[str, str],
     isolate_img_mock_per_test: dict[str, int], tmp_path: Path,
 ) -> None:
-    """钉缺陷：历史消息中的上传图片必须以 <img> 真实渲染，而不是降级文件卡。
+    """硬断言：历史消息中的上传图片必须以 <img> 真实渲染，而不是降级文件卡。
 
-    缺陷现场（2026-09-29 取证）：附件元数据正确（kind=user_image、imageUrl 指向
-    artifact 路由），但浏览器 <img> 请求该路由被 WebControlGuardMiddleware 以
-    「Missing or invalid web control token」403 拒绝，前端 onError 后降级为文件
-    卡（figure 内无 img）。影响面：上传图片与生成图片（同一 URL 形态）在时间线里
-    永远不可见为图片，下载链接（无 token 的导航 GET）同样 403。
-    strict xfail：产品修复后本用例转 XPASS 判失败，强制把它提升为硬断言。
+    历史缺陷（2026-09-29 取证，已修复）：附件元数据正确（kind=user_image、
+    imageUrl 指向 artifact 路由），但浏览器 <img> 请求该路由被
+    WebControlGuardMiddleware 以「Missing or invalid web control token」403
+    拒绝，前端 onError 后降级为文件卡（figure 内无 img）。修复：会话图片
+    artifact 的 GET 走 _SOURCE_ONLY_GET_PATH_PREFIXES 窄口放行（仅图片扩展名，
+    文档 artifact 与 mutating 方法仍要 token），下载导航（无 token 的
+    ``?download=1`` GET）同批恢复可达。
     """
     image_path = tmp_path / "e2e-img-render.png"
     image_path.write_bytes(build_png(rgb=(90, 90, 210)))
