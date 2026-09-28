@@ -1,4 +1,4 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -180,6 +180,7 @@ import {
 } from "./process/launcherBootstrap.js";
 import { listActiveWorkRuns } from "./process/activeWorkGuard.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
+import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
 import { executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
 import {
@@ -571,6 +572,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
           console.warn(error instanceof Error ? error.message : String(error));
         }),
       onWorkbenchOpenRequest: () => startOrFocusWorkbenchFromProductEntryOnShell(),
+      openExternalUrl: (url) => shell.openExternal(url),
       onInstanceCloseRequest: async (instanceId) => {
         try {
           const result = await orchestrateBranchInstanceLifecycle("stop", {
@@ -3085,6 +3087,38 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
     return failedConversationNotificationResult(payload);
   }
   return await service.notify(payload);
+});
+
+ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (event, rawUrl: unknown) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  if (!isExternalOpenableUrl(rawUrl)) {
+    return false;
+  }
+  try {
+    await shell.openExternal(rawUrl);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle(IPC_CHANNELS.openPath, async (event, rawPath: unknown) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  const target = normalizeAbsoluteOpenPath(rawPath);
+  if (target === null) {
+    return "";
+  }
+  return await shell.openPath(target);
+});
+
+ipcMain.handle(IPC_CHANNELS.showItemInFolder, (event, rawPath: unknown) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  const target = normalizeAbsoluteOpenPath(rawPath);
+  if (target === null) {
+    return false;
+  }
+  shell.showItemInFolder(target);
+  return true;
 });
 
 function launcherIpcTrustedOrigins(): string[] {

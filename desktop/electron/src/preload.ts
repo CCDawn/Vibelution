@@ -32,6 +32,12 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
       return null;
     }
   },
+  /** 用系统默认浏览器/处理程序打开 http/https/mailto 链接；scheme 白名单在 main 侧复核。 */
+  openExternalUrl: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.openExternalUrl, url),
+  /** 用系统默认程序打开绝对路径指向的文件/目录；main 侧复核绝对路径。 */
+  openPath: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.openPath, path),
+  /** 在系统文件管理器中显示该绝对路径对应的条目。 */
+  showItemInFolder: (path: string) => ipcRenderer.invoke(IPC_CHANNELS.showItemInFolder, path),
   onLauncherStateChanged: (listener: (payload: unknown) => void) => {
     const wrapped = (_event: unknown, payload: unknown) => listener(payload);
     ipcRenderer.on(IPC_CHANNELS.launcherStateChanged, wrapped);
