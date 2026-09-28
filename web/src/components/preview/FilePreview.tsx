@@ -14,6 +14,7 @@ import { classifyLogText, matchesSeverityFilter, type LogSeverityFilter } from "
 import { parseStructuredLogPreview } from "../../logs/structuredLogPreview";
 import { StructuredLogPreview } from "./StructuredLogPreview";
 import styles from "./FilePreview.styles";
+import { buildSafeHtmlPreview } from "./safeHtmlPreview";
 
 export type FilePreviewProps = {
   file: FileContent;
@@ -247,8 +248,12 @@ export function FilePreview({
   highlightAsLog = false,
   severityFilter = "all",
 }: FilePreviewProps) {
-  const { t } = useAppI18n({ domains: ["chat"] });
+  const { t, lang } = useAppI18n({ domains: ["chat"] });
   const [viewMode, setViewMode] = useState<"structured" | "raw">("structured");
+  const isHtml = !highlightAsLog && !file.truncated && /\.html?$/i.test(file.path);
+  const safeHtml = useMemo(() => isHtml && typeof document !== "undefined"
+    ? buildSafeHtmlPreview(file.content) : "", [isHtml, file.content]);
+  const showHtml = isHtml && viewMode !== "raw";
   const languageExtensions = useFilePreviewLanguageExtensions(file.language);
   const editorExtensions = useMemo(() => {
     const extensions = [...languageExtensions, EditorView.lineWrapping];
@@ -309,13 +314,25 @@ export function FilePreview({
         <div className={styles.metaBlockClass}>
           {changed ? <span className={styles.changedPillClass}>{t("changed")}</span> : null}
           <span className={styles.sourcePillClass}>{sourceLabel}</span>
-          {previewModeActions}
+          {isHtml ? (
+            <div className={styles.previewModeGroupClass} role="group" aria-label={lang === "zh" ? "HTML 查看方式" : "HTML view"}>
+              <VButton variant="ghost" aria-pressed={showHtml} onPress={() => setViewMode("structured")}>
+                {lang === "zh" ? "网页预览" : "Web preview"}
+              </VButton>
+              <VButton variant="ghost" aria-pressed={!showHtml} onPress={() => setViewMode("raw")}>
+                {lang === "zh" ? "源码" : "Source"}
+              </VButton>
+            </div>
+          ) : previewModeActions}
           {headerActions}
         </div>
       </div>
 
       <div className={styles.editorWrapClass}>
-        {showStructuredPreview && structuredModel ? (
+        {showHtml ? (
+          <iframe title={file.path} sandbox="" referrerPolicy="no-referrer" srcDoc={safeHtml}
+            className="h-full min-h-0 w-full border-0 bg-white" />
+        ) : showStructuredPreview && structuredModel ? (
           <StructuredLogPreview model={structuredModel} severityFilter={severityFilter} />
         ) : (
           <PreviewEditorErrorBoundary key={editorKey} previewPath={file.path} fallbackContent={displayContent}>
@@ -336,6 +353,9 @@ export function FilePreview({
         )}
       </div>
 
+      {isHtml ? <p className={styles.footnoteClass}>{lang === "zh"
+        ? "安全预览：不运行脚本，不加载外部资源；交互效果请在独立浏览器中查看。"
+        : "Safe preview: scripts and external resources are disabled. Use a separate browser for interactive behavior."}</p> : null}
       {file.truncated ? <p className={styles.footnoteClass}>{t("previewTruncated")}</p> : null}
     </div>
   );
