@@ -9,6 +9,10 @@ export type LazyConversationMarkdownRendererProps = {
   classNames?: ConversationMarkdownClassNames;
   duplicateImageUrls?: Set<string>;
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => ReactNode;
+  /** Session workspace root enabling workspace-file markdown links. */
+  workspaceRoot?: string;
+  /** Bilingual chrome text for workspace-file menus and mermaid blocks. */
+  language?: "zh" | "en";
 };
 
 const ConversationMarkdownRenderer = lazy(async () => {

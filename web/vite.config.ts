@@ -174,7 +174,10 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 760,
-    rollupOptions: {
+    // rolldownOptions (not the deprecated rollupOptions alias): manualChunks is
+    // ignored when codeSplitting is present, so the vendor taxonomy and the
+    // mermaid groups both live in codeSplitting.groups below.
+    rolldownOptions: {
       input: {
         // Main app entry keeps its historical `index-*` output name so the
         // existing budget rules stay valid.
@@ -192,46 +195,50 @@ export default defineConfig({
          * Keep the main `index-*.js` entry as app shell glue.
          * Framework graphs are large, change rarely, and benefit from independent caching.
          * Budget taxonomy treats `vendor-*` separately from route feature chunks.
+         *
+         * Groups are first-match by priority: the heavy mermaid dependency
+         * families (elk / cytoscape) capture before the mermaid group so its
+         * recursive dependency inclusion cannot swallow them into one chunk.
          */
-        manualChunks(id) {
-          const normalized = id.replace(/\\/g, "/");
-          if (normalized.endsWith("/src/routes/teams/useSourceCollectionPresentationTail.ts")) {
-            return "teams-source-collection-tail";
-          }
-          if (!normalized.includes("/node_modules/")) {
-            return undefined;
-          }
-          if (
-            normalized.includes("/node_modules/react-dom/")
-            || normalized.includes("/node_modules/scheduler/")
-          ) {
-            return "vendor-react-dom";
-          }
-          if (
-            normalized.includes("/node_modules/react-router/")
-            || normalized.includes("/node_modules/react-router-dom/")
-            || normalized.includes("/node_modules/cookie/")
-            || normalized.includes("/node_modules/set-cookie-parser/")
-          ) {
-            return "vendor-react-router";
-          }
-          // Bare `react` package only — not react-dom / react-router.
-          if (
-            normalized.includes("/node_modules/react/")
-            || normalized.includes("/node_modules/use-sync-external-store/")
-          ) {
-            return "vendor-react";
-          }
-          if (normalized.includes("/node_modules/@tanstack/")) {
-            return "vendor-query";
-          }
-          if (
-            normalized.includes("/node_modules/@radix-ui/")
-            || normalized.includes("/node_modules/@floating-ui/")
-          ) {
-            return "vendor-overlay";
-          }
-          return undefined;
+        codeSplitting: {
+          groups: [
+            { name: "mermaid-elk", test: /node_modules[\\/]elkjs[\\/]/, priority: 30 },
+            { name: "mermaid-cytoscape", test: /node_modules[\\/]cytoscape/, priority: 30 },
+            {
+              // Diagram layout + parsing engines (largest exclusive deps).
+              name: "mermaid-graph",
+              test: /node_modules[\\/](?:d3|d3-sankey|dagre-d3-es|chevrotain)[\\/]/,
+              priority: 30,
+            },
+            {
+              // Util/parser periphery of mermaid.
+              name: "mermaid-vendor",
+              test: /node_modules[\\/](?:es-toolkit|dayjs|marked|roughjs|dompurify|stylis|uuid|ts-dedent|@iconify[\\/]utils|@upsetjs[\\/]venn\.js|@braintree[\\/]sanitize-url)[\\/]/,
+              priority: 30,
+            },
+            {
+              // Conversation ```mermaid diagrams: dynamic-imported on the
+              // explicit render click only. The core runtime with every
+              // diagram family is ~2.3MB minified, so maxSize makes rolldown
+              // split the group into near-budget pieces; the budget entry
+              // pattern covers the suffixed chunk names.
+              name: "mermaid",
+              test: /node_modules[\\/]mermaid[\\/]|node_modules[\\/]@mermaid-js[\\/]/,
+              priority: 20,
+              maxSize: 1_900_000,
+            },
+            { name: "teams-source-collection-tail", test: /useSourceCollectionPresentationTail/, priority: 10 },
+            { name: "vendor-react-dom", test: /node_modules[\\/](?:react-dom|scheduler)[\\/]/, priority: 10 },
+            {
+              name: "vendor-react-router",
+              test: /node_modules[\\/](?:react-router|react-router-dom|cookie|set-cookie-parser)[\\/]/,
+              priority: 10,
+            },
+            // Bare `react` package only — not react-dom / react-router.
+            { name: "vendor-react", test: /node_modules[\\/](?:react|use-sync-external-store)[\\/]/, priority: 10 },
+            { name: "vendor-query", test: /node_modules[\\/]@tanstack[\\/]/, priority: 10 },
+            { name: "vendor-overlay", test: /node_modules[\\/]@(?:radix-ui|floating-ui)[\\/]/, priority: 10 },
+          ],
         },
       },
     },
