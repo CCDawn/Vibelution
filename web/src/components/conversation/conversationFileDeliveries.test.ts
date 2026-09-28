@@ -47,6 +47,21 @@ describe("turn file deliveries", () => {
     expect(result.files).toEqual([{ path: "a.html", content: undefined, deleted: false }]);
     expect(result.patches).toHaveLength(1);
   });
+  it("includes native SEARCH/REPLACE and edit_file calls, but excludes their returned failures", () => {
+    const edited = cell("replace", "apply_diff_edit_tool", {
+      file_path: "report.html", diff_text: "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nsecond\n=======\nupdated\n>>>>>>> REPLACE",
+    });
+    const failed = cell("failed", "apply_diff_edit_tool", { file_path: "bad.html", diff_text: "bad" });
+    failed.toolLifecycleModel!.toolCalls[0].resultPreview = "[编辑] 错误: 找不到匹配的代码块";
+    const malformed = cell("invalid", "apply_diff_edit_tool", { file_path: "invalid.html", diff_text: "bad" });
+    malformed.toolLifecycleModel!.toolCalls[0].resultPreview = "[编辑] 格式验证失败: 缺少 SEARCH";
+    const legacy = cell("edit", "edit_file", { file_path: "legacy.txt", search_string: "before", replace_string: "after" });
+    const result = collectConversationFileDeliveries([edited, failed, malformed, legacy]);
+    expect(result.files.map((file) => file.path)).toEqual(["report.html", "legacy.txt"]);
+    expect(result.files.every((file) => file.content === undefined)).toBe(true);
+    expect(result.patches[0].text).toContain("-old\n+new\n@@\n-second\n+updated");
+    expect(result.patches[1].text).toContain("-before\n+after");
+  });
   it("can preview a complete add, but cannot preview a deletion or truncated write", () => {
     const patch = cell("a", "apply_patch", { patch: "*** Begin Patch\n*** Add File: new.html\n+<h1>New</h1>\n*** Delete File: old.html\n*** End Patch" });
     const large = cell("b", "write_file_tool", { file_path: "large.html", content: "x".repeat(200001) });
