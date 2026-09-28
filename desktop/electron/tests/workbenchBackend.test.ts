@@ -1148,7 +1148,7 @@ describe("clearWorkbenchLauncherRuntimeState", () => {
 });
 
 describe("frontend build supervision", () => {
-  it("routes release preparation through the shared Python builder", async () => {
+  it.skipIf(process.platform !== "win32")("routes release preparation through the shared Python builder", async () => {
     const runBridge = vi.fn(async (input) => {
       expect(input.pythonPath).toBe("C:/repo/.venv/Scripts/python.exe");
       expect(input.cwd).toBe("C:/repo");

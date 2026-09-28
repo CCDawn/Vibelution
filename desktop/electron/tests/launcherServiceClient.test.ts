@@ -4,7 +4,7 @@ import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import { stopPythonLauncherService } from "../src/process/launcherServiceClient.js";
 
 describe("stopPythonLauncherService", () => {
-  it("routes owned shutdown through the Python desktop entry bridge", async () => {
+  it.skipIf(process.platform !== "win32")("routes owned shutdown through the Python desktop entry bridge", async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
     const child = fakeChildProcess();
     const stopPromise = stopPythonLauncherService({
@@ -64,7 +64,7 @@ describe("stopPythonLauncherService", () => {
     });
   });
 
-  it("reaps leftover Python launcher via state-owned backend pid when no owned pid is known", async () => {
+  it.skipIf(process.platform !== "win32")("reaps leftover Python launcher via state-owned backend pid when no owned pid is known", async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: Record<string, unknown> }> = [];
     const child = fakeChildProcess();
     const stopPromise = stopPythonLauncherService({
