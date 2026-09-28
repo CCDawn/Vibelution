@@ -1638,7 +1638,7 @@ export const ConversationView = React.memo(function ConversationView({
     () => activeTimelineMessages.slice(timelineLiveTailStartIndex),
     [activeTimelineMessages, timelineLiveTailStartIndex],
   );
-  const timelineHistoryRowKeys = useMemo(
+  const timelineHistoryRowKeys = useMemo<string[]>(
     () => activeTimelineRowIdentities.map((identity) => identity.rowKey),
     [activeTimelineRowIdentities],
   );
@@ -1665,7 +1665,7 @@ export const ConversationView = React.memo(function ConversationView({
     count: timelineHistoryMessages.length,
     getScrollElement: getTimelineScrollElement,
     estimateSize: () => CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX,
-    getItemKey: (index: number) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
+    getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`,
     overscan: TIMELINE_VIRTUAL_OVERSCAN,
     gap: TIMELINE_VIRTUAL_ROW_GAP_PX,
     scrollMargin: TIMELINE_VIRTUAL_SCROLL_MARGIN_PX,
@@ -6109,8 +6109,8 @@ export const ConversationView = React.memo(function ConversationView({
                   isDisabled={composerPending}
                   onClick={onRetryComposerAttachmentUploads}
                   title={t("retryUpload")}
+                  icon={<RefreshCw size={12} aria-hidden="true" />}
                 >
-                  <RefreshCw size={12} aria-hidden="true" />
                   <span>{t("retryUpload")}</span>
                 </VButton>
               ) : null}
