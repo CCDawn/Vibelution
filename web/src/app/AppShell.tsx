@@ -79,6 +79,11 @@ import {
   writeStoredWorkbenchTheme,
   type WorkbenchTheme,
 } from "./themePreference";
+import {
+  applyUiFontBasePx,
+  readStoredUiFontBasePx,
+  subscribeStoredUiFontBasePx,
+} from "./uiFontPreference";
 import { startWorkbenchUiPreferencesSync } from "./workbenchUiPreferencesSync";
 import { startWorkbenchWindowMemory } from "./workbenchWindowMemory";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
@@ -789,6 +794,14 @@ export function AppShell() {
   });
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
+
+  // Interface font size base: the index.html bootstrap already painted it
+  // pre-CSS; re-apply once on mount and track settings/storage changes live
+  // (same-window writes and cross-window storage events both land here).
+  useEffect(() => {
+    applyUiFontBasePx(document, readStoredUiFontBasePx());
+    return subscribeStoredUiFontBasePx((px) => applyUiFontBasePx(document, px));
+  }, []);
 
   // Project-local layout memory (port/origin stable) + F11/windowed size memory.
   useEffect(() => startWorkbenchUiPreferencesSync(), []);
