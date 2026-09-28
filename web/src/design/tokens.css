@@ -185,19 +185,33 @@
   --font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, monospace;
 
-  /* Primitive size ladder (rem @ 16px root) */
-  --vui-font-micro-9: 0.5625rem; /* 9 — micro meta, badge/eyebrow only, rare */
-  --vui-font-micro-10: 0.625rem; /* 10 — micro meta */
-  --vui-font-micro-11: 0.6875rem; /* 11 — micro meta */
-  --vui-font-2xs: 0.75rem; /* 12 — dense meta, rare */
-  --vui-font-micro-13: 0.8125rem; /* 13 — micro meta / label */
-  --vui-font-xs: 0.875rem; /* 14 — caption / chip / toolbar */
-  --vui-font-sm: 0.9375rem; /* 15 — control / list secondary */
-  --vui-font-md: 1rem; /* 16 — body default */
-  --vui-font-chat: 1.0625rem; /* 17 — conversation readable */
-  --vui-font-lg: 1.125rem; /* 18 — emphasis body / empty states */
-  --vui-font-title: 1.1875rem; /* 19 — section / route title */
-  --vui-font-xl: 1.375rem; /* 22 — page title (rare) */
+  /*
+   * Primitive size ladder — derived from the single base --vui-font-base
+   * (default 1rem = md = 16px). Every main step is base + a px offset, so the
+   * whole main ladder rescales from one custom property: the workbench user
+   * preference (localStorage vibelution.workbench.font-base-px, 14–18px, set
+   * inline on :root by the early bootstrap and web/src/app/uiFontPreference.ts).
+   * calc() on a custom property resolves at the declaring element, so a :root
+   * override rescales every consumer. Line-height pairs stay unitless and the
+   * semantic --vui-type-* roles stay var() references — both track the ladder
+   * automatically. The canvas sub-ladder and pet tokens below are deliberately
+   * NOT derived (fixed-density axes).
+   */
+  --vui-font-base: 1rem; /* 16 — derivation base (= md); user-scalable 14–18px, local machine preference */
+
+  /* Main ladder: base + px offset (micro-9 = −7 … title = +3; xl = +6 keeps the legacy 22px display jump). */
+  --vui-font-micro-9: calc(var(--vui-font-base) - 7px); /* 9 — micro meta, badge/eyebrow only, rare */
+  --vui-font-micro-10: calc(var(--vui-font-base) - 6px); /* 10 — micro meta */
+  --vui-font-micro-11: calc(var(--vui-font-base) - 5px); /* 11 — micro meta */
+  --vui-font-2xs: calc(var(--vui-font-base) - 4px); /* 12 — dense meta, rare */
+  --vui-font-micro-13: calc(var(--vui-font-base) - 3px); /* 13 — micro meta / label */
+  --vui-font-xs: calc(var(--vui-font-base) - 2px); /* 14 — caption / chip / toolbar */
+  --vui-font-sm: calc(var(--vui-font-base) - 1px); /* 15 — control / list secondary */
+  --vui-font-md: var(--vui-font-base); /* 16 — body default (offset 0) */
+  --vui-font-chat: calc(var(--vui-font-base) + 1px); /* 17 — conversation readable */
+  --vui-font-lg: calc(var(--vui-font-base) + 2px); /* 18 — emphasis body / empty states */
+  --vui-font-title: calc(var(--vui-font-base) + 3px); /* 19 — section / route title */
+  --vui-font-xl: calc(var(--vui-font-base) + 6px); /* 22 — page title (rare; exception +6 step, legacy 22px) */
 
   /*
    * Workflow canvas sub-ladder (declared micro axis, 2026-09 visual-unification
@@ -210,6 +224,10 @@
    * knowledge badges under components/vui/renderers/shadcn/workflow/; main
    * surfaces must keep using --vui-font-*. Consume as
    * [font-size:var(--vui-font-canvas-*)], never text-[var(...)] (color trap).
+   * Fixed-density axis: these stay literal px and are NOT derived from
+   * --vui-font-base — ELK edge-label geometry hard-couples the 11px step in
+   * workflowEdgeLabelGeometry.ts (EDGE_LABEL_FONT_SIZE/CJK_ADVANCE), so a
+   * base override must not shift it.
    */
   --vui-font-canvas-2xs: 9px; /* stage-region kicker */
   --vui-font-canvas-xs: 10px; /* node badges, status chips, legend */
@@ -306,6 +324,8 @@
    * consumed only by the desktop-pet surface
    * (web/src/design/route-css/desktop-pet.tailwind.css + routes/desktopPet/*).
    * Values were consolidated verbatim from that surface (P3 visual unification).
+   * Fixed-density axis: NOT derived from --vui-font-base — the pet window is a
+   * constant-dark standalone surface and never tracks the workbench base size.
    */
   --vui-pet-accent: #36d5cc;
   --vui-pet-accent-rgb: 54 213 204;

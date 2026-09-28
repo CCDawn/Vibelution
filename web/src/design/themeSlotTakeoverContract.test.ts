@@ -45,13 +45,19 @@ const RADIUS_SLOT_TARGETS: Record<string, string> = {
   "--radius-xl": "var(--vui-radius-panel-soft)",
 };
 
-/** tokens.css literals the zero-drift basis relies on (rem @ 16px root). */
+/**
+ * tokens.css values the zero-drift basis relies on. The main font ladder is
+ * derived from the single base --vui-font-base (1rem = 16px default), so the
+ * assertions pin the derived calc() expressions instead of resolved rem
+ * literals — same values at the default base, rescalable by the workbench
+ * font-base preference (14–18px).
+ */
 const TOKEN_VALUE_LITERALS: Record<string, string> = {
-  "--vui-font-2xs": "0.75rem",
-  "--vui-font-xs": "0.875rem",
-  "--vui-font-md": "1rem",
-  "--vui-font-lg": "1.125rem",
-  "--vui-font-title": "1.1875rem",
+  "--vui-font-2xs": "calc(var(--vui-font-base) - 4px)",
+  "--vui-font-xs": "calc(var(--vui-font-base) - 2px)",
+  "--vui-font-md": "var(--vui-font-base)",
+  "--vui-font-lg": "calc(var(--vui-font-base) + 2px)",
+  "--vui-font-title": "calc(var(--vui-font-base) + 3px)",
   "--radius-control": "8px",
 };
 
