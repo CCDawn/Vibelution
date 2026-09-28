@@ -125,6 +125,11 @@ def test_refresh_lock_does_not_quarantine_fresh_lock_after_stale_observation(tmp
     assert json.loads(lock_path.read_text(encoding="utf-8"))["pid"] == 99126
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="no_window_subprocess_kwargs intentionally drops creationflags on "
+    "POSIX, where the console-free spawn policy does not apply",
+)
 def test_schedule_desktop_shell_refresh_spawns_pythonw_helper(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
 
