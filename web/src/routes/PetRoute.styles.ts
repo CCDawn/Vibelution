@@ -11,22 +11,22 @@ const bodyClass =
   "min-h-0 min-w-0 flex-1 overflow-auto [scrollbar-gutter:stable] grid content-start gap-1.5 p-[var(--route-workspace-padding)]";
 
 const surfaceClass = `min-w-0 ${vuiFlatPanelClass}`;
-const avatarPanelClass = `inline-flex max-w-full min-w-0 items-center gap-[7px] rounded-[var(--radius-control)] ${vuiOpaqueRowClass} px-2 py-1.5`;
+const avatarPanelClass = `inline-flex max-w-full min-w-0 items-center gap-2 rounded-[var(--radius-control)] ${vuiOpaqueRowClass} px-2 py-1.5`;
 const avatarOrbClass = "grid h-[34px] w-[34px] place-items-center rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] font-[var(--font-body)] text-vui-md font-bold text-[var(--accent-warm-2)]";
 const avatarMetaClass = "m-0 max-w-[110px] truncate [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const metricGridClass = "grid min-w-0 grid-cols-4 gap-1.5 max-[860px]:grid-cols-2 max-[640px]:grid-cols-1";
-const metricCardClass = `${surfaceClass} grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 p-[9px]`;
+const metricCardClass = `${surfaceClass} grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 p-2`;
 const metricLabelClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const metricValueClass = "min-w-0 truncate text-vui-xs text-vui-fg-primary";
 const statusGridClass = "grid min-w-0 grid-cols-3 items-start gap-1.5 max-[860px]:grid-cols-2 max-[640px]:grid-cols-1";
-const cardClass = `${surfaceClass} p-[9px]`;
-const cardTitleClass = "m-0 mb-[3px] [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary";
+const cardClass = `${surfaceClass} p-2`;
+const cardTitleClass = "m-0 mb-1 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary";
 const statListClass = "grid gap-1 [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const progressTrackClass = `h-1.5 overflow-hidden rounded-[var(--radius-control)] ${vuiOpaqueRowClass}`;
 const progressFillClass = "h-full w-[var(--pet-progress)] bg-[var(--vui-gradient-route-soft)]";
 const supportTextClass = "text-vui-fg-secondary";
 const badgeRowClass = "flex min-w-0 flex-wrap gap-1.5";
-const badgeClass = "max-w-full truncate rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] px-[7px] py-1 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)]";
+const badgeClass = "max-w-full truncate rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)]";
 
 const styles = {
   pageClass,

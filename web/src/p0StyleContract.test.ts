@@ -22,7 +22,7 @@ const BASELINES = {
   arbitraryRadius: 21,
   fixedRadius: 6,
   alphaUtility: 0,
-  arbitrarySpacing: 290,
+  arbitrarySpacing: 0,
 };
 
 const PATTERNS: Record<keyof typeof BASELINES, RegExp> = {

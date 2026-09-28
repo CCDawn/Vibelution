@@ -817,8 +817,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.leftBlock).toContain("shrink-0");
     expect(routeStyles.leftBlock).toContain("gap-1.5");
     expect(routeStyles.leftBlock).toContain("p-2");
-    expect(routeStyles.leftBlock).not.toContain("gap-[2px]");
-    expect(routeStyles.leftBlock).not.toContain("p-[2px]");
+    expect(routeStyles.leftBlock).not.toContain("gap-0.5");
+    expect(routeStyles.leftBlock).not.toContain("p-0.5");
     expect(routeStyles.rightPane).toContain("grid");
     expect(routeStyles.rightPane).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.rightPane).toContain("p-[var(--chat-workbench-gap)]");
@@ -989,9 +989,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
     expect(conversationStyles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
-    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pt-[9px]");
-    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pb-[11px]");
-    expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:gap-[7px]");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pt-2");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pb-3");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:gap-2");
   });
 
   it("keeps the embedded composer compact inside the workbench frame", () => {

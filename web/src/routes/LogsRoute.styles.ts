@@ -136,7 +136,7 @@ const styles = {
   previewActions: `previewActions min-w-0 flex flex-wrap items-center gap-1.5 ${vuiFlatPanelClass} p-1.5`,
   previewPane:
     "previewPane min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 grid min-h-0 grid-rows-[minmax(0,1fr)] gap-1.5 overflow-auto overflow-x-hidden",
-  previewStateFlow: `previewStateFlow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]`,
+  previewStateFlow: `previewStateFlow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-1 max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]`,
   previewStateHeader:
     "previewStateHeader min-w-0 flex flex-wrap items-center gap-1.5",
   railHeader:
@@ -204,7 +204,7 @@ const styles = {
     "sidebarPath min-w-0 max-w-full truncate font-mono [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sidebarTitle:
     "sidebarTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
-  stateFactRow: `stateFactRow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] w-full mt-0.5 max-[560px]:grid-cols-[minmax(0,1fr)]`,
+  stateFactRow: `stateFactRow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 w-full mt-0.5 max-[560px]:grid-cols-[minmax(0,1fr)]`,
   stateSurface: "stateSurface min-w-0 max-w-full",
   toolbarButton:
     "toolbarButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&>span]:truncate",

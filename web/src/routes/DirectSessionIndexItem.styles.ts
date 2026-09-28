@@ -57,7 +57,7 @@ const styles = {
   conversationMetaRow:
     "vui-routes-chatcodingroute conversationMetaRow grid min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-start gap-x-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
   conversationMetaTime:
-    "vui-routes-chatcodingroute conversationMetaTime inline-flex max-w-[112px] shrink-0 self-start items-center justify-end overflow-visible whitespace-nowrap pt-[1px] [font-size:var(--vui-font-xs)] leading-tight tabular-nums text-[var(--fg-tertiary)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
+    "vui-routes-chatcodingroute conversationMetaTime inline-flex max-w-[112px] shrink-0 self-start items-center justify-end overflow-visible whitespace-nowrap pt-0 [font-size:var(--vui-font-xs)] leading-tight tabular-nums text-[var(--fg-tertiary)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
   conversationTitleMain:
     "vui-routes-chatcodingroute conversationTitleMain inline-flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden",
   conversationTitleRow:

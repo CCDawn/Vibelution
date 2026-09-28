@@ -17,7 +17,7 @@ const styles = {
   sessionSurface:
     "flex min-h-[544px] flex-1 flex-col overflow-hidden",
   selectedHeader:
-    "flex min-h-[72px] shrink-0 flex-wrap items-center justify-between gap-x-[18px] gap-y-2.5 border-b border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,_var(--vui-surface-row)_54%,_var(--vui-surface-panel))] px-[13px] py-[11px]",
+    "flex min-h-[72px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2.5 border-b border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,_var(--vui-surface-row)_54%,_var(--vui-surface-panel))] px-3 py-3",
   selectedIdentity: "flex min-w-0 flex-[1_1_270px] items-center gap-2.5",
   selectedAvatar:
     "grid size-8 shrink-0 place-items-center rounded-[var(--vui-radius-md)] bg-[color-mix(in_srgb,_var(--accent-cool)_16%,_var(--vui-surface-muted))] text-[length:var(--vui-font-sm)] font-semibold text-[var(--vui-text-strong)]",

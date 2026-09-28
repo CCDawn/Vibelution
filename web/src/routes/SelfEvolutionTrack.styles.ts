@@ -79,7 +79,7 @@ export const selfEvolutionTrackStyles = {
   loadingPanel:
     `grid min-h-0 content-start gap-2 p-3 ${rowSurfaceSoft} [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-secondary`,
   loadingStatGrid:
-    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[var(--radius-control)] [&_span]:bg-vui-surface-row [&_span]:px-[7px] [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
+    "grid grid-cols-3 gap-1.5 [&_span]:grid [&_span]:min-w-0 [&_span]:gap-1 [&_span]:rounded-[var(--radius-control)] [&_span]:bg-vui-surface-row [&_span]:px-2 [&_span]:py-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:font-mono [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
   loadingBody: "grid min-h-0 grid-cols-3 gap-2",
   skeletonLineWide: "block h-2 w-[min(100%,620px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLine: "block h-2 w-[min(72%,460px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
@@ -133,14 +133,14 @@ export const selfEvolutionTrackStyles = {
   subsurface:
     `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
   listItem:
-    `grid gap-2 px-[13px] py-3 ${rowSurfaceSoft} [&_strong]:overflow-wrap-anywhere [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
+    `grid gap-2 px-3 py-3 ${rowSurfaceSoft} [&_strong]:overflow-wrap-anywhere [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
   listItemSelected:
     "border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-tint-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-faint),transparent)]",
   petAvatarStage:
     `relative grid min-h-[164px] place-items-center overflow-hidden max-[760px]:min-h-[200px] ${rowSurface}`,
   petAvatarHalo:
     "absolute inset-auto h-[86px] w-32 rounded-[14px] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-faint),transparent)]",
-  petAvatarMark: "relative flex animate-bounce items-center justify-center gap-[7px]",
+  petAvatarMark: "relative flex animate-bounce items-center justify-center gap-2",
   petAvatarBody:
     "h-[98px] w-[74px] rounded-[48%_48%_42%_42%] border border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line-strong),transparent)] bg-[var(--vui-gradient-route-soft)]",
   petAvatarClaw:
@@ -153,7 +153,7 @@ export const selfEvolutionTrackStyles = {
   headerIcon: "flex-none text-[var(--fg-tertiary)]",
   metricStrip: "grid grid-cols-4 gap-3 max-[1180px]:grid-cols-1 max-[760px]:grid-cols-2",
   stripItem:
-    `grid min-h-[58px] gap-1 px-2.5 py-[9px] ${rowSurfaceSoft} [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:overflow-wrap-anywhere [&_strong]:text-vui-sm [&_strong]:text-vui-fg-primary`,
+    `grid min-h-[58px] gap-1 px-2.5 py-2 ${rowSurfaceSoft} [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:overflow-wrap-anywhere [&_strong]:text-vui-sm [&_strong]:text-vui-fg-primary`,
   compactMetricGrid: "grid grid-cols-2 gap-2 max-[760px]:grid-cols-1",
   observationMetricGrid: "grid grid-cols-3 gap-2 max-[900px]:grid-cols-1",
   historyToolbar: "flex flex-wrap items-center justify-between gap-3",
@@ -167,7 +167,7 @@ export const selfEvolutionTrackStyles = {
   transactionFilterButtonActive:
     "border-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-line),transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_var(--vui-alpha-wash-strong),transparent)] text-[var(--accent-warm-2)]",
   transactionDetailsToggle:
-    "inline-flex min-h-7 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_var(--vui-alpha-veil),transparent)] px-[9px] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] aria-expanded:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] aria-expanded:text-[var(--accent-cool)]",
+    "inline-flex min-h-7 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_var(--vui-alpha-veil),transparent)] px-2 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] aria-expanded:border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-tint-strong),transparent)] aria-expanded:text-[var(--accent-cool)]",
   transactionDateGroup:
     "grid gap-2 pt-0.5 [&+&]:mt-3 [&+&]:pt-1",
   transactionDateHeader:
@@ -184,7 +184,7 @@ export const selfEvolutionTrackStyles = {
   compactPreviewText: "m-0 line-clamp-2 overflow-wrap-anywhere [font-size:var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
   rawBlock: `overflow-auto rounded-[var(--radius-panel)] ${vuiOpaqueRowClass} !border-0 p-3 font-mono [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]`,
   transactionDetailsPanel:
-    `grid grid-cols-2 gap-2 p-[9px] max-[1180px]:grid-cols-1 ${rowSurfaceSoft}`,
+    `grid grid-cols-2 gap-2 p-2 max-[1180px]:grid-cols-1 ${rowSurfaceSoft}`,
   transactionDetailRow:
     "grid min-w-0 gap-1 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:overflow-wrap-anywhere [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:leading-snug [&_strong]:text-[var(--fg-secondary)]",
   vitalList: "grid gap-2",

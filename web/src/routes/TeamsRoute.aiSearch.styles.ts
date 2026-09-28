@@ -20,7 +20,7 @@ const styles = {
   aiSearchRunCardHeader: `aiSearchRunCardHeader min-w-0 ${vuiOpaqueRowClass} p-1.5 flex flex-wrap items-center gap-1.5`,
   aiSearchRunCardReview: `aiSearchRunCardReview min-w-0 ${vuiOpaqueRowClass} p-1.5`,
   aiSearchRunCards:
-    "aiSearchRunCards min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-[7px]",
+    "aiSearchRunCards min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2",
   aiSearchRunFallbackReason:
     "aiSearchRunFallbackReason min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   aiSearchRunHeader:
