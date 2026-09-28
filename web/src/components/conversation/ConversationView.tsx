@@ -227,7 +227,7 @@ import {
   toolActivityAriaTitle,
 } from "./ConversationToolActivityPills";
 import { ConversationFileDeliveries } from "./ConversationFileDeliveries";
-import { fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
+import { conversationChangedFilesFromMetadata, fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
 import { ConversationPatchDiff } from "./ConversationPatchDiff";
 import { conversationToolPatchText } from "./conversationPatchModel";
 import {
@@ -4224,6 +4224,9 @@ export const ConversationView = React.memo(function ConversationView({
           <ConversationFileDeliveries
             cells={cells}
             language={lang === "en" ? "en" : "zh"}
+            changedFiles={conversationChangedFilesFromMetadata(message.metadata)}
+            sessionId={sessionId}
+            turnId={message.role === "assistant" ? message.turnId : undefined}
             onContinue={showComposer && !composerDisabled ? (path) => {
               onComposerChange(fileDeliveryFollowupDraft(composerValue, path, lang === "en" ? "en" : "zh"));
               requestAnimationFrame(() => composerInputRef.current?.focus());

@@ -310,6 +310,13 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(conversationViewSource).toContain("agentCodexSurfacesByMessageId");
     expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
   });
+
+  it("feeds the file deliveries panel disk-truth metadata for the rewind entry", () => {
+    expect(conversationViewSource).toContain("conversationChangedFilesFromMetadata(message.metadata)");
+    expect(conversationViewSource).toContain("changedFiles={conversationChangedFilesFromMetadata(message.metadata)}");
+    expect(conversationViewSource).toContain("sessionId={sessionId}");
+    expect(conversationViewSource).toContain('turnId={message.role === "assistant" ? message.turnId : undefined}');
+  });
 });
 
 describe("ConversationView failed-turn error presentation", () => {

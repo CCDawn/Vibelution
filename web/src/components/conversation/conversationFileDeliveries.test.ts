@@ -3,6 +3,7 @@ import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { buildCodexTranscriptCells } from "./codexTranscriptCells";
 import {
   collectConversationFileDeliveries,
+  conversationChangedFilesFromMetadata,
   fileDeliveryFollowupDraft,
   mergeConversationFileDeliveries,
   type ConversationChangedFileSummary,
@@ -148,5 +149,29 @@ describe("changedFiles merge", () => {
     expect(mergeConversationFileDeliveries(cells, [{ path: "only/on-disk.txt", state: "created" }]).files).toEqual([
       { path: "only/on-disk.txt", content: undefined, deleted: false, additions: undefined, deletions: undefined, state: "created" },
     ]);
+  });
+});
+
+describe("conversationChangedFilesFromMetadata", () => {
+  it("reads ledgered summaries defensively from assistant message metadata", () => {
+    expect(conversationChangedFilesFromMetadata({
+      changedFiles: [
+        { path: "src/a.ts", additions: 3, deletions: 1, state: "modified" },
+        { path: "  ", additions: 9 },
+        { additions: 1 },
+        "junk",
+        null,
+      ],
+    })).toEqual([
+      { path: "src/a.ts", additions: 3, deletions: 1, state: "modified" },
+    ]);
+  });
+
+  it("treats missing, non-array, or empty metadata as no summary", () => {
+    expect(conversationChangedFilesFromMetadata(undefined)).toEqual([]);
+    expect(conversationChangedFilesFromMetadata(null)).toEqual([]);
+    expect(conversationChangedFilesFromMetadata({})).toEqual([]);
+    expect(conversationChangedFilesFromMetadata({ changedFiles: "nope" })).toEqual([]);
+    expect(conversationChangedFilesFromMetadata({ changedFiles: [] })).toEqual([]);
   });
 });
