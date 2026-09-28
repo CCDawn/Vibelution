@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from config.public_config import load_public_config
+from core.infrastructure.feature_gate import FeatureDecision
 from core.launcher import desktop_session_store
 from core.launcher import service as standalone_launcher_service
 from core.runtime_manager.work_run_store import WorkRunStore
@@ -3061,6 +3062,7 @@ def test_runtime_restart_blocks_without_stopping_active_work(monkeypatch):
     assert worktree_calls == []
     assert calls == []
 
+@pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; delayed module imports dispatch WindowsPath on POSIX")
 def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -3143,6 +3145,7 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
         session_service._clear_session_live_output("session-live")
 
 @pytest.mark.slow
+@pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; delayed module imports dispatch WindowsPath on POSIX")
 def test_runtime_shutdown_blocks_active_chat_room_round_without_stopping_it(tmp_path, monkeypatch):
     scene_events: list[tuple[str, str, str, dict]] = []
 
@@ -4960,6 +4963,18 @@ def test_self_evolution_control_paths_record_child_log_before_agent_turn(tmp_pat
         self_evolution_control_service,
         "get_workbench_contract",
         lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "resolve_feature_decision",
+        lambda feature, **_kwargs: FeatureDecision(
+            feature=feature,
+            configured_enabled=True,
+            effective_enabled=True,
+            source="test",
+            reason="host operator config may disable self_evolution",
+            config_revision="test",
+        ),
     )
     monkeypatch.setattr(self_evolution_control_service, "active_session_has_write_leases", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "list_active_session_work_runs", lambda: [])
