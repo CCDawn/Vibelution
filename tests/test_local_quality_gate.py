@@ -35,7 +35,9 @@ def _stable_validation_toolchain(monkeypatch: pytest.MonkeyPatch) -> None:
         return ValidationToolchain(
             checkout_root=checkout,
             integration_root=checkout,
-            python_executable=Path(sys.executable).resolve(),
+            # Keep the venv entry point: resolving it on macOS swaps in the
+            # base interpreter, whose `-I` subprocess lacks site-packages.
+            python_executable=Path(sys.executable),
             source="checkout_venv",
             requirements_sha256="a" * 64,
             python_identity=identity,
@@ -161,7 +163,10 @@ def _git_sh_exe() -> Path:
 @pytest.fixture(scope="session")
 def _git_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     template = tmp_path_factory.mktemp("quality-gate-git-template")
-    git(template, "init")
+    # Pin the seed branch name: a bare `git init` follows the host's
+    # init.defaultBranch, and hosts defaulting to `main` trip the commit
+    # gate's main-direct-write block before the lint path under test.
+    git(template, "init", "-b", "seed-default")
     git(template, "config", "user.email", "quality-gate@example.invalid")
     git(template, "config", "user.name", "Quality Gate Test")
     (template / "seed.txt").write_text("seed\n", encoding="utf-8")
@@ -2336,7 +2341,9 @@ def test_run_closeout_links_node_modules_and_records_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git(git_repo, "branch", "-M", "main")
-    commit_file(git_repo, ".gitignore", "node_modules/\n", "ignore installs")
+    # No trailing slash: the gate's node_modules link is a directory symlink
+    # on macOS, which git does not match against a directory-only pattern.
+    commit_file(git_repo, ".gitignore", "node_modules\n", "ignore installs")
     source_tree = git_repo / "web" / "node_modules" / "vitest"
     source_tree.mkdir(parents=True)
     (source_tree / "vitest.mjs").write_text("export {};\n", encoding="utf-8")
@@ -2393,7 +2400,9 @@ def test_run_closeout_reports_missing_node_modules_source_actionably(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     git(git_repo, "branch", "-M", "main")
-    commit_file(git_repo, ".gitignore", "node_modules/\n", "ignore installs")
+    # No trailing slash: the gate's node_modules link is a directory symlink
+    # on macOS, which git does not match against a directory-only pattern.
+    commit_file(git_repo, ".gitignore", "node_modules\n", "ignore installs")
     git(git_repo, "worktree", "add", ".worktrees/task", "-b", "codex/link-task")
     task_root = git_repo / ".worktrees" / "task"
     commit_file(task_root, "docs/note.md", "changed\n", "docs change")
