@@ -42,7 +42,7 @@ export function collectConversationFileDeliveries(cells: readonly CodexTranscrip
       const id = call.toolCallId || call.rawOperationId;
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      if (/\[(?:FAIL|ERROR|SECURITY)\]|\[(?:编辑|文件编辑)\]\s*(?:错误|格式验证失败)/i.test(call.resultPreview || "")) continue;
+      if (/\[(?:FAIL|ERROR|SECURITY)\]|\[(?:编辑|文件编辑|patch)\]\s*(?:错误|格式错误|格式验证失败)/i.test(call.resultPreview || "")) continue;
       const name = (call.rawToolName || "").split(".").at(-1) || "";
       const args = call.arguments;
       if (WRITE_TOOLS.has(name) && args) {

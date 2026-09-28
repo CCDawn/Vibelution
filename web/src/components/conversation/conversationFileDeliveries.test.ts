@@ -40,6 +40,11 @@ describe("turn file deliveries", () => {
     failed.toolLifecycleModel!.toolCalls[0].resultPreview = "[创建文件] [SECURITY] denied";
     expect(collectConversationFileDeliveries([failed]).files).toEqual([]);
   });
+  it.each(["[patch] 格式错误: 缺少结束标记", "[patch] 错误: hunk 不匹配", "[patch] 错误: 原子应用失败"])("excludes completed calls returning %s", (resultPreview) => {
+    const failed = cell("patch-error", "apply_patch_tool", { patch_text: "*** Begin Patch\n*** Add File: missing.html\n+wrong\n*** End Patch" });
+    failed.toolLifecycleModel!.toolCalls[0].resultPreview = resultPreview;
+    expect(collectConversationFileDeliveries([failed])).toEqual({ files: [], patches: [] });
+  });
   it("invalidates full content after a patch update and keeps ordered patches", () => {
     const write = cell("a", "write_file_tool", { file_path: "a.html", content: "before" });
     const patch = cell("b", "apply_patch_tool", { patch_text: "*** Begin Patch\n*** Update File: a.html\n@@\n-before\n+after\n*** End Patch" });
