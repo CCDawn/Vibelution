@@ -86,6 +86,7 @@ from core.web.services.session_service import (
     list_session_queued_turns,
     query_sessions,
     remove_session_queued_turn,
+    send_now_session_queued_turn,
     update_session_queued_turn,
     regenerate_session_message,
     request_stop_session_turn,
@@ -818,6 +819,39 @@ def session_remove_queued_turn(session_id: str, queued_turn_id: str) -> dict:
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"queuedTurns": rows}
+
+
+class SessionQueuedTurnSendNowPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Identity of the running turn the caller saw; a mismatch (the turn
+    # settled or was replaced meanwhile) rejects the stop so the promotion
+    # rolls back instead of interrupting an unrelated newer turn.
+    expectedTurnId: str | None = None
+
+
+@router.post(
+    "/sessions/{session_id}/queued-turns/{queued_turn_id}/send-now",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def session_send_now_queued_turn(
+    session_id: str,
+    queued_turn_id: str,
+    payload: SessionQueuedTurnSendNowPayload,
+) -> dict:
+    try:
+        result = send_now_session_queued_turn(
+            session_id,
+            queued_turn_id,
+            expected_turn_id=payload.expectedTurnId or "",
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"queuedTurns": result["queuedTurns"], "stopRequested": bool(result["stopRequested"])}
 
 
 @router.post(

@@ -14,6 +14,7 @@ import type {
 import {
   listSessionQueuedTurns,
   removeSessionQueuedTurn,
+  sendNowSessionQueuedTurn,
   submitSessionGuidance,
   submitSessionMessage,
   updateSessionQueuedTurn,
@@ -39,6 +40,7 @@ vi.mock("../../api/chat", async (importOriginal) => {
     listSessionQueuedTurns: vi.fn(async () => []),
     removeSessionQueuedTurn: vi.fn(async () => []),
     updateSessionQueuedTurn: vi.fn(async () => []),
+    sendNowSessionQueuedTurn: vi.fn(async () => ({ queuedTurns: [], stopRequested: true })),
     uploadSessionImageAttachment: vi.fn(async () => ({ artifactId: "artifact-1" })),
     submitSessionGuidance: vi.fn(async () => ({ id: "session-1" }) as SessionDetail),
     submitSessionMessage: vi.fn(async () => {
@@ -236,6 +238,13 @@ function Harness({
         onClick={() => actions.handleFollowupQueueTogglePause("q-1", false)}
       >
         resume
+      </button>
+      <button
+        type="button"
+        data-testid="send-now-queue"
+        onClick={() => actions.handleFollowupQueueSendNow("q-2")}
+      >
+        send-now
       </button>
     </div>
   );
@@ -1236,6 +1245,165 @@ describe("useChatComposerSubmitActions follow-up queue", () => {
     // The pre-drag order is restored and the failure is surfaced.
     expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
     expect(errors["session-1"]).toContain("网络断了");
+  });
+
+  it("pins a queued turn optimistically and rebases after send-now succeeds", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let resolveSendNow:
+      | ((result: { queuedTurns: SessionQueuedTurn[]; stopRequested: boolean }) => void)
+      | undefined;
+    vi.mocked(sendNowSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveSendNow = resolve;
+      }),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click();
+    });
+
+    // The row paints at the head with the pin at click time, before the API answers.
+    expect(readCachedQueue()).toEqual(["q-2", "q-1"]);
+    expect(sendNowSessionQueuedTurn).toHaveBeenCalledWith("session-1", "q-2", {
+      expectedTurnId: "turn-session-1",
+    });
+
+    // The authoritative rows rebase and win.
+    await act(async () => {
+      resolveSendNow?.({
+        queuedTurns: [
+          { id: "q-2", position: 1, status: "queued", content: "第二条", sendNow: true },
+          { id: "q-1", position: 2, status: "queued", content: "第一条" },
+        ],
+        stopRequested: true,
+      });
+      await Promise.resolve();
+    });
+    const rebasedRows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(rebasedRows.map((row) => row.id)).toEqual(["q-2", "q-1"]);
+    expect(rebasedRows[0]?.sendNow).toBe(true);
+    expect(rebasedRows[1]?.sendNow).toBeUndefined();
+  });
+
+  it("rolls the send-now pin back when the stop is rejected", async () => {
+    const { mutations } = createMutations();
+    let errors: Record<string, string> = {};
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    let rejectSendNow: ((error: Error) => void) | undefined;
+    vi.mocked(sendNowSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise((_resolve, reject) => {
+        rejectSendNow = reject;
+      }),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      onErrors: (next) => {
+        errors = next;
+      },
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click();
+    });
+    expect(readCachedQueue()).toEqual(["q-2", "q-1"]);
+
+    await act(async () => {
+      rejectSendNow?.(new Error("停止请求对应的轮次已不是当前运行轮次，请刷新后重试。"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The pre-click order is restored, the pin is gone and the failure surfaces.
+    const rolledRows = queryClient.getQueryData<SessionDetail>(queryKeys.session("session-1"))?.queuedTurns ?? [];
+    expect(readCachedQueue()).toEqual(["q-1", "q-2"]);
+    expect(rolledRows.every((row) => !row.sendNow)).toBe(true);
+    expect(errors["session-1"]).toContain("不是当前运行轮次");
+  });
+
+  it("dedupes send-now clicks while the first promotion is in flight", async () => {
+    const { mutations } = createMutations();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), {
+      id: "session-1",
+      activeTurnId: "turn-session-1",
+      queuedTurns: [
+        { id: "q-1", position: 1, status: "queued", content: "第一条" },
+        { id: "q-2", position: 2, status: "queued", content: "第二条" },
+      ],
+    } as SessionDetail);
+    vi.mocked(sendNowSessionQueuedTurn).mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    await mount({
+      busy: true,
+      draft: "",
+      queues: {
+        "session-1": [
+          { id: "q-1", text: "第一条", position: 1 },
+          { id: "q-2", text: "第二条", position: 2 },
+        ],
+      },
+      mutations,
+      queryClient,
+    });
+
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click();
+      // A late echo that still carries the row must not tempt a second call.
+      queryClient.setQueryData<SessionDetail>(queryKeys.session("session-1"), (current) =>
+        current
+          ? {
+            ...current,
+            queuedTurns: [
+              { id: "q-1", position: 1, status: "queued", content: "第一条" },
+              { id: "q-2", position: 2, status: "queued", content: "第二条" },
+            ],
+          }
+          : current,
+      );
+    });
+    await act(async () => {
+      container?.querySelector<HTMLButtonElement>('[data-testid="send-now-queue"]')?.click();
+    });
+
+    expect(sendNowSessionQueuedTurn).toHaveBeenCalledTimes(1);
   });
 
   it("pauses and resumes queued turns through the server status patch", async () => {

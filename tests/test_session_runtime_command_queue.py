@@ -192,3 +192,157 @@ def test_cli_result_wake_queues_and_a_later_rewind_drops_it(sessions):
     )
     assert late == "stale_branch_dropped"
     assert _rows(sessions) == []
+
+
+def _enqueue_user_turn(content: str, submission_id: str) -> dict:
+    return queued_turns.enqueue_session_queued_turn(
+        PARENT_ID,
+        content=content,
+        attachments=[],
+        references=[],
+        mental_model_enabled=None,
+        runtime_status_enabled=None,
+        turn_mode="",
+        write_intent=False,
+        client_submission_id=submission_id,
+    )
+
+
+def test_send_now_promotes_row_to_head_and_drain_submits_it_first(sessions, monkeypatch):
+    session_running = {"value": True}
+    monkeypatch.setattr(
+        session_service,
+        "_is_session_running",
+        lambda _session_id: session_running["value"],
+    )
+    stop_calls: list[dict] = []
+
+    def _stop(session_id, *, expected_turn_id="", fast_ack=False):
+        stop_calls.append(
+            {"session_id": session_id, "expected_turn_id": expected_turn_id, "fast_ack": fast_ack}
+        )
+        return {"id": session_id, "currentPhase": "stopping"}
+
+    monkeypatch.setattr(session_service, "request_stop_session_turn", _stop)
+    first = _enqueue_user_turn("第一条排队", "user-1")
+    second = _enqueue_user_turn("第二条排队", "user-2")
+    third = _enqueue_user_turn("第三条排队", "user-3")
+
+    result = queued_turns.send_now_session_queued_turn(
+        PARENT_ID,
+        third["id"],
+        expected_turn_id="turn-running",
+    )
+
+    assert stop_calls == [
+        {"session_id": PARENT_ID, "expected_turn_id": "turn-running", "fast_ack": True}
+    ]
+    assert result["stopRequested"] is True
+    rows = result["queuedTurns"]
+    assert [row["id"] for row in rows] == [third["id"], first["id"], second["id"]]
+    assert rows[0]["sendNow"] is True
+    assert all("sendNow" not in row for row in rows[1:])
+    persisted = _rows(sessions)
+    assert persisted[0]["id"] == third["id"]
+    assert persisted[0]["sendNow"] is True
+
+    # The stop settled: the drain claims the promoted head row first.
+    session_running["value"] = False
+    submitted: list[dict] = []
+
+    def _submit(session_id, content, **kwargs):
+        submitted.append({"session_id": session_id, "content": content, **kwargs})
+        return {"accepted": True}
+
+    monkeypatch.setattr(session_service, "submit_session_message", _submit)
+    assert queued_turns.drain_session_queued_turns(PARENT_ID) is True
+    assert submitted[0]["content"] == "第三条排队"
+    remaining = _rows(sessions)
+    assert [row["content"] for row in remaining] == ["第一条排队", "第二条排队"]
+    assert all("sendNow" not in row for row in remaining)
+
+
+def test_send_now_rolls_back_to_original_slot_when_stop_is_rejected(sessions, monkeypatch):
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+
+    def _stop(_session_id, *, expected_turn_id="", fast_ack=False):
+        raise session_service.SessionBusyError("停止请求对应的轮次已不是当前运行轮次，请刷新后重试。")
+
+    monkeypatch.setattr(session_service, "request_stop_session_turn", _stop)
+    first = _enqueue_user_turn("第一条排队", "user-1")
+    second = _enqueue_user_turn("第二条排队", "user-2")
+
+    with pytest.raises(session_service.SessionBusyError):
+        queued_turns.send_now_session_queued_turn(PARENT_ID, second["id"], expected_turn_id="turn-stale")
+
+    rows = _rows(sessions)
+    assert [row["id"] for row in rows] == [first["id"], second["id"]]
+    assert all("sendNow" not in row for row in rows)
+
+
+def test_send_now_is_idempotent_for_an_already_promoted_row(sessions, monkeypatch):
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    stop_calls: list[dict] = []
+
+    def _stop(session_id, *, expected_turn_id="", fast_ack=False):
+        stop_calls.append({"session_id": session_id})
+        return {"id": session_id, "currentPhase": "stopping"}
+
+    monkeypatch.setattr(session_service, "request_stop_session_turn", _stop)
+    only = _enqueue_user_turn("唯一排队", "user-1")
+
+    first_result = queued_turns.send_now_session_queued_turn(PARENT_ID, only["id"])
+    second_result = queued_turns.send_now_session_queued_turn(PARENT_ID, only["id"])
+
+    assert first_result["stopRequested"] is True
+    assert second_result["stopRequested"] is False
+    assert len(stop_calls) == 1
+    assert [row["id"] for row in _rows(sessions)] == [only["id"]]
+    assert _rows(sessions)[0]["sendNow"] is True
+
+
+def test_send_now_rejects_runtime_notices(sessions, monkeypatch):
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    stop_calls: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "request_stop_session_turn",
+        lambda session_id, **_kwargs: stop_calls.append({"session_id": session_id}),
+    )
+    _enqueue_user_turn("用户排队", "user-1")
+    notice = queued_turns.enqueue_session_runtime_notice(
+        PARENT_ID,
+        kind="task_notification",
+        content="后台任务完成",
+        source_id="task-a",
+        branch_generation=0,
+        task_id="task-a",
+    )
+
+    with pytest.raises(session_service.SessionValidationError):
+        queued_turns.send_now_session_queued_turn(PARENT_ID, notice["id"])
+
+    assert stop_calls == []
+    rows = _rows(sessions)
+    assert [row["kind"] for row in rows] == ["user", "task_notification"]
+    assert all("sendNow" not in row for row in rows)
+
+
+def test_send_now_rejects_paused_and_starting_rows(sessions, monkeypatch):
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: True)
+    monkeypatch.setattr(
+        session_service,
+        "request_stop_session_turn",
+        lambda session_id, **_kwargs: {"id": session_id},
+    )
+    paused = _enqueue_user_turn("暂停条", "user-1")
+    queued_turns.update_session_queued_turn(PARENT_ID, paused["id"], status="paused")
+    with pytest.raises(session_service.SessionValidationError):
+        queued_turns.send_now_session_queued_turn(PARENT_ID, paused["id"])
+
+    # A paused row keeps no send-now pin; pausing a pinned row clears the pin.
+    pinned = _enqueue_user_turn("置顶后暂停", "user-2")
+    queued_turns.send_now_session_queued_turn(PARENT_ID, pinned["id"])
+    assert _rows(sessions)[0]["sendNow"] is True
+    queued_turns.update_session_queued_turn(PARENT_ID, pinned["id"], status="paused")
+    assert all("sendNow" not in row for row in _rows(sessions))

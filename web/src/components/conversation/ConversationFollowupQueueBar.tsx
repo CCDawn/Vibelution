@@ -1,5 +1,5 @@
 import { createContext, useContext, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowRight, GripVertical, Paperclip, Pause, Pencil, Play, X } from "lucide-react";
+import { ArrowRight, GripVertical, Paperclip, Pause, Pencil, Play, Send, X } from "lucide-react";
 
 import { VButton, VNativeInput, VTooltip } from "../vui";
 import styles from "./ConversationView.styles";
@@ -41,11 +41,16 @@ export type ConversationFollowupQueueBarProps = {
   saveEditLabel?: string;
   cancelEditLabel?: string;
   dragHandleLabel?: string;
+  sendNowLabel?: string;
+  sendNowPendingLabel?: string;
+  /** Whether the session currently has a turn running; gates the send-now control. */
+  turnRunning?: boolean;
   onUpdate: (id: string, text: string) => void;
   onRemove: (id: string) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
   onSteer?: (id: string) => void;
   onTogglePause?: FollowupQueueTogglePauseAction;
+  onSendNow?: (id: string) => void;
 };
 
 export function ConversationFollowupQueueBar({
@@ -58,11 +63,15 @@ export function ConversationFollowupQueueBar({
   saveEditLabel,
   cancelEditLabel,
   dragHandleLabel,
+  sendNowLabel,
+  sendNowPendingLabel,
+  turnRunning = false,
   onUpdate,
   onRemove,
   onMove,
   onSteer,
   onTogglePause,
+  onSendNow,
 }: ConversationFollowupQueueBarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -79,6 +88,7 @@ export function ConversationFollowupQueueBar({
 
   const resolvedSaveEditLabel = saveEditLabel ?? (lang === "zh" ? "保存" : "Save");
   const resolvedCancelEditLabel = cancelEditLabel ?? (lang === "zh" ? "取消" : "Cancel");
+  const resolvedSendNowLabel = sendNowLabel ?? (lang === "zh" ? "立即发送" : "Send now");
   const resolvedDragHandleLabel = dragHandleLabel
     ?? (lang === "zh"
       ? "拖动调整顺序；聚焦后按上下方向键移动"
@@ -117,6 +127,16 @@ export function ConversationFollowupQueueBar({
           const editing = editingId === item.id;
           const paused = item.status === "paused";
           const systemReturn = item.kind === "task_notification" || item.kind === "subagent_message";
+          // The send-now pin only paints while the promoted row still waits:
+          // paused/blocked/starting rows are not about to go out.
+          const sendNowPinned = !systemReturn
+            && item.status === "queued"
+            && item.sendNow === true;
+          const canSendNow = turnRunning
+            && Boolean(onSendNow)
+            && !systemReturn
+            && item.status === "queued"
+            && !sendNowPinned;
           const canTogglePause = !systemReturn && Boolean(togglePause) && (item.status === "queued" || paused);
           // Only the explicit grip handle drags: system returns and the row
           // being edited never reorder, and a single row has nothing to swap.
@@ -273,6 +293,12 @@ export function ConversationFollowupQueueBar({
                       {lang === "zh" ? "已暂停" : "Paused"}
                     </span>
                   ) : null}
+                  {sendNowPinned ? (
+                    <span className={barStyles.followupQueueChipSendNow}>
+                      <Send size={11} />
+                      {sendNowPendingLabel ?? (lang === "zh" ? "即将发送" : "Sending next")}
+                    </span>
+                  ) : null}
                 </span>
               )}
               <div
@@ -301,6 +327,16 @@ export function ConversationFollowupQueueBar({
                   </>
                 ) : (
                   <>
+                    {canSendNow && onSendNow ? (
+                      <VButton
+                        density="compact"
+                        variant="ghost"
+                        icon={<Send size={13} />}
+                        onPress={() => onSendNow(item.id)}
+                      >
+                        {resolvedSendNowLabel}
+                      </VButton>
+                    ) : null}
                     {canTogglePause ? (
                       <VButton
                         density="compact"

@@ -22,6 +22,10 @@ const styles = {
     "vui-components-conversationview followupQueueRowDragLock hover:!bg-transparent",
   followupQueueRowActionsDragLock:
     "vui-components-conversationview followupQueueRowActionsDragLock group-hover:!opacity-0",
+  // Send-now pin: the promoted row is leaving next; tint the chip with the
+  // same cool accent the queue already reserves for insertion/priority cues.
+  followupQueueChipSendNow:
+    "vui-components-conversationview followupQueueChipSendNow inline-flex shrink-0 items-center gap-0.5 rounded-[5px] border border-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] px-1 text-vui-2xs font-semibold leading-tight text-[var(--accent-cool)]",
 } as const;
 
 export default styles;

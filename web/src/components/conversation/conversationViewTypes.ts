@@ -208,4 +208,6 @@ export type ConversationViewProps = {
   /** Steer the running turn with one queued item instead of waiting for drain. */
   onFollowupQueueSteer?: (id: string) => void;
   followupQueueSteerLabel?: string;
+  /** Stop the running turn and send one queued item next (send-now promotion). */
+  onFollowupQueueSendNow?: (id: string) => void;
 };
