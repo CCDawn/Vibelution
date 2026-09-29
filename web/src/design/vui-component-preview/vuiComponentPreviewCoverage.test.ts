@@ -21,6 +21,10 @@ const previewExemptDesignSections = new Set([
   "ResearchWorkflowRecoveryEntry",
   "ConversationMessageVersionSwitcher",
   "AgentUserContentSectionView",
+  // Route-owned compositions: source/run/session state is supplied by EvolutionRoute.
+  // Covered by their interaction tests and the isolated supervised workspace preview.
+  "SupervisedConversationWorkspace",
+  "EvolutionSupervisedLiveSetupPanel",
 ]);
 
 function collectPreviewSources(directory: string): string {
