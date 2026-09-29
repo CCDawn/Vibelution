@@ -772,6 +772,8 @@ export type SessionQueuedTurn = {
    */
   status: string;
   content: string;
+  /** Set while the row is pinned at the head for immediate send after the stop settles. */
+  sendNow?: boolean;
   attachments?: Array<{
     id?: string;
     artifactId?: string;

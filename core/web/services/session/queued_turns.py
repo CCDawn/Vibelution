@@ -227,6 +227,10 @@ def enqueue_session_queued_turn(
     return row
 
 
+def _clear_send_now_flag(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in row.items() if key != "sendNow"}
+
+
 def update_session_queued_turn(
     session_id: str,
     queued_turn_id: str,
@@ -327,6 +331,8 @@ def update_session_queued_turn(
             row["content"] = str(content or "")
         if requested_status == "paused":
             row["status"] = "paused"
+            # A paused row never drains, so a pending send-now pin is stale.
+            row = _clear_send_now_flag(row)
         elif requested_status == "queued":
             row["status"] = "queued"
         elif current_status != "paused":
@@ -345,6 +351,8 @@ def update_session_queued_turn(
         elif position is not None:
             target = max(0, min(len(rows) - 1, int(position) - 1))
             if target != index:
+                # An explicit reorder supersedes a pending send-now pin.
+                row = _clear_send_now_flag(row)
                 rows.pop(index)
                 rows.insert(target, row)
         _write_queued_turn_rows(s, normalized_session_id, conversation, rows)
@@ -388,6 +396,151 @@ def remove_session_queued_turn(
     s._publish_session_detail_snapshot(normalized_session_id)
     s._schedule_session_queued_turn_drain(normalized_session_id)
     return normalized_rows
+
+
+def _rollback_send_now_promotion(
+    s: Any,
+    session_id: str,
+    queued_turn_id: str,
+    *,
+    original_index: int,
+) -> None:
+    """Best-effort undo of a send-now promotion (row back to its old slot).
+
+    The caller is about to surface the stop failure anyway, so rollback errors
+    are swallowed: the row stays pinned at the head, which the next successful
+    drain still resolves in queue order.
+    """
+
+    if original_index < 0:
+        return
+    try:
+        with s._CHAT_STATE_LOCK:
+            conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+            if conversation is None:
+                return
+            rows = session_queued_turn_rows(conversation)
+            index = next((i for i, row in enumerate(rows) if row["id"] == queued_turn_id), -1)
+            if index < 0 or not rows[index].get("sendNow"):
+                return
+            restored = _clear_send_now_flag(rows.pop(index))
+            restored["updatedAt"] = s._now_timestamp()
+            rows.insert(min(max(0, original_index), len(rows)), restored)
+            _write_queued_turn_rows(s, session_id, conversation, rows)
+    except Exception:  # noqa: BLE001 - rollback is best effort
+        return
+    s._publish_session_detail_snapshot(session_id)
+
+
+def send_now_session_queued_turn(
+    session_id: str,
+    queued_turn_id: str,
+    *,
+    expected_turn_id: str = "",
+    lang: str = "",
+) -> dict[str, Any]:
+    """Promote one queued user turn to the head and stop the running turn.
+
+    Codex ``sendQueuedNow`` parity: the promoted row keeps its persisted queue
+    entry (status stays ``queued``) so a crash between promotion and submission
+    cannot drop the message, and the existing drain claims the head row first
+    once the stop settles. Promotion never touches the scheduler queue, so the
+    stop path's own cancel of the active turn cannot drop it. A failed or
+    identity-rejected stop rolls the row back to its original slot. Repeating
+    the call for the already promoted row is a no-op.
+    """
+
+    s = _service()
+    lang = str(lang or "").strip() or s.get_web_language()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(queued_turn_id or "").strip()
+    if not normalized_session_id or not normalized_turn_id:
+        raise s.SessionValidationError(
+            s.text_for(lang, zh="请选择要立即发送的排队消息。", en="Choose a queued message to send now.")
+        )
+    original_index = -1
+    promoted = False
+    with s._CHAT_STATE_LOCK:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if conversation is None:
+            raise s.SessionNotFoundError(
+                s.text_for(lang, zh="未找到当前会话。", en="Session not found.")
+            )
+        s._ensure_session_mutable(normalized_session_id, conversation=conversation)
+        rows = session_queued_turn_rows(conversation)
+        index = next((i for i, row in enumerate(rows) if row["id"] == normalized_turn_id), -1)
+        if index < 0:
+            raise s.SessionValidationError(
+                s.text_for(lang, zh="该排队消息已不在队列中。", en="That queued message is no longer in the queue.")
+            )
+        row = rows[index]
+        if _row_kind(row) != KIND_USER:
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="这条是系统回传，不能立即发送；它会随队列自动处理。",
+                    en="This queued item is a system return and cannot be sent now; the queue handles it automatically.",
+                )
+            )
+        if row["status"] == "starting":
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="该排队消息正在发送，无需立即发送。",
+                    en="That queued message is already being sent.",
+                )
+            )
+        if row["status"] == "paused":
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="该排队消息已暂停；恢复后再立即发送。",
+                    en="That queued message is paused; resume it before sending now.",
+                )
+            )
+        if row["status"] != "queued":
+            raise s.SessionValidationError(
+                s.text_for(
+                    lang,
+                    zh="发送失败的排队消息不能立即发送；编辑后会自动重试。",
+                    en="A failed queued message cannot be sent now; edit it to retry.",
+                )
+            )
+        if row.get("sendNow"):
+            # Idempotent: an earlier call already promoted this row and asked
+            # for the stop; repeating must not re-stop or re-pin another row.
+            return {"queuedTurns": rows, "stopRequested": False}
+        original_index = index
+        promoted_row = {**_clear_send_now_flag(row), "sendNow": True, "updatedAt": s._now_timestamp()}
+        # Only one row may carry the pin: promoting a new row releases the
+        # previous one back to plain queue order (it keeps its current slot).
+        rows = [_clear_send_now_flag(pinned) if pinned.get("sendNow") else pinned for pinned in rows]
+        rows.pop(index)
+        rows.insert(0, promoted_row)
+        _write_queued_turn_rows(s, normalized_session_id, conversation, rows)
+        promoted = True
+        normalized_rows = session_queued_turn_rows(conversation)
+    if promoted:
+        s._publish_session_detail_snapshot(normalized_session_id)
+        try:
+            s.request_stop_session_turn(
+                normalized_session_id,
+                expected_turn_id=str(expected_turn_id or "").strip(),
+                fast_ack=True,
+            )
+        except Exception:
+            _rollback_send_now_promotion(
+                s,
+                normalized_session_id,
+                normalized_turn_id,
+                original_index=original_index,
+            )
+            raise
+        # Safety net for the already-idle race: if the running turn settled
+        # between promotion and stop, nothing else schedules the drain that
+        # submits the head row. While still stopping this claim is a no-op.
+        s._schedule_session_queued_turn_drain(normalized_session_id)
+    return {"queuedTurns": normalized_rows, "stopRequested": promoted}
 
 
 def session_branch_generation(session_id: str) -> int:

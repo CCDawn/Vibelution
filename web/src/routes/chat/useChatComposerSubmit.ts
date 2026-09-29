@@ -14,6 +14,7 @@ import {
   listSessionQueuedTurns,
   regenerateSessionMessage,
   removeSessionQueuedTurn,
+  sendNowSessionQueuedTurn,
   stopSessionTurn,
   submitSessionGuidance,
   submitSessionMessage,
@@ -1128,6 +1129,7 @@ export type UseChatComposerSubmitActionsResult = {
   handleFollowupQueueMove: (fromIndex: number, toIndex: number) => void;
   handleFollowupQueueSteer: (id: string) => void;
   handleFollowupQueueTogglePause: (id: string, paused: boolean) => void;
+  handleFollowupQueueSendNow: (id: string) => void;
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
   handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
@@ -1992,6 +1994,58 @@ export function useChatComposerSubmitActions({
       ));
   }, [activeSessionId, lang, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
 
+  // Send-now (Codex sendQueuedNow parity): pin one queued row at the head and
+  // stop the running turn; the server keeps the row persisted in the queue so
+  // nothing is lost, and the drain submits the pinned row first after the stop
+  // settles.
+  const handleFollowupQueueSendNow = useCallback((id: string) => {
+    const sessionId = activeSessionId;
+    if (!sessionId || pendingQueueWithdrawalIdsRef.current.has(id)) {
+      return;
+    }
+    const rowsAtIntent = queryClient.getQueryData<SessionDetail>(queryKeys.session(sessionId))?.queuedTurns ?? [];
+    if (!rowsAtIntent.some((row) => row.id === id)) {
+      return;
+    }
+    // Optimistic pin (same pending-intent style as the other queue intents):
+    // the row paints at the head with the send-now flag at click time; the
+    // API response rebases the authoritative rows and a rejected stop (the
+    // running turn changed or settled meanwhile) restores the pre-click order.
+    const optimisticRows = rowsAtIntent
+      .map((row) => (row.sendNow ? { ...row, sendNow: false } : row))
+      .filter((row) => row.id !== id);
+    const snapshotRow = rowsAtIntent.find((row) => row.id === id);
+    if (snapshotRow) {
+      optimisticRows.unshift({ ...snapshotRow, sendNow: true });
+    }
+    pendingQueueWithdrawalIdsRef.current.add(id);
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+      detailState ? { ...detailState, queuedTurns: optimisticRows } : detailState,
+    );
+    const expectedTurnId = resolveSessionStopTurnId(detail, activeTurnId);
+    void sendNowSessionQueuedTurn(sessionId, id, { expectedTurnId: expectedTurnId || undefined })
+      .then((result) => syncQueuedTurnsIntoDetail(sessionId, result.queuedTurns))
+      .catch((error) => {
+        // Roll back only this intent; authoritative rows that landed meanwhile stay.
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(sessionId), (detailState) =>
+          detailState
+            ? {
+              ...detailState,
+              queuedTurns: restoreQueuedTurnOrder(rowsAtIntent, detailState.queuedTurns ?? []),
+            }
+            : detailState,
+        );
+        reportQueuedTurnError(
+          sessionId,
+          error,
+          lang === "zh" ? "立即发送排队消息失败" : "Failed to send the queued message now",
+        );
+      })
+      .finally(() => {
+        pendingQueueWithdrawalIdsRef.current.delete(id);
+      });
+  }, [activeSessionId, activeTurnId, detail, lang, queryClient, reportQueuedTurnError, syncQueuedTurnsIntoDetail]);
+
   const handleSubmitTurn = useCallback(() => {
     if (!activeSessionId) {
       return;
@@ -2673,6 +2727,7 @@ export function useChatComposerSubmitActions({
     handleFollowupQueueMove,
     handleFollowupQueueSteer,
     handleFollowupQueueTogglePause,
+    handleFollowupQueueSendNow,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleRegenerateAssistantMessage,

@@ -520,6 +520,27 @@ export function removeSessionQueuedTurn(
   ).then(readQueuedTurnsResponse);
 }
 
+/** Promotes one queued turn to the head and stops the running turn (send-now). */
+export function sendNowSessionQueuedTurn(
+  sessionId: string,
+  queuedTurnId: string,
+  payload: { expectedTurnId?: string } = {},
+): Promise<{ queuedTurns: SessionQueuedTurn[]; stopRequested: boolean }> {
+  return fetchJson<{ queuedTurns?: SessionQueuedTurn[]; stopRequested?: boolean }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/queued-turns/${encodeURIComponent(queuedTurnId)}/send-now`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ expectedTurnId: payload.expectedTurnId || null }),
+    },
+  ).then((payload) => ({
+    queuedTurns: readQueuedTurnsResponse(payload),
+    stopRequested: Boolean(payload.stopRequested),
+  }));
+}
+
 export function editResubmitSessionMessage(
   sessionId: string,
   payload: {

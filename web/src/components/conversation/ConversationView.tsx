@@ -1181,6 +1181,7 @@ export const ConversationView = React.memo(function ConversationView({
   onFollowupQueueRemove,
   onFollowupQueueMove,
   onFollowupQueueSteer,
+  onFollowupQueueSendNow,
   followupQueueSteerLabel,
 }: ConversationViewProps) {
   void interruptGuidanceLabel;
@@ -6456,10 +6457,14 @@ export const ConversationView = React.memo(function ConversationView({
       saveEditLabel={t("saveFollowupQueueEdit")}
       cancelEditLabel={t("cancelFollowupQueueEdit")}
       dragHandleLabel={t("dragFollowupQueue")}
+      sendNowLabel={t("sendFollowupQueueNow")}
+      sendNowPendingLabel={t("sendFollowupQueueNowPending")}
+      turnRunning={runningGuidanceActionsEnabled}
       onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
       onRemove={onFollowupQueueRemove ?? (() => undefined)}
       onMove={onFollowupQueueMove ?? (() => undefined)}
       onSteer={onFollowupQueueSteer}
+      onSendNow={onFollowupQueueSendNow}
     />
   ) : null;
 

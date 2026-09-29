@@ -378,3 +378,119 @@ describe("ConversationFollowupQueueBar drag reorder", () => {
     expect(onMove).not.toHaveBeenCalled();
   });
 });
+
+describe("ConversationFollowupQueueBar send now", () => {
+  const SEND_NOW_LABEL = "立即发送";
+  let root: Root | null = null;
+  let container: HTMLDivElement | null = null;
+
+  afterEach(async () => {
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+    }
+    container?.remove();
+    root = null;
+    container = null;
+  });
+
+  function sendNowButtons(): HTMLButtonElement[] {
+    return Array.from(container?.querySelectorAll("button") ?? []).filter(
+      (button) => button.textContent === SEND_NOW_LABEL,
+    );
+  }
+
+  async function renderBar(options: {
+    items: ComposerQueueItem[];
+    turnRunning?: boolean;
+    onSendNow?: (id: string) => void;
+  }) {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <ConversationFollowupQueueBar
+          items={options.items}
+          lang="zh"
+          editLabel={EDIT_LABEL}
+          withdrawLabel={WITHDRAW_LABEL}
+          dragHandleLabel={DRAG_LABEL}
+          sendNowLabel={SEND_NOW_LABEL}
+          turnRunning={options.turnRunning}
+          onUpdate={() => undefined}
+          onRemove={() => undefined}
+          onMove={() => undefined}
+          onSendNow={options.onSendNow}
+        />,
+      );
+    });
+  }
+
+  it("shows the send-now button only while a turn is running", async () => {
+    const items = [
+      { id: "q-1", text: "第一条", status: "queued" },
+      { id: "q-2", text: "第二条", status: "paused" },
+    ];
+
+    await renderBar({ items, turnRunning: false, onSendNow: () => undefined });
+    expect(sendNowButtons()).toHaveLength(0);
+
+    await renderBar({ items, turnRunning: true, onSendNow: () => undefined });
+    expect(sendNowButtons()).toHaveLength(1);
+  });
+
+  it("hides send-now for system returns and without a handler", async () => {
+    await renderBar({
+      items: [
+        { id: "q-sys", text: "后台任务完成", kind: "task_notification", status: "queued" },
+        { id: "q-1", text: "第一条", status: "queued" },
+      ],
+      turnRunning: true,
+      onSendNow: () => undefined,
+    });
+    expect(sendNowButtons()).toHaveLength(1);
+
+    await renderBar({ items: [{ id: "q-1", text: "第一条", status: "queued" }], turnRunning: true });
+    expect(sendNowButtons()).toHaveLength(0);
+  });
+
+  it("calls onSendNow with the clicked row id", async () => {
+    const onSendNow = vi.fn();
+    await renderBar({
+      items: [
+        { id: "q-1", text: "第一条", status: "queued" },
+        { id: "q-2", text: "第二条", status: "queued" },
+      ],
+      turnRunning: true,
+      onSendNow,
+    });
+
+    await act(async () => {
+      sendNowButtons()[1]?.click();
+    });
+    expect(onSendNow).toHaveBeenCalledTimes(1);
+    expect(onSendNow).toHaveBeenCalledWith("q-2");
+  });
+
+  it("pins the promoted row with the sending-next chip instead of a button", async () => {
+    const onSendNow = vi.fn();
+    await renderBar({
+      items: [
+        { id: "q-2", text: "第二条", status: "queued", sendNow: true },
+        { id: "q-1", text: "第一条", status: "queued" },
+      ],
+      turnRunning: true,
+      onSendNow,
+    });
+
+    expect(container?.textContent).toContain("即将发送");
+    // The pinned row itself offers no second send-now; the waiting row still does.
+    expect(sendNowButtons()).toHaveLength(1);
+    await act(async () => {
+      sendNowButtons()[0]?.click();
+    });
+    expect(onSendNow).toHaveBeenCalledWith("q-1");
+  });
+});

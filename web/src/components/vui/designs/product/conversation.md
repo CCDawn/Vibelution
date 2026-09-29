@@ -105,7 +105,7 @@
 ## ConversationFollowupQueueBar
 
 ### 功能
-运行中跟进队列横条：把尚未发出的下一条指令停在输入框上方，用户可以撤回、修改或调序。
+运行中跟进队列横条：把尚未发出的下一条指令停在输入框上方，用户可以撤回、修改、调序，或选择「立即发送」（停止当前轮并让这条排队消息下一个发出）。
 
 ### 适用范围
 - **适用**：当前轮仍在运行、用户已按 Enter 入队、内容还不能进正式时间线。
@@ -129,9 +129,13 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
   saveEditLabel={t("saveFollowupQueueEdit")}
   cancelEditLabel={t("cancelFollowupQueueEdit")}
   dragHandleLabel={t("dragFollowupQueue")}
+  sendNowLabel={t("sendFollowupQueueNow")}
+  sendNowPendingLabel={t("sendFollowupQueueNowPending")}
+  turnRunning={runningGuidanceActionsEnabled}
   onUpdate={onUpdate}
   onRemove={onRemove}
   onMove={onMove}
+  onSendNow={onSendNow}
 />
 ```
 
@@ -140,23 +144,28 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 | items | 未发出的排队全文 | 一条一条横条，不进时间线 |
 | 改 / 撤回 / 拖动 | 只改队列 | 按钮用 `VButton`，行内编辑用 `VNativeInput`（Enter 保存、Esc 取消） |
 | 拖拽手柄 | 显式 grip（`VButton`），只有手柄可拖，整行不可拖 | 聚焦手柄后上下方向键等同调序；编辑中的行与系统回执行不可拖 |
+| turnRunning + onSendNow | 「立即发送」按钮（图标+文案 `VButton`），仅在当前有轮运行时出现 | 只对 `status=queued` 的用户排队显示；系统回传、暂停、失败行不可立即发送；置顶行（`sendNow`）改挂「即将发送」徽标，不再出现按钮 |
+| sendNow 徽标 | 冷色 accent 描边徽标（同队列插入指示色系） | 只在 `queued` 行上显示；暂停/失败后消失 |
 
 ### 非职责
 - 不调用 `/guidance`，不写正式会话。
 - 不做手机端 390 预览变体。
+- 不实现停止本身：立即发送只调用队列 send-now API，停止语义归会话控制面。
 
 ### 视觉与状态
 - 默认横条、编辑中描边、拖动调序。
 - 拖动中：源行降透明，悬停目标行显示插入位指示（向上拖在行上方、向下拖在行下方），拖拽期间冻结各行 hover 反馈。
+- 立即发送中：被提升行置顶并挂「即将发送」徽标；API 失败回滚原位并提示。
 - 空队列不渲染。
 
 ### 实现落点
 - 源码：`web/src/components/conversation/ConversationFollowupQueueBar.tsx`
-- 样式：`ConversationView.styles.ts` 的 `followupQueue*`
+- 样式：`ConversationView.styles.ts` 的 `followupQueue*`；`ConversationFollowupQueueBar.styles.ts` 的 `followupQueueChipSendNow`
 
 ### 反冗余
 - 不替代 composer 编辑条或时间线用户气泡。
 - 禁止再做第二套排队条。
+- 立即发送不新造停止入口：停止请求复用会话控制面现有 `request_stop`，前端不出现第二个停止按钮。
 
 ## ConversationMessageVersionSwitcher
 

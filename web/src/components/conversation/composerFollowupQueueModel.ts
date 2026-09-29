@@ -6,6 +6,8 @@ export type ComposerQueueItem = {
   /** Server-owned queue metadata; absent for the local design-preview queue. */
   status?: string;
   position?: number;
+  /** Pinned at the head for immediate send once the running turn stops. */
+  sendNow?: boolean;
   attachmentCount?: number;
   lastError?: string;
   canSteer?: boolean;
