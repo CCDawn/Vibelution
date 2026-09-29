@@ -124,9 +124,11 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 <ConversationFollowupQueueBar
   items={queue}
   lang="zh"
-  queueLabel="排队"
-  editLabel="修改这条排队"
-  withdrawLabel="撤回这条排队"
+  editLabel={t("editFollowupQueue")}
+  withdrawLabel={t("withdrawFollowupQueue")}
+  saveEditLabel={t("saveFollowupQueueEdit")}
+  cancelEditLabel={t("cancelFollowupQueueEdit")}
+  dragHandleLabel={t("dragFollowupQueue")}
   onUpdate={onUpdate}
   onRemove={onRemove}
   onMove={onMove}
@@ -136,7 +138,8 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
 | items | 未发出的排队全文 | 一条一条横条，不进时间线 |
-| 改 / 撤回 / 拖动 | 只改队列 | 按钮用 `VButton`，编辑用 `VNativeTextarea` |
+| 改 / 撤回 / 拖动 | 只改队列 | 按钮用 `VButton`，行内编辑用 `VNativeInput`（Enter 保存、Esc 取消） |
+| 拖拽手柄 | 显式 grip（`VButton`），只有手柄可拖，整行不可拖 | 聚焦手柄后上下方向键等同调序；编辑中的行与系统回执行不可拖 |
 
 ### 非职责
 - 不调用 `/guidance`，不写正式会话。
@@ -144,6 +147,7 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 
 ### 视觉与状态
 - 默认横条、编辑中描边、拖动调序。
+- 拖动中：源行降透明，悬停目标行显示插入位指示（向上拖在行上方、向下拖在行下方），拖拽期间冻结各行 hover 反馈。
 - 空队列不渲染。
 
 ### 实现落点

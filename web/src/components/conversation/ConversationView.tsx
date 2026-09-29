@@ -6083,6 +6083,9 @@ export const ConversationView = React.memo(function ConversationView({
       editLabel={t("editFollowupQueue")}
       withdrawLabel={t("withdrawFollowupQueue")}
       steerLabel={followupQueueSteerLabel ?? t("immediateSteer")}
+      saveEditLabel={t("saveFollowupQueueEdit")}
+      cancelEditLabel={t("cancelFollowupQueueEdit")}
+      dragHandleLabel={t("dragFollowupQueue")}
       onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
       onRemove={onFollowupQueueRemove ?? (() => undefined)}
       onMove={onFollowupQueueMove ?? (() => undefined)}

@@ -1,9 +1,9 @@
-import { createContext, useContext, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowRight, GripVertical, Paperclip, Pause, Pencil, Play, X } from "lucide-react";
 
 import { VButton, VNativeInput, VTooltip } from "../vui";
 import styles from "./ConversationView.styles";
-import tooltipStyles from "./ConversationFollowupQueueBar.styles";
+import barStyles from "./ConversationFollowupQueueBar.styles";
 import {
   type ComposerQueueItem,
 } from "./composerFollowupQueueModel";
@@ -13,9 +13,9 @@ const VISIBLE_QUEUE_ROWS = 4;
 /** ZCode-style two-part tooltip: strong title line + muted description line. */
 function tooltipTitleDescription(title: string, description: string): ReactNode {
   return (
-    <span className={tooltipStyles.tooltipContent}>
-      <span className={tooltipStyles.tooltipTitle}>{title}</span>
-      <span className={tooltipStyles.tooltipDescription}>{description}</span>
+    <span className={barStyles.tooltipContent}>
+      <span className={barStyles.tooltipTitle}>{title}</span>
+      <span className={barStyles.tooltipDescription}>{description}</span>
     </span>
   );
 }
@@ -37,6 +37,10 @@ export type ConversationFollowupQueueBarProps = {
   editLabel: string;
   withdrawLabel: string;
   steerLabel?: string;
+  /** Dictionary-backed editing copy; falls back to the zh/en literals. */
+  saveEditLabel?: string;
+  cancelEditLabel?: string;
+  dragHandleLabel?: string;
   onUpdate: (id: string, text: string) => void;
   onRemove: (id: string) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
@@ -51,6 +55,9 @@ export function ConversationFollowupQueueBar({
   editLabel,
   withdrawLabel,
   steerLabel,
+  saveEditLabel,
+  cancelEditLabel,
+  dragHandleLabel,
   onUpdate,
   onRemove,
   onMove,
@@ -60,9 +67,28 @@ export function ConversationFollowupQueueBar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [queueExpanded, setQueueExpanded] = useState(false);
-  const dragFrom = useRef<number | null>(null);
+  // Drag bookkeeping lives in state (not a ref) so the source row, the
+  // insertion indicator and the hover lock re-render while dragging. The ref
+  // mirrors the source index for the event handlers: dragover/drop can fire
+  // before React re-renders after dragstart, so the state closure is stale.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
   const contextTogglePause = useContext(FollowupQueueTogglePauseContext);
   const togglePause = onTogglePause ?? contextTogglePause ?? undefined;
+
+  const resolvedSaveEditLabel = saveEditLabel ?? (lang === "zh" ? "保存" : "Save");
+  const resolvedCancelEditLabel = cancelEditLabel ?? (lang === "zh" ? "取消" : "Cancel");
+  const resolvedDragHandleLabel = dragHandleLabel
+    ?? (lang === "zh"
+      ? "拖动调整顺序；聚焦后按上下方向键移动"
+      : "Drag to reorder; focus and use ArrowUp/ArrowDown to move");
+
+  const clearDragState = () => {
+    dragIndexRef.current = null;
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
 
   if (!items.length) {
     return null;
@@ -81,6 +107,7 @@ export function ConversationFollowupQueueBar({
           : `${styles.followupQueueTray} ${styles.followupQueueTrayInset}`
       }
       aria-label={lang === "zh" ? "待发送队列" : "Queued follow-ups"}
+      data-queue-drag-active={dragIndex != null ? "true" : undefined}
     >
       <div className={styles.followupQueueHeader}>
         {lang === "zh" ? `排队中 · ${items.length} 条` : `Queued · ${items.length}`}
@@ -91,32 +118,100 @@ export function ConversationFollowupQueueBar({
           const paused = item.status === "paused";
           const systemReturn = item.kind === "task_notification" || item.kind === "subagent_message";
           const canTogglePause = !systemReturn && Boolean(togglePause) && (item.status === "queued" || paused);
+          // Only the explicit grip handle drags: system returns and the row
+          // being edited never reorder, and a single row has nothing to swap.
+          const canDrag = !editing && !systemReturn && items.length > 1;
+          const rowClassName = [
+            editing
+              ? `${styles.followupQueueRow} ${styles.followupQueueRowEditing}`
+              : paused
+                ? `${styles.followupQueueRow} ${styles.followupQueueRowPaused}`
+                : styles.followupQueueRow,
+            dragIndex === index ? barStyles.followupQueueRowDragSource : "",
+            dragOverIndex === index && dragIndex != null && dragIndex < index
+              ? barStyles.followupQueueRowDropAfter
+              : "",
+            dragOverIndex === index && dragIndex != null && dragIndex > index
+              ? barStyles.followupQueueRowDropBefore
+              : "",
+            dragIndex != null ? barStyles.followupQueueRowDragLock : "",
+          ].filter(Boolean).join(" ");
+          const handleDragStart = canDrag
+            ? (event: DragEvent<HTMLElement>) => {
+                const dataTransfer = event.dataTransfer;
+                dataTransfer?.setData?.("text/plain", item.id);
+                if (dataTransfer) {
+                  dataTransfer.effectAllowed = "move";
+                }
+                dragIndexRef.current = index;
+                setDragIndex(index);
+                setDragOverIndex(null);
+              }
+            : undefined;
+          const handleKeyDown = canDrag
+            ? (event: KeyboardEvent<HTMLElement>) => {
+                // Keyboard reorder path on the focused handle: no drag needed.
+                if (event.key === "ArrowUp" && index > 0) {
+                  event.preventDefault();
+                  onMove(index, index - 1);
+                } else if (event.key === "ArrowDown" && index < items.length - 1) {
+                  event.preventDefault();
+                  onMove(index, index + 1);
+                }
+              }
+            : undefined;
           return (
             <div
               key={item.id}
-              className={
-                editing
-                  ? `${styles.followupQueueRow} ${styles.followupQueueRowEditing}`
-                  : paused
-                    ? `${styles.followupQueueRow} ${styles.followupQueueRowPaused}`
-                    : styles.followupQueueRow
-              }
-              draggable={!editing && !systemReturn}
-              onDragStart={() => {
-                dragFrom.current = index;
-              }}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => {
-                if (dragFrom.current == null) {
+              className={rowClassName}
+              onDragOver={(event) => {
+                if (dragIndexRef.current == null) {
                   return;
                 }
-                onMove(dragFrom.current, index);
-                dragFrom.current = null;
+                event.preventDefault();
+                if (event.dataTransfer) {
+                  event.dataTransfer.dropEffect = "move";
+                }
+                setDragOverIndex(index);
+              }}
+              onDragLeave={(event) => {
+                if (dragOverIndex !== index) {
+                  return;
+                }
+                const nextTarget = event.relatedTarget as Node | null;
+                if (nextTarget && event.currentTarget.contains(nextTarget)) {
+                  return;
+                }
+                setDragOverIndex(null);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const fromIndex = dragIndexRef.current;
+                if (fromIndex != null && fromIndex !== index) {
+                  onMove(fromIndex, index);
+                }
+                clearDragState();
               }}
             >
-              <span className={styles.followupQueueDrag} aria-hidden="true">
-                <GripVertical size={14} />
-              </span>
+              {canDrag ? (
+                <VButton
+                  type="button"
+                  density="compact"
+                  variant="ghost"
+                  isIconOnly
+                  className={barStyles.followupQueueDragHandle}
+                  aria-label={resolvedDragHandleLabel}
+                  icon={<GripVertical size={12} />}
+                  draggable
+                  onDragStart={handleDragStart}
+                  onDragEnd={clearDragState}
+                  onKeyDown={handleKeyDown}
+                />
+              ) : (
+                <span className={styles.followupQueueDrag} aria-hidden="true">
+                  <GripVertical size={14} />
+                </span>
+              )}
               <span className={styles.followupQueueIndex} aria-hidden="true">{index + 1}</span>
               {editing ? (
                 <VNativeInput
@@ -181,11 +276,12 @@ export function ConversationFollowupQueueBar({
                 </span>
               )}
               <div
-                className={
+                className={[
                   editing
                     ? `${styles.followupQueueRowActions} ${styles.followupQueueRowActionsEditing}`
-                    : styles.followupQueueRowActions
-                }
+                    : styles.followupQueueRowActions,
+                  dragIndex != null ? barStyles.followupQueueRowActionsDragLock : "",
+                ].filter(Boolean).join(" ")}
               >
                 {editing ? (
                   <>
@@ -197,10 +293,10 @@ export function ConversationFollowupQueueBar({
                         setEditingId(null);
                       }}
                     >
-                      {lang === "zh" ? "保存" : "Save"}
+                      {resolvedSaveEditLabel}
                     </VButton>
                     <VButton density="compact" variant="ghost" onPress={() => setEditingId(null)}>
-                      {lang === "zh" ? "取消" : "Cancel"}
+                      {resolvedCancelEditLabel}
                     </VButton>
                   </>
                 ) : (
