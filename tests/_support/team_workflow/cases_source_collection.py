@@ -2256,8 +2256,8 @@ def test_source_ingestor_writeback_reuses_existing_knowledge_expansion_library_w
         "task-kb-dedupe-2",
     )
 
-    assert first["status"] == "completed"
-    assert second["status"] == "completed"
+    assert first["status"] == "pending_review"
+    assert second["status"] == "pending_review"
     assert first["knowledgeBaseId"] == second["knowledgeBaseId"]
     assert first["scopedKnowledgeBaseId"] == second["scopedKnowledgeBaseId"]
     bases = team_knowledge_service.list_team_knowledge_bases(team["teamId"], internal=True)["knowledgeBases"]
@@ -5085,7 +5085,7 @@ def test_source_collection_stage_turn_completion_reconciles_post_writeback_check
     assert stored_task["completionGate"]["passed"] is True
     assert stored_task["taskToolProgress"]["completed"] == len(stored_task["taskChecklist"])
 
-def test_source_collection_stage_turn_completion_reconciles_feedback_event_checklist(tmp_path, monkeypatch):
+def test_source_collection_stage_turn_feedback_checklist_cannot_bypass_knowledge_review(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
@@ -5151,7 +5151,7 @@ def test_source_collection_stage_turn_completion_reconciles_feedback_event_check
         task["taskId"],
         {
             "status": "completed",
-            "summary": "已完成正式知识入库，但 checklist 在同轮 feedback events 末尾才补齐。",
+            "summary": "已提交待审来源，checklist 在同轮 feedback events 末尾才补齐。",
             "result": {
                 "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
                 "stewardPackDraft": {
@@ -5172,7 +5172,7 @@ def test_source_collection_stage_turn_completion_reconciles_feedback_event_check
         },
     )
     assert first["task"]["status"] == "needs_review"
-    assert first["task"]["completionGate"]["artifactComplete"] is True
+    assert first["task"]["completionGate"]["artifactComplete"] is False
     assert first["task"]["completionGate"]["taskChecklistComplete"] is False
 
     session_service._persist_session_turn_result(
@@ -5192,9 +5192,9 @@ def test_source_collection_stage_turn_completion_reconciles_feedback_event_check
         team["teamId"],
         task["taskId"],
     )
-    assert stored_task["status"] == "completed"
-    assert stored_task["completionGate"]["passed"] is True
-    assert stored_task["taskToolProgress"]["completed"] == len(stored_task["taskChecklist"])
+    assert stored_task["status"] == "needs_review"
+    assert stored_task["completionGate"]["passed"] is False
+    assert stored_task["taskToolProgress"]["completed"] < len(stored_task["taskChecklist"])
     assert stored_task["taskToolProgress"]["source"] == "feedback_events"
 
 
