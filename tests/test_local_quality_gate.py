@@ -661,7 +661,11 @@ def test_materialize_command_resolves_windowless_vitest_launcher(git_repo: Path)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher resolution")
-def test_materialize_command_keeps_root_bound_vitest_at_repository_root(git_repo: Path) -> None:
+def test_materialize_command_runs_root_bound_vitest_from_frontend_root_on_windows(git_repo: Path) -> None:
+    # a38714744 unified root-bound vitest selectors onto the frontend-root
+    # form (no --root, no web/ prefix, cwd=web) unconditionally; this
+    # Windows-gated pin had kept the old repository-root expectation and
+    # could never run on the POSIX side that authored the change.
     spec = gate.parse_allowed_command(
         "node web/node_modules/vitest/vitest.mjs run src/example.test.ts --root web",
         git_repo,
@@ -671,13 +675,11 @@ def test_materialize_command_keeps_root_bound_vitest_at_repository_root(git_repo
 
     assert Path(materialized.argv[0]).name.lower() == "node.exe"
     assert materialized.argv[1:] == [
-        "web/node_modules/vitest/vitest.mjs",
+        "node_modules/vitest/vitest.mjs",
         "run",
         "src/example.test.ts",
-        "--root",
-        "web",
     ]
-    assert materialized.cwd == git_repo
+    assert materialized.cwd == git_repo / "web"
 
 
 @pytest.mark.parametrize(
