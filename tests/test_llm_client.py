@@ -15,12 +15,14 @@ from core.llm.client import (
     LLMClient,
     _cancellable_client_cache_key,
     _configure_litellm_import_environment,
+    _default_anthropic_native_backend,
     _default_completion_backend,
     _default_responses_backend,
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
     _llm_route_concurrency_gate,
     _llm_route_concurrency_key,
+    _new_cancellable_anthropic_http_client,
     _new_cancellable_completion_http_handler,
     _new_cancellable_responses_http_handler,
     _qwen_inflight_cache_keepalive_enabled,
@@ -3802,13 +3804,17 @@ def test_chat_completion_with_ordinary_empty_checker_does_not_inject_client(monk
     assert "client" not in observed
 
 
-def test_native_anthropic_route_does_not_inject_litellm_client(monkeypatch):
-    """Native Anthropic Messages payloads must remain free of LiteLLM fields."""
+def test_native_anthropic_route_injects_raw_httpx_client(monkeypatch):
+    """Native Anthropic Messages injection is a raw httpx client, never litellm."""
+    import httpx
     from types import SimpleNamespace
 
     client = LLMClient.__new__(LLMClient)
     client._backend = _default_completion_backend
+    client._anthropic_backend = _default_anthropic_native_backend
     client.protocol_route = SimpleNamespace(adapter_id="anthropic_messages_native")
+    client._cancellable_completion_http_handler_lock = threading.Lock()
+    client._cancellable_completion_stream_lock = threading.Lock()
     payload = {
         "model": "claude-test",
         "messages": [{"role": "user", "content": [{"type": "text", "text": "ping"}]}],
@@ -3818,50 +3824,59 @@ def test_native_anthropic_route_does_not_inject_litellm_client(monkeypatch):
     with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
         prepared, finish = client._prepare_cancellable_chat_stream(payload)
     try:
-        assert prepared is payload
-        assert "client" not in prepared
+        assert prepared is not payload
+        assert isinstance(prepared["client"], httpx.Client)
     finally:
         finish()
 
 
-def _bare_llm_client(backend, adapter_id):
-    """Build an unmounted LLMClient for cancellable-prepare unit tests."""
-
-    client = LLMClient.__new__(LLMClient)
-    client._backend = backend
-    client._responses_backend = _default_responses_backend
-    client.protocol_route = SimpleNamespace(adapter_id=adapter_id)
-    client.role = "primary"
-    client.profile_id = "primary"
-    client.provider = SimpleNamespace(provider_id="default")
-    client.profile = SimpleNamespace(model="glm-5.3-flash")
-    client._cancellable_responses_http_handler_lock = threading.Lock()
-    client._cancellable_responses_request_lock = threading.Lock()
-    client._cancellable_completion_http_handler_lock = threading.Lock()
-    client._cancellable_completion_request_lock = threading.Lock()
-    return client
-
-
-def _capture_llm_scene_events(monkeypatch):
-    """Route _record_llm_scene_event into a list and reset the emit dedupe."""
-    from core.llm import client as llm_client_module
-
-    events = []
-    monkeypatch.setattr(
-        llm_client_module,
-        "_record_llm_scene_event",
-        lambda phase, event_code, **kwargs: events.append((phase, event_code, kwargs)),
-    )
-    llm_client_module._PROVIDER_ABORT_UNAVAILABLE_EMITTED.clear()
-    return events
-
-
-def test_native_anthropic_chat_stream_records_abort_unavailable_once(monkeypatch):
-    """The native Anthropic adapter keeps cooperative cancel and records it."""
+def test_native_anthropic_chat_stream_injects_client_without_unavailable_event(monkeypatch):
+    """The default native Anthropic backend hosts the hard abort watcher now."""
     from core.llm import client as llm_client_module
 
     events = _capture_llm_scene_events(monkeypatch)
     client = _bare_llm_client(_default_completion_backend, "anthropic_messages_native")
+    payload = {
+        "model": "claude-test",
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": True,
+    }
+    reused_handlers = []
+
+    class FakeNativeClient:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        llm_client_module,
+        "_new_cancellable_anthropic_http_client",
+        lambda _payload: reused_handlers.append(FakeNativeClient()) or reused_handlers[0],
+    )
+
+    with llm_cancel_context(lambda: "", enable_chat_provider_abort=True):
+        prepared, finish = client._prepare_cancellable_chat_stream(payload)
+        try:
+            assert prepared is not payload
+            assert prepared["client"] is reused_handlers[0]
+        finally:
+            finish()
+        # A second prepare on the same credentials reuses the cached handler.
+        prepared_next, finish_next = client._prepare_cancellable_chat_stream(payload)
+        try:
+            assert prepared_next["client"] is reused_handlers[0]
+        finally:
+            finish_next()
+
+    assert len(reused_handlers) == 1
+    assert events == []
+
+
+def test_native_anthropic_custom_backend_records_abort_unavailable_once(monkeypatch):
+    """A custom native Anthropic backend stays cooperative-only and says so once."""
+
+    events = _capture_llm_scene_events(monkeypatch)
+    client = _bare_llm_client(_default_completion_backend, "anthropic_messages_native")
+    client._anthropic_backend = lambda _payload: iter(())
     payload = {
         "model": "claude-test",
         "messages": [{"role": "user", "content": "ping"}],
@@ -3886,9 +3901,153 @@ def test_native_anthropic_chat_stream_records_abort_unavailable_once(monkeypatch
     assert kwargs["level"] == "warning"
     fields = kwargs["fields"]
     assert fields["transport"] == "chat_stream"
-    assert fields["reason"] == "native_anthropic_adapter"
+    assert fields["reason"] == "backend_not_default"
     assert fields["adapterId"] == "anthropic_messages_native"
     assert fields["purpose"] == "primary"
+
+
+def test_default_anthropic_native_backend_consumes_injected_client_non_stream():
+    """The native backend uses the injected client and never wires it into the body."""
+
+    class FakeNativeClient:
+        def __init__(self):
+            self.posts = []
+            self.closed = False
+
+        def post(self, endpoint, headers=None, json=None):
+            self.posts.append((endpoint, headers, json))
+            return SimpleNamespace(status_code=200, json=lambda: {"ok": True})
+
+        def close(self):
+            self.closed = True
+
+    fake_client = FakeNativeClient()
+    response = _default_anthropic_native_backend(
+        {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "ping"}],
+            "stream": False,
+            "base_url": "https://relay.example/v1/messages",
+            "api_key": "sk-native-test",
+            "client": fake_client,
+        }
+    )
+
+    assert response == {"ok": True}
+    endpoint, headers, body = fake_client.posts[0]
+    assert endpoint == "https://relay.example/v1/messages"
+    assert headers["x-api-key"] == "sk-native-test"
+    assert "client" not in body
+    assert body["model"] == "claude-test"
+    assert fake_client.closed is False
+
+
+def test_default_anthropic_native_backend_consumes_injected_client_stream():
+    """The injected client also serves SSE streams and stays open afterwards."""
+
+    class FakeStreamResponse:
+        def __init__(self, body):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def iter_lines(self):
+            return iter(
+                [
+                    'data: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "ok"}}',
+                    "data: [DONE]",
+                ]
+            )
+
+    class FakeNativeClient:
+        def __init__(self):
+            self.stream_calls = []
+            self.closed = False
+
+        def stream(self, method, endpoint, headers=None, json=None):
+            self.stream_calls.append((method, endpoint, headers, json))
+            return FakeStreamResponse(json)
+
+        def close(self):
+            self.closed = True
+
+    fake_client = FakeNativeClient()
+    payload = {
+        "model": "claude-test",
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": True,
+        "base_url": "https://relay.example/v1/messages",
+        "api_key": "sk-native-test",
+        "client": fake_client,
+    }
+    events = list(_default_anthropic_native_backend(payload))
+
+    assert events[0]["type"] == "content_block_delta"
+    assert len(fake_client.stream_calls) == 1
+    method, endpoint, _headers, body = fake_client.stream_calls[0]
+    assert method == "POST"
+    assert endpoint == "https://relay.example/v1/messages"
+    assert "client" not in body
+    assert fake_client.closed is False
+
+
+def _bare_llm_client(backend, adapter_id):
+    """Build an unmounted LLMClient for cancellable-prepare unit tests."""
+
+    client = LLMClient.__new__(LLMClient)
+    client._backend = backend
+    client._responses_backend = _default_responses_backend
+    client._anthropic_backend = _default_anthropic_native_backend
+    client.protocol_route = SimpleNamespace(adapter_id=adapter_id)
+    client.role = "primary"
+    client.profile_id = "primary"
+    client.provider = SimpleNamespace(provider_id="default")
+    client.profile = SimpleNamespace(model="glm-5.3-flash")
+    client._cancellable_responses_http_handler_lock = threading.Lock()
+    client._cancellable_responses_request_lock = threading.Lock()
+    client._cancellable_completion_http_handler_lock = threading.Lock()
+    client._cancellable_completion_stream_lock = threading.Lock()
+    client._cancellable_completion_request_lock = threading.Lock()
+    return client
+
+
+def _client_with_native_anthropic_route(config):
+    """Build a real LLMClient whose route is forced to anthropic_messages_native.
+
+    Schema v1 test kwargs cannot carry ``driver: anthropic`` (the v1 inline
+    provider field list has no driver), so the resolved ``litellm_compat``
+    route is swapped in place for the route production resolves for schema v2
+    native providers. Everything downstream (wire adapter, payload builder,
+    backend selection) then follows the real native path.
+    """
+
+    client = LLMClient(config=config)
+    route = client.protocol_route
+    assert route.adapter_id == "anthropic_messages_litellm_compat"
+    client.protocol_route = type(route)(
+        **{
+            **{field: getattr(route, field) for field in route.__dataclass_fields__},
+            "adapter_id": "anthropic_messages_native",
+        }
+    )
+    return client
+
+
+def _capture_llm_scene_events(monkeypatch):
+    """Route _record_llm_scene_event into a list and reset the emit dedupe."""
+    from core.llm import client as llm_client_module
+    events = []
+    monkeypatch.setattr(
+        llm_client_module,
+        "_record_llm_scene_event",
+        lambda phase, event_code, **kwargs: events.append((phase, event_code, kwargs)),
+    )
+    llm_client_module._PROVIDER_ABORT_UNAVAILABLE_EMITTED.clear()
+    return events
 
 
 def test_non_default_chat_backend_records_abort_unavailable(monkeypatch):
@@ -4137,6 +4296,166 @@ def test_chat_completion_stream_cancellation_interrupts_blocked_backend_request(
         assert entered.wait(1.0)
         cancelled["reason"] = "挑战杯逻辑任务已达到截止时间。"
         thread.join(timeout=1.0)
+    finally:
+        released.set()
+        thread.join(timeout=2.0)
+
+    assert isinstance(observed["error"], LLMError)
+    assert observed["error"].category == "cancelled"
+    assert observed["calls"] == 1
+    assert observed["closed"] is True
+
+
+def test_native_anthropic_stream_cancellation_interrupts_blocked_request(monkeypatch):
+    """The native Anthropic stream aborts within the watchdog window on stop."""
+    from core.llm import client as llm_client_module
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.driver": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://www.atpify.cn",
+            "llm.providers.default.compat_mode": "native",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-opus-4-7",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+        }
+    )
+    entered = threading.Event()
+    released = threading.Event()
+    cancelled = {"reason": ""}
+    observed = {"calls": 0, "error": None, "closed": False}
+
+    class FakeNativeHTTPClient:
+        def close(self):
+            observed["closed"] = True
+            released.set()
+
+    native_client = FakeNativeHTTPClient()
+
+    def fake_native_backend(payload):
+        observed["calls"] += 1
+        assert payload["client"] is native_client
+        entered.set()
+        assert released.wait(2.0)
+        raise OSError("provider request interrupted")
+
+    monkeypatch.setattr(
+        llm_client_module,
+        "_default_anthropic_native_backend",
+        fake_native_backend,
+    )
+    monkeypatch.setattr(
+        llm_client_module,
+        "_new_cancellable_anthropic_http_client",
+        lambda _payload: native_client,
+    )
+
+    def run_stream():
+        try:
+            client = _client_with_native_anthropic_route(config)
+            assert client.protocol_route.adapter_id == "anthropic_messages_native"
+            with llm_cancel_context(
+                lambda: cancelled["reason"],
+                enable_chat_provider_abort=True,
+            ):
+                list(client.stream_events([{"role": "user", "content": "ping"}]))
+        except Exception as exc:
+            observed["error"] = exc
+
+    thread = threading.Thread(target=run_stream)
+    thread.start()
+    try:
+        assert entered.wait(1.0), repr(observed["error"])
+        cancelled["reason"] = "操作者请求停止当前轮。"
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
+    finally:
+        released.set()
+        thread.join(timeout=2.0)
+
+    assert isinstance(observed["error"], LLMError)
+    assert observed["error"].category == "cancelled"
+    assert observed["calls"] == 1
+    assert observed["closed"] is True
+
+
+def test_native_anthropic_non_stream_cancellation_interrupts_blocked_request(monkeypatch):
+    """The native Anthropic non-stream call aborts and never retries after stop."""
+    from core.llm import client as llm_client_module
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "anthropic",
+            "llm.providers.default.driver": "anthropic",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://www.atpify.cn",
+            "llm.providers.default.compat_mode": "native",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "claude-opus-4-7",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+        }
+    )
+    entered = threading.Event()
+    released = threading.Event()
+    cancelled = {"reason": ""}
+    observed = {"calls": 0, "error": None, "closed": False}
+
+    class FakeNativeHTTPClient:
+        def close(self):
+            observed["closed"] = True
+            released.set()
+
+    native_client = FakeNativeHTTPClient()
+
+    def fake_native_backend(payload):
+        observed["calls"] += 1
+        assert payload["client"] is native_client
+        entered.set()
+        assert released.wait(2.0)
+        raise OSError("provider request interrupted")
+
+    monkeypatch.setattr(
+        llm_client_module,
+        "_default_anthropic_native_backend",
+        fake_native_backend,
+    )
+    monkeypatch.setattr(
+        llm_client_module,
+        "_new_cancellable_anthropic_http_client",
+        lambda _payload: native_client,
+    )
+
+    def run_request():
+        try:
+            client = _client_with_native_anthropic_route(config)
+            with llm_cancel_context(
+                lambda: cancelled["reason"],
+                enable_chat_provider_abort=True,
+            ):
+                client._invoke_backend_with_retry(
+                    {
+                        "model": "claude-opus-4-7",
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "stream": False,
+                        "base_url": "https://www.atpify.cn/v1/messages",
+                    },
+                    phase="completion",
+                    event_code="test.completion",
+                    message_count=1,
+                    tool_count=0,
+                )
+        except Exception as exc:
+            observed["error"] = exc
+
+    thread = threading.Thread(target=run_request)
+    thread.start()
+    try:
+        assert entered.wait(1.0), repr(observed["error"])
+        cancelled["reason"] = "操作者请求停止当前轮。"
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
     finally:
         released.set()
         thread.join(timeout=2.0)

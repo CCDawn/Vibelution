@@ -2252,11 +2252,18 @@ def _default_responses_backend(payload: Dict[str, Any]) -> Any:
 
 
 def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
-    """Call an explicit Anthropic Messages endpoint without LiteLLM shape conversion."""
+    """Call an Anthropic Messages endpoint with raw httpx, honoring abort injection.
+
+    The provider-abort watcher may inject a cancellable httpx client via
+    ``payload["client"]`` (same contract as the LiteLLM backends); when present
+    it replaces the throwaway per-request client so ``close()`` can kill the
+    in-flight request. The injected key is popped before the JSON body is
+    built — it must never reach the wire.
+    """
 
     _raise_if_llm_cancelled()
     try:
-        import httpx
+        import httpx  # noqa: F401 - dependency guard; clients come from _llm_new_httpx_client
     except Exception as exc:  # pragma: no cover
         raise LLMError(
             "configuration_error",
@@ -2264,6 +2271,8 @@ def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
             retryable=False,
         ) from exc
     request_payload = dict(payload)
+    # Abort watcher injects a cancellable httpx client; it must never reach the wire body.
+    injected_client = request_payload.pop("client", None)
     endpoint = str(request_payload.pop("base_url", "") or "").strip()
     api_key = str(request_payload.pop("api_key", "") or "").strip()
     timeout = request_payload.pop("timeout", None)
@@ -2304,13 +2313,21 @@ def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
         )
 
     if not bool(request_payload.get("stream")):
+        if injected_client is not None:
+            response = injected_client.post(endpoint, headers=headers, json=request_payload)
+            check_response(response)
+            return response.json()
         with _llm_new_httpx_client(timeout=timeout, verify=ssl_verify) as client:
             response = client.post(endpoint, headers=headers, json=request_payload)
             check_response(response)
             return response.json()
 
     def iter_sse():
-        with _llm_new_httpx_client(timeout=timeout, verify=ssl_verify) as client:
+        client = injected_client
+        owns_client = client is None
+        if client is None:
+            client = _llm_new_httpx_client(timeout=timeout, verify=ssl_verify)
+        try:
             with client.stream("POST", endpoint, headers=headers, json=request_payload) as response:
                 check_response(response)
                 for line in response.iter_lines():
@@ -2333,6 +2350,9 @@ def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
                         ) from exc
                     if isinstance(event, dict):
                         yield event
+        finally:
+            if owns_client:
+                client.close()
 
     return iter_sse()
 
@@ -2415,6 +2435,32 @@ def _new_cancellable_completion_http_handler(payload: Dict[str, Any]) -> Any:
         http_client=_llm_new_httpx_client(timeout=timeout, verify=ssl_verify),
         max_retries=0,
     )
+
+
+def _new_cancellable_anthropic_http_client(payload: Dict[str, Any]) -> Any:
+    """Create an interruptible httpx client for Anthropic Messages native routes.
+
+    ``_default_anthropic_native_backend`` honors the same ``payload["client"]``
+    injection contract as the LiteLLM backends: an injected raw httpx.Client
+    replaces its throwaway per-request client, so the provider-abort watcher's
+    ``close()`` on the connection pool aborts the in-flight request at TCP
+    level. ``base_url`` here is the final endpoint (no LiteLLM service-root
+    shift), and the slot cache key already keys on the raw endpoint string.
+    """
+
+    try:
+        import httpx  # noqa: F401 - dependency guard; clients come from _llm_new_httpx_client
+    except Exception as exc:  # pragma: no cover
+        raise LLMError(
+            "configuration_error",
+            "httpx 未安装，无法创建可中断的 Anthropic Messages 客户端",
+            retryable=False,
+        ) from exc
+    timeout = payload.get("timeout")
+    ssl_verify = payload.get("ssl_verify")
+    if ssl_verify is None:
+        ssl_verify = True
+    return _llm_new_httpx_client(timeout=timeout, verify=ssl_verify)
 
 
 class _CancellableProviderStream:
@@ -2742,12 +2788,12 @@ class LLMClient:
     ) -> None:
         """Record residual cancel risk once per transport+purpose+reason.
 
-        Non-default backends and the native Anthropic Messages adapter cannot
-        host the hard provider-abort watcher; the call still proceeds with
-        cooperative stop-checker cancellation only.  The Challenge deadline
-        contract requires the precise residual risk to stay visible, so this
-        emits one bounded scene event per transport+purpose+reason and never
-        refuses the call.
+        Only non-default backends (injected test doubles or external overrides)
+        cannot host the hard provider-abort watcher; the call still proceeds
+        with cooperative stop-checker cancellation only.  The Challenge
+        deadline contract requires the precise residual risk to stay visible,
+        so this emits one bounded scene event per transport+purpose+reason and
+        never refuses the call.
         """
 
         purpose = str(getattr(self, "role", "") or "").strip() or "primary"
@@ -2896,28 +2942,31 @@ class LLMClient:
         self,
         payload: Dict[str, Any],
     ) -> tuple[Dict[str, Any], Callable[[], None]]:
-        """Attach a cancellable client only to the default Chat backend."""
+        """Attach a cancellable client to the default Chat/Anthropic native backends."""
 
         checker = _LLM_CANCEL_CHECKER_CONTEXT.get(None)
         abort_enabled = _chat_provider_abort_enabled(checker)
         native_adapter = self.protocol_route.adapter_id == "anthropic_messages_native"
-        if abort_enabled and (
-            self._backend is not _default_completion_backend or native_adapter
-        ):
+        request_backend = self._anthropic_backend if native_adapter else self._backend
+        backend_supported = (
+            request_backend is _default_anthropic_native_backend
+            if native_adapter
+            else request_backend is _default_completion_backend
+        )
+        if abort_enabled and not backend_supported:
             self._record_provider_abort_unavailable_once(
                 "chat_stream",
-                reason="native_anthropic_adapter"
-                if native_adapter
-                else "backend_not_default",
-                backend=self._backend,
+                reason="backend_not_default",
+                backend=request_backend,
             )
-        if (
-            not abort_enabled
-            or self._backend is not _default_completion_backend
-            or native_adapter
-        ):
+        if not abort_enabled or not backend_supported:
             return payload, lambda: None
 
+        handler_factory = (
+            _new_cancellable_anthropic_http_client
+            if native_adapter
+            else _new_cancellable_completion_http_handler
+        )
         while not self._cancellable_completion_stream_lock.acquire(timeout=0.05):
             try:
                 reason = str(checker() or "").strip()
@@ -2929,7 +2978,7 @@ class LLMClient:
             with self._cancellable_completion_http_handler_lock:
                 handler = self._get_or_create_cancellable_client(
                     "_cancellable_completion_http_handler",
-                    _new_cancellable_completion_http_handler,
+                    handler_factory,
                     payload,
                 )
         except Exception:
@@ -3013,25 +3062,27 @@ class LLMClient:
         elif "messages" in payload:
             abort_enabled = _chat_provider_abort_enabled(checker)
             native_adapter = self.protocol_route.adapter_id == "anthropic_messages_native"
-            if abort_enabled and (
-                self._backend is not _default_completion_backend or native_adapter
-            ):
+            request_backend = self._anthropic_backend if native_adapter else self._backend
+            backend_supported = (
+                request_backend is _default_anthropic_native_backend
+                if native_adapter
+                else request_backend is _default_completion_backend
+            )
+            if abort_enabled and not backend_supported:
                 self._record_provider_abort_unavailable_once(
                     "non_stream_chat",
-                    reason="native_anthropic_adapter"
-                    if native_adapter
-                    else "backend_not_default",
-                    backend=self._backend,
+                    reason="backend_not_default",
+                    backend=request_backend,
                 )
-            enabled = (
-                abort_enabled
-                and self._backend is _default_completion_backend
-                and not native_adapter
-            )
+            enabled = abort_enabled and backend_supported
             handler_attr = "_cancellable_completion_http_handler"
             handler_lock = self._cancellable_completion_http_handler_lock
             request_lock = self._cancellable_completion_request_lock
-            factory = _new_cancellable_completion_http_handler
+            factory = (
+                _new_cancellable_anthropic_http_client
+                if native_adapter
+                else _new_cancellable_completion_http_handler
+            )
         else:
             enabled = False
             handler_attr = ""
@@ -3183,6 +3234,7 @@ class LLMClient:
             bound_tools=list(tools or []),
             backend=self._backend,
             responses_backend=self._responses_backend,
+            anthropic_backend=self._anthropic_backend,
         )
 
     def _build_payload(
