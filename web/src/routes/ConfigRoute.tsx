@@ -334,7 +334,7 @@ export function ConfigRoute() {
   const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
   // First-run onboarding: auto-open the provider quick-setup panel once per
   // browser session while no model credential is configured (skippable, and
-  // the settings entry stays available via "添加连接").
+  // the settings entry stays available via "添加供应商").
   useEffect(() => {
     if (!workspace?.modelOptions) {
       return;
@@ -1555,19 +1555,6 @@ export function ConfigRoute() {
             {isSectionVisible("models") && workspace.schemaVersion === 2 ? (
                 <VActionGroup ariaLabel={copy.modelsActionsAria}>
                   <VButton
-                    title={copy.addConnectionHint}
-                    className={styles.providerModeButton}
-                    aria-pressed={providerConnecting}
-                    variant={providerConnecting ? "primary" : "secondary"}
-                    onPress={() => {
-                      if (providerQuickSetupState.phase === "success") dispatchProviderQuickSetup({ type: "reset" });
-                      setProviderShowMore(false);
-                      setProviderConnecting(true);
-                    }}
-                  >
-                    {copy.addConnection}
-                  </VButton>
-                  <VButton
                     title={copy.advancedSettingsHint}
                     className={styles.providerModeButton}
                     aria-pressed={providerShowMore}
@@ -1870,7 +1857,11 @@ export function ConfigRoute() {
                   onSaveExternal={() => {
                     void handleApply();
                   }}
-                  onAddConnection={() => setProviderConnecting(true)}
+                  onAddConnection={() => {
+                    if (providerQuickSetupState.phase === "success") dispatchProviderQuickSetup({ type: "reset" });
+                    setProviderShowMore(false);
+                    setProviderConnecting(true);
+                  }}
                   onSelectProvider={(providerId) => {
                     setProviderCredentialEditId("");
                     setProviderCredentialValue("");

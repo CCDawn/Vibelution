@@ -29,7 +29,7 @@ export type ProviderRegistryRow = {
 
 /**
  * Asset-home list: only providers that already have credentials ready.
- * Full vendor/template catalog belongs in「添加连接」, not the left rail.
+ * Full vendor/template catalog belongs in「添加供应商」flow, not the left rail.
  */
 export function isReadyProviderAsset(row: Pick<ProviderRegistryRow, "credentialState">): boolean {
   return row.credentialState === "configured" || row.credentialState === "not_required";
@@ -41,8 +41,8 @@ export function filterReadyProviderAssets<T extends Pick<ProviderRegistryRow, "c
   return rows.filter((row) => isReadyProviderAsset(row));
 }
 
-/** Statuses that should not crowd the primary asset list. */
-const ABNORMAL_PROVIDER_STATUSES = new Set([
+/** Statuses that mark a provider as not (yet) usable — shared with Lane 2 consumers. */
+export const ABNORMAL_PROVIDER_STATUSES = new Set([
   "auth_failed",
   "discovery_failed",
   "blocked",
@@ -208,6 +208,71 @@ export function sortProviderRegistryRows(rows: ProviderRegistryRow[]): ProviderR
     if (byPinned !== 0) return byPinned;
     return String(left.label || left.providerId).localeCompare(String(right.label || right.providerId), "zh");
   });
+}
+
+/**
+ * P0 list-row model (九产品共识): one compact row per provider.
+ * - `dotClass` reflects connection availability ONLY (绿=可用 / 橙=异常或未检测 / 灰=停用);
+ *   catalog freshness (stale/refreshDue) never tints the dot — it lives in the detail area.
+ * - `inUse` marks providers whose pinned models are referenced live; they sort first.
+ * - "off" is reserved for the Wave 2 enabled switch and is not derived yet.
+ */
+export type ProviderDotClass = "ok" | "warn" | "off";
+
+export type ProviderListRow = {
+  providerId: string;
+  name: string;
+  dotClass: ProviderDotClass;
+  inUse: boolean;
+  rank: number;
+  modelsCount: number;
+  keyState: string;
+};
+
+/** Single source of the availability-only dot rule for the provider list. */
+export function deriveProviderDotClass(
+  row: Pick<ProviderRegistryRow, "credentialState" | "status">,
+): ProviderDotClass {
+  if (isHealthyProviderAsset(row)) return "ok";
+  // Wave 2 will map ProviderConfig.enabled === false to "off" here.
+  return "warn";
+}
+
+/** Live model references grouped per provider: any referenced model marks the provider in use. */
+export function isProviderInUse(
+  row: Pick<ProviderRegistryRow, "providerId" | "models">,
+  liveReferenceCountByModelRef: Record<string, number> = {},
+): boolean {
+  return row.models.some((model) => (liveReferenceCountByModelRef[model.modelRef] ?? 0) > 0);
+}
+
+/**
+ * Derive the P0 provider list: in-use first, then usable, then abnormal/unchecked;
+ * name-sorted (zh collation) inside each band.
+ */
+export function deriveProviderListRows(
+  rows: ProviderRegistryRow[],
+  liveReferenceCountByModelRef?: Record<string, number>,
+): ProviderListRow[] {
+  return rows
+    .map((row) => {
+      const dotClass = deriveProviderDotClass(row);
+      const inUse = isProviderInUse(row, liveReferenceCountByModelRef);
+      return {
+        providerId: row.providerId,
+        name: row.label || row.providerId,
+        dotClass,
+        inUse,
+        rank: inUse ? 0 : dotClass === "ok" ? 1 : 2,
+        modelsCount: row.models.length,
+        keyState: row.credentialState,
+      };
+    })
+    .sort((left, right) => {
+      const byRank = left.rank - right.rank;
+      if (byRank !== 0) return byRank;
+      return left.name.localeCompare(right.name, "zh");
+    });
 }
 
 export type ProviderSetupChecklistItem = {

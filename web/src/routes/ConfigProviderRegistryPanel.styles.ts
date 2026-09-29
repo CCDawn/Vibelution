@@ -8,10 +8,8 @@ const styles = {
     "vui-routes-configproviderregistrypanel providerListSection grid min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-1.5",
   providerListHeading:
     "vui-routes-configproviderregistrypanel providerListHeading m-0 px-0.5 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-wide text-vui-fg-tertiary",
-  abnormalSection:
-    "vui-routes-configproviderregistrypanel abnormalSection grid min-w-0 gap-1.5 border-t border-vui-border-hairline pt-2",
-  abnormalToggle:
-    "vui-routes-configproviderregistrypanel abnormalToggle !flex !h-auto !min-h-9 !w-full !items-center !justify-between gap-2 px-2 py-1.5 text-left [&_span]:grid [&_span]:min-w-0 [&_span]:gap-0.5 [&_small]:[font-size:10px] [&_small]:font-normal [&_small]:text-vui-fg-tertiary",
+  providerAddRow:
+    "vui-routes-configproviderregistrypanel providerAddRow !flex !h-auto !min-h-9 !w-full !items-center !justify-start gap-1.5 !border-0 !bg-transparent !shadow-none rounded-md border-t border-dashed border-vui-border-subtle px-2 py-1.5 text-vui-fg-tertiary [&_span]:[font-size:var(--vui-font-xs)] hover:!bg-vui-control-muted hover:!text-vui-fg-secondary",
   registryWorkspace:
     "vui-routes-configproviderregistrypanel registryWorkspace max-[720px]:[&>[data-vui=split-sidebar]]:!w-full max-[720px]:[&>[data-vui=split-sidebar]]:!max-w-none max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto max-[720px]:[&>[data-vui=split-sidebar]]:!h-auto max-[720px]:[&>[role=separator]]:hidden max-[720px]:[&>[data-vui=split-main]]:!h-auto max-[720px]:[&>[data-vui=split-main]]:!overflow-visible h-full min-h-0 min-w-0 gap-4 overflow-hidden max-[720px]:!flex-col",
   providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 content-start gap-4 overflow-y-auto border-r border-vui-border-subtle pr-3 max-[720px]:max-h-40",
@@ -19,14 +17,18 @@ const styles = {
   providerRow:
     "vui-routes-configproviderregistrypanel providerRow min-w-0",
   providerButton:
-    "vui-routes-configproviderregistrypanel providerButton !flex !h-auto !min-h-16 !w-full min-w-0 !flex-col !items-stretch !justify-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-2 text-left",
+    "vui-routes-configproviderregistrypanel providerButton !flex !h-auto !min-h-9 !w-full min-w-0 !flex-row !items-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-1.5 text-left",
+  providerDot: "vui-routes-configproviderregistrypanel providerDot h-2 w-2 shrink-0 rounded-full",
+  providerDotOk: "vui-routes-configproviderregistrypanel providerDotOk bg-[var(--state-success)]",
+  providerDotWarn: "vui-routes-configproviderregistrypanel providerDotWarn bg-[var(--state-warning)]",
+  providerDotOff: "vui-routes-configproviderregistrypanel providerDotOff bg-vui-fg-tertiary/55",
+  providerInUseBadge:
+    "vui-routes-configproviderregistrypanel providerInUseBadge inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)] bg-[var(--vui-status-info-bg)] px-2 py-px text-[10px] font-semibold leading-relaxed text-[var(--vui-status-info-fg)]",
+  providerFreshness:
+    "vui-routes-configproviderregistrypanel providerFreshness m-0 min-w-0 [font-size:var(--vui-font-xs)] leading-snug text-vui-fg-tertiary",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   providerLabel:
-    "vui-routes-configproviderregistrypanel providerLabel min-w-0 whitespace-normal break-words text-vui-xs font-semibold leading-snug text-vui-fg-primary",
-  providerMeta:
-    "vui-routes-configproviderregistrypanel providerMeta min-w-0 whitespace-normal break-all [overflow-wrap:anywhere] [font-size:var(--vui-font-xs)] leading-snug text-vui-fg-tertiary",
-  providerStatusRow:
-    "vui-routes-configproviderregistrypanel providerStatusRow flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1",
+    "vui-routes-configproviderregistrypanel providerLabel min-w-0 flex-1 truncate text-vui-xs font-semibold leading-snug text-vui-fg-primary",
   ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
   modelsColumn:
     "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 content-start gap-6 overflow-y-auto overflow-x-hidden pr-1",

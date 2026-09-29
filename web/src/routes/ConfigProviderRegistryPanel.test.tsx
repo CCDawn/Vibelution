@@ -323,13 +323,18 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain("思考深度: 未配置");
   });
 
-  it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
+  it("fills the desktop workspace with compact Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
     expect(panelSource).toContain("defaultWidth: 224");
     expect(panelStyles.providerList).toContain("min-h-0");
-    expect(panelStyles.providerButton).toContain("!min-h-16");
-    expect(panelStyles.providerLabel).toContain("whitespace-normal");
-    expect(panelStyles.providerLabel).toContain("break-words");
+    expect(panelStyles.providerButton).toContain("!min-h-9");
+    expect(panelStyles.providerButton).toContain("!flex-row");
+    expect(panelStyles.providerDot).toContain("h-2 w-2");
+    expect(panelStyles.providerDotOk).toContain("state-success");
+    expect(panelStyles.providerDotWarn).toContain("state-warning");
+    expect(panelStyles.providerLabel).toContain("truncate");
+    expect(panelStyles.providerInUseBadge).toContain("rounded-full");
+    expect(panelStyles.providerAddRow).toContain("border-dashed");
     expect(panelStyles.inspectorPanel).toContain("max-h-[72vh]");
     expect(panelStyles.modelsColumn).toContain("overflow-y-auto");
     expect(panelSource).toContain('data-provider-action="edit-asset"');
@@ -380,7 +385,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain("已配置服务");
   });
 
-  it("collapses abnormal services and surfaces a strong save prompt when draft is dirty", () => {
+  it("lists abnormal providers in one rail with a warn dot and no status words", () => {
     const healthy = provider([model("luna", "pinned")]);
     const broken = {
       ...provider([]),
@@ -388,14 +393,19 @@ describe("ConfigProviderRegistryPanel", () => {
       label: "Broken Relay",
       status: "auth_failed" as const,
     };
-    const collapsed = renderToStaticMarkup(
+    const markup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([], { rows: [healthy, broken] })} />,
     );
-    expect(collapsed).toContain("已配置服务");
-    expect(collapsed).toContain("需要处理 · 1");
-    expect(collapsed).toContain('data-abnormal-expanded="false"');
-    expect(collapsed).toContain("Relay A");
-    expect(collapsed).not.toContain("Broken Relay");
+    expect(markup).toContain("已配置服务");
+    expect(markup).toContain("Broken Relay");
+    expect(markup).toContain('data-provider-dot="warn"');
+    expect(markup).toContain('data-provider-dot="ok"');
+    // P0 consensus: status/error words never render as row text (tooltip only).
+    expect(markup).not.toContain("需要处理");
+    expect(markup).not.toContain(">认证失败<");
+    expect(markup).toContain('title="认证失败"');
+    expect(panelSource).not.toContain("abnormalSection");
+    expect(panelSource).not.toContain("showAbnormalAssets");
 
     const dirty = renderToStaticMarkup(
       <ConfigProviderRegistryPanel
@@ -414,6 +424,82 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelStyles.savePrompt).toContain("shrink-0");
   });
 
+  it("keeps the dot on availability only: stale catalog still shows a green dot", () => {
+    const stale = { ...provider([]), status: "stale" as const, refreshDue: true };
+    const markup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([], { rows: [stale] })} />,
+    );
+    expect(markup).toContain('data-provider-dot="ok"');
+    // Freshness moved into one detail line, not the row.
+    expect(markup).toContain('data-provider-freshness="stale"');
+    expect(markup).toContain("模型目录已过期");
+    const freshMarkup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([])} />,
+    );
+    expect(freshMarkup).toContain('data-provider-freshness="fresh"');
+    expect(freshMarkup).toContain("模型目录已同步");
+  });
+
+  it("pins in-use providers to the top with a badge and no extra words", () => {
+    const idle = { ...provider([]), providerId: "relay_idle", label: "Idle Relay" };
+    const busy = { ...provider([model("luna", "pinned")]), providerId: "relay_busy", label: "Busy Relay" };
+    const markup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel
+        {...panelProps([], {
+          rows: [idle, busy],
+          liveReferenceCountByModelRef: { "relay_a/luna": 2 },
+        })}
+      />,
+    );
+    expect(markup).toContain('data-provider-inuse="true"');
+    expect(markup).toContain("使用中");
+    const busyIndex = markup.indexOf("Busy Relay");
+    const idleIndex = markup.indexOf("Idle Relay");
+    expect(busyIndex).toBeGreaterThan(-1);
+    expect(idleIndex).toBeGreaterThan(busyIndex);
+  });
+
+  it("adds providers from a bottom light row that opens the existing quick setup", async () => {
+    const onAddConnection = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(
+      <ConfigProviderRegistryPanel {...panelProps([], { onAddConnection })} />,
+    ));
+    const addRow = container.querySelector<HTMLButtonElement>('[data-provider-action="add-provider"]');
+    expect(addRow?.textContent).toContain("添加供应商");
+    await act(async () => addRow!.click());
+    expect(onAddConnection).toHaveBeenCalledTimes(1);
+    expect(panelSource).not.toContain("批量停用");
+  });
+
+  it("runs one-shot health detection from the detail header", async () => {
+    const onDiscover = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(
+      <ConfigProviderRegistryPanel {...panelProps([], { onDiscover })} />,
+    ));
+    const detect = container.querySelector<HTMLButtonElement>('[data-provider-action="detect"]');
+    expect(detect?.textContent).toContain("检测");
+    await act(async () => detect!.click());
+    expect(onDiscover).toHaveBeenCalledWith("relay_a");
+
+    const busyMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], {
+      actionFeedback: {
+        kind: "discover",
+        providerId: "relay_a",
+        phase: "busy",
+        message: "正在检测连通与认证…",
+      },
+    })} />);
+    expect(busyMarkup).toContain("检测中…");
+  });
+
   it("aligns Provider action labels, active states, and nearby feedback", () => {
     const models = [model("observed", "observed")];
     const busyMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models, {
@@ -427,9 +513,9 @@ describe("ConfigProviderRegistryPanel", () => {
       },
     })} />);
 
-    expect(busyMarkup).toContain("发现中…");
+    expect(busyMarkup).toContain("检测中…");
     expect(busyMarkup).toContain('data-provider-action="edit-asset"');
-    expect(busyMarkup).toContain('data-provider-action="discover"');
+    expect(busyMarkup).toContain('data-provider-action="detect"');
     expect(busyMarkup).toContain('aria-live="polite"');
     expect(busyMarkup).toContain("正在发现模型…");
 
