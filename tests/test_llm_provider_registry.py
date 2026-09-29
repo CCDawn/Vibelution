@@ -4,6 +4,7 @@ import copy
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,9 @@ from config.llm_provider_registry import (
     update_llm_provider,
     validate_provider_registry,
 )
+from config.models import ProviderConfig
 from config.public_config import list_llm_provider_options
+from config.toml_writer import dumps_public_config
 
 
 def test_protocol_resolver_imports_in_fresh_process() -> None:
@@ -337,7 +340,40 @@ def test_provider_options_expose_credential_state_without_reference_or_secret() 
             "context_window": None,
             "default_protocol": "responses",
             "pinned_count": 0,
+            "enabled": True,
         }
     ]
     assert "credential_ref" not in options[0]
     assert "secret" not in options[0]
+
+
+def test_provider_options_expose_enabled_switch_without_inventing_legacy_keys() -> None:
+    """Wave 2 row switch: disabled providers project enabled=False; legacy rows
+    without the key read as enabled and stay key-absent on disk."""
+    base = {**_provider("none"), "auth_kind": "none", "requires_credential": False}
+    config = add_llm_provider(_empty_v2(), "relay_a", base)
+
+    # Legacy: no `enabled` key anywhere.
+    options = list_llm_provider_options(config)
+    assert options[0]["enabled"] is True
+    assert "enabled" not in config["llm"]["providers"]["relay_a"]
+
+    # Explicit disable flows through the registry mutation unchanged.
+    disabled = update_llm_provider(config, "relay_a", {**base, "enabled": False})
+    assert disabled["llm"]["providers"]["relay_a"]["enabled"] is False
+    assert list_llm_provider_options(disabled)[0]["enabled"] is False
+    # Round-trip is idempotent: re-reading and re-projecting keeps the value.
+    reread = tomllib.loads(dumps_public_config(disabled, []))
+    assert reread["llm"]["providers"]["relay_a"]["enabled"] is False
+    assert list_llm_provider_options(reread)[0]["enabled"] is False
+
+
+def test_provider_config_schema_reads_legacy_entries_as_enabled() -> None:
+    base = {**_provider("none"), "auth_kind": "none", "requires_credential": False}
+    legacy = ProviderConfig.model_validate(base)
+    assert legacy.enabled is True
+    disabled = ProviderConfig.model_validate({**base, "enabled": False})
+    assert disabled.enabled is False
+    # Non-boolean junk fails schema validation instead of coercing silently.
+    with pytest.raises(ValueError):
+        ProviderConfig.model_validate({**base, "enabled": "maybe"})

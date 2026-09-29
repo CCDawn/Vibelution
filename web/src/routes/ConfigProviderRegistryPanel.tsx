@@ -20,6 +20,7 @@ import {
   VStateSurface,
   VStatusChip,
   VSurface,
+  VSwitch,
   VTooltip,
   type VStatusTone,
 } from "../components/vui";
@@ -94,6 +95,12 @@ export type ConfigProviderRegistryPanelProps = {
   onProbeImageInput: (modelRef: string) => void;
   onDeleteProvider: (providerId: string) => void;
   onAddConnection?: () => void;
+  /**
+   * Wave 2 row-level enable switch. Must flow through the config draft chain —
+   * the toggle only edits the draft; the「保存到外部配置」prompt persists it.
+   * Selection-surface semantics only: no running call is cut off.
+   */
+  onToggleEnabled?: (providerId: string, enabled: boolean) => void;
 };
 
 const TABS: Array<{ id: ConfigProviderRegistryTab; copyKey: "registryTabConnection" | "registryTabModels" | "registryTabProtocols" | "registryTabDiagnostics" }> = [
@@ -185,7 +192,7 @@ function providerDotClassName(dotClass: ProviderDotClass): string {
   return `${styles.providerDot} ${styles.providerDotOff}`;
 }
 
-/** Sidebar list row (P0): dot + name + in-use badge. Status words stay in the dot tooltip. */
+/** Sidebar list row (P0): dot + name + in-use badge; Wave 2 adds the inline enable switch. */
 function ProviderListRowItem({
   row,
   selected,
@@ -193,6 +200,7 @@ function ProviderListRowItem({
   disabled,
   copy,
   onSelect,
+  onToggle,
 }: {
   row: ProviderListRow & { status: string; dotTitle: string };
   selected: boolean;
@@ -200,6 +208,7 @@ function ProviderListRowItem({
   disabled: boolean;
   copy: ConfigCopy;
   onSelect: () => void;
+  onToggle?: (providerId: string, enabled: boolean) => void;
 }) {
   return (
     <div
@@ -207,6 +216,7 @@ function ProviderListRowItem({
       data-active={selected ? "true" : "false"}
       data-inspecting={inspecting ? "true" : "false"}
       data-provider-status={row.status}
+      data-provider-enabled={row.enabled ? "true" : "false"}
     >
       <VButton
         className={styles.providerButton}
@@ -227,6 +237,17 @@ function ProviderListRowItem({
           <span className={styles.providerInUseBadge} data-provider-inuse="true">{copy.inUseBadge}</span>
         ) : null}
       </VButton>
+      {onToggle ? (
+        <VSwitch
+          className={styles.providerSwitch}
+          isSelected={row.enabled}
+          isDisabled={disabled}
+          data-provider-switch="true"
+          aria-label={`${row.name} · ${copy.providerSwitchAriaSuffix}`}
+          title={copy.providerSwitchHint}
+          onChange={(next) => onToggle(row.providerId, next)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -875,6 +896,7 @@ export function ConfigProviderRegistryPanel({
   onProbeImageInput,
   onDeleteProvider,
   onAddConnection,
+  onToggleEnabled,
 }: ConfigProviderRegistryPanelProps) {
   const orderedRows = useMemo(() => sortProviderRegistryRows(rows), [rows]);
   // P0 single list: every provider shows once; dot carries availability, in-use sorts first.
@@ -1128,6 +1150,7 @@ export function ConfigProviderRegistryPanel({
                     disabled={disabled}
                     copy={copy}
                     onSelect={() => onSelectProvider(row.providerId)}
+                    onToggle={onToggleEnabled}
                   />
                 )}
               />

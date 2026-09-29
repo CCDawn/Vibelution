@@ -142,6 +142,8 @@ export type ConfigProviderOption = {
   context_window?: number | null;
   default_protocol: string;
   pinned_count: number;
+  /** Row-level enable switch (Wave 2). Legacy rows without the key read as enabled. */
+  enabled?: boolean;
 };
 
 export type ConfigCatalogModel = {

@@ -69,6 +69,7 @@ export {
   type VStringSelectProps,
 } from "./forms/VStringSelect";
 export { VTextarea, type VTextareaProps } from "./forms/VTextarea";
+export { VSwitch, type VSwitchProps } from "./forms/VSwitch";
 export {
   VSettingsGroupCard,
   VSettingsRow,

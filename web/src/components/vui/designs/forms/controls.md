@@ -274,6 +274,38 @@ import { VCheckbox } from "@/components/vui";
 
 ---
 
+## VSwitch
+
+### 功能
+开关：单布尔状态的即时开/关形态（track + thumb）。与 `VCheckbox` 同一套受控契约，但视觉语义是「状态切换」而非「多选项勾选」。
+
+### 适用范围
+- **适用**：行内启停开关、设置项 on/off（一眼表达当前状态）。
+- **不适用**：多选列表（→ `VCheckbox`）、互斥枚举（→ `VStringSelect`）。
+
+| 场景 | 选择 |
+| --- | --- |
+| 列表行内启停（如供应商停用） | `VSwitch` |
+| 同意条款 / 批量多选 | `VCheckbox` |
+| 枚举单选 | `VStringSelect` |
+
+### 使用方式
+```tsx
+import { VSwitch } from "@/components/vui";
+
+<VSwitch isSelected={on} onChange={setOn} aria-label="启用" />
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| isSelected / onChange | 受控布尔 | 开关无文字标签；必须提供 aria-label 说明作用对象 |
+| isDisabled | 停用态 | 保持 data-disabled 供测试选择 |
+
+### 实现落点
+- `forms/VSwitch.tsx` → `ShadcnSwitch`
+
+---
+
 ## VFieldRow
 
 ### 功能
