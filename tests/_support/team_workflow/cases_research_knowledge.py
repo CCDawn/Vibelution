@@ -2848,9 +2848,13 @@ def test_knowledge_collection_completion_runs_search_extract_before_ingestion(tm
 def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Knowledge Review Agent")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": steward["agentId"], "role": "steward"}],
+        members=[
+            {"agentId": steward["agentId"], "role": "steward"},
+            {"agentId": reviewer["agentId"], "role": "lead"},
+        ],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -3041,8 +3045,9 @@ def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, m
         team["teamId"],
         inbox_source_id,
         decision="accepted",
-        reviewed_by_agent_id=steward["agentId"],
+        reviewed_by_agent_id=reviewer["agentId"],
     )
+    assert reviewed_source["source"]["reviewedByAgentId"] == reviewer["agentId"]
     pending_candidate = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
         team["teamId"],
         steward_candidate["candidateId"],
@@ -3071,7 +3076,7 @@ def test_knowledge_ingestion_status_tracks_pending_and_official_sync(tmp_path, m
         pending_candidate["candidateId"],
         {
             "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
-            "reviewedByAgentId": steward["agentId"],
+            "reviewedByAgentId": reviewer["agentId"],
             "decision": "approved",
             "resolutionNote": "Evidence accepted for official knowledge.",
         },
