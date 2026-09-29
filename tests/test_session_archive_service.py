@@ -10,6 +10,7 @@ import pytest
 from tests.test_agent_config_workspace_service import (
     _fake_config_workspace,
     _use_tmp_project_root,
+    agent_bulk_delete_service,
     agent_directory_service,
     client,
     config_service,
@@ -141,6 +142,67 @@ def test_archive_missing_session_returns_404(tmp_path, monkeypatch):
 
     assert client.post("/api/sessions/does-not-exist/archive").status_code == 404
     assert client.post("/api/sessions/does-not-exist/unarchive").status_code == 404
+
+
+def test_agent_sealed_sessions_stay_out_of_user_archive_view_and_reject_unarchive(
+    tmp_path, monkeypatch
+):
+    """source="agent_archive" rows belong to the Agent lifecycle, not the user view."""
+
+    created = _create_session(tmp_path, monkeypatch, title="Agent 封存会话")
+    session_id = created["id"]
+    agent_id = str(created.get("agentId") or "").strip()
+    assert agent_id
+
+    # Real agent-archive seal path (same contract as DELETE /api/agents).
+    result = agent_bulk_delete_service.bulk_archive_agents([agent_id])
+    assert result.get("archivedCount", result.get("archived", 0)) or result
+
+    detail = _detail(session_id)
+    assert detail["archiveState"]["status"] == "archived"
+    assert detail["archiveState"]["source"] == "agent_archive"
+
+    # Agent-sealed rows never enter the user archived view.
+    archived_page = client.get("/api/session-archive").json()
+    assert session_id not in {item["id"] for item in archived_page["items"]}
+
+    # And user-side unarchive is rejected: only the Agent lifecycle unseals.
+    response = client.post(f"/api/sessions/{session_id}/unarchive")
+    assert response.status_code == 422, response.text
+    detail_message = str(response.json()["detail"])
+    assert "Agent" in detail_message and ("封存" in detail_message or "seal" in detail_message.lower())
+
+    # The seal is untouched afterwards.
+    detail_after = _detail(session_id)
+    assert detail_after["archiveState"]["status"] == "archived"
+    assert detail_after["archiveState"]["source"] == "agent_archive"
+    assert detail_after["readOnly"] is True
+
+
+def test_unarchive_restores_manual_read_only_state(tmp_path, monkeypatch):
+    """A manually read-only session keeps read_only across an archive round."""
+
+    created = _create_session(tmp_path, monkeypatch, title="手动只读会话")
+    session_id = created["id"]
+    conversation = session_service.load_session_chat_state(
+        session_service.PROJECT_ROOT, session_id
+    )
+    assert conversation is not None
+    conversation["read_only"] = True
+    conversation["readOnly"] = True
+    session_service.save_session_chat_state(
+        session_service.PROJECT_ROOT, session_id, conversation
+    )
+
+    archived = client.post(f"/api/sessions/{session_id}/archive")
+    assert archived.status_code == 200, archived.text
+    unarchived = client.post(f"/api/sessions/{session_id}/unarchive")
+    assert unarchived.status_code == 200, unarchived.text
+
+    detail = _detail(session_id)
+    assert detail.get("archiveState", {}) == {}
+    # The pre-archive manual read-only flag survives the archive round.
+    assert detail["readOnly"] is True
 
 
 def test_store_directory_row_leaves_default_index_and_is_restored(

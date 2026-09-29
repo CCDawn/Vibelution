@@ -49,6 +49,12 @@ def conversation_is_archived(conversation: dict[str, Any] | None) -> bool:
     return str(archive_state.get("status") or "").strip().lower() == "archived"
 
 
+def _archive_state_source(conversation: dict[str, Any]) -> str:
+    """Source discriminant of the archived flag ("" when absent)."""
+
+    return str(_conversation_archive_state(conversation).get("source") or "").strip().lower()
+
+
 def _response(session_id: str, conversation: dict[str, Any], *, changed: bool) -> dict[str, Any]:
     archive_state = _conversation_archive_state(conversation)
     return {
@@ -90,6 +96,9 @@ def _apply_archive_flags(conversation: dict[str, Any], timestamp: str) -> None:
             or conversation.get("conversationIndexVisibility")
             or ""
         ),
+        "previousConversationReadOnly": bool(
+            conversation.get("read_only") or conversation.get("readOnly")
+        ),
         "previousHiddenFromIndex": bool(
             conversation.get("hidden_from_index") or conversation.get("hiddenFromIndex")
         ),
@@ -123,10 +132,11 @@ def _clear_archive_flags(conversation: dict[str, Any], timestamp: str) -> None:
             agent,
         )
     previous_hidden = bool(archive_state.get("previousHiddenFromIndex"))
+    previous_read_only = bool(archive_state.get("previousConversationReadOnly"))
     conversation.pop("archive_state", None)
     conversation.pop("archiveState", None)
-    conversation["read_only"] = False
-    conversation["readOnly"] = False
+    conversation["read_only"] = previous_read_only
+    conversation["readOnly"] = previous_read_only
     conversation["hidden_from_index"] = previous_hidden
     conversation["hiddenFromIndex"] = previous_hidden
     conversation["conversation_index_kind"] = previous_kind
@@ -199,7 +209,7 @@ def archive_session(session_id: str) -> dict[str, Any]:
 
 
 def unarchive_session(session_id: str) -> dict[str, Any]:
-    """Unarchive one session: clear the flag and restore index visibility."""
+    """Unarchive one session previously archived through this service."""
 
     s = _service()
     normalized = str(session_id or "").strip()
@@ -208,6 +218,17 @@ def unarchive_session(session_id: str) -> dict[str, Any]:
         conversation = _require_conversation(normalized)
         if not conversation_is_archived(conversation):
             return _response(normalized, conversation, changed=False)
+        # Agent-archive seals sessions under source="agent_archive"; only the
+        # Agent lifecycle may unseal them. User unarchive must not break the
+        # "agent archived implies sessions sealed" invariant.
+        if _archive_state_source(conversation) != _ARCHIVE_SOURCE:
+            raise s.SessionValidationError(
+                s.text_for(
+                    s.get_web_language(),
+                    zh=f"会话 {normalized} 随 Agent 归档封存，请通过恢复 Agent 解除封存。",
+                    en=f"Session {normalized} was sealed by an Agent archive; restore the Agent to unseal it.",
+                )
+            )
         _clear_archive_flags(conversation, timestamp)
         s.save_session_chat_state(s.PROJECT_ROOT, normalized, conversation)
     _sync_directory(conversation, archive=False)
@@ -248,7 +269,11 @@ def list_archived_sessions(
         archived_raw = [
             raw
             for raw in conversations
-            if isinstance(raw, dict) and conversation_is_archived(raw)
+            if isinstance(raw, dict)
+            and conversation_is_archived(raw)
+            # Agent-sealed rows (source="agent_archive") belong to the Agent
+            # lifecycle view, not the user's session archive.
+            and _archive_state_source(raw) == _ARCHIVE_SOURCE
         ]
     agent_by_id = s._agent_lookup_for_conversations()
     archived = []
