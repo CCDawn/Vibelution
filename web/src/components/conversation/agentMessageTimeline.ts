@@ -13,6 +13,12 @@ export type AgentMessageThoughtTimelineItem = {
   preview: string;
   defaultExpanded: boolean;
   sourceOperationIds: string[];
+  /**
+   * Server-derived settled duration for the collapsed header. Merged adjacent
+   * segments sum their segment durations (one collapsed unit, its total honest
+   * thinking time); absent when no segment carried canonical stamps.
+   */
+  settledDurationSeconds?: number;
 };
 
 export type AgentMessageAssistantTextTimelineItem = {
@@ -151,6 +157,7 @@ function timelineItemsFromOperations(
           preview: firstParagraphPreview(text),
           defaultExpanded: isRunningStatus(operation.status),
           sourceOperationIds: [operation.id],
+          settledDurationSeconds: operation.settledDurationSeconds,
         });
       }
       continue;
@@ -496,12 +503,24 @@ function mergeAdjacentThoughtItems(items: AgentMessageTimelineItem[]) {
         preview: firstParagraphPreview(text),
         defaultExpanded: previous.defaultExpanded || item.defaultExpanded,
         sourceOperationIds: [...previous.sourceOperationIds, ...item.sourceOperationIds],
+        settledDurationSeconds: sumSettledDurations(previous, item),
       };
       continue;
     }
     merged.push(item);
   }
   return merged;
+}
+
+/** Total honest thinking time of one collapsed unit; absent unless some segment carries it. */
+function sumSettledDurations(
+  previous: AgentMessageThoughtTimelineItem,
+  next: AgentMessageThoughtTimelineItem,
+) {
+  if (previous.settledDurationSeconds === undefined && next.settledDurationSeconds === undefined) {
+    return undefined;
+  }
+  return (previous.settledDurationSeconds ?? 0) + (next.settledDurationSeconds ?? 0);
 }
 
 function operationText(operation: AgentMessageOperation) {

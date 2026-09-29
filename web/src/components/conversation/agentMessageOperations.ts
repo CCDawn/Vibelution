@@ -8,6 +8,7 @@ import type {
 } from "../../agent-thread/types";
 import { agentMessageProcessSections } from "./agentMessageSections";
 import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
+import { settledThoughtDurationSeconds } from "./conversationThoughtDuration";
 
 export type AgentMessageOperationKind = "thought" | "mental" | "tool" | "status";
 
@@ -20,6 +21,12 @@ export type AgentMessageOperation = {
   rawStatus?: string;
   summary: string;
   durationSeconds: number | null;
+  /**
+   * Settled server-derived duration of one reasoning segment (thought kind
+   * only). Present only when the source turn item carried both canonical
+   * stamps; never a whole-turn number. See conversationThoughtDuration.ts.
+   */
+  settledDurationSeconds?: number;
   arguments?: Record<string, unknown>;
   resultPreview?: string;
   resultType?: string;
@@ -146,6 +153,7 @@ function agentThoughtPartToOperation(
     status: part.status || (message.streaming ? "running" : "done"),
     summary: compactPreview(part.summary || text),
     durationSeconds: null,
+    settledDurationSeconds: settledThoughtDurationSeconds(part.createdAt, part.updatedAt) ?? undefined,
     resultPreview: text,
     sequence: numberOrNull(part.sequence) ?? undefined,
     timestamp: part.timestamp,

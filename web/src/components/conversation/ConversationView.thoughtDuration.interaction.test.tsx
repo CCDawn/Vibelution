@@ -39,6 +39,17 @@ function reasoningMessage(status: "running" | "completed"): ConversationMessage 
   } as ConversationMessage;
 }
 
+/** Settled reasoning item carrying canonical stamps: the only honest settled duration. */
+function stampedSettledMessage(createdAt: string, updatedAt: string): ConversationMessage {
+  const message = reasoningMessage("completed") as ConversationMessage & {
+    turnItems: Array<Record<string, unknown>>;
+  };
+  return {
+    ...message,
+    turnItems: message.turnItems.map((item) => ({ ...item, createdAt, updatedAt })),
+  } as ConversationMessage;
+}
+
 /** Mid-turn settle: the reasoning item finished while the turn keeps running. */
 function itemSettledLiveMessage(): ConversationMessage {
   const message = reasoningMessage("running") as ConversationMessage & {
@@ -190,7 +201,7 @@ describe("thought duration client-clock label", () => {
       setMessages?.([itemSettledLiveMessage()]);
     });
     const settledLabel = container?.querySelector('[data-thought-duration="settled"]');
-    expect(settledLabel?.textContent).toContain("持续了 8 秒");
+    expect(settledLabel?.textContent).toContain("8s");
     expect(container?.textContent).toContain("已思考");
   });
 
@@ -207,7 +218,7 @@ describe("thought duration client-clock label", () => {
       setMessages?.([itemSettledLiveMessage()]);
     });
     expect(container?.querySelector('[data-thought-duration="settled"]')?.textContent)
-      .toContain("持续了几秒");
+      .toContain("几秒");
   });
 
   it("renders no duration for units that arrive already settled", async () => {
@@ -225,8 +236,73 @@ describe("thought duration client-clock label", () => {
       disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(container?.textContent).toContain("已思考");
-    // History loads have no honest client-clock duration: nothing renders.
+    // History loads without canonical stamps have no honest duration: nothing
+    // renders — not even a whole-turn number from usageStats.
     expect(container?.querySelector("[data-thought-duration]")).toBeNull();
-    expect(container?.textContent).not.toContain("持续了");
+  });
+
+  it("renders the server-derived duration for settled units carrying canonical stamps", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    await mountThought([stampedSettledMessage(
+      "2026-09-11T05:00:00Z",
+      "2026-09-11T05:00:12Z",
+    )]);
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    const disclosure = container?.querySelector<HTMLButtonElement>(
+      "details[data-codex-process-disclosure] summary",
+    );
+    await act(async () => {
+      disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const settledLabel = container?.querySelector('[data-thought-duration="settled"]');
+    expect(settledLabel?.textContent).toContain("12s");
+  });
+
+  it("prefers canonical stamps over the client clock once the unit settles", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const header = await mountThought([reasoningMessage("running")]);
+    await act(async () => {
+      header?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    // The client clock only saw 5s; the server stamps bracket the true 30s.
+    await act(async () => {
+      setMessages?.([stampedSettledMessage(
+        "2026-09-11T05:00:00Z",
+        "2026-09-11T05:00:30Z",
+      )]);
+    });
+    // A fully settled message joins the history rendering; open the process
+    // disclosure to reveal the settled thought cell.
+    const disclosure = container?.querySelector<HTMLButtonElement>(
+      "details[data-codex-process-disclosure] summary",
+    );
+    await act(async () => {
+      disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const settledLabel = container?.querySelector('[data-thought-duration="settled"]');
+    expect(settledLabel?.textContent).toContain("30s");
+  });
+
+  it("ignores clock-skewed stamps instead of showing a negative duration", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    await mountThought([stampedSettledMessage(
+      "2026-09-11T05:00:30Z",
+      "2026-09-11T05:00:12Z",
+    )]);
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    const disclosure = container?.querySelector<HTMLButtonElement>(
+      "details[data-codex-process-disclosure] summary",
+    );
+    await act(async () => {
+      disclosure?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container?.querySelector("[data-thought-duration]")).toBeNull();
   });
 });

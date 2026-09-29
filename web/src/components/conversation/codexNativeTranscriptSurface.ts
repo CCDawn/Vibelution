@@ -30,6 +30,7 @@ import {
 } from "../../routes/chatTurnProtocol";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
 import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
+import { settledThoughtDurationSeconds } from "./conversationThoughtDuration";
 
 export type CodexTranscriptSurfaceMode = "native" | "empty";
 
@@ -200,6 +201,11 @@ export function codexNativeTranscriptToCells(
           toolArguments: cell.toolArguments,
           sourceItemId: cell.sourceItemId,
           originType: cell.originType,
+          // Reasoning only: settled thinking seconds from the canonical item
+          // stamps; undefined (renders nothing) when the stamps are absent.
+          settledDurationSeconds: cell.kind === "reasoning_summary"
+            ? settledThoughtDurationSeconds(cell.createdAt, cell.updatedAt) ?? undefined
+            : undefined,
         };
       })
       .filter(shouldDisplayTranscriptCell)),

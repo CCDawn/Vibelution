@@ -95,6 +95,8 @@ function processPartSignal(part: AgentMessagePart) {
       part.status,
       part.sequence ?? "",
       part.timestamp ?? "",
+      part.createdAt ?? "",
+      part.updatedAt ?? "",
       compactTextSignal(part.text),
       compactTextSignal(part.summary ?? ""),
     ].join(":");
