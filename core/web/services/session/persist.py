@@ -480,6 +480,30 @@ def _persist_session_turn_result(
         result_stop_requested
         and stop_reason == _CHALLENGE_DEADLINE_PROBLEM_CODE
     )
+    # Extracted once for every terminal shape: failed_provider turns must land
+    # the usage their (partial) attempt produced just like completed turns.
+    llm_usage = s._normalize_turn_llm_usage(result.get("llm_usage") if isinstance(result, dict) else None)
+    if llm_usage is not None:
+        llm_usage["recordedAt"] = llm_usage.get("recordedAt") or s._now_timestamp()
+        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+        llm_usage["promptCacheScope"] = (
+            llm_usage.get("promptCacheScope")
+            or metadata.get("promptCacheScope")
+            or metadata.get("prompt_cache_scope")
+            or "chat_session"
+        )
+        llm_usage["promptCachePartition"] = (
+            llm_usage.get("promptCachePartition")
+            or metadata.get("promptCachePartition")
+            or metadata.get("prompt_cache_partition")
+            or ""
+        )
+        llm_usage["llmModelId"] = (
+            llm_usage.get("llmModelId")
+            or metadata.get("llmModelId")
+            or metadata.get("llm_model_id")
+            or ""
+        )
     provider_failure = s._is_provider_failed_result(result)
     committed_final_answer_text = (
         _session_turn_canonical_final_answer_text(session_id, turn_id)
@@ -512,7 +536,7 @@ def _persist_session_turn_result(
         context_composition = s._normalize_session_context_composition(
             result.get("context_composition") if isinstance(result, dict) else None
         )
-        cache_composition = s._build_session_cache_composition(turn_id, None)
+        cache_composition = s._build_session_cache_composition(turn_id, llm_usage)
         partial_reply = s._provider_failure_partial_visible_reply(result, failure_message)
         partial_entry: dict[str, Any] | None = None
         if partial_reply:
@@ -537,7 +561,14 @@ def _persist_session_turn_result(
             turn_error,
             error_type=error_type,
             turn_id=turn_id,
+            llm_usage=llm_usage,
         )
+        # Failed turns land their usage fact too: the real usage when the
+        # attempt produced it, otherwise the honest zero-value fact (the
+        # attempt happened; unknown token counts record 0 with source
+        # "missing" so aggregation can still count the attempt — numbers are
+        # never invented).
+        s._record_session_llm_usage_event(session_id, turn_id, llm_usage)
         timestamp = str(error_entry.get("timestamp") or s._now_timestamp()).strip()
         stored_active_task = s._normalize_session_active_task(
             conversation.get("active_task") or conversation.get("activeTask")
@@ -684,6 +715,9 @@ def _persist_session_turn_result(
                 "errorType": error_type,
                 "message": str(turn_error.get("message") or ""),
                 "rawError": raw_error,
+                "llmUsage": llm_usage
+                if llm_usage is not None
+                else s._missing_llm_usage(recorded_at=s._now_timestamp()),
             },
             source="persist_session_turn_result",
         )
@@ -752,28 +786,6 @@ def _persist_session_turn_result(
                 "outcome": "failed",
             }
             result_status = "failed_runtime"
-    llm_usage = s._normalize_turn_llm_usage(result.get("llm_usage") if isinstance(result, dict) else None)
-    if llm_usage is not None:
-        llm_usage["recordedAt"] = llm_usage.get("recordedAt") or s._now_timestamp()
-        metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
-        llm_usage["promptCacheScope"] = (
-            llm_usage.get("promptCacheScope")
-            or metadata.get("promptCacheScope")
-            or metadata.get("prompt_cache_scope")
-            or "chat_session"
-        )
-        llm_usage["promptCachePartition"] = (
-            llm_usage.get("promptCachePartition")
-            or metadata.get("promptCachePartition")
-            or metadata.get("prompt_cache_partition")
-            or ""
-        )
-        llm_usage["llmModelId"] = (
-            llm_usage.get("llmModelId")
-            or metadata.get("llmModelId")
-            or metadata.get("llm_model_id")
-            or ""
-        )
     context_composition = s._normalize_session_context_composition(
         result.get("context_composition") if isinstance(result, dict) else None
     )
@@ -1369,6 +1381,12 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             summary=work_run_summary,
             recovery_pointer={"resumeAllowed": True, "source": "provider_failure"},
         )
+        # Zero-value usage fact for the exception path (ZCode usage fact on
+        # error turns): the attempt happened, but the raised failure carries no
+        # per-turn totals, so unknown token counts record 0 with source
+        # "missing" instead of invented numbers. Successful provider calls of
+        # this attempt are already in the invocation-level usage ledger.
+        s._record_session_llm_usage_event(session_id, turn_id, None)
         s._record_session_turn_visible_message(
             session_id,
             turn_id,
@@ -1424,6 +1442,9 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 "rawError": raw_error,
                 "failureCategory": classification.category,
                 "failureDisposition": classification.disposition,
+                # Zero-value usage fact: attempt happened, per-turn totals
+                # unknown (see _record_session_llm_usage_event call above).
+                "llmUsage": s._missing_llm_usage(recorded_at=s._now_timestamp()),
                 **(
                     {"problemCode": classification.problem_code}
                     if classification.problem_code
@@ -1494,6 +1515,10 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         summary=work_run_summary,
         recovery_pointer={"resumeAllowed": True, "source": "runtime_failure"},
     )
+    # Zero-value usage fact (honest accounting, mirrors the provider-failure
+    # branch above): the attempt happened; the raised exception carries no
+    # per-turn totals, so unknown token counts record 0 with source "missing".
+    s._record_session_llm_usage_event(session_id, turn_id, None)
     s._record_session_turn_lifecycle_event(
         session_id,
         "failure_persisted",
@@ -1542,6 +1567,8 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             "rawError": raw_error,
             "failureCategory": classification.category,
             "failureDisposition": classification.disposition,
+            # Zero-value usage fact: attempt happened, per-turn totals unknown.
+            "llmUsage": s._missing_llm_usage(recorded_at=s._now_timestamp()),
             **(
                 {"problemCode": classification.problem_code}
                 if classification.problem_code

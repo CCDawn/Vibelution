@@ -642,3 +642,182 @@ def test_persist_operator_stop_keeps_existing_ready_semantics(tmp_path, monkeypa
     assert stored["last_turn_status"] == "ready"
     assert stored["last_turn_terminal_reason"] == "stopped_by_user"
     assert "last_turn_terminal_problem_code" not in stored
+
+
+def test_persist_provider_failure_lands_usage_fact(tmp_path, monkeypatch) -> None:
+    """A failed_provider turn carries its attempt's usage like a success does."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-usage", "turn-usage")
+    usage_events: list[tuple[str, str, object]] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_llm_usage_event",
+        lambda session_id, turn_id, usage: usage_events.append((session_id, turn_id, usage)),
+    )
+
+    persist._persist_session_turn_result(
+        "session-usage",
+        {
+            "status": "failed",
+            "summary": _PAYLOAD_PROTOCOL_ERROR,
+            "raw_output": _PAYLOAD_PROTOCOL_ERROR,
+            "error": _PAYLOAD_PROTOCOL_ERROR,
+            "llm_usage": {
+                "source": "provider_usage",
+                "input_tokens": 90,
+                "output_tokens": 30,
+            },
+        },
+        turn_id="turn-usage",
+    )
+
+    assert len(usage_events) == 1
+    assert usage_events[0][0] == "session-usage"
+    assert usage_events[0][1] == "turn-usage"
+    landed = usage_events[0][2]
+    assert landed is not None
+    assert landed["source"] == "provider_usage"
+    assert landed["inputTokens"] == 90
+    assert landed["outputTokens"] == 30
+    events = session_service._load_session_conversation_events_cached("session-usage")
+    failed_events = [event for event in events if event.event_type == session_service.EVENT_TURN_FAILED]
+    assert len(failed_events) == 1
+    payload_usage = failed_events[0].payload.get("llmUsage")
+    assert payload_usage is not None
+    assert payload_usage["source"] == "provider_usage"
+    assert payload_usage["inputTokens"] == 90
+    assert payload_usage["outputTokens"] == 30
+
+
+def test_persist_provider_failure_without_usage_records_zero_fact(tmp_path, monkeypatch) -> None:
+    """Provider gave no usage: honest zero-value fact, never invented numbers."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-zero", "turn-zero")
+    usage_events: list[object] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_llm_usage_event",
+        lambda _session_id, _turn_id, usage: usage_events.append(usage),
+    )
+
+    persist._persist_session_turn_result(
+        "session-zero",
+        {
+            "status": "failed",
+            "summary": _PAYLOAD_PROTOCOL_ERROR,
+            "raw_output": _PAYLOAD_PROTOCOL_ERROR,
+            "error": _PAYLOAD_PROTOCOL_ERROR,
+        },
+        turn_id="turn-zero",
+    )
+
+    # None rides into the usage event: source "missing", token counts unknown.
+    assert usage_events == [None]
+    events = session_service._load_session_conversation_events_cached("session-zero")
+    failed_events = [event for event in events if event.event_type == session_service.EVENT_TURN_FAILED]
+    assert len(failed_events) == 1
+    payload_usage = failed_events[0].payload.get("llmUsage")
+    assert payload_usage is not None
+    assert payload_usage["source"] == "missing"
+    assert payload_usage["inputTokens"] == 0
+    assert payload_usage["outputTokens"] == 0
+
+
+def test_persist_turn_failure_records_zero_usage_fact(tmp_path, monkeypatch) -> None:
+    """Worker exception path: the attempt happened, per-turn totals unknown."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-fail", "turn-fail")
+    usage_events: list[object] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_llm_usage_event",
+        lambda _session_id, _turn_id, usage: usage_events.append(usage),
+    )
+
+    persist._persist_session_turn_failure(
+        "session-fail",
+        {"turn_id": "turn-fail"},
+        RuntimeError("boom"),
+    )
+
+    assert usage_events == [None]
+    events = session_service._load_session_conversation_events_cached("session-fail")
+    failed_events = [event for event in events if event.event_type == session_service.EVENT_TURN_FAILED]
+    assert len(failed_events) == 1
+    payload_usage = failed_events[0].payload.get("llmUsage")
+    assert payload_usage is not None
+    assert payload_usage["source"] == "missing"
+    assert payload_usage["totalTokens"] == 0
+
+
+def test_persist_stopped_turn_lands_folded_usage(tmp_path, monkeypatch) -> None:
+    """A cooperatively stopped turn keeps the usage its invocation reported."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_running_session(tmp_path, "session-stopped", "turn-stopped")
+    usage_events: list[object] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_llm_usage_event",
+        lambda _session_id, _turn_id, usage: usage_events.append(usage),
+    )
+
+    persist._persist_session_turn_result(
+        "session-stopped",
+        {
+            "status": "stopped",
+            "summary": "",
+            "raw_output": "",
+            "stop_requested": True,
+            "stop_reason": "user_requested",
+            "tool_call_count": 0,
+            "tool_trace": [],
+            "llm_usage": {
+                "source": "provider_usage",
+                "input_tokens": 12,
+                "output_tokens": 8,
+            },
+        },
+        turn_id="turn-stopped",
+    )
+
+    assert usage_events
+    landed = usage_events[0]
+    assert landed is not None
+    assert landed["source"] == "provider_usage"
+    assert landed["totalTokens"] == 20
+    events = session_service._load_session_conversation_events_cached("session-stopped")
+    interrupted_events = [
+        event for event in events if event.event_type == session_service.EVENT_TURN_INTERRUPTED
+    ]
+    assert len(interrupted_events) == 1
+    payload_usage = interrupted_events[0].payload.get("llmUsage")
+    assert payload_usage is not None
+    assert payload_usage["inputTokens"] == 12
+    assert payload_usage["outputTokens"] == 8
+
+
+def test_provider_failure_message_carries_llm_usage_metadata() -> None:
+    """The failure DTO embeds the attempt's usage so the timeline can show it."""
+
+    message = session_service._make_provider_failure_chat_message(
+        {"message": "boom", "timestamp": "2026-09-29T00:00:00Z"},
+        error_type="server_error",
+        turn_id="turn-dto",
+        llm_usage={
+            "source": "provider_usage",
+            "input_tokens": 7,
+            "output_tokens": 3,
+        },
+    )
+    assert message["metadata"]["llmUsage"]["inputTokens"] == 7
+
+    plain = session_service._make_provider_failure_chat_message(
+        {"message": "boom", "timestamp": "2026-09-29T00:00:00Z"},
+        error_type="server_error",
+        turn_id="turn-dto",
+    )
+    assert "llmUsage" not in (plain.get("metadata") or {})

@@ -2542,7 +2542,18 @@ def _run_session_continuation_loop(
                     "stopReason": trim_lines(stop_reason, max_lines=2),
                 },
             )
-            return s._build_stopped_turn_result(stop_reason)
+            stopped_result = s._build_stopped_turn_result(stop_reason)
+            # Preflight stop after an earlier continuation iteration: carry the
+            # last observed invocation usage so the stopped turn still lands
+            # its usage fact (no new attempt happened here).
+            remembered_usage = (
+                last_visible_result.get("llm_usage")
+                if isinstance(last_visible_result, dict)
+                else None
+            )
+            if isinstance(remembered_usage, dict) and remembered_usage:
+                stopped_result["llm_usage"] = remembered_usage
+            return stopped_result
 
         # Work-run heartbeat at the continuation-loop boundary (throttled
         # inside the helper): proves worker liveness so the stale sweep's
@@ -2708,7 +2719,15 @@ def _run_session_continuation_loop(
                     "llmElapsedMs": llm_elapsed_ms,
                 },
             )
-            return s._build_stopped_turn_result(return_stop_reason)
+            stopped_result = s._build_stopped_turn_result(return_stop_reason)
+            # Cooperative stop must not lose the usage the completed invocation
+            # already reported (ZCode usage fact on cancelled turns): fold it
+            # into the stopped result so the persist path lands it on the turn
+            # record and the usage aggregation still counts this attempt.
+            stopped_usage = result.get("llm_usage") if isinstance(result, dict) else None
+            if isinstance(stopped_usage, dict) and stopped_usage:
+                stopped_result["llm_usage"] = stopped_usage
+            return stopped_result
 
         # LLM receipt is in hand: fold this invocation's usage into the
         # session-turn token counter checked by the real-time fuse below.
