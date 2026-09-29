@@ -3142,11 +3142,26 @@ def _sequence_file_signature(path: Path) -> tuple[int, int]:
     return (int(stat.st_mtime_ns), int(stat.st_size))
 
 
+# Per-process resolve cache: journal paths repeat per session per request and
+# Path.resolve() is a slow syscall on Windows. Keys are immutable strings and
+# the resolved identity of a given path string is stable for the process
+# lifetime, so a plain dict needs no lock (CPython get/set are atomic) and no
+# invalidation. Only successful resolves are cached — an OSError fallback keeps
+# retrying so a transient resolve failure never freezes a non-resolved key.
+_SEQUENCE_RESOLVED_PATH_CACHE: dict[str, str] = {}
+
+
 def _sequence_cache_key(path: Path) -> str:
+    raw = str(path)
+    cached = _SEQUENCE_RESOLVED_PATH_CACHE.get(raw)
+    if cached is not None:
+        return cached
     try:
-        return str(path.resolve())
+        resolved = str(path.resolve())
     except OSError:
-        return str(path)
+        return raw
+    _SEQUENCE_RESOLVED_PATH_CACHE[raw] = resolved
+    return resolved
 
 
 def _safe_session_workspace_token(session_id: str) -> str:

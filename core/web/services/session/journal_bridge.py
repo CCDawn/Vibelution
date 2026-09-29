@@ -94,8 +94,23 @@ def prune_session_conversation_events_cache_locked() -> None:
         _SESSION_CONVERSATION_EVENTS_CACHE.pop(oldest_key, None)
 
 
+# Per-process resolve cache: Path.resolve() is a slow syscall on Windows and
+# every cache-key build used to re-resolve the same project root. Keys are
+# immutable strings and the set of distinct roots in a process is tiny, so a
+# plain dict is enough (CPython get/set are atomic; no unbounded growth, no
+# invalidation). If a root's resolved identity could ever change in-process
+# (e.g. symlink retargeting), clear this dict — the events cache only loses
+# its warm namespace, never correctness.
+_RESOLVED_ROOT_CACHE: dict[str, str] = {}
+
+
 def _cache_key(root: Path, session_id: str) -> str:
-    return f"{Path(root).resolve()}:{str(session_id or '').strip()}"
+    raw_root = str(root)
+    resolved_root = _RESOLVED_ROOT_CACHE.get(raw_root)
+    if resolved_root is None:
+        resolved_root = str(Path(root).resolve())
+        _RESOLVED_ROOT_CACHE[raw_root] = resolved_root
+    return f"{resolved_root}:{str(session_id or '').strip()}"
 
 
 def invalidate_session_conversation_events_cache(session_id: str = "") -> None:

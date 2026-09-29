@@ -299,3 +299,49 @@ def test_base_exception_releases_inflight_slot(tmp_path: Path, monkeypatch) -> N
         journal_bridge.load_session_conversation_events_cached(session_id, project_root=root)
 
     assert cache_key not in journal_bridge._SESSION_CONVERSATION_EVENTS_INFLIGHT
+
+
+def test_cache_key_resolves_each_root_once(tmp_path: Path, monkeypatch) -> None:
+    """Warm cache-key builds must not re-resolve; distinct roots stay isolated."""
+
+    journal_bridge._RESOLVED_ROOT_CACHE.clear()
+    calls = {"count": 0}
+    original_resolve = Path.resolve
+
+    def counting_resolve(self, *args, **kwargs):
+        calls["count"] += 1
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", counting_resolve)
+
+    root = tmp_path
+    first = journal_bridge._cache_key(root, "s1")
+    assert calls["count"] == 1
+    # Warm call: another session on the same root adds no resolve.
+    second = journal_bridge._cache_key(root, "s2")
+    assert calls["count"] == 1
+    assert second.endswith(":s2") and second != first
+
+    # A different root value gets its own resolve and its own namespace.
+    other_root = tmp_path / "other-root"
+    other_key = journal_bridge._cache_key(other_root, "s1")
+    assert calls["count"] == 2
+    assert other_key != first
+
+    monkeypatch.undo()
+    assert first == f"{Path(root).resolve()}:s1"
+    assert other_key == f"{Path(other_root).resolve()}:s1"
+    journal_bridge._RESOLVED_ROOT_CACHE.clear()
+
+
+def test_cache_key_values_agree_with_legacy_resolved_format(tmp_path: Path) -> None:
+    journal_bridge._RESOLVED_ROOT_CACHE.clear()
+    unresolved_root = tmp_path
+    resolved_root = unresolved_root.resolve()
+    key = journal_bridge._cache_key(unresolved_root, "format-session")
+    assert key == f"{resolved_root}:format-session"
+    journal_bridge.invalidate_session_conversation_events_cache("format-session")
+    assert journal_bridge._cache_key(unresolved_root, "format-session").endswith(
+        ":format-session"
+    )
+    journal_bridge._RESOLVED_ROOT_CACHE.clear()
