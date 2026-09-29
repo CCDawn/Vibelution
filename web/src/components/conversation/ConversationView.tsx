@@ -4129,6 +4129,21 @@ export const ConversationView = React.memo(function ConversationView({
       });
   }
 
+  // Failed/interrupted turns force their tool/work rows open (scene kept for
+  // diagnosis): persisted turn_error, interrupted partials, and the live
+  // turnError still in flight for this turn (same judgment as the banner).
+  function turnWorkForceExpand(message: ConversationMessage): boolean {
+    const turnId = message.role === "assistant" ? String(message.turnId || "").trim() : "";
+    return isTurnErrorMessage(message)
+      || message.metadata?.interrupted === true
+      || Boolean(
+        turnError
+        && !turnErrorSupersededByFinalAnswer
+        && turnId
+        && String(turnError.turnId || "") === turnId,
+      );
+  }
+
   function renderCodexTranscriptCells(
     message: ConversationMessage,
     cells: CodexTranscriptCell[],
@@ -4194,6 +4209,8 @@ export const ConversationView = React.memo(function ConversationView({
             renderToolDetails={renderCodexTranscriptToolDetailContent}
             toolDetailIsEmpty={codexTranscriptToolDetailIsEmpty}
             approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
+            sessionId={sessionId}
+            turnFailed={turnWorkForceExpand(message)}
           />
         );
       });
@@ -4449,6 +4466,8 @@ export const ConversationView = React.memo(function ConversationView({
           language={lang === "en" ? "en" : "zh"}
           renderToolDetails={renderCodexTranscriptToolDetailContent}
           approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
+          sessionId={sessionId}
+          turnFailed={turnWorkForceExpand(message)}
         />
       );
     }
