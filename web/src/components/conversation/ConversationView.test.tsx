@@ -959,10 +959,14 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
   });
 
   it("threads the session workspace root into every markdown render path", () => {
-    // The route forwards the session summary workspacePath; without a root the
-    // markdown link classifier keeps workspace-file hrefs inert (legacy anchor).
+    // The route prefers the absolute workspaceRoot (backend resolves the
+    // relative workspacePath against PROJECT_ROOT) and falls back to the raw
+    // workspacePath; without a root the markdown link classifier keeps
+    // workspace-file hrefs inert (legacy anchor).
     expect(conversationViewSource).toContain("sessionWorkspacePath,");
-    expect(chatRouteSource).toContain("sessionWorkspacePath: detail.workspacePath,");
+    expect(chatRouteSource).toContain(
+      "sessionWorkspacePath: detail.workspaceRoot || detail.workspacePath,",
+    );
     // Both markdown surfaces (segment bodies + assistant transcript cell) must
     // forward the root and the chrome language together (two joined instances;
     // tool detail surfaces already pass language={lang} separately).
