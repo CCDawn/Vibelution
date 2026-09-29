@@ -211,11 +211,56 @@ def _agent_directory_session_stub_for_id(
     return None
 
 
-def _agent_for_direct_session(session_id: str) -> dict[str, Any] | None:
+def _lookup_agent_for_direct_session(
+    session_id: str,
+    *,
+    agent_by_id: dict[str, dict[str, Any]],
+    require_archived: bool,
+) -> dict[str, Any] | None:
+    """Narrow in-memory reverse lookup over the conversation agent lookup map.
+
+    Mirrors ``list_agents`` result ordering (``updatedAt``/``createdAt`` desc,
+    stable ties keep raw directory order) so the first match is identical to
+    the full-projection scan without projecting every agent.
+    """
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    matches: list[dict[str, Any]] = []
+    for agent in agent_by_id.values():
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("directSessionId") or "").strip() != normalized_session_id:
+            continue
+        is_archived = str(agent.get("status") or "active").strip().lower() == "archived"
+        if is_archived != require_archived:
+            continue
+        matches.append(agent)
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""),
+        reverse=True,
+    )
+    return dict(matches[0])
+
+
+def _agent_for_direct_session(
+    session_id: str,
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
+    if isinstance(agent_by_id, dict):
+        return s._lookup_agent_for_direct_session(
+            normalized_session_id,
+            agent_by_id=agent_by_id,
+            require_archived=False,
+        )
     try:
         agents = s.agent_directory_service.list_agents(include_archived=False)
     except Exception:
@@ -351,11 +396,21 @@ def _append_session_runtime_notice(items: Any, notice: dict[str, Any]) -> list[d
     return s._normalize_session_runtime_notices([*list(items or []), notice])
 
 
-def _archived_agent_for_direct_session(session_id: str) -> dict[str, Any] | None:
+def _archived_agent_for_direct_session(
+    session_id: str,
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
+    if isinstance(agent_by_id, dict):
+        return s._lookup_agent_for_direct_session(
+            normalized_session_id,
+            agent_by_id=agent_by_id,
+            require_archived=True,
+        )
     try:
         agents = s.agent_directory_service.list_agents(include_archived=True)
     except Exception:
