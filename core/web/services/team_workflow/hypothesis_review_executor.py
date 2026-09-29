@@ -68,6 +68,9 @@ from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationStatus,
 )
 from core.web.services.team_workflow import literature_contrast
+from core.web.services.team_workflow.research_runtime.hypothesis_tournament import (
+    tournament_from_comparisons,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1688,6 +1691,11 @@ def execute_hypothesis_review(
         "positionSeed": seed,
         "candidates": reviewed_candidates,
         "pairwiseComparisons": comparisons,
+        "tournamentRanking": tournament_from_comparisons(
+            comparisons,
+            tournament_id=str(round_id or ""),
+            created_at=f"round:{round_id}" if round_id else "",
+        ),
         "pareto": pareto,
         "metaReview": meta_review,
         "reviewCallBudget": budget_record,

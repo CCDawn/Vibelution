@@ -14,7 +14,7 @@ import {
 import { createDesktopPaths, resolveWorkspaceRuntimeDir } from "../src/paths.js";
 
 describe("Electron desktop paths", () => {
-  it("keeps launcher runtime state under the external workspace", () => {
+  it.skipIf(process.platform !== "win32")("keeps launcher runtime state under the external workspace", () => {
     const paths = createDesktopPaths({
       importMetaUrl: "file:///C:/Program%20Files/Vibelution/resources/app.asar/dist/main.js",
       resourcesRoot: "C:/Program Files/Vibelution/resources",

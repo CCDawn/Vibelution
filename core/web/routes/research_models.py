@@ -161,3 +161,30 @@ class ResearchOrgProposalResponse(BaseModel):
     organization: dict[str, Any] | None = None
     proposal: dict[str, Any] | None = None
     results: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ResearchReportSynthesisItem(BaseModel):
+    itemId: str
+    title: str = ""
+    summary: str = ""
+    sourceRefs: list[str] = Field(default_factory=list)
+    section: str = ""
+
+
+class ResearchReportSynthesisPayload(BaseModel):
+    topic: str
+    items: list[ResearchReportSynthesisItem] = Field(default_factory=list)
+    modelRef: str
+    workflowRunId: str
+
+
+class ResearchReportSynthesisResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    recordId: str = ""
+    topic: str = ""
+    reportMarkdown: str = ""
+    itemCount: int = 0
+    citationIndex: dict[str, Any] = Field(default_factory=dict)
+    citationIntegrity: dict[str, Any] = Field(default_factory=dict)
+    updatedAt: str = ""

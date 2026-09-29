@@ -1126,6 +1126,49 @@ def consume_all_agent_inbox_messages(
     }
 
 
+def promote_agent_inbox_message_body(
+    agent_id: str,
+    message_id: str,
+    *,
+    content: str,
+) -> dict[str, Any]:
+    """Promote a pending summary-only inbox row to carry the full body.
+
+    Used when the target session is busy (ADR 0002 amended 2026-09-28): the
+    row stays pending so the idle drain still wakes the session after release,
+    but it must carry the full body so that wake lands the body verbatim on
+    the session history, exactly like the non-SSOT path.
+    """
+    s = _service()
+    agent = s.get_agent(agent_id, include_archived=True)
+    if not agent:
+        raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+    normalized_message_id = str(message_id or "").strip()
+    normalized_content = str(content or "").strip()
+    if not normalized_message_id or not normalized_content:
+        raise s.AgentDirectoryError("Agent inbox message id and content are required.")
+    path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+    messages = s._read_jsonl(path)
+    for item in messages:
+        if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
+            continue
+        if str(item.get("status") or "pending").strip().lower() == "pending":
+            item["content"] = normalized_content
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            metadata.pop("bodyPreviewOnly", None)
+            metadata["bodyPromotedForDrain"] = True
+            item["metadata"] = metadata
+            s._write_jsonl(path, messages)
+            s._record_memory_event(
+                "agent_inbox.message_body_promoted",
+                item,
+                agent_id=str(agent.get("agentId") or ""),
+                lifecycle=True,
+            )
+        return item
+    raise s.AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+
+
 def count_agent_inbox_messages_for_agent(agent_id: str, *, status: str = "pending") -> int:
     s = _service()
     state = s.load_state()

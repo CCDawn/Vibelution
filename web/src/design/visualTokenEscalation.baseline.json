@@ -1,6 +1,6 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
-  "updatedAt": "2026-09-27",
+  "updatedAt": "2026-09-28",
   "scannedFileCount": 1352,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",

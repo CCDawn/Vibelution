@@ -1851,7 +1851,7 @@ export const ConversationView = React.memo(function ConversationView({
     () => activeTimelineMessages.slice(timelineLiveTailStartIndex),
     [activeTimelineMessages, timelineLiveTailStartIndex],
   );
-  const timelineHistoryRowKeys = useMemo(
+  const timelineHistoryRowKeys = useMemo<string[]>(
     () => activeTimelineRowIdentities.map((identity) => identity.rowKey),
     [activeTimelineRowIdentities],
   );
@@ -6452,7 +6452,7 @@ export const ConversationView = React.memo(function ConversationView({
                   title={t("retryUpload")}
                   icon={<RefreshCw size={12} aria-hidden="true" />}
                 >
-                  {t("retryUpload")}
+                  <span>{t("retryUpload")}</span>
                 </VButton>
               ) : null}
             </p>

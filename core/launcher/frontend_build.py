@@ -8,6 +8,7 @@ This keeps a running backend from observing a half-written Vite output.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -383,6 +384,12 @@ def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 18
         holder = {"pid": os.getpid(), "startedAt": time.time(), "token": uuid.uuid4().hex}
         staging = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
         try:
+            # POSIX rename() silently replaces an empty lockdir, which would
+            # bypass the grace-period recovery for unfinished claims; treat an
+            # existing lockdir as held, with rename() remaining the atomic
+            # arbiter for genuine races between concurrent claimants.
+            if path.exists():
+                return None
             staging.mkdir()
             with (staging / "holder.json").open("x", encoding="utf-8") as handle:
                 json.dump(holder, handle)
@@ -391,6 +398,14 @@ def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 18
                 # observe either no lockdir or a fully described lockdir.
                 staging.rename(path)
             except FileExistsError:
+                return None
+            except OSError as error:
+                # POSIX rename() onto an existing non-empty lockdir reports
+                # ENOTEMPTY instead of EEXIST; that is the same
+                # "lockdir already published" race, so hand control to the
+                # stale-holder recovery below instead of crashing waiters.
+                if error.errno != errno.ENOTEMPTY:
+                    raise
                 return None
             return holder
         finally:

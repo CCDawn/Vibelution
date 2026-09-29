@@ -39,7 +39,10 @@ env/
 # --- IDE / package managers ---
 .idea/
 .vscode/
-node_modules/
+# No trailing slash: must also ignore directory symlinks the quality gate
+# links on macOS; with a slash git treats the link as a file and it dirties
+# the task worktree after closeout validation.
+node_modules
 .vite/
 *.swp
 *.swo

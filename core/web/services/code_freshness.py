@@ -34,7 +34,10 @@ FINGERPRINT_SCHEMA_VERSION = 1
 FINGERPRINT_NAME = "running-code-fingerprint.json"
 # Pre-governance checkout-relative snapshot location.  Writes go to the active
 # runtime home instead; this stays readable for pre-migration instances.
-LEGACY_FINGERPRINT_RELATIVE = Path(".runtime") / FINGERPRINT_NAME
+# Kept as a plain forward-slash string: a module-level Path() would dispatch
+# WindowsPath during import when a test has patched os.name to "nt" on POSIX,
+# which raises NotImplementedError before any test setup can run.
+LEGACY_FINGERPRINT_RELATIVE = f".runtime/{FINGERPRINT_NAME}"
 GIT_TIMEOUT_SECONDS = 10
 
 

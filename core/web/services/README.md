@@ -28,9 +28,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**75**
+- Facade `*_service.py`：**78**
 - 有 pack README：**6**
-- 仅单文件 facade：**69**
+- 仅单文件 facade：**72**
 
 ## Domain 速查
 
@@ -38,13 +38,13 @@
 | --- | ---: |
 | Session / Chat hot path (`session`) | 1 |
 | Team workflow / SC / experiment (`team_workflow`) | 1 |
-| Team registry / canvas (`team`) | 2 |
+| Team registry / canvas (`team`) | 3 |
 | Agent directory / config (`agent`) | 17 |
 | Chat room / conversation index (`chat`) | 3 |
 | Knowledge / RAG (`knowledge`) | 4 |
 | Memory (`memory`) | 4 |
 | Research / Challenge Cup (`research`) | 5 |
-| Self / Supervised evolution (`evolution`) | 11 |
+| Self / Supervised evolution (`evolution`) | 12 |
 | Runtime / runtime scene (`runtime`) | 3 |
 | Launcher / Reset (`launcher`) | 2 |
 | Config / Provider / Model / Theme (`config`) | 7 |
@@ -58,55 +58,56 @@
 | Computer Use (`computer_use`) | 1 |
 | Data processing (`data`) | 1 |
 | User content markdown (`content`) | 1 |
-| Other (`other`) | 1 |
+| Other (`other`) | 2 |
 
 ## Session / Chat hot path
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `session_service.py` | Real chat session payloads for the web workbench. | `session/` | `agents.py`, `cli_agents.py`, `sessions.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py` |
+| `session_service.py` | Real chat session payloads for the web workbench. | `session/` | `agents.py`, `cli_agents.py`, `sessions.py` | `test_session_fork.py`, `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py` |
 
 ## Team workflow / SC / experiment
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `team_workflow_orchestration_service.py` | Team workflow orchestration and candidate-store service. | `team_workflow/` | `team_workflows/_models.py`, `team_workflows/challenge_cup_dev_controls.py`, `team_workflows/experiment.py`, `team_workflows/knowledge.py`, `team_workflows/orchestration.py` | `test_agent_tool_contracts.py`, `test_agent_turn_completion_continuation.py`, `test_candidate_schema_registry.py` |
+| `team_workflow_orchestration_service.py` | Team workflow orchestration and candidate-store service. | `team_workflow/` | `team_workflows/_models.py`, `team_workflows/challenge_cup_dev_controls.py`, `team_workflows/experiment.py`, `team_workflows/knowledge.py`, `team_workflows/orchestration.py` | `test_candidate_session_read_gate.py`, `test_source_collection_writeback_recovery.py`, `test_evidence_relation_feedback.py` |
 
 ## Team registry / canvas
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `team_service.py` | Team registry and organization canvas service. | `team/` | `agents.py`, `research_evidence.py`, `research_loop.py`, `team_workflows/challenge_cup_dev_controls.py`, `team_workflows/challenge_cup_real_batch.py` | `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py`, `test_agent_config_workspace_service.py` |
+| `team_bundle_service.py` | Team bundle export / import. | — | `team_bundles.py` | `test_team_bundle_routes.py`, `test_team_bundle_service.py` |
+| `team_service.py` | Team registry and organization canvas service. | `team/` | `agents.py`, `research_evidence.py`, `research_loop.py`, `team_workflows/challenge_cup_dev_controls.py`, `team_workflows/challenge_cup_real_batch.py` | `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py`, `test_question_experiment_retire.py` |
 | `team_template_service.py` | Reusable Team templates for demo and onboarding flows. | — | `team_templates.py` | `test_team_template_routes.py` |
 
 ## Agent directory / config
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `agent_bulk_delete_service.py` | Bulk Agent delete/archive orchestration helpers. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py` |
+| `agent_bulk_delete_service.py` | Bulk Agent delete/archive orchestration helpers. | — | `agents.py` | `test_agent_reset_direct_session_safety.py`, `test_agent_bulk_route_contract.py`, `test_team_service.py` |
 | `agent_bulk_edit_service.py` | Bulk Agent edit orchestration helpers. | — | `agents.py` | `test_agent_bulk_edit_service.py` |
-| `agent_config_change_service.py` | Append-only private drafts and revision evidence for Agent configuration. | — | `agents.py` | `test_agent_config_change_route_contract.py`, `test_agent_config_change_service.py`, `test_agent_config_ssot_contract.py` |
-| `agent_config_workspace_service.py` | Read-only Agent configuration workspace aggregation. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_config_change_service.py`, `test_agent_config_ssot_contract.py` |
-| `agent_directory_service.py` | Persistent AgentInstance registry for chat-facing agents. | `agent_directory/` | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_avatar_model_repair.py`, `test_agent_avatar_role_defaults.py` |
-| `agent_mode_binding_service.py` | Mode-to-Agent binding store for configurable Agent runtimes. | — | `agents.py` | `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py`, `test_agent_config_workspace_service.py` |
-| `agent_model_candidate_service.py` | Read-only projection of configured and observed Provider models for Agents. | — | — | `test_agent_model_candidate_service.py`, `test_session_llm_selection.py` |
+| `agent_config_change_service.py` | Append-only private drafts and revision evidence for Agent configuration. | — | `agents.py` | `test_agent_config_ssot_contract.py`, `test_agent_config_change_service.py`, `test_agent_config_change_route_contract.py` |
+| `agent_config_workspace_service.py` | Read-only Agent configuration workspace aggregation. | — | `agents.py` | `test_agent_config_ssot_contract.py`, `test_team_service.py`, `test_tool_approval_flow.py` |
+| `agent_directory_service.py` | Persistent AgentInstance registry for chat-facing agents. | `agent_directory/` | `agents.py` | `test_agent_config_ssot_contract.py`, `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py` |
+| `agent_mode_binding_service.py` | Mode-to-Agent binding store for configurable Agent runtimes. | — | `agents.py` | `test_agent_reset_direct_session_safety.py`, `test_team_service.py`, `test_self_evolution_control_service.py` |
+| `agent_model_candidate_service.py` | Read-only projection of configured and observed Provider models for Agents. | — | — | `test_session_llm_selection.py`, `test_agent_model_candidate_service.py` |
 | `agent_model_promotion_service.py` | Atomic promotion of one observed Provider model into one Agent binding. | — | `agents.py` | `test_agent_config_workspace_routes.py`, `test_agent_model_promotion_service.py` |
 | `agent_operation_service.py` | Shared Agent catalog operations for HTTP routes and governed tools. | — | `agents.py` | `test_project_operation_tools.py` |
 | `agent_plugin_service.py` | Trusted first-party Agent plugin catalog and binding facade. | — | `agent_plugins.py` | `test_virtual_human_life_api.py` |
-| `agent_role_tool_profile_service.py` | Single source of truth for fixed-role Agent tool profiles. | — | — | `test_agent_lifecycle_create_delete.py`, `test_agent_membership_indexes.py`, `test_agent_role_tool_profile_service.py` |
-| `agent_tool_governance_service.py` | Controlled Agent tool-permission governance. | — | `agents.py` | `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py`, `test_agent_lifecycle_reset_policy.py` |
+| `agent_role_tool_profile_service.py` | Single source of truth for fixed-role Agent tool profiles. | — | — | `test_tool_policy_evaluator.py`, `test_tool_authorization_contract.py`, `test_agent_role_tool_profile_service.py` |
+| `agent_tool_governance_service.py` | Controlled Agent tool-permission governance. | — | `agents.py` | `test_agent_support_route_contract.py`, `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py` |
 | `cli_agent_service.py` | Controlled non-interactive adapters for external CLI coding agents. | — | — | `test_cli_agent_service.py` |
-| `cli_agent_terminal_service.py` | Persistent terminal sessions for configured CLI Agent adapters. | — | `cli_agents.py` | `test_cli_agent_service.py`, `test_cli_agent_task_kernel.py`, `test_web_lifecycle.py` |
-| `project_agent_bus_service.py` | Project-level Agent communication bus. | — | `project_agent_bus.py` | `test_agent_orphan_team_private_sessions.py`, `test_candidate_session_read_gate.py`, `test_challenge_cup_agent_ssot_contract.py` |
-| `prompt_template_service.py` | Prompt template index service for AgentInstance configuration. | — | `agents.py` | `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py`, `test_agent_lifecycle_reset_policy.py` |
-| `supervised_agent_service.py` | Persistent AgentInstance alignment for supervised evolution roles. | — | `agents.py`, `evolution.py` | `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py`, `test_agent_lifecycle_reset_policy.py` |
+| `cli_agent_terminal_service.py` | Persistent terminal sessions for configured CLI Agent adapters. | — | `cli_agents.py` | `test_cli_agent_task_kernel.py`, `test_web_lifecycle.py`, `test_cli_agent_service.py` |
+| `project_agent_bus_service.py` | Project-level Agent communication bus. | — | `project_agent_bus.py` | `test_candidate_session_read_gate.py`, `test_team_service.py`, `test_team_member_direct_session.py` |
+| `prompt_template_service.py` | Prompt template index service for AgentInstance configuration. | — | `agents.py` | `test_context_prefix_freeze.py`, `test_self_evolution_control_service.py`, `test_agent_role_tool_profile_service.py` |
+| `supervised_agent_service.py` | Persistent AgentInstance alignment for supervised evolution roles. | — | `agents.py`, `evolution.py` | `test_team_structure_packs.py`, `test_session_service.py`, `test_agent_config_workspace_service.py` |
 
 ## Chat room / conversation index
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `chat_room_service.py` | Chat room orchestration for multi-session agent discussion. | — | `agents.py`, `chat_rooms.py`, `team_workflows/hypothesis_first.py` | `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py`, `test_agent_config_workspace_routes.py` |
-| `conversation_service.py` | Unified conversation index for direct agents and group rooms. | — | `conversations.py`, `sessions.py` | `test_multi_agent_conversations.py`, `test_runtime_scene_package_index.py`, `test_session_workspace_isolation.py` |
+| `chat_room_service.py` | Chat room orchestration for multi-session agent discussion. | — | `agents.py`, `chat_rooms.py`, `team_workflows/hypothesis_first.py` | `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py`, `test_research_workflow_snapshot_projection.py` |
+| `conversation_service.py` | Unified conversation index for direct agents and group rooms. | — | `conversations.py`, `sessions.py` | `test_session_workspace_isolation.py`, `test_web_session_routes.py`, `test_multi_agent_conversations.py` |
 | `conversation_timeline_service.py` | Conversation timeline projection for chat session messages. | — | — | `test_conversation_timeline_service.py` |
 
 ## Knowledge / RAG
@@ -115,69 +116,70 @@
 | --- | --- | --- | --- | --- |
 | `rag_retrieval_service.py` | Governed RAG retrieval helpers for Team Knowledge. | — | `knowledge.py` | `test_rag_retrieval_service.py`, `test_session_document_attachments.py` |
 | `rag_vector_index_service.py` | File-backed metadata for optional RAG vector indexing. | — | — | `test_challenge_cup_knowledge_migration.py`, `test_developer_sandbox_path_routing.py`, `test_memory_cleanup_service.py` |
-| `team_knowledge_service.py` | Team-scoped knowledge base storage and governance service. | `team_knowledge/` | `knowledge.py` | `test_agent_project_memory_updates.py`, `test_agent_tool_contracts.py`, `test_candidate_session_read_gate.py` |
+| `team_knowledge_service.py` | Team-scoped knowledge base storage and governance service. | `team_knowledge/` | `knowledge.py` | `test_context_prefix_freeze.py`, `test_candidate_session_read_gate.py`, `test_workflow_binding_evidence_ssot.py` |
 | `unified_knowledge_search_service.py` | Unified read-only search boundary for governed memory and formal knowledge. | — | — | `test_unified_knowledge_search_github_projects.py`, `test_unified_knowledge_search_user_content.py` |
 
 ## Memory
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `github_project_library_service.py` | Persistent public GitHub clones of the default-branch tip (depth 1) under project memory, with a generated index. | — | `memory.py` | `test_github_project_library_service.py`, `test_github_project_library_tools.py`, `test_reuse_research_contract.py` |
-| `memory_cleanup_service.py` | Hard-delete cleanup helpers for Memory Library targets. | — | `memory.py` | `test_memory_cleanup_service.py`, `test_select_tests.py`, `test_web_memory_routes.py` |
+| `github_project_library_service.py` | Persistent public GitHub clones of the default-branch tip (depth 1) under project memory, with a generated index. | — | `memory.py` | `test_unified_knowledge_search_github_projects.py`, `test_github_project_library_service.py`, `test_reuse_research_contract.py` |
+| `memory_cleanup_service.py` | Hard-delete cleanup helpers for Memory Library targets. | — | `memory.py` | `test_web_memory_routes.py`, `test_memory_cleanup_service.py`, `test_select_tests.py` |
 | `memory_graph_service.py` | Read-only project memory knowledge graph service. | — | `memory.py` | `test_team_knowledge_service.py`, `test_web_memory_routes.py` |
-| `memory_service.py` | Agent memory overview and user management service. | — | `memory.py` | `test_agent_protocol.py`, `test_agent_tool_contracts.py`, `test_codebase_map_builder.py` |
+| `memory_service.py` | Agent memory overview and user management service. | — | `memory.py` | `test_self_evolution_autonomous_loop_runtime.py`, `test_supervised_conversation_harness_adapter.py`, `test_codebase_map_builder.py` |
 
 ## Research / Challenge Cup
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `challenge_cup_versioning_service.py` | Lightweight Challenge Cup candidate versioning ledger. | — | — | `test_challenge_cup_operations_tools.py`, `test_challenge_cup_versioning_service.py` |
-| `research_evidence_service.py` | Web-facing ClaimEvidence service with no formal knowledge side effects. | — | `research_evidence.py` | `test_research_evidence_routes.py`, `test_workflow_binding_evidence_ssot.py` |
-| `research_loop_service.py` | Template-driven research loop orchestration service. | — | `research_loop.py` | `test_challenge_cup_operations_tools.py`, `test_memory_storage_finalization.py`, `test_research_loop_routes.py` |
-| `research_organization_service.py` | Research organization graph and communication bus. | — | `research.py` | `test_agent_message_session_addressing.py`, `test_context_engine.py`, `test_context_prefix_freeze.py` |
+| `challenge_cup_versioning_service.py` | Lightweight Challenge Cup candidate versioning ledger. | — | — | `test_challenge_cup_versioning_service.py`, `test_challenge_cup_operations_tools.py` |
+| `research_evidence_service.py` | Web-facing ClaimEvidence service with no formal knowledge side effects. | — | `research_evidence.py` | `test_workflow_binding_evidence_ssot.py`, `test_research_evidence_routes.py` |
+| `research_loop_service.py` | Template-driven research loop orchestration service. | — | `research_loop.py` | `test_research_loop_service.py`, `test_memory_storage_finalization.py`, `test_challenge_cup_operations_tools.py` |
+| `research_organization_service.py` | Research organization graph and communication bus. | — | `research.py` | `test_context_prefix_freeze.py`, `test_research_organization_tools.py`, `test_research_organization_service.py` |
 | `research_service.py` | Web service facade for Research theme discovery. | — | `research.py` | `test_research_agent_config_ssot.py`, `test_research_theme_discovery.py` |
 
 ## Self / Supervised evolution
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `chat_review_service.py` | Web payloads for reviewed chat-dataset candidates. | — | `evolution.py` | `test_web_app.py`, `test_web_evolution_routes.py` |
+| `chat_review_service.py` | Web payloads for reviewed chat-dataset candidates. | — | `evolution.py` | `test_web_app.py`, `test_web_session_message_curation.py`, `test_web_evolution_routes.py` |
 | `evolution_runtime_projection_service.py` | Unified runtime projections for evolution workspace surfaces. | — | `evolution.py` | `test_evolution_promotion_lane.py`, `test_evolution_runtime_projection_service.py` |
-| `evolution_service.py` | Real supervised evolution payloads for the web workbench. | — | `evolution.py` | `test_developer_sandbox_path_routing.py`, `test_evaluator_quality_pipelines.py`, `test_evolution_service.py` |
+| `evolution_service.py` | Real supervised evolution payloads for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_self_evolution_service.py`, `test_runtime_scene_package_diagnosis.py` |
 | `self_evolution_autonomous_loop_service.py` | Persistent no-score orchestration for user-approved self-evolution loops. | — | `evolution.py` | `test_self_evolution_autonomous_loop_service.py` |
-| `self_evolution_control_service.py` | Bounded self-evolution run control for the web workbench. | — | `agents.py`, `evolution.py` | `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py`, `test_agent_lifecycle_reset_policy.py` |
-| `self_evolution_service.py` | Real self-evolution payloads for the web workbench. | — | `evolution.py` | `test_self_evolution_service.py`, `test_web_app.py`, `test_web_config_routes.py` |
-| `supervised_candidate_integration_service.py` | Transactional Git integration for supervised evolution candidates. | — | — | `test_supervised_candidate_integration_service.py`, `test_supervised_worktree_evolution_service.py` |
-| `supervised_candidate_runtime_service.py` | Isolated execution contract for a supervised candidate harness. | — | — | `test_supervised_candidate_evidence_subprocess.py`, `test_supervised_candidate_runtime_service.py` |
-| `supervised_control_service.py` | Live supervised run control for the web workbench. | — | `evolution.py` | `test_developer_sandbox_path_routing.py`, `test_runtime_manager.py`, `test_session_detail_contract.py` |
+| `self_evolution_control_service.py` | Bounded self-evolution run control for the web workbench. | — | `agents.py`, `evolution.py` | `test_web_app.py`, `test_self_evolution_autonomous_loop_runtime.py`, `test_team_structure_packs.py` |
+| `self_evolution_service.py` | Real self-evolution payloads for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_self_evolution_service.py`, `test_web_config_routes.py` |
+| `supervised_candidate_integration_service.py` | Transactional Git integration for supervised evolution candidates. | — | — | `test_supervised_worktree_evolution_service.py`, `test_supervised_candidate_integration_service.py` |
+| `supervised_candidate_runtime_service.py` | Isolated execution contract for a supervised candidate harness. | — | — | `test_supervised_candidate_runtime_service.py`, `test_supervised_candidate_evidence_subprocess.py` |
+| `supervised_control_service.py` | Live supervised run control for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_web_config_routes.py`, `test_session_chat_stream_e2e.py` |
 | `supervised_judge_quality_service.py` | Supervised judge-quality panel service (read-only accumulation surface). | — | `evolution.py` | `test_evaluator_quality_pipelines.py`, `test_judge_agreement_stats.py` |
-| `supervised_worktree_evolution_service.py` | Supervised worktree self-evolution loop for the web workbench. | — | `evolution.py` | `test_developer_sandbox_path_routing.py`, `test_evaluator_quality_pipelines.py`, `test_select_tests.py` |
+| `supervised_rubric_promotion_service.py` | Rubric promotion gate service (evaluate + gated promote). | — | `evolution.py` | `test_rubric_promotion_gate.py` |
+| `supervised_worktree_evolution_service.py` | Supervised worktree self-evolution loop for the web workbench. | — | `evolution.py` | `test_web_app.py`, `test_supervised_runtime_activation_intent.py`, `test_evaluator_loop_wiring.py` |
 
 ## Runtime / runtime scene
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `runtime_manager_control_service.py` | Lightweight runtime-manager control checks for web services. | — | — | `test_runtime_manager_control_service.py`, `test_select_tests.py` |
-| `runtime_scene_service.py` | Structured runtime scene bundles for frontend inspection and agent diagnosis. | `runtime_scene/` | `agents.py`, `knowledge.py`, `launcher.py`, `logs.py`, `runtime.py` | `test_agent_protocol.py`, `test_browser_user_action_telemetry_query.py`, `test_challenge_chain_observability.py` |
-| `runtime_service.py` | Runtime summary helpers for the web shell. | — | `runtime.py` | `test_launcher_service.py`, `test_research_knowledge_request_tool.py`, `test_research_workflow_atomic_store.py` |
+| `runtime_scene_service.py` | Structured runtime scene bundles for frontend inspection and agent diagnosis. | `runtime_scene/` | `agents.py`, `knowledge.py`, `launcher.py`, `logs.py`, `runtime.py` | `test_storage_migration.py`, `test_web_app.py`, `test_chat_next_state_signals.py` |
+| `runtime_service.py` | Runtime summary helpers for the web shell. | — | `runtime.py` | `test_web_app.py`, `test_supervised_candidate_runtime_service.py`, `test_research_workflow_meeting_driver_recovery.py` |
 
 ## Launcher / Reset
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `launcher_service.py` | Compatibility facade for the standalone Launcher service. | — | `launcher.py` | `test_branch_instance_cleanup.py`, `test_branch_instance_lifecycle.py`, `test_launcher_branch_instance_runtime.py` |
-| `reset_service.py` | Compatibility alias for Launcher-owned reset maintenance. | — | — | `test_challenge_cup_reset_live_adapter.py`, `test_challenge_cup_reset_service.py`, `test_developer_sandbox_path_routing.py` |
+| `launcher_service.py` | Compatibility facade for the standalone Launcher service. | — | `launcher.py` | `test_launcher_status_live_observe.py`, `test_launcher_scene_control_log.py`, `test_vibelution_desktop_entry.py` |
+| `reset_service.py` | Compatibility alias for Launcher-owned reset maintenance. | — | — | `test_reset_service.py`, `test_challenge_cup_reset_live_adapter.py`, `test_challenge_cup_reset_service.py` |
 
 ## Config / Provider / Model / Theme
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `avatar_image_service.py` | User avatar image storage helpers for the web workbench. | — | `config.py` | `test_web_config_routes.py` |
-| `config_service.py` | Config workspace helpers for the web workbench. | — | `config.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_config_workspace_routes.py`, `test_agent_config_workspace_service.py` |
+| `config_service.py` | Config workspace helpers for the web workbench. | — | `config.py` | `test_config_editor_ssot.py`, `test_web_config_routes.py`, `test_provider_config_service.py` |
 | `model_capability_service.py` | Shared model capability inference for web services. | — | — | — |
-| `model_reference_service.py` | LLM model reference lifecycle helpers. | — | `config.py` | `test_model_reference_service.py`, `test_provider_config_service.py`, `test_select_tests.py` |
-| `provider_config_service.py` | Draft-only Provider registry orchestration for the config workbench. | — | `config.py` | `test_config_redaction.py`, `test_llm_config_v2_integration.py`, `test_provider_config_service.py` |
-| `theme_background_service.py` | Workbench theme background image storage helpers. | — | `config.py` | `test_theme_background_service.py`, `test_web_config_routes.py` |
+| `model_reference_service.py` | LLM model reference lifecycle helpers. | — | `config.py` | `test_web_config_routes.py`, `test_provider_config_service.py`, `test_model_reference_service.py` |
+| `provider_config_service.py` | Draft-only Provider registry orchestration for the config workbench. | — | `config.py` | `test_web_config_routes.py`, `test_provider_config_service.py`, `test_config_redaction.py` |
+| `theme_background_service.py` | Workbench theme background image storage helpers. | — | `config.py` | `test_web_config_routes.py`, `test_theme_background_service.py` |
 | `tool_policy_configuration_service.py` | Versioned Agent ToolPolicy configuration, validation, and explain projections. | — | `agents.py` | `test_agent_support_route_contract.py`, `test_agent_tool_policy_configuration.py` |
 
 ## Workbench contract / preferences
@@ -191,39 +193,39 @@
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `git_status_service.py` | Git status and local commit helpers for the web workbench. | — | `git.py` | `test_coordination_scene.py`, `test_git_status_service.py`, `test_web_git_routes.py` |
+| `git_status_service.py` | Git status and local commit helpers for the web workbench. | — | `git.py` | `test_git_status_service.py`, `test_web_git_routes.py`, `test_coordination_scene.py` |
 
 ## Logs / Diagnostics
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `diagnostics_service.py` | Health diagnostics helpers for the web workbench. | — | `diagnostics.py` | `test_log_diagnostics.py` |
-| `log_service.py` | Log tree, preview, and guarded cleanup helpers. | — | `logs.py` | `test_agent_log_context.py`, `test_log_diagnostics.py`, `test_web_config_routes.py` |
+| `log_service.py` | Log tree, preview, and guarded cleanup helpers. | — | `logs.py` | `test_web_config_routes.py`, `test_agent_log_context.py`, `test_web_runtime_routes.py` |
 
 ## Workspace files
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `file_service.py` | Workspace file tree and preview helpers. | — | `files.py` | `test_agent_lifecycle_create_delete.py`, `test_agent_membership_indexes.py`, `test_agent_role_tool_profile_service.py` |
+| `file_service.py` | Workspace file tree and preview helpers. | — | `files.py` | `test_web_file_routes.py`, `test_tool_policy_evaluator.py`, `test_tool_authorization_contract.py` |
 
 ## Tools registry
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `tool_registry_service.py` | Tool registry service for the local web workbench. | — | `tools.py` | `test_agent_episodic_memory_tool.py`, `test_agent_tool_policy_configuration.py`, `test_computer_use_tool.py` |
+| `tool_registry_service.py` | Tool registry service for the local web workbench. | — | `tools.py` | `test_tool_registry_service.py`, `test_computer_use_tool.py`, `test_agent_episodic_memory_tool.py` |
 
 ## Skills
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `skill_library_service.py` | External memory-backed skill library indexing and search. | — | — | `test_skill_library_service.py` |
-| `skill_service.py` | Read-only skill library service for the web workbench. | — | `skills.py` | `test_skill_service.py`, `test_web_app.py` |
+| `skill_service.py` | Read-only skill library service for the web workbench. | — | `skills.py` | `test_web_app.py`, `test_skill_service.py` |
 
 ## Pet
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `pet_activity_service.py` | Read-only desktop-pet projection over native Session authorities. | — | `pet.py` | `test_pet_activity_service.py`, `test_pet_web_actions.py` |
+| `pet_activity_service.py` | Read-only desktop-pet projection over native Session authorities. | — | `pet.py` | `test_pet_web_actions.py`, `test_pet_activity_service.py` |
 | `pet_service.py` | Pet space summary helpers. | — | `pet.py` | `test_pet_web_actions.py` |
 
 ## Computer Use
@@ -236,19 +238,20 @@
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `data_processing_service.py` | Generic data processing substrate for agent-driven intake pipelines. | — | `data_processing.py` | `test_candidate_session_read_gate.py`, `test_collection_orphan_recovery.py`, `test_data_processing_routes.py` |
+| `data_processing_service.py` | Generic data processing substrate for agent-driven intake pipelines. | — | `data_processing.py` | `test_question_experiment_retire.py`, `test_candidate_session_read_gate.py`, `test_data_processing_service.py` |
 
 ## User content markdown
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `user_content_markdown_service.py` | User markdown content space (read/index/delete semantics for workbench). | — | `user_content.py` | `test_team_knowledge_tools.py`, `test_unified_knowledge_search_user_content.py`, `test_user_content_markdown_service.py` |
+| `user_content_markdown_service.py` | User markdown content space (read/index/delete semantics for workbench). | — | `user_content.py` | `test_web_user_content_routes.py`, `test_team_knowledge_tools.py`, `test_user_content_markdown_service.py` |
 
 ## Other
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `virtual_human_life_service.py` | Web/runtime facade for the trusted virtual-human-life plugin. | — | `virtual_human_life.py` | `test_agent_bulk_delete_service.py`, `test_agent_plugin_runtime_extensions.py`, `test_companion_lived_continuity.py` |
+| `prompt_reflection_service.py` | GEPA-style prompt reflection orchestration for supervised evolution. | — | `evolution.py` | `test_prompt_reflection.py` |
+| `virtual_human_life_service.py` | Web/runtime facade for the trusted virtual-human-life plugin. | — | `virtual_human_life.py` | `test_virtual_human_life_api.py`, `test_virtual_human_life_tools.py`, `test_virtual_human_life_delivery_v2.py` |
 
 ## 硬边界（所有 facade）
 

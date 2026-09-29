@@ -227,8 +227,12 @@ def test_unix_read_only_execution_requires_native_codex_binary(monkeypatch, tmp_
     monkeypatch.setattr(codex_cli_sandbox, "_current_agent_sandbox_mode", lambda: "read_only")
     monkeypatch.setattr(codex_cli_sandbox, "_resolve_codex_executable", lambda: "")
 
+    # `dir` routes as Windows-only: tools.shell_tools classification reads the
+    # real host platform, so a POSIX dev host would fail with
+    # SHELL_ROUTE_BLOCKED before reaching the codex-executable check this
+    # test is about. `echo` is shared by both routing tables.
     result = codex_cli_sandbox.start_codex_sandbox_terminal_session(
-        "dir",
+        "echo hi",
         cwd=str(tmp_path),
     )
 

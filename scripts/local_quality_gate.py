@@ -284,10 +284,16 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
         return CommandSpec("electron-test", argv, root)
     if normalized[:3] == ["node", "web/node_modules/vitest/vitest.mjs", "run"]:
         if normalized[-2:] == ["--root", "web"]:
-            # Current selector output is self-contained: Vitest receives the
-            # frontend root even when the command is copied from repository
-            # root, so it loads web/vite.config.ts and ignores sibling trees.
-            return CommandSpec("web-test", argv, root)
+            # On POSIX, spawning the vitest entrypoint from the repository
+            # root does not reliably apply web/vite.config.ts (React loses
+            # the compose-refs alias shim and interaction suites crash with
+            # invalid-hook-call), so run the same selector text from the
+            # frontend project root like the legacy branch below.
+            return CommandSpec(
+                "web-test",
+                [argv[0], "node_modules/vitest/vitest.mjs", *argv[2:-2]],
+                root / "web",
+            )
         # Frontend selectors intentionally use paths relative to ``web`` (for example
         # ``src/routes/...``).  Running the node entrypoint from the repository root
         # skips web/vite.config.ts, so Vitest loses its project test plugins as well.

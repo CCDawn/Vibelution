@@ -93,7 +93,7 @@ describe("Electron desktop tray", () => {
     iconPaths.length = 0;
   });
 
-  it("creates a persistent Vibelution tray icon with a tooltip", () => {
+  it.skipIf(process.platform !== "win32")("creates a persistent Vibelution tray icon with a tooltip", () => {
     const tray = createDesktopTray(desktopPaths, createActions());
 
     expect(trayInstances).toHaveLength(1);

@@ -4,6 +4,7 @@
 
 Accepted (requirements alignment 2026-08-03).
 **Amended 2026-08-03:** dual-write of message **body** is rejected; **single source of truth (SSOT)** for collab body is the target **Session** only.
+**Amended 2026-09-28:** delivery `historyStatus` enumerates `appended | pending | deferred | rejected`. `skipped_busy` (target session running) never mutates the busy session's history and never consumes the pending row: the idle drain wakes the session after release. For summary-only session-SSOT rows the kernel promotes the pending row to carry the full body so that drain wake lands the body verbatim on the session history; `historyStatus` stays `deferred` until that drain turn lands it. `skipped_in_flight` defers to the in-flight wake instead of double-landing. `started_consume_failed` still counts as `appended` (the body landed before consume failed).
 
 ## Context
 
