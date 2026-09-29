@@ -421,7 +421,7 @@ export function useChatWorkspaceLifecycle({
       const tempSessionId = String(context?.tempSessionId || "").trim();
       if (!nextId) {
         const intent = createSessionIntentsRef.current.get(tempSessionId);
-        if (intent?.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
+        if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
         telemetry?.failed(undefined, { reason: "missing_session_id" });
         return;
       }
@@ -602,7 +602,7 @@ export function useChatWorkspaceLifecycle({
         );
       } else {
         const intent = createSessionIntentsRef.current.get(String(context?.tempSessionId || "").trim());
-        if (intent?.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
+        if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
       }
       context?.telemetry?.failed(error, {
         tempSessionId: String(context?.tempSessionId || "").trim(),
