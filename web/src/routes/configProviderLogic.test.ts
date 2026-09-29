@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { ConfigCatalogModel, ConfigModelCatalog, ConfigProviderOption } from "../api/types";
 import { CONFIG_COPY } from "./config/configCopy";
 import {
+  ABNORMAL_PROVIDER_STATUSES,
+  deriveProviderDotClass,
+  deriveProviderListRows,
   deriveProviderMergeCandidate,
   buildProviderWizardDraft,
   canAdvanceProviderWizard,
@@ -554,6 +557,77 @@ describe("configProviderLogic", () => {
     ]);
     expect(healthy).toHaveLength(1);
     expect(abnormal).toHaveLength(2);
+  });
+
+  it("derives the list dot from availability only, never from catalog freshness", () => {
+    // Stale catalog is a freshness signal, not an availability failure → green dot.
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "stale" })).toBe("ok");
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "reachable" })).toBe("ok");
+    expect(deriveProviderDotClass({ credentialState: "not_required", status: "configured" })).toBe("ok");
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "auth_failed" })).toBe("warn");
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "not_discovered" })).toBe("warn");
+    expect(deriveProviderDotClass({ credentialState: "missing", status: "reachable" })).toBe("warn");
+    // "off" is reserved for the Wave 2 enabled switch; nothing derives it yet.
+    expect(ABNORMAL_PROVIDER_STATUSES.has("auth_failed")).toBe(true);
+  });
+
+  it("builds P0 list rows with in-use first and compact availability fields", () => {
+    const base = {
+      label: "x",
+      serviceClass: "relay",
+      vendor: "multi_model",
+      driver: "openai",
+      runtimeFramework: "",
+      artifactPath: "",
+      baseUrl: "https://relay.example/v1",
+      credentialState: "configured" as const,
+      defaultProtocol: "responses",
+      lastAttemptAt: "",
+      lastSuccessAt: "",
+      refreshDue: false,
+    };
+    const rows = [
+      { ...base, providerId: "relay_warn", label: "Warn Relay", status: "auth_failed", pinnedCount: 0, models: [] as ConfigCatalogModel[] },
+      { ...base, providerId: "relay_ok", label: "OK Relay", status: "reachable", pinnedCount: 0, models: [] as ConfigCatalogModel[] },
+      { ...base, providerId: "relay_busy", label: "Busy Relay", status: "reachable", pinnedCount: 1, models: [catalogModel("relay_a/luna")] },
+    ];
+    const listRows = deriveProviderListRows(rows, { "relay_a/luna": 1 });
+
+    expect(listRows.map((row) => row.providerId)).toEqual(["relay_busy", "relay_ok", "relay_warn"]);
+    expect(listRows[0]).toMatchObject({
+      name: "Busy Relay",
+      dotClass: "ok",
+      inUse: true,
+      rank: 0,
+      modelsCount: 1,
+      keyState: "configured",
+    });
+    expect(listRows[1]).toMatchObject({ dotClass: "ok", inUse: false, rank: 1 });
+    expect(listRows[2]).toMatchObject({ dotClass: "warn", inUse: false, rank: 2 });
+  });
+
+  it("keeps list rows dot-pure when references live on other providers", () => {
+    const base = {
+      label: "Solo Relay",
+      serviceClass: "relay",
+      vendor: "multi_model",
+      driver: "openai",
+      runtimeFramework: "",
+      artifactPath: "",
+      baseUrl: "https://relay.example/v1",
+      credentialState: "configured" as const,
+      defaultProtocol: "responses",
+      lastAttemptAt: "",
+      lastSuccessAt: "",
+      refreshDue: false,
+      status: "reachable",
+      pinnedCount: 1,
+      models: [catalogModel("relay_a/luna")],
+    };
+    const [row] = deriveProviderListRows([base], { "relay_other/gpt": 3 });
+    expect(row.inUse).toBe(false);
+    expect(row.rank).toBe(1);
+    expect(deriveProviderListRows([base])[0].inUse).toBe(false);
   });
 
   it("upgrades catalog observed rows to pinned when draft already pins them", () => {

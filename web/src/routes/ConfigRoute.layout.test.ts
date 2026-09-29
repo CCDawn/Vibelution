@@ -157,7 +157,7 @@ describe("ConfigRoute layout contract", () => {
     expect(wizardSource).toContain("canAdvanceProviderWizard");
   });
 
-  it("defaults Provider workspace to model assets home, with quick setup as add-connection entry", () => {
+  it("defaults Provider workspace to model assets home, with quick setup as add-provider entry", () => {
     expect(routeSource).toContain("ConfigQuickSetupPanel");
     expect(routeSource).toContain("useState(false)");
     expect(routeSource).toContain("providerConnecting");
@@ -165,7 +165,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("handlePrepareProviderQuickSetup");
     expect(routeSource).toContain("handleConfirmProviderQuickSetup");
     expect(routeSource).toContain("recommendProviderModel");
-    expect(routeSource).toContain("添加连接");
+    // P0: the add entry lives on the provider list bottom row (add-provider action), not the page header.
+    expect(routeSource).toContain("添加供应商");
+    expect(routeSource).not.toContain("addConnection");
     expect(routeSource).toContain("返回已配置服务");
     expect(routeSource).not.toContain("① 模型资产");
     expect(routeSource).not.toContain("② 添加连接");
@@ -309,7 +311,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('phase: "busy"');
     expect(routeSource).toContain('phase: "success"');
     expect(routeSource).toContain('phase: "error"');
-    expect(configCopySource).toContain("发现中…");
+    expect(configCopySource).toContain("检测中…");
     expect(providerPanelSource).toContain("discoverBusy");
     expect(routeSource).toContain("正在保存 API Key…");
     expect(routeSource).toContain("生成预览中…");
@@ -401,7 +403,8 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
     expect(styles.providerModeButton).not.toMatch(/min-h-|font-size/);
-    expect(routeSource).toContain("aria-pressed={providerConnecting}");
+    // P0: add-provider entry lives on the provider list bottom row, not the page header.
+    expect(providerPanelSource).toContain('data-provider-action="add-provider"');
     expect(routeSource).toContain("aria-pressed={providerShowMore}");
     expect(routeSource).not.toContain('aria-pressed={providerWorkspaceMode === "quick"}');
     expect(quickSetupStyles.resultRegion).not.toContain("min-h-");
@@ -603,7 +606,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain("defaultWidth: 224");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("min-h-0");
-    expect(providerPanelStyles.providerButton).toContain("!min-h-16");
+    expect(providerPanelStyles.providerButton).toContain("!min-h-9");
     expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");

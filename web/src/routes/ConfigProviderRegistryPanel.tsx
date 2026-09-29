@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, Image as ImageIcon, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -34,14 +34,15 @@ import {
   buildProviderSetupChecklist,
   canTestProviderModel,
   defaultProviderModelFilter,
+  deriveProviderListRows,
   deriveProviderMergeCandidate,
   deriveProviderModelActionState,
   filterProviderModels,
-  filterReadyProviderAssets,
-  partitionReadyProviderAssets,
   pinnableProviderModels,
   sortProviderRegistryRows,
   summarizeProviderModels,
+  type ProviderDotClass,
+  type ProviderListRow,
   type ProviderModelFilter,
   type ProviderRegistryRow,
 } from "./configProviderLogic";
@@ -165,14 +166,27 @@ function providerStatusLabel(status: string, labels: ProviderStatusLabels): stri
   return labelsByStatus[status] || status;
 }
 
-function statusTone(status: string): VStatusTone {
-  if (status === "reachable") return "success";
-  if (status === "stale" || status === "not_discovered" || status === "configured") return "warning";
-  if (["auth_failed", "discovery_failed", "protocol_mismatch", "blocked"].includes(status)) return "danger";
-  return "neutral";
+/**
+ * Dot tooltip text (P0 consensus: error words live here, never as row text).
+ * ok → 可用；off → 已停用；warn 且无具体异常 → 异常或未检测；其余 → 具体异常短语（如「认证失败」）。
+ */
+function providerDotTitle(dotClass: ProviderDotClass, status: string, copy: ConfigCopy): string {
+  if (dotClass === "ok") return copy.providerDotOk;
+  if (dotClass === "off") return copy.providerDotOff;
+  const healthyStatuses = new Set(["reachable", "configured", "stale", ""]);
+  if (healthyStatuses.has(status)) return copy.providerDotWarn;
+  const statusText = providerStatusLabel(status, copy);
+  return statusText && statusText !== status ? statusText : copy.providerDotWarn;
 }
 
-function ProviderAssetRow({
+function providerDotClassName(dotClass: ProviderDotClass): string {
+  if (dotClass === "ok") return `${styles.providerDot} ${styles.providerDotOk}`;
+  if (dotClass === "warn") return `${styles.providerDot} ${styles.providerDotWarn}`;
+  return `${styles.providerDot} ${styles.providerDotOff}`;
+}
+
+/** Sidebar list row (P0): dot + name + in-use badge. Status words stay in the dot tooltip. */
+function ProviderListRowItem({
   row,
   selected,
   inspecting,
@@ -180,7 +194,7 @@ function ProviderAssetRow({
   copy,
   onSelect,
 }: {
-  row: ProviderRegistryRow;
+  row: ProviderListRow & { status: string; dotTitle: string };
   selected: boolean;
   inspecting: boolean;
   disabled: boolean;
@@ -200,18 +214,19 @@ function ProviderAssetRow({
         variant="ghost"
         aria-pressed={selected}
         isDisabled={disabled}
-        title={`${row.label || row.providerId}\n${row.providerId}`}
+        title={`${row.name}\n${row.providerId}`}
         onPress={onSelect}
       >
-        <span className={styles.providerIdentity}>
-          <strong className={styles.providerLabel}>{row.label || row.providerId}</strong>
-        </span>
-        <span className={styles.providerStatusRow}>
-          <small className={styles.providerMeta}>{row.pinnedCount}{copy.registryModelsCountUnit}</small>
-          <VStatusChip tone={statusTone(row.status)} data-provider-status={row.status}>{providerStatusLabel(row.status, copy)}</VStatusChip>
-        </span>
+        <span
+          className={providerDotClassName(row.dotClass)}
+          data-provider-dot={row.dotClass}
+          title={row.dotTitle}
+        />
+        <span className={styles.providerLabel}>{row.name}</span>
+        {row.inUse ? (
+          <span className={styles.providerInUseBadge} data-provider-inuse="true">{copy.inUseBadge}</span>
+        ) : null}
       </VButton>
-
     </div>
   );
 }
@@ -862,24 +877,28 @@ export function ConfigProviderRegistryPanel({
   onAddConnection,
 }: ConfigProviderRegistryPanelProps) {
   const orderedRows = useMemo(() => sortProviderRegistryRows(rows), [rows]);
-  // Asset home: credential-ready only; primary list hides auth/discovery failures.
-  const readyRows = useMemo(() => filterReadyProviderAssets(orderedRows), [orderedRows]);
-  const { healthy: healthyRows, abnormal: abnormalRows } = useMemo(
-    () => partitionReadyProviderAssets(readyRows),
-    [readyRows],
+  // P0 single list: every provider shows once; dot carries availability, in-use sorts first.
+  const listRows = useMemo(
+    () => deriveProviderListRows(rows, liveReferenceCountByModelRef),
+    [liveReferenceCountByModelRef, rows],
   );
-  const [showAbnormalAssets, setShowAbnormalAssets] = useState(false);
-  const visibleSidebarRows = useMemo(
-    () => (showAbnormalAssets ? [...healthyRows, ...abnormalRows] : healthyRows),
-    [abnormalRows, healthyRows, showAbnormalAssets],
+  const listItems = useMemo(
+    () => listRows.map((listRow) => {
+      const full = rows.find((row) => row.providerId === listRow.providerId);
+      return {
+        ...listRow,
+        id: listRow.providerId,
+        status: full?.status ?? "",
+        dotTitle: providerDotTitle(listRow.dotClass, full?.status ?? "", copy),
+      };
+    }),
+    [copy, listRows, rows],
   );
   const provider =
-    visibleSidebarRows.find((row) => row.providerId === selectedProviderId)
-    ?? healthyRows.find((row) => row.providerId === selectedProviderId)
-    ?? readyRows.find((row) => row.providerId === selectedProviderId)
-    ?? healthyRows[0]
-    ?? readyRows[0]
-    ?? null;
+    rows.find((row) => row.providerId === selectedProviderId)
+    ?? (listRows[0]
+      ? rows.find((row) => row.providerId === listRows[0].providerId) ?? null
+      : null);
   const [modelQuery, setModelQuery] = useState("");
   const [contextWindowDraft, setContextWindowDraft] = useState("");
   const [modelFilter, setModelFilter] = useState<ProviderModelFilter>(() =>
@@ -895,22 +914,12 @@ export function ConfigProviderRegistryPanel({
     setContextWindowDraft(provider.contextWindow ? String(provider.contextWindow) : "");
   }, [provider?.providerId, provider?.contextWindow]);
 
-  // Prefer a healthy asset when selection is empty or points at a filtered-out row.
+  // Keep the selection on a listed provider; default to the first list row (in-use first).
   useEffect(() => {
-    const pool = showAbnormalAssets ? readyRows : healthyRows.length ? healthyRows : readyRows;
-    if (!pool.length) return;
-    if (selectedProviderId && pool.some((row) => row.providerId === selectedProviderId)) return;
-    // Selected abnormal while collapsed → expand abnormal section instead of jumping away.
-    if (
-      selectedProviderId
-      && abnormalRows.some((row) => row.providerId === selectedProviderId)
-      && !showAbnormalAssets
-    ) {
-      setShowAbnormalAssets(true);
-      return;
-    }
-    onSelectProvider(pool[0].providerId);
-  }, [abnormalRows, healthyRows, onSelectProvider, readyRows, selectedProviderId, showAbnormalAssets]);
+    if (!listRows.length) return;
+    if (selectedProviderId && rows.some((row) => row.providerId === selectedProviderId)) return;
+    onSelectProvider(listRows[0].providerId);
+  }, [listRows, onSelectProvider, rows, selectedProviderId]);
 
   const [mergePreview, setMergePreview] = useState<ConfigProviderMergePreview | null>(null);
   const [mergeResult, setMergeResult] = useState<ConfigProviderMergeResult | null>(null);
@@ -1099,25 +1108,20 @@ export function ConfigProviderRegistryPanel({
         }}
         sidebar={(
           <div className={styles.providerRail}>
-            {onAddConnection ? <VButton variant="secondary" isDisabled={disabled} onPress={onAddConnection}>
-              {copy.addProvider}
-            </VButton> : null}
             <div className={styles.providerListSection}>
-              <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {healthyRows.length}</p>
+              <p className={styles.providerListHeading}>{copy.configuredProvidersHeading} · {listRows.length}</p>
               <VEntityList
                 ariaLabel={copy.configuredListAria}
                 activeId={provider?.providerId}
                 className={styles.providerList}
-                items={healthyRows.map((row) => ({ ...row, id: row.providerId }))}
+                items={listItems}
                 empty={(
                   <VStateSurface tone="empty" title={copy.emptyConfiguredTitle}>
-                    {abnormalRows.length
-                      ? copy.emptyConfiguredAbnormal
-                      : copy.emptyConfiguredNormal}
+                    {copy.emptyConfiguredNormal}
                   </VStateSurface>
                 )}
                 renderItem={(row) => (
-                  <ProviderAssetRow
+                  <ProviderListRowItem
                     row={row}
                     selected={provider?.providerId === row.providerId}
                     inspecting={inspectorOpen && provider?.providerId === row.providerId}
@@ -1128,40 +1132,19 @@ export function ConfigProviderRegistryPanel({
                 )}
               />
             </div>
-            {abnormalRows.length > 0 ? (
-              <div className={styles.abnormalSection} data-abnormal-assets="true">
-                <VButton
-                  className={styles.abnormalToggle}
-                  density="compact"
-                  variant="ghost"
-                  contentLayout="plain"
-                  aria-expanded={showAbnormalAssets}
-                  data-abnormal-expanded={showAbnormalAssets ? "true" : "false"}
-                  tooltip={copy.abnormalToggleTooltip}
-                  onPress={() => setShowAbnormalAssets((open) => !open)}
-                >
-                  <span>{copy.needsAttention} · {abnormalRows.length}</span>
-                  <span>{showAbnormalAssets ? copy.collapseAction : copy.expandAction}</span>
-                </VButton>
-                {showAbnormalAssets ? (
-                  <VEntityList
-                    ariaLabel={copy.attentionListAria}
-                    activeId={provider?.providerId}
-                    className={styles.providerList}
-                    items={abnormalRows.map((row) => ({ ...row, id: row.providerId }))}
-                    renderItem={(row) => (
-                      <ProviderAssetRow
-                        row={row}
-                        selected={provider?.providerId === row.providerId}
-                        inspecting={inspectorOpen && provider?.providerId === row.providerId}
-                        disabled={disabled}
-                        copy={copy}
-                        onSelect={() => onSelectProvider(row.providerId)}
-                          />
-                    )}
-                  />
-                ) : null}
-              </div>
+            {onAddConnection ? (
+              <VButton
+                className={styles.providerAddRow}
+                variant="ghost"
+                contentLayout="plain"
+                data-provider-action="add-provider"
+                isDisabled={disabled}
+                tooltip={copy.addProviderHint}
+                onPress={onAddConnection}
+              >
+                <Plus size={14} />
+                <span>{copy.addProvider}</span>
+              </VButton>
             ) : null}
           </div>
         )}
@@ -1186,8 +1169,28 @@ export function ConfigProviderRegistryPanel({
             ) : null}
             <div className={styles.providerSettings} data-vui-region="config-provider-connection">
               <VPanelHeader title={provider.label || provider.providerId} headingLevel={3}
-                actions={<VButton data-provider-action="edit-asset" variant="ghost" isDisabled={disabled}
-                  onPress={() => openInspector(provider.providerId)}>{copy.advancedManage}</VButton>} />
+                actions={(
+                  <VActionGroup ariaLabel={copy.providerHeaderActionsAria} className={styles.actions}>
+                    <VButton
+                      data-provider-action="detect"
+                      variant="secondary"
+                      icon={<RefreshCw size={14} />}
+                      isDisabled={disabled}
+                      title={copy.detectHint}
+                      onPress={() => onDiscover(provider.providerId)}
+                    >
+                      {discoverBusy ? copy.detectBusy : copy.detectAction}
+                    </VButton>
+                    <VButton data-provider-action="edit-asset" variant="ghost" isDisabled={disabled}
+                      onPress={() => openInspector(provider.providerId)}>{copy.advancedManage}</VButton>
+                  </VActionGroup>
+                )} />
+              <p
+                className={styles.providerFreshness}
+                data-provider-freshness={provider.refreshDue ? "stale" : "fresh"}
+              >
+                {provider.refreshDue ? copy.catalogStaleLine : copy.catalogFreshLine}
+              </p>
               <VSettingsGroupCard>
                 <VSettingsRow label={copy.baseUrlRowLabel} description={provider.baseUrl || copy.notConfigured}
                   control={<VButton data-provider-action="route" variant="secondary" isDisabled={disabled}
@@ -1217,20 +1220,6 @@ export function ConfigProviderRegistryPanel({
 
                 </small>
               </span>
-                )}
-                toolbarActions={(
-              <VActionGroup ariaLabel={copy.modelsLibraryActionsAria} className={`${styles.actions} ml-auto`}>
-                <VButton
-                  data-provider-action="discover"
-                  variant="secondary"
-                  icon={<RefreshCw size={14} />}
-                  isDisabled={disabled}
-                  title={copy.discoverHint}
-                  onPress={() => onDiscover(provider.providerId)}
-                >
-                  {discoverBusy ? copy.discoverBusy : copy.discoverModels}
-                </VButton>
-              </VActionGroup>
                 )}
                 provider={provider}
                 disabled={disabled}
