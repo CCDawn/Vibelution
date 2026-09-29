@@ -342,6 +342,43 @@ def test_provider_channel_health_requires_configured_credential(monkeypatch):
     assert candidate_item["providerHealthy"] is False
 
 
+def test_disabled_provider_projects_unhealthy_channel_even_when_reachable(monkeypatch):
+    """Wave 2 row switch: enabled=False hides the provider's models from the picker
+    via the same providerHealthy=False path as broken channels. Selection-surface
+    semantics only — candidate generation and ordering stay untouched."""
+    monkeypatch.setenv("AI_PIXEL_API_KEY", "candidate-health-key")
+
+    public_config, catalog = _with_provider_status("reachable")
+    public_config["llm"]["providers"]["ai-pixel"]["enabled"] = False
+    by_ref = {
+        item["modelRef"]: item
+        for item in agent_model_candidate_service.project_agent_model_candidates(
+            public_config, catalog
+        )
+    }
+
+    # Every candidate of the disabled provider shares the unhealthy channel.
+    assert by_ref["ai-pixel/gpt-5.6-luna"]["providerHealthy"] is False
+    assert by_ref["ai-pixel/image2"]["providerHealthy"] is False
+    assert by_ref["ai-pixel/gpt-5.6-luna"]["providerStatus"] == "reachable"
+    # Candidates are still generated (hidden by filter, not deleted).
+    assert len(by_ref) == 4
+
+
+def test_enabled_defaults_to_true_for_legacy_provider_without_key(monkeypatch):
+    monkeypatch.setenv("AI_PIXEL_API_KEY", "candidate-health-key")
+
+    public_config, catalog = _with_provider_status("reachable")
+    assert "enabled" not in public_config["llm"]["providers"]["ai-pixel"]
+    by_ref = {
+        item["modelRef"]: item
+        for item in agent_model_candidate_service.project_agent_model_candidates(
+            public_config, catalog
+        )
+    }
+    assert by_ref["ai-pixel/gpt-5.6-luna"]["providerHealthy"] is True
+
+
 def test_list_candidates_reads_each_snapshot_once_and_never_exposes_secret(monkeypatch):
     public_config = _public_config()
     catalog = _catalog_state()

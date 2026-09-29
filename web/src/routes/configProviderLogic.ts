@@ -24,6 +24,8 @@ export type ProviderRegistryRow = {
   lastErrorType?: string;
   lastSuccessAt: string;
   refreshDue: boolean;
+  /** Row-level enable switch (Wave 2). Legacy rows without the key read as enabled. */
+  enabled: boolean;
   models: ConfigCatalogModel[];
 };
 
@@ -212,10 +214,12 @@ export function sortProviderRegistryRows(rows: ProviderRegistryRow[]): ProviderR
 
 /**
  * P0 list-row model (九产品共识): one compact row per provider.
- * - `dotClass` reflects connection availability ONLY (绿=可用 / 橙=异常或未检测 / 灰=停用);
+ * - `dotClass` reflects availability: 绿=可用 / 橙=异常或未检测 / 灰=停用(enabled=false,
+ *   takes precedence over health so a disabled-but-reachable provider still reads off);
  *   catalog freshness (stale/refreshDue) never tints the dot — it lives in the detail area.
  * - `inUse` marks providers whose pinned models are referenced live; they sort first.
- * - "off" is reserved for the Wave 2 enabled switch and is not derived yet.
+ *   The badge stays truthful for disabled providers that still have live references.
+ * - rank: inUse(0) > ok(1) > warn(2) > off(3) — disabled providers sort last.
  */
 export type ProviderDotClass = "ok" | "warn" | "off";
 
@@ -227,14 +231,17 @@ export type ProviderListRow = {
   rank: number;
   modelsCount: number;
   keyState: string;
+  enabled: boolean;
 };
 
 /** Single source of the availability-only dot rule for the provider list. */
 export function deriveProviderDotClass(
-  row: Pick<ProviderRegistryRow, "credentialState" | "status">,
+  row: Pick<ProviderRegistryRow, "credentialState" | "status" | "enabled">,
 ): ProviderDotClass {
+  // Wave 2: operator disable wins over connection health — gray reads "stopped",
+  // never "broken", so an enabled=false provider never shows the warn dot.
+  if (row.enabled === false) return "off";
   if (isHealthyProviderAsset(row)) return "ok";
-  // Wave 2 will map ProviderConfig.enabled === false to "off" here.
   return "warn";
 }
 
@@ -247,8 +254,8 @@ export function isProviderInUse(
 }
 
 /**
- * Derive the P0 provider list: in-use first, then usable, then abnormal/unchecked;
- * name-sorted (zh collation) inside each band.
+ * Derive the P0 provider list: in-use first, then usable, then abnormal/unchecked,
+ * then disabled last; name-sorted (zh collation) inside each band.
  */
 export function deriveProviderListRows(
   rows: ProviderRegistryRow[],
@@ -263,9 +270,12 @@ export function deriveProviderListRows(
         name: row.label || row.providerId,
         dotClass,
         inUse,
-        rank: inUse ? 0 : dotClass === "ok" ? 1 : 2,
+        // inUse(0) > ok(1) > warn(2) > off(3): disabled rows sink to the bottom
+        // even when still referenced (badge stays, sort position reflects switch).
+        rank: inUse ? 0 : dotClass === "ok" ? 1 : dotClass === "warn" ? 2 : 3,
         modelsCount: row.models.length,
         keyState: row.credentialState,
+        enabled: row.enabled !== false,
       };
     })
     .sort((left, right) => {
@@ -396,6 +406,9 @@ export function deriveProviderRegistryRows(
         lastErrorType: observed?.lastErrorType ?? "",
         lastSuccessAt: observed?.lastSuccessAt ?? "",
         refreshDue: observed?.refreshDue ?? false,
+        // Row-level enable switch: draft providerOptions carry the toggled value,
+        // legacy rows without the key read as enabled.
+        enabled: provider.enabled !== false,
         models,
       };
     })

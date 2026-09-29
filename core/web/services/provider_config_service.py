@@ -486,6 +486,11 @@ def _project_provider_option(value: Any) -> dict[str, Any]:
         and 0 <= pinned_count <= 1_000_000
     ):
         projected["pinned_count"] = pinned_count
+    # Row-level enable switch: boolean-only pass-through when the source row
+    # declares it. Legacy rows without the key stay key-absent here; consumers
+    # read a missing `enabled` as enabled.
+    if "enabled" in option and option.get("enabled") is not None:
+        projected["enabled"] = option.get("enabled") is not False
     return projected
 
 

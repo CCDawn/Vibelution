@@ -938,6 +938,7 @@ export function ConfigRoute() {
     handleCancelDeleteProvider,
     handleUpdateProviderCredential: updateProviderCredential,
     handleUpdateProviderContextWindow: updateProviderContextWindow,
+    handleToggleProviderEnabled,
     handleBeginProviderRouteEdit,
     handlePreviewProviderRoute,
     handleApplyProviderRoutePreview: applyProviderRoutePreview,
@@ -1914,6 +1915,10 @@ export function ConfigRoute() {
                   }}
                   onDeleteProvider={(providerId) => {
                     void handleDeleteProvider(providerId);
+                  }}
+                  onToggleEnabled={(providerId, enabled) => {
+                    // Wave 2: draft-only toggle; the save prompt persists it.
+                    void handleToggleProviderEnabled(providerId, enabled);
                   }}
                 />
                   </>

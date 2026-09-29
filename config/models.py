@@ -334,6 +334,11 @@ class ProviderConfig(BaseModel):
     auth_kind: Literal["api_key", "oauth", "none"] = "api_key"
     credential_ref: str = ""
     requires_credential: bool = True
+    # Operator row-level enable switch (Wave 2). Default True keeps legacy configs
+    # (no `enabled` key) readable. Selection-surface semantics only: a disabled
+    # provider is hidden from the model picker (providerHealthy=False) and shows
+    # a gray dot; it does NOT cut off calls already configured on running agents.
+    enabled: bool = True
     protocols: ProviderProtocolsConfig = Field(default_factory=ProviderProtocolsConfig)
     discovery: ProviderDiscoverySettings = Field(default_factory=ProviderDiscoverySettings)
     deployment: ProviderDeploymentConfig = Field(default_factory=ProviderDeploymentConfig)
