@@ -27,6 +27,14 @@ vi.mock("react-markdown", async (importOriginal) => {
   return { default: CountingMarkdown };
 });
 
+// Pathological block fixture: a mermaid fence whose block component crashes
+// during render, simulating a hostile payload breaking exactly one block.
+vi.mock("./conversationMarkdownMermaidBlock", () => ({
+  ConversationMarkdownMermaidBlock: function BrokenMermaidBlock() {
+    throw new Error("synthetic mermaid block crash");
+  },
+}));
+
 describe("ConversationMarkdownRenderer", () => {
   it("normalizes common agent markdown glitches into readable blocks", async () => {
     const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
@@ -539,5 +547,140 @@ describe("ConversationMarkdownRenderer", () => {
     expect(html).not.toContain("katex");
     expect(html).toContain("export PRICE=$5-$10");
     expect(html).toContain("echo $PATH");
+  });
+});
+
+describe("ConversationMarkdownRenderer block-level degradation", () => {
+  let root: Root | null = null;
+  let container: HTMLDivElement | null = null;
+
+  const renderWith = async (content: string) => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<ConversationMarkdownRenderer content={content} classNames={styles} />);
+    });
+  };
+
+  afterEach(async () => {
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+    }
+    container?.remove();
+    root = null;
+    container = null;
+  });
+
+  it("degrades only the crashing block to raw text and keeps sibling blocks rendering", async () => {
+    await renderWith(
+      [
+        "段落甲保持正常渲染。",
+        "",
+        "```mermaid",
+        "graph TD; A-->B;",
+        "```",
+        "",
+        "段落乙也保持正常渲染。",
+      ].join("\n"),
+    );
+
+    const html = container!.innerHTML;
+    // The sick block degrades into the block-level fallback carrying its raw
+    // fence source, styled with the host pre chrome like its healthy siblings.
+    const blockFallback = container!.querySelector<HTMLElement>('[data-markdown-block-error-fallback="true"]');
+    expect(blockFallback).not.toBeNull();
+    expect(blockFallback!.textContent).toContain("graph TD; A-->B;");
+    const fallbackPre = blockFallback!.querySelector("pre");
+    expect(fallbackPre?.className).toContain("responseSegmentPre");
+    // The mermaid block itself never mounted.
+    expect(html).not.toContain("data-markdown-mermaid-block");
+    // Sibling prose renders through the normal markdown path.
+    expect(container!.textContent).toContain("段落甲保持正常渲染。");
+    expect(container!.textContent).toContain("段落乙也保持正常渲染。");
+    expect(container!.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+    expect(html).not.toContain("data-markdown-error-fallback");
+  });
+
+  it("keeps the degraded block stable across an unchanged re-render and retries on content change", async () => {
+    await renderWith(["```mermaid", "graph TD; A-->B;", "```"].join("\n"));
+    expect(container!.querySelector('[data-markdown-block-error-fallback="true"]')).not.toBeNull();
+    expect(container!.textContent).toContain("graph TD; A-->B;");
+
+    // Unchanged content re-render: stays degraded with the same source, no
+    // state churn (idempotent fallback).
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    await act(async () => {
+      root!.render(
+        <ConversationMarkdownRenderer content={["```mermaid", "graph TD; A-->B;", "```"].join("\n")} classNames={styles} />,
+      );
+    });
+    expect(container!.querySelector('[data-markdown-block-error-fallback="true"]')).not.toBeNull();
+    expect(container!.textContent).toContain("graph TD; A-->B;");
+
+    // Content change under the failed block: the boundary retries once and
+    // degrades again — showing the NEW raw text, not a stale copy.
+    await act(async () => {
+      root!.render(
+        <ConversationMarkdownRenderer content={["```mermaid", "graph TD; X-->Y;", "```"].join("\n")} classNames={styles} />,
+      );
+    });
+    expect(container!.querySelector('[data-markdown-block-error-fallback="true"]')).not.toBeNull();
+    expect(container!.textContent).toContain("graph TD; X-->Y;");
+    expect(container!.textContent).not.toContain("graph TD; A-->B;");
+  });
+
+  it("extracts block source text and stable keys from the hast node", async () => {
+    const { markdownBlockBoundaryKey, markdownBlockSourceText } = await import(
+      "./conversationMarkdownBlockBoundary"
+    );
+    const tableNode = {
+      type: "element",
+      tagName: "table",
+      position: { start: { line: 3, column: 1 } },
+      children: [
+        {
+          type: "element",
+          tagName: "thead",
+          children: [
+            {
+              type: "element",
+              tagName: "tr",
+              children: [
+                { type: "element", tagName: "th", children: [{ type: "text", value: "项目" }] },
+                { type: "element", tagName: "th", children: [{ type: "text", value: "状态" }] },
+              ],
+            },
+          ],
+        },
+        {
+          type: "element",
+          tagName: "tbody",
+          children: [
+            {
+              type: "element",
+              tagName: "tr",
+              children: [
+                { type: "element", tagName: "td", children: [{ type: "text", value: "A" }] },
+                { type: "element", tagName: "td", children: [{ type: "text", value: "ok" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    // Rows separate by newline, cells by two spaces, code-style whitespace
+    // preserved elsewhere; malformed input degrades to "" instead of throwing.
+    expect(markdownBlockSourceText(tableNode)).toBe("项目  状态\nA  ok");
+    expect(markdownBlockSourceText({ type: "element", tagName: "pre", children: [{ type: "text", value: "a\nb" }] })).toBe(
+      "a\nb",
+    );
+    expect(markdownBlockSourceText(undefined)).toBe("");
+    expect(markdownBlockBoundaryKey(tableNode)).toBe("md-block-3:1");
+    expect(markdownBlockBoundaryKey({ type: "text", value: "x" })).toBeUndefined();
   });
 });

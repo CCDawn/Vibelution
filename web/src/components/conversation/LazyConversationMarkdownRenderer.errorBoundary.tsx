@@ -13,7 +13,8 @@ type ConversationMarkdownErrorBoundaryState = {
   failed: boolean;
 };
 
-function markdownErrorNoteLang(): "zh" | "en" {
+/** Document language for degradation chrome; shared with the block boundary. */
+export function markdownErrorNoteLang(): "zh" | "en" {
   if (typeof document === "undefined") {
     return "zh";
   }
