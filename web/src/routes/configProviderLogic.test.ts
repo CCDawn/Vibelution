@@ -348,6 +348,19 @@ describe("configProviderLogic", () => {
     expect(rows.map((row) => row.pinnedCount)).toEqual([1, 1]);
   });
 
+  it("propagates the row-level enable switch from provider options, defaulting to enabled", () => {
+    // Legacy options without the key read as enabled.
+    const legacy = deriveProviderRegistryRows(providers, catalog);
+    expect(legacy.map((row) => row.enabled)).toEqual([true, true]);
+    const disabled = deriveProviderRegistryRows(
+      providers.map((option) =>
+        option.provider_id === "relay_b" ? { ...option, enabled: false } : option,
+      ),
+      catalog,
+    );
+    expect(disabled.map((row) => row.enabled)).toEqual([true, false]);
+  });
+
   it("allows unpin only for backend-owned pinned or missing-remote models", () => {
     const [provider] = deriveProviderRegistryRows(providers, catalog);
     const pinned = catalogModel("relay_a/pinned");
@@ -561,14 +574,39 @@ describe("configProviderLogic", () => {
 
   it("derives the list dot from availability only, never from catalog freshness", () => {
     // Stale catalog is a freshness signal, not an availability failure → green dot.
-    expect(deriveProviderDotClass({ credentialState: "configured", status: "stale" })).toBe("ok");
-    expect(deriveProviderDotClass({ credentialState: "configured", status: "reachable" })).toBe("ok");
-    expect(deriveProviderDotClass({ credentialState: "not_required", status: "configured" })).toBe("ok");
-    expect(deriveProviderDotClass({ credentialState: "configured", status: "auth_failed" })).toBe("warn");
-    expect(deriveProviderDotClass({ credentialState: "configured", status: "not_discovered" })).toBe("warn");
-    expect(deriveProviderDotClass({ credentialState: "missing", status: "reachable" })).toBe("warn");
-    // "off" is reserved for the Wave 2 enabled switch; nothing derives it yet.
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "stale", enabled: true })).toBe("ok");
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "reachable", enabled: true })).toBe("ok");
+    expect(deriveProviderDotClass({ credentialState: "not_required", status: "configured", enabled: true })).toBe("ok");
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "auth_failed", enabled: true })).toBe("warn");
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "not_discovered", enabled: true })).toBe("warn");
+    expect(deriveProviderDotClass({ credentialState: "missing", status: "reachable", enabled: true })).toBe("warn");
     expect(ABNORMAL_PROVIDER_STATUSES.has("auth_failed")).toBe(true);
+  });
+
+  it("derives the off dot from the Wave 2 enable switch, winning over health", () => {
+    // Disabled-but-healthy still reads off: gray means "stopped", never "broken".
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "reachable", enabled: false })).toBe("off");
+    // Disabled beats abnormal too — the operator turned it off, diagnostics stay in detail.
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "auth_failed", enabled: false })).toBe("off");
+    // Legacy rows without the key stay on the health path.
+    expect(deriveProviderDotClass({ credentialState: "configured", status: "reachable", enabled: undefined as unknown as boolean })).toBe("ok");
+  });
+
+  it("keeps the in-use badge truthful for disabled providers with live references", () => {
+    const disabledInUse = {
+      providerId: "relay_off",
+      label: "Off Relay",
+      credentialState: "configured" as const,
+      status: "reachable",
+      enabled: false,
+      pinnedCount: 1,
+      models: [catalogModel("relay_a/luna")],
+    };
+    const [row] = deriveProviderListRows([disabledInUse], { "relay_a/luna": 2 });
+    // Badge stays (inUse true), and in-use still sorts first per the rank chain.
+    expect(row.inUse).toBe(true);
+    expect(row.rank).toBe(0);
+    expect(row.enabled).toBe(false);
   });
 
   it("builds P0 list rows with in-use first and compact availability fields", () => {
@@ -604,6 +642,31 @@ describe("configProviderLogic", () => {
     });
     expect(listRows[1]).toMatchObject({ dotClass: "ok", inUse: false, rank: 1 });
     expect(listRows[2]).toMatchObject({ dotClass: "warn", inUse: false, rank: 2 });
+  });
+
+  it("sinks disabled providers to the bottom of the P0 list (off rank 3)", () => {
+    const base = {
+      label: "x",
+      serviceClass: "relay",
+      vendor: "multi_model",
+      driver: "openai",
+      runtimeFramework: "",
+      artifactPath: "",
+      baseUrl: "https://relay.example/v1",
+      credentialState: "configured" as const,
+      defaultProtocol: "responses",
+      lastAttemptAt: "",
+      lastSuccessAt: "",
+      refreshDue: false,
+    };
+    const rows = [
+      { ...base, providerId: "relay_off", label: "Off Relay", status: "reachable", enabled: false, pinnedCount: 0, models: [] as ConfigCatalogModel[] },
+      { ...base, providerId: "relay_warn", label: "Warn Relay", status: "auth_failed", enabled: true, pinnedCount: 0, models: [] as ConfigCatalogModel[] },
+      { ...base, providerId: "relay_ok", label: "OK Relay", status: "reachable", enabled: true, pinnedCount: 0, models: [] as ConfigCatalogModel[] },
+    ];
+    const listRows = deriveProviderListRows(rows);
+    expect(listRows.map((row) => row.providerId)).toEqual(["relay_ok", "relay_warn", "relay_off"]);
+    expect(listRows[2]).toMatchObject({ dotClass: "off", inUse: false, rank: 3, enabled: false });
   });
 
   it("keeps list rows dot-pure when references live on other providers", () => {

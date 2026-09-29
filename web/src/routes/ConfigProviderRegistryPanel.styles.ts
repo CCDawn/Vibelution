@@ -15,15 +15,17 @@ const styles = {
   providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 content-start gap-4 overflow-y-auto border-r border-vui-border-subtle pr-3 max-[720px]:max-h-40",
   providerList: "vui-routes-configproviderregistrypanel providerList min-h-0 min-w-0 overflow-y-auto !border-0 !bg-transparent !backdrop-blur-none !p-0 [&>[data-vui=entity-list-item]]:!px-1 [&>[data-vui=entity-list-item]]:!py-0.5",
   providerRow:
-    "vui-routes-configproviderregistrypanel providerRow min-w-0",
+    "vui-routes-configproviderregistrypanel providerRow flex min-w-0 items-center gap-1",
   providerButton:
-    "vui-routes-configproviderregistrypanel providerButton !flex !h-auto !min-h-9 !w-full min-w-0 !flex-row !items-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-1.5 text-left",
+    "vui-routes-configproviderregistrypanel providerButton !flex !h-auto !min-h-9 !w-auto !flex-1 min-w-0 !flex-row !items-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-1.5 text-left",
   providerDot: "vui-routes-configproviderregistrypanel providerDot h-2 w-2 shrink-0 rounded-full",
   providerDotOk: "vui-routes-configproviderregistrypanel providerDotOk bg-[var(--state-success)]",
   providerDotWarn: "vui-routes-configproviderregistrypanel providerDotWarn bg-[var(--state-warning)]",
   providerDotOff: "vui-routes-configproviderregistrypanel providerDotOff bg-vui-fg-tertiary/55",
   providerInUseBadge:
     "vui-routes-configproviderregistrypanel providerInUseBadge inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)] bg-[var(--vui-status-info-bg)] px-2 py-px text-[10px] font-semibold leading-relaxed text-[var(--vui-status-info-fg)]",
+  providerSwitch:
+    "vui-routes-configproviderregistrypanel providerSwitch shrink-0",
   providerFreshness:
     "vui-routes-configproviderregistrypanel providerFreshness m-0 min-w-0 [font-size:var(--vui-font-xs)] leading-snug text-vui-fg-tertiary",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",

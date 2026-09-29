@@ -78,6 +78,15 @@ export type UseSessionDetailStreamOptions = {
   setActiveTurnLayersBySession: Dispatch<SetStateAction<Record<string, ActiveTurnLayerState>>>;
   activeTurnLayersBySessionRef: MutableRefObject<Record<string, ActiveTurnLayerState>>;
   lastAssistantDeltaAppliedAtRef: MutableRefObject<Record<string, number>>;
+  /**
+   * Epoch-ms stamp of the last APPLIED stream event per session (applied delta
+   * frame or applied detail reconcile). This is the no-output stall baseline:
+   * any applied frame counts as activity, body text or not — received-but-held
+   * frames must never reset it. Kept separate from
+   * `lastAssistantDeltaAppliedAtRef`, whose performance-clock values feed the
+   * applyToPaintMs telemetry only.
+   */
+  lastStreamActivityAppliedAtRef: MutableRefObject<Record<string, number>>;
   sessionStreamDecisionSnapshotRef: MutableRefObject<SessionStreamDecisionSnapshot>;
   desktopConversationNotifierRef: MutableRefObject<DesktopConversationNotifier>;
   createSessionEventStream?: (sessionId: string) => SessionEventStream;
@@ -100,6 +109,7 @@ export function useSessionDetailStream({
   setActiveTurnLayersBySession,
   activeTurnLayersBySessionRef,
   lastAssistantDeltaAppliedAtRef,
+  lastStreamActivityAppliedAtRef,
   sessionStreamDecisionSnapshotRef,
   desktopConversationNotifierRef,
   createSessionEventStream = createDefaultSessionEventStream,
@@ -287,6 +297,17 @@ export function useSessionDetailStream({
       });
     };
 
+    // Epoch-ms activity stamp for the no-output stall advisory. Written only
+    // at the two "applied" funnels below: the projection gate (or apply
+    // decision) must have accepted the event — receiving a frame is not
+    // activity. Date.now() on purpose: the consumer ticks with wall-clock.
+    const stampStreamActivity = () => {
+      lastStreamActivityAppliedAtRef.current = {
+        ...lastStreamActivityAppliedAtRef.current,
+        [streamSessionId]: Date.now(),
+      };
+    };
+
     const forceCloseStream = (reason: SessionStreamCloseReason = "grace_timeout") => {
       if (closeTelemetryFired || disposed) {
         return;
@@ -448,6 +469,8 @@ export function useSessionDetailStream({
       if (activeLayer) {
         const reconciledLayer = reconcileActiveTurnLayerItemsWithMessages(activeLayer, detail.messages);
         if (reconciledLayer !== activeLayer) {
+          // Reconcile actually advanced the overlay: applied activity too.
+          stampStreamActivity();
           committedAssistantDeltaLayer = reconciledLayer;
           setActiveTurnLayersBySession((current) =>
             setActiveTurnLayerForSession(current, streamSessionId, reconciledLayer)
@@ -551,6 +574,11 @@ export function useSessionDetailStream({
       if (!decision.applied) {
         return;
       }
+      // Any applied frame is stream activity, body delta or not (thinking /
+      // tool turnItems ride assistant_delta too); held frames never reach here.
+      // Written regardless of shouldCommitRender: a silent re-apply still
+      // proves the stream is alive.
+      stampStreamActivity();
       committedAssistantDeltaLayer = decision.nextCommittedLayer;
       if (decision.shouldCommitRender) {
         setActiveTurnLayersBySession((current) =>

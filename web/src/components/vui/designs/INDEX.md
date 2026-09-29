@@ -63,6 +63,7 @@
 | `VNativeSelect` | [forms/controls.md](./forms/controls.md#vnativeselect) |
 | `VStringSelect` | [forms/controls.md](./forms/controls.md#vstringselect) |
 | `VCheckbox` | [forms/controls.md](./forms/controls.md#vcheckbox) |
+| `VSwitch` | [forms/controls.md](./forms/controls.md#vswitch) |
 | `VFieldRow` | [forms/controls.md](./forms/controls.md#vfieldrow) |
 | `VSettingsRow` | [forms/settings-rows.md](./forms/settings-rows.md#vsettingsrow) |
 | `VSettingsGroupCard` | [forms/settings-rows.md](./forms/settings-rows.md#vsettingsgroupcard) |

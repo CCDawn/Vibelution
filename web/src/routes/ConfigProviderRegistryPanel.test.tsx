@@ -55,6 +55,7 @@ function provider(models: ConfigCatalogModel[]): ProviderRegistryRow {
     lastAttemptAt: "2026-07-12T00:00:00Z",
     lastSuccessAt: "2026-07-12T00:00:00Z",
     refreshDue: false,
+    enabled: true,
     models,
   };
 }
@@ -457,6 +458,45 @@ describe("ConfigProviderRegistryPanel", () => {
     const idleIndex = markup.indexOf("Idle Relay");
     expect(busyIndex).toBeGreaterThan(-1);
     expect(idleIndex).toBeGreaterThan(busyIndex);
+  });
+
+  it("renders the inline enable switch per row and toggles through the draft callback", async () => {
+    const onToggleEnabled = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(
+      <ConfigProviderRegistryPanel {...panelProps([], { onToggleEnabled })} />,
+    ));
+    const switchInput = container.querySelector<HTMLInputElement>('input[data-vui="switch"], input[role="switch"]');
+    expect(switchInput).not.toBeNull();
+    expect(switchInput!.checked).toBe(true);
+    expect(switchInput!.getAttribute("aria-label")).toContain("Relay A");
+    await act(async () => switchInput!.click());
+    expect(onToggleEnabled).toHaveBeenCalledWith("relay_a", false);
+  });
+
+  it("hides the switch when no toggle callback is wired (legacy embeds)", () => {
+    const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([])} />);
+    expect(markup).not.toContain('data-provider-switch="true"');
+  });
+
+  it("marks disabled providers with an off dot, the 已停用 tooltip, and last position", () => {
+    const off = { ...provider([]), providerId: "relay_off", label: "Off Relay", enabled: false };
+    const ok = { ...provider([]), providerId: "relay_ok", label: "Ok Relay", enabled: true };
+    const markup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([], { rows: [off, ok], onToggleEnabled: () => undefined })} />,
+    );
+    expect(markup).toContain('data-provider-dot="off"');
+    expect(markup).toContain('data-provider-enabled="false"');
+    expect(markup).toContain('data-provider-switch="true"');
+    // Off tooltip comes from the shared providerDotOff copy.
+    expect(markup).toContain("已停用");
+    const offIndex = markup.indexOf("Off Relay");
+    const okIndex = markup.indexOf("Ok Relay");
+    expect(okIndex).toBeGreaterThan(-1);
+    expect(offIndex).toBeGreaterThan(okIndex);
   });
 
   it("adds providers from a bottom light row that opens the existing quick setup", async () => {

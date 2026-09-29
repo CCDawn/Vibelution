@@ -8,6 +8,7 @@ import {
   activeTurnOptimisticStageSummary,
   activeTurnStageBarPhase,
   activeTurnStageLabel,
+  activeTurnStageSegmentSeconds,
   buildActiveTurnStageBarItems,
   formatActiveTurnHeartbeatText,
   planActiveTurnStageSwitch,
@@ -17,6 +18,7 @@ import {
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
   shouldShowActiveTurnReconnectAction,
+  shouldShowNoOutputStall,
   visibleActiveTurnRetryProgress,
 } from "./conversationActiveTurnStatusPresentation";
 
@@ -229,5 +231,53 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(resolveActiveTurnRouteFallback({ routeFallback: { from: "gpt-x", to: "" } })).toBeNull();
     expect(resolveActiveTurnRouteFallback({ routeFallback: { from: " gpt-x ", to: " gpt-y " } }))
       .toEqual({ from: "gpt-x", to: "gpt-y" });
+  });
+
+  it("gates the no-output stall hint to the body-streaming stages", () => {
+    expect(shouldShowNoOutputStall("responding")).toBe(true);
+    expect(shouldShowNoOutputStall(" Responding ")).toBe(true);
+    expect(shouldShowNoOutputStall("assistant_response")).toBe(true);
+    // Thinking / tool / queue / retry silence is the normal agentic shape.
+    expect(shouldShowNoOutputStall("model_thinking")).toBe(false);
+    expect(shouldShowNoOutputStall("server_thinking")).toBe(false);
+    expect(shouldShowNoOutputStall("reasoning")).toBe(false);
+    expect(shouldShowNoOutputStall("thinking")).toBe(false);
+    expect(shouldShowNoOutputStall("working")).toBe(false);
+    expect(shouldShowNoOutputStall("tool_running")).toBe(false);
+    expect(shouldShowNoOutputStall("queued")).toBe(false);
+    expect(shouldShowNoOutputStall("model_retry")).toBe(false);
+    // Generic fallback stages stay quiet too.
+    expect(shouldShowNoOutputStall("running")).toBe(false);
+    expect(shouldShowNoOutputStall("")).toBe(false);
+  });
+
+  it("counts thinking-segment seconds inside the thinking family only", () => {
+    const nowMs = Date.parse("2026-09-16T10:00:30.000Z");
+    expect(activeTurnStageSegmentSeconds({
+      stage: "model_thinking",
+      segmentStartedAtMs: nowMs - 12_400,
+      nowMs,
+    })).toBe(12);
+    expect(activeTurnStageSegmentSeconds({ stage: "server_thinking", segmentStartedAtMs: nowMs, nowMs })).toBe(0);
+    expect(activeTurnStageSegmentSeconds({ stage: "reasoning", segmentStartedAtMs: nowMs - 500, nowMs })).toBe(0);
+    // Missing or invalid segment start: no segment clock.
+    expect(activeTurnStageSegmentSeconds({ stage: "thinking", segmentStartedAtMs: null, nowMs })).toBeNull();
+    expect(activeTurnStageSegmentSeconds({ stage: "thinking", nowMs })).toBeNull();
+    expect(activeTurnStageSegmentSeconds({
+      stage: "model_thinking",
+      segmentStartedAtMs: -5,
+      nowMs,
+    })).toBeNull();
+    // Non-thinking stages never report a segment clock, even with a start.
+    expect(activeTurnStageSegmentSeconds({
+      stage: "responding",
+      segmentStartedAtMs: nowMs - 1_000,
+      nowMs,
+    })).toBeNull();
+    expect(activeTurnStageSegmentSeconds({
+      stage: "working",
+      segmentStartedAtMs: nowMs - 1_000,
+      nowMs,
+    })).toBeNull();
   });
 });

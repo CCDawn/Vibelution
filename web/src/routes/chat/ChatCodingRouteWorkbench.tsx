@@ -677,6 +677,9 @@ export function ChatCodingRouteWorkbench() {
   const [expandedGroupMessageIds, setExpandedGroupMessageIds] = useState<string[]>([]);
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const lastAssistantDeltaAppliedAtRef = useRef<Record<string, number>>({});
+  // Epoch-ms stamp of the last applied stream event per session; feeds the
+  // active-turn no-output stall baseline through a getter (see below).
+  const lastStreamActivityAppliedAtRef = useRef<Record<string, number>>({});
   // ConversationView reports its committed frame from a child effect. React
   // runs that effect before this parent's effects, so the paint handler must
   // read the freshest committed layers; the store keeps its read-through ref
@@ -1018,6 +1021,7 @@ export function ChatCodingRouteWorkbench() {
     setActiveTurnLayersBySession,
     activeTurnLayersBySessionRef,
     lastAssistantDeltaAppliedAtRef,
+    lastStreamActivityAppliedAtRef,
     sessionStreamDecisionSnapshotRef,
     desktopConversationNotifierRef,
     sessionTitleForNotifications,
@@ -1031,9 +1035,20 @@ export function ChatCodingRouteWorkbench() {
       streamConnected: streamDisconnectedSinceMs != null ? false : undefined,
       streamDisconnectedSinceMs,
       lastAssistantDeltaAtMs: lastAssistantDeltaAppliedAtRef.current[String(activeSessionId || "")],
+      // Ref-backed getter on purpose: the stamps advance on every applied frame
+      // while this memo almost never recomputes, so the note's per-second tick
+      // must read the fresh value through the closure.
+      lastStreamActivityAtMs: () =>
+        lastStreamActivityAppliedAtRef.current[String(activeSessionId || "")] || null,
       reconnectSessionStream,
     }),
-    [streamDisconnectedSinceMs, activeSessionId, lastAssistantDeltaAppliedAtRef, reconnectSessionStream],
+    [
+      streamDisconnectedSinceMs,
+      activeSessionId,
+      lastAssistantDeltaAppliedAtRef,
+      lastStreamActivityAppliedAtRef,
+      reconnectSessionStream,
+    ],
   );
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
