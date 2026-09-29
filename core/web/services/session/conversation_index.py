@@ -8,6 +8,7 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -23,6 +24,78 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+# Per-process negative-result cache for the masterless-conversation agent
+# binding probes in ``_ensure_conversation_agent_metadata``. Without it, every
+# ``_load_conversations(repair=True)`` re-ran the archived/active reverse
+# lookups for every conversation that has no bound agent, because a
+# "nothing found" outcome is inherently not persisted. Keyed by project root;
+# the stored signature invalidates the probed set whenever the agent directory
+# changes (any create/update/bind/archive/delete flips agentId, directSessionId,
+# status, timestamp or count), so a later binding still gets discovered on the
+# next load.
+_CONVERSATION_AGENT_PROBE_LOCK = threading.Lock()
+_CONVERSATION_AGENT_PROBE_STATE: dict[str, tuple[str, frozenset[str]]] = {}
+
+
+def _conversation_agent_binding_probe_signature(
+    agent_by_id: dict[str, dict[str, Any]],
+) -> str:
+    parts = [
+        "{agent_id}:{direct_session_id}:{status}:{updated_at}".format(
+            agent_id=str(agent_id or "").strip(),
+            direct_session_id=str((agent or {}).get("directSessionId") or "").strip(),
+            status=str((agent or {}).get("status") or "").strip(),
+            updated_at=str((agent or {}).get("updatedAt") or (agent or {}).get("createdAt") or "").strip(),
+        )
+        for agent_id, agent in agent_by_id.items()
+    ]
+    digest = hashlib.sha1("\n".join(sorted(parts)).encode("utf-8")).hexdigest()
+    return f"{len(parts)}:{digest}"
+
+
+def _conversation_agent_binding_probe_pending(
+    session_id: str,
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None,
+) -> bool:
+    """True when this load may run the direct-session reverse lookups.
+
+    Callers without a lookup map (direct unit calls) always probe so their
+    behavior stays unchanged.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or not isinstance(agent_by_id, dict):
+        return True
+    signature = s._conversation_agent_binding_probe_signature(agent_by_id)
+    with _CONVERSATION_AGENT_PROBE_LOCK:
+        current = _CONVERSATION_AGENT_PROBE_STATE.get(str(s.PROJECT_ROOT))
+        if current is None or current[0] != signature:
+            _CONVERSATION_AGENT_PROBE_STATE[str(s.PROJECT_ROOT)] = (signature, frozenset())
+            return True
+        return normalized_session_id not in current[1]
+
+
+def _conversation_agent_binding_probe_completed(
+    session_id: str,
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None,
+) -> None:
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or not isinstance(agent_by_id, dict):
+        return
+    signature = s._conversation_agent_binding_probe_signature(agent_by_id)
+    with _CONVERSATION_AGENT_PROBE_LOCK:
+        key = str(s.PROJECT_ROOT)
+        current = _CONVERSATION_AGENT_PROBE_STATE.get(key)
+        if current is None or current[0] != signature:
+            _CONVERSATION_AGENT_PROBE_STATE[key] = (signature, frozenset({normalized_session_id}))
+            return
+        _CONVERSATION_AGENT_PROBE_STATE[key] = (signature, current[1] | {normalized_session_id})
 
 
 def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> bool:
@@ -644,7 +717,15 @@ def _ensure_conversation_agent_metadata(
             agent=existing_agent,
         ) or changed
         return changed
-    archived_direct_agent = s._archived_agent_for_direct_session(conversation_id) if not existing_agent_id else None
+    probe_direct_binding = not existing_agent_id and s._conversation_agent_binding_probe_pending(
+        conversation_id,
+        agent_by_id=agent_by_id,
+    )
+    archived_direct_agent = (
+        s._archived_agent_for_direct_session(conversation_id, agent_by_id=agent_by_id)
+        if probe_direct_binding
+        else None
+    )
     if archived_direct_agent:
         archived_agent_id = str(archived_direct_agent.get("agentId") or "").strip()
         changed = False
@@ -661,7 +742,13 @@ def _ensure_conversation_agent_metadata(
             agent=archived_direct_agent,
         ) or changed
         return changed
-    direct_agent = s._agent_for_direct_session(conversation_id) if not existing_agent_id else None
+    direct_agent = (
+        s._agent_for_direct_session(conversation_id, agent_by_id=agent_by_id)
+        if probe_direct_binding
+        else None
+    )
+    if probe_direct_binding:
+        s._conversation_agent_binding_probe_completed(conversation_id, agent_by_id=agent_by_id)
     if not direct_agent and not s._conversation_requires_agent_materialization(conversation):
         return False
     llm_bindings_for_ensure = (
