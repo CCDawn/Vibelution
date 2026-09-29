@@ -9,6 +9,8 @@ const styles = {
     "vui-routes-chatsessionworkspacepanel conversationFrame relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden",
   conversationBody:
     "vui-routes-chatsessionworkspacepanel conversationBody relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden",
+  conversationToolbar:
+    "vui-routes-chatsessionworkspacepanel conversationToolbar relative flex w-full shrink-0 flex-row items-center justify-end gap-2 px-4 pt-2",
   conversationKeepAlivePane:
     "vui-routes-chatsessionworkspacepanel conversationKeepAlivePane relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden",
   // When status rail is closed the center track already reclaims full width.

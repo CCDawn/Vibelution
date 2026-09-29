@@ -241,6 +241,15 @@ describe("ChatConversationComposerBridge", () => {
   it("marks the primary Chat composer as the Codex variant", () => {
     expect(bridgeSource).toContain('composerVariant="codex"');
   });
+
+  it("forwards the session workspace root through the props spread", () => {
+    // sessionWorkspacePath rides the ConversationViewProps-derived spread into
+    // LazyConversationView; listing it as bridge-managed would silently drop
+    // the workspace root and keep markdown file links inert.
+    expect(bridgeSource).not.toContain('"sessionWorkspacePath"');
+    expect(bridgeSource).toContain("<LazyConversationView");
+    expect(bridgeSource).toContain("{...props}");
+  });
 });
 
 function emptyStateInput() {

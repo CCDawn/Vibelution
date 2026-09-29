@@ -9,6 +9,7 @@ import {
   ActiveTurnStreamStateContext,
   type ActiveTurnStreamState,
 } from "../../components/conversation/activeTurnStreamState";
+import { ConversationShareExportButton } from "../../components/conversation/ConversationShareExportButton";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
 import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
@@ -173,6 +174,18 @@ export function ChatSessionWorkspacePanel({
             </div>
           ) : null}
           <ChatRuntimeNoticeStack lang={lang} notices={notices} />
+          {conversation ? (
+            <div className={styles.conversationToolbar}>
+              {/* Session-level local HTML export; direct sessions only — group
+                  rooms render through their own transcript component above. */}
+              <ConversationShareExportButton
+                sessionId={conversation.sessionId}
+                messages={conversation.messages}
+                language={lang}
+                isDisabled={conversation.messages.length === 0}
+              />
+            </div>
+          ) : null}
           <div className={styles.conversationBody}>
             {/*
               key=sessionId remounts clean per thread (no cross-session scroll/expansion bleed).

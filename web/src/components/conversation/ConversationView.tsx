@@ -227,7 +227,7 @@ import {
   toolActivityAriaTitle,
 } from "./ConversationToolActivityPills";
 import { ConversationFileDeliveries } from "./ConversationFileDeliveries";
-import { fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
+import { conversationChangedFilesFromMetadata, fileDeliveryFollowupDraft } from "./conversationFileDeliveryModel";
 import { ConversationPatchDiff } from "./ConversationPatchDiff";
 import { conversationToolPatchText } from "./conversationPatchModel";
 import {
@@ -1035,6 +1035,7 @@ export const ConversationView = React.memo(function ConversationView({
   messages,
   activeTurnMessage,
   transcriptPending = false,
+  sessionWorkspacePath,
   className,
   density = "default",
   composerVariant = "compact",
@@ -4224,6 +4225,9 @@ export const ConversationView = React.memo(function ConversationView({
           <ConversationFileDeliveries
             cells={cells}
             language={lang === "en" ? "en" : "zh"}
+            changedFiles={conversationChangedFilesFromMetadata(message.metadata)}
+            sessionId={sessionId}
+            turnId={message.role === "assistant" ? message.turnId : undefined}
             onContinue={showComposer && !composerDisabled ? (path) => {
               onComposerChange(fileDeliveryFollowupDraft(composerValue, path, lang === "en" ? "en" : "zh"));
               requestAnimationFrame(() => composerInputRef.current?.focus());
@@ -5970,6 +5974,8 @@ export const ConversationView = React.memo(function ConversationView({
         content={content}
         duplicateImageUrls={duplicateImageUrls}
         renderImage={renderMarkdownImage}
+        workspaceRoot={sessionWorkspacePath}
+        language={lang}
       />
     );
   }
@@ -5992,6 +5998,8 @@ export const ConversationView = React.memo(function ConversationView({
         isStreaming={isStreaming}
         duplicateImageUrls={duplicateImageUrls}
         renderImage={renderMarkdownImage}
+        workspaceRoot={sessionWorkspacePath}
+        language={lang}
       />
     );
   }
