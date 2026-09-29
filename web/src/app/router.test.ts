@@ -108,6 +108,31 @@ describe("router route contracts", () => {
     });
   });
 
+  it("keeps the aggregated Evolution entry and the retired-nav deep links reachable", () => {
+    // P2 nav collapse: the aggregate plus the four legacy paths must all stay
+    // registered so existing deep links and bookmarks never 404.
+    [
+      "evolution/workspace",
+      "supervised-evolution",
+      "self-evolution",
+      "kernel",
+      "memory",
+    ].forEach((path) => {
+      expect(findWorkbenchRoute(path)).toBeTruthy();
+    });
+
+    // The aggregate renders the unforced EvolutionRoute: no forcedTrack/forcedView,
+    // so the in-page track toggle owns the supervised/self split.
+    const aggregate = findWorkbenchRoute("evolution/workspace");
+    const suspense = aggregate.element as ReactElement<{ children?: ReactNode }>;
+    const domainGate = suspense.props.children as ReactElement<{ children?: ReactNode }>;
+    expect(isValidElement(domainGate)).toBe(true);
+    expect((domainGate as ReactElement<{ domain?: string }>).props.domain).toBe("evolution");
+    const evolutionRouteElement = domainGate.props.children as ReactElement<Record<string, unknown>>;
+    expect(isValidElement(evolutionRouteElement)).toBe(true);
+    expect(Object.keys(evolutionRouteElement.props)).toEqual([]);
+  });
+
   it("guards the usage route with workbench fallback and error boundary elements", () => {
     const route = findWorkbenchRoute("usage");
     expectRouteErrorSurface(route, "workbench");
