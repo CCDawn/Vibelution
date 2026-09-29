@@ -331,6 +331,59 @@ def test_curation_state_derives_items_and_counts_from_queue(tmp_path, monkeypatc
     assert missing.status_code == 404
 
 
+def test_curation_existence_matches_legacy_set_for_hidden_sessions(tmp_path, monkeypatch):
+    """404-semantics equivalence: sessions hidden from the index still resolve.
+
+    The legacy existence oracle was _load_conversations() membership, which has
+    no hidden/internal filtering. The fast path must agree for every case:
+    found stays found (including index-hidden sessions), missing stays 404.
+    """
+
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service.agent_directory_service, "PROJECT_ROOT", tmp_path)
+
+    visible = session_service.create_chat_session(
+        title="可见策展会话", lightweight=True
+    )
+    hidden = session_service.create_chat_session(
+        title="索引隐藏策展会话",
+        conversation_index_kind=session_service.agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+        lightweight=True,
+        activate=False,
+    )
+    session_service._invalidate_session_list_cache()
+
+    # The hidden session is genuinely excluded from the visible session index.
+    visible_ids = {str(item.get("id") or "").strip() for item in session_service.list_sessions()}
+    assert visible["id"] in visible_ids
+    assert hidden["id"] not in visible_ids
+
+    # The legacy oracle still finds it, and the endpoint must match it exactly.
+    legacy_ids = {
+        str(item.get("id") or "").strip()
+        for item in session_service._load_conversations()[1]
+    }
+    assert hidden["id"] in legacy_ids
+    for session_id, expected_status in (
+        (visible["id"], 200),
+        (hidden["id"], 200),
+        ("session-missing", 404),
+    ):
+        assert (session_id in legacy_ids) is (expected_status == 200)
+        response = client.get(f"/api/sessions/{session_id}/curation")
+        assert response.status_code == expected_status
+
+    payload = client.get(f"/api/sessions/{hidden['id']}/curation")
+    assert payload.status_code == 200
+    assert payload.json() == {
+        "sessionId": hidden["id"],
+        "captureEnabled": True,
+        "items": [],
+        "countsByModel": [],
+    }
+
+
 def test_curation_state_returns_empty_for_fresh_session(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

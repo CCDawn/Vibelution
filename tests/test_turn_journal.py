@@ -808,3 +808,51 @@ def test_latest_open_turn_id_ignores_completed_turn_after_head_select():
 
     assert [event.event_id for event in active] == ["event-ts1", "event-u1", "event-a1"]
     assert latest_open_turn_id(events) == ""
+
+
+def test_sequence_cache_key_resolves_each_path_once(tmp_path, monkeypatch):
+    """Warm _sequence_cache_key hits must not re-resolve; paths stay isolated."""
+
+    turn_journal._SEQUENCE_RESOLVED_PATH_CACHE.clear()
+    calls = {"count": 0}
+    original_resolve = Path.resolve
+
+    def counting_resolve(self, *args, **kwargs):
+        calls["count"] += 1
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", counting_resolve)
+
+    path = tmp_path / "session-a" / "turn_journal.jsonl"
+    first = turn_journal._sequence_cache_key(path)
+    assert calls["count"] == 1
+    assert turn_journal._sequence_cache_key(path) == first
+    assert calls["count"] == 1
+
+    other = tmp_path / "session-b" / "turn_journal.jsonl"
+    second = turn_journal._sequence_cache_key(other)
+    assert calls["count"] == 2
+    assert second != first
+
+    monkeypatch.undo()
+    assert first == str(path.resolve())
+    assert second == str(other.resolve())
+    turn_journal._SEQUENCE_RESOLVED_PATH_CACHE.clear()
+
+
+def test_sequence_cache_key_oserror_fallback_is_not_cached(tmp_path, monkeypatch):
+    """A transient resolve failure keeps retrying instead of freezing a key."""
+
+    turn_journal._SEQUENCE_RESOLVED_PATH_CACHE.clear()
+
+    def raising_resolve(self, *args, **kwargs):
+        raise OSError("resolve unavailable")
+
+    monkeypatch.setattr(Path, "resolve", raising_resolve)
+    path = tmp_path / "session-fallback" / "turn_journal.jsonl"
+    assert turn_journal._sequence_cache_key(path) == str(path)
+    assert str(path) not in turn_journal._SEQUENCE_RESOLVED_PATH_CACHE
+
+    monkeypatch.undo()
+    assert turn_journal._sequence_cache_key(path) == str(path.resolve())
+    turn_journal._SEQUENCE_RESOLVED_PATH_CACHE.clear()
