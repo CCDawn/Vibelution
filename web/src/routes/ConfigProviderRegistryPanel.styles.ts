@@ -23,7 +23,7 @@ const styles = {
   providerDotWarn: "vui-routes-configproviderregistrypanel providerDotWarn bg-[var(--state-warning)]",
   providerDotOff: "vui-routes-configproviderregistrypanel providerDotOff bg-vui-fg-tertiary/55",
   providerInUseBadge:
-    "vui-routes-configproviderregistrypanel providerInUseBadge inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)] bg-[var(--vui-status-info-bg)] px-2 py-px text-[10px] font-semibold leading-relaxed text-[var(--vui-status-info-fg)]",
+    "vui-routes-configproviderregistrypanel providerInUseBadge inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)] bg-[var(--vui-status-info-bg)] px-2 py-px [font-size:var(--vui-font-micro-10)] font-semibold leading-relaxed text-[var(--vui-status-info-fg)]",
   providerSwitch:
     "vui-routes-configproviderregistrypanel providerSwitch shrink-0",
   providerFreshness:
@@ -100,7 +100,7 @@ const styles = {
   modelDotIdle:
     "vui-routes-configproviderregistrypanel modelDotIdle border border-vui-border-strong bg-transparent",
   modelInUseBadge:
-    "vui-routes-configproviderregistrypanel modelInUseBadge inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)] bg-[var(--vui-status-info-bg)] px-2 py-px text-[10px] font-semibold leading-relaxed text-[var(--vui-status-info-fg)]",
+    "vui-routes-configproviderregistrypanel modelInUseBadge inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)] bg-[var(--vui-status-info-bg)] px-2 py-px [font-size:var(--vui-font-micro-10)] font-semibold leading-relaxed text-[var(--vui-status-info-fg)]",
   modelRowName:
     "vui-routes-configproviderregistrypanel modelRowName min-w-0 flex-1 truncate text-vui-xs font-semibold leading-snug text-vui-fg-primary",
   modelDetailPane:
