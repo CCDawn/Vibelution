@@ -2128,7 +2128,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     <VTrackWorkbenchPage
       ref={evolutionLayoutRef}
       fill
-      className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} !gap-0 !p-0` : styles.page}
+      className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} ${styles.supervisedLivePage}` : styles.page}
       ariaLabel={routeTitle}
       domainRecipe="evolution-multi-rail"
       data-vui-recipe="evolution-workbench"
@@ -2265,7 +2265,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             onSettings={() => setSupervisedDialog("settings")}
             onOpenConversation={supervisedSelectedAgentMember?.chatRoute ? () => navigate(supervisedSelectedAgentMember.chatRoute!) : undefined}
             setup={
-              <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+              <div className={styles.supervisedSetupFrame}>
                 {workbenchCatalogUnavailable ? <p role="alert" className={styles.errorTextCompact}>{lang === "zh" ? "评估集目录暂时不可用，请稍后重试。" : "Evaluation catalog is temporarily unavailable."}</p> : null}
                 {supervisedSnapshotErrorText ? <p role="alert" className={styles.errorTextCompact}>{supervisedSnapshotErrorText}<VButton onPress={() => void workspaceSnapshotQuery.refetch()}>{lang === "zh" ? "重试" : "Retry"}</VButton></p> : null}
                 <EvolutionSupervisedLiveSetupPanel
@@ -2331,7 +2331,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 />
               </div>
             }
-            conversation={<div className="flex h-full min-h-0 flex-col">
+            conversation={<div className={styles.supervisedConversationFrame}>
               {supervisedSnapshotErrorText ? <p role="alert" className={styles.errorTextCompact}>{supervisedSnapshotErrorText}<VButton onPress={() => void workspaceSnapshotQuery.refetch()}>{lang === "zh" ? "重试" : "Retry"}</VButton></p> : null}
               {recentRunDetail.loading ? <p role="status">{t("loading")}</p>
                 : recentRunDetail.error ? <div role="alert">{recentRunDetail.error.message}<VButton onPress={() => void recentRunDetail.retry()}>{lang === "zh" ? "重试" : "Retry"}</VButton></div>
@@ -2352,8 +2352,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     />}
             </div>}
             footer={supervisedRunIsLive ? (
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-vui-border-subtle px-3 py-2">
-                <span className="text-vui-xs text-vui-fg-secondary">{supervisedMembersRunStatusLabel} · {supervisedWorkflowCards.find((step) => step.current)?.label}</span>
+              <div className={styles.supervisedLiveFooter}>
+                <span className={styles.supervisedSecondaryText}>{supervisedMembersRunStatusLabel} · {supervisedWorkflowCards.find((step) => step.current)?.label}</span>
                 <VButton variant="ghost" isDisabled={!canTerminateSupervisedRun || terminateSupervisedPending} disabledReason={terminateSupervisedDisabledReason} onPress={() => supervisedWorktreeLiveRun && setSupervisedConfirmation({runId:supervisedWorktreeLiveRun.runId,action:"terminate"})}>{lang === "zh" ? "停止运行" : "Stop run"}</VButton>
                 {supervisedControlError ? <p role="alert" className={styles.errorTextCompact}>{supervisedControlError}</p> : null}
               </div>
@@ -2376,11 +2376,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     />}
             evidenceTabs={[
               { id: "changes", label: lang === "zh" ? "改动" : "Changes", content: (
-                <section className="grid gap-3 p-3" aria-label={lang === "zh" ? "本轮候选改动" : "Candidate changes"}>
+                <section className={styles.supervisedChanges} aria-label={lang === "zh" ? "本轮候选改动" : "Candidate changes"}>
                   {(reviewCandidateWorktree?.mergeAnalysis?.changedFiles ?? []).map((file) => (
-                    <div key={file.path} className="grid min-w-0 gap-1 border-b border-vui-border-subtle pb-2">
-                      <code className="break-all text-vui-xs">{file.path}</code>
-                      <span className="text-vui-xs text-vui-fg-secondary">{file.changeType || file.status}{file.highRisk ? (lang === "zh" ? " · 需要复核" : " · Review required") : ""}</span>
+                    <div key={file.path} className={styles.supervisedChangedFile}>
+                      <code className={styles.supervisedChangedPath}>{file.path}</code>
+                      <span className={styles.supervisedSecondaryText}>{file.changeType || file.status}{file.highRisk ? (lang === "zh" ? " · 需要复核" : " · Review required") : ""}</span>
                     </div>
                   ))}
                   {!reviewCandidateWorktree?.mergeAnalysis?.changedFiles?.length ? <p>{lang === "zh" ? "本轮尚未生成候选文件变更记录。" : "No candidate file changes are available yet."}</p> : null}
@@ -2391,7 +2391,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               { id: "progress", label: lang === "zh" ? "进度" : "Progress", content: <>
           <Suspense fallback={<p className={styles.noticeText}>{t("loading")}</p>}>
             <EvolutionActiveRunMonitorPanel
-              className="min-w-0"
+              className={styles.supervisedEvidenceContent}
               header={{
                 eyebrow: t("activeSupervisedRun"),
                 title: monitoredRunIdentity || t("activeSupervisedRun"),
@@ -2431,24 +2431,24 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </> },
             ]}
           />
-          <VDialog className="!translate-none !transform-[translate(-50%,-50%)] !animate-none max-w-[calc(100vw-24px)]" open={supervisedDialog !== null} onOpenChange={(open) => !open && setSupervisedDialog(null)} title={supervisedDialog === "source" ? (lang === "zh" ? "本轮评估集" : "Run evaluation source") : (lang === "zh" ? "运行配置" : "Run settings")}>
+          <VDialog className={styles.supervisedDialog} open={supervisedDialog !== null} onOpenChange={(open) => !open && setSupervisedDialog(null)} title={supervisedDialog === "source" ? (lang === "zh" ? "本轮评估集" : "Run evaluation source") : (lang === "zh" ? "运行配置" : "Run settings")}>
             {supervisedDialog === "settings" && showTrackToggle ? <VTabs aria-label={lang === "zh" ? "进化轨道" : "Evolution track"} value={activeTrack} onValueChange={(value) => {
               if (value === "self" || value === "supervised") { setEvolutionTrack(value); setSupervisedDialog(null); }
             }} items={[{id:"supervised",label:t("supervisedEvolutionMode")},{id:"self",label:t("selfEvolutionMode")}]} /> : null}
             {supervisedDialog === "settings" ? <SupervisedWorkspaceControls activeView={evolutionView} overviewIntakeMode={overview?.intakeMode} configIntakeMode={configQuery.data?.intakeMode} /> : null}
-            {supervisedDialog === "settings" ? <details className="p-3"><summary>{lang === "zh" ? "评估来源目录" : "Evaluation source catalog"}</summary>
+            {supervisedDialog === "settings" ? <details className={styles.supervisedSourceCatalog}><summary>{lang === "zh" ? "评估来源目录" : "Evaluation source catalog"}</summary>
               <EvolutionDatasetCatalogPanel lang={lang} copy={{datasetCatalog:t("datasetCatalog"),datasetCatalogAll:t("datasetCatalogAll"),datasetCatalogRunnable:t("datasetCatalogRunnable"),datasetCatalogBlocked:t("datasetCatalogBlocked"),datasetCatalogRoadmap:t("datasetCatalogRoadmap"),datasetCatalogHiddenReason:t("datasetCatalogHiddenReason")}} items={datasetCatalog} groups={datasetCatalogGroups} selectedFilter={selectedDatasetCatalogFilter} onFilterChange={setSelectedDatasetCatalogFilter} />
             </details> : null}
-            <dl className="grid gap-3 p-3 text-vui-sm">
-              <div><dt>{lang === "zh" ? "评估来源" : "Evaluation source"}</dt><dd className="break-all">{frozenSourceLabel}</dd></div>
+            <dl className={styles.supervisedSourceFacts}>
+              <div><dt>{lang === "zh" ? "评估来源" : "Evaluation source"}</dt><dd className={styles.supervisedSourceName}>{frozenSourceLabel}</dd></div>
               <div><dt>{lang === "zh" ? "本轮样本" : "Run cases"}</dt><dd>{reviewCandidateWorktree?.costEstimate?.caseCount ?? monitoredRun?.caseTotal ?? "—"}</dd></div>
               <div><dt>{lang === "zh" ? "审批方式" : "Approval mode"}</dt><dd>{reviewCandidateWorktree?.approvalMode === "agent" ? "Agent" : (lang === "zh" ? "人工" : "Human")}</dd></div>
             </dl>
-            <p className="px-3 text-vui-xs text-vui-fg-secondary">{lang === "zh" ? "本轮来源由运行记录固定；更换评估集需要新建一轮。" : "The run record fixes this source. Create a new run to change it."}</p>
+            <p className={styles.supervisedSourceHint}>{lang === "zh" ? "本轮来源由运行记录固定；更换评估集需要新建一轮。" : "The run record fixes this source. Create a new run to change it."}</p>
             <VButton variant="secondary" onPress={openSupervisedSetup}>{lang === "zh" ? "选择评估集新建" : "Create with another source"}</VButton>
           </VDialog>
           <VDialog
-            className="!translate-none !transform-[translate(-50%,-50%)] !animate-none max-w-[calc(100vw-24px)]"
+            className={styles.supervisedDialog}
             open={Boolean(supervisedConfirmation)}
             onOpenChange={(open) => !open && !approvalWorktreeActionMutation.isPending && setSupervisedConfirmation(null)}
             title={confirmationLabel}

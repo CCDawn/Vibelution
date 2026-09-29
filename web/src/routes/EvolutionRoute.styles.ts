@@ -25,6 +25,21 @@ const compactMetricSurface =
   `grid [gap:3px] min-w-0 ${rowSurfaceSoft} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-weight:600] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [min-height:36px] [padding:5px_7px]`;
 
 const styles = {
+  supervisedLivePage: "!gap-0 !p-0",
+  supervisedSetupFrame: "flex h-full min-h-0 min-w-0 flex-1 flex-col",
+  supervisedConversationFrame: "flex h-full min-h-0 flex-col",
+  supervisedLiveFooter: "flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-vui-border-subtle px-3 py-2",
+  supervisedSecondaryText: "text-vui-xs text-vui-fg-secondary",
+  supervisedChanges: "grid gap-3 p-3",
+  supervisedChangedFile: "grid min-w-0 gap-1 border-b border-vui-border-subtle pb-2",
+  supervisedChangedPath: "break-all text-vui-xs",
+  supervisedEvidenceContent: "min-w-0",
+  supervisedDialog: "!translate-none !transform-[translate(-50%,-50%)] !animate-none max-w-[calc(100vw-24px)]",
+  supervisedSourceCatalog: "p-3",
+  supervisedSourceFacts: "grid gap-3 p-3 text-vui-sm",
+  supervisedSourceName: "break-all",
+  supervisedSourceHint: "px-3 text-vui-xs text-vui-fg-secondary",
+
   sourceInventorySection:
     "grid [gap:6px]",
   actionRow:

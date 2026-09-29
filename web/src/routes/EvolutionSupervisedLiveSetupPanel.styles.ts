@@ -49,7 +49,7 @@ const styles = {
   advancedToggle: "!flex !h-9 !min-h-9 !w-full !justify-between !px-2 [font-size:var(--vui-font-xs)]",
   advancedFields: "grid min-w-0 gap-2 px-1 pb-1 [@container(min-width:720px)]:[grid-template-columns:minmax(0,_1fr)]",
   selectInput: "w-full",
-  footer: "sticky bottom-0 z-10 grid min-w-0 [grid-template-columns:minmax(0,_1fr)_auto] items-center gap-3 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-4 py-2.5 shadow-[0_-8px_20px_color-mix(in_srgb,_var(--vui-surface-base)_76%,transparent)] max-[520px]:grid-cols-1 max-[520px]:gap-2 max-[520px]:px-3",
+  footer: "sticky bottom-0 z-10 grid min-w-0 [grid-template-columns:minmax(0,_1fr)_auto] items-center gap-3 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-4 py-2.5 shadow-[var(--vui-elevation-panel)] max-[520px]:grid-cols-1 max-[520px]:gap-2 max-[520px]:px-3",
   footerMessage: "min-w-0 [&_p]:max-w-[760px]",
   lockHint: "m-0 [color:var(--fg-tertiary)] [font-size:var(--vui-font-2xs)] [line-height:1.4] [overflow-wrap:anywhere]",
   footerActions: "flex min-w-0 items-center justify-end gap-2 max-[520px]:grid max-[520px]:grid-cols-2 max-[520px]:data-[single=true]:grid-cols-1",

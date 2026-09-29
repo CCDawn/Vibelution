@@ -129,7 +129,7 @@ describe("EvolutionRoute library user flow contract", () => {
   it("keeps supervised live work in the conversation-first workspace", () => {
     expect(routeSource).toContain("import { SupervisedConversationWorkspace } from \"./SupervisedConversationWorkspace\"");
     expect(routeSource).toContain("<SupervisedConversationWorkspace");
-    expect(routeSource).toContain("conversation={<div className=\"flex h-full min-h-0 flex-col\">");
+    expect(routeSource).toContain("conversation={<div className={styles.supervisedConversationFrame}>");
     expect(routeSource).toContain("compact");
     expect(routeSource).toContain("setup={");
     expect(routeSource).toContain("evidenceTabs={[");
@@ -484,7 +484,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('data-vui-recipe="evolution-workbench"');
     expect(routeSource).toContain('domainRecipe="evolution-multi-rail"');
     expect(routeSource).toContain('const showRouteToolbar = activeTrack !== "self" && evolutionView !== "live";');
-    expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} !gap-0 !p-0` : styles.page');
+    expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} ${styles.supervisedLivePage}` : styles.page');
     expect(routeSource).toContain("header={");
     expect(routeSource).toContain("showRouteToolbar");
     // Page host fill is owned by VTrackWorkbenchPage; route styles only add chrome.
@@ -579,7 +579,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps the real Agent conversation in the primary supervised workspace region", () => {
-    expect(routeSource).toContain("conversation={<div className=\"flex h-full min-h-0 flex-col\">");
+    expect(routeSource).toContain("conversation={<div className={styles.supervisedConversationFrame}>");
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
     expect(routeSource).toContain("compact");
     expect(supervisedConversationWorkspaceSource).toContain("<main className={styles.mainPane}>");
