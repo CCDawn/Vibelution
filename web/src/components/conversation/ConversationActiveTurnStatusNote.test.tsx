@@ -155,11 +155,12 @@ describe("ConversationActiveTurnStatusNote stream advisories", () => {
     expect(html).not.toContain('data-active-turn-stalled="true"');
   });
 
-  it("upgrades to the no-output stall hint past the threshold and stacks with disconnect", () => {
+  it("upgrades the responding stage to the no-output stall hint past the threshold", () => {
     const html = renderNote({
       message: {
         timestamp: new Date(Date.now() - 120_000).toISOString(),
         status: "running",
+        metadata: { processStage: "responding" },
         turnItems: [],
       },
       streamState: {
@@ -169,11 +170,56 @@ describe("ConversationActiveTurnStatusNote stream advisories", () => {
       },
     });
 
-    // Orthogonal: the reconnecting notice and the stall hint coexist.
+    // Only the body-streaming stage earns the hint; it stacks with disconnect.
+    expect(html).toContain('data-active-turn-stage="responding"');
     expect(html).toContain('data-active-turn-disconnected="true"');
     expect(html).toContain('data-active-turn-stalled="true"');
     expect(html).toContain(dictionaryChat.zh.chatStreamNoOutputStalled);
     expect(html.match(/长时间无输出，可停止 · 9[45]s/g)).toHaveLength(1);
+  });
+
+  it("suppresses the no-output stall hint while the turn is thinking", () => {
+    const html = renderNote({
+      message: {
+        timestamp: new Date(Date.now() - 300_000).toISOString(),
+        status: "running",
+        metadata: { processStage: "model_thinking" },
+        turnItems: [],
+      },
+      streamState: {
+        streamConnected: true,
+        lastAssistantDeltaAtMs: Date.now() - 200_000,
+      },
+    });
+
+    // Long thinking silence is the normal agentic shape: no "can stop" hint.
+    expect(html).toContain('data-active-turn-stage="model_thinking"');
+    expect(html).not.toContain('data-active-turn-stalled="true"');
+    expect(html).not.toContain(dictionaryChat.zh.chatStreamNoOutputStalled);
+    // The heartbeat bills the current thinking segment, not the whole turn
+    // (static first render counts the segment from mount: 0s).
+    expect(html).toContain("思考中 · 0s");
+  });
+
+  it("prefers the live activity-stamp getter over the legacy delta timestamp", () => {
+    const html = renderNote({
+      message: {
+        timestamp: new Date(Date.now() - 300_000).toISOString(),
+        status: "running",
+        metadata: { processStage: "responding" },
+        turnItems: [],
+      },
+      streamState: {
+        streamConnected: true,
+        // The legacy field alone would read ~200s stalled (chip shown); the
+        // fresh activity stamp resets the baseline under the threshold.
+        lastAssistantDeltaAtMs: Date.now() - 200_000,
+        lastStreamActivityAtMs: () => Date.now() - 10_000,
+      },
+    });
+
+    expect(html).not.toContain('data-active-turn-stalled="true"');
+    expect(html).not.toContain(dictionaryChat.zh.chatStreamNoOutputStalled);
   });
 
   it("hides companion-mode advisories", () => {
