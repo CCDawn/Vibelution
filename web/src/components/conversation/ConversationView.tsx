@@ -116,6 +116,11 @@ import {
 import { useComposerPromptSuggestion } from "./useComposerPromptSuggestion";
 import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
 import {
+  ConversationSlashCommandChip,
+  parseUserSlashCommandEcho,
+  resolveUserSlashCommandTone,
+} from "./ConversationSlashCommandChip";
+import {
   insertSlashCommandSuggestion,
   mergeSlashCommandSuggestions,
   moveSlashCommandActiveIndex,
@@ -2980,7 +2985,7 @@ export const ConversationView = React.memo(function ConversationView({
                     />
                   ) : showUserContent ? (
                     <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
-                      {renderResponseText(userContentText)}
+                      {renderUserContentWithSlashEcho(userContentText, userAuthoredMessage)}
                     </AgentUserContentSectionView>
                   ) : null}
                   {groupTranscriptMessage ? (
@@ -6306,6 +6311,34 @@ export const ConversationView = React.memo(function ConversationView({
         workspaceRoot={sessionWorkspacePath}
         language={lang}
       />
+    );
+  }
+
+  /**
+   * User message bodies echo a leading slash command as a chip (ZCode
+   * ConversationUserInputContent parity). The text prefix is the parse basis:
+   * optimistic rows and unknown commands carry no `slashSkillCommand`
+   * metadata, and the chip must render for both — tone comes from the same
+   * skill library the composer suggestion list ranks. Everything after the
+   * command token keeps the ordinary markdown body; non-user rows and
+   * slash-less text are untouched.
+   */
+  function renderUserContentWithSlashEcho(content: string, isUserAuthored: boolean) {
+    if (!isUserAuthored) {
+      return renderResponseText(content);
+    }
+    const echo = parseUserSlashCommandEcho(content);
+    if (!echo) {
+      return renderResponseText(content);
+    }
+    return (
+      <>
+        <ConversationSlashCommandChip
+          command={echo.command}
+          tone={resolveUserSlashCommandTone(echo.command, slashCommandSuggestions)}
+        />
+        {echo.rest.trim() ? renderResponseText(echo.rest) : null}
+      </>
     );
   }
 

@@ -139,6 +139,7 @@ function renderConversation(
       name?: string;
       command: string;
       description?: string;
+      aliases?: string[];
     }>;
     configWorkspace?: {
       modelOptions: Array<{ model_id: string; label: string }>;
@@ -2791,5 +2792,68 @@ describe("group transcript rich text", () => {
     expect(html).toContain("markdownBody");
     expect(html).not.toContain("groupTranscriptBody");
     expect(html).not.toContain("群聊同步记录");
+  });
+});
+
+describe("user slash command echo chip", () => {
+  function userMessage(id: string, content: string): ConversationMessage {
+    return {
+      id,
+      role: "user",
+      content,
+      timestamp: "2026-09-20T05:00:00Z",
+    };
+  }
+
+  const knownSkill = { directoryName: "ccdawn-brt", name: "BRT", command: "/brt", description: "Intent routing" };
+
+  it("renders a leading slash command as a chip with the skill tone and keeps the argument text", () => {
+    const html = renderConversation(
+      [userMessage("message-slash-skill", "/brt 帮我梳理意图路由")],
+      { slashCommandSuggestions: [knownSkill] },
+    );
+
+    expect(html).toContain('data-testid="user-slash-command-chip"');
+    expect(html).toContain('data-slash-command-tone="skill"');
+    expect(html).toContain("/brt");
+    // Argument text stays in the ordinary markdown body after the chip.
+    expect(html).toContain("帮我梳理意图路由");
+  });
+
+  it("renders unknown slash commands in the neutral tone", () => {
+    const html = renderConversation(
+      [userMessage("message-slash-unknown", "/totally-unknown 看看这个")],
+      { slashCommandSuggestions: [knownSkill] },
+    );
+
+    expect(html).toContain('data-testid="user-slash-command-chip"');
+    expect(html).toContain('data-slash-command-tone="unknown"');
+    expect(html).toContain("/totally-unknown");
+    expect(html).toContain("看看这个");
+  });
+
+  it("leaves plain user messages and slash-look-alike text untouched", () => {
+    const html = renderConversation(
+      [
+        userMessage("message-plain", "普通消息，不渲染 chip"),
+        userMessage("message-path", "/etc/hosts 是绝对路径不是命令"),
+      ],
+      { slashCommandSuggestions: [knownSkill] },
+    );
+
+    expect(html).toContain("普通消息，不渲染 chip");
+    expect(html).toContain("/etc/hosts");
+    expect(html).not.toContain('data-testid="user-slash-command-chip"');
+  });
+
+  it("parses the echo from the text prefix only, never from metadata", () => {
+    // Optimistic rows carry no metadata; an alias match still lands the skill tone.
+    const html = renderConversation(
+      [userMessage("message-slash-alias", "/brt-alias 参数")],
+      { slashCommandSuggestions: [{ ...knownSkill, aliases: ["brt-alias"] }] },
+    );
+
+    expect(html).toContain('data-slash-command-tone="skill"');
+    expect(html).toContain("/brt-alias");
   });
 });
