@@ -15,7 +15,7 @@ const styles = {
   ),
   bar: fb(
     "bar",
-    "flex min-w-0 items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] px-2 py-1.5 shadow-[var(--vui-shadow-soft)] backdrop-blur-[10px]",
+    "flex min-w-0 items-center gap-1.5 rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-[var(--vui-surface-popover)] px-2 py-1.5 shadow-[var(--vui-shadow-soft)] backdrop-blur-[10px]",
   ),
   input: fb(
     "input",
