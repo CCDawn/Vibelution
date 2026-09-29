@@ -1311,6 +1311,7 @@ def _source_collection_stage_writeback_closure_summary(
     relation_edges_not_materialized = False
     relation_dangling_edge_count = 0
     relation_unresolved_link_count = 0
+    ingestion_review_pending = False
     excluded_source_count = s._source_collection_count(materialized_sources.get("excludedSourceCount"))
     if stage_id == "finding" or agent_role == "source_finder":
         target_label = "原始资料"
@@ -1387,10 +1388,17 @@ def _source_collection_stage_writeback_closure_summary(
     elif stage_id == "ingestion" or agent_role == "source_ingestor":
         target_label = "入库审核包"
         action_label = "入库审核"
-        success_count = s._source_collection_count(materialized_knowledge_ingestion.get("formalKnowledgeItemCount")) or (
-            1 if materialized_knowledge_ingestion.get("stewardPackCandidateId") else 0
+        success_count = s._source_collection_count(materialized_knowledge_ingestion.get("formalKnowledgeItemCount"))
+        ingestion_review_pending = s._trim_text(
+            materialized_knowledge_ingestion.get("status"), max_length=80
+        ) == "pending_review"
+        artifact_status = (
+            "knowledge_review_pending"
+            if ingestion_review_pending
+            else "knowledge_ingestion_ready"
+            if success_count
+            else "no_effect"
         )
-        artifact_status = "knowledge_ingestion_ready" if success_count else "no_effect"
 
     artifact_complete = bool(
         success_count > 0
@@ -1399,6 +1407,7 @@ def _source_collection_stage_writeback_closure_summary(
         and not relation_edges_not_materialized
         and not relation_dangling_edge_count
         and not relation_unresolved_link_count
+        and not ingestion_review_pending
     )
     if stage_id in {"finding", "extraction"} and not artifact_complete and excluded_source_count > 0 and (not coverage or complete) and not unresolved_blocked_ids:
         artifact_complete = True
@@ -1456,6 +1465,10 @@ def _source_collection_stage_writeback_closure_summary(
             "请使用 retry_evidence 上下文只补 unresolvedBlockedIds 中候选的真实证据锚，"
             "不要重做已有 evidence_ready 结果。"
         )
+    elif ingestion_review_pending:
+        user_status = "partial"
+        message = "入库审核包已提交，等待独立 Agent 审核来源和知识提案；正式知识尚未完成入库。"
+        retry_instruction = "请由具备权限且不是提案者的 Agent 完成来源与知识提案审核；不要重复创建入库审核包。"
     elif success_count > 0 and (not coverage or complete) and task_checklist_complete:
         user_status = "success"
         message = f"已生成 {success_count} 个{target_label}，本阶段闭环成功。"
@@ -1975,7 +1988,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(
             failed=[{"reason": "challenge_scope_incomplete", "error": str(exc)}],
         )
     team_members = s._source_collection_team_member_snapshot(team_id)
-    reviewer_agent_id = steward_agent_id
+    reviewer_agent_id = ""
     if challenge_scope:
         reviewer_agent_id = _challenge_knowledge_manager_agent_id({"members": team_members})
         if not reviewer_agent_id:
@@ -2010,19 +2023,20 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(
             knowledge_base = resolved["knowledgeBase"]
             knowledge_base_id = s._knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
             scoped_knowledge_base_id = s._knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
-        s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, reviewer_agent_id)
-        # 与 KB review grant 对称的 trusted-gate 授权确保：只把本次自动链实际执行
-        # owner source 审阅的 steward agent 加进该 team 的 localStewardAgentIds，
-        # 不扩 REVIEW_ROLES、不影响其他 agent。
-        s.team_knowledge_service.ensure_owner_source_review_grant("team", team_id, reviewer_agent_id)
-        # 候选写入必须落在 authority run 的 owner 工程店里：pack/提交/审核整条
-        # 链都带 run_id 走 run-owner 解析；owner 解析失败时保留历史活跃店目标
-        # 并记录带 reason 的 warning 事件，不再静默漂移（SCI-091 事故根因）。
+        if reviewer_agent_id:
+            # A challenge manager may be assigned review rights, but the
+            # ingestor's writeback is never that manager's review decision.
+            s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, reviewer_agent_id)
+            s.team_knowledge_service.ensure_owner_source_review_grant("team", team_id, reviewer_agent_id)
+        # Keep the draft and source inbox in the authority run's owner store.
+        # An independent reviewer must accept the source and submit/review the
+        # knowledge proposal through the explicit review APIs.
         pack_records: list[dict[str, Any]] = []
         knowledge_item_ids: list[str] = []
         source_pending: dict[str, Any] = {}
         knowledge_pending: dict[str, Any] = {}
         knowledge_review: dict[str, Any] = {}
+        has_pending_review = False
         for source_candidate_id in approved_candidate_ids:
             source_candidate = source_candidates_by_id[source_candidate_id]
             proposed_by_agent_id = steward_agent_id
@@ -2042,7 +2056,6 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(
                 scope=challenge_scope,
             )
             pack_record = _reusable_source_ingestion_pack(team_id, run_id, source_pack_output, scoped_knowledge_base_id)
-            reused_pack = pack_record is not None
             if pack_record is None:
                 pack_record = s.record_local_research_model_output(
                     team_id,
@@ -2072,45 +2085,14 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(
                 knowledge_item_ids.extend(official["knowledgeItemIds"])
                 knowledge_review = {"knowledgeIngestion": {"status": "official_synced", "officialSyncRecord": official}}
                 continue
-            if ingestion.get("status") != "pending_review":
-                if not ingestion.get("inboxSourceId"):
-                    source_pending = s.submit_steward_pack_to_knowledge_ingestion(
-                        team_id, pack_record["candidateId"], ingestion_contract, run_id=run_id)
-                    ingestion = source_pending["candidate"].get("metadata", {}).get("knowledgeIngestion", {})
-                inbox_source_id = s._trim_text(ingestion.get("inboxSourceId"), max_length=160)
-                central_source_id = ""
-                if reused_pack:
-                    inbox = s.team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=reviewer_agent_id)
-                    source = next((item for item in inbox.get("sources", []) if item.get("inboxSourceId") == inbox_source_id), {})
-                    if source.get("status") == "accepted":
-                        central_source_id = s._trim_text(source.get("centralSourceId"), max_length=160)
-                if not central_source_id:
-                    reviewed_source = s.team_knowledge_service.review_owner_inbox_source(
-                        "team", team_id, inbox_source_id, decision="accepted", reviewed_by_agent_id=reviewer_agent_id)
-                    central_source_id = s._trim_text((reviewed_source.get("centralSource") or {}).get("centralSourceId"), max_length=160)
-                knowledge_pending = s.submit_steward_pack_to_knowledge_ingestion(
-                    team_id, pack_record["candidateId"], {**ingestion_contract, "centralSourceId": central_source_id}, run_id=run_id)
-            knowledge_review = s.review_steward_pack_knowledge_ingestion(
-                team_id,
-                pack_record["candidateId"],
-                {
-                    "knowledgeBaseId": scoped_knowledge_base_id,
-                    "reviewedByAgentId": reviewer_agent_id,
-                    "decision": "approved",
-                    "resolutionNote": s._trim_text(decision.get("reason") or writeback.get("summary"), max_length=2000),
-                },
-                run_id=run_id,
-            )
-            official_record = (
-                knowledge_review.get("knowledgeIngestion", {}).get("officialSyncRecord", {})
-                if isinstance(knowledge_review.get("knowledgeIngestion"), dict)
-                else {}
-            )
-            knowledge_item_ids.extend(
-                s._trim_text(item, max_length=160)
-                for item in list(official_record.get("knowledgeItemIds") or [])
-                if s._trim_text(item, max_length=160)
-            )
+            has_pending_review = True
+            if ingestion.get("status") == "pending_review":
+                knowledge_pending = {"knowledgeIngestion": ingestion}
+            elif ingestion.get("status") == "pending_source_review" or ingestion.get("inboxSourceId"):
+                source_pending = {"knowledgeIngestion": ingestion}
+            else:
+                source_pending = s.submit_steward_pack_to_knowledge_ingestion(
+                    team_id, pack_record["candidateId"], ingestion_contract, run_id=run_id)
     except (s.TeamWorkflowOrchestrationError, s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
         summary = s._source_collection_stage_writeback_knowledge_ingestion_summary(
             status="failed",
@@ -2145,7 +2127,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion_locked(
         return summary
 
     summary = s._source_collection_stage_writeback_knowledge_ingestion_summary(
-        status="completed",
+        status="pending_review" if has_pending_review else "completed",
         steward_pack_candidate_id=s._trim_text(pack_records[0].get("candidateId"), max_length=160) if pack_records else "",
         knowledge_base_id=knowledge_base_id,
         scoped_knowledge_base_id=scoped_knowledge_base_id,

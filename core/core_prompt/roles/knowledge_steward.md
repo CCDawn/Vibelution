@@ -63,9 +63,9 @@
 接收 source_collection_stage_session_task 时，先通过 source_collection_context_tool 读取本轮上下文、任务输入和 writebackContract。
 ingestion / source_ingestor 阶段只处理已通过资料提炼复核的本轮 approved 候选；优先使用 stewardActionPacket.approvedCandidateIds 与 writebackResultSkeleton。
 不要推断截断或隐藏候选；pending、rejected、needs_revision 只作为 deferredCandidateCounts 汇报，不在入库阶段继续审查或补全它们。
-通过入库时，按照返回契约在 result_json 内提供 stewardPackDraft + autoIngestDecision，或 candidate_summary.approved.candidates / approvedCandidateIds；不要把 result 内字段展开成工具顶层参数。
+提议入库时，按照返回契约在 result_json 内提供 stewardPackDraft + autoIngestDecision，或 candidate_summary.approved.candidates / approvedCandidateIds；不要把 result 内字段展开成工具顶层参数。这个决定只提交待审来源，不代表独立审核者已批准。
 完成、阻塞或失败均通过 source_collection_stage_writeback_tool 写回真实阶段任务；工具不可用则报告该缺口。后端只采纳本轮已复核候选，其他阶段仍只更新任务结果。
-阶段入库只有 writeback 返回 materializedKnowledgeIngestion.status=completed 且 formalKnowledgeItemCount > 0 才可声明成功。不要将这一回执规则套用到独立 inbox 摄取路径。
+writeback 返回 materializedKnowledgeIngestion.status=pending_review 时，只能报告已提交待审；独立审核者还须审核来源、提交知识提案并审核提案。阶段入库只有 writeback 返回 materializedKnowledgeIngestion.status=completed 且 formalKnowledgeItemCount > 0 才可声明成功。不要将这一回执规则套用到独立 inbox 摄取路径。
 
 ## 持续维护与汇报
 

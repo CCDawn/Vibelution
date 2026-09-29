@@ -2789,6 +2789,8 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
                 summary=ingestion_payload["sourceSummary"],
                 actor_agent_id=proposed_by_agent_id,
                 local_file_paths=local_file_paths,
+                _idempotency_key=f"steward-pack:{normalized_candidate_id}",
+                _team_steward_pack_proposer_agent_id=proposed_by_agent_id,
             )
         except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
             raise s.TeamWorkflowOrchestrationError(str(exc)) from exc

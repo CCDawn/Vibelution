@@ -2012,7 +2012,7 @@ def test_source_collection_stage_session_task_writeback_rejects_leads_without_id
 
     assert data_processing_service.list_records(stage_response["run"]["runId"])["records"] == []
 
-def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path, monkeypatch):
+def test_source_ingestor_writeback_stops_at_independent_source_review(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
@@ -2104,7 +2104,7 @@ def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path
         task["taskId"],
         {
             "status": "completed",
-            "summary": "资料入库 Agent 已审核并入库高置信资料。",
+            "summary": "资料入库 Agent 已提交高置信资料，等待独立审核。",
             "result": {
                 "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
                 "stewardPackDraft": pack_output,
@@ -2126,29 +2126,36 @@ def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path
     projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)
     ingestion_card = next(card for card in projection["cards"] if card["stageId"] == "ingestion")
 
-    assert response["task"]["writesFormalKnowledge"] is True
-    assert response["writeback"]["materializedKnowledgeIngestion"]["status"] == "completed"
-    assert response["writeback"]["materializedKnowledgeIngestion"]["approvedCandidateCount"] == 1
-    assert response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemCount"] == 1
-    assert knowledge_items["summary"]["itemCount"] == 1
+    materialized = response["writeback"]["materializedKnowledgeIngestion"]
+    assert response["task"]["writesFormalKnowledge"] is False
+    assert materialized["status"] == "pending_review"
+    assert materialized["sourceReviewStatus"] == "pending_source_review"
+    assert materialized["approvedCandidateCount"] == 1
+    assert materialized["formalKnowledgeItemCount"] == 0
+    assert knowledge_items["summary"]["itemCount"] == 0
     assert response["task"]["status"] == "needs_review"
     assert response["task"]["result"]["closureSummary"]["completionGatePassed"] is False
-    assert ingestion_card["status"] == "artifact_ready_agent_needs_review"
+    assert ingestion_card["status"] == "partial_current_inputs"
     _append_stage_task_tool_trace(tmp_path, response["task"])
 
     team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
     projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)
     ingestion_card = next(card for card in projection["cards"] if card["stageId"] == "ingestion")
-    assert ingestion_card["status"] == "closed_loop"
-    assert ingestion_card["counts"]["output"] == 1
-    assert ingestion_card["latestTask"]["materializedKnowledgeIngestion"]["status"] == "completed"
-    assert ingestion_card["latestTask"]["closureSummary"]["completionGatePassed"] is True
+    assert ingestion_card["status"] == "partial_current_inputs"
+    assert ingestion_card["counts"]["output"] == 0
+    assert ingestion_card["latestTask"]["materializedKnowledgeIngestion"]["status"] == "pending_review"
+    assert ingestion_card["latestTask"]["materializedKnowledgeIngestion"]["sourceReviewStatus"] == "pending_source_review"
+    assert ingestion_card["latestTask"]["closureSummary"]["completionGatePassed"] is False
+    assert ingestion_card["latestTask"]["closureSummary"]["userStatus"] == "partial"
+    assert "等待独立 Agent 审核来源和知识提案" in ingestion_card["userSummary"]
     ingestion_events = _workflow_scene_events_by_code(scene_events, "source_collection.stage_session_task_knowledge_ingestion_materialized")
     assert ingestion_events[-1]["child_log_payload"]["kind"] == "source_collection_stage_knowledge_ingestion_materialization"
-    assert ingestion_events[-1]["child_log_payload"]["status"] == "completed"
+    assert ingestion_events[-1]["child_log_payload"]["status"] == "pending_review"
     assert ingestion_events[-1]["child_log_payload"]["steps"][0]["stageId"] == "auto_ingest_gate"
+    assert ingestion_events[-1]["child_log_payload"]["steps"][0]["status"] == "pending_review"
     assert ingestion_events[-1]["child_log_payload"]["steps"][-1]["stageId"] == "official_sync"
-    assert ingestion_events[-1]["child_log_payload"]["formalKnowledgeItemIds"] == response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemIds"]
+    assert ingestion_events[-1]["child_log_payload"]["steps"][-1]["status"] == "pending_review"
+    assert ingestion_events[-1]["child_log_payload"]["formalKnowledgeItemIds"] == []
 
 def test_source_ingestor_writeback_reuses_existing_knowledge_expansion_library_when_request_id_missing(tmp_path, monkeypatch):
     """缺省 knowledgeBaseId 的重试必须复用同名既有库，而不是每次新建。"""
@@ -2256,7 +2263,7 @@ def test_source_ingestor_writeback_reuses_existing_knowledge_expansion_library_w
     bases = team_knowledge_service.list_team_knowledge_bases(team["teamId"], internal=True)["knowledgeBases"]
     assert [str(item.get("name") or "") for item in bases] == ["Knowledge Expansion Library"]
 
-def test_source_ingestor_writeback_auto_ingests_approved_candidate_summary(tmp_path, monkeypatch):
+def test_source_ingestor_writeback_keeps_approved_candidate_summary_pending_review(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
@@ -2326,7 +2333,7 @@ def test_source_ingestor_writeback_auto_ingests_approved_candidate_summary(tmp_p
         task["taskId"],
         {
             "status": "completed",
-            "summary": "资料入库 Agent 通过 1 条候选，进入正式入库。",
+            "summary": "资料入库 Agent 提交 1 条候选，等待独立审核。",
             "result": {
                 "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
                 "candidate_summary": {
@@ -2354,11 +2361,13 @@ def test_source_ingestor_writeback_auto_ingests_approved_candidate_summary(tmp_p
         agent_id=ingestor_agent_id,
     )
 
-    assert response["writeback"]["materializedKnowledgeIngestion"]["status"] == "completed"
-    assert response["writeback"]["materializedKnowledgeIngestion"]["approvedCandidateCount"] == 1
-    assert response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemCount"] == 1
-    assert response["task"]["writesFormalKnowledge"] is True
-    assert knowledge_items["summary"]["itemCount"] == 1
+    materialized = response["writeback"]["materializedKnowledgeIngestion"]
+    assert materialized["status"] == "pending_review"
+    assert materialized["sourceReviewStatus"] == "pending_source_review"
+    assert materialized["approvedCandidateCount"] == 1
+    assert materialized["formalKnowledgeItemCount"] == 0
+    assert response["task"]["writesFormalKnowledge"] is False
+    assert knowledge_items["summary"]["itemCount"] == 0
 
 def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -4514,7 +4523,7 @@ def test_source_quality_batch_skips_superseded_source_versions(tmp_path, monkeyp
 
 
 def test_source_collection_ingestion_stage_writeback_uses_scoped_team_base_when_ids_overlap(tmp_path, monkeypatch):
-    """Stage writeback must scope a raw team KB id before granting/reviewing ingestion."""
+    """Pending stage writeback must keep its target KB scoped when raw IDs overlap."""
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     extractor = agent_directory_service.create_agent_instance(display_name="资料提炼")
@@ -4659,10 +4668,12 @@ def test_source_collection_ingestion_stage_writeback_uses_scoped_team_base_when_
 
     materialized = response["writeback"]["materializedKnowledgeIngestion"]
     assert materialized["failed"] == [], materialized["failed"]
-    assert materialized["status"] == "completed", materialized
+    assert materialized["status"] == "pending_review", materialized
+    assert materialized["sourceReviewStatus"] == "pending_source_review"
     assert materialized["knowledgeBaseId"] == target_base["knowledgeBaseId"]
     assert materialized["scopedKnowledgeBaseId"] == target_base["scopedKnowledgeBaseId"]
-    assert materialized["formalKnowledgeItemCount"] >= 1
+    assert materialized["formalKnowledgeItemCount"] == 0
+    assert materialized["writesFormalKnowledge"] is False
 
 def test_content_extraction_writeback_requires_candidate_coverage_and_materializes_extractions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)

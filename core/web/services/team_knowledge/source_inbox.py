@@ -23,7 +23,11 @@ def _service():
     return team_knowledge_service
 
 
-_INTERNAL_SOURCE_FIELDS = {"_idempotency", "_sessionAttachmentCollectorAgentId"}
+_INTERNAL_SOURCE_FIELDS = {
+    "_idempotency",
+    "_sessionAttachmentCollectorAgentId",
+    "_teamStewardPackProposerAgentId",
+}
 
 
 def _public_source(source: dict[str, Any]) -> dict[str, Any]:
@@ -78,6 +82,81 @@ def _session_attachment_idempotency_record(
             "summary": summary,
         }
     )
+    return {"scopeHash": scope_hash, "requestFingerprint": request_fingerprint}
+
+
+def _source_collection_idempotency_record(
+    *,
+    owner: dict[str, Any],
+    actor_agent_id: str,
+    idempotency_key: str,
+    source_type: str,
+    source_ref: dict[str, Any],
+    original_content: str,
+    original_filename: str,
+    source_created_at: str,
+    captured_by: str,
+    source_hash: str,
+    evidence_range: dict[str, Any],
+    title: str,
+    summary: str,
+    local_file_paths: list[Any],
+) -> dict[str, str] | None:
+    normalized_key = str(idempotency_key or "").strip()
+    if not normalized_key:
+        return None
+    if len(normalized_key) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in normalized_key):
+        raise _service().TeamKnowledgeError("Idempotency-Key must contain at most 200 printable characters.")
+
+    s = _service()
+    key_hash = hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()
+    scope_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "ownerType": owner["ownerType"],
+                "ownerId": owner["ownerId"],
+                "actorAgentId": actor_agent_id,
+                "idempotencyKeyHash": key_hash,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    local_copy_fingerprints: list[dict[str, Any]] = []
+    for raw_item in list(local_file_paths or [])[: s.MAX_LOCAL_SOURCE_COPIES]:
+        spec = raw_item if isinstance(raw_item, dict) else {"path": raw_item}
+        resolved = s._resolve_copyable_local_file(spec.get("path") or spec.get("sourcePath") or spec.get("filePath"))
+        local_copy_fingerprints.append(
+            {
+                "candidateId": s._safe_token(spec.get("candidateId") or spec.get("sourceId") or "", default="", max_length=96),
+                "title": trim_lines(str(spec.get("title") or (resolved.name if resolved else "")), max_lines=1).strip(),
+                "filename": s._safe_source_filename(resolved.name, default="source.bin") if resolved else "",
+                "sha256": s._sha256_local_file(resolved) if resolved else "",
+                "originRef": trim_lines(str(spec.get("originRef") or ""), max_lines=1).strip()[:240],
+            }
+        )
+
+    request_payload = {
+        "ownerType": owner["ownerType"],
+        "ownerId": owner["ownerId"],
+        "actorAgentId": actor_agent_id,
+        "sourceType": source_type,
+        "sourceRef": source_ref,
+        "originalContentHash": hashlib.sha256(str(original_content or "").encode("utf-8")).hexdigest(),
+        "originalFilename": original_filename,
+        "sourceCreatedAt": source_created_at,
+        "capturedBy": captured_by,
+        "sourceHash": source_hash,
+        "evidenceRange": evidence_range,
+        "title": title,
+        "summary": summary,
+        "localCopies": local_copy_fingerprints,
+    }
+    request_fingerprint = hashlib.sha256(
+        json.dumps(request_payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return {"scopeHash": scope_hash, "requestFingerprint": request_fingerprint}
 
 
@@ -193,7 +272,9 @@ def collect_source_to_inbox(
     local_file_paths: list[Any] | None = None,
     _minimal_audit: bool = False,
     _idempotency: dict[str, str] | None = None,
+    _idempotency_key: str = "",
     _session_attachment_collector_agent_id: str = "",
+    _team_steward_pack_proposer_agent_id: str = "",
 ) -> dict[str, Any]:
     """Stage raw source material inside the owning Team/Agent workspace."""
 
@@ -210,71 +291,129 @@ def collect_source_to_inbox(
         if str(owner.get("ownerType") or "") != "team":
             raise s.TeamKnowledgeError("team_chat_refinement sources require a Team owner.")
         s._validate_team_chat_source(owner["team"], normalized_ref)
-    now = s.utc_now_iso()
-    inbox_source_id = s._new_event_id("inboxsrc")
     safe_title = trim_lines(title or normalized_type, max_lines=1).strip()
     safe_summary = trim_lines(summary or "", max_lines=16).strip()
     safe_content = str(original_content or "")
-    original_path = s._write_owner_inbox_source_file(
-        owner,
-        inbox_source_id,
-        original_filename=original_filename,
-        original_content=safe_content,
-        source_ref=normalized_ref,
-        title=safe_title,
-        summary=safe_summary,
-    )
-    local_copies = s._stage_local_source_copies(
-        owner,
-        inbox_source_id,
-        local_file_paths or [],
-    )
-    if local_copies:
-        normalized_ref["localCopies"] = local_copies
     normalized_hash = trim_lines(
         source_hash or s._source_hash_with_content(normalized_ref, safe_title, safe_summary, safe_content),
         max_lines=1,
     ).strip()
-    source = {
-        "schemaVersion": s.SCHEMA_VERSION,
-        "inboxSourceId": inbox_source_id,
-        "ownerType": owner["ownerType"],
-        "ownerId": owner["ownerId"],
-        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
-        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
-        "sourceType": normalized_type,
-        "sourceRef": normalized_ref,
-        "sourceCreatedAt": trim_lines(source_created_at or "", max_lines=1).strip(),
-        "capturedBy": trim_lines(captured_by or actor_id or "user", max_lines=1).strip(),
-        "capturedAt": now,
-        "sourceHash": normalized_hash,
-        "evidenceRange": s._bounded_dict(evidence_range if isinstance(evidence_range, dict) else {}),
-        "title": safe_title,
-        "summary": safe_summary,
-        "originalFilename": s._safe_source_filename(original_filename, default=f"{normalized_type}.txt"),
-        "originalPath": s._project_relative_path(original_path),
-        "localCopies": local_copies,
-        "status": "pending",
-        "curationStatus": "owner_inbox",
-        "centralSourceId": "",
-        "dedupeStatus": "",
-        "reviewedAt": "",
-        "reviewedByAgentId": "",
-        "resolutionNote": "",
-        "updatedAt": now,
-    }
-    if isinstance(_idempotency, dict) and _idempotency.get("scopeHash") and _idempotency.get("requestFingerprint"):
-        source["_idempotency"] = {
+    safe_source_created_at = trim_lines(source_created_at or "", max_lines=1).strip()
+    safe_captured_by = trim_lines(captured_by or actor_id or "user", max_lines=1).strip()
+    safe_filename = s._safe_source_filename(original_filename, default=f"{normalized_type}.txt")
+    normalized_evidence_range = s._bounded_dict(evidence_range if isinstance(evidence_range, dict) else {})
+    if _idempotency_key:
+        if _idempotency:
+            raise s.TeamKnowledgeError("Pass either an idempotency key or an idempotency record, not both.")
+        _idempotency = _source_collection_idempotency_record(
+            owner=owner,
+            actor_agent_id=actor_id,
+            idempotency_key=_idempotency_key,
+            source_type=normalized_type,
+            source_ref=normalized_ref,
+            original_content=safe_content,
+            original_filename=safe_filename,
+            source_created_at=safe_source_created_at,
+            captured_by=safe_captured_by,
+            source_hash=normalized_hash,
+            evidence_range=normalized_evidence_range,
+            title=safe_title,
+            summary=safe_summary,
+            local_file_paths=list(local_file_paths or []),
+        )
+    idempotency_record = (
+        {
             "scopeHash": str(_idempotency["scopeHash"]),
             "requestFingerprint": str(_idempotency["requestFingerprint"]),
         }
+        if isinstance(_idempotency, dict) and _idempotency.get("scopeHash") and _idempotency.get("requestFingerprint")
+        else None
+    )
     trusted_attachment_collector_id = str(_session_attachment_collector_agent_id or "").strip()
     if trusted_attachment_collector_id:
         if trusted_attachment_collector_id != actor_id:
             raise s.TeamKnowledgePermissionError("The session attachment collector must match the authorized actor.")
-        source["_sessionAttachmentCollectorAgentId"] = trusted_attachment_collector_id
+    trusted_steward_pack_proposer_id = str(_team_steward_pack_proposer_agent_id or "").strip()
+    if trusted_steward_pack_proposer_id:
+        if owner["ownerType"] != "team":
+            raise s.TeamKnowledgeError("The Team steward-pack proposer marker requires a Team owner.")
+        if trusted_steward_pack_proposer_id != actor_id:
+            raise s.TeamKnowledgePermissionError("The Team steward-pack proposer must match the authorized actor.")
+
     with s._LOCK:
         sources = s._read_jsonl(s._owner_source_index_path(owner))
+        if idempotency_record:
+            existing = next(
+                (
+                    item
+                    for item in sources
+                    if isinstance(item, dict)
+                    and isinstance(item.get("_idempotency"), dict)
+                    and str(item["_idempotency"].get("scopeHash") or "") == idempotency_record["scopeHash"]
+                ),
+                None,
+            )
+            if existing is not None:
+                old_record = existing.get("_idempotency") if isinstance(existing.get("_idempotency"), dict) else {}
+                if str(old_record.get("requestFingerprint") or "") != idempotency_record["requestFingerprint"]:
+                    raise s.TeamKnowledgeIdempotencyConflictError(
+                        "Idempotency-Key was already used for a different source inbox request."
+                    )
+                # Return the persisted record as-is so a retry cannot reset a review decision.
+                return _public_source(existing)
+
+        now = s.utc_now_iso()
+        inbox_source_id = s._new_event_id("inboxsrc")
+        original_path = s._write_owner_inbox_source_file(
+            owner,
+            inbox_source_id,
+            original_filename=original_filename,
+            original_content=safe_content,
+            source_ref=normalized_ref,
+            title=safe_title,
+            summary=safe_summary,
+        )
+        local_copies = s._stage_local_source_copies(
+            owner,
+            inbox_source_id,
+            local_file_paths or [],
+        )
+        if local_copies:
+            normalized_ref["localCopies"] = local_copies
+        source = {
+            "schemaVersion": s.SCHEMA_VERSION,
+            "inboxSourceId": inbox_source_id,
+            "ownerType": owner["ownerType"],
+            "ownerId": owner["ownerId"],
+            "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+            "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+            "sourceType": normalized_type,
+            "sourceRef": normalized_ref,
+            "sourceCreatedAt": safe_source_created_at,
+            "capturedBy": safe_captured_by,
+            "capturedAt": now,
+            "sourceHash": normalized_hash,
+            "evidenceRange": normalized_evidence_range,
+            "title": safe_title,
+            "summary": safe_summary,
+            "originalFilename": safe_filename,
+            "originalPath": s._project_relative_path(original_path),
+            "localCopies": local_copies,
+            "status": "pending",
+            "curationStatus": "owner_inbox",
+            "centralSourceId": "",
+            "dedupeStatus": "",
+            "reviewedAt": "",
+            "reviewedByAgentId": "",
+            "resolutionNote": "",
+            "updatedAt": now,
+        }
+        if idempotency_record:
+            source["_idempotency"] = idempotency_record
+        if trusted_attachment_collector_id:
+            source["_sessionAttachmentCollectorAgentId"] = trusted_attachment_collector_id
+        if trusted_steward_pack_proposer_id:
+            source["_teamStewardPackProposerAgentId"] = trusted_steward_pack_proposer_id
         sources.append(source)
         s._write_jsonl(s._owner_source_index_path(owner), sources)
         s._rewrite_owner_source_review_queue_locked(owner, sources)
@@ -618,6 +757,15 @@ def review_owner_inbox_source(
         ):
             raise s.TeamKnowledgePermissionError(
                 "A Team Agent cannot review their own staged session attachment source."
+            )
+        protected_steward_pack_proposer_id = str(source.get("_teamStewardPackProposerAgentId") or "").strip()
+        if (
+            owner["ownerType"] == "team"
+            and protected_steward_pack_proposer_id
+            and reviewer_id == protected_steward_pack_proposer_id
+        ):
+            raise s.TeamKnowledgePermissionError(
+                "A Team Agent cannot review their own staged steward-pack source."
             )
         central_source: dict[str, Any] | None = None
         promotion: dict[str, Any] | None = None

@@ -180,8 +180,9 @@ def test_ingestion_uses_canonical_task_actor_when_writeback_uses_display_name(
     materialized = response["writeback"]["materializedKnowledgeIngestion"]
     assert captured["actorAgentId"] == task["agentId"]
     assert captured["actorAgentId"] != writeback["recordedByAgent"]
-    assert materialized["status"] == "completed"
-    assert materialized["formalKnowledgeItemCount"] == 1
+    assert materialized["status"] == "pending_review"
+    assert materialized["sourceReviewStatus"] == "pending_source_review"
+    assert materialized["formalKnowledgeItemCount"] == 0
     assert source["title"]
 
 

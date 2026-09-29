@@ -643,6 +643,180 @@ def test_owner_source_review_directly_ingests_accepted_source_into_formal_knowle
     assert governance["summary"]["proposalReviewCount"] == 0
 
 
+def test_source_collection_retry_reuses_appended_source_without_resetting_review_state(knowledge_env, monkeypatch):
+    team_id = knowledge_env["team"]["teamId"]
+    member_id = knowledge_env["member"]["agentId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    original_record_event = team_knowledge_service._record_event
+
+    def fail_after_inbox_append(event_type, *args, **kwargs):
+        if event_type == "knowledge.source_inbox.collected":
+            raise RuntimeError("simulated crash before steward-pack receipt")
+        return original_record_event(event_type, *args, **kwargs)
+
+    monkeypatch.setattr(team_knowledge_service, "_record_event", fail_after_inbox_append)
+    request = {
+        "source_type": "agent_authored",
+        "source_ref": {"candidateId": "candidate-retry-1", "contentTrust": "untrusted_source_material"},
+        "original_content": "The same staged candidate must not create a second inbox source after a receipt failure.",
+        "original_filename": "candidate-retry.txt",
+        "title": "Retry-safe candidate",
+        "summary": "A stable candidate identity is used across attempts.",
+        "actor_agent_id": member_id,
+        "_idempotency_key": "steward-pack:candidate-retry-1",
+        "_team_steward_pack_proposer_agent_id": member_id,
+    }
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        team_knowledge_service.collect_source_to_inbox("team", team_id, **request)
+    monkeypatch.setattr(team_knowledge_service, "_record_event", original_record_event)
+
+    before_review = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+    assert before_review["summary"]["pendingSourceCount"] == 1
+    original_id = before_review["sources"][0]["inboxSourceId"]
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team_id,
+        original_id,
+        decision="accepted",
+        reviewed_by_agent_id=lead_id,
+    )
+
+    replayed = team_knowledge_service.collect_source_to_inbox("team", team_id, **request)
+    after_retry = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+
+    assert replayed["inboxSourceId"] == original_id
+    assert replayed["status"] == "accepted"
+    assert replayed["reviewedByAgentId"] == lead_id
+    assert reviewed["source"]["status"] == "accepted"
+    assert len(after_retry["sources"]) == 1
+    assert after_retry["sources"][0]["inboxSourceId"] == original_id
+
+
+def test_source_collection_idempotency_key_conflicts_on_changed_payload(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    member_id = knowledge_env["member"]["agentId"]
+    shared = {
+        "source_type": "agent_authored",
+        "source_ref": {"candidateId": "candidate-conflict-1"},
+        "original_filename": "candidate-conflict.txt",
+        "title": "Conflicting candidate",
+        "summary": "The same key cannot name changed content.",
+        "actor_agent_id": member_id,
+        "_idempotency_key": "steward-pack:candidate-conflict-1",
+        "_team_steward_pack_proposer_agent_id": member_id,
+    }
+    first = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        original_content="First candidate content.",
+        **shared,
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgeIdempotencyConflictError):
+        team_knowledge_service.collect_source_to_inbox(
+            "team",
+            team_id,
+            original_content="Changed candidate content.",
+            **shared,
+        )
+
+    inbox = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+    assert len(inbox["sources"]) == 1
+    assert inbox["sources"][0]["inboxSourceId"] == first["inboxSourceId"]
+
+
+def test_source_collection_idempotency_serializes_concurrent_replays(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    member_id = knowledge_env["member"]["agentId"]
+    barrier = threading.Barrier(6)
+
+    def collect_candidate():
+        barrier.wait(timeout=5)
+        return team_knowledge_service.collect_source_to_inbox(
+            "team",
+            team_id,
+            source_type="agent_authored",
+            source_ref={"candidateId": "candidate-concurrent-1"},
+            original_content="Concurrent retries should append one source under the owner lock.",
+            original_filename="candidate-concurrent.txt",
+            title="Concurrent candidate",
+            actor_agent_id=member_id,
+            _idempotency_key="steward-pack:candidate-concurrent-1",
+            _team_steward_pack_proposer_agent_id=member_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        sources = list(pool.map(lambda _: collect_candidate(), range(6)))
+
+    inbox = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+    source_ids = {source["inboxSourceId"] for source in sources}
+    assert len(source_ids) == 1
+    assert len(inbox["sources"]) == 1
+    assert inbox["sources"][0]["inboxSourceId"] in source_ids
+
+
+def test_steward_pack_team_proposer_cannot_self_review_but_private_owner_flow_is_unchanged(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+    team_knowledge_service.update_owner_source_governance(
+        "team",
+        team_id,
+        local_steward_agent_ids=[member_id],
+        actor_agent_id=lead_id,
+    )
+    team_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        source_type="agent_authored",
+        source_ref={"candidateId": "self-review-candidate"},
+        original_content="A Team steward-pack proposer must not approve their own staged candidate.",
+        title="Self-review candidate",
+        actor_agent_id=lead_id,
+        _idempotency_key="steward-pack:self-review-candidate",
+        _team_steward_pack_proposer_agent_id=lead_id,
+    )
+
+    assert "_teamStewardPackProposerAgentId" not in team_source
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="own staged steward-pack"):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            team_id,
+            team_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=lead_id,
+        )
+    approved_by_other = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team_id,
+        team_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=member_id,
+    )
+
+    private_source = team_knowledge_service.collect_source_to_inbox(
+        "agent",
+        member_id,
+        source_type="agent_authored",
+        source_ref={"note": "private source"},
+        original_content="The Agent owner can still review their own private source.",
+        title="Private owner source",
+        actor_agent_id=member_id,
+    )
+    private_review = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        member_id,
+        private_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=member_id,
+    )
+
+    assert approved_by_other["source"]["reviewedByAgentId"] == member_id
+    assert private_review["source"]["status"] == "accepted"
+    assert private_review["source"]["reviewedByAgentId"] == member_id
+
+
 def test_global_knowledge_steward_can_direct_ingest_screened_team_source(knowledge_env):
     steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     inbox_source = team_knowledge_service.collect_source_to_inbox(
