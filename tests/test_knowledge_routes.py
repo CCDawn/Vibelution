@@ -446,6 +446,7 @@ def test_session_attachment_team_collector_cannot_self_review_but_agent_private_
             "knowledgeContent": "This must stay pending until another Team Agent reviews it.",
         },
     )
+    team_knowledge_service.ensure_knowledge_base_review_grant(base["knowledgeBaseId"], member["agentId"])
     independent_review = client.patch(
         f"/api/knowledge/sources/inbox/team/{team['teamId']}/{inbox_source_id}/review",
         json={
