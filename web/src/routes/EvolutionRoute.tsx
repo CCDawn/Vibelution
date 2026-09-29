@@ -44,16 +44,12 @@ import {
   migrateLegacyNumericPanes,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
-import {
-  migrateLegacyNumericHeight,
-  type PaneHeightSpec,
-} from "../components/layout/paneHeightPersistence";
-import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
-import { paneHeightCssVar, paneWidthCssVar } from "../components/layout/paneCssVariables";
+import { paneWidthCssVar } from "../components/layout/paneCssVariables";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
+  VDialog,
   VMetricStrip,
   VSection,
   VSurface,
@@ -114,6 +110,7 @@ import {
 } from "./evolution/evolutionRouteModel";
 
 import { getEffectiveIntakeMode, SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
+import { SupervisedConversationWorkspace } from "./SupervisedConversationWorkspace";
 import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationPanel";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import {
@@ -125,7 +122,6 @@ import {
   EvolutionSupervisedWorkflowMembersPanel,
   type EvolutionSupervisedWorkflowStepView,
 } from "./EvolutionSupervisedWorkflowMembersPanel";
-import { EvolutionSupervisedRunPlanPanel } from "./EvolutionSupervisedRunPlanPanel";
 import { EvolutionSupervisedLiveIoPanel } from "./EvolutionSupervisedLiveIoPanel";
 import { EvolutionSupervisedRunsView } from "./EvolutionSupervisedRunsView";
 import { EvolutionSupervisedLibraryView } from "./EvolutionSupervisedLibraryView";
@@ -230,32 +226,10 @@ const EVOLUTION_LIBRARY_LIST_PANE: PaneSpec = {
   minWidth: 280,
   maxWidth: 520,
 };
-const EVOLUTION_LIVE_LAUNCH_PANE: PaneSpec = {
-  id: "live-launch",
-  defaultWidth: 440,
-  minWidth: 400,
-  maxWidth: 600,
-};
-const EVOLUTION_LIVE_RUN_PANE: PaneSpec = {
-  id: "live-run",
-  defaultWidth: 380,
-  minWidth: 320,
-  maxWidth: 560,
-};
 const EVOLUTION_WIDTH_PANES: PaneSpec[] = [
   EVOLUTION_RUNS_QUEUE_PANE,
   EVOLUTION_LIBRARY_LIST_PANE,
-  EVOLUTION_LIVE_LAUNCH_PANE,
-  EVOLUTION_LIVE_RUN_PANE,
 ];
-const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
-const EVOLUTION_LIVE_IO_HEIGHT_PANE: PaneHeightSpec = {
-  id: "live-io",
-  defaultHeight: 340,
-  minHeight: 260,
-  maxHeight: 780,
-};
-const EVOLUTION_HEIGHT_PANES: PaneHeightSpec[] = [EVOLUTION_LIVE_IO_HEIGHT_PANE];
 export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps) {
   const {
     lang,
@@ -300,7 +274,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [approvalMode, setApprovalMode] = useState<"human" | "agent">("human");
   const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
   const [selectedSupervisedWorkflowStepId, setSelectedSupervisedWorkflowStepId] = useState<SupervisedWorkflowStepId | null>(null);
-  const [supervisedEvidenceStep, setSupervisedEvidenceStep] = useState<string | null>(null);
+  const [supervisedSetupOpen, setSupervisedSetupOpen] = useState(false);
+  const [supervisedConfirmation, setSupervisedConfirmation] = useState<{runId:string;action:string} | null>(null);
+  const [supervisedDialog, setSupervisedDialog] = useState<"source" | "settings" | null>(null);
+  const supervisedDraftRef = useRef<{
+    sourceKind: "dataset" | "bundle"; datasetName: string; bundleName: string;
+    limit: string; approval: "human" | "agent"; mental: SupervisedMentalModelMode;
+  } | null>(null);
   const [selectedSupervisedAgentRole, setSelectedSupervisedAgentRole] = useState<SupervisedMemberRole | null>(null);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
   const [recentSupervisedWorktreeRunId, setRecentSupervisedWorktreeRunId] = useState<string | null>(
@@ -346,30 +326,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const runsQueueWidth = evolutionPaneWidths["runs-queue"] ?? EVOLUTION_RUNS_QUEUE_PANE.defaultWidth;
   const libraryListWidth = evolutionPaneWidths["library-list"] ?? EVOLUTION_LIBRARY_LIST_PANE.defaultWidth;
-  const liveLaunchWidth = evolutionPaneWidths["live-launch"] ?? EVOLUTION_LIVE_LAUNCH_PANE.defaultWidth;
-  const liveRunWidth = evolutionPaneWidths["live-run"] ?? EVOLUTION_LIVE_RUN_PANE.defaultWidth;
-  // Synchronous one-time migrate so the first height resolve sees shared storage.
-  migrateLegacyNumericHeight(
-    EVOLUTION_LAYOUT_ID,
-    EVOLUTION_LIVE_IO_HEIGHT_PANE.id,
-    EVOLUTION_LIVE_IO_HEIGHT_KEY,
-  );
-  const {
-    registerSplitContainer: registerEvolutionHeightContainer,
-    paneVariablesStyle: evolutionHeightVariablesStyle,
-    heights: evolutionPaneHeights,
-    draggingPaneId: evolutionHeightDraggingPaneId,
-    startResize: startEvolutionHeightResize,
-    onResizeKeyDown: onEvolutionHeightResizeKeyDown,
-  } = usePersistedPaneHeight({
-    layoutId: EVOLUTION_LAYOUT_ID,
-    panes: EVOLUTION_HEIGHT_PANES,
-  });
-  const liveIoHeight = evolutionPaneHeights["live-io"] ?? EVOLUTION_LIVE_IO_HEIGHT_PANE.defaultHeight;
   const [runsQueueCollapsed, setRunsQueueCollapsed] = useState(false);
   const [libraryListCollapsed, setLibraryListCollapsed] = useState(false);
-  const [liveLaunchCollapsed, setLiveLaunchCollapsed] = useState(false);
-  const [liveRunCollapsed, setLiveRunCollapsed] = useState(true);
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
@@ -543,7 +501,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedWorktreeLiveRunId = supervisedWorktreeLiveRun?.runId ?? "";
   useEffect(() => {
     if (supervisedWorktreeLiveRunId) {
-      setLiveRunCollapsed(false);
       setRecentSupervisedWorktreeRunId(supervisedWorktreeLiveRunId);
       rememberRecentSupervisedWorktreeRunId(supervisedRunSessionStorage(), supervisedWorktreeLiveRunId);
     }
@@ -585,7 +542,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const routeSubtitle =
     activeTrack === "self" ? t("selfEvolutionSubtitle") : t("supervisedEvolutionSubtitle");
   const hideSupervisedToolbarIntro = activeTrack === "supervised";
-  const showRouteToolbar = activeTrack !== "self";
+  const showRouteToolbar = activeTrack !== "self" && evolutionView !== "live";
   const currentIntakeMode = getEffectiveIntakeMode(overview?.intakeMode, configQuery.data?.intakeMode);
   const overviewCurrentStatus = overview?.currentStatus ?? null;
   const overviewRecentRuns = overview?.recentRuns ?? [];
@@ -795,10 +752,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ? normalizedSupervisedRuntimeRole
       : supervisedRunMembers.find((member) => member.status === "active")?.role ?? null
     : null;
-  const supervisedSelectedAgentRole = selectedSupervisedAgentRole
+  const selectedWorkflowRole = SUPERVISED_RUN_MEMBER_ROLES.includes(supervisedSelectedWorkflowStep.role as SupervisedMemberRole)
+    ? supervisedSelectedWorkflowStep.role as SupervisedMemberRole : null;
+  const supervisedSelectedAgentRole: SupervisedMemberRole = selectedSupervisedAgentRole
     && supervisedRunMemberByRole.has(selectedSupervisedAgentRole)
     ? selectedSupervisedAgentRole
-    : supervisedActiveAgentRole
+    : selectedWorkflowRole
+      ?? (supervisedSelectedWorkflowStep.id === "approval"
+        ? (supervisedRunMemberByRole.get("reviewer")?.conversationSession?.conversationSessionId ? "reviewer" : "judge")
+        : supervisedActiveAgentRole)
       ?? supervisedRunMembers.find((member) => member.agentId)?.role
       ?? supervisedRunMembers[0]?.role
       ?? "baseline";
@@ -809,11 +771,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     (step) => step.role === supervisedSelectedAgentRole,
   );
   const supervisedSelectedAgentWorkflowStep =
-    supervisedSelectedAgentWorkflowSteps.find((step) => step.current)
+    (supervisedSelectedWorkflowStep.role === supervisedSelectedAgentRole ? supervisedSelectedWorkflowStep : undefined)
+    ?? supervisedSelectedAgentWorkflowSteps.find((step) => step.current)
     ?? [...supervisedSelectedAgentWorkflowSteps].reverse().find((step) => step.conversationMessages?.length)
     ?? supervisedSelectedAgentWorkflowSteps[0];
   const supervisedSelectedAgentFallbackMessages =
-    supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole && monitoredCaseConversationMessages.length > 0
+    !supervisedWorkflowManualSelection && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole && monitoredCaseConversationMessages.length > 0
       ? monitoredCaseConversationMessages
       : supervisedSelectedAgentWorkflowStep?.conversationMessages ?? [];
   const supervisedSelectedAgentTaskSummary =
@@ -973,6 +936,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const definition = SUPERVISED_WORKFLOW_STEPS.find((step) => step.id === resolvedStepId);
     if (definition?.role) {
       setSelectedSupervisedAgentRole(definition.role);
+    } else {
+      setSelectedSupervisedAgentRole(null);
     }
     if (evolutionView !== "live") {
       goToSupervisedView("live");
@@ -1356,30 +1321,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       )
       ? t("sourceOfficialVerifierWarning")
       : "";
-  const selectedSourcePlannedCases = sourceKind === "dataset" && datasetLimitInput.trim()
-    ? `${datasetLimitInput.trim()} / ${selectedSourceOption?.caseCount ?? "--"}`
-    : selectedSourceCaseText;
-  const configuredSupervisedAgentCount = supervisedRunMembers.filter((member) => Boolean(member.agentId)).length;
-  const supervisedRunPlanBody = !supervisedWorkflowRun ? (
-    <EvolutionSupervisedRunPlanPanel
-      lang={lang}
-      sourceLabel={selectedSourceOption?.label || "--"}
-      plannedCasesText={selectedSourcePlannedCases}
-      memberCountText={`${configuredSupervisedAgentCount} / ${SUPERVISED_RUN_MEMBER_ROLES.length}`}
-      startDisabled={
-        Boolean(datasetLimitError) ||
-        startLocked
-        || !workbenchControl
-        || (sourceKind === "dataset" && !datasetName)
-        || (sourceKind === "bundle" && !selectedBundleExists)
-      }
-      startDisabledReason={supervisedStartDisabledReason}
-      startPendingVisual={supervisedStartSubmitting || supervisedPrimaryRunning}
-      startLabel={supervisedStartButtonLabel}
-      startTooltip={t("launchSupervisedRunHint")}
-      onStart={() => startWorktreeRunMutation.mutate()}
-    />
-  ) : null;
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
     entries.filter((item) => {
@@ -1718,28 +1659,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }) as CSSProperties,
     [libraryListCollapsed],
   );
-  const liveWorkspaceStyle = useMemo(
-    () =>
-      ({
-        ...(liveLaunchCollapsed ? { [paneWidthCssVar("live-launch")]: "0px" } : null),
-        ...(liveRunCollapsed ? { [paneWidthCssVar("live-run")]: "0px" } : null),
-        "--evolution-live-io-height": `var(${paneHeightCssVar("live-io")})`,
-      }) as CSSProperties,
-    [liveLaunchCollapsed, liveRunCollapsed],
-  );
-  // display:contents wrapper: hosts the hook drag variables (and both
-  // registrations) without adding a box between the page body and its branches.
-  const evolutionVariablesStyle = useMemo(
-    () => ({ ...evolutionPaneVariablesStyle, ...evolutionHeightVariablesStyle }) as CSSProperties,
-    [evolutionHeightVariablesStyle, evolutionPaneVariablesStyle],
-  );
-  const registerEvolutionVariablesContainer = useCallback((element: HTMLDivElement | null) => {
-    registerEvolutionContainer(element);
-    registerEvolutionHeightContainer(element);
-  }, [registerEvolutionContainer, registerEvolutionHeightContainer]);
-  const resizeLiveLaunchLabel = lang === "zh" ? "调整启动卡片宽度" : "Resize launch card";
-  const resizeLiveRunLabel = lang === "zh" ? "调整当前任务卡片宽度" : "Resize active run card";
-  const resizeLiveIoLabel = lang === "zh" ? "调整 CASE 输出高度" : "Resize case output height";
+  const evolutionVariablesStyle = evolutionPaneVariablesStyle;
+  const registerEvolutionVariablesContainer = registerEvolutionContainer;
   const resizeRunsQueueLabel = lang === "zh" ? "调整运行列表宽度" : "Resize run list";
   const resizeLibraryListLabel = lang === "zh" ? "调整提案列表宽度" : "Resize proposal list";
 
@@ -2157,42 +2078,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     onEvolutionPaneResizeKeyDown("runs-queue", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleLiveLaunchResizeStart(event: PointerEvent<any>) {
-    if (liveLaunchCollapsed) {
-      return;
-    }
-    startEvolutionPaneResize("live-launch", event as PointerEvent<HTMLDivElement>, { direction: 1 });
-  }
-
-  function handleLiveLaunchResizeKeyDown(event: KeyboardEvent<any>) {
-    if (liveLaunchCollapsed) {
-      return;
-    }
-    onEvolutionPaneResizeKeyDown("live-launch", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
-  }
-
-  function handleLiveRunResizeStart(event: PointerEvent<any>) {
-    if (liveRunCollapsed) {
-      return;
-    }
-    startEvolutionPaneResize("live-run", event as PointerEvent<HTMLDivElement>, { direction: -1 });
-  }
-
-  function handleLiveRunResizeKeyDown(event: KeyboardEvent<any>) {
-    if (liveRunCollapsed) {
-      return;
-    }
-    onEvolutionPaneResizeKeyDown("live-run", event as KeyboardEvent<HTMLDivElement>, { direction: -1 });
-  }
-
-  function handleLiveIoResizeStart(event: PointerEvent<any>) {
-    startEvolutionHeightResize("live-io", event, { direction: 1 });
-  }
-
-  function handleLiveIoResizeKeyDown(event: KeyboardEvent<any>) {
-    onEvolutionHeightResizeKeyDown("live-io", event, { direction: 1 });
-  }
-
   function handleLibraryResizeStart(event: PointerEvent<any>) {
     if (libraryListCollapsed) {
       return;
@@ -2208,11 +2093,42 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }
 
 
+  const confirmationRun = supervisedConfirmation?.runId === supervisedWorktreeLiveRun?.runId
+    ? supervisedWorktreeLiveRun : supervisedConfirmation?.runId === reviewCandidateWorktree?.runId ? reviewCandidateWorktree : null;
+  const confirmationActionKey = supervisedConfirmation ? ({
+    approve_review: "approveReview", run_agent_approval: "runAgentApproval",
+    reject_review: "rejectReview", request_rerun: "requestRerun",
+  } as Record<string, string>)[supervisedConfirmation.action] || supervisedConfirmation.action : "";
+  const confirmationEnabled = Boolean(confirmationRun?.actionStates?.[confirmationActionKey]?.enabled);
+  const confirmationLabel = supervisedConfirmation ? (lang === "zh" ? ({
+    terminate: "停止运行", approve_review: "批准并受控合入", run_agent_approval: "运行 Agent 审批",
+    reject_review: "拒绝改动", request_rerun: "重新评测", merge: "合入候选", rollback: "回滚改动",
+  } as Record<string, string>)[supervisedConfirmation.action] || supervisedConfirmation.action : supervisedConfirmation.action) : "";
+  const frozenSourceLabel = reviewCandidateWorktree?.datasetName || reviewCandidateWorktree?.bundleName
+    || monitoredRun?.datasetName || monitoredRun?.bundleName || (lang === "zh" ? "尚未选择" : "Not selected");
+  function openSupervisedSetup() {
+    if (!supervisedSetupOpen) supervisedDraftRef.current = {
+      sourceKind, datasetName, bundleName: bundleNameInput, limit: datasetLimitInput,
+      approval: approvalMode, mental: supervisedMentalModelMode,
+    };
+    setSupervisedDialog(null);
+    setSupervisedSetupOpen(true);
+  }
+  function cancelSupervisedSetup() {
+    const draft = supervisedDraftRef.current;
+    if (draft) {
+      setSourceKind(draft.sourceKind); setDatasetName(draft.datasetName); setBundleNameInput(draft.bundleName);
+      setDatasetLimitInput(draft.limit); setApprovalMode(draft.approval); setSupervisedMentalModelMode(draft.mental);
+    }
+    supervisedDraftRef.current = null;
+    setSupervisedSetupOpen(false);
+  }
+
   return (
     <VTrackWorkbenchPage
       ref={evolutionLayoutRef}
       fill
-      className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}
+      className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} !gap-0 !p-0` : styles.page}
       ariaLabel={routeTitle}
       domainRecipe="evolution-multi-rail"
       data-vui-recipe="evolution-workbench"
@@ -2278,11 +2194,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         style={evolutionVariablesStyle}
         className="contents"
       >
-      <EvolutionBaselinePromotionStrip
+      {activeTrack === "self" ? <EvolutionBaselinePromotionStrip
         lang={lang}
         t={t}
         promotion={workspaceSnapshot?.evolutionRuntime?.currentBaseline}
-      />
+      /> : null}
       {activeTrack === "self" ? (
         <EvolutionSelfTrackBoundary
           lang={lang}
@@ -2323,98 +2239,47 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "live" ? (
-        <div className={styles.overviewGrid} style={liveWorkspaceStyle}>
-          <section
-            className={
-              liveLaunchCollapsed
-                ? `${styles.dashboardLaunch} ${styles.liveLaunchStack} ${styles.paneCollapsed}`
-                : `${styles.dashboardLaunch} ${styles.liveLaunchStack}`
-            }
-            aria-hidden={liveLaunchCollapsed}
-          >
-            <VSurface
-              as="section"
-              className={`${styles.surface} ${styles.launchSurface} ${styles.supervisedRunConsole}`}
-              elevation="panel"
-              padding="none"
-              tone="panel"
-            >
-              <div className={`${styles.surfaceHeaderCompact} ${styles.supervisedRunConsoleHeader}`}>
-                <div>
-                  <p className={styles.eyebrow}>{t("supervisedControl")}</p>
-                  <h2 className={styles.sectionTitle}>{lang === "zh" ? "监督运行控制台" : "Supervised run console"}</h2>
-                </div>
-                <div className={styles.supervisedRunConsoleStatus}>
-                  <span className={styles.secondaryPill}>
-                    {lang === "zh" ? "来源" : "Source"} {sourceCatalogCountLabel}
-                  </span>
-                  <span className={styles.secondaryPill}>
-                    {supervisedWorkflowRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}
-                  </span>
-                </div>
-              </div>
-
-              <details className={styles.rawBlock}>
-              <summary>{lang === "zh" ? "浏览评测来源与数据集" : "Browse evaluation sources"}</summary>
-              <VSection
-                className={styles.sourceInventorySection}
-                eyebrow={lang === "zh" ? "运行前检查" : "Preflight"}
-                title={lang === "zh" ? "监督运行来源" : "Supervised run sources"}
-              >
-                <VMetricStrip
-                  ariaLabel={lang === "zh" ? "监督运行来源概览" : "Supervised run source overview"}
-                  className={styles.sourceInventoryBar}
-                  metrics={[
-                    { id: "datasets", label: lang === "zh" ? "数据集" : "Datasets", value: workbenchCatalogLoading ? "--" : primaryDatasets.length },
-                    { id: "bundles", label: lang === "zh" ? "评测包" : "Bundles", value: workbenchCatalogLoading ? "--" : availableBundles.length },
-                    { id: "evidence", label: lang === "zh" ? "证据根" : "Evidence", value: supervisedEvidenceRootLabel, detail: supervisedEvidenceRootTitle },
-                    ...(hiddenDatasetCount > 0 ? [{ id: "hidden", label: lang === "zh" ? "隐藏" : "Hidden", value: hiddenDatasetCount }] : []),
-                  ]}
-                />
-              </VSection>
-              <EvolutionDatasetCatalogPanel
-                lang={lang}
-                copy={{
-                  datasetCatalog: t("datasetCatalog"),
-                  datasetCatalogAll: t("datasetCatalogAll"),
-                  datasetCatalogRunnable: t("datasetCatalogRunnable"),
-                  datasetCatalogBlocked: t("datasetCatalogBlocked"),
-                  datasetCatalogRoadmap: t("datasetCatalogRoadmap"),
-                  datasetCatalogHiddenReason: t("datasetCatalogHiddenReason"),
-                }}
-                items={datasetCatalog}
-                groups={datasetCatalogGroups}
-                selectedFilter={selectedDatasetCatalogFilter}
-                onFilterChange={setSelectedDatasetCatalogFilter}
-              />
-              </details>
-              {workbenchCatalogUnavailable ? (
-                <p className={styles.errorTextCompact}>
-                  {lang === "zh" ? "评测来源暂时不可用，正在等待目录刷新。" : "Evaluation sources are temporarily unavailable while the catalog refreshes."}
-                </p>
-              ) : null}
-              {supervisedSnapshotErrorText ? (
-                <div className={styles.supervisedSnapshotErrorBanner} role="alert">
-                  <span>
-                    {lang === "zh" ? "运行记录与当前状态加载失败：" : "Run records and current status failed to load: "}
-                    {supervisedSnapshotErrorText}
-                  </span>
-                  <VButton type="button" variant="secondary" onPress={() => void workspaceSnapshotQuery.refetch()}>
-                    {lang === "zh" ? "重试" : "Retry"}
-                  </VButton>
-                </div>
-              ) : null}
-
-              <div className={styles.supervisedRunConsoleGrid}>
+        <>
+          <SupervisedConversationWorkspace
+            lang={lang}
+            title={monitoredRunIdentity || (lang === "zh" ? "监督进化" : "Supervised evolution")}
+            sourceLabel={frozenSourceLabel}
+            hasRun={Boolean(supervisedWorkflowRun)}
+            setupOpen={supervisedSetupOpen || !supervisedWorkflowRun}
+            selectedStepId={selectedSupervisedAgentRole && !SUPERVISED_WORKFLOW_STEPS.some((step) => step.role === selectedSupervisedAgentRole)
+              ? `agent:${selectedSupervisedAgentRole}` : supervisedSelectedWorkflowStepId || "baseline_eval"}
+            steps={[...supervisedWorkflowCards.map((step) => ({
+              id: step.id,
+              label: `${step.label}${step.role ? ` · ${runRoleLabel(step.role)}` : ""}${step.current ? (lang === "zh" ? " · 当前" : " · Current") : ""}`,
+              disabled: !step.current && step.status === "pending" && !step.conversationSessionId,
+            })), ...supervisedRunMembers.filter((member) => !SUPERVISED_WORKFLOW_STEPS.some((step) => step.role === member.role)).map((member) => ({
+              id: `agent:${member.role}`, label: runRoleLabel(member.role), disabled: !member.agentId && !member.conversationSession?.conversationSessionId,
+            }))]}
+            onSelectStep={(id) => id.startsWith("agent:") ? handleSupervisedAgentSelect(id.slice(6) as SupervisedMemberRole) : handleSupervisedWorkflowStepSelect(id as SupervisedWorkflowStepId)}
+            showFollowLive={supervisedWorkflowManualSelection || Boolean(selectedSupervisedAgentRole && selectedSupervisedAgentRole !== supervisedActiveAgentRole)}
+            onFollowLive={handleFollowSupervisedAgent}
+            onNew={openSupervisedSetup}
+            onSource={() => setSupervisedDialog("source")}
+            onHistory={() => goToSupervisedView("runs")}
+            onLibrary={() => goToSupervisedView("library")}
+            onSettings={() => setSupervisedDialog("settings")}
+            onOpenConversation={supervisedSelectedAgentMember?.chatRoute ? () => navigate(supervisedSelectedAgentMember.chatRoute!) : undefined}
+            setup={
+              <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+                {workbenchCatalogUnavailable ? <p role="alert" className={styles.errorTextCompact}>{lang === "zh" ? "评估集目录暂时不可用，请稍后重试。" : "Evaluation catalog is temporarily unavailable."}</p> : null}
+                {supervisedSnapshotErrorText ? <p role="alert" className={styles.errorTextCompact}>{supervisedSnapshotErrorText}<VButton onPress={() => void workspaceSnapshotQuery.refetch()}>{lang === "zh" ? "重试" : "Retry"}</VButton></p> : null}
                 <EvolutionSupervisedLiveSetupPanel
                   lang={lang}
+                  onCancel={supervisedWorkflowRun ? cancelSupervisedSetup : undefined}
                   sourceKind={sourceKind}
                   selectedSourceValue={selectedSourceValue}
                   sourceOptions={supervisedSourceOptions.map((source) => ({
                     value: source.value,
-                    label: source.kind === "dataset"
-                      ? `${source.name} [${datasetUsabilityLabel(source.dataset, lang)}]`
-                      : `${source.name} [${source.caseCount} cases]`,
+                    kind: source.kind,
+                    caseCount: source.caseCount,
+                    detail: source.kind === "dataset" ? source.dataset?.description : "",
+                    status: source.kind === "dataset" ? datasetUsabilityLabel(source.dataset, lang) : undefined,
+                    label: source.name,
                   }))}
                   onSourceValueChange={(value) => {
                     const [nextKind, ...nameParts] = value.split(":");
@@ -2462,49 +2327,71 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   runningLockHint={activationLocked ? t("supervisedActivationLockHint") : t("runningLockHint")}
                   showRunningLock={runLocked || worktreeRunLocked || activationLocked}
                   controlError={datasetLimitError || supervisedControlError}
-                  onStart={() => startWorktreeRunMutation.mutate()}
-                />
-                {actionFeedback ? <p role="status" className={styles.noticeTextCompact}>{actionFeedback}</p> : null}
-                <EvolutionSupervisedWorkflowMembersPanel
-                  lang={lang}
-                  membersSource={supervisedMembersSource}
-                  selectedStepLabel={supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
-                  membersHint={supervisedMembersHint}
-                  showFollowLive={supervisedWorkflowManualSelection}
-                  onFollowLive={() => setSelectedSupervisedWorkflowStepId(null)}
-                  stepCount={supervisedWorkflowCards.length}
-                  steps={supervisedWorkflowStepViews}
-                  onSelectStep={handleSupervisedWorkflowStepSelect}
+                  onStart={() => startWorktreeRunMutation.mutate(undefined, { onSuccess: () => { setSupervisedSetupOpen(false); supervisedDraftRef.current = null; } })}
                 />
               </div>
-            </VSurface>
-
-          </section>
-
-          <PaneCollapseHandle
-            side="left"
-            collapsed={liveLaunchCollapsed}
-            separatorLabel={resizeLiveLaunchLabel}
-            collapseLabel={lang === "zh" ? "收起启动卡片" : "Collapse launch card"}
-            expandLabel={lang === "zh" ? "展开启动卡片" : "Expand launch card"}
-            className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleLaunch}`}
-            active={evolutionDraggingPaneId === "live-launch"}
-            valueNow={liveLaunchWidth}
-            valueMin={EVOLUTION_LIVE_LAUNCH_PANE.minWidth}
-            valueMax={EVOLUTION_LIVE_LAUNCH_PANE.maxWidth}
-            onToggle={() => setLiveLaunchCollapsed((current) => !current)}
-            onPointerDown={handleLiveLaunchResizeStart}
-            onKeyDown={handleLiveLaunchResizeKeyDown}
-          />
-
+            }
+            conversation={<div className="flex h-full min-h-0 flex-col">
+              {supervisedSnapshotErrorText ? <p role="alert" className={styles.errorTextCompact}>{supervisedSnapshotErrorText}<VButton onPress={() => void workspaceSnapshotQuery.refetch()}>{lang === "zh" ? "重试" : "Retry"}</VButton></p> : null}
+              {recentRunDetail.loading ? <p role="status">{t("loading")}</p>
+                : recentRunDetail.error ? <div role="alert">{recentRunDetail.error.message}<VButton onPress={() => void recentRunDetail.retry()}>{lang === "zh" ? "重试" : "Retry"}</VButton></div>
+                : <SupervisedAgentConversationPanel
+                      compact
+                      members={supervisedRunMembers}
+                      selectedRole={supervisedSelectedAgentRole}
+                      activeRole={supervisedActiveAgentRole}
+                      fallbackMessages={supervisedSelectedAgentFallbackMessages}
+                      taskSummary={supervisedSelectedAgentTaskSummary}
+                      isLive={supervisedRunIsLive}
+                      lang={lang}
+                      roleLabel={runRoleLabel}
+                      roleDescription={supervisedAgentRoleDescription}
+                      statusLabel={statusLabel}
+                      onSelectRole={handleSupervisedAgentSelect}
+                      onFollowLive={handleFollowSupervisedAgent}
+                    />}
+            </div>}
+            footer={supervisedRunIsLive ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-vui-border-subtle px-3 py-2">
+                <span className="text-vui-xs text-vui-fg-secondary">{supervisedMembersRunStatusLabel} · {supervisedWorkflowCards.find((step) => step.current)?.label}</span>
+                <VButton variant="ghost" isDisabled={!canTerminateSupervisedRun || terminateSupervisedPending} disabledReason={terminateSupervisedDisabledReason} onPress={() => supervisedWorktreeLiveRun && setSupervisedConfirmation({runId:supervisedWorktreeLiveRun.runId,action:"terminate"})}>{lang === "zh" ? "停止运行" : "Stop run"}</VButton>
+                {supervisedControlError ? <p role="alert" className={styles.errorTextCompact}>{supervisedControlError}</p> : null}
+              </div>
+            ) : <SupervisedApprovalDecisionPanel compact
+                      run={reviewCandidateWorktree}
+                      lang={lang}
+                      pending={approvalWorktreeActionMutation.isPending}
+                      onPrepareRerun={(run) => {
+                        openSupervisedSetup();
+                        setSourceKind(run.sourceKind === "dataset" ? "dataset" : "bundle");
+                        setDatasetName(run.datasetName || "");
+                        setBundleNameInput(run.bundleName || "");
+                        setDatasetLimitInput(run.datasetLimit == null ? "" : String(run.datasetLimit));
+                        setApprovalMode(run.approvalMode === "agent" ? "agent" : "human");
+                        setActionFeedback(lang === "zh" ? "已恢复本轮来源、样本数和审批方式；请检查当前配置后点击开始监督运行。" : "Source, sample limit and approval mode restored. Check current settings before starting.");
+                        requestAnimationFrame(() => datasetLimitInputRef.current?.focus());
+                      }}
+                      error={approvalWorktreeActionMutation.error?.message ?? ""}
+                      onAction={(runId, action) => setSupervisedConfirmation({ runId, action })}
+                    />}
+            evidenceTabs={[
+              { id: "changes", label: lang === "zh" ? "改动" : "Changes", content: (
+                <section className="grid gap-3 p-3" aria-label={lang === "zh" ? "本轮候选改动" : "Candidate changes"}>
+                  {(reviewCandidateWorktree?.mergeAnalysis?.changedFiles ?? []).map((file) => (
+                    <div key={file.path} className="grid min-w-0 gap-1 border-b border-vui-border-subtle pb-2">
+                      <code className="break-all text-vui-xs">{file.path}</code>
+                      <span className="text-vui-xs text-vui-fg-secondary">{file.changeType || file.status}{file.highRisk ? (lang === "zh" ? " · 需要复核" : " · Review required") : ""}</span>
+                    </div>
+                  ))}
+                  {!reviewCandidateWorktree?.mergeAnalysis?.changedFiles?.length ? <p>{lang === "zh" ? "本轮尚未生成候选文件变更记录。" : "No candidate file changes are available yet."}</p> : null}
+                  <VButton variant="secondary" onPress={() => navigate("/supervised-evolution/review")}>{lang === "zh" ? "完整审核与证据" : "Full review and evidence"}</VButton>
+                </section>
+              ) },
+              { id: "scores", label: lang === "zh" ? "评分" : "Scores", content: <SupervisedApprovalDecisionPanel hideActions run={reviewCandidateWorktree} lang={lang} pending={approvalWorktreeActionMutation.isPending} onAction={(runId, action) => setSupervisedConfirmation({ runId, action })} /> },
+              { id: "progress", label: lang === "zh" ? "进度" : "Progress", content: <>
           <Suspense fallback={<p className={styles.noticeText}>{t("loading")}</p>}>
             <EvolutionActiveRunMonitorPanel
-              ariaHidden={liveRunCollapsed}
-              className={
-                liveRunCollapsed
-                  ? `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun} ${styles.paneCollapsed}`
-                  : `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun}`
-              }
+              className="min-w-0"
               header={{
                 eyebrow: t("activeSupervisedRun"),
                 title: monitoredRunIdentity || t("activeSupervisedRun"),
@@ -2538,126 +2425,49 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               }}
             />
           </Suspense>
-
-          <PaneCollapseHandle
-            side="right"
-            collapsed={liveRunCollapsed}
-            separatorLabel={resizeLiveRunLabel}
-            collapseLabel={lang === "zh" ? "收起当前任务卡片" : "Collapse active run card"}
-            expandLabel={lang === "zh" ? "展开当前任务卡片" : "Expand active run card"}
-            className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleRun}`}
-            active={evolutionDraggingPaneId === "live-run"}
-            valueNow={liveRunWidth}
-            valueMin={EVOLUTION_LIVE_RUN_PANE.minWidth}
-            valueMax={EVOLUTION_LIVE_RUN_PANE.maxWidth}
-            onToggle={() => setLiveRunCollapsed((current) => !current)}
-            onPointerDown={handleLiveRunResizeStart}
-            onKeyDown={handleLiveRunResizeKeyDown}
-          />
-
-          <EvolutionSupervisedLiveIoPanel
-            eyebrow={
-              !supervisedWorkflowRun
-                ? (lang === "zh" ? "运行前计划" : "Run plan")
-                : supervisedApprovalSelected
-                  ? supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)
-                  : (lang === "zh" ? "Agent 对话" : "Agent conversations")
-            }
-            title={
-              supervisedApprovalSelected
-                ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
-                : !supervisedWorkflowRun
-                  ? (lang === "zh" ? "本轮监督进化" : "Supervised evolution run")
-                  : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)
-            }
-            titleTooltip={
-              (supervisedApprovalSelected ? selectedWorkflowTaskSummary : supervisedSelectedAgentTaskSummary) || undefined
-            }
-            statusPills={[
-              ...(supervisedWorkflowRun && !supervisedApprovalSelected
-                ? [runRoleLabel(supervisedSelectedAgentRole)]
-                : []),
-              !supervisedWorkflowRun
-                ? (lang === "zh" ? "未开始" : "Not started")
-                : supervisedApprovalSelected
-                  ? statusLabel(supervisedSelectedWorkflowStep.status)
-                  : statusLabel(
-                    supervisedSelectedAgentMember?.conversationSession?.status
-                    || supervisedSelectedAgentMember?.status
-                    || "idle",
-                  ),
-              ...(monitoredRun?.currentCaseScenario && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
-                ? [monitoredRun.currentCaseScenario]
-                : []),
-              ...(monitoredRun?.currentCaseMode && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
-                ? [monitoredRun.currentCaseMode]
-                : []),
+                <EvolutionSupervisedWorkflowMembersPanel lang={lang} membersSource={supervisedMembersSource} selectedStepLabel={supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)} membersHint={supervisedMembersHint} showFollowLive={supervisedWorkflowManualSelection} onFollowLive={handleFollowSupervisedAgent} stepCount={supervisedWorkflowCards.length} steps={supervisedWorkflowStepViews} onSelectStep={handleSupervisedWorkflowStepSelect} />
+                {supervisedLiveConversationSupplement}
+                <EvolutionBaselinePromotionStrip lang={lang} t={t} promotion={workspaceSnapshot?.evolutionRuntime?.currentBaseline} />
+              </> },
             ]}
-            body={
-              recentRunDetail.loading ? <p role="status">正在加载本轮详情…</p>
-                : recentRunDetail.error ? <div role="alert">运行详情加载失败：{recentRunDetail.error.message}<VButton onPress={() => void recentRunDetail.retry()}>重试</VButton></div>
-                : !supervisedWorkflowRun
-                ? supervisedRunPlanBody
-                : supervisedApprovalSelected
-                  ? (
-                    <SupervisedApprovalDecisionPanel
-                      run={reviewCandidateWorktree}
-                      lang={lang}
-                      pending={approvalWorktreeActionMutation.isPending}
-                      onPrepareRerun={(run) => {
-                        setSourceKind(run.sourceKind === "dataset" ? "dataset" : "bundle");
-                        setDatasetName(run.datasetName || "");
-                        setBundleNameInput(run.bundleName || "");
-                        setDatasetLimitInput(run.datasetLimit == null ? "" : String(run.datasetLimit));
-                        setApprovalMode(run.approvalMode === "agent" ? "agent" : "human");
-                        setLiveLaunchCollapsed(false);
-                        setActionFeedback(lang === "zh" ? "已恢复本轮来源、样本数和审批方式；请检查当前配置后点击开始监督运行。" : "Source, sample limit and approval mode restored. Check current settings before starting.");
-                        requestAnimationFrame(() => datasetLimitInputRef.current?.focus());
-                      }}
-                      error={approvalWorktreeActionMutation.error?.message ?? ""}
-                      onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
-                    />
-                  )
-                  : (
-                    <div className={styles.stepResultStack} key={supervisedSelectedWorkflowStepId}>
-                    <SupervisedStepResult run={reviewCandidateWorktree} title={supervisedSelectedWorkflowStep.label} summary={supervisedSelectedWorkflowStep.summary || supervisedSelectedWorkflowStep.livePreview || ""} />
-                    <details className={styles.rawBlock} onToggle={(event) => setSupervisedEvidenceStep(event.currentTarget.open ? supervisedSelectedWorkflowStepId : null)}>
-                    <summary>查看完整 Agent 会话与证据</summary>
-                    <div className={styles.stepEvidenceBody}>
-                    {supervisedEvidenceStep === supervisedSelectedWorkflowStepId ? <SupervisedAgentConversationPanel
-                      members={supervisedRunMembers}
-                      selectedRole={supervisedSelectedAgentRole}
-                      activeRole={supervisedActiveAgentRole}
-                      fallbackMessages={supervisedSelectedAgentFallbackMessages}
-                      taskSummary={supervisedSelectedAgentTaskSummary}
-                      supplementalContent={
-                        supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
-                          ? supervisedLiveConversationSupplement
-                          : undefined
-                      }
-                      isLive={supervisedRunIsLive}
-                      lang={lang}
-                      roleLabel={runRoleLabel}
-                      roleDescription={supervisedAgentRoleDescription}
-                      statusLabel={statusLabel}
-                      onSelectRole={handleSupervisedAgentSelect}
-                      onFollowLive={handleFollowSupervisedAgent}
-                    /> : null}
-                    </div>
-                    </details>
-                    </div>
-                  )
-            }
-            height={liveIoHeight}
-            heightMin={EVOLUTION_LIVE_IO_HEIGHT_PANE.minHeight}
-            heightMax={EVOLUTION_LIVE_IO_HEIGHT_PANE.maxHeight}
-            heightDragging={evolutionHeightDraggingPaneId === "live-io"}
-            heightResizeLabel={resizeLiveIoLabel}
-            onHeightPointerDown={handleLiveIoResizeStart}
-            onHeightKeyDown={handleLiveIoResizeKeyDown}
           />
-
-        </div>
+          <VDialog className="!translate-none !transform-[translate(-50%,-50%)] !animate-none max-w-[calc(100vw-24px)]" open={supervisedDialog !== null} onOpenChange={(open) => !open && setSupervisedDialog(null)} title={supervisedDialog === "source" ? (lang === "zh" ? "本轮评估集" : "Run evaluation source") : (lang === "zh" ? "运行配置" : "Run settings")}>
+            {supervisedDialog === "settings" && showTrackToggle ? <VTabs aria-label={lang === "zh" ? "进化轨道" : "Evolution track"} value={activeTrack} onValueChange={(value) => {
+              if (value === "self" || value === "supervised") { setEvolutionTrack(value); setSupervisedDialog(null); }
+            }} items={[{id:"supervised",label:t("supervisedEvolutionMode")},{id:"self",label:t("selfEvolutionMode")}]} /> : null}
+            {supervisedDialog === "settings" ? <SupervisedWorkspaceControls activeView={evolutionView} overviewIntakeMode={overview?.intakeMode} configIntakeMode={configQuery.data?.intakeMode} /> : null}
+            {supervisedDialog === "settings" ? <details className="p-3"><summary>{lang === "zh" ? "评估来源目录" : "Evaluation source catalog"}</summary>
+              <EvolutionDatasetCatalogPanel lang={lang} copy={{datasetCatalog:t("datasetCatalog"),datasetCatalogAll:t("datasetCatalogAll"),datasetCatalogRunnable:t("datasetCatalogRunnable"),datasetCatalogBlocked:t("datasetCatalogBlocked"),datasetCatalogRoadmap:t("datasetCatalogRoadmap"),datasetCatalogHiddenReason:t("datasetCatalogHiddenReason")}} items={datasetCatalog} groups={datasetCatalogGroups} selectedFilter={selectedDatasetCatalogFilter} onFilterChange={setSelectedDatasetCatalogFilter} />
+            </details> : null}
+            <dl className="grid gap-3 p-3 text-vui-sm">
+              <div><dt>{lang === "zh" ? "评估来源" : "Evaluation source"}</dt><dd className="break-all">{frozenSourceLabel}</dd></div>
+              <div><dt>{lang === "zh" ? "本轮样本" : "Run cases"}</dt><dd>{reviewCandidateWorktree?.costEstimate?.caseCount ?? monitoredRun?.caseTotal ?? "—"}</dd></div>
+              <div><dt>{lang === "zh" ? "审批方式" : "Approval mode"}</dt><dd>{reviewCandidateWorktree?.approvalMode === "agent" ? "Agent" : (lang === "zh" ? "人工" : "Human")}</dd></div>
+            </dl>
+            <p className="px-3 text-vui-xs text-vui-fg-secondary">{lang === "zh" ? "本轮来源由运行记录固定；更换评估集需要新建一轮。" : "The run record fixes this source. Create a new run to change it."}</p>
+            <VButton variant="secondary" onPress={openSupervisedSetup}>{lang === "zh" ? "选择评估集新建" : "Create with another source"}</VButton>
+          </VDialog>
+          <VDialog
+            className="!translate-none !transform-[translate(-50%,-50%)] !animate-none max-w-[calc(100vw-24px)]"
+            open={Boolean(supervisedConfirmation)}
+            onOpenChange={(open) => !open && !approvalWorktreeActionMutation.isPending && setSupervisedConfirmation(null)}
+            title={confirmationLabel}
+            description={supervisedConfirmation?.action === "approve_review"
+              ? (lang === "zh" ? "批准后将由后端受控合入并请求激活；是否已生效，以运行版本核验结果为准。" : "Approval requests a controlled merge and activation. Runtime verification determines whether the change is applied.")
+              : (lang === "zh" ? "确认对本轮运行执行此操作？结果以服务端返回的最新状态为准。" : "Perform this action on the current run? The server determines the resulting state.")}
+            footer={<>
+              <VButton variant="secondary" isDisabled={approvalWorktreeActionMutation.isPending} onPress={() => setSupervisedConfirmation(null)}>{lang === "zh" ? "返回" : "Back"}</VButton>
+              <VButton variant={supervisedConfirmation?.action === "terminate" || supervisedConfirmation?.action === "reject_review" || supervisedConfirmation?.action === "rollback" ? "danger" : "primary"}
+                isDisabled={!confirmationEnabled || approvalWorktreeActionMutation.isPending}
+                onPress={() => {
+                  if (supervisedConfirmation && confirmationEnabled) approvalWorktreeActionMutation.mutate(supervisedConfirmation, {onSuccess: () => setSupervisedConfirmation(null)});
+                }}>{approvalWorktreeActionMutation.isPending ? (lang === "zh" ? "正在执行…" : "Working…") : (lang === "zh" ? "确认执行" : "Confirm")}</VButton>
+            </>}
+          >
+            {!confirmationEnabled ? <p role="status">{confirmationRun?.actionStates?.[confirmationActionKey]?.reason || (lang === "zh" ? "运行状态已变化，此操作当前不可用。" : "The run state changed; this action is unavailable.")}</p> : null}
+            {approvalWorktreeActionMutation.error ? <p role="alert">{approvalWorktreeActionMutation.error.message}</p> : null}
+          </VDialog>
+        </>
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "runs" ? (

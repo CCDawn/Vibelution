@@ -1,6 +1,8 @@
 const styles = {
   root:
     "flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden bg-vui-surface-workspace p-2",
+  compactRoot:
+    "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-vui-surface-workspace",
   tabRail:
     "grid shrink-0 grid-flow-col auto-cols-[minmax(152px,1fr)] gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
   tabButton:
@@ -16,6 +18,8 @@ const styles = {
     "mt-0.5 min-h-5 shrink-0 self-start px-1.5",
   sessionSurface:
     "flex min-h-[544px] flex-1 flex-col overflow-hidden",
+  compactSessionSurface:
+    "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
   selectedHeader:
     "flex min-h-[72px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2.5 border-b border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,_var(--vui-surface-row)_54%,_var(--vui-surface-panel))] px-3 py-3",
   selectedIdentity: "flex min-w-0 flex-[1_1_270px] items-center gap-2.5",
@@ -44,9 +48,14 @@ const styles = {
   sessionAction: "h-7 w-fit min-w-0 px-2 text-[length:var(--vui-font-xs)]",
   body:
     "relative flex min-h-[430px] flex-1 overflow-hidden bg-vui-surface-chat",
+  compactBody:
+    "relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-vui-surface-chat",
   conversation: "h-full min-h-[430px] w-full flex-1",
+  compactConversation: "h-full min-h-0 w-full min-w-0 flex-1",
   loading:
     "flex h-full min-h-[430px] w-full items-center justify-center gap-2 text-[length:var(--vui-font-sm)] text-vui-fg-tertiary",
+  compactLoading:
+    "flex h-full min-h-0 w-full items-center justify-center gap-2 text-[length:var(--vui-font-sm)] text-vui-fg-tertiary",
   empty:
     "m-auto w-[min(72%,_460px)] px-8 py-7 text-center",
   emptyAvatar:

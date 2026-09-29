@@ -7,6 +7,10 @@ const borderedSurface =
   `rounded-lg border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass}`;
 
 const styles = {
+  compactPanel: "grid shrink-0 gap-1.5 border-t border-vui-border-subtle bg-vui-surface-panel px-3 py-2",
+  compactSummary: "flex min-w-0 flex-wrap items-center justify-between gap-2 text-vui-sm [&>span]:text-vui-fg-secondary",
+  compactReason: "m-0 line-clamp-2 text-vui-xs text-vui-fg-secondary",
+
   actionBar:
     "flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--vui-border-subtle)] pt-2.5 max-[560px]:items-stretch max-[560px]:[&>button]:w-full",
   actionButtons:

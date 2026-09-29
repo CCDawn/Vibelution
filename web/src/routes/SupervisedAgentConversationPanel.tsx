@@ -32,6 +32,7 @@ export type SupervisedAgentConversationPanelProps = {
   taskSummary: string;
   supplementalContent?: ReactNode;
   isLive: boolean;
+  compact?: boolean;
   lang: "zh" | "en";
   roleLabel: (role: string | undefined) => string;
   roleDescription: (role: SupervisedMemberRole) => string;
@@ -141,6 +142,7 @@ export function SupervisedAgentConversationPanel({
   taskSummary,
   supplementalContent,
   isLive,
+  compact = false,
   lang,
   roleLabel,
   roleDescription,
@@ -151,6 +153,17 @@ export function SupervisedAgentConversationPanel({
   const navigate = useNavigate();
   const selectedMember = members.find((member) => member.role === selectedRole) ?? members[0];
   const selectedChatRoute = selectedMember?.chatRoute;
+  const fullSessionAction = selectedChatRoute ? (
+    <VButton
+      type="button"
+      className={styles.sessionAction}
+      trailingIcon={<ArrowUpRight size={13} aria-hidden="true" />}
+      variant="secondary"
+      onPress={() => navigate(selectedChatRoute)}
+    >
+      {lang === "zh" ? "完整会话" : "Full session"}
+    </VButton>
+  ) : null;
   const sessionId = String(selectedMember?.conversationSession?.conversationSessionId || "").trim();
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(sessionId || "none"),
@@ -223,66 +236,69 @@ export function SupervisedAgentConversationPanel({
 
   return (
     <div
-      className={styles.root}
+      className={compact ? styles.compactRoot : styles.root}
       data-supervised-agent-conversation-panel
       data-vui-recipe="supervised-agent-conversation"
     >
-      <div className={styles.tabRail} role="tablist" aria-label={lang === "zh" ? "选择 Agent 对话" : "Select Agent conversation"}>
-        {members.map((member, memberIndex) => {
-          const selected = member.role === selectedRole;
-          const active = isLive && member.role === activeRole;
-          const memberRawStatus = member.conversationSession?.status || member.status;
-          const memberStatus = memberStatusLabel(
-            memberRawStatus,
-            lang,
-            statusLabel,
-          );
-          return (
-            <VButton
-              key={member.role}
-              type="button"
-              contentLayout="plain"
-              density="normal"
-              variant={selected ? "primary" : "secondary"}
-              className={styles.tabButton}
-              role="tab"
-              id={`supervised-agent-tab-${member.role}`}
-              aria-controls={`supervised-agent-panel-${member.role}`}
-              aria-selected={selected}
-              tabIndex={selected ? 0 : -1}
-              onKeyDown={(event) => handleTabKeyDown(event, memberIndex)}
-              onPress={() => onSelectRole(member.role)}
-            >
-              <span className={styles.tabLayout}>
-                <span className={styles.avatar} aria-hidden="true">{roleAvatar(member.role, lang)}</span>
-                <span className={styles.tabCopy}>
-                  <span className={styles.tabTitle}>{roleConversationTitle(member.role, lang)}</span>
-                  <span className={styles.tabSubtitle}>{roleDescription(member.role)}</span>
+      {!compact ? (
+        <div className={styles.tabRail} role="tablist" aria-label={lang === "zh" ? "选择 Agent 对话" : "Select Agent conversation"}>
+          {members.map((member, memberIndex) => {
+            const selected = member.role === selectedRole;
+            const active = isLive && member.role === activeRole;
+            const memberRawStatus = member.conversationSession?.status || member.status;
+            const memberStatus = memberStatusLabel(
+              memberRawStatus,
+              lang,
+              statusLabel,
+            );
+            return (
+              <VButton
+                key={member.role}
+                type="button"
+                contentLayout="plain"
+                density="normal"
+                variant={selected ? "primary" : "secondary"}
+                className={styles.tabButton}
+                role="tab"
+                id={`supervised-agent-tab-${member.role}`}
+                aria-controls={`supervised-agent-panel-${member.role}`}
+                aria-selected={selected}
+                tabIndex={selected ? 0 : -1}
+                onKeyDown={(event) => handleTabKeyDown(event, memberIndex)}
+                onPress={() => onSelectRole(member.role)}
+              >
+                <span className={styles.tabLayout}>
+                  <span className={styles.avatar} aria-hidden="true">{roleAvatar(member.role, lang)}</span>
+                  <span className={styles.tabCopy}>
+                    <span className={styles.tabTitle}>{roleConversationTitle(member.role, lang)}</span>
+                    <span className={styles.tabSubtitle}>{roleDescription(member.role)}</span>
+                  </span>
+                  <VStatusChip
+                    className={styles.tabStatus}
+                    tone={memberStatusTone(memberRawStatus, active)}
+                  >
+                    {active ? (lang === "zh" ? "现场" : "Live") : memberStatus}
+                  </VStatusChip>
                 </span>
-                <VStatusChip
-                  className={styles.tabStatus}
-                  tone={memberStatusTone(memberRawStatus, active)}
-                >
-                  {active ? (lang === "zh" ? "现场" : "Live") : memberStatus}
-                </VStatusChip>
-              </span>
-            </VButton>
-          );
-        })}
-      </div>
+              </VButton>
+            );
+          })}
+        </div>
+      ) : null}
 
       <VSurface
         as="section"
-        className={styles.sessionSurface}
+        className={compact ? styles.compactSessionSurface : styles.sessionSurface}
         data-vui="supervised-agent-conversation-surface"
         elevation="panel"
         padding="none"
         tone="panel"
-        role="tabpanel"
+        role={compact ? "region" : "tabpanel"}
         id={selectedPanelId}
-        aria-labelledby={selectedTabId}
+        aria-labelledby={compact ? undefined : selectedTabId}
+        aria-label={compact ? (lang === "zh" ? `${assistantDisplayName} 会话` : `${assistantDisplayName} session`) : undefined}
       >
-        <div className={styles.selectedHeader}>
+        {!compact ? <div className={styles.selectedHeader}>
           <div className={styles.selectedIdentity}>
             <span className={styles.selectedAvatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
             <div className={styles.selectedCopy}>
@@ -304,43 +320,45 @@ export function SupervisedAgentConversationPanel({
                   </>
                 )}
               />
-              <p className={styles.selectedDescription}>{roleDescription(selectedRole)}</p>
+              {!compact ? <p className={styles.selectedDescription}>{roleDescription(selectedRole)}</p> : null}
             </div>
           </div>
-          <dl
-            className={styles.selectedFacts}
-            aria-label={lang === "zh" ? "当前 Agent 会话信息" : "Current Agent session facts"}
-          >
-            <div className={styles.factCell}>
-              <dt className={styles.factLabel}>{lang === "zh" ? "会话" : "Session"}</dt>
-              <dd className={styles.factValue}>
-                <VTooltip content={sessionId || (lang === "zh" ? "尚无会话" : "No session")} width="wide">
-                  <span tabIndex={0}>{sessionId || "--"}</span>
-                </VTooltip>
-              </dd>
-            </div>
-            <div className={styles.factCell}>
-              <dt className={styles.factLabel}>{lang === "zh" ? "模型" : "Model"}</dt>
-              <dd className={styles.factValue}>
-                <VTooltip content={selectedMember?.modelId || selectedMember?.model || "--"} width="wide">
-                  <span tabIndex={0}>{selectedMember?.model || "--"}</span>
-                </VTooltip>
-              </dd>
-            </div>
-            <div className={styles.factCell}>
-              <dt className={styles.factLabel}>{lang === "zh" ? "耗时" : "Duration"}</dt>
-              <dd className={styles.factValue}>{duration}</dd>
-            </div>
-            <div className={styles.factCell}>
-              <dt className={styles.factLabel}>{lang === "zh" ? "消息" : "Messages"}</dt>
-              <dd className={styles.factValue}>
-                {lang === "zh" ? `${messageCount} 条` : `${messageCount}`}
-              </dd>
-            </div>
-          </dl>
-        </div>
+          {!compact ? (
+            <dl
+              className={styles.selectedFacts}
+              aria-label={lang === "zh" ? "当前 Agent 会话信息" : "Current Agent session facts"}
+            >
+              <div className={styles.factCell}>
+                <dt className={styles.factLabel}>{lang === "zh" ? "会话" : "Session"}</dt>
+                <dd className={styles.factValue}>
+                  <VTooltip content={sessionId || (lang === "zh" ? "尚无会话" : "No session")} width="wide">
+                    <span tabIndex={0}>{sessionId || "--"}</span>
+                  </VTooltip>
+                </dd>
+              </div>
+              <div className={styles.factCell}>
+                <dt className={styles.factLabel}>{lang === "zh" ? "模型" : "Model"}</dt>
+                <dd className={styles.factValue}>
+                  <VTooltip content={selectedMember?.modelId || selectedMember?.model || "--"} width="wide">
+                    <span tabIndex={0}>{selectedMember?.model || "--"}</span>
+                  </VTooltip>
+                </dd>
+              </div>
+              <div className={styles.factCell}>
+                <dt className={styles.factLabel}>{lang === "zh" ? "耗时" : "Duration"}</dt>
+                <dd className={styles.factValue}>{duration}</dd>
+              </div>
+              <div className={styles.factCell}>
+                <dt className={styles.factLabel}>{lang === "zh" ? "消息" : "Messages"}</dt>
+                <dd className={styles.factValue}>
+                  {lang === "zh" ? `${messageCount} 条` : `${messageCount}`}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
+        </div> : null}
 
-        <VToolbar
+        {!compact ? <VToolbar
           ariaLabel={lang === "zh" ? "Agent 会话工具栏" : "Agent conversation toolbar"}
           className={styles.timelineToolbar}
         >
@@ -364,21 +382,11 @@ export function SupervisedAgentConversationPanel({
                 {lang === "zh" ? "跟随现场" : "Follow live"}
               </VButton>
             ) : null}
-            {selectedChatRoute ? (
-              <VButton
-                type="button"
-                className={styles.sessionAction}
-                trailingIcon={<ArrowUpRight size={13} aria-hidden="true" />}
-                variant="secondary"
-                onPress={() => navigate(selectedChatRoute)}
-              >
-                {lang === "zh" ? "完整会话" : "Full session"}
-              </VButton>
-            ) : null}
+            {fullSessionAction}
           </div>
-        </VToolbar>
+        </VToolbar> : null}
 
-        <div className={styles.body} aria-live="polite">
+        <div className={compact ? styles.compactBody : styles.body} aria-live="polite">
           {sessionDetailQuery.isError ? (
             <VStatusStrip
               className={styles.queryNotice}
@@ -393,14 +401,14 @@ export function SupervisedAgentConversationPanel({
           {messages.length > 0 ? (
             <LazyConversationView
               sessionId={sessionId || `${selectedRole}-supervised`}
-              className={styles.conversation}
+              className={compact ? styles.compactConversation : styles.conversation}
               density="compact"
               title={assistantDisplayName}
               phase={phase}
               messages={messages}
               assistantDisplayName={assistantDisplayName}
               userDisplayName={lang === "zh" ? "监督任务" : "Supervised task"}
-              taskSummary={detail?.taskSummary || taskSummary}
+              taskSummary={compact ? undefined : detail?.taskSummary || taskSummary}
               defaultFileContext={detail?.defaultFileContext || "supervised-evolution"}
               summaryItems={[]}
               showHeader={false}
@@ -418,7 +426,7 @@ export function SupervisedAgentConversationPanel({
               fallback={(
                 <ProgressiveRegionSkeleton
                   variant="conversation"
-                  className={styles.loading}
+                  className={compact ? styles.compactLoading : styles.loading}
                   label={lang === "zh" ? "正在加载统一对话前端" : "Loading conversation"}
                 />
               )}

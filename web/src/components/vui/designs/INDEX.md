@@ -8,6 +8,8 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
+| `SupervisedConversationWorkspace` | [product/evolution.md](./product/evolution.md#supervisedconversationworkspace) |
+| `EvolutionSupervisedLiveSetupPanel` | [product/evolution.md](./product/evolution.md#evolutionsupervisedlivesetuppanel) |
 | `VWorkflowCanvas` | [product/workflow.md](./product/workflow.md#vworkflowcanvas) |
 | 假说先行区域 | [product/workflow.md](./product/workflow.md#假说先行区域) |
 | 知识侧流程区域 | [product/workflow.md](./product/workflow.md#知识侧流程区域) |

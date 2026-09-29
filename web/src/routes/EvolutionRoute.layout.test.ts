@@ -32,6 +32,9 @@ import supervisedApprovalDecisionPanelStyles from "./SupervisedApprovalDecisionP
 import supervisedApprovalDecisionSource from "./supervisedApprovalDecision.ts?raw";
 import supervisedAgentConversationPanelSource from "./SupervisedAgentConversationPanel.tsx?raw";
 import supervisedAgentConversationPanelStyles from "./SupervisedAgentConversationPanel.styles";
+import supervisedConversationWorkspaceSource from "./SupervisedConversationWorkspace.tsx?raw";
+import supervisedConversationWorkspaceStyles from "./SupervisedConversationWorkspace.styles";
+import supervisedLiveSetupPanelStyles from "./EvolutionSupervisedLiveSetupPanel.styles";
 import evolutionRouteModelSource from "./evolution/evolutionRouteModel.ts?raw";
 import routeStyles from "./EvolutionRoute.styles";
 import stylesSource from "./EvolutionRoute.styles.ts?raw";
@@ -123,12 +126,20 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedLibraryViewSource).toContain("onChange={() => onToggleProposalSelection(item)}");
   });
 
-  it("adds collapse handles to the supervised split panes", () => {
-    expect(routeSource).toContain("PaneCollapseHandle");
-    expect(routeSource).toContain("liveLaunchCollapsed");
-    expect(routeSource).toContain("liveRunCollapsed");
-    expect(routeSource).toContain("runsQueueCollapsed");
-    expect(routeSource).toContain("libraryListCollapsed");
+  it("keeps supervised live work in the conversation-first workspace", () => {
+    expect(routeSource).toContain("import { SupervisedConversationWorkspace } from \"./SupervisedConversationWorkspace\"");
+    expect(routeSource).toContain("<SupervisedConversationWorkspace");
+    expect(routeSource).toContain("conversation={<div className=\"flex h-full min-h-0 flex-col\">");
+    expect(routeSource).toContain("compact");
+    expect(routeSource).toContain("setup={");
+    expect(routeSource).toContain("evidenceTabs={[");
+    expect(supervisedConversationWorkspaceSource).toContain('data-vui-region="supervised-conversation-workspace"');
+    expect(supervisedConversationWorkspaceSource).toContain("{conversation}");
+    expect(supervisedConversationWorkspaceSource).toContain("const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;");
+    expect(supervisedConversationWorkspaceSource).toContain("onPress={onNew}");
+    expect(supervisedConversationWorkspaceSource).toContain("onPress={onSource}");
+    expect(routeSource).not.toContain("liveLaunchCollapsed");
+    expect(routeSource).not.toContain("liveRunCollapsed");
   });
 
   it("keeps the unforced aggregate self-gating the supervised section on the mode flag", () => {
@@ -232,9 +243,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionRouteModelSource).toContain("item.taskType");
     expect(evolutionRouteModelSource).toContain("item.runBudgetClass");
     expect(routeSource).toContain("datasetBenchmarkDetail(item, lang)");
-    expect(supervisedLiveSetupPanelSource).toContain("数据集会先物化，评测包可直接运行。");
-    expect(routeSource).toContain("sourceInventoryBar");
+    expect(supervisedLiveSetupPanelSource).toContain("onSourceValueChange(option.value)");
+    expect(supervisedLiveSetupPanelSource).toContain("caseCount");
+    expect(supervisedLiveSetupPanelSource).toContain("styles.sourceGroups");
+    expect(supervisedLiveSetupPanelSource).toContain("styles.officialWarning");
+    expect(supervisedLiveSetupPanelStyles.sourceGroups).toContain("overflow-y-auto");
     expect(routeSource).toContain("primaryDatasets.map((item)");
+    expect(routeSource).toContain("const supervisedSourceOptions = useMemo<SupervisedSourceOption[]>(");
+    expect(routeSource).toContain("sourceOptions={supervisedSourceOptions.map((source) => ({");
   });
 
   it("surfaces the supervised evidence root from workbench storage metadata", () => {
@@ -285,9 +301,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("非官方 Terminal-Bench 成绩");
     expect(routeSource).toContain("selectedSourceOfficialWarning");
     expect(routeSource).toContain('t("sourceOfficialVerifierWarning")');
-    expect(supervisedLiveSetupPanelSource).toContain("styles.sourceWarningStrip");
+    expect(supervisedLiveSetupPanelSource).toContain("styles.officialWarning");
     expect(evolutionDictionarySource).toContain("Terminal-Bench 官方 Harbor 判分尚未接入");
-    expect(routeStyles.sourceWarningStrip).toContain("var(--state-warning)");
+    expect(supervisedLiveSetupPanelStyles.officialWarning).toContain("var(--accent-warm)");
   });
 
   it("keeps supervised rejection and runtime notes in governance wording instead of raw status codes", () => {
@@ -382,9 +398,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("const monitoredRun = effectiveActiveRunSnapshot\n    ?? visibleLiveRunSnapshot\n    ?? latestSupervisedRunSnapshot;");
     expect(routeSource).not.toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
     expect(routeSource).toContain("monitoredRun.runId === supervisedWorkflowRun.runId");
-    expect(routeSource).toContain(
-      "{supervisedWorkflowRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}",
-    );
+    expect(routeSource).toContain("const supervisedMembersRunStatusLabel =");
+    expect(routeSource).toContain("const supervisedMembersIdleStatusLabel =");
+    expect(routeSource).toContain("{supervisedMembersRunStatusLabel} · {supervisedWorkflowCards.find((step) => step.current)?.label}");
     expect(routeSource).toContain("const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS");
     expect(routeSource).toContain("const supervisedMembersBindings = supervisedMembersUseRunBindings");
     expect(routeSource).not.toContain("supervisedMembersRun = monitoredRun\n    ?? latestSupervisedRunSnapshot");
@@ -467,8 +483,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("fill");
     expect(routeSource).toContain('data-vui-recipe="evolution-workbench"');
     expect(routeSource).toContain('domainRecipe="evolution-multi-rail"');
-    expect(routeSource).toContain('const showRouteToolbar = activeTrack !== "self";');
-    expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page');
+    expect(routeSource).toContain('const showRouteToolbar = activeTrack !== "self" && evolutionView !== "live";');
+    expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} !gap-0 !p-0` : styles.page');
     expect(routeSource).toContain("header={");
     expect(routeSource).toContain("showRouteToolbar");
     // Page host fill is owned by VTrackWorkbenchPage; route styles only add chrome.
@@ -523,15 +539,19 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("legacyTerminateSupervisedAction");
   });
 
-  it("keeps the supervised launch panel compact", () => {
-    expect(routeSource).toContain("styles.supervisedRunConsole");
-    expect(routeSource).toContain("styles.supervisedRunConsoleGrid");
+  it("keeps source selection and guarded start inside the supervised setup state", () => {
+    expect(routeSource).toContain("setupOpen={supervisedSetupOpen || !supervisedWorkflowRun}");
+    expect(routeSource).toContain("onNew={openSupervisedSetup}");
+    expect(routeSource).toContain("onCancel={supervisedWorkflowRun ? cancelSupervisedSetup : undefined}");
     expect(routeSource).toContain("EvolutionSupervisedLiveSetupPanel");
-    expect(routeSource).toContain("EvolutionSupervisedWorkflowMembersPanel");
-    expect(supervisedLiveSetupPanelSource).toContain("styles.supervisedRunSetup");
-    expect(supervisedLiveSetupPanelSource).toContain("styles.supervisedRunOptions");
-    expect(supervisedLiveSetupPanelSource).toContain("sourceMetaSide");
-    expect(supervisedLiveSetupPanelSource).toContain("数据集会先物化，评测包可直接运行。");
+    expect(supervisedLiveSetupPanelSource).toContain('id="supervised-source-search"');
+    expect(supervisedLiveSetupPanelSource).toContain("styles.sourceGroups");
+    expect(supervisedLiveSetupPanelSource).toContain("styles.selectedSourceCard");
+    expect(routeSource).toContain("startDisabledReason={supervisedStartDisabledReason}");
+    expect(routeSource).toContain("showRunningLock={runLocked || worktreeRunLocked || activationLocked}");
+    expect(supervisedLiveSetupPanelSource).toContain("const submissionDisabled = startDisabled || startPendingVisual || showRunningLock");
+    expect(supervisedLiveSetupPanelStyles.footer).toContain("sticky bottom-0");
+    expect(supervisedLiveSetupPanelStyles.startButton).toContain("!min-h-11");
     expect(routeSource).toContain("startWorktreeRunMutation");
     expect(routeSource).toContain("SupervisedMentalModelMode");
     expect(routeSource).toContain("supervisedMentalModelMode");
@@ -558,23 +578,25 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionDictionarySource).toContain('workbenchContext: "当前评测入口"');
   });
 
-  it("keeps the live launch panel focused on starting evaluations", () => {
-    expect(routeSource).toContain("styles.liveLaunchStack");
-    expect(routeSource).not.toContain("styles.closedLoopLaunchBlock");
-    expect(routeSource).not.toContain('t("startClosedLoopRun")');
-    expect(routeSource).not.toContain("styles.worktreeReviewSurface");
-    expect(routeSource).not.toContain("worktreeReviewPanelHint");
-    expect(routeStyles.liveLaunchStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
-    expect(routeStyles.launchSurface).toContain("[max-height:none]");
-    expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
-    expect(routeStyles.supervisedRunConsole).toContain("[grid-auto-rows:max-content]");
-    expect(routeStyles.supervisedRunConsole).not.toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
-    expect(routeStyles.supervisedRunConsoleGrid).toContain("[grid-template-columns:minmax(0,_1fr)]");
+  it("keeps the real Agent conversation in the primary supervised workspace region", () => {
+    expect(routeSource).toContain("conversation={<div className=\"flex h-full min-h-0 flex-col\">");
+    expect(routeSource).toContain("<SupervisedAgentConversationPanel");
+    expect(routeSource).toContain("compact");
+    expect(supervisedConversationWorkspaceSource).toContain("<main className={styles.mainPane}>");
+    expect(supervisedConversationWorkspaceSource).toContain("<div className={styles.conversationFrame}>{conversation}</div>");
+    expect(supervisedConversationWorkspaceSource).toContain("<div className={styles.setupFrame}>{setup}</div>");
+    expect(supervisedConversationWorkspaceStyles.mainPane).toContain("flex-1");
+    expect(supervisedConversationWorkspaceStyles.conversationFrame).toContain("flex-1");
+    expect(supervisedConversationWorkspaceSource).toContain("const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;");
   });
 
-  it("keeps supervised start controls above workflow navigation in single-column layouts", () => {
-    expect(routeStyles.supervisedRunConsoleGrid).toContain("[grid-auto-rows:max-content]");
-    expect(routeStyles.supervisedRunConsoleGrid).toContain("[align-content:start]");
+  it("keeps the setup picker usable at narrow widths with a visible start action", () => {
+    expect(supervisedLiveSetupPanelStyles.content).toContain("[grid-template-columns:minmax(0,_1fr)]");
+    expect(supervisedLiveSetupPanelStyles.content).toContain("[@container(min-width:720px)]");
+    expect(supervisedLiveSetupPanelStyles.sourceGroups).toContain("overflow-y-auto");
+    expect(supervisedLiveSetupPanelStyles.footer).toContain("sticky bottom-0");
+    expect(supervisedLiveSetupPanelStyles.footerButton).toContain("!min-h-11");
+    expect(supervisedConversationWorkspaceStyles.phaseSelect).toContain("max-[879px]:[&_button]:!min-h-11");
   });
 
   it("shows a compact supervised workflow rail and center overview fallback", () => {
@@ -599,7 +621,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain('const supervisedApprovalSelected = selectedSupervisedWorkflowStepId === "approval";');
     expect(routeSource).toContain("<SupervisedApprovalDecisionPanel");
     expect(routeSource).toContain("run={reviewCandidateWorktree}");
-    expect(routeSource).toContain("onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}");
+    expect(routeSource).toContain("onAction={(runId, action) => setSupervisedConfirmation({ runId, action })}");
+    expect(routeSource).toContain("const confirmationEnabled = Boolean(confirmationRun?.actionStates?.[confirmationActionKey]?.enabled);");
+    expect(routeSource).toContain("if (supervisedConfirmation && confirmationEnabled) approvalWorktreeActionMutation.mutate(supervisedConfirmation");
+    expect(routeSource).not.toContain("onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}");
     expect(supervisedApprovalDecisionPanelSource).toContain("buildSupervisedApprovalDecision");
     expect(supervisedApprovalDecisionPanelSource).toContain("最终审批决策工作台");
     expect(supervisedApprovalDecisionPanelSource).toContain("是否授权后端受控合入");
@@ -730,6 +755,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionTailwindSource).toContain(
       '@source "../../routes/SupervisedApprovalDecisionPanel.styles.ts"',
     );
+    expect(evolutionTailwindSource).toContain('@source "../../routes/SupervisedConversationWorkspace.tsx"');
+    expect(evolutionTailwindSource).toContain(
+      '@source "../../routes/SupervisedConversationWorkspace.styles.ts"',
+    );
     expect(supervisedAgentConversationPanelStyles.empty).toContain("text-center");
     expect(supervisedAgentConversationPanelStyles.empty).toContain("w-[min(72%,_460px)]");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardGrid");
@@ -811,7 +840,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("snapshot?.activeRun?.runId");
     expect(routeSource).toContain("snapshot?.worktreeActiveRun?.runId");
     expect(routeSource).not.toContain("snapshot?.selfAutonomousActiveRun?.runId");
-    expect(routeSource).toContain('onStart={() => startWorktreeRunMutation.mutate()}');
+    expect(routeSource).toContain("onStart={() => startWorktreeRunMutation.mutate(undefined, { onSuccess:");
+    expect(routeSource).toContain("setSupervisedSetupOpen(false); supervisedDraftRef.current = null;");
     expect(runMutationsSource).toContain('executionMode: "real"');
     expect(runMutationsSource).toContain("confirmRealLlmCost: true");
     expect(routeSource).toContain("监督运行中");
@@ -906,26 +936,23 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(activeRunMonitorPanelSource.split('icon={<LibraryBig size={15} />}')).toHaveLength(3);
   });
 
-  it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
-    expect(routeStyles.overviewGrid).toContain("grid-cols-[var(--pane-w-live-launch,440px)");
-    expect(routeStyles.overviewGrid).toContain("[grid-template-rows:minmax(0,_1fr)]");
-    expect(routeStyles.overviewGrid).not.toContain("grid-template-areas");
-    expect(routeStyles.overviewGrid).not.toContain("--evolution-overview-areas");
-    expect(routeStyles.dashboardLaunch).toContain("[grid-column:1]");
-    expect(routeStyles.dashboardLaunch).toContain("[grid-row:1]");
-    expect(routeStyles.liveResizeHandleLaunch).toContain("[grid-column:2]");
-    expect(routeStyles.liveResizeHandleLaunch).toContain("[grid-row:1]");
-    expect(routeStyles.dashboardIo).toContain("[grid-column:3]");
-    expect(routeStyles.dashboardIo).toContain("[grid-row:1]");
-    expect(routeStyles.liveResizeHandleRun).toContain("[grid-column:4]");
-    expect(routeStyles.liveResizeHandleRun).toContain("[grid-row:1]");
-    expect(routeStyles.dashboardRun).toContain("[grid-column:5]");
-    expect(routeStyles.dashboardRun).toContain("[grid-row:1]");
+  it("opens run evidence beside the main conversation on wide screens", () => {
+    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = showEvidence && !narrow;");
+    expect(supervisedConversationWorkspaceSource).toContain("aside={desktopEvidence}");
+    expect(supervisedConversationWorkspaceSource).toContain("resize={LIVE_RUN_RESIZE}");
+    expect(supervisedConversationWorkspaceStyles.splitWorkspace).toContain("!overflow-hidden");
+    expect(supervisedConversationWorkspaceStyles.mainPane).toContain("flex-1");
+    expect(supervisedConversationWorkspaceStyles.evidencePanel).toContain("shrink-0");
+    expect(supervisedConversationWorkspaceStyles.evidencePanel).toContain("border-l");
   });
 
-  it("keeps supervised split resize handles on the shared collapse-resize contract", () => {
-    expect(routeStyles.resizeHandle).toContain("max-[1200px]:hidden");
-    expect(routeSource).toContain("PaneCollapseHandle");
+  it("uses the shared resizable workspace for optional run evidence", () => {
+    expect(supervisedConversationWorkspaceSource).toContain("VSplitWorkspace");
+    expect(supervisedConversationWorkspaceSource).toContain("const LIVE_RUN_PANE = {");
+    expect(supervisedConversationWorkspaceSource).toContain("defaultWidth: 400");
+    expect(supervisedConversationWorkspaceSource).toContain("minWidth: 320");
+    expect(supervisedConversationWorkspaceSource).toContain("maxWidth: 560");
+    expect(supervisedConversationWorkspaceSource).not.toContain("PaneCollapseHandle");
   });
 
   it("keeps supervised run empty states compact for first-viewport scanning", () => {
@@ -934,51 +961,33 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.structuredEmptyState).not.toContain("[min-height:220px]");
   });
 
-  it("uses denser supervised launch and member panels at narrow workbench widths", () => {
-    expect(routeStyles.overviewGrid).toContain("var(--pane-w-live-launch,440px)");
-    expect(routeStyles.overviewGrid).toContain("var(--pane-w-live-run,380px)");
-    expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
-    expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)]");
-    expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[align-items:start]");
-    expect(routeStyles.overviewGrid).toContain("[grid-template-rows:minmax(0,_1fr)]");
-    expect(routeStyles.overviewGrid).not.toContain("[grid-template-rows:minmax(0,_auto)_minmax(0,_0.9fr)_minmax(150px,_0.82fr)]");
-    expect(routeStyles.overviewGrid).not.toContain("[grid-template-rows:minmax(0,_auto)_minmax(156px,_0.86fr)_minmax(150px,_0.74fr)]");
-    expect(routeStyles.launchSurface).not.toContain("[max-height:min(430px,_60vh)]");
-    expect(routeStyles.noticeText).toContain("max-[1200px]:hidden");
-    expect(routeStyles.formHint).toContain("max-[1200px]:hidden");
-    expect(routeStyles.sourceInventoryBar).not.toContain("max-[1200px]:hidden");
-    expect(routeStyles.sourceMetaCompact).not.toContain("max-[1200px]:hidden");
-    expect(routeStyles.supervisedMembersList).toContain("[max-height:min(118px,_22vh)]");
-    expect(routeStyles.supervisedMembersList).toContain("[@container(min-width:560px)]:[max-height:min(238px,_34vh)]");
-    expect(routeStyles.supervisedMemberRow).toContain("[min-height:34px]");
-    expect(routeStyles.supervisedMemberRow).not.toContain("[min-height:40px]");
-    expect(routeStyles.supervisedMemberIdentity).toContain("[font-family:var(--font-mono)]");
-    expect(routeStyles.supervisedMembersPanel).not.toContain("[align-self:end]");
+  it("keeps source search and selection facts readable in the setup layout", () => {
+    expect(supervisedLiveSetupPanelStyles.content).toContain("[@container(min-width:720px)]:[grid-template-columns:minmax(0,_1.12fr)_minmax(240px,_0.88fr)]");
+    expect(supervisedLiveSetupPanelStyles.sourceGroups).toContain("[max-height:min(44vh,_420px)]");
+    expect(supervisedLiveSetupPanelStyles.searchInput).toContain("!min-h-10");
+    expect(supervisedLiveSetupPanelStyles.sourceFacts).toContain("grid-cols-2");
+    expect(supervisedLiveSetupPanelStyles.selectedSourceCard).toContain("bg-[var(--vui-surface-panel)]");
+    expect(supervisedLiveSetupPanelStyles.footer).toContain("sticky bottom-0");
   });
 
-  it("switches the supervised live grid to a single-column flow below tablet width", () => {
-    expect(routeStyles.overviewGrid).toContain("max-[900px]:[grid-template-rows:max-content_max-content_max-content]");
-    expect(routeStyles.dashboardIo).toContain("max-[900px]:[grid-row:1]");
-    expect(routeStyles.dashboardLaunch).toContain("max-[900px]:[grid-row:2]");
-    expect(routeStyles.dashboardRun).toContain("max-[900px]:[grid-row:3]");
-    expect(routeStyles.overviewGrid).toContain("max-[900px]:[align-content:start]");
-    expect(routeStyles.overviewGrid).toContain("max-[900px]:[height:auto]");
-    expect(routeStyles.overviewGrid).toContain("max-[900px]:[overflow:auto]");
-    expect(routeStyles.liveLaunchStack).toContain("max-[900px]:[grid-auto-rows:max-content]");
-    expect(routeStyles.launchSurface).toContain("max-[900px]:[height:max-content]");
-    expect(routeStyles.launchSurface).toContain("max-[900px]:[min-height:max-content]");
-    expect(routeStyles.launchSurface).toContain("max-[900px]:[overflow:visible]");
-    expect(routeStyles.supervisedMembersList).toContain("max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))]");
+  it("moves evidence into a narrow-screen dialog while keeping the conversation primary", () => {
+    expect(supervisedConversationWorkspaceSource).toContain("const narrow = useNarrowViewport();");
+    expect(supervisedConversationWorkspaceSource).toContain("const showMobileEvidence = showEvidence && narrow;");
+    expect(supervisedConversationWorkspaceSource).toContain("open={showMobileEvidence}");
+    expect(supervisedConversationWorkspaceStyles.mobileEvidenceDialog).toContain("!w-[min(88vw,420px)]");
+    expect(supervisedConversationWorkspaceStyles.mobileEvidenceBody).toContain("overflow-hidden");
+    expect(supervisedLiveSetupPanelStyles.content).toContain("[grid-template-columns:minmax(0,_1fr)]");
   });
 
-  it("lets the embedded supervised conversation fill the lower vertical space", () => {
+  it("lets the compact native conversation fill the supervised main region", () => {
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
-    expect(supervisedAgentConversationPanelSource).toContain("className={styles.conversation}");
+    expect(routeSource).toContain("compact");
+    expect(supervisedAgentConversationPanelSource).toContain("className={compact ? styles.compactConversation : styles.conversation}");
     expect(supervisedConversationEvidencePanelSource).toContain("styles.caseRawEvidence");
     expect(routeSource).toContain("currentCaseOutputLabel(monitoredRun)");
-    expect(supervisedAgentConversationPanelStyles.root).toContain("flex-1");
-    expect(supervisedAgentConversationPanelStyles.body).toContain("flex-1");
-    expect(supervisedAgentConversationPanelStyles.conversation).toContain("h-full");
+    expect(supervisedAgentConversationPanelStyles.compactRoot).toContain("h-full");
+    expect(supervisedAgentConversationPanelStyles.compactBody).toContain("flex-1");
+    expect(supervisedAgentConversationPanelStyles.compactConversation).toContain("h-full");
     expect(routeStyles.caseRawEvidence).toContain("[max-height:none]");
     expect(routeStyles.supervisedConversationTrace).toContain("[max-height:min(260px,_30vh)]");
     expect(routeStyles.supervisedConversationTrace).not.toContain("[max-height:340px]");
@@ -999,11 +1008,12 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.casePreflightIssue).toContain("var(--state-warning)");
   });
 
-  it("keeps supervised launch from reserving an empty worktree-review track", () => {
-    expect(routeStyles.liveLaunchStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
-    expect(routeStyles.liveLaunchStack).toContain("[overflow:hidden]");
-    expect(routeStyles.launchSurface).toContain("[max-height:none]");
-    expect(routeStyles.launchSurface).not.toContain("[max-height:min(430px,_60vh)]");
+  it("shows real changed-file evidence only when a run exists", () => {
+    expect(supervisedConversationWorkspaceSource).toContain("isDisabled={!hasRun || evidenceTabs.length === 0}");
+    expect(supervisedConversationWorkspaceSource).toContain("const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;");
+    expect(routeSource).toContain("(reviewCandidateWorktree?.mergeAnalysis?.changedFiles ?? []).map((file)");
+    expect(routeSource).toContain("file.path");
+    expect(routeSource).not.toContain("SupervisedWorktreeReviewPanel");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
     expect(worktreeReviewStylesSource).toContain("worktreeReviewSurfaceClass");
   });
@@ -1037,14 +1047,20 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps the supervised center pane as a real Agent-switchable read-only conversation surface", () => {
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
+    expect(routeSource).toContain("steps={[...supervisedWorkflowCards.map");
+    expect(routeSource).toContain("id: `agent:${member.role}`");
     expect(routeSource).toContain("monitoredCaseConversationMessages");
     expect(routeSource).toContain("supervisedSelectedAgentFallbackMessages");
     expect(routeSource).toContain("handleSupervisedAgentSelect");
     expect(routeSource).toContain("handleFollowSupervisedAgent");
+    expect(routeSource).toContain("const selectedWorkflowRole =");
+    expect(routeSource).toContain(": selectedWorkflowRole");
     expect(routeSource).toContain("selectedWorkflowIsRuntimeStep");
     expect(routeSource).toContain("supervisedLiveConversationSupplement");
+    expect(routeSource).toContain("!supervisedWorkflowManualSelection && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole && monitoredCaseConversationMessages.length > 0");
     expect(supervisedAgentConversationPanelSource).toContain("fetchSessionDetailWindow");
     expect(supervisedAgentConversationPanelSource).toContain("queryKeys.session(sessionId || \"none\")");
+    expect(supervisedAgentConversationPanelSource).toContain("const messages = detail?.messages?.length ? detail.messages : fallbackMessages;");
     expect(supervisedAgentConversationPanelSource).toContain("LazyConversationView");
     expect(routeSource).toContain("supervisedRoleConversationSession(backendWorkflowSteps, role)");
     expect(routeSource).toContain("supervisedWorkflowRun && isLiveSupervisedRunStatus(supervisedWorkflowRun.status)");
@@ -1055,8 +1071,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedAgentConversationPanelSource).toContain("不会借用其他 Agent 的消息");
     expect(supervisedAgentConversationPanelSource).toContain('role="tablist"');
     expect(supervisedAgentConversationPanelSource).toContain('role="tab"');
-    expect(supervisedAgentConversationPanelSource).toContain('role="tabpanel"');
-    expect(supervisedAgentConversationPanelSource).toContain("className={styles.sessionSurface}");
+    expect(supervisedAgentConversationPanelSource).toContain('role={compact ? "region" : "tabpanel"}');
+    expect(supervisedAgentConversationPanelSource).toContain("className={compact ? styles.compactSessionSurface : styles.sessionSurface}");
+    expect(supervisedConversationWorkspaceSource).toContain("ariaLabel={labels.phaseNavigation}");
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("overflow-x-auto");
     expect(supervisedAgentConversationPanelStyles.body).toContain("min-h-[430px]");
     expect(routeStyles.supervisedConversationEvidence).toContain("[width:100%]");

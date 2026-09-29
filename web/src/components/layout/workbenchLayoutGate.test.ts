@@ -268,11 +268,14 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(policy).toContain("usePersistedPaneHeight");
   });
 
-  it("keeps Evolution CASE IO on shared height resize handle", () => {
+  it("keeps Evolution conversation evidence on the shared persisted split", () => {
     const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
-    const liveIo = readFileSync(resolve(webSrc, "routes/EvolutionSupervisedLiveIoPanel.tsx"), "utf-8");
-    expect(evolution).toContain("usePersistedPaneHeight");
-    expect(liveIo).toContain("PaneHeightResizeHandle");
+    const workspace = readFileSync(resolve(webSrc, "routes/SupervisedConversationWorkspace.tsx"), "utf-8");
+    expect(evolution).toContain("<SupervisedConversationWorkspace");
+    expect(workspace).toContain("<VSplitWorkspace");
+    expect(workspace).toContain("WORKBENCH_LAYOUT_IDS.evolution");
+    expect(workspace).toContain('id: "live-run"');
+    expect(workspace).not.toContain("localStorage");
     expect(evolution).not.toContain("beginPaneHeightResize");
   });
 
