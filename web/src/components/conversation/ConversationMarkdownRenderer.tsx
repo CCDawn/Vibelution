@@ -9,6 +9,11 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 
 import { VNativeButton } from "../vui";
+import {
+  ConversationMarkdownBlockBoundary,
+  markdownBlockBoundaryKey,
+  markdownBlockSourceText,
+} from "./conversationMarkdownBlockBoundary";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import { classifyConversationMarkdownLinkTarget } from "./conversationMarkdownLinkTargets";
 import { guardConversationMarkdownMath } from "./conversationMarkdownMathGuard";
@@ -235,60 +240,120 @@ function markdownComponents(
     p({ children }: ComponentPropsWithoutRef<"p">) {
       return <p className={classNames.messageBody}>{children}</p>;
     },
-    pre({ children }: ComponentPropsWithoutRef<"pre">) {
-      const codeBlock = markdownCodeBlockChildren(children);
-      const languageLabel = markdownCodeBlockLanguage(codeBlock);
-      if ((languageLabel ?? "").trim().toLowerCase() === "mermaid") {
-        return (
-          <ConversationMarkdownMermaidBlock
-            code={markdownCodeBlockText(codeBlock)}
+    pre({ children, node }: ComponentPropsWithoutRef<"pre"> & { node?: unknown }) {
+      // Block-scope guard (ZCode-aligned granularity): a crash while rendering
+      // this one fence degrades the fence to its raw text and leaves sibling
+      // blocks untouched. The risky work (formatting, mermaid detection and
+      // render machine, truncation) lives inside ConversationMarkdownPreBlock,
+      // i.e. INSIDE the boundary — throws in the override body itself would
+      // bypass it. Source text comes from the hast node (see
+      // markdownBlockSourceText for the trade-off); the key derives from the
+      // block's source position so reconciliation stays stable across
+      // re-renders.
+      return (
+        <ConversationMarkdownBlockBoundary
+          key={markdownBlockBoundaryKey(node)}
+          source={markdownBlockSourceText(node)}
+          preClassName={classNames.responseSegmentPre}
+        >
+          <ConversationMarkdownPreBlock
             preClassName={classNames.responseSegmentPre}
             language={language}
-          />
-        );
-      }
-      return (
-        <ConversationMarkdownCodeBlock
-          language={languageLabel}
-          text={markdownCodeBlockText(codeBlock)}
-          preClassName={classNames.responseSegmentPre}
-          code={codeBlock}
-          truncation={truncateConversationMarkdownCodeBlock(codeBlock)}
-        />
+          >
+            {children}
+          </ConversationMarkdownPreBlock>
+        </ConversationMarkdownBlockBoundary>
       );
     },
     strong({ children }: ComponentPropsWithoutRef<"strong">) {
       return <strong className={classNames.inlineStrong}>{children}</strong>;
     },
-    table({ children }: ComponentPropsWithoutRef<"table">) {
-      const truncation = truncateConversationMarkdownTable(children);
-      if (!truncation) {
-        return (
-          <div className={classNames.markdownTableWrap}>
-            <table className={classNames.markdownTable}>{children}</table>
-          </div>
-        );
-      }
+    table({ children, node }: ComponentPropsWithoutRef<"table"> & { node?: unknown }) {
+      // Same block-scope guard as `pre`: table truncation/rendering runs
+      // inside ConversationMarkdownTableBlock so a throw degrades only this
+      // table to its cell text.
       return (
-        <>
-          <div className={classNames.markdownTableWrap}>
-            <table className={classNames.markdownTable}>{truncation.visible}</table>
-          </div>
-          <details className={conversationMarkdownOverflowStyles.overflowDetails}>
-            <summary className={conversationMarkdownOverflowStyles.overflowSummary}>
-              {`展开其余 ${truncation.overflowCount} 行`}
-            </summary>
-            <div className={classNames.markdownTableWrap}>
-              <table className={classNames.markdownTable}>{truncation.overflow}</table>
-            </div>
-          </details>
-        </>
+        <ConversationMarkdownBlockBoundary
+          key={markdownBlockBoundaryKey(node)}
+          source={markdownBlockSourceText(node)}
+        >
+          <ConversationMarkdownTableBlock classNames={classNames}>{children}</ConversationMarkdownTableBlock>
+        </ConversationMarkdownBlockBoundary>
       );
     },
     ul({ children }: ComponentPropsWithoutRef<"ul">) {
       return <ul className={classNames.responseSegmentList}>{children}</ul>;
     },
   };
+}
+
+type ConversationMarkdownPreBlockProps = {
+  children: React.ReactNode;
+  preClassName: string;
+  language: "zh" | "en";
+};
+
+/**
+ * Block body of a fenced code block (plain fences and ```mermaid fences).
+ * Everything that can realistically throw — code formatting, mermaid machine
+ * render, truncation arithmetic — deliberately runs in THIS component's
+ * render, i.e. inside the surrounding block boundary: work done in the
+ * `components` override body itself would throw before the boundary exists
+ * and fall through to the whole-message boundary instead.
+ */
+function ConversationMarkdownPreBlock({ children, preClassName, language }: ConversationMarkdownPreBlockProps) {
+  const codeBlock = markdownCodeBlockChildren(children);
+  const languageLabel = markdownCodeBlockLanguage(codeBlock);
+  if ((languageLabel ?? "").trim().toLowerCase() === "mermaid") {
+    return (
+      <ConversationMarkdownMermaidBlock
+        code={markdownCodeBlockText(codeBlock)}
+        preClassName={preClassName}
+        language={language}
+      />
+    );
+  }
+  return (
+    <ConversationMarkdownCodeBlock
+      language={languageLabel}
+      text={markdownCodeBlockText(codeBlock)}
+      preClassName={preClassName}
+      code={codeBlock}
+      truncation={truncateConversationMarkdownCodeBlock(codeBlock)}
+    />
+  );
+}
+
+type ConversationMarkdownTableBlockProps = {
+  children: React.ReactNode;
+  classNames: ConversationMarkdownClassNames;
+};
+
+/** Block body of a GFM table — see ConversationMarkdownPreBlock for the split. */
+function ConversationMarkdownTableBlock({ children, classNames }: ConversationMarkdownTableBlockProps) {
+  const truncation = truncateConversationMarkdownTable(children);
+  if (!truncation) {
+    return (
+      <div className={classNames.markdownTableWrap}>
+        <table className={classNames.markdownTable}>{children}</table>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className={classNames.markdownTableWrap}>
+        <table className={classNames.markdownTable}>{truncation.visible}</table>
+      </div>
+      <details className={conversationMarkdownOverflowStyles.overflowDetails}>
+        <summary className={conversationMarkdownOverflowStyles.overflowSummary}>
+          {`展开其余 ${truncation.overflowCount} 行`}
+        </summary>
+        <div className={classNames.markdownTableWrap}>
+          <table className={classNames.markdownTable}>{truncation.overflow}</table>
+        </div>
+      </details>
+    </>
+  );
 }
 
 function languageFromCodeClassName(className: string) {
