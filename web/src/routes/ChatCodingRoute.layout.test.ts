@@ -1854,7 +1854,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLifecycleSource).toContain("const createSessionMutation");
     expect(chatApiSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
     expect(chatApiSource).toContain('Prefer: "respond-async"');
-    expect(routeAndLifecycleSource).toContain("createChatSession({ agentId })");
+    expect(routeAndLifecycleSource).toContain("createChatSession(");
+    expect(routeAndLifecycleSource).toContain("createIntent.idempotencyKey");
     expect(routeAndLifecycleSource).toContain("mergeSessionDetailIntoSummaries");
     expect(routeAndLifecycleSource).toContain("updateAgentSessionSummaryCaches");
     expect(routeAndLifecycleSource).toContain("pinSessionCreatePreserve");
