@@ -60,6 +60,9 @@ def rag_knowledge_env(tmp_path, monkeypatch):
     private_lead = agent_directory_service.create_agent_instance(
         display_name="Private RAG Lead",
     )
+    private_reviewer = agent_directory_service.create_agent_instance(
+        display_name="Private RAG Reviewer",
+    )
 
     team = team_service.create_team(
         name="RAG Knowledge Team",
@@ -72,6 +75,7 @@ def rag_knowledge_env(tmp_path, monkeypatch):
         name="Private RAG Team",
         members=[
             {"agentId": private_lead["agentId"], "role": "lead"},
+            {"agentId": private_reviewer["agentId"], "role": "member"},
         ],
     )
     readable_base = team_knowledge_service.create_knowledge_base(
@@ -84,7 +88,18 @@ def rag_knowledge_env(tmp_path, monkeypatch):
         private_team["teamId"],
         name="Private RAG Base",
         actor_agent_id=private_lead["agentId"],
-        acl={"grants": {"review": [private_lead["agentId"]], "rate": [private_lead["agentId"]]}},
+        acl={
+            "grants": {
+                "review": [private_lead["agentId"], private_reviewer["agentId"]],
+                "rate": [private_lead["agentId"]],
+            }
+        },
+    )
+    team_knowledge_service.update_owner_source_governance(
+        "team",
+        private_team["teamId"],
+        local_steward_agent_ids=[private_reviewer["agentId"]],
+        actor_agent_id=private_lead["agentId"],
     )
 
     source = _source_artifact(
@@ -142,7 +157,7 @@ def rag_knowledge_env(tmp_path, monkeypatch):
                 owner_type="team",
                 owner_id=private_team["teamId"],
                 actor_agent_id=private_lead["agentId"],
-                reviewer_agent_id=private_lead["agentId"],
+                reviewer_agent_id=private_reviewer["agentId"],
                 title="Private source",
             )["sourceArtifactId"]
         ],
@@ -156,7 +171,7 @@ def rag_knowledge_env(tmp_path, monkeypatch):
         private_base["knowledgeBaseId"],
         private_proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=private_lead["agentId"],
+        reviewed_by_agent_id=private_reviewer["agentId"],
     )["item"]
 
     return {

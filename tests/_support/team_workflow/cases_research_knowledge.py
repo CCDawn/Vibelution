@@ -2357,6 +2357,11 @@ def test_knowledge_collection_ingestion_auto_closes_to_formal_item_via_coordinat
 
     # 同步闭环真正产出正式 KnowledgeItem，且没有回落到唤醒 steward agent 的异步路径。
     assert response["knowledgeReview"] is not None
+    assert response["sourceReview"]["source"]["reviewedByAgentId"] == coordinator["agentId"]
+    assert response["sourceReview"]["source"]["reviewedByAgentId"] != steward_id
+    official_record = response["knowledgeReview"]["knowledgeIngestion"]["officialSyncRecord"]
+    assert official_record["reviewedByAgentId"] == coordinator["agentId"]
+    assert official_record["reviewedByAgentId"] != steward_id
     assert response["knowledgeStewardActivation"] is None
     assert response["summary"]["formalKnowledgeItemCount"] >= 1
     assert response["statusSnapshot"]["summary"]["formalKnowledgeItemCount"] >= 1

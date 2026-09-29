@@ -767,6 +767,15 @@ def review_owner_inbox_source(
             raise s.TeamKnowledgePermissionError(
                 "A Team Agent cannot review their own staged steward-pack source."
             )
+        if wants_direct_ingest:
+            target_owner, target_base = s._require_base_with_owner(knowledge_base_id)
+            target_owner = s._coerce_owner_context(target_owner)
+            if target_owner["ownerType"] != owner["ownerType"] or target_owner["ownerId"] != owner["ownerId"]:
+                raise s.TeamKnowledgePermissionError(
+                    "Direct ingestion target knowledge base must belong to the reviewed owner."
+                )
+            if not s._is_global_knowledge_steward(reviewer_id):
+                s._require_permission(target_owner, target_base, reviewer_id, "review")
         central_source: dict[str, Any] | None = None
         promotion: dict[str, Any] | None = None
         if normalized_decision == "accepted":
@@ -959,6 +968,8 @@ def _direct_ingest_accepted_source_locked(
         raise s.TeamKnowledgePermissionError("Direct ingestion target knowledge base must belong to the reviewed owner.")
     if not s._can_review_owner_source(owner, reviewer_id):
         raise s.TeamKnowledgePermissionError("Agent is not allowed to direct-ingest this owner source.")
+    if not s._is_global_knowledge_steward(reviewer_id):
+        s._require_permission(target_owner, base, reviewer_id, "review")
     normalized_title = trim_lines(knowledge_title or source.get("title") or central_source.get("title") or "", max_lines=1).strip()
     normalized_summary = trim_lines(
         knowledge_summary or source.get("summary") or central_source.get("summary") or "",

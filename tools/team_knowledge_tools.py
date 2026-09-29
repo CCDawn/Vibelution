@@ -523,8 +523,12 @@ def knowledge_ingestion_tool(
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
     base_id = str(knowledge_base_id or "").strip()
+    normalized_inbox_source_id = str(inbox_source_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
-    allowed_base_ids = _policy_ids(memory_policy, "proposeKnowledgeBaseIds")
+    allowed_base_ids = _policy_ids(
+        memory_policy,
+        "reviewKnowledgeBaseIds" if normalized_inbox_source_id else "proposeKnowledgeBaseIds",
+    )
     if base_id and not _policy_allows_knowledge_base(base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
     source_ref = _parse_json_object(source_ref_json, "source_ref_json")
@@ -536,7 +540,6 @@ def knowledge_ingestion_tool(
     try:
         from core.web.services import team_knowledge_service
 
-        normalized_inbox_source_id = str(inbox_source_id or "").strip()
         if normalized_inbox_source_id:
             review = team_knowledge_service.review_owner_inbox_source(
                 owner_type,

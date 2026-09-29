@@ -643,6 +643,79 @@ def test_owner_source_review_directly_ingests_accepted_source_into_formal_knowle
     assert governance["summary"]["proposalReviewCount"] == 0
 
 
+def test_source_reviewer_without_base_review_cannot_direct_ingest_team_knowledge(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    outsider_id = knowledge_env["outsider"]["agentId"]
+    team_knowledge_service.ensure_owner_source_review_grant("team", team_id, outsider_id)
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        source_type="manual_user_entry",
+        source_ref={"note": "source-review-only"},
+        original_content="A source reviewer must not publish to an unrelated knowledge base ACL.",
+        title="Source-review-only candidate",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="review this knowledge base"):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            team_id,
+            inbox_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=outsider_id,
+            ingest_on_accept=True,
+            knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+            knowledge_title="Must remain pending",
+            knowledge_content="Source-review permission alone cannot publish formal Team knowledge.",
+        )
+
+    inbox = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=knowledge_env["lead"]["agentId"])
+    items = team_knowledge_service.list_knowledge_items(
+        knowledge_env["base"]["knowledgeBaseId"],
+        agent_id=knowledge_env["lead"]["agentId"],
+    )
+    assert inbox["sources"][0]["status"] == "pending"
+    assert items["summary"]["itemCount"] == 0
+
+
+def test_agent_owner_can_direct_ingest_and_read_private_knowledge(knowledge_env):
+    owner_id = knowledge_env["outsider"]["agentId"]
+    private_base = team_knowledge_service.create_agent_knowledge_base(
+        owner_id, name="Private Direct Memory", actor_agent_id=owner_id
+    )
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "agent",
+        owner_id,
+        source_type="agent_authored",
+        source_ref={"note": "private-direct-memory"},
+        original_content="The owning Agent can persist and read its own private formal memory.",
+        title="Private direct memory",
+        actor_agent_id=owner_id,
+    )
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        owner_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=owner_id,
+        ingest_on_accept=True,
+        knowledge_base_id=private_base["knowledgeBaseId"],
+        knowledge_title="Private direct memory",
+        knowledge_content="The owning Agent can persist and read its own private formal memory.",
+    )
+    owner_items = team_knowledge_service.list_knowledge_items(
+        private_base["knowledgeBaseId"], agent_id=owner_id
+    )
+    assert reviewed["directIngestion"]["status"] == "ingested"
+    assert owner_items["summary"]["itemCount"] == 1
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.list_knowledge_items(
+            private_base["knowledgeBaseId"], agent_id=knowledge_env["lead"]["agentId"]
+        )
+
+
 def test_source_collection_retry_reuses_appended_source_without_resetting_review_state(knowledge_env, monkeypatch):
     team_id = knowledge_env["team"]["teamId"]
     member_id = knowledge_env["member"]["agentId"]

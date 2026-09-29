@@ -5299,10 +5299,17 @@ def test_source_collection_ingestion_reconciles_nested_approve_all_decision_afte
         task["taskId"],
     )
     materialized = stored_task["writeback"]["materializedKnowledgeIngestion"]
-    assert materialized["status"] == "completed", materialized
-    assert materialized["formalKnowledgeItemCount"] >= 1
-    assert stored_task["completionGate"]["artifactComplete"] is True
-    assert stored_task["status"] == "completed"
+    assert materialized["status"] == "pending_review", materialized
+    assert materialized["sourceReviewStatus"] == "pending_source_review"
+    assert materialized["formalKnowledgeItemCount"] == 0
+    assert materialized["writesFormalKnowledge"] is False
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        materialized["knowledgeBaseId"], agent_id=ingestor["agentId"]
+    )
+    assert knowledge_items["summary"]["itemCount"] == 0
+    assert stored_task["completionGate"]["artifactComplete"] is False
+    assert stored_task["completionGate"]["passed"] is False
+    assert stored_task["status"] == "needs_review"
 
 
 def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_same_task(tmp_path, monkeypatch):

@@ -580,6 +580,50 @@ def test_knowledge_ingestion_tool_directly_ingests_reviewed_inbox_source(tmp_pat
     assert items["summary"]["itemCount"] == 1
 
 
+def test_knowledge_ingestion_tool_uses_review_policy_for_inbox_direct_ingest(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "policy-gated-direct-ingest"},
+        original_content="The source should remain pending when the runtime review policy excludes its base.",
+        title="Policy-gated source",
+        actor_agent_id=env["member"]["agentId"],
+    )
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {
+            "agentId": env["lead"]["agentId"],
+            "memoryPolicy": {
+                "proposeKnowledgeBaseIds": [_kb_ref(env)],
+                "reviewKnowledgeBaseIds": ["kb-other"],
+            },
+        },
+    )
+
+    result = json.loads(
+        team_knowledge_tools.knowledge_ingestion_tool(
+            knowledge_base_id=_kb_ref(env),
+            source_type="manual_user_entry",
+            source_ref_json='{"note":"policy-gated-direct-ingest"}',
+            proposal_title="Policy-gated source",
+            inbox_source_id=inbox_source["inboxSourceId"],
+            owner_type="team",
+            owner_id=env["team"]["teamId"],
+            proposal_content="This must not become formal knowledge.",
+        )
+    )
+
+    inbox = team_knowledge_service.list_owner_source_inbox(
+        "team", env["team"]["teamId"], agent_id=env["lead"]["agentId"]
+    )
+    assert result["ok"] is False
+    assert result["error"] == "knowledge_base_not_in_memory_policy"
+    assert inbox["sources"][0]["status"] == "pending"
+
+
 def test_knowledge_ingestion_tool_reports_partial_when_experiment_reconciliation_fails(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     inbox_source = team_knowledge_service.collect_source_to_inbox(

@@ -3053,33 +3053,7 @@ def _search_item_view(
         "evidenceLevel": str(item.get("evidenceLevel") or ""),
         "sourceTypes": sorted({str(source.get("sourceType") or "") for source in source_artifacts if str(source.get("sourceType") or "")}),
         "localCopies": local_copies,
-        "sourceSummaries": [
-            {
-                "sourceArtifactId": str(source.get("sourceArtifactId") or ""),
-                "centralSourceId": str(source.get("centralSourceId") or ""),
-                "sourceType": str(source.get("sourceType") or ""),
-                "capturedAt": str(source.get("capturedAt") or ""),
-                "title": trim_lines(str(source.get("title") or ""), max_lines=1),
-                "summary": trim_lines(str(source.get("summary") or ""), max_lines=2),
-                "centralPath": str(
-                    (source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}).get("centralPath")
-                    or ""
-                ),
-                "localCopyCount": len(
-                    [
-                        item
-                        for item in list(
-                            (source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}).get(
-                                "localCopies"
-                            )
-                            or []
-                        )
-                        if isinstance(item, dict)
-                    ]
-                ),
-            }
-            for source in source_artifacts[:6]
-        ],
+        "sourceSummaries": [_search_source_summary(source) for source in source_artifacts[:6]],
         "title": trim_lines(str(item.get("title") or ""), max_lines=2),
         "summary": trim_lines(str(item.get("summary") or ""), max_lines=4),
         "content": trim_lines(str(item.get("content") or ""), max_lines=12),
@@ -3093,6 +3067,24 @@ def _search_item_view(
         "appliedAt": str(item.get("appliedAt") or ""),
         "updatedAt": str(item.get("updatedAt") or ""),
     }
+
+
+def _search_source_summary(source: dict[str, Any]) -> dict[str, Any]:
+    source_ref = source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}
+    summary = {
+        "sourceArtifactId": str(source.get("sourceArtifactId") or ""),
+        "centralSourceId": str(source.get("centralSourceId") or ""),
+        "sourceType": str(source.get("sourceType") or ""),
+        "capturedAt": str(source.get("capturedAt") or ""),
+        "title": trim_lines(str(source.get("title") or ""), max_lines=1),
+        "summary": trim_lines(str(source.get("summary") or ""), max_lines=2),
+        "centralPath": str(source_ref.get("centralPath") or ""),
+        "localCopyCount": len([item for item in list(source_ref.get("localCopies") or []) if isinstance(item, dict)]),
+    }
+    content_trust = trim_lines(str(source_ref.get("contentTrust") or ""), max_lines=1).strip()[:80]
+    if content_trust:
+        summary["contentTrust"] = content_trust
+    return summary
 
 
 def _task_status_matches(closed: bool, normalized_status: str) -> bool:
