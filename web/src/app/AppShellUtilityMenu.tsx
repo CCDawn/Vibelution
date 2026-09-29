@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, BellRing, ExternalLink, GitBranch, ScrollText } from "lucide-react";
+import { Activity, BellRing, Cpu, ExternalLink, GitBranch, ScrollText } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -109,6 +109,15 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           <ExternalLink size={16} />
           <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
         </a>
+        {/* P2 nav collapse: Kernel moved out of the primary nav into the settings gear. */}
+        <VRouteLinkButton
+          to="/kernel"
+          className={utilityNavClass(location.pathname, "/kernel")}
+          onClick={onClose}
+          icon={<Cpu size={16} aria-hidden="true" />}
+        >
+          Kernel
+        </VRouteLinkButton>
         <VTooltip content={t("usageUtilityTitle")}>
           <VRouteLinkButton
             to="/usage"

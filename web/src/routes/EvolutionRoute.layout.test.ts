@@ -131,6 +131,22 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("libraryListCollapsed");
   });
 
+  it("keeps the unforced aggregate self-gating the supervised section on the mode flag", () => {
+    // P2 nav collapse: /evolution/workspace mounts EvolutionRoute without forcedTrack,
+    // so these exact expressions decide what the aggregated entry shows.
+    // supervised flag off -> track toggle hidden and activeTrack falls back to self only.
+    expect(routeSource).toContain(
+      'const selfTrackEnabled = forcedTrack === "self" || (configQuery.data?.modeAvailability.self_evolution ?? false);',
+    );
+    expect(routeSource).toContain(
+      'const supervisedTrackEnabled = forcedTrack === "supervised" || (configQuery.data?.modeAvailability.supervised_evolution ?? true);',
+    );
+    expect(routeSource).toContain(
+      "const showTrackToggle = !forcedTrack && selfTrackEnabled && supervisedTrackEnabled;",
+    );
+    expect(routeSource).toContain('evolutionTrack === "self" && selfTrackEnabled');
+  });
+
   it("routes the primary self-evolution start into the user-reviewed autonomous loop", () => {
     expect(routeSource).toContain("startSelfAutonomousLoopMutation");
     expect(runMutationsSource).toContain("startSelfEvolutionAutonomousLoop(payload)");
