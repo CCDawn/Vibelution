@@ -1056,8 +1056,16 @@ def remove_agent_from_chat_rooms(
     allow_empty_rooms: bool = False,
     direct_session_id: str = "",
     include_restore_token: bool = False,
+    dissolve_empty_rooms: bool = False,
 ) -> dict[str, Any]:
-    """Remove one Agent from all chat room participant lists before safe archival."""
+    """Remove one Agent from all chat room participant lists before safe archival.
+
+    ``dissolve_empty_rooms=True`` implies permission to empty rooms: a room
+    left without any participant by this removal is dissolved (deleted) the
+    same way ``delete_chat_room`` would, instead of staying behind as an empty
+    shell. The restore token records the dissolved room ids so a compensation
+    rollback can rebuild them from its pre-removal snapshots.
+    """
 
     lang = get_web_language()
     normalized_agent_id = str(agent_id or "").strip()
@@ -1070,6 +1078,7 @@ def remove_agent_from_chat_rooms(
 
     changed_rooms: list[dict[str, Any]] = []
     restore_rooms: list[dict[str, Any]] = []
+    dissolved_rooms: list[dict[str, Any]] = []
     now = utc_now_iso()
     session_summaries = _session_summary_index()
     # Lock order contract: the participant repair reads the agent directory and
@@ -1097,21 +1106,36 @@ def remove_agent_from_chat_rooms(
             ]
             if next_participants == participants:
                 continue
-            if not next_participants and not allow_empty_rooms:
+            if not next_participants and not allow_empty_rooms and not dissolve_empty_rooms:
+                room_id = str(room.get("roomId") or "").strip()
+                room_title = str(room.get("title") or "").strip() or room_id
                 raise ChatRoomValidationError(
                     text_for(
                         lang,
-                        zh="不能归档仍是某个群聊唯一成员的 Agent。请先删除该群聊或添加其他成员。",
-                        en="Cannot archive an Agent that is the only member of a group room. Delete the room or add another member first.",
+                        zh=f"不能归档仍是群聊「{room_title}」（{room_id}）唯一成员的 Agent。请先删除该群聊或添加其他成员。",
+                        en=f"Cannot archive an Agent that is the only member of group room \"{room_title}\" ({room_id}). Delete the room or add another member first.",
                     )
                 )
             _raise_if_room_busy(room)
             if include_restore_token:
                 restore_rooms.append(copy.deepcopy(room))
+            if not next_participants and dissolve_empty_rooms:
+                room["participants"] = []
+                room["updatedAt"] = now
+                changed_rooms.append(room)
+                dissolved_rooms.append(room)
+                continue
             room["participants"] = next_participants
             room["updatedAt"] = now
             changed_rooms.append(room)
         if changed_rooms:
+            if dissolved_rooms:
+                dissolved_room_ids = {str(room.get("roomId") or "").strip() for room in dissolved_rooms}
+                state["rooms"] = [
+                    item
+                    for item in rooms
+                    if str(item.get("roomId") or "").strip() not in dissolved_room_ids
+                ]
             _store().save(state)
 
     _emit_deferred_participant_repair_events(deferred_repair_events)
@@ -1126,13 +1150,31 @@ def remove_agent_from_chat_rooms(
                 "participantCount": len(room.get("participants") or []),
             },
         )
+    for room in dissolved_rooms:
+        _record_room_event(
+            "room",
+            "chat_room.dissolved",
+            room,
+            fields={
+                "reason": "last_member_archived",
+                "agentId": normalized_agent_id,
+                "participantCount": 0,
+                "roundCount": len(room.get("rounds") or []),
+            },
+            outcome="dissolved",
+            lifecycle=True,
+        )
     result = {
         "agentId": normalized_agent_id,
         "changedRoomIds": [str(room.get("roomId") or "").strip() for room in changed_rooms],
+        "dissolvedRoomIds": [str(room.get("roomId") or "").strip() for room in dissolved_rooms],
         "chatRooms": list_chat_rooms(),
     }
     if include_restore_token:
-        result["restoreToken"] = {"rooms": restore_rooms}
+        result["restoreToken"] = {
+            "rooms": restore_rooms,
+            "dissolvedRoomIds": [str(room.get("roomId") or "").strip() for room in dissolved_rooms],
+        }
     return result
 
 
@@ -1144,8 +1186,15 @@ def remove_agents_from_chat_rooms(
     include_chat_rooms: bool = True,
     repair_participants: bool = True,
     include_restore_token: bool = False,
+    dissolve_empty_rooms: bool = False,
 ) -> dict[str, Any]:
-    """Remove multiple Agents from all room participant lists in one atomic room update."""
+    """Remove multiple Agents from all room participant lists in one atomic room update.
+
+    ``dissolve_empty_rooms=True`` implies permission to empty rooms and mirrors
+    ``remove_agent_from_chat_rooms``: rooms emptied by this removal are
+    dissolved instead of kept, and the restore token records their ids so a
+    compensation rollback can rebuild them.
+    """
 
     lang = get_web_language()
     requested = [str(item or "").strip() for item in list(agent_ids or []) if str(item or "").strip()]
@@ -1175,6 +1224,7 @@ def remove_agents_from_chat_rooms(
 
     changed_rooms: list[dict[str, Any]] = []
     restore_rooms: list[dict[str, Any]] = []
+    dissolved_rooms: list[dict[str, Any]] = []
     removed_by_agent_id: dict[str, list[str]] = {agent_id: [] for agent_id in normalized_agent_ids}
     agent_id_set = set(normalized_agent_ids)
     now = utc_now_iso()
@@ -1211,12 +1261,14 @@ def remove_agents_from_chat_rooms(
                 next_participants.append(participant)
             if next_participants == participants:
                 continue
-            if not next_participants and not allow_empty_rooms:
+            if not next_participants and not allow_empty_rooms and not dissolve_empty_rooms:
+                room_id = str(room.get("roomId") or "").strip()
+                room_title = str(room.get("title") or "").strip() or room_id
                 raise ChatRoomValidationError(
                     text_for(
                         lang,
-                        zh="不能归档仍是某个群聊唯一成员的 Agent。请先删除该群聊或添加其他成员。",
-                        en="Cannot archive an Agent that is the only member of a group room. Delete the room or add another member first.",
+                        zh=f"不能归档仍是群聊「{room_title}」（{room_id}）唯一成员的 Agent。请先删除该群聊或添加其他成员。",
+                        en=f"Cannot archive an Agent that is the only member of group room \"{room_title}\" ({room_id}). Delete the room or add another member first.",
                     )
                 )
             _raise_if_room_busy(room)
@@ -1224,13 +1276,25 @@ def remove_agents_from_chat_rooms(
         for room, next_participants, removed_agent_ids_for_room in planned_changes:
             if include_restore_token:
                 restore_rooms.append(copy.deepcopy(room))
-            room["participants"] = next_participants
-            room["updatedAt"] = now
+            if not next_participants and dissolve_empty_rooms:
+                room["participants"] = []
+                room["updatedAt"] = now
+                dissolved_rooms.append(room)
+            else:
+                room["participants"] = next_participants
+                room["updatedAt"] = now
             changed_rooms.append(room)
             room_id = str(room.get("roomId") or "").strip()
             for removed_agent_id in removed_agent_ids_for_room:
                 removed_by_agent_id.setdefault(removed_agent_id, []).append(room_id)
         if changed_rooms:
+            if dissolved_rooms:
+                dissolved_room_ids = {str(room.get("roomId") or "").strip() for room in dissolved_rooms}
+                state["rooms"] = [
+                    item
+                    for item in rooms
+                    if str(item.get("roomId") or "").strip() not in dissolved_room_ids
+                ]
             _store().save(state)
 
     _emit_deferred_participant_repair_events(deferred_repair_events)
@@ -1252,9 +1316,31 @@ def remove_agents_from_chat_rooms(
                 "participantCount": len(room.get("participants") or []),
             },
         )
+    for room in dissolved_rooms:
+        room_id = str(room.get("roomId") or "").strip()
+        dissolved_agent_ids = [
+            agent_id
+            for agent_id, room_ids in removed_by_agent_id.items()
+            if room_id in set(room_ids)
+        ]
+        _record_room_event(
+            "room",
+            "chat_room.dissolved",
+            room,
+            fields={
+                "reason": "last_member_archived",
+                "agentIds": dissolved_agent_ids,
+                "agentCount": len(dissolved_agent_ids),
+                "participantCount": 0,
+                "roundCount": len(room.get("rounds") or []),
+            },
+            outcome="dissolved",
+            lifecycle=True,
+        )
     result = {
         "agentIds": normalized_agent_ids,
         "changedRoomIds": [str(room.get("roomId") or "").strip() for room in changed_rooms],
+        "dissolvedRoomIds": [str(room.get("roomId") or "").strip() for room in dissolved_rooms],
         "removedByAgentId": {
             agent_id: list(room_ids)
             for agent_id, room_ids in removed_by_agent_id.items()
@@ -1264,31 +1350,55 @@ def remove_agents_from_chat_rooms(
     if include_chat_rooms:
         result["chatRooms"] = list_chat_rooms(session_summaries=session_summaries)
     if include_restore_token:
-        result["restoreToken"] = {"rooms": restore_rooms}
+        result["restoreToken"] = {
+            "rooms": restore_rooms,
+            "dissolvedRoomIds": [str(room.get("roomId") or "").strip() for room in dissolved_rooms],
+        }
     return result
 
 
 def restore_removed_agents_to_chat_rooms(restore_token: dict[str, Any] | None) -> dict[str, Any]:
-    """Restore exact room participant snapshots after a failed archive."""
+    """Restore exact room participant snapshots after a failed archive.
 
-    snapshots = [copy.deepcopy(item) for item in list(dict(restore_token or {}).get("rooms") or []) if isinstance(item, dict)]
+    Rooms the removal dissolved are listed under ``dissolvedRoomIds`` in the
+    token; those are rebuilt from their pre-removal snapshots when missing so
+    the archive compensation returns the workspace to its pre-archive state.
+    Snapshots for rooms that still exist keep the replace-in-place behavior,
+    and snapshots without a dissolved marker are still skipped when the room
+    is gone.
+    """
+
+    token = dict(restore_token or {})
+    snapshots = [copy.deepcopy(item) for item in list(token.get("rooms") or []) if isinstance(item, dict)]
+    dissolved_room_ids = {
+        str(item or "").strip()
+        for item in list(token.get("dissolvedRoomIds") or [])
+        if str(item or "").strip()
+    }
     if not snapshots:
-        return {"restoredRoomIds": []}
+        return {"restoredRoomIds": [], "rebuiltRoomIds": []}
     restored_ids: list[str] = []
+    rebuilt_ids: list[str] = []
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
         by_id = {str(item.get("roomId") or "").strip(): index for index, item in enumerate(rooms)}
         for snapshot in snapshots:
             room_id = str(snapshot.get("roomId") or "").strip()
-            if not room_id or room_id not in by_id:
+            if not room_id:
                 continue
-            rooms[by_id[room_id]] = snapshot
-            restored_ids.append(room_id)
+            if room_id in by_id:
+                rooms[by_id[room_id]] = snapshot
+                restored_ids.append(room_id)
+            elif room_id in dissolved_room_ids:
+                rooms.append(snapshot)
+                by_id[room_id] = len(rooms) - 1
+                restored_ids.append(room_id)
+                rebuilt_ids.append(room_id)
         state["rooms"] = rooms
-        if restored_ids:
+        if restored_ids or rebuilt_ids:
             _store().save(state)
-    return {"restoredRoomIds": restored_ids}
+    return {"restoredRoomIds": restored_ids, "rebuiltRoomIds": rebuilt_ids}
 
 
 def delete_chat_room(room_id: str) -> dict[str, Any]:
