@@ -346,7 +346,12 @@ def latest_active_desktop_session(
         parameters.append(normalized_provider)
     if normalized_workspace:
         clauses.append("replace(lower(workspace_root), '/', '\\') = ?")
-        parameters.append(normalized_workspace)
+        # Mirror the column-side rewrite on the parameter too: os.path
+        # .normcase lower-cases only on Windows, and POSIX roots are stored
+        # with forward slashes, so without this the two sides never match on
+        # macOS/Linux. Both sides now share the lowered backslash form and
+        # the expression index stays usable.
+        parameters.append(normalized_workspace.replace("/", "\\").lower())
     if normalized_window_role:
         clauses.append("json_type(windows_json, '$.' || ?) = 'object'")
         parameters.append(normalized_window_role)

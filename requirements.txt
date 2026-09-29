@@ -7,6 +7,8 @@ tiktoken>=0.7.0            # Token 计数（用于日志实时显示输入 token
 regex==2026.5.9
 psutil>=5.9.0
 rich>=13.7.0              # CLI 富文本渲染引擎 (Claude Code 级 TUI)
+# 会话图片附件的模型输入降采样等 4 个产品模块 import PIL；缺它会在运行时 ImportError。
+Pillow>=10.0
 
 # LangChain 依赖
 langchain>=0.1.0

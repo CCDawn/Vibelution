@@ -22,10 +22,12 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
 const protocolPath = join(repoRoot, "tests", "fixtures", "launcher", "instance_lock_protocol.json");
 const pythonExe = [
   join(repoRoot, ".venv", "Scripts", "python.exe"),
-  join(repoRoot, "..", "..", ".venv", "Scripts", "python.exe")
+  join(repoRoot, ".venv", "bin", "python"),
+  join(repoRoot, "..", "..", ".venv", "Scripts", "python.exe"),
+  join(repoRoot, "..", "..", ".venv", "bin", "python")
 ].find((candidate) => existsSync(candidate));
 if (!pythonExe) {
-  throw new Error("python.exe not found beside the worktree or the main checkout .venv");
+  throw new Error("python not found beside the worktree or the main checkout .venv");
 }
 const tempDirs: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];

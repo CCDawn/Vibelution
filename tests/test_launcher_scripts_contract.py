@@ -148,7 +148,7 @@ def test_launcher_native_entry_source_and_build_contract():
     assert "UseShellExecute = false" in source
     assert "CreateNoWindow = true" in source
     assert "WindowStyle = ProcessWindowStyle.Hidden" in source
-    assert "RunNativeAction(projectDir, parsed.ForwardedArgs)" in source
+    assert "RunNativeAction(projectDir, parsed.ForwardedArgs, parsed.HiddenPresentation)" in source
     assert '"X-Vibelution-Launcher-Trigger"' in source
     assert "wscript.exe" not in source
     assert "vibelution_desktop_entry.vbs" not in source

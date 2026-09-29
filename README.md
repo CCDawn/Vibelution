@@ -32,7 +32,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1
 
 打开桌面的 **Vibelution Launcher**，按[模型配置指南](docs/ops/config/INDEX.md)配置服务商与密钥。随后：**创建 Agent → 配置模型与工具 → 绑定团队角色 → 提交研究问题**。
 
-[Windows 安装指南](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md)
+[Windows 安装指南](docs/guides/install-windows.md) · [macOS](docs/guides/install-macos.md) · [Linux](docs/guides/install-linux.md) · [让 AI 帮你部署（Agent Runbook）](docs/guides/agent-deploy-runbook.md) · [Linux 部署参考](docs/ops/linux-bootstrap.md)
 
 *macOS / Linux 按对应指南从终端启动浏览器工作台。工作台在本机运行；使用云端模型时，请求会发给所选服务商并可能产生费用。配置与密钥保存在仓库之外。*
 

@@ -1942,6 +1942,7 @@ def test_list_llm_model_options_detects_windows_user_scoped_model_key(monkeypatc
     assert option["api_key_configured"] is True
 
 
+@pytest.mark.skipif(os.name != "nt", reason="flips the shared os module to nt; pathlib then constructs WindowsPath on POSIX")
 def test_build_effective_config_prefers_model_user_env_key_on_windows(monkeypatch):
     public_config = add_llm_model(
         _load_schema_v1_inline_public_config(),
