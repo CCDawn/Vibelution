@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import atexit
+import json
 import logging
 import os
 import re
@@ -23,6 +25,10 @@ from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port  # 
 
 
 USER_ENV_FALLBACK_ENV = "VIBELUTION_ENABLE_USER_ENV_FALLBACK"
+
+# Runtime scene opened by this backend process (see bootstrap below); the exit
+# seal only touches the pointer while it still references this scene.
+_startup_runtime_scene_reference: dict[str, str] | None = None
 
 
 class WorkbenchAccessLogFilter(logging.Filter):
@@ -114,6 +120,85 @@ def install_access_log_filters() -> None:
     logger.addFilter(WorkbenchAccessLogFilter())
 
 
+def open_runtime_scene_for_startup() -> dict[str, object]:
+    """Open a fresh runtime scene for this backend start, then prune overflow.
+
+    Ported from the retired Python launcher path: every backend start seals the
+    previous scene as ``orphan_reconciled`` and repoints
+    ``active-runtime-scene.json`` at a new timestamped scene, which is what
+    makes query-side retention (keep newest 30, protect the current scene)
+    effective again. Kept as a pure function so tests can run it against an
+    isolated service root without starting uvicorn.
+    """
+    from core.web.services.runtime_scene.lifecycle import (
+        BACKEND_STARTUP_TRIGGER,
+        start_runtime_scene,
+    )
+    from core.web.services.runtime_scene.query import _enforce_runtime_scene_retention
+
+    reference = start_runtime_scene(BACKEND_STARTUP_TRIGGER)
+    retention: dict[str, object] = {}
+    try:
+        retention = dict(_enforce_runtime_scene_retention() or {})
+    except Exception as exc:  # retention must never block backend startup
+        retention = {"error": type(exc).__name__}
+    return {"runtimeScene": reference, "retention": retention}
+
+
+def seal_runtime_scene_on_exit() -> None:
+    """Best-effort seal of this process's runtime scene at interpreter exit.
+
+    Skips when the pointer already moved to a newer scene (a fresh start owns
+    it). Pure file operations: never blocks, never spawns a process, never
+    opens a console. Crashes are covered by the next start's
+    ``orphan_reconciled`` seal.
+    """
+    try:
+        from core.web.services.runtime_scene import lifecycle
+
+        started = _startup_runtime_scene_reference
+        if started:
+            try:
+                payload = json.loads(
+                    lifecycle._active_runtime_scene_pointer_path().read_text(encoding="utf-8-sig")
+                )
+            except (OSError, json.JSONDecodeError, ValueError):
+                return
+            if (
+                not isinstance(payload, dict)
+                or str(payload.get("runtimeSceneId") or "")
+                != str(started.get("runtimeSceneId") or "")
+            ):
+                return
+        lifecycle.seal_active_runtime_scene(
+            "backend_exited", "Workbench backend process exited cleanly."
+        )
+    except Exception:
+        pass
+
+
+def bootstrap_runtime_scene_for_workbench() -> None:
+    """Startup wiring: open scene + retention + graceful-exit seal (best-effort).
+
+    Deliberately NOT wired into the FastAPI lifespan: TestClient triggers the
+    lifespan, which would create runtime scenes in every service test. Only
+    the real entrypoint (``main``) calls this. Any failure here degrades to no
+    scene rotation; backend startup must proceed.
+    """
+    global _startup_runtime_scene_reference
+    try:
+        result = open_runtime_scene_for_startup()
+        scene = result.get("runtimeScene") if isinstance(result, dict) else None
+        _startup_runtime_scene_reference = scene if isinstance(scene, dict) else None
+    except Exception as exc:
+        _startup_runtime_scene_reference = None
+        logging.getLogger("uvicorn.error").warning("Runtime scene bootstrap skipped: %s", type(exc).__name__)
+    try:
+        atexit.register(seal_runtime_scene_on_exit)
+    except Exception:
+        pass
+
+
 def main() -> None:
     args = parse_args()
     url = f"http://{args.host}:{args.port}"
@@ -121,6 +206,7 @@ def main() -> None:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     enable_user_env_fallback_for_workbench()
     install_access_log_filters()
+    bootstrap_runtime_scene_for_workbench()
     uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=args.reload)
 
 

@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 
 from core.logging import debug as _debug_logger
@@ -21,6 +23,34 @@ from core.logging.trace_context import current_trace_fields, merge_current_trace
 
 _TOOL_ARGUMENT_TELEMETRY_KEYS = frozenset({"tool_args", "toolargs", "arguments"})
 _TRUNCATED_TELEMETRY_VALUE = "[truncated]"
+
+
+def _atomic_write_scene_text(path: Path, text: str) -> None:
+    """原子写场景 JSON 文件：临时文件 + os.replace，崩溃时不留半写目标文件。
+
+    不复用 core.infrastructure.atomic_io.atomic_write_text：它的 <target>.lock
+    sidecar 会常驻场景目录，被 _list_package_files 计入 research/raw 等文件清单，
+    改变 event_counts 口径。此处临时文件只在写入瞬间存在，写完即替换或清理；
+    Windows 上目标文件被读者短暂持有时 replace 短重试，仍失败则退化为原地写
+    （与历史 write_text 行为一致），保证最终一致。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+        for attempt in range(5):
+            try:
+                os.replace(temp_path, path)
+                return
+            except PermissionError:
+                sleep(0.02 * (attempt + 1))
+        path.write_text(text, encoding="utf-8")
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _service():
@@ -2054,7 +2084,7 @@ def _save_runtime_scene_lightweight_package_index(scene_dir: Path, package_index
     s = _service()
     index_path = scene_dir / s.PACKAGE_INDEX_PATH
     payload = s._runtime_scene_lightweight_package_index_payload(package_index)
-    index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_scene_text(index_path, json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _save_runtime_scene_package_index(
@@ -2069,7 +2099,7 @@ def _save_runtime_scene_package_index(
     payload = s._runtime_scene_package_index_payload(
         scene_dir, package_index, timeline=timeline, lifecycle=lifecycle
     )
-    index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_scene_text(index_path, json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _save_runtime_scene_research_summary(scene_dir: Path) -> None:
@@ -2079,9 +2109,9 @@ def _save_runtime_scene_research_summary(scene_dir: Path) -> None:
         return
     summary_path = s._resolve_scene_child(scene_dir, s.RESEARCH_SUMMARY_PATH)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(
+    _atomic_write_scene_text(
+        summary_path,
         json.dumps(s._runtime_scene_research_summary_payload(events), ensure_ascii=False, indent=2),
-        encoding="utf-8",
     )
 
 
@@ -2104,13 +2134,13 @@ def _save_runtime_scene_summary(
         timeline=timeline,
         lifecycle=lifecycle,
     )
-    summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_scene_text(summary_path, json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 def _save_scene_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
     s = _service()
     manifest_path = scene_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_scene_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2))
 
 
 def _scene_dirs() -> list[Path]:
@@ -2463,6 +2493,69 @@ def _note_scene_package_refresh_started(now: float) -> None:
 def _note_scene_package_refresh_duration(started_at: float) -> None:
     s = _service()
     s._last_scene_package_refresh_duration_s = max(0.0, monotonic() - started_at)
+
+
+_BACKGROUND_SCENE_REFRESH_THREAD_NAME = "runtime-scene-package-refresh"
+
+# 防堆积登记表：记录已排队或在跑的后台刷新场景目录。请求路径只登记与提交，
+# 权威的窗口+非阻塞写锁门控仍在 _refresh_active_scene_package_if_due 内执行。
+_background_scene_refresh_state_lock = threading.Lock()
+_background_scene_refresh_busy: set[Path] = set()
+
+
+def _scene_background_refresh_busy(scene_dir: Path) -> bool:
+    with _background_scene_refresh_state_lock:
+        return scene_dir in _background_scene_refresh_busy
+
+
+def _wait_for_background_scene_refresh(scene_dir: Path, timeout: float = 10.0) -> bool:
+    """等待指定场景的后台刷新线程退出（登记表清空）；供测试与收口辅助。"""
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        if not _scene_background_refresh_busy(scene_dir):
+            return True
+        sleep(0.01)
+    return not _scene_background_refresh_busy(scene_dir)
+
+
+def _submit_background_scene_package_refresh(scene_dir: Path) -> bool:
+    """把节流全量刷新提交到后台 daemon 线程，返回是否真的排队。
+
+    防堆积：同一场景已有后台刷新排队或在跑时直接跳过；提交时窗口已关闭也
+    跳过（真正的窗口判定由后台线程在非阻塞写锁内重做，不在此处抢占）。
+    daemon 线程不阻塞解释器退出；manifest/summary 写入走原子替换，线程在
+    解释器退出被截断时也不会留下半写文件。
+    """
+    s = _service()
+    if not s._scene_package_refresh_window_open(monotonic()):
+        return False
+    with _background_scene_refresh_state_lock:
+        if scene_dir in _background_scene_refresh_busy:
+            return False
+        _background_scene_refresh_busy.add(scene_dir)
+    thread = threading.Thread(
+        target=_run_background_scene_package_refresh,
+        args=(scene_dir,),
+        name=_BACKGROUND_SCENE_REFRESH_THREAD_NAME,
+        daemon=True,
+    )
+    thread.start()
+    return True
+
+
+def _run_background_scene_package_refresh(scene_dir: Path) -> None:
+    try:
+        try:
+            _refresh_active_scene_package_if_due(scene_dir)
+        except Exception as exc:  # noqa: BLE001 - 后台诊断刷新绝不影响请求路径
+            _debug_logger.warning(
+                f"background scene package refresh failed ({scene_dir.name}): "
+                f"{type(exc).__name__}: {exc}",
+                tag="SCENE",
+            )
+    finally:
+        with _background_scene_refresh_state_lock:
+            _background_scene_refresh_busy.discard(scene_dir)
 
 
 def _refresh_active_scene_package_if_due(scene_dir: Path) -> bool:
@@ -3196,19 +3289,27 @@ def _record_runtime_scene_event_impl(
         event_payload["lifecycle"] = True
     s._append_scene_event(scene_dir, component_name, event_payload)
 
-    # 节流刷新活跃场景的 summary/package_index，保证诊断入口始终新鲜（常规事件也补齐）。
-    # Launcher / Runtime Manager 生命周期热路径可以只追加持久事件；明确的
-    # warning/error 仍会在下方走即时完整投影，并与本刷新共享同一窗口，避免叠加。
-    periodic_refresh_ran = False
-    if refresh_package_if_due:
-        periodic_refresh_ran = s._refresh_active_scene_package_if_due(scene_dir)
-
-    projection_refresh = "deferred"
+    # 周期性刷新活跃场景的 summary/package_index（常规事件也补齐），但普通事件
+    # 不再在请求线程内联执行全量刷新（真实环境全量读可达数秒~30s+，会把并发
+    # 请求整体拖慢数倍）：毫秒级登记后提交到后台 daemon 线程，窗口+非阻塞写锁
+    # 门控在后台线程内沿用（防堆积，同一场景排队/在跑只保留一个）。
+    # warning/error 即时投影事件保持原语义：仍在本线程内联节流刷新，并与下方
+    # 完整投影共享同一窗口（periodic_refresh_ran 复用），避免与刚提交的后台刷新
+    # 抢锁导致即时投影被推迟。Launcher / Runtime Manager 生命周期热路径仍显式
+    # 传 refresh_package_if_due=False。
     requires_projection_lock = s._runtime_scene_event_requires_immediate_projection(
         event_code=event_name,
         level=level_name,
         outcome=outcome_name,
     )
+    periodic_refresh_ran = False
+    if refresh_package_if_due:
+        if requires_projection_lock:
+            periodic_refresh_ran = s._refresh_active_scene_package_if_due(scene_dir)
+        else:
+            _submit_background_scene_package_refresh(scene_dir)
+
+    projection_refresh = "deferred"
     if requires_projection_lock:
         # Full diagnosis generation is intentionally isolated from the append
         # lock. A slow warning projection must not queue ordinary Agent events

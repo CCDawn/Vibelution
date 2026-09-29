@@ -4,6 +4,7 @@
 - ``query`` — list/get/detail/evidence (Phase 13)
 - ``diagnosis`` — issue/work-run/startup diagnosis (Phase 14)
 - ``package_index`` — package_index sidecar sync (Phase 19)
+- ``lifecycle`` — backend-start scene rotation and sealing
 
 Public callers use ``runtime_scene_service`` facade re-exports.
 """
