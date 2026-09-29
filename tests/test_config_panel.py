@@ -1694,6 +1694,9 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
     monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_GPT_5_6_LUNA_API_KEY", "relay-secret")
     monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
     monkeypatch.setattr("core.llm.client._default_responses_backend", fake_backend)
+    # Hermetic unit test: skip the probe's real-DNS target validation so the
+    # machine's current network/proxy environment cannot fail this test.
+    monkeypatch.setattr("config.public_config.validate_llm_provider_target", lambda *_args, **_kwargs: None)
 
     result = _probe_llm_runtime(provider, profile, "relay-secret")
 
