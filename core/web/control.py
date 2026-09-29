@@ -27,21 +27,50 @@ _SOURCE_ONLY_GET_PATH_PREFIXES = (
 )
 # Session artifact GETs need the same browser-native treatment (timeline
 # <img> elements and no-token download navigation), but the artifacts route
-# also serves document attachments (text/PDF). Only image-extension artifact
-# ids are exempt; document artifacts and every mutating method keep the token
-# gate. Safety audit of the exempt surface (core/web/routes/sessions.py ->
-# session_image_artifact -> resolve_session_image_artifact): the artifact id
-# must be a bare filename matching the route's safe-chars allowlist with an
-# image extension, the session workspace is resolved and confined under the
-# sandboxed sessions root, and the target must resolve inside
-# <workspace>/artifacts/images as an existing regular file, so the exemption
-# only ever serves image bytes from controlled storage. The extension set is
-# pinned to session_service._SESSION_IMAGE_ARTIFACT_CONTENT_TYPES by a unit
-# test (tests/test_web_control_custom_ports.py).
+# also serves document attachments (text/PDF). Image- and document-extension
+# artifact ids are exempt on GET only; every mutating method and any other
+# path shape keeps the token gate. Safety audit of the exempt surface
+# (core/web/routes/sessions.py -> session_image_artifact ->
+# resolve_session_image_artifact / resolve_session_document_artifact): the
+# artifact id must be a bare filename matching the route's safe-chars
+# allowlist with an exempt extension, the session workspace is resolved and
+# confined under the sandboxed sessions root, and the target must resolve
+# inside <workspace>/artifacts/images or <workspace>/artifacts/documents as
+# an existing regular file, so the exemption only ever serves attachment
+# bytes from controlled storage (HTML/HTM uploads are re-typed text/plain at
+# store time, PDF payloads are validated to start with %PDF-). The extension
+# sets are pinned to session_service._SESSION_IMAGE_ARTIFACT_CONTENT_TYPES
+# and document_attachments.SESSION_DOCUMENT_ALL_EXTENSIONS by unit tests
+# (tests/test_web_control_custom_ports.py).
 _SESSION_ARTIFACT_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
-_SESSION_ARTIFACT_IMAGE_PATH_RE = re.compile(
-    r"/api/sessions/[^/]+/artifacts/[A-Za-z0-9_.-]+(?:%s)\Z"
-    % "|".join(re.escape(extension) for extension in _SESSION_ARTIFACT_IMAGE_EXTENSIONS)
+# Document artifact ids (text/code files and PDF uploaded through the
+# document-attachment pipeline) share the same narrow gate; keep the tuple
+# local to control.py and let the pin test hold it equal to the service
+# allowlist (mirrors the image-extension precedent).
+_SESSION_ARTIFACT_DOCUMENT_EXTENSIONS = (
+    ".md", ".markdown", ".txt", ".text",
+    ".csv", ".tsv", ".json", ".jsonl", ".yaml", ".yml", ".xml", ".html", ".htm",
+    ".py", ".pyw", ".ipynb", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".css", ".scss", ".less", ".sql", ".sh", ".bash", ".zsh", ".ps1", ".bat",
+    ".r", ".rmd", ".rb", ".php", ".java", ".kt", ".swift", ".c", ".h", ".cc",
+    ".cpp", ".hpp", ".cs", ".go", ".rs", ".scala", ".pl", ".lua", ".dart",
+    ".toml", ".ini", ".cfg", ".conf", ".log", ".srt", ".vtt", ".bib", ".tex", ".sty",
+    ".pdf",
+)
+
+
+def _session_artifact_get_path_pattern(extensions: tuple[str, ...]) -> re.Pattern[str]:
+    return re.compile(
+        r"/api/sessions/[^/]+/artifacts/[A-Za-z0-9_.-]+(?:%s)\Z"
+        % "|".join(re.escape(extension) for extension in extensions)
+    )
+
+
+_SESSION_ARTIFACT_IMAGE_PATH_RE = _session_artifact_get_path_pattern(
+    _SESSION_ARTIFACT_IMAGE_EXTENSIONS
+)
+_SESSION_ARTIFACT_DOCUMENT_PATH_RE = _session_artifact_get_path_pattern(
+    _SESSION_ARTIFACT_DOCUMENT_EXTENSIONS
 )
 CONTROL_TOKEN_ENV = "VIBELUTION_WEB_CONTROL_TOKEN"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
@@ -122,9 +151,13 @@ def _is_source_only_get_path(path: str) -> bool:
     normalized = str(path or "")
     if normalized.startswith(_SOURCE_ONLY_GET_PATH_PREFIXES):
         return True
-    # Narrow session-artifact gate: image-extension artifact ids only
-    # (documents and multi-segment or traversal-shaped paths fail closed).
-    return _SESSION_ARTIFACT_IMAGE_PATH_RE.fullmatch(normalized) is not None
+    # Narrow session-artifact gate: image- and document-extension artifact ids
+    # only (unknown extensions and multi-segment or traversal-shaped paths
+    # fail closed).
+    return (
+        _SESSION_ARTIFACT_IMAGE_PATH_RE.fullmatch(normalized) is not None
+        or _SESSION_ARTIFACT_DOCUMENT_PATH_RE.fullmatch(normalized) is not None
+    )
 
 
 class WebControlGuardMiddleware(BaseHTTPMiddleware):

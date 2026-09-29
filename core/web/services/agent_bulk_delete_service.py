@@ -156,6 +156,7 @@ def _prepare_bulk_archive_references(
     snapshots_by_agent_id: dict[str, dict[str, Any]],
     timings: dict[str, float],
     allow_empty_rooms: bool = False,
+    dissolve_empty_rooms: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Remove archive references while compensating every completed stage on failure."""
 
@@ -174,6 +175,7 @@ def _prepare_bulk_archive_references(
             lambda: remove_agents_from_chat_rooms(
                 candidate_ids,
                 allow_empty_rooms=allow_empty_rooms,
+                dissolve_empty_rooms=dissolve_empty_rooms,
                 include_chat_rooms=False,
                 include_restore_token=True,
             ),
@@ -259,8 +261,14 @@ def bulk_archive_agents(
     agent_ids: list[str] | None,
     *,
     allow_empty_rooms: bool = False,
+    dissolve_empty_rooms: bool = True,
 ) -> dict[str, Any]:
-    """Archive Agents one-by-one. Earlier successes stay committed if a later Agent fails."""
+    """Archive Agents one-by-one. Earlier successes stay committed if a later Agent fails.
+
+    Like the single-Agent archive, rooms emptied because the archived Agent
+    was their last member are dissolved by default (``dissolve_empty_rooms``),
+    so no ghost empty room is left behind.
+    """
 
     requested_agent_ids = _dedupe_agent_ids(agent_ids)
     if len(requested_agent_ids) > MAX_BULK_AGENT_IDS:
@@ -270,6 +278,7 @@ def bulk_archive_agents(
         return _bulk_archive_agents_unlocked(
             requested_agent_ids,
             allow_empty_rooms=allow_empty_rooms,
+            dissolve_empty_rooms=dissolve_empty_rooms,
         )
     finally:
         _release_archive_in_flight(requested_agent_ids)
@@ -279,6 +288,7 @@ def _bulk_archive_agents_unlocked(
     requested_agent_ids: list[str],
     *,
     allow_empty_rooms: bool,
+    dissolve_empty_rooms: bool = True,
 ) -> dict[str, Any]:
     timings: dict[str, float] = {}
     started_at = perf_counter()
@@ -287,6 +297,7 @@ def _bulk_archive_agents_unlocked(
     failed: list[dict[str, Any]] = []
     changed_team_ids: list[str] = []
     changed_room_ids: list[str] = []
+    changed_dissolved_room_ids: list[str] = []
     mode_repair_warnings: list[Any] = []
     session_archive_by_agent_id: dict[str, dict[str, Any]] = {}
 
@@ -313,6 +324,7 @@ def _bulk_archive_agents_unlocked(
                 snapshots_by_agent_id={agent_id: snapshot},
                 timings=timings,
                 allow_empty_rooms=allow_empty_rooms,
+                dissolve_empty_rooms=dissolve_empty_rooms,
             )
             prepared = True
             session_archive = _timed(
@@ -351,8 +363,10 @@ def _bulk_archive_agents_unlocked(
         session_archive_by_agent_id[agent_id] = public_session_cleanup
         removed_from_room_ids = list((room_cleanup.get("removedByAgentId") or {}).get(agent_id) or [])
         removed_from_team_ids = list((team_cleanup.get("removedByAgentId") or {}).get(agent_id) or [])
+        dissolved_room_ids_for_agent = list(room_cleanup.get("dissolvedRoomIds") or [])
         _extend_unique(changed_room_ids, room_cleanup.get("changedRoomIds") or [])
         _extend_unique(changed_team_ids, team_cleanup.get("changedTeamIds") or [])
+        _extend_unique(changed_dissolved_room_ids, dissolved_room_ids_for_agent)
         mode_repair_warnings.extend(list(mode_cleanup.get("repairWarnings") or []))
         success.append(
             {
@@ -360,6 +374,7 @@ def _bulk_archive_agents_unlocked(
                 "archiveSummary": {
                     "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                     "removedFromRoomIds": removed_from_room_ids,
+                    "dissolvedRoomIds": dissolved_room_ids_for_agent,
                     "removedFromTeamIds": removed_from_team_ids,
                     "sessions": public_session_cleanup,
                     "dataRetention": "sealed",
@@ -396,6 +411,7 @@ def _bulk_archive_agents_unlocked(
         "summary": summary,
         "cleanupSummary": {
             "removedFromRoomIds": changed_room_ids,
+            "dissolvedRoomIds": changed_dissolved_room_ids,
             "removedFromTeamIds": changed_team_ids,
             "modeBindingsRepaired": len(mode_repair_warnings),
             "dataRetention": "sealed",

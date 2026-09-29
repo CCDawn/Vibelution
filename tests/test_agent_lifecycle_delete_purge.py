@@ -230,19 +230,22 @@ def test_agent_purge_api_preserves_fixed_role_tombstone_after_legacy_archive(tmp
     ]
 
 
-def test_agent_delete_api_rejects_only_group_member_without_partial_archive(tmp_path, monkeypatch):
+def test_agent_archive_api_dissolves_last_member_room_without_ghost(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = session_service.create_chat_session(title="Solo Agent")
-    chat_room_service.create_chat_room(
+    room = chat_room_service.create_chat_room(
         title="单成员历史群聊",
         participant_session_ids=[agent["id"]],
     )
 
     response = client.delete(f"/api/agents/{agent['agentId']}")
 
-    assert response.status_code == 422
-    assert "唯一成员" in response.json()["detail"] or "only member" in response.json()["detail"]
-    assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert payload["archiveSummary"]["dissolvedRoomIds"] == [room["roomId"]]
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == []
 
 
 def test_agent_delete_api_rejects_protected_agent_without_reference_cleanup(tmp_path, monkeypatch):

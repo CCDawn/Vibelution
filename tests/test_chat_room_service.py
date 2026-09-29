@@ -7728,3 +7728,166 @@ def test_chat_state_participant_index_signature_skips_journal_walk(tmp_path, mon
     state["conversations"][0]["title"] = "Alpha Renamed Agent"
     save_chat_state(tmp_path, state)
     assert chat_room_service._chat_state_participant_index_signature() != plain
+
+
+def _isolate_archive_removal_services(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    recorded_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    return recorded_events
+
+
+def test_remove_agent_dissolves_room_when_last_member_and_dissolve_enabled(tmp_path, monkeypatch):
+    recorded_events = _isolate_archive_removal_services(tmp_path, monkeypatch)
+    solo = session_service.create_chat_session(title="末位归档 Agent")
+    room = chat_room_service.create_chat_room(
+        title="末位群聊",
+        participant_session_ids=[solo["id"]],
+    )
+
+    result = chat_room_service.remove_agent_from_chat_rooms(
+        solo["agentId"],
+        dissolve_empty_rooms=True,
+        include_restore_token=True,
+    )
+
+    assert result["changedRoomIds"] == [room["roomId"]]
+    assert result["dissolvedRoomIds"] == [room["roomId"]]
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == []
+    token = result["restoreToken"]
+    assert token["dissolvedRoomIds"] == [room["roomId"]]
+    assert [item["roomId"] for item in token["rooms"]] == [room["roomId"]]
+    assert [item["agentId"] for item in token["rooms"][0]["participants"]] == [solo["agentId"]]
+    dissolved_events = [
+        (args, kwargs)
+        for args, kwargs in recorded_events
+        if len(args) >= 3 and args[2] == "chat_room.dissolved"
+    ]
+    assert len(dissolved_events) == 1
+    fields = dissolved_events[0][1]["fields"]
+    assert fields["reason"] == "last_member_archived"
+    assert fields["agentId"] == solo["agentId"]
+    assert fields["roomId"] == room["roomId"]
+    assert fields["roomTitle"] == "末位群聊"
+    assert fields["participantCount"] == 0
+
+
+def test_remove_agent_last_member_without_dissolve_reports_room_identity(tmp_path, monkeypatch):
+    _isolate_archive_removal_services(tmp_path, monkeypatch)
+    solo = session_service.create_chat_session(title="末位拦截 Agent")
+    room = chat_room_service.create_chat_room(
+        title="拦截群聊",
+        participant_session_ids=[solo["id"]],
+    )
+
+    with pytest.raises(chat_room_service.ChatRoomValidationError) as exc_info:
+        chat_room_service.remove_agent_from_chat_rooms(solo["agentId"])
+
+    message = str(exc_info.value)
+    assert "唯一成员" in message
+    assert room["roomId"] in message
+    assert "拦截群聊" in message
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == [room["roomId"]]
+
+
+def test_remove_agent_non_last_member_keeps_room_intact(tmp_path, monkeypatch):
+    recorded_events = _isolate_archive_removal_services(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    room = chat_room_service.create_chat_room(
+        title="多人群聊",
+        participant_session_ids=[alpha["id"], beta["id"]],
+    )
+
+    result = chat_room_service.remove_agent_from_chat_rooms(
+        alpha["agentId"],
+        dissolve_empty_rooms=True,
+        include_restore_token=True,
+    )
+
+    assert result["changedRoomIds"] == [room["roomId"]]
+    assert result["dissolvedRoomIds"] == []
+    rooms = chat_room_service.list_chat_rooms()
+    assert [item["roomId"] for item in rooms] == [room["roomId"]]
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [item["agentId"] for item in detail["participants"]] == [beta["agentId"]]
+    assert not [args for args, kwargs in recorded_events if len(args) >= 3 and args[2] == "chat_room.dissolved"]
+
+
+def test_restore_token_rebuilds_dissolved_room_from_snapshot(tmp_path, monkeypatch):
+    _isolate_archive_removal_services(tmp_path, monkeypatch)
+    solo = session_service.create_chat_session(title="回滚重建 Agent")
+    room = chat_room_service.create_chat_room(
+        title="回滚群聊",
+        participant_session_ids=[solo["id"]],
+    )
+    removal = chat_room_service.remove_agent_from_chat_rooms(
+        solo["agentId"],
+        dissolve_empty_rooms=True,
+        include_restore_token=True,
+    )
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == []
+
+    restored = chat_room_service.restore_removed_agents_to_chat_rooms(removal["restoreToken"])
+
+    assert restored["restoredRoomIds"] == [room["roomId"]]
+    assert restored["rebuiltRoomIds"] == [room["roomId"]]
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == [room["roomId"]]
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [item["agentId"] for item in detail["participants"]] == [solo["agentId"]]
+
+
+def test_restore_token_without_dissolved_marker_does_not_rebuild_missing_room(tmp_path, monkeypatch):
+    _isolate_archive_removal_services(tmp_path, monkeypatch)
+    solo = session_service.create_chat_session(title="无标记回滚 Agent")
+    room = chat_room_service.create_chat_room(
+        title="无标记群聊",
+        participant_session_ids=[solo["id"]],
+    )
+    removal = chat_room_service.remove_agent_from_chat_rooms(
+        solo["agentId"],
+        dissolve_empty_rooms=True,
+        include_restore_token=True,
+    )
+    legacy_token = {"rooms": removal["restoreToken"]["rooms"]}
+
+    restored = chat_room_service.restore_removed_agents_to_chat_rooms(legacy_token)
+
+    assert restored["restoredRoomIds"] == []
+    assert restored["rebuiltRoomIds"] == []
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == []
+
+
+def test_remove_agents_dissolves_last_member_room_in_bulk_removal(tmp_path, monkeypatch):
+    recorded_events = _isolate_archive_removal_services(tmp_path, monkeypatch)
+    solo = session_service.create_chat_session(title="批量末位 Agent")
+    room = chat_room_service.create_chat_room(
+        title="批量末位群聊",
+        participant_session_ids=[solo["id"]],
+    )
+
+    result = chat_room_service.remove_agents_from_chat_rooms(
+        [solo["agentId"]],
+        dissolve_empty_rooms=True,
+        include_restore_token=True,
+        include_chat_rooms=False,
+    )
+
+    assert result["changedRoomIds"] == [room["roomId"]]
+    assert result["dissolvedRoomIds"] == [room["roomId"]]
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == []
+    dissolved_events = [
+        (args, kwargs)
+        for args, kwargs in recorded_events
+        if len(args) >= 3 and args[2] == "chat_room.dissolved"
+    ]
+    assert len(dissolved_events) == 1
+    fields = dissolved_events[0][1]["fields"]
+    assert fields["agentIds"] == [solo["agentId"]]
+    assert fields["reason"] == "last_member_archived"

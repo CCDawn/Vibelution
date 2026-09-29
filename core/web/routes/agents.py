@@ -1208,7 +1208,14 @@ def _archive_agent_with_session_lifecycle(
         room_cleanup = _timed_agent_delete_stage(
             timings,
             "remove_from_chat_rooms",
-            lambda: remove_agent_from_chat_rooms(agent_id, include_restore_token=True),
+            # Archiving may legally empty a room the Agent was the last member
+            # of; such rooms are dissolved (with an audit event) instead of
+            # blocking the archive or leaving a ghost empty room behind.
+            lambda: remove_agent_from_chat_rooms(
+                agent_id,
+                dissolve_empty_rooms=True,
+                include_restore_token=True,
+            ),
         )
         mode_cleanup = _timed_agent_delete_stage(
             timings,
@@ -1279,6 +1286,7 @@ def _archive_agent_with_session_lifecycle(
     archive_summary = {
         "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
         "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+        "dissolvedRoomIds": list(room_cleanup.get("dissolvedRoomIds") or []),
         "removedFromTeamIds": list(team_cleanup.get("changedTeamIds") or []),
         "sessions": _public_agent_session_cleanup(session_cleanup),
         "dataRetention": "sealed",

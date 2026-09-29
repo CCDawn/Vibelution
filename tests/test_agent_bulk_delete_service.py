@@ -483,3 +483,44 @@ def test_bulk_purge_skips_system_fixed_role_agent_even_when_legacy_archived(tmp_
         }
     ]
     assert agent_directory_service.get_agent(protected["agentId"], include_archived=True)["status"] == "archived"
+
+
+def test_bulk_archive_dissolves_room_when_last_member_archived(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Bulk Archive Last Member")
+    room = chat_room_service.create_chat_room(
+        title="Bulk Last Member Room",
+        participant_session_ids=[agent["id"]],
+    )
+
+    result = agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]])
+
+    assert result["status"] == "completed"
+    assert result["summary"]["successCount"] == 1
+    assert result["cleanupSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert result["cleanupSummary"]["dissolvedRoomIds"] == [room["roomId"]]
+    assert result["success"][0]["archiveSummary"]["dissolvedRoomIds"] == [room["roomId"]]
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == []
+
+
+def test_bulk_archive_failure_rebuilds_dissolved_last_member_room(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Bulk Archive Rebuild")
+    room = chat_room_service.create_chat_room(
+        title="Bulk Rebuild Room",
+        participant_session_ids=[agent["id"]],
+    )
+
+    def fail_archive(*args, **kwargs):
+        raise agent_directory_service.AgentDirectoryError("archive write failed")
+
+    monkeypatch.setattr(agent_bulk_delete_service, "archive_agent_instance", fail_archive)
+
+    result = agent_bulk_delete_service.bulk_archive_agents([agent["agentId"]])
+
+    assert result["status"] == "failed"
+    assert result["summary"]["failedCount"] == 1
+    assert agent_directory_service.get_agent(agent["agentId"])["status"] == "active"
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert detail is not None
+    assert [item["agentId"] for item in detail["participants"]] == [agent["agentId"]]
