@@ -60,8 +60,6 @@ def _session_attachment_idempotency_record(
             "ownerType": owner["ownerType"],
             "ownerId": owner["ownerId"],
             "actorAgentId": actor_agent_id,
-            "sessionId": session_id,
-            "attachmentId": attachment_id,
             "idempotencyKeyHash": key_hash,
         }
     )

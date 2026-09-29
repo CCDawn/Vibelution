@@ -511,8 +511,12 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
 
     mutateSessionCreate("agent-a");
     await flushMutationQueue();
+    const failedTempSessionId = hookOptions!.route.ref.current.kind === "session"
+      ? hookOptions!.route.ref.current.sessionId
+      : "";
     mutateSessionCreate("agent-a");
     await flushMutationQueue();
+    expect(hookOptions!.route.ref.current).toEqual({ kind: "session", sessionId: failedTempSessionId });
     mutateSessionCreate("agent-b");
     await flushMutationQueue();
 
@@ -523,6 +527,33 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     expect(sessionCreateIdempotencyKey(requests[1])).toBe(firstKey);
     expect(sessionCreateIdempotencyKey(requests[2])).toBeTruthy();
     expect(sessionCreateIdempotencyKey(requests[2])).not.toBe(firstKey);
+  });
+
+  it("starts a new same-Agent intent after leaving the failed temp session", async () => {
+    fetchJsonMock
+      .mockRejectedValueOnce(new TypeError("network timeout"))
+      .mockRejectedValueOnce(new TypeError("network timeout"));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const failedTempSessionId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    expect(failedTempSessionId).toBeTruthy();
+    hookOptions.route.ref.current = { kind: "bare" };
+
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const newTempSessionId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    expect(newTempSessionId).toBeTruthy();
+    expect(newTempSessionId).not.toBe(failedTempSessionId);
+    const requests = sessionCreateRequests();
+    expect(requests).toHaveLength(2);
+    expect(sessionCreateIdempotencyKey(requests[1])).not.toBe(sessionCreateIdempotencyKey(requests[0]));
   });
 
   it.each([409, 410])("rotates the key after a definitive HTTP %i response", async (status) => {

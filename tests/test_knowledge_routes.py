@@ -580,8 +580,22 @@ def test_session_attachment_idempotency_replays_conflicts_and_serializes_concurr
     conflict = client.post(url, json=payload, headers={"Idempotency-Key": idempotency_key})
     assert conflict.status_code == 409, conflict.text
 
+    other_attachment = document_attachments.store_session_user_document_attachment(
+        session_id,
+        b"A different attachment must not reuse the same retry key.",
+        filename="different-memory.txt",
+        content_type="text/plain",
+    )
+    different_attachment = client.post(
+        url,
+        json={**payload, "attachmentId": other_attachment["artifactId"]},
+        headers={"Idempotency-Key": idempotency_key},
+    )
+    assert different_attachment.status_code == 409, different_attachment.text
+
     owner = team_knowledge_service._require_owner_context("team", team["teamId"])
     stored = team_knowledge_service._read_jsonl(team_knowledge_service._owner_source_index_path(owner))
+    assert len(stored) == 1
     matches = [item for item in stored if item.get("sourceRef", {}).get("attachmentId") == attachment["artifactId"]]
     assert len(matches) == 1
     assert matches[0]["_idempotency"]["scopeHash"]
