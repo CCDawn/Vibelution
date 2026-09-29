@@ -803,19 +803,24 @@ const THOUGHT_DURATION_TICK_MS = 1000;
  * ZCode thought-duration semantics, client clock only: the timer starts at the
  * unit's first live render, ticks every second while (and only while) the unit
  * is expanded and live, and freezes when the unit settles. Units that arrive
- * already settled (history loads) have no honest duration — no server
- * timestamp — so they render nothing rather than fabricate one.
+ * already settled (history loads) have no client-clock reading — they show a
+ * duration only when the server carried canonical reasoning stamps
+ * (`settledDurationSeconds`, see conversationThoughtDuration.ts); otherwise
+ * they render nothing rather than fabricate one.
  */
 const ThoughtDurationLabel = React.memo(function ThoughtDurationLabel({
   live,
   expanded,
-  lastedSecondsTemplate,
-  lastedMomentsLabel,
+  settledDurationSeconds,
+  settledSecondsTemplate,
+  settledMomentsLabel,
 }: {
   live: boolean;
   expanded: boolean;
-  lastedSecondsTemplate: string;
-  lastedMomentsLabel: string;
+  /** Server-derived total for units that arrived settled; undefined when the stamps are absent. */
+  settledDurationSeconds?: number;
+  settledSecondsTemplate: string;
+  settledMomentsLabel: string;
 }) {
   const startedAtRef = useRef<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
@@ -858,21 +863,39 @@ const ThoughtDurationLabel = React.memo(function ThoughtDurationLabel({
     }
   }, [live]);
 
-  // Nothing observed live (history unit) or nothing ticked yet (collapsed):
-  // no duration label.
-  if (startedAtRef.current === null || elapsedSeconds === null) {
+  if (live) {
+    // Nothing ticked yet (collapsed live unit): no duration label.
+    if (elapsedSeconds === null) {
+      return null;
+    }
+    return (
+      <span
+        className={styles.thoughtDuration}
+        data-thought-duration="live"
+      >
+        <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+        {`${elapsedSeconds}s`}
+      </span>
+    );
+  }
+  // Settled: server-derived canonical stamps win (they bracket the true
+  // measurement window; the client window only opens at first render), then
+  // the client-clock frozen reading. Units with neither show nothing.
+  const frozenSeconds = settledDurationSeconds
+    ?? (startedAtRef.current !== null && elapsedSeconds !== null ? elapsedSeconds : null);
+  if (frozenSeconds === null) {
     return null;
   }
-  const frozenLabel = elapsedSeconds < 1
-    ? lastedMomentsLabel
-    : replaceDividerPlaceholder(lastedSecondsTemplate, "seconds", String(elapsedSeconds));
+  const frozenLabel = frozenSeconds < 1
+    ? settledMomentsLabel
+    : replaceDividerPlaceholder(settledSecondsTemplate, "seconds", String(frozenSeconds));
   return (
     <span
       className={styles.thoughtDuration}
-      data-thought-duration={live ? "live" : "settled"}
+      data-thought-duration="settled"
     >
       <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
-      {live ? `${elapsedSeconds}s` : frozenLabel}
+      {frozenLabel}
     </span>
   );
 });
@@ -4836,6 +4859,7 @@ export const ConversationView = React.memo(function ConversationView({
       phase?: string;
       channel?: string;
       kind?: CodexTranscriptCell["kind"];
+      settledDurationSeconds?: number;
     },
   ) {
     const fullText = String(input.text || "").trim();
@@ -4895,8 +4919,9 @@ export const ConversationView = React.memo(function ConversationView({
               <ThoughtDurationLabel
                 live={isLive}
                 expanded={expanded}
-                lastedSecondsTemplate={t("thoughtDurationLastedSeconds")}
-                lastedMomentsLabel={t("thoughtDurationLastedMoments")}
+                settledDurationSeconds={input.settledDurationSeconds}
+                settledSecondsTemplate={t("thoughtDurationSettledSeconds")}
+                settledMomentsLabel={t("thoughtDurationSettledMoments")}
               />
               {!expanded ? <ThoughtStreamingSummary text={fullText} /> : null}
             </span>
@@ -5002,6 +5027,7 @@ export const ConversationView = React.memo(function ConversationView({
       phase: cell.phase,
       channel: cell.channel,
       kind: cell.kind,
+      settledDurationSeconds: cell.settledDurationSeconds,
     });
   }
 
@@ -5479,8 +5505,9 @@ export const ConversationView = React.memo(function ConversationView({
               <ThoughtDurationLabel
                 live={isLive}
                 expanded={expanded}
-                lastedSecondsTemplate={t("thoughtDurationLastedSeconds")}
-                lastedMomentsLabel={t("thoughtDurationLastedMoments")}
+                settledDurationSeconds={item.settledDurationSeconds}
+                settledSecondsTemplate={t("thoughtDurationSettledSeconds")}
+                settledMomentsLabel={t("thoughtDurationSettledMoments")}
               />
               {!expanded ? <ThoughtStreamingSummary text={item.text} /> : null}
             </span>

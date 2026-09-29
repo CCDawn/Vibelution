@@ -50,6 +50,8 @@ export type CodexTranscriptCell = {
   toolArguments?: Record<string, unknown>;
   sourceItemId?: string;
   originType?: CodexTranscriptCellOriginType;
+  /** Reasoning cells only: settled server-derived thinking seconds (see conversationThoughtDuration.ts). */
+  settledDurationSeconds?: number;
 };
 
 export type CodexTranscriptCellBuildOptions = {
@@ -178,6 +180,7 @@ function cellsFromTimelineItems(
           summary: item.preview || item.text,
           operationIds: [...item.sourceOperationIds],
           sourceItemId: item.id,
+          settledDurationSeconds: item.settledDurationSeconds,
         };
       }
       if (item.kind === "assistant_text") {

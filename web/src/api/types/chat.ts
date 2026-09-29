@@ -557,6 +557,9 @@ export type CodexTranscriptCell = {
   sourceItemId?: string;
   /** Canonical SessionTurnItem type that produced this render cell. */
   originType?: SessionTurnItem["type"];
+  /** Canonical item stamps, carried for reasoning-duration derivation only. */
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type CodexTranscriptProjection = CodexToolLifecycleModel & {

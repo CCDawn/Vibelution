@@ -89,6 +89,8 @@ function assistantTurnItemsToAgentParts(items: readonly SessionTurnItem[]): Agen
           status: item.status,
           sequence: item.sequence,
           timestamp: item.updatedAt ?? item.createdAt,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
         } satisfies AgentThoughtPart] : [];
       }
       if (item.type === "status" && item.code === "mental_snapshot") {

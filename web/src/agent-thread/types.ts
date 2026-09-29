@@ -47,7 +47,14 @@ export type AgentThoughtPart = {
   status: string;
   summary?: string;
   sequence?: number;
+  /** Last-activity stamp (`updatedAt ?? createdAt`) for ordering/display. */
   timestamp?: string;
+  /**
+   * Canonical turn-item stamps bracketing this reasoning segment. Both are
+   * required to derive a settled duration; either alone is not a duration.
+   */
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type AgentMentalSnapshot = {

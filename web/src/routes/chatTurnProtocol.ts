@@ -208,6 +208,10 @@ export function codexTranscriptFromTurnItems(
       diagnosticSummary: item.diagnosticSummary,
       sourceItemId: item.itemId,
       originType: item.type,
+      // Canonical stamps ride along untouched; the conversation layer derives
+      // the reasoning duration from them (see conversationThoughtDuration.ts).
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
     };
     if (item.type === "agent_message") {
       const text = compactText(item.text);
