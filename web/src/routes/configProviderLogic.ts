@@ -263,16 +263,17 @@ export function deriveProviderListRows(
 ): ProviderListRow[] {
   return rows
     .map((row) => {
-      const dotClass = deriveProviderDotClass(row);
+      const dot = deriveProviderDotClass(row);
       const inUse = isProviderInUse(row, liveReferenceCountByModelRef);
       return {
         providerId: row.providerId,
         name: row.label || row.providerId,
-        dotClass,
+        dotClass: dot,
         inUse,
-        // inUse(0) > ok(1) > warn(2) > off(3): disabled rows sink to the bottom
-        // even when still referenced (badge stays, sort position reflects switch).
-        rank: inUse ? 0 : dotClass === "ok" ? 1 : dotClass === "warn" ? 2 : 3,
+        // inUse(0) > ok(1) > warn(2) > off(3): a disabled-but-referenced row
+        // keeps rank 0 so the operator still sees what agents actually use;
+        // non-referenced disabled rows sink to the bottom (badge stays truthful).
+        rank: inUse ? 0 : dot === "ok" ? 1 : dot === "warn" ? 2 : 3,
         modelsCount: row.models.length,
         keyState: row.credentialState,
         enabled: row.enabled !== false,
