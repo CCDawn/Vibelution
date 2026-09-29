@@ -461,3 +461,37 @@ export function resolveActiveTurnStallSeconds(input: {
   }
   return Math.max(0, Math.floor(stalledForMs / 1000));
 }
+
+/**
+ * Stage gate for the no-output stall advisory: only the body-streaming stages
+ * earn the "can stop" hint. Silence during thinking / tool / queue phases is
+ * the normal shape of an agentic turn (ZCode itself renders no user-visible
+ * stall warning, only stream-drop recovery; the backend idle watchdog owns
+ * real dead-stream detection), so warning there would be noise.
+ */
+export function shouldShowNoOutputStall(stage: string): boolean {
+  const normalized = normalizeStage(stage);
+  return normalized === "responding" || normalized === "assistant_response";
+}
+
+/**
+ * Seconds elapsed inside the current thinking segment (ZCode reasoning-block
+ * semantics: each segment starts counting when the stage enters the thinking
+ * family and freezes when it leaves — the heartbeat never bills the whole turn
+ * to one "thinking" label). Null outside the thinking family, or when no
+ * usable segment start exists.
+ */
+export function activeTurnStageSegmentSeconds(input: {
+  stage: string;
+  segmentStartedAtMs?: number | null;
+  nowMs: number;
+}): number | null {
+  if (activeTurnStageBarPhase(input.stage) !== "thinking") {
+    return null;
+  }
+  const startedMs = Number(input.segmentStartedAtMs);
+  if (!Number.isFinite(startedMs) || startedMs <= 0) {
+    return null;
+  }
+  return Math.max(0, Math.floor((input.nowMs - startedMs) / 1000));
+}

@@ -119,6 +119,7 @@ function baseOptions(overrides: Partial<UseSessionDetailStreamOptions> = {}): {
     setActiveTurnLayersBySession: vi.fn(),
     activeTurnLayersBySessionRef: { current: {} },
     lastAssistantDeltaAppliedAtRef: { current: {} },
+    lastStreamActivityAppliedAtRef: { current: {} },
     sessionStreamDecisionSnapshotRef: decisionSnapshotRef as never,
     desktopConversationNotifierRef: {
       current: { handleSessionDetail: vi.fn(), handleAssistantDelta: vi.fn() },
@@ -719,6 +720,34 @@ describe("useSessionDetailStream stop intent freeze", () => {
       vi.advanceTimersByTime(64);
     });
     expect(setActiveTurnLayersBySessionSpy).toHaveBeenCalledTimes(1);
+    unmount(root);
+  });
+
+  it("stamps stream activity only for frames the projection gate applies", () => {
+    vi.useFakeTimers();
+    const { options } = baseOptions({});
+    const activityRef = options.lastStreamActivityAppliedAtRef;
+    const root = mount(options);
+    act(() => {
+      FakeEventSource.instances[0].open();
+    });
+
+    // Applied frame stamps activity, keyed by session.
+    act(() => {
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 1 }));
+      vi.advanceTimersByTime(64);
+    });
+    const appliedStamp = activityRef.current.s1;
+    expect(appliedStamp).toBeTypeOf("number");
+
+    // Seq-gap frame is held by the continuity gate: received is not applied,
+    // so the no-output baseline must not reset.
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 9 }));
+      vi.advanceTimersByTime(64);
+    });
+    expect(activityRef.current.s1).toBe(appliedStamp);
     unmount(root);
   });
 });

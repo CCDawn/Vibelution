@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { VCheckbox, VFieldRow, VInput, VSelect, VSettingsGroupCard, VSettingsRow, VTextarea } from "../../../components/vui";
+import { VCheckbox, VFieldRow, VInput, VSelect, VSettingsGroupCard, VSettingsRow, VSwitch, VTextarea } from "../../../components/vui";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
 
@@ -21,6 +21,9 @@ export function FormsCatalog() {
       </VuiPreviewCard>
       <VuiPreviewCard name="VCheckbox">
         <VCheckbox isSelected={checked} onChange={setChecked} aria-label="已确认" />
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VSwitch">
+        <VSwitch isSelected={checked} onChange={setChecked} aria-label="自动重试" />
       </VuiPreviewCard>
       <VuiPreviewCard name="VTextarea">
         <VTextarea aria-label="说明" defaultValue="异常召回率提高至少 8%。" minRows={2} className="max-w-72" />

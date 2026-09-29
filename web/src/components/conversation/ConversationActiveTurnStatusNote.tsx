@@ -6,6 +6,8 @@ import { dictionaryChat } from "../../i18n/domains/dictionaryChat";
 import {
   ACTIVE_TURN_RECONNECT_ACTION_COOLDOWN_MS,
   activeTurnElapsedSeconds,
+  activeTurnStageBarPhase,
+  activeTurnStageSegmentSeconds,
   formatActiveTurnHeartbeatText,
   planActiveTurnStageSwitch,
   resolveActiveTurnDisconnectSeconds,
@@ -14,6 +16,7 @@ import {
   resolveActiveTurnRouteFallback,
   resolveActiveTurnStallSeconds,
   shouldShowActiveTurnReconnectAction,
+  shouldShowNoOutputStall,
   visibleActiveTurnRetryProgress,
   type ActiveTurnStatusMessageLike,
 } from "./conversationActiveTurnStatusPresentation";
@@ -77,8 +80,30 @@ export function ConversationActiveTurnStatusNote({
     return () => window.clearInterval(timer);
   }, [companionMode]);
 
+  // ZCode reasoning-block semantics: the heartbeat bills the current thinking
+  // segment, not the whole turn. A segment starts when the displayed stage
+  // enters the thinking family and resets when it leaves. Until the first
+  // effect tick the segment counts from the current frame (static renders
+  // show 0s), never the turn start.
+  const thinkingSegmentStartedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (activeTurnStageBarPhase(stage) === "thinking") {
+      if (thinkingSegmentStartedAtRef.current === null) {
+        thinkingSegmentStartedAtRef.current = Date.now();
+      }
+      return;
+    }
+    thinkingSegmentStartedAtRef.current = null;
+  }, [stage]);
+
   const langKey = lang === "en" ? "en" : "zh";
   const elapsedSeconds = activeTurnElapsedSeconds(message.timestamp, nowMs);
+  const thinkingSegmentSeconds = activeTurnStageSegmentSeconds({
+    stage,
+    segmentStartedAtMs: thinkingSegmentStartedAtRef.current
+      ?? (activeTurnStageBarPhase(stage) === "thinking" ? nowMs : null),
+    nowMs,
+  });
   const retryProgress = stage === "model_retry" || stage === "retrying"
     ? resolveActiveTurnRetryProgress(message)
     : null;
@@ -89,7 +114,7 @@ export function ConversationActiveTurnStatusNote({
     : visibleActiveTurnRetryProgress(retryProgress);
   const heartbeatText = companionMode
     ? (lang === "en" ? "Typing…" : "正在输入…")
-    : formatActiveTurnHeartbeatText(stage, elapsedSeconds, lang, retryProgress);
+    : formatActiveTurnHeartbeatText(stage, thinkingSegmentSeconds ?? elapsedSeconds, lang, retryProgress);
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 
@@ -102,13 +127,22 @@ export function ConversationActiveTurnStatusNote({
       streamDisconnectedSinceMs: streamState.streamDisconnectedSinceMs,
       nowMs,
     });
+  // Stall baseline: the fresher of the live activity stamp (any applied stream
+  // event — received is not applied) and the body-delta timestamp; with
+  // neither, the turn start fills in inside resolveActiveTurnStallSeconds.
+  const lastStreamActivityAtMs = streamState.lastStreamActivityAtMs?.() ?? 0;
+  const lastDeltaAtMs = streamState.lastAssistantDeltaAtMs ?? 0;
+  const stallBaselineAtMs = Math.max(lastStreamActivityAtMs, lastDeltaAtMs) || lastDeltaAtMs || null;
   const stallSeconds = companionMode
     ? null
     : resolveActiveTurnStallSeconds({
-      lastAssistantDeltaAtMs: streamState.lastAssistantDeltaAtMs,
+      lastAssistantDeltaAtMs: stallBaselineAtMs,
       turnStartedAt: message.timestamp,
       nowMs,
     });
+  // Thinking/tool/queue silence is the normal agentic shape; only the
+  // body-streaming stage surfaces the "no output — you can stop" hint.
+  const showNoOutputStall = stallSeconds !== null && shouldShowNoOutputStall(stage);
   const routeFallback = companionMode ? null : resolveActiveTurnRouteFallback(message);
 
   // Manual reconnect affordance: only while a real reconnect loop is showing
@@ -161,7 +195,7 @@ export function ConversationActiveTurnStatusNote({
       data-active-turn-elapsed-seconds={elapsedSeconds ?? ""}
       data-active-turn-retry-attempt={visibleRetryProgress ? visibleRetryProgress.attempt : undefined}
       data-active-turn-disconnected={disconnectSeconds !== null ? "true" : undefined}
-      data-active-turn-stalled={stallSeconds !== null ? "true" : undefined}
+      data-active-turn-stalled={showNoOutputStall ? "true" : undefined}
       data-active-turn-route-fallback={routeFallback ? "true" : undefined}
       data-companion-typing-status={companionMode ? "true" : undefined}
     >
@@ -199,7 +233,7 @@ export function ConversationActiveTurnStatusNote({
             {reconnectLabel}
           </VButton>
         ) : null}
-        {stallSeconds !== null ? (
+        {showNoOutputStall ? (
           <VStatusChip
             tone="warning"
             className={styles.advisory}
