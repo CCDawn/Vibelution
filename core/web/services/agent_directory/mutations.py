@@ -14,6 +14,8 @@ import base64
 import binascii
 import re
 import secrets
+import stat as stat_module
+import threading
 import time
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -527,6 +529,10 @@ def store_agent_avatar_image(
     output_name = f"agent-avatar-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
     output_path = _agent_custom_avatar_file(output_name)
     output_path.write_bytes(payload)
+    # New unique filename normally flips the directory mtime, but invalidate
+    # explicitly so cache freshness never depends on filesystem mtime
+    # granularity for the product upload path.
+    _invalidate_agent_avatar_dir_cache()
     relative_path = str(s.AGENT_AVATAR_RELATIVE_DIR / output_name)
     updated = s.update_agent_avatar(agent_id, avatar_image_path=relative_path)
     s._record_agent_avatar_uploaded_event(updated, content_type=normalized_type, size_bytes=len(payload))
@@ -1046,19 +1052,72 @@ def _agent_avatar_source(filename: str) -> str:
     return "unavailable"
 
 
+# Process-level cache for per-directory avatar filename snapshots. Entries are
+# keyed by "<source>|<resolved dir path>" so each of the custom/bundled/legacy
+# storage directories invalidates independently. The stored marker mirrors what
+# the uncached probe observed (missing directories are re-probed on every call
+# via one cheap stat; only the directory walk is skipped while the marker is
+# unchanged). Readers are lock-free: immutable tuples are swapped in under the
+# fine-grained lock and dict.get is atomic, so concurrent iteration never sees a
+# partial snapshot.
+_AVATAR_DIR_CACHE_LOCK = threading.Lock()
+_AVATAR_DIR_CACHE: dict[str, tuple[int | None, bool, tuple[str, ...]]] = {}
+
+
+def _invalidate_agent_avatar_dir_cache() -> None:
+    """Drop cached avatar directory snapshots.
+
+    ``store_agent_avatar_image`` writes a brand-new unique filename, so the
+    custom directory mtime would normally invalidate the cache at the next
+    probe. The explicit call after that write removes any dependence on
+    filesystem mtime granularity (coarse timestamps, fast successive writes)
+    for the product write path.
+    """
+    with _AVATAR_DIR_CACHE_LOCK:
+        _AVATAR_DIR_CACHE.clear()
+
+
+def _probe_agent_avatar_dir(avatar_dir: Path) -> tuple[int | None, bool]:
+    """One cheap stat probe: (mtime_ns, is_dir). Missing paths report (None, False)."""
+    try:
+        stat_result = avatar_dir.stat()
+    except OSError:
+        return (None, False)
+    return (stat_result.st_mtime_ns, stat_module.S_ISDIR(stat_result.st_mode))
+
+
+def _scan_agent_avatar_dir_filenames(source: str, avatar_dir: Path) -> tuple[str, ...]:
+    s = _service()
+    if not avatar_dir.exists() or not avatar_dir.is_dir():
+        return ()
+    found = {
+        item.name
+        for item in avatar_dir.iterdir()
+        if item.is_file()
+        and not (source != "bundled" and item.name in s.AGENT_AVATAR_MODEL_FILENAMES)
+        and s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / item.name))
+    }
+    return tuple(sorted(found))
+
+
+def _cached_agent_avatar_dir_filenames(source: str, avatar_dir: Path) -> tuple[str, ...]:
+    """Directory walk with mtime-gated caching (readers lock-free)."""
+    identity = f"{source}|{avatar_dir}"
+    marker = _probe_agent_avatar_dir(avatar_dir)
+    cached = _AVATAR_DIR_CACHE.get(identity)
+    if cached is not None and (cached[0], cached[1]) == marker:
+        return cached[2]
+    filenames = _scan_agent_avatar_dir_filenames(source, avatar_dir)
+    with _AVATAR_DIR_CACHE_LOCK:
+        _AVATAR_DIR_CACHE[identity] = (marker[0], marker[1], filenames)
+    return filenames
+
+
 def _available_agent_avatar_filenames() -> list[str]:
     s = _service()
     existing: set[str] = set()
     for source, avatar_dir in _agent_avatar_storage_dirs():
-        if not avatar_dir.exists() or not avatar_dir.is_dir():
-            continue
-        existing.update(
-            item.name
-            for item in avatar_dir.iterdir()
-            if item.is_file()
-            and not (source != "bundled" and item.name in s.AGENT_AVATAR_MODEL_FILENAMES)
-            and s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / item.name))
-        )
+        existing.update(_cached_agent_avatar_dir_filenames(source, avatar_dir))
     ordered = [filename for filename in s.AGENT_AVATAR_FILENAMES if filename in existing]
     extra = sorted(existing.difference(ordered))
     return ordered + extra
