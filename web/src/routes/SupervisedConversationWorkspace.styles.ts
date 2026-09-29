@@ -26,14 +26,32 @@ const styles = {
     "!inline-flex !min-h-8 !w-fit min-w-0 max-w-full items-center justify-center gap-1.5 whitespace-nowrap !px-2 text-[length:var(--vui-font-xs)] font-medium !text-[var(--fg-secondary)] hover:!bg-[var(--vui-surface-row)] max-[879px]:!min-h-11 max-[879px]:!px-2 [&_svg]:shrink-0",
   moreLabel: "max-[879px]:hidden",
   splitWorkspace:
-    "!flex !min-h-0 !min-w-0 !flex-1 !items-stretch !gap-2 !overflow-hidden max-[879px]:!gap-0",
+    "!flex !min-h-0 !min-w-0 !flex-1 !items-stretch !gap-0 !overflow-hidden",
+  workspaceBody: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
+  contextPanel:
+    "flex h-full min-h-0 w-[248px] shrink-0 flex-col overflow-y-auto !rounded-none !border-0 border-r border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] !p-3 max-[879px]:!w-full",
+  sourceSection: "shrink-0 border-b border-[var(--vui-border-subtle)] pb-4",
+  contextHeading: "m-0 mb-2 text-[length:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
+  contextSourceButton: "!flex !h-auto !min-h-10 !w-full !justify-start !gap-2 !px-1 !py-2 !text-[length:var(--vui-font-xs)] !whitespace-normal",
+  contextSourceName: "min-w-0 flex-1 break-words text-left [overflow-wrap:anywhere]",
+  sourceSummary: "mt-1 text-[length:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
+  contextPhases: "shrink-0 py-4",
+  contextPhase:
+    "!flex !h-auto !min-h-10 !w-full !justify-start !gap-2 !px-1.5 !py-2 !text-[length:var(--vui-font-xs)] aria-pressed:!bg-[var(--vui-surface-panel)] max-[879px]:!min-h-11",
+  phaseNumber: "flex size-5 shrink-0 items-center justify-center rounded-full border border-[var(--vui-border-subtle)] text-[10px]",
+  contextPhaseName: "min-w-0 flex-1 whitespace-normal text-left",
+  contextPhaseStatus: "shrink-0 text-[10px] text-[var(--fg-tertiary)]",
+  contextLinks: "flex shrink-0 flex-col gap-1 border-t border-[var(--vui-border-subtle)] pt-2",
+  contextLink: "!flex !min-h-10 !w-full !justify-start !gap-2 !px-2 !text-[length:var(--vui-font-xs)] max-[879px]:!min-h-11",
+  mobileNavigationDialog:
+    "!fixed !left-0 !right-auto !top-0 !bottom-0 !h-[100dvh] !max-h-[100dvh] !w-[min(88vw,300px)] !max-w-[calc(100vw-18px)] !translate-none !transform-none !animate-none !rounded-none shadow-[var(--vui-elevation-panel)]",
   mainPane:
     "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--vui-surface-panel)]",
   followLiveNotice:
     "flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] px-3 py-1 text-[length:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   followLiveButton:
     "!inline-flex !min-h-7 !w-fit items-center gap-1.5 px-2 text-[length:var(--vui-font-xs)] font-medium text-[var(--fg-primary)]",
-  conversationFrame: "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+  conversationFrame: "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden [&_.timeline]:!px-6 [&_.assistantTurn]:!max-w-[1120px] [&_.assistantTurn]:!justify-self-start [&_.userTurn]:!max-w-[1120px] [&_.userTurn]:!justify-self-start [&_.timelineAssistantTextCell]:!w-full [&_.timelineAssistantTextCell]:!max-w-[1120px] [&_.timelineAssistantTextCell]:!mx-0 max-[879px]:[&_.timeline]:!px-3",
   footer:
     "z-10 shrink-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
   setupFrame: "flex min-h-0 min-w-0 flex-1 overflow-auto",

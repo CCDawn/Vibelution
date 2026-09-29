@@ -2244,6 +2244,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             lang={lang}
             title={monitoredRunIdentity || (lang === "zh" ? "监督进化" : "Supervised evolution")}
             sourceLabel={frozenSourceLabel}
+            sourceSummary={`${lang === "zh" ? "本轮样本" : "Run cases"} ${reviewCandidateWorktree?.costEstimate?.caseCount ?? monitoredRun?.caseTotal ?? "—"} · ${reviewCandidateWorktree?.approvalMode === "agent" ? "Agent" : (lang === "zh" ? "人工审批" : "Human approval")}`}
+            phases={supervisedWorkflowCards.map((step) => ({
+              id: step.id, label: step.label, statusLabel: statusLabel(step.status), current: step.current,
+              disabled: !step.current && step.status === "pending" && !step.conversationSessionId,
+            }))}
             hasRun={Boolean(supervisedWorkflowRun)}
             setupOpen={supervisedSetupOpen || !supervisedWorkflowRun}
             selectedStepId={selectedSupervisedAgentRole && !SUPERVISED_WORKFLOW_STEPS.some((step) => step.role === selectedSupervisedAgentRole)

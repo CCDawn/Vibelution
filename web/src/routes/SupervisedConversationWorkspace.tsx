@@ -6,6 +6,7 @@ import {
   Ellipsis,
   History,
   MessageSquareText,
+  PanelLeft,
   PanelRightClose,
   PanelRightOpen,
   Plus,
@@ -41,6 +42,8 @@ export type SupervisedConversationWorkspaceProps = {
   lang: "zh" | "en";
   title: string;
   sourceLabel: string;
+  sourceSummary?: ReactNode;
+  phases?: readonly { id: string; label: string; statusLabel: string; current: boolean; disabled?: boolean }[];
   selectedStepId: string;
   steps: readonly SupervisedConversationWorkspaceStep[];
   onSelectStep: (id: string) => void;
@@ -90,6 +93,8 @@ function labelsFor(lang: "zh" | "en") {
       followLive: "Return to current",
       closeEvidence: "Close evidence",
       evidenceTitle: "Run evidence",
+      navigation: "Run context",
+      progress: "Phase progress",
     };
   }
   return {
@@ -108,6 +113,8 @@ function labelsFor(lang: "zh" | "en") {
     followLive: "返回当前运行",
     closeEvidence: "关闭证据",
     evidenceTitle: "运行证据",
+    navigation: "运行导航",
+    progress: "阶段进度",
   };
 }
 
@@ -130,6 +137,8 @@ export function SupervisedConversationWorkspace({
   lang,
   title,
   sourceLabel,
+  sourceSummary,
+  phases = [],
   selectedStepId,
   steps,
   onSelectStep,
@@ -151,6 +160,8 @@ export function SupervisedConversationWorkspace({
   const labels = labelsFor(lang);
   const narrow = useNarrowViewport();
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [desktopNavigationOpen, setDesktopNavigationOpen] = useState(true);
   const [selectedEvidenceTabId, setSelectedEvidenceTabId] = useState("");
   const evidenceTab = evidenceTabs.find((tab) => tab.id === selectedEvidenceTabId)
     ?? evidenceTabs[0];
@@ -161,6 +172,7 @@ export function SupervisedConversationWorkspace({
   useEffect(() => {
     if (setupOpen) {
       setEvidenceOpen(false);
+      setNavigationOpen(false);
     }
   }, [setupOpen]);
 
@@ -204,6 +216,36 @@ export function SupervisedConversationWorkspace({
     disabled: step.disabled,
   }));
   const showNavigation = !setupOpen && hasRun && navigationOptions.length > 0;
+  const showContext = !setupOpen && hasRun;
+  const closeNavigation = () => setNavigationOpen(false);
+  const contextPanel = (
+    <VSurface as="aside" padding="none" className={styles.contextPanel} aria-label={labels.navigation}>
+      <section className={styles.sourceSection}>
+        <h2 className={styles.contextHeading}>{labels.dataset}</h2>
+        <VButton aria-label={labels.dataset} title={sourceLabel} contentLayout="plain" variant="ghost" className={styles.contextSourceButton}
+          onPress={() => { closeNavigation(); onSource(); }} icon={<Database size={15} />}>
+          <span className={styles.contextSourceName}>{sourceLabel || labels.dataset}</span>
+        </VButton>
+        {sourceSummary ? <div className={styles.sourceSummary}>{sourceSummary}</div> : null}
+      </section>
+      <nav aria-label={labels.progress} className={styles.contextPhases}>
+        <h2 className={styles.contextHeading}>{labels.progress}</h2>
+        {phases.map((phase, index) => (
+          <VButton key={phase.id} contentLayout="plain" variant="ghost" className={styles.contextPhase}
+            aria-pressed={selectedStepId === phase.id} aria-current={phase.current ? "step" : undefined}
+            isDisabled={phase.disabled} onPress={() => { onSelectStep(phase.id); closeNavigation(); }}>
+            <span className={styles.phaseNumber}>{index + 1}</span>
+            <span className={styles.contextPhaseName}>{phase.label}</span>
+            <span className={styles.contextPhaseStatus}>{phase.statusLabel}</span>
+          </VButton>
+        ))}
+      </nav>
+      <div className={styles.contextLinks}>
+        <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<History size={15} />} onPress={() => { closeNavigation(); onHistory(); }}>{labels.history}</VButton>
+        <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<Settings2 size={15} />} onPress={() => { closeNavigation(); onSettings(); }}>{labels.settings}</VButton>
+      </div>
+    </VSurface>
+  );
 
   const evidenceTabsView = evidenceTabs.length ? (
     <VTabs
@@ -274,10 +316,13 @@ export function SupervisedConversationWorkspace({
     >
       <header className={`${styles.header} ${showNavigation ? styles.headerWithNavigation : styles.headerWithoutNavigation}`}>
         <div className={styles.runIdentity} data-has-source={!setupOpen && sourceLabel ? "true" : "false"}>
-          <h1 className={`${styles.title} ${!setupOpen && sourceLabel ? styles.titleWithSource : ""}`} title={setupOpen ? labels.setupTitle : title}>
+          {showContext ? <VIconButton label={labels.navigation} variant="ghost" icon={<PanelLeft size={16} />}
+            aria-expanded={narrow ? navigationOpen : desktopNavigationOpen}
+            onPress={() => narrow ? setNavigationOpen((open) => !open) : setDesktopNavigationOpen((open) => !open)} /> : null}
+          <h1 className={styles.title} title={setupOpen ? labels.setupTitle : title}>
             {setupOpen ? labels.setupTitle : title}
           </h1>
-          {!setupOpen ? (
+          {!setupOpen && !hasRun ? (
             <VButton
               aria-label={labels.dataset}
               title={sourceLabel || labels.dataset}
@@ -351,6 +396,8 @@ export function SupervisedConversationWorkspace({
         </div>
       </header>
 
+      <div className={styles.workspaceBody}>
+      {showContext && !narrow && desktopNavigationOpen ? contextPanel : null}
       <VSplitWorkspace
         aside={desktopEvidence}
         className={styles.splitWorkspace}
@@ -358,6 +405,12 @@ export function SupervisedConversationWorkspace({
         main={mainContent}
         resize={LIVE_RUN_RESIZE}
       />
+      </div>
+
+      <VDialog className={styles.mobileNavigationDialog} open={showContext && narrow && navigationOpen}
+        onOpenChange={setNavigationOpen} size="md" title={labels.navigation}>
+        {contextPanel}
+      </VDialog>
 
       <VDialog
         className={styles.mobileEvidenceDialog}

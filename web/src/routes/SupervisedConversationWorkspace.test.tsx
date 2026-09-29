@@ -32,6 +32,12 @@ const defaultProps: SupervisedConversationWorkspaceProps = {
   lang: "zh" as const,
   title: "研究资料溯源质量改进",
   sourceLabel: "研究资料溯源 · 20 个样本",
+  sourceSummary: "20 个样本 · 人工审批",
+  phases: [
+    { id: "baseline", label: "基线评测", statusLabel: "已完成", current: false },
+    { id: "improve", label: "自改", statusLabel: "运行中", current: true },
+    { id: "evaluate", label: "复跑评分", statusLabel: "待执行", current: false, disabled: true },
+  ],
   selectedStepId: "improve",
   steps: [
     { id: "baseline", label: "基线评测" },
@@ -105,6 +111,35 @@ afterEach(async () => {
 });
 
 describe("SupervisedConversationWorkspace interactions", () => {
+  it("keeps run context in the left rail and phase/agent selection in the topbar", async () => {
+    const onSelectStep = vi.fn();
+    const container = renderWorkspace({ onSelectStep });
+    const rail = container.querySelector('aside[aria-label="运行导航"]')!;
+    expect(rail.textContent).toContain("20 个样本 · 人工审批");
+    expect(container.querySelector('header button[aria-label="进化阶段"]')).not.toBeNull();
+    expect(container.querySelector('header button[aria-label="评估集"]')).toBeNull();
+    expect(buttonByText(rail, "复跑评分").disabled).toBe(true);
+    await clickAndFlush(buttonByText(rail, "基线评测"));
+    expect(onSelectStep).toHaveBeenCalledWith("baseline");
+    await clickAndFlush(container.querySelector('button[aria-label="运行导航"]')!);
+    expect(container.querySelector('aside[aria-label="运行导航"]')).toBeNull();
+    expect(container.textContent).toContain("Native Agent conversation");
+  });
+
+  it("opens mobile context on demand and closes it after a phase is selected", async () => {
+    setViewport(390);
+    const onSelectStep = vi.fn();
+    const container = renderWorkspace({ onSelectStep });
+    expect(document.body.querySelector('aside[aria-label="运行导航"]')).toBeNull();
+    await clickAndFlush(container.querySelector('button[aria-label="运行导航"]')!);
+    const dialog = document.body.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("20 个样本 · 人工审批");
+    await clickAndFlush(buttonByText(dialog, "基线评测"));
+    expect(onSelectStep).toHaveBeenCalledWith("baseline");
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Native Agent conversation");
+  });
+
   it("routes phase, dataset, and new-run actions to their owners", async () => {
     const container = renderWorkspace();
 
@@ -115,7 +150,7 @@ describe("SupervisedConversationWorkspace interactions", () => {
       .find((option) => option.textContent?.includes("基线评测"));
     expect(baselineOption).not.toBeUndefined();
     await clickAndFlush(baselineOption!);
-    await clickAndFlush(buttonByText(container, "评估集"));
+    await clickAndFlush(container.querySelector('button[aria-label="评估集"]')!);
     await clickAndFlush(buttonByText(container, "新建"));
 
     expect(defaultProps.onSelectStep).toHaveBeenCalledWith("baseline");
