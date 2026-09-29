@@ -1,14 +1,14 @@
 # 2026-08-31 挑战杯假说质量与链路效率优化方案（假说优先链）
 
-- **Status**: superseded（2026-09-01 被 Stage1 统一方案吸收，见下方 Superseded by 与 §12 裁决；原 user-approved 状态保留于 git 历史）
+- **Status**: superseded（2026-09-01 被 Stage1 统一方案吸收；2026-09-29 从在研目录归档。见下方 Superseded by 与 §12 裁决；原 user-approved 状态保留于 git 历史）
 - **Owner**: challenge 链路 lane（实施任务各自建 claim）
 - **Claim**: 本文档自身无代码 claim；实施任务 claim 按 §6 任务图逐任务建立
-- **Scope**: `docs/plans/2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md`（本文件）
+- **Scope**: `docs/archive/plans/2026-09/2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md`（本文件，已退出在研目录）
 - **Supersedes**: 无（不取代任何 ACTIVE 计划；与兄弟计划的去重边界见 §10）
 - **Superseded by**: `挑战杯/03-工程合同/2026-08-31-挑战杯第一阶段高质量假说闭环高ROI优化实施计划.md`（CC-AIS-STAGE1-HYPOTHESIS-IMPL-001 **v1.2.0**，§6.5 统一裁决矩阵吸收本文全部六任务；repo 外桌面治理文档）
 - **Implementation link**: 已废止；实施统一走 Stage1 方案任务图（本文 T4→Stage1 Task R1、T5→R2、T1→R3、T2 发言协议→并入 Task 3A、T2 预检索/T3/T6→废弃，见 §12）
 - **Validation**: 见 §8 验证矩阵（随本文一并由 Stage1 方案 §8 统一）
-- **Close condition**: 已达成（superseded 关闭）；本文保留作调研证据与裁决记录，随 Stage1 方案关闭一并移入 `docs/archive/`
+- **Close condition**: 已达成（superseded 关闭）。2026-09-29 移入 `docs/archive/plans/2026-09/`。本文只保留调研证据与裁决记录；实施以仓外 Stage1 方案为准。
 - **证据基线**: main@fc700e8e2，2026-08-31；运行数据来自 `model_invocation_receipts`（463 条）、`meeting_rounds.jsonl`（332 轮）、`hypothesis_rounds.jsonl`（4 轮 12 候选）、22 个 source_collection run
 - **非完成声明**: 本文是实施合同，不是完成证据；文中所有"目标值"为监测指标，除机制验收外不构成硬门（质量分数提升属实验结果）。
 
