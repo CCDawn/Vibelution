@@ -2119,6 +2119,9 @@ def test_config_workspace_llm_http_fallback_uses_anthropic_messages(monkeypatch)
             return FakeResponse()
 
     monkeypatch.setattr(public_config_module.urllib.request, "build_opener", lambda *_args, **_kwargs: FakeOpener())
+    # The probe's target validator resolves DNS for real; a unit test must stay
+    # hermetic regardless of the machine's current network/proxy environment.
+    monkeypatch.setattr(public_config_module, "validate_llm_provider_target", lambda *_args, **_kwargs: None)
 
     result = public_config_module._probe_llm_http(provider, profile, "anthropic-secret")
 
@@ -2167,6 +2170,8 @@ def test_config_workspace_llm_http_fallback_uses_primary_openai_chat_completion(
             return FakeResponse()
 
     monkeypatch.setattr(public_config_module.urllib.request, "build_opener", lambda *_args, **_kwargs: FakeOpener())
+    # Hermetic unit test: skip the probe's real-DNS target validation.
+    monkeypatch.setattr(public_config_module, "validate_llm_provider_target", lambda *_args, **_kwargs: None)
 
     result = public_config_module._probe_llm_http(provider, profile, "token-plan-secret")
 
