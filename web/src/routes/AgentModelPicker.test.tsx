@@ -7,7 +7,9 @@ import {
   AgentModelPicker,
   agentModelChoiceDisabledReason,
   expandedAgentModelProviderIds,
+  filterUsableProviderCandidates,
   groupAgentModelCandidates,
+  hasUsableProviderChannel,
 } from "./AgentModelPicker";
 import pickerSource from "./AgentModelPicker.tsx?raw";
 import pickerStyles from "./AgentModelPicker.styles";
@@ -35,6 +37,8 @@ function candidate(
     availability: "observed",
     verificationStatus: "unverified",
     catalogStale: false,
+    providerStatus: "reachable",
+    providerHealthy: true,
     slotCompatibility: { dialogue: { allowed: true, reasonCode: "" } },
     capabilities: {},
     apiKeyEnv: "",
@@ -140,5 +144,78 @@ describe("AgentModelPicker", () => {
       "请先保存或放弃未保存修改",
     );
     expect(agentModelChoiceDisabledReason(candidates[1]!, "dialogue", true)).toBe("");
+  });
+
+  it("hides broken provider channels from the menu entirely", () => {
+    const broken = candidate("bad-relay/gpt-broken", "Broken", {
+      providerStatus: "auth_failed",
+      providerHealthy: false,
+    });
+    const missingKey = candidate("no-key-relay/gpt-nokey", "NoKey", {
+      missingApiKey: true,
+      providerStatus: "not_discovered",
+      providerHealthy: false,
+    });
+    const mixed = [...candidates, broken, missingKey];
+
+    expect(hasUsableProviderChannel(broken)).toBe(false);
+    const filtered = filterUsableProviderCandidates(mixed);
+    expect(filtered.map((item) => item.providerId)).not.toContain("bad-relay");
+    expect(filtered.map((item) => item.providerId)).not.toContain("no-key-relay");
+
+    const groups = groupAgentModelCandidates(filtered, "dialogue", "");
+    expect(groups.map((group) => group.providerId)).toEqual(["ai-pixel"]);
+    expect(groups.some((group) => group.providerId === "bad-relay")).toBe(false);
+  });
+
+  it("keeps the selected trigger label when its provider channel is broken", () => {
+    const brokenSelected = candidate("bad-relay/gpt-broken", "Broken", {
+      source: "pinned",
+      runtimeSelectable: true,
+      availability: "pinned",
+      providerStatus: "auth_failed",
+      providerHealthy: false,
+    });
+    const html = renderToStaticMarkup(
+      <AgentModelPicker
+        candidates={[...candidates, brokenSelected]}
+        slot={{ slot: "dialogue", label: "对话", description: "", required: true }}
+        selectedModelRef="bad-relay/gpt-broken"
+        disabled={false}
+        pendingModelRef=""
+        configDraftDirty={false}
+        agentDraftDirty={false}
+        onSelectPinned={() => undefined}
+        onPromote={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Broken");
+    expect(html).toContain("bad-relay");
+    expect(html).not.toContain("选择模型");
+  });
+
+  it("keeps healthy provider groups untouched beside filtered ones", () => {
+    const broken = candidate("bad-relay/gpt-broken", "Broken", {
+      providerStatus: "discovery_failed",
+      providerHealthy: false,
+    });
+    const legacyUndefined = candidate("legacy-relay/gpt-legacy", "Legacy", {
+      providerStatus: undefined,
+      providerHealthy: undefined,
+    });
+    const groups = groupAgentModelCandidates(
+      filterUsableProviderCandidates([...candidates, broken, legacyUndefined]),
+      "dialogue",
+      "",
+    );
+
+    expect(groups.map((group) => group.providerId)).toEqual(["ai-pixel", "legacy-relay"]);
+    expect(groups[0]?.items.map((item) => item.label)).toEqual([
+      "Image 2",
+      "Luna",
+      "Sol",
+      "Terra",
+    ]);
   });
 });

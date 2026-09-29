@@ -89,6 +89,23 @@ export function groupAgentModelCandidates(
       || left.providerId.localeCompare(right.providerId));
 }
 
+/**
+ * Provider channel health comes from the backend candidate DTO
+ * (`providerHealthy`, same determination as the provider registry rail).
+ * Broken channels (auth/discovery/protocol failure or missing key) are hidden
+ * from the menu entirely; `undefined` (older payloads) stays usable.
+ */
+export function hasUsableProviderChannel(candidate: AgentModelChoice): boolean {
+  return candidate.providerHealthy !== false;
+}
+
+/** Menu candidates only; the selected-model fallback keeps the full list. */
+export function filterUsableProviderCandidates(
+  candidates: AgentModelChoice[],
+): AgentModelChoice[] {
+  return candidates.filter(hasUsableProviderChannel);
+}
+
 function slotCompatibility(candidate: AgentModelChoice, slot: string) {
   return candidate.slotCompatibility?.[slot] ?? {
     allowed: false,
@@ -166,9 +183,13 @@ export function AgentModelPicker({
     () => new Set(),
   );
   const [pendingPromote, setPendingPromote] = useState<AgentModelChoice | null>(null);
+  const menuCandidates = useMemo(
+    () => filterUsableProviderCandidates(candidates),
+    [candidates],
+  );
   const groups = useMemo(
-    () => groupAgentModelCandidates(candidates, slot.slot, query),
-    [candidates, query, slot.slot],
+    () => groupAgentModelCandidates(menuCandidates, slot.slot, query),
+    [menuCandidates, query, slot.slot],
   );
   const expandedProviderIds = useMemo(
     () => expandedAgentModelProviderIds(
