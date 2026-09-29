@@ -61,6 +61,10 @@ import {
   ConversationToolActivityPills,
   toolActivityAriaTitle,
 } from "./ConversationToolActivityPills";
+import {
+  readOpenToolKeys,
+  setToolRowOpen,
+} from "./conversationToolExpandPersistence";
 import styles from "./ConversationToolActivity.styles";
 
 type ConversationToolActivityProps = {
@@ -71,6 +75,10 @@ type ConversationToolActivityProps = {
   toolDetailIsEmpty?: (cell: CodexTranscriptCell) => boolean;
   /** Codex-style approval card rendered under the matching tool call. */
   approvalSlot?: ReactNode;
+  /** Owning session id: scopes the expand-state localStorage persistence. */
+  sessionId?: string;
+  /** Failed/interrupted turn: force the work rows open to preserve the scene. */
+  turnFailed?: boolean;
 };
 
 const STAGGERED_DETAILS_CLOSE_DURATION_MS = 520;
@@ -78,11 +86,11 @@ const MAX_STAGGERED_ROW_DELAY = 8;
 
 /**
  * ZCode ToolLayout-aligned open persistence: the user's explicit expand/collapse
- * choice survives re-renders and remounts via a module-level map keyed by the
- * tool's stable identity. Rows start collapsed — a running row no longer opens
- * itself; the action word's shimmer carries the live state instead.
+ * choice survives re-renders, remounts, and full page reloads via the
+ * localStorage store in conversationToolExpandPersistence (scoped per session).
+ * Rows start collapsed — a running row no longer opens itself; the action
+ * word's shimmer carries the live state instead.
  */
-const toolRowOpenState = new Map<string, boolean>();
 const TOOL_ROW_BODY_UNMOUNT_DELAY_MS = 300;
 const TOOL_FAILURE_COPY_FEEDBACK_MS = 1600;
 const TOOL_FAILURE_SUMMARY_MAX_LENGTH = 240;
@@ -123,22 +131,80 @@ async function copyToolFailureToClipboard(text: string) {
   }
 }
 
+type ToolRowOpenOptions = {
+  /** Owning session id; scopes the persistence (empty string = memory only). */
+  sessionId: string;
+  /** Failed/interrupted turn: force the row open to preserve the scene. */
+  forceOpen?: boolean;
+  /** Live run state; drives the running→settled auto-collapse edge. */
+  running?: boolean;
+};
+
 /**
- * Expand/collapse state for one tool row: reads the module-level map on mount,
- * writes through on every toggle, and keeps the body mounted for a short delay
- * after a collapse so a rapid re-expand never unmounts/remounts the content.
+ * Expand/collapse state for one tool row.
+ *
+ * Open-state priority (ZCode ToolLayout semantics, highest first):
+ * 1. failed/interrupted turn (`forceOpen`) — the scene stays open and the
+ *    complete-edge auto-collapse below is disabled for the whole turn;
+ * 2. a manual user toggle made while the row was running — never overwritten;
+ * 3. the running→settled edge — auto-collapse once (only if nothing above);
+ * 4. the persisted per-session choice (localStorage), else collapsed.
+ *
+ * Reads the persistence store on mount, writes through on every toggle, and
+ * keeps the body mounted for a short delay after a collapse so a rapid
+ * re-expand never unmounts/remounts the content.
  */
-function usePersistentToolRowOpen(persistKey: string) {
-  const [isOpen, setIsOpen] = useState(() => toolRowOpenState.get(persistKey) ?? false);
+function usePersistentToolRowOpen(persistKey: string, options: ToolRowOpenOptions) {
+  const { sessionId, forceOpen = false, running = false } = options;
+  const [isOpen, setIsOpen] = useState(
+    () => forceOpen || readOpenToolKeys(sessionId).has(persistKey),
+  );
   const [shouldRenderBody, setShouldRenderBody] = useState(isOpen);
   const bodyUnmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isOpenRef = useRef(isOpen);
+  const wasRunningRef = useRef(running);
+  // A manual toggle during the run outranks the complete-edge auto-collapse.
+  const userToggledWhileRunningRef = useRef(false);
 
-  const toggle = useCallback(() => {
-    const next = !(toolRowOpenState.get(persistKey) ?? false);
-    toolRowOpenState.set(persistKey, next);
+  const applyOpen = useCallback((next: boolean, persist: boolean) => {
+    isOpenRef.current = next;
+    if (persist) {
+      setToolRowOpen(sessionId, persistKey, next);
+    }
     setShouldRenderBody(true);
     setIsOpen(next);
-  }, [persistKey]);
+  }, [persistKey, sessionId]);
+
+  const toggle = useCallback(() => {
+    if (running) {
+      userToggledWhileRunningRef.current = true;
+    }
+    applyOpen(!isOpenRef.current, true);
+  }, [applyOpen, running]);
+
+  // Failure edge: force the scene open once, even over the stored default.
+  // The user may still collapse it again afterwards (this effect only fires
+  // when `forceOpen` flips, not on every render).
+  useEffect(() => {
+    if (forceOpen && !isOpenRef.current) {
+      applyOpen(true, false);
+    }
+  }, [applyOpen, forceOpen]);
+
+  // ZCode complete-edge auto-collapse: when a row settles after running, close
+  // it once — unless the turn failed (keep the scene for diagnosis) or the
+  // user toggled the row while it ran (their choice wins).
+  useEffect(() => {
+    const wasRunning = wasRunningRef.current;
+    wasRunningRef.current = running;
+    if (!wasRunning || running || forceOpen) {
+      return;
+    }
+    if (userToggledWhileRunningRef.current || !isOpenRef.current) {
+      return;
+    }
+    applyOpen(false, true);
+  }, [applyOpen, forceOpen, running]);
 
   useEffect(() => {
     if (isOpen) {
@@ -338,17 +404,24 @@ function ToolStatusIcon({
   return <Icon className={styles.itemIcon} size={15} />;
 }
 
+type ToolRowScopeProps = {
+  sessionId: string;
+  turnFailed: boolean;
+};
+
 function ToolActivityItem({
   cell,
   language,
   renderToolDetails,
   toolDetailIsEmpty,
+  sessionId,
+  turnFailed,
 }: {
   cell: CodexTranscriptCell;
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
   toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
-}) {
+} & ToolRowScopeProps) {
   const noMatch = conversationToolActivityIsNoMatchTerminalExit(cell);
   // Agent-spawn rows render the subagent's name as the colored main subject.
   const agentName = conversationToolCategoryForCell(cell) === "agent"
@@ -362,7 +435,11 @@ function ToolActivityItem({
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
   const persistKey = conversationToolPersistKey(cell);
-  const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(persistKey);
+  const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(persistKey, {
+    sessionId,
+    forceOpen: turnFailed,
+    running: cell.status === "running" || cell.status === "pending",
+  });
   // ZCode failure denoising: the colored status word + dashed underline carries
   // the failure semantics; hovering it reveals the error summary, and the
   // expanded body keeps the full error with a copy affordance.
@@ -498,13 +575,17 @@ function ToolActivityBatch({
   language,
   renderToolDetails,
   toolDetailIsEmpty,
+  sessionId,
+  turnFailed,
 }: {
   item: Extract<ConversationToolActivityPresentationItem, { kind: "batch" }>;
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
   toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
-}) {
-  const staggeredDetails = useStaggeredDetails(false);
+} & ToolRowScopeProps) {
+  // A failed turn force-opens the batch so its work history stays on scene;
+  // batches have no running→completed auto-collapse (they never self-open).
+  const staggeredDetails = useStaggeredDetails(turnFailed);
   const descriptor = conversationToolActivityRendererForCell(item.cells[0], language);
   const Icon = descriptor.icon;
   const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
@@ -543,6 +624,8 @@ function ToolActivityBatch({
                 language={language}
                 renderToolDetails={renderToolDetails}
                 toolDetailIsEmpty={toolDetailIsEmpty}
+                sessionId={sessionId}
+                turnFailed={turnFailed}
               />
             </div>
           ))}
@@ -569,21 +652,27 @@ function checklistModelForBatch(
  * child states with B2 semantics: any running child keeps the category word
  * shimmering; failures surface as a dashed attention word whose hover tooltip
  * carries the first failed child's error summary. The expand choice persists
- * through the shared B2 map keyed by the group's anchored id (first child's
- * stable tool identity), so streaming appends never reset it.
+ * through the per-session localStorage store keyed by the group's anchored id
+ * (first child's stable tool identity), so streaming appends never reset it.
  */
 function ToolActivityCategoryGroup({
   item,
   language,
   renderToolDetails,
   toolDetailIsEmpty,
+  sessionId,
+  turnFailed,
 }: {
   item: ConversationToolCategoryGroupItem;
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
   toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
-}) {
-  const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(item.id);
+} & ToolRowScopeProps) {
+  const { isOpen, shouldRenderBody, toggle } = usePersistentToolRowOpen(item.id, {
+    sessionId,
+    forceOpen: turnFailed,
+    running: item.running,
+  });
   const Icon = CATEGORY_GROUP_ICONS[item.category];
   const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
   const statusKind = item.failedCount > 0 ? "failed" : "attention";
@@ -712,6 +801,7 @@ function toolActivityRowContent(
   language: ConversationToolPresentationLanguage,
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"],
   toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"],
+  scope?: ToolRowScopeProps,
 ): ReactNode {
   if (item.kind === "categoryGroup") {
     return (
@@ -720,6 +810,8 @@ function toolActivityRowContent(
         language={language}
         renderToolDetails={renderToolDetails}
         toolDetailIsEmpty={toolDetailIsEmpty}
+        sessionId={scope?.sessionId ?? ""}
+        turnFailed={scope?.turnFailed ?? false}
       />
     );
   }
@@ -736,6 +828,8 @@ function toolActivityRowContent(
         language={language}
         renderToolDetails={renderToolDetails}
         toolDetailIsEmpty={toolDetailIsEmpty}
+        sessionId={scope?.sessionId ?? ""}
+        turnFailed={scope?.turnFailed ?? false}
       />
     );
   }
@@ -745,6 +839,8 @@ function toolActivityRowContent(
       language={language}
       renderToolDetails={renderToolDetails}
       toolDetailIsEmpty={toolDetailIsEmpty}
+      sessionId={scope?.sessionId ?? ""}
+      turnFailed={scope?.turnFailed ?? false}
     />
   );
 }
@@ -754,17 +850,22 @@ function ToolActivityRows({
   language,
   renderToolDetails,
   toolDetailIsEmpty,
+  sessionId,
+  turnFailed,
 }: {
   items: ConversationToolCategorizedItem[];
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
   toolDetailIsEmpty?: ConversationToolActivityProps["toolDetailIsEmpty"];
-}) {
+} & ToolRowScopeProps) {
   return (
     <>
       {items.map((item) => (
         <div key={item.id} className={styles.activityRow}>
-          {toolActivityRowContent(item, language, renderToolDetails, toolDetailIsEmpty)}
+          {toolActivityRowContent(item, language, renderToolDetails, toolDetailIsEmpty, {
+            sessionId,
+            turnFailed,
+          })}
         </div>
       ))}
     </>
@@ -777,6 +878,8 @@ export function ConversationToolActivity({
   renderToolDetails,
   toolDetailIsEmpty,
   approvalSlot = null,
+  sessionId = "",
+  turnFailed = false,
 }: ConversationToolActivityProps) {
   // Category pass runs on top of the same-name batches: distinct same-category
   // runs (read + grep + glob → "探索") escalate to one anchored parent group.
@@ -816,6 +919,8 @@ export function ConversationToolActivity({
         language={language}
         renderToolDetails={renderToolDetails}
         toolDetailIsEmpty={toolDetailIsEmpty}
+        sessionId={sessionId}
+        turnFailed={turnFailed}
       />
       {approvalSlot ? (
         <div className={styles.approvalSlot} data-codex-tool-approval-inline="true">
