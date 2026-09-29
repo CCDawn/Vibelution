@@ -475,4 +475,69 @@ describe("ConversationMarkdownRenderer", () => {
       container.remove();
     }
   });
+
+  it("renders single-dollar inline math and $$ block math through KaTeX", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    // Block math is the flow form ($$ on its own lines) — remark-math only
+    // marks that as display; a single-line `$$…$$` stays inline.
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer
+        content={["边际成本 $c = a + b$ 递增。", "", "$$", "\\sum_{i=1}^{n} x_i", "$$"].join("\n")}
+        classNames={styles}
+      />,
+    );
+
+    expect(html).toContain('class="katex"');
+    expect(html).toContain("katex-display");
+    expect(html).toContain("边际成本");
+    expect(html).toContain("递增");
+  });
+
+  it("keeps dollar amounts as literal text instead of formulas", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content="套餐价格 $5-$10，月费 $100，年费 $1,200。" classNames={styles} />,
+    );
+
+    expect(html).not.toContain("katex");
+    expect(html).toContain("$5-$10");
+    expect(html).toContain("$100");
+    expect(html).toContain("$1,200");
+  });
+
+  it("degrades a failed formula to its LaTeX source without breaking the message", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content="前文 $\notacommand$ 后文继续。" classNames={styles} />,
+    );
+
+    // KaTeX's throwOnError:false fallback keeps the raw source visible in the
+    // muted error color (rehype-katex degrades instead of throwing), and the
+    // surrounding prose survives untouched.
+    expect(html).toContain("notacommand");
+    expect(html).toContain("color:var(--fg-tertiary)");
+    expect(html).toContain("前文");
+    expect(html).toContain("后文继续");
+  });
+
+  it("leaves a lone dollar sign as plain text without crashing", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content="成本合计约 $ 元。" classNames={styles} />,
+    );
+
+    expect(html).not.toContain("katex");
+    expect(html).toContain("成本合计约 $ 元。");
+  });
+
+  it("skips the math pipeline inside fenced code blocks", async () => {
+    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+    const html = renderToStaticMarkup(
+      <ConversationMarkdownRenderer content={["```bash", "export PRICE=$5-$10", "echo $PATH", "```"].join("\n")} classNames={styles} />,
+    );
+
+    expect(html).not.toContain("katex");
+    expect(html).toContain("export PRICE=$5-$10");
+    expect(html).toContain("echo $PATH");
+  });
 });
