@@ -1,0 +1,48 @@
+/*
+ * 对话内查找的行级高亮样式（data 属性驱动，见 conversationFindHighlightDom.ts）。
+ *
+ * 命中行由 DOM 侧打 data-conversation-find-match / data-conversation-find-active
+ * 属性；React 不感知这些属性，因此虚拟化重挂/重渲染不会与之冲突。
+ * 当前命中行带 3s 衰减动画（conversationFindRowFlash）：起手强调色强高亮，
+ * 结束时衰减为与普通命中一致的淡标记；普通命中行只有淡标记。
+ */
+
+/* 普通命中行：淡琥珀底 + 左侧发丝线（与当前命中同色系但明显更弱）。 */
+[data-conversation-find-match="true"] {
+  background-color: color-mix(in srgb, var(--state-warning, #d7a84d) 7%, transparent);
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--state-warning, #d7a84d) 32%, transparent);
+  border-radius: 6px;
+}
+
+/* 当前命中行：强调色；起手强高亮在 3s 内衰减为普通命中的淡标记。 */
+[data-conversation-find-active="true"] {
+  background-color: color-mix(in srgb, var(--state-warning, #d7a84d) 8%, transparent);
+  box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--state-warning, #d7a84d) 55%, transparent);
+  border-radius: 6px;
+  animation: conversationFindRowFlash 3s ease-out forwards;
+}
+
+@keyframes conversationFindRowFlash {
+  0% {
+    background-color: color-mix(in srgb, var(--state-warning, #d7a84d) 34%, transparent);
+    box-shadow:
+      inset 3px 0 0 0 var(--state-warning, #d7a84d),
+      0 0 0 1px color-mix(in srgb, var(--state-warning, #d7a84d) 45%, transparent);
+  }
+  55% {
+    background-color: color-mix(in srgb, var(--state-warning, #d7a84d) 18%, transparent);
+    box-shadow:
+      inset 2px 0 0 0 color-mix(in srgb, var(--state-warning, #d7a84d) 75%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--state-warning, #d7a84d) 20%, transparent);
+  }
+  100% {
+    background-color: color-mix(in srgb, var(--state-warning, #d7a84d) 8%, transparent);
+    box-shadow: inset 2px 0 0 0 color-mix(in srgb, var(--state-warning, #d7a84d) 55%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-conversation-find-active="true"] {
+    animation: none;
+  }
+}

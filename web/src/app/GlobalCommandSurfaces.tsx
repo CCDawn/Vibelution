@@ -151,13 +151,10 @@ export function GlobalCommandSurfaces() {
       ...(chatEnabled
         ? [{ to: "/companions", label: t("navCompanions"), keywords: "companions 伴侣 虚拟人" }]
         : []),
-      ...(supervisedEvolutionEnabled
-        ? [{ to: "/supervised-evolution", label: t("navSupervisedEvolution"), keywords: "supervised 监督进化" }]
-        : []),
-      ...(selfEvolutionEnabled
-        ? [{ to: "/self-evolution", label: t("navSelfEvolution"), keywords: "self evolution 自进化" }]
-        : []),
       { to: "/teams", label: t("navTeams"), keywords: "teams 团队" },
+      ...(supervisedEvolutionEnabled || selfEvolutionEnabled
+        ? [{ to: "/evolution/workspace", label: t("navEvolution"), keywords: "evolution 进化 supervised 监督进化 self 自进化" }]
+        : []),
       { to: "/kernel", label: "Kernel", keywords: "kernel 内核 任务" },
       { to: "/memory", label: t("navMemory"), keywords: "memory 记忆" },
       { to: "/agents", label: t("navAgents"), keywords: "agents 智能体 助手 prompts skills tools" },

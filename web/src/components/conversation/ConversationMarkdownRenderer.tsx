@@ -1,11 +1,17 @@
 import React, { useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { Check, Copy, WrapText } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Options as ReactMarkdownOptions } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+// Local bundling only: fonts resolve from node_modules alongside the CSS —
+// no CDN or external font fetch is allowed.
+import "katex/dist/katex.min.css";
 
 import { VNativeButton } from "../vui";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import { classifyConversationMarkdownLinkTarget } from "./conversationMarkdownLinkTargets";
+import { guardConversationMarkdownMath } from "./conversationMarkdownMathGuard";
 import { ConversationMarkdownMermaidBlock } from "./conversationMarkdownMermaidBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import { ConversationMarkdownWorkspaceFileLink } from "./conversationMarkdownWorkspaceFileLink";
@@ -40,7 +46,22 @@ export type ConversationMarkdownRendererProps = {
   language?: "zh" | "en";
 };
 
-const markdownPlugins = [remarkGfm];
+// Order matters: GFM first, then math, so tables/task lists resolve before
+// `$…$` inline math; KaTeX runs on the rehype tree (rehype-katex degrades a
+// failed formula to its LaTeX source instead of throwing — a ParseError falls
+// back to a `.katex-error` span carrying the source text).
+const markdownPlugins = [remarkGfm, remarkMath];
+const markdownRehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]> = [
+  [
+    rehypeKatex,
+    {
+      errorColor: "var(--fg-tertiary)",
+      // Strict-mode issues (unicode/text-mode nits) must not fail the first
+      // render pass; ParseErrors still degrade to the source-text span.
+      strict: "ignore" as const,
+    },
+  ],
+];
 
 /**
  * Content-memoized: completed messages never re-parse; a re-render with the
@@ -61,15 +82,17 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
   if (!normalized.trim()) {
     return null;
   }
+  const guarded = guardConversationMarkdownMath(normalized);
   const hasTable = /^\s*\|.+\|\s*$/m.test(normalized);
   return (
     <div className={[classNames.markdownBody, hasTable ? classNames.markdownBodyWithTable : ""].filter(Boolean).join(" ")}>
       <ReactMarkdown
         remarkPlugins={markdownPlugins}
+        rehypePlugins={markdownRehypePlugins}
         skipHtml
         components={markdownComponents(classNames, duplicateImageUrls, renderImage, workspaceRoot, language)}
       >
-        {normalized}
+        {guarded}
       </ReactMarkdown>
     </div>
   );

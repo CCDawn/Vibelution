@@ -154,6 +154,17 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        // P2 nav collapse: aggregated Evolution entry (supervised + self sections via
+        // the in-page track toggle). `/evolution` itself stays a retired legacy URL;
+        // forced deep links below keep /supervised-evolution and /self-evolution alive.
+        path: "evolution/workspace",
+        ...guardedLazyElement(
+          <WorkbenchDomainRoute domain="evolution">
+            <EvolutionRoute />
+          </WorkbenchDomainRoute>,
+        ),
+      },
+      {
         path: "supervised-evolution",
         ...guardedLazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">

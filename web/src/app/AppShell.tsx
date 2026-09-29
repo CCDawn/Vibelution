@@ -135,12 +135,26 @@ const LazyAppShellUtilityMenu = lazy(() =>
     }),
 );
 
-/** Prefix-active match for primary shell routes (/agents covers /agents/prompts). */
+/**
+ * Prefix-active match for primary shell routes (/agents covers /agents/prompts).
+ * P2 nav collapse: the aggregated Evolution entry also owns the legacy
+ * supervised/self-evolution deep links.
+ */
 export function isShellPrimaryNavActive(pathname: string, to: string): boolean {
   const path = String(pathname || "").trim() || "/";
   const target = String(to || "").trim() || "/";
   if (target === "/") {
     return path === "/";
+  }
+  if (target === "/evolution/workspace") {
+    return (
+      path === "/evolution/workspace"
+      || path.startsWith("/evolution/workspace/")
+      || path === "/supervised-evolution"
+      || path.startsWith("/supervised-evolution/")
+      || path === "/self-evolution"
+      || path.startsWith("/self-evolution/")
+    );
   }
   return path === target || path.startsWith(`${target}/`);
 }
@@ -860,8 +874,9 @@ export function AppShell() {
     const pathname = location.pathname;
     if (pathname.startsWith("/companions")) return t("navCompanions");
     if (pathname.startsWith("/chat")) return t("navChat");
-    if (pathname.startsWith("/supervised-evolution")) return t("navSupervisedEvolution");
-    if (pathname.startsWith("/self-evolution")) return t("navSelfEvolution");
+    if (pathname.startsWith("/supervised-evolution")) return t("navEvolution");
+    if (pathname.startsWith("/self-evolution")) return t("navEvolution");
+    if (pathname.startsWith("/evolution/workspace")) return t("navEvolution");
     if (pathname.startsWith("/teams")) return t("navTeams");
     if (pathname.startsWith("/kernel")) return "Kernel";
     if (pathname.startsWith("/memory")) return t("navMemory");
@@ -2259,36 +2274,6 @@ export function AppShell() {
               {t("navCompanions")}
             </span>
           )}
-          {supervisedEvolutionEnabled ? (
-            <VRouteLinkButton
-              chrome="shell-nav"
-              to="/supervised-evolution"
-              className={shellPrimaryNavClass(location.pathname, "/supervised-evolution")}
-              aria-current={isShellPrimaryNavActive(location.pathname, "/supervised-evolution") ? "page" : undefined}
-              onClick={(event) => handlePrimaryNavClick(event, "/supervised-evolution")}
-            >
-              {t("navSupervisedEvolution")}
-            </VRouteLinkButton>
-          ) : (
-            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Supervised evolution is disabled" : "监督进化未启用"}>
-              {t("navSupervisedEvolution")}
-            </span>
-          )}
-          {selfEvolutionEnabled ? (
-            <VRouteLinkButton
-              chrome="shell-nav"
-              to="/self-evolution"
-              className={shellPrimaryNavClass(location.pathname, "/self-evolution")}
-              aria-current={isShellPrimaryNavActive(location.pathname, "/self-evolution") ? "page" : undefined}
-              onClick={(event) => handlePrimaryNavClick(event, "/self-evolution")}
-            >
-              {t("navSelfEvolution")}
-            </VRouteLinkButton>
-          ) : (
-            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Self evolution is disabled" : "自进化未启用"}>
-              {t("navSelfEvolution")}
-            </span>
-          )}
           <VRouteLinkButton
             chrome="shell-nav"
             to="/teams"
@@ -2298,15 +2283,21 @@ export function AppShell() {
           >
             {t("navTeams")}
           </VRouteLinkButton>
-          <VRouteLinkButton
-            chrome="shell-nav"
-            to="/kernel"
-            className={shellPrimaryNavClass(location.pathname, "/kernel")}
-            aria-current={isShellPrimaryNavActive(location.pathname, "/kernel") ? "page" : undefined}
-            onClick={(event) => handlePrimaryNavClick(event, "/kernel")}
-          >
-            Kernel
-          </VRouteLinkButton>
+          {supervisedEvolutionEnabled || selfEvolutionEnabled ? (
+            <VRouteLinkButton
+              chrome="shell-nav"
+              to="/evolution/workspace"
+              className={shellPrimaryNavClass(location.pathname, "/evolution/workspace")}
+              aria-current={isShellPrimaryNavActive(location.pathname, "/evolution/workspace") ? "page" : undefined}
+              onClick={(event) => handlePrimaryNavClick(event, "/evolution/workspace")}
+            >
+              {t("navEvolution")}
+            </VRouteLinkButton>
+          ) : (
+            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Evolution is disabled" : "进化未启用"}>
+              {t("navEvolution")}
+            </span>
+          )}
           <VRouteLinkButton
             chrome="shell-nav"
             to="/memory"
@@ -2544,18 +2535,12 @@ export function AppShell() {
                   {t("navCompanions")}
                 </VRouteLinkButton>
               ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navCompanions")}</span>}
-              {supervisedEvolutionEnabled ? (
-                <VRouteLinkButton chrome="shell-nav" to="/supervised-evolution" className={shellMobileNavClass(location.pathname, "/supervised-evolution")} aria-current={isShellPrimaryNavActive(location.pathname, "/supervised-evolution") ? "page" : undefined} onClick={closeUtilityMenu}>
-                  {t("navSupervisedEvolution")}
-                </VRouteLinkButton>
-              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSupervisedEvolution")}</span>}
-              {selfEvolutionEnabled ? (
-                <VRouteLinkButton chrome="shell-nav" to="/self-evolution" className={shellMobileNavClass(location.pathname, "/self-evolution")} aria-current={isShellPrimaryNavActive(location.pathname, "/self-evolution") ? "page" : undefined} onClick={closeUtilityMenu}>
-                  {t("navSelfEvolution")}
-                </VRouteLinkButton>
-              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navSelfEvolution")}</span>}
               <VRouteLinkButton chrome="shell-nav" to="/teams" className={shellMobileNavClass(location.pathname, "/teams")} aria-current={isShellPrimaryNavActive(location.pathname, "/teams") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navTeams")}</VRouteLinkButton>
-              <VRouteLinkButton chrome="shell-nav" to="/kernel" className={shellMobileNavClass(location.pathname, "/kernel")} aria-current={isShellPrimaryNavActive(location.pathname, "/kernel") ? "page" : undefined} onClick={closeUtilityMenu}>Kernel</VRouteLinkButton>
+              {supervisedEvolutionEnabled || selfEvolutionEnabled ? (
+                <VRouteLinkButton chrome="shell-nav" to="/evolution/workspace" className={shellMobileNavClass(location.pathname, "/evolution/workspace")} aria-current={isShellPrimaryNavActive(location.pathname, "/evolution/workspace") ? "page" : undefined} onClick={closeUtilityMenu}>
+                  {t("navEvolution")}
+                </VRouteLinkButton>
+              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navEvolution")}</span>}
               <VRouteLinkButton chrome="shell-nav" to="/memory" className={shellMobileNavClass(location.pathname, "/memory")} aria-current={isShellPrimaryNavActive(location.pathname, "/memory") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navMemory")}</VRouteLinkButton>
               <VRouteLinkButton chrome="shell-nav" to="/agents" className={shellMobileNavClass(location.pathname, "/agents")} aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navAgents")}</VRouteLinkButton>
             </nav>

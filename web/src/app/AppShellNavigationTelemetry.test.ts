@@ -193,7 +193,7 @@ describe("AppShell navigation telemetry", () => {
     expect(
       collectRouteLinksUsingDocumentReload(
         source,
-        new Set(["/chat", "/companions", "/supervised-evolution", "/self-evolution", "/teams", "/memory", "/agents", "/logs", "/git", "/config"]),
+        new Set(["/chat", "/companions", "/evolution/workspace", "/supervised-evolution", "/self-evolution", "/teams", "/memory", "/agents", "/logs", "/git", "/config"]),
       ),
     ).toEqual([]);
     expect(appShellSource).toContain('chrome="shell-nav"');
