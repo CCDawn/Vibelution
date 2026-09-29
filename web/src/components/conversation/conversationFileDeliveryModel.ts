@@ -17,6 +17,38 @@ export type ConversationChangedFileSummary = {
 
 export type ConversationFileDeliveryState = "created" | "modified" | "deleted" | string;
 
+/**
+ * Extract the disk-truth change summary from assistant message metadata.
+ * The backend projection only stamps `changedFiles` on ledgered turns; a
+ * missing, non-array, or malformed value reads as "no summary" so the panel
+ * falls back to the transcript extraction unchanged.
+ */
+export function conversationChangedFilesFromMetadata(
+  metadata: Record<string, unknown> | undefined | null,
+): ConversationChangedFileSummary[] {
+  const raw = metadata?.changedFiles;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const summaries: ConversationChangedFileSummary[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.path !== "string" || !record.path.trim()) {
+      continue;
+    }
+    summaries.push({
+      path: record.path,
+      additions: typeof record.additions === "number" ? record.additions : undefined,
+      deletions: typeof record.deletions === "number" ? record.deletions : undefined,
+      state: typeof record.state === "string" ? record.state : undefined,
+    });
+  }
+  return summaries;
+}
+
 /** Delivery row enriched with the disk-truth state and +/- line counts when known. */
 export type ConversationFileDeliveryView = ConversationFileDelivery & {
   additions?: number;
