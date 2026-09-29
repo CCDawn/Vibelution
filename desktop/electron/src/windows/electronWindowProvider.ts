@@ -3,6 +3,7 @@ import { isLauncherAppUrl, launcherAppOriginFor } from "../protocol/launcherAppP
 import { assertLocalHttpUrl } from "../security/urlPolicy.js";
 import { isExternalOpenableUrl } from "../security/externalOpenPolicy.js";
 import { desktopPetWindowUrl } from "./petWindow.js";
+import { isWorkbenchErrorPageUrl, workbenchErrorPageDataUrl } from "./workbenchErrorPage.js";
 import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } from "./windowProviderTypes.js";
 
 type ElectronWindowEventListener = (...args: unknown[]) => void;
@@ -818,11 +819,44 @@ export class ElectronWindowProvider {
         }
         this.workbenchReadyUrl = safeUrl;
       } catch (error: unknown) {
-        this.discardFailedWorkbenchWindow(workbenchWindow);
+        // Never destroy the window out from under the user (a one-frame flash
+        // with no explanation). Keep it alive, present the bilingual error
+        // document, and rethrow the original failure so the desktop action
+        // stays retryable and the log keeps the root cause.
+        await this.presentWorkbenchErrorStatus({
+          origin: originOfUrl(safeUrl),
+          detail: navigationFailureDetail(error)
+        });
         throw navigationFailure(safeUrl, error);
       }
     }
 
+    presentElectronWindow(workbenchWindow);
+    return this.reportAndReturn(this.stateFor("workbench"));
+  }
+
+  /**
+   * Present the visible bilingual "backend unavailable" status in the
+   * Workbench window instead of destroying it. Reused by the navigation
+   * failure path and by main.ts when the backend start attempt itself failed
+   * before any navigation could happen. Best-effort: if even the local error
+   * document cannot load, the window stays hidden rather than masking the
+   * original failure.
+   */
+  async presentWorkbenchErrorStatus(input: { origin: string; detail: string }): Promise<ManagedWindowState> {
+    let workbenchWindow = this.reconcileCurrentWorkbenchWindow();
+    if (!workbenchWindow || workbenchWindow.isDestroyed()) {
+      workbenchWindow = this.createWorkbenchWindow(this.workbenchUrl, this.paths);
+      this.workbenchWindow = workbenchWindow;
+      this.workbenchReadyUrl = null;
+      this.attachWindowEvents("workbench", workbenchWindow);
+    }
+    this.workbenchReadyUrl = null;
+    try {
+      await workbenchWindow.loadURL(workbenchErrorPageDataUrl(input));
+    } catch {
+      // The error document is best-effort; never mask the original failure.
+    }
     presentElectronWindow(workbenchWindow);
     return this.reportAndReturn(this.stateFor("workbench"));
   }
@@ -846,22 +880,6 @@ export class ElectronWindowProvider {
       return true;
     }
     return currentOrigin !== targetOrigin;
-  }
-
-  private discardFailedWorkbenchWindow(window: ElectronWindowLike): void {
-    if (this.workbenchWindow === window) {
-      this.workbenchWindow = null;
-      this.workbenchReadyUrl = null;
-      this.workbenchCloseAuthorized = false;
-      this.workbenchCloseInFlight = false;
-    }
-    if (!window.isDestroyed()) {
-      try {
-        window.destroy();
-      } catch {
-        // Preserve the original navigation failure for the desktop action result.
-      }
-    }
   }
 
   private requestWorkbenchCloseTransaction(): void {
@@ -968,6 +986,14 @@ export class ElectronWindowProvider {
 
   private syncWorkbenchUrlFromWindow(window: ElectronWindowLike): void {
     const currentUrl = window.webContents.getURL().trim();
+    if (isWorkbenchErrorPageUrl(currentUrl)) {
+      // The error document is not a ready Workbench page: keep the ready
+      // marker unset so sends, attention overlays and focus tracking stay
+      // disabled, and keep the previous workbench URL so the next open
+      // reloads the real origin.
+      this.workbenchReadyUrl = null;
+      return;
+    }
     this.workbenchReadyUrl = currentUrl || null;
     if (!currentUrl) {
       return;
@@ -1149,8 +1175,12 @@ function launcherWindowUrl(value: string): string {
 
 function navigationFailure(url: string, error: unknown): Error {
   const origin = new URL(url).origin;
-  const detail = error instanceof Error ? error.message : String(error);
+  const detail = navigationFailureDetail(error);
   return new Error(`Workbench navigation failed for ${origin}: ${detail.slice(0, 300)}`);
+}
+
+function navigationFailureDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function preventWindowClose(event: unknown): void {

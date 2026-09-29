@@ -244,6 +244,7 @@ import {
 } from "./windows/windowUrlResolver.js";
 import { startOrFocusWorkbenchFromProductEntry } from "./windows/productEntryWorkbench.js";
 import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
+import { ensureWorkbenchBackendReady } from "./windows/workbenchOpenBackendGate.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 import {
   MainWorkbenchCloseTransactionStore,
@@ -957,6 +958,25 @@ async function openWorkbenchAtCurrentLauncherUrl(
     const payloadUrl = typeof payload.workbenchUrl === "string" ? payload.workbenchUrl.trim() : "";
     workbenchUrl = resolveWorkbenchUrl(desktopEnvironment(), payloadUrl || bootstrap.workbenchUrl);
     currentWorkbenchUrl = workbenchUrl;
+    // A stale resolution can still name port 8000 after the backend died
+    // (2026-09-29: "open window" created a Workbench window against a dead
+    // backend and the window flashed away with no explanation). Prove the
+    // backend is actually serving before navigating; when it is down, bring
+    // it back through the existing lifecycle start path with a bounded wait.
+    try {
+      await ensureWorkbenchBackendReady({
+        workspaceRoot: paths.workspaceRoot,
+        workbenchUrl,
+        startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open-workbench" })
+      });
+    } catch (gateError: unknown) {
+      const gateDetail = gateError instanceof Error ? gateError.message : String(gateError);
+      await provider.presentWorkbenchErrorStatus({
+        origin: safeOrigin(workbenchUrl),
+        detail: gateDetail
+      });
+      throw gateError instanceof Error ? gateError : new Error(gateDetail);
+    }
     const state = await provider.openOrFocusWorkbench(workbenchUrl);
     await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench.navigation.ready",

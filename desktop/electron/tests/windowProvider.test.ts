@@ -13,6 +13,7 @@ import {
   type ElectronWindowOpenDecision,
   type ElectronWindowOpenHandler
 } from "../src/windows/electronWindowProvider.js";
+import { isWorkbenchErrorPageUrl } from "../src/windows/workbenchErrorPage.js";
 import { closedWindowState } from "../src/windows/windowProviderTypes.js";
 import type { DesktopPaths } from "../src/paths.js";
 
@@ -39,6 +40,7 @@ class FakeWindow implements ElectronWindowLike {
   flashCalls: boolean[] = [];
   sentIpc: Array<{ channel: string; payload: unknown }> = [];
   title = "";
+  navigationError: Error | null = null;
   private destroyed = false;
   private focused = false;
   private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -48,9 +50,10 @@ class FakeWindow implements ElectronWindowLike {
     private url: string,
     rendererProcessId: number,
     private readonly closeEmitsClosed = true,
-    private readonly navigationError: Error | null = null
+    navigationError: Error | null = null
   ) {
     this.id = id;
+    this.navigationError = navigationError;
     this.webContents = {
       getOSProcessId: () => rendererProcessId,
       getURL: () => this.url,
@@ -100,7 +103,9 @@ class FakeWindow implements ElectronWindowLike {
 
   loadURL(url: string): Promise<void> {
     this.loadedUrls.push(url);
-    if (this.navigationError !== null) {
+    // A local data: error document always loads — only the real workbench
+    // origin fails when the backend is down.
+    if (this.navigationError !== null && !url.startsWith("data:")) {
       return Promise.reject(this.navigationError);
     }
     this.url = url;
@@ -532,30 +537,60 @@ describe("Electron window provider state", () => {
     expect(workbenchWindow.loadedUrls).toEqual(["http://127.0.0.1:8002/teams?questionId=Q-1"]);
   });
 
-  it("keeps a failed navigation hidden and permits the next open action to retry", async () => {
+  it("keeps the window alive with a bilingual error status when navigation fails, and retries in place", async () => {
     const failedWindow = new FakeWindow(42, "", 0, true, new Error("ERR_CONNECTION_REFUSED"));
-    const recoveredWindow = new FakeWindow(43, "", 4343);
-    const factory = vi
-      .fn<(url: string, paths: DesktopPaths) => FakeWindow>()
-      .mockReturnValueOnce(failedWindow)
-      .mockReturnValueOnce(recoveredWindow);
     const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
       createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
-      createWorkbenchWindow: factory
+      createWorkbenchWindow: () => failedWindow
     });
 
+    // The original failure still surfaces to the caller (the desktop action
+    // stays retryable and the log keeps the root cause).
     await expect(provider.openOrFocusWorkbench("http://127.0.0.1:8002/")).rejects.toThrow("ERR_CONNECTION_REFUSED");
 
-    expect(failedWindow.showCount).toBe(0);
-    expect(failedWindow.destroyCount).toBe(1);
-    expect(provider.snapshot().workbench).toEqual(closedWindowState("workbench"));
+    // The window is never destroyed out from under the user: it presents the
+    // bilingual error document instead of flashing away.
+    expect(failedWindow.destroyCount).toBe(0);
+    expect(failedWindow.showCount).toBe(1);
+    expect(failedWindow.loadedUrls).toHaveLength(2);
+    const errorUrl = failedWindow.loadedUrls[1];
+    expect(isWorkbenchErrorPageUrl(errorUrl)).toBe(true);
+    const errorHtml = decodeURIComponent(errorUrl.slice(errorUrl.indexOf(",") + 1));
+    expect(errorHtml).toContain("工作台暂时无法连接");
+    expect(errorHtml).toContain("The Workbench backend is not ready");
+    expect(errorHtml).toContain("ERR_CONNECTION_REFUSED");
+    expect(provider.snapshot().workbench).toMatchObject({ open: true });
 
+    // The error window is not a ready workbench page: sends stay disabled.
+    expect(provider.sendToWorkbench("channel", {})).toBe(false);
+
+    // The next open action reuses the same window and reloads the real origin.
+    failedWindow.navigationError = null; // the backend came back
     await expect(provider.openOrFocusWorkbench("http://127.0.0.1:8002/")).resolves.toMatchObject({
       open: true,
       url: "http://127.0.0.1:8002/"
     });
-    expect(recoveredWindow.showCount).toBe(1);
-    expect(factory).toHaveBeenCalledTimes(2);
+    expect(failedWindow.loadedUrls).toHaveLength(3);
+    expect(failedWindow.loadedUrls[2]).toBe("http://127.0.0.1:8002/");
+  });
+
+  it("presents the backend-unavailable status on demand without a navigation failure", async () => {
+    const workbenchWindow = new FakeWindow(42, "", 0);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    const state = await provider.presentWorkbenchErrorStatus({
+      origin: "http://127.0.0.1:8000",
+      detail: "workbench start outcome is uncertain"
+    });
+
+    expect(workbenchWindow.destroyCount).toBe(0);
+    expect(workbenchWindow.showCount).toBe(1);
+    expect(isWorkbenchErrorPageUrl(workbenchWindow.loadedUrls[0])).toBe(true);
+    expect(state).toMatchObject({ role: "workbench", open: true });
+    expect(provider.sendToWorkbench("channel", {})).toBe(false);
   });
 
   it("cancels same-origin in-page workbench navigations after the first load", async () => {
