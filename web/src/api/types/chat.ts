@@ -893,6 +893,24 @@ export type SessionRewindUnsafeFile = {
   classification?: SessionRewindFileClassification;
 };
 
+/** Local self-contained HTML export request (`POST /api/sessions/{id}/export-html`). */
+export type SessionExportHtmlPayload = {
+  /** Selected turn ids; empty/missing keeps every turn. */
+  turnIds?: string[];
+  /** Embed image attachments as base64 data URIs. */
+  includeAttachments?: boolean;
+};
+
+/**
+ * Single-file HTML export document: the client saves `html` as `filename`
+ * through a Blob download. `skippedTurnIds` lists requested-but-unknown ids.
+ */
+export type SessionExportHtmlResponse = {
+  filename: string;
+  html: string;
+  skippedTurnIds: string[];
+};
+
 export type SessionTurnErrorRetry = {
   attempt: number;
   maxAttempts: number;

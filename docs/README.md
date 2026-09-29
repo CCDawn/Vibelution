@@ -63,6 +63,7 @@
 | [plans/research-flow-v2.md](plans/research-flow-v2.md) | 三阶段科研流权威方案：第二阶段基础实验已闭环；第三阶段已接通 Seed、v2 多动作决策、1.1.0 显式迁移及版本化基线修复，真实 CUDA 迭代待验收 |
 | [plans/2026-09-05-independent-operator-experiment-flow-plan.md](plans/2026-09-05-independent-operator-experiment-flow-plan.md) | 技术实施参考：成熟项目调研、独立算子实验基础与历史证据；流程部分由 research-flow-v2.md 替代，旧状态不作为当前完成情况 |
 | [plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED：10 并发链路改造任务清单（搜索 circuit/fan-in P0、dispatch 并行化、串线丢写修复、并发验收） |
+| [plans/2026-09-02-meeting-store-physical-sharding.md](plans/2026-09-02-meeting-store-physical-sharding.md) | 设计阶段：会议轮次按 meetingRoundId 物理分片，尚未实施 |
 | [plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED：挑战杯群聊、摘要、LangGraph/Ledger 自动运行链路的 deadline、durable recovery、run 隔离、上下文与自动推进修复计划 |
 | [plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md](plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED：挑战杯从官方题目冷启动到产出登记与 H1–H4 审核的规范化状态 V2、服务端动作和真实链路闭环验收 |
 | [plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved：挑战杯节点根会话、逐假说 Child Session 与结构化聚合 |
@@ -73,8 +74,6 @@
 | [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
 | [plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md](plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan：模型配置与协议路由 |
 | [plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md](plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md) | user-approved：多 Agent 协议配置设计 |
-| [plans/2026-08-13-portable-branch-workspace.md](plans/2026-08-13-portable-branch-workspace.md) | 仓内 `.worktrees` + Launcher 全部分支清单 |
-| [plans/2026-08-11-multi-instance-branch-isolation.md](plans/2026-08-11-multi-instance-branch-isolation.md) | 多实例端口隔离与注册表 |
 
 ### 本轮迁入 archive
 
@@ -88,6 +87,9 @@
 | `docs/plans/2026-08-26-test-selector-import-closure.md` | `archive/plans/2026-08/`（Implemented；未映射 Python 改动按最近测试 import 前沿选择测试） |
 | `docs/plans/2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md` | `archive/plans/2026-09/`（Implemented / DEV Closed；来源血缘、pinned definition、检索预算/质量与真实回执绑定） |
 | `docs/plans/2026-08-26-development-loop-throughput.md` | `archive/plans/2026-08/`（Implemented；测试去重、短时集成锁与 gate-definition 并行自测） |
+| `docs/plans/2026-08-13-portable-branch-workspace.md` | `archive/plans/2026-08/`（superseded；目录池与分支清单见协作规范，整树替换晋升未采用） |
+| `docs/plans/2026-08-11-multi-instance-branch-isolation.md` | `archive/plans/2026-08/`（superseded；现行见 ADR 0009 与 instance-lifecycle） |
+| `docs/plans/2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md` | `archive/plans/2026-09/`（superseded；实施改走仓外 Stage1 方案） |
 | `docs/archive/plans/2026-08-26-challenge-workflow-recovery-closure.md` | `archive/plans/2026-08/`（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main） |
 | `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |
 | `docs/frontend/*` | `archive/frontend/` |

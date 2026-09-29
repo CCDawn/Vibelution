@@ -1,6 +1,7 @@
 # 多实例架构：按分支隔离 + Launcher 多项目管理（块B）
 
-> 状态：方向已对齐（2026-08-11），待立项
+> 状态：superseded（2026-09-29 归档）。本文实例 ID 用「项目 + 分支名」，任务目录写在仓库外的兄弟文件夹；现行实现都没有采用。
+> 现行：[ADR 0009](../../../adr/0009-launcher-control-plane-lives-in-electron-main.md)、[instance-lifecycle.md](../../../../core/launcher/instance-lifecycle.md)、[worktree-collaboration.md](../../../agents/worktree-collaboration.md)。实例按 checkout 路径区分，注册表在 `%LOCALAPPDATA%\Vibelution\instances.json`，任务目录在仓内 `.worktrees/`。
 > 前置：块A（daemon 单例守卫 / orphaned 清理上限 / 粘性消息清除）已提交
 > 触发背景：2026-08-11 工作台事故——单目录内两套 Launcher/daemon 实例并发，
 > 后端 24808 被挤到 8002 而观察/窗口仍指向 8000，daemon 判孤儿强制关窗。

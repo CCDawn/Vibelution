@@ -1,7 +1,8 @@
 # 便携分支工作区：仓内 `.worktrees` + Launcher 全部分支
 
-> **状态**：草案，供继续优化。升格 ADR / 写入 `docs/standards/` 之前，**不覆盖** `AGENTS.md` 与现行协作规范。
-> **部分落地（2026-08-16）**：仓内 `.worktrees/` 已是默认任务 checkout 池（见根 `AGENTS.md` §2 与 [worktree-collaboration.md](../agents/worktree-collaboration.md)）；旧兄弟目录 `Vibelution-worktrees` 只读兼容。本文剩余目标：Launcher 全分支清单、Git 整树晋升与多实例注册表。
+> **状态**：superseded（2026-09-29 归档）。目录池、分支清单和实例注册表已有现行文档。第 7.2 节「晋升时丢掉 main 上独有提交」没有采用，不能再当实施说明。
+> **现行**：[worktree-collaboration.md](../../../agents/worktree-collaboration.md)、[instance-lifecycle.md](../../../../core/launcher/instance-lifecycle.md)、[ADR 0009](../../../adr/0009-launcher-control-plane-lives-in-electron-main.md)。监督合入仍走 `expected_head` 校验后的 Git 合并，不是本文的整树替换。
+> **部分落地（2026-08-16）**：仓内 `.worktrees/` 已是默认任务 checkout 池（见根 `AGENTS.md` §2 与 [worktree-collaboration.md](../../../agents/worktree-collaboration.md)）；旧兄弟目录 `Vibelution-worktrees` 只读兼容。
 > **日期**：2026-08-13
 > **触发**：Launcher 首屏只能看见当前 checkout；「多分支管理」与「统一到一个文件夹」需要一份对**任意用户部署**成立的目录契约，而不是本机 Desktop/junction。
 > **2026-08-13 校准**：监督进化发现优秀子树后，**整树晋升到现在的 `main`**；**所有流程必须在 Git 管辖内**（worktree / merge / ref / revert），禁止拷文件、换目录、junction 当晋升。

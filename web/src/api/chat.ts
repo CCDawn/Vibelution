@@ -12,6 +12,8 @@ import type {
   SessionDeleteResponse,
   SessionBulkDeleteResponse,
   SessionDetail,
+  SessionExportHtmlPayload,
+  SessionExportHtmlResponse,
   SessionGuidanceMode,
   SessionLlmOptions,
   SessionMessageCurationAction,
@@ -278,6 +280,28 @@ export function bulkDeleteChatSessions(sessionIds: string[]): Promise<SessionBul
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sessionIds }),
   });
+}
+
+/**
+ * Local self-contained HTML export: the server assembles one single-file
+ * document (escaped content, base64-embedded images) that the caller saves via
+ * a Blob download. Unknown requested turn ids ride back on `skippedTurnIds`.
+ */
+export function exportSessionHtml(
+  sessionId: string,
+  payload: SessionExportHtmlPayload = {},
+): Promise<SessionExportHtmlResponse> {
+  return fetchJson<SessionExportHtmlResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/export-html`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        turnIds: payload.turnIds ?? [],
+        includeAttachments: payload.includeAttachments ?? true,
+      }),
+    },
+  );
 }
 
 export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOptions> {

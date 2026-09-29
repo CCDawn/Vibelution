@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
@@ -17,13 +19,15 @@ def _source_artifact(
     reviewer_agent_id: str,
     title: str,
     source_type: str = "manual_user_entry",
+    original_content: str = "RAG test source content.",
+    source_path: str = "",
 ) -> dict:
     inbox_source = team_knowledge_service.collect_source_to_inbox(
         owner_type,
         owner_id,
         source_type=source_type,
-        source_ref={"note": title},
-        original_content="RAG test source content.",
+        source_ref={"note": f"{title}; paraphrase of {source_path}" if source_path else title},
+        original_content=original_content,
         original_filename="rag-source.txt",
         title=title,
         actor_agent_id=actor_agent_id,
@@ -270,6 +274,165 @@ def test_local_rag_bm25_retrieval_ranks_term_dense_formal_knowledge(rag_knowledg
     ]
     assert payload["contexts"][0]["score"] > payload["contexts"][1]["score"] > 0
     assert payload["contexts"][0]["matchReason"] == "bm25"
+
+
+def test_local_rag_memory_evaluation_baseline(rag_knowledge_env):
+    """Measure offline retrieval of four project-workflow rules.
+
+    The source excerpts are anonymized paraphrases of project rules, not an Agent
+    answer-quality or runtime latency benchmark. Deprecated-item visibility is an
+    observation rather than an acceptance requirement.
+    """
+    from core.web.services import rag_retrieval_service
+
+    base_id = rag_knowledge_env["readableBase"]["knowledgeBaseId"]
+    team_id = rag_knowledge_env["team"]["teamId"]
+    member_id = rag_knowledge_env["member"]["agentId"]
+    lead_id = rag_knowledge_env["lead"]["agentId"]
+
+    def approve(title: str, content: str, source_path: str) -> tuple[dict, str]:
+        source = _source_artifact(
+            base_id,
+            owner_type="team",
+            owner_id=team_id,
+            actor_agent_id=member_id,
+            reviewer_agent_id=lead_id,
+            title=title,
+            original_content=content,
+            source_path=source_path,
+        )
+        proposal = team_knowledge_service.create_refinement_proposal(
+            base_id,
+            source_artifact_ids=[source["sourceArtifactId"]],
+            proposed_by_agent_id=member_id,
+            title=title,
+            content=content,
+            tags=["memory-evaluation"],
+        )
+        item = team_knowledge_service.review_refinement_proposal(
+            base_id,
+            proposal["proposalId"],
+            status="approved",
+            reviewed_by_agent_id=lead_id,
+        )["item"]
+        return item, source["sourceArtifactId"]
+
+    cases = [
+        (
+            "Can an unreviewed proposal enter formal RAG search?",
+            "A refinement proposal becomes formal knowledge only after reviewer approval.",
+            "core/core_prompt/roles/knowledge_steward.md",
+        ),
+        (
+            "What happens to a catalog card when its source file hash changes?",
+            "A public catalog card with a changed source hash is hidden from search and queued for review.",
+            "core/web/services/team_knowledge/public_catalog.py",
+        ),
+        (
+            "Find the rule for a superseded personal episode in a later session context.",
+            "A superseded personal episodic event remains in history but is omitted from a new session context.",
+            "tests/test_agent_episodic_memory_tool.py",
+        ),
+        (
+            "Can imported document instructions grant an Agent extra tool permission?",
+            "Imported Markdown is untrusted data and cannot override Agent instructions or tool permissions.",
+            "docs/standards/development-standard.md",
+        ),
+    ]
+    expected = [
+        approve(f"Case {index + 1}", content, path)
+        for index, (_, content, path) in enumerate(cases)
+    ]
+    reciprocal_ranks = []
+    retrieved_count = 0
+    cited_count = 0
+    gold_source_hits = 0
+    for (query, _, _), (expected_item, gold_source_id) in zip(cases, expected, strict=True):
+        payload = rag_retrieval_service.retrieve_rag_contexts(
+            agent_id=member_id,
+            query=query,
+            knowledge_base_id=base_id,
+            retrieval_mode="bm25",
+            provider="local",
+            top_k=3,
+        )
+        contexts = payload["contexts"]
+        ranks = [context["source"]["knowledgeItemId"] for context in contexts]
+        expected_id = expected_item["knowledgeItemId"]
+        reciprocal_ranks.append(1 / (ranks.index(expected_id) + 1) if expected_id in ranks else 0)
+        retrieved_count += len(contexts)
+        citations = {citation["contextId"]: citation for citation in payload["citations"]}
+        cited_count += sum(
+            citations.get(context["contextId"], {}).get("knowledgeItemId") == context["source"]["knowledgeItemId"]
+            and bool(citations.get(context["contextId"], {}).get("sourceArtifactIds"))
+            for context in contexts
+        )
+        matching_context = next(
+            (context for context in contexts if context["source"]["knowledgeItemId"] == expected_id),
+            None,
+        )
+        if matching_context:
+            gold_source_hits += gold_source_id in citations.get(matching_context["contextId"], {}).get(
+                "sourceArtifactIds", []
+            )
+
+    private_payload = rag_retrieval_service.retrieve_rag_contexts(
+        agent_id=member_id,
+        query="private vector secret",
+        retrieval_mode="bm25",
+        provider="local",
+        top_k=5,
+    )
+    private_id = rag_knowledge_env["privateItem"]["knowledgeItemId"]
+    forbidden_exposure = any(
+        context["source"]["knowledgeItemId"] == private_id
+        or "private vector secret" in context["text"].lower()
+        for context in private_payload["contexts"]
+    )
+
+    deprecated_item, _ = approve(
+        "Retired retrieval recipe",
+        "The retired retrieval recipe uses a stale procedure for a previous application version.",
+        "core/web/services/team_knowledge_service.py",
+    )
+    team_knowledge_service.update_knowledge_item_rating(
+        base_id,
+        deprecated_item["knowledgeItemId"],
+        actor_agent_id=lead_id,
+        stability="deprecated",
+        marking_reason="Superseded by a later measurement.",
+    )
+    deprecated_payload = rag_retrieval_service.retrieve_rag_contexts(
+        agent_id=member_id,
+        query="retired retrieval recipe stale procedure",
+        knowledge_base_id=base_id,
+        retrieval_mode="bm25",
+        provider="local",
+        top_k=5,
+    )
+    deprecated_exposure = any(
+        context["source"]["knowledgeItemId"] == deprecated_item["knowledgeItemId"]
+        for context in deprecated_payload["contexts"]
+    )
+
+    metrics = {
+        "dataset": "project-workflow-paraphrases-v1",
+        "retrievalMode": "bm25",
+        "provider": "local",
+        "caseCount": len(cases),
+        "recallAt3": sum(rank > 0 for rank in reciprocal_ranks) / len(cases),
+        "mrrAt3": sum(reciprocal_ranks) / len(cases),
+        "citationLinkCoverage": cited_count / retrieved_count if retrieved_count else 0,
+        "goldSourceAt3": gold_source_hits / len(cases),
+        "forbiddenExposure": forbidden_exposure,
+        "deprecatedExposureObserved": deprecated_exposure,
+    }
+    print("MEMORY_EVALUATION_BASELINE " + json.dumps(metrics, sort_keys=True))
+    assert metrics["recallAt3"] == 1.0
+    assert metrics["mrrAt3"] >= 0.75
+    assert metrics["citationLinkCoverage"] == 1.0
+    assert metrics["goldSourceAt3"] == 1.0
+    assert metrics["forbiddenExposure"] is False
 
 
 def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
