@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from config.public_config import load_public_config
+from config.public_config import get_public_config_snapshot
 
 
 DEFAULT_LANGUAGE = "zh"
@@ -15,8 +15,10 @@ def resolve_language(value: object) -> str:
 
 
 def get_web_language() -> str:
+    # 会话归一化等热路径每请求要取多次语言；走进程内共享快照（一次 stat），
+    # 不做 resolve/读盘/深拷贝。写路径与外部改文件都会让快照换新。
     try:
-        public_config = load_public_config()
+        public_config = get_public_config_snapshot()
     except Exception:
         return DEFAULT_LANGUAGE
     return resolve_language(public_config.get("ui", {}).get("language", DEFAULT_LANGUAGE))

@@ -476,3 +476,84 @@ def test_load_public_config_rereads_when_signature_changes_or_missing(tmp_path):
     config_file.unlink()
     with pytest.raises(FileNotFoundError):
         public_config_module.load_public_config(config_file)
+
+
+def test_load_public_config_default_path_warm_calls_skip_read_and_resolve(tmp_path, monkeypatch):
+    public_config_module._reset_public_config_cache()
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_file)
+
+    read_calls: list[Path] = []
+    resolve_calls: list[Path] = []
+    real_read_text = Path.read_text
+    real_resolve = Path.resolve
+
+    def counting_read_text(self, *args, **kwargs):
+        if Path(self) == config_file:
+            read_calls.append(Path(self))
+        return real_read_text(self, *args, **kwargs)
+
+    def counting_resolve(self, *args, **kwargs):
+        if Path(self) == config_file:
+            resolve_calls.append(Path(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+    monkeypatch.setattr(Path, "resolve", counting_resolve)
+
+    first = public_config_module.load_public_config()
+    assert first["ui"]["language"] == "en"
+    reads_after_cold = len(read_calls)
+    resolves_after_cold = len(resolve_calls)
+    assert reads_after_cold >= 1
+
+    # warm 调用：不再重复读文件、不再重复 resolve（resolve 结果进程内 memoize）。
+    second = public_config_module.load_public_config()
+    snapshot = public_config_module.get_public_config_snapshot()
+    assert second["ui"]["language"] == "en"
+    assert snapshot["ui"]["language"] == "en"
+    assert len(read_calls) == reads_after_cold
+    assert len(resolve_calls) == resolves_after_cold
+
+    # 快照是共享对象：warm 调用直接复用，不做深拷贝。
+    assert public_config_module.get_public_config_snapshot() is snapshot
+    # load_public_config 契约不变：仍返回独立深拷贝，改动不污染快照。
+    assert second is not first
+    second["ui"]["language"] = "fr"
+    assert public_config_module.load_public_config()["ui"]["language"] == "en"
+    assert snapshot["ui"]["language"] == "en"
+
+
+def test_get_web_language_refreshes_after_save_public_config(tmp_path, monkeypatch):
+    from core.web.services.i18n import get_web_language
+
+    public_config_module._reset_public_config_cache()
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_file)
+
+    assert get_web_language() == "en"
+
+    updated = public_config_module.load_public_config()
+    updated["ui"]["language"] = "zh"
+    public_config_module.save_public_config(updated, config_file)
+
+    # 写时刷新：保存后快照立即读到新语言（UI 可感知行为）。
+    assert get_web_language() == "zh"
+
+
+def test_get_web_language_refreshes_after_external_file_edit(tmp_path, monkeypatch):
+    from core.web.services.i18n import get_web_language
+
+    public_config_module._reset_public_config_cache()
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[ui]\nlanguage = "en"\n', encoding="utf-8")
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_file)
+
+    assert get_web_language() == "en"
+
+    # 外部直接改文件（不走 save_public_config）：mtime 门兜底刷新。
+    config_file.write_text('[ui]\nlanguage = "zh"\n', encoding="utf-8")
+
+    assert get_web_language() == "zh"

@@ -1283,16 +1283,38 @@ def _legacy_v1_public_payload(public_config: dict | None) -> bool:
 # - upgrade_legacy_capability_cache_if_needed 幂等且只写 catalog 旁路文件，
 #   只在 cache miss 时执行一次即可；写入本身不改 config 文件签名。
 # - 返回值始终是独立深拷贝：调用方直接改动不影响缓存与其他调用方。
+# - 默认路径（config_path=None）另有进程级快照 _PUBLIC_CONFIG_SNAPSHOT：解析
+#   结果整对象复用，get_public_config_snapshot 返回共享只读对象（读路径无锁，
+#   模块全局引用重绑定是原子的），load_public_config 命中快照时返回深拷贝。
+#   失效双保险：save_public_config 写完显式失效（写时刷新），外部直接改文件
+#   由 mtime 门兜底。
+# - resolve() 是 Windows 慢系统调用且 CONFIG_PATH 进程内是常量，按原始字符串
+#   memoize 一次；键用 str(CONFIG_PATH)，测试 monkeypatch CONFIG_PATH 时天然
+#   分区，不会串路径。
 _PUBLIC_CONFIG_CACHE_LOCK = threading.RLock()
 _PUBLIC_CONFIG_CACHE: dict[tuple[str, int, int, bool | None], dict[str, Any]] = {}
 _PUBLIC_CONFIG_CACHE_LIMIT = 8
+_PUBLIC_CONFIG_SNAPSHOT: tuple[tuple[str, int, int], bool | None, dict[str, Any]] | None = None
+_RESOLVED_DEFAULT_PATHS: dict[str, Path] = {}
 
 
 def _reset_public_config_cache() -> None:
-    """测试专用：清空 load_public_config 的签名缓存。"""
+    """测试专用：清空 load_public_config 的签名缓存与默认路径快照。"""
 
+    global _PUBLIC_CONFIG_SNAPSHOT
     with _PUBLIC_CONFIG_CACHE_LOCK:
         _PUBLIC_CONFIG_CACHE.clear()
+        _PUBLIC_CONFIG_SNAPSHOT = None
+        _RESOLVED_DEFAULT_PATHS.clear()
+
+
+def _resolved_default_config_path() -> Path:
+    raw = str(CONFIG_PATH)
+    resolved = _RESOLVED_DEFAULT_PATHS.get(raw)
+    if resolved is None:
+        resolved = Path(CONFIG_PATH).expanduser().resolve()
+        _RESOLVED_DEFAULT_PATHS[raw] = resolved
+    return resolved
 
 
 def _public_config_file_signature(config_path: Path) -> tuple[str, int, int] | None:
@@ -1303,10 +1325,9 @@ def _public_config_file_signature(config_path: Path) -> tuple[str, int, int] | N
     return (str(config_path), int(stat.st_mtime_ns), int(stat.st_size))
 
 
-def _cached_public_config(resolved: Path, allow_legacy_v1: bool | None) -> dict[str, Any] | None:
-    signature = _public_config_file_signature(resolved)
-    if signature is None:
-        return None
+def _cached_public_config_from_signature(
+    signature: tuple[str, int, int], allow_legacy_v1: bool | None
+) -> dict[str, Any] | None:
     cache_key = (signature[0], signature[1], signature[2], allow_legacy_v1)
     with _PUBLIC_CONFIG_CACHE_LOCK:
         cached = _PUBLIC_CONFIG_CACHE.get(cache_key)
@@ -1315,19 +1336,89 @@ def _cached_public_config(resolved: Path, allow_legacy_v1: bool | None) -> dict[
     return copy.deepcopy(cached)
 
 
-def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool | None = None) -> dict:
-    if config_path is None:
-        cached = _cached_public_config(Path(CONFIG_PATH).expanduser().resolve(), allow_legacy_v1)
-        if cached is not None:
-            return cached
-    resolved = _resolve_public_config_path(config_path)
+def _store_public_config_snapshot(
+    signature: tuple[str, int, int],
+    requested_allow_legacy_v1: bool | None,
+    payload: dict[str, Any],
+) -> None:
+    """原子替换默认路径快照；快照对象只进不改，读路径无锁。"""
+
+    global _PUBLIC_CONFIG_SNAPSHOT
+    _PUBLIC_CONFIG_SNAPSHOT = (signature, requested_allow_legacy_v1, payload)
+
+
+def _invalidate_public_config_caches(resolved_config_path: Path) -> None:
+    """写时刷新：清掉该路径的进程内缓存，下次读取按新签名重载。"""
+
+    global _PUBLIC_CONFIG_SNAPSHOT
+    path_key = str(resolved_config_path)
+    with _PUBLIC_CONFIG_CACHE_LOCK:
+        _PUBLIC_CONFIG_SNAPSHOT = None
+        stale = [key for key in _PUBLIC_CONFIG_CACHE if key[0] == path_key]
+        for key in stale:
+            _PUBLIC_CONFIG_CACHE.pop(key, None)
+
+
+def get_public_config_snapshot() -> dict[str, Any]:
+    """返回默认路径公共配置的进程内共享快照。
+
+    只读约定：调用方不得修改返回对象（写路径与 mtime 变化时会原子换新）。
+    供 get_web_language 这类每请求热路径使用：一次 stat + 字典读取，不做
+    resolve、不读文件、不深拷贝。
+    """
+
+    resolved = _resolved_default_config_path()
     signature = _public_config_file_signature(resolved)
-    cache_key: tuple[str, int, int, bool | None] | None = None
     if signature is not None:
-        cache_key = (signature[0], signature[1], signature[2], allow_legacy_v1)
-        cached = _cached_public_config(resolved, allow_legacy_v1)
-        if cached is not None:
-            return cached
+        snapshot = _PUBLIC_CONFIG_SNAPSHOT
+        if snapshot is not None and snapshot[0] == signature:
+            return snapshot[2]
+    payload = load_public_config()
+    snapshot = _PUBLIC_CONFIG_SNAPSHOT
+    if snapshot is not None:
+        return snapshot[2]
+    return payload
+
+
+def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool | None = None) -> dict:
+    requested_allow_legacy_v1 = allow_legacy_v1
+    if config_path is None:
+        resolved = _resolved_default_config_path()
+        signature = _public_config_file_signature(resolved)
+        if signature is not None:
+            snapshot = _PUBLIC_CONFIG_SNAPSHOT
+            if (
+                snapshot is not None
+                and snapshot[0] == signature
+                and snapshot[1] == requested_allow_legacy_v1
+            ):
+                return copy.deepcopy(snapshot[2])
+            cached = _cached_public_config_from_signature(signature, requested_allow_legacy_v1)
+            if cached is not None:
+                _store_public_config_snapshot(signature, requested_allow_legacy_v1, copy.deepcopy(cached))
+                return cached
+        # 快照/签名缓存未命中：保持原语义，默认路径先 ensure init 再读。
+        ensure_global_config_initialized(CONFIG_PATH)
+        signature = _public_config_file_signature(resolved)
+        if signature is not None:
+            snapshot = _PUBLIC_CONFIG_SNAPSHOT
+            if (
+                snapshot is not None
+                and snapshot[0] == signature
+                and snapshot[1] == requested_allow_legacy_v1
+            ):
+                return copy.deepcopy(snapshot[2])
+            cached = _cached_public_config_from_signature(signature, requested_allow_legacy_v1)
+            if cached is not None:
+                _store_public_config_snapshot(signature, requested_allow_legacy_v1, copy.deepcopy(cached))
+                return cached
+    else:
+        resolved = _resolve_public_config_path(config_path)
+        signature = _public_config_file_signature(resolved)
+        if signature is not None:
+            cached = _cached_public_config_from_signature(signature, requested_allow_legacy_v1)
+            if cached is not None:
+                return cached
     raw = _load_raw_public_config(resolved)
     upgrade_legacy_capability_cache_if_needed(raw, config_path=resolved)
     if allow_legacy_v1 is None:
@@ -1335,11 +1426,15 @@ def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool
     payload = strip_runtime_model_capability_fields(
         _canonicalize_public_config(raw, allow_legacy_v1=bool(allow_legacy_v1))
     )
-    if cache_key is not None:
+    if signature is not None:
         with _PUBLIC_CONFIG_CACHE_LOCK:
-            _PUBLIC_CONFIG_CACHE[cache_key] = copy.deepcopy(payload)
+            _PUBLIC_CONFIG_CACHE[
+                (signature[0], signature[1], signature[2], requested_allow_legacy_v1)
+            ] = copy.deepcopy(payload)
             while len(_PUBLIC_CONFIG_CACHE) > _PUBLIC_CONFIG_CACHE_LIMIT:
                 _PUBLIC_CONFIG_CACHE.pop(next(iter(_PUBLIC_CONFIG_CACHE)))
+        if config_path is None:
+            _store_public_config_snapshot(signature, requested_allow_legacy_v1, copy.deepcopy(payload))
     return payload
 
 
@@ -2558,6 +2653,8 @@ def save_public_config(public_config: dict, config_path: Path | None = None) -> 
         temp_path = resolved_config_path.with_suffix(resolved_config_path.suffix + ".tmp")
         temp_path.write_text(dumps_public_config(cleaned_public_config, HEADER_LINES), encoding="utf-8")
         _replace_config_file_atomically(temp_path, resolved_config_path)
+        # 写时刷新：进程内缓存立刻失效；外部直接改文件由 mtime 门兜底。
+        _invalidate_public_config_caches(resolved_config_path)
 
 
 def _replace_config_file_atomically(temp_path: Path, target_path: Path) -> None:
@@ -2723,6 +2820,7 @@ __all__ = [
     "UNCONFIGURED_MODEL_REF",
     "public_config_hash",
     "load_public_config",
+    "get_public_config_snapshot",
     "build_effective_config",
     "build_effective_from_public_payload",
     "resolve_llm_model_context_window",

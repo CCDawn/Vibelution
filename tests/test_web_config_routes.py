@@ -4410,7 +4410,7 @@ def test_updating_language_refreshes_config_summary(monkeypatch):
 
     monkeypatch.setattr(config_service, "load_public_config", fake_load_public_config)
     monkeypatch.setattr(config_service, "save_public_config", fake_save_public_config)
-    monkeypatch.setattr("core.web.services.i18n.load_public_config", fake_load_public_config)
+    monkeypatch.setattr("core.web.services.i18n.get_public_config_snapshot", fake_load_public_config)
 
     update_response = client.put("/api/config/language", json={"language": "en"})
     config_response = client.get("/api/config/public")
