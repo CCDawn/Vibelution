@@ -1,4 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
+import { useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import {
@@ -275,11 +276,39 @@ export function useChatWorkspaceLifecycle({
   setEditingSessionTitle,
   suppressRenameBlurUntilRef,
 }: UseChatWorkspaceLifecycleOptions): UseChatWorkspaceLifecycleResult {
+  const createSessionIdempotencyKeysRef = useRef(new Map<string, string>());
+  const getCreateSessionIdempotencyKey = (agentId: string): string => {
+    const normalizedAgentId = String(agentId || "").trim();
+    const existingKey = createSessionIdempotencyKeysRef.current.get(normalizedAgentId);
+    if (existingKey) return existingKey;
+    const randomUuid = globalThis.crypto?.randomUUID?.();
+    const idempotencyKey = randomUuid
+      ? `session-create:${randomUuid}`
+      : `session-create:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    createSessionIdempotencyKeysRef.current.set(normalizedAgentId, idempotencyKey);
+    return idempotencyKey;
+  };
+  const clearCreateSessionIdempotencyKey = (agentId: string, expectedKey?: string): void => {
+    const normalizedAgentId = String(agentId || "").trim();
+    if (
+      expectedKey
+      && createSessionIdempotencyKeysRef.current.get(normalizedAgentId) === expectedKey
+    ) {
+      createSessionIdempotencyKeysRef.current.delete(normalizedAgentId);
+    }
+  };
+
   const createSessionMutation = useMutation({
-    mutationFn: async ({ agentId }: { agentId: string }) =>
-      createChatSession({ agentId }),
+    mutationFn: async ({ agentId }: { agentId: string }) => {
+      const normalizedAgentId = String(agentId || "").trim();
+      return createChatSession(
+        { agentId: normalizedAgentId },
+        getCreateSessionIdempotencyKey(normalizedAgentId),
+      );
+    },
     onMutate: async ({ agentId }) => {
       const normalizedAgentId = String(agentId || "").trim();
+      const idempotencyKey = getCreateSessionIdempotencyKey(normalizedAgentId);
       const telemetry = startUserAction("session_create", { agentId: normalizedAgentId });
       // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
       // Real id arrives on success; UI must stay interactive while POST is in flight.
@@ -355,7 +384,7 @@ export function useChatWorkspaceLifecycle({
       }
       setSessionFilter("");
       syncSessionDetail(optimisticDetail);
-      return { tempSessionId, agentId: normalizedAgentId, telemetry };
+      return { tempSessionId, agentId: normalizedAgentId, idempotencyKey, telemetry };
     },
     onSuccess: (nextDetail, variables, context) => {
       const telemetry = context?.telemetry;
@@ -365,6 +394,10 @@ export function useChatWorkspaceLifecycle({
         telemetry?.failed(undefined, { reason: "missing_session_id" });
         return;
       }
+      clearCreateSessionIdempotencyKey(
+        String(context?.agentId || variables.agentId || "").trim(),
+        context?.idempotencyKey,
+      );
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
       // Prefer server title (now defaults to Agent name); fall back to local Agent label.
       const serverTitle = String(nextDetail.title || "").trim();
@@ -531,6 +564,15 @@ export function useChatWorkspaceLifecycle({
       });
     },
     onError: (error, _variables, context) => {
+      const status = error instanceof Error
+        ? (error as Error & { status?: unknown }).status
+        : undefined;
+      if (status === 409 || status === 410) {
+        clearCreateSessionIdempotencyKey(
+          String(context?.agentId || "").trim(),
+          context?.idempotencyKey,
+        );
+      }
       context?.telemetry?.failed(error, {
         tempSessionId: String(context?.tempSessionId || "").trim(),
         agentId: String(context?.agentId || "").trim(),

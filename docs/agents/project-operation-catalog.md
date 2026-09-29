@@ -107,7 +107,7 @@
 | --- | --- | --- | --- |
 | List sessions | `GET /api/sessions` | `AUTO_READ` | safe |
 | Session detail | `GET /api/sessions/{id}` | `AUTO_READ` | safe |
-| Create session | `POST /api/sessions` | `GOVERNED_WRITE` | safe（`session_create_tool`） |
+| Create session | `POST /api/sessions` | `GOVERNED_WRITE` | safe（`session_create_tool`）；可带 `Idempotency-Key` 安全重试，冲突为 409，原会话已删除为 410 |
 | Update session | `PATCH /api/sessions/{id}` | `GOVERNED_WRITE` | safe（`session_update_tool`） |
 | Stop turn | `POST /api/sessions/{id}/stop`（202 异步受理） | `GOVERNED_WRITE` | safe（`session_stop_tool`） |
 | Delete session | `DELETE /api/sessions/{id}` | `APPROVAL_REQUIRED` | delete（`session_delete_tool`） |
@@ -144,6 +144,9 @@ Phase 2 已实现以下 canonical governed tools（`tools/project_operation_tool
 | `agent_message_consume_tool` | 消费一条 inbox 消息并记录 Session/turn 来源 | `GOVERNED_WRITE` / write · on_request |
 | `agent_messages_consume_all_tool` | 消费一个 Agent inbox 的全部未消费消息 | `GOVERNED_WRITE` / write · on_request |
 | `knowledge_base_acl_grant_tool` | 当前 owner/reviewer 为 active Agent 授予显式 read/propose/review；actor 只能来自当前 runtime | `APPROVAL_REQUIRED` / write · on_request |
+| `search_agent_private_memory_tool` | 只读检索当前 Agent 自有的正式私有知识库；不接收 owner、KB ID 或用户内容范围 | `AUTO_READ` / read · never，仍受 Agent 身份与库 ACL 约束 |
+| `knowledge_stage_session_attachment_tool` | 将当前 Agent 会话中的已就绪附件暂存到自身或有权限的 Team Owner Inbox；仅生成 pending 来源 | `GOVERNED_WRITE` / write · on_request |
+| `knowledge_proposal_review_tool` | 当前 reviewer 应用或驳回待审提案；Team 提案者不能自审，正式 Item 只在应用后生成 | `APPROVAL_REQUIRED` / write · on_request |
 
 以下边界仍必须保持：
 
@@ -152,6 +155,7 @@ Phase 2 已实现以下 canonical governed tools（`tools/project_operation_tool
 3. `knowledge_base_acl_grant_tool` 不接受 actor 参数、不允许 wildcard、不接受不存在或 archived 的目标 Agent；只有当前 runtime Agent 自身具备 owner/review 权限时可用。
 4. **无 pause/resume、无通用 restore、无单 Session archive/restore 工具** — 这些能力不存在或为内部服务，**不要发明**对应工具名。
 5. 新 Agent 创建完成后，如需项目知识库，必须显式调用 `knowledge_base_acl_grant_tool`；不得硬编码某个 KB，也不得直接改知识状态文件。
+6. 附件暂存不是正式入库；Agent 自有库检索只覆盖当前 Agent，Team 检索和提案审核仍需显式授权。附件来源和提案的重试应复用相同 `Idempotency-Key`，避免响应超时后重复创建。
 
 例外与既有面：
 - `create_child_session_tool` / `list_child_sessions_tool`（`tools/session_child_tools.py`）**已存在**。

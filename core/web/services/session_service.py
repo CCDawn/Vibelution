@@ -1314,6 +1314,14 @@ class SessionValidationError(ValueError):
     """Raised when an incoming session turn payload is invalid."""
 
 
+class SessionIdempotencyConflictError(RuntimeError):
+    """Raised when one session-create idempotency key is reused for another request."""
+
+
+class SessionIdempotencyReplayGoneError(RuntimeError):
+    """Raised when a previously created idempotent session has since been deleted."""
+
+
 class SessionRewindConflictError(RuntimeError):
     """Raised when a strict rewind hits files classified unsafe.
 

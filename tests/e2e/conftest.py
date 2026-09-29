@@ -143,13 +143,21 @@ def e2e_instance() -> E2EInstance:
         )
         port = int(entry["port"])
         health = instance_registry.fetch_health(port)
-        instance_registry.assert_health_serves_worktree(health, WORKTREE_ROOT)
+        data_home = _resolve_data_home(entry)
+        registered_data_home = str(entry.get("dataHome") or "").strip()
+        if registered_data_home and instance_registry.normalize_path(registered_data_home) != instance_registry.normalize_path(data_home):
+            raise instance_registry.InstanceRegistryError(
+                "registry dataHome 与项目实例存储路径不一致"
+            )
+        instance_registry.assert_health_serves_worktree(
+            health, WORKTREE_ROOT, data_home=data_home
+        )
         instance = E2EInstance(
             port=port,
             base_url=f"http://127.0.0.1:{port}",
             instance_id=str(entry.get("instanceId") or entry.get("slotId") or ""),
             project_root=WORKTREE_ROOT,
-            data_home=str(entry.get("dataHome") or ""),
+            data_home=data_home,
             health=health,
         )
         print(

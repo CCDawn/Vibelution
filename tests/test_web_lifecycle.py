@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 from fastapi import FastAPI
 
@@ -278,6 +279,11 @@ def test_health_reports_backend_identity_for_port_occupant_reclaim():
     # backends instead of silently drifting to another port.
     assert body["pid"] == _os.getpid()
     assert isinstance(body["workspaceRoot"], str) and body["workspaceRoot"]
+    from core.infrastructure.developer_sandbox import formal_workspace_path
+
+    assert body["storageWorkspaceRoot"] == str(
+        formal_workspace_path(Path(body["workspaceRoot"])).resolve()
+    )
 
 
 def test_health_workspace_root_prefers_launcher_environment():

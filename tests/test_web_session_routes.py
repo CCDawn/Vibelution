@@ -113,6 +113,111 @@ def test_active_session_route_returns_empty_id_without_persisted_selection(monke
     assert response.json() == {"activeSessionId": ""}
 
 
+def test_session_create_route_replays_key_across_lightweight_preferences(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    recorded_events: list[tuple[tuple, dict]] = []
+
+    def capture_event(*args, **kwargs):
+        recorded_events.append((args, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", capture_event)
+    monkeypatch.setattr(session_routes, "record_runtime_scene_event", capture_event)
+    idempotency_key = "route-replay-private-key"
+    title = "Route replay private title"
+    request_body = {"title": title}
+
+    first = client.post(
+        "/api/sessions",
+        json=request_body,
+        headers={"Idempotency-Key": idempotency_key, "Prefer": "respond-async"},
+    )
+    replay = client.post(
+        "/api/sessions",
+        json=request_body,
+        headers={"Idempotency-Key": idempotency_key},
+    )
+
+    assert first.status_code == replay.status_code == 201
+    assert first.json()["id"] == replay.json()["id"]
+    persisted = load_chat_state(tmp_path)
+    assert [item["conversation_id"] for item in persisted["conversations"]] == [first.json()["id"]]
+    assert first.json()["createdLightweight"] is True
+    assert replay.json().get("createdLightweight") is not True
+    assert idempotency_key not in json.dumps(recorded_events, ensure_ascii=False)
+    assert title not in json.dumps(recorded_events, ensure_ascii=False)
+
+    from fastapi import FastAPI
+
+    contract_app = FastAPI()
+    contract_app.include_router(session_routes.router, prefix="/api")
+    create_contract = contract_app.openapi()["paths"]["/api/sessions"]["post"]
+    idempotency_parameter = next(
+        parameter
+        for parameter in create_contract["parameters"]
+        if parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_parameter["in"] == "header"
+    assert idempotency_parameter["required"] is False
+    assert {"201", "409", "410"}.issubset(create_contract["responses"])
+
+
+def test_session_create_route_maps_idempotency_conflict_to_409(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    headers = {"Idempotency-Key": "route-conflict-private-key"}
+
+    first = client.post("/api/sessions", json={"title": "Original route title"}, headers=headers)
+    conflict = client.post("/api/sessions", json={"title": "Changed route title"}, headers=headers)
+
+    assert first.status_code == 201
+    assert conflict.status_code == 409
+    assert "already bound" in conflict.json()["detail"]
+    persisted = load_chat_state(tmp_path)
+    assert [item["conversation_id"] for item in persisted["conversations"]] == [first.json()["id"]]
+
+
+def test_session_create_route_maps_deleted_idempotent_replay_to_410(monkeypatch):
+    def gone(**_kwargs):
+        raise session_service.SessionIdempotencyReplayGoneError("previous session was deleted")
+
+    monkeypatch.setattr(session_routes, "create_chat_session", gone)
+
+    response = client.post(
+        "/api/sessions",
+        json={"title": "Deleted replay"},
+        headers={"Idempotency-Key": "route-gone-private-key"},
+    )
+
+    assert response.status_code == 410
+    assert response.json()["detail"] == "previous session was deleted"
+
+
+def test_session_create_real_delete_then_same_key_returns_410(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_routes, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
+    key = "route-real-delete-replay-key"
+    body = {"title": "Create then delete real session"}
+    headers = {"Idempotency-Key": key}
+
+    created = client.post("/api/sessions", json=body, headers=headers)
+    assert created.status_code == 201
+    session_id = created.json()["id"]
+
+    deleted = client.delete(f"/api/sessions/{session_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["deletedSessionId"] == session_id
+
+    replay = client.post("/api/sessions", json=body, headers=headers)
+    assert replay.status_code == 410
+    assert "no longer exists" in replay.json()["detail"]
+    assert session_id not in {item["id"] for item in client.get("/api/sessions").json()}
+
+
 def test_session_select_route_keeps_last_viewed_preference_contract(monkeypatch):
     """POST /select stays a last-viewed preference write (ADR 0009).
 

@@ -1,10 +1,16 @@
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import knowledge as knowledge_routes
-from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
+from core.web.services import agent_directory_service, chat_room_service, session_service, team_knowledge_service, team_service
+from core.web.services.session import document_attachments
+from tests.helpers.web_chat_state import _bind_seeded_session_agent, _seed_chat_state
 
 
 @pytest.fixture(autouse=True)
@@ -250,6 +256,347 @@ def test_knowledge_source_inbox_routes_promote_and_attach_central_source(tmp_pat
     )
     assert artifact_response.status_code == 201
     assert artifact_response.json()["centralSourceId"] == central_source["centralSourceId"]
+
+
+def test_central_source_artifact_route_replays_idempotency_key_and_conflicts_on_changed_body(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Idempotent route KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    central_source = _promote_central_source(client, team, lead, member, title="Idempotency route source")
+    url = f"/api/knowledge-bases/{base['knowledgeBaseId']}/central-source-artifacts"
+    headers = {"Idempotency-Key": "route-artifact-key-001"}
+    payload = {
+        "centralSourceId": central_source["centralSourceId"],
+        "actorAgentId": member["agentId"],
+        "title": "Stable artifact title",
+        "summary": "Stable artifact summary",
+    }
+
+    first = client.post(url, json=payload, headers=headers)
+    replay = client.post(url, json=payload, headers=headers)
+    changed = client.post(url, json={**payload, "title": "Changed artifact title"}, headers=headers)
+
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["sourceArtifactId"] == first.json()["sourceArtifactId"]
+    assert "_idempotency" not in first.json()
+    assert changed.status_code == 409, changed.text
+
+    owner = team_knowledge_service._require_base_with_owner(base["knowledgeBaseId"])[0]
+    stored = team_knowledge_service._read_jsonl(team_knowledge_service._source_artifacts_path_for_owner(owner))
+    assert sum(item.get("sourceArtifactId") == first.json()["sourceArtifactId"] for item in stored) == 1
+
+
+def test_session_attachment_can_only_be_staged_from_the_actor_bound_session(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    session_id = str(member["directSessionId"])
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": session_id,
+                "title": "Member source session",
+                "updated_at": "2026-09-29T10:00:00",
+                "last_turn_status": "ready",
+                "messages": [],
+            }
+        ],
+    )
+    _bind_seeded_session_agent(tmp_path, member, session_id=session_id)
+    attachment_payload = "A durable source fact from an attached document.".encode("utf-8")
+    attachment = document_attachments.store_session_user_document_attachment(
+        session_id,
+        attachment_payload,
+        filename="memory-evidence.txt",
+        content_type="text/plain",
+    )
+    observed_runtime_events = []
+
+    def capture_runtime_event(*args, **kwargs):
+        observed_runtime_events.append({"args": args, "kwargs": kwargs})
+
+    monkeypatch.setattr(team_knowledge_service, "record_runtime_scene_event", capture_runtime_event)
+
+    response = client.post(
+        "/api/knowledge/sources/inbox",
+        json={
+            "ownerType": "team",
+            "ownerId": team["teamId"],
+            "actorAgentId": member["agentId"],
+            "sessionId": session_id,
+            "attachmentId": attachment["artifactId"],
+            "title": "Session attachment evidence",
+        },
+    )
+    cross_agent = client.post(
+        "/api/knowledge/sources/inbox",
+        json={
+            "ownerType": "team",
+            "ownerId": team["teamId"],
+            "actorAgentId": lead["agentId"],
+            "sessionId": session_id,
+            "attachmentId": attachment["artifactId"],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    source = response.json()
+    assert source["status"] == "pending"
+    assert source["curationStatus"] == "owner_inbox"
+    assert source["centralSourceId"] == ""
+    assert source["sourceRef"]["sessionId"] == session_id
+    assert source["sourceRef"]["attachmentId"] == attachment["artifactId"]
+    source_body = team_knowledge_service._project_path_from_relative(source["originalPath"])
+    assert source_body.read_text(encoding="utf-8") == "A durable source fact from an attached document."
+    copied_attachment = source["localCopies"][0]
+    assert "originalPath" not in copied_attachment
+    copied_path = team_knowledge_service._project_path_from_relative(copied_attachment["inboxPath"])
+    assert copied_path.read_bytes() == attachment_payload
+    assert cross_agent.status_code == 403, cross_agent.text
+
+    owner = team_knowledge_service._require_owner_context("team", team["teamId"])
+    audit_rows = team_knowledge_service._read_jsonl(team_knowledge_service._audit_path_for_owner(owner))
+    collection_audit = [item for item in audit_rows if item.get("action") == "knowledge.source_inbox.collected"]
+    assert len(collection_audit) == 1
+
+    audit_text = json.dumps(collection_audit, ensure_ascii=False, sort_keys=True)
+    runtime_text = json.dumps(observed_runtime_events, ensure_ascii=False, sort_keys=True)
+    for sensitive_value in (
+        session_id,
+        attachment["artifactId"],
+        source["inboxSourceId"],
+        "memory-evidence.txt",
+        "A durable source fact from an attached document.",
+    ):
+        assert sensitive_value not in audit_text
+        assert sensitive_value not in runtime_text
+    assert {item["args"][2] for item in observed_runtime_events} == {
+        "knowledge.source_inbox.collected",
+        "knowledge.source_inbox.attachment_staged",
+    }
+
+
+def test_session_attachment_team_collector_cannot_self_review_but_agent_private_owner_can(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lead_session_id = str(lead["directSessionId"])
+    member_session_id = str(member["directSessionId"])
+    conversations = [
+        {
+            "conversation_id": session_id,
+            "title": "Attachment review session",
+            "updated_at": "2026-09-29T10:00:00",
+            "last_turn_status": "ready",
+            "messages": [],
+        }
+        for session_id in (lead_session_id, member_session_id)
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    _bind_seeded_session_agent(tmp_path, lead, session_id=lead_session_id)
+    _bind_seeded_session_agent(tmp_path, member, session_id=member_session_id)
+    team_attachment = document_attachments.store_session_user_document_attachment(
+        lead_session_id,
+        b"The Team lead's own attachment cannot be directly approved by that lead.",
+        filename="lead-private-decision.txt",
+        content_type="text/plain",
+    )
+    private_attachment = document_attachments.store_session_user_document_attachment(
+        member_session_id,
+        b"An Agent owner may govern their own private memory source.",
+        filename="agent-private-decision.txt",
+        content_type="text/plain",
+    )
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Attachment review KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    team_knowledge_service.update_owner_source_governance(
+        "team",
+        team["teamId"],
+        local_steward_agent_ids=[member["agentId"]],
+        actor_agent_id=lead["agentId"],
+    )
+
+    collected = client.post(
+        "/api/knowledge/sources/inbox",
+        json={
+            "ownerType": "team",
+            "ownerId": team["teamId"],
+            "actorAgentId": lead["agentId"],
+            "sessionId": lead_session_id,
+            "attachmentId": team_attachment["artifactId"],
+            "title": "Team lead attachment",
+        },
+    )
+    assert collected.status_code == 201, collected.text
+    inbox_source_id = collected.json()["inboxSourceId"]
+    assert "_sessionAttachmentCollectorAgentId" not in collected.json()
+
+    own_review = client.patch(
+        f"/api/knowledge/sources/inbox/team/{team['teamId']}/{inbox_source_id}/review",
+        json={
+            "decision": "accepted",
+            "reviewedByAgentId": lead["agentId"],
+            "ingestOnAccept": True,
+            "knowledgeBaseId": base["knowledgeBaseId"],
+            "knowledgeTitle": "Rejected self-review",
+            "knowledgeContent": "This must stay pending until another Team Agent reviews it.",
+        },
+    )
+    independent_review = client.patch(
+        f"/api/knowledge/sources/inbox/team/{team['teamId']}/{inbox_source_id}/review",
+        json={
+            "decision": "accepted",
+            "reviewedByAgentId": member["agentId"],
+            "ingestOnAccept": True,
+            "knowledgeBaseId": base["knowledgeBaseId"],
+            "knowledgeTitle": "Independently reviewed attachment",
+            "knowledgeContent": "The separate Team reviewer can ingest the staged attachment as formal knowledge.",
+        },
+    )
+
+    assert own_review.status_code == 403, own_review.text
+    assert independent_review.status_code == 200, independent_review.text
+    assert independent_review.json()["directIngestion"]["status"] == "ingested"
+
+    private_base = team_knowledge_service.create_agent_knowledge_base(
+        member["agentId"],
+        name="Private Attachment Knowledge",
+        actor_agent_id=member["agentId"],
+    )
+    private_source = team_knowledge_service.collect_session_attachment_to_inbox(
+        "agent",
+        member["agentId"],
+        session_id=member_session_id,
+        attachment_id=private_attachment["artifactId"],
+        actor_agent_id=member["agentId"],
+    )
+    private_review = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        member["agentId"],
+        private_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=member["agentId"],
+        ingest_on_accept=True,
+        knowledge_base_id=private_base["knowledgeBaseId"],
+        knowledge_title="Private self-reviewed attachment",
+        knowledge_content="The Agent owner can still directly govern private memory.",
+    )
+    assert private_review["directIngestion"]["status"] == "ingested"
+
+
+def test_session_attachment_idempotency_replays_conflicts_and_serializes_concurrent_requests(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    session_id = str(member["directSessionId"])
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": session_id,
+                "title": "Idempotent attachment session",
+                "updated_at": "2026-09-29T10:00:00",
+                "last_turn_status": "ready",
+                "messages": [],
+            }
+        ],
+    )
+    _bind_seeded_session_agent(tmp_path, member, session_id=session_id)
+    attachment_payload = b"Stable attachment content for timeout-safe inbox ingestion."
+    attachment = document_attachments.store_session_user_document_attachment(
+        session_id,
+        attachment_payload,
+        filename="idempotent-memory.txt",
+        content_type="text/plain",
+    )
+    idempotency_key = "session-attachment-retry-001"
+    barrier = threading.Barrier(6)
+    observed_runtime_events = []
+
+    def capture_runtime_event(*args, **kwargs):
+        observed_runtime_events.append({"args": args, "kwargs": kwargs})
+
+    monkeypatch.setattr(team_knowledge_service, "record_runtime_scene_event", capture_runtime_event)
+
+    def stage_concurrently(_index: int) -> dict:
+        barrier.wait(timeout=5)
+        return team_knowledge_service.collect_session_attachment_to_inbox(
+            "team",
+            team["teamId"],
+            session_id=session_id,
+            attachment_id=attachment["artifactId"],
+            actor_agent_id=member["agentId"],
+            title="Stable attachment title",
+            summary="Stable attachment summary",
+            idempotency_key=idempotency_key,
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        results = list(executor.map(stage_concurrently, range(6)))
+    source_ids = {item["inboxSourceId"] for item in results}
+    assert len(source_ids) == 1
+
+    url = "/api/knowledge/sources/inbox"
+    payload = {
+        "ownerType": "team",
+        "ownerId": team["teamId"],
+        "actorAgentId": member["agentId"],
+        "sessionId": session_id,
+        "attachmentId": attachment["artifactId"],
+        "title": "Stable attachment title",
+        "summary": "Stable attachment summary",
+    }
+    replay = client.post(url, json=payload, headers={"Idempotency-Key": idempotency_key})
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["inboxSourceId"] == next(iter(source_ids))
+    listed = client.get(
+        url,
+        params={"ownerType": "team", "ownerId": team["teamId"], "agentId": lead["agentId"]},
+    )
+    assert listed.status_code == 200, listed.text
+    assert all("_idempotency" not in item for item in listed.json()["sources"])
+    assert all("_sessionAttachmentCollectorAgentId" not in item for item in listed.json()["sources"])
+
+    reviewed = client.patch(
+        f"/api/knowledge/sources/inbox/team/{team['teamId']}/{next(iter(source_ids))}/review",
+        json={"decision": "accepted", "reviewedByAgentId": lead["agentId"]},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert "_idempotency" not in reviewed.json()["source"]
+    assert "_sessionAttachmentCollectorAgentId" not in reviewed.json()["source"]
+    after_review_retry = client.post(url, json=payload, headers={"Idempotency-Key": idempotency_key})
+    assert after_review_retry.status_code == 201, after_review_retry.text
+    assert after_review_retry.json()["inboxSourceId"] == next(iter(source_ids))
+    assert after_review_retry.json()["status"] == "accepted"
+
+    attachment_path, _content_type = document_attachments.resolve_session_document_artifact(
+        session_id,
+        attachment["artifactId"],
+    )
+    attachment_path.write_bytes(b"Changed attachment content under the same attachment id.")
+    conflict = client.post(url, json=payload, headers={"Idempotency-Key": idempotency_key})
+    assert conflict.status_code == 409, conflict.text
+
+    owner = team_knowledge_service._require_owner_context("team", team["teamId"])
+    stored = team_knowledge_service._read_jsonl(team_knowledge_service._owner_source_index_path(owner))
+    matches = [item for item in stored if item.get("sourceRef", {}).get("attachmentId") == attachment["artifactId"]]
+    assert len(matches) == 1
+    assert matches[0]["_idempotency"]["scopeHash"]
+    assert matches[0]["_idempotency"]["requestFingerprint"]
+    assert matches[0]["_sessionAttachmentCollectorAgentId"] == member["agentId"]
+    assert idempotency_key not in json.dumps(matches, ensure_ascii=False)
+    assert {item["args"][2] for item in observed_runtime_events} >= {
+        "knowledge.source_inbox.collected",
+        "knowledge.source_inbox.attachment_staged",
+        "knowledge.source_inbox.attachment_idempotency_replayed",
+        "knowledge.source_inbox.attachment_idempotency_conflict",
+    }
+    runtime_text = json.dumps(observed_runtime_events, ensure_ascii=False, sort_keys=True)
+    for sensitive_value in (idempotency_key, session_id, attachment["artifactId"], "Stable attachment content"):
+        assert sensitive_value not in runtime_text
 
 
 def test_knowledge_source_review_route_can_directly_ingest_to_formal_knowledge(tmp_path, monkeypatch):

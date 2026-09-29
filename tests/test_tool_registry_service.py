@@ -237,6 +237,7 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     ]
     assert {
         "knowledge_proposal_tool",
+        "knowledge_proposal_review_tool",
         "knowledge_ingestion_tool",
         "knowledge_governance_tasks_tool",
     }.issubset(set(bundles["knowledge_steward"]["toolNames"]))
@@ -340,6 +341,7 @@ def test_tool_registry_lists_unified_memory_search_tool_as_agent_facing(tmp_path
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
     payload = registry.get_tool_registry()
+    bundles = {item["bundleId"]: item for item in payload["toolBundles"]}
 
     tool = next(item for item in payload["tools"] if item["name"] == "research_knowledge_query_tool")
     assert tool["source"] == "built_in"
@@ -357,11 +359,45 @@ def test_tool_registry_lists_unified_memory_search_tool_as_agent_facing(tmp_path
     assert "unified_search" in unified_tool["capabilityTags"]
     assert "rag_retrieval" in unified_tool["capabilityTags"]
     assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("unified_memory_search_tool")
+    assert unified_tool["permissionTier"] == "high"
+    assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is True
     properties = unified_tool["argsSchema"]["properties"]
     assert "include_user_content" in properties
     assert properties["include_user_content"]["default"] is False
     assert "user_content_space_ids" in properties
     assert properties["user_content_space_ids"]["default"] == ""
+
+    private_search = next(item for item in payload["tools"] if item["name"] == "search_agent_private_memory_tool")
+    private_descriptor = next(item for item in payload["descriptors"] if item["name"] == "search_agent_private_memory_tool")
+    private_properties = private_search["argsSchema"]["properties"]
+    assert private_search["llmVisible"] is True
+    assert private_search["permissionTier"] == "low"
+    assert private_search["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert private_descriptor["risk"] == "read"
+    assert private_descriptor["approval"] == "never"
+    assert set(private_properties) == {"query", "query_mode", "limit", "max_context_chars"}
+    assert agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.count("search_agent_private_memory_tool") == 1
+    assert "search_agent_private_memory_tool" in bundles["memory_context"]["toolNames"]
+
+    attachment_stage = next(item for item in payload["tools"] if item["name"] == "knowledge_stage_session_attachment_tool")
+    attachment_descriptor = next(item for item in payload["descriptors"] if item["name"] == "knowledge_stage_session_attachment_tool")
+    assert attachment_stage["llmVisible"] is True
+    assert attachment_stage["permissionTier"] == "high"
+    assert attachment_stage["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert attachment_descriptor["risk"] == "write"
+    assert attachment_descriptor["approval"] == "on_request"
+    assert set(attachment_stage["argsSchema"]["properties"]) == {"attachment_id", "team_id", "title", "summary"}
+    assert "knowledge_stage_session_attachment_tool" in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
+    assert "knowledge_stage_session_attachment_tool" in bundles["memory_context"]["toolNames"]
+
+    proposal_review = next(item for item in payload["tools"] if item["name"] == "knowledge_proposal_review_tool")
+    review_descriptor = next(item for item in payload["descriptors"] if item["name"] == "knowledge_proposal_review_tool")
+    assert proposal_review["permissionTier"] == "high"
+    assert proposal_review["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert review_descriptor["risk"] == "write"
+    assert review_descriptor["approval"] == "on_request"
+    assert "knowledge_proposal_review_tool" in bundles["knowledge_steward"]["toolNames"]
+    assert "knowledge_proposal_review_tool" not in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
 
 
 def test_tool_registry_marks_web_search_not_llm_visible_when_autoglm_unavailable(tmp_path, monkeypatch):

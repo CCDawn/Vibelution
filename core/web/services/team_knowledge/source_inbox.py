@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,66 @@ def _service():
     from core.web.services import team_knowledge_service
 
     return team_knowledge_service
+
+
+_INTERNAL_SOURCE_FIELDS = {"_idempotency", "_sessionAttachmentCollectorAgentId"}
+
+
+def _public_source(source: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in source.items() if key not in _INTERNAL_SOURCE_FIELDS}
+
+
+def _session_attachment_idempotency_record(
+    *,
+    owner: dict[str, Any],
+    actor_agent_id: str,
+    session_id: str,
+    attachment_id: str,
+    idempotency_key: str,
+    file_hash: str,
+    filename: str,
+    content_type: str,
+    attachment_kind: str,
+    title: str,
+    summary: str,
+) -> dict[str, str] | None:
+    normalized_key = str(idempotency_key or "").strip()
+    if not normalized_key:
+        return None
+    if len(normalized_key) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in normalized_key):
+        raise _service().TeamKnowledgeError("Idempotency-Key must contain at most 200 printable characters.")
+
+    def digest(value: dict[str, Any]) -> str:
+        encoded = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    key_hash = hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()
+    scope_hash = digest(
+        {
+            "ownerType": owner["ownerType"],
+            "ownerId": owner["ownerId"],
+            "actorAgentId": actor_agent_id,
+            "sessionId": session_id,
+            "attachmentId": attachment_id,
+            "idempotencyKeyHash": key_hash,
+        }
+    )
+    request_fingerprint = digest(
+        {
+            "ownerType": owner["ownerType"],
+            "ownerId": owner["ownerId"],
+            "actorAgentId": actor_agent_id,
+            "sessionId": session_id,
+            "attachmentId": attachment_id,
+            "sourceHash": file_hash,
+            "filename": filename,
+            "contentType": content_type,
+            "attachmentKind": attachment_kind,
+            "title": title,
+            "summary": summary,
+        }
+    )
+    return {"scopeHash": scope_hash, "requestFingerprint": request_fingerprint}
 
 
 def update_owner_source_governance(
@@ -132,6 +193,9 @@ def collect_source_to_inbox(
     summary: str = "",
     actor_agent_id: str = "",
     local_file_paths: list[Any] | None = None,
+    _minimal_audit: bool = False,
+    _idempotency: dict[str, str] | None = None,
+    _session_attachment_collector_agent_id: str = "",
 ) -> dict[str, Any]:
     """Stage raw source material inside the owning Team/Agent workspace."""
 
@@ -201,24 +265,277 @@ def collect_source_to_inbox(
         "resolutionNote": "",
         "updatedAt": now,
     }
+    if isinstance(_idempotency, dict) and _idempotency.get("scopeHash") and _idempotency.get("requestFingerprint"):
+        source["_idempotency"] = {
+            "scopeHash": str(_idempotency["scopeHash"]),
+            "requestFingerprint": str(_idempotency["requestFingerprint"]),
+        }
+    trusted_attachment_collector_id = str(_session_attachment_collector_agent_id or "").strip()
+    if trusted_attachment_collector_id:
+        if trusted_attachment_collector_id != actor_id:
+            raise s.TeamKnowledgePermissionError("The session attachment collector must match the authorized actor.")
+        source["_sessionAttachmentCollectorAgentId"] = trusted_attachment_collector_id
     with s._LOCK:
         sources = s._read_jsonl(s._owner_source_index_path(owner))
         sources.append(source)
         s._write_jsonl(s._owner_source_index_path(owner), sources)
         s._rewrite_owner_source_review_queue_locked(owner, sources)
-        s._append_audit(owner, "knowledge.source_inbox.collected", source, actor_agent_id=actor_id)
+        audit_payload = {"status": "pending"} if _minimal_audit else source
+        s._append_audit(owner, "knowledge.source_inbox.collected", audit_payload, actor_agent_id=actor_id)
     s._record_event(
         "knowledge.source_inbox.collected",
         owner,
         "",
         actor_agent_id=actor_id,
-        fields={
-            "inboxSourceId": inbox_source_id,
-            "sourceType": normalized_type,
-            "localCopyCount": len(local_copies),
-        },
+        fields=(
+            {"localCopyCount": len(local_copies)}
+            if _minimal_audit
+            else {
+                "inboxSourceId": inbox_source_id,
+                "sourceType": normalized_type,
+                "localCopyCount": len(local_copies),
+            }
+        ),
     )
-    return source
+    return _public_source(source)
+
+
+def collect_session_attachment_to_inbox(
+    owner_type: str,
+    owner_id: str,
+    *,
+    session_id: str,
+    attachment_id: str,
+    actor_agent_id: str,
+    title: str = "",
+    summary: str = "",
+    idempotency_key: str = "",
+) -> dict[str, Any]:
+    """Copy one ready attachment from the actor's own session into owner Inbox.
+
+    The caller supplies identifiers only. Local paths are resolved from the
+    session attachment registry and never accepted from the request body.
+    This only creates a pending Inbox source; a reviewer still controls
+    promotion to central and formal knowledge.
+    """
+
+    s = _service()
+    started_at = time.perf_counter()
+    owner = s._require_owner_context(owner_type, owner_id)
+    normalized_actor_id = str(actor_agent_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_attachment_id = str(attachment_id or "").strip()
+    normalized_idempotency_key = str(idempotency_key or "").strip()
+    if not normalized_session_id or not normalized_attachment_id:
+        raise s.TeamKnowledgeError("sessionId and attachmentId are required for session attachment ingestion.")
+    if len(normalized_idempotency_key) > 200 or any(
+        ord(char) < 32 or ord(char) == 127 for char in normalized_idempotency_key
+    ):
+        raise s.TeamKnowledgeError("Idempotency-Key must contain at most 200 printable characters.")
+    if not s._can_collect_owner_source(owner, normalized_actor_id):
+        raise s.TeamKnowledgePermissionError("Agent is not allowed to collect sources for this owner.")
+    authorized_at = time.perf_counter()
+
+    from core.web.services import session_service
+    from core.web.services.session import document_attachments, image_attachments
+
+    try:
+        session_agent_id = session_service._session_agent_id_snapshot(normalized_session_id)
+    except session_service.SessionNotFoundError as exc:
+        raise s.TeamKnowledgeNotFoundError("Session not found.") from exc
+    if session_agent_id != normalized_actor_id:
+        raise s.TeamKnowledgePermissionError("Only the Agent bound to the session can stage its attachments.")
+    with session_service._CHAT_STATE_LOCK:
+        conversation = session_service.load_session_chat_state(
+            session_service.PROJECT_ROOT,
+            normalized_session_id,
+        )
+        attachment = session_service._find_session_attachment_metadata(
+            conversation,
+            normalized_attachment_id,
+        )
+    if not attachment or str(attachment.get("artifactId") or "").strip() != normalized_attachment_id:
+        raise s.TeamKnowledgeNotFoundError("Session attachment not found.")
+    attachment_kind = str(attachment.get("kind") or "").strip().lower()
+    attachment_status = str(attachment.get("status") or "").strip().lower()
+    if attachment_kind not in {"user_document", "user_image"} or attachment_status not in {"", "ready"}:
+        raise s.TeamKnowledgeError("Only ready user-uploaded session attachments can be staged.")
+
+    artifact_id = normalized_attachment_id
+    filename = s._safe_source_filename(
+        attachment.get("filename") or artifact_id,
+        default="session-attachment.bin",
+    )
+    content_type = str(attachment.get("contentType") or "").split(";", 1)[0].strip().lower()
+    is_document = document_attachments.is_document_attachment(attachment)
+    try:
+        if is_document:
+            attachment_path, _resolved_content_type = document_attachments.resolve_session_document_artifact(
+                normalized_session_id,
+                artifact_id,
+            )
+            size_limit = document_attachments.SESSION_DOCUMENT_MAX_BYTES
+            extension = Path(artifact_id).suffix.lower().lstrip(".")
+        else:
+            attachment_path, _resolved_content_type = image_attachments.resolve_session_image_artifact(
+                normalized_session_id,
+                artifact_id,
+            )
+            size_limit = session_service._SESSION_USER_IMAGE_MAX_BYTES
+            extension = Path(artifact_id).suffix.lower().lstrip(".")
+    except FileNotFoundError as exc:
+        raise s.TeamKnowledgeNotFoundError("Session attachment not found.") from exc
+    attachment_resolved_at = time.perf_counter()
+    try:
+        file_size = attachment_path.stat().st_size
+        if file_size <= 0 or file_size > size_limit:
+            raise s.TeamKnowledgeError("Session attachment exceeds the supported ingestion size.")
+        file_bytes = attachment_path.read_bytes()
+    except OSError as exc:
+        raise s.TeamKnowledgeNotFoundError("Session attachment could not be read.") from exc
+    file_hash = "sha256:" + hashlib.sha256(file_bytes).hexdigest()
+    content_read_at = time.perf_counter()
+    safe_title = trim_lines(title or filename, max_lines=1).strip()
+    safe_summary = trim_lines(summary or "", max_lines=16).strip()
+    idempotency_record = _session_attachment_idempotency_record(
+        owner=owner,
+        actor_agent_id=normalized_actor_id,
+        session_id=normalized_session_id,
+        attachment_id=artifact_id,
+        idempotency_key=normalized_idempotency_key,
+        file_hash=file_hash,
+        filename=filename,
+        content_type=content_type,
+        attachment_kind=attachment_kind,
+        title=safe_title,
+        summary=safe_summary,
+    )
+    origin_ref = f"session_attachment:{normalized_session_id}:{artifact_id}"[:240]
+    def stage_source() -> tuple[dict[str, Any], float]:
+        try:
+            extracted_text = (
+                document_attachments.extract_document_text(file_bytes, extension=extension)
+                if is_document
+                else ""
+            )
+        except ValueError as exc:
+            raise s.TeamKnowledgeError(str(exc)) from exc
+        extracted_text = str(extracted_text or "")
+        max_text_chars = 200_000
+        truncated_chars = max(0, len(extracted_text) - max_text_chars)
+        safe_content = extracted_text[:max_text_chars]
+        source_ref = {
+            "note": f"Session attachment: {filename}",
+            "sourceKind": "session_attachment",
+            "sessionId": normalized_session_id,
+            "attachmentId": artifact_id,
+            "originalFilename": filename,
+            "contentType": content_type,
+            "attachmentKind": attachment_kind,
+            "contentTrust": "untrusted_source_material",
+            "documentHash": file_hash,
+            "textTruncated": bool(truncated_chars),
+            "truncatedCharacters": truncated_chars,
+        }
+        body_filename = (
+            f"{Path(filename).stem}.extracted.txt"
+            if safe_content and extension == "pdf"
+            else filename if safe_content else "session-attachment.json"
+        )
+        source = collect_source_to_inbox(
+            owner["ownerType"],
+            owner["ownerId"],
+            source_type="manual_user_entry",
+            source_ref=source_ref,
+            original_content=safe_content,
+            original_filename=body_filename,
+            source_hash=file_hash,
+            title=safe_title,
+            summary=safe_summary,
+            actor_agent_id=normalized_actor_id,
+            local_file_paths=[
+                {
+                    "path": str(attachment_path),
+                    "title": filename,
+                    "originRef": origin_ref,
+                }
+            ],
+            _minimal_audit=True,
+            _idempotency=idempotency_record,
+            _session_attachment_collector_agent_id=normalized_actor_id,
+        )
+        return source, time.perf_counter()
+
+    lock_wait_started_at = time.perf_counter()
+    existing: dict[str, Any] | None = None
+    idempotency_outcome = "created"
+    if idempotency_record:
+        with s._LOCK:
+            lock_acquired_at = time.perf_counter()
+            sources = s._read_jsonl(s._owner_source_index_path(owner))
+            existing = next(
+                (
+                    item
+                    for item in sources
+                    if isinstance(item, dict)
+                    and isinstance(item.get("_idempotency"), dict)
+                    and str(item["_idempotency"].get("scopeHash") or "") == idempotency_record["scopeHash"]
+                ),
+                None,
+            )
+            if existing is not None:
+                old_record = existing.get("_idempotency") if isinstance(existing.get("_idempotency"), dict) else {}
+                idempotency_outcome = (
+                    "replayed"
+                    if str(old_record.get("requestFingerprint") or "") == idempotency_record["requestFingerprint"]
+                    else "conflict"
+                )
+                staged = _public_source(existing)
+                collected_at = time.perf_counter()
+            else:
+                staged, collected_at = stage_source()
+    else:
+        lock_acquired_at = lock_wait_started_at
+        staged, collected_at = stage_source()
+
+    if not idempotency_record:
+        lock_acquired_at = lock_wait_started_at
+    phase_timings_ms = {
+        "ownerAuthorization": round((authorized_at - started_at) * 1000, 3),
+        "sessionAndAttachmentResolve": round((attachment_resolved_at - authorized_at) * 1000, 3),
+        "attachmentRead": round((content_read_at - attachment_resolved_at) * 1000, 3),
+        "lockWait": round((lock_acquired_at - lock_wait_started_at) * 1000, 3),
+        "inboxCollection": round((collected_at - content_read_at) * 1000, 3),
+        "total": round((collected_at - started_at) * 1000, 3),
+    }
+    if idempotency_outcome == "conflict":
+        s._record_event(
+            "knowledge.source_inbox.attachment_idempotency_conflict",
+            owner,
+            "",
+            actor_agent_id=normalized_actor_id,
+            fields={"idempotencyOutcome": idempotency_outcome, "phaseTimingsMs": phase_timings_ms},
+        )
+        raise s.TeamKnowledgeIdempotencyConflictError(
+            "Idempotency-Key was already used for a different session attachment source request."
+        )
+    if idempotency_outcome == "replayed":
+        s._record_event(
+            "knowledge.source_inbox.attachment_idempotency_replayed",
+            owner,
+            "",
+            actor_agent_id=normalized_actor_id,
+            fields={"idempotencyOutcome": idempotency_outcome, "phaseTimingsMs": phase_timings_ms},
+        )
+        return staged
+    s._record_event(
+        "knowledge.source_inbox.attachment_staged",
+        owner,
+        "",
+        actor_agent_id=normalized_actor_id,
+        fields={"idempotencyOutcome": "created" if idempotency_record else "unkeyed", "phaseTimingsMs": phase_timings_ms},
+    )
+    return staged
 
 
 def list_owner_source_inbox(
@@ -248,7 +565,7 @@ def list_owner_source_inbox(
         "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "actorAgentId": actor_id,
         "summary": s._source_inbox_summary(sources),
-        "sources": sources,
+        "sources": [_public_source(item) for item in sources],
         "updatedAt": s.utc_now_iso(),
     }
 
@@ -295,6 +612,15 @@ def review_owner_inbox_source(
         current_status = str(source.get("status") or "")
         if current_status not in {"pending", "needs_more_context"}:
             raise s.TeamKnowledgeError("Only pending or needs_more_context inbox sources can be reviewed.")
+        protected_collector_id = str(source.get("_sessionAttachmentCollectorAgentId") or "").strip()
+        if (
+            owner["ownerType"] == "team"
+            and protected_collector_id
+            and reviewer_id == protected_collector_id
+        ):
+            raise s.TeamKnowledgePermissionError(
+                "A Team Agent cannot review their own staged session attachment source."
+            )
         central_source: dict[str, Any] | None = None
         promotion: dict[str, Any] | None = None
         if normalized_decision == "accepted":
@@ -372,7 +698,7 @@ def review_owner_inbox_source(
         "schemaVersion": s.SCHEMA_VERSION,
         "ownerType": owner["ownerType"],
         "ownerId": owner["ownerId"],
-        "source": source,
+        "source": _public_source(source),
         "centralSource": central_source,
         "promotion": promotion,
         "directIngestion": direct_ingestion,
@@ -388,6 +714,7 @@ def create_source_artifact_from_central_source(
     evidence_range: dict[str, Any] | None = None,
     title: str = "",
     summary: str = "",
+    idempotency_key: str = "",
 ) -> dict[str, Any]:
     s = _service()
     owner, base = s._require_base_with_owner(knowledge_base_id)
@@ -422,6 +749,7 @@ def create_source_artifact_from_central_source(
         actor_agent_id=actor_agent_id,
         central_source_id=central_source["centralSourceId"],
         inbox_source_id=str(owner_ref.get("inboxSourceId") or ""),
+        idempotency_key=idempotency_key,
     )
 
 
@@ -895,18 +1223,21 @@ def _stage_local_source_copies(
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(s._extended_fs_path(resolved), s._extended_fs_path(dest_path))
         seen_hashes.add(digest)
-        copies.append(
-            {
-                "candidateId": candidate_id,
-                "title": trim_lines(str(spec.get("title") or resolved.name), max_lines=1).strip(),
-                "filename": dest_name,
-                "originalPath": s._project_relative_path(resolved),
-                "inboxPath": s._project_relative_path(dest_path),
-                "sha256": digest,
-                "byteSize": int(resolved.stat().st_size),
-                "kind": "local_file",
-            }
-        )
+        copy_record = {
+            "candidateId": candidate_id,
+            "title": trim_lines(str(spec.get("title") or resolved.name), max_lines=1).strip(),
+            "filename": dest_name,
+            "inboxPath": s._project_relative_path(dest_path),
+            "sha256": digest,
+            "byteSize": int(resolved.stat().st_size),
+            "kind": "local_file",
+        }
+        origin_ref = trim_lines(str(spec.get("originRef") or ""), max_lines=1).strip()
+        if origin_ref:
+            copy_record["originRef"] = origin_ref[:240]
+        else:
+            copy_record["originalPath"] = s._project_relative_path(resolved)
+        copies.append(copy_record)
         if len(copies) >= s.MAX_LOCAL_SOURCE_COPIES:
             break
     return copies

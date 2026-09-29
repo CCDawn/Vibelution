@@ -31,6 +31,12 @@ def _health_workspace_root() -> str:
     return str(Path(__file__).resolve().parents[2])
 
 
+def _health_storage_workspace_root() -> str:
+    from core.infrastructure.developer_sandbox import formal_workspace_path
+
+    return str(formal_workspace_path(Path(_health_workspace_root())).resolve())
+
+
 def create_app() -> FastAPI:
     """Create the local web workbench app.
 
@@ -104,6 +110,7 @@ def create_app() -> FastAPI:
             # (safe to reclaim) from a foreign process holding the preferred port.
             "pid": os.getpid(),
             "workspaceRoot": _health_workspace_root(),
+            "storageWorkspaceRoot": _health_storage_workspace_root(),
             "apiContractVersion": str(serving.get("apiContractVersion") or "v1"),
             "serving": serving,
             # Keep the high-value fields flat for lightweight launcher clients

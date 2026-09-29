@@ -100,9 +100,12 @@ from tools.team_knowledge_tools import (
     knowledge_ingestion_tool as _knowledge_ingestion_impl,
     knowledge_operations_health_tool as _knowledge_operations_health_impl,
     knowledge_proposal_tool as _knowledge_proposal_impl,
+    knowledge_proposal_review_tool as _knowledge_proposal_review_impl,
+    knowledge_stage_session_attachment_tool as _knowledge_stage_session_attachment_impl,
     knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
     knowledge_steward_recommendations_tool as _knowledge_steward_recommendations_impl,
     knowledge_steward_workbench_tool as _knowledge_steward_workbench_impl,
+    search_agent_private_memory_tool as _search_agent_private_memory_impl,
     unified_memory_search_tool as _unified_memory_search_impl,
 )
 from tools.skill_library_tools import skill_library_search_tool as _skill_library_search_impl
@@ -2751,6 +2754,63 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def search_agent_private_memory_tool(
+        query: str = "",
+        query_mode: str = "auto",
+        limit: int = 8,
+        max_context_chars: int = 1200,
+    ) -> str:
+        """
+        【私有记忆搜索】只读检索当前 Agent 自己的正式私有知识库。
+
+        搜索范围由运行时 Agent 身份绑定，只包含该 Agent 可读的自有知识库；不会读取 Team 知识库、其他 Agent 私有知识或用户内容。
+        结果带来源与引用，可用于查找尚未出现在当前对话上下文中的个人经验。
+
+        Args:
+            query: 查询内容；metadata 模式可为空
+            query_mode: auto / literal / semantic / hybrid / bm25 / metadata / regex / rg / grep / rag
+            limit: 最多返回结果数，范围 1-25
+            max_context_chars: RAG 模式单条上下文最大字符数
+
+        Returns:
+            JSON 格式的当前 Agent 私有知识搜索结果
+        """
+        return _search_agent_private_memory_impl(
+            query=query,
+            query_mode=query_mode,
+            limit=limit,
+            max_context_chars=max_context_chars,
+        )
+
+    @tool
+    def knowledge_stage_session_attachment_tool(
+        attachment_id: str,
+        team_id: str = "",
+        title: str = "",
+        summary: str = "",
+    ) -> str:
+        """
+        【暂存会话附件】把当前会话中的一个 ready 上传附件暂存到 Agent 私有或授权 Team 的待审核 Inbox。
+
+        只能使用当前 Agent 绑定的会话和其中真实存在的附件 ID；不会接受本地路径，也不会直接写入正式知识。Team 目标由 Team ACL 校验，调用需要逐次审批。
+
+        Args:
+            attachment_id: 当前会话附件的 artifact ID
+            team_id: 可选 Team ID；留空时进入当前 Agent 自己的 Inbox
+            title: 可选来源标题
+            summary: 可选来源摘要
+
+        Returns:
+            JSON 格式的待审核 Inbox 来源摘要
+        """
+        return _knowledge_stage_session_attachment_impl(
+            attachment_id=attachment_id,
+            team_id=team_id,
+            title=title,
+            summary=summary,
+        )
+
+    @tool
     def skill_library_search_tool(
         query: str = "",
         query_mode: str = "auto",
@@ -2883,6 +2943,21 @@ def _build_key_tools() -> List[BaseTool]:
             evidence_range_json=evidence_range_json,
             source_created_at=source_created_at,
             captured_by=captured_by,
+        )
+
+    @tool
+    def knowledge_proposal_review_tool(
+        knowledge_base_id: str,
+        proposal_id: str,
+        decision: str,
+        resolution_note: str = "",
+    ) -> str:
+        """由当前 Agent 以 reviewer 身份应用或驳回待审知识提案；需目标库 review ACL。"""
+        return _knowledge_proposal_review_impl(
+            knowledge_base_id=knowledge_base_id,
+            proposal_id=proposal_id,
+            decision=decision,
+            resolution_note=resolution_note,
         )
 
     @tool
@@ -3246,11 +3321,14 @@ def _build_key_tools() -> List[BaseTool]:
         computer_use_session_tool,
         research_knowledge_query_tool,
         research_knowledge_request_tool,
+        search_agent_private_memory_tool,
+        knowledge_stage_session_attachment_tool,
         unified_memory_search_tool,
         skill_library_search_tool,
         github_project_library_search_tool,
         github_project_library_clone_tool,
         knowledge_proposal_tool,
+        knowledge_proposal_review_tool,
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,
         knowledge_operations_health_tool,

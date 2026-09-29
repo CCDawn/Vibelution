@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -56,6 +58,10 @@ class TeamKnowledgeNotFoundError(TeamKnowledgeError):
 
 class TeamKnowledgePermissionError(TeamKnowledgeError):
     """Raised when an actor cannot perform the requested knowledge action."""
+
+
+class TeamKnowledgeIdempotencyConflictError(TeamKnowledgeError):
+    """Raised when an Idempotency-Key is reused with a different request."""
 
 
 class TeamKnowledgeAmbiguousKnowledgeBaseError(TeamKnowledgeError):
@@ -575,7 +581,10 @@ def create_source_artifact(
     actor_agent_id: str = "",
     central_source_id: str = "",
     inbox_source_id: str = "",
+    idempotency_key: str = "",
 ) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    prepare_started_at = started_at
     owner, base = _require_base_with_owner(knowledge_base_id)
     _require_permission(owner, base, actor_agent_id, "propose")
     central_source: dict[str, Any] | None = None
@@ -624,6 +633,12 @@ def create_source_artifact(
     ][:MAX_LOCAL_SOURCE_COPIES]
     if local_copies:
         bounded_ref["localCopies"] = local_copies
+    normalized_actor_id = str(actor_agent_id or "").strip()
+    normalized_idempotency_key = str(idempotency_key or "").strip()
+    if len(normalized_idempotency_key) > 200 or any(
+        ord(char) < 32 or ord(char) == 127 for char in normalized_idempotency_key
+    ):
+        raise TeamKnowledgeError("Idempotency-Key must contain at most 200 printable characters.")
     artifact = {
         "sourceArtifactId": _new_event_id("src"),
         "ownerType": owner["ownerType"],
@@ -644,17 +659,122 @@ def create_source_artifact(
         "inboxSourceId": trim_lines(inbox_source_id or str(owner_ref.get("inboxSourceId") or ""), max_lines=1).strip(),
         "curationStatus": "central_curated" if normalized_central_source_id else "source_artifact",
     }
+    idempotency_scope = ""
+    if normalized_idempotency_key:
+        idempotency_scope = hashlib.sha256(
+            json.dumps(
+                {
+                    "ownerType": owner["ownerType"],
+                    "ownerId": owner["ownerId"],
+                    "actorAgentId": normalized_actor_id,
+                    "key": normalized_idempotency_key,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        fingerprint_payload = {
+            key: artifact[key]
+            for key in (
+                "ownerType",
+                "ownerId",
+                "knowledgeBaseId",
+                "sourceType",
+                "sourceRef",
+                "sourceCreatedAt",
+                "capturedBy",
+                "sourceHash",
+                "evidenceRange",
+                "title",
+                "summary",
+                "centralSourceId",
+                "inboxSourceId",
+                "curationStatus",
+            )
+        }
+        request_fingerprint = hashlib.sha256(
+            json.dumps(
+                fingerprint_payload,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        # The idempotency key itself is never persisted or logged. These hashes
+        # live beside the artifact in the same JSONL row, so one append commits
+        # both the artifact and its replay record.
+        artifact["_idempotency"] = {
+            "scopeHash": idempotency_scope,
+            "requestFingerprint": request_fingerprint,
+        }
+    phase_timings_ms = {
+        "prepare": round((time.perf_counter() - prepare_started_at) * 1000, 3),
+    }
+    lock_wait_started_at = time.perf_counter()
+    result_artifact = artifact
+    result_kind = "created"
     with _LOCK:
-        _append_jsonl(_source_artifacts_path_for_owner(owner), artifact)
-        _append_audit(owner, "knowledge.source.registered", artifact, actor_agent_id=actor_agent_id)
+        lock_acquired_at = time.perf_counter()
+        phase_timings_ms["lockWait"] = round((lock_acquired_at - lock_wait_started_at) * 1000, 3)
+        lookup_started_at = lock_acquired_at
+        if idempotency_scope:
+            existing_artifacts = _read_jsonl(_source_artifacts_path_for_owner(owner))
+            existing = next(
+                (
+                    item
+                    for item in existing_artifacts
+                    if isinstance(item.get("_idempotency"), dict)
+                    and str(item["_idempotency"].get("scopeHash") or "") == idempotency_scope
+                ),
+                None,
+            )
+            if existing is not None:
+                result_artifact = existing
+                existing_fingerprint = str(
+                    (existing.get("_idempotency") or {}).get("requestFingerprint") or ""
+                )
+                if existing_fingerprint != request_fingerprint:
+                    result_kind = "conflict"
+                else:
+                    result_kind = "replayed"
+        phase_timings_ms["idempotencyLookup"] = round((time.perf_counter() - lookup_started_at) * 1000, 3)
+        write_started_at = time.perf_counter()
+        if result_kind == "created":
+            _append_jsonl(_source_artifacts_path_for_owner(owner), artifact)
+            _append_audit(
+                owner,
+                "knowledge.source.registered",
+                _public_source_artifact(artifact),
+                actor_agent_id=actor_agent_id,
+            )
+        phase_timings_ms["write"] = round((time.perf_counter() - write_started_at) * 1000, 3)
+    phase_timings_ms["total"] = round((time.perf_counter() - started_at) * 1000, 3)
+    event_fields = {
+        "sourceArtifactId": str(result_artifact.get("sourceArtifactId") or ""),
+        "sourceType": str(artifact.get("sourceType") or ""),
+        "idempotencyOutcome": result_kind,
+        "phaseTimingsMs": phase_timings_ms,
+    }
+    if result_kind == "conflict":
+        _record_event(
+            "knowledge.source.idempotency_conflict",
+            owner,
+            base["knowledgeBaseId"],
+            actor_agent_id=actor_agent_id,
+            fields=event_fields,
+        )
+        raise TeamKnowledgeIdempotencyConflictError(
+            "Idempotency-Key was already used for a different source artifact request."
+        )
     _record_event(
-        "knowledge.source.registered",
+        "knowledge.source.idempotency_replayed" if result_kind == "replayed" else "knowledge.source.registered",
         owner,
         base["knowledgeBaseId"],
         actor_agent_id=actor_agent_id,
-        fields={"sourceArtifactId": artifact["sourceArtifactId"], "sourceType": artifact["sourceType"]},
+        fields=event_fields,
     )
-    return artifact
+    return _public_source_artifact(result_artifact)
 
 
 def create_refinement_proposal(
@@ -872,6 +992,8 @@ def review_refinement_proposal(
             raise TeamKnowledgePermissionError("This proposal must be reviewed by its designated reviewer.")
         if required_reviewer_id and proposer_id and reviewer_id == proposer_id:
             raise TeamKnowledgePermissionError("A designated reviewer cannot review their own proposal.")
+        if owner["ownerType"] == "team" and proposer_id and reviewer_id == proposer_id:
+            raise TeamKnowledgePermissionError("Team proposals must be reviewed by an Agent other than the proposer.")
         now = utc_now_iso()
         proposal["status"] = "rejected" if normalized_status == "rejected" else "applied"
         proposal["updatedAt"] = now
@@ -2665,10 +2787,16 @@ def _find_knowledge_base(team_id: str, knowledge_base_id: str) -> dict[str, Any]
 def _source_artifacts_for_base(owner_value: Any, knowledge_base_id: str) -> list[dict[str, Any]]:
     owner = _coerce_owner_context(owner_value)
     return [
-        item
+        _public_source_artifact(item)
         for item in _read_jsonl(_source_artifacts_path_for_owner(owner))
         if str(item.get("knowledgeBaseId") or "") == knowledge_base_id
     ]
+
+
+def _public_source_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Project internal persistence metadata out of source artifact responses."""
+
+    return {key: value for key, value in artifact.items() if key != "_idempotency"}
 
 
 def _require_item(owner_value: Any, knowledge_base_id: str, knowledge_item_id: str) -> dict[str, Any]:
@@ -2781,6 +2909,7 @@ _normalize_acl = _tk_permissions._normalize_acl
 update_owner_source_governance = _tk_source_inbox.update_owner_source_governance
 ensure_owner_source_review_grant = _tk_source_inbox.ensure_owner_source_review_grant
 collect_source_to_inbox = _tk_source_inbox.collect_source_to_inbox
+collect_session_attachment_to_inbox = _tk_source_inbox.collect_session_attachment_to_inbox
 list_owner_source_inbox = _tk_source_inbox.list_owner_source_inbox
 review_owner_inbox_source = _tk_source_inbox.review_owner_inbox_source
 create_source_artifact_from_central_source = _tk_source_inbox.create_source_artifact_from_central_source

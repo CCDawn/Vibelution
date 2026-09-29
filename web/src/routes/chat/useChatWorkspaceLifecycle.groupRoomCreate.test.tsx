@@ -13,12 +13,14 @@ import type { InfiniteData, MutableRefObject } from "@tanstack/react-query";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createChatSession } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ChatRoomDetail,
   ConversationQueryFilters,
   ConversationQueryResponse,
   ConversationSummary,
+  SessionDetail,
 } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { chatRouteSelectionsEqual, type ChatRouteSelection } from "./chatSelectionProjection";
@@ -261,6 +263,60 @@ function mutateGroupCreate(): void {
   });
 }
 
+function mutateSessionCreate(agentId: string): void {
+  act(() => {
+    resultRef!.createSessionMutation.mutate({ agentId });
+  });
+}
+
+function sessionCreateRequests(): RequestInit[] {
+  return fetchJsonMock.mock.calls
+    .filter(
+      ([input, init]) =>
+        input === "/api/sessions"
+        && (init as RequestInit | undefined)?.method === "POST",
+    )
+    .map(([, init]) => init as RequestInit);
+}
+
+function sessionCreateIdempotencyKey(init: RequestInit): string | undefined {
+  return (init.headers as Record<string, string> | undefined)?.["Idempotency-Key"];
+}
+
+function serverSessionFor(id: string, agentId: string): SessionDetail {
+  const now = "2026-01-01T00:00:00.000Z";
+  return {
+    id,
+    title: "新会话",
+    agentId,
+    status: "idle",
+    currentPhase: "ready",
+    taskSummary: "",
+    lastActive: now,
+    updatedAt: now,
+    createdAt: now,
+    messages: [],
+    defaultFileContext: "",
+    previewTabs: [],
+    activePreviewPath: "",
+    changedFiles: [],
+    readFiles: [],
+    stopRequested: false,
+    stopRequestedAt: "",
+    stopReason: "",
+    messageWindow: {
+      mode: "window",
+      totalMessages: 0,
+      returnedMessages: 0,
+      oldestMessageIndex: 0,
+      newestMessageIndex: 0,
+      hasEarlier: false,
+      hasLater: false,
+      transcriptScope: "window",
+    },
+  };
+}
+
 function groupCreateTelemetry(): TelemetryEvent {
   const event = telemetryEvents.find((item) => item.name === "group_room_create");
   expect(event, "group_room_create telemetry should start with the mutation").toBeTruthy();
@@ -441,5 +497,76 @@ describe("useChatWorkspaceLifecycle group room optimistic create", () => {
       message: "network down",
     }));
     expect(telemetry.succeeded).not.toHaveBeenCalled();
+  });
+});
+
+describe("useChatWorkspaceLifecycle session create idempotency", () => {
+  it("reuses the key after an ambiguous failure and changes it when the Agent intent changes", async () => {
+    fetchJsonMock
+      .mockRejectedValueOnce(new TypeError("network timeout"))
+      .mockRejectedValueOnce(new TypeError("network timeout"))
+      .mockRejectedValueOnce(new TypeError("network timeout"));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    mutateSessionCreate("agent-b");
+    await flushMutationQueue();
+
+    const requests = sessionCreateRequests();
+    expect(requests).toHaveLength(3);
+    const firstKey = sessionCreateIdempotencyKey(requests[0]);
+    expect(firstKey).toBeTruthy();
+    expect(sessionCreateIdempotencyKey(requests[1])).toBe(firstKey);
+    expect(sessionCreateIdempotencyKey(requests[2])).toBeTruthy();
+    expect(sessionCreateIdempotencyKey(requests[2])).not.toBe(firstKey);
+  });
+
+  it.each([409, 410])("rotates the key after a definitive HTTP %i response", async (status) => {
+    fetchJsonMock
+      .mockRejectedValueOnce(Object.assign(new Error("session create rejected"), { status }))
+      .mockResolvedValueOnce(serverSessionFor("session-after-conflict", "agent-a"));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+
+    const requests = sessionCreateRequests();
+    expect(requests).toHaveLength(2);
+    expect(sessionCreateIdempotencyKey(requests[0])).toBeTruthy();
+    expect(sessionCreateIdempotencyKey(requests[1])).toBeTruthy();
+    expect(sessionCreateIdempotencyKey(requests[1])).not.toBe(sessionCreateIdempotencyKey(requests[0]));
+  });
+
+  it("rotates the key after success and preserves compatibility for callers without a key", async () => {
+    fetchJsonMock
+      .mockResolvedValueOnce(serverSessionFor("session-first", "agent-a"))
+      .mockResolvedValueOnce(serverSessionFor("session-detail-first", "agent-a"))
+      .mockResolvedValueOnce(serverSessionFor("session-second", "agent-a"));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+
+    const requests = sessionCreateRequests();
+    expect(requests).toHaveLength(2);
+    expect(sessionCreateIdempotencyKey(requests[0])).toBeTruthy();
+    expect(sessionCreateIdempotencyKey(requests[1])).toBeTruthy();
+    expect(sessionCreateIdempotencyKey(requests[1])).not.toBe(sessionCreateIdempotencyKey(requests[0]));
+
+    fetchJsonMock.mockClear();
+    fetchJsonMock.mockResolvedValueOnce(serverSessionFor("session-legacy", "agent-a"));
+    await createChatSession({ agentId: "agent-a" });
+    const legacyInit = fetchJsonMock.mock.calls[0]?.[1] as RequestInit;
+    expect(legacyInit.headers).not.toHaveProperty("Idempotency-Key");
   });
 });

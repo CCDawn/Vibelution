@@ -655,7 +655,9 @@ def _start_and_reattach(e2e_instance: Any, handle: Any) -> int:
     )
     port = int(entry["port"])
     health = instance_registry.fetch_health(port)
-    instance_registry.assert_health_serves_worktree(health, e2e_instance.project_root)
+    instance_registry.assert_health_serves_worktree(
+        health, e2e_instance.project_root, data_home=str(entry.get("dataHome") or "")
+    )
     # 端口可能随重启迁移：同步刷新 session fixture 与 provider 句柄上的端口，
     # 后续 DOM 断言（e2e_instance.base_url）与 teardown 注销（center.port）都打新端口。
     e2e_instance.port = port

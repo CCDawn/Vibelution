@@ -1,5 +1,6 @@
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -141,6 +142,87 @@ def _source_ids_for_env(knowledge_env: dict, *, title: str = "Test source") -> l
     return [source["sourceArtifactId"]]
 
 
+def test_central_source_artifact_idempotency_is_persisted_and_serializes_concurrent_replays(
+    knowledge_env,
+    monkeypatch,
+):
+    central_source = _promote_central_source(
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Idempotent source",
+    )
+    base_id = knowledge_env["base"]["knowledgeBaseId"]
+    actor_id = knowledge_env["member"]["agentId"]
+    barrier = threading.Barrier(8)
+    observed_events: list[dict] = []
+    observed_lock = threading.Lock()
+
+    def record_event(event_code, owner, knowledge_base_id, **kwargs):
+        with observed_lock:
+            observed_events.append({"eventCode": event_code, **kwargs})
+
+    monkeypatch.setattr(team_knowledge_service, "_record_event", record_event)
+
+    def create_once(_index: int) -> dict:
+        barrier.wait(timeout=5)
+        return team_knowledge_service.create_source_artifact_from_central_source(
+            base_id,
+            central_source["centralSourceId"],
+            actor_agent_id=actor_id,
+            title="Idempotent source",
+            summary="Stable request payload",
+            idempotency_key="kb-artifact-retry-001",
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(create_once, range(8)))
+
+    artifact_ids = {item["sourceArtifactId"] for item in results}
+    assert len(artifact_ids) == 1
+    assert all("_idempotency" not in item for item in results)
+
+    owner = team_knowledge_service._require_base_with_owner(base_id)[0]
+    stored = team_knowledge_service._read_jsonl(team_knowledge_service._source_artifacts_path_for_owner(owner))
+    persisted = [
+        item
+        for item in stored
+        if str(item.get("sourceArtifactId") or "") in artifact_ids
+    ]
+    assert len(persisted) == 1
+    assert persisted[0]["_idempotency"]["scopeHash"]
+    assert "kb-artifact-retry-001" not in json.dumps(persisted[0])
+
+    replay = team_knowledge_service.create_source_artifact_from_central_source(
+        base_id,
+        central_source["centralSourceId"],
+        actor_agent_id=actor_id,
+        title="Idempotent source",
+        summary="Stable request payload",
+        idempotency_key="kb-artifact-retry-001",
+    )
+    assert replay["sourceArtifactId"] == next(iter(artifact_ids))
+    with pytest.raises(team_knowledge_service.TeamKnowledgeIdempotencyConflictError):
+        team_knowledge_service.create_source_artifact_from_central_source(
+            base_id,
+            central_source["centralSourceId"],
+            actor_agent_id=actor_id,
+            title="Changed source title",
+            summary="Stable request payload",
+            idempotency_key="kb-artifact-retry-001",
+        )
+
+    timing_events = [
+        event
+        for event in observed_events
+        if str(event.get("eventCode") or "").startswith("knowledge.source.")
+    ]
+    assert timing_events
+    assert all(event["fields"]["phaseTimingsMs"]["total"] >= 0 for event in timing_events)
+    assert all("kb-artifact-retry-001" not in json.dumps(event) for event in timing_events)
+
+
 def test_team_member_can_register_source_and_submit_proposal(knowledge_env):
     source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -242,6 +324,30 @@ def test_scoped_proposal_cannot_be_self_reviewed(knowledge_env):
             status="approved",
             reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
         )
+
+
+def test_team_proposal_without_designated_reviewer_still_requires_independent_review(knowledge_env):
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Unassigned reviewer source"),
+        proposed_by_agent_id=knowledge_env["lead"]["agentId"],
+        title="Team review separation",
+        content="A Team lead cannot approve their own proposal when no reviewer was designated.",
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="other than the proposer"):
+        team_knowledge_service.review_refinement_proposal(
+            knowledge_env["base"]["knowledgeBaseId"],
+            proposal["proposalId"],
+            status="approved",
+            reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        )
+
+    owner = team_knowledge_service._require_base_with_owner(knowledge_env["base"]["knowledgeBaseId"])[0]
+    stored_proposals = team_knowledge_service._read_jsonl(team_knowledge_service._proposals_path_for_owner(owner))
+    stored = team_knowledge_service._find_by_id(stored_proposals, "proposalId", proposal["proposalId"])
+    assert stored is not None
+    assert stored["status"] == "pending"
 
 
 def test_scoped_search_filters_questions_and_chinese_bm25_prefers_phrases(knowledge_env):
@@ -955,9 +1061,16 @@ def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     first_agent = agent_directory_service.create_agent_instance(display_name="First KB Owner")
+    first_reviewer = agent_directory_service.create_agent_instance(display_name="First KB Reviewer")
     second_agent = agent_directory_service.create_agent_instance(display_name="Second KB Owner")
     viewer = agent_directory_service.create_agent_instance(display_name="Duplicate KB Viewer")
-    first_team = team_service.create_team(name="First KB Team", members=[{"agentId": first_agent["agentId"], "role": "lead"}])
+    first_team = team_service.create_team(
+        name="First KB Team",
+        members=[
+            {"agentId": first_agent["agentId"], "role": "lead"},
+            {"agentId": first_reviewer["agentId"], "role": "steward"},
+        ],
+    )
     second_team = team_service.create_team(name="Second KB Team", members=[{"agentId": second_agent["agentId"], "role": "lead"}])
     first_base = team_knowledge_service.create_knowledge_base(
         first_team["teamId"],
@@ -1001,7 +1114,7 @@ def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch)
         first_base["scopedKnowledgeBaseId"],
         proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=first_agent["agentId"],
+        reviewed_by_agent_id=first_reviewer["agentId"],
     )
     scoped_items = team_knowledge_service.list_knowledge_items(
         first_base["scopedKnowledgeBaseId"],
@@ -1132,7 +1245,14 @@ def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     lead = agent_directory_service.create_agent_instance(display_name="Lead Agent")
-    team = team_service.create_team(name="Knowledge Team", members=[{"agentId": lead["agentId"], "role": "lead"}])
+    reviewer = agent_directory_service.create_agent_instance(display_name="Knowledge Reviewer")
+    team = team_service.create_team(
+        name="Knowledge Team",
+        members=[
+            {"agentId": lead["agentId"], "role": "lead"},
+            {"agentId": reviewer["agentId"], "role": "steward"},
+        ],
+    )
     base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Shared Decisions",
@@ -1157,7 +1277,7 @@ def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_
         base["knowledgeBaseId"],
         proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=lead["agentId"],
+        reviewed_by_agent_id=reviewer["agentId"],
     )
     pending_source = _create_central_source_artifact(
         base["knowledgeBaseId"],

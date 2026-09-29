@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,11 @@ import {
   retireIsolatedRuntimeBeforeStart
 } from "../src/lifecycle/isolatedInstanceRegistryHost.js";
 import { claimStopIfGeneration, readRegistry } from "../src/lifecycle/instanceRegistryStore.js";
+import {
+  instanceIdForProject,
+  normalizeInstanceKey,
+  resolveDataHomeForProject
+} from "../src/lifecycle/projectStoragePaths.js";
 
 afterEach(() => {
   resetAdmissionCacheForTests();
@@ -55,6 +60,50 @@ describe("isolatedInstanceRegistryHost", () => {
 
   it("returns null when the instance path is missing", () => {
     expect(resolveIsolatedClaimTarget({ items: [{ id: "worktree:task" }] }, "worktree:task")).toBeNull();
+  });
+
+  it("persists canonical slot identity and data home in an isolated start claim", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-start-slot-fields-"));
+    const projectRoot = join(dir, "checkout");
+    const identityDir = join(projectRoot, ".vibelution");
+    const registryPath = join(dir, "instances.json");
+    const admissionStorePath = join(dir, "admission.json");
+    await mkdir(identityDir, { recursive: true });
+    await writeFile(
+      join(identityDir, "project.json"),
+      JSON.stringify({ schemaVersion: 1, projectId: "test-project" }),
+      "utf8"
+    );
+
+    const expectedSlotFields = {
+      slotKey: normalizeInstanceKey(projectRoot),
+      slotId: instanceIdForProject(projectRoot),
+      dataHome: resolveDataHomeForProject(projectRoot)
+    };
+    const claimed = await claimIsolatedStart({
+      instanceId: "worktree:task",
+      branchInstances: {
+        items: [{
+          id: "worktree:task",
+          path: projectRoot,
+          branch: "task",
+          port: 8003,
+          controlPort: 8768,
+          alive: false
+        }]
+      },
+      commandId: "start-with-slot-fields",
+      registryPath,
+      admissionStorePath,
+      storeOptions: { portIsFree: async () => true }
+    });
+
+    expect(claimed.ok).toBe(true);
+    if (!claimed.ok) {
+      return;
+    }
+    expect(claimed.entry).toMatchObject(expectedSlotFields);
+    expect((await readRegistry(registryPath)).instances["worktree:task"]).toMatchObject(expectedSlotFields);
   });
 
   it("rejects a fourth isolated start inside the burst window", async () => {
