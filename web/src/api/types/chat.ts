@@ -22,6 +22,7 @@ export type SessionSummary = {
   agentPrimaryDirectSessionId?: string;
   agentDirectSessionMismatch?: boolean;
   workspacePath?: string;
+  workspaceRoot?: string;
   agentWorkspacePath?: string;
   agentMissingId?: string;
   agentMissing?: boolean;

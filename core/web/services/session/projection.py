@@ -562,6 +562,26 @@ def _session_runtime_metrics(
     }
 
 
+def _session_workspace_root_value(workspace_path: Any) -> str:
+    """Absolute workspace root for workspace-file links; "" when nothing to resolve.
+
+    ``workspacePath`` stays the relative ``workspace/sessions/<token>`` contract
+    for existing consumers, but the desktop bridge's openPath only accepts
+    absolute paths. Resolve relative roots against PROJECT_ROOT; absolute roots
+    pass through with native separators. Empty input keeps the field omitted.
+    """
+    value = str(workspace_path or "").strip()
+    if not value:
+        return ""
+    try:
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = Path(_service().PROJECT_ROOT) / candidate
+        return str(candidate)
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
 def _build_session_detail(
     conversation: dict[str, Any],
     *,
@@ -860,6 +880,8 @@ def _build_session_summary(
         if include_runtime_metrics
         else None
     )
+    workspace_path = str(conversation.get("workspacePath") or s._session_workspace_relative_path(conversation["id"]))
+    workspace_root = _session_workspace_root_value(workspace_path)
     return {
         "id": session_id,
         "title": display_title,
@@ -886,8 +908,9 @@ def _build_session_summary(
         "sessionRole": str(conversation.get("session_role") or conversation.get("sessionRole") or "").strip(),
         "dialogueModelId": dialogue_model_id,
         "reasoningEffort": s.normalize_reasoning_effort(conversation.get("reasoningEffort")),
-        "workspacePath": str(conversation.get("workspacePath") or s._session_workspace_relative_path(conversation["id"])),
+        "workspacePath": workspace_path,
         "agentWorkspacePath": agent_workspace_path,
+        **({"workspaceRoot": workspace_root} if workspace_root else {}),
         **agent_status,
         "status": status,
         "taskSummary": summary,
@@ -1057,6 +1080,7 @@ def _normalize_conversation(
     if not conversation_id:
         return None
     workspace_path = s._session_workspace_relative_path(conversation_id)
+    workspace_root = _session_workspace_root_value(workspace_path)
     if ensure_workspace:
         s._ensure_session_workspace(conversation_id)
     title = str(raw.get("title") or s.DEFAULT_CHAT_CONVERSATION_TITLE).strip() or s.DEFAULT_CHAT_CONVERSATION_TITLE
@@ -1199,6 +1223,7 @@ def _normalize_conversation(
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
         "agentPrimaryDirectSessionId": agent_primary_direct_session_id,
         "workspacePath": workspace_path,
+        **({"workspaceRoot": workspace_root} if workspace_root else {}),
         "messages": messages,
         "_messagesNormalized": not lightweight,
         "_messagesPreview": bool(lightweight),

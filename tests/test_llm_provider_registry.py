@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -85,6 +86,11 @@ def test_same_endpoint_with_different_credential_is_distinct() -> None:
     assert set(config["llm"]["providers"]) == {"relay_a", "relay_b"}
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="credential env names fold case only on Windows; on POSIX "
+    "env:relay_key and env:RELAY_KEY are distinct variables",
+)
 def test_duplicate_business_identity_uses_normalized_endpoint_and_credential_ref() -> (
     None
 ):

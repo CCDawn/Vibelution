@@ -8,7 +8,7 @@ import {
 } from "../src/paths.js";
 
 describe("Electron desktop paths", () => {
-  it("keeps packaged bundle path separate from external workspace", () => {
+  it.skipIf(process.platform !== "win32")("keeps packaged bundle path separate from external workspace", () => {
     const paths = createDesktopPaths({
       importMetaUrl: "file:///C:/Program%20Files/Vibelution/resources/app.asar/dist/main.js",
       resourcesRoot: "C:/Program Files/Vibelution/resources",
@@ -24,7 +24,7 @@ describe("Electron desktop paths", () => {
     );
   });
 
-  it("resolves the shared Vibelution icon from the external workspace", () => {
+  it.skipIf(process.platform !== "win32")("resolves the shared Vibelution icon from the external workspace", () => {
     const paths = createDesktopPaths({
       importMetaUrl: "file:///C:/Program%20Files/Vibelution/resources/app.asar/dist/main.js",
       resourcesRoot: "C:/Program Files/Vibelution/resources",
@@ -37,7 +37,7 @@ describe("Electron desktop paths", () => {
     );
   });
 
-  it("resolves the desktop entry catalog from the packaged app bundle", () => {
+  it.skipIf(process.platform !== "win32")("resolves the desktop entry catalog from the packaged app bundle", () => {
     const paths = createDesktopPaths({
       importMetaUrl: "file:///C:/Program%20Files/Vibelution/resources/app.asar/dist/main.js",
       resourcesRoot: "C:/Program Files/Vibelution/resources",

@@ -23,6 +23,8 @@ import navigatorSource from "./ConversationTurnNavigator.tsx?raw";
 import navigatorStylesSource from "./ConversationTurnNavigator.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
+import conversationViewTypesSource from "./conversationViewTypes.ts?raw";
+import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import { ConversationView } from "./ConversationView";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
@@ -309,6 +311,13 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(conversationViewSource).toContain("buildCodexTranscriptCells(");
     expect(conversationViewSource).toContain("agentCodexSurfacesByMessageId");
     expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
+  });
+
+  it("feeds the file deliveries panel disk-truth metadata for the rewind entry", () => {
+    expect(conversationViewSource).toContain("conversationChangedFilesFromMetadata(message.metadata)");
+    expect(conversationViewSource).toContain("changedFiles={conversationChangedFilesFromMetadata(message.metadata)}");
+    expect(conversationViewSource).toContain("sessionId={sessionId}");
+    expect(conversationViewSource).toContain('turnId={message.role === "assistant" ? message.turnId : undefined}');
   });
 });
 
@@ -949,6 +958,31 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     );
   });
 
+  it("threads the session workspace root into every markdown render path", () => {
+    // The route prefers the absolute workspaceRoot (backend resolves the
+    // relative workspacePath against PROJECT_ROOT) and falls back to the raw
+    // workspacePath; without a root the markdown link classifier keeps
+    // workspace-file hrefs inert (legacy anchor).
+    expect(conversationViewSource).toContain("sessionWorkspacePath,");
+    expect(chatRouteSource).toContain(
+      "sessionWorkspacePath: detail.workspaceRoot || detail.workspacePath,",
+    );
+    // Both markdown surfaces (segment bodies + assistant transcript cell) must
+    // forward the root and the chrome language together (two joined instances;
+    // tool detail surfaces already pass language={lang} separately).
+    expect(conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(2);
+    expect(
+      conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
+    ).toBe(2);
+    // Prop lives on the shared view contract so the composer bridge passes it
+    // through its ConversationViewProps-derived spread.
+    expect(conversationViewTypesSource).toContain("sessionWorkspacePath?: string");
+    // The streaming transcript content threads the root into its stable
+    // markdown subtree (settled answers render through the same renderer).
+    expect(conversationStreamingResponseContentSource).toContain("workspaceRoot={workspaceRoot}");
+    expect(conversationStreamingResponseContentSource).toContain("language={language}");
+  });
+
   it("keeps tool detail expansion work off collapsed renders", () => {
     expect(conversationViewSource).toContain('from "./ConversationOperationDetails"');
     expect(conversationViewSource).not.toContain("function DeferredOperationDetails");
@@ -1053,7 +1087,9 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     // react-virtual owns row measurement: stable keys feed its item-size cache,
     // and row refs delegate to measureElement (rAF-batched ResizeObserver).
     expect(conversationViewSource).toContain("useVirtualizer({");
-    expect(conversationViewSource).toContain("getItemKey: (index) => timelineHistoryRowKeys[index]");
+    expect(conversationViewSource).toContain(
+      "getItemKey: (index) => timelineHistoryRowKeys[index] ?? `timeline-row-${index}`",
+    );
     expect(conversationViewSource).toContain("measureTimelineVirtualRow");
     expect(conversationViewSource).toContain("useAnimationFrameWithResizeObserver: true");
     expect(conversationViewSource).not.toContain("timelineRowResizeObserversRef");

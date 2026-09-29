@@ -726,11 +726,11 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
             [
                 f"=== Shell 方言（{label} 宿主）===",
                 "1. 默认 bash/Unix；不要使用 Windows 专用命令或裸 PowerShell cmdlet。",
-                "2. 输出必须有界；优先 `rg -n` 与结构化工具。",
+                "2. 输出保持有界；优先 `rg -n` 与结构化工具。",
                 "3. 同类失败 1 次后改结构化工具，不要换壳硬试。",
             ]
         )
-    return "=== Shell 方言（宿主未归类）===\n优先结构化工具；必须 shell 时只用短、无管道、无平台特有语法命令。"
+    return "=== Shell 方言（宿主未归类）===\n优先结构化工具；确需 shell 时只用短、无管道、无平台特有语法命令。"
 
 
 # 同一进程内按「命令意图 / 失败类别」计数的 shell 失败冷却（测试可 reset）。

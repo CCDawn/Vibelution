@@ -221,3 +221,9 @@ class EvolutionRubricPromotionResponse(EvolutionJsonResponse):
     candidateVersionId: str | None = None
     checks: list[dict[str, Any]] | None = None
     promoted: dict[str, Any] | None = None
+
+
+class PromptReflectionGeneratePayload(BaseModel):
+    decisionPath: str
+    modelRef: str
+    maxSamples: int = 8

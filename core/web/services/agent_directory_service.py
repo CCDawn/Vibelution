@@ -352,6 +352,7 @@ from .agent_directory.ops_residual import (
     list_project_memory_update_proposals,
     next_wakeable_agent_inbox_message_for_agent,
     normalize_conversation_index_kind,
+    promote_agent_inbox_message_body,
     reactivate_agent_instance,
     registry_path,
     resolve_agent_workspace_territory,

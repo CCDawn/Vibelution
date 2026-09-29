@@ -961,6 +961,10 @@ export type AgentModelChoice = {
   availability: string;
   verificationStatus: string;
   catalogStale: boolean;
+  /** Raw provider discovery status from the model catalog; "" when absent. */
+  providerStatus?: string;
+  /** False when the provider channel is broken (auth/discovery/protocol or missing key). */
+  providerHealthy?: boolean;
   slotCompatibility: Record<string, { allowed: boolean; reasonCode: string }>;
   capabilities: Record<string, unknown>;
   apiKeyEnv: string;

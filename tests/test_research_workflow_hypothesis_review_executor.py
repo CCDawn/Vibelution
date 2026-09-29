@@ -2157,3 +2157,35 @@ def test_max_concurrent_review_calls_env_override(monkeypatch):
     assert executor.resolve_max_concurrent_review_calls() == 1
     monkeypatch.setenv(env, "999")
     assert executor.resolve_max_concurrent_review_calls() == 4
+
+
+def test_result_carries_deterministic_tournament_ranking():
+    runners = _complete_review_runners()
+
+    result = hypothesis_review_executor.execute_hypothesis_review(
+        {**_direct_review_context()},
+        round_id="round-elo-1",
+        pairwise_runner=runners["pairwise_runner"],
+        pareto_runner=runners["pareto_runner"],
+        metareview_runner=runners["metareview_runner"],
+        reviewer_assignments={"metareview": "coordinator"},
+    )
+
+    ranking = result["tournamentRanking"]
+    assert ranking["tournamentId"] == "round-elo-1"
+    assert ranking["createdAt"] == "round:round-elo-1"
+    assert ranking["totalOutcomes"] == len(result["pairwiseComparisons"])
+    assert [entry["rank"] for entry in ranking["ranking"]] == [
+        index for index in range(1, len(ranking["ranking"]) + 1)
+    ]
+    # Deterministic: replaying the same comparisons reproduces the artifact.
+    from core.web.services.team_workflow.research_runtime.hypothesis_tournament import (
+        tournament_from_comparisons,
+    )
+
+    replay = tournament_from_comparisons(
+        result["pairwiseComparisons"],
+        tournament_id="round-elo-1",
+        created_at="round:round-elo-1",
+    )
+    assert replay == ranking

@@ -279,6 +279,69 @@ def test_reasoning_contract_accepts_only_operator_or_current_verified_evidence()
     assert by_ref["ai-pixel/gpt-5.6-terra"]["capabilityStatus"] == "confirmed"
 
 
+def _with_provider_status(catalog_status: str | None) -> tuple[dict, dict]:
+    """Fixture pair with an explicit provider catalog status for health tests."""
+
+    public_config = _public_config()
+    catalog = _catalog_state()
+    provider_catalog = catalog["providers"]["ai-pixel"]
+    if catalog_status is None:
+        catalog["providers"].pop("ai-pixel")
+    else:
+        provider_catalog["status"] = catalog_status
+    return public_config, catalog
+
+
+def test_provider_channel_health_mirrors_registry_status_set(monkeypatch):
+    monkeypatch.setenv("AI_PIXEL_API_KEY", "candidate-health-key")
+
+    def candidates_with(status: str | None):
+        public_config, catalog = _with_provider_status(status)
+        return {
+            item["modelRef"]: item
+            for item in agent_model_candidate_service.project_agent_model_candidates(
+                public_config, catalog
+            )
+        }
+
+    # Registry-healthy channel: reachable plus a configured key.
+    reachable = candidates_with("reachable")["ai-pixel/gpt-5.6-luna"]
+    assert reachable["providerStatus"] == "reachable"
+    assert reachable["providerHealthy"] is True
+
+    # Mild staleness stays usable (same tolerance as the registry rail).
+    stale = candidates_with("stale")["ai-pixel/gpt-5.6-luna"]
+    assert stale["providerHealthy"] is True
+
+    # Broken auth/discovery/protocol channels are unhealthy.
+    for broken_status in ("auth_failed", "discovery_failed", "blocked", "protocol_mismatch", "not_discovered"):
+        candidate_item = candidates_with(broken_status)["ai-pixel/gpt-5.6-luna"]
+        assert candidate_item["providerStatus"] == broken_status
+        assert candidate_item["providerHealthy"] is False
+
+    # Provider without a catalog entry defaults to healthy with an empty status.
+    # Only pinned models remain candidates in that case.
+    undiscovered = candidates_with(None)["ai-pixel/image2"]
+    assert undiscovered["providerStatus"] == ""
+    assert undiscovered["providerHealthy"] is True
+
+
+def test_provider_channel_health_requires_configured_credential(monkeypatch):
+    monkeypatch.delenv("AI_PIXEL_API_KEY", raising=False)
+
+    public_config, catalog = _with_provider_status("reachable")
+    by_ref = {
+        item["modelRef"]: item
+        for item in agent_model_candidate_service.project_agent_model_candidates(
+            public_config, catalog
+        )
+    }
+
+    candidate_item = by_ref["ai-pixel/gpt-5.6-luna"]
+    assert candidate_item["missingApiKey"] is True
+    assert candidate_item["providerHealthy"] is False
+
+
 def test_list_candidates_reads_each_snapshot_once_and_never_exposes_secret(monkeypatch):
     public_config = _public_config()
     catalog = _catalog_state()

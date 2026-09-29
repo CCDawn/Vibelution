@@ -3111,6 +3111,10 @@ export function ChatCodingRouteWorkbench() {
       sessionId: activeSessionId ?? detail.id,
       title: detail.title,
       phase: detail.currentPhase,
+      // Session summary carries an absolute workspace root (backend resolves
+      // relative paths against PROJECT_ROOT); markdown workspace-file links
+      // resolve against it. Undefined keeps links inert (legacy behavior).
+      sessionWorkspacePath: detail.workspaceRoot || detail.workspacePath,
       messages: detail.messages,
       transcriptPending: sessionTranscriptPending,
       hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier),
