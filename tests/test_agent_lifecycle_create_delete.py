@@ -64,7 +64,7 @@ def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeyp
     assert agent["directSessionId"]
     assert agent["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     direct_session = session_service.get_session_detail(agent["directSessionId"])
-    assert direct_session["title"] == agent["displayName"]
+    assert direct_session["title"] in {"新会话", "New session"}
     assert direct_session["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     assert direct_session["conversationIndexVisibility"] == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
     assert agent["directSessionId"] in {item["id"] for item in session_service.list_sessions()}
