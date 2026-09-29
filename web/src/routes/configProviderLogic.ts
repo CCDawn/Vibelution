@@ -717,6 +717,23 @@ export function canTestProviderModel(model: ConfigCatalogModel): boolean {
   return model.availability === "pinned" || model.availability === "missing_remote";
 }
 
+/**
+ * P1 model row dot (九产品共识: status = one interactive element, never row text).
+ * Availability-only, mirroring the provider dot rule: green=已添加可用 /
+ * orange=已添加但最新目录未收录 / gray=已禁用 / hollow=已发现未添加.
+ * Verification and error words stay in the detail pane, never on the row.
+ */
+export type ModelDotClass = "ok" | "warn" | "off" | "idle";
+
+export function deriveModelDotClass(
+  model: Pick<ConfigCatalogModel, "availability">,
+): ModelDotClass {
+  if (model.availability === "pinned") return "ok";
+  if (model.availability === "missing_remote") return "warn";
+  if (model.availability === "disabled") return "off";
+  return "idle";
+}
+
 export function filterAlreadyPinnedModels(
   models: ConfigCatalogModel[],
   pinnedModelRefs: ReadonlySet<string>,

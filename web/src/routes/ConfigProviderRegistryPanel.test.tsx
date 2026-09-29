@@ -136,10 +136,11 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
     modelQuery="" modelFilter="all" liveReferenceCountByModelRef={options.liveReferences ?? {}}
     onQueryChange={() => {}} onFilterChange={() => {}} onPin={() => {}} onUnpin={() => {}}
     onTestModel={options.onTestModel ?? (() => {})} onProbeImageInput={() => {}} imageCapabilityBusy={options.imageCapabilityBusy} />));
-  const details = container.querySelector<HTMLButtonElement>('button[aria-label$=" 详情"]');
-  expect(details).not.toBeNull();
-  await act(async () => details!.click());
-  return Array.from(document.body.querySelectorAll('[role="dialog"]')).at(-1)!.outerHTML;
+  // P1 list/detail split: clicking the model row opens the detail pane (no dialog).
+  const row = container.querySelector<HTMLButtonElement>('[data-model-row] button');
+  expect(row).not.toBeNull();
+  await act(async () => row!.click());
+  return container.querySelector<HTMLElement>('[data-vui-region="config-models-detail"]')!.outerHTML;
 }
 
 describe("ConfigProviderRegistryPanel", () => {
@@ -216,17 +217,144 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(observedMarkup).not.toContain("从模型库移除");
     expect(observedMarkup).not.toContain("测试调用");
     expect(observedMarkup).toContain("验证推理 low / high");
-    expect(renderModels([model("disabled", "disabled")])).toContain("已禁用");
-    expect(renderModels([model("disabled", "disabled")])).not.toContain("从模型库移除");
 
     const pinned = model("pinned", "pinned");
     const inUseMarkup = await renderModelDetails([pinned], { liveReferences: { [pinned.modelRef]: 2 } });
     expect(inUseMarkup).toContain("使用中 · 2 个引用");
     expect(inUseMarkup).not.toContain("从模型库移除");
 
-    expect(renderModels([pinned])).toContain("测试调用");
+    // P1: actions moved into the detail pane; the row no longer carries test words.
+    expect(await renderModelDetails([pinned])).toContain("测试调用");
+    expect(renderModels([pinned])).not.toContain("测试调用");
     expect(await renderModelDetails([pinned])).toContain("从模型库移除");
+    // Availability words live on the detail chip and dot tooltips, never as row text.
+    expect(await renderModelDetails([model("disabled", "disabled")])).toContain("已禁用");
+    expect(renderModels([model("disabled", "disabled")]).replace(/<[^>]+>/g, "|")).not.toContain("已禁用");
+    expect(renderModels([model("disabled", "disabled")])).not.toContain("从模型库移除");
     expect(observedMarkup).not.toContain("发现 1 个可固定模型");
+  });
+
+  it("keeps model rows to dot + name + in-use badge with no status phrases", () => {
+    const pinned = model("luna", "pinned");
+    const markup = renderModels(
+      [pinned, model("observed", "observed"), model("disabled", "disabled")],
+      { liveReferences: { [pinned.modelRef]: 1 } },
+    );
+    const listRegion = markup.slice(
+      markup.indexOf('data-vui-region="config-models-split"'),
+      markup.indexOf('data-vui-region="config-models-detail"'),
+    );
+    expect(listRegion).toContain("luna");
+    expect(listRegion).toContain('data-model-dot="ok"');
+    expect(listRegion).toContain('data-model-dot="idle"');
+    expect(listRegion).toContain('data-model-dot="off"');
+    expect(listRegion).toContain('data-model-inuse="true"');
+    expect(listRegion).toContain("使用中");
+    // Negative (九产品共识): status/error words never render as row text —
+    // they may only live in tooltip attributes (dot title) and the detail pane.
+    const listText = listRegion.replace(/<[^>]+>/g, "|");
+    for (const phrase of ["已添加", "已发现", "已禁用", "最新目录未收录", "测试通过", "测试失败", "未测试", "上游 ID"]) {
+      expect(listText).not.toContain(phrase);
+    }
+    expect(listRegion).toContain('title="已添加"');
+    expect(listRegion).toContain('title="已禁用"');
+    expect(listRegion).not.toContain('data-model-action');
+    expect(listRegion).not.toContain('data-term-help');
+    expect(listRegion).not.toContain(">详情<");
+    // ≤5 words per row: text tokens are the name plus at most the in-use badge.
+    const rows = Array.from(listRegion.matchAll(/data-model-row="[^"]+"[\s\S]*?<\/div>/g)).map((match) => match[0]);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      const tokens = row.replace(/<[^>]+>/g, "\n").split("\n").flatMap((line) => line.trim().split(/\s+/)).filter(Boolean);
+      expect(tokens.length).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("opens model details from the row click and parks actions in the pane", async () => {
+    const onPin = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const observed = model("observed", "observed");
+    await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider([observed])} disabled={false}
+      modelQuery="" modelFilter="all" liveReferenceCountByModelRef={{}}
+      onQueryChange={() => {}} onFilterChange={() => {}} onPin={onPin} onUnpin={() => {}}
+      onTestModel={() => {}} onProbeImageInput={() => {}} />));
+    // Before the click the pane is an empty invitation, rows carry no actions.
+    expect(container.querySelector('[data-vui-region="config-models-detail"]')!.textContent).toContain("选择模型");
+    expect(container.innerHTML).not.toContain('data-model-action="pin"');
+    const row = container.querySelector<HTMLButtonElement>('[data-model-row] button');
+    await act(async () => row!.click());
+    const detailPane = container.querySelector('[data-vui-region="config-models-detail"]')!;
+    expect(detailPane.querySelector('[data-model-detail="relay_a/observed"]')).not.toBeNull();
+    const pinButton = detailPane.querySelector<HTMLButtonElement>('[data-model-action="pin"]');
+    expect(pinButton?.textContent).toContain("添加到模型库");
+    // Rows still carry no action buttons after selection (list pane only).
+    const listPane = container.querySelector('[class*="modelListPane"]')!;
+    expect(listPane.innerHTML).not.toContain('data-model-action');
+    await act(async () => pinButton!.click());
+    expect(onPin).toHaveBeenCalledWith("relay_a", [observed]);
+  });
+
+  it("converges model-domain buttons to one primary weight, ghost filters, and a single danger", async () => {
+    // Discovered model: the only primary weight is 添加 (banner bulk + detail pin),
+    // probes/test are secondary, filters stay ghost even when pressed.
+    const observed = model("observed", "observed");
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider([observed])} disabled={false}
+      modelQuery="" modelFilter="discovered" liveReferenceCountByModelRef={{}}
+      onQueryChange={() => {}} onFilterChange={() => {}} onPin={() => {}} onUnpin={() => {}}
+      onTestModel={() => {}} onProbeImageInput={() => {}} />));
+    const row = container.querySelector<HTMLButtonElement>('[data-model-row] button');
+    await act(async () => row!.click());
+    const html = container.innerHTML;
+
+    const pressedButtons = html.match(/<button[^>]*aria-pressed="true"[^>]*>/g) ?? [];
+    expect(pressedButtons.length).toBeGreaterThanOrEqual(2);
+    for (const tag of pressedButtons) {
+      // P1: selection states never borrow the primary weight.
+      expect(tag).toContain('data-variant="ghost"');
+    }
+    const primaryTags = html.match(/<button[^>]*data-variant="primary"[^>]*>/g) ?? [];
+    expect(primaryTags.length).toBe(2);
+    for (const tag of primaryTags) {
+      expect(tag.includes('data-model-action="pin"') || tag.includes('data-model-action="pin-all"')).toBe(true);
+    }
+    expect(html).toContain('data-variant="secondary"');
+    expect(html.match(/<button[^>]*data-variant="danger"/g) ?? []).toHaveLength(0);
+
+    // Pinned model detail: the single danger is 移除; no primary remains.
+    const pinned = model("luna", "pinned");
+    const pinnedMarkup = await renderModelDetails([pinned]);
+    expect(pinnedMarkup.match(/<button[^>]*data-variant="danger"/g) ?? []).toHaveLength(1);
+    expect(pinnedMarkup.match(/data-variant="primary"/g) ?? []).toHaveLength(0);
+  });
+
+  it("explains domain jargon through ? tooltips with bilingual short copy", async () => {
+    const reasoningModel = {
+      ...model("luna", "pinned"),
+      reasoningEffortValues: ["low", "high"],
+      reasoningVerificationStatus: "verified",
+    };
+    const detail = await renderModelDetails([reasoningModel]);
+    expect((detail.match(/data-term-help="true"/g) ?? []).length).toBe(3);
+    expect(detail).toContain('aria-label="最近测试 说明"');
+    expect(detail).toContain('aria-label="能力来源 说明"');
+    expect(detail).toContain('aria-label="思考深度 说明"');
+    for (const key of ["termVerificationHelp", "termCapabilitiesHelp", "termReasoningHelp", "termContextWindowHelp"] as const) {
+      const zh = CONFIG_COPY.zh[key];
+      const en = CONFIG_COPY.en[key];
+      expect(zh.length).toBeLessThanOrEqual(15);
+      expect(en.length).toBeGreaterThan(0);
+      expect(en).not.toBe(zh);
+    }
+    // The connection domain carries the context-window term on its setting row.
+    const panelMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([])} />);
+    expect(panelMarkup).toContain('aria-label="默认上下文上限 说明"');
   });
 
   it("exposes a per-model image input capability probe with current-state copy", async () => {
@@ -286,7 +414,8 @@ describe("ConfigProviderRegistryPanel", () => {
   it("keeps the real model test callback in details", async () => {
     const onTestModel = vi.fn();
     await renderModelDetails([model("luna", "pinned")], { onTestModel });
-    const action = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(button => button.textContent?.trim() === "测试调用");
+    const detailPane = document.querySelector('[data-vui-region="config-models-detail"]');
+    const action = Array.from(detailPane!.querySelectorAll<HTMLButtonElement>("button")).find(button => button.textContent?.trim() === "测试调用");
     expect(action).toBeTruthy();
     await act(async () => action!.click());
     expect(onTestModel).toHaveBeenCalledWith("relay_a/luna");
@@ -303,14 +432,15 @@ describe("ConfigProviderRegistryPanel", () => {
     // Observed (not pinned) must not spam "thinking not declared" warnings.
     expect(markup).not.toContain("思考深度: 未配置");
     expect(markup).not.toContain("reasoning: 未声明");
-    expect(markup).toContain("详情");
+    // P1: the detail pane hosts everything the rows used to; the empty pane
+    // invites selection instead of a per-row「详情」button.
+    expect(markup).toContain('data-vui-region="config-models-detail"');
+    expect(markup).toContain("选择模型");
     expect(markup).not.toContain("unknown · 未观测");
     expect(panelStyles.tableScroll).toContain("min-h-0");
     expect(panelStyles.tableScroll).not.toContain("max-h-[calc(100dvh-33rem)]");
     expect(panelStyles.tableScroll).toContain("overflow-auto");
-    expect(panelStyles.table).not.toContain("min-w-[820px]");
-    expect(panelStyles.table).toContain("table-fixed");
-    expect(panelStyles.table).toContain("[&amp;_thead]:sticky".replace("&amp;", "&"));
+    expect(panelStyles.modelList).toContain("overflow-y-auto");
     const heroUiImportToken = ["@heroui", "react"].join("/");
     expect(panelSource).not.toContain(heroUiImportToken);
   });

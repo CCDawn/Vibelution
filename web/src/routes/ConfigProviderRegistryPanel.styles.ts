@@ -31,10 +31,11 @@ const styles = {
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   providerLabel:
     "vui-routes-configproviderregistrypanel providerLabel min-w-0 flex-1 truncate text-vui-xs font-semibold leading-snug text-vui-fg-primary",
-  ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
   modelsColumn:
     "vui-routes-configproviderregistrypanel modelsColumn grid h-full min-h-0 min-w-0 content-start gap-6 overflow-y-auto overflow-x-hidden pr-1",
   providerSettings: "grid min-w-0 gap-4 [&_[data-vui=settings-row]]:[overflow-wrap:anywhere]",
+  settingsRowLabel:
+    "vui-routes-configproviderregistrypanel settingsRowLabel inline-flex min-w-0 items-center gap-1 [&_[data-vui=button]]:align-middle",
   inspectorPanel:
     "vui-routes-configproviderregistrypanel inspectorPanel grid min-h-0 min-w-0 max-h-[72vh] overflow-hidden",
   inspectorBody:
@@ -80,6 +81,39 @@ const styles = {
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
   modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid min-h-0 min-w-0 content-start gap-3",
+  modelsSplit:
+    "vui-routes-configproviderregistrypanel modelsSplit grid min-h-0 min-w-0 items-start gap-3 [grid-template-columns:minmax(13rem,17rem)_minmax(0,1fr)] max-[960px]:[grid-template-columns:minmax(0,1fr)]",
+  modelListPane:
+    "vui-routes-configproviderregistrypanel modelListPane grid min-h-0 min-w-0 content-start gap-1.5",
+  modelListHeading:
+    "vui-routes-configproviderregistrypanel modelListHeading m-0 px-0.5 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-wide text-vui-fg-tertiary",
+  modelList:
+    "vui-routes-configproviderregistrypanel modelList max-h-[26rem] min-h-0 min-w-0 overflow-y-auto !border-0 !bg-transparent !backdrop-blur-none !p-0 [&>[data-vui=entity-list-item]]:!px-1 [&>[data-vui=entity-list-item]]:!py-0.5",
+  modelRow:
+    "vui-routes-configproviderregistrypanel modelRow flex min-w-0 items-center gap-1",
+  modelRowButton:
+    "vui-routes-configproviderregistrypanel modelRowButton !flex !h-auto !min-h-8 !w-auto !flex-1 min-w-0 !flex-row !items-center gap-2 !border-0 !bg-transparent !shadow-none px-2 py-1 text-left",
+  modelDot: "vui-routes-configproviderregistrypanel modelDot h-2 w-2 shrink-0 rounded-full",
+  modelDotOk: "vui-routes-configproviderregistrypanel modelDotOk bg-[var(--state-success)]",
+  modelDotWarn: "vui-routes-configproviderregistrypanel modelDotWarn bg-[var(--state-warning)]",
+  modelDotOff: "vui-routes-configproviderregistrypanel modelDotOff bg-vui-fg-tertiary/55",
+  modelDotIdle:
+    "vui-routes-configproviderregistrypanel modelDotIdle border border-vui-border-strong bg-transparent",
+  modelInUseBadge:
+    "vui-routes-configproviderregistrypanel modelInUseBadge inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)] bg-[var(--vui-status-info-bg)] px-2 py-px text-[10px] font-semibold leading-relaxed text-[var(--vui-status-info-fg)]",
+  modelRowName:
+    "vui-routes-configproviderregistrypanel modelRowName min-w-0 flex-1 truncate text-vui-xs font-semibold leading-snug text-vui-fg-primary",
+  modelDetailPane:
+    "vui-routes-configproviderregistrypanel modelDetailPane grid min-h-0 min-w-0 content-start gap-3 overflow-y-auto rounded-md border border-vui-border-subtle bg-vui-surface-panel p-3 max-[960px]:max-h-none",
+  modelDetailBody: "vui-routes-configproviderregistrypanel modelDetailBody grid min-w-0 content-start gap-3",
+  modelDetailAvailability:
+    "vui-routes-configproviderregistrypanel modelDetailAvailability inline-flex min-w-0",
+  modelDetailSectionHead:
+    "vui-routes-configproviderregistrypanel modelDetailSectionHead flex min-w-0 items-center gap-1 [&_h3]:font-semibold [&_h3]:text-vui-fg-secondary",
+  modelFilterButton:
+    "vui-routes-configproviderregistrypanel modelFilterButton shrink-0 data-[active=true]:bg-vui-control-muted data-[active=true]:text-vui-fg-primary",
+  termHelpButton:
+    "vui-routes-configproviderregistrypanel termHelpButton !h-auto !min-h-5 !w-5 !flex-none !px-0 align-middle text-vui-fg-tertiary hover:!text-vui-fg-secondary [&_svg]:shrink-0",
   modelChrome: "vui-routes-configproviderregistrypanel modelChrome grid min-w-0 gap-2",
   modelToolbar:
     "vui-routes-configproviderregistrypanel modelToolbar flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 pb-2 border-b border-vui-border-subtle",
@@ -91,17 +125,13 @@ const styles = {
     "vui-routes-configproviderregistrypanel pinBannerActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
   tableScroll:
     "vui-routes-configproviderregistrypanel tableScroll min-h-0 min-w-0 overflow-auto",
-  table:
-    "vui-routes-configproviderregistrypanel table w-full min-w-0 !border-0 !rounded-none [&_table]:w-full [&_table]:table-fixed [&_td]:whitespace-normal [&_td]:break-words [&_td]:!align-top [&_td]:!py-4 !overflow-visible [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10",
   verification: "grid min-w-0 gap-1 justify-items-start",
   verificationError: "text-vui-xs text-[var(--state-error)]",
   verificationDetails: "cursor-pointer text-vui-xs font-medium text-vui-fg-secondary",
   verificationMessage: "mt-2 max-w-full whitespace-pre-wrap break-words text-vui-xs text-vui-fg-secondary [overflow-wrap:anywhere]",
   connectionAddress: "text-vui-xs text-vui-fg-secondary break-words [overflow-wrap:anywhere]",
   modelName: "min-w-0 break-words [overflow-wrap:anywhere]",
-  compactModelActions: "flex min-w-0 flex-wrap items-center gap-1",
-  modelDetails: "grid min-w-0 gap-4",
-  modelDetailSection: "grid min-w-0 gap-2 [&_h3]:font-semibold [&_h3]:text-vui-fg-secondary [&_strong]:whitespace-normal [&_strong]:break-all [&_span]:max-w-full [&_.ellipsis]:whitespace-normal [&_.ellipsis]:break-all",
+  modelDetailSection: "grid min-w-0 gap-2 [&_h3]:font-semibold [&_h3]:text-vui-fg-secondary [&_strong]:whitespace-normal [&_strong]:break-all [&_span]:max-w-full",
   modelIdentity: "vui-routes-configproviderregistrypanel modelIdentity grid min-w-0 gap-0.5",
   modelActionState:
     "vui-routes-configproviderregistrypanel modelActionState inline-flex min-h-6 items-center rounded-full border border-vui-border-subtle bg-vui-surface-row/70 px-2 [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",

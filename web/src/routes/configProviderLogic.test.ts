@@ -4,6 +4,7 @@ import type { ConfigCatalogModel, ConfigModelCatalog, ConfigProviderOption } fro
 import { CONFIG_COPY } from "./config/configCopy";
 import {
   ABNORMAL_PROVIDER_STATUSES,
+  deriveModelDotClass,
   deriveProviderDotClass,
   deriveProviderListRows,
   deriveProviderMergeCandidate,
@@ -590,6 +591,16 @@ describe("configProviderLogic", () => {
     expect(deriveProviderDotClass({ credentialState: "configured", status: "auth_failed", enabled: false })).toBe("off");
     // Legacy rows without the key stay on the health path.
     expect(deriveProviderDotClass({ credentialState: "configured", status: "reachable", enabled: undefined as unknown as boolean })).toBe("ok");
+  });
+
+  it("derives the model row dot from availability only (P1 scan rows)", () => {
+    expect(deriveModelDotClass({ availability: "pinned" })).toBe("ok");
+    expect(deriveModelDotClass({ availability: "missing_remote" })).toBe("warn");
+    expect(deriveModelDotClass({ availability: "disabled" })).toBe("off");
+    // Discovered-but-not-added reads idle, never warn: it is not a failure.
+    expect(deriveModelDotClass({ availability: "observed" })).toBe("idle");
+    expect(deriveModelDotClass({ availability: "capability_unknown" })).toBe("idle");
+    expect(deriveModelDotClass({ availability: "unknown" })).toBe("idle");
   });
 
   it("keeps the in-use badge truthful for disabled providers with live references", () => {

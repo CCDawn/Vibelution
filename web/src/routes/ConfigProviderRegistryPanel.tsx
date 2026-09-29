@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, CircleHelp, Database, Image as ImageIcon, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -7,9 +7,7 @@ import {
   VActionGroup,
   VButton,
   VCheckbox,
-  VDenseTable,
   VDialog,
-  type VDenseTableColumn,
   VEntityList,
   VInput,
   VPanelHeader,
@@ -35,6 +33,7 @@ import {
   buildProviderSetupChecklist,
   canTestProviderModel,
   defaultProviderModelFilter,
+  deriveModelDotClass,
   deriveProviderListRows,
   deriveProviderMergeCandidate,
   deriveProviderModelActionState,
@@ -42,6 +41,7 @@ import {
   pinnableProviderModels,
   sortProviderRegistryRows,
   summarizeProviderModels,
+  type ModelDotClass,
   type ProviderDotClass,
   type ProviderListRow,
   type ProviderModelFilter,
@@ -295,7 +295,20 @@ function capabilityTone(observation: ConfigCapabilityObservation): VStatusTone {
   return "warning";
 }
 
-function CapabilityList({ model, copy }: { model: ConfigCatalogModel; copy: ConfigCopy }) {
+function CapabilityList({
+  model,
+  copy,
+  termReasoningHelp,
+  termReasoningLabel,
+  termHelpAriaSuffix,
+}: {
+  model: ConfigCatalogModel;
+  copy: ConfigCopy;
+  /** P1 term-help props (optional so ProtocolsTab can reuse the plain list). */
+  termReasoningHelp?: string;
+  termReasoningLabel?: string;
+  termHelpAriaSuffix?: string;
+}) {
   const capabilities = Object.entries(model.capabilities);
   const reasoningValues = model.reasoningEffortValues ?? [];
   const reasoningSource = String(model.reasoningCapabilitySource || "");
@@ -329,6 +342,12 @@ function CapabilityList({ model, copy }: { model: ConfigCatalogModel; copy: Conf
         <VTooltip key={row.key} content={row.detail} width="wide">
           <span className={styles.providerIdentity} data-capability="reasoning_effort">
             <VStatusChip tone={row.tone}>{row.label}</VStatusChip>
+            {termReasoningHelp && termReasoningLabel && termHelpAriaSuffix ? (
+              <TermHelp
+                ariaLabel={`${termReasoningLabel}${termHelpAriaSuffix}`}
+                help={termReasoningHelp}
+              />
+            ) : null}
           </span>
         </VTooltip>
       ))}
@@ -349,8 +368,29 @@ function CapabilityList({ model, copy }: { model: ConfigCatalogModel; copy: Conf
   );
 }
 
-function ProviderSetupChecklist({ provider, copy }: { provider: ProviderRegistryRow; copy: ConfigCopy }) {
-  const items = buildProviderSetupChecklist(provider, copy);
+/**
+ * P1 term help (九产品共识: 零教学卡): a "?" icon whose hover tooltip carries a
+ * ≤15-char explanation. ZCode evidence: ModelConfigHelp keeps the help control a
+ * sibling of its label — never nested inside — so labels keep their click target.
+ */
+function TermHelp({ ariaLabel, help }: { ariaLabel: string; help: string }) {
+  return (
+    <VTooltip content={help} width="compact">
+      <VButton
+        className={styles.termHelpButton}
+        variant="ghost"
+        density="compact"
+        contentLayout="plain"
+        data-term-help="true"
+        aria-label={ariaLabel}
+      >
+        <CircleHelp size={12} aria-hidden="true" />
+      </VButton>
+    </VTooltip>
+  );
+}
+
+function ProviderSetupChecklist({ provider, copy }: { provider: ProviderRegistryRow; copy: ConfigCopy }) {  const items = buildProviderSetupChecklist(provider, copy);
   const next = items.find((item) => !item.done);
   return (
     <div className={styles.setupChecklist} data-provider-checklist="true" aria-label={copy.checklistAria}>
@@ -435,7 +475,15 @@ function ConnectionTab({
             </VActionGroup>
           </div>
         ) : undefined} />
-      <VSettingsRow label={copy.contextLimitRowLabel}
+      <VSettingsRow label={(
+          <span className={styles.settingsRowLabel}>
+            {copy.contextLimitRowLabel}
+            <TermHelp
+              ariaLabel={`${copy.contextLimitRowLabel}${copy.termHelpAriaSuffix}`}
+              help={copy.termContextWindowHelp}
+            />
+          </span>
+        )}
         description={copy.contextLimitRowHint}
         control={<span className={styles.muted}>{provider.contextWindow ? `${provider.contextWindow.toLocaleString()} token` : copy.useModelDeclared}</span>}
         footer={<details>
@@ -483,6 +531,282 @@ export type ProviderModelsTabProps = {
   onProbeReasoning?: (modelRef: string) => void;
 };
 
+/** P1 model row dot: availability-only tone; the status word lives in the title. */
+function modelDotToneClass(dot: ModelDotClass): string {
+  if (dot === "ok") return `${styles.modelDot} ${styles.modelDotOk}`;
+  if (dot === "warn") return `${styles.modelDot} ${styles.modelDotWarn}`;
+  if (dot === "off") return `${styles.modelDot} ${styles.modelDotOff}`;
+  return `${styles.modelDot} ${styles.modelDotIdle}`;
+}
+
+/** Last-test render shared by the detail pane (P1: rows never carry test words). */
+function ModelVerificationDetail({ model, copy }: { model: ConfigCatalogModel; copy: ConfigCopy }) {
+  const verificationStatus = model.verificationStatus || "unverified";
+  const errorLabel = (() => {
+    const kind = String(model.verificationErrorType || "").trim();
+    if (!kind) return "";
+    if (kind === "timeout") return copy.verifyErrTimeout;
+    if (kind === "bad_request") return copy.verifyErrBadRequest;
+    if (kind === "auth_failed") return copy.verifyErrAuthFailed;
+    if (kind === "rate_limited") return copy.verifyErrRateLimited;
+    if (kind === "not_found") return copy.verifyErrNotFound;
+    if (kind === "network") return copy.verifyErrNetwork;
+    if (kind === "missing_credential") return copy.verifyErrMissingCredential;
+    if (kind === "service_unavailable" || kind === "upstream_unavailable") return copy.verifyErrUnavailable;
+    return kind;
+  })();
+  const detail = [
+    model.verificationHttpStatus ? `HTTP ${model.verificationHttpStatus}` : "",
+    errorLabel,
+    model.verificationMessage || "",
+    model.verificationCheckedAt || (verificationStatus === "unverified" ? copy.verifyUntested : ""),
+  ].filter(Boolean).join(" · ");
+  return (
+    <div className={styles.verification}>
+      <VStatusChip tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "neutral"}>
+        {verificationStatus === "verified" ? copy.verifyPassed : verificationStatus === "failed" ? copy.verifyFailed : copy.verifyUntested}
+      </VStatusChip>
+      {verificationStatus === "failed" ? <>
+        <small className={styles.verificationError}>{errorLabel || copy.verifyRequestFailed}{model.verificationHttpStatus ? ` · HTTP ${model.verificationHttpStatus}` : ""}</small>
+        <small className={styles.muted}>{modelTestRecoveryHint(model.verificationErrorType || "", copy)}</small>
+        <details><summary className={styles.verificationDetails}>{copy.verifyErrorDetails}</summary><p className={styles.verificationMessage}>{detail}</p></details>
+      </> : model.verificationCheckedAt ? <small className={styles.muted}>{model.verificationCheckedAt}</small> : null}
+    </div>
+  );
+}
+
+/**
+ * P1 scan row (九产品共识): dot + name + at most one in-use badge; ≤5 words, no
+ * status phrases, no buttons — the whole row opens the detail pane.
+ */
+function ModelListRowItem({
+  model,
+  selected,
+  liveReferenceCount,
+  copy,
+  onSelect,
+}: {
+  model: ConfigCatalogModel;
+  selected: boolean;
+  liveReferenceCount: number;
+  copy: ConfigCopy;
+  onSelect: () => void;
+}) {
+  const dot = deriveModelDotClass(model);
+  return (
+    <div
+      className={styles.modelRow}
+      data-model-row={model.modelRef}
+      data-model-availability={model.availability}
+    >
+      <VButton
+        className={styles.modelRowButton}
+        contentLayout="plain"
+        variant="ghost"
+        aria-pressed={selected}
+        isDisabled={false}
+        title={model.modelRef}
+        onPress={onSelect}
+      >
+        <span
+          className={modelDotToneClass(dot)}
+          data-model-dot={dot}
+          title={providerStatusLabel(model.availability, copy)}
+        />
+        <span className={styles.modelRowName} title={model.label || model.modelKey}>{model.label || model.modelKey}</span>
+        {liveReferenceCount > 0 ? (
+          <span className={styles.modelInUseBadge} data-model-inuse="true">{copy.inUseBadge}</span>
+        ) : null}
+      </VButton>
+    </div>
+  );
+}
+
+/**
+ * P1 detail pane: carries everything the old inline table squeezed into rows —
+ * identity, verification, capabilities, and all actions with converged weight
+ * (primary=添加一个 / secondary=测试与探测 / danger=移除).
+ */
+function ModelDetailBody({
+  provider,
+  model,
+  copy,
+  disabled,
+  pinBusy,
+  imageCapabilityBusy,
+  liveReferenceCount,
+  reasoningFeedback,
+  onPin,
+  onUnpin,
+  onTestModel,
+  onProbeImageInput,
+  onProbeReasoning,
+}: {
+  provider: ProviderRegistryRow;
+  model: ConfigCatalogModel;
+  copy: ConfigCopy;
+  disabled: boolean;
+  pinBusy: boolean;
+  imageCapabilityBusy: boolean;
+  liveReferenceCount: number;
+  reasoningFeedback?: {
+    phase: "busy" | "success" | "error";
+    values: string[];
+    message: string;
+  };
+  onPin: (providerId: string, models: ConfigCatalogModel[]) => void;
+  onUnpin: (modelRef: string) => void;
+  onTestModel: (modelRef: string) => void;
+  onProbeImageInput?: (modelRef: string) => void;
+  onProbeReasoning?: (modelRef: string) => void;
+}) {
+  const action = deriveProviderModelActionState(provider, model, liveReferenceCount, disabled, copy);
+  const testAvailable = canTestProviderModel(model);
+  const imageCapability = model.capabilities?.image_input;
+  const imageProbeAvailable = (
+    ["observed", "pinned"].includes(model.availability)
+    && !provider.refreshDue
+  );
+  const reasoningValues = reasoningFeedback?.phase === "success"
+    ? reasoningFeedback.values
+    : model.reasoningEffortValues ?? [];
+  const reasoningSource = String(model.reasoningCapabilitySource || "");
+  const reasoningDeclared = (
+    reasoningValues.length > 0
+    && (
+      reasoningSource === "operator_override"
+      || model.reasoningVerificationStatus === "declared"
+    )
+  );
+  const reasoningVerified = reasoningFeedback?.phase === "success"
+    || model.reasoningVerificationStatus === "verified";
+  const reasoningHasContract = reasoningDeclared || reasoningVerified || reasoningValues.length > 0;
+  // T6: probe is optional evidence; operator declaration already enables UI (D1).
+  const reasoningProbeAvailable = (
+    provider.defaultProtocol === "responses"
+    && ["observed", "pinned"].includes(model.availability)
+    && !reasoningHasContract
+    && !provider.refreshDue
+  );
+  return (
+    <div className={styles.modelDetailBody} data-model-detail={model.modelRef} data-model-availability={model.availability}>
+      <div className={styles.modelIdentity}>
+        <strong className={styles.modelName} title={model.modelRef}>{model.label || model.modelKey}</strong>
+        <small className={styles.muted} title={model.modelRef}>{model.modelRef}</small>
+        <small className={styles.muted}>{copy.columnUpstreamId}: {model.upstreamId}</small>
+        <span className={styles.modelDetailAvailability}>
+          <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability, copy)}</VStatusChip>
+        </span>
+      </div>
+      <section className={styles.modelDetailSection} data-model-section="verification">
+        <div className={styles.modelDetailSectionHead}>
+          <h3>{copy.verificationHeader}</h3>
+          <TermHelp
+            ariaLabel={`${copy.verificationHeader}${copy.termHelpAriaSuffix}`}
+            help={copy.termVerificationHelp}
+          />
+        </div>
+        <ModelVerificationDetail model={model} copy={copy} />
+      </section>
+      <section className={styles.modelDetailSection} data-model-section="capabilities">
+        <div className={styles.modelDetailSectionHead}>
+          <h3>{copy.columnCapabilities}</h3>
+          <TermHelp
+            ariaLabel={`${copy.columnCapabilities}${copy.termHelpAriaSuffix}`}
+            help={copy.termCapabilitiesHelp}
+          />
+        </div>
+        <CapabilityList model={model} copy={copy} termReasoningHelp={copy.termReasoningHelp} termReasoningLabel={copy.reasoningTermLabel} termHelpAriaSuffix={copy.termHelpAriaSuffix} />
+      </section>
+      <section className={styles.modelDetailSection} data-model-section="actions">
+        <div className={styles.modelDetailSectionHead}>
+          <h3>{copy.columnActions}</h3>
+        </div>
+        <VActionGroup ariaLabel={`${model.modelRef}${copy.modelActionsAriaSuffix}`}>
+          {action.kind === "pin" ? (
+            <VButton
+              variant="primary"
+              data-model-action="pin"
+              isDisabled={action.disabled || pinBusy}
+              title={action.reason}
+              onPress={() => onPin(provider.providerId, [model])}
+            >
+              {pinBusy ? copy.pinAdding : copy.pinToAdd}
+            </VButton>
+          ) : null}
+          {testAvailable ? (
+            <VButton
+              variant="secondary"
+              isDisabled={disabled}
+              title={copy.testCallHint}
+              onPress={() => onTestModel(model.modelRef)}
+            >
+              {copy.testCall}
+            </VButton>
+          ) : null}
+          {imageProbeAvailable ? (
+            <VButton
+              variant="secondary"
+              data-model-capability-action="image_input"
+              icon={<ImageIcon size={14} />}
+              isDisabled={disabled || imageCapabilityBusy}
+              title={copy.imageProbeHint}
+              onPress={() => onProbeImageInput?.(model.modelRef)}
+            >
+              {imageCapabilityBusy
+                ? copy.imageProbeBusy
+                : imageCapability?.value === "supported" || imageCapability?.value === "unsupported"
+                  ? copy.imageProbeRetry
+                  : copy.imageProbeAction}
+            </VButton>
+          ) : null}
+          {reasoningHasContract ? (
+            <span
+              className={styles.modelActionState}
+              data-model-reasoning={reasoningDeclared && !reasoningVerified ? "declared" : "verified"}
+              title={
+                reasoningDeclared && !reasoningVerified
+                  ? copy.reasoningDeclaredTooltip
+                  : copy.reasoningVerifiedTooltip
+              }
+            >
+              {reasoningDeclared && !reasoningVerified
+                ? `${copy.reasoningDeclaredPrefix}${reasoningValues.join(" / ")}`
+                : formatConfigCopy(copy.reasoningVerifiedTemplate, { values: reasoningValues.join(" / ") })}
+            </span>
+          ) : reasoningProbeAvailable ? (
+            <VButton
+              variant="secondary"
+              isDisabled={disabled || reasoningFeedback?.phase === "busy"}
+              title={copy.reasoningProbeHint}
+              onPress={() => onProbeReasoning?.(model.modelRef)}
+            >
+              {reasoningFeedback?.phase === "busy" ? copy.reasoningProbeBusy : copy.reasoningProbeAction}
+            </VButton>
+          ) : null}
+          {action.kind === "unpin" ? (
+            <VButton
+              variant="danger"
+              isDisabled={action.disabled}
+              title={action.reason || undefined}
+              onPress={() => onUnpin(model.modelRef)}
+            >
+              {copy.unpinAction}
+            </VButton>
+          ) : action.kind === "in_use" || action.kind === "unavailable" ? (
+            <span className={styles.modelActionState} data-model-action={action.kind}>
+              {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount}${copy.referenceCountUnit}` : ""}
+            </span>
+          ) : null}
+          {reasoningFeedback?.phase === "error" ? (
+            <small className={styles.critical} role="alert">{reasoningFeedback.message}</small>
+          ) : null}
+        </VActionGroup>
+      </section>
+    </div>
+  );
+}
+
 export function ProviderModelsTab({
   copy,
   toolbarIdentity,
@@ -520,192 +844,14 @@ export function ProviderModelsTab({
         ? copy.modelsEmptyDiscovered
         : copy.modelsEmptyNoMatch;
 
+  // P1 list/detail split: rows scan, the pane carries everything else.
   const [detailModelRef, setDetailModelRef] = useState("");
-  const detailModel = provider.models.find((model) => model.modelRef === detailModelRef);
-  const verificationColumn: VDenseTableColumn<ConfigCatalogModel> = {
-    id: "verification",
-    header: copy.verificationHeader,
-    render: (model) => {
-      const verificationStatus = model.verificationStatus || "unverified";
-      const errorLabel = (() => {
-        const kind = String(model.verificationErrorType || "").trim();
-        if (!kind) return "";
-        if (kind === "timeout") return copy.verifyErrTimeout;
-        if (kind === "bad_request") return copy.verifyErrBadRequest;
-        if (kind === "auth_failed") return copy.verifyErrAuthFailed;
-        if (kind === "rate_limited") return copy.verifyErrRateLimited;
-        if (kind === "not_found") return copy.verifyErrNotFound;
-        if (kind === "network") return copy.verifyErrNetwork;
-        if (kind === "missing_credential") return copy.verifyErrMissingCredential;
-        if (kind === "service_unavailable" || kind === "upstream_unavailable") return copy.verifyErrUnavailable;
-        return kind;
-      })();
-      const detail = [
-        model.verificationHttpStatus ? `HTTP ${model.verificationHttpStatus}` : "",
-        errorLabel,
-        model.verificationMessage || "",
-        model.verificationCheckedAt || (verificationStatus === "unverified" ? copy.verifyUntested : ""),
-      ].filter(Boolean).join(" · ");
-      return (
-        <div className={styles.verification}>
-          <VStatusChip tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "neutral"}>
-            {verificationStatus === "verified" ? copy.verifyPassed : verificationStatus === "failed" ? copy.verifyFailed : copy.verifyUntested}
-          </VStatusChip>
-          {verificationStatus === "failed" ? <>
-            <small className={styles.verificationError}>{errorLabel || copy.verifyRequestFailed}{model.verificationHttpStatus ? ` · HTTP ${model.verificationHttpStatus}` : ""}</small>
-            <small className={styles.muted}>{modelTestRecoveryHint(model.verificationErrorType || "", copy)}</small>
-            <details><summary className={styles.verificationDetails}>{copy.verifyErrorDetails}</summary><p className={styles.verificationMessage}>{detail}</p></details>
-          </> : model.verificationCheckedAt ? <small className={styles.muted}>{model.verificationCheckedAt}</small> : null}
-        </div>
-      );
-    },
-  };
-  const detailColumns: VDenseTableColumn<ConfigCatalogModel>[] = [
+  const detailModel = provider.models.find((model) => model.modelRef === detailModelRef) ?? null;
 
-    {
-      id: "model-ref",
-      header: copy.columnModelRef,
-      render: (model) => (
-        <span className={styles.modelIdentity} data-model-availability={model.availability}>
-          <strong className={styles.ellipsis} title={model.modelRef}>{model.modelRef}</strong>
-          <small className={styles.muted}>{model.label || model.modelKey}</small>
-        </span>
-      ),
-    },
-    {
-      id: "upstream",
-      header: copy.columnUpstreamId,
-      render: (model) => <span className={styles.ellipsis} title={model.upstreamId}>{model.upstreamId}</span>,
-    },
-    { id: "availability", header: copy.columnAvailability, render: (model) => <VStatusChip tone={model.availability === "disabled" ? "danger" : "neutral"}>{providerStatusLabel(model.availability, copy)}</VStatusChip> },
-    verificationColumn,
-    { id: "capabilities", header: copy.columnCapabilities, render: (model) => <CapabilityList model={model} copy={copy} /> },
-    {
-      id: "actions",
-      header: copy.columnActions,
-      render: (model) => {
-        const action = deriveProviderModelActionState(
-          provider,
-          model,
-          liveReferenceCountByModelRef[model.modelRef] ?? 0,
-          disabled,
-          copy,
-        );
-        const testAvailable = canTestProviderModel(model);
-        const imageCapability = model.capabilities?.image_input;
-        const imageProbeAvailable = (
-          ["observed", "pinned"].includes(model.availability)
-          && !provider.refreshDue
-        );
-        const reasoningFeedback = reasoningFeedbackByModelRef[model.modelRef];
-        const reasoningValues = reasoningFeedback?.phase === "success"
-          ? reasoningFeedback.values
-          : model.reasoningEffortValues ?? [];
-        const reasoningSource = String(model.reasoningCapabilitySource || "");
-        const reasoningDeclared = (
-          reasoningValues.length > 0
-          && (
-            reasoningSource === "operator_override"
-            || model.reasoningVerificationStatus === "declared"
-          )
-        );
-        const reasoningVerified = reasoningFeedback?.phase === "success"
-          || model.reasoningVerificationStatus === "verified";
-        const reasoningHasContract = reasoningDeclared || reasoningVerified || reasoningValues.length > 0;
-        // T6: probe is optional evidence; operator declaration already enables UI (D1).
-        const reasoningProbeAvailable = (
-          provider.defaultProtocol === "responses"
-          && ["observed", "pinned"].includes(model.availability)
-          && !reasoningHasContract
-          && !provider.refreshDue
-        );
-        return (
-          <VActionGroup ariaLabel={`${model.modelRef}${copy.modelActionsAriaSuffix}`}>
-            {imageProbeAvailable ? (
-              <VButton
-                data-model-capability-action="image_input"
-                density="compact"
-                icon={<ImageIcon size={14} />}
-                isDisabled={disabled || imageCapabilityBusy}
-                title={copy.imageProbeHint}
-                onPress={() => onProbeImageInput?.(model.modelRef)}
-              >
-                {imageCapabilityBusy
-                  ? copy.imageProbeBusy
-                  : imageCapability?.value === "supported" || imageCapability?.value === "unsupported"
-                    ? copy.imageProbeRetry
-                    : copy.imageProbeAction}
-              </VButton>
-            ) : null}
-            {reasoningHasContract ? (
-              <span
-                className={styles.modelActionState}
-                data-model-reasoning={reasoningDeclared && !reasoningVerified ? "declared" : "verified"}
-                title={
-                  reasoningDeclared && !reasoningVerified
-                    ? copy.reasoningDeclaredTooltip
-                    : copy.reasoningVerifiedTooltip
-                }
-              >
-                {reasoningDeclared && !reasoningVerified
-                  ? `${copy.reasoningDeclaredPrefix}${reasoningValues.join(" / ")}`
-                  : formatConfigCopy(copy.reasoningVerifiedTemplate, { values: reasoningValues.join(" / ") })}
-              </span>
-            ) : reasoningProbeAvailable ? (
-              <VButton
-                density="compact"
-                isDisabled={disabled || reasoningFeedback?.phase === "busy"}
-                title={copy.reasoningProbeHint}
-                onPress={() => onProbeReasoning?.(model.modelRef)}
-              >
-                {reasoningFeedback?.phase === "busy" ? copy.reasoningProbeBusy : copy.reasoningProbeAction}
-              </VButton>
-            ) : null}
-            {action.kind === "pin" ? (
-              <VButton
-                variant="primary"
-                density="compact"
-                data-model-action="pin"
-                isDisabled={action.disabled || pinBusy}
-                title={action.reason}
-                onPress={() => onPin(provider.providerId, [model])}
-              >
-                {pinBusy ? copy.pinAdding : copy.pinToAdd}
-              </VButton>
-            ) : null}
-            {testAvailable ? (
-              <VButton
-                density="compact"
-                isDisabled={disabled}
-                title={copy.testCallHint}
-                onPress={() => onTestModel(model.modelRef)}
-              >
-                {copy.testCall}
-              </VButton>
-            ) : null}
-            {action.kind === "unpin" ? (
-              <VButton
-                variant="danger"
-                density="compact"
-                isDisabled={action.disabled}
-                title={action.reason || undefined}
-                onPress={() => onUnpin(model.modelRef)}
-              >
-                {copy.unpinAction}
-              </VButton>
-            ) : action.kind === "in_use" || action.kind === "unavailable" ? (
-              <span className={styles.modelActionState} data-model-action={action.kind}>
-                {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount}${copy.referenceCountUnit}` : ""}
-              </span>
-            ) : null}
-            {reasoningFeedback?.phase === "error" ? (
-              <small className={styles.critical} role="alert">{reasoningFeedback.message}</small>
-            ) : null}
-          </VActionGroup>
-        );
-      },
-    },
-  ];
+  // Detail selection follows the provider: switching providers clears the pane.
+  useEffect(() => {
+    setDetailModelRef("");
+  }, [provider.providerId]);
 
   return (
     <div className={styles.modelsWorkspace}>
@@ -723,8 +869,12 @@ export function ProviderModelsTab({
           {MODEL_FILTERS.map((filter) => (
             <VButton
               key={filter.id}
+              className={styles.modelFilterButton}
               density="compact"
-              variant={modelFilter === filter.id ? "primary" : "ghost"}
+              // P1 convergence: filters stay ghost (weak, aria-pressed), so the
+              // domain keeps a single primary weight = 添加.
+              variant="ghost"
+              data-active={modelFilter === filter.id ? "true" : "false"}
               aria-pressed={modelFilter === filter.id}
               onPress={() => onFilterChange(filter.id)}
             >
@@ -760,42 +910,50 @@ export function ProviderModelsTab({
         </div>
       ) : null}
       </div>
-      <div className={styles.tableScroll}>
-        <VDenseTable
-          ariaLabel={`${provider.label}${copy.catalogTableAriaSuffix}`}
-          className={styles.table}
-          rows={visibleModels}
-          getRowKey={(model) => model.modelRef}
-          emptyText={emptyText}
-          columns={[
-            { id: "model", header: copy.columnModel, className: "w-auto", render: (model) => (
-              <span className={styles.modelIdentity} data-model-availability={model.availability}>
-                <strong className={styles.modelName} title={model.modelRef}>{model.label || model.modelKey}</strong>
-                <small className={styles.muted}>{providerStatusLabel(model.availability, copy)}</small>
-              </span>
-            ) },
-            { ...verificationColumn, className: "w-[16rem]" },
-            { id: "actions", header: copy.columnActions, className: "w-[12rem]", render: (model) => (
-              <div className={styles.compactModelActions}>
-                {(() => {
-                  const action = deriveProviderModelActionState(provider, model, liveReferenceCountByModelRef[model.modelRef] ?? 0, disabled, copy);
-                  return action.kind === "pin" ? <VButton density="compact" variant="primary" isDisabled={action.disabled || pinBusy} title={action.reason} onPress={() => onPin(provider.providerId, [model])}>{copy.pinCompact}</VButton> : null;
-                })()}
-                <VButton density="compact" variant="ghost" onPress={() => setDetailModelRef(model.modelRef)} aria-label={`${model.label || model.modelKey}${copy.detailAriaSuffix}`}>{copy.detailsAction}</VButton>
-                {canTestProviderModel(model) ? <VButton density="compact" isDisabled={disabled} title={copy.testCallHint} onPress={() => onTestModel(model.modelRef)}>{copy.testCall}</VButton> : null}
-              </div>
-            ) },
-          ]}
-        />
+      <div className={styles.modelsSplit} data-vui-region="config-models-split">
+        <div className={styles.modelListPane}>
+          <p className={styles.modelListHeading}>{copy.modelListHeading} · {visibleModels.length}</p>
+          <div className={styles.tableScroll}>
+            <VEntityList
+              ariaLabel={`${provider.label}${copy.modelListAria}`}
+              className={styles.modelList}
+              activeId={detailModelRef || undefined}
+              items={visibleModels.map((model) => ({ ...model, id: model.modelRef }))}
+              empty={<span className={styles.muted}>{emptyText}</span>}
+              renderItem={(model) => (
+                <ModelListRowItem
+                  model={model}
+                  selected={detailModelRef === model.modelRef}
+                  liveReferenceCount={liveReferenceCountByModelRef[model.modelRef] ?? 0}
+                  copy={copy}
+                  onSelect={() => setDetailModelRef(model.modelRef)}
+                />
+              )}
+            />
+          </div>
+        </div>
+        <div className={styles.modelDetailPane} data-vui-region="config-models-detail" aria-label={copy.modelDetailPaneAria}>
+          {detailModel ? (
+            <ModelDetailBody
+              provider={provider}
+              model={detailModel}
+              copy={copy}
+              disabled={disabled}
+              pinBusy={pinBusy}
+              imageCapabilityBusy={imageCapabilityBusy}
+              liveReferenceCount={liveReferenceCountByModelRef[detailModel.modelRef] ?? 0}
+              reasoningFeedback={reasoningFeedbackByModelRef[detailModel.modelRef]}
+              onPin={onPin}
+              onUnpin={onUnpin}
+              onTestModel={onTestModel}
+              onProbeImageInput={onProbeImageInput}
+              onProbeReasoning={onProbeReasoning}
+            />
+          ) : (
+            <VStateSurface tone="empty" title={copy.modelDetailEmptyTitle}>{copy.modelDetailEmptyBody}</VStateSurface>
+          )}
+        </div>
       </div>
-      <VDialog open={Boolean(detailModel)} onOpenChange={(open) => { if (!open) setDetailModelRef(""); }} title={detailModel?.label || detailModel?.modelKey || copy.modelDetailTitle} description={copy.modelDetailDescription}>
-        {detailModel ? <div className={styles.modelDetails}>
-          {detailColumns.map((column) => <section key={column.id} className={styles.modelDetailSection}>
-            <h3>{column.header}</h3>
-            {column.render(detailModel)}
-          </section>)}
-        </div> : null}
-      </VDialog>
     </div>
   );
 }

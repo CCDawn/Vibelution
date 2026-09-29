@@ -587,7 +587,10 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("<ConfigProviderRegistryPanel");
     expect(providerPanelSource).toContain('id="config-models"');
     expect(providerPanelSource).toContain("styles.registryWorkspace");
-    expect(providerPanelSource).toContain("<VDenseTable");
+    // P1: the model domain split into scan rows (entity list) + a detail pane,
+    // replacing the old inline VDenseTable.
+    expect(providerPanelSource).toContain("<VEntityList");
+    expect(providerPanelSource).toContain('data-vui-region="config-models-detail"');
     expect(routeSource).toContain("onProbeImageInput={(modelRef) =>");
     expect(providerPanelSource).toContain('data-model-capability-action="image_input"');
     expect(routeSource).toContain("styles.configEditorSection");
@@ -608,7 +611,8 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStyles.tableScroll).toContain("min-h-0");
     expect(providerPanelStyles.providerButton).toContain("!min-h-9");
     expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
-    expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
+    // P1: model scan rows use the entity list language, not a second table grid.
+    expect(providerPanelStyles.modelList).toContain("overflow-y-auto");
     expect(providerPanelSource).toContain("filterProviderModels");
     expect(providerPanelSource).toContain("deriveProviderModelActionState");
     expect(providerPanelSource).toContain("copy.searchModelsAria");
