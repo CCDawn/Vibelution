@@ -360,11 +360,13 @@ def get_session_message_curation(session_id: str) -> dict[str, Any]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
-    _, conversations = s._load_conversations()
-    conversation = next(
-        (item for item in conversations if str(item.get("id") or "").strip() == normalized_session_id),
-        None,
-    )
+    # Existence-only check: the loaded conversation object was never used past
+    # the 404 gate. Read the single session runtime row from the same chat-state
+    # store that backs _load_conversations() instead of loading and fully
+    # normalizing every conversation. Visibility semantics stay identical: the
+    # old set had no hidden/internal filtering, so hidden sessions still resolve
+    # here, and agent-directory stubs (absent from the store) still 404.
+    conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
     if conversation is None:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
 
