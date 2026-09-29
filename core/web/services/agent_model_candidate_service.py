@@ -52,6 +52,15 @@ _NON_DIALOGUE_MODEL_PATTERN = re.compile(
     r"sora|speech|stable-diffusion|tts|video|whisper)(?:$|[-_/.])",
     re.IGNORECASE,
 )
+# Provider channel statuses that make every model of that provider unusable.
+# Same values as the operator-facing registry rail
+# (web/src/routes/configProviderLogic.ts ABNORMAL_PROVIDER_STATUSES); the raw
+# statuses originate from config/model_catalog.py provider discovery state.
+# "stale" stays usable (mild staleness only), and a provider without a catalog
+# entry defaults to healthy, matching the frontend "configured" default.
+_ABNORMAL_PROVIDER_STATUSES = frozenset(
+    {"auth_failed", "discovery_failed", "blocked", "protocol_mismatch", "not_discovered"}
+)
 _REASONING_EFFORT_LABELS = {
     "none": "无",
     "minimal": "最小",
@@ -280,6 +289,23 @@ def _provider_credential_compatibility(provider: dict[str, Any]) -> dict[str, An
     }
 
 
+def _provider_channel_health(
+    provider_catalog: dict[str, Any],
+    credential_compatibility: dict[str, Any],
+) -> dict[str, Any]:
+    """Project the provider channel health signal onto candidates (read-only).
+
+    Reuses the operator-facing registry determination instead of a second one:
+    credential readiness from ``_provider_credential_compatibility`` plus the
+    catalog discovery status, judged against ``_ABNORMAL_PROVIDER_STATUSES``.
+    """
+
+    status = str(provider_catalog.get("status") or "").strip()
+    credential_ready = not bool(credential_compatibility.get("missingApiKey"))
+    healthy = credential_ready and status not in _ABNORMAL_PROVIDER_STATUSES
+    return {"providerStatus": status, "providerHealthy": healthy}
+
+
 def _safe_int(value: Any) -> int:
     try:
         return max(0, int(value or 0))
@@ -324,6 +350,7 @@ def _candidate(
     defaults = pinned.get("defaults") if isinstance(pinned.get("defaults"), dict) else {}
     limits = observed.get("limits") if isinstance(observed.get("limits"), dict) else {}
     protocols = provider.get("protocols") if isinstance(provider.get("protocols"), dict) else {}
+    provider_channel_health = _provider_channel_health(provider_catalog, credential_compatibility)
     # Protocol-default reasoning for OpenAI Responses pins (same contract as pin/list projection).
     from config.llm_projection import _default_v2_reasoning_effort_defaults
 
@@ -360,6 +387,8 @@ def _candidate(
         "runtimeSelectable": has_pinned and pinned.get("enabled", True) is not False,
         "availability": str(observed.get("availability") or ("pinned" if has_pinned else "unknown")),
         "catalogStale": catalog_stale,
+        "providerStatus": provider_channel_health["providerStatus"],
+        "providerHealthy": provider_channel_health["providerHealthy"],
         "verificationStatus": (
             "stale" if fingerprint_stale else str(verification.get("status") or "unverified")
         ),
