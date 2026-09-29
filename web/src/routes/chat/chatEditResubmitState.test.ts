@@ -75,4 +75,44 @@ describe("edit generation in query and paint caches", () => {
     const accepted = mergeSessionDetailMessageWindow(pending, ack());
     expect(rollbackEditResubmit(accepted, original(), "edit")).toBe(accepted);
   });
+
+  // Nail: the onError rollback is NOT subject to the union-merge resurrection
+  // bug (fxl-0022 family). Two independent reasons, both pinned here:
+  // 1. the write carries editResubmitProtection.phase === "rolled_back", and
+  //    mergeEditResubmitDetail short-circuits that phase with replace
+  //    semantics (returns next verbatim, union never runs) — so even genuine
+  //    removals land instead of being resurrected from previous;
+  // 2. the restore direction is additive: the pre-edit snapshot is a superset
+  //    of the tail-hidden pending cache.
+  it("rolls a failed edit back through the query structural-sharing chain with replace semantics", () => {
+    const client = new QueryClient({ defaultOptions: { queries: {
+      structuralSharing: (before, next) => mergeSessionDetailMessageWindow(before as SessionDetail, next as SessionDetail),
+    } } });
+    client.setQueryData(["s"], original());
+    client.setQueryData(["s"], edit());
+    // While the request is in flight a late earlier page lands inside the
+    // guarded prefix (index 100 < target 103) — a row the pre-edit snapshot
+    // does not carry. The rollback below must genuinely remove it.
+    client.setQueryData(["s"], { ...original(), ledgerSeq: 11,
+      messages: [msg(100, "user", "late page"), msg(101, "user", "earlier", "earlier"),
+        msg(102, "assistant", "kept", "earlier")] });
+    const pending = client.getQueryData<SessionDetail>(["s"])!;
+    expect(pending.messages.map((item) => item.content)).toEqual(["late page", "earlier", "kept", "edited"]);
+
+    // Exactly what editResubmitMutation.onError writes through setQueryData.
+    client.setQueryData(["s"], (current) => rollbackEditResubmit(current, original(), "edit"));
+    const rolled = client.getQueryData<SessionDetail>(["s"])!;
+    expect(rolled.messages.map((item) => item.content)).toEqual(["earlier", "kept", "original", "stopped"]);
+    expect(rolled.messages.find((item) => item.id === "s-message-103")?.content).toBe("original");
+    expect(rolled.editResubmitProtection?.phase).toBe("rolled_back");
+
+    // Post-rollback poll: the server never saw the edit, so its snapshots are
+    // original-shaped. The union may run again (guard now rolled_back), but
+    // nothing resurrects the edited text or the superseded tail.
+    client.setQueryData(["s"], { ...original(), ledgerSeq: 12 });
+    const polled = client.getQueryData<SessionDetail>(["s"])!;
+    expect(polled.messages.map((item) => item.content)).toEqual(["earlier", "kept", "original", "stopped"]);
+    expect(polled.messages.some((item) => item.content === "edited")).toBe(false);
+    client.clear();
+  });
 });
