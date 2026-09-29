@@ -48,6 +48,9 @@ export const queryKeys = {
   conversationsCatalogQuery: (limit = 100) => ["conversations", "query", limit] as const,
   sessions: () => ["sessions"] as const,
   sessionQuery: (q = "", limit = 50, cursor = "") => ["sessions", "query", q, limit, cursor] as const,
+  // Archived-session listing; the "sessions" prefix keeps broad invalidations
+  // (["sessions"]) reaching it after archive/unarchive mutations.
+  sessionArchive: () => ["sessions", "archived"] as const,
   session: (id: string) => ["sessions", id] as const,
   // Group-chat expanded agent panels fetch a narrower window (messageLimit 20)
   // than the direct session view (40); a dedicated key keeps the two windows

@@ -9,6 +9,7 @@ import type { dictionaryEvolution } from "./domains/dictionaryEvolution";
 import type { dictionaryGit } from "./domains/dictionaryGit";
 import type { dictionaryLogs } from "./domains/dictionaryLogs";
 import type { dictionaryPet } from "./domains/dictionaryPet";
+import type { dictionarySessionArchive } from "./domains/dictionarySessionArchive";
 import type { dictionaryTeams } from "./domains/dictionaryTeams";
 import type { dictionaryTools } from "./domains/dictionaryTools";
 
@@ -23,4 +24,5 @@ export type TranslationKey =
   | keyof typeof dictionaryTools.zh
   | keyof typeof dictionaryGit.zh
   | keyof typeof dictionaryLogs.zh
-  | keyof typeof dictionaryPet.zh;
+  | keyof typeof dictionaryPet.zh
+  | keyof typeof dictionarySessionArchive.zh;

@@ -37,6 +37,7 @@ import {
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
+import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchive";
 import { archiveAgent, updateAgent } from "../../api/agents";
 import {
   listVirtualHumanCompanionActivity,
@@ -126,6 +127,7 @@ import { ConversationIndexTree } from "../ConversationIndexTree";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   hasInvalidChildSessionLink,
+  isSessionArchived,
   rootSessionIdFor,
   sessionToConversationSummary,
   useConversationIndexModel,
@@ -634,6 +636,7 @@ export function ChatCodingRouteWorkbench() {
   }, [editingSessionTitle]);
 
   const [directoryFilterText, setDirectoryFilterText] = useState("");
+  const [showArchivedSessions, setShowArchivedSessions] = useState(false);
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
     () => readStoredMentalModelToggle() ?? false,
   );
@@ -1089,6 +1092,7 @@ export function ChatCodingRouteWorkbench() {
     resolveModelLabel,
     rawSessionsQuery,
     sessionsQuery,
+    archivedSessionsQuery,
     conversationsQuery,
     teamsQuery,
     agentsQuery,
@@ -1117,6 +1121,62 @@ export function ChatCodingRouteWorkbench() {
     groupStreamConnected,
     requestedSessionId,
     requestedRoomId,
+    showArchivedSessions,
+  });
+
+  // Session-level archive (ZCode-style metadata flip). Optimistic cache update
+  // keeps the default list clean immediately; the archived listing refetches.
+  const archivedSessions = useMemo(
+    () => (showArchivedSessions ? archivedSessionsQuery.data?.items ?? [] : []),
+    [archivedSessionsQuery.data, showArchivedSessions],
+  );
+  const sessionArchiveMutation = useMutation({
+    mutationFn: async (payload: { sessionId: string; archive: boolean }) => (
+      payload.archive
+        ? archiveChatSession(payload.sessionId)
+        : unarchiveChatSession(payload.sessionId)
+    ),
+    onMutate: async (variables) => {
+      const telemetry = startUserAction(
+        variables.archive ? "session_archive" : "session_unarchive",
+        { sessionId: variables.sessionId },
+      );
+      void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
+      const nextArchiveState = variables.archive
+        ? {
+            status: "archived",
+            source: "session_archive",
+            archivedAt: new Date().toISOString(),
+          }
+        : {};
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        sessions?.map((session) => session.id === variables.sessionId
+          ? {
+              ...session,
+              archiveState: nextArchiveState,
+              readOnly: variables.archive,
+              hiddenFromIndex: variables.archive,
+            }
+          : session),
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionArchive() });
+      return { telemetry };
+    },
+    onSuccess: (_result, variables, context) => {
+      context?.telemetry?.succeeded({ sessionId: variables.sessionId });
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { sessionId: variables.sessionId });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(
+          error,
+          variables.archive
+            ? lang === "zh" ? "归档会话失败" : "Failed to archive session"
+            : lang === "zh" ? "取消归档失败" : "Failed to unarchive session",
+        ),
+      }));
+    },
   });
   const agentPermissionPresetMutation = useAgentPermissionPresetMutation({
     onSuccess: (_agent, input) => {
@@ -2527,11 +2587,31 @@ export function ChatCodingRouteWorkbench() {
     pendingArchiveAgentIds,
   });
 
-  const routeVisibleSessions = useMemo(() => sessionsForChatRoute({
-    sessions: sessionsQuery.data,
-    agents: agentsQuery.data,
-    companionRouteVerified: verifiedCompanionMode,
-  }), [agentsQuery.data, sessionsQuery.data, verifiedCompanionMode]);
+  const rawSessionsWithArchived = useMemo(() => {
+    if (!showArchivedSessions || archivedSessions.length === 0) {
+      return rawSessionsQuery.data;
+    }
+    const known = new Set((rawSessionsQuery.data ?? []).map((session) => session.id));
+    return [
+      ...(rawSessionsQuery.data ?? []),
+      ...archivedSessions.filter((session) => !known.has(session.id)),
+    ];
+  }, [archivedSessions, rawSessionsQuery.data, showArchivedSessions]);
+  const routeVisibleSessions = useMemo(() => {
+    const base = sessionsForChatRoute({
+      sessions: sessionsQuery.data,
+      agents: agentsQuery.data,
+      companionRouteVerified: verifiedCompanionMode,
+    });
+    if (!showArchivedSessions || archivedSessions.length === 0) {
+      return base;
+    }
+    const known = new Set((base ?? []).map((session) => session.id));
+    return [
+      ...(base ?? []),
+      ...archivedSessions.filter((session) => !known.has(session.id)),
+    ];
+  }, [agentsQuery.data, archivedSessions, sessionsQuery.data, showArchivedSessions, verifiedCompanionMode]);
 
   const requestedCompanionAgentId = useMemo(() => (
     requestedCompanionId
@@ -2583,6 +2663,7 @@ export function ChatCodingRouteWorkbench() {
     pendingArchiveAgentIds,
     archiveVisibleAgents,
     activeSessionId,
+    includeArchivedSessions: showArchivedSessions,
     detail,
     directSessionActiveSummary,
     sessionDetailAgentId: sessionDetailQuery.data?.agentId,
@@ -2728,9 +2809,10 @@ export function ChatCodingRouteWorkbench() {
   } = useConversationIndexModel({
     agents: agentsQuery.data,
     conversations: conversationsQuery.data,
+    includeArchivedSessions: showArchivedSessions,
     lang,
     linkedTeamRoomIds,
-    rawSessions: rawSessionsQuery.data,
+    rawSessions: rawSessionsWithArchived,
     rightIndexSessions,
     sessionFilter,
     sessionsById,
@@ -2897,6 +2979,14 @@ export function ChatCodingRouteWorkbench() {
     renameSession: (variables) => renameSessionMutation.mutate(variables),
     suppressRenameBlurUntilRef,
   });
+
+  const handleArchiveSession = useCallback((session: SessionSummary) => {
+    setSessionContextMenu(null);
+    sessionArchiveMutation.mutate({
+      sessionId: session.id,
+      archive: !isSessionArchived(session),
+    });
+  }, [sessionArchiveMutation, setSessionContextMenu]);
 
   const {
     handleCreateAgent,
@@ -3105,7 +3195,13 @@ export function ChatCodingRouteWorkbench() {
                 position={sessionContextMenu}
                 session={contextMenuSession}
                 t={t}
+                archiveDisabled={sessionArchiveMutation.isPending}
+                archivePending={
+                  sessionArchiveMutation.isPending
+                  && sessionArchiveMutation.variables?.sessionId === contextMenuSession.id
+                }
                 onAddToReview={handleAddSessionToReview}
+                onArchive={handleArchiveSession}
                 onClearHistory={handleClearSessionHistory}
                 onDelete={handleDeleteSession}
                 onOpenAgentConfig={openSessionAgentConfig}
@@ -3730,6 +3826,8 @@ export function ChatCodingRouteWorkbench() {
         conversationIndexPanel={conversationIndexPanel}
         directoryFilterText={directoryFilterText}
         onDirectoryFilterChange={setDirectoryFilterText}
+        showArchivedSessions={showArchivedSessions}
+        onToggleShowArchivedSessions={() => setShowArchivedSessions((current) => !current)}
         groupComposerOpen={groupComposerOpen}
         createGroupRoomPending={createGroupRoomMutation.isPending}
         createSessionPending={createSessionMutation.isPending || !selectedChatAgent}

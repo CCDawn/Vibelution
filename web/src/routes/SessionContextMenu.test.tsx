@@ -41,7 +41,8 @@ describe("SessionContextMenu", () => {
   it("clamps the menu inside the visible viewport", () => {
     expect(sessionContextMenuStyle({ x: 900, y: 700 }, { width: 960, height: 720 })).toEqual({
       left: 772,
-      top: 516,
+      // Menu height estimate grew from 204 to 232 with the archive action.
+      top: 488,
     });
     expect(sessionContextMenuStyle({ x: 24, y: 32 }, undefined)).toEqual({
       left: 24,

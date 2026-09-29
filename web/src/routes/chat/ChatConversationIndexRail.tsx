@@ -1,4 +1,5 @@
 import {
+  Archive,
   Bot,
   ChevronRight,
   LayoutList,
@@ -69,6 +70,8 @@ export type ChatConversationIndexRailProps = {
   conversationIndexPanel: ReactNode;
   directoryFilterText: string;
   onDirectoryFilterChange: (value: string) => void;
+  showArchivedSessions: boolean;
+  onToggleShowArchivedSessions: () => void;
   conversationIndexPaneClassName: string;
   createGroupRoomPending: boolean;
   createSessionPending: boolean;
@@ -157,6 +160,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     conversationIndexPanel,
     directoryFilterText,
     onDirectoryFilterChange,
+    showArchivedSessions,
+    onToggleShowArchivedSessions,
     conversationIndexPaneClassName,
     createGroupRoomPending,
     createSessionPending,
@@ -323,6 +328,29 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
             >
               <LayoutList size={16} aria-hidden="true" />
             </VNativeButton>
+            <VButton
+              type="button"
+              data-vui="session-archive-toggle"
+              isIconOnly
+              className={styles.railActionButton}
+              aria-label={showArchivedSessions
+                ? (lang === "zh" ? "隐藏已归档会话" : "Hide archived sessions")
+                : (lang === "zh" ? "显示已归档会话" : "Show archived sessions")}
+              aria-pressed={showArchivedSessions}
+              onClick={onToggleShowArchivedSessions}
+              title={showArchivedSessions
+                ? (lang === "zh" ? "隐藏已归档会话" : "Hide archived sessions")
+                : (lang === "zh" ? "显示已归档会话" : "Show archived sessions")}
+              icon={
+                <Archive
+                  size={16}
+                  aria-hidden="true"
+                  className={showArchivedSessions ? "text-[var(--accent-cool)]" : undefined}
+                />
+              }
+            >
+              {null}
+            </VButton>
             <VDropdownMenu
               aria-label={lang === "zh" ? "新建任务" : "Create task"}
               align="start"
