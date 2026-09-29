@@ -86,6 +86,7 @@ from core.infrastructure import developer_sandbox
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
 from core.orchestration.turn_runner import prepare_agent_turn, run_existing_agent_single_turn
+from core.prompt_manager.assembly_resolver import PromptAssemblyBudgetError
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import READONLY_CHAT_LEASE
 from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
@@ -339,10 +340,14 @@ _SPEAKER_LAST_ERROR_CONTEXT_KEY = "_lastSpeakerError"
 # Zero-output retries recover transient provider/runtime failures.  These
 # error types are configuration problems: the same turn cannot succeed on a
 # second attempt, so retrying would only burn another full budget.
+# ``PromptAssemblyBudgetError`` belongs here for the same reason: the
+# fail-closed budget gate rejects the same payload deterministically, so a
+# retry is a guaranteed second failure, not a recovery path.
 _ZERO_OUTPUT_RETRY_EXCLUDED_ERROR_TYPES = frozenset(
     {
         "ChatRoomValidationError",
         "AgentLlmResolutionError",
+        "PromptAssemblyBudgetError",
     }
 )
 # Idempotency guard at the speaker commit side: a byte-identical completed
@@ -3375,6 +3380,36 @@ def _context_queue_wait_ms(context: Mapping[str, Any]) -> int:
         return 0
 
 
+def _speaker_budget_failure_exception(exc: Exception) -> Exception:
+    """Re-wrap an assembly-budget rejection with actionable speaker guidance.
+
+    The prompt-assembly hard gate is fail-closed by design (no protected-content
+    truncation, no budget-parameter tuning), so the only recovery is model
+    configuration: this speaker's model needs a larger context window. The
+    bilingual summary flows out through the existing failure-message summary
+    channel; the error type is preserved so the zero-output retry fence keeps
+    classifying it as non-retryable.
+    """
+
+    if not isinstance(exc, PromptAssemblyBudgetError):
+        return exc
+    detail = str(exc).strip()
+    actionable = text_for(
+        get_web_language(),
+        zh=(
+            "群聊发言被提示词装配预算闸拦截：该成员当前模型的上下文窗口过小，"
+            "装不下核心提示词。请为该成员更换上下文窗口更大（建议 ≥64k）的模型后重试。"
+        ),
+        en=(
+            "Group-chat speech was blocked by the prompt-assembly budget gate: "
+            "this member's current model has a context window too small for the "
+            "core prompts. Switch this member to a model with a larger context "
+            "window (>=64k recommended) and retry."
+        ),
+    )
+    return PromptAssemblyBudgetError(f"{actionable} ({detail})" if detail else actionable)
+
+
 def _prep_speaker_failure_message(
     participant: dict[str, Any],
     context: Mapping[str, Any],
@@ -4374,6 +4409,7 @@ def _run_one_speaker(
             },
         }
     except Exception as exc:
+        exc = _speaker_budget_failure_exception(exc)
         total_speaker_ms = _elapsed_ms_between(speaker_started_at)
         normalized_round_id = str(context.get("roundId") or "").strip()
         stop_reason = _chat_room_round_stop_reason(normalized_round_id)
@@ -4958,7 +4994,38 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         if stop_reason:
             raise RuntimeError(stop_reason)
         stage_started_at = _perf_counter()
-        agent_context = build_agent_context(agent_id, session_id=session_id, run_id=round_id) if agent_id else None
+        # 群聊 speaker 对齐直聊 session worker：先冻结 Agent 核心快照
+        # （COMMON/SOUL/AGENTS + 角色模板），快照块随后并入 static runtime
+        # context 注入，并标记 host-seeded，PromptManager 才把受保护的
+        # STABLE_CORE 段移出装配预算闸。Agent 无 promptTemplateId 时这里返回
+        # 空 dict、快照块为空：标记保持 False，预算闸照常 fail-closed raise，
+        # 不做 protected 内容裁剪、不改预算公式。
+        agent_prompt_snapshot = (
+            session_service._ensure_session_agent_prompt_snapshot(
+                session_id,
+                agent,
+                interrupt_checker=interrupt_checker,
+            )
+            if agent
+            else {}
+        )
+        agent_prompt_snapshot_block = session_service._render_agent_prompt_snapshot_block(
+            agent_prompt_snapshot
+        )
+        timings["promptSnapshotMs"] = _elapsed_ms(stage_started_at)
+        timings["promptSnapshotIncluded"] = bool(agent_prompt_snapshot_block)
+        stage_started_at = _perf_counter()
+        agent_context = (
+            build_agent_context(
+                agent_id,
+                session_id=session_id,
+                run_id=round_id,
+                # 快照已包含角色模板内容；跳过 ContextEngine 的模板块避免同文重复。
+                include_prompt_template_context=not bool(agent_prompt_snapshot_block),
+            )
+            if agent_id
+            else None
+        )
         timings["agentContextBuildMs"] = _elapsed_ms(stage_started_at)
         if agent_context is not None:
             for timing_key, timing_value in dict(getattr(agent_context, "timings", {}) or {}).items():
@@ -5124,9 +5191,16 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                 runtime_context=agent_context.context_block if agent_context is not None else "",
                 static_runtime_context=(
                     _chat_room_static_runtime_context(
-                        getattr(agent_context, "static_context_block", "")
-                        if agent_context is not None
-                        else "",
+                        "\n\n".join(
+                            part
+                            for part in (
+                                agent_prompt_snapshot_block,
+                                getattr(agent_context, "static_context_block", "")
+                                if agent_context is not None
+                                else "",
+                            )
+                            if str(part or "").strip()
+                        ),
                         context,
                     )
                 ),
@@ -5134,6 +5208,21 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     getattr(agent_context, "dynamic_context_block", "") if agent_context is not None else ""
                 ),
             )
+            # 与直聊 worker 相同的 host-seed 标记：快照块确实随 static runtime
+            # context 注入且核心 schema 有效时，Agent 装配系统提示词会排除
+            # PromptManager 的三个受保护核心段并关闭 enforce_core_floor；
+            # 否则保持 False，装配预算闸继续 fail-closed。
+            core_prompt_snapshot_seeded = bool(agent_prompt_snapshot_block) and int(
+                (agent_prompt_snapshot or {}).get("corePromptSchemaVersion") or 0
+            ) > 0
+            core_prompt_snapshot_marker = getattr(
+                agent_runtime,
+                "mark_core_prompt_snapshot_seeded_by_host",
+                None,
+            )
+            if callable(core_prompt_snapshot_marker):
+                core_prompt_snapshot_marker(core_prompt_snapshot_seeded)
+            timings["promptSnapshotSeeded"] = core_prompt_snapshot_seeded
             timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
             timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
             stage_started_at = _perf_counter()

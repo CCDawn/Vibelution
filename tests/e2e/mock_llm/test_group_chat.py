@@ -50,11 +50,13 @@ pytestmark = [
 PROVIDER_ID = "e2e-mock-group"
 MODEL_A = "e2e-mock-group-a"
 MODEL_B = "e2e-mock-group-b"
-# context_window 必须给大：群聊 speaker 轮走 v2 prompt 装配（分层预算硬闸），
+# context_window 用 32768：群聊 speaker 轮走 v2 prompt 装配（分层预算硬闸），
 # STABLE_CORE 层预算 = max(3000, window*0.05)，本仓库 AGENTS.md 段实测 ~3063
-# tokens，32768 窗口下预算 3000 直接 protected_tier_over_budget（实测 run3）；
-# 直聊车道不受此闸影响。200k 下 STABLE_CORE 预算 6000、总预算 24000，真实可过。
-GROUP_CONTEXT_WINDOW = 200_000
+# tokens，32768 窗口下预算 3000 直接 protected_tier_over_budget（实测 run3）。
+# 历史上这条车道被迫声明 200k 大窗口绕闸；核心快照 seed 对齐直聊后，speaker
+# 的核心三文件由 session 快照承载并移出 PromptManager 装配预算，32k 小窗口
+# 真实可过。本文件因此回归钉 32768：seed 失效即整车道发言失败（原始复现场景）。
+GROUP_CONTEXT_WINDOW = 32_768
 PROVIDER_MODELS: dict[str, dict[str, Any]] = {
     MODEL_A: {
         "upstream_id": MODEL_A,
@@ -452,15 +454,27 @@ def _first_prompt_template_id(port: int) -> str:
     raise RuntimeError(f"实例无可用提示词模板，无法创建 Agent: {str(catalog)[:200]}")
 
 
-def create_group_member(port: int, display_name: str, model_key: str) -> dict:
-    """建群聊成员 Agent（persistent + 直属会话），dialogue 槽绑到本车道模型。"""
+def create_group_member(
+    port: int,
+    display_name: str,
+    model_key: str,
+    *,
+    prompt_template_id: str = "",
+) -> dict:
+    """建群聊成员 Agent（persistent + 直属会话），dialogue 槽绑到本车道模型。
+
+    ``prompt_template_id`` 缺省取实例模板目录首个可用模板；显式传入不存在的
+    模板 id（如 fail-closed 用例）会得到一个快照不可 seed 的成员——与「Agent
+    无 promptTemplateId」同一条 fail-closed 分支（ensure 返回的快照渲染不出
+    快照块，host-seed 标记保持 False）。
+    """
     agent = _post_ok(
         port,
         "/api/agents",
         {
             "displayName": display_name,
             "primaryMode": "chat",
-            "promptTemplateId": _first_prompt_template_id(port),
+            "promptTemplateId": prompt_template_id or _first_prompt_template_id(port),
             "llmBindings": {"dialogue": {"modelId": f"{PROVIDER_ID}/{model_key}"}},
         },
         what=f"创建群聊成员 {display_name}",
@@ -1006,3 +1020,75 @@ def test_group_round_pending_speaker_visibility(
     assert_member_reply_attribution(page, round3["roundId"], member_a, reply_a_r3, member_b, reply_b_r3)
     assert_member_reply_attribution(page, round3["roundId"], member_b, reply_b_r3, member_a, reply_a_r3)
     assert_round_journal(group_llm, "E2E-GROUP-R3", [MODEL_A, MODEL_B])
+
+
+def test_group_speaker_without_seedable_snapshot_fails_closed_at_32k(
+    e2e_instance: Any,
+    group_llm: Any,
+    group_members: dict,
+    group_room_state: dict,
+    group_room_cleanup: None,
+) -> None:
+    """32k 窗口回归钉的 fail-closed 侧：快照不可 seed 的成员不绕预算硬闸。
+
+    成员 C 的 promptTemplateId 指向不存在的模板（与「Agent 无 promptTemplateId」
+    同一条 fail-closed 分支：快照渲染不出快照块，host-seed 标记 False）。32k
+    窗口下核心三文件装不进 STABLE_CORE 预算（3000），protected_tier_over_budget
+    硬闸拦截其发言；轮内失败消息必须携带可行动指引（换更大窗口模型），且同成员
+    正常模板的发言不受影响（round partial 收口）。零输出重试排除由单测钉住，
+    这里钉真实链路的失败消息形态。
+    """
+    port = e2e_instance.port
+    member_a = group_members["a"]
+    broken = create_group_member(
+        port,
+        "E2E群聊成员C-缺模板",
+        MODEL_B,
+        prompt_template_id="prompt-e2e-group-missing-template",
+    )
+    try:
+        room = create_room_via_api(
+            port,
+            f"E2E群聊-缺模板fail-closed-{int(time.time())}",
+            [member_a["agentId"], broken["agentId"]],
+        )
+        room_id = room["roomId"]
+        group_room_state["roomId"] = room_id
+
+        status, started = _api(
+            port,
+            "POST",
+            f"/api/chat-rooms/{room_id}/rounds",
+            {"topic": "E2E-GROUP-FC 请确认预算闸行为", "mode": "round_robin", "purpose": "discussion"},
+        )
+        assert 200 <= status < 300, f"开轮失败: HTTP {status} {str(started)[:300]}"
+
+        latest = wait_round_terminal(port, room_id, min_rounds=1)
+        round_status = str(latest.get("status") or "")
+        assert round_status in {"partial", "failed"}, (
+            f"缺模板成员应令轮次以 partial/failed 收口，实际 {round_status}: "
+            f"{str(latest.get('messages'))[:400]}"
+        )
+        messages = latest.get("messages") or []
+        assert len(messages) == 2, f"轮内应有 2 条消息（1 成功 1 失败）: {str(messages)[:400]}"
+
+        by_agent: dict[str, dict] = {
+            str((m or {}).get("agentId") or ""): m for m in messages if isinstance(m, dict)
+        }
+        ok_message = by_agent.get(member_a["agentId"]) or {}
+        assert str(ok_message.get("status") or "") == "completed", (
+            f"正常模板成员在 32k 窗口下应照常发言（seed 生效）: {str(ok_message)[:300]}"
+        )
+        failed_message = by_agent.get(broken["agentId"]) or {}
+        assert str(failed_message.get("status") or "") == "failed", (
+            f"缺模板成员应失败落消息: {str(failed_message)[:300]}"
+        )
+        summary = str(failed_message.get("summary") or "")
+        assert str(failed_message.get("errorType") or "") == "PromptAssemblyBudgetError", (
+            f"失败消息 errorType 应为预算闸错误: {str(failed_message)[:300]}"
+        )
+        assert "64k" in summary and ("预算闸" in summary or "budget gate" in summary), (
+            f"失败消息缺可行动指引（换 ≥64k 模型）: {summary[:300]}"
+        )
+    finally:
+        delete_group_member(port, broken["agentId"])
