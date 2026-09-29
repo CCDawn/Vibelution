@@ -254,6 +254,7 @@ def assemble_prepared_turn_messages(
     allow_append_user_message: bool,
     static_context_blocks: Sequence[str] | None = None,
     runtime_context_blocks: Sequence[str] | None = None,
+    volatile_context_blocks: Sequence[str] | None = None,
     dynamic_system_context_message: Any = None,
     prepare_turn_messages_fn: PrepareTurnMessagesFn | None = None,
     insert_static_fn: InsertContextFn | None = None,
@@ -297,6 +298,9 @@ def assemble_prepared_turn_messages(
         volatile_context_messages.append(dynamic_system_context_message)
     if pending_runtime:
         volatile_context_messages.extend(SystemMessage(content=block) for block in pending_runtime)
+    pending_volatile = _coerce_text_blocks(volatile_context_blocks)
+    if pending_volatile:
+        volatile_context_messages.extend(SystemMessage(content=block) for block in pending_volatile)
     if volatile_context_messages:
         insert_volatile = insert_volatile_fn or _default_insert_volatile()
         messages = insert_volatile(

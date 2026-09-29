@@ -2666,6 +2666,8 @@ class AgentRuntime:
         self._pending_static_context_blocks = []
         pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
         self._pending_runtime_context_blocks = []
+        pending_volatile_context_blocks = list(getattr(self, "_pending_volatile_context_blocks", []) or [])
+        self._pending_volatile_context_blocks = []
         assembled_turn_messages = assemble_prepared_turn_messages(
             system_prompt=sp,
             user_prompt=user_prompt,
@@ -2677,6 +2679,7 @@ class AgentRuntime:
             allow_append_user_message=policy.mode == AgentMode.CHAT and policy.keep_multi_turn_context,
             static_context_blocks=pending_static_context_blocks,
             runtime_context_blocks=pending_runtime_context_blocks,
+            volatile_context_blocks=pending_volatile_context_blocks,
             dynamic_system_context_message=dynamic_system_context_message,
             prepare_turn_messages_fn=TurnOutcomeController.prepare_turn_messages,
             insert_static_fn=TurnOutcomeController.insert_static_context_after_system,

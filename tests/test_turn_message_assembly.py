@@ -6,6 +6,7 @@ from core.infrastructure.llm_utils import (
     build_dynamic_system_context_message,
     extend_system_message_cacheable_prefix,
     is_dynamic_system_context_message,
+    is_volatile_system_context_message,
 )
 from core.infrastructure.runtime_input import build_chat_user_message
 from core.orchestration.turn_message_assembly import (
@@ -134,6 +135,28 @@ def test_assemble_prepared_turn_messages_keeps_system_history_volatile_user_orde
         isinstance(item, SystemMessage) and str(item.content or "").startswith("## Agent Runtime Context")
         for item in volatile
     )
+
+
+def test_personal_memory_seed_reaches_current_model_turn_without_becoming_history():
+    memory = "## 个人记忆\n- episodeId=episode-test kind=private_note\n  text: Amber-47-K9P3"
+    history = [SystemMessage(content="system"), build_chat_user_message("earlier"), AIMessage(content="done")]
+    assembled = assemble_prepared_turn_messages(
+        system_prompt="system",
+        user_prompt="What is my calibration phrase?",
+        effective_goal="What is my calibration phrase?",
+        active_turn_messages=history,
+        active_turn_goal="__chat_session__",
+        build_system_message=lambda text: SystemMessage(content=str(text)),
+        build_external_request_message=build_chat_user_message,
+        allow_append_user_message=True,
+        volatile_context_blocks=[memory],
+    )
+
+    assert assembled.messages[1:3] == history[1:]
+    assert isinstance(assembled.messages[-2], SystemMessage)
+    assert assembled.messages[-2].content == memory
+    assert is_volatile_system_context_message(assembled.messages[-2])
+    assert assembled.messages[-1]["role"] == "user"
 
 
 def test_assemble_falls_back_to_static_insert_when_prefix_cannot_merge():

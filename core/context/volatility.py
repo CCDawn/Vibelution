@@ -17,6 +17,9 @@ VOLATILE_CONTEXT_HEADERS: tuple[str, ...] = (
     "## Recent Operator Guidance",
     "## Slash Skill Context",
     "## Active Skill Context",
+    "## 个人记忆",
+    "GroupContextEvents:",
+    "AgentInboxMessages:",
 )
 
 
