@@ -29,6 +29,10 @@ type ConversationStreamingResponseContentProps = {
   duplicateImageUrls?: Set<string>;
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => ReactNode;
   classNames?: ConversationStreamingResponseContentClassNames;
+  /** Session workspace root enabling workspace-file markdown links. */
+  workspaceRoot?: string;
+  /** Bilingual chrome text for workspace-file menus and mermaid blocks. */
+  language?: "zh" | "en";
 };
 
 /**
@@ -40,11 +44,15 @@ const StreamingStableMarkdown = memo(function StreamingStableMarkdown({
   classNames,
   duplicateImageUrls,
   renderImage,
+  workspaceRoot,
+  language,
 }: {
   content: string;
   classNames: ConversationMarkdownClassNames;
   duplicateImageUrls?: Set<string>;
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => ReactNode;
+  workspaceRoot?: string;
+  language?: "zh" | "en";
 }) {
   return (
     <LazyConversationMarkdownRenderer
@@ -52,6 +60,8 @@ const StreamingStableMarkdown = memo(function StreamingStableMarkdown({
       classNames={classNames}
       duplicateImageUrls={duplicateImageUrls}
       renderImage={renderImage}
+      workspaceRoot={workspaceRoot}
+      language={language}
     />
   );
 });
@@ -62,6 +72,8 @@ export function ConversationStreamingResponseContent({
   duplicateImageUrls,
   renderImage,
   classNames = styles,
+  workspaceRoot,
+  language,
 }: ConversationStreamingResponseContentProps) {
   const visibleText = String(content ?? "");
   const streamProjection = useMemo(() => {
@@ -118,6 +130,8 @@ export function ConversationStreamingResponseContent({
           classNames={classNames}
           duplicateImageUrls={duplicateImageUrls}
           renderImage={renderImage}
+          workspaceRoot={workspaceRoot}
+          language={language}
         />
       ) : null}
       {liveBlocks.length ? (

@@ -70,6 +70,12 @@ export type ConversationViewProps = {
    * Empty timeline then shows a loading surface instead of the empty-session copy.
    */
   transcriptPending?: boolean;
+  /**
+   * Session workspace root forwarded to the markdown renderer: workspace-file
+   * links in assistant markdown resolve against it (desktop-bridge open).
+   * Absent/relative roots keep the legacy inert-anchor behavior.
+   */
+  sessionWorkspacePath?: string;
   className?: string;
   density?: "default" | "compact";
   composerVariant?: ConversationComposerVariant;
