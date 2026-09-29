@@ -14,6 +14,7 @@ from tests.test_agent_config_workspace_service import (
     _use_tmp_project_root,
     agent_bulk_delete_service,
     agent_directory_service,
+    chat_room_service,
     client,
     config_service,
     session_service,
@@ -1036,3 +1037,45 @@ def test_single_archive_compensation_continues_after_an_earlier_rollback_fails()
 
     assert calls == ["first", "second"]
     assert failures == ["rollback_first:OSError"]
+
+
+def test_archive_failure_rolls_back_dissolved_last_member_room(tmp_path, monkeypatch):
+    from core.web.routes import agents as agent_routes
+
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    room = chat_room_service.create_chat_room(
+        title="归档回滚群聊",
+        participant_session_ids=[direct["id"]],
+    )
+
+    def fail_archive(*args, **kwargs):
+        raise agent_directory_service.AgentDirectoryError("archive write failed")
+
+    monkeypatch.setattr(agent_routes, "archive_agent_instance", fail_archive)
+
+    response = client.delete(f"/api/agents/{direct['agentId']}")
+
+    assert response.status_code == 422, response.text
+    assert agent_directory_service.get_agent(direct["agentId"])["status"] == "active"
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert detail is not None
+    assert [item["agentId"] for item in detail["participants"]] == [direct["agentId"]]
+
+
+def test_archive_keeps_shared_room_for_non_last_member(tmp_path, monkeypatch):
+    direct, _child = _create_agent_with_child_session(tmp_path, monkeypatch)
+    peer = session_service.create_chat_session(title="共享群聊留守 Agent")
+    room = chat_room_service.create_chat_room(
+        title="共享群聊",
+        participant_agent_ids=[direct["agentId"], peer["agentId"]],
+    )
+
+    response = client.delete(f"/api/agents/{direct['agentId']}")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    assert payload["archiveSummary"]["dissolvedRoomIds"] == []
+    assert [item["roomId"] for item in chat_room_service.list_chat_rooms()] == [room["roomId"]]
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [item["agentId"] for item in detail["participants"]] == [peer["agentId"]]
