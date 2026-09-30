@@ -22,7 +22,9 @@ def test_native_launcher_default_action_runs_as_tray_app():
     assert "Global\\\\Vibelution.Launcher.Tray" in source
     assert "HandleSecondaryTrayLaunch(projectDir)" in source
     assert "EnsureFreshLauncherBackend(projectDir)" in source
-    assert "LaunchCurrentElectronMain(projectDir, \"open\", false)" in source
+    # Tray default action still launches Electron open through the shared shim;
+    # the trailing false is hiddenPresentation (opt-in e2e flag, user opens show).
+    assert "LaunchCurrentElectronMain(projectDir, \"open\", false, false)" in source
     assert "TryLaunchElectronAndWaitForTrayOwner(projectDir)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
 
@@ -47,7 +49,9 @@ def test_native_launcher_secondary_shortcut_launch_refreshes_stale_backend_and_o
     source = _source()
 
     assert "native_action.secondary_launch" in source
-    assert "LaunchCurrentElectronMain(projectDir, \"open\", false)" in source
+    # Secondary shortcut still refreshes the backend via an Electron open launch
+    # (HandleSecondaryTrayLaunch); trailing false = hiddenPresentation, user-initiated.
+    assert "LaunchCurrentElectronMain(projectDir, \"open\", false, false)" in source
     assert "/api/launcher/freshness" in source
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
     assert "--from-shortcut" in source
@@ -93,13 +97,17 @@ def test_native_launcher_last_resort_tray_bootstraps_electron_without_lifecycle_
     )[0]
 
     assert "ThreadPool.QueueUserWorkItem(delegate { BootstrapLauncherBackend(); });" in source
-    assert 'LaunchCurrentElectronMain(projectDir, "open", false)' in bootstrap_block
+    # Last-resort tray bootstrap still launches Electron open (openWorkbench
+    # false = no lifecycle post); trailing false = hiddenPresentation.
+    assert 'LaunchCurrentElectronMain(projectDir, "open", false, false)' in bootstrap_block
 
 
 def test_native_launcher_non_default_actions_use_console_free_control_api():
     source = _source()
 
-    assert "RunNativeAction(projectDir, parsed.ForwardedArgs)" in source
+    # Non-default actions still route through the native action dispatcher;
+    # parsed.HiddenPresentation threads the opt-in e2e flag into it.
+    assert "RunNativeAction(projectDir, parsed.ForwardedArgs, parsed.HiddenPresentation)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
     assert '"/api/launcher/status"' in source
     assert 'PostLauncher("/api/launcher/force-stop")' not in source
@@ -114,7 +122,8 @@ def test_native_launcher_forwards_lifecycle_to_packaged_electron():
 
     # The shim launches current checkout Electron main (packaged if current,
     # otherwise unpackaged) and never builds a Python :8765 control plane.
-    assert "ForwardOrLaunchElectron(projectDir, action, forwardedArgs)" in source
+    # hiddenPresentation is the opt-in e2e flag threaded through the forward.
+    assert "ForwardOrLaunchElectron(projectDir, action, forwardedArgs, hiddenPresentation)" in source
     assert "LaunchCurrentElectronMain" in source
     assert "launch-desktop-shell" in source
     assert "--open-workbench" in source
