@@ -50,6 +50,7 @@ import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
+import { ConversationRerunFileChoiceDialog } from "../../components/conversation/ConversationRerunFileChoiceDialog";
 import { FollowupQueueTogglePauseContext } from "../../components/conversation/ConversationFollowupQueueBar";
 import { queryKeys } from "../../api/queryKeys";
 import {
@@ -2408,6 +2409,10 @@ export function ChatCodingRouteWorkbench() {
     handleRegenerateAssistantMessage,
     handleRetryFailedTurn,
     handleSwitchMessageVersion,
+    rerunFileChoice,
+    confirmRerunFileRestore,
+    keepFilesAndRerun,
+    dismissRerunFileChoice,
     handleComposerChange,
     handleMentalModelEnabledChange,
     handleRuntimeStatusEnabledChange,
@@ -3990,6 +3995,20 @@ export function ChatCodingRouteWorkbench() {
         onConfirm={confirmPendingWorkbenchAction}
       />
     </ChatSessionWorkbenchShell>
+      <ConversationRerunFileChoiceDialog
+        open={Boolean(rerunFileChoice)}
+        language={lang === "en" ? "en" : "zh"}
+        paths={rerunFileChoice?.paths ?? []}
+        pending={Boolean(rerunFileChoice?.restoring)}
+        error={rerunFileChoice?.error ?? ""}
+        onOpenChange={(open) => {
+          if (!open) dismissRerunFileChoice();
+        }}
+        onRestoreAndRerun={() => {
+          void confirmRerunFileRestore();
+        }}
+        onRerunOnly={keepFilesAndRerun}
+      />
     </ActiveTurnLayersStoreProvider>
   );
 }
