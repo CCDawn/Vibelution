@@ -23,6 +23,16 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
   } = props;
   const highlightIds = props.highlightIds ?? EMPTY_HIGHLIGHTS;
   const layout = useMemo(() => layoutMemoryKnowledgeGraph(nodes, edges), [nodes, edges]);
+  const rendererLayout = useMemo(() => {
+    if (!flat) return layout;
+    return {
+      nodes: layout.nodes.map((node) => ({ ...node, z: 0 })),
+      clusters: layout.clusters.map((cluster) => ({
+        ...cluster,
+        center: { ...cluster.center, z: 0 },
+      })),
+    };
+  }, [flat, layout]);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const labelLayerRef = useRef<HTMLDivElement | null>(null);
@@ -84,8 +94,8 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
           OrbitControls: controlsModule.OrbitControls,
           host: canvasHost,
           labelLayer: graphLabelLayer,
-          nodes: layout.nodes,
-          clusters: layout.clusters,
+          nodes: rendererLayout.nodes,
+          clusters: rendererLayout.clusters,
           edges,
           selectedNodeId: initial.selectedNodeId,
           flat: initial.flat,
@@ -126,7 +136,7 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
       engineRef.current?.dispose();
       engineRef.current = null;
     };
-  }, [layout, edges]);
+  }, [rendererLayout, edges]);
 
   useEffect(() => {
     const engine = engineRef.current;

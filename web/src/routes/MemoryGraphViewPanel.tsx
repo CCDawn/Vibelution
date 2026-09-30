@@ -138,7 +138,7 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
         <div className={styles.atlasTools}><VButton variant="ghost" aria-label="恢复全景" icon={<Maximize2 size={16} />} onClick={reset} /><VButton variant="ghost" aria-label="聚焦选中节点" isDisabled={!selectedId} icon={<Focus size={16} />} onClick={() => setFocusToken(value => value + 1)} /><VButton variant="ghost" aria-label="节点列表" aria-pressed={showList} icon={<List size={16} />} onClick={() => setShowList(value => !value)} /></div>
       </div>
       {graphPayload && props.graphError && <p role="alert" className={styles.refreshError}>刷新失败，当前显示上次加载的图谱。<VButton variant="ghost" onClick={props.onRetryGraph}>重试</VButton></p>}
-      <div className={styles.atlasFooter}><span>{copy.graphVisibleNodes}: {slice.nodes.length} · {copy.graphVisibleEdges}: {slice.edges.length}{graphPayload?.summary.truncated ? " · 已达到加载上限" : ""}</span><span>{flat ? "拖动平移" : "拖动旋转 · 右键平移"} · 滚轮缩放</span></div>
+      <div className={styles.atlasFooter}><span>{copy.graphVisibleNodes}: {slice.nodes.length} · {copy.graphVisibleEdges}: {slice.edges.length}{graphPayload?.summary.truncated ? " · 已达到加载上限" : ""}</span><span>{flat ? "拖动平移" : "360° 拖动环绕 · 右键平移"} · 滚轮缩放</span></div>
       {showList && <div className={styles.atlasNodeList} data-vui-region="memory-graph-node-list">{slice.nodes.map(node => <VButton key={node.id} variant="ghost" onClick={() => select(node.id)}>{node.label}</VButton>)}</div>}
     </div>} inspector={inspector} />;
 }

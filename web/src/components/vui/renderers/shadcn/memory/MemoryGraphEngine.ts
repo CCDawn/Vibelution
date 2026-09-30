@@ -14,6 +14,7 @@ import {
   type MemoryGraphEdgePath,
   type MemoryGraphLabelElements,
 } from "./memoryGraphLabels";
+import { nebulaMaterial } from "./NebulaField";
 import { memoryGraphRendererStyles as styles } from "./memoryGraphRenderer.styles";
 
 type ThreeApi = typeof import("three");
@@ -24,6 +25,7 @@ type MemoryGraphTheme = {
   clusterColors: Map<MemoryGraphClusterKey, number>;
   edgeColor: number;
   selectedColor: number;
+  lightSurface: boolean;
 };
 
 export type MemoryGraphEngine = {
@@ -174,6 +176,7 @@ function readTheme(
     clusterColors,
     edgeColor: cssColor(THREE, host, "--vui-border-strong", "rgb(135, 151, 170)"),
     selectedColor: cssColor(THREE, host, "--accent-cool", "#0a84ff"),
+    lightSurface,
   };
 }
 function getNodeScale(node: MemoryKnowledgeGraphNode): number {
@@ -196,47 +199,18 @@ function getNodeScale(node: MemoryKnowledgeGraphNode): number {
 function createNodeGeometry(THREE: ThreeApi, node: MemoryKnowledgeGraphNode): import("three").BufferGeometry {
   const size = getNodeScale(node);
   if (node.type === "knowledge_item") {
-    return new THREE.TorusGeometry(0.21 * size, 0.046 * size, 8, 24);
+    return new THREE.SphereGeometry(0.205 * size, 32, 24);
   }
   if (node.type === "source_artifact" || node.type === "knowledge_batch") {
-    return new THREE.OctahedronGeometry(0.19 * size, 0);
+    return new THREE.OctahedronGeometry(0.235 * size, 0);
   }
   if (node.type === "agent" || node.type === "team") {
-    return new THREE.IcosahedronGeometry(0.19 * size, 0);
+    return new THREE.IcosahedronGeometry(0.27 * size, 1);
   }
   if (node.type === "project") {
-    return new THREE.DodecahedronGeometry(0.22 * size, 0);
+    return new THREE.DodecahedronGeometry(0.235 * size, 0);
   }
-  return new THREE.SphereGeometry(0.155 * size, 12, 10);
-}
-
-function createClusterIsland(
-  THREE: ThreeApi,
-  nodes: readonly PositionedMemoryKnowledgeGraphNode[],
-  cluster: MemoryGraphCluster,
-  clusterIndex: number,
-): { geometry: import("three").BufferGeometry; radiusX: number; radiusY: number; landZ: number } {
-  const members = nodes.filter((node) => node.clusterKey === cluster.key);
-  const radiusX = Math.max(2.2, ...members.map((node) => Math.abs(node.x - cluster.center.x) + 1.15));
-  const radiusY = Math.max(1.8, ...members.map((node) => Math.abs(node.y - cluster.center.y) + 0.95));
-  const points = 48;
-  const shape = new THREE.Shape();
-  for (let index = 0; index <= points; index += 1) {
-    const angle = (index / points) * Math.PI * 2;
-    const wobble =
-      1 +
-      0.055 * Math.sin(angle * 3 + clusterIndex) +
-      0.032 * Math.cos(angle * 5 - clusterIndex * 0.6);
-    const x = Math.cos(angle) * radiusX * wobble;
-    const y = Math.sin(angle) * radiusY * wobble;
-    if (index === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  const geometry = new THREE.ShapeGeometry(shape, points);
-  const landZ = cluster.center.z - 0.68;
-  geometry.translate(cluster.center.x, cluster.center.y, landZ);
-  return { geometry, radiusX, radiusY, landZ };
+  return new THREE.SphereGeometry(0.18 * size, 32, 24);
 }
 
 function isReducedMotion(): boolean {
@@ -278,6 +252,13 @@ function initializeMemoryGraphEngine(
   runtime.addCleanup(() => renderer.dispose());
 
   const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xe1eeff, 0x29313a, 1.65));
+  const keyLight = new THREE.DirectionalLight(0xf0f3ed, 1.05);
+  keyLight.position.set(-12, 18, 25);
+  scene.add(keyLight);
+  const rimLight = new THREE.DirectionalLight(0x9fbedb, 0.65);
+  rimLight.position.set(15, -4, -14);
+  scene.add(rimLight);
   runtime.addCleanup(() => scene.clear());
   const camera = new THREE.PerspectiveCamera(44, 1, 0.1, 220);
   const positions = new Map<string, Vector3>();
@@ -323,13 +304,15 @@ function initializeMemoryGraphEngine(
   const tangent = Math.tan(THREE.MathUtils.degToRad(fieldOfView / 2));
   const contentWidth = nodes.length ? bounds.maxX - bounds.minX + 5 : 12;
   const contentHeight = nodes.length ? bounds.maxY - bounds.minY + 5 : 12;
+  const contentDepth = nodes.length ? bounds.maxZ - bounds.minZ : 0;
   const initialAspect = Math.max(0.65, host.clientWidth / Math.max(1, host.clientHeight));
-  const initialDistance = Math.max(
+  const planarFitDistance = Math.max(
     18,
     Math.max(contentHeight / (2 * tangent), contentWidth / (2 * tangent * initialAspect)) * 1.1,
   );
+  const initialDistance = planarFitDistance + contentDepth * 0.5;
   let overviewDistance = initialDistance;
-  const perspectiveDirection = new THREE.Vector3(0, Math.sin(THREE.MathUtils.degToRad(15)), Math.cos(THREE.MathUtils.degToRad(15))).normalize();
+  const perspectiveDirection = new THREE.Vector3(0.32, 0.22, 1).normalize();
   const initialCameraPosition = initialTarget.clone().add(perspectiveDirection.clone().multiplyScalar(overviewDistance));
   const flatOverviewPosition = initialTarget.clone().add(new THREE.Vector3(0, 0, overviewDistance));
   camera.position.copy(options.flat ? flatOverviewPosition : initialCameraPosition);
@@ -361,8 +344,8 @@ function initializeMemoryGraphEngine(
   controls.maxDistance = Math.max(42, overviewDistance * 2.35);
   camera.far = Math.max(220, controls.maxDistance + graphRadius * 1.5 + 10);
   camera.updateProjectionMatrix();
-  controls.minPolarAngle = Math.PI / 2 - THREE.MathUtils.degToRad(26);
-  controls.maxPolarAngle = Math.PI / 2 + THREE.MathUtils.degToRad(26);
+  controls.minPolarAngle = 0.04;
+  controls.maxPolarAngle = Math.PI - 0.04;
 
   const configureInputMode = (flat: boolean) => {
     controls.enableRotate = !flat;
@@ -407,13 +390,13 @@ function initializeMemoryGraphEngine(
   const theme = readTheme(THREE, host, clusters);
   const nodeGroups = new Map<string, import("three").Group>();
   const nodeMaterials = new Map<string, {
-    body: import("three").MeshBasicMaterial;
+    body: import("three").MeshStandardMaterial;
     ring: import("three").MeshBasicMaterial;
     clusterKey: MemoryGraphClusterKey;
   }>();
-  const islandMaterials = new Map<MemoryGraphClusterKey, {
-    land: import("three").MeshBasicMaterial;
-    contour: import("three").LineBasicMaterial;
+  const clusterMaterials = new Map<MemoryGraphClusterKey, {
+    nebula: import("three").ShaderMaterial;
+    dust: import("three").PointsMaterial;
   }>();
   const hitObjects = new Map<string, import("three").Mesh>();
   const edgePaths: MemoryGraphEdgePath[] = [];
@@ -428,7 +411,7 @@ function initializeMemoryGraphEngine(
     positions.clear();
     nodeGroups.clear();
     nodeMaterials.clear();
-    islandMaterials.clear();
+    clusterMaterials.clear();
     hitObjects.clear();
     edgePaths.length = 0;
     edgeVisuals.length = 0;
@@ -474,51 +457,50 @@ function initializeMemoryGraphEngine(
   let reducedMotion = isReducedMotion();
 
   for (const [index, cluster] of clusters.entries()) {
+    const members = nodes.filter((node) => node.clusterKey === cluster.key);
+    if (!members.length || options.flat) continue;
     const clusterColor = theme.clusterColors.get(cluster.key) ?? theme.selectedColor;
-    const island = createClusterIsland(THREE, nodes, cluster, index);
-    const landMaterial = disposeMaterial(
-      new THREE.MeshBasicMaterial({
-        color: clusterColor,
-        transparent: true,
-        opacity: 0.045,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      }),
+    const center = new THREE.Vector3(cluster.center.x, cluster.center.y, cluster.center.z);
+    const radius = Math.max(
+      2.6,
+      ...members.map((node) => positions.get(node.id)?.distanceTo(center) ?? 0),
+    ) + 1.1;
+    const nebula = disposeMaterial(
+      nebulaMaterial(THREE, center, radius, clusterColor, index * 11.71, theme.lightSurface ? 0.65 : 1),
     );
-    const land = new THREE.Mesh(disposeGeometry(island.geometry), landMaterial);
-    land.renderOrder = -2;
-    scene.add(land);
+    const cloud = new THREE.Mesh(
+      disposeGeometry(new THREE.SphereGeometry(radius, 28, 20)),
+      nebula,
+    );
+    cloud.position.copy(center);
+    cloud.renderOrder = -3;
+    scene.add(cloud);
 
-    const contourPoints: Vector3[] = [];
-    for (let point = 0; point <= 64; point += 1) {
-      const angle = (point / 64) * Math.PI * 2;
-      const wobble =
-        1 +
-        0.055 * Math.sin(angle * 3 + index) +
-        0.032 * Math.cos(angle * 5 - index * 0.6);
-      contourPoints.push(
-        new THREE.Vector3(
-          cluster.center.x + Math.cos(angle) * island.radiusX * wobble,
-          cluster.center.y + Math.sin(angle) * island.radiusY * wobble,
-          island.landZ + 0.018,
-        ),
+    const dustPositions: number[] = [];
+    for (let star = 0; star < 44; star += 1) {
+      const vertical = 1 - (2 * (star + 0.5)) / 44;
+      const angle = star * 2.39996323;
+      const radial = radius * 0.84 * Math.cbrt((((star * 17) % 43) + 1) / 44);
+      const circle = Math.sqrt(1 - vertical * vertical);
+      dustPositions.push(
+        center.x + radial * circle * Math.cos(angle),
+        center.y + radial * vertical,
+        center.z + radial * circle * Math.sin(angle),
       );
     }
-    const contourMaterial = disposeMaterial(
-      new THREE.LineBasicMaterial({
+    const dustGeometry = disposeGeometry(new THREE.BufferGeometry());
+    dustGeometry.setAttribute("position", new THREE.Float32BufferAttribute(dustPositions, 3));
+    const dust = disposeMaterial(
+      new THREE.PointsMaterial({
         color: clusterColor,
+        size: 0.026,
         transparent: true,
-        opacity: 0.17,
+        opacity: 0.42,
         depthWrite: false,
       }),
     );
-    const contour = new THREE.Line(
-      disposeGeometry(new THREE.BufferGeometry().setFromPoints(contourPoints)),
-      contourMaterial,
-    );
-    contour.renderOrder = -1;
-    scene.add(contour);
-    islandMaterials.set(cluster.key, { land: landMaterial, contour: contourMaterial });
+    scene.add(new THREE.Points(dustGeometry, dust));
+    clusterMaterials.set(cluster.key, { nebula, dust });
   }
 
   for (const edge of edges) {
@@ -527,7 +509,7 @@ function initializeMemoryGraphEngine(
     if (!start || !end) continue;
 
     const middle = start.clone().add(end).multiplyScalar(0.5);
-    middle.z += 0.22 + Math.min(0.32, start.distanceTo(end) * 0.02);
+    if (!options.flat) middle.z += 0.22 + Math.min(0.32, start.distanceTo(end) * 0.02);
     const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
     const lineMaterial = disposeMaterial(
       new THREE.LineBasicMaterial({
@@ -575,7 +557,15 @@ function initializeMemoryGraphEngine(
     const group = new THREE.Group();
     group.position.set(node.x, node.y, node.z);
     const bodyMaterial = disposeMaterial(
-      new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.88 }),
+      new THREE.MeshStandardMaterial({
+        color: colorHex,
+        roughness: 0.96,
+        metalness: 0,
+        emissive: colorHex,
+        emissiveIntensity: theme.lightSurface ? 0.02 : 0.09,
+        transparent: true,
+        opacity: 0.88,
+      }),
     );
     const ringMaterial = disposeMaterial(
       new THREE.MeshBasicMaterial({
@@ -667,10 +657,17 @@ function initializeMemoryGraphEngine(
       appearance.body.color.setHex(color);
       appearance.ring.color.setHex(color);
     }
-    for (const [key, appearance] of islandMaterials) {
+    for (const appearance of nodeMaterials.values()) {
+      appearance.body.emissive.setHex(
+        theme.clusterColors.get(appearance.clusterKey) ?? theme.selectedColor,
+      );
+      appearance.body.emissiveIntensity = next.lightSurface ? 0.02 : 0.09;
+    }
+    for (const [key, appearance] of clusterMaterials) {
       const color = theme.clusterColors.get(key) ?? theme.selectedColor;
-      appearance.land.color.setHex(color);
-      appearance.contour.color.setHex(color);
+      appearance.nebula.uniforms.tint.value.setHex(color);
+      appearance.nebula.uniforms.strength.value = next.lightSurface ? 0.65 : 1;
+      appearance.dust.color.setHex(color);
     }
     for (const visual of edgeVisuals) {
       visual.material.color.setHex(theme.edgeColor);
@@ -805,10 +802,11 @@ function initializeMemoryGraphEngine(
       camera.position.distanceTo(oldOverview) < 0.5 &&
       controls.target.distanceTo(initialTarget) < 0.5;
     camera.aspect = width / height;
-    const nextDistance = Math.max(
+    const planarFitDistance = Math.max(
       18,
       Math.max(contentHeight / (2 * tangent), contentWidth / (2 * tangent * camera.aspect)) * 1.1,
     );
+    const nextDistance = planarFitDistance + contentDepth * 0.5;
     overviewDistance = nextDistance;
     initialCameraPosition.copy(initialTarget).add(perspectiveDirection.clone().multiplyScalar(nextDistance));
     flatOverviewPosition.copy(initialTarget).add(new THREE.Vector3(0, 0, nextDistance));

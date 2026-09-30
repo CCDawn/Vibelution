@@ -35,11 +35,11 @@ export type MemoryGraphLayout = {
 type ClusterDefinition = Omit<MemoryGraphCluster, "nodeIds">;
 
 const CLUSTERS: readonly ClusterDefinition[] = [
-  { key: "workspace", label: "项目与团队", center: { x: -11, y: 5, z: -0.12 } },
-  { key: "agents", label: "Agent 与私有记忆", center: { x: 2, y: 9, z: 0.08 } },
-  { key: "knowledge", label: "知识与概念", center: { x: 14, y: 2, z: -0.06 } },
-  { key: "sources", label: "知识来源", center: { x: 6, y: -8, z: 0.12 } },
-  { key: "operations", label: "运行与扩展", center: { x: -9, y: -9, z: 0.02 } },
+  { key: "workspace", label: "项目与团队", center: { x: -7, y: 7, z: -3 } },
+  { key: "agents", label: "Agent 与私有记忆", center: { x: -6, y: 0, z: 5 } },
+  { key: "knowledge", label: "知识与概念", center: { x: 2, y: 4, z: -5 } },
+  { key: "sources", label: "知识来源", center: { x: 7, y: -2, z: 3 } },
+  { key: "operations", label: "运行与扩展", center: { x: -1, y: -5, z: -4 } },
 ] as const;
 
 const TYPE_CLUSTER: Record<string, MemoryGraphClusterKey> = {
@@ -78,7 +78,7 @@ function clusterForType(type: string): MemoryGraphClusterKey {
 }
 
 function radiusForCount(count: number): number {
-  return count <= 1 ? 0 : 1.15 + Math.sqrt(Math.max(0, count - 2)) * 0.64;
+  return count <= 1 ? 0 : 1.35 + Math.cbrt(count) * 0.7;
 }
 
 function resolveClusterCenters(
@@ -102,7 +102,7 @@ function resolveClusterCenters(
     for (let right = left + 1; right < populated.length; right += 1) {
       const deltaX = populated[left].center.x - populated[right].center.x;
       const deltaY = populated[left].center.y - populated[right].center.y;
-      nearest = Math.min(nearest, Math.hypot(deltaX, deltaY));
+      nearest = Math.min(nearest, Math.hypot(deltaX, deltaY, populated[left].center.z - populated[right].center.z));
     }
   }
 
@@ -116,7 +116,7 @@ function resolveClusterCenters(
     centers.set(cluster.key, {
       x: centroid.x + (cluster.center.x - centroid.x) * spacingScale,
       y: centroid.y + (cluster.center.y - centroid.y) * spacingScale,
-      z: cluster.center.z,
+      z: centroid.z + (cluster.center.z - centroid.z) * spacingScale,
     });
   }
   return centers;
@@ -148,7 +148,6 @@ export function layoutMemoryKnowledgeGraph(
   }
   const counts = new Map([...grouped.entries()].map(([key, members]) => [key, members.length]));
   const centers = resolveClusterCenters(CLUSTERS, counts);
-  const definitions = new Map(CLUSTERS.map((cluster) => [cluster.key, cluster]));
   const positioned: PositionedMemoryKnowledgeGraphNode[] = [];
   const clusters: MemoryGraphCluster[] = [];
 
@@ -167,16 +166,20 @@ export function layoutMemoryKnowledgeGraph(
     });
 
     members.forEach((source, index) => {
-      const angle = CLUSTER_PHASE[definition.key] + Math.max(0, index - 1) * GOLDEN_ANGLE;
-      const radius = index === 0 ? 0 : 1.15 + Math.sqrt(index - 1) * 0.64;
+      // A spherical distribution gives every topic genuine depth. Small radial
+      // variation avoids a hollow shell without piling nodes at the center.
+      const angle = CLUSTER_PHASE[definition.key] + index * GOLDEN_ANGLE;
+      const vertical = 1 - 2 * (index + 0.5) / members.length;
+      const radial = Math.sqrt(Math.max(0, 1 - vertical * vertical));
+      const radius = radiusForCount(members.length) * (index % 3 === 0 ? 0.82 : 1);
       positioned.push({
         id: source.id,
         source,
         clusterKey: definition.key,
         clusterLabel: definition.label,
-        x: center.x + Math.cos(angle) * radius,
-        y: center.y + Math.sin(angle) * radius * 0.72,
-        z: center.z + (index % 3 - 1) * 0.075,
+        x: center.x + Math.cos(angle) * radial * radius,
+        y: center.y + vertical * radius,
+        z: center.z + Math.sin(angle) * radial * radius,
       });
     });
   }

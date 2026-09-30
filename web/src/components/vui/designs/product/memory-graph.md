@@ -4,7 +4,7 @@
 
 ### 功能
 
-将服务端已授权的记忆与知识关系投影为可旋转、平移、缩放、选择节点与关系的主题簇画布。落实用户确认的第二版隔离预览：克制色彩、浅纵深、按缩放显示标签、选中邻域突出方向。
+将服务端已授权的记忆与知识关系投影为可旋转、平移、缩放、选择节点与关系的主题簇画布。落实用户确认的三维星域预览：节点在 XYZ 三轴分布、不同主题由彩色体积星云包裹，节点使用柔和哑光材质；按缩放显示标签、选中邻域突出方向。
 
 ### 适用范围
 
@@ -20,7 +20,7 @@ import { VMemoryGraphCanvas } from "../components/vui";
   flat={false} onSelectEdge={setEdgeId} />
 ```
 
-输入保留 MemoryKnowledgeGraphNode / Edge DTO 的身份与方向，节点详情与来源读取归 route 的现有 query。`flat` 控制平面左拖平移；3D 左拖旋转、右拖平移；`focusToken` 显式触发聚焦；普通 selection 不重建引擎或重置镜头；`highlightIds` 标记搜索命中。
+输入保留 MemoryKnowledgeGraphNode / Edge DTO 的身份与方向，节点详情与来源读取归 route 的现有 query。`flat` 将节点与关系投影至 z=0 并以左拖平移；3D 恢复空间坐标，左拖全方位环绕、右拖平移；`focusToken` 显式触发聚焦；普通 selection 不重建引擎或重置镜头；`highlightIds` 标记搜索命中。
 
 ### 非职责
 
@@ -28,7 +28,7 @@ import { VMemoryGraphCanvas } from "../components/vui";
 
 ### 视觉与状态
 
-遵循产品主题变量；远景显示主题，近景逐步增加节点标签，文字避让节点及其他标签。选中突出一跳关系，关系名称保留服务端原值。画布空态、加载态、WebGL失败列表及键盘选择保持可用。详情默认收起，选点展开；窄屏复用 VCanvasWorkbenchPage 的受控 drawer，以保留产品级焦点和键盘约定。
+遵循产品主题变量；星云复用已批准预览的有限步数体积噪声，按需渲染、不引入持续动画；资源随画布卸载释放。远景显示主题，近景逐步增加节点标签，文字避让节点及其他标签。选中突出一跳关系，关系名称保留服务端原值。画布空态、加载态、WebGL失败列表及键盘选择保持可用。详情默认收起，选点展开；窄屏复用 VCanvasWorkbenchPage 的受控 drawer，以保留产品级焦点和键盘约定。
 
 ### 实现落点
 

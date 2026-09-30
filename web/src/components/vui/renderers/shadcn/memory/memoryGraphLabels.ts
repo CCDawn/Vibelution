@@ -104,6 +104,7 @@ export function createMemoryGraphLabelElements(
     button.dataset.nodeId = node.id;
     button.dataset.nodeType = node.type;
     button.dataset.clusterKey = viewNode.clusterKey;
+    button.dataset.worldPosition = [viewNode.x, viewNode.y, viewNode.z].join(",");
     button.setAttribute(
       "aria-label",
       [node.label, kindLabel(node), viewNode.clusterLabel, node.summary].filter(Boolean).join("，"),
