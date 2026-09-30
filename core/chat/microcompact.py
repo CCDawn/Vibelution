@@ -21,10 +21,24 @@ Semantics (v1):
 The projection is read-time only. The ConversationLedger is never touched;
 the next assembly rebuilds history from the ledger and re-derives the
 projection, so the persisted transcript stays the single source of truth.
+
+When the projection applies, the working-set re-injection stage (borrowed
+from ZCode ``runtime/helpers/compact-post-reminders.ts``; design, not code)
+rebuilds the most recently read working-set files from the cleared
+``read_file_tool`` groups as synthetic system-role Read reminders appended to
+the projected list: at most 5 files, one file capped at 5k estimated tokens
+and the whole batch at 50k; anything over the limits degrades to a one-line
+"re-read with read_file_tool" pointer. Files whose reads are still live in
+the preserved tail are skipped, ``.git`` paths are excluded, and paths are
+deduplicated keeping the latest read. The reminders carry the shared
+reference + sha256 + tool_call_id recoverability contract, contain no
+wall-clock data, and are therefore deterministic per input: the next
+assembly rebuilds the same view.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from .tool_result_replacement import (
@@ -37,6 +51,14 @@ MICRO_COMPACT_SCHEMA_VERSION = 1
 DEFAULT_KEEP_RECENT_GROUPS = 5
 DEFAULT_MIN_SAVINGS_TOKENS = 256
 DEFAULT_PREVIEW_CHAR_LIMIT = 800
+
+DEFAULT_REINJECTION_MAX_FILES = 5
+DEFAULT_REINJECTION_MAX_FILE_TOKENS = 5_000
+DEFAULT_REINJECTION_MAX_TOTAL_TOKENS = 50_000
+# Working-set re-injection restores *file* reads; search/list results carry
+# no single-file content, so only the file-reading tool re-enters context.
+WORKING_SET_REINJECTION_TOOL = "read_file_tool"
+WORKING_SET_REINJECTION_HEADER = "[工作集文件重注入]"
 
 # Error-preservation convention shared with tools/token_manager.py
 # (``_ERROR_KEYWORDS``): results carrying these markers are retention
@@ -132,6 +154,21 @@ def empty_micro_compact_state() -> dict[str, Any]:
         "skippedErrorOrMediaGroups": 0,
         "rollbackReason": "",
         "replacements": [],
+        "reinjection": empty_working_set_reinjection_state(),
+        "tokenMetering": {"tokenSource": "estimate"},
+    }
+
+
+def empty_working_set_reinjection_state() -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "mode": "working_set_reinjection",
+        "injectedFiles": [],
+        "downgradedFiles": [],
+        "skippedPreservedPaths": [],
+        "skippedGitPathCount": 0,
+        "totalTokens": 0,
+        "entries": [],
     }
 
 
@@ -144,12 +181,19 @@ def apply_micro_compact_projection(
     tool_whitelist: Iterable[str] | None = None,
     preview_char_limit: int = DEFAULT_PREVIEW_CHAR_LIMIT,
     estimate_tokens: Any = None,
+    reinjection_enabled: bool = True,
+    reinjection_max_files: int = DEFAULT_REINJECTION_MAX_FILES,
+    reinjection_max_file_tokens: int = DEFAULT_REINJECTION_MAX_FILE_TOKENS,
+    reinjection_max_total_tokens: int = DEFAULT_REINJECTION_MAX_TOTAL_TOKENS,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Project old whitelisted tool results onto reference+preview placeholders.
 
     Returns ``(projected_messages, state)``. When the projection is skipped or
     rolled back the original list contents are returned unchanged (new list
     object, same message objects) and ``state["applied"]`` stays ``False``.
+    When it applies, the working-set re-injection stage appends synthetic
+    system-role Read reminders for the cleared ``read_file_tool`` groups
+    (deterministic per input; see module docstring).
     """
 
     source = list(messages or [])
@@ -258,7 +302,163 @@ def apply_micro_compact_projection(
             "replacements": replacements,
         }
     )
+    if reinjection_enabled:
+        cleared_group_indexes = {
+            group_index for group_index, _group, _results in clearable
+        }
+        preserved_paths = _preserved_working_set_paths(
+            groups,
+            tool_group_indexes,
+            cleared_group_indexes,
+        )
+        reinjection_state = build_working_set_reinjection(
+            clearable,
+            preserved_paths=preserved_paths,
+            session_id=session_id,
+            max_files=reinjection_max_files,
+            max_file_tokens=reinjection_max_file_tokens,
+            max_total_tokens=reinjection_max_total_tokens,
+        )
+        state["reinjection"] = reinjection_state
+        projected.extend(reinjection_state["entries"])
     return projected, state
+
+
+def build_working_set_reinjection(
+    clearable: list[tuple[int, list[Any], list[dict[str, Any]]]],
+    *,
+    preserved_paths: set[str],
+    session_id: str = "",
+    max_files: int = DEFAULT_REINJECTION_MAX_FILES,
+    max_file_tokens: int = DEFAULT_REINJECTION_MAX_FILE_TOKENS,
+    max_total_tokens: int = DEFAULT_REINJECTION_MAX_TOTAL_TOKENS,
+) -> dict[str, Any]:
+    """Build the deterministic working-set re-injection for cleared file reads.
+
+    ``clearable`` carries the pre-replacement groups, so the original file
+    contents are still available here. Candidates come from cleared
+    ``read_file_tool`` calls only; paths still live in the preserved tail
+    (``preserved_paths``) are skipped, ``.git`` paths are excluded, and a path
+    read several times keeps only its latest content. Selection is
+    most-recent-first, capped at ``max_files``; a file over
+    ``max_file_tokens`` estimated tokens, or that would push the batch over
+    ``max_total_tokens``, degrades to a one-line re-read pointer.
+    """
+
+    state = empty_working_set_reinjection_state()
+    bounded_max_files = max(
+        0, int(max_files if max_files is not None else DEFAULT_REINJECTION_MAX_FILES)
+    )
+    bounded_file_limit = max(
+        0,
+        int(
+            max_file_tokens
+            if max_file_tokens is not None
+            else DEFAULT_REINJECTION_MAX_FILE_TOKENS
+        ),
+    )
+    bounded_total_limit = max(
+        0,
+        int(
+            max_total_tokens
+            if max_total_tokens is not None
+            else DEFAULT_REINJECTION_MAX_TOTAL_TOKENS
+        ),
+    )
+
+    candidates: dict[str, dict[str, Any]] = {}
+    for group_index, group, results in clearable:
+        for entry in _message_tool_call_args(group[0]):
+            if str(entry.get("name") or "").strip() != WORKING_SET_REINJECTION_TOOL:
+                continue
+            args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
+            path = str(args.get("file_path") or args.get("path") or "").strip()
+            if not path:
+                continue
+            normalized = _normalize_reinjection_path(path)
+            if "/.git/" in f"/{normalized}":
+                state["skippedGitPathCount"] += 1
+                continue
+            if normalized in preserved_paths:
+                if normalized not in state["skippedPreservedPaths"]:
+                    state["skippedPreservedPaths"].append(normalized)
+                continue
+            content = _cleared_group_result_content(entry, group, results)
+            if not str(content or "").strip():
+                continue
+            # Later reads of the same path win: the dict is overwritten in
+            # group order, so the last (most recent) read is kept.
+            candidates[normalized] = {
+                "path": path,
+                "normalizedPath": normalized,
+                "content": str(content or ""),
+                "toolCallId": str(entry.get("id") or ""),
+                "order": group_index,
+            }
+
+    ordered = sorted(
+        candidates.values(),
+        key=lambda item: (-int(item["order"]), str(item["normalizedPath"])),
+    )
+    total_tokens = 0
+    for candidate in ordered[:bounded_max_files]:
+        content = candidate["content"]
+        approx_tokens = _estimate_content_tokens(content)
+        if (
+            approx_tokens > bounded_file_limit
+            or total_tokens + approx_tokens > bounded_total_limit
+        ):
+            state["downgradedFiles"].append(candidate["path"])
+            state["entries"].append(_build_reinjection_pointer_message(candidate))
+            continue
+        total_tokens += approx_tokens
+        state["injectedFiles"].append(candidate["path"])
+        state["entries"].append(
+            _build_reinjection_message(
+                candidate,
+                session_id=session_id,
+            )
+        )
+    state["totalTokens"] = int(total_tokens)
+    return state
+
+
+def append_working_set_reminders(
+    messages: list[Any],
+    entries: Iterable[Any],
+) -> list[Any]:
+    """Append reminder entries, skipping files whose reads are live again.
+
+    Deterministic post-filter for call sites that re-derive the message list
+    between projection and send (chat-mode ledger replay restores original
+    tool results): an entry whose ``toolCallId`` is present on a
+    non-placeholder tool result in ``messages`` is dropped instead of
+    duplicating live content. Entries are plain data, so re-running on the
+    same inputs yields the same list.
+    """
+
+    live_call_ids: set[str] = set()
+    for message in list(messages or []):
+        if _message_role(message) != "tool" or _result_is_placeholder(message):
+            continue
+        call_id = _message_tool_call_id(message)
+        if call_id:
+            live_call_ids.add(call_id)
+    result = list(messages or [])
+    for entry in list(entries or []):
+        metadata = entry.get("metadata") if isinstance(entry, dict) else {}
+        payload = (
+            metadata.get("workingSetReinjection")
+            if isinstance(metadata, dict)
+            else {}
+        )
+        call_id = (
+            str(payload.get("toolCallId") or "") if isinstance(payload, dict) else ""
+        )
+        if call_id and call_id in live_call_ids:
+            continue
+        result.append(entry)
+    return result
 
 
 def _pair_preserving_groups(messages: list[Any]) -> list[list[Any]]:
@@ -496,12 +696,201 @@ def _default_estimate_tokens(messages: list[Any]) -> int:
     return int(estimate_messages_tokens(messages))
 
 
+def _message_tool_call_args(message: Any) -> list[dict[str, Any]]:
+    """Return ``{id, name, args}`` entries; ``args`` is parsed lazily.
+
+    Covers both shapes the projection sees: OpenAI-style dicts with
+    ``function.arguments`` JSON strings and LangChain ``AIMessage.tool_calls``
+    with an ``args`` mapping. Malformed arguments degrade to an empty mapping
+    so the candidate is skipped, never raised.
+    """
+
+    if isinstance(message, dict):
+        raw_items = list(message.get("tool_calls") or message.get("toolCalls") or [])
+    else:
+        raw_items = list(getattr(message, "tool_calls", None) or [])
+    entries: list[dict[str, Any]] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        function_block = (
+            raw.get("function") if isinstance(raw.get("function"), dict) else {}
+        )
+        call_id = str(
+            raw.get("id")
+            or raw.get("tool_call_id")
+            or raw.get("toolCallId")
+            or ""
+        ).strip()
+        name = str(
+            raw.get("name")
+            or raw.get("toolName")
+            or raw.get("tool_name")
+            or function_block.get("name")
+            or ""
+        ).strip()
+        raw_args = raw.get("args")
+        if raw_args is None:
+            raw_args = function_block.get("arguments")
+        if raw_args is None:
+            raw_args = raw.get("arguments")
+        entries.append(
+            {
+                "id": call_id,
+                "name": name,
+                "args": _coerce_args_mapping(raw_args),
+            }
+        )
+    return entries
+
+
+def _coerce_args_mapping(raw_args: Any) -> dict[str, Any]:
+    if isinstance(raw_args, dict):
+        return raw_args
+    if isinstance(raw_args, str) and raw_args.strip():
+        try:
+            parsed = json.loads(raw_args)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _cleared_group_result_content(
+    entry: dict[str, Any],
+    group: list[Any],
+    results: list[Any],
+) -> str:
+    """Original content of the cleared result belonging to one call entry."""
+
+    call_id = str(entry.get("id") or "").strip()
+    for message in results:
+        if call_id and _message_tool_call_id(message) == call_id:
+            return _message_content(message)
+    for message in group[1:]:
+        if _is_tool_result(message) and (
+            not call_id or _message_tool_call_id(message) == call_id
+        ):
+            return _message_content(message)
+    return ""
+
+
+def _preserved_working_set_paths(
+    groups: list[list[Any]],
+    tool_group_indexes: list[int],
+    cleared_group_indexes: set[int],
+) -> set[str]:
+    """Normalized paths whose read results are still live (never cleared).
+
+    Covers both "still inside the kept recent tail" and "older but skipped
+    from clearing (whitelist/error/media)": in both cases the original
+    content stays in the projection output, so a synthetic reminder would
+    duplicate live context.
+    """
+
+    preserved: set[str] = set()
+    for group_index in tool_group_indexes:
+        if group_index in cleared_group_indexes:
+            continue
+        for entry in _message_tool_call_args(groups[group_index][0]):
+            if str(entry.get("name") or "").strip() != WORKING_SET_REINJECTION_TOOL:
+                continue
+            args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
+            path = str(args.get("file_path") or args.get("path") or "").strip()
+            if path:
+                preserved.add(_normalize_reinjection_path(path))
+    return preserved
+
+
+def _normalize_reinjection_path(path: str) -> str:
+    return str(path or "").strip().replace("\\", "/")
+
+
+def _estimate_content_tokens(content: str) -> int:
+    """Estimated tokens under the shared token-manager convention."""
+
+    from tools.token_manager import estimate_tokens_precise
+
+    try:
+        return max(0, int(estimate_tokens_precise(str(content or ""))))
+    except Exception:
+        return max(0, len(str(content or "")) // 4)
+
+
+def _build_reinjection_message(
+    candidate: dict[str, Any],
+    *,
+    session_id: str,
+) -> dict[str, Any]:
+    content = candidate["content"]
+    _placeholder, reference, digest = build_tool_result_placeholder(
+        content=content,
+        session_id=session_id,
+        tool_call_id=candidate["toolCallId"],
+        tool_name=WORKING_SET_REINJECTION_TOOL,
+        preview_limit=0,
+    )
+    body = "\n".join(
+        [
+            WORKING_SET_REINJECTION_HEADER,
+            f"文件: {candidate['path']}",
+            f"引用: {reference}",
+            f"工具调用ID: {candidate['toolCallId']}",
+            f"原始SHA256: {digest}",
+            "说明: 以下为微压缩前最近一次读取的文件内容；"
+            "需要完整重读时用 read_file_tool。",
+            "文件内容:",
+            content,
+        ]
+    )
+    return {
+        "role": "system",
+        "content": body,
+        "metadata": {
+            "workingSetReinjection": {
+                "mode": "full",
+                "path": candidate["path"],
+                "reference": reference,
+                "sha256": digest,
+                "toolCallId": candidate["toolCallId"],
+            }
+        },
+    }
+
+
+def _build_reinjection_pointer_message(candidate: dict[str, Any]) -> dict[str, Any]:
+    body = (
+        f"{WORKING_SET_REINJECTION_HEADER} 文件 {candidate['path']} 在微压缩前被读取，"
+        "内容过大未随上下文恢复；需要时用 read_file_tool 重读。"
+    )
+    return {
+        "role": "system",
+        "content": body,
+        "metadata": {
+            "workingSetReinjection": {
+                "mode": "pointer",
+                "path": candidate["path"],
+                "toolCallId": candidate["toolCallId"],
+            }
+        },
+    }
+
+
 __all__ = [
     "DEFAULT_KEEP_RECENT_GROUPS",
     "DEFAULT_MIN_SAVINGS_TOKENS",
+    "DEFAULT_PREVIEW_CHAR_LIMIT",
+    "DEFAULT_REINJECTION_MAX_FILES",
+    "DEFAULT_REINJECTION_MAX_FILE_TOKENS",
+    "DEFAULT_REINJECTION_MAX_TOTAL_TOKENS",
     "MICRO_COMPACT_SCHEMA_VERSION",
+    "WORKING_SET_REINJECTION_HEADER",
+    "WORKING_SET_REINJECTION_TOOL",
+    "append_working_set_reminders",
     "apply_micro_compact_projection",
+    "build_working_set_reinjection",
     "empty_micro_compact_state",
+    "empty_working_set_reinjection_state",
     "micro_compact_band_contains",
     "micro_compact_trigger_tokens",
     "normalize_micro_compact_whitelist",

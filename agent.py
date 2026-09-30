@@ -89,6 +89,10 @@ from core.chat.microcompact import (
     empty_micro_compact_state,
     micro_compact_trigger_tokens,
 )
+from core.chat.microcompact_anchor import (
+    estimate_tokens_with_anchor,
+    load_provider_usage_anchor,
+)
 from core.chat.model_messages import normalize_model_messages
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
 from core.orchestration.cache_diagnostics import (
@@ -1032,6 +1036,45 @@ class AgentRuntime:
             "tool_whitelist": list(getattr(cc, "micro_compact_tool_whitelist", []) or []),
         }
 
+    def _micro_compact_gate_metering(
+        self,
+        messages: list,
+        *,
+        fallback_tokens: int,
+        trigger_tokens: int,
+    ) -> tuple[int, Dict[str, Any]]:
+        """Hybrid metering for the micro-compaction trigger gate.
+
+        Anchors on the latest committed provider usage for this conversation
+        (usage ledger, strictly read-only) and only locally estimates the
+        messages produced after the last committed assistant. Any failure or
+        missing anchor falls back to the pure estimate — behaviorally
+        identical to the pre-anchor tier. The returned audit dict carries
+        ``tokenSource`` (``estimate`` / ``provider_usage`` / ``anchor+estimate``)
+        into the micro-compaction decision record.
+        """
+
+        try:
+            conversation_id = str(
+                (_turn_runtime_from_env() or {}).get("sessionId") or ""
+            ).strip()
+            anchor = load_provider_usage_anchor(
+                conversation_id=conversation_id,
+                session_id=conversation_id,
+            )
+            tokens, metering = estimate_tokens_with_anchor(
+                messages,
+                anchor=anchor,
+                fallback_tokens=fallback_tokens,
+                incremental_estimate=lambda slice_messages: estimate_messages_tokens_for_threshold(
+                    slice_messages,
+                    trigger_tokens,
+                ),
+            )
+            return max(0, int(tokens)), metering
+        except Exception:
+            return max(0, int(fallback_tokens or 0)), {"tokenSource": "estimate"}
+
     def _apply_micro_compact_messages(
         self,
         messages: list,
@@ -1039,12 +1082,14 @@ class AgentRuntime:
         iteration: int,
         estimated_tokens: int,
         trigger_tokens: int,
+        metering: Optional[Dict[str, Any]] = None,
     ) -> tuple[list, Dict[str, Any]]:
         """Apply the read-time micro-compaction projection to live turn messages.
 
         Ledger stays untouched; the projection only rewrites old whitelisted
         tool-result contents, so the next turn rebuilds the same view from the
-        ledger via the context assembler.
+        ledger via the context assembler. The gate's hybrid metering audit
+        (``tokenSource``) rides on the returned decision state.
         """
 
         settings = self._micro_compact_settings()
@@ -1060,6 +1105,7 @@ class AgentRuntime:
         except Exception as exc:
             state = empty_micro_compact_state()
             state["rollbackReason"] = "projection_failed"
+            state["tokenMetering"] = dict(metering or {"tokenSource": "estimate"})
             _record_agent_scene_event(
                 "llm",
                 "agent.context_micro_compact.failed",
@@ -1073,10 +1119,14 @@ class AgentRuntime:
                 },
             )
             return messages, state
+        state["tokenMetering"] = dict(metering or {"tokenSource": "estimate"})
         common_fields = {
             "iteration": iteration,
             "triggerTokens": max(0, int(trigger_tokens or 0)),
             "estimatedTokens": max(0, int(estimated_tokens or 0)),
+            "tokenSource": str(
+                (metering or {}).get("tokenSource") or "estimate"
+            ),
             "clearedGroups": int(state.get("clearedGroups") or 0),
             "clearedResults": int(state.get("clearedResults") or 0),
             "tokensSaved": int(state.get("tokensSaved") or 0),
@@ -2854,20 +2904,25 @@ class AgentRuntime:
                 # 微压缩 tier：估算落入 [微压缩触发线, 全量触发线) 时先做读时
                 # 投影，清除白名单工具的旧工具结果；重估降到全量触发线之下则
                 # 本轮不触发全量压缩（ledger 不动，下轮按 ledger 重建同视图）。
+                # 触发判定用混合计量：以最近一条已提交 provider usage 为基数，
+                # 仅对其后消息做本地估算；无锚点时回退纯估算（与原行为等价）。
                 micro_compact_state: Optional[Dict[str, Any]] = None
                 if not compression_triggered:
                     micro_trigger_tokens = self._micro_compact_trigger_tokens()
-                    if (
-                        micro_trigger_tokens > 0
-                        and current_tokens >= micro_trigger_tokens
-                        and self._micro_compact_enabled()
-                    ):
-                        messages, micro_compact_state = self._apply_micro_compact_messages(
+                    if micro_trigger_tokens > 0 and self._micro_compact_enabled():
+                        gate_tokens, gate_metering = self._micro_compact_gate_metering(
                             messages,
-                            iteration=iteration,
-                            estimated_tokens=current_tokens,
+                            fallback_tokens=current_tokens,
                             trigger_tokens=micro_trigger_tokens,
                         )
+                        if gate_tokens >= micro_trigger_tokens:
+                            messages, micro_compact_state = self._apply_micro_compact_messages(
+                                messages,
+                                iteration=iteration,
+                                estimated_tokens=gate_tokens,
+                                trigger_tokens=micro_trigger_tokens,
+                                metering=gate_metering,
+                            )
                         if micro_compact_state.get("applied"):
                             current_tokens = estimate_messages_tokens_for_threshold(
                                 messages,
