@@ -90,6 +90,25 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _persist_agent_registry(path: Path, payload: dict[str, Any], project_root: Path) -> None:
+    """Persist agents.json through the agent_directory registry surface.
+
+    The agent registry is the directory's authority file: rebind writes must
+    share its registry lock, shrink guard and atomic replacement instead of a
+    bare non-atomic write_text, and must target the directory-resolved path so
+    developer-mode sandbox routing keeps a single registry copy.
+    """
+    from core.web.services.agent_directory import ops_residual as agent_registry
+
+    registry_file = agent_registry.registry_path(project_root=project_root)
+    if path.resolve() != registry_file.resolve() and path.exists():
+        # Detached registry copy outside the directory routing: not the shared
+        # authority, so keep a plain atomic single-file write for it.
+        atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        return
+    agent_registry.save_registry_payload(payload, project_root=project_root)
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -994,7 +1013,7 @@ def _replace_workspace_agent_refs(path: Path, project_root: Path, from_model_id:
             )
         )
     if updated_refs:
-        _write_json(path, payload)
+        _persist_agent_registry(path, payload, project_root)
     return updated_refs, bool(updated_refs)
 
 

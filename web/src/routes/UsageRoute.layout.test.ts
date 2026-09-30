@@ -1,255 +1,144 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const usageQueryState = vi.hoisted(() => ({
-  current: {} as Record<string, unknown>,
-  invalidateQueries: vi.fn(),
-}));
-
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => usageQueryState.current,
-  useQueryClient: () => ({ invalidateQueries: usageQueryState.invalidateQueries }),
-}));
-vi.mock("../app/pollingPolicy", () => ({
-  resolvePollingInterval: () => false,
-  usePageVisibility: () => true,
-}));
-vi.mock("../i18n/useAppI18n", () => ({ useAppI18n: () => ({ lang: "zh" }) }));
-
-import routeSource from "./UsageRoute.tsx?raw";
-import stylesSource from "./UsageRoute.styles.ts?raw";
-import styles from "./UsageRoute.styles";
+const query = vi.hoisted(() => ({ current: {} as Record<string, unknown>, refetch: vi.fn(), lang: "zh" }));
+vi.mock("@tanstack/react-query", () => ({ useQuery: () => query.current }));
+vi.mock("../app/pollingPolicy", () => ({ resolvePollingInterval: () => false, usePageVisibility: () => true }));
+vi.mock("../i18n/useAppI18n", () => ({ useAppI18n: () => ({ lang: query.lang }) }));
 import { UsageRoute } from "./UsageRoute";
+import routeSource from "./UsageRoute.tsx?raw";
+import utilitySource from "../app/AppShellUtilityMenu.tsx?raw";
+import settingsSource from "../app/AppShellSettingsMenu.tsx?raw";
+import styles from "./UsageRoute.styles";
 
-const ZERO_ROLLUP = {
-  inputTokens: 0,
-  cachedInputTokens: 0,
-  cacheReadInputTokens: 0,
-  cacheCreationInputTokens: 0,
-  uncachedInputTokens: 0,
-  outputTokens: 0,
-  reasoningOutputTokens: 0,
-  totalTokens: 0,
-  callCount: 0,
-  observedCallCount: 0,
-  estimatedCallCount: 0,
-  missingCallCount: 0,
-  notCalledCount: 0,
-  latencyMs: 0,
-  cacheHitRate: 0,
+const zero = {
+  inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0,
+  totalTokens: 0, callCount: 0, observedCallCount: 0, estimatedCallCount: 0, missingCallCount: 0,
 };
-
-const LOADED_ZERO_SUMMARY = {
-  scope: "global",
-  globalTokenUsage: { allTime: ZERO_ROLLUP, today: ZERO_ROLLUP, last7Days: ZERO_ROLLUP },
-  sessionTokenUsage: ZERO_ROLLUP,
-  agentTokenUsage: ZERO_ROLLUP,
-  scopeTokenUsage: ZERO_ROLLUP,
+const week = {
+  ...zero, inputTokens: 1000, outputTokens: 200, totalTokens: 1200, cachedInputTokens: 250,
+  reasoningOutputTokens: 50, callCount: 10, observedCallCount: 7, estimatedCallCount: 2, missingCallCount: 1,
+  cacheHitRate: 0.9,
 };
-
-const STALE_SENTINEL_SUMMARY = {
-  ...LOADED_ZERO_SUMMARY,
-  globalTokenUsage: {
-    ...LOADED_ZERO_SUMMARY.globalTokenUsage,
-    allTime: { ...ZERO_ROLLUP, totalTokens: 12_345, callCount: 1 },
-  },
+const summary = {
+  globalTokenUsage: { today: { ...week, totalTokens: 500 }, last7Days: week, allTime: { ...week, totalTokens: 12000 } },
+  lastTokenUsage: { source: "missing", totalTokens: 0, eventId: "event-demo", provider: "example", model: "test-model" },
+  diagnostics: { source: "usage_ledger", schemaVersion: 1, skippedRecordCount: 2 },
 };
-
-function renderUsage(state: Record<string, unknown>) {
-  usageQueryState.current = {
-    data: undefined,
-    error: null,
-    isError: false,
-    isFetching: false,
-    isPending: false,
-    refetch: vi.fn(),
-    ...state,
-  };
-  return renderToStaticMarkup(createElement(UsageRoute));
+let host: HTMLDivElement;
+let root: Root;
+async function render(state: Record<string, unknown> = {}) {
+  query.current = { data: summary, isPending: false, isFetching: false, isError: false, refetch: query.refetch, ...state };
+  await act(async () => root.render(createElement(MemoryRouter, null, createElement(UsageRoute))));
 }
-
-describe("UsageRoute layout contract", () => {
-  beforeEach(() => {
-    usageQueryState.invalidateQueries.mockReset();
+function text(id: string) { return host.querySelector('[data-testid="' + id + '"]')?.textContent; }
+async function click(name: string, selector = "button") {
+  const element = [...host.querySelectorAll<HTMLButtonElement>(selector)].find(node => node.textContent?.includes(name));
+  expect(element).toBeDefined();
+  await act(async () => {
+    if (element!.getAttribute("role") === "tab") element!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    else element!.click();
   });
-  const overflowGuardStyles = [
-    styles.page,
-    styles.metricBand,
-    styles.primaryColumn,
-    styles.compositionPanel,
-    styles.rollupPanel,
-    styles.recordPanel,
-    styles.usageList,
-    styles.detailGrid,
-    styles.breakdownList,
-  ] as const;
+}
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  query.lang = "zh";
+  query.refetch.mockReset();
+  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+});
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-  it("renders a compact operational token usage route from the usage summary API", () => {
-    expect(routeSource).toContain('from "../api/usage"');
+describe("Usage settings page", () => {
+  it("uses the existing API, settings recipe and settings-only entry", async () => {
+    await render();
     expect(routeSource).toContain("fetchUsageSummary");
-    expect(routeSource).toContain("queryKeys.usageSummary");
-    expect(routeSource).toContain("globalTokenUsage");
-    expect(routeSource).toContain("lastTokenUsage");
-    expect(routeSource).toContain("rollupFilters");
-    expect(routeSource).toContain("Token 构成");
-    expect(routeSource).toContain("Token composition");
-    expect(routeSource).toContain("计数概览");
-    expect(routeSource).toContain("Counting overview");
-    expect(routeSource).toContain("最近会话");
-    expect(routeSource).toContain("Latest session");
-    expect(routeSource).toContain("最近 Agent");
-    expect(routeSource).toContain("Latest agent");
-    expect(routeSource).toContain("provider_usage");
-    expect(routeSource).toContain("estimated");
-    expect(routeSource).toContain("missing");
-    expect(routeSource).toContain("reasoningOutputTokens");
-    expect(routeSource).not.toContain("cost");
-    expect(routeSource).not.toContain("billing");
+    expect(routeSource).toContain('queryKeys.usageSummary("global")');
+    expect(host.querySelector('[data-vui-recipe="settings-form-page"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/config"]')).not.toBeNull();
+    expect(settingsSource).toContain('to="/usage"');
+    expect(utilitySource).not.toContain('to="/usage"');
+    expect(styles.page).toContain("overflow-y-auto");
+    expect(styles.metrics).toContain("max-[700px]:grid-cols-2");
   });
-
-  it("uses a metric strip and distinguishes not-called usage from zero usage", () => {
-    expect(routeSource).toContain("VMetricStrip");
-    expect(routeSource).toContain("VStateSurface");
-    expect(routeSource).toContain('lastSource === "not_called"');
-    expect(routeSource).toContain("尚未调用");
-    expect(routeSource).toContain("Not called yet");
-    expect(styles.overviewBand).toContain("min-w-0");
+  it("defaults to seven days and switches all metrics without using latest-call source as global state", async () => {
+    await render();
+    expect(text("usage-total")).toBe("1,200");
+    expect(text("usage-calls")).toBe("10");
+    expect(host.textContent).not.toContain("此时间范围内暂无调用");
+    await click("今日", '[role="tab"]');
+    expect(text("usage-total")).toBe("500");
+    await click("全部时间", '[role="tab"]');
+    expect(text("usage-total")).toBe("12,000");
   });
-
-  it("uses the dense-ops page recipe for the usage shell", () => {
-    expect(routeSource).toContain("VDenseOpsPage");
-    expect(routeSource).toContain("toolbarSlot");
-    expect(routeSource).toContain("headerClassName={styles.header}");
+  it("uses cached input divided by all input, not the backend observed-only cache rate", async () => {
+    await render();
+    expect(text("usage-cache-share")).toBe("25.0%");
+    expect(host.textContent).toContain("7 / 10 次");
+    expect(host.textContent).toContain("70.0% 覆盖率");
+    expect(host.textContent).not.toContain("可信度");
   });
-
-  it("keeps the usage page dense with shared hierarchy instead of hero or nested-card composition", () => {
-    expect(styles.page).toBeTypeOf("string");
-    expect(styles.overviewBand).toBeTypeOf("string");
-    expect(styles.emptyState).toBeTypeOf("string");
-    expect(styles.metricBand).toBeTypeOf("string");
-    expect(stylesSource).toContain("grid-cols-[minmax(0,1fr)_clamp(260px,24vw,360px)]");
-    expect(stylesSource).toContain('from "../design/vuiSurfaceRecipes"');
-    expect(stylesSource).toContain("vuiFlatPanelClass");
-    expect(stylesSource).toContain("vuiOpaqueRowClass");
-    expect(stylesSource).toContain("vuiDenseRowClass");
-    expect(styles.compositionPanel).toContain("!bg-vui-surface-panel");
-    expect(styles.usageRow).toContain("!bg-vui-surface-row");
-    expect(stylesSource).toContain("min-h-0");
-    expect(styles.compositionPanel).toContain("shadow-none");
-    expect(styles.usageRow).toContain("hover:bg-vui-surface-row-hover");
-    expect(stylesSource).not.toContain("--surface-panel-strong");
-    expect(stylesSource).not.toContain("--surface-page");
-    expect(stylesSource).not.toContain("bg-vui-surface-panel/88");
-    expect(styles.emptyState).toContain("mx-2 mt-1.5");
-    expect(styles.compositionPanel).toContain("p-2");
-    expect(styles.rollupPanel).toContain("p-2");
-    expect(styles.recordPanel).toContain("p-2");
-    expect(stylesSource).not.toContain("grid-cols-[minmax(260px,0.82fr)_minmax(0,1.18fr)_minmax(260px,0.8fr)]");
-    expect(stylesSource).not.toContain("rounded-lg");
-    expect(stylesSource).not.toContain("bg-vui-surface-row-hover");
-    expect(stylesSource).not.toContain("rounded-[2rem]");
-    expect(stylesSource).not.toContain("text-6xl");
-    expect(stylesSource).not.toContain("from-purple");
+  it("keeps diagnostics hidden until requested, and distinguishes missing latest usage from zero", async () => {
+    await render();
+    expect(host.querySelector("#usage-diagnostics")).toBeNull();
+    expect(host.textContent).not.toContain("usage_ledger");
+    await click("最近一次调用与诊断");
+    expect(host.querySelector("#usage-diagnostics")?.textContent).toContain("event-demo");
+    expect(host.querySelector("#usage-diagnostics")?.textContent).toContain("缺少用量");
+    expect(host.querySelector("#usage-diagnostics")?.textContent).not.toContain("0 tokens");
+    await click("最近一次调用与诊断");
+    expect(host.querySelector("#usage-diagnostics")).toBeNull();
   });
-
-  it("guards the Usage workbench against horizontal overflow on mobile", () => {
-    for (const className of overflowGuardStyles) {
-      expect(className).toContain("min-w-0");
-      expect(className).toContain("max-w-full");
-    }
-
-    expect(styles.page).toContain("overflow-x-hidden");
-    expect(styles.metricBand).toContain("overflow-x-hidden");
-    expect(styles.metricBand).toContain("max-[860px]:overflow-x-hidden");
-    expect(styles.primaryColumn).toContain("max-[980px]:overflow-x-hidden");
-    expect(styles.recordPanel).toContain("max-[980px]:overflow-x-hidden");
-    expect(styles.usageList).toContain("overflow-x-hidden");
-    expect(styles.detailGrid).toContain("overflow-x-hidden");
-    expect(styles.breakdownList).toContain("overflow-x-hidden");
-    expect(stylesSource).not.toContain("overflow-visible");
+  it("retains nonzero data during refresh and disables duplicate refreshes", async () => {
+    await render({ isFetching: true });
+    expect(text("usage-total")).toBe("1,200");
+    expect(host.textContent).toContain("同步中");
+    expect(host.querySelector('[data-vui="loading-value"]')).toBeNull();
+    expect([...host.querySelectorAll("button")].find(b => b.textContent === "刷新")?.disabled).toBe(true);
   });
-
-  it("keeps chips, rows, and detail values bounded by their content", () => {
-    expect(styles.header).toContain("max-[720px]:grid-cols-[minmax(0,1fr)]");
-    expect(styles.headerMeta).toContain("[&_[data-vui=\"status-strip-item\"]]:grid-cols-[auto_minmax(0,1fr)]");
-    expect(styles.headerMeta).toContain("[&_[data-vui=\"status-strip-item\"]_span]:text-ellipsis");
-    expect(styles.countPill).toContain("w-fit");
-    expect(styles.countPill).toContain("max-w-full");
-    expect(styles.countPill).toContain("whitespace-nowrap");
-    expect(styles.sourceTile).toContain("[&_span]:text-ellipsis");
-    expect(styles.sourceTile).toContain("[&_strong]:text-vui-xs");
-    expect(styles.usageRow).toContain("grid-cols-[minmax(96px,0.2fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)]");
-    expect(styles.usageRow).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
-    expect(styles.usageRow).toContain("[&_code]:max-w-full");
-    expect(styles.usageRowWide).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
-    expect(styles.detailRow).toContain("max-[520px]:grid-cols-[minmax(0,1fr)]");
+  it("retains the last successful values after a failed refresh and can retry", async () => {
+    await render({ isError: true, error: new Error("stale warning") });
+    expect(text("usage-total")).toBe("1,200");
+    expect(host.textContent).toContain("保留上次成功读取的数据");
+    expect(host.textContent).toContain("stale warning");
+    await click("刷新");
+    expect(query.refetch).toHaveBeenCalledOnce();
   });
-
-  it("distinguishes pending rollups from loaded zero values", () => {
-    expect(routeSource).toContain("deriveQueryPresentation");
-    expect(routeSource).toContain("<VLoadingValue");
-    expect(routeSource).not.toContain("function rollupOrEmpty");
-    expect(routeSource).not.toContain("const allTime = rollupOrEmpty");
-    expect(routeSource).toContain('usagePresentation === "initial-loading"');
-    expect(routeSource).toContain('usagePresentation === "refreshing"');
+  it("does not turn initial loading or unavailable data into factual zeros", async () => {
+    await render({ data: undefined, isPending: true, isFetching: true });
+    expect(host.querySelector('[data-vui="loading-value"]')).not.toBeNull();
+    expect(host.textContent).toContain("正在加载 Token 用量");
+    expect(host.textContent).not.toContain("暂无调用");
+    await render({ data: undefined, isError: true, error: new Error("unavailable") });
+    expect(text("usage-total")).toBe("—");
+    expect(text("usage-cache-share")).toBe("—");
+    expect(host.textContent).toContain("unavailable");
+    expect(host.textContent).not.toContain("0 次");
   });
-
-  it("reserves stable metric heights while values load", () => {
-    expect(styles.overviewBand).toContain("min-h-[52px]");
-    expect(styles.sourceTile).toContain("grid min-h-[50px]");
+  it("shows loaded zero counts with no fabricated percentage", async () => {
+    await render({ data: { ...summary, globalTokenUsage: { last7Days: zero } } });
+    expect(text("usage-total")).toBe("0");
+    expect(text("usage-cache-share")).toBe("—");
+    expect(host.textContent).toContain("此时间范围内暂无调用");
+    expect(host.textContent).not.toContain("0.0%");
   });
-
-  it.each([
-    ["initial-loading", { isFetching: true, isPending: true }, "正在加载 Token 用量"],
-    ["loaded-zero", { data: LOADED_ZERO_SUMMARY }, ">0<"],
-  ])("renders the %s query presentation", (_name, state, expected) => {
-    expect(renderUsage(state)).toContain(expected);
+  it("does not interpret an absent range as empty", async () => {
+    await render({ data: { ...summary, globalTokenUsage: {} } });
+    expect(text("usage-total")).toBe("—");
+    expect(host.textContent).toContain("此时间范围的统计暂不可用");
+    expect(host.textContent).not.toContain("暂无调用");
   });
-
-  it("keeps the complete card structure during initial loading without projecting factual empty values", () => {
-    const markup = renderUsage({ isFetching: true, isPending: true });
-    expect(markup).toContain("Token 构成");
-    expect(markup).toContain("计数概览");
-    expect(markup).toContain("最近记录");
-    expect(markup).toContain("正在加载 Token 用量");
-    expect(markup).toContain('data-vui="loading-value"');
-    expect(markup).not.toContain("尚未调用");
-    expect(markup).not.toContain("当前没有可用的 Token 用量记录");
-    expect(markup).not.toContain("未记录");
-    expect(markup).not.toContain("usage_ledger");
-    expect(markup).not.toContain(">1</span>");
+  it("marks unobserved cache counts unavailable and reports partial coverage", async () => {
+    await render({ data: { ...summary, globalTokenUsage: { last7Days: { ...week, cacheUsageObserved: false } } } });
+    expect(text("usage-cache-share")).toBe("—");
+    expect(host.textContent).toContain("不代表完整缓存用量");
   });
-
-  it("preserves stale non-zero usage while refreshing", () => {
-    const markup = renderUsage({ data: STALE_SENTINEL_SUMMARY, isFetching: true });
-    expect(markup).toContain("12,345");
-    expect(markup).toContain("同步中");
-    expect(markup).toContain('aria-busy="false"');
-    expect(markup).not.toContain('data-vui="loading-value"');
-    expect(markup).not.toContain("不可用");
-  });
-
-  it("preserves stale non-zero usage while showing an error warning", () => {
-    const markup = renderUsage({
-      data: STALE_SENTINEL_SUMMARY,
-      error: new Error("stale usage warning"),
-      isError: true,
-    });
-    expect(markup).toContain("12,345");
-    expect(markup).toContain("stale usage warning");
-    expect(markup).toContain('aria-busy="false"');
-    expect(markup).not.toContain('data-vui="loading-value"');
-    expect(markup).not.toContain("不可用");
-    expect(markup).toContain("重试");
-    expect(routeSource).toContain("usageQuery.refetch()");
-  });
-
-  it("renders unavailable values and retry without zero projection for error-empty", () => {
-    const markup = renderUsage({ error: new Error("usage unavailable"), isError: true });
-    expect(markup).toContain('data-tone="error"');
-    expect(markup).toContain("usage unavailable");
-    expect(markup).toContain("重试");
-    expect(markup).not.toContain(">0<");
+  it("supports English without untranslated state labels", async () => {
+    query.lang = "en"; await render({ data: undefined, isError: true });
+    expect(host.textContent).toContain("Usage statistics");
+    expect(host.textContent).toContain("Usage unavailable");
+    expect(host.textContent).not.toContain("不可用");
   });
 });

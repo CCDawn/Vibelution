@@ -275,6 +275,7 @@ import {
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
+import { ConversationTurnModelControl } from "./ConversationTurnModelControl";
 import { ComposerContextRing } from "./ComposerContextRing";
 import {
   addComparableConversationImageUrl,
@@ -1135,6 +1136,7 @@ export const ConversationView = React.memo(function ConversationView({
   permissionControl,
   toolApproval = null,
   llmControl,
+  turnModelControl,
   composerContextRing = null,
   onOpenComposerContextDetail,
   onCreateSession,
@@ -7327,6 +7329,7 @@ export const ConversationView = React.memo(function ConversationView({
             </div>
             <div className={styles.composerToolbarEnd}>
               {llmControl ? <ConversationInferenceControl {...llmControl} openSignal={modelMenuOpenSignal} /> : null}
+              {turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null}
               {composerContextRing ? (
                 <ComposerContextRing
                   model={composerContextRing}

@@ -127,6 +127,11 @@ def session_queued_turn_rows(conversation: dict[str, Any] | None) -> list[dict[s
         row["content"] = str(item.get("content") or "")
         row["attachments"] = _normalize_queued_attachments(item.get("attachments"))
         row["references"] = _normalize_queued_references(item.get("references"))
+        row["modelSelection"] = (
+            dict(item.get("modelSelection"))
+            if isinstance(item.get("modelSelection"), dict) and item.get("modelSelection")
+            else None
+        )
         generation = _row_generation(item)
         if generation is None:
             row.pop("branchGeneration", None)
@@ -172,6 +177,7 @@ def enqueue_session_queued_turn(
     turn_mode: str,
     write_intent: bool | None,
     client_submission_id: str,
+    model_selection: dict[str, Any] | None = None,
     lang: str = "",
 ) -> dict[str, Any]:
     """Append one validated user turn to the session queue (idempotent per submission id)."""
@@ -216,6 +222,13 @@ def enqueue_session_queued_turn(
             "runtimeStatusEnabled": runtime_status_enabled,
             "turnMode": str(turn_mode or ""),
             "writeIntent": write_intent,
+            # Per-turn model override rides the queue row so a turn submitted
+            # while busy still runs on the model the user pinned for it.
+            "modelSelection": (
+                {key: value for key, value in dict(model_selection).items() if value}
+                if isinstance(model_selection, dict) and model_selection
+                else None
+            ),
             "status": "queued",
             "createdAt": s._now_timestamp(),
             "updatedAt": s._now_timestamp(),
@@ -930,6 +943,7 @@ def drain_session_queued_turns(session_id: str) -> bool:
         else:
             content = str(head.get("content") or "")
             message_source = DRAINED_TURN_MESSAGE_SOURCE
+            drained_model_selection = head.get("modelSelection")
             submit_kwargs = {
                 "client_submission_id": str(head.get("clientSubmissionId") or ""),
                 "attachment_ids": [
@@ -946,6 +960,11 @@ def drain_session_queued_turns(session_id: str) -> bool:
                 "runtime_status_enabled": head.get("runtimeStatusEnabled"),
                 "turn_mode": str(head.get("turnMode") or ""),
                 "write_intent": head.get("writeIntent"),
+                "model_selection": (
+                    dict(drained_model_selection)
+                    if isinstance(drained_model_selection, dict) and drained_model_selection
+                    else None
+                ),
             }
         try:
             s.submit_session_message(

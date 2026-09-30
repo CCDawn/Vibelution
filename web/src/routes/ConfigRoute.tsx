@@ -1634,6 +1634,7 @@ export function ConfigRoute() {
         <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
 
         {showingSettingsIndex ? <ConfigSettingsIndex
+          showUsage={!requestedSectionId}
           groups={requestedSectionId ? settingsGroups.filter((group) => group.id === activeGroup?.id) : settingsGroups}
           sections={workspaceSections} language={currentLanguage} onNavigate={handleNavigateSettings}
         /> : null}

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, BellRing, Cpu, ExternalLink, GitBranch, ScrollText } from "lucide-react";
+import { BellRing, Cpu, ExternalLink, GitBranch, ScrollText } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -118,16 +118,6 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
         >
           Kernel
         </VRouteLinkButton>
-        <VTooltip content={t("usageUtilityTitle")}>
-          <VRouteLinkButton
-            to="/usage"
-            className={utilityNavClass(location.pathname, "/usage")}
-            onClick={onClose}
-            icon={<Activity size={16} aria-hidden="true" />}
-          >
-            {t("navUsage")}
-          </VRouteLinkButton>
-        </VTooltip>
         <VRouteLinkButton
           to="/logs"
           className={utilityNavClass(location.pathname, "/logs")}

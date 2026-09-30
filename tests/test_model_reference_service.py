@@ -294,6 +294,59 @@ def test_rebind_model_references_updates_live_sources_without_rewriting_history(
     assert "model-a" in decision_path.read_text(encoding="utf-8")
 
 
+def test_rebind_agent_registry_persists_through_surface_gate(tmp_path, monkeypatch):
+    _seed_agent_registry(tmp_path, "model-a")
+    from core.web.services.agent_directory import ops_residual
+
+    calls: list[dict] = []
+    original = ops_residual.save_registry_payload
+
+    def _spy(payload, **kwargs):
+        calls.append({"payload": payload, **kwargs})
+        return original(payload, **kwargs)
+
+    monkeypatch.setattr(ops_residual, "save_registry_payload", _spy)
+
+    result = rebind_model_references("model-a", "model-b", project_root=tmp_path)
+
+    assert result["updatedReferenceCount"] == 3
+    assert len(calls) == 1
+    assert calls[0]["project_root"] == tmp_path
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    assert list(tmp_path.rglob("agents.json")) == [registry_path]
+    agents = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert agents["agents"][0]["dialogueModelId"] == "model-b"
+    assert agents["agents"][0]["agentTemplateLabel"] == "model-b"
+    assert agents["agents"][0]["llmBindings"]["dialogue"]["modelId"] == "model-b"
+    assert agents["agents"][0]["llmBindings"]["summary"]["modelId"] == "model-b"
+
+
+def test_rebind_detached_registry_copy_stays_atomic_without_surface_lock(tmp_path, monkeypatch):
+    _seed_agent_registry(tmp_path, "model-a")
+    from core.web.services.agent_directory import ops_residual
+
+    surface_calls: list[dict] = []
+    monkeypatch.setattr(
+        ops_residual,
+        "save_registry_payload",
+        lambda payload, **kwargs: surface_calls.append({"payload": payload, **kwargs}),
+    )
+    monkeypatch.setattr(
+        ops_residual,
+        "registry_path",
+        lambda *, project_root=None: tmp_path / "elsewhere" / "agents.json",
+    )
+
+    result = rebind_model_references("model-a", "model-b", project_root=tmp_path)
+
+    assert result["updatedReferenceCount"] == 3
+    assert surface_calls == []
+    agents = json.loads(
+        (tmp_path / "workspace" / "agents" / "agents.json").read_text(encoding="utf-8")
+    )
+    assert agents["agents"][0]["dialogueModelId"] == "model-b"
+
+
 def test_scan_can_ignore_public_config_refs_for_workspace_guard(tmp_path):
     impact = scan_model_references(
         "model-a",
