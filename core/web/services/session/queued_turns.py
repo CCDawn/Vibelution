@@ -696,6 +696,55 @@ def enqueue_session_runtime_notice(
     return row
 
 
+def _sealed_child_return_drop(child_session_id: str, turn_id: str) -> dict[str, Any] | None:
+    """Drop a child return whose notifications were sealed, without waking the parent.
+
+    The seal is written by the cascade stop when the owning parent turn was
+    explicitly cancelled. A return arriving afterwards goes through the same
+    dropped shape as the stale-branch channel (``dropped=sealed``) and never
+    touches the parent queue, so a settled turn is not woken. Registry
+    unavailability fails open (behave as unsealed), mirroring the fencing
+    philosophy: the drop decision needs a readable ledger.
+    """
+
+    try:
+        from .. import runtime_task_registry as runtime_tasks
+
+        store = runtime_tasks.default_store()
+        if not store.is_notification_sealed(child_session_id):
+            return None
+    except Exception:
+        return None
+    dropped_at = datetime.now(timezone.utc).isoformat()
+    try:
+        store.update_task(
+            child_session_id,
+            lambda state: {
+                **state,
+                "lastNotificationDrop": {
+                    "dropped": "sealed",
+                    "at": dropped_at,
+                    "turnId": str(turn_id or "").strip(),
+                },
+            },
+        )
+        store.mark_task_terminal(
+            child_session_id,
+            status="canceled",
+            reason="notification_sealed",
+        )
+    except Exception:
+        pass
+    return {
+        "id": "",
+        "kind": KIND_SUBAGENT_MESSAGE,
+        "status": "dropped",
+        "dropped": "sealed",
+        "sourceId": f"child-return:{child_session_id}:{turn_id}",
+        "childSessionId": child_session_id,
+    }
+
+
 def notify_parent_session_of_child_return(session_id: str, *, turn_id: str) -> dict[str, Any] | None:
     """Queue a child session's finished turn onto its parent, once per turn."""
 
@@ -714,6 +763,9 @@ def notify_parent_session_of_child_return(session_id: str, *, turn_id: str) -> d
     ).strip()
     if not parent_id or parent_id == normalized_session_id:
         return None
+    sealed_drop = _sealed_child_return_drop(normalized_session_id, normalized_turn_id)
+    if sealed_drop is not None:
+        return sealed_drop
     title = str(conversation.get("task_title") or conversation.get("title") or "子对话").strip() or "子对话"
     summary = ""
     try:

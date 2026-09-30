@@ -346,3 +346,86 @@ def test_send_now_rejects_paused_and_starting_rows(sessions, monkeypatch):
     assert _rows(sessions)[0]["sendNow"] is True
     queued_turns.update_session_queued_turn(PARENT_ID, pinned["id"], status="paused")
     assert all("sendNow" not in row for row in _rows(sessions))
+
+
+def _register_child_task(store, task_id, *, parent, generation=0, kind="child_session"):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    return store.register_task(
+        runtime_tasks.new_snapshot(
+            kind=kind,
+            task_id=task_id,
+            status="running",
+            source_session_id=parent,
+            parent_session_id=parent,
+            branch_generation=generation,
+        )
+    )
+
+
+def test_sealed_child_return_is_dropped_without_waking_parent(sessions, monkeypatch):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    store = runtime_tasks.store_for(sessions)
+    monkeypatch.setattr(runtime_tasks, "default_store", lambda: store)
+    _register_child_task(store, CHILD_ID, parent=PARENT_ID)
+    store.seal_and_request_stop(
+        CHILD_ID,
+        reason="parent_turn_cancelled",
+        turn_id="turn-stop",
+        cascaded_from=PARENT_ID,
+    )
+
+    dropped = queued_turns.notify_parent_session_of_child_return(CHILD_ID, turn_id="turn-1")
+
+    assert dropped == {
+        "id": "",
+        "kind": "subagent_message",
+        "status": "dropped",
+        "dropped": "sealed",
+        "sourceId": f"child-return:{CHILD_ID}:turn-1",
+        "childSessionId": CHILD_ID,
+    }
+    assert _rows(sessions) == []
+    state = store.load_state(CHILD_ID)
+    assert state["lastNotificationDrop"]["dropped"] == "sealed"
+    assert state["lastNotificationDrop"]["turnId"] == "turn-1"
+    assert state["status"] == "canceled"
+
+
+def test_unsealed_child_return_still_queues_after_normal_completion(sessions, monkeypatch):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    store = runtime_tasks.store_for(sessions)
+    monkeypatch.setattr(runtime_tasks, "default_store", lambda: store)
+    _register_child_task(store, CHILD_ID, parent=PARENT_ID)
+    # Normal completion mirrors the return without ever sealing.
+    store.mark_task_terminal(CHILD_ID, status="completed", reason="child_session_return")
+
+    queued = queued_turns.notify_parent_session_of_child_return(CHILD_ID, turn_id="turn-1")
+
+    assert queued["status"] == "queued"
+    assert queued["kind"] == "subagent_message"
+    assert [row["kind"] for row in _rows(sessions)] == ["subagent_message"]
+    assert store.load_state(CHILD_ID)["notificationSealed"] is False
+
+
+def test_seal_drops_independently_of_generation_and_stacks_with_fencing(sessions, monkeypatch):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    store = runtime_tasks.store_for(sessions)
+    monkeypatch.setattr(runtime_tasks, "default_store", lambda: store)
+    _register_child_task(store, CHILD_ID, parent=PARENT_ID, generation=0)
+    store.seal_and_request_stop(CHILD_ID, reason="parent_turn_cancelled", turn_id="turn-stop")
+
+    # Generation still matches: the seal alone drops the return.
+    sealed = queued_turns.notify_parent_session_of_child_return(CHILD_ID, turn_id="turn-1")
+    assert sealed["dropped"] == "sealed"
+    assert _rows(sessions) == []
+
+    # A rewind on top of the seal: fencing and seal stack, the sealed channel
+    # still reports the drop and nothing reaches the parent queue.
+    queued_turns.advance_session_branch_generation(PARENT_ID)
+    stacked = queued_turns.notify_parent_session_of_child_return(CHILD_ID, turn_id="turn-2")
+    assert stacked["dropped"] == "sealed"
+    assert _rows(sessions) == []
