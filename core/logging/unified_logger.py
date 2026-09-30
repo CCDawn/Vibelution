@@ -23,6 +23,8 @@ import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
+from core.logging.value_redaction import redact_sensitive_text, redact_sensitive_values
+
 # 导入 ConversationLogger (在 logger.py 中)
 from .logger import ConversationLogger
 from .transcript_logger import TranscriptLogger
@@ -85,7 +87,8 @@ class UnifiedLogger:
         # ConversationLogger: 开始新会话
         self._conversation.new_session()
         if metadata:
-            self._conversation.start_session(metadata)
+            # value 级脱敏：会话元数据可能携带环境/账户信息。
+            self._conversation.start_session(redact_sensitive_values(metadata))
 
         # 如果有 System Prompt，写入
         if isinstance(system_prompt, str) and system_prompt:
@@ -96,6 +99,10 @@ class UnifiedLogger:
         if self._system_prompt_written:
             return
         self._system_prompt_written = True
+
+        # value 级脱敏：系统提示词理论上不含 secret，一旦内联了凭据也不能落盘。
+        # TranscriptLogger 只记录 hash，不受影响；ConversationLogger 落原文前必须清洗。
+        system_prompt = redact_sensitive_text(system_prompt)
 
         # TranscriptLogger: 写入 Markdown
         self._transcript.write_system_prompt(system_prompt)
@@ -114,6 +121,9 @@ class UnifiedLogger:
 
     def log_external_request(self, content: str):
         """记录外部任务输入"""
+        # value 级脱敏：外部输入可能内联凭据，两个下游都只收清洗后的副本。
+        content = redact_sensitive_text(content)
+
         # ConversationLogger: JSON 日志
         self._conversation.log_external_request(content)
 
@@ -124,12 +134,19 @@ class UnifiedLogger:
 
     def log_llm_request(self, messages: list, model: str = None, iteration: int = 0):
         """记录发送给 LLM 的请求"""
+        # value 级脱敏：消息体递归扫描（嵌套 dict/list 一并覆盖）。
+        messages = redact_sensitive_values(messages)
+
         # ConversationLogger: JSON 日志
         self._conversation.log_llm_request(messages, model=model, iteration=iteration)
 
     def log_llm_response(self, content: str, raw_response: str = None,
                          input_tokens: int = 0, output_tokens: int = 0, tool_call_count: int = 0):
         """记录 LLM 的响应"""
+        # value 级脱敏：响应与原始响应都可能回显凭据。
+        content = redact_sensitive_text(content)
+        raw_response = redact_sensitive_text(raw_response)
+
         # ConversationLogger: JSON 日志
         self._conversation.log_llm_response(content, raw_response,
                                             input_tokens=input_tokens,
@@ -141,11 +158,18 @@ class UnifiedLogger:
 
     def log_llm_thinking(self, thinking: str):
         """记录 LLM 的思考过程"""
+        # value 级脱敏后再落盘。
+        thinking = redact_sensitive_text(thinking)
+
         # TranscriptLogger: Markdown 格式（带折叠）
         self._transcript.write_llm_response("", thinking)
 
     def log_llm_intent(self, intent: str, content_preview: str = None):
         """记录 LLM 的意图/思考"""
+        # value 级脱敏后再落盘。
+        intent = redact_sensitive_text(intent)
+        content_preview = redact_sensitive_text(content_preview)
+
         # ConversationLogger: JSON 日志
         self._conversation.log_llm_intent(intent, content_preview)
 
@@ -160,6 +184,11 @@ class UnifiedLogger:
         tool_call_id: str = None,
     ):
         """记录工具调用"""
+        # value 级脱敏：工具参数与返回值是凭据最常出现的位置（safe_payload 的
+        # shape+hash 之外的正文明文兜底）。
+        args = redact_sensitive_values(args)
+        result = redact_sensitive_text(result)
+
         # ConversationLogger: JSON 日志
         self._conversation.log_tool_call(tool_name, args, result, status, tool_call_id=tool_call_id)
 
@@ -177,6 +206,9 @@ class UnifiedLogger:
 
     def log_action(self, action: str, details: dict = None):
         """记录特殊动作（restart/hibernated/skip 等）"""
+        # value 级脱敏后再落盘。
+        details = redact_sensitive_values(details)
+
         # ConversationLogger: JSON 日志
         self._conversation.log_action(action, details)
 
@@ -185,6 +217,11 @@ class UnifiedLogger:
 
     def log_error(self, error_type: str, error_msg: str, traceback: str = None, details: dict = None):
         """记录错误"""
+        # value 级脱敏：异常消息/堆栈常内联 URL 与凭据。
+        error_msg = redact_sensitive_text(error_msg)
+        traceback = redact_sensitive_text(traceback)
+        details = redact_sensitive_values(details)
+
         # ConversationLogger: JSON 日志
         self._conversation.log_error(error_type, error_msg, traceback, details=details)
         # TranscriptLogger: Markdown 格式

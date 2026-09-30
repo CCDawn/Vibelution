@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from config.paths import resolve_workspace_home
 from core.logging.safe_payload import summarize_tool_arguments
+from core.logging.value_redaction import redact_sensitive_text
 
 
 class TranscriptLogger:
@@ -198,7 +199,9 @@ session: {self._session_id}
     def write_external_request(self, content: str, timestamp: str = None):
         """写入外部任务输入"""
         ts = timestamp or self._timestamp()
-        escaped_content = self._escape_markdown(content)
+        # value 级脱敏：直连本 logger 的调用方（get_transcript_logger 单例）不经过
+        # UnifiedLogger，这里再兜一道；对已脱敏输入幂等。
+        escaped_content = self._escape_markdown(redact_sensitive_text(content))
 
         content_md = f"""### 外部任务输入
 
@@ -220,14 +223,14 @@ session: {self._session_id}
 <details>
 <summary>🤔 模型思考过程</summary>
 
-{self._escape_markdown(thinking)}
+{self._escape_markdown(redact_sensitive_text(thinking))}
 
 </details>
 
 """
 
         # 转义并处理回复内容
-        escaped_content = self._escape_markdown(content)
+        escaped_content = self._escape_markdown(redact_sensitive_text(content))
 
         content_md = f"""{thinking_section}### 🤖 模型回复
 
@@ -248,13 +251,13 @@ session: {self._session_id}
             "failed": "❌"
         }.get(status, "🔧")
 
-        # 格式化参数
+        # 格式化参数（safe_payload shape+hash，无明文；不接 value 脱敏以保契约）
         args_str = self._format_tool_args(args)
 
         # 截断结果
         result_str = ""
         if result:
-            truncated_result = self._truncate_text(result, 500)
+            truncated_result = self._truncate_text(redact_sensitive_text(result), 500)
             escaped_result = self._escape_markdown(truncated_result)
             result_str = f"""
 
@@ -298,7 +301,7 @@ session: {self._session_id}
 ### ⚠️ 错误: {error_type}
 
 ```
-{self._escape_markdown(error_msg)}
+{self._escape_markdown(redact_sensitive_text(error_msg))}
 ```
 
 """
@@ -306,7 +309,7 @@ session: {self._session_id}
 
     def write_action(self, action: str, details: str = None):
         """写入特殊动作"""
-        details_str = f"\n\n**详情**: {details}" if details else ""
+        details_str = f"\n\n**详情**: {redact_sensitive_text(details)}" if details else ""
 
         content_md = f"""
 

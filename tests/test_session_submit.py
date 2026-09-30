@@ -1113,3 +1113,198 @@ def test_enqueue_busy_session_turn_response_and_events_carry_queue_facts(
     assert lifecycle_events[0][0] == "busy_turn_queued"
     assert lifecycle_events[0][1] == result["queuedTurnId"]
     assert lifecycle_events[0][2]["contentPreview"] == "busy queue me"
+
+
+def test_normalize_turn_model_selection_validates_against_llm_options(monkeypatch) -> None:
+    """Unknown model ids / unsupported efforts fail closed with clear copy."""
+
+    monkeypatch.setattr(
+        session_service,
+        "_session_llm_model_choices",
+        lambda: [
+            {
+                "modelId": "qwen3.6-plus",
+                "modelRef": "dashscope_main/qwen3.6-plus",
+                "providerId": "dashscope_main",
+                "reasoningEffortValues": ["low", "high"],
+            },
+            {
+                "modelId": "glm-5.3-flash",
+                "modelRef": "autodl/GLM-5.3-flash",
+                "providerId": "autodl",
+                "reasoningEffortValues": [],
+            },
+        ],
+    )
+
+    assert submit._normalize_turn_model_selection(None, "zh") is None
+    normalized = submit._normalize_turn_model_selection(
+        {"modelId": "dashscope_main/qwen3.6-plus", "reasoningEffort": "HIGH"},
+        "zh",
+    )
+    assert normalized == {
+        "modelId": "qwen3.6-plus",
+        "modelRef": "dashscope_main/qwen3.6-plus",
+        "providerId": "dashscope_main",
+        "reasoningEffort": "high",
+    }
+    # Bare modelId (library id) resolves to the same candidate.
+    by_library_id = submit._normalize_turn_model_selection({"modelId": "glm-5.3-flash"}, "zh")
+    assert by_library_id is not None
+    assert by_library_id["modelRef"] == "autodl/GLM-5.3-flash"
+    assert "reasoningEffort" not in by_library_id
+
+    with pytest.raises(submit.SessionModelSelectionError):
+        submit._normalize_turn_model_selection({"modelId": "missing/model-x"}, "zh")
+    with pytest.raises(submit.SessionModelSelectionError):
+        submit._normalize_turn_model_selection({"modelId": ""}, "zh")
+    with pytest.raises(submit.SessionModelSelectionError):
+        submit._normalize_turn_model_selection(
+            {"modelId": "dashscope_main/qwen3.6-plus", "reasoningEffort": "ultra"},
+            "zh",
+        )
+
+
+def test_submit_model_selection_flows_into_context_and_turn_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The per-turn override reaches the worker context and the turn record."""
+
+    session_id = "session-model-selection"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    monkeypatch.setattr(
+        session_service,
+        "_session_llm_model_choices",
+        lambda: [
+            {
+                "modelId": "qwen3.6-plus",
+                "modelRef": "dashscope_main/qwen3.6-plus",
+                "providerId": "dashscope_main",
+                "reasoningEffortValues": ["low", "high"],
+            },
+        ],
+    )
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+
+    try:
+        result = submit.submit_session_message(
+            session_id,
+            "用另一个模型回答这一条",
+            client_submission_id="submission-model-selection",
+            model_selection={"modelId": "dashscope_main/qwen3.6-plus", "reasoningEffort": "high"},
+            include_started_turn_id=True,
+            lightweight_response=True,
+        )
+
+        assert result["accepted"] is True
+        assert len(scheduled_contexts) == 1
+        context = scheduled_contexts[0]
+        assert context["model_selection"] == {
+            "modelId": "qwen3.6-plus",
+            "modelRef": "dashscope_main/qwen3.6-plus",
+            "providerId": "dashscope_main",
+            "reasoningEffort": "high",
+        }
+        assert context["message_metadata"]["modelSelection"] == context["model_selection"]
+
+        events = session_service._load_session_conversation_events_cached(session_id)
+        user_events = [
+            event for event in events if event.event_type == session_service.EVENT_USER_MESSAGE
+        ]
+        assert user_events
+        journaled = user_events[-1].payload.get("metadata") or {}
+        assert journaled.get("modelSelection") == context["model_selection"]
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_submit_model_selection_rejects_unknown_model_before_turn_opens(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """An unknown override model fails with the dedicated 400-class error."""
+
+    session_id = "session-model-selection-bad"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    monkeypatch.setattr(
+        session_service,
+        "_session_llm_model_choices",
+        lambda: [],
+    )
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)),
+    )
+
+    try:
+        with pytest.raises(submit.SessionModelSelectionError):
+            submit.submit_session_message(
+                session_id,
+                "这一条不该被受理",
+                client_submission_id="submission-model-selection-bad",
+                model_selection={"modelId": "missing/model-x"},
+            )
+        assert scheduled_contexts == []
+        assert not session_service._is_session_running(session_id)
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_queued_turn_persists_and_drains_model_selection(tmp_path: Path, monkeypatch) -> None:
+    """The override rides the queue row and reaches the drained submit."""
+
+    session_id = "session-live"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_chat_state(tmp_path)
+    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    # Keep the drain deterministic: enqueue must not trigger the async drain
+    # that would race the explicit drain below.
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_queued_turn_drain",
+        lambda _session_id: None,
+    )
+
+    row = session_service.enqueue_session_queued_turn(
+        session_id,
+        content="排队换模型发送",
+        attachments=[],
+        references=[],
+        mental_model_enabled=False,
+        runtime_status_enabled=False,
+        turn_mode="",
+        write_intent=False,
+        client_submission_id="submission-queue-model",
+        model_selection={
+            "modelId": "qwen3.6-plus",
+            "modelRef": "dashscope_main/qwen3.6-plus",
+            "providerId": "dashscope_main",
+            "reasoningEffort": "high",
+        },
+    )
+    assert row["modelSelection"]["modelRef"] == "dashscope_main/qwen3.6-plus"
+    rows = session_service.list_session_queued_turns(session_id)
+    assert rows[0]["modelSelection"]["reasoningEffort"] == "high"
+
+    captured_kwargs: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda _session_id, content, **kwargs: captured_kwargs.append(dict(kwargs)) or {"accepted": True},
+    )
+    assert session_service._drain_session_queued_turns(session_id) is True
+    assert len(captured_kwargs) == 1
+    assert captured_kwargs[0]["model_selection"] == row["modelSelection"]
+    assert session_service.list_session_queued_turns(session_id) == []

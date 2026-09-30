@@ -69,6 +69,7 @@ from core.web.services.session_service import (
     SessionIdempotencyConflictError,
     SessionIdempotencyReplayGoneError,
     SessionMessageCurationStateError,
+    SessionModelSelectionError,
     SessionNotFoundError,
     SessionRewindConflictError,
     SessionValidationError,
@@ -240,6 +241,13 @@ def _new_client_submission_id() -> str:
     return f"submission-{uuid4().hex}"
 
 
+class SessionModelSelectionPayload(BaseModel):
+    """One-shot per-turn model override (does not change the session default)."""
+
+    modelId: str = ""
+    reasoningEffort: str | None = None
+
+
 class SessionMessagePayload(BaseModel):
     clientSubmissionId: str = Field(default_factory=_new_client_submission_id, max_length=128)
     content: str = ""
@@ -252,6 +260,7 @@ class SessionMessagePayload(BaseModel):
     turnMode: str = ""
     writeIntent: bool | None = None
     queueIfBusy: bool = False
+    modelSelection: SessionModelSelectionPayload | None = None
 
 
 class SessionMessageEditPayload(SessionMessagePayload):
@@ -845,6 +854,7 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
 )
 def session_submit_message(session_id: str, payload: SessionMessagePayload, request: Request) -> dict:
     client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
+    model_selection = payload.modelSelection.model_dump() if payload.modelSelection is not None else None
     try:
         if "respond-async" in str(request.headers.get("prefer") or "").lower():
             return submit_session_message_lightweight(
@@ -860,6 +870,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
                 turn_mode=payload.turnMode,
                 write_intent=payload.writeIntent,
                 queue_if_busy=payload.queueIfBusy,
+                model_selection=model_selection,
             )
         return submit_session_message(
             session_id,
@@ -874,9 +885,14 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
             queue_if_busy=payload.queueIfBusy,
+            model_selection=model_selection,
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionModelSelectionError as exc:
+        # Documented 400: the caller pinned a model outside the session
+        # llm-options list; distinct from the generic 422 payload shape error.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SessionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionValidationError as exc:

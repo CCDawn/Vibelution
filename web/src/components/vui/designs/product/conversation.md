@@ -835,3 +835,56 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 
 ### 反冗余
 - 禁止为 live tail 另开第二套行内渲染或样式 map；新增行内语法只在 `conversationInlineMarkdown` 一处扩展。
+
+## ConversationTurnModelControl
+
+### 功能
+composer 工具栏上的「本次发送模型」选择入口（ZCode per-turn modelSelection 语义）：为紧接着的这一次发送选择模型，不改会话默认。默认显示会话当前模型（跟随会话切换）；用户改选后粘性保持到再改；非会话默认时触发高亮 chip（accent 环 + 圆点）作为「≠会话默认」视觉标记；菜单第一行「跟随会话默认」一键恢复跟随。
+
+### 适用范围
+- **适用**：普通会话 composer 的工具栏尾部（推理强度控件旁）；仅当会话 llm-options 返回 `choices` 时渲染。
+- **不适用**：会话级默认模型/推理强度切换（`ConversationInferenceControl` + Agent 管理模型绑定）；虚拟人 Companion 模式（不渲染）。
+
+| 场景 | 选择 |
+| --- | --- |
+| 只想这一轮换模型 | `ConversationTurnModelControl` |
+| 改会话默认模型 | Agent 管理（`AgentModelPicker`） |
+| 改会话默认推理强度 | `ConversationInferenceControl` |
+
+### 使用方式
+```tsx
+import { ConversationTurnModelControl } from "../../conversation/ConversationTurnModelControl";
+
+<ConversationTurnModelControl
+  choices={sessionLlmOptions.choices}
+  sessionDefaultModelId={sessionLlmOptions.currentModelId}
+  selection={turnModelSelection}
+  disabled={composerDisabled}
+  onSelectionChange={setTurnModelSelection}
+/>
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| choices | llm-options 的完整可选模型列表 | 只读展示，不做发现/添加 |
+| sessionDefaultModelId | 会话当前模型（modelRef 优先） | 跟随会话切换；菜单内标注「会话默认」 |
+| selection | 粘性覆盖；null = 跟随会话 | 压在同一模型上不显示覆盖标记 |
+| onSelectionChange(null) | 恢复跟随会话 | 必须可达，不允许粘死 |
+
+### 非职责
+- 不发送消息；覆盖值随下一次提交走 `POST /messages` 的 `modelSelection`，排队轮由后端队列行持久化。
+- 不改 Agent 绑定、会话默认模型或推理强度默认值。
+
+### 视觉与状态
+- 默认态与推理强度控件同字号同灰阶；覆盖态用 `--accent-cool` 混色底 + 细环 + 圆点，禁止原始十六进制色。
+- 菜单：首行「跟随会话默认」；模型按 llm-options 顺序列出（provider 副标题、会话默认/未配置 Key 徽标）；选中覆盖模型后其推理强度子区（跟随会话强度 + 该模型 effort 选项）出现在菜单底部。
+- 禁止把覆盖状态写成第二套配色体系；一切标记走 token。
+
+### 实现落点
+- 源码：`web/src/components/conversation/ConversationTurnModelControl.tsx`
+- 样式：`ConversationTurnModelControl.styles.ts`
+- 类型：`web/src/api/types/chat.ts` 的 `SessionModelSelection`；提交通道 `useChatComposerSubmit`（`SubmitTurnVariables.modelSelection`）
+
+### 反冗余
+- 不复制 `AgentModelPicker`（发现/添加模型、槽位兼容）能力；这里只消费 llm-options 的 `choices`。
+- 不与 `ConversationInferenceControl` 合并：一个管会话默认（强度），一个管单轮覆盖（模型+可选强度），语义不同。

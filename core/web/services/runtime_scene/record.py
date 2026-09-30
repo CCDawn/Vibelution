@@ -20,6 +20,7 @@ from typing import Any
 
 from core.logging import debug as _debug_logger
 from core.logging.trace_context import current_trace_fields, merge_current_trace_fields
+from core.logging.value_redaction import redact_sensitive_text, redact_sensitive_values
 
 _TOOL_ARGUMENT_TELEMETRY_KEYS = frozenset({"tool_args", "toolargs", "arguments"})
 _TRUNCATED_TELEMETRY_VALUE = "[truncated]"
@@ -845,10 +846,12 @@ def _normalize_telemetry_fields(value: object) -> dict[str, Any]:
                 if s._is_sensitive_telemetry_key(key_text)
                 else s._normalize_telemetry_value(item, depth=0)
             )
-        return normalized
+        # key 级脱敏只拦 keyword-in-key；这里对剩余字段补一道 value 级扫描，
+        # 覆盖常量折叠 / 动态拼接 key 与正文中的凭据（占位符值幂等跳过）。
+        return redact_sensitive_values(normalized)
     if value is None:
         return {}
-    return {"value": s._normalize_telemetry_value(value, depth=0)}
+    return redact_sensitive_values({"value": s._normalize_telemetry_value(value, depth=0)})
 
 
 def _normalize_telemetry_value(value: object, *, depth: int) -> Any:
@@ -2735,9 +2738,11 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
         else "succeeded"
     )
     event_code = s._sanitize_token(payload.get("event_code"), default="backend.api.request")
-    message = s._truncate_text(
-        str(payload.get("message") or f"{method or 'API'} {path_template or path} -> {status_code or '?'}"),
-        320,
+    message = redact_sensitive_text(
+        s._truncate_text(
+            str(payload.get("message") or f"{method or 'API'} {path_template or path} -> {status_code or '?'}"),
+            320,
+        )
     )
     correlation_fields = merge_current_trace_fields(payload.get("fields"))
     fields = s.developer_sandbox.enrich_debug_fields(s._normalize_telemetry_fields(
@@ -2833,7 +2838,7 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
     phase = s._sanitize_token(payload.get("phase"), default="page")
     event_code = s._sanitize_token(payload.get("eventCode"), default="browser.telemetry")
     level = s._sanitize_token(payload.get("level"), default="info")
-    message = s._truncate_text(str(payload.get("message") or event_code), 320)
+    message = redact_sensitive_text(s._truncate_text(str(payload.get("message") or event_code), 320))
     fields = s.developer_sandbox.enrich_debug_fields(
         s._normalize_telemetry_fields(merge_current_trace_fields(payload.get("fields"))),
         project_root=s.PROJECT_ROOT,
@@ -2958,7 +2963,7 @@ def record_research_scene_event(
         normalized_fields["sessionId"] = normalized_session_id
     if normalized_agent_key:
         normalized_fields["agentKey"] = normalized_agent_key
-    message_text = s._truncate_text(str(message or event_name), 320)
+    message_text = redact_sensitive_text(s._truncate_text(str(message or event_name), 320))
 
     with s.RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
         manifest = s._load_scene_manifest(scene_dir)
@@ -3238,7 +3243,7 @@ def _record_runtime_scene_event_impl(
     event_name = s._sanitize_token(event_code, default=f"{component_name}.event")
     level_name = s._sanitize_token(level, default="info")
     outcome_name = s._sanitize_token(outcome, default="observed")
-    message_text = s._truncate_text(str(message or event_name), 320)
+    message_text = redact_sensitive_text(s._truncate_text(str(message or event_name), 320))
     normalized_fields = s.developer_sandbox.enrich_debug_fields(s._normalize_telemetry_fields(fields), project_root=s.PROJECT_ROOT)
     normalized_raw_refs = s._normalize_raw_refs(raw_refs)
     normalized_child_path = s._safe_optional_relative_path(child_log_path)

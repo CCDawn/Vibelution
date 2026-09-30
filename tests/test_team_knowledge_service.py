@@ -1302,6 +1302,99 @@ def test_agent_formal_knowledge_is_private_and_governed(tmp_path, monkeypatch):
     assert (tmp_path / "workspace" / "agents" / owner["agentId"] / "knowledge" / "knowledge_bases.json").exists()
 
 
+def test_agent_knowledge_snapshot_projection_preserves_owner_scope_and_acl(knowledge_env, monkeypatch):
+    first_owner = knowledge_env["lead"]
+    second_owner = knowledge_env["outsider"]
+    first_base = team_knowledge_service.create_agent_knowledge_base(
+        first_owner["agentId"],
+        name="First private snapshot KB",
+        actor_agent_id=first_owner["agentId"],
+    )
+    second_base = team_knowledge_service.create_agent_knowledge_base(
+        second_owner["agentId"],
+        name="Second private snapshot KB",
+        actor_agent_id=second_owner["agentId"],
+    )
+    snapshots = {
+        str(agent.get("agentId") or ""): agent
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+    }
+    expected_first = team_knowledge_service.list_agent_knowledge_bases(
+        first_owner["agentId"], actor_agent_id=first_owner["agentId"]
+    )
+    expected_second = team_knowledge_service.list_agent_knowledge_bases(
+        second_owner["agentId"], actor_agent_id=second_owner["agentId"]
+    )
+    expected_denied = team_knowledge_service.list_agent_knowledge_bases(
+        first_owner["agentId"], actor_agent_id=second_owner["agentId"]
+    )
+
+    def fail_get_agent(*_args, **_kwargs):
+        raise AssertionError("snapshot-based Agent knowledge reads must not hydrate Agent detail")
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", fail_get_agent)
+
+    first = team_knowledge_service._list_agent_knowledge_bases_from_snapshot(
+        snapshots[first_owner["agentId"]], actor_agent_id=first_owner["agentId"]
+    )
+    second = team_knowledge_service._list_agent_knowledge_bases_from_snapshot(
+        snapshots[second_owner["agentId"]], actor_agent_id=second_owner["agentId"]
+    )
+    denied = team_knowledge_service._list_agent_knowledge_bases_from_snapshot(
+        snapshots[first_owner["agentId"]], actor_agent_id=second_owner["agentId"]
+    )
+
+    def without_generated_time(payload):
+        return {key: value for key, value in payload.items() if key != "updatedAt"}
+
+    assert without_generated_time(first) == without_generated_time(expected_first)
+    assert without_generated_time(second) == without_generated_time(expected_second)
+    assert without_generated_time(denied) == without_generated_time(expected_denied)
+    assert [base["knowledgeBaseId"] for base in first["knowledgeBases"]] == [first_base["knowledgeBaseId"]]
+    assert [base["knowledgeBaseId"] for base in second["knowledgeBases"]] == [second_base["knowledgeBaseId"]]
+    assert denied["knowledgeBases"] == []
+
+
+def test_agent_knowledge_snapshot_includes_archived_owner_and_public_lookup_keeps_missing_error(
+    knowledge_env,
+    monkeypatch,
+):
+    owner = agent_directory_service.create_agent_instance(display_name="Archived Knowledge Owner")
+    base = team_knowledge_service.create_agent_knowledge_base(
+        owner["agentId"],
+        name="Archived private KB",
+        actor_agent_id=owner["agentId"],
+    )
+    with pytest.raises(team_knowledge_service.TeamKnowledgeNotFoundError, match="Agent not found"):
+        team_knowledge_service.list_agent_knowledge_bases("missing-agent")
+
+    agent_directory_service.archive_agent_instance(owner["agentId"])
+    archived_snapshot = next(
+        agent
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if agent["agentId"] == owner["agentId"]
+    )
+    archived_public = team_knowledge_service.list_agent_knowledge_bases(
+        owner["agentId"], actor_agent_id=owner["agentId"]
+    )
+
+    def fail_get_agent(*_args, **_kwargs):
+        raise AssertionError("archived snapshot reads must not hydrate Agent detail")
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", fail_get_agent)
+    archived_snapshot_payload = team_knowledge_service._list_agent_knowledge_bases_from_snapshot(
+        archived_snapshot,
+        actor_agent_id=owner["agentId"],
+    )
+
+    assert archived_snapshot["status"] == "archived"
+    assert archived_snapshot_payload["agentId"] == owner["agentId"]
+    assert [item["knowledgeBaseId"] for item in archived_snapshot_payload["knowledgeBases"]] == [base["knowledgeBaseId"]]
+    assert {
+        key: value for key, value in archived_snapshot_payload.items() if key != "updatedAt"
+    } == {key: value for key, value in archived_public.items() if key != "updatedAt"}
+
+
 def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

@@ -1122,12 +1122,18 @@ def _execute_agents(candidate: ResetCandidate) -> ResetActionResult:
     result = _execute_delete_candidate(candidate)
     if result.status != "deleted":
         return result
-    registry_path = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "agents", "agents.json")
+    # 延迟导入：launcher 侧不常驻加载 web 服务依赖图。
+    from core.web.services.agent_directory import ops_residual as agent_registry
+
+    registry_path = agent_registry.registry_path(project_root=PROJECT_ROOT)
     try:
-        registry_path.parent.mkdir(parents=True, exist_ok=True)
-        registry_path.write_text(
-            json.dumps({"version": 1, "agents": []}, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+        # 路径解析必须经 agent_directory surface，保证写的是目录权威认定的
+        # 同一份注册表；空注册表是确认后的重置语义，跳过 shrink guard，
+        # 但仍共享注册表锁与原子替换。
+        agent_registry.save_registry_payload(
+            {"version": 1, "agents": []},
+            project_root=PROJECT_ROOT,
+            enforce_shrink_guard=False,
         )
     except OSError as exc:
         failed = ResetActionResult("failed", registry_path, "file", "reset", str(exc))

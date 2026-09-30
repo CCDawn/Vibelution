@@ -105,6 +105,7 @@ describe("useChatComposerSubmitActions stop intent", () => {
       activeReferenceAttachments: [],
       mentalModelEnabledForNextTurn: false,
       runtimeStatusEnabledForNextTurn: false,
+      turnModelSelection: null,
       resolvedEditTarget: null,
       activeEditTarget: null,
       composerDisabled: false,
