@@ -114,7 +114,7 @@ export function MemoryGraphCatalog() {
                 setSelectedNodeId(nodeId);
                 setSelectedEdgeId("");
               }}
-              onSelectEdge={setSelectedEdgeId}
+              onSelectEdge={(edgeId) => { setSelectedEdgeId(edgeId); setSelectedNodeId(""); }}
               fallbackText="3D 画布不可用时，可使用下面的选择状态继续检查组件。"
             />
           </div>
