@@ -28,15 +28,15 @@
 
 ## 统计
 
-- Facade `*_service.py`：**78**
+- Facade `*_service.py`：**79**
 - 有 pack README：**6**
-- 仅单文件 facade：**72**
+- 仅单文件 facade：**73**
 
 ## Domain 速查
 
 | Domain | Facades |
 | --- | ---: |
-| Session / Chat hot path (`session`) | 1 |
+| Session / Chat hot path (`session`) | 2 |
 | Team workflow / SC / experiment (`team_workflow`) | 1 |
 | Team registry / canvas (`team`) | 3 |
 | Agent directory / config (`agent`) | 17 |
@@ -65,6 +65,7 @@
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `session_service.py` | Real chat session payloads for the web workbench. | `session/` | `agents.py`, `cli_agents.py`, `sessions.py` | `test_session_fork.py`, `test_agent_reset_direct_session_safety.py`, `test_research_workflow_policy_shadow_evaluator.py` |
+| `session_archive_service.py` | Session-level archive/unarchive (ZCode-style lightweight archive). | — | `session_archive.py` | `test_session_archive_service.py` |
 
 ## Team workflow / SC / experiment
 

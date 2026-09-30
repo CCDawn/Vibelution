@@ -2,7 +2,7 @@
 
 **规则：** 先定表内 owner，再编辑。无 owner → 搜 facade/`README` → 仍无则停并问用户，勿新建平行树。
 
-**后端 service 全量索引（71 facades）：** [`core/web/services/README.md`](../../core/web/services/README.md)
+**后端 service 全量索引（份数以该文件统计节为准）：** [`core/web/services/README.md`](../../core/web/services/README.md)
 
 ---
 
@@ -31,7 +31,7 @@
 
 | Domain | routes | pack / facade | README |
 | --- | --- | --- | --- |
-| **全量 71 facades** | — | 全部 `*_service.py` | **[`services/README.md`](../../core/web/services/README.md)** |
+| **全量索引** | — | 全部 `*_service.py` | **[`services/README.md`](../../core/web/services/README.md)** |
 | Session 热路径 | `core/web/routes/sessions.py` | `session/*` · `session_service.py` | `session/README.md` |
 | Team workflow | `core/web/routes/team_workflows/` | `team_workflow/*` · facade | `team_workflow/README.md` |
 | Team CRUD | `core/web/routes/teams.py` | `team/*` · `team_service.py` | `team/README.md` |
@@ -52,7 +52,7 @@
 
 | 关注 | 路径 | 备注 |
 | --- | --- | --- |
-| 单轮编排 | `agent.py` | 新逻辑进 `core/` |
+| 单轮编排 | `agent.py` · `core/orchestration/` | 新逻辑进 `core/orchestration/`；`agent.py` 只做 composition root |
 | 模式 | `core/orchestration/` | |
 | LLM | `core/llm/` | `PROTOCOL.md` |
 | Prompt | `core/prompt_manager/` · `core/core_prompt/` | 不扩权 |
@@ -67,7 +67,7 @@
 | 组件 | 路径 |
 | --- | --- |
 | Launcher scripts | `scripts/vibelution_launcher.*` |
-| **Launcher 控制面 / 桌面壳** | `desktop/electron/`（目标 writer，[ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) · [迁移账本](../../desktop/electron/CONTROL_PLANE_MIGRATION.md)）；当前 HTTP 仍在 `core/launcher/` |
+| **Launcher 控制面 / 桌面壳** | `desktop/electron/`（目标 writer，[ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) · [Electron README](../../desktop/electron/README.md) · [运行时索引](../../core/web/services/launcher_runtime.md)）；`core/launcher/` 只留 HTTP 残留，收口顺序见 [物理退役计划](../plans/2026-08-20-physical-retirement-of-python-lifecycle.md) |
 | Runtime manager | `core/runtime_manager/` |
 | Workbench build | `web/`；open_workbench 含 `tsc -b` |
 
