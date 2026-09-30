@@ -378,7 +378,12 @@ describe("AppShell layout contract", () => {
     // Health passes but /api/runtime/summary keeps failing: the runtime card
     // speaks at caution grade so the primary status cannot stay a pure green
     // "connected" driven by the frontend card.
-    expect(shellSource).toContain("runtimeSummaryUnavailable");
+    // The outage predicate must be runtimeQuery.isError alone: TanStack v5
+    // keeps stale data beside a failed refetch, so requiring !runtimeQuery.data
+    // would miss exactly the cached-data half-dead shape. (startupLoading keeps
+    // its own !data guard — a pre-first-load concern, untouched here.)
+    const outageDeclaration = shellSource.match(/const runtimeSummaryUnavailable = [^;]+;/)?.[0] ?? "";
+    expect(outageDeclaration).toBe("const runtimeSummaryUnavailable = runtimeQuery.isError;");
     expect(shellSource).toContain("applyRuntimeSummaryOutage(");
     expect(shellSource).toContain('t("systemRuntime_unavailable")');
     expect(shellSource).toContain("pickPrimarySystemStatusCard(rightStatusCards)");

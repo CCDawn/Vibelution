@@ -2154,7 +2154,11 @@ export function AppShell() {
   // Health passing while /api/runtime/summary keeps failing means a half-dead
   // backend: the runtime card must say "status unavailable" at caution grade
   // instead of letting the shell stay a pure green "connected".
-  const runtimeSummaryUnavailable = runtimeQuery.isError && !runtimeQuery.data;
+  // TanStack v5 keeps the previous data when a refetch fails, so a stale cache
+  // next to isError=true is exactly the half-dead shape — isError itself means
+  // retries were exhausted and the feed is down; enabled: shellStartupDataReady
+  // already gates the first load, so no data fallback is needed here.
+  const runtimeSummaryUnavailable = runtimeQuery.isError;
   const rightStatusCards: SystemStatusCard[] = [
     {
       id: "frontend",

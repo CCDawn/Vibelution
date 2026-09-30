@@ -1312,6 +1312,27 @@ describe("system status cards", () => {
     expect(primary.tone === "running" && primary.value === "已连接").toBe(false);
   });
 
+  it("treats a refetch failure beside cached data as the half-dead outage shape", () => {
+    // TanStack v5 keeps the previous data when a refetch fails, so the real
+    // half-dead backend looks like isError=true WITH stale cache. The outage
+    // must still apply: the presence of cached data says nothing about the
+    // feed being alive. (The shell derives unavailable from
+    // runtimeQuery.isError alone; see the AppShell layout contract.)
+    const cachedButFailing = healthyCards.map((card) =>
+      card.id === "runtime"
+        ? applyRuntimeSummaryOutage(
+          // Card value/tone derived from the cached snapshot (managed, running).
+          { ...card },
+          true,
+          "状态不可用",
+        )
+        : card);
+    const primary = pickPrimarySystemStatusCard(cachedButFailing);
+    expect(primary.tone).toBe("caution");
+    expect(primary.value).toBe("状态不可用");
+    expect(primary.tone === "running" && primary.value === "已连接").toBe(false);
+  });
+
   it("keeps a failed primary status when the backend is offline, outage or not", () => {
     const primary = pickPrimarySystemStatusCard([
       { id: "frontend", label: "前端", value: "已连接", tone: "running" },
