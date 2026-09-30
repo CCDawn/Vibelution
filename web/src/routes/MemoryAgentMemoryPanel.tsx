@@ -181,7 +181,7 @@ export function MemoryAgentMemoryPanel({
         <div className={styles.readingContent}>
           {selectedAgent ? <header className={styles.agentTitle}><span className={styles.avatarLarge}>{avatar(selectedAgent.name)}</span><div><h2>{selectedAgent.name}</h2><p>{selectedAgent.fileCount} {copy.privateMemoryFileUnit}</p></div></header> : null}
           {detailErrorText ? <VStateSurface tone="error" title={copy.loadFailed}>{detailErrorText}</VStateSurface> : null}
-          {detailPending ? <div aria-label={copy.loading} className="grid gap-5"><VSkeleton shape="line" /><VSkeleton shape="line" /><VSkeleton shape="line" /></div> : null}
+          {detailPending ? <div aria-label={copy.loading} className={styles.loading}><VSkeleton shape="line" /><VSkeleton shape="line" /><VSkeleton shape="line" /></div> : null}
           {!detailPending && !detailErrorText && selectedAgent ? <>
             <div className={styles.collectionHeading}><BookOpen size={16} /><span>{copy.privateMemoryAllFiles}</span><span>{items.length}</span></div>
             {items.length ? <div className={styles.documents}>{items.map((item) => (

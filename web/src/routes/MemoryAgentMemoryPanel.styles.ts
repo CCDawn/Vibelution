@@ -32,6 +32,7 @@ const styles = {
   readingContent: "mx-auto w-full max-w-[1000px] px-5 py-7 lg:px-11 lg:py-9",
   agentTitle: "mb-8 flex min-w-0 items-center gap-3.5 [&>div]:min-w-0 [&_h2]:break-words [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mt-2 [&_p]:text-xs [&_p]:text-[var(--fg-tertiary)]",
   collectionHeading: "mb-4 flex items-center gap-2 text-sm font-medium [&>span:last-child]:text-xs [&>span:last-child]:text-[var(--fg-tertiary)]",
+  loading: "grid gap-5",
   documents: "grid min-w-0 gap-5",
   document: `${vuiFlatPanelClass} min-w-0 !rounded-xl px-5 pt-6 lg:px-8 lg:pt-7`,
   documentKicker: `flex flex-wrap items-center gap-2 text-xs ${muted} [&>span:last-child]:ml-auto`,
