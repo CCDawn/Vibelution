@@ -6416,7 +6416,9 @@ class TestDelegationExposure:
         assert "search_memory_tool" in names
         assert "apply_patch_tool" in names
         assert "apply_diff_edit_tool" in names
-        assert "read_file_tool" not in names
+        assert "read_file_tool" in names
+        assert "禁用" not in descriptions["read_file_tool"]
+        assert "cli_tool" in descriptions["read_file_tool"]
         assert "grep_search_tool" in names
         assert "glob_tool" in names
         assert "code_symbol_tool" in names

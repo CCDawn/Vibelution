@@ -57,6 +57,21 @@ def _ledger_post_write(abs_path) -> None:
         pass
 
 
+def _bound_existing_write_block(abs_path) -> str | None:
+    from core.chat.read_file_grant import existing_file_write_block
+
+    return existing_file_write_block(abs_path)
+
+
+def _remember_written_file(abs_path) -> None:
+    try:
+        from core.chat.read_file_grant import remember_current_file
+
+        remember_current_file(abs_path, source="write")
+    except Exception:
+        return
+
+
 # ============================================================================
 # 配置
 # ============================================================================
@@ -734,6 +749,10 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
             changed_files.append(str(target_path))
         return f"[编辑] 成功修改 {len(changed_files)} 个文件"
 
+    block = _bound_existing_write_block(path)
+    if block:
+        return f"[编辑] 错误: {block}"
+
     try:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -788,6 +807,7 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
         with open(path, 'w', encoding='utf-8', newline='') as f:
             f.write(new_content)
         _ledger_post_write(str(path))
+        _remember_written_file(path)
     except Exception as e:
         return f"[编辑] 错误: 无法写入文件 - {e}"
 
@@ -966,6 +986,12 @@ def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
                 return result
             planned.append((action, path, new_content))
 
+    for action, path, _content in planned:
+        if action in {"update", "delete"}:
+            block = _bound_existing_write_block(path)
+            if block:
+                return f"[patch] 错误: {block}"
+
     originals: Dict[Path, Optional[bytes]] = {}
     applied: List[Path] = []
     try:
@@ -998,6 +1024,10 @@ def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
             else "; rollback=completed"
         )
         return f"[patch] 错误: 原子应用失败 - {exc}{rollback_detail}"
+
+    for action, path, _content in planned:
+        if action != "delete":
+            _remember_written_file(path)
 
     return json.dumps(
         {

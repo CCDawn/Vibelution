@@ -30,6 +30,13 @@ def _changes(scope):
     }
 
 
+def _full_read(path: Path) -> None:
+    from tools.shell_tools import read_file
+
+    result = read_file(str(path), max_lines=None, offset=0)
+    assert result.startswith("[文件]"), result
+
+
 def test_create_file_new_records_created_state(ledger_scope):
     target = ledger_scope.root / "fresh.py"
     with _bind(ledger_scope):
@@ -45,6 +52,7 @@ def test_create_file_overwrite_restores_previous_content(ledger_scope):
     target = ledger_scope.root / "over.txt"
     target.write_text("original\n", encoding="utf-8")
     with _bind(ledger_scope):
+        _full_read(target)
         create_file(str(target), "replaced\n")
 
     changes = _changes(ledger_scope)
@@ -61,6 +69,7 @@ def test_edit_file_checkpoint_restores_pre_image(ledger_scope):
     target = ledger_scope.root / "code.py"
     target.write_text("value = 1\nprint(value)\n", encoding="utf-8")
     with _bind(ledger_scope):
+        _full_read(target)
         result = edit_file(str(target), "value = 1", "value = 42")
 
     assert "成功" in result
@@ -76,6 +85,7 @@ def test_apply_diff_edit_checkpoint(ledger_scope):
     target = ledger_scope.root / "diffed.py"
     target.write_text("x = 1\ny = 2\n", encoding="utf-8")
     with _bind(ledger_scope):
+        _full_read(target)
         result = apply_diff_edit(
             str(target),
             "<<<<<<< SEARCH\nx = 1\ny = 2\n=======\nx = 999\ny = 2\n>>>>>>> REPLACE",
@@ -98,6 +108,7 @@ def test_apply_patch_edit_add_and_delete_rewind(ledger_scope):
 *** Delete File: victim.txt
 *** End Patch"""
     with _bind(ledger_scope):
+        _full_read(existing)
         result = apply_patch_edit(patch, cwd=str(ledger_scope.root))
 
     import json
@@ -119,6 +130,7 @@ def test_multi_write_turn_rewinds_to_pre_turn_state(ledger_scope):
     target = ledger_scope.root / "story.txt"
     target.write_text("v1\n", encoding="utf-8")
     with _bind(ledger_scope):
+        _full_read(target)
         create_file(str(target), "v2\n")
         edit_file(str(target), "v2", "v3")
         edit_file(str(target), "v3", "v4")

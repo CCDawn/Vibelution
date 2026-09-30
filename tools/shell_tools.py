@@ -79,6 +79,32 @@ def _ledger_post_write(abs_path) -> None:
     except Exception:
         pass
 
+
+def _bound_existing_write_block(abs_path) -> str | None:
+    """已有文件在绑定回合内缺少完整读取或指纹失配时返回原因。无回合则放行。"""
+    from core.chat.read_file_grant import existing_file_write_block
+
+    return existing_file_write_block(abs_path)
+
+
+def _remember_full_read(abs_path) -> None:
+    try:
+        from core.chat.read_file_grant import remember_current_file
+
+        remember_current_file(abs_path, source="read")
+    except Exception:
+        return
+
+
+def _remember_written_file(abs_path) -> None:
+    try:
+        from core.chat.read_file_grant import remember_current_file
+
+        remember_current_file(abs_path, source="write")
+    except Exception:
+        return
+
+
 # ============================================================================
 # 文件 Glob 搜索
 # ============================================================================
@@ -717,7 +743,7 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
                 "3. 不要用 `findstr` 搜 UTF-8 无 BOM 配置文件（系统代码页 GBK 会漏匹配）；文件内容搜索用 `grep_search_tool` / `rg -n`。",
                 "4. Unix 管道片段（`| head`、`grep -n`、`xargs`、`/dev/null`）→ 拦截；需要 bash 时显式 `bash -c \"...\"`。",
                 "5. 本轮选定一种写法后不要再探路；**cmd 方言下跑裸 PowerShell** 失败 1 次后改 `code_symbol_tool`/`grep_search_tool`。PowerShell 路径/引号 EXEC 失败只拦截同一条命令，改写后的 Get-Item/Get-Content 可继续。",
-                "推荐：`rg -n \"pattern\" path`（无管道）；读小段用完整 PowerShell Get-Content。",
+                "推荐：`rg -n \"pattern\" path`（无管道）；读取文件内容用 `read_file_tool`。",
             ]
         )
     if system_key in {"linux", "darwin"}:
@@ -1802,6 +1828,9 @@ def read_file(
 
         result_lines.append("--- End ---")
 
+        if offset <= 0 and not truncated:
+            _remember_full_read(abs_path)
+
         return '\n'.join(result_lines)
 
     except PermissionError:
@@ -1984,6 +2013,11 @@ def create_file(
     if not _is_path_allowed(abs_path):
         return "[创建文件] [SECURITY] " + _path_boundary_message(abs_path, operation="创建/覆盖文件")
 
+    if os.path.isfile(abs_path):
+        block = _bound_existing_write_block(abs_path)
+        if block:
+            return f"[创建文件] [ERROR] {block}"
+
     # 确保目录存在
     parent_dir = os.path.dirname(abs_path)
     if parent_dir:
@@ -2011,6 +2045,7 @@ def create_file(
                 pass
 
             action = "覆盖" if existed_before else "成功"
+            _remember_written_file(abs_path)
             return f"[创建文件] [OK] {action}\n文件: {abs_path}\n大小: {file_size} 字节\n行数: {line_count}"
         else:
             return "[创建文件] [FAIL] 创建失败"
@@ -2069,6 +2104,10 @@ def edit_file(
         if pattern in abs_str:
             return f"[文件编辑] 错误: 禁止编辑敏感文件 - {abs_path}"
 
+    block = _bound_existing_write_block(abs_path)
+    if block:
+        return f"[文件编辑] 错误: {block}"
+
     try:
         with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
             old_content = f.read()
@@ -2102,6 +2141,7 @@ def edit_file(
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
         _ledger_post_write(str(abs_path))
+        _remember_written_file(abs_path)
 
         result = [
             "=" * 50,

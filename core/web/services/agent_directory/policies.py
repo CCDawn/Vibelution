@@ -132,14 +132,14 @@ def _direct_session_visibility(
 
 def _effective_agent_tool_policy(policy: dict[str, Any], delegation_policy: dict[str, Any] | None) -> dict[str, Any]:
     s = _service()
-    return s._without_disabled_agent_tools(s._without_subagent_delegation_tools(policy, delegation_policy))
+    return s._without_subagent_delegation_tools(policy, delegation_policy)
 
 
 def _without_personal_memory_write_tools(policy: dict[str, Any]) -> dict[str, Any]:
     """Strip personal-memory write tools from an effective (runtime) tool policy.
 
-    Mirrors ``_without_disabled_agent_tools``: only the in-memory effective copy
-    is rewritten; the persisted agent record and agents.json stay untouched.
+    Only the in-memory effective copy is rewritten; the persisted agent record
+    and agents.json stay untouched.
     Covers the current tool names plus the legacy episodic aliases so historical
     persisted policies cannot leak the removed tools back in.
     """
@@ -925,7 +925,7 @@ def compute_effective_tool_visibility(
     policy: dict[str, Any] | None = None,
 ) -> Any:
     s = _service()
-    normalized_policy = s._without_disabled_agent_tools(policy if isinstance(policy, dict) else {})
+    normalized_policy = policy if isinstance(policy, dict) else {}
     policy_id = str(normalized_policy.get("policyId") or normalized_policy.get("id") or s.DEFAULT_TOOL_POLICY_ID).strip()
     policy_id = policy_id or s.DEFAULT_TOOL_POLICY_ID
     tool_names = s._tool_name_list(tools)
@@ -1382,18 +1382,6 @@ def evaluate_current_tool_policy(tool_name: str, tool_args: dict[str, Any]) -> A
         return s.ToolPolicyDecision(True)
     normalized_tool = str(tool_name or "").strip()
     delegation_policy = s.normalize_delegation_policy(runtime.get("delegationPolicy"))
-    if normalized_tool in s.DISABLED_AGENT_DIRECT_READ_TOOL_NAMES:
-        policy = runtime.get("toolPolicy") or {}
-        policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or s.DEFAULT_TOOL_POLICY_ID
-        decision = s._blocked_decision(
-            normalized_tool,
-            "direct_read_tool_disabled",
-            policy_id,
-            agent_id,
-            f"[工具策略提示] 当前 Agent 默认关闭 `{normalized_tool}`；请改用 `cli_tool` 执行 `rg` 与小范围命令读取。",
-        )
-        s._record_policy_block(agent_id, policy, normalized_tool, tool_args, decision)
-        return decision
     if normalized_tool in s.SUBAGENT_DELEGATION_TOOL_NAMES and not bool(
         delegation_policy.get("allowSubagents", False)
     ):
@@ -1744,8 +1732,6 @@ def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[s
             normalized_values.append(value)
             seen_values.add(value)
         payload[key] = normalized_values
-    for key in ("allowedTools", "preferredTools"):
-        payload[key] = [name for name in payload.get(key) or [] if name not in s.DISABLED_AGENT_DIRECT_READ_TOOL_NAMES]
     payload["readScopes"] = s._normalize_tool_policy_scopes(payload.get("readScopes"))
     payload["writeScopes"] = s._normalize_tool_policy_scopes(payload.get("writeScopes"))
     payload["perToolRules"] = dict(payload.get("perToolRules") or {})

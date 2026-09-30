@@ -518,13 +518,14 @@ class TestBuildAPI:
         result = to_string(sp)
 
         assert "## 工具索引" not in result
-        assert "`read_file_tool`" not in result
         assert "`clean_workspace_debris_tool`" not in result
         assert "工具错误是可观察反馈" not in result
         assert "参数错误时按返回的必填/可选参数和示例修正后重试" not in result
         assert "安全、权限、停止和事务类拦截属于硬边界" not in result
+        # `read_file_tool` 含有旧名 `read_file` 的前缀；先摘掉现行工具名再检查旧索引。
+        indexed = result.replace("`read_file_tool`", "")
         for marker in LEGACY_PROMPT_TOOL_MARKERS:
-            assert marker not in result
+            assert marker not in indexed
 
     def test_env_info_includes_windows_shell_discipline(self):
         pm = PromptManager()

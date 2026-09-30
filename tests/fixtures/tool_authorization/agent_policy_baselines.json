@@ -49,13 +49,15 @@
         "knowledge_base_acl_grant_tool",
         "github_project_library_search_tool",
         "github_project_library_clone_tool",
-        "todo_write"
+        "todo_write",
+        "read_file_tool"
       ],
       "expected_preferred_tools": [
         "exec_command",
         "write_stdin",
         "grep_search_tool",
         "code_symbol_tool",
+        "read_file_tool",
         "github_project_library_search_tool",
         "apply_patch_tool",
         "run_test_for_tool",

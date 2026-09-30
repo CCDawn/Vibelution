@@ -153,7 +153,7 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert "apply_patch_tool" in by_role["candidate"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"]
     assert "write_file_tool" in by_role["candidate"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"]
     assert "read_file_tool" not in by_role["baseline"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"]
-    assert "read_file_tool" not in by_role["candidate"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"]
+    assert "read_file_tool" in by_role["candidate"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"]
     assert by_role["judge"]["metadata"]["supervisedRoleContract"]["effectiveRuntimeTools"] == []
     assert "可复现" in by_role["baseline"]["personaProfile"]["personality"]
     assert "spawn_agent_tool" in by_role["judge"]["taskProfile"]["avoidTasks"]
@@ -921,6 +921,7 @@ def test_child_process_agent_runtime_injects_supervised_env_tool_grants(tmp_path
     assert runtime["supervisionPolicy"]["evidenceLevel"] == "strict"
     assert [tool.name for tool in visible_tools] == [
         "open_evolution_transaction_tool",
+        "read_file_tool",
         "cli_tool",
     ]
 

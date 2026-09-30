@@ -334,7 +334,6 @@ from .agent_directory.ops_residual import (
     _tool_governance_requests_for_agent,
     _with_runtime_tool_grants,
     _with_session_terminal_protocol_defaults,
-    _without_disabled_agent_tools,
     _write_jsonl,
     consume_agent_inbox_message,
     consume_all_agent_inbox_messages,
@@ -407,6 +406,7 @@ _LEGACY_SESSION_AGENT_ALLOWED_TOOLS = (
 _LEGACY_SESSION_AGENT_PREFERRED_TOOLS = (
     "grep_search_tool",
     "code_symbol_tool",
+    "read_file_tool",
     "apply_patch_tool",
     "run_test_for_tool",
     "cli_tool",
@@ -482,6 +482,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
         # Presentation-only checklist snapshot; journaled with the turn and
         # derived client-side by the conversation checklist card.
         "todo_write",
+        "read_file_tool",
     ]
 )
 _DEFAULT_SESSION_AGENT_PREFERRED_BASE = tuple(
@@ -514,7 +515,13 @@ def _rewrite_legacy_personal_memory_tool_names(names: list[str]) -> list[str]:
 # The persistent stdin protocol belongs to ordinary conversation Agents.  Keep
 # self-evolution role policy unchanged until its own execution contract opts in.
 SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(
-    dict.fromkeys((*_LEGACY_SESSION_AGENT_ALLOWED_TOOLS, *GENERATION_HANDOFF_MEMORY_TOOLS))
+    dict.fromkeys(
+        (
+            *_LEGACY_SESSION_AGENT_ALLOWED_TOOLS,
+            *GENERATION_HANDOFF_MEMORY_TOOLS,
+            "read_file_tool",
+        )
+    )
 )
 SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS = tuple(_LEGACY_SESSION_AGENT_PREFERRED_TOOLS)
 SELF_EVOLUTION_EXECUTABLE_ROLES = {"executor", "reviewer"}
@@ -527,9 +534,6 @@ SUBAGENT_DELEGATION_TOOL_NAMES = {
     "create_child_session_tool",
     "list_child_sessions_tool",
     "spawn_agent_tool",
-}
-DISABLED_AGENT_DIRECT_READ_TOOL_NAMES = {
-    "read_file_tool",
 }
 SESSION_AGENT_VISIBILITY_ACTIVE = "active_session"
 SESSION_AGENT_VISIBILITY_PENDING = "pending_activity"
