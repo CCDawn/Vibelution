@@ -134,7 +134,7 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("--shell-topbar-height: 40px");
     expect(shellStyles).not.toContain("--shell-settings-dock-height");
     expect(shellStyles).toContain("env(titlebar-area-width");
-    expect(styles.settingsPopoverContent).toContain("w-[min(350px,calc(100vw-20px))]");
+    expect(styles.settingsPopoverContent).toContain("w-[min(280px,calc(100vw-20px))]");
     expect(styles.settingsPopoverContent).toContain("max-h-[min(650px,calc(100dvh-90px))]");
     expect(styles.settingsActionList).toContain("grid-cols-1");
     expect(styles.settingsTrigger).toContain("!min-h-8");
@@ -343,114 +343,14 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("navMemory")');
   });
 
-  it("groups appearance, configuration, usage, logs and git in the bottom settings popover", () => {
-    const primaryNav = shellSource.slice(
-      shellSource.indexOf("<nav className={styles.nav}>"),
-      shellSource.indexOf("</nav>"),
-    );
-
-    expect(primaryNav).not.toContain('to="/logs"');
-    expect(primaryNav).not.toContain('to="/usage"');
-    expect(primaryNav).not.toContain('to="/tools"');
-    expect(primaryNav).not.toContain('to="/agents/tools"');
-    expect(primaryNav).not.toContain('to="/git"');
-    expect(shellSource).toContain("settingsSlot");
-    expect(shellSource).toContain("settingsTriggerOpen");
-    expect(shellSource).toContain("aria-expanded={utilityOpen}");
-    expect(shellSource).toContain("<VPopover");
-    expect(shellSource).toContain("contentClassName={styles.settingsPopoverContent}");
-    expect(shellSource).toContain('side="bottom"');
-    expect(shellSource).toContain('align="end"');
-    expect(shellSource).toContain("selectTheme(\"light\")");
-    expect(shellSource).toContain("selectTheme(\"dark\")");
-    expect(shellSource).toContain("LazyAppShellUtilityMenu");
-    expect(shellSource).not.toContain("utilityMenuRef");
-    expect(shellSource).not.toContain("queryKeys.gitStatus()");
-    expect(shellSource).toContain("queryFn: ({ signal }) => fetchPublicConfig({ signal })");
-    expect(shellSource).toContain('queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal })');
-    expect(shellSource).toContain('cache: "no-store",\n        signal,');
-    expect(utilityMenuSource).toContain("queryKeys.gitStatusSummary()");
-    expect(utilityMenuSource).toContain('queryFn: ({ signal }) => fetchJson<GitStatusSummary>("/api/git/status", { signal })');
-    expect(utilityMenuSource).not.toContain("queryKeys.fileTree()");
-    expect(utilityMenuSource).not.toContain("/api/files/tree");
-    expect(shellSource).not.toContain("queryKeys.fileTree()");
-    expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');
-    expect(utilityMenuSource).not.toContain("AppShell.styles");
-    expect(utilityMenuSource).toContain("utilityPanel");
-    expect(utilityMenuSource).toContain('role="region"');
-    expect(utilityMenuSource).not.toContain('role="menu"');
-    expect(utilityMenuSource).not.toContain('role="menuitem"');
-    expect(utilityMenuSource).not.toContain("VMetricStrip");
-    expect(utilityMenuSource).not.toContain("VPanelHeader");
-    expect(utilityMenuSource).not.toContain("<VChip");
-    expect(utilityMenuSource).not.toContain("<VNativeInput");
-    expect(utilityMenuSource).toContain("VStatusChip");
-    expect(utilityMenuSource).toContain("<VRouteLinkButton");
-    expect(utilityMenuSource).not.toMatch(/<input\b/);
-    expect(utilityMenuSource).not.toContain("<NavLink");
-    expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
-    expect(utilityMenuSource).toContain('to="/usage"');
-    expect(utilityMenuSource).toContain('t("navUsage")');
-    expect(utilityMenuSource).toContain('<VTooltip content={t("usageUtilityTitle")}>');
-    expect(utilityMenuSource).not.toContain('className={styles.utilityPanelHeader}');
-    expect(utilityMenuSource).toContain("gitHeroLabel");
-    expect(utilityMenuSource).toContain("gitSummaryRow");
-    expect(utilityMenuSource).not.toContain('to="/chat"');
-    expect(utilityMenuSource).not.toContain("gitMiniPanel");
-    expect(utilityMenuSource).not.toContain("utility-file-navigator");
-    expect(utilityMenuSource).not.toContain('title={t("usageUtilityTitle")}');
-    expect(utilityMenuSource).not.toContain('title={gitTitle}');
-    expect(utilityMenuSource).toContain("Activity");
-    expect(utilityMenuSource.indexOf('href="/launcher"')).toBeLessThan(utilityMenuSource.indexOf('to="/usage"'));
-    expect(utilityMenuSource.indexOf('to="/usage"')).toBeLessThan(utilityMenuSource.indexOf('to="/logs"'));
-    expect(utilityMenuSource).toContain('to="/logs"');
-    expect(shellSource).not.toContain('to="/agents/tools"');
-    expect(shellSource).not.toContain('to="/tools"');
-    expect(shellSource).toContain("SlidersHorizontal");
-    expect(utilityMenuSource).toContain('to="/git"');
-    expect(utilityMenuSource).toContain('href="/launcher"');
-    expect(utilityMenuSource).toContain('target="_blank"');
-    // Shell SPA links are VRouteLinkButton (primary nav uses shell-nav chrome).
-    expect(shellSource).toContain("<VRouteLinkButton");
-    expect(shellSource).toContain('chrome="shell-nav"');
-    expect(shellSource).toContain("shellPrimaryNavClass");
-    expect(shellSource).toContain("shellMobileNavClass");
-    expect(shellSource).toContain("isShellPrimaryNavActive");
-    expect(shellSource).not.toContain("<NavLink");
-    expect(shellSource).toContain('to="/config"');
-    expect(shellSource).toContain("<Settings size={17}");
-    expect(utilityMenuSource).toContain("requiresAttention");
-    expect(utilityMenuSource).toContain("gitStatusLevel");
-    expect(utilityMenuSource).not.toContain("gitSignalGrid");
-    expect(utilityMenuSource).not.toContain("gitCountGrid");
-    expect(utilityMenuSource).not.toContain("gitMetaGrid");
-    expect(utilityMenuSource).not.toContain("gitMiniHeader");
-    expect(utilityMenuSource).not.toContain("gitMetricStrip");
-    expect(utilityMenuSource).not.toContain("gitMetricStack");
-    expect(utilityMenuSource).not.toContain("gitDetails");
-    expect(utilityMenuSource).not.toContain("gitPendingWorktrees");
-    expect(shellSource).toContain('data-browser-role="workbench"');
-    expect(styles.settingsTrigger).toBeTypeOf("string");
-    expect(styles.settingsTriggerOpen).toBeTypeOf("string");
-    expect(styles.settingsPopoverContent).toBeTypeOf("string");
-    expect(utilityMenuStyles.utilityPanel).toBeTypeOf("string");
-    expect(utilityMenuStyles.utilityButtonGrid).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitSummaryRow).toBeTypeOf("string");
-    expect(utilityMenuStyles.gitStatusChip).toBeTypeOf("string");
-    expect(shellStyles).toContain(".settingsPopoverBody .utilityButtonGrid");
-    const settingsUtilityGrid = shellStyles.slice(
-      shellStyles.indexOf(":where(.vui-app-appshell).settingsPopoverBody .utilityButtonGrid"),
-      shellStyles.indexOf(":where(.vui-app-appshell).settingsPopoverBody .utilityPanel"),
-    );
-    expect(settingsUtilityGrid).toContain("grid-template-columns: minmax(0, 1fr)");
-    expect(settingsUtilityGrid).not.toContain("repeat(2");
-    expect(shellStyles).toContain(".settingsPopoverBody .utilityPanel");
-    expect(shellStyles).not.toContain("minmax(5.5rem, 1fr)");
-    expect(utilityMenuStylesSource).toContain("gitSummaryRow");
-    expect(utilityMenuSource.match(/to="\/git"/g)).toHaveLength(1);
-    expect(utilityMenuStylesSource).not.toContain("utilityFileButton");
-    expect(utilityMenuStylesSource).not.toContain("gitMetricStrip");
-    expect(utilityMenuStylesSource).not.toContain("gitSignalGrid");
+  it("keeps common settings separate from maintenance and project tools", () => {
+    expect(shellSource).toContain("LazyAppShellSettingsMenu");
+    expect(shellSource).toContain("onThemeChange={selectTheme}");
+    expect(shellSource).toContain("onRefresh={refreshFrontend}");
+    expect(shellSource).toContain('to="/git"');
+    expect(shellSource).toContain('kind: "project_bus"');
+    expect(shellSource).not.toContain("gitHeroLabel");
+    expect(styles.settingsPopoverContent).toContain("280px");
   });
 
   it("moves active work details into a title-bar popover", () => {
@@ -562,11 +462,9 @@ describe("AppShell layout contract", () => {
   });
 
   it("keeps frontend refresh in the shell while Launcher exclusively owns lifecycle controls", () => {
-    expect(shellSource).toContain("className={styles.settingsActionButton}");
-    expect(shellSource).toContain("{refreshFrontendLabel}");
+    expect(shellSource).toContain("onRefresh={refreshFrontend}");
     expect(shellSource).not.toContain("className={styles.actionIconButton}");
-    expect(shellSource).toContain("RefreshCw");
-    expect(shellSource).toContain("refreshFrontendLabel");
+    expect(shellSource).toContain("refreshDisabled={restartRequested || shutdownRequested");
     expect(shellSource).toContain("browser.user_action.frontend_refresh_requested");
     expect(shellSource).toContain("allowNextWorkbenchWindowUnload");
     expect(shellSource).toContain("window.location.reload()");
