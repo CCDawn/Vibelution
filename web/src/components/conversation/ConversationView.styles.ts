@@ -305,7 +305,7 @@ backToBottomButton:
   // The thumbnail stays the primary click target: it opens the shared image
   // preview dialog, so it keeps a real tap area (56px) and a hover/focus hint.
   composerAttachmentChip:
-    "vui-components-conversationview composerAttachmentChip group inline-flex min-w-0 w-fit max-w-full items-center gap-2.5 overflow-hidden rounded-[14px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] p-1.5 pr-2 transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[var(--vui-control-muted-hover)] focus-within:border-[var(--accent-cool)]",
+    "vui-components-conversationview composerAttachmentChip group inline-flex min-w-0 w-fit max-w-full items-center gap-2.5 overflow-hidden rounded-xl border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] p-1.5 pr-2 transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[var(--vui-control-muted-hover)] focus-within:border-[var(--accent-cool)]",
   // Failed upload keeps the chip in place but repaints it on the danger scale:
   // red ring + faint error wash, with the retry icon button carrying the fix.
   composerAttachmentChipFailed:
