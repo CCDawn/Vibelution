@@ -212,6 +212,15 @@ def _ensure_watcher_started() -> None:
         _WATCHER_STARTED = True
     thread = threading.Thread(target=_watch_active_tasks, name="cli-agent-task-watchdog", daemon=True)
     thread.start()
+    # Restart recovery: tasks left active by a previous process only get a
+    # backgrounded stamp if the sweeper is running even when no new task is
+    # submitted. Disabled threshold -> strict no-op.
+    try:
+        from . import runtime_task_auto_background
+
+        runtime_task_auto_background.ensure_auto_background_sweeper()
+    except Exception:
+        pass
 
 
 def _watch_active_tasks() -> None:

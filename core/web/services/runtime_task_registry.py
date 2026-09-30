@@ -2,7 +2,7 @@
 
 One ledger for every runtime task that outlives a single turn: CLI Agent
 terminal tasks, child sessions and research project Agent tasks. The registry
-owns four things that used to be implicit or missing:
+owns five things that used to be implicit or missing:
 
 1. A typed snapshot per task, persisted as one JSON file per task id.
 2. Mandatory ``branchGeneration`` stamping at registration. The stamp is the
@@ -20,6 +20,12 @@ owns four things that used to be implicit or missing:
    every tick. A periodic full-directory reconcile heals index drift (for
    example a crash between the snapshot write and the index update, or legacy
    snapshots written before the index existed).
+5. Lifecycle verbs that used to live in each surface: ``request_stop`` (who
+   asked to wind a task down) and ``request_background`` (the task passed its
+   wait threshold and is handed to the background once, with conservative
+   refusals for stop-requested, never-started and explicitly-disabled tasks).
+   The auto-background sweeper that drives ``request_background`` lives in
+   ``runtime_task_auto_background``.
 
 Cross-process safety: snapshot writes go through
 ``core.infrastructure.atomic_io.atomic_write_json`` (temp file + ``os.replace``
@@ -99,6 +105,26 @@ SEAL_REASON_PARENT_TURN_CANCELLED = "parent_turn_cancelled"
 # index, the depth cap plus the visited set bound the walk against registry
 # corruption (a parentSessionId cycle) and runaway chains.
 MAX_CASCADE_DEPTH = 8
+# Outcomes of ``request_background`` (mirrors the request_stop verb): a task
+# whose threshold elapsed without completing is stamped once and keeps
+# running; the parent learns "already backgrounded, completion will notify".
+BACKGROUND_OUTCOME_BACKGROUNDED = "backgrounded"
+BACKGROUND_OUTCOME_ALREADY = "already_backgrounded"
+BACKGROUND_OUTCOME_SETTLED = "settled"
+BACKGROUND_OUTCOME_UNKNOWN = "unknown"
+# Conservative refusals: a stop already requested makes backgrounding
+# pointless, an idle child session never started, and a task may opt out
+# explicitly. Refusals stamp a one-shot audit instead of retrying per tick.
+BACKGROUND_REFUSAL_STOP_REQUESTED = "stop_requested"
+BACKGROUND_REFUSAL_NOT_STARTED = "task_not_started"
+BACKGROUND_REFUSAL_DISABLED_BY_TASK = "disabled_by_task"
+BACKGROUND_REFUSAL_REASONS = frozenset(
+    {
+        BACKGROUND_REFUSAL_STOP_REQUESTED,
+        BACKGROUND_REFUSAL_NOT_STARTED,
+        BACKGROUND_REFUSAL_DISABLED_BY_TASK,
+    }
+)
 
 # Sentinel for "stamp argument not provided"; distinct from an explicit None.
 UNSET_BRANCH_GENERATION = object()
@@ -121,6 +147,31 @@ def is_active_status(status: str) -> bool:
     return str(status or "").strip().lower() in ACTIVE_STATUSES
 
 
+def backgrounding_refusal_reason(state: dict[str, Any]) -> str:
+    """Conservative auto-background guard for one task snapshot.
+
+    Refuses when:
+
+    - a stop was already requested (user/model): the task is being wound
+      down, backgrounding it would only confuse the stop chain;
+    - the task never started (an idle child session created with
+      ``auto_start=False``): there is nothing running to hand to the
+      background;
+    - the task explicitly opted out (``backgroundingDisabled``), the escape
+      hatch for borrowed/synchronous-style executions that must stay under
+      their caller's lifecycle.
+    """
+
+    snapshot = normalize_snapshot(state)
+    if str(snapshot.get("stopInitiator") or "") in STOP_INITIATORS:
+        return BACKGROUND_REFUSAL_STOP_REQUESTED
+    if bool(snapshot.get("backgroundingDisabled")):
+        return BACKGROUND_REFUSAL_DISABLED_BY_TASK
+    if str(snapshot.get("status") or "").strip().lower() == "idle":
+        return BACKGROUND_REFUSAL_NOT_STARTED
+    return ""
+
+
 def new_snapshot(
     *,
     kind: str,
@@ -131,6 +182,7 @@ def new_snapshot(
     branch_generation: Any = UNSET_BRANCH_GENERATION,
     label: str = "",
     output: str = "",
+    backgrounding_disabled: bool = False,
 ) -> dict[str, Any]:
     """Build a registry snapshot envelope for one new task."""
 
@@ -161,6 +213,10 @@ def new_snapshot(
         "createdAt": _now_iso(),
         "updatedAt": _now_iso(),
         "completedAt": "",
+        # Escape hatch for borrowed/synchronous-style executions that must
+        # stay under their caller's lifecycle and never move to the
+        # background (ZCode's borrowed-foreground-agent rule).
+        "backgroundingDisabled": bool(backgrounding_disabled),
     }
     if branch_generation is not UNSET_BRANCH_GENERATION:
         snapshot["branchGeneration"] = _coerce_generation(branch_generation)
@@ -220,6 +276,7 @@ def normalize_snapshot(payload: Any) -> dict[str, Any]:
     state["branchGenerationStampSource"] = str(
         state.get("branchGenerationStampSource") or ""
     )
+    state["backgroundingDisabled"] = bool(state.get("backgroundingDisabled"))
     return state
 
 
@@ -289,6 +346,17 @@ class RuntimeTaskStore:
             state["startedAt"] = str(state.get("createdAt") or "").strip() or _now_iso()
         state["updatedAt"] = _now_iso()
         self.save_state(state)
+        # Lazy hook: when the auto-background threshold is configured, make
+        # sure the sweeper daemon is running. A disabled threshold turns this
+        # into a strict no-op (no thread, no poke); failures never block
+        # registration.
+        try:
+            from . import runtime_task_auto_background
+
+            if runtime_task_auto_background.resolve_threshold_seconds() is not None:
+                runtime_task_auto_background.ensure_auto_background_sweeper()
+        except Exception:
+            pass
         return state
 
     def save_state(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -483,6 +551,55 @@ class RuntimeTaskStore:
             if not frontier:
                 break
         return targets
+    def request_background(
+        self, task_id: str, *, reason: str = "auto_background_timeout"
+    ) -> str:
+        """Stamp one active task as backgrounded (idempotent, once per task).
+
+        The task itself keeps running unchanged: stopInitiator, terminal
+        statuses and the completion notification chain are untouched. A task
+        that already carries the stamp, already settled, or is conservatively
+        refused (see ``backgrounding_refusal_reason``) is left alone; refusals
+        write a one-shot audit so a per-tick sweeper does not rewrite the
+        snapshot every second.
+
+        Returns one of the ``BACKGROUND_OUTCOME_*`` strings.
+        """
+
+        normalized_reason = str(reason or "").strip() or "auto_background_timeout"
+        outcome = BACKGROUND_OUTCOME_UNKNOWN
+
+        def _mutate(state: dict[str, Any]) -> dict[str, Any] | None:
+            nonlocal outcome
+            if is_terminal_status(str(state.get("status") or "")):
+                outcome = BACKGROUND_OUTCOME_SETTLED
+                return None
+            refusal = backgrounding_refusal_reason(state)
+            if refusal:
+                if str(state.get("backgroundingRefusedReason") or "") != refusal:
+                    now = _now_iso()
+                    state["backgroundingRefusedAt"] = now
+                    state["backgroundingRefusedReason"] = refusal
+                    state["updatedAt"] = now
+                    outcome = f"refused:{refusal}"
+                    return state
+                outcome = f"refused:{refusal}"
+                return None
+            if state.get("backgroundedAt"):
+                outcome = BACKGROUND_OUTCOME_ALREADY
+                return None
+            now = _now_iso()
+            state["backgroundedAt"] = now
+            state["backgroundedReason"] = normalized_reason
+            state["updatedAt"] = now
+            outcome = BACKGROUND_OUTCOME_BACKGROUNDED
+            return state
+
+        current = self.load_state(task_id)
+        if not current:
+            return BACKGROUND_OUTCOME_UNKNOWN
+        self.update_task(task_id, _mutate)
+        return outcome
 
     # -- reads -----------------------------------------------------------
 
