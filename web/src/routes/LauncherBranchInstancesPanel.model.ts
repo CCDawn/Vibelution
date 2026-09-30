@@ -341,6 +341,15 @@ export function instanceRuntimeState(
   item: LauncherBranchInstance,
   pending?: LifecyclePendingInput,
 ): InstanceRuntimeState {
+  // The frontend build gate blocks the start/restart IPC for the whole build,
+  // so a pending intent stays active for minutes while the payload already
+  // reports the truth. The optimistic starting/restarting label must not
+  // swallow that building window: payload building wins over any intent.
+  // Stop needs no special case — the gate clears its marker in a finally and
+  // the row settles with the stop intent once the build window is gone.
+  if (item.runtime.lifecycleState === "building") {
+    return "building";
+  }
   const active = resolveItemPending(item, pending);
   if (active) {
     if (active.operation === "stop") {
