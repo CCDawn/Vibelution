@@ -106,11 +106,11 @@ const styles = {
   settingsChoiceButtonActive:
     `vui-app-appshell settingsChoiceButtonActive ${vuiStateSelectedRowClass}`,
   settingsSlot:
-    "vui-app-appshell settingsSlot flex shrink-0 items-center pr-1",
+    "vui-app-appshell settingsSlot flex shrink-0 items-center gap-1 pr-1",
   settingsPopoverBody:
-    "vui-app-appshell settingsPopoverBody grid min-w-0 gap-0 p-2",
+    "vui-app-appshell settingsPopoverBody grid min-w-0 gap-0 p-1",
   settingsPopoverContent:
-    "vui-app-appshell settingsPopoverContent z-[95] w-[min(350px,calc(100vw-20px))] max-h-[min(650px,calc(100dvh-90px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+    "vui-app-appshell settingsPopoverContent z-[95] w-[min(280px,calc(100vw-20px))] max-h-[min(650px,calc(100dvh-90px))] overflow-y-auto rounded-[10px] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   settingsPopoverHeader:
     "vui-app-appshell settingsPopoverHeader flex min-w-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1.5 [&_strong]:text-vui-xs [&_strong]:font-semibold",
   settingsSection:
@@ -126,7 +126,7 @@ const styles = {
   settingsRowChevronOpen:
     "vui-app-appshell settingsRowChevronOpen shrink-0 rotate-90 text-[var(--fg-tertiary)] transition-transform",
   settingsStatus:
-    "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-vui-xs text-[var(--fg-tertiary)]",
+    "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-vui-xs text-[var(--fg-tertiary)] [&>span:last-child]:hidden sm:[&>span:last-child]:inline sm:[&>span:last-child]:max-w-28 sm:[&>span:last-child]:truncate",
   settingsThemeChoices:
     "vui-app-appshell settingsThemeChoices grid min-w-0 gap-0 border-l border-[var(--vui-border-subtle)] pl-2 ml-7",
   settingsTrigger:

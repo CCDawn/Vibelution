@@ -225,7 +225,7 @@ describe("AppShell navigation telemetry", () => {
   });
 
   it("does not embed a file tree or chat shortcut in the workbench utility menu", () => {
-    expect(appShellSource).toContain("LazyAppShellUtilityMenu");
+    expect(appShellSource).toContain("LazyAppShellSettingsMenu");
     expect(appShellSource).not.toContain("filterUtilityFileTree");
     expect(appShellSource).not.toContain("renderUtilityFileTree");
     expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');

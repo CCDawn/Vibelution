@@ -516,6 +516,56 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 - 复用 `VDialog`/`VButton`/`VChip`，不新建 `V*` primitive。
 - 不与 `ConversationForkSessionDialog`（分叉出口）共享状态或入口。
 
+## ConversationRerunFileChoiceDialog
+
+### 功能
+编辑一条消息再发送、重新生成某条回答，或重试失败轮次时，如果将被换掉的已加载消息带有磁盘变更和轮次号，先问要不要把这些文件还原。三个选择：还原文件并重跑、只重跑、取消。还原调用现有整轮回退，从较新的轮次到较旧的轮次逐个 strict 应用；某一轮失败就停在弹窗里显示错误，不开始重跑。没有这类文件时不弹窗，行为和原来一样。
+
+### 适用范围
+- **适用**：当前会话已加载的消息窗口。编辑从被编辑的那条用户消息算起，重新生成从被点的那条助手回答算起，失败重试从最近一条用户消息算起，一直到窗口末尾。
+- **不适用**：普通新发送、切换回答版本、从节点分叉会话。没有 `metadata.changedFiles` 或没有轮次号时不问。窗口后面还没加载的消息不另发请求，那些文件不会出现在这次名单里。
+
+### 使用方式
+
+```tsx
+<ConversationRerunFileChoiceDialog
+  open={Boolean(rerunFileChoice)}
+  language={language}
+  paths={rerunFileChoice?.paths ?? []}
+  pending={Boolean(rerunFileChoice?.restoring)}
+  error={rerunFileChoice?.error ?? ""}
+  onOpenChange={(open) => {
+    if (!open) dismissRerunFileChoice();
+  }}
+  onRestoreAndRerun={() => {
+    void confirmRerunFileRestore();
+  }}
+  onRerunOnly={keepFilesAndRerun}
+/>
+```
+
+| 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| 时机 | 重跑真正发出之前，图片上传也在选择之后 | 取消不上传、不改会话 |
+| 名单 | 最多 8 条路径，其余写「另外还有 N 个」 | 路径来自 `metadata.changedFiles` |
+| 还原 | 主按钮，进行中改为「正在还原文件…」并禁用三个按钮 | `force` 仍只在整轮回退弹窗里 |
+| 失败 | 正文里一行错误 | 弹窗保持打开，可以改选「只重跑」或取消 |
+
+### 非职责
+- 不自动还原文件。
+- 不在切换回答版本或分叉时询问。
+- 不把命令改过、但没有进入 `changedFiles` 的文件算进这次名单。
+
+### 实现落点
+- 弹窗：`web/src/components/conversation/ConversationRerunFileChoiceDialog.tsx`
+- 名单与选择：`web/src/routes/chat/rerunFileRestore.ts`、`web/src/routes/chat/useRerunFileChoice.ts`
+- 接线：`web/src/routes/chat/useChatComposerSubmit.ts`、`web/src/routes/chat/ChatCodingRouteWorkbench.tsx`
+- 还原 API：`applySessionTurnRewind`（`force: false`）
+
+### 反冗余
+- 复用 `VDialog` / `VButton` 和整轮回退 API，不新建 `V*` primitive。
+- 不并入 `ConversationFileRewindDialog`。那个弹窗仍负责单轮预览、冲突和 force。
+
 ## ConversationMarkdownCodeBlock
 
 ### 功能

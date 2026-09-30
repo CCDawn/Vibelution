@@ -32,6 +32,7 @@
 | 内置斜杠命令 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#内置斜杠命令) |
 | ConversationForkSessionDialog | [product/conversation.md](./product/conversation.md#conversationforksessiondialog) |
 | ConversationFileRewindDialog | [product/conversation.md](./product/conversation.md#conversationfilerewinddialog) |
+| `ConversationRerunFileChoiceDialog` | [product/conversation.md](./product/conversation.md#conversationrerunfilechoicedialog) |
 | `ConversationMarkdownCodeBlock` | [product/conversation.md](./product/conversation.md#conversationmarkdowncodeblock) |
 | Markdown 工作区文件链接 | [product/conversation.md](./product/conversation.md#markdown-工作区文件链接) |
 | Mermaid 代码块 | [product/conversation.md](./product/conversation.md#mermaid-代码块) |

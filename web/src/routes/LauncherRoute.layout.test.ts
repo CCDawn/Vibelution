@@ -130,7 +130,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routerSource).toContain("element: <LauncherShell />");
     expect(routerSource).toContain('guardedLazyElement(<LauncherRoute />, "launcher")');
     expect(routerSource).not.toContain('{ path: "launcher", element: lazyElement(<LauncherRoute />) }');
-    expect(shellSource).toContain("LazyAppShellUtilityMenu");
+    expect(shellSource).toContain("LazyAppShellSettingsMenu");
     expect(utilityMenuSource).toContain('href="/launcher"');
     expect(utilityMenuSource).toContain('target="_blank"');
     expect(utilityMenuSource).toContain('lang === "zh" ? "启动器" : "Launcher"');
