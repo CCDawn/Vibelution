@@ -177,6 +177,7 @@ def test_knowledge_steward_profile_owns_formal_knowledge_tools():
 
     assert policy is not None
     assert "knowledge_proposal_tool" in policy["allowedTools"]
+    assert "knowledge_proposal_review_tool" in policy["allowedTools"]
     assert "knowledge_ingestion_tool" in policy["allowedTools"]
     assert "knowledge_rating_suggestion_tool" in policy["allowedTools"]
     assert "web_search_tool" not in policy["allowedTools"]
@@ -353,6 +354,7 @@ def test_challenge_cup_experiment_iteration_roles_are_bounded_operation_agents()
     forbidden = {
         "web_search_tool",
         "knowledge_proposal_tool",
+        "knowledge_proposal_review_tool",
         "knowledge_ingestion_tool",
         "cli_tool",
         "apply_patch_tool",

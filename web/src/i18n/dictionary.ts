@@ -10,6 +10,7 @@ import { dictionaryEvolution } from "./domains/dictionaryEvolution";
 import { dictionaryGit } from "./domains/dictionaryGit";
 import { dictionaryLogs } from "./domains/dictionaryLogs";
 import { dictionaryPet } from "./domains/dictionaryPet";
+import { dictionarySessionArchive } from "./domains/dictionarySessionArchive";
 import { dictionaryTeams } from "./domains/dictionaryTeams";
 import { dictionaryTools } from "./domains/dictionaryTools";
 
@@ -26,6 +27,7 @@ export const dictionary = {
     ...dictionaryGit.zh,
     ...dictionaryLogs.zh,
     ...dictionaryPet.zh,
+    ...dictionarySessionArchive.zh,
   },
   en: {
     ...dictionaryCore.en,
@@ -37,5 +39,6 @@ export const dictionary = {
     ...dictionaryGit.en,
     ...dictionaryLogs.en,
     ...dictionaryPet.en,
+    ...dictionarySessionArchive.en,
   },
 } as const;

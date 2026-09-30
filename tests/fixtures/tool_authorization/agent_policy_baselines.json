@@ -33,6 +33,8 @@
         "user_action_telemetry_query_tool",
         "append_personal_memory_tool",
         "supersede_personal_memory_tool",
+        "search_agent_private_memory_tool",
+        "knowledge_stage_session_attachment_tool",
         "agent_create_tool",
         "agent_update_tool",
         "agent_archive_tool",
@@ -47,13 +49,15 @@
         "knowledge_base_acl_grant_tool",
         "github_project_library_search_tool",
         "github_project_library_clone_tool",
-        "todo_write"
+        "todo_write",
+        "read_file_tool"
       ],
       "expected_preferred_tools": [
         "exec_command",
         "write_stdin",
         "grep_search_tool",
         "code_symbol_tool",
+        "read_file_tool",
         "github_project_library_search_tool",
         "apply_patch_tool",
         "run_test_for_tool",

@@ -5,10 +5,11 @@ export function mergeAllVisibleSessions(
   sessions: SessionSummary[] | undefined,
   childSessions: SessionSummary[] | undefined,
   pendingArchiveAgentIds: ReadonlySet<string>,
+  options?: { includeArchivedSessions?: boolean },
 ): SessionSummary[] {
   const merged = [...(sessions ?? []), ...(childSessions ?? [])];
   return merged
-    .filter(isVisibleDirectSession)
+    .filter((session) => isVisibleDirectSession(session, options))
     .filter((session) => !pendingArchiveAgentIds.has(String(session.agentId || "").trim()))
     .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index);
 }

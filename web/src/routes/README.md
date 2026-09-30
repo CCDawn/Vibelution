@@ -22,8 +22,8 @@
 
 | URL path | Route 入口 | 域 / 职责 | API 模块 | Layout / contract test |
 | --- | --- | --- | --- | --- |
-| `/chat` | `ChatCodingRoute.tsx` → [`chat/ChatCodingRouteWorkbench.tsx`](chat/ChatCodingRouteWorkbench.tsx) | Chat workbench | [`api/chat.ts`](../api/chat.ts) · [`agents.ts`](../api/agents.ts) | [`ChatCodingRoute.layout.test.ts`](ChatCodingRoute.layout.test.ts) |
-| `/teams` | `TeamsRoute.tsx` → [`teams/TeamsRouteWorkbench.tsx`](teams/TeamsRouteWorkbench.tsx) | Teams board / canvas | [`api/teams.ts`](../api/teams.ts) · [`teamWorkflow.ts`](../api/teamWorkflow.ts) · [`sourceCollection.ts`](../api/sourceCollection.ts) | [`TeamsRoute.layout.test.ts`](TeamsRoute.layout.test.ts) |
+| `/chat` | `ChatCodingRoute.tsx` → [`chat/ChatCodingRouteWorkbench.tsx`](chat/ChatCodingRouteWorkbench.tsx) | Chat workbench | [`api/chat.ts`](../api/chat.ts) · [`agents.ts`](../api/agents.ts) | [`chat/`](chat/) · [`components/conversation/`](../components/conversation/) |
+| `/teams` | `TeamsRoute.tsx` → [`teams/TeamsRouteWorkbench.tsx`](teams/TeamsRouteWorkbench.tsx) | Teams board / canvas | [`api/teams.ts`](../api/teams.ts) · [`teamWorkflow.ts`](../api/teamWorkflow.ts) · [`sourceCollection.ts`](../api/sourceCollection.ts) | [`teams/`](teams/) |
 | `/agents` | `AgentsRoute.tsx` | Agent 目录 / workspace | [`api/agents.ts`](../api/agents.ts) | [`AgentsRoute.layout.test.ts`](AgentsRoute.layout.test.ts) |
 | `/agents/prompts` | `PromptTemplatesRoute.tsx` | Prompt 模板 | [`api/agents.ts`](../api/agents.ts) | [`PromptTemplatesRoute.layout.test.ts`](PromptTemplatesRoute.layout.test.ts) |
 | `/agents/tools` | `ToolsRoute.tsx` | Agent 工具治理 | [`api/tools.ts`](../api/tools.ts) · [`api/agents.ts`](../api/agents.ts) | [`ToolsRoute.layout.test.ts`](ToolsRoute.layout.test.ts) |

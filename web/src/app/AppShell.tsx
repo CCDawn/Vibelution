@@ -3,16 +3,13 @@ import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent,
 import { Link, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
-  Check,
+  BellRing,
+  GitBranch,
   ChevronDown,
   ChevronRight,
   LoaderCircle,
   Menu,
-  Moon,
-  RefreshCw,
   Settings,
-  SlidersHorizontal,
-  Sun,
   X,
 } from "lucide-react";
 
@@ -122,14 +119,16 @@ import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
+import { serializeChatRouteSelection } from "../routes/chat/chatSelectionProjection";
+import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 
-const LazyAppShellUtilityMenu = lazy(() =>
-  import("./AppShellUtilityMenu")
-    .then((module) => ({ default: module.AppShellUtilityMenu }))
+const LazyAppShellSettingsMenu = lazy(() =>
+  import("./AppShellSettingsMenu")
+    .then((module) => ({ default: module.AppShellSettingsMenu }))
     .catch((error) => {
       if (recoverFromDynamicImportFetchError(error, globalThis.window, postBrowserTelemetry)) {
-        return new Promise<{ default: typeof import("./AppShellUtilityMenu").AppShellUtilityMenu }>(() => undefined);
+        return new Promise<{ default: typeof import("./AppShellSettingsMenu").AppShellSettingsMenu }>(() => undefined);
       }
       throw error;
     }),
@@ -687,6 +686,7 @@ export function AppShell() {
   const { lang, t, statusLabel } = useShellI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
+  const chatRoute = useChatRouteSelection();
   const navigate = useNavigate();
   const navigationType = useNavigationType();
   const { request: requestLifecycle } = useWorkbenchLifecycleActions("app_shell");
@@ -701,7 +701,6 @@ export function AppShell() {
   const [lifecycleCancelPending, setLifecycleCancelPending] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
   const [activeWorkOpen, setActiveWorkOpen] = useState(false);
-  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
@@ -844,13 +843,9 @@ export function AppShell() {
   const chatEnabled = isWorkbenchDomainEnabled(configQuery.data, "chat");
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
   const selfEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "self_evolution");
-  const refreshFrontendLabel = lang === "en" ? "Refresh frontend" : "刷新前端";
   const settingsLabel = lang === "en" ? "Settings" : "设置";
-  const settingsAndToolsLabel = lang === "en" ? "Settings and tools" : "设置与工具";
+  const settingsAndToolsLabel = settingsLabel;
   const activeConversationsLabel = lang === "en" ? "Active conversations" : "进行中的会话";
-  const appearanceLabel = lang === "en" ? "Appearance" : "外观";
-  const lightThemeLabel = lang === "en" ? "Light" : "浅色";
-  const darkThemeLabel = lang === "en" ? "Dark" : "深色";
   const cancelShutdownLabel = lang === "en" ? "Cancel close" : "取消关闭";
   const cancelRestartLabel = lang === "en" ? "Cancel restart" : "取消重启";
   const cancellingLifecycleLabel = lang === "en" ? "Cancelling..." : "正在取消...";
@@ -1027,7 +1022,6 @@ export function AppShell() {
   }, []);
   const closeUtilityMenu = useCallback(() => {
     setUtilityOpen(false);
-    setAppearanceOpen(false);
     setMobileNavigationOpen(false);
   }, []);
   useEffect(() => {
@@ -2449,13 +2443,29 @@ export function AppShell() {
           </VPopover>
         </div>
       <div className={styles.settingsSlot} data-shell-group="settings">
+        <span
+          className={styles.settingsStatus}
+          title={statusSummaryTitle}
+          aria-label={`${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
+        >
+          <span aria-hidden="true" className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`} />
+          <span>{effectivePrimaryStatusCard.value}</span>
+        </span>
+
+        <VRouteLinkButton to="/git" variant="ghost" className={styles.settingsTrigger} aria-label="Git" title="Git"><GitBranch size={17} /></VRouteLinkButton>
+        <VRouteLinkButton to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }} variant="ghost" className={styles.settingsTrigger} aria-label={lang === "zh" ? "助手通知" : "Agent notices"} title={lang === "zh" ? "助手通知" : "Agent notices"} onClick={(event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          chatRoute.openProjectBus({ telemetrySource: "shell_settings" });
+          closeUtilityMenu();
+        }}><BellRing size={17} /></VRouteLinkButton>
+
         <VPopover
           open={utilityOpen}
           onOpenChange={(open) => {
             setUtilityOpen(open);
             if (open) setActiveWorkOpen(false);
             else {
-              setAppearanceOpen(false);
               setMobileNavigationOpen(false);
             }
           }}
@@ -2485,21 +2495,6 @@ export function AppShell() {
           )}
         >
           <div className={styles.settingsPopoverBody}>
-            <header className={styles.settingsPopoverHeader}>
-              <strong>{settingsAndToolsLabel}</strong>
-              <span
-                className={styles.settingsStatus}
-                title={statusSummaryTitle}
-                aria-label={`${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`}
-                />
-                <span>{effectivePrimaryStatusCard.label} {effectivePrimaryStatusCard.value}</span>
-              </span>
-            </header>
-
             <VButton
               type="button"
               variant="ghost"
@@ -2545,75 +2540,10 @@ export function AppShell() {
               <VRouteLinkButton chrome="shell-nav" to="/agents" className={shellMobileNavClass(location.pathname, "/agents")} aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navAgents")}</VRouteLinkButton>
             </nav>
 
-            <section className={styles.settingsSection} aria-label={appearanceLabel}>
-              <VButton
-                type="button"
-                variant="ghost"
-                contentLayout="plain"
-                className={styles.settingsActionButton}
-                aria-expanded={appearanceOpen}
-                onPress={() => setAppearanceOpen((open) => !open)}
-              >
-                <span className={styles.settingsRowContent}>
-                  {theme === "light" ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
-                  <span className={styles.settingsRowLabel}>{appearanceLabel}</span>
-                  <span className={styles.settingsRowValue}>{theme === "light" ? lightThemeLabel : darkThemeLabel}</span>
-                  <ChevronRight size={15} className={appearanceOpen ? styles.settingsRowChevronOpen : styles.settingsRowChevron} aria-hidden="true" />
-                </span>
-              </VButton>
-              {appearanceOpen ? <div className={styles.settingsThemeChoices}>
-                <VButton
-                  type="button"
-                  variant="ghost"
-                  className={theme === "light" ? `${styles.settingsChoiceButton} ${styles.settingsChoiceButtonActive}` : styles.settingsChoiceButton}
-                  aria-pressed={theme === "light"}
-                  icon={<Sun size={13} aria-hidden="true" />}
-                  onPress={() => { selectTheme("light"); setAppearanceOpen(false); }}
-                >
-                  {lightThemeLabel}{theme === "light" ? <Check size={13} aria-hidden="true" /> : null}
-                </VButton>
-                <VButton
-                  type="button"
-                  variant="ghost"
-                  className={theme === "dark" ? `${styles.settingsChoiceButton} ${styles.settingsChoiceButtonActive}` : styles.settingsChoiceButton}
-                  aria-pressed={theme === "dark"}
-                  icon={<Moon size={13} aria-hidden="true" />}
-                  onPress={() => { selectTheme("dark"); setAppearanceOpen(false); }}
-                >
-                  {darkThemeLabel}{theme === "dark" ? <Check size={13} aria-hidden="true" /> : null}
-                </VButton>
-              </div> : null}
-            </section>
-
-            <div className={styles.settingsActionList}>
-              <VRouteLinkButton
-                to="/config"
-                variant="ghost"
-                className={styles.settingsActionButton}
-                onClick={closeUtilityMenu}
-                icon={<SlidersHorizontal size={15} aria-hidden="true" />}
-              >
-                {lang === "en" ? "All settings" : "全部设置"}
-              </VRouteLinkButton>
-              <VButton
-                type="button"
-                variant="ghost"
-                className={styles.settingsActionButton}
-                icon={<RefreshCw size={15} aria-hidden="true" />}
-                onPress={refreshFrontend}
-                isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
-              >
-                {refreshFrontendLabel}
-              </VButton>
-            </div>
-
             <Suspense fallback={null}>
-              <LazyAppShellUtilityMenu
-                lang={lang}
-                t={t}
-                frontendVisible={frontendVisible}
-                onClose={closeUtilityMenu}
-              />
+              <LazyAppShellSettingsMenu lang={lang} theme={theme} onThemeChange={selectTheme}
+                onClose={closeUtilityMenu} onRefresh={refreshFrontend}
+                refreshDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)} />
             </Suspense>
           </div>
         </VPopover>

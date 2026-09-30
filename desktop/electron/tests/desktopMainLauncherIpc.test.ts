@@ -113,8 +113,12 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("observeIsolatedError");
     const isolatedMutationStart = mainSource.indexOf("async function runIsolatedRegistryMutation");
     const isolatedMutationBody = mainSource.slice(isolatedMutationStart, branchStart);
-    expect(isolatedMutationBody).toContain("await ensureFrontendRelease({");
+    // The isolated start/restart gates its frontend build through the shared
+    // build gate so the row reports "building" while the build blocks.
+    expect(isolatedMutationBody).toContain("await runWithFrontendBuildGate(");
+    expect(isolatedMutationBody).toContain("() => ensureFrontendRelease({");
     expect(isolatedMutationBody).toContain("workspaceRoot: target.projectRoot");
+    expect(mainSource).toContain('from "./lifecycle/frontendBuildState.js"');
     expect(mainSource).toContain("from \"./process/isolatedInstanceSupervisor.js\"");
     expect(mainSource).toContain("from \"./lifecycle/isolatedInstanceRegistryHost.js\"");
   });
@@ -263,10 +267,16 @@ describe("Electron main Launcher IPC facade", () => {
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
     expect(lifecycleBody).not.toContain("await ensureLatestLauncher(");
-    expect(lifecycleBody.indexOf("await ensureFrontendRelease(")).toBeGreaterThanOrEqual(0);
-    expect(lifecycleBody.indexOf("await ensureFrontendRelease(")).toBeLessThan(
+    // The frontend build runs inside the shared building gate and must stay
+    // ahead of the live-workbench reuse probe.
+    expect(lifecycleBody.indexOf("runWithFrontendBuildGate(")).toBeGreaterThanOrEqual(0);
+    expect(lifecycleBody.indexOf("runWithFrontendBuildGate(")).toBeLessThan(
       lifecycleBody.indexOf("await mainLineBackendIsReusable(paths.workspaceRoot)")
     );
+    expect(lifecycleBody.indexOf("() => ensureFrontendRelease({")).toBeGreaterThan(
+      lifecycleBody.indexOf("runWithFrontendBuildGate(")
+    );
+    expect(lifecycleBody).toContain('notify: () => updateLauncherWindowTruth()');
     expect(lifecycleBody).toContain("mainLineBackendIsReachable(paths.workspaceRoot)");
     expect(lifecycleBody).toContain('lifecycleOperation = "restart"');
     expect(lifecycleBody).not.toContain("app.relaunch()");

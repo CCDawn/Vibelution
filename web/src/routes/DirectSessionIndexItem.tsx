@@ -112,6 +112,11 @@ export function isChildSession(session: Pick<SessionSummary, "sessionKind"> | un
   return String(session?.sessionKind ?? "").trim() === "child";
 }
 
+/** ZCode-style archive flag: pure metadata, reversible via unarchive. */
+export function isSessionRowArchived(session: Pick<SessionSummary, "archiveState"> | undefined | null) {
+  return String(session?.archiveState?.status || "").trim().toLowerCase() === "archived";
+}
+
 export function isAgentRootSession(session: Pick<SessionSummary, "agentId" | "sessionKind"> | undefined | null) {
   return Boolean(String(session?.agentId ?? "").trim()) && !isChildSession(session);
 }
@@ -343,6 +348,7 @@ export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
     sessionIsChild ? styles.childTopLevelSessionItem : "",
     active ? styles.sessionItemActive : "",
     contextMenuActive && !active ? styles.sessionItemContextTarget : "",
+    isSessionRowArchived(session) ? styles.sessionItemArchived : "",
   ].filter(Boolean).join(" ");
   const avatarClassName = `${styles.conversationAvatar} ${styles.conversationAvatarDirect}`;
   const renameLabel = t(sessionIsChild ? "renameTask" : isAgentRootSession(session) ? "renameAgent" : "renameSession");

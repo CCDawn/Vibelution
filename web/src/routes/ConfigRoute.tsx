@@ -312,7 +312,9 @@ export function ConfigRoute() {
   }
 
   useEffect(() => {
-    if (workspaceQuery.data) {
+    // Background query refreshes must not replace an open editing session.
+    // Explicit reload and successful apply still call syncWorkspace directly.
+    if (workspaceQuery.data && !editBaselineRef.current.baseConfig) {
       syncWorkspace(workspaceQuery.data);
     }
   }, [workspaceQuery.data]);

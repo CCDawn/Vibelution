@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
@@ -55,6 +53,7 @@ import graphNodeInspectorPanelSource from "./MemoryGraphNodeInspectorPanel.tsx?r
 import graphNodeInspectorPanelStyles from "./MemoryGraphNodeInspectorPanel.styles";
 import graphViewPanelSource from "./MemoryGraphViewPanel.tsx?raw";
 import graphViewPanelStyles from "./MemoryGraphViewPanel.styles";
+import graphSliceSource from "./memory/memoryGraphSlice.ts?raw";
 import detailPanelStyles from "./MemoryDetailPanel.styles";
 import agentMemoryPanelStyles from "./MemoryAgentMemoryPanel.styles";
 import cleanupPanelStyles from "./MemoryCleanupPanel.styles";
@@ -63,7 +62,6 @@ import knowledgeSourceGovernancePanelStyles from "./MemoryKnowledgeSourceGoverna
 import reviewQueuePanelStyles from "./MemoryReviewQueuePanel.styles";
 import knowledgeRagPanelStyles from "./MemoryKnowledgeRagPanel.styles";
 import knowledgeStewardPanelStyles from "./MemoryKnowledgeStewardPanel.styles";
-import graphCanvasStyles from "./MemoryGraphCanvas.styles";
 import styles from "./MemoryRoute.styles";
 import stylesModuleSource from "./MemoryRoute.styles.ts?raw";
 import knowledgeGovernancePanelSource from "./MemoryKnowledgeGovernancePanel.tsx?raw";
@@ -88,7 +86,6 @@ const memoryCssSource = [
     effectivePanelStyles,
     graphNodeInspectorPanelStyles,
     graphViewPanelStyles,
-    graphCanvasStyles,
     knowledgeStewardPanelStyles,
     knowledgeRagPanelStyles,
     itemListPanelStyles,
@@ -115,8 +112,6 @@ const memoryCssSource = [
     ...Object.values(map),
   ]),
 ].join("\n");
-const graphWorkerSource = readFileSync(new URL("./memoryGraphLayout.worker.ts", import.meta.url), "utf-8");
-
 describe("MemoryRoute layout contract", () => {
   it("cancels stale entry queries when the memory view changes", () => {
     const entryQuerySource = workbenchQueriesSource.slice(
@@ -160,13 +155,15 @@ describe("MemoryRoute layout contract", () => {
     expect(workbenchQueriesSource).toContain("fetchMemoryAgents<AgentMemoryInventoryPayload>({ signal })");
     expect(workbenchQueriesSource).toContain("fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId, {");
     expect(workbenchQueriesSource).toContain("includeContent: true");
+    expect(workbenchQueriesSource).toContain(
+      "resolveDefaultAgentMemoryId(agentMemoryInventoryAgents, requestedKnowledgeActorAgentId)",
+    );
     expect(routeSource).toContain("toAgentMemoryAgentView");
     expect(routeSource).toContain("agentMemorySelectPrompt:");
     expect(memoryApiSource).toContain("/api/memory/agents/${encodeURIComponent(agentId)}");
     expect(routeSource).toContain("selectedAgentMemoryAgentId");
     expect(routeSource).toContain("createAgentMemoryPanel()");
     expect(routeSource).toContain("copy.personalView");
-    expect(agentMemoryPanelSource).toContain("copy.memoryCount");
     expect(routeSource).toContain("styles.browseViewStack");
     expect(memoryCssSource).toContain(".browseViewStack");
     expect(memoryCssSource).toContain(".agentMemoryWorkspace");
@@ -178,8 +175,11 @@ describe("MemoryRoute layout contract", () => {
     expect(contentBrowsePanelSource).toContain("VSkeleton");
     expect(contentBrowsePanelSource).toContain("toReadableMemoryBlocks");
     expect(contentBrowsePanelSource).not.toContain("VSplitWorkspace");
+    expect(agentMemoryPanelSource).toContain("VSplitWorkspace");
+    expect(agentMemoryPanelSource).not.toContain("<MemoryContentBrowsePanel");
     expect(agentMemoryPanelSource).toContain("styles.agentMemoryWorkspace");
-    expect(agentMemoryPanelSource).toContain("copy.agentMemorySelectPrompt");
+    expect(agentMemoryPanelSource).toContain('aria-expanded={expanded}');
+    expect(agentMemoryPanelSource).toContain('setShowMobileAgents(true)');
     expect(agentMemoryPanelSource).not.toContain("useQuery");
     expect(agentMemoryPanelSource).not.toContain("useMutation");
     expect(agentMemoryPanelSource).not.toContain("fetchJson");
@@ -384,9 +384,10 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("PaneResizeHandle");
     expect(styles).not.toHaveProperty("paneResizeHandleLeft");
     expect(styles).not.toHaveProperty("paneResizeHandleRight");
-    expect(agentMemoryPanelStyles.detailPanel).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.detailPanel).toContain("overflow-auto");
-    expect(agentMemoryPanelStyles.emptyDetail).toContain("min-h-[96px]");
+    expect(agentMemoryPanelStyles.reader).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.readingScroll).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.readingScroll).toContain("overflow-y-auto");
+    expect(agentMemoryPanelStyles.workspace).toContain("max-md:[&>[data-vui=split-sidebar]]:!hidden");
     expect(styles.controlStrip).toContain("overflow-x-auto");
     expect(styles.controlStrip).not.toContain("overflow-hidden");
     expect(styles.subnav).toContain("w-fit");
@@ -483,14 +484,16 @@ describe("MemoryRoute layout contract", () => {
     expect(itemListPanelStyles.itemButton).toContain("w-full");
     expect(sourceAndItemPanelStyles.sourceButton).not.toContain("w-fit");
     expect(sourceAndItemPanelStyles.sourceButton).toContain("w-full");
-    expect(graphViewPanelStyles.itemButton).not.toContain("w-fit");
-    expect(graphViewPanelStyles.itemButton).toContain("w-full");
-
-    // Graph shell fills; columns owned by VCanvasWorkbenchPage / panel hosts (not route CSS vars).
+    // The VUI workbench owns pane geometry; this surface only needs to fill its route slot.
     expect(graphViewPanelStyles.graphWorkspace).toContain("h-full");
     expect(graphViewPanelStyles.graphWorkspace).toContain("min-h-0");
     expect(graphViewPanelStyles.graphWorkspace).toContain("overflow-hidden");
-    expect(graphViewPanelStyles.graphWorkspace).not.toContain("grid-cols-[minmax(190px,240px)");
+    expect(graphViewPanelStyles.atlasMain).toContain("min-h-0");
+    expect(graphViewPanelStyles.atlasStage).toContain("min-w-0");
+    expect(graphViewPanelStyles.atlasStage).toContain("overflow-hidden");
+    expect(graphViewPanelStyles.atlasRailInner).toContain("overflow-auto");
+    expect(graphViewPanelStyles.atlasFilters).toContain("[&_button]:w-full");
+    expect(graphViewPanelStyles.atlasSearch).toContain("[&_input]:w-full");
 
     expect(detailPanelStyles.detailHeader).toContain("[&_h2]:break-words");
     expect(detailPanelStyles.detailHeader).toContain("[&_p]:line-clamp-2");
@@ -499,7 +502,6 @@ describe("MemoryRoute layout contract", () => {
     expect(itemListPanelStyles.itemPath).toContain("truncate");
     expect(itemListPanelStyles.manageItemSummary).toContain("line-clamp-1");
     expect(sourceAndItemPanelStyles.sourceCopy).toContain("[&_strong]:truncate");
-    expect(graphViewPanelStyles.graphNodeList).toContain("[&_[data-vui=\"button\"]]:w-full");
     expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("whitespace-pre-wrap");
     expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("break-words");
   });
@@ -509,16 +511,10 @@ describe("MemoryRoute layout contract", () => {
     expect(managePanelSource).toContain("VSection");
     expect(managePanelSource).toContain("VStateSurface");
     expect(managePanelStyles.manageFilterPanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
-    expect(graphViewPanelSource).toContain("VMetricStrip");
+    expect(graphViewPanelSource).toContain("VCanvasWorkbenchPage");
     expect(graphViewPanelSource).toContain("VSurface");
-    expect(graphViewPanelSource).toContain("usePersistedPaneHeight");
-    expect(graphViewPanelSource).toContain("PaneHeightResizeHandle");
-    expect(graphViewPanelSource).toContain("graph-node-list");
-    expect(graphViewPanelSource).not.toContain("styles.summaryCard");
-    expect(graphViewPanelStyles.sourcePanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
-    expect(graphViewPanelStyles.graphCanvasPanel).not.toContain("rounded-[var(--radius-panel)]");
-    expect(graphViewPanelStyles.graphCanvasPanel).toContain("--pane-h-graph-node-list");
-    expect(graphViewPanelStyles.graphNodeListResizeHandle).not.toContain("cursor-row-resize");
+    expect(graphViewPanelSource).toContain('data-vui-recipe="memory-knowledge-workbench"');
+    expect(graphViewPanelSource).toContain('data-vui-region="memory-graph-canvas"');
     expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
   });
 
@@ -574,17 +570,10 @@ describe("MemoryRoute layout contract", () => {
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("h-full");
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("min-h-0");
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("overflow-auto");
-    expect(graphViewPanelStyles.graphCanvasPanel).toContain("h-full");
-    expect(graphViewPanelStyles.graphCanvasPanel).toContain("overflow-hidden");
-    // After panel ownership, source/item shells are scrollports; list grids live on itemList.
-    expect(agentMemoryPanelStyles.sourcePanel).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.sourcePanel).toMatch(/overflow/);
-    expect(agentMemoryPanelStyles.itemPanel).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.itemPanel).toMatch(/overflow/);
-    expect(agentMemoryPanelStyles.itemList).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.itemList).toContain("overflow-auto");
-    expect(agentMemoryPanelStyles.itemList).toContain("grid");
-    expect(agentMemoryPanelStyles.itemList).toContain("content-start");
+    // Personal memory now reads in one scrollable document pane beside the Agent rail.
+    expect(agentMemoryPanelStyles.reader).toContain("flex-col");
+    expect(agentMemoryPanelStyles.readingScroll).toContain("overflow-y-auto");
+    expect(agentMemoryPanelStyles.documents).toContain("grid");
   });
 
   it("keeps restored MemoryRoute grids from the CSS module migration", () => {
@@ -613,154 +602,45 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.knowledgeViewStack).not.toContain("[&>.summaryGrid]:grid-cols-");
   });
 
-  it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
+  it("keeps graph reads scoped to the active actor and fetches node bodies on demand", () => {
     expect(workbenchQueriesSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
     expect(workbenchQueriesSource).toContain('include: "officialResearchGraph"');
     expect(workbenchQueriesSource).toContain("appendAgentParam(");
-    expect(memoryApiSource).toContain("/api/memory/knowledge-graph?");
     expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraph<MemoryKnowledgeGraphPayload>({");
-    expect(workbenchQueriesSource).toContain("MemoryKnowledgeGraphNodeDetailPayload");
     expect(workbenchQueriesSource).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
     expect(workbenchQueriesSource).toContain("nodeId: selectedGraphNodeId");
-    expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraphNodeDetail<MemoryKnowledgeGraphNodeDetailPayload>({");
+    expect(workbenchQueriesSource).toContain("agentId: fallbackKnowledgeActorAgentId");
+    expect(workbenchQueriesSource).toContain("enabled: forcedView === \"graph\" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId)");
+    expect(memoryApiSource).toContain("/api/memory/knowledge-graph?");
     expect(memoryApiSource).toContain("/api/memory/knowledge-graph/node-detail?");
-    expect(routeSource).toContain("memoryKnowledgeGraphQuery");
-    expect(routeSource).toContain("memoryKnowledgeGraphNodeDetailQuery");
+    expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraphNodeDetail<MemoryKnowledgeGraphNodeDetailPayload>({");
+
     expect(routeSource).toContain('import("./MemoryGraphViewPanel")');
     expect(routeSource).toContain("<MemoryGraphViewPanel");
-    expect(routeSource).toContain("selectedGraphDetailItems");
-    expect(routeSource).toContain("graphSearchText");
-    expect(routeSource).toContain("activeGraphNodeType");
-    expect(routeSource).toContain("selectedGraphNodeId");
-    expect(routeSource).toContain("graphNodesMatchingSearch");
-    expect(routeSource).toContain("selectedGraphRelations");
-    expect(routeSource).toContain("selectedGraphChildren");
-    expect(routeSource).toContain("selectGraphNode");
-    expect(routeSource).toContain("onFocusGraphNode={selectGraphNode}");
-    expect(routeSource).toContain("next.set(\"agentId\", agentId.trim())");
+    expect(routeSource).toContain("graphPayload={graphPayload}");
     expect(routeSource).toContain("requestedKnowledgeActorAgentId,");
     expect(routeSource).toContain("buildMemoryLink(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText, requestedKnowledgeActorAgentId)");
-    expect(routeSource).toContain("setActiveGraphNodeType");
-    expect(routeSource).toContain("setSelectedGraphNodeId(\"\")");
-    expect(routeSource).not.toContain("MemoryGraphCanvas = lazy");
-    expect(routeSource).not.toContain("GRAPH_NODE_TYPE_LABELS");
-    expect(graphViewPanelSource).toContain("export function MemoryGraphViewPanel");
-    expect(graphViewPanelSource).toContain("MemoryGraphCanvas");
-    expect(graphViewPanelSource).toContain("copy.graphGpu");
-    expect(graphViewPanelSource).toContain("copy.graphWorker");
-    expect(graphViewPanelSource).toContain("copy.graphReadOnly");
-    expect(graphViewPanelSource).toContain("copy.graphAcl");
-    expect(graphViewPanelSource).toContain("copy.graphInteractionHint");
-    expect(graphViewPanelSource).toContain("copy.graphVisibleNodes");
-    expect(graphViewPanelSource).toContain("copy.graphVisibleEdges");
-    expect(graphViewPanelSource).toContain("copy.graphClearFocus");
+    expect(routeSource).toContain("onFocusGraphNode={selectGraphNode}");
+    expect(routeSource).not.toContain("graphNodesMatchingSearch");
+    expect(routeSource).not.toContain("const graphSlice =");
+
+    expect(graphViewPanelSource).toContain('from "./memory/memoryGraphSlice"');
+    expect(graphViewPanelSource).toContain("memoryGraphSlice(");
+    expect(graphViewPanelSource).toContain("VCanvasWorkbenchPage");
+    expect(graphViewPanelSource).toContain("VSurface");
     expect(graphViewPanelSource).toContain("MemoryGraphNodeInspectorPanel");
-    expect(graphViewPanelSource).toContain('from "./MemoryGraphNodeInspectorPanel"');
-    expect(graphViewPanelSource).toContain("styles.graphClearFocusButton");
-    expect(graphViewPanelSource).toContain("styles.graphWorkspace");
-    expect(graphViewPanelSource).toContain("styles.graphCanvasPanel");
-    expect(graphViewPanelSource).toContain("styles.graphTypeList");
-    expect(graphViewPanelSource).toContain("GRAPH_NODE_TYPE_LABELS");
-    expect(graphViewPanelSource).toContain("styles.graphNodeTypeMark");
-    expect(graphViewPanelSource).toContain("data-node-type");
-    expect(graphViewPanelSource).toContain("data-active");
-    expect(graphViewPanelSource).toContain("onFocusGraphNode");
+    expect(graphViewPanelSource).toContain("MemoryGraphRelationInspector");
     expect(graphViewPanelSource).not.toContain("useQuery");
     expect(graphViewPanelSource).not.toContain("fetchJson");
-    expect(graphNodeInspectorPanelSource).toContain("export function MemoryGraphNodeInspectorPanel");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphResponsibilityQuestion");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphDirectChildren");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphNodeKnowledge");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphKnowledgeLoading");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphKnowledgeTruncated");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphRelations");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphIncoming");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphOutgoing");
-    expect(graphNodeInspectorPanelSource).toContain("copy.graphNoRelations");
-    expect(graphNodeInspectorPanelSource).toContain("styles.graphResponsibilityPanel");
-    expect(graphNodeInspectorPanelSource).toContain("styles.graphKnowledgePanel");
-    expect(graphNodeInspectorPanelSource).toContain("styles.graphKnowledgeContent");
-    expect(graphNodeInspectorPanelSource).toContain("styles.graphRelationPanel");
-    expect(graphNodeInspectorPanelSource).toContain("styles.graphRelationGroup");
-    expect(graphNodeInspectorPanelSource).toContain("onFocusGraphNode");
-    expect(graphNodeInspectorPanelSource).not.toContain("useQuery");
-    expect(graphNodeInspectorPanelSource).not.toContain("fetchJson");
-    expect(graphCanvasSource).toContain("graphCanvasLabels");
-    expect(graphCanvasSource).toContain("graphNodeBadge");
-    expect(graphCanvasSource).toContain('DragMode = "rotate" | "pan"');
-    expect(graphCanvasSource).toContain('event.button === 1 ? "pan" : "rotate"');
-    expect(graphCanvasSource).toContain("DENSE_LABEL_LIMIT");
-    expect(graphCanvasSource).toContain("SEARCH_LABEL_LIMIT");
-    expect(graphCanvasSource).toContain("STELLAR_NODE_TYPES");
-    expect(graphCanvasSource).toContain("SATELLITE_NODE_TYPES");
-    expect(graphCanvasSource).toContain("createStellarBody");
-    expect(graphCanvasSource).toContain("createPlanetBody");
-    expect(graphCanvasSource).toContain("createSatelliteBody");
-    expect(graphCanvasSource).toContain("planetSurfaceGeometry");
-    expect(graphCanvasSource).toContain("starFacetGeometry");
-    expect(graphCanvasSource).toContain("satelliteFacetGeometry");
-    expect(graphCanvasSource).toContain("wireframe: true");
-    expect(graphCanvasSource).toContain("flatShading: true");
-    expect(graphCanvasSource).toContain("pickVisibleLabelIds");
-    expect(graphCanvasSource).toContain("nodeColor");
-    expect(graphCanvasSource).toContain("nodeSize");
-    expect(graphCanvasSource).toContain("graphNodeBadgeQuestion");
-    expect(graphCanvasSource).toContain("node.responsibilityQuestion");
-    expect(graphCanvasSource).toContain("dataset.agentCategory");
-    expect(graphCanvasSource).toContain("setPixelRatio(1)");
-    expect(graphCanvasSource).toContain("renderInteractionFrame");
-    expect(graphCanvasSource).toContain("requestRender");
-    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.3, 12, 10)");
-    expect(graphCanvasSource).toContain("new THREE.IcosahedronGeometry(0.42, 1)");
-    expect(graphCanvasSource).toContain("new THREE.DodecahedronGeometry(0.28, 0)");
-    expect(graphCanvasSource).not.toContain("createGlowTexture");
-    expect(graphCanvasSource).not.toContain("AdditiveBlending");
-    expect(graphCanvasSource).not.toContain("TorusGeometry");
-    expect(graphCanvasSource).toContain("translate(-50%, calc(-100% - 20px))");
-    expect(graphCanvasSource).toContain("trimText(node.summary");
-    expect(graphCanvasSource).toContain("hitObjects");
-    expect(graphCanvasSource).toContain('import("three")');
-    expect(graphCanvasSource).not.toContain('import * as THREE from "three"');
-    expect(graphWorkerSource).toContain("layerSpread");
-    expect(graphWorkerSource).toContain("runtime_scene: 34");
-    expect(graphCanvasStyles.graphCanvasShell).toContain("min-h-[360px]");
-    expect(graphCanvasStyles.graphCanvasShell).toContain("bg-[var(--vui-gradient-route-soft)]");
-    expect(graphCanvasStyles.graphCanvasShell).toContain("after:content-['']");
-    expect(graphCanvasStyles.graphCanvasShell).toContain("after:[background-size:91px_91px]");
-    expect(graphViewPanelStyles.graphWorkspace).toContain("h-full");
-    expect(graphViewPanelStyles.graphWorkspace).toContain("overflow-hidden");
-    expect(graphCanvasStyles.graphNodeBadge).toBeTypeOf("string");
-    expect(memoryCssSource).not.toContain("backdrop-filter");
-    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[detail=true]:z-10");
-    expect(memoryCssSource).toContain(".graphNodeBadgeType");
-    expect(memoryCssSource).toContain(".graphNodeBadgeQuestion");
-    expect(memoryCssSource).toContain(".graphResponsibilityPanel");
-    expect(memoryCssSource).toContain(".graphKnowledgePanel");
-    expect(graphNodeInspectorPanelStyles.graphKnowledgeItem).toBeTypeOf("string");
-    expect(memoryCssSource).toContain(".graphKnowledgeContent");
-    expect(memoryCssSource).toContain(".graphInteractionHint");
-    expect(memoryCssSource).toContain(".graphNodeTypeMark");
-    expect(graphViewPanelStyles.graphTypeList).toContain("[&_button]:w-full");
-    expect(graphViewPanelStyles.graphTypeList).toContain("[&_[data-active=true]]:border-[var(--accent-cool)]");
-    expect(memoryCssSource).toContain(".graphClearFocusButton");
-    expect(memoryCssSource).toContain(".graphRelationPanel");
-    expect(graphNodeInspectorPanelStyles.graphRelationGroup).toContain("[&_button]:w-full");
-    expect(memoryCssSource).toContain(".graphRelationEmpty");
-    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[agent-category=session_agent]");
-    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[agent-category=team_member_agent]");
-    expect(memoryCssSource).toContain(".ragPreviewPanel");
-    expect(memoryCssSource).toContain(".ragHealthStrip");
-    expect(knowledgeRagPanelSource).toContain("data-stale={Number(providerHealth?.staleItemCount ?? 0) > 0");
-    expect(memoryCssSource).toContain(".ragPolicyStrip");
-    expect(memoryCssSource).toContain(".ragContextCard");
-    expect(graphNodeInspectorPanelStyles.graphKnowledgeItem).toContain("line-clamp-3");
-    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[node-type=knowledge_base]");
-    expect(routerSource).toContain('path: "memory/graph"');
-    expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
-    expect(routerSource).not.toContain('path: "agents/memory/graph"');
-    expect(routerSource).not.toContain("LegacyMemoryRedirect");
-  });
 
+    // Canvas rendering remains behind the VUI product component boundary.
+    expect(graphCanvasSource).toContain("VMemoryGraphCanvas");
+    expect(graphCanvasSource).toContain("<VMemoryGraphCanvas {...props} />");
+    expect(graphCanvasSource).not.toContain("new THREE.");
+
+    expect(graphSliceSource).toContain("Only expands within the server-authorized payload");
+    expect(graphSliceSource).toContain("if (!allowed.has(edge.source) || !allowed.has(edge.target)) continue");
+  });
   it("wires the hard-delete memory cleanup console behind preview and confirmation APIs", () => {
     expect(routeSource).toContain("MemoryCleanupTargetRequest");
     expect(routeSource).toContain("MemoryCleanupPreviewResponse");
@@ -1262,8 +1142,6 @@ describe("MemoryRoute layout contract", () => {
     expect(cleanupPanelSource).not.toContain('title={copy.cleanupNoBackup}');
     expect(cleanupPanelSource).toContain('content={copy.cleanupCentralSourceBoundary}');
     expect(cleanupPanelSource).not.toContain('title={copy.cleanupCentralSourceBoundary}');
-    expect(graphViewPanelSource).toContain('title={copy.graphInteractionHint}');
-
     expect(routeSource).not.toContain("className={styles.subtitle}>{memoryViewSubtitle");
     expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.projectMemoryQueueHint}</p>");
     expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.knowledgeHint}</p>");

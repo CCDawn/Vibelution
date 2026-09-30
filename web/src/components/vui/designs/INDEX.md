@@ -9,8 +9,10 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `SupervisedConversationWorkspace` | [product/evolution.md](./product/evolution.md#supervisedconversationworkspace) |
+| `SelfEvolutionConversationWorkspace` | [product/evolution.md](./product/evolution.md#selfevolutionconversationworkspace) |
 | `EvolutionSupervisedLiveSetupPanel` | [product/evolution.md](./product/evolution.md#evolutionsupervisedlivesetuppanel) |
 | `VWorkflowCanvas` | [product/workflow.md](./product/workflow.md#vworkflowcanvas) |
+| `VMemoryGraphCanvas` | [product/memory-graph.md](./product/memory-graph.md#vmemorygraphcanvas) |
 | 假说先行区域 | [product/workflow.md](./product/workflow.md#假说先行区域) |
 | 知识侧流程区域 | [product/workflow.md](./product/workflow.md#知识侧流程区域) |
 | 阶段未激活区域 | [product/workflow.md](./product/workflow.md#阶段未激活区域) |
@@ -30,6 +32,7 @@
 | 内置斜杠命令 | [product/conversation-starter-cards.md](./product/conversation-starter-cards.md#内置斜杠命令) |
 | ConversationForkSessionDialog | [product/conversation.md](./product/conversation.md#conversationforksessiondialog) |
 | ConversationFileRewindDialog | [product/conversation.md](./product/conversation.md#conversationfilerewinddialog) |
+| `ConversationRerunFileChoiceDialog` | [product/conversation.md](./product/conversation.md#conversationrerunfilechoicedialog) |
 | `ConversationMarkdownCodeBlock` | [product/conversation.md](./product/conversation.md#conversationmarkdowncodeblock) |
 | Markdown 工作区文件链接 | [product/conversation.md](./product/conversation.md#markdown-工作区文件链接) |
 | Mermaid 代码块 | [product/conversation.md](./product/conversation.md#mermaid-代码块) |

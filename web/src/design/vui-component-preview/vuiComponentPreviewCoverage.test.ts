@@ -20,10 +20,13 @@ const previewExemptDesignSections = new Set([
   "ResearchWorkflowRecoveryPanel",
   "ResearchWorkflowRecoveryEntry",
   "ConversationMessageVersionSwitcher",
+  // Chat rerun choice is mounted by the workbench and covered by its click tests.
+  "ConversationRerunFileChoiceDialog",
   "AgentUserContentSectionView",
   // Route-owned compositions: source/run/session state is supplied by EvolutionRoute.
   // Covered by their interaction tests and the isolated supervised workspace preview.
   "SupervisedConversationWorkspace",
+  "SelfEvolutionConversationWorkspace",
   "EvolutionSupervisedLiveSetupPanel",
 ]);
 

@@ -10,3 +10,7 @@
 @source "../../routes/MemoryRoute.styles.ts";
 @source "../../routes/Memory*.tsx";
 @source "../../routes/Memory*.styles.ts";
+@source "../../components/vui/renderers/shadcn/memory/**/*.tsx";
+@source "../../components/vui/renderers/shadcn/memory/**/*.ts";
+@source "../../components/vui/product/memory/**/*.tsx";
+@source "../../components/vui/product/memory/**/*.ts";

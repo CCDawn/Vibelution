@@ -1,67 +1,45 @@
-import {
-  vuiControlPillClass,
-} from "../design/vuiChromeRecipes";
+import { vuiFlatPanelClass, vuiRailFillClass, vuiWorkspaceFillClass } from "../design/vuiSurfaceRecipes";
 
-import {
-  vuiFlatPanelClass,
-  vuiOpaqueRowClass,
-  vuiStateCoolInfoClass,
-  vuiStateSelectedRowClass,
-  vuiWorkspaceFillClass,
-} from "../design/vuiSurfaceRecipes";
-
-const listButton =
-  "min-w-0 w-full max-w-full !h-auto text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:gap-1";
-
+const buttonContent = "[&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-3 [&_[data-slot=vui-button-label]]:whitespace-normal";
+const muted = "text-[var(--fg-tertiary)]";
+const avatar = "flex size-9 shrink-0 items-center justify-center rounded-xl bg-vui-surface-inset text-xs font-semibold text-[var(--accent-cool)]";
 const styles = {
-  // Width ownership: VSplitWorkspace + WORKBENCH_LAYOUT_IDS.memory (agent-list / agent-detail).
-  agentMemoryWorkspace:
-    `agentMemoryWorkspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-2 ${vuiStateCoolInfoClass}`,
-  countPill:
-    `countPill min-w-0 ${vuiControlPillClass}`,
-  detailHeader:
-    "detailHeader min-w-0 grid gap-1 px-1 py-0.5 [&_h2]:min-w-0 [&_h2]:truncate [&_p]:min-w-0 [&_p]:truncate [&_p]:[font-size:var(--vui-font-xs)] [&_p]:text-[var(--fg-tertiary)]",
-  detailMeta:
-    "detailMeta min-w-0 grid gap-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&>span]:min-w-0 [&>span]:truncate",
-  detailPanel: `detailPanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
-  emptyDetail: `emptyDetail min-w-0 grid min-h-[96px] content-center justify-items-center gap-1.5 ${vuiFlatPanelClass} p-3 text-center [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
-  emptyState:
-    "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  generatedAt:
-    "generatedAt min-w-0 [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
-  itemBadges:
-    "itemBadges min-w-0 flex flex-wrap items-center gap-1",
-  itemButton: `itemButton ${listButton} ${vuiOpaqueRowClass} px-2 py-1.5`,
-  itemButtonActive: `itemButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
-  itemHeader:
-    "itemHeader flex min-w-0 items-baseline justify-between gap-2 [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[var(--fg-primary)] [&>span]:shrink-0 [&>span]:text-[var(--fg-tertiary)]",
-  itemList:
-    "itemList min-w-0 grid min-h-0 flex-1 content-start gap-1 overflow-auto",
-  itemOrigin:
-    "itemOrigin min-w-0 truncate [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
-  itemPanel: `itemPanel min-w-0 h-full min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden ${vuiFlatPanelClass} p-2`,
-  itemPath:
-    "itemPath min-w-0 truncate font-mono [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
-  itemSummary:
-    "itemSummary min-w-0 line-clamp-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
-  panelEyebrow:
-    "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  panelHeader:
-    "panelHeader min-w-0 flex items-start justify-between gap-1.5 px-1 py-0.5 [&_h2]:min-w-0 [&_h2]:truncate",
-  rawPanel: `rawPanel min-w-0 ${vuiFlatPanelClass} p-2 [&_pre]:max-h-[min(28rem,46vh)] [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words`,
-  searchBox: `searchBox min-w-0 flex items-center gap-1.5 ${vuiOpaqueRowClass} px-2 py-1`,
-  sectionPanel: `sectionPanel min-w-0 ${vuiFlatPanelClass} p-2`,
-  sourcePanel: `sourcePanel min-w-0 h-full min-h-0 grid grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden ${vuiFlatPanelClass} p-2`,
-  statusPill:
-    `statusPill min-w-0 ${vuiControlPillClass}`,
-  statusPillVisible:
-    "statusPillVisible min-w-0",
-  summaryCard: `summaryCard min-w-0 ${vuiOpaqueRowClass} grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:[font-size:var(--vui-font-xs)] [&>strong]:[font-size:var(--vui-font-title)]`,
-  summaryGrid: `summaryGrid min-w-0 shrink-0`,
-  usageList:
-    "usageList min-w-0 grid min-h-0 content-start gap-1 overflow-auto [&>span]:min-w-0 [&>span]:truncate",
-  workspace:
-    `workspace min-w-0 h-full min-h-0 flex-1 overflow-hidden ${vuiWorkspaceFillClass}`,
+  agentMemoryWorkspace: "agentMemoryWorkspace flex h-full min-h-0 min-w-0 flex-1 overflow-hidden",
+  workspace: `workspace h-full min-h-0 w-full overflow-hidden !gap-0 ${vuiWorkspaceFillClass} max-md:[&>[data-vui=split-sidebar]]:!hidden max-md:[&>[role=separator]]:!hidden`,
+  agentRail: `flex h-full min-h-0 flex-col px-4 pb-4 pt-6 ${vuiRailFillClass}`,
+  railHeading: `mb-4 px-2 text-xs font-semibold ${muted}`,
+  searchBox: "searchBox focus-within:ring-2 focus-within:ring-[var(--accent-cool)] mb-6 flex min-w-0 items-center gap-2 rounded-lg border border-vui-border-subtle bg-vui-surface-panel px-3 py-2 text-[var(--fg-tertiary)] [&_input]:min-w-0 [&_input]:w-full [&_input]:!border-0 [&_input]:!bg-transparent [&_input]:!shadow-none [&_input]:!outline-none [&_input]:text-sm",
+  railScroll: "min-h-0 flex-1 overflow-y-auto",
+  groupHeading: `mb-3 flex items-center gap-2 px-2 text-xs ${muted}`,
+  agentList: "grid gap-1.5",
+  agentRow: `!h-auto !min-h-16 !w-full !justify-start !rounded-xl !border-0 !px-3 !py-3 text-left ${buttonContent}`,
+  agentRowActive: "!bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  avatar,
+  avatarLarge: `${avatar} !size-11 !text-sm`,
+  agentIdentity: "flex min-w-0 flex-1 flex-col gap-1.5 [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_small]:text-xs [&_small]:font-normal [&_small]:text-[var(--fg-tertiary)]",
+  selectedDot: "size-1.5 shrink-0 rounded-full bg-[var(--accent-cool)]",
+  groupToggle: `!mt-5 !h-auto !w-full !justify-start !px-2 !py-3 !border-0 !bg-transparent !shadow-none text-xs ${muted} ${buttonContent} [&_[data-slot=vui-button-label]>span:last-child]:ml-auto`,
+  railNote: `mt-5 flex items-start gap-2 border-t border-vui-border-subtle pt-4 text-xs leading-relaxed ${muted}`,
+  emptyState: `emptyState p-3 text-sm leading-relaxed ${muted}`,
+  reader: "flex h-full min-h-0 min-w-0 flex-col",
+  readerTop: `flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-vui-border-subtle px-6 text-xs ${muted}`,
+  breadcrumb: "hidden min-w-0 items-center gap-2 truncate md:flex",
+  privateBadge: "flex shrink-0 items-center gap-1.5",
+  mobileSwitch: "!h-auto !px-0 !py-2 md:!hidden [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+  // Tailwind translate already centers this dialog; avoid the legacy motion transform applying it twice.
+  mobileDialog: "!transform-none !h-[min(80dvh,640px)] !p-0 overflow-hidden",
+  readingScroll: "min-h-0 flex-1 overflow-y-auto",
+  readingContent: "mx-auto w-full max-w-[1000px] px-5 py-7 lg:px-11 lg:py-9",
+  agentTitle: "mb-8 flex min-w-0 items-center gap-3.5 [&>div]:min-w-0 [&_h2]:break-words [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mt-2 [&_p]:text-xs [&_p]:text-[var(--fg-tertiary)]",
+  collectionHeading: "mb-4 flex items-center gap-2 text-sm font-medium [&>span:last-child]:text-xs [&>span:last-child]:text-[var(--fg-tertiary)]",
+  loading: "grid gap-5",
+  documents: "grid min-w-0 gap-5",
+  document: `${vuiFlatPanelClass} min-w-0 !rounded-xl px-5 pt-6 lg:px-8 lg:pt-7`,
+  documentKicker: `flex flex-wrap items-center gap-2 text-xs ${muted} [&>span:last-child]:ml-auto`,
+  documentTitle: "mt-5 mb-5 break-words text-lg font-semibold leading-relaxed",
+  documentBody: "min-w-0 space-y-5 border-t border-vui-border-subtle pt-5 [overflow-wrap:anywhere] [&_p]:!leading-8 [&_p]:!text-[var(--fg-secondary)] [&_dl]:!gap-5 [&_dt]:!text-sm [&_dt]:!text-[var(--fg-primary)] [&_dd]:!mt-2 [&_dd]:!leading-8 [&_dd]:!text-[var(--fg-secondary)] [&_ul]:list-disc [&_li]:leading-8",
+  truncated: "mt-4 text-sm text-[var(--fg-tertiary)]",
+  documentFooter: `mt-6 flex min-w-0 items-center justify-between gap-3 border-t border-vui-border-subtle py-4 text-xs ${muted} [&>span:first-child]:min-w-0 [&>span:first-child]:truncate [&>span:last-child]:shrink-0`,
+  readingNote: `mt-5 flex items-start gap-2 text-xs leading-relaxed ${muted} [&_svg]:shrink-0`,
 } as const;
-
 export default styles;

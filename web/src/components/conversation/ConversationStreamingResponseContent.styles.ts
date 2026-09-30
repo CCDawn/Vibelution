@@ -1,42 +1,13 @@
+import { conversationMarkdownRendererStyles } from "./ConversationMarkdownRenderer.styles";
+
+// This surface survives the streaming-to-settled transition. Keep the full
+// Markdown presentation shared; only streaming layout belongs here.
 const styles = {
-  inlineCode:
-    "vui-components-conversationview inlineCode min-w-0 font-mono text-vui-xs whitespace-normal break-words",
-  inlineLink:
-    "vui-components-conversationview inlineLink min-w-0",
-  inlineStrong:
-    "vui-components-conversationview inlineStrong min-w-0",
-  markdownBlockquote:
-    "vui-components-conversationview markdownBlockquote min-w-0",
-  markdownBody:
-    "vui-components-conversationview markdownBody min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,128ch)] whitespace-normal break-words [overflow-wrap:anywhere]",
+  ...conversationMarkdownRendererStyles,
   streamingResponseText:
-    "vui-components-conversationview streamingResponseText min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] text-vui-chat leading-[var(--vui-line-readable)] whitespace-normal break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview streamingResponseText min-w-0 max-w-full whitespace-normal break-words [overflow-wrap:anywhere]",
   streamingLiveTail:
-    "vui-components-conversationview streamingLiveTail min-w-0 mt-0 text-vui-chat leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  markdownBodyWithTable:
-    "vui-components-conversationview markdownBodyWithTable min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
-  markdownDivider:
-    "vui-components-conversationview markdownDivider min-w-0",
-  markdownHeading:
-    "vui-components-conversationview markdownHeading min-w-0",
-  markdownHeading1:
-    "vui-components-conversationview markdownHeading1 min-w-0",
-  markdownHeading2:
-    "vui-components-conversationview markdownHeading2 min-w-0",
-  markdownHeading3:
-    "vui-components-conversationview markdownHeading3 min-w-0",
-  markdownHeading4:
-    "vui-components-conversationview markdownHeading4 min-w-0",
-  markdownTable:
-    "vui-components-conversationview markdownTable min-w-full table-fixed",
-  markdownTableWrap:
-    "vui-components-conversationview markdownTableWrap max-w-full overflow-x-auto overflow-y-hidden [scrollbar-gutter:stable]",
-  messageBody:
-    "vui-components-conversationview messageBody min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere] max-w-[min(100%,76ch)]",
-  responseSegmentList:
-    "vui-components-conversationview responseSegmentList min-w-0",
-  responseSegmentPre:
-    "vui-components-conversationview responseSegmentPre min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] [content-visibility:auto] [contain-intrinsic-size:auto_200px]",
+    "vui-components-conversationview streamingLiveTail min-w-0 mt-3 first:mt-0 text-vui-sm leading-[1.8] text-[var(--fg-primary)]",
 } as const;
 
 export default styles;

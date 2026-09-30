@@ -12,6 +12,7 @@ ROLE_TOOL_PROFILE_VERSION = 1
 
 FORMAL_KNOWLEDGE_WRITE_TOOLS = (
     "knowledge_proposal_tool",
+    "knowledge_proposal_review_tool",
     "knowledge_ingestion_tool",
 )
 KNOWLEDGE_GOVERNANCE_TOOLS = (

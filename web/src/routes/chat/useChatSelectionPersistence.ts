@@ -48,7 +48,7 @@ type UseChatSelectionPersistenceResult = {
 function availabilityFromSessions(sessions: SessionSummary[]): DirectSelectionAvailability {
   const sessionsById = new Map<string, string>();
   const agentIds = new Set<string>();
-  const visibleSessions = sessions.filter(isVisibleDirectSession);
+  const visibleSessions = sessions.filter((session) => isVisibleDirectSession(session));
   for (const session of visibleSessions) {
     const sessionId = String(session.id || "").trim();
     const agentId = String(session.agentId || "").trim();

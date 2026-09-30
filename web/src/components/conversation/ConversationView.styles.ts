@@ -570,9 +570,9 @@ backToBottomButton:
   markdownBlockquote:
     `vui-components-conversationview markdownBlockquote my-2 min-w-0 border-l-2 border-l-[var(--vui-border-strong)] pl-3 text-[var(--fg-secondary)] ${readableMarkdownMeasure}`,
   markdownBody:
-    "vui-components-conversationview markdownBody min-w-0 max-w-full text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-components-conversationview markdownBody min-w-0 max-w-full text-vui-sm leading-[1.8] text-[var(--fg-primary)] whitespace-normal break-words [overflow-wrap:anywhere]",
   markdownBodyWithTable:
-    "vui-components-conversationview markdownBodyWithTable min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
+    "vui-components-conversationview markdownBodyWithTable min-w-0 text-vui-sm leading-[1.8] text-[var(--fg-primary)] max-w-full",
   markdownDivider:
     `vui-components-conversationview markdownDivider my-4 min-w-0 border-0 border-t border-t-[var(--vui-border-subtle)] ${readableMarkdownMeasure}`,
   markdownHeading:
@@ -673,7 +673,7 @@ backToBottomButton:
   mentalWhisper:
     "vui-components-conversationview mentalWhisper min-w-0",
   messageBody:
-    `vui-components-conversationview messageBody min-w-0 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere] ${readableMarkdownMeasure}`,
+    `vui-components-conversationview messageBody mb-3 last:mb-0 min-w-0 text-vui-sm leading-[1.8] text-[var(--fg-primary)] whitespace-pre-wrap [overflow-wrap:anywhere] ${readableMarkdownMeasure}`,
   messageCard: `vui-components-conversationview messageCard min-w-0 ${vuiGlassPanelClass} p-2 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   messageMeta:
     "vui-components-conversationview messageMeta min-w-0 flex flex-wrap items-center gap-1.5 text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
@@ -1044,7 +1044,7 @@ backToBottomButton:
   responseSegmentMeta:
     "vui-components-conversationview responseSegmentMeta min-w-0 flex flex-wrap items-center gap-1.5",
   responseSegmentPre:
-    "vui-components-conversationview responseSegmentPre my-3 min-w-0 max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--fg-primary)_4%,var(--vui-surface-row))] p-3 font-mono text-vui-xs leading-[1.55] text-[var(--fg-primary)] whitespace-pre [content-visibility:auto] [contain-intrinsic-size:auto_200px]",
+    "vui-components-conversationview responseSegmentPre my-3 min-w-0 max-w-full max-h-80 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-4 py-3 font-mono text-vui-2xs leading-[1.75] text-[var(--fg-secondary)] whitespace-pre [content-visibility:auto] [contain-intrinsic-size:auto_200px]",
   responseSegment_active:
     `vui-components-conversationview responseSegment_active min-w-0 ${vuiStateSelectedRowClass}`,
   responseSegment_answer:
@@ -1208,8 +1208,11 @@ timeline:
     "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-2.5",
   timelineVirtualSpacer:
     "vui-components-conversationview timelineVirtualSpacer pointer-events-none min-w-0 shrink-0",
+  // Translated into one shared layer. content-visibility would size-contain
+  // the row at the 120px estimate while the text still paints, so the next
+  // row covers it. Code blocks keep that treatment; the row must not.
   timelineVirtualRow:
-    "vui-components-conversationview timelineVirtualRow min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_120px]",
+    "vui-components-conversationview timelineVirtualRow min-w-0",
   timelineAssistantTextCell:
     `vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] mx-auto ${transcriptMeasure}`,
   timelineCellDetailButton:

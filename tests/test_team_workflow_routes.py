@@ -574,6 +574,7 @@ def _submit_steward_pack_through_source_review_route(
     candidate_id: str,
     knowledge_base_id: str,
     steward_agent_id: str,
+    reviewer_agent_id: str,
 ) -> tuple[dict, dict]:
     source_response = client.post(
         f"/api/teams/{team_id}/workflow-orchestration/steward-packs/{candidate_id}/knowledge-ingestion",
@@ -584,7 +585,7 @@ def _submit_steward_pack_through_source_review_route(
     inbox_source_id = source_payload["candidate"]["metadata"]["knowledgeIngestion"]["inboxSourceId"]
     review_response = client.patch(
         f"/api/knowledge/sources/inbox/team/{team_id}/{inbox_source_id}/review",
-        json={"decision": "accepted", "reviewedByAgentId": steward_agent_id},
+        json={"decision": "accepted", "reviewedByAgentId": reviewer_agent_id},
     )
     assert review_response.status_code == 200, review_response.text
     central_source_id = review_response.json()["centralSource"]["centralSourceId"]
@@ -3346,11 +3347,15 @@ def test_team_workflow_routes_submit_steward_pack_to_knowledge_ingestion(tmp_pat
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = client.post(
         "/api/teams",
         json={
             "name": "挑战杯科研团队",
-            "members": [{"agentId": steward["agentId"], "role": "steward"}],
+            "members": [
+                {"agentId": steward["agentId"], "role": "steward"},
+                {"agentId": reviewer["agentId"], "role": "coordinator"},
+            ],
         },
     ).json()
     knowledge_base = client.post(
@@ -3390,6 +3395,7 @@ def test_team_workflow_routes_submit_steward_pack_to_knowledge_ingestion(tmp_pat
         candidate_id=candidate["candidateId"],
         knowledge_base_id=knowledge_base["knowledgeBaseId"],
         steward_agent_id=steward["agentId"],
+        reviewer_agent_id=reviewer["agentId"],
     )
     items_response = client.get(
         f"/api/knowledge-bases/{knowledge_base['knowledgeBaseId']}/items",
@@ -3409,11 +3415,15 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = client.post(
         "/api/teams",
         json={
             "name": "挑战杯科研团队",
-            "members": [{"agentId": steward["agentId"], "role": "steward"}],
+            "members": [
+                {"agentId": steward["agentId"], "role": "steward"},
+                {"agentId": reviewer["agentId"], "role": "coordinator"},
+            ],
         },
     ).json()
     knowledge_base = client.post(
@@ -3452,6 +3462,7 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
         candidate_id=candidate["candidateId"],
         knowledge_base_id=knowledge_base["knowledgeBaseId"],
         steward_agent_id=steward["agentId"],
+        reviewer_agent_id=reviewer["agentId"],
     )
     pending = knowledge_payload["candidate"]
 
@@ -3459,7 +3470,7 @@ def test_team_workflow_routes_review_steward_pack_knowledge_ingestion(tmp_path, 
         f"/api/teams/{team['teamId']}/workflow-orchestration/steward-packs/{pending['candidateId']}/knowledge-ingestion/review",
         json={
             "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
-            "reviewedByAgentId": steward["agentId"],
+            "reviewedByAgentId": reviewer["agentId"],
             "decision": "approved",
             "resolutionNote": "Approved for official sync.",
         },

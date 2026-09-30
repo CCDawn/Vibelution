@@ -101,6 +101,26 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
     expect(markup).not.toContain("分数");
   });
 
+  it("can render lifecycle evidence without duplicating review actions", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SelfEvolutionAutonomousLoopPanel
+          lang="zh"
+          run={reviewRun()}
+          pending={false}
+          error=""
+          hideActions
+          onAction={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("自进化自动闭环");
+    expect(markup).toContain("data-testid=\"self-loop-phase-stepper\"");
+    expect(markup).not.toContain("批准并自动合入");
+    expect(markup).not.toContain("拒绝并保留候选");
+  });
+
   it("reports exact Git and cleanup proof after completion", () => {
     const completed = {
       ...reviewRun(),

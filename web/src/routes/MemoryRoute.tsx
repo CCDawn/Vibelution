@@ -265,6 +265,12 @@ type Copy = {
   manageSubtitle: string;
   sourcesSubtitle: string;
   knowledgeSubtitle: string;
+  privateMemoryLabel: string;
+  privateMemoryFileUnit: string;
+  privateMemorySwitchAgent: string;
+  privateMemoryReadingHint: string;
+  privateMemoryIsolationHint: string;
+  privateMemoryAllFiles: string;
   agentMemoryAgents: string;
   agentMemoryPrivateFiles: string;
   agentMemoryFormalKnowledge: string;
@@ -780,7 +786,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourcesView: "来源审计",
     knowledgeView: "团队知识库",
     overviewSubtitle: "先看 Agent 正在用哪些记忆，再处理需要你确认的条目。",
-    personalSubtitle: "点一张 Agent 卡片，查看它现在有的记忆。",
+    personalSubtitle: "切换 Agent，阅读已保存的私有记忆。",
     teamSubtitle: "点一个知识库，查看团队现在有的记忆。",
     librarySubtitle: "项目里当前存在的共享记忆，以及已落盘的开源项目索引。",
     githubProjectsTitle: "开源项目索引",
@@ -796,6 +802,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourcesSubtitle: "保留完整来源、路径、接口、原文和复制动作，供专业审查使用。",
     knowledgeSubtitle: "管理团队共享知识库、来源登记、精炼提案、审核落盘和重要程度标记。",
     agentMemoryAgents: "Agent 列表",
+    privateMemoryLabel: "私有",
+    privateMemoryFileUnit: "份记忆文件",
+    privateMemorySwitchAgent: "切换 Agent",
+    privateMemoryReadingHint: "这里展示已保存的内容。会话中是否使用某条记忆，取决于当次检索与上下文。",
+    privateMemoryIsolationHint: "每个 Agent 的记忆独立保存",
+    privateMemoryAllFiles: "全部记忆",
     agentMemoryPrivateFiles: "私有文件",
     agentMemoryFormalKnowledge: "正式知识",
     agentMemoryPrivateRoot: "私有目录",
@@ -1206,7 +1218,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourcesView: "Source audit",
     knowledgeView: "Team knowledge",
     overviewSubtitle: "See which memories the Agent is using, then handle anything that needs your confirmation.",
-    personalSubtitle: "Open an Agent card to read the memories it currently has.",
+    personalSubtitle: "Switch Agents to read their saved private memories.",
     teamSubtitle: "Open a knowledge base to read the team's current memories.",
     librarySubtitle: "Shared project memories, plus the local GitHub project index.",
     githubProjectsTitle: "Open-source project index",
@@ -1222,6 +1234,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourcesSubtitle: "Keeps the full source, path, API, raw content, and copy actions for professional audit.",
     knowledgeSubtitle: "Manage team knowledge bases, source registration, refinement proposals, review, and importance marking.",
     agentMemoryAgents: "Agents",
+    privateMemoryLabel: "Private",
+    privateMemoryFileUnit: "memory files",
+    privateMemorySwitchAgent: "Switch Agent",
+    privateMemoryReadingHint: "These are saved memories. Use in a conversation depends on retrieval and context.",
+    privateMemoryIsolationHint: "Each Agent stores its own memories",
+    privateMemoryAllFiles: "All memories",
     agentMemoryPrivateFiles: "Private files",
     agentMemoryFormalKnowledge: "Formal knowledge",
     agentMemoryPrivateRoot: "Private root",
@@ -2626,33 +2644,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const governanceTasks = governanceTasksQuery.data?.tasks ?? [];
   const ingestionAdapters = ingestionAdaptersQuery.data?.adapters ?? [];
   const graphPayload = memoryKnowledgeGraphQuery.data;
-  const graphSearch = graphSearchText.trim().toLowerCase();
-  const graphNodesMatchingSearch = useMemo(() => {
-    const nodes = graphPayload?.nodes ?? [];
-    if (!graphSearch) {
-      return nodes;
-    }
-    return nodes.filter((node) =>
-      [
-        node.label,
-        node.type,
-        node.status,
-        node.summary,
-        node.responsibilityQuestion,
-        ...(node.contentItems ?? []).map((item) => `${item.title} ${item.summary} ${item.knowledgeBaseName ?? ""}`),
-      ].some((value) => String(value || "").toLowerCase().includes(graphSearch)),
-    );
-  }, [graphPayload?.nodes, graphSearch]);
-  const filteredGraphNodes = useMemo(
-    () => graphNodesMatchingSearch.filter((node) => (activeGraphNodeType ? node.type === activeGraphNodeType : true)),
-    [activeGraphNodeType, graphNodesMatchingSearch],
-  );
-  const graphVisibleNodeIds = useMemo(() => new Set(filteredGraphNodes.map((node) => node.id)), [filteredGraphNodes]);
-  const filteredGraphEdges = useMemo(
-    () => (graphPayload?.edges ?? []).filter((edge) => graphVisibleNodeIds.has(edge.source) && graphVisibleNodeIds.has(edge.target)),
-    [graphPayload?.edges, graphVisibleNodeIds],
-  );
-  const selectedGraphNode = selectedGraphNodeId ? filteredGraphNodes.find((node) => node.id === selectedGraphNodeId) ?? null : null;
+  const selectedGraphNode = selectedGraphNodeId ? graphPayload?.nodes.find((node) => node.id === selectedGraphNodeId) ?? null : null;
   const selectedGraphDetailItems = memoryKnowledgeGraphNodeDetailQuery.data?.contentItems ?? selectedGraphNode?.contentItems ?? [];
   const graphNodeById = useMemo(() => new Map((graphPayload?.nodes ?? []).map((node) => [node.id, node])), [graphPayload?.nodes]);
   const selectedGraphRelations = useMemo(() => {
@@ -2700,10 +2692,10 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     }
   }, [activeGraphNodeType, graphTypeEntries]);
   useEffect(() => {
-    if (selectedGraphNodeId && !filteredGraphNodes.some((node) => node.id === selectedGraphNodeId)) {
+    if (graphPayload && selectedGraphNodeId && !graphPayload.nodes.some((node) => node.id === selectedGraphNodeId)) {
       setSelectedGraphNodeId("");
     }
-  }, [filteredGraphNodes, selectedGraphNodeId]);
+  }, [graphPayload?.nodes, selectedGraphNodeId]);
   const allPairs = useMemo(() => flattenSections(sections), [sections]);
   const runtimePairs = useMemo(
     () =>
@@ -4229,8 +4221,9 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       <MemoryGraphViewPanel
         copy={copy}
         graphPayload={graphPayload}
-        filteredGraphNodes={filteredGraphNodes}
-        filteredGraphEdges={filteredGraphEdges}
+        isGraphLoading={memoryKnowledgeGraphQuery.isFetching && !graphPayload}
+        graphError={memoryKnowledgeGraphQuery.error instanceof Error ? memoryKnowledgeGraphQuery.error.message : ""}
+        onRetryGraph={() => { void memoryKnowledgeGraphQuery.refetch(); }}
         graphSearchText={graphSearchText}
         activeGraphNodeType={activeGraphNodeType}
         graphTypeEntries={graphTypeEntries}
@@ -4265,6 +4258,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.header}
+      hideHeader={isPersonalMemoryView(forcedView)}
       data-vui-domain-recipe="memory-knowledge-workbench"
       data-vui-layout-id={MEMORY_LAYOUT_ID}
       ariaLabel={memoryViewLabel(copy, forcedView)}

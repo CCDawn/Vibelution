@@ -25,6 +25,7 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.virtual_human_life",
     "core.web.routes.conversations",
     "core.web.routes.sessions",
+    "core.web.routes.session_archive",
     "core.web.routes.session_export",
     "core.web.routes.chat_rooms",
     "core.web.routes.cli_agents",

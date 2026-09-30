@@ -236,9 +236,10 @@ export function classifyTrayBranchInstances(payload: unknown): TrayBranchInstanc
       || backend?.listening === true
       || windowInfo?.open === true;
     const attention = lifecycleState === "error" || (lifecycleState === "partial" && !live);
-    const transitional = lifecycleState === "starting" || lifecycleState === "stopping" || lifecycleState === "restarting";
+    const transitional = lifecycleState === "building" || lifecycleState === "starting"
+      || lifecycleState === "stopping" || lifecycleState === "restarting";
     const stoppable = operable && !transitional && (live || attention);
-    const startable = operable && !live && !attention && lifecycleState !== "starting";
+    const startable = operable && !live && !attention && !transitional;
     items.push({
       id,
       label: shortName || branch || id,

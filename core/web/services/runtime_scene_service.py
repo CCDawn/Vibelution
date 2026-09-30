@@ -311,6 +311,11 @@ from .runtime_scene.package_index import (
     _sync_runtime_scene_package_index_if_stale,
     _update_runtime_scene_manifest_package_index_fields,
 )
+from .runtime_scene.lifecycle import (
+    BACKEND_STARTUP_TRIGGER,
+    seal_active_runtime_scene,
+    start_runtime_scene,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]

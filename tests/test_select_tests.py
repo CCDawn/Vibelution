@@ -92,7 +92,8 @@ def test_pytest_regression_documentation_overrides_project_fail_fast() -> None:
 
     assert "全量回归命令必须显式追加 `--maxfail=0`" in documentation
     assert "-m pytest tests/ -v -x" not in documentation
-    assert "pytest tests -q --maxfail=0" in root_documentation
+    assert "pytest tests/ -v --maxfail=0" in documentation
+    assert "[测试指南](tests/README.md)" in root_documentation
     assert "pytest tests/ -v --maxfail=0" in package_documentation
     assert "pytest tests/ -v --tb=short --maxfail=0" in package_documentation
 
@@ -396,7 +397,8 @@ def test_selector_matches_chat_style_map_to_chat_validation_commands():
     assert result["matchedRules"][0]["id"] == "web-session-chat-ui"
     assert "web/src/routes/ChatCodingRoute.styles.ts" in result["matchedRules"][0]["matchedFiles"]
     assert not any("tests/test_web_session_routes.py" in command for command in result["commands"])
-    assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
+    assert any("src/routes/chat" in command and "src/components/conversation" in command for command in result["commands"])
+    assert not any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
     assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
     assert any("vuiComponentDesignContract.test.ts" in command for command in result["commands"])
     assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
@@ -422,8 +424,11 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
     assert "web/src/routes/TeamsRoute.styles.ts" in result["matchedRules"][0]["matchedFiles"]
     assert not any("tests/test_team_workflow_facade_contract.py" in command for command in result["commands"])
     assert not any("tests/test_team_workflow_source_collection_cases.py" in command for command in result["commands"])
-    assert any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
-    assert any("src/routes/teams" in command for command in result["commands"])
+    assert any(
+        "src/routes/teams" in command and "TeamsRoute.layout.test.ts" not in command
+        for command in result["commands"]
+    )
+    assert not any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
     assert any("vuiShadcnRouteContract.test.ts" in command for command in result["commands"])
     assert any("vuiImportBoundary.test.ts" in command for command in result["commands"])
     assert any("vuiSurfaceAlphaPolicy.test.ts" in command for command in result["commands"])

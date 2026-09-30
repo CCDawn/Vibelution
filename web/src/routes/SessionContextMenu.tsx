@@ -1,4 +1,4 @@
-import { BookPlus, Eraser, Pencil, Settings2, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BookPlus, Eraser, Pencil, Settings2, Trash2 } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import type { SessionSummary } from "../api/types";
@@ -7,7 +7,7 @@ import type { TranslationKey } from "../i18n/dictionary";
 import styles from "./SessionContextMenu.styles";
 
 const MENU_WIDTH = 188;
-const MENU_HEIGHT = 204;
+const MENU_HEIGHT = 232;
 const MENU_MARGIN = 12;
 
 export type SessionContextMenuPosition = {
@@ -34,6 +34,8 @@ export function sessionContextMenuStyle(
 type SessionContextMenuProps = {
   addToReviewDisabled: boolean;
   addToReviewPending: boolean;
+  archiveDisabled?: boolean;
+  archivePending?: boolean;
   clearHistoryDisabled: boolean;
   clearHistoryPending: boolean;
   clearHistoryVisible: boolean;
@@ -43,6 +45,7 @@ type SessionContextMenuProps = {
   session: SessionSummary;
   t: (key: TranslationKey) => string;
   onAddToReview: (session: SessionSummary) => void;
+  onArchive?: (session: SessionSummary) => void;
   onClearHistory: (session: SessionSummary) => void;
   onDelete: (session: SessionSummary) => void;
   onOpenAgentConfig?: (session: SessionSummary) => void;
@@ -53,6 +56,8 @@ type SessionContextMenuProps = {
 export function SessionContextMenu({
   addToReviewDisabled,
   addToReviewPending,
+  archiveDisabled = false,
+  archivePending = false,
   clearHistoryDisabled,
   clearHistoryPending,
   clearHistoryVisible,
@@ -62,13 +67,15 @@ export function SessionContextMenu({
   session,
   t,
   onAddToReview,
+  onArchive,
   onClearHistory,
   onDelete,
   onOpenAgentConfig,
   onRename,
   onDismiss,
 }: SessionContextMenuProps) {
-  const busy = addToReviewPending || clearHistoryPending;
+  const busy = addToReviewPending || clearHistoryPending || archivePending;
+  const archived = String(session.archiveState?.status || "").trim().toLowerCase() === "archived";
   const addToReviewTitle = addToReviewPending
     ? t("addingSessionToReview")
     : addToReviewDisabled
@@ -80,6 +87,14 @@ export function SessionContextMenu({
     : clearHistoryDisabled
       ? t("clearSessionHistoryBusy")
       : t("clearSessionHistory");
+  const archiveLabel = archived
+    ? (archivePending ? t("unarchivingSession") : t("unarchiveSession"))
+    : (archivePending ? t("archivingSession") : t("archiveSession"));
+  const archiveTitle = archivePending
+    ? archiveLabel
+    : archiveDisabled
+      ? (archived ? t("unarchiveSessionBusy") : t("archiveSessionBusy"))
+      : archiveLabel;
 
   return (
     <VDropdownMenu
@@ -129,6 +144,16 @@ export function SessionContextMenu({
               title: clearHistoryTitle,
               label: clearHistoryPending ? t("clearingSessionHistory") : t("clearSessionHistory"),
               onSelect: () => onClearHistory(session),
+            }]
+          : []),
+        ...(onArchive
+          ? [{
+              id: "archive",
+              icon: archived ? <ArchiveRestore size={14} /> : <Archive size={14} />,
+              disabled: archiveDisabled,
+              title: archiveTitle,
+              label: archiveLabel,
+              onSelect: () => onArchive(session),
             }]
           : []),
         {

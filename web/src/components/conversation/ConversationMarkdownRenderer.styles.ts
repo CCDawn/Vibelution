@@ -23,18 +23,18 @@ export const conversationMarkdownOverflowStyles = {
 export const conversationMarkdownCodeBlockStyles = {
   shell: "vui-components-conversationview markdownCodeBlock min-w-0 max-w-full",
   header:
-    "vui-components-conversationview markdownCodeBlockHeader mt-3 flex min-w-0 max-w-full items-center justify-between gap-x-2 rounded-t-[var(--radius-control)] border border-b-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] py-0.5 pl-2.5 pr-1",
+    "vui-components-conversationview markdownCodeBlockHeader mt-4 flex min-h-10 min-w-0 max-w-full items-center justify-between gap-x-2 rounded-t-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-1",
   language:
     "vui-components-conversationview markdownCodeBlockLanguage min-w-0 truncate font-mono lowercase text-vui-2xs text-[var(--fg-tertiary)]",
   actions: "vui-components-conversationview markdownCodeBlockActions inline-flex shrink-0 items-center gap-x-0.5",
   headerButton:
-    "vui-components-conversationview markdownCodeBlockHeaderButton h-6 w-6 place-items-center p-0 text-[var(--fg-tertiary)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)]",
+    "vui-components-conversationview markdownCodeBlockHeaderButton inline-grid h-6 w-6 place-items-center border-0 bg-transparent p-0 text-[var(--fg-tertiary)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)]",
   headerButtonActive:
     "vui-components-conversationview markdownCodeBlockHeaderButtonActive text-[var(--accent-cool)] hover:text-[var(--accent-cool)]",
-  // Axis-specific overrides (mt / rounded-t / border-t) win the Tailwind
-  // cascade over the host map's shorthand (my / rounded / border).
+  // Explicit overrides keep the seam joined even when production CSS chunk
+  // order places the host's border/radius shorthand after this style map.
   preAttached:
-    "vui-components-conversationview markdownCodeBlockPre mt-0 rounded-t-none border-t-0",
+    "vui-components-conversationview markdownCodeBlockPre mt-0 !rounded-t-none !border-t-0",
   preWrapped:
     "vui-components-conversationview markdownCodeBlockPreWrapped whitespace-pre-wrap break-words",
 } as const;

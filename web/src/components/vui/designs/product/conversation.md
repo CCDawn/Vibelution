@@ -254,6 +254,20 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 测量式（scrollHeight + ResizeObserver）而非行数预算；不复制 `ConversationMarkdownRenderer` 的 `<details>` 行预算折叠。
 - 按钮复用 `VNativeButton`，禁止第二套展开钮、渐隐样式或直连 shadcn renderer。
 
+## 时间线虚拟行
+
+### 功能
+历史消息按量到的行高绝对定位。还没量到时，间距先用 120px 估算；量到之后按正文自己的高度排开，下一条不得盖住上一条。
+
+### 视觉与状态
+- 行本身不用 `content-visibility`，也不用 120px 的 `contain-intrinsic-size`。那会把行的边框锁在估算高度，正文仍然画出来，下一条的位移就压在上一条上面。
+- 代码块仍可以对屏幕外的块使用 `content-visibility`，避免测量抖动。这只作用在代码块，不作用在整行。
+- 用户消息超过 120px 后的折叠是气泡内部的钳制，不代替行高。
+
+### 实现落点
+- 样式：`ConversationView.styles.ts` 的 `timelineVirtualRow`
+- 估算常量：`conversationTimelineFollowState.ts` 的 `CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX`
+
 ## ChatComposerPlusMenu
 
 ### 功能
@@ -501,6 +515,56 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 ### 反冗余
 - 复用 `VDialog`/`VButton`/`VChip`，不新建 `V*` primitive。
 - 不与 `ConversationForkSessionDialog`（分叉出口）共享状态或入口。
+
+## ConversationRerunFileChoiceDialog
+
+### 功能
+编辑一条消息再发送、重新生成某条回答，或重试失败轮次时，如果将被换掉的已加载消息带有磁盘变更和轮次号，先问要不要把这些文件还原。三个选择：还原文件并重跑、只重跑、取消。还原调用现有整轮回退，从较新的轮次到较旧的轮次逐个 strict 应用；某一轮失败就停在弹窗里显示错误，不开始重跑。没有这类文件时不弹窗，行为和原来一样。
+
+### 适用范围
+- **适用**：当前会话已加载的消息窗口。编辑从被编辑的那条用户消息算起，重新生成从被点的那条助手回答算起，失败重试从最近一条用户消息算起，一直到窗口末尾。
+- **不适用**：普通新发送、切换回答版本、从节点分叉会话。没有 `metadata.changedFiles` 或没有轮次号时不问。窗口后面还没加载的消息不另发请求，那些文件不会出现在这次名单里。
+
+### 使用方式
+
+```tsx
+<ConversationRerunFileChoiceDialog
+  open={Boolean(rerunFileChoice)}
+  language={language}
+  paths={rerunFileChoice?.paths ?? []}
+  pending={Boolean(rerunFileChoice?.restoring)}
+  error={rerunFileChoice?.error ?? ""}
+  onOpenChange={(open) => {
+    if (!open) dismissRerunFileChoice();
+  }}
+  onRestoreAndRerun={() => {
+    void confirmRerunFileRestore();
+  }}
+  onRerunOnly={keepFilesAndRerun}
+/>
+```
+
+| 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| 时机 | 重跑真正发出之前，图片上传也在选择之后 | 取消不上传、不改会话 |
+| 名单 | 最多 8 条路径，其余写「另外还有 N 个」 | 路径来自 `metadata.changedFiles` |
+| 还原 | 主按钮，进行中改为「正在还原文件…」并禁用三个按钮 | `force` 仍只在整轮回退弹窗里 |
+| 失败 | 正文里一行错误 | 弹窗保持打开，可以改选「只重跑」或取消 |
+
+### 非职责
+- 不自动还原文件。
+- 不在切换回答版本或分叉时询问。
+- 不把命令改过、但没有进入 `changedFiles` 的文件算进这次名单。
+
+### 实现落点
+- 弹窗：`web/src/components/conversation/ConversationRerunFileChoiceDialog.tsx`
+- 名单与选择：`web/src/routes/chat/rerunFileRestore.ts`、`web/src/routes/chat/useRerunFileChoice.ts`
+- 接线：`web/src/routes/chat/useChatComposerSubmit.ts`、`web/src/routes/chat/ChatCodingRouteWorkbench.tsx`
+- 还原 API：`applySessionTurnRewind`（`force: false`）
+
+### 反冗余
+- 复用 `VDialog` / `VButton` 和整轮回退 API，不新建 `V*` primitive。
+- 不并入 `ConversationFileRewindDialog`。那个弹窗仍负责单轮预览、冲突和 force。
 
 ## ConversationMarkdownCodeBlock
 

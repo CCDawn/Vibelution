@@ -32,6 +32,8 @@ export type VCanvasWorkbenchDrawerConfig = {
   /** Initial open state for the narrow/compact overlay. Defaults to false. */
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Inspector only: preserve canvas context with a bottom sheet in narrow mode. */
+  narrowPlacement?: "side" | "bottom";
 };
 
 export type VCanvasWorkbenchResponsiveConfig = {
@@ -131,6 +133,7 @@ function CanvasWorkbenchDrawer({
   open,
   onClose,
   returnFocusRef,
+  bottom = false,
   children,
 }: {
   side: "left" | "right";
@@ -139,6 +142,7 @@ function CanvasWorkbenchDrawer({
   open: boolean;
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  bottom?: boolean;
   children: ReactNode;
 }) {
   const shouldRestoreFocusRef = useRef(false);
@@ -158,7 +162,7 @@ function CanvasWorkbenchDrawer({
     trigger?.focus();
   }, [id, open, returnFocusRef]);
 
-  const panelClassName = cn(
+  const panelClassName = bottom ? "!top-auto !bottom-0 !left-0 !right-0 !h-[64dvh] !max-h-[720px] !w-full !max-w-none !transform-none !translate-x-0 !translate-y-0 rounded-b-none rounded-t-xl border-b-0 shadow-[var(--vui-elevation-panel)]" : cn(
     "!top-[var(--shell-topbar-height,0px)] !bottom-0 !h-auto !max-h-none !w-[min(88vw,380px)] !translate-x-0 !translate-y-0 rounded-none border-y-0 shadow-[var(--vui-elevation-panel)]",
     side === "left"
       ? "!left-0 !right-auto !translate-x-0 border-l-0"
@@ -399,6 +403,7 @@ export function VCanvasWorkbenchPage({
           <CanvasWorkbenchDrawer
             id={inspectorDrawerId}
             side="right"
+            bottom={mode === "narrow" && responsive?.inspector?.narrowPlacement === "bottom"}
             title={inspectorLabel}
             open={inspectorOpen}
             returnFocusRef={inspectorToggleRef}

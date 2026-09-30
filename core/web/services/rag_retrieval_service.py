@@ -182,6 +182,7 @@ def _context_from_search_result(
         "knowledgeItemId": str(result.get("knowledgeItemId") or "").strip(),
         "sourceArtifactIds": source_artifact_ids,
         "centralSourceIds": central_source_ids,
+        "sourceSummaries": _source_trust_summaries(result.get("sourceSummaries")),
         "researchProjectId": str(result.get("researchProjectId") or "").strip(),
         "questionId": str(result.get("questionId") or "").strip(),
         "sourceCollectionRunId": str(result.get("sourceCollectionRunId") or "").strip(),
@@ -227,6 +228,7 @@ def _citation_from_context(context: dict[str, Any]) -> dict[str, Any]:
         "knowledgeItemId": str(source.get("knowledgeItemId") or "").strip(),
         "sourceArtifactIds": list(source.get("sourceArtifactIds") or []),
         "centralSourceIds": list(source.get("centralSourceIds") or []),
+        "sourceSummaries": _source_trust_summaries(source.get("sourceSummaries")),
         "researchProjectId": str(source.get("researchProjectId") or "").strip(),
         "questionId": str(source.get("questionId") or "").strip(),
         "sourceCollectionRunId": str(source.get("sourceCollectionRunId") or "").strip(),
@@ -236,6 +238,24 @@ def _citation_from_context(context: dict[str, Any]) -> dict[str, Any]:
         "provider": str(context.get("provider") or "").strip(),
         "retrievalMode": str(context.get("retrievalMode") or "").strip(),
     }
+
+
+def _source_trust_summaries(value: Any) -> list[dict[str, str]]:
+    summaries = []
+    for source in list(value or [])[:6]:
+        if not isinstance(source, dict):
+            continue
+        source_summary = {
+            key: trim_lines(str(source.get(key) or ""), max_lines=1).strip()[:160]
+            for key in ("sourceArtifactId", "centralSourceId", "sourceType")
+            if str(source.get(key) or "").strip()
+        }
+        content_trust = trim_lines(str(source.get("contentTrust") or ""), max_lines=1).strip()[:80]
+        if content_trust:
+            source_summary["contentTrust"] = content_trust
+        if source_summary:
+            summaries.append(source_summary)
+    return summaries
 
 
 def _context_text(result: dict[str, Any]) -> str:

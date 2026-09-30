@@ -57,6 +57,7 @@ import {
 import { appendSupervisorEventFallback } from "./lifecycle/supervisorEventFallback.js";
 import { fulfillDeferredRestartIntentOnce } from "./lifecycle/deferredRestartIntents.js";
 import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
+import { runWithFrontendBuildGate } from "./lifecycle/frontendBuildState.js";
 import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
   createConversationNotificationService,
@@ -3178,10 +3179,17 @@ async function orchestrateLauncherLifecycle(
     // Opening a workbench prepares that checkout's frontend. Rebuilding the
     // desktop shell here used to overwrite workbench_job.node while this
     // process still had it loaded, and the start died before the backend.
-    const frontend = await ensureFrontendRelease({
-      workspaceRoot: paths.workspaceRoot,
-      pythonPath
-    });
+    // The build gate runs before the supervisor claims the intent, so the
+    // in-process marker (published ahead of the await) is what lets the
+    // Launcher UI report "building" instead of a frozen start button.
+    const frontend = await runWithFrontendBuildGate(
+      "main",
+      { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
+      () => ensureFrontendRelease({
+        workspaceRoot: paths.workspaceRoot,
+        pythonPath
+      })
+    );
     frontendReleaseChanged = !frontend.skipped;
     if (!app.isPackaged) {
       try {
@@ -3824,11 +3832,18 @@ async function runIsolatedRegistryMutation(input: {
     }
     if (target) {
       input.signal?.throwIfAborted();
-      await ensureFrontendRelease({
-        workspaceRoot: target.projectRoot,
-        pythonPath: input.pythonPath,
-        signal: input.signal
-      });
+      // Same build gate as the main line: publish "building" before the
+      // await and clear it in a finally so an aborted or failed build cannot
+      // leave the row stuck in building.
+      await runWithFrontendBuildGate(
+        input.instanceId,
+        { operation: input.operation, notify: () => updateLauncherWindowTruth() },
+        () => ensureFrontendRelease({
+          workspaceRoot: target.projectRoot,
+          pythonPath: input.pythonPath,
+          signal: input.signal
+        })
+      );
       input.signal?.throwIfAborted();
       const claimed = await prepareIsolatedStart({
         instanceId: input.instanceId,

@@ -631,15 +631,9 @@ def _runtime_constraint_denial(
 ) -> tuple[str, str] | None:
     del tool_args
     from core.web.services.agent_directory_service import (
-        DISABLED_AGENT_DIRECT_READ_TOOL_NAMES,
         SUBAGENT_DELEGATION_TOOL_NAMES,
     )
 
-    if tool_name in DISABLED_AGENT_DIRECT_READ_TOOL_NAMES:
-        return (
-            "direct_read_tool_disabled",
-            f"当前 Agent 已关闭 `{tool_name}` 直读能力，请使用已授权的受控读取工具。",
-        )
     if tool_name in SUBAGENT_DELEGATION_TOOL_NAMES:
         raw_policy = _as_mapping(runtime.get("delegationPolicy") or runtime.get("delegation_policy"))
         allow_subagents = _coerce_bool(

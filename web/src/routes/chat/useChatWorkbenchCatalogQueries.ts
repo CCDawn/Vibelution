@@ -18,6 +18,7 @@ import {
 import { fetchPublicConfig } from "../../api/config";
 import { listProjectAgentBusTimeline } from "../../api/projectAgentBus";
 import { fetchRuntimeSummary } from "../../api/runtime";
+import { listArchivedChatSessions } from "../../api/sessionArchive";
 import { fetchSkillLibrary } from "../../api/skills";
 import { listTeams } from "../../api/teams";
 import { queryKeys } from "../../api/queryKeys";
@@ -66,6 +67,8 @@ export type ChatWorkbenchCatalogQueriesInput = {
   groupStreamConnected: boolean;
   requestedSessionId: string;
   requestedRoomId: string;
+  /** Archived view toggle: lazily fetches the archived-session listing. */
+  showArchivedSessions: boolean;
 };
 
 export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQueriesInput) {
@@ -179,7 +182,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
   const visibleSessionsData = useMemo(
-    () => rawSessionsQuery.data?.filter(isVisibleDirectSession),
+    () => rawSessionsQuery.data?.filter((session) => isVisibleDirectSession(session)),
     [rawSessionsQuery.data],
   );
   const sessionsQuery = useMemo(
@@ -189,6 +192,12 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     }),
     [rawSessionsQuery, visibleSessionsData],
   );
+  const archivedSessionsQuery = useQuery({
+    queryKey: queryKeys.sessionArchive(),
+    queryFn: ({ signal }) => listArchivedChatSessions({ signal }),
+    enabled: input.showArchivedSessions,
+    staleTime: 5_000,
+  });
   const conversationsQueryRaw = useInfiniteQuery({
     queryKey: queryKeys.conversationsCatalogQuery(CONVERSATIONS_CATALOG_PAGE_SIZE),
     initialPageParam: "",
@@ -324,6 +333,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     resolveModelLabel,
     rawSessionsQuery,
     sessionsQuery,
+    archivedSessionsQuery,
     conversationsQuery,
     teamsQuery,
     agentsQuery,

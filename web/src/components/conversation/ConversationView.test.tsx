@@ -1327,6 +1327,30 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     );
   });
 
+  it("spaces each virtual row by its own text instead of a shared 120px slot", () => {
+    expect(styles.timelineVirtualRow).not.toContain("content-visibility");
+    expect(styles.timelineVirtualRow).not.toContain("contain-intrinsic-size");
+    const longText = "会话正文 ".repeat(80);
+    const html = renderConversation([
+      {
+        id: "message-user-a",
+        role: "user",
+        content: longText,
+        timestamp: "2026-05-22T00:00:00Z",
+      },
+      {
+        id: "message-user-b",
+        role: "user",
+        content: longText,
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+    ]);
+    const rows = html.match(/data-conversation-virtual-row="[^"]+"/g) ?? [];
+    expect(rows).toHaveLength(2);
+    expect(html).toContain(styles.timelineVirtualRow);
+    expect(html).not.toContain("contain-intrinsic-size:auto_120px");
+  });
+
   it("reveals per-message action buttons on hover while keeping them reachable", () => {
     // zai-org/ZCode ConversationRowView treatment (Apache-2.0): opacity
     // transition + group-hover reveal, focus-within for keyboard reachability,

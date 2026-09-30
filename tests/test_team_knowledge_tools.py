@@ -91,19 +91,73 @@ def _kb_ref(env: dict) -> str:
     return str(env["base"].get("scopedKnowledgeBaseId") or env["base"]["knowledgeBaseId"])
 
 
+def _create_approved_owner_knowledge_item(
+    *,
+    owner_type: str,
+    owner_id: str,
+    knowledge_base_id: str,
+    actor_agent_id: str,
+    reviewer_agent_id: str,
+    title: str,
+    content: str,
+) -> dict:
+    source_type = "agent_authored" if owner_type == "agent" else "manual_user_entry"
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        owner_type,
+        owner_id,
+        source_type=source_type,
+        source_ref={"note": title},
+        original_content=content,
+        original_filename=f"{title}.txt",
+        title=title,
+        actor_agent_id=actor_agent_id,
+    )
+    reviewed_source = team_knowledge_service.review_owner_inbox_source(
+        owner_type,
+        owner_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=reviewer_agent_id,
+    )
+    artifact = team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_base_id,
+        reviewed_source["centralSource"]["centralSourceId"],
+        actor_agent_id=actor_agent_id,
+        title=title,
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_base_id,
+        source_artifact_ids=[artifact["sourceArtifactId"]],
+        proposed_by_agent_id=actor_agent_id,
+        title=title,
+        content=content,
+    )
+    return team_knowledge_service.review_refinement_proposal(
+        knowledge_base_id,
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=reviewer_agent_id,
+    )["item"]
+
+
 _LLM_FACING_KNOWLEDGE_TOOL_NAMES = {
     "unified_memory_search_tool",
     "knowledge_proposal_tool",
+    "knowledge_proposal_review_tool",
     "knowledge_rating_suggestion_tool",
     "knowledge_operations_health_tool",
     "knowledge_governance_plan_tool",
     "knowledge_steward_recommendations_tool",
     "knowledge_steward_workbench_tool",
 }
+_LLM_FACING_PRIVATE_MEMORY_TOOL_NAMES = {"search_agent_private_memory_tool"}
+_LLM_FACING_ATTACHMENT_STAGE_TOOL_NAMES = {"knowledge_stage_session_attachment_tool"}
 _LLM_FACING_COMMUNICATION_TOOL_NAMES = {
     "agent_message_tool",
 }
 _LLM_FACING_TOOL_NAMES = _LLM_FACING_KNOWLEDGE_TOOL_NAMES | _LLM_FACING_COMMUNICATION_TOOL_NAMES
+_LLM_FACING_TOOL_NAMES |= _LLM_FACING_PRIVATE_MEMORY_TOOL_NAMES
+_LLM_FACING_TOOL_NAMES |= _LLM_FACING_ATTACHMENT_STAGE_TOOL_NAMES
 
 
 def _llm_facing_knowledge_tools():
@@ -123,8 +177,301 @@ def test_team_knowledge_tools_are_hidden_without_explicit_allow(tmp_path, monkey
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
     assert {tool.name for tool in tools} == _LLM_FACING_TOOL_NAMES
-    assert {tool.name for tool in visible} == _LLM_FACING_COMMUNICATION_TOOL_NAMES
+    assert {tool.name for tool in visible} == (
+        _LLM_FACING_COMMUNICATION_TOOL_NAMES
+        | _LLM_FACING_PRIVATE_MEMORY_TOOL_NAMES
+        | _LLM_FACING_ATTACHMENT_STAGE_TOOL_NAMES
+    )
     assert not ({tool.name for tool in visible} & _LLM_FACING_KNOWLEDGE_TOOL_NAMES)
+
+
+def test_search_agent_private_memory_tool_reads_only_current_agents_private_knowledge(tmp_path, monkeypatch):
+    from core.web.services import user_content_markdown_service
+
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    owner_id = env["member"]["agentId"]
+    other = agent_directory_service.create_agent_instance(display_name="Private Memory Other Agent")
+    own_base = team_knowledge_service.create_agent_knowledge_base(
+        owner_id,
+        name="Current Agent Private Knowledge",
+        actor_agent_id=owner_id,
+    )
+    other_base = team_knowledge_service.create_agent_knowledge_base(
+        other["agentId"],
+        name="Other Agent Private Knowledge",
+        actor_agent_id=other["agentId"],
+    )
+    query_text = "cobalt archive private retrieval"
+    own_item = _create_approved_owner_knowledge_item(
+        owner_type="agent",
+        owner_id=owner_id,
+        knowledge_base_id=own_base["knowledgeBaseId"],
+        actor_agent_id=owner_id,
+        reviewer_agent_id=owner_id,
+        title="Current Agent Private Note",
+        content=f"{query_text}: this belongs to the current Agent.",
+    )
+    other_item = _create_approved_owner_knowledge_item(
+        owner_type="agent",
+        owner_id=other["agentId"],
+        knowledge_base_id=other_base["knowledgeBaseId"],
+        actor_agent_id=other["agentId"],
+        reviewer_agent_id=other["agentId"],
+        title="Other Agent Private Note",
+        content=f"{query_text}: this belongs to another Agent.",
+    )
+    team_item = _create_approved_owner_knowledge_item(
+        owner_type="team",
+        owner_id=env["team"]["teamId"],
+        knowledge_base_id=_kb_ref(env),
+        actor_agent_id=owner_id,
+        reviewer_agent_id=env["lead"]["agentId"],
+        title="Team Shared Note",
+        content=f"{query_text}: this belongs to the Team.",
+    )
+
+    monkeypatch.setattr(user_content_markdown_service, "PROJECT_ROOT", tmp_path / "project")
+    user_source = tmp_path / "user-source"
+    user_source.mkdir()
+    (user_source / "user-note.md").write_text(f"# User note\n{query_text}: user content.", encoding="utf-8")
+    user_space = user_content_markdown_service.import_markdown_space(str(user_source), space_name="Private Search User Notes")
+    agent_directory_service.update_agent_instance(
+        owner_id,
+        memory_policy={
+            "readKnowledgeBaseIds": [_kb_ref(env)],
+            "readUserContentSpaceIds": [user_space["space"]["spaceId"]],
+        },
+    )
+
+    with agent_directory_service.active_agent_runtime(owner_id, session_id="session-private-search"):
+        payload = json.loads(
+            team_knowledge_tools.search_agent_private_memory_tool(
+                query=query_text,
+                query_mode="hybrid",
+                limit=10,
+            )
+        )
+
+    result_ids = {item.get("knowledgeItemId") for item in payload["results"]}
+    assert payload["ok"] is True
+    assert payload["summary"]["userContentResultCount"] == 0
+    assert result_ids == {own_item["knowledgeItemId"]}
+    assert other_item["knowledgeItemId"] not in result_ids
+    assert team_item["knowledgeItemId"] not in result_ids
+    assert all(item.get("ownerType") == "agent" and item.get("ownerId") == owner_id for item in payload["results"])
+
+
+def test_search_agent_private_memory_tool_hides_internal_errors(monkeypatch):
+    monkeypatch.setattr(team_knowledge_tools, "_current_runtime", lambda: {"agentId": "agent-private"})
+    monkeypatch.setattr(team_knowledge_tools, "_record_event", lambda *args, **kwargs: None)
+
+    def fail_list(*args, **kwargs):
+        raise FileNotFoundError("C:/private/runtime/knowledge.json")
+
+    monkeypatch.setattr(team_knowledge_service, "list_agent_knowledge_bases", fail_list)
+    payload = json.loads(team_knowledge_tools.search_agent_private_memory_tool(query="fact"))
+
+    assert payload["ok"] is False
+    assert payload["error"] == "private_memory_search_failed"
+    assert "C:/private/runtime" not in json.dumps(payload)
+
+
+def test_session_attachment_stage_tool_binds_agent_and_session_from_runtime(monkeypatch):
+    from core.web.services import runtime_scene_service
+
+    calls = []
+    events = []
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append(kwargs))
+
+    def collect(owner_type, owner_id, **kwargs):
+        calls.append({"ownerType": owner_type, "ownerId": owner_id, **kwargs})
+        return {
+            "inboxSourceId": "inbox-staged",
+            "sourceType": "manual_user_entry",
+            "status": "pending",
+            "originalPath": "private/hidden-document.txt",
+            "localCopies": ["private/hidden-document.txt"],
+            "sourceRef": {"localCopies": ["private/hidden-document.txt"]},
+        }
+
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {"agentId": "agent-current", "sessionId": "session-current"},
+    )
+    monkeypatch.setattr(team_knowledge_service, "collect_session_attachment_to_inbox", collect)
+
+    private_result = json.loads(
+        team_knowledge_tools.knowledge_stage_session_attachment_tool(attachment_id="attachment-1")
+    )
+    team_result = json.loads(
+        team_knowledge_tools.knowledge_stage_session_attachment_tool(
+            attachment_id="attachment-2",
+            team_id="team-authorized-by-service",
+            title="Team source",
+            summary="A staged team source.",
+        )
+    )
+    titled_result = json.loads(
+        team_knowledge_tools.knowledge_stage_session_attachment_tool(
+            attachment_id="attachment-1", title="Updated source title"
+        )
+    )
+
+    assert private_result["ok"] is True
+    assert private_result["ownerType"] == "agent"
+    assert private_result["ownerId"] == "agent-current"
+    assert private_result["reviewStatus"] == "pending"
+    assert "source" not in private_result
+    assert "private/hidden-document.txt" not in json.dumps(private_result)
+    assert "sessionId" not in private_result
+    assert events and all("sessionId" not in event["fields"] for event in events)
+    assert team_result["ok"] is True
+    assert team_result["ownerType"] == "team"
+    assert team_result["ownerId"] == "team-authorized-by-service"
+    stage_keys = [call.pop("idempotency_key") for call in calls]
+    assert all(key.startswith("agent-stage-") and len(key) == 76 for key in stage_keys)
+    assert stage_keys[0] != stage_keys[1]
+    assert stage_keys[0] != stage_keys[2]
+    assert all("idempotency_key" not in json.dumps(result) for result in (private_result, team_result))
+    assert calls == [
+        {
+            "ownerType": "agent",
+            "ownerId": "agent-current",
+            "session_id": "session-current",
+            "attachment_id": "attachment-1",
+            "actor_agent_id": "agent-current",
+            "title": "",
+            "summary": "",
+        },
+        {
+            "ownerType": "team",
+            "ownerId": "team-authorized-by-service",
+            "session_id": "session-current",
+            "attachment_id": "attachment-2",
+            "actor_agent_id": "agent-current",
+            "title": "Team source",
+            "summary": "A staged team source.",
+        },
+        {
+            "ownerType": "agent",
+            "ownerId": "agent-current",
+            "session_id": "session-current",
+            "attachment_id": "attachment-1",
+            "actor_agent_id": "agent-current",
+            "title": "Updated source title",
+            "summary": "",
+        },
+    ]
+    assert titled_result["reviewStatus"] == "pending"
+
+    import inspect
+
+    parameters = inspect.signature(team_knowledge_tools.knowledge_stage_session_attachment_tool).parameters
+    assert not {"owner_type", "owner_id", "agent_id", "session_id", "actor_agent_id", "path"} & set(parameters)
+
+
+def test_session_attachment_stage_tool_requires_bound_runtime_session(monkeypatch):
+    calls = []
+    monkeypatch.setattr(team_knowledge_tools, "_current_runtime", lambda: {"agentId": "agent-current"})
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "collect_session_attachment_to_inbox",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    payload = json.loads(team_knowledge_tools.knowledge_stage_session_attachment_tool(attachment_id="attachment-1"))
+
+    assert payload["ok"] is False
+    assert payload["error"] == "agent_session_identity_required"
+    assert calls == []
+
+
+def test_session_attachment_stage_tool_redacts_sensitive_error_details(monkeypatch):
+    from core.web.services import runtime_scene_service
+
+    events = []
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append(kwargs))
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {"agentId": "agent-current", "sessionId": "session-secret"},
+    )
+
+    def fail(*args, **kwargs):
+        raise ValueError("private/path/session-secret")
+
+    monkeypatch.setattr(team_knowledge_service, "collect_session_attachment_to_inbox", fail)
+    payload = json.loads(team_knowledge_tools.knowledge_stage_session_attachment_tool(attachment_id="attachment-1"))
+    assert payload["ok"] is False
+    assert "private/path" not in json.dumps(payload)
+    assert "session-secret" not in json.dumps(payload)
+    assert events and all("sessionId" not in event["fields"] for event in events)
+
+
+def test_disabled_private_memory_blocks_default_search_and_private_attachment_stage(monkeypatch):
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {
+            "agentId": "agent-current",
+            "sessionId": "session-current",
+            "memoryPolicy": {"enabled": False},
+        },
+    )
+    search = json.loads(team_knowledge_tools.search_agent_private_memory_tool(query="private fact"))
+    stage = json.loads(
+        team_knowledge_tools.knowledge_stage_session_attachment_tool(attachment_id="attachment-1")
+    )
+    assert search["ok"] is False and search["error"] == "personal_memory_disabled"
+    assert stage["ok"] is False and stage["error"] == "personal_memory_disabled"
+
+
+def test_proposal_review_tool_uses_runtime_reviewer_and_returns_bounded_result(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    base_ref = _kb_ref(env)
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base_ref,
+        source_artifact_ids=_source_ids(env),
+        proposed_by_agent_id=env["member"]["agentId"],
+        title="Reviewed fact",
+        content="A reviewed fact.",
+    )
+    reviewer_id = env["lead"]["agentId"]
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {
+            "agentId": reviewer_id,
+            "memoryPolicy": {"reviewKnowledgeBaseIds": [base_ref]},
+        },
+    )
+
+    payload = json.loads(
+        team_knowledge_tools.knowledge_proposal_review_tool(
+            base_ref, proposal["proposalId"], "applied"
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["status"] == "applied"
+    assert payload["knowledgeItemId"]
+    assert "proposal" not in payload and "item" not in payload
+    reviewed = team_knowledge_service.list_knowledge_items(base_ref, agent_id=reviewer_id)
+    assert any(item["knowledgeItemId"] == payload["knowledgeItemId"] for item in reviewed["items"])
+
+    import inspect
+
+    parameters = inspect.signature(team_knowledge_tools.knowledge_proposal_review_tool).parameters
+    assert not {"actor_agent_id", "reviewed_by_agent_id", "owner_id"} & set(parameters)
+
+
+def test_session_attachment_stage_tool_signature_cannot_select_actor_or_local_path():
+    import inspect
+
+    parameters = inspect.signature(team_knowledge_tools.knowledge_stage_session_attachment_tool).parameters
+
+    assert not {"owner_type", "owner_id", "agent_id", "session_id", "actor_agent_id", "path", "local_file_paths"} & set(parameters)
 
 
 def test_team_knowledge_tools_are_llm_facing_with_explicit_allow(tmp_path, monkeypatch):
@@ -231,6 +578,50 @@ def test_knowledge_ingestion_tool_directly_ingests_reviewed_inbox_source(tmp_pat
     assert result["workflowReconciliation"]["status"] == "not_applicable"
     assert result["workflowReconciliation"]["updated"] is False
     assert items["summary"]["itemCount"] == 1
+
+
+def test_knowledge_ingestion_tool_uses_review_policy_for_inbox_direct_ingest(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        env["team"]["teamId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "policy-gated-direct-ingest"},
+        original_content="The source should remain pending when the runtime review policy excludes its base.",
+        title="Policy-gated source",
+        actor_agent_id=env["member"]["agentId"],
+    )
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {
+            "agentId": env["lead"]["agentId"],
+            "memoryPolicy": {
+                "proposeKnowledgeBaseIds": [_kb_ref(env)],
+                "reviewKnowledgeBaseIds": ["kb-other"],
+            },
+        },
+    )
+
+    result = json.loads(
+        team_knowledge_tools.knowledge_ingestion_tool(
+            knowledge_base_id=_kb_ref(env),
+            source_type="manual_user_entry",
+            source_ref_json='{"note":"policy-gated-direct-ingest"}',
+            proposal_title="Policy-gated source",
+            inbox_source_id=inbox_source["inboxSourceId"],
+            owner_type="team",
+            owner_id=env["team"]["teamId"],
+            proposal_content="This must not become formal knowledge.",
+        )
+    )
+
+    inbox = team_knowledge_service.list_owner_source_inbox(
+        "team", env["team"]["teamId"], agent_id=env["lead"]["agentId"]
+    )
+    assert result["ok"] is False
+    assert result["error"] == "knowledge_base_not_in_memory_policy"
+    assert inbox["sources"][0]["status"] == "pending"
 
 
 def test_knowledge_ingestion_tool_reports_partial_when_experiment_reconciliation_fails(tmp_path, monkeypatch):
@@ -560,7 +951,7 @@ def test_unified_memory_search_tool_limits_unscoped_search_to_memory_policy(tmp_
             title="Blocked unified source",
             knowledge_base_id=other_base["scopedKnowledgeBaseId"],
         ),
-        proposed_by_agent_id=env["lead"]["agentId"],
+        proposed_by_agent_id=env["member"]["agentId"],
         title="Blocked unified knowledge",
         content="Unified global search must not return this memory-policy-blocked knowledge.",
         tags=["unified-policy"],

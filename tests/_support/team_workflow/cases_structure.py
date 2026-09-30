@@ -393,7 +393,7 @@ def test_source_collection_writeback_recovers_fenced_structured_result_text(tmp_
     assert response["writeback"]["coverageSummary"]["missing"] == 0
     assert response["task"]["result"]["_structuredResultRecoveredFrom"] == "text"
 
-def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape(tmp_path, monkeypatch):
+def test_knowledge_steward_memory_writeback_leaves_real_steward_pack_pending_for_independent_review(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
@@ -407,7 +407,7 @@ def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape
     team = team_service.create_team(
         name="挑战杯科研团队",
         members=[
-            {"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"},
+            {"agentId": coordinator["agentId"], "role": "coordinator", "agentName": "科研协调"},
             {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
         ],
     )
@@ -505,14 +505,75 @@ def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape
 
     materialized = response["writeback"]["materializedKnowledgeIngestion"]
 
-    assert materialized["status"] == "completed"
+    assert materialized["status"] == "pending_review"
     assert materialized["approvedCandidateIds"] == [source["candidateId"]]
-    assert materialized["formalKnowledgeItemCount"] == 1
-    assert materialized["writesFormalKnowledge"] is True
+    assert materialized["sourceReviewStatus"] == "pending_source_review"
+    assert materialized["knowledgeSubmissionStatus"] == ""
+    assert materialized["knowledgeReviewStatus"] == ""
+    assert materialized["formalKnowledgeItemCount"] == 0
+    assert materialized["writesFormalKnowledge"] is False
 
     knowledge_items = team_knowledge_service.list_knowledge_items(
         materialized["knowledgeBaseId"],
         agent_id=ingestor["agentId"],
+    )
+    assert knowledge_items["summary"]["itemCount"] == 0
+
+    pack_candidate = next(
+        item
+        for item in team_workflow_orchestration_service.list_candidate_store(
+            team["teamId"], run_id=run_id
+        )["candidates"]
+        if item["candidateId"] == materialized["stewardPackCandidateId"]
+    )
+    ingestion = pack_candidate["metadata"]["knowledgeIngestion"]
+    assert pack_candidate["currentState"] == "steward_pending_source_review"
+    assert ingestion["status"] == "pending_source_review"
+    assert not ingestion["proposalId"]
+    inbox = team_knowledge_service.list_owner_source_inbox(
+        "team", team["teamId"], agent_id=coordinator["agentId"]
+    )
+    staged_source = next(
+        item for item in inbox["sources"] if item["inboxSourceId"] == ingestion["inboxSourceId"]
+    )
+    assert staged_source["sourceRef"]["contentTrust"] == "untrusted_source_material"
+
+    reviewed_source = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team["teamId"],
+        ingestion["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=coordinator["agentId"],
+    )
+    knowledge_pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
+        team["teamId"],
+        pack_candidate["candidateId"],
+        {
+            "knowledgeBaseId": ingestion["knowledgeBaseId"],
+            "proposedByAgentId": ingestor["agentId"],
+            "centralSourceId": reviewed_source["centralSource"]["centralSourceId"],
+        },
+        run_id=run_id,
+    )
+    assert knowledge_pending["knowledgeIngestion"]["status"] == "pending_review"
+    assert knowledge_pending["candidate"]["metadata"]["knowledgeIngestion"]["proposalId"]
+
+    reviewed_knowledge = team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
+        team["teamId"],
+        pack_candidate["candidateId"],
+        {
+            "knowledgeBaseId": ingestion["knowledgeBaseId"],
+            "reviewedByAgentId": coordinator["agentId"],
+            "decision": "approved",
+            "resolutionNote": "独立审核通过后正式入库。",
+        },
+        run_id=run_id,
+    )
+    assert reviewed_knowledge["candidate"]["metadata"]["officialSyncRecord"]["reviewedByAgentId"] == coordinator["agentId"]
+    assert reviewed_knowledge["knowledgeIngestion"]["officialSyncRecord"]["formalKnowledgeItemCreated"] is True
+    knowledge_items = team_knowledge_service.list_knowledge_items(
+        materialized["knowledgeBaseId"],
+        agent_id=coordinator["agentId"],
     )
     assert knowledge_items["summary"]["itemCount"] == 1
 
@@ -650,9 +711,13 @@ def test_steward_pack_requires_approval_gate(tmp_path, monkeypatch):
 def test_steward_pack_submits_pending_knowledge_ingestion_without_official_write(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": steward["agentId"], "role": "steward"}],
+        members=[
+            {"agentId": steward["agentId"], "role": "steward"},
+            {"agentId": reviewer["agentId"], "role": "coordinator"},
+        ],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -709,7 +774,7 @@ def test_steward_pack_submits_pending_knowledge_ingestion_without_official_write
         team["teamId"],
         inbox_source_id,
         decision="accepted",
-        reviewed_by_agent_id=steward["agentId"],
+        reviewed_by_agent_id=reviewer["agentId"],
     )
     response = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
         team["teamId"],
@@ -746,9 +811,13 @@ def test_steward_pack_submits_pending_knowledge_ingestion_without_official_write
 def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledge(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": steward["agentId"], "role": "steward"}],
+        members=[
+            {"agentId": steward["agentId"], "role": "steward"},
+            {"agentId": reviewer["agentId"], "role": "coordinator"},
+        ],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -786,6 +855,7 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
         candidate["candidateId"],
         knowledge_base["knowledgeBaseId"],
         steward["agentId"],
+        reviewer["agentId"],
     )["knowledgePending"]["candidate"]
 
     response = team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
@@ -793,7 +863,7 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
         pending["candidateId"],
         {
             "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
-            "reviewedByAgentId": steward["agentId"],
+            "reviewedByAgentId": reviewer["agentId"],
             "decision": "approved",
             "resolutionNote": "Evidence accepted for official knowledge.",
         },
@@ -823,6 +893,8 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
     assert response["candidate"]["currentState"] == "official_synced"
     assert response["candidate"]["qualityStatus"] == "approved"
     assert response["knowledgeIngestion"]["review"]["proposal"]["status"] == "applied"
+    assert official_record["reviewedByAgentId"] == reviewer["agentId"]
+    assert official_record["reviewedByAgentId"] != steward["agentId"]
     assert response["knowledgeIngestion"]["review"]["item"]["knowledgeItemId"] in official_record["knowledgeItemIds"]
     assert official_record["formalKnowledgeItemCreated"] is True
     assert official_record["writesOfficialKnowledge"] is True
@@ -851,9 +923,13 @@ def test_steward_pack_approval_gate_applies_pending_ingestion_to_formal_knowledg
 def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_write(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     steward = agent_directory_service.create_agent_instance(display_name="Knowledge Steward Agent")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Independent Knowledge Reviewer")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": steward["agentId"], "role": "steward"}],
+        members=[
+            {"agentId": steward["agentId"], "role": "steward"},
+            {"agentId": reviewer["agentId"], "role": "coordinator"},
+        ],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -889,6 +965,7 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
         candidate["candidateId"],
         knowledge_base["knowledgeBaseId"],
         steward["agentId"],
+        reviewer["agentId"],
     )["knowledgePending"]["candidate"]
 
     response = team_workflow_orchestration_service.review_steward_pack_knowledge_ingestion(
@@ -896,7 +973,7 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
         pending["candidateId"],
         {
             "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
-            "reviewedByAgentId": steward["agentId"],
+            "reviewedByAgentId": reviewer["agentId"],
             "decision": "rejected",
             "resolutionNote": "Evidence is too weak.",
         },
@@ -914,6 +991,8 @@ def test_steward_pack_approval_gate_rejects_pending_ingestion_without_formal_wri
     assert response["candidate"]["currentState"] == "steward_needs_revision"
     assert response["candidate"]["qualityStatus"] == "rejected_by_gate"
     assert response["knowledgeIngestion"]["review"]["proposal"]["status"] == "rejected"
+    assert official_record["reviewedByAgentId"] == reviewer["agentId"]
+    assert official_record["reviewedByAgentId"] != steward["agentId"]
     assert official_record["formalKnowledgeItemCreated"] is False
     assert official_record["writesOfficialKnowledge"] is False
     assert official_record["writesOfficialGraph"] is False

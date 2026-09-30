@@ -54,6 +54,10 @@
 # 最终收口必须从根 main cwd 调用；pre-commit 已记录 claim binding 时可省略 claim-id/agent-id；未生成 manifest 时只执行一次 selector 计划
 Set-Location "<ROOT_MAIN>"
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>"
+# Codex App 等外部管理或仍承担运行职责的已登记 worktree：照常验证和 ff-only 合入，但保留目录、分支与依赖链接。
+# 此模式不停止服务、不绕过 claim/manifest；成功返回 merged=true、exit_code=0、merged_cleanup_pending。
+# 外部托管工作区待停止使用后由所属管理器归档，不得对它运行 --cleanup-only。
+.\.venv\Scripts\python.exe "<TASK_WORKTREE>\scripts\task_closeout.py" --task-worktree "<TASK_WORKTREE>" --retain-worktree
 # selector 中的 .venv 是逻辑命令；同 requirements 指纹时由 gate 只读解析到根 main .venv，禁止在任务树创建 junction
 # 已有 manifest 或 integration 冲突返回 manifest：原样复用，禁止再跑测试
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --manifest "<MANIFEST_PATH>"

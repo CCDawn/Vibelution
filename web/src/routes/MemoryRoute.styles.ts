@@ -21,7 +21,7 @@ const styles = {
   controlStrip:
     "controlStrip min-w-0 flex items-center gap-1.5 overflow-x-auto overflow-y-hidden px-2 pb-1",
   graphViewStack:
-    "graphViewStack min-w-0 !grid h-full min-h-0 !grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+    "graphViewStack min-w-0 !flex h-full min-h-0 flex-col overflow-hidden [&>section]:flex-1",
   header:
     "header min-w-0 flex flex-wrap items-center gap-1.5",
   headerActions:

@@ -3300,6 +3300,7 @@ def _steward_pack_ingestion_payload(
         "agentId": proposed_by_agent_id,
         "teamId": team_id,
         "candidateId": str(candidate.get("candidateId") or ""),
+        "contentTrust": "untrusted_source_material",
         "workflowId": str(candidate.get("workflowId") or ""),
         "taskType": "steward_pack_draft",
         "targetDomain": s._trim_text(output.get("targetDomain"), max_length=160),

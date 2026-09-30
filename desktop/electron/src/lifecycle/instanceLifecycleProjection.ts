@@ -1,4 +1,5 @@
 export type InstanceLifecycleState =
+  | "building"
   | "starting"
   | "restarting"
   | "stopping"
@@ -61,6 +62,12 @@ export function projectInstanceLifecycle(
   );
   if (input.startSupervisorLost && !backendReady && !input.windowOpen) {
     return { lifecycleState: "error", errorCode: "start_supervisor_lost" };
+  }
+  // A frontend build gate runs before the supervisor claims the intent; the
+  // Electron overlay stamps phase="building" from its in-process marker so
+  // the row keeps one shared projection channel for in-flight work.
+  if (phase === "building" || registryStatus === "building") {
+    return { lifecycleState: "building", errorCode: "" };
   }
   if (phase === "restarting" || phase === "restart" || registryStatus === "restarting") {
     return { lifecycleState: "restarting", errorCode: "" };

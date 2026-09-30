@@ -110,7 +110,8 @@ import {
 } from "./evolution/evolutionRouteModel";
 
 import { getEffectiveIntakeMode, SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
-import { SupervisedConversationWorkspace } from "./SupervisedConversationWorkspace";
+import { SupervisedConversationWorkspace, type EvolutionWorkspaceRunGroup } from "./SupervisedConversationWorkspace";
+import { buildUnifiedEvolutionRuns, evolutionRunTimestamp, isEvolutionRunHistory, selectUnifiedEvolutionRun } from "./unifiedEvolutionRuns";
 import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationPanel";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import {
@@ -165,6 +166,10 @@ const EvolutionActiveRunMonitorPanel = lazy(() =>
   import("./EvolutionActiveRunMonitorPanel").then((module) => ({
     default: module.EvolutionActiveRunMonitorPanel,
   })),
+);
+
+const SelfEvolutionConversationWorkspace = lazy(() =>
+  import("./SelfEvolutionConversationWorkspace").then((module) => ({ default: module.SelfEvolutionConversationWorkspace })),
 );
 
 
@@ -250,6 +255,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const evolutionWorkspaceCache = useMemo(() => createEvolutionWorkspaceCache(queryClient), [queryClient]);
   const evolutionTrack = useShellStore((state) => state.evolutionTrack);
   const setEvolutionTrack = useShellStore((state) => state.setEvolutionTrack);
+  // Legacy URLs choose the initial track; the workspace can switch without leaving its conversation.
+  const [workspaceTrack, setWorkspaceTrack] = useState<EvolutionRouteTrack>(forcedTrack ?? evolutionTrack);
+  const [workspaceRunKeys, setWorkspaceRunKeys] = useState<Record<EvolutionRouteTrack, string | null>>({ supervised: null, self: null });
+  const [selfPhaseSelections, setSelfPhaseSelections] = useState<Record<string, string>>({});
+  const [selfRunFeedback, setSelfRunFeedback] = useState<Record<string, string>>({});
+  const [selfDetailsOpen, setSelfDetailsOpen] = useState(false);
   const rawEvolutionView = useShellStore((state) => state.evolutionView);
   const setEvolutionView = useShellStore((state) => state.setEvolutionView);
   const evolutionView = forcedView ?? (rawEvolutionView === "overview" ? "live" : rawEvolutionView);
@@ -273,7 +284,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [approvalMode, setApprovalMode] = useState<"human" | "agent">("human");
   const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
-  const [selectedSupervisedWorkflowStepId, setSelectedSupervisedWorkflowStepId] = useState<SupervisedWorkflowStepId | null>(null);
+  const [supervisedSelections, setSupervisedSelections] = useState<Record<string, { step: SupervisedWorkflowStepId | null; role: SupervisedMemberRole | null }>>({});
   const [supervisedSetupOpen, setSupervisedSetupOpen] = useState(false);
   const [supervisedConfirmation, setSupervisedConfirmation] = useState<{runId:string;action:string} | null>(null);
   const [supervisedDialog, setSupervisedDialog] = useState<"source" | "settings" | null>(null);
@@ -281,7 +292,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     sourceKind: "dataset" | "bundle"; datasetName: string; bundleName: string;
     limit: string; approval: "human" | "agent"; mental: SupervisedMentalModelMode;
   } | null>(null);
-  const [selectedSupervisedAgentRole, setSelectedSupervisedAgentRole] = useState<SupervisedMemberRole | null>(null);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
   const [recentSupervisedWorktreeRunId, setRecentSupervisedWorktreeRunId] = useState<string | null>(
     () => readRecentSupervisedWorktreeRunId(supervisedRunSessionStorage()),
@@ -346,8 +356,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const selfTrackEnabled = forcedTrack === "self" || (configQuery.data?.modeAvailability.self_evolution ?? false);
   const supervisedTrackEnabled = forcedTrack === "supervised" || (configQuery.data?.modeAvailability.supervised_evolution ?? true);
-  const activeTrack = forcedTrack ?? (
-    evolutionTrack === "self" && selfTrackEnabled
+  const activeTrack: EvolutionRouteTrack = (
+    workspaceTrack === "self" && selfTrackEnabled
       ? "self"
       : supervisedTrackEnabled
         ? "supervised"
@@ -357,6 +367,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const selfTrackQueriesEnabled = activeTrack === "self";
   const supervisedTrackQueriesEnabled = activeTrack === "supervised";
+
+  function changeWorkspaceTrack(track: EvolutionRouteTrack) {
+    const currentRun = activeTrack === "supervised" ? selectedSupervisedWorkspaceRun : selectedSelfWorkspaceRun;
+    setWorkspaceRunKeys((keys) => ({ ...keys, [activeTrack]: keys[activeTrack] ?? currentRun?.key ?? null }));
+    setWorkspaceTrack(track);
+    setEvolutionTrack(track);
+    if (forcedView && forcedView !== "live") navigate(track === "self" ? "/self-evolution" : "/supervised-evolution");
+    else setEvolutionView("live");
+  }
 
   const workspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionWorkspaceSnapshot(),
@@ -371,7 +390,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return resolvePollingInterval(pageVisible, hasActiveRun ? 4_000 : 12_000);
     },
     refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled,
+    enabled: supervisedTrackEnabled,
   });
   const workbenchCatalogQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
@@ -395,7 +414,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return resolvePollingInterval(pageVisible, hasActiveRun ? 4_000 : 30_000);
     },
     refetchIntervalInBackground: false,
-    enabled: selfTrackQueriesEnabled,
+    enabled: selfTrackEnabled,
   });
   const selectedSelfObservationRunQuery = useQuery({
     queryKey: queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || "__none__"),
@@ -458,6 +477,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setLiveActiveRun,
     setSelectedSelfObservationRunId,
     selectSupervisedWorktreeRun: (runId) => {
+      setWorkspaceRunKeys((keys) => ({ ...keys, supervised: `supervised:worktree:${runId}` }));
       setRecentSupervisedWorktreeRunId(runId);
       rememberRecentSupervisedWorktreeRunId(supervisedRunSessionStorage(), runId);
     },
@@ -512,16 +532,28 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const recentRunDetail = useSupervisedRunDetail(recentSupervisedWorktreeSummary);
   const recentSupervisedWorktreeRun = recentRunDetail.run;
   const selfWorktreeRun = selfWorkspaceSnapshot?.worktreeActiveRun ?? null;
-  const reviewCandidateWorktree = activeWorktreeRun ?? recentSupervisedWorktreeRun;
+  const selfObservationRun = selfWorkspaceSnapshot?.observationActiveRun
+    ?? selectedSelfObservationRunQuery.data
+    ?? null;
+  const unifiedRuns = buildUnifiedEvolutionRuns({
+    supervisedWorktreeRuns: worktreeRuns,
+    supervisedActiveWorktreeRun: activeWorktreeRun,
+    supervisedActiveRun: activeRunSnapshot ?? liveActiveRun,
+    supervisedLatestRun: latestSupervisedRunSnapshot,
+    selfSnapshot: selfWorkspaceSnapshot,
+    observationRun: selfObservationRun,
+  });
+  const selectedSupervisedWorkspaceRun = selectUnifiedEvolutionRun(unifiedRuns, "supervised", workspaceRunKeys.supervised);
+  const selectedSelfWorkspaceRun = selectUnifiedEvolutionRun(unifiedRuns, "self", workspaceRunKeys.self);
+  const selectedSupervisedDetail = useSupervisedRunDetail(selectedSupervisedWorkspaceRun?.worktreeRun ?? null);
+  const selectedSelfDetail = useSupervisedRunDetail(selectedSelfWorkspaceRun?.worktreeRun ?? null);
+  const reviewCandidateWorktree = selectedSupervisedDetail.run;
   const reviewCandidateGate = reviewCandidateWorktree?.reviewGate ?? reviewCandidateWorktree?.mergeAnalysis?.reviewGate;
   const highlightedReviewPending = isSelfEvolutionWorktreeRun(reviewCandidateWorktree)
     && Boolean(reviewCandidateGate?.required)
     && String(reviewCandidateGate?.status || "").trim().toLowerCase() !== "approved";
   const selfOverview = selfWorkspaceSnapshot?.overview;
   const selfTransactions = selfWorkspaceSnapshot?.transactions ?? [];
-  const selfObservationRun = selfWorkspaceSnapshot?.observationActiveRun
-    ?? selectedSelfObservationRunQuery.data
-    ?? null;
   const selfAutonomousRun: SelfEvolutionAutonomousLoopRun | null =
     selfWorkspaceSnapshot?.autonomousActiveRun
     ?? selfWorkspaceSnapshot?.autonomousLatestRun
@@ -535,7 +567,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? latestSupervisedRunSnapshot?.closedLoopRecord
     ?? null;
   const supervisedWorktreeLedgerSummary = buildSupervisedWorktreeLedgerSummary(recentSupervisedWorktreeRun);
-  const showTrackToggle = !forcedTrack && selfTrackEnabled && supervisedTrackEnabled;
+  const showTrackToggle = selfTrackEnabled && supervisedTrackEnabled;
   const routeEyebrow = activeTrack === "self" ? t("navSelfEvolution") : t("navSupervisedEvolution");
   const routeTitle =
     activeTrack === "self" ? t("selfEvolutionMode") : t("supervisedEvolutionMode");
@@ -550,23 +582,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const effectiveActiveRunSnapshot = shouldIgnoreActiveRunSnapshot(activeRunSnapshot, liveActiveRun)
     ? null
     : activeRunSnapshot;
-  const visibleLiveRunSnapshot = liveActiveRun && (
-    isLiveSupervisedRunStatus(liveActiveRun.status)
-    || ["done", "failed", "cancelled"].includes(String(liveActiveRun.status || "").toLowerCase())
-  )
-    ? liveActiveRun
-    : null;
-  const monitoredRun = effectiveActiveRunSnapshot
-    ?? visibleLiveRunSnapshot;
+  const monitoredRun = selectedSupervisedWorkspaceRun?.activeRun ?? null;
   const supervisedRunMonitorSource = selectSupervisedRunMonitorSource({
-    worktreeRun: supervisedWorktreeLiveRun,
-    activeRun: effectiveActiveRunSnapshot,
-    liveRun: visibleLiveRunSnapshot,
+    worktreeRun: selectedSupervisedDetail.run,
+    activeRun: monitoredRun,
+    liveRun: null,
   });
   const monitoredWorktreeRun = supervisedRunMonitorSource?.kind === "worktree"
     ? supervisedRunMonitorSource.run
     : null;
-  const supervisedWorkflowRun = supervisedWorktreeLiveRun ?? monitoredRun ?? recentSupervisedWorktreeRun;
+  const supervisedWorkflowRun = selectedSupervisedDetail.run ?? monitoredRun;
   const supervisedMembersRun = monitoredRun && (
     !supervisedWorkflowRun || monitoredRun.runId === supervisedWorkflowRun.runId
   )
@@ -575,8 +600,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedMembersUseRunBindings = hasSupervisedAgentBindings(supervisedWorkflowRun?.agentBindings);
   const supervisedMembersBindings = supervisedMembersUseRunBindings
     ? supervisedWorkflowRun?.agentBindings ?? EMPTY_AGENT_BINDINGS
-    : currentSupervisedAgentBindings;
-  const supervisedMembersSource = supervisedMembersUseRunBindings ? "run" : "current_config";
+    : supervisedWorkflowRun ? EMPTY_AGENT_BINDINGS : currentSupervisedAgentBindings;
+  const supervisedMembersSource = supervisedWorkflowRun ? "run" : "current_config";
   const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
@@ -587,13 +612,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun);
   const activationLocked = isSupervisedRuntimeActivationBusy(
-    reviewCandidateWorktree?.runtimeActivation?.status
+    activeWorktreeRun?.runtimeActivation?.status
     ?? selfWorktreeRun?.runtimeActivation?.status,
   );
   const startLocked = isSupervisedStartLocked({
     liveStatus: runningRun?.status,
     worktreeStatus: (activeWorktreeRun ?? selfWorktreeRun)?.status,
-    activationStatus: reviewCandidateWorktree?.runtimeActivation?.status
+    activationStatus: activeWorktreeRun?.runtimeActivation?.status
       ?? selfWorktreeRun?.runtimeActivation?.status,
     submitting: supervisedStartSubmitting,
   });
@@ -640,13 +665,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedMemberReturnTo = `${location.pathname}${location.search}` || "/supervised-evolution";
   const supervisedMemberReturnLabel = lang === "zh" ? "返回监督进化" : "Back to supervised evolution";
   const supervisedMembersRunIdentity = supervisedWorkflowRun?.runId || monitoredRun?.sessionId || "";
-  const previousMembersRunIdentity = useRef("");
-  useEffect(() => {
-    if (previousMembersRunIdentity.current && previousMembersRunIdentity.current !== supervisedMembersRunIdentity) {
-      setSelectedSupervisedWorkflowStepId(null);
-      setSelectedSupervisedAgentRole(null);
-    }
-    previousMembersRunIdentity.current = supervisedMembersRunIdentity;
+  const selectedSupervisedWorkflowStepId = supervisedSelections[supervisedMembersRunIdentity]?.step ?? null;
+  const selectedSupervisedAgentRole = supervisedSelections[supervisedMembersRunIdentity]?.role ?? null;
+  const setSelectedSupervisedWorkflowStepId = useCallback((step: SupervisedWorkflowStepId | null) => {
+    setSupervisedSelections((current) => ({ ...current, [supervisedMembersRunIdentity]: { role: current[supervisedMembersRunIdentity]?.role ?? null, step } }));
+  }, [supervisedMembersRunIdentity]);
+  const setSelectedSupervisedAgentRole = useCallback((role: SupervisedMemberRole | null) => {
+    setSupervisedSelections((current) => ({ ...current, [supervisedMembersRunIdentity]: { step: current[supervisedMembersRunIdentity]?.step ?? null, role } }));
   }, [supervisedMembersRunIdentity]);
   const backendWorkflowSteps = supervisedWorkflowRun?.workflowSteps ?? [];
   const backendWorkflowCurrent = backendWorkflowSteps.find((step) => step.current);
@@ -715,7 +740,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ownerKind: backendStep?.ownerKind || (definition.role ? "agent" : "human"),
       role: backendStep?.role ?? definition.role,
       status: definition.id === "approval"
-        ? supervisedApprovalWorkflowStatus(recentSupervisedWorktreeRun, backendStatus)
+        ? supervisedApprovalWorkflowStatus(reviewCandidateWorktree, backendStatus)
         : backendStatus,
       current: backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId,
       summary: backendStep?.summary || (
@@ -942,7 +967,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (evolutionView !== "live") {
       goToSupervisedView("live");
     }
-  }, [evolutionView]);
+  }, [evolutionView, setSelectedSupervisedWorkflowStepId, setSelectedSupervisedAgentRole]);
   const handleSupervisedAgentSelect = useCallback((role: SupervisedMemberRole) => {
     setSelectedSupervisedAgentRole(role);
     if (role === "baseline") {
@@ -959,14 +984,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (evolutionView !== "live") {
       goToSupervisedView("live");
     }
-  }, [evolutionView, supervisedRuntimeWorkflowStepId]);
+  }, [evolutionView, supervisedRuntimeWorkflowStepId, setSelectedSupervisedWorkflowStepId, setSelectedSupervisedAgentRole]);
   const handleFollowSupervisedAgent = useCallback(() => {
     setSelectedSupervisedAgentRole(null);
     setSelectedSupervisedWorkflowStepId(null);
-  }, []);
+  }, [setSelectedSupervisedAgentRole, setSelectedSupervisedWorkflowStepId]);
   const terminateWorktreeAction = supervisedWorktreeLiveRun?.actionStates?.terminate;
   const terminateSupervisedAction = terminateWorktreeAction;
-  const canTerminateSupervisedRun = Boolean(supervisedWorktreeLiveRun && terminateWorktreeAction?.enabled);
+  const canTerminateSupervisedRun = Boolean(supervisedWorkflowRun?.runId === supervisedWorktreeLiveRun?.runId && terminateWorktreeAction?.enabled);
   const terminateSupervisedPending = approvalWorktreeActionMutation.isPending;
   const handleTerminateSupervisedRun = () => {
     if (supervisedWorktreeLiveRun) {
@@ -974,9 +999,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     }
   };
   const supervisedControlError =
-    approvalWorktreeActionMutation.error?.message
-    ?? startWorktreeRunMutation.error?.message
-    ?? "";
+    (approvalWorktreeActionMutation.variables?.runId === selectedSupervisedWorkspaceRun?.runId ? approvalWorktreeActionMutation.error?.message : "")
+    || ((supervisedSetupOpen || !selectedSupervisedWorkspaceRun) ? startWorktreeRunMutation.error?.message : "")
+    || "";
   const terminateSupervisedDisabledReason = disabledReason(terminateSupervisedAction);
   const supervisedActiveRunMonitorMetrics: EvolutionActiveRunMonitorMetric[] = monitoredWorktreeRun
     ? [
@@ -1524,11 +1549,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [activeRunSnapshot]);
 
   useEffect(() => {
-    if (!forcedTrack || evolutionTrack === forcedTrack) {
-      return;
-    }
-    setEvolutionTrack(forcedTrack);
-  }, [evolutionTrack, forcedTrack, setEvolutionTrack]);
+    if (forcedTrack) setWorkspaceTrack(forcedTrack);
+  }, [forcedTrack]);
 
   useEffect(() => {
     if (!forcedView && rawEvolutionView === "overview") {
@@ -1545,7 +1567,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [selfGoalInitialized, selfWorkspaceSnapshot?.overview?.goal]);
 
   useEffect(() => {
-    if (!pageVisible) {
+    if (!pageVisible || activeTrack !== "supervised") {
       return;
     }
     const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun;
@@ -1584,6 +1606,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     liveActiveRun?.runId,
     liveActiveRun?.status,
     pageVisible,
+    activeTrack,
     evolutionWorkspaceCache,
   ]);
 
@@ -2105,6 +2128,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     reject_review: "拒绝改动", request_rerun: "重新评测", merge: "合入候选", rollback: "回滚改动",
   } as Record<string, string>)[supervisedConfirmation.action] || supervisedConfirmation.action : supervisedConfirmation.action) : "";
   const frozenSourceLabel = reviewCandidateWorktree?.datasetName || reviewCandidateWorktree?.bundleName
+    || selectedSupervisedWorkspaceRun?.worktreeRun?.datasetName || selectedSupervisedWorkspaceRun?.worktreeRun?.bundleName
     || monitoredRun?.datasetName || monitoredRun?.bundleName || (lang === "zh" ? "尚未选择" : "Not selected");
   function openSupervisedSetup() {
     if (!supervisedSetupOpen) supervisedDraftRef.current = {
@@ -2124,11 +2148,45 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setSupervisedSetupOpen(false);
   }
 
+  const workspaceRunGroups: EvolutionWorkspaceRunGroup[] = (["supervised", "self"] as const)
+    .filter((track) => track === "supervised" ? supervisedTrackEnabled : selfTrackEnabled)
+    .map((track) => ({
+      id: track,
+      label: track === "supervised" ? t("supervisedEvolutionMode") : (lang === "zh" ? "自进化 · 当前与最近" : "Self-evolution · current and latest"),
+      onHistory: () => {
+        changeWorkspaceTrack(track);
+        if (track === "supervised") goToSupervisedView("runs");
+        else setSelfDetailsOpen(true);
+      },
+      runs: unifiedRuns.filter((run) => run.track === track)
+        .sort((left, right) => evolutionRunTimestamp(right) - evolutionRunTimestamp(left)).map((run) => ({
+        id: run.key,
+        title: run.title,
+        history: isEvolutionRunHistory(run),
+        status: `${statusLabel(run.status)} · ${run.runId.slice(-8)}`,
+        selected: activeTrack === track && run.key === (track === "supervised" ? selectedSupervisedWorkspaceRun?.key : selectedSelfWorkspaceRun?.key),
+        onSelect: () => {
+          setActionFeedback("");
+          setSelfActionFeedback("");
+          setWorkspaceRunKeys((keys) => ({ ...keys, [track]: run.key }));
+          setSupervisedSetupOpen(false);
+          changeWorkspaceTrack(track);
+        },
+      })),
+    }));
+  const workspaceNavigation = {
+    activeTrack,
+    onTrackChange: changeWorkspaceTrack,
+    trackAvailability: { supervised: supervisedTrackEnabled, self: selfTrackEnabled },
+    runGroups: workspaceRunGroups,
+  };
+  const selectedSelfRunMissing = Boolean(workspaceRunKeys.self && !selectedSelfWorkspaceRun && !selfWorkspaceSnapshotQuery.isLoading);
+
   return (
     <VTrackWorkbenchPage
       ref={evolutionLayoutRef}
       fill
-      className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} ${styles.supervisedLivePage}` : styles.page}
+      className={activeTrack === "self" || evolutionView === "live" ? `${styles.page} ${styles.supervisedLivePage}` : styles.page}
       ariaLabel={routeTitle}
       domainRecipe="evolution-multi-rail"
       data-vui-recipe="evolution-workbench"
@@ -2163,7 +2221,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       value={activeTrack}
                       onValueChange={(value) => {
                         if (value === "supervised" || value === "self") {
-                          setEvolutionTrack(value);
+                          changeWorkspaceTrack(value);
                         }
                       }}
                       items={[
@@ -2194,24 +2252,72 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         style={evolutionVariablesStyle}
         className="contents"
       >
-      {activeTrack === "self" ? <EvolutionBaselinePromotionStrip
-        lang={lang}
-        t={t}
-        promotion={workspaceSnapshot?.evolutionRuntime?.currentBaseline}
-      /> : null}
       {activeTrack === "self" ? (
+        <Suspense fallback={<p role="status">{t("loading")}</p>}>
+          <SelfEvolutionConversationWorkspace
+            lang={lang}
+            workspaceNavigation={workspaceNavigation}
+            selectedRunKind={selectedSelfWorkspaceRun?.kind === "session" ? null : selectedSelfWorkspaceRun?.kind ?? null}
+            overview={selfOverview}
+            autonomousRun={selectedSelfWorkspaceRun?.autonomousRun ?? null}
+            observationRun={selectedSelfWorkspaceRun?.observationRun ?? null}
+            worktreeRun={selectedSelfDetail.run}
+            phaseSelections={selfPhaseSelections}
+            onPhaseSelect={(runKey, phaseId) => setSelfPhaseSelections((current) => ({ ...current, [runKey]: phaseId }))}
+            goalInput={selfGoalInput}
+            onGoalInputChange={setSelfGoalInput}
+            onStartRun={() => startSelfAutonomousLoopMutation.mutate({ goal: selfGoalInput.trim(), maxIterations: 1 }, {
+              onSuccess: (run) => {
+                setWorkspaceRunKeys((keys) => ({ ...keys, self: `self:autonomous:${run.runId}` }));
+                setSelfRunFeedback((current) => ({ ...current, [`self:autonomous:${run.runId}`]: lang === "zh" ? "自动闭环已启动。" : "The autonomous loop started." }));
+              },
+            })}
+            onAutonomousAction={(runId, action, comment) => {
+              setSelfRunFeedback((current) => ({ ...current, [`self:autonomous:${runId}`]: "" }));
+              selfAutonomousLoopActionMutation.mutate({ runId, action, comment }, { onSuccess: (run) => setSelfRunFeedback((current) => ({ ...current, [`self:autonomous:${run.runId}`]: run.error?.message || (run.status === "completed" ? (lang === "zh" ? "候选已完成 Git 集成与清理。" : "Candidate integration and cleanup completed.") : "") })) });
+            }}
+            onStartObservation={(payload) => startSelfObservationMutation.mutate(payload, {
+              onSuccess: (run) => setWorkspaceRunKeys((keys) => ({ ...keys, self: `self:observation:${run.runId}` })),
+            })}
+            onTerminateObservation={(runId) => selfObservationActionMutation.mutate({ runId, action: "terminate" })}
+            onWorktreeAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
+            startPending={startSelfAutonomousLoopMutation.isPending}
+            observationStartPending={startSelfObservationMutation.isPending}
+            observationActionPending={selfObservationActionMutation.isPending}
+            worktreeActionPending={approvalWorktreeActionMutation.isPending}
+            autonomousActionPending={selfAutonomousLoopActionMutation.isPending}
+            startWorktreeError={startSelfAutonomousLoopMutation.error?.message ?? ""}
+            observationStartError={startSelfObservationMutation.error?.message ?? ""}
+            observationActionError={selfObservationActionMutation.variables?.runId === selectedSelfWorkspaceRun?.runId ? selfObservationActionMutation.error?.message ?? "" : ""}
+            worktreeActionError={approvalWorktreeActionMutation.variables?.runId === selectedSelfWorkspaceRun?.runId ? approvalWorktreeActionMutation.error?.message ?? "" : ""}
+            autonomousActionError={selfAutonomousLoopActionMutation.variables?.runId === selectedSelfWorkspaceRun?.runId ? selfAutonomousLoopActionMutation.error?.message ?? "" : ""}
+            actionFeedback={selectedSelfWorkspaceRun ? selfRunFeedback[selectedSelfWorkspaceRun.key] ?? "" : ""}
+            runLocked={selfRunLocked}
+            worktreeRunLocked={worktreeRunLocked}
+            loading={selfTrackLoading || selectedSelfDetail.loading}
+            loadError={selectedSelfRunMissing ? (lang === "zh" ? "所选运行已不在当前列表中，请在左栏重新选择。" : "The selected run is no longer in this list. Select another run.") : selectedSelfDetail.error?.message || selfWorkspaceSnapshotQuery.error?.message || ""}
+            onRetry={() => { void selfWorkspaceSnapshotQuery.refetch(); void selectedSelfDetail.retry(); }}
+            onHistory={() => setSelfDetailsOpen(true)}
+            onSettings={() => setSelfDetailsOpen(true)}
+            onLibrary={() => { changeWorkspaceTrack("supervised"); goToSupervisedView("library"); }}
+          />
+        </Suspense>
+      ) : null}
+      <VDialog open={activeTrack === "self" && selfDetailsOpen} onOpenChange={setSelfDetailsOpen}
+        title={lang === "zh" ? "所选运行详情与事务历史" : "Selected run details and transaction history"} className={styles.selfDetailsDialog}>
+        {selfDetailsOpen ? (
         <EvolutionSelfTrackBoundary
           lang={lang}
           overview={selfOverview}
-          worktreeRun={selfWorktreeRun}
-          observationRun={selfObservationRun ?? null}
-          autonomousRun={selfAutonomousRun}
+          worktreeRun={selectedSelfDetail.run}
+          observationRun={selectedSelfWorkspaceRun?.observationRun ?? null}
+          autonomousRun={selectedSelfWorkspaceRun?.autonomousRun ?? null}
           goalInput={selfGoalInput}
           onGoalInputChange={setSelfGoalInput}
           onStartRun={() => startSelfAutonomousLoopMutation.mutate({
             goal: selfGoalInput.trim(),
             maxIterations: 1,
-          })}
+          }, { onSuccess: (run) => setWorkspaceRunKeys((keys) => ({ ...keys, self: `self:autonomous:${run.runId}` })) })}
           onAutonomousAction={(runId, action, comment) =>
             selfAutonomousLoopActionMutation.mutate({ runId, action, comment })}
           onStartObservation={(payload) => startSelfObservationMutation.mutate(payload)}
@@ -2236,16 +2342,23 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           transactions={selfTransactions}
           loading={selfTrackLoading}
         />
-      ) : null}
+        ) : null}
+      </VDialog>
 
       {activeTrack === "supervised" && evolutionView === "live" ? (
         <>
           <SupervisedConversationWorkspace
+            {...workspaceNavigation}
             lang={lang}
-            title={monitoredRunIdentity || (lang === "zh" ? "监督进化" : "Supervised evolution")}
+            title={selectedSupervisedWorkspaceRun?.title || (lang === "zh" ? "监督进化" : "Supervised evolution")}
             sourceLabel={frozenSourceLabel}
-            hasRun={Boolean(supervisedWorkflowRun)}
-            setupOpen={supervisedSetupOpen || !supervisedWorkflowRun}
+            sourceSummary={`${lang === "zh" ? "本轮样本" : "Run cases"} ${reviewCandidateWorktree?.costEstimate?.caseCount ?? monitoredRun?.caseTotal ?? "—"} · ${reviewCandidateWorktree?.approvalMode === "agent" ? "Agent" : (lang === "zh" ? "人工审批" : "Human approval")}`}
+            phases={supervisedWorkflowCards.map((step) => ({
+              id: step.id, label: step.label, statusLabel: statusLabel(step.status), current: step.current,
+              disabled: !step.current && step.status === "pending" && !step.conversationSessionId,
+            }))}
+            hasRun={Boolean(selectedSupervisedWorkspaceRun)}
+            setupOpen={supervisedSetupOpen || !selectedSupervisedWorkspaceRun}
             selectedStepId={selectedSupervisedAgentRole && !SUPERVISED_WORKFLOW_STEPS.some((step) => step.role === selectedSupervisedAgentRole)
               ? `agent:${selectedSupervisedAgentRole}` : supervisedSelectedWorkflowStepId || "baseline_eval"}
             steps={[...supervisedWorkflowCards.map((step) => ({
@@ -2266,6 +2379,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             onOpenConversation={supervisedSelectedAgentMember?.chatRoute ? () => navigate(supervisedSelectedAgentMember.chatRoute!) : undefined}
             setup={
               <div className={styles.supervisedSetupFrame}>
+                {workspaceRunKeys.supervised && !selectedSupervisedWorkspaceRun && !workspaceSnapshotQuery.isLoading ? <p role="alert" className={styles.errorTextCompact}>{lang === "zh" ? "所选运行已不在当前列表中，请在左栏重新选择。" : "The selected run is no longer in this list. Select another run."}</p> : null}
                 {workbenchCatalogUnavailable ? <p role="alert" className={styles.errorTextCompact}>{lang === "zh" ? "评估集目录暂时不可用，请稍后重试。" : "Evaluation catalog is temporarily unavailable."}</p> : null}
                 {supervisedSnapshotErrorText ? <p role="alert" className={styles.errorTextCompact}>{supervisedSnapshotErrorText}<VButton onPress={() => void workspaceSnapshotQuery.refetch()}>{lang === "zh" ? "重试" : "Retry"}</VButton></p> : null}
                 <EvolutionSupervisedLiveSetupPanel
@@ -2333,8 +2447,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             }
             conversation={<div className={styles.supervisedConversationFrame}>
               {supervisedSnapshotErrorText ? <p role="alert" className={styles.errorTextCompact}>{supervisedSnapshotErrorText}<VButton onPress={() => void workspaceSnapshotQuery.refetch()}>{lang === "zh" ? "重试" : "Retry"}</VButton></p> : null}
-              {recentRunDetail.loading ? <p role="status">{t("loading")}</p>
-                : recentRunDetail.error ? <div role="alert">{recentRunDetail.error.message}<VButton onPress={() => void recentRunDetail.retry()}>{lang === "zh" ? "重试" : "Retry"}</VButton></div>
+              {selectedSupervisedDetail.loading ? <p role="status">{t("loading")}</p>
+                : selectedSupervisedDetail.error ? <div role="alert">{selectedSupervisedDetail.error.message}<VButton onPress={() => void selectedSupervisedDetail.retry()}>{lang === "zh" ? "重试" : "Retry"}</VButton></div>
                 : <SupervisedAgentConversationPanel
                       compact
                       members={supervisedRunMembers}
@@ -2371,7 +2485,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         setActionFeedback(lang === "zh" ? "已恢复本轮来源、样本数和审批方式；请检查当前配置后点击开始监督运行。" : "Source, sample limit and approval mode restored. Check current settings before starting.");
                         requestAnimationFrame(() => datasetLimitInputRef.current?.focus());
                       }}
-                      error={approvalWorktreeActionMutation.error?.message ?? ""}
+                      error={supervisedControlError}
                       onAction={(runId, action) => setSupervisedConfirmation({ runId, action })}
                     />}
             evidenceTabs={[
@@ -2433,7 +2547,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           />
           <VDialog className={styles.supervisedDialog} open={supervisedDialog !== null} onOpenChange={(open) => !open && setSupervisedDialog(null)} title={supervisedDialog === "source" ? (lang === "zh" ? "本轮评估集" : "Run evaluation source") : (lang === "zh" ? "运行配置" : "Run settings")}>
             {supervisedDialog === "settings" && showTrackToggle ? <VTabs aria-label={lang === "zh" ? "进化轨道" : "Evolution track"} value={activeTrack} onValueChange={(value) => {
-              if (value === "self" || value === "supervised") { setEvolutionTrack(value); setSupervisedDialog(null); }
+              if (value === "self" || value === "supervised") { changeWorkspaceTrack(value); setSupervisedDialog(null); }
             }} items={[{id:"supervised",label:t("supervisedEvolutionMode")},{id:"self",label:t("selfEvolutionMode")}]} /> : null}
             {supervisedDialog === "settings" ? <SupervisedWorkspaceControls activeView={evolutionView} overviewIntakeMode={overview?.intakeMode} configIntakeMode={configQuery.data?.intakeMode} /> : null}
             {supervisedDialog === "settings" ? <details className={styles.supervisedSourceCatalog}><summary>{lang === "zh" ? "评估来源目录" : "Evaluation source catalog"}</summary>

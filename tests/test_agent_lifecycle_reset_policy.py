@@ -230,7 +230,7 @@ def test_agent_reset_api_can_reset_session_agent_advanced_policies_without_profi
     assert payload["agent"]["toolPolicyId"].startswith("tool-")
     assert payload["agent"]["toolPolicy"]["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
     assert payload["agent"]["toolPolicy"]["preferredTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
-    assert "read_file_tool" not in payload["agent"]["toolPolicy"]["allowedTools"]
+    assert "read_file_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "cli_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "apply_patch_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
     assert "run_test_for_tool" in payload["agent"]["toolPolicy"]["allowedTools"]
@@ -385,13 +385,13 @@ def test_normalize_tool_policy_dedupes_tool_lists_preserving_order():
     )
 
     assert policy["allowedTools"] == ["cli_tool", "rg_tool"]
-    assert policy["preferredTools"] == ["cli_tool"]
+    assert policy["preferredTools"] == ["cli_tool", "read_file_tool"]
     assert policy["blockedTools"] == ["danger"]
 
 
-def test_agent_runtime_blocks_disabled_direct_read_tool_even_when_granted(tmp_path, monkeypatch):
+def test_agent_runtime_allows_read_file_tool_when_granted(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="Read Disabled Agent", primary_mode="chat")
+    agent = agent_directory_service.create_agent_instance(display_name="Read Enabled Agent", primary_mode="chat")
 
     with agent_directory_service.active_agent_runtime(
         agent["agentId"],
@@ -401,10 +401,10 @@ def test_agent_runtime_blocks_disabled_direct_read_tool_even_when_granted(tmp_pa
         policy = agent_directory_service.current_agent_runtime()["toolPolicy"]
         decision = agent_directory_service.evaluate_current_tool_policy("read_file_tool", {"file_path": "demo.py"})
 
-    assert "read_file_tool" not in policy["allowedTools"]
+    assert "read_file_tool" in policy["allowedTools"]
     assert "cli_tool" in policy["allowedTools"]
-    assert decision.allowed is False
-    assert decision.reason == "direct_read_tool_disabled"
+    assert decision.allowed is True
+    assert decision.reason != "direct_read_tool_disabled"
 
 
 def test_session_agent_policy_id_patch_honors_selected_shared_policy_without_forcing_defaults(tmp_path, monkeypatch):

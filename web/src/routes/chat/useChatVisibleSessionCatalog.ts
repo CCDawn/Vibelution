@@ -19,6 +19,8 @@ export type UseChatVisibleSessionCatalogInput = {
   detail: SessionDetail | undefined;
   directSessionActiveSummary: SessionSummary | undefined;
   sessionDetailAgentId: string | undefined;
+  /** Archived view: archived rows stay in sessionsById for rows/menus. */
+  includeArchivedSessions?: boolean;
 };
 
 export type UseChatVisibleSessionCatalogResult = {
@@ -37,12 +39,13 @@ export function useChatVisibleSessionCatalog({
   detail,
   directSessionActiveSummary,
   sessionDetailAgentId,
+  includeArchivedSessions = false,
 }: UseChatVisibleSessionCatalogInput): UseChatVisibleSessionCatalogResult {
   const [, setSessionActivitySeenEpoch] = useState(0);
 
   const allVisibleSessions = useMemo(
-    () => mergeAllVisibleSessions(sessions, childSessions, pendingArchiveAgentIds),
-    [childSessions, pendingArchiveAgentIds, sessions],
+    () => mergeAllVisibleSessions(sessions, childSessions, pendingArchiveAgentIds, { includeArchivedSessions }),
+    [childSessions, includeArchivedSessions, pendingArchiveAgentIds, sessions],
   );
 
   const sessionsById = useMemo(

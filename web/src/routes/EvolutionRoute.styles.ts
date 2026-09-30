@@ -26,6 +26,7 @@ const compactMetricSurface =
 
 const styles = {
   supervisedLivePage: "!gap-0 !p-0",
+  selfDetailsDialog: "!translate-none !transform-[translate(-50%,-50%)] !animate-none !h-[min(90dvh,1000px)] !w-[min(94vw,1400px)] !max-w-[calc(100vw-24px)] [&_[data-slot=dialog-body]]:min-h-0",
   supervisedSetupFrame: "flex h-full min-h-0 min-w-0 flex-1 flex-col",
   supervisedConversationFrame: "flex h-full min-h-0 flex-col",
   supervisedLiveFooter: "flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-vui-border-subtle px-3 py-2",

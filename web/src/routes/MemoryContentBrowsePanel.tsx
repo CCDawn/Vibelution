@@ -73,7 +73,7 @@ function groupItems<T extends { id: string; group?: string }>(
   return groups;
 }
 
-function MemoryReadableBlocks({
+export function MemoryReadableBlocks({
   blocks,
   emptyText,
 }: {

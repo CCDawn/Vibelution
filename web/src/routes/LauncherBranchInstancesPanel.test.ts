@@ -119,7 +119,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("kind === \"startable\" && state === \"stopped\"");
     expect(panelSource).toContain("isAdmissionBlocked");
     expect(panelSource).toContain("formatAdmissionReason");
-    expect(panelSource).toContain("isDisabled={startBusy || admissionBlocked}");
+    expect(panelSource).toContain("isDisabled={building || startBusy || admissionBlocked}");
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
@@ -778,7 +778,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
   it("does not globally disable stop while a start is in flight", () => {
     expect(panelSource).toContain("const startBusy");
     expect(panelSource).toContain("const stopBusy");
-    expect(panelSource).toContain("isDisabled={startBusy || admissionBlocked}");
+    expect(panelSource).toContain("isDisabled={building || startBusy || admissionBlocked}");
     expect(panelSource).toContain("isDisabled={stopBusy}");
     expect(panelSource).not.toContain("isDisabled={lifecyclePending || inFlight}");
     expect(panelSource).toContain("if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id))");
@@ -790,7 +790,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     const startable = instance({ id: "worktree:startable", shortName: "startable" });
     expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation)");
     expect(panelSource).not.toContain("|| state === \"starting\" || state === \"restarting\"");
-    expect(panelSource).toContain("variant={startingOrRestarting ? \"primary\" : \"secondary\"}");
+    expect(panelSource).toContain("variant={startingOrRestarting || building ? \"primary\" : \"secondary\"}");
     expect(panelSource).toContain("isPending={stopBusy}");
     expect(panelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
     expect(panelSource).toContain("LoaderCircle");
@@ -835,5 +835,69 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("shouldHoldOpenClickGuard");
     expect(panelSource).toContain("outcome.accepted === false");
     expect(panelSource).toContain("lifecycleIntentRejectMessage");
+  });
+
+  it("turns the start control into a disabled Building state while the frontend build gates the start", () => {
+    const building = instance({
+      id: "worktree:building",
+      shortName: "building",
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "building",
+        phase: "building",
+        observedState: "building",
+      },
+    });
+    expect(instanceRuntimeState(building)).toBe("building");
+    // The start IPC blocks for the whole frontend build, so the accepted
+    // start intent stays active while the payload already reports building;
+    // payload truth must win over the optimistic starting label or the whole
+    // build window renders as 正在启动 again.
+    const startIntent = { instanceId: "worktree:building", operation: "start" as const };
+    expect(instanceRuntimeState(building, startIntent)).toBe("building");
+    expect(
+      instanceRuntimeState(building, { instanceId: "worktree:building", operation: "restart" as const })
+    ).toBe("building");
+    // The disabled pending button contract is keyed off this state: the row
+    // above with a live start intent renders isPending + 构建中… through it.
+    expect(instanceRuntimeStateLabel("building", true)).toBe("构建中");
+    expect(instanceRuntimeStateLabel("building", false)).toBe("Building");
+    expect(shouldHoldOpenClickGuard("building")).toBe(true);
+    expect(canRequestOpenInstance(building)).toBe(false);
+    expect(canStartInstance(building)).toBe(false);
+    expect(groupBranchInstances([building]).running.map((item) => item.id)).toEqual(["worktree:building"]);
+    expect(groupBranchInstances([building]).attention).toEqual([]);
+    // The primary control stays visible but disabled with the pending spinner
+    // plus a one-line build hint, instead of vanishing like a frozen button.
+    expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || building;");
+    expect(panelSource).toContain("isPending={building}");
+    expect(panelSource).toContain("isDisabled={building || startBusy || admissionBlocked}");
+    expect(panelSource).toContain("{building ? labels.building : openLabel}");
+    expect(panelSource).toContain('building: "构建中…"');
+    expect(panelSource).toContain('building: "Building…"');
+    expect(panelSource).toContain("buildingHint: \"前端代码有更新，正在构建新版本，约需几分钟。\"");
+    expect(panelSource).toContain("buildingHint: \"The frontend has updates and a new build is running. This takes a few minutes.\"");
+    expect(panelSource).toContain("正在构建前端，点击可停止");
+    expect(panelSource).toContain("Building frontend — click to stop");
+    // Build state keeps the row out of attention and out of cleanup.
+    expect(panelSource).toContain("isDisabled={cleanupMutation.isPending || building || startingOrRestarting || stopBusy}");
+  });
+
+  it("keeps the optimistic starting label for a starting payload with a start intent", () => {
+    // Regression: only the building payload overrides the pending intent; a
+    // payload that already started keeps the existing optimistic semantics.
+    const starting = instance({
+      id: "worktree:starting",
+      shortName: "starting",
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "starting",
+        phase: "opening",
+        observedState: "starting",
+      },
+    });
+    expect(instanceRuntimeState(starting, { instanceId: "worktree:starting", operation: "start" })).toBe("starting");
+    expect(instanceRuntimeState(starting)).toBe("starting");
+    expect(instanceRuntimeStateLabel("starting", true)).toBe("正在启动");
   });
 });

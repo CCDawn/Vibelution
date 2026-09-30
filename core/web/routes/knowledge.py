@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from core.web.routes.knowledge_models import KnowledgeRouteResponse
@@ -12,6 +12,7 @@ from core.web.services.rag_retrieval_service import RagRetrievalError, get_rag_r
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_knowledge_service import (
     TeamKnowledgeError,
+    TeamKnowledgeIdempotencyConflictError,
     TeamKnowledgeNotFoundError,
     TeamKnowledgePermissionError,
     create_knowledge_base,
@@ -20,6 +21,7 @@ from core.web.services.team_knowledge_service import (
     create_rating_suggestion,
     create_refinement_proposal,
     collect_source_to_inbox,
+    collect_session_attachment_to_inbox,
     create_source_artifact_from_central_source,
     get_agent_memory_readiness_report,
     get_knowledge_dashboard_snapshot,
@@ -80,6 +82,8 @@ class SourceInboxCollectPayload(BaseModel):
     title: str = Field("", max_length=240)
     summary: str = Field("", max_length=4000)
     actorAgentId: str = Field("", max_length=160)
+    sessionId: str = Field("", max_length=160)
+    attachmentId: str = Field("", max_length=200)
 
 
 class SourceInboxReviewPayload(BaseModel):
@@ -511,8 +515,28 @@ def _record_rag_health_event(
     response_model=KnowledgeRouteResponse,
     response_model_exclude_unset=True,
 )
-def knowledge_source_inbox_collect(payload: SourceInboxCollectPayload) -> dict:
+def knowledge_source_inbox_collect(
+    payload: SourceInboxCollectPayload,
+    idempotency_key: str = Header(default="", alias="Idempotency-Key", max_length=200),
+) -> dict:
     try:
+        if payload.sessionId or payload.attachmentId:
+            if not payload.sessionId or not payload.attachmentId:
+                raise TeamKnowledgeError("sessionId and attachmentId must be provided together.")
+            if payload.originalContent:
+                raise TeamKnowledgeError(
+                    "originalContent must be omitted when collecting a session attachment; its content is resolved from the stored attachment."
+                )
+            return collect_session_attachment_to_inbox(
+                payload.ownerType,
+                payload.ownerId,
+                session_id=payload.sessionId,
+                attachment_id=payload.attachmentId,
+                actor_agent_id=payload.actorAgentId,
+                title=payload.title,
+                summary=payload.summary,
+                idempotency_key=idempotency_key,
+            )
         return collect_source_to_inbox(
             payload.ownerType,
             payload.ownerId,
@@ -528,6 +552,8 @@ def knowledge_source_inbox_collect(payload: SourceInboxCollectPayload) -> dict:
             summary=payload.summary,
             actor_agent_id=payload.actorAgentId,
         )
+    except TeamKnowledgeIdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
@@ -765,7 +791,11 @@ def agent_knowledge_base_create(agent_id: str, payload: KnowledgeBaseCreatePaylo
     response_model=KnowledgeRouteResponse,
     response_model_exclude_unset=True,
 )
-def knowledge_central_source_artifact_create(knowledge_base_id: str, payload: CentralSourceArtifactCreatePayload) -> dict:
+def knowledge_central_source_artifact_create(
+    knowledge_base_id: str,
+    payload: CentralSourceArtifactCreatePayload,
+    idempotency_key: str = Header(default="", alias="Idempotency-Key", max_length=200),
+) -> dict:
     try:
         return create_source_artifact_from_central_source(
             knowledge_base_id,
@@ -774,7 +804,10 @@ def knowledge_central_source_artifact_create(knowledge_base_id: str, payload: Ce
             evidence_range=payload.evidenceRange,
             title=payload.title,
             summary=payload.summary,
+            idempotency_key=idempotency_key,
         )
+    except TeamKnowledgeIdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:

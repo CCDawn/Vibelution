@@ -1,4 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
+import { useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import {
@@ -62,7 +63,7 @@ import {
   unpinSessionCreatePreserve,
 } from "../sessionCreatePreserve";
 import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
-import { createTempSessionId } from "../sessionOptimisticIds";
+import { createTempSessionId, isTempSessionId } from "../sessionOptimisticIds";
 import {
   createTempRoomId,
   insertTempGroupRoomConversation,
@@ -80,6 +81,19 @@ import type { ChatRouteSelection } from "./chatSelectionProjection";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
+type SessionCreateVariables = { agentId: string; createIntent?: SessionCreateIntent };
+type SessionCreateIntent = {
+  agentId: string;
+  idempotencyKey: string;
+  tempSessionId: string;
+  state: "pending" | "failed";
+};
+type SessionCreateMutationContext = {
+  tempSessionId: string;
+  agentId: string;
+  idempotencyKey: string;
+  telemetry: ReturnType<typeof startUserAction>;
+};
 
 type ChatRouteLifecycleActions = {
   openSession: (sessionId: string) => void;
@@ -147,7 +161,12 @@ export type UseChatWorkspaceLifecycleOptions = {
 };
 
 export type UseChatWorkspaceLifecycleResult = {
-  createSessionMutation: UseMutationResult<SessionDetail, Error, { agentId: string }, unknown>;
+  createSessionMutation: UseMutationResult<
+    SessionDetail,
+    Error,
+    SessionCreateVariables,
+    SessionCreateMutationContext
+  >;
   createGroupRoomMutation: UseMutationResult<
     ChatRoomDetail,
     Error,
@@ -275,15 +294,54 @@ export function useChatWorkspaceLifecycle({
   setEditingSessionTitle,
   suppressRenameBlurUntilRef,
 }: UseChatWorkspaceLifecycleOptions): UseChatWorkspaceLifecycleResult {
+  const createSessionIntentsRef = useRef(new Map<string, SessionCreateIntent>());
+  const newCreateSessionIdempotencyKey = (): string => {
+    const randomUuid = globalThis.crypto?.randomUUID?.();
+    return randomUuid
+      ? `session-create:${randomUuid}`
+      : `session-create:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  };
+  const forgetCreateSessionIntent = (tempSessionId: string, expectedKey: string): void => {
+    const current = createSessionIntentsRef.current.get(tempSessionId);
+    if (current?.idempotencyKey === expectedKey) {
+      createSessionIntentsRef.current.delete(tempSessionId);
+    }
+  };
+
   const createSessionMutation = useMutation({
-    mutationFn: async ({ agentId }: { agentId: string }) =>
-      createChatSession({ agentId }),
-    onMutate: async ({ agentId }) => {
+    mutationFn: async ({ agentId, createIntent }: SessionCreateVariables) => {
       const normalizedAgentId = String(agentId || "").trim();
+      if (!createIntent) throw new Error("Session create intent was not prepared.");
+      return createChatSession(
+        { agentId: normalizedAgentId },
+        createIntent.idempotencyKey,
+      );
+    },
+    onMutate: async (variables: SessionCreateVariables) => {
+      const { agentId } = variables;
+      const normalizedAgentId = String(agentId || "").trim();
+      const selectedTempSessionId = routeSelectionRef.current.kind === "session"
+        ? String(routeSelectionRef.current.sessionId || "").trim()
+        : "";
+      const retryIntent = isTempSessionId(selectedTempSessionId)
+        ? createSessionIntentsRef.current.get(selectedTempSessionId)
+        : undefined;
+      const intent = retryIntent?.state === "failed" && retryIntent.agentId === normalizedAgentId
+        ? retryIntent
+        : {
+            agentId: normalizedAgentId,
+            idempotencyKey: newCreateSessionIdempotencyKey(),
+            tempSessionId: createTempSessionId(),
+            state: "pending" as const,
+          };
+      intent.state = "pending";
+      variables.createIntent = intent;
+      createSessionIntentsRef.current.set(intent.tempSessionId, intent);
+      const idempotencyKey = intent.idempotencyKey;
       const telemetry = startUserAction("session_create", { agentId: normalizedAgentId });
       // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
       // Real id arrives on success; UI must stay interactive while POST is in flight.
-      const tempSessionId = createTempSessionId();
+      const tempSessionId = intent.tempSessionId;
       const nowIso = new Date().toISOString();
       const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
@@ -355,16 +413,19 @@ export function useChatWorkspaceLifecycle({
       }
       setSessionFilter("");
       syncSessionDetail(optimisticDetail);
-      return { tempSessionId, agentId: normalizedAgentId, telemetry };
+      return { tempSessionId, agentId: normalizedAgentId, idempotencyKey, telemetry };
     },
     onSuccess: (nextDetail, variables, context) => {
       const telemetry = context?.telemetry;
       const nextId = String(nextDetail.id || "").trim();
       const tempSessionId = String(context?.tempSessionId || "").trim();
       if (!nextId) {
+        const intent = createSessionIntentsRef.current.get(tempSessionId);
+        if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
         telemetry?.failed(undefined, { reason: "missing_session_id" });
         return;
       }
+      forgetCreateSessionIntent(tempSessionId, String(context?.idempotencyKey || ""));
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
       // Prefer server title (now defaults to Agent name); fall back to local Agent label.
       const serverTitle = String(nextDetail.title || "").trim();
@@ -531,6 +592,18 @@ export function useChatWorkspaceLifecycle({
       });
     },
     onError: (error, _variables, context) => {
+      const status = error instanceof Error
+        ? (error as Error & { status?: unknown }).status
+        : undefined;
+      if (status === 409 || status === 410) {
+        forgetCreateSessionIntent(
+          String(context?.tempSessionId || "").trim(),
+          String(context?.idempotencyKey || ""),
+        );
+      } else {
+        const intent = createSessionIntentsRef.current.get(String(context?.tempSessionId || "").trim());
+        if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
+      }
       context?.telemetry?.failed(error, {
         tempSessionId: String(context?.tempSessionId || "").trim(),
         agentId: String(context?.agentId || "").trim(),

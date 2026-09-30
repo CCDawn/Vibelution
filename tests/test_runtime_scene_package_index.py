@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from core.web.services import runtime_scene_service
+from core.web.services.runtime_scene import record as runtime_scene_record
 
 def _local_index_key_prefix(iso_value: str) -> str:
     parsed = datetime.fromisoformat(iso_value.replace("Z", "+00:00")).astimezone()
@@ -130,6 +131,14 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     )
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    # 本测试验证 package 内容随各事件刷新的正确性（调度时序由
+    # test_periodic_refresh_runs_off_request_path 覆盖），这里把周期刷新换回
+    # 内联执行以保持逐事件断言确定性。
+    monkeypatch.setattr(
+        runtime_scene_record,
+        "_submit_background_scene_package_refresh",
+        lambda scene_dir: runtime_scene_record._refresh_active_scene_package_if_due(scene_dir),
+    )
 
     response = runtime_scene_service.record_runtime_scene_event(
         "work_run",

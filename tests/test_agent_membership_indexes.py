@@ -104,7 +104,6 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     assert "knowledge_governance" in context_block
     assert "Knowledge bodies are tool-readable only" in context_block
     assert "ToolPolicy: tool-knowledge-steward" not in context_block
-    assert "knowledge_governance_tasks_tool" not in context_block
     assert "research_proposal_apply_tool" not in context_block
 
 

@@ -70,6 +70,9 @@ def test_default_session_policy_includes_personal_memory_tools():
         assert name not in agent_directory_service.SESSION_PROTOCOL_ALLOWED_TOOLS
     assert "append_episodic_memory_tool" not in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
     assert "supersede_episodic_memory_tool" not in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
+    assert "search_agent_private_memory_tool" in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
+    assert "search_agent_private_memory_tool" not in agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS
+    assert "knowledge_stage_session_attachment_tool" in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
 
 
 def test_generation_handoff_tools_stay_off_default_session_policy():
@@ -162,6 +165,11 @@ def test_key_tools_catalog_includes_personal_memory_tools():
         assert metadata["category"] == "memory_context"
         assert metadata["permissionTier"] == "medium"
         assert "memory_write" in metadata["riskTags"]
+    private_search = tool_catalog.metadata_for_tool("search_agent_private_memory_tool")
+    assert private_search["category"] == "memory_context"
+    assert private_search["permissionTier"] == "low"
+    assert "read_only" in private_search["capabilityTags"]
+    assert "search_agent_private_memory_tool" in names
     assert "append_episodic_memory_tool" not in names
     assert "supersede_episodic_memory_tool" not in names
     assert "append_episodic_memory_tool" in tool_catalog.TOOL_CATALOG

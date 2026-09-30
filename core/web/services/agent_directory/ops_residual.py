@@ -1016,28 +1016,6 @@ def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict
     }
 
 
-def _without_disabled_agent_tools(policy: dict[str, Any]) -> dict[str, Any]:
-    s = _service()
-    blocked_tools = s.DISABLED_AGENT_DIRECT_READ_TOOL_NAMES
-    allowed = [name for name in s._tool_name_list(policy.get("allowedTools") or []) if name not in blocked_tools]
-    preferred = [name for name in s._tool_name_list(policy.get("preferredTools") or []) if name not in blocked_tools]
-    temporary_allowed = [
-        name for name in s._tool_name_list(policy.get("temporaryAllowedTools") or []) if name not in blocked_tools
-    ]
-    if (
-        allowed == s._tool_name_list(policy.get("allowedTools") or [])
-        and preferred == s._tool_name_list(policy.get("preferredTools") or [])
-        and temporary_allowed == s._tool_name_list(policy.get("temporaryAllowedTools") or [])
-    ):
-        return policy
-    return {
-        **policy,
-        "allowedTools": allowed,
-        "preferredTools": preferred,
-        "temporaryAllowedTools": temporary_allowed,
-    }
-
-
 def _write_jsonl(path: Path, payloads: list[dict[str, Any]]) -> None:
     s = _service()
     path.parent.mkdir(parents=True, exist_ok=True)

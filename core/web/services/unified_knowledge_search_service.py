@@ -427,6 +427,7 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()],
         "centralSourceIds": [str(value or "").strip() for value in list(item.get("centralSourceIds") or []) if str(value or "").strip()],
+        "sourceSummaries": _source_trust_summaries(item.get("sourceSummaries")),
         "researchProjectId": str(item.get("researchProjectId") or "").strip(),
         "questionId": str(item.get("questionId") or "").strip(),
         "sourceCollectionRunId": str(item.get("sourceCollectionRunId") or "").strip(),
@@ -468,6 +469,7 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(source.get("sourceArtifactIds") or []) if str(value or "").strip()],
         "centralSourceIds": [str(value or "").strip() for value in list(source.get("centralSourceIds") or []) if str(value or "").strip()],
+        "sourceSummaries": _source_trust_summaries(source.get("sourceSummaries")),
         "researchProjectId": str(source.get("researchProjectId") or "").strip(),
         "questionId": str(source.get("questionId") or "").strip(),
         "sourceCollectionRunId": str(source.get("sourceCollectionRunId") or "").strip(),
@@ -483,6 +485,24 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
             "retrievalMode": str(context.get("retrievalMode") or "").strip(),
         },
     }
+
+
+def _source_trust_summaries(value: Any) -> list[dict[str, str]]:
+    summaries = []
+    for source in list(value or [])[:6]:
+        if not isinstance(source, dict):
+            continue
+        source_summary = {
+            key: trim_lines(str(source.get(key) or ""), max_lines=1).strip()[:160]
+            for key in ("sourceArtifactId", "centralSourceId", "sourceType")
+            if str(source.get(key) or "").strip()
+        }
+        content_trust = trim_lines(str(source.get("contentTrust") or ""), max_lines=1).strip()[:80]
+        if content_trust:
+            source_summary["contentTrust"] = content_trust
+        if source_summary:
+            summaries.append(source_summary)
+    return summaries
 
 
 def _user_content_results(
@@ -578,6 +598,7 @@ def _citation_from_rag_result(result: dict[str, Any], *, rank: int) -> dict[str,
         "knowledgeItemId": str(result.get("knowledgeItemId") or "").strip(),
         "sourceArtifactIds": list(result.get("sourceArtifactIds") or []),
         "centralSourceIds": list(result.get("centralSourceIds") or []),
+        "sourceSummaries": _source_trust_summaries(result.get("sourceSummaries")),
         "researchProjectId": str(result.get("researchProjectId") or "").strip(),
         "questionId": str(result.get("questionId") or "").strip(),
         "sourceCollectionRunId": str(result.get("sourceCollectionRunId") or "").strip(),
@@ -620,6 +641,7 @@ def _citation_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[st
         "knowledgeItemId": str(source.get("knowledgeItemId") or "").strip(),
         "sourceArtifactIds": list(source.get("sourceArtifactIds") or []),
         "centralSourceIds": list(source.get("centralSourceIds") or []),
+        "sourceSummaries": _source_trust_summaries(source.get("sourceSummaries")),
         "researchProjectId": str(source.get("researchProjectId") or "").strip(),
         "questionId": str(source.get("questionId") or "").strip(),
         "sourceCollectionRunId": str(source.get("sourceCollectionRunId") or "").strip(),

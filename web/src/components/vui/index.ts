@@ -179,3 +179,4 @@ export {
   type VSessionSearchDialogLabels,
   type VSessionSearchDialogProps,
 } from "./product/workbench-shell";
+export { VMemoryGraphCanvas, type VMemoryGraphCanvasProps } from "./product/memory/VMemoryGraphCanvas";

@@ -62,7 +62,7 @@ FRONTEND_TEST_RECOMMENDATIONS = (
         "web/src/routes/configroutelogic",
         "npm --prefix web run test -- ConfigRoute.layout.test.ts configRouteLogic.test.ts",
     ),
-    ("web/src/routes/teamsroute", "npm --prefix web run test -- TeamsRoute.layout.test.ts"),
+    ("web/src/routes/teamsroute", "npm --prefix web run test -- src/routes/teams"),
     (
         "web/src/routes/launcherroute",
         "npm --prefix web run test -- AppShellNavigationTelemetry.test.ts LauncherRoute.layout.test.ts",

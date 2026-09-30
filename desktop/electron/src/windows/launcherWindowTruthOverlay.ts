@@ -1,4 +1,5 @@
 import { peekAdmissionDecision } from "../lifecycle/instanceAdmissionStore.js";
+import { peekFrontendBuild } from "../lifecycle/frontendBuildState.js";
 import {
   instanceLifecycleIsStartable,
   projectInstanceLifecycle
@@ -141,6 +142,11 @@ function overlayStatusWindowTruth(
       };
     });
   }
+  // The frontend build gate runs before the supervisor claims the intent, so
+  // the marker (not the registry) is the only signal that this phase exists.
+  if (peekFrontendBuild("main")) {
+    bundle.phase = "building";
+  }
   return payload;
 }
 
@@ -214,6 +220,13 @@ function overlayBranchInstancesWindowTruth(
         item.startable = false;
       }
       item.runtime = runtime;
+    }
+    // The frontend build gate runs before the supervisor claims the intent;
+    // stamp it last so neither the Python runtime nor the window-truth
+    // re-projection above can override an in-flight build back to closed.
+    if (isRecord(item.runtime) && peekFrontendBuild(String(item.id || ""))) {
+      item.runtime.lifecycleState = "building";
+      item.startable = false;
     }
     applyAdmissionOverlay(item, String(item.id || ""));
     return item;

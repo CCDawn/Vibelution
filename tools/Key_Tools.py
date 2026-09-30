@@ -100,9 +100,12 @@ from tools.team_knowledge_tools import (
     knowledge_ingestion_tool as _knowledge_ingestion_impl,
     knowledge_operations_health_tool as _knowledge_operations_health_impl,
     knowledge_proposal_tool as _knowledge_proposal_impl,
+    knowledge_proposal_review_tool as _knowledge_proposal_review_impl,
+    knowledge_stage_session_attachment_tool as _knowledge_stage_session_attachment_impl,
     knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
     knowledge_steward_recommendations_tool as _knowledge_steward_recommendations_impl,
     knowledge_steward_workbench_tool as _knowledge_steward_workbench_impl,
+    search_agent_private_memory_tool as _search_agent_private_memory_impl,
     unified_memory_search_tool as _unified_memory_search_impl,
 )
 from tools.skill_library_tools import skill_library_search_tool as _skill_library_search_impl
@@ -169,8 +172,9 @@ def _cli_tool_docstring() -> str:
     return f"""
 【CLI】执行本地 Shell 命令（经沙盒 + 统一路由）。
 
-定位代码时**优先** `code_symbol_tool` / `grep_search_tool` / `glob_tool`；
-shell 只在结构化工具不够或需要执行/验证（git/pytest/编译）时使用。
+定位代码时优先 `code_symbol_tool` / `grep_search_tool` / `glob_tool`；
+读取文件内容用 `read_file_tool`。
+shell 用于执行与验证，例如 git、测试和编译。
 
 底层自动选择：系统按当前宿主平台自动选择 Shell 与沙盒后端（Windows / Linux /
 Codex CLI），无需在命令中指定或选择平台；写命令时遵循下方 `Shell 方言` 规则即可。
@@ -179,7 +183,7 @@ Codex CLI），无需在命令中指定或选择平台；写命令时遵循下�
 
 === 调用纪律 ===
 1. 搜索：`rg -n "pattern" path`（无管道；不要 `rg ... | head`）。
-2. 读小段：按当前宿主方言用有界命令读取（如 `cat ... | head -n 80` 或 `Get-Content -LiteralPath "file" -TotalCount 80`）。
+2. 读取文件内容用 `read_file_tool`（整文件用 max_lines=0 且 offset=0）。
 3. 同类 shell 失败 **1 次**后立即换结构化工具，避免 cmd/PowerShell/bash 来回探路。
 4. 输出默认有界；`max_output_chars` 默认 6000，大结果只消费结论。
 5. 本回合工具有额度上限：探查不要耗尽额度，至少预留 2–3 次给 lint/test。
@@ -436,6 +440,8 @@ def _build_key_tools() -> List[BaseTool]:
     def apply_diff_edit_tool(file_path: str, diff_text: str, allow_fuzzy: bool = False) -> str:
         """
         SEARCH/REPLACE 代码编辑器。适合对单个文件做局部替换。
+        已有文件需要这次会话里先有一次 offset=0 且 max_lines=0 的完整读取，
+        并且文件在那次读取之后没有变化；否则返回错误。
 
         格式：
         <<<<<<< SEARCH
@@ -479,6 +485,8 @@ def _build_key_tools() -> List[BaseTool]:
         Codex 风格 patch 编辑器。适合一次提交多文件 Add/Update/Delete patch。
         所有目标需位于 cwd 内；整份 patch 会先完成路径与 hunk 校验，
         应用中失败时回滚本次已写文件，避免留下部分修改。
+        已有文件的 Update 和 Delete 需要这次会话里先有一次 offset=0 且 max_lines=0 的完整读取，
+        并且文件在那次读取之后没有变化；Add 新建文件不需要。不满足时整份 patch 不会写入。
 
         格式：
         *** Begin Patch
@@ -1448,8 +1456,9 @@ def _build_key_tools() -> List[BaseTool]:
         """
         【读取文件】读取本地文件的全部或部分内容。
 
-        支持编码自动检测、行号显示、分页读取。Agent 会话已禁用此工具；
-        读取文件请改用 cli_tool（可配合 rg、Get-Content 等）。
+        支持编码自动检测、行号显示、分页读取。
+        读取文件内容用这个工具；git、测试和编译交给 `cli_tool`。
+        修改已有文件前，用 offset=0 且 max_lines=0 把文件从头到尾读完。
 
         Args:
             file_path: 文件路径（相对或绝对）
@@ -1469,6 +1478,8 @@ def _build_key_tools() -> List[BaseTool]:
         【写入文件】创建或覆盖文件。
 
         自动创建父目录，以 UTF-8 编码写入。
+        新建文件可以直接写。覆盖已有文件时，这次会话要先有一次 offset=0 且 max_lines=0 的完整读取，
+        并且文件在那次读取之后没有变化；否则返回错误，请重新完整读取后再写。
 
         Args:
             file_path: 文件路径（相对路径自动前缀 workspace/）
@@ -2751,6 +2762,63 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def search_agent_private_memory_tool(
+        query: str = "",
+        query_mode: str = "auto",
+        limit: int = 8,
+        max_context_chars: int = 1200,
+    ) -> str:
+        """
+        【私有记忆搜索】只读检索当前 Agent 自己的正式私有知识库。
+
+        搜索范围由运行时 Agent 身份绑定，只包含该 Agent 可读的自有知识库；不会读取 Team 知识库、其他 Agent 私有知识或用户内容。
+        结果带来源与引用，可用于查找尚未出现在当前对话上下文中的个人经验。
+
+        Args:
+            query: 查询内容；metadata 模式可为空
+            query_mode: auto / literal / semantic / hybrid / bm25 / metadata / regex / rg / grep / rag
+            limit: 最多返回结果数，范围 1-25
+            max_context_chars: RAG 模式单条上下文最大字符数
+
+        Returns:
+            JSON 格式的当前 Agent 私有知识搜索结果
+        """
+        return _search_agent_private_memory_impl(
+            query=query,
+            query_mode=query_mode,
+            limit=limit,
+            max_context_chars=max_context_chars,
+        )
+
+    @tool
+    def knowledge_stage_session_attachment_tool(
+        attachment_id: str,
+        team_id: str = "",
+        title: str = "",
+        summary: str = "",
+    ) -> str:
+        """
+        【暂存会话附件】把当前会话中的一个 ready 上传附件暂存到 Agent 私有或授权 Team 的待审核 Inbox。
+
+        只能使用当前 Agent 绑定的会话和其中真实存在的附件 ID；不会接受本地路径，也不会直接写入正式知识。Team 目标由 Team ACL 校验，调用需要逐次审批。
+
+        Args:
+            attachment_id: 当前会话附件的 artifact ID
+            team_id: 可选 Team ID；留空时进入当前 Agent 自己的 Inbox
+            title: 可选来源标题
+            summary: 可选来源摘要
+
+        Returns:
+            JSON 格式的待审核 Inbox 来源摘要
+        """
+        return _knowledge_stage_session_attachment_impl(
+            attachment_id=attachment_id,
+            team_id=team_id,
+            title=title,
+            summary=summary,
+        )
+
+    @tool
     def skill_library_search_tool(
         query: str = "",
         query_mode: str = "auto",
@@ -2883,6 +2951,21 @@ def _build_key_tools() -> List[BaseTool]:
             evidence_range_json=evidence_range_json,
             source_created_at=source_created_at,
             captured_by=captured_by,
+        )
+
+    @tool
+    def knowledge_proposal_review_tool(
+        knowledge_base_id: str,
+        proposal_id: str,
+        decision: str,
+        resolution_note: str = "",
+    ) -> str:
+        """由当前 Agent 以 reviewer 身份应用或驳回待审知识提案；需目标库 review ACL。"""
+        return _knowledge_proposal_review_impl(
+            knowledge_base_id=knowledge_base_id,
+            proposal_id=proposal_id,
+            decision=decision,
+            resolution_note=resolution_note,
         )
 
     @tool
@@ -3246,11 +3329,14 @@ def _build_key_tools() -> List[BaseTool]:
         computer_use_session_tool,
         research_knowledge_query_tool,
         research_knowledge_request_tool,
+        search_agent_private_memory_tool,
+        knowledge_stage_session_attachment_tool,
         unified_memory_search_tool,
         skill_library_search_tool,
         github_project_library_search_tool,
         github_project_library_clone_tool,
         knowledge_proposal_tool,
+        knowledge_proposal_review_tool,
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,
         knowledge_operations_health_tool,
@@ -3303,7 +3389,6 @@ def create_llm_facing_tools() -> List[BaseTool]:
         "task_start_tool",
         "task_output_tool",
         "task_stop_tool",
-        "read_file_tool",
         "list_workspace_debris_tool",
         "clean_workspace_debris_tool",
         "get_session_files_tool",

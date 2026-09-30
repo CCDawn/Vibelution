@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -10,7 +11,10 @@ from core.chat.chat_task_types import trim_lines
 
 
 UNIFIED_MEMORY_SEARCH_TOOL_NAME = "unified_memory_search_tool"
+AGENT_PRIVATE_MEMORY_SEARCH_TOOL_NAME = "search_agent_private_memory_tool"
+SESSION_ATTACHMENT_STAGE_TOOL_NAME = "knowledge_stage_session_attachment_tool"
 KNOWLEDGE_PROPOSAL_TOOL_NAME = "knowledge_proposal_tool"
+KNOWLEDGE_PROPOSAL_REVIEW_TOOL_NAME = "knowledge_proposal_review_tool"
 KNOWLEDGE_INGESTION_TOOL_NAME = "knowledge_ingestion_tool"
 KNOWLEDGE_GOVERNANCE_TASKS_TOOL_NAME = "knowledge_governance_tasks_tool"
 KNOWLEDGE_OPERATIONS_HEALTH_TOOL_NAME = "knowledge_operations_health_tool"
@@ -109,6 +113,201 @@ def unified_memory_search_tool(
                 "message": trim_lines(str(exc), max_lines=2),
                 "agentId": agent_id,
                 "knowledgeBaseId": requested_base_id,
+            }
+        )
+
+
+def search_agent_private_memory_tool(
+    query: str = "",
+    query_mode: str = "auto",
+    limit: int = 8,
+    max_context_chars: int = 1200,
+) -> str:
+    """Search reviewed formal knowledge in the current Agent's own private KBs only."""
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    if not agent_id:
+        return _json_result(_blocked_result("", "agent_identity_required"))
+    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
+    if memory_policy.get("enabled") is False:
+        return _json_result(_blocked_result(agent_id, "personal_memory_disabled"))
+
+    try:
+        from core.web.services import team_knowledge_service, unified_knowledge_search_service
+
+        private_bases = team_knowledge_service.list_agent_knowledge_bases(
+            agent_id,
+            actor_agent_id=agent_id,
+        )
+        private_base_ids = [
+            str(base.get("scopedKnowledgeBaseId") or "").strip()
+            for base in list(private_bases.get("knowledgeBases") or [])
+            if isinstance(base, dict)
+            and str(base.get("ownerType") or "").strip() == "agent"
+            and str(base.get("ownerId") or "").strip() == agent_id
+            and str(base.get("status") or "active").strip() == "active"
+            and bool((base.get("permissions") or {}).get("canRead"))
+            and str(base.get("scopedKnowledgeBaseId") or "").strip()
+        ]
+        if not private_base_ids:
+            payload = {
+                "ok": True,
+                "status": "empty",
+                "agentId": agent_id,
+                "message": "当前 Agent 没有可检索的私有正式知识库。",
+                "summary": {"resultCount": 0, "citationCount": 0, "userContentResultCount": 0},
+                "results": [],
+                "citations": [],
+            }
+            _record_event(
+                "memory.tool.private_search.empty",
+                runtime=runtime,
+                outcome="succeeded",
+                fields={"knowledgeBaseCount": 0, "queryLength": len(trim_lines(str(query or ""), max_lines=4).strip())},
+            )
+            return _json_result(payload)
+
+        payload = unified_knowledge_search_service.search_unified_memory(
+            agent_id=agent_id,
+            query=trim_lines(str(query or ""), max_lines=4).strip(),
+            query_mode=query_mode,
+            owner_type="agent",
+            owner_id=agent_id,
+            allowed_knowledge_base_ids=private_base_ids,
+            include_user_content=False,
+            allowed_user_content_space_ids=[],
+            limit=limit,
+            max_context_chars=max_context_chars,
+        )
+        _record_event(
+            "memory.tool.private_search.succeeded",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "knowledgeBaseCount": len(private_base_ids),
+                "queryLength": int((payload.get("request") or {}).get("queryLength") or 0),
+                "queryMode": str((payload.get("request") or {}).get("effectiveQueryMode") or query_mode),
+                "resultCount": int((payload.get("summary") or {}).get("resultCount") or 0),
+            },
+        )
+        return _json_result({"ok": True, "status": "succeeded", **payload})
+    except Exception as exc:
+        _record_event(
+            "memory.tool.private_search.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": "private_memory_search_failed",
+                "message": "私有知识检索失败，请稍后重试或检查知识库状态。",
+                "agentId": agent_id,
+            }
+        )
+
+
+def knowledge_stage_session_attachment_tool(
+    attachment_id: str,
+    team_id: str = "",
+    title: str = "",
+    summary: str = "",
+) -> str:
+    """Stage a ready attachment from the current Agent's session into its own or an authorized Team inbox."""
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    session_id = str(runtime.get("sessionId") or "").strip()
+    if not agent_id or not session_id:
+        return _json_result(
+            {
+                "ok": False,
+                "status": "blocked",
+                "error": "agent_session_identity_required",
+                "message": "必须从绑定当前 Agent 的活动会话中暂存附件。",
+                "agentId": agent_id,
+            }
+        )
+
+    normalized_team_id = str(team_id or "").strip()
+    owner_type = "team" if normalized_team_id else "agent"
+    owner_id = normalized_team_id or agent_id
+    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
+    if owner_type == "agent" and memory_policy.get("enabled") is False:
+        return _json_result(_blocked_result(agent_id, "personal_memory_disabled"))
+    normalized_attachment_id = str(attachment_id or "").strip()
+    stage_identity = json.dumps(
+        [
+            "session-attachment-stage-v1",
+            agent_id,
+            session_id,
+            owner_type,
+            owner_id,
+            normalized_attachment_id,
+            str(title or ""),
+            str(summary or ""),
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    idempotency_key = "agent-stage-" + hashlib.sha256(stage_identity.encode("utf-8")).hexdigest()
+    try:
+        from core.web.services import team_knowledge_service
+
+        source = team_knowledge_service.collect_session_attachment_to_inbox(
+            owner_type,
+            owner_id,
+            session_id=session_id,
+            attachment_id=normalized_attachment_id,
+            actor_agent_id=agent_id,
+            title=title,
+            summary=summary,
+            idempotency_key=idempotency_key,
+        )
+        _record_event(
+            "knowledge.tool.session_attachment.staged",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "ownerType": owner_type,
+                "inboxSourceId": str(source.get("inboxSourceId") or ""),
+                "sourceType": str(source.get("sourceType") or ""),
+            },
+            include_session_id=False,
+        )
+        return _json_result(
+            {
+                "ok": True,
+                "status": "staged",
+                "agentId": agent_id,
+                "ownerType": owner_type,
+                "ownerId": owner_id,
+                "inboxSourceId": str(source.get("inboxSourceId") or ""),
+                "sourceType": str(source.get("sourceType") or ""),
+                "reviewStatus": str(source.get("status") or "pending"),
+            }
+        )
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.session_attachment.stage_failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"ownerType": owner_type, "errorType": type(exc).__name__},
+            include_session_id=False,
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": "附件暂存失败；请检查会话、附件状态和知识库权限。",
+                "agentId": agent_id,
+                "ownerType": owner_type,
             }
         )
 
@@ -219,6 +418,79 @@ def knowledge_proposal_tool(
         )
 
 
+def knowledge_proposal_review_tool(
+    knowledge_base_id: str,
+    proposal_id: str,
+    decision: str,
+    resolution_note: str = "",
+) -> str:
+    """Apply or reject a pending proposal as the current authorized reviewer."""
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    base_id = str(knowledge_base_id or "").strip()
+    normalized_decision = str(decision or "").strip().lower()
+    if not agent_id:
+        return _json_result(_blocked_result("", "agent_identity_required"))
+    if normalized_decision not in {"applied", "rejected"}:
+        return _json_result(_invalid_json_result(agent_id, "decision must be applied or rejected"))
+    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
+    allowed_base_ids = _policy_ids(memory_policy, "reviewKnowledgeBaseIds")
+    if base_id and not _policy_allows_knowledge_base(base_id, allowed_base_ids):
+        return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
+
+    try:
+        from core.web.services import team_knowledge_service
+
+        result = team_knowledge_service.review_refinement_proposal(
+            base_id,
+            str(proposal_id or "").strip(),
+            status=normalized_decision,
+            reviewed_by_agent_id=agent_id,
+            resolution_note=resolution_note,
+        )
+        proposal = result.get("proposal") if isinstance(result.get("proposal"), dict) else {}
+        item = result.get("item") if isinstance(result.get("item"), dict) else {}
+        _record_event(
+            "knowledge.tool.proposal.reviewed",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "knowledgeBaseId": base_id,
+                "proposalId": str(proposal.get("proposalId") or ""),
+                "decision": normalized_decision,
+                "knowledgeItemId": str(item.get("knowledgeItemId") or ""),
+            },
+        )
+        return _json_result(
+            {
+                "ok": True,
+                "status": str(proposal.get("status") or normalized_decision),
+                "knowledgeBaseId": base_id,
+                "proposalId": str(proposal.get("proposalId") or ""),
+                "knowledgeItemId": str(item.get("knowledgeItemId") or ""),
+            }
+        )
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.proposal.review_failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"knowledgeBaseId": base_id, "errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "knowledgeBaseId": base_id,
+                "proposalId": str(proposal_id or "").strip(),
+            }
+        )
+
+
 def knowledge_ingestion_tool(
     knowledge_base_id: str,
     source_type: str,
@@ -251,8 +523,12 @@ def knowledge_ingestion_tool(
     runtime = _current_runtime()
     agent_id = str(runtime.get("agentId") or "").strip()
     base_id = str(knowledge_base_id or "").strip()
+    normalized_inbox_source_id = str(inbox_source_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
-    allowed_base_ids = _policy_ids(memory_policy, "proposeKnowledgeBaseIds")
+    allowed_base_ids = _policy_ids(
+        memory_policy,
+        "reviewKnowledgeBaseIds" if normalized_inbox_source_id else "proposeKnowledgeBaseIds",
+    )
     if base_id and not _policy_allows_knowledge_base(base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
     source_ref = _parse_json_object(source_ref_json, "source_ref_json")
@@ -264,7 +540,6 @@ def knowledge_ingestion_tool(
     try:
         from core.web.services import team_knowledge_service
 
-        normalized_inbox_source_id = str(inbox_source_id or "").strip()
         if normalized_inbox_source_id:
             review = team_knowledge_service.review_owner_inbox_source(
                 owner_type,
@@ -743,6 +1018,7 @@ def _record_event(
     level: str = "info",
     outcome: str = "observed",
     fields: dict[str, Any] | None = None,
+    include_session_id: bool = True,
 ) -> None:
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -756,7 +1032,7 @@ def _record_event(
             outcome=outcome,
             fields={
                 "agentId": str(runtime.get("agentId") or "").strip(),
-                "sessionId": str(runtime.get("sessionId") or "").strip(),
+                **({"sessionId": str(runtime.get("sessionId") or "").strip()} if include_session_id else {}),
                 **dict(fields or {}),
             },
             lifecycle=True,

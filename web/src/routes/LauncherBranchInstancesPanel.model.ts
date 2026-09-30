@@ -46,7 +46,7 @@ export function cleanupRiskLabels(item: LauncherBranchInstance, isZh: boolean): 
   return inferCleanupRisks(item).map((code) => labels[code] || code);
 }
 
-export type InstanceRuntimeState = "starting" | "running" | "partial" | "stopping" | "restarting" | "failed" | "stopped";
+export type InstanceRuntimeState = "building" | "starting" | "running" | "partial" | "stopping" | "restarting" | "failed" | "stopped";
 
 export type InstancePendingOperation = {
   instanceId: string;
@@ -105,7 +105,7 @@ export function hasActiveLifecyclePending(pending?: LifecyclePendingInput): bool
 
 /** Double-click guard may stay only while this row is actually in a lifecycle transition. */
 export function shouldHoldOpenClickGuard(state: InstanceRuntimeState): boolean {
-  return state === "starting" || state === "restarting" || state === "stopping";
+  return state === "building" || state === "starting" || state === "restarting" || state === "stopping";
 }
 
 export function lifecycleIntentRejectMessage(
@@ -341,6 +341,15 @@ export function instanceRuntimeState(
   item: LauncherBranchInstance,
   pending?: LifecyclePendingInput,
 ): InstanceRuntimeState {
+  // The frontend build gate blocks the start/restart IPC for the whole build,
+  // so a pending intent stays active for minutes while the payload already
+  // reports the truth. The optimistic starting/restarting label must not
+  // swallow that building window: payload building wins over any intent.
+  // Stop needs no special case — the gate clears its marker in a finally and
+  // the row settles with the stop intent once the build window is gone.
+  if (item.runtime.lifecycleState === "building") {
+    return "building";
+  }
   const active = resolveItemPending(item, pending);
   if (active) {
     if (active.operation === "stop") {
@@ -350,6 +359,7 @@ export function instanceRuntimeState(
   }
   const states: Record<LauncherBranchInstance["runtime"]["lifecycleState"], InstanceRuntimeState> = {
     closed: "stopped",
+    building: "building",
     starting: "starting",
     running: "running",
     stopping: "stopping",
@@ -363,6 +373,7 @@ export function instanceRuntimeState(
 export function instanceRuntimeStateLabel(state: InstanceRuntimeState, isZh: boolean): string {
   if (isZh) {
     return {
+      building: "构建中",
       starting: "正在启动",
       running: "正常运行",
       partial: "部分运行",
@@ -373,6 +384,7 @@ export function instanceRuntimeStateLabel(state: InstanceRuntimeState, isZh: boo
     }[state];
   }
   return {
+    building: "Building",
     starting: "Starting",
     running: "Running",
     partial: "Partially running",
@@ -393,7 +405,7 @@ export function isStartableInstance(item: LauncherBranchInstance, pending?: Life
 
 export function isAttentionInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   const state = instanceRuntimeState(item, pending);
-  if (["starting", "stopping", "restarting"].includes(state)) {
+  if (["building", "starting", "stopping", "restarting"].includes(state)) {
     return false;
   }
   if (state === "failed") {
@@ -610,7 +622,7 @@ export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: L
   if (!isOperableInstance(item) || item.startBlockReason === "launcher_refresh_required") {
     return false;
   }
-  return !["starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending));
+  return !["building", "starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending));
 }
 
 export function canStartInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {

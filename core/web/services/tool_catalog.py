@@ -138,7 +138,9 @@ EXPLICIT_ALLOW_TOOLS = {
     "research_communication_edge_proposal_tool",
     "research_proposal_apply_tool",
     "unified_memory_search_tool",
+    "knowledge_stage_session_attachment_tool",
     "knowledge_proposal_tool",
+    "knowledge_proposal_review_tool",
     "knowledge_ingestion_tool",
     "knowledge_governance_tasks_tool",
     "knowledge_operations_health_tool",
@@ -695,6 +697,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["memory_write"],
         "permissionTier": MEDIUM_PERMISSION_TIER,
     },
+    "search_agent_private_memory_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["agent_private_memory", "read_only", "citations"],
+        "riskTags": ["agent_private_memory_access", "prompt_context_candidate"],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "knowledge_stage_session_attachment_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge_write", "session_attachment", "untrusted_source"],
+        "riskTags": ["team_knowledge_write", "untrusted_source_material"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "supersede_personal_memory_tool": {
         "category": "memory_context",
         "capabilityTags": ["memory_write", "private_episode"],
@@ -833,6 +847,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "category": "memory_context",
         "capabilityTags": ["team_knowledge", "proposal_write", "central_source_attachment"],
         "riskTags": ["team_knowledge_proposal"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "knowledge_proposal_review_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "proposal_review", "knowledge_item_write"],
+        "riskTags": ["team_knowledge_write", "formal_knowledge_mutation"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "knowledge_ingestion_tool": {
@@ -1088,7 +1108,9 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "unified_memory_search_tool",
+            "knowledge_stage_session_attachment_tool",
             "knowledge_proposal_tool",
+            "knowledge_proposal_review_tool",
             "knowledge_ingestion_tool",
             "knowledge_governance_tasks_tool",
             "knowledge_operations_health_tool",
@@ -1181,6 +1203,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "toolNames": [
             "get_core_context_tool",
             "get_current_goal_tool",
+            "search_agent_private_memory_tool",
+            "knowledge_stage_session_attachment_tool",
             "search_memory_tool",
             "search_error_archive_tool",
             "history_search_tool",
@@ -1197,6 +1221,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         ],
         "preferredToolNames": [
             "get_core_context_tool",
+            "search_agent_private_memory_tool",
             "unified_memory_search_tool",
             "skill_library_search_tool",
             "github_project_library_search_tool",

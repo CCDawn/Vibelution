@@ -25,7 +25,7 @@ describe("VPopover contract", () => {
     const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
     expect(shell).toContain("VPopover");
     expect(shell).toContain("contentClassName={styles.settingsPopoverContent}");
-    expect(shell).toContain("LazyAppShellUtilityMenu");
+    expect(shell).toContain("LazyAppShellSettingsMenu");
     expect(shell).not.toContain("utilityMenuRef");
     expect(shell).not.toContain("onMouseEnter={() => setUtilityOpen(true)}");
   });

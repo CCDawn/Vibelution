@@ -42,6 +42,7 @@ import {
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
 import { isTempSessionId } from "../sessionOptimisticIds";
+import { useRerunFileChoice } from "./useRerunFileChoice";
 import {
   appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
@@ -1135,6 +1136,14 @@ export type UseChatComposerSubmitActionsResult = {
   handleRegenerateAssistantMessage: (message: ConversationMessage) => void;
   handleRetryFailedTurn: () => void;
   handleSwitchMessageVersion: (message: ConversationMessage, targetNodeId: string) => void;
+  rerunFileChoice: {
+    paths: string[];
+    error: string;
+    restoring: boolean;
+  } | null;
+  confirmRerunFileRestore: () => Promise<void>;
+  keepFilesAndRerun: () => void;
+  dismissRerunFileChoice: () => void;
 };
 
 /**
@@ -1194,6 +1203,17 @@ export function useChatComposerSubmitActions({
   // row once its wait exceeds the threshold; forget a row when it leaves the
   // queue so a re-queued row can be hinted again.
   const queuedStuckHintedIdsRef = useRef<Set<string>>(new Set());
+  const {
+    rerunFileChoice,
+    interceptRerun,
+    confirmRerunFileRestore,
+    keepFilesAndRerun,
+    dismissRerunFileChoice,
+  } = useRerunFileChoice({
+    sessionId: activeSessionId,
+    lang,
+    describeError,
+  });
   const activeQueuedTurns = detail?.queuedTurns;
   useEffect(() => {
     const sessionId = activeSessionId;
@@ -2203,80 +2223,87 @@ export function useChatComposerSubmitActions({
       const editTarget = resolvedEditTarget;
       const editAttachments = activeImageAttachments;
       const carriedAttachmentIds = resolveEditCarryOverAttachmentIds(detail, editTarget.messageId);
-      void (async () => {
-        if (editAttachments.length && imageUploadInFlightRef.current[activeSessionId]) {
-          return;
-        }
-        let uploadedAttachmentIds: string[] = [];
-        if (editAttachments.length) {
-          imageUploadInFlightRef.current[activeSessionId] = true;
-          pendingUploadSubmissionRef.current.set(activeSessionId, clientSubmissionId);
-          setSessionImageUploadPending((current) => ({
-            ...current,
-            [activeSessionId]: true,
-          }));
-          try {
-            // Same per-attachment settle as the direct submit: chips that
-            // already carry an artifactId ride along without a re-upload, and
-            // failures stay in the tray as retryable failed chips.
-            let outcomes: ComposerAttachmentUploadOutcome[] = [];
-            const needUpload = editAttachments.filter(needsComposerAttachmentUpload);
-            if (needUpload.length) {
-              setSessionImageAttachments((current) => ({
-                ...current,
-                [activeSessionId]: markComposerAttachmentsUploading(current[activeSessionId] ?? []),
-              }));
-              outcomes = await uploadComposerAttachmentsSettled(activeSessionId, needUpload);
-              setSessionImageAttachments((current) => ({
-                ...current,
-                [activeSessionId]: applyComposerAttachmentUploadOutcomes(current[activeSessionId] ?? [], outcomes),
-              }));
-            }
-            const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
-            if (failedOutcomes.length) {
+      const editMessages = detail?.messages ?? [];
+      const editStartIndex = editMessages.findIndex(
+        (message) => String(message.id || "").trim() === editTarget.messageId,
+      );
+      const continueEdit = () => {
+        void (async () => {
+          if (editAttachments.length && imageUploadInFlightRef.current[activeSessionId]) {
+            return;
+          }
+          let uploadedAttachmentIds: string[] = [];
+          if (editAttachments.length) {
+            imageUploadInFlightRef.current[activeSessionId] = true;
+            pendingUploadSubmissionRef.current.set(activeSessionId, clientSubmissionId);
+            setSessionImageUploadPending((current) => ({
+              ...current,
+              [activeSessionId]: true,
+            }));
+            try {
+              // Same per-attachment settle as the direct submit: chips that
+              // already carry an artifactId ride along without a re-upload, and
+              // failures stay in the tray as retryable failed chips.
+              let outcomes: ComposerAttachmentUploadOutcome[] = [];
+              const needUpload = editAttachments.filter(needsComposerAttachmentUpload);
+              if (needUpload.length) {
+                setSessionImageAttachments((current) => ({
+                  ...current,
+                  [activeSessionId]: markComposerAttachmentsUploading(current[activeSessionId] ?? []),
+                }));
+                outcomes = await uploadComposerAttachmentsSettled(activeSessionId, needUpload);
+                setSessionImageAttachments((current) => ({
+                  ...current,
+                  [activeSessionId]: applyComposerAttachmentUploadOutcomes(current[activeSessionId] ?? [], outcomes),
+                }));
+              }
+              const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
+              if (failedOutcomes.length) {
+                setSessionComposerErrors((current) => ({
+                  ...current,
+                  [activeSessionId]: describeError(
+                    failedOutcomes[0].error,
+                    lang === "zh" ? "图片上传失败" : "Image upload failed",
+                  ),
+                }));
+                restorePendingStopAfterUploadFailure(activeSessionId);
+                return;
+              }
+              uploadedAttachmentIds = composerUploadedArtifactIds(
+                applyComposerAttachmentUploadOutcomes(editAttachments, outcomes),
+              );
+            } catch (error) {
               setSessionComposerErrors((current) => ({
                 ...current,
-                [activeSessionId]: describeError(
-                  failedOutcomes[0].error,
-                  lang === "zh" ? "图片上传失败" : "Image upload failed",
-                ),
+                [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
               }));
               restorePendingStopAfterUploadFailure(activeSessionId);
               return;
+            } finally {
+              if (pendingUploadSubmissionRef.current.get(activeSessionId) === clientSubmissionId) {
+                pendingUploadSubmissionRef.current.delete(activeSessionId);
+              }
+              imageUploadInFlightRef.current[activeSessionId] = false;
+              setSessionImageUploadPending((current) => ({
+                ...current,
+                [activeSessionId]: false,
+              }));
             }
-            uploadedAttachmentIds = composerUploadedArtifactIds(
-              applyComposerAttachmentUploadOutcomes(editAttachments, outcomes),
-            );
-          } catch (error) {
-            setSessionComposerErrors((current) => ({
-              ...current,
-              [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
-            }));
-            restorePendingStopAfterUploadFailure(activeSessionId);
-            return;
-          } finally {
-            if (pendingUploadSubmissionRef.current.get(activeSessionId) === clientSubmissionId) {
-              pendingUploadSubmissionRef.current.delete(activeSessionId);
-            }
-            imageUploadInFlightRef.current[activeSessionId] = false;
-            setSessionImageUploadPending((current) => ({
-              ...current,
-              [activeSessionId]: false,
-            }));
           }
-        }
-        editResubmitMutation.mutate({
-          sessionId: activeSessionId,
-          messageId: editTarget.messageId,
-          ...(editTarget.nodeId ? { baseMessageId: editTarget.nodeId } : {}),
-          clientSubmissionId,
-          content,
-          attachmentIds: [...carriedAttachmentIds, ...uploadedAttachmentIds],
-          mentalModelEnabled: mentalModelEnabledForNextTurn,
-          runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
-          turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
-        });
-      })();
+          editResubmitMutation.mutate({
+            sessionId: activeSessionId,
+            messageId: editTarget.messageId,
+            ...(editTarget.nodeId ? { baseMessageId: editTarget.nodeId } : {}),
+            clientSubmissionId,
+            content,
+            attachmentIds: [...carriedAttachmentIds, ...uploadedAttachmentIds],
+            mentalModelEnabled: mentalModelEnabledForNextTurn,
+            runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+            turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+          });
+        })();
+      };
+      interceptRerun(editMessages, editStartIndex, continueEdit);
       return;
     }
     void submitTurnWithAttachments(
@@ -2299,8 +2326,10 @@ export function useChatComposerSubmitActions({
     composerDisabled,
     companionAgentId,
     describeError,
+    detail,
     editResubmitMutation,
     imageUploadInFlightRef,
+    interceptRerun,
     lang,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
@@ -2415,22 +2444,27 @@ export function useChatComposerSubmitActions({
     if (!userMessage || userMessage.role !== "user") {
       return;
     }
+    const rerunUser = userMessage;
     // Branch from the clicked assistant answer when it carries a node id;
     // otherwise fall back to the legacy latest-only regenerate.
-    const baseMessageId = String(message.nodeId || userMessage.nodeId || "").trim();
-    regenerateMutation.mutate({
-      sessionId: activeSessionId,
-      messageId: userMessage.id,
-      ...(baseMessageId ? { baseMessageId } : {}),
-      clientSubmissionId: createClientSubmissionId(activeSessionId),
-      content: String(userMessage.content || ""),
-      mentalModelEnabled: mentalModelEnabledForNextTurn,
-      runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
-      turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+    const baseMessageId = String(message.nodeId || rerunUser.nodeId || "").trim();
+    const clientSubmissionId = createClientSubmissionId(activeSessionId);
+    interceptRerun(messages, assistantIndex, () => {
+      regenerateMutation.mutate({
+        sessionId: activeSessionId,
+        messageId: rerunUser.id,
+        ...(baseMessageId ? { baseMessageId } : {}),
+        clientSubmissionId,
+        content: String(rerunUser.content || ""),
+        mentalModelEnabled: mentalModelEnabledForNextTurn,
+        runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+        turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+      });
     });
   }, [
     activeSessionId,
     detail,
+    interceptRerun,
     mentalModelEnabledForNextTurn,
     regenerateMutation,
     runtimeStatusEnabledForNextTurn,
@@ -2445,29 +2479,36 @@ export function useChatComposerSubmitActions({
     }
     const messages = detail?.messages ?? [];
     let userMessage: ConversationMessage | undefined;
+    let userIndex = -1;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       if (messages[index].role === "user") {
         userMessage = messages[index];
+        userIndex = index;
         break;
       }
     }
-    if (!userMessage || userMessage.role !== "user") {
+    if (!userMessage || userMessage.role !== "user" || userIndex < 0) {
       return;
     }
-    const baseMessageId = String(userMessage.nodeId || "").trim();
-    regenerateMutation.mutate({
-      sessionId: activeSessionId,
-      messageId: userMessage.id,
-      ...(baseMessageId ? { baseMessageId } : {}),
-      clientSubmissionId: createClientSubmissionId(activeSessionId),
-      content: String(userMessage.content || ""),
-      mentalModelEnabled: mentalModelEnabledForNextTurn,
-      runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
-      turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+    const rerunUser = userMessage;
+    const baseMessageId = String(rerunUser.nodeId || "").trim();
+    const clientSubmissionId = createClientSubmissionId(activeSessionId);
+    interceptRerun(messages, userIndex, () => {
+      regenerateMutation.mutate({
+        sessionId: activeSessionId,
+        messageId: rerunUser.id,
+        ...(baseMessageId ? { baseMessageId } : {}),
+        clientSubmissionId,
+        content: String(rerunUser.content || ""),
+        mentalModelEnabled: mentalModelEnabledForNextTurn,
+        runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
+        turnStatusTail: loadTurnStatusTailConfig(activeSessionId),
+      });
     });
   }, [
     activeSessionId,
     detail,
+    interceptRerun,
     mentalModelEnabledForNextTurn,
     regenerateMutation,
     runtimeStatusEnabledForNextTurn,
@@ -2733,5 +2774,9 @@ export function useChatComposerSubmitActions({
     handleRegenerateAssistantMessage,
     handleRetryFailedTurn,
     handleSwitchMessageVersion,
+    rerunFileChoice,
+    confirmRerunFileRestore,
+    keepFilesAndRerun,
+    dismissRerunFileChoice,
   };
 }

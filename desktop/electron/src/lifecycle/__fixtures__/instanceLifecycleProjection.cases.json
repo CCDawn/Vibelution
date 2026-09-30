@@ -671,6 +671,79 @@
         "startSupervisorLost": false
       },
       "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d2-building-phase-reports-building-before-intent",
+      "input": {
+        "observedState": "closed",
+        "phase": "building",
+        "desiredState": "open",
+        "registryStatus": "closed",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": false,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "building", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d2-building-phase-overrides-live-restart-signals",
+      "input": {
+        "observedState": "open",
+        "phase": "building",
+        "desiredState": "open",
+        "registryStatus": "running",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "building", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d2-building-registry-status-reports-building",
+      "input": {
+        "observedState": "starting",
+        "phase": "opening",
+        "desiredState": "open",
+        "registryStatus": "building",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": false,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "building", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d2-building-supervisor-lost-still-reports-error",
+      "input": {
+        "observedState": "closed",
+        "phase": "building",
+        "desiredState": "open",
+        "registryStatus": "closed",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": false,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": true
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "start_supervisor_lost", "startable": true }
     }
+
   ]
 }

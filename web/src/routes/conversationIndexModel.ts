@@ -26,7 +26,8 @@ export type ConversationIndexGroupKey =
   | "setupTeams"
   | "standaloneGroups"
   | "other"
-  | "invalid";
+  | "invalid"
+  | "archived";
 
 export type ConversationIndexDynamicGroupKey = ConversationIndexGroupKey | `team:${string}`;
 
@@ -74,6 +75,7 @@ export const DEFAULT_COLLAPSED_CONVERSATION_GROUPS: Record<ConversationIndexGrou
   standaloneGroups: true,
   other: false,
   invalid: false,
+  archived: false,
 };
 
 export const CONVERSATION_GROUP_ORDER: ConversationIndexGroupKey[] = [
@@ -514,14 +516,28 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
   return summary;
 }
 
-export function isVisibleDirectSession(session: SessionSummary | undefined | null) {
+export type ConversationVisibilityOptions = {
+  /** Archived view: keep archiveState=archived sessions visible in this surface. */
+  includeArchivedSessions?: boolean;
+};
+
+export function isSessionArchived(session: SessionSummary | undefined | null) {
+  return String(session?.archiveState?.status || "").trim().toLowerCase() === "archived";
+}
+
+export function isVisibleDirectSession(
+  session: SessionSummary | undefined | null,
+  options?: ConversationVisibilityOptions,
+) {
   if (!session) {
     return false;
   }
-  if (
-    session.hiddenFromIndex
-    || String(session.archiveState?.status || "").trim().toLowerCase() === "archived"
-  ) {
+  if (isSessionArchived(session)) {
+    // Archived sessions surface only in the archived view; the index-hidden
+    // marker they carry is part of the archive flip, not an independent hide.
+    return Boolean(options?.includeArchivedSessions) && !session.agentMissing;
+  }
+  if (session.hiddenFromIndex) {
     return false;
   }
   if (session.agentMissing) {
@@ -554,9 +570,16 @@ export function hasInvalidChildSessionLink(session: SessionSummary | undefined |
 export function isVisibleConversation(
   conversation: ConversationSummary,
   sessionsById?: Map<string, SessionSummary>,
+  options?: ConversationVisibilityOptions,
 ) {
   if (conversation.type !== "direct_agent") {
     return true;
+  }
+  const sessionId = conversation.directSessionId || conversation.conversationId;
+  const session = sessionId && sessionsById ? sessionsById.get(sessionId) : undefined;
+  if (session && isSessionArchived(session)) {
+    // The archive flip marks the row hidden; only the archived view may show it.
+    return Boolean(options?.includeArchivedSessions) && isVisibleDirectSession(session, options);
   }
   const conversationKind = String(conversation.conversationIndexKind ?? "").trim();
   const conversationVisibility = String(conversation.conversationIndexVisibility ?? "").trim();
@@ -569,8 +592,6 @@ export function isVisibleConversation(
   if (conversationKind === CONVERSATION_INDEX_KIND_HIDDEN) {
     return false;
   }
-  const sessionId = conversation.directSessionId || conversation.conversationId;
-  const session = sessionId && sessionsById ? sessionsById.get(sessionId) : undefined;
   const sessionKind = String(session?.conversationIndexKind ?? "").trim();
   const sessionVisibility = String(session?.conversationIndexVisibility ?? "").trim();
   if (
@@ -583,7 +604,7 @@ export function isVisibleConversation(
     return false;
   }
   if (session) {
-    return isVisibleDirectSession(session);
+    return isVisibleDirectSession(session, options);
   }
   if (conversation.agentMissing) {
     return false;
@@ -713,6 +734,7 @@ export function conversationGroupLabel(groupKey: ConversationIndexGroupKey, lang
     standaloneGroups: { zh: "未归属群聊", en: "Standalone groups" },
     other: { zh: "其他助手", en: "Other agents" },
     invalid: { zh: "异常会话", en: "Invalid sessions" },
+    archived: { zh: "已归档", en: "Archived" },
   };
   return labels[groupKey][lang];
 }
@@ -729,6 +751,7 @@ export type ConversationIndexModel = {
 type BuildConversationIndexModelOptions = {
   agents?: AgentInstance[];
   conversations: ConversationSummary[] | undefined;
+  includeArchivedSessions?: boolean;
   lang: "zh" | "en";
   linkedTeamRoomIds: Set<string>;
   rawSessions: SessionSummary[] | undefined;
@@ -741,6 +764,7 @@ type BuildConversationIndexModelOptions = {
 function computeConversationIndexModel({
   agents = [],
   conversations,
+  includeArchivedSessions = false,
   lang,
   linkedTeamRoomIds,
   rawSessions,
@@ -764,6 +788,15 @@ function computeConversationIndexModel({
       const sessionId = conversation.directSessionId || conversation.conversationId;
       const session = sessionId ? sessionsById.get(sessionId) : undefined;
       const rawSession = sessionId ? rawSessionsById.get(sessionId) : undefined;
+      if (
+        includeArchivedSessions
+        && ((Boolean(session) && isSessionArchived(session))
+          || (Boolean(rawSession) && isSessionArchived(rawSession)))
+      ) {
+        // Archived view: archived rows bypass the agent-tab and visibility
+        // gates the archive flip itself sets.
+        return true;
+      }
       if (isRepresentedInAgentSessionTabs(session)) {
         return false;
       }
@@ -839,6 +872,7 @@ function computeConversationIndexModel({
   const buckets = new Map<ConversationIndexGroupKey, ConversationSummary[]>(
     CONVERSATION_GROUP_ORDER.map((groupKey) => [groupKey, []]),
   );
+  buckets.set("archived", []);
   const teamOrderById = new Map(
     discussionTeams.map((team, index) => [String(team.teamId ?? "").trim(), index]),
   );
@@ -849,6 +883,15 @@ function computeConversationIndexModel({
     items: ConversationSummary[];
   }>();
   filteredConversations.forEach((conversation) => {
+    if (includeArchivedSessions) {
+      const archivedSessionId = conversation.directSessionId || conversation.conversationId;
+      const archivedSession = (archivedSessionId ? sessionsById.get(archivedSessionId) : undefined)
+        ?? (archivedSessionId ? rawSessionsById.get(archivedSessionId) : undefined);
+      if (archivedSession && isSessionArchived(archivedSession)) {
+        buckets.get("archived")?.push(conversation);
+        return;
+      }
+    }
     const team = conversationTeamFor(conversation, conversationTeamLookup);
     const explicitTeamIdentity = conversationTeamIdentityFor(conversation);
     const teamId = String(team?.teamId ?? explicitTeamIdentity?.teamId ?? "").trim();
@@ -885,7 +928,17 @@ function computeConversationIndexModel({
         groupKind: "team" as const,
       });
     });
+  const archivedBucket = buckets.get("archived") ?? [];
+  const archivedConversationGroups: ConversationIndexGroup[] = archivedBucket.length
+    ? [{
+        groupKey: "archived" as const,
+        label: conversationGroupLabel("archived", lang),
+        items: archivedBucket,
+        groupKind: "default" as const,
+      }]
+    : [];
   const groupedConversations = [
+    ...archivedConversationGroups,
     ...leadingGroupKeys
       .map((groupKey) => ({
         groupKey,
@@ -1005,6 +1058,7 @@ function stabilizeConversationIndexModel(
 type ConversationIndexModelOptionsSnapshot = {
   agents: AgentInstance[] | undefined;
   conversations: ConversationSummary[] | undefined;
+  includeArchivedSessions: boolean;
   lang: "zh" | "en";
   linkedTeamRoomIds: Set<string>;
   rawSessions: SessionSummary[] | undefined;
@@ -1020,6 +1074,7 @@ function conversationIndexModelOptionsSnapshot(
   return {
     agents: options.agents,
     conversations: options.conversations,
+    includeArchivedSessions: Boolean(options.includeArchivedSessions),
     lang: options.lang,
     linkedTeamRoomIds: options.linkedTeamRoomIds,
     rawSessions: options.rawSessions,
@@ -1036,6 +1091,7 @@ function areConversationIndexModelOptionsIdentical(
 ): boolean {
   return left.agents === right.agents
     && left.conversations === right.conversations
+    && left.includeArchivedSessions === right.includeArchivedSessions
     && left.lang === right.lang
     && left.linkedTeamRoomIds === right.linkedTeamRoomIds
     && left.rawSessions === right.rawSessions
@@ -1074,6 +1130,7 @@ export function useConversationIndexModel(options: BuildConversationIndexModelOp
     [
       options.conversations,
       options.agents,
+      options.includeArchivedSessions,
       options.lang,
       options.linkedTeamRoomIds,
       options.rawSessions,

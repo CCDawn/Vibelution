@@ -69,9 +69,11 @@ def test_integration_claim_conflict_preserves_prevalidated_manifest(
     assert events == ["closeout", "verify", "acquire"]
 
 
+@pytest.mark.parametrize("retain_worktree", [False, True])
 def test_integration_claim_wait_reuses_manifest_without_rerunning_closeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    retain_worktree: bool,
 ) -> None:
     events: list[str] = []
     attempts = 0
@@ -102,7 +104,7 @@ def test_integration_claim_wait_reuses_manifest_without_rerunning_closeout(
     monkeypatch.setattr(closeout.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(closeout, "merge_ff_only", lambda *_args, **_kwargs: "head-sha")
     monkeypatch.setattr(closeout, "release_claim", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: events.append("cleanup"))
     monkeypatch.setattr(closeout, "complete_agent", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
 
@@ -111,9 +113,14 @@ def test_integration_claim_wait_reuses_manifest_without_rerunning_closeout(
         claim_id="claim-dev",
         agent_id="agent-test",
         integration_wait_seconds=1,
+        retain_worktree=retain_worktree,
     )
 
-    assert result.status == "merged_clean"
+    assert result.status == ("merged_cleanup_pending" if retain_worktree else "merged_clean")
+    assert result.merged is True
+    assert result.exit_code == 0
+    assert ("cleanup" in events) is not retain_worktree
+    assert result.next_action == ("retain_worktree_until_owner_releases_it" if retain_worktree else "")
     assert events.count("closeout") == 1
     assert attempts == 3
 
@@ -272,6 +279,29 @@ def test_resolve_context_rejects_worktree_outside_managed_parent(
         closeout.resolve_context(task_root)
 
     assert caught.value.code == "unsafe_worktree_path"
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_retained_external_worktree_requires_git_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registered: bool,
+) -> None:
+    main_root = tmp_path / "main"
+    task_root = tmp_path / "external" / "task"
+    monkeypatch.setattr(gate, "repository_root", lambda _path: task_root)
+    monkeypatch.setattr(gate, "current_branch", lambda root: "main" if Path(root) == main_root else "codex/test-task")
+    monkeypatch.setattr(gate, "main_worktree", lambda *_args: main_root)
+    monkeypatch.setattr(gate, "git_lines", lambda *_args: [])
+    monkeypatch.setattr(closeout, "worktree_is_registered", lambda _context: registered)
+    if registered:
+        assert closeout.resolve_context(task_root, retain_worktree=True).task_root == task_root.resolve()
+    else:
+        with pytest.raises(closeout.ManagedCloseoutError, match="unregistered_task_worktree"):
+            closeout.resolve_context(task_root, retain_worktree=True)
+
+
+def test_retention_cannot_be_combined_with_cleanup_only() -> None:
+    with pytest.raises(SystemExit):
+        closeout.build_parser().parse_args(["--task-worktree", "task", "--retain-worktree", "--cleanup-only"])
 
 
 def test_failed_quality_gate_never_acquires_integration_claim(

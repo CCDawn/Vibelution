@@ -127,7 +127,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised live work in the conversation-first workspace", () => {
-    expect(routeSource).toContain("import { SupervisedConversationWorkspace } from \"./SupervisedConversationWorkspace\"");
+    expect(routeSource).toContain("import { SupervisedConversationWorkspace,");
     expect(routeSource).toContain("<SupervisedConversationWorkspace");
     expect(routeSource).toContain("conversation={<div className={styles.supervisedConversationFrame}>");
     expect(routeSource).toContain("compact");
@@ -153,9 +153,9 @@ describe("EvolutionRoute library user flow contract", () => {
       'const supervisedTrackEnabled = forcedTrack === "supervised" || (configQuery.data?.modeAvailability.supervised_evolution ?? true);',
     );
     expect(routeSource).toContain(
-      "const showTrackToggle = !forcedTrack && selfTrackEnabled && supervisedTrackEnabled;",
+      "const showTrackToggle = selfTrackEnabled && supervisedTrackEnabled;",
     );
-    expect(routeSource).toContain('evolutionTrack === "self" && selfTrackEnabled');
+    expect(routeSource).toContain('workspaceTrack === "self" && selfTrackEnabled');
   });
 
   it("routes the primary self-evolution start into the user-reviewed autonomous loop", () => {
@@ -388,13 +388,13 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(proposalActionBandsStylesSource).toContain("relatedList");
   });
 
-  it("keeps the latest finished supervised run out of the live monitor and into the closed-loop ledger", () => {
+  it("separates the selected supervised run from activity locks and keeps the closed-loop ledger", () => {
     expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");
     expect(routeSource).toContain("fetchEvolutionWorkspaceSnapshot<");
     expect(evolutionApiSource).toContain('"/api/evolution/workspace-snapshot"');
     expect(routeSource).toContain("latestSupervisedRunSnapshot");
-    expect(routeSource).toContain("const monitoredRun = effectiveActiveRunSnapshot");
-    expect(routeSource).toContain("?? visibleLiveRunSnapshot;");
+    expect(routeSource).toContain("const monitoredRun = selectedSupervisedWorkspaceRun?.activeRun ?? null");
+    expect(routeSource).toContain("const runningRun = effectiveActiveRunSnapshot");
     expect(routeSource).not.toContain("const monitoredRun = effectiveActiveRunSnapshot\n    ?? visibleLiveRunSnapshot\n    ?? latestSupervisedRunSnapshot;");
     expect(routeSource).not.toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
     expect(routeSource).toContain("monitoredRun.runId === supervisedWorkflowRun.runId");
@@ -430,7 +430,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const selfTransactions = selfWorkspaceSnapshot?.transactions ?? []");
     expect(routeSource).toContain("const selfTrackLoading = selfTrackQueriesEnabled");
     expect(routeSource).toContain("overview={selfOverview}");
-    expect(routeSource).toContain("worktreeRun={selfWorktreeRun}");
+    expect(routeSource).toContain("worktreeRun={selectedSelfDetail.run}");
     expect(routeSource).toContain("transactions={selfTransactions}");
     expect(routeSource).toContain("loading={selfTrackLoading}");
     expect(routeSource).not.toContain("loading={workspaceSnapshotQuery.isLoading}");
@@ -448,13 +448,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionApiSource).toContain("/api/evolution/self/observation-runs/${encodeURIComponent(runId)}");
     expect(routeSource).toContain("const selfObservationRun = selfWorkspaceSnapshot?.observationActiveRun");
     expect(routeSource).toContain("?? selectedSelfObservationRunQuery.data");
-    expect(routeSource).toContain("observationRun={selfObservationRun ?? null}");
+    expect(routeSource).toContain("observationRun={selectedSelfWorkspaceRun?.observationRun ?? null}");
   });
 
-  it("does not poll self-evolution detail endpoints while the supervised track is active", () => {
+  it("loads both compact snapshots for the run rail but gates detailed track work", () => {
     expect(routeSource).toContain('const selfTrackQueriesEnabled = activeTrack === "self"');
     expect(routeSource).toContain('const supervisedTrackQueriesEnabled = activeTrack === "supervised"');
-    expect(routeSource).toContain("enabled: selfTrackQueriesEnabled");
+    expect(routeSource).toContain("enabled: Boolean(selfTrackQueriesEnabled && selectedSelfObservationRunId)");
+    expect(routeSource).toContain("enabled: selfTrackEnabled");
+    expect(routeSource).toContain("enabled: supervisedTrackEnabled");
     expect(routeSource).not.toContain('const selfTrackQueriesEnabled = forcedTrack === "self" || forcedTrack === undefined');
   });
 
@@ -484,7 +486,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('data-vui-recipe="evolution-workbench"');
     expect(routeSource).toContain('domainRecipe="evolution-multi-rail"');
     expect(routeSource).toContain('const showRouteToolbar = activeTrack !== "self" && evolutionView !== "live";');
-    expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : evolutionView === "live" ? `${styles.page} ${styles.supervisedLivePage}` : styles.page');
+    expect(routeSource).toContain('activeTrack === "self" || evolutionView === "live" ? `${styles.page} ${styles.supervisedLivePage}` : styles.page');
     expect(routeSource).toContain("header={");
     expect(routeSource).toContain("showRouteToolbar");
     // Page host fill is owned by VTrackWorkbenchPage; route styles only add chrome.
@@ -540,7 +542,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps source selection and guarded start inside the supervised setup state", () => {
-    expect(routeSource).toContain("setupOpen={supervisedSetupOpen || !supervisedWorkflowRun}");
+    expect(routeSource).toContain("setupOpen={supervisedSetupOpen || !selectedSupervisedWorkspaceRun}");
     expect(routeSource).toContain("onNew={openSupervisedSetup}");
     expect(routeSource).toContain("onCancel={supervisedWorkflowRun ? cancelSupervisedSetup : undefined}");
     expect(routeSource).toContain("EvolutionSupervisedLiveSetupPanel");
@@ -830,7 +832,7 @@ describe("EvolutionRoute library user flow contract", () => {
     );
     expect(runMutationsSource).toContain("void options.afterWorktreeRunChanged()");
     expect(routeSource).not.toContain("isEvolutionRunCommandAccepted");
-    expect(routeSource).toContain("visibleLiveRunSnapshot");
+    expect(routeSource).toContain("supervisedActiveRun: activeRunSnapshot ?? liveActiveRun");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
     expect(runMutationsSource).toContain("options.setLiveActiveRun((current: any) =>");
     expect(runMutationsSource).toContain(
@@ -937,7 +939,7 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("opens run evidence beside the main conversation on wide screens", () => {
-    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = showEvidence && !narrow;");
+    expect(supervisedConversationWorkspaceSource).toContain("const showDesktopEvidence = showEvidence && workspaceWidth >= 960;");
     expect(supervisedConversationWorkspaceSource).toContain("aside={desktopEvidence}");
     expect(supervisedConversationWorkspaceSource).toContain("resize={LIVE_RUN_RESIZE}");
     expect(supervisedConversationWorkspaceStyles.splitWorkspace).toContain("!overflow-hidden");
@@ -971,8 +973,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("moves evidence into a narrow-screen dialog while keeping the conversation primary", () => {
-    expect(supervisedConversationWorkspaceSource).toContain("const narrow = useNarrowViewport();");
-    expect(supervisedConversationWorkspaceSource).toContain("const showMobileEvidence = showEvidence && narrow;");
+    expect(supervisedConversationWorkspaceSource).toContain("const narrow = workspaceWidth < 880;");
+    expect(supervisedConversationWorkspaceSource).toContain("const showMobileEvidence = showEvidence && !showDesktopEvidence;");
     expect(supervisedConversationWorkspaceSource).toContain("open={showMobileEvidence}");
     expect(supervisedConversationWorkspaceStyles.mobileEvidenceDialog).toContain("!w-[min(88vw,420px)]");
     expect(supervisedConversationWorkspaceStyles.mobileEvidenceBody).toContain("overflow-hidden");

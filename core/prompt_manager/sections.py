@@ -344,9 +344,7 @@ def make_reading_rules_section() -> SystemPromptSection:
             "## 阅读规则\n"
             "- **默认定位**走 `code_symbol_tool` / `grep_search_tool` / `glob_tool`，不要一上来连串 shell 探查。\n"
             "- 需要命令行搜索时用有界 `rg -n \"关键词\" 路径`（无 Unix 管道）；Windows 上 `rg ... | head` 会被拦截。\n"
-            "- Windows 读小段用**完整 PowerShell**（如 `Get-Content -LiteralPath \"路径\" | Select-Object -First 80`），"
-            "不要假设默认 bash，也不要在 bash 里写 `Select-Object`。\n"
-            "- 不要调用 `read_file_tool`，不要整文件粗读；已读范围不重复读。\n"
+            "- 读取文件内容用 `read_file_tool`。只查看时可以分页；要修改已有文件时，先用 offset=0、max_lines=0 把该文件从头读到尾。\n"
             "- 同类 shell 失败 1 次后回到结构化工具，禁止换壳重试同一意图。\n"
         )
 
@@ -648,7 +646,7 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
         common = [
             "- 默认中文；代码、命令、路径、协议字段、必要报错可保留原文。",
             "- 同轮同类失败不重复：shell/被拦截失败 **1 次**后立即换 `code_symbol_tool`/`grep_search_tool`，禁止换壳连撞。",
-            "- 工具顺序：定位优先结构化工具 → 必要时有界 `rg`/小范围读 → 稳定修改批次后按影响面做最小 lint/compile/test；同一 HEAD、同一命令且相关输入未变化时复用通过结果，不重复执行。",
+            "- 工具顺序：定位优先结构化工具 → 读取文件内容用 `read_file_tool` → 稳定修改批次后按影响面做最小 lint/compile/test；同一 HEAD、同一命令且相关输入未变化时复用通过结果，不重复执行。",
             budget_rule,
             "- cli_tool/exec_command 共用 shell 方言路由；命令要短、可复现、输出有界（默认约 6KB），大结果只消费结论。",
             "- 记忆读取可用于查历史决策；record_learning 只在形成可复用经验或踩坑规律时写入。",
