@@ -527,4 +527,15 @@ def test_empty_micro_compact_state_shape():
         "skippedErrorOrMediaGroups": 0,
         "rollbackReason": "",
         "replacements": [],
+        "reinjection": {
+            "schemaVersion": 1,
+            "mode": "working_set_reinjection",
+            "injectedFiles": [],
+            "downgradedFiles": [],
+            "skippedPreservedPaths": [],
+            "skippedGitPathCount": 0,
+            "totalTokens": 0,
+            "entries": [],
+        },
+        "tokenMetering": {"tokenSource": "estimate"},
     }
