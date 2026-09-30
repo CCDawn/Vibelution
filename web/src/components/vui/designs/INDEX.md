@@ -34,6 +34,7 @@
 | ConversationFileRewindDialog | [product/conversation.md](./product/conversation.md#conversationfilerewinddialog) |
 | `ConversationRerunFileChoiceDialog` | [product/conversation.md](./product/conversation.md#conversationrerunfilechoicedialog) |
 | `ConversationMarkdownCodeBlock` | [product/conversation.md](./product/conversation.md#conversationmarkdowncodeblock) |
+| `ConversationTurnModelControl` | [product/conversation.md](./product/conversation.md#conversationturnmodelcontrol) |
 | Markdown 工作区文件链接 | [product/conversation.md](./product/conversation.md#markdown-工作区文件链接) |
 | Mermaid 代码块 | [product/conversation.md](./product/conversation.md#mermaid-代码块) |
 

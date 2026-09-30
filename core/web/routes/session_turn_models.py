@@ -54,3 +54,4 @@ class SessionLlmOptionsResponse(BaseModel):
     currentModelId: str = ""
     currentReasoningEffort: str = ""
     model: dict[str, Any] | None = None
+    choices: list[dict[str, Any]] = []

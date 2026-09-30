@@ -5,6 +5,7 @@ import type {
   ConversationMessage,
   SessionReferenceAttachment,
   SessionLlmModelOption,
+  SessionModelSelection,
   SessionTurnError,
   SkillLibraryItem,
   AgentPermissionPreset,
@@ -39,6 +40,15 @@ export type ConversationLlmControl = {
   disabled: boolean;
   pending: boolean;
   onReasoningEffortChange: (reasoningEffort: string) => void;
+};
+
+/** Composer "send once with model" control state (ZCode per-turn modelSelection). */
+export type ConversationTurnModelControl = {
+  choices: SessionLlmModelOption[];
+  sessionDefaultModelId: string;
+  selection: SessionModelSelection | null;
+  disabled: boolean;
+  onSelectionChange: (selection: SessionModelSelection | null) => void;
 };
 
 export type ConversationComposerVariant = "compact" | "codex";
@@ -147,6 +157,8 @@ export type ConversationViewProps = {
   /** Pending tool approval shown under the matching running tool (Codex-style). */
   toolApproval?: ConversationToolApprovalSurface | null;
   llmControl?: ConversationLlmControl;
+  /** Per-turn model override entry; absent when the session has no model choices. */
+  turnModelControl?: ConversationTurnModelControl;
   /** Compact context composition ring (left of send). */
   composerContextRing?: ComposerContextRingModel | null;
   onOpenComposerContextDetail?: () => void;

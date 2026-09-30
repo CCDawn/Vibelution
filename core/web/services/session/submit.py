@@ -150,6 +150,91 @@ class _SessionTurnQueued(Exception):
         self.payload = dict(payload or {})
 
 
+class SessionModelSelectionError(ValueError):
+    """Raised when a per-turn model override names a model outside llm-options.
+
+    Deliberately a ``ValueError`` sibling of ``SessionValidationError`` (same
+    user-input failure family) but a distinct type so the route can answer the
+    documented 400 instead of the generic 422 payload-validation status.
+    """
+
+
+def _normalize_turn_model_selection(value: Any, lang: str) -> dict[str, Any] | None:
+    """Validate a per-turn model override against the session llm-options list.
+
+    Returns the canonical persisted shape ``{modelId, modelRef, providerId,
+    reasoningEffort}`` (reasoningEffort omitted when not pinned), or ``None``
+    when the caller did not ask for an override. Unknown model ids and
+    unsupported reasoning efforts fail closed with a localized message: a
+    silently ignored override would run the turn on a model the user did not
+    choose.
+    """
+
+    s = _service()
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise SessionModelSelectionError(
+            s.text_for(
+                lang,
+                zh="本轮模型选择的格式无效。",
+                en="The per-turn model selection payload is invalid.",
+            )
+        )
+    raw_model_id = str(value.get("modelId") or value.get("modelRef") or "").strip()
+    if not raw_model_id:
+        raise SessionModelSelectionError(
+            s.text_for(
+                lang,
+                zh="本轮模型选择缺少模型 ID。",
+                en="The per-turn model selection is missing a model id.",
+            )
+        )
+    raw_reasoning_effort = str(value.get("reasoningEffort") or "").strip().lower()
+    candidates = s._session_llm_model_choices()
+    candidate = next(
+        (
+            choice
+            for choice in candidates
+            if raw_model_id
+            in {
+                str(choice.get("modelRef") or "").strip(),
+                str(choice.get("modelId") or "").strip(),
+            }
+        ),
+        None,
+    )
+    if candidate is None:
+        raise SessionModelSelectionError(
+            s.text_for(
+                lang,
+                zh=f"本轮模型 `{raw_model_id}` 不在当前可选模型列表中，请刷新模型选项后重试。",
+                en=f"Model `{raw_model_id}` is not in the selectable model list for this session; refresh the model options and retry.",
+            )
+        )
+    model_ref = str(candidate.get("modelRef") or candidate.get("modelId") or raw_model_id).strip()
+    normalized: dict[str, Any] = {
+        "modelId": str(candidate.get("modelId") or model_ref).strip(),
+        "modelRef": model_ref,
+        "providerId": str(candidate.get("providerId") or "").strip(),
+    }
+    if raw_reasoning_effort:
+        effort_values = [
+            str(item or "").strip().lower()
+            for item in list(candidate.get("reasoningEffortValues") or [])
+        ]
+        if effort_values and raw_reasoning_effort not in effort_values:
+            raise SessionModelSelectionError(
+                s.text_for(
+                    lang,
+                    zh=f"模型 `{model_ref}` 不支持推理强度 `{raw_reasoning_effort}`。",
+                    en=f"Model `{model_ref}` does not support reasoning effort `{raw_reasoning_effort}`.",
+                )
+            )
+        normalized["reasoningEffort"] = raw_reasoning_effort
+    return normalized
+
+
 def _active_session_turn_id_for_submit(service: Any, session_id: str) -> str:
     """Best-effort active turn id the queued turn will wait behind (diagnostics only)."""
 
@@ -230,6 +315,7 @@ def _enqueue_busy_session_turn(
     write_intent: bool | None,
     client_submission_id: str,
     lang: str,
+    model_selection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Accept a user turn that arrived while the session still had an active turn."""
 
@@ -305,6 +391,7 @@ def _enqueue_busy_session_turn(
         turn_mode=turn_mode,
         write_intent=write_intent,
         client_submission_id=client_submission_id,
+        model_selection=model_selection,
         lang=lang,
     )
     payload = _accepted_session_turn_payload(
@@ -722,6 +809,7 @@ def submit_session_message(
     include_started_turn_id: bool = False,
     lightweight_response: bool = False,
     queue_if_busy: bool = False,
+    model_selection: Mapping[str, Any] | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> dict:
     """Persist a user message and start a single web chat turn.
@@ -730,6 +818,12 @@ def submit_session_message(
     rejecting it when another turn of the same session is still running
     (Codex ``thread/queue`` parity). The queued turn starts once the active
     turn settles.
+
+    ``model_selection`` is a one-shot per-turn override
+    (``{modelId, reasoningEffort?}``): it changes only this turn's dialogue
+    model, never the session default. It is validated against the session
+    llm-options list, persisted with the turn record, and survives the busy
+    queue.
     """
 
     s = _service()
@@ -740,6 +834,12 @@ def submit_session_message(
     lang = s.get_web_language()
     conversation_id = str(session_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
+    # Validate before the busy/queue branch so a queued turn also refuses an
+    # unknown model up front instead of failing only when it drains.
+    normalized_model_selection = _normalize_turn_model_selection(
+        dict(model_selection) if isinstance(model_selection, Mapping) else None,
+        lang,
+    )
     development_admission_runtime = None
     existing_development_admission: dict[str, Any] | None = None
     if normalized_client_submission_id:
@@ -788,6 +888,7 @@ def submit_session_message(
                 turn_mode=turn_mode,
                 write_intent=write_intent,
                 client_submission_id=normalized_client_submission_id,
+                model_selection=normalized_model_selection,
                 lang=lang,
             )
         raise _session_still_running_error(s, lang)
@@ -818,6 +919,7 @@ def submit_session_message(
                         turn_mode=turn_mode,
                         write_intent=write_intent,
                         client_submission_id=normalized_client_submission_id,
+                        model_selection=normalized_model_selection,
                         lang=lang,
                     )
                 )
@@ -973,6 +1075,7 @@ def submit_session_message(
                     turn_mode=turn_mode,
                     write_intent=write_intent,
                     client_submission_id=normalized_client_submission_id,
+                    model_selection=normalized_model_selection,
                     lang=lang,
                 )
             raise _session_still_running_error(s, lang)
@@ -1059,6 +1162,11 @@ def submit_session_message(
         if normalized_client_submission_id:
             persisted_message_metadata["clientSubmissionId"] = normalized_client_submission_id
         persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
+        if normalized_model_selection:
+            # Admission record: the per-turn override rides the user message
+            # payload so the turn record shows which model this turn asked for
+            # even before (and independent of) the worker executing it.
+            persisted_message_metadata["modelSelection"] = dict(normalized_model_selection)
         # Kernel bridge is audit/traceOnly: never hold CHAT_STATE_LOCK or block
         # Prefer: respond-async accept on its latency (measured cold path ~5s).
         deferred_kernel_trace = {
@@ -1435,6 +1543,7 @@ def submit_session_message(
             "skill_invocation": skill_invocation,
             "active_skill_contract": active_skill_contract,
             "llm_slot": s.SESSION_LLM_SLOT_DIALOGUE,
+            "model_selection": dict(normalized_model_selection) if normalized_model_selection else None,
             "trace_context_carrier": dict(normalized_trace_context_carrier),
             "submit_timing_fields": dict(submit_timing_fields),
             "submit_started_at_monotonic": submit_started_at,
@@ -1541,6 +1650,7 @@ def submit_session_message_lightweight(
     turn_mode: str = "",
     write_intent: bool | None = None,
     queue_if_busy: bool = False,
+    model_selection: Mapping[str, Any] | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit a user message and return the smallest accepted-turn payload."""
@@ -1558,6 +1668,7 @@ def submit_session_message_lightweight(
         turn_mode=turn_mode,
         write_intent=write_intent,
         queue_if_busy=queue_if_busy,
+        model_selection=model_selection,
         trace_context_carrier=trace_context_carrier,
         include_started_turn_id=True,
         lightweight_response=True,

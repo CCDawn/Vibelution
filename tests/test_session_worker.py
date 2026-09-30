@@ -1800,6 +1800,97 @@ def test_formal_turn_pin_falls_back_when_frozen_model_unresolvable(
     assert warnings[0]["fields"]["expectedModelRef"] == "dashscope_main/qwen3.6-plus"
 
 
+def test_per_turn_model_selection_pins_dialogue_llm_for_one_turn(monkeypatch) -> None:
+    """A user per-turn override rebinds only this turn's slot resolution."""
+
+    def _resolve_by_binding(agent, slot, *, reasoning_effort=None):
+        binding = (agent or {}).get("llmBindings", {}).get(slot, {}).get("modelId", "")
+        return _resolved_llm_stub(binding or "autodl/GLM-5.3-flash")
+
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=_resolve_by_binding,
+    )
+
+    resolved = _resolved_llm_stub("autodl/GLM-5.3-flash")
+    result = worker._apply_per_turn_model_selection(
+        resolved,
+        {"modelId": "dashscope_main/qwen3.6-plus", "providerId": "dashscope_main"},
+        {},
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+        reasoning_effort="high",
+    )
+
+    assert result is not resolved
+    assert result.model_ref == "dashscope_main/qwen3.6-plus"
+    assert len(resolve_calls) == 1
+    pinned_agent, pinned_slot, pinned_effort = resolve_calls[0]
+    assert pinned_agent["llmBindings"]["dialogue"] == {"modelId": "dashscope_main/qwen3.6-plus"}
+    assert pinned_slot == "dialogue"
+    assert pinned_effort == "high"
+    applied = [kwargs for phase, kwargs in lifecycle if phase == "per_turn_model_override_applied"]
+    assert len(applied) == 1
+    assert applied[0]["fields"]["requestedModelRef"] == "dashscope_main/qwen3.6-plus"
+    # The Agent binding passed to the resolver is a throwaway copy: the
+    # session default must stay untouched.
+    assert _PIN_AGENT["llmBindings"]["dialogue"] == {"modelId": "autodl/GLM-5.3-flash"}
+
+
+def test_per_turn_model_selection_noop_when_model_already_resolved(monkeypatch) -> None:
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=lambda _agent, _slot, *, reasoning_effort=None: pytest.fail(
+            "same-model override must not re-resolve"
+        ),
+    )
+
+    resolved = _resolved_llm_stub("dashscope_main/qwen3.6-plus")
+    result = worker._apply_per_turn_model_selection(
+        resolved,
+        {"modelId": "dashscope_main/qwen3.6-plus"},
+        {},
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert result is resolved
+    assert resolve_calls == []
+    assert lifecycle == []
+
+
+def test_per_turn_model_selection_yields_to_challenge_frozen_route(monkeypatch) -> None:
+    """A formal research turn keeps its frozen route; the override is skipped."""
+
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=lambda _agent, _slot, *, reasoning_effort=None: pytest.fail(
+            "challenge route must outrank the user override"
+        ),
+    )
+
+    resolved = _resolved_llm_stub("autodl/GLM-5.3-flash")
+    result = worker._apply_per_turn_model_selection(
+        resolved,
+        {"modelId": "dashscope_main/qwen3.6-plus"},
+        _PIN_CONTEXT,
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert result is resolved
+    assert resolve_calls == []
+    skipped = [kwargs for phase, kwargs in lifecycle if phase == "per_turn_model_override_skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["fields"]["reason"] == "challenge_frozen_route_wins"
+
+
 def test_continuation_loop_stop_at_agent_return_carries_usage(tmp_path, monkeypatch) -> None:
     """A cooperative stop must land the completed invocation's usage fact."""
 

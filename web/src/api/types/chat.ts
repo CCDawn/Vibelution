@@ -118,6 +118,19 @@ export type SessionLlmOptions = {
   currentModelId: string;
   currentReasoningEffort: string;
   model: SessionLlmModelOption | null;
+  /** Full selectable list for per-turn overrides (composer "send once with model" menu). */
+  choices?: SessionLlmModelOption[];
+};
+
+/**
+ * One-shot per-turn model override (ZCode modelSelection parity): changes only
+ * the turn being sent, never the session default. `modelId` accepts the
+ * canonical modelRef; `reasoningEffort` is optional and validated against the
+ * chosen model's supported values.
+ */
+export type SessionModelSelection = {
+  modelId: string;
+  reasoningEffort?: string;
 };
 
 /** In-conversation SFT dataset curation decision for one assistant answer. */
@@ -785,6 +798,8 @@ export type SessionQueuedTurn = {
   references?: unknown[];
   lastError?: string;
   clientSubmissionId?: string;
+  /** Per-turn model override persisted with the queued row (null = follow session default). */
+  modelSelection?: SessionModelSelection | null;
   createdAt?: string;
   updatedAt?: string;
 };

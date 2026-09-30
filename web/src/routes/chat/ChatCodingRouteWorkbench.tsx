@@ -68,6 +68,7 @@ import {
     SessionSummary,
   SessionStreamEvent,
   SessionReferenceAttachment,
+  SessionModelSelection,
   SessionTurnAcceptedResponse,
   ConversationMessage,
   ToolCall,
@@ -647,6 +648,10 @@ export function ChatCodingRouteWorkbench() {
   // Per-session opt-in; the backend only holds the latest capture per session,
   // so remember the operator choice per session instead of globally.
   const [promptSuggestionEnabledBySession, setPromptSuggestionEnabledBySession] = useState<Record<string, boolean>>({});
+  // Sticky per-turn model override (ZCode modelSelection semantics): follows
+  // the session default until the user pins a model, then stays pinned across
+  // sends until changed or restored. Keyed per session.
+  const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>({});
   const [groupManageDialogOpen, setGroupManageDialogOpen] = useState(false);
   const {
     groupComposerOpen,
@@ -2446,6 +2451,7 @@ export function ChatCodingRouteWorkbench() {
     activeReferenceAttachments,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
+    turnModelSelection: activeSessionId ? turnModelSelections[activeSessionId] ?? null : null,
     resolvedEditTarget,
     activeEditTarget,
     composerDisabled: companionComposerDisabled,
@@ -2475,6 +2481,26 @@ export function ChatCodingRouteWorkbench() {
     }));
   }, [activeSessionId]);
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
+  const turnModelSelection = activeSessionId ? turnModelSelections[activeSessionId] ?? null : null;
+  const turnModelControl = activeSessionId && sessionLlmOptions?.choices?.length ? {
+    choices: sessionLlmOptions.choices,
+    sessionDefaultModelId: sessionLlmOptions.currentModelId,
+    selection: turnModelSelection,
+    disabled: (
+      sessionLlmOptionsQuery.isLoading
+      || sessionLlmOptionsQuery.isError
+      || companionComposerDisabled
+    ),
+    onSelectionChange: (selection: SessionModelSelection | null) => {
+      if (!activeSessionId) {
+        return;
+      }
+      setTurnModelSelections((current) => ({
+        ...current,
+        [activeSessionId]: selection,
+      }));
+    },
+  } : undefined;
   const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
     model: sessionLlmOptions.model,
     sessionId: activeSessionId,
@@ -3333,6 +3359,7 @@ export function ChatCodingRouteWorkbench() {
         },
       } : undefined,
       llmControl: verifiedCompanionMode ? undefined : sessionLlmControl,
+      turnModelControl: verifiedCompanionMode ? undefined : turnModelControl,
       composerContextRing: verifiedCompanionMode ? null : composerContextRing,
       onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
       onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
