@@ -95,6 +95,16 @@ STOP_INITIATORS = frozenset({"user", "model"})
 FENCING_DECISION_ALLOWED = "allowed"
 FENCING_DECISION_DROPPED = "dropped"
 
+# Notification sealing: when the owning session turn is explicitly cancelled,
+# the whole descendant subtree is sealed so late completion notifications can
+# never wake a settled turn. Idempotent keep-first marks; normal completion
+# never seals.
+SEAL_REASON_PARENT_TURN_CANCELLED = "parent_turn_cancelled"
+
+# Descendant cascade collection bounds: breadth comes from the active-task
+# index, the depth cap plus the visited set bound the walk against registry
+# corruption (a parentSessionId cycle) and runaway chains.
+MAX_CASCADE_DEPTH = 8
 # Outcomes of ``request_background`` (mirrors the request_stop verb): a task
 # whose threshold elapsed without completing is stamped once and keeps
 # running; the parent learns "already backgrounded, completion will notify".
@@ -190,6 +200,12 @@ def new_snapshot(
         "sourceSessionId": str(source_session_id or "").strip(),
         "stopInitiator": None,
         "pendingMessages": [],
+        "notificationSealed": False,
+        "notificationSealedAt": "",
+        "notificationSealedReason": "",
+        "notificationSealedByTurnId": "",
+        "cascadeStop": None,
+        "lastNotificationDrop": None,
         "output": str(output or ""),
         "label": str(label or "").strip(),
         "resultSummary": "",
@@ -231,6 +247,18 @@ def normalize_snapshot(payload: Any) -> dict[str, Any]:
     stop_initiator = state.get("stopInitiator")
     state["stopInitiator"] = (
         str(stop_initiator) if str(stop_initiator or "") in STOP_INITIATORS else None
+    )
+    state["notificationSealed"] = bool(state.get("notificationSealed"))
+    state["notificationSealedAt"] = str(state.get("notificationSealedAt") or "")
+    state["notificationSealedReason"] = str(state.get("notificationSealedReason") or "")
+    state["notificationSealedByTurnId"] = str(state.get("notificationSealedByTurnId") or "")
+    state["cascadeStop"] = (
+        dict(state.get("cascadeStop")) if isinstance(state.get("cascadeStop"), dict) else None
+    )
+    state["lastNotificationDrop"] = (
+        dict(state.get("lastNotificationDrop"))
+        if isinstance(state.get("lastNotificationDrop"), dict)
+        else None
     )
     messages = state.get("pendingMessages")
     state["pendingMessages"] = [
@@ -421,6 +449,108 @@ class RuntimeTaskStore:
 
         return self.update_task(task_id, _mutate)
 
+    def seal_and_request_stop(
+        self,
+        task_id: str,
+        *,
+        reason: str,
+        turn_id: str = "",
+        cascaded_from: str = "",
+        initiator: str = "user",
+    ) -> dict[str, Any] | None:
+        """Seal completion notifications and record stop intent in one RMW.
+
+        Used by the descendant cascade when an owning session turn is
+        explicitly cancelled. The seal is keep-first idempotent: re-sealing
+        keeps the original seal timestamp and reason so the audit trail shows
+        the first cause. Stop intent follows the same rules as
+        :meth:`request_stop` (terminal tasks are never re-armed), but the seal
+        itself still lands on a terminal task: a settled task may still emit
+        late delivery attempts that must be dropped.
+        """
+
+        normalized = str(initiator or "").strip().lower()
+        if normalized not in STOP_INITIATORS:
+            raise ValueError(f"Unknown stop initiator: {normalized or '(empty)'}")
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            raise ValueError("Notification sealing requires a non-empty reason.")
+
+        def _mutate(state: dict[str, Any]) -> dict[str, Any]:
+            now = _now_iso()
+            if not state.get("notificationSealed"):
+                state["notificationSealed"] = True
+                state["notificationSealedAt"] = now
+                state["notificationSealedReason"] = normalized_reason
+                state["notificationSealedByTurnId"] = str(turn_id or "").strip()
+            if cascaded_from and not state.get("cascadeStop"):
+                state["cascadeStop"] = {
+                    "cascadedFrom": str(cascaded_from).strip(),
+                    "cascadedAt": now,
+                    "reason": normalized_reason,
+                    "turnId": str(turn_id or "").strip(),
+                }
+            if not is_terminal_status(str(state.get("status") or "")):
+                state["stopInitiator"] = normalized
+                state["stopRequestedAt"] = now
+                state["updatedAt"] = now
+            else:
+                state["updatedAt"] = now
+            return state
+
+        return self.update_task(task_id, _mutate)
+
+    def is_notification_sealed(self, task_id: str) -> bool:
+        """True when late completion notifications for the task are sealed."""
+
+        state = self.load_state(task_id)
+        return bool(state.get("notificationSealed"))
+
+    def collect_cascade_targets(
+        self, session_id: str, *, max_depth: int = MAX_CASCADE_DEPTH
+    ) -> list[dict[str, Any]]:
+        """Collect the active descendant task subtree of one session.
+
+        Level 0 holds tasks whose ``parentSessionId`` equals ``session_id``;
+        every ``child_session`` task recurses into its ``taskId`` as the next
+        session id, so grandchildren spawned by a child session are covered.
+        The walk is bounded by the visited set (cycles cannot loop it) and by
+        ``max_depth``. Returns snapshots in breadth-first order, annotated
+        in-memory only with ``cascadeDepth``.
+        """
+
+        root = str(session_id or "").strip()
+        if not root or max_depth <= 0:
+            return []
+        by_parent: dict[str, list[dict[str, Any]]] = {}
+        for state in self.active_task_states():
+            parent = str(state.get("parentSessionId") or "").strip()
+            if not parent:
+                continue
+            by_parent.setdefault(parent, []).append(state)
+        targets: list[dict[str, Any]] = []
+        visited_tasks: set[str] = set()
+        visited_sessions = {root}
+        frontier = [root]
+        for depth in range(max_depth):
+            next_frontier: list[str] = []
+            for current in frontier:
+                for state in by_parent.get(current, []):
+                    task_id = str(state.get("taskId") or "").strip()
+                    if not task_id or task_id in visited_tasks:
+                        continue
+                    visited_tasks.add(task_id)
+                    annotated = dict(state)
+                    annotated["cascadeDepth"] = depth
+                    targets.append(annotated)
+                    if str(state.get("kind") or "").strip() == KIND_CHILD_SESSION:
+                        if task_id not in visited_sessions:
+                            visited_sessions.add(task_id)
+                            next_frontier.append(task_id)
+            frontier = next_frontier
+            if not frontier:
+                break
+        return targets
     def request_background(
         self, task_id: str, *, reason: str = "auto_background_timeout"
     ) -> str:
