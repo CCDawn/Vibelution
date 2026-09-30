@@ -106,23 +106,23 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
     responsive={{ enabled: true, rail: { label: "搜索与筛选" }, inspector: { label: "节点详情", open: detailOpen, onOpenChange: setDetailOpen, narrowPlacement: "bottom" } }}
     railClassName={styles.atlasRail} canvasClassName={styles.atlasCanvas} inspectorClassName={styles.atlasInspectorHost}
     rail={<VSurface as="div" tone="rail" padding="none" className={styles.atlasRailInner} data-vui-region="memory-graph-filters">
-      <div><p className={styles.atlasEyebrow}>MEMORY ATLAS</p><h2 className="mt-2 text-base font-medium">{copy.knowledgeGraph}</h2></div>
+      <div><p className={styles.atlasEyebrow}>MEMORY ATLAS</p><h2 className={styles.railTitle}>{copy.knowledgeGraph}</h2></div>
       <label className={styles.atlasSearch}><Search size={16} /><VNativeInput aria-label={copy.graphSearchPlaceholder} placeholder={copy.graphSearchPlaceholder}
         value={graphSearchText} onChange={event => { onGraphSearchTextChange(event.target.value); clearSelection(); }} />
         {graphSearchText && <VButton variant="ghost" aria-label="清空搜索" icon={<X size={14} />} onClick={() => { onGraphSearchTextChange(""); clearSelection(); }} />}</label>
       <div><p className={styles.atlasEyebrow}>{copy.graphNodeTypes}</p><div className={styles.atlasFilters}>
         {graphTypeEntries.map(([type, count]) => <VButton key={type} variant="ghost" contentLayout="plain" aria-pressed={activeGraphNodeType === type}
           data-active={activeGraphNodeType === type} onClick={() => { onActiveGraphNodeTypeChange(activeGraphNodeType === type ? "" : type); clearSelection(); }}>
-          <span>{GRAPH_NODE_TYPE_LABELS[type] ?? type}</span><span className="text-xs text-[var(--fg-tertiary)]">{count}</span>
+          <span>{GRAPH_NODE_TYPE_LABELS[type] ?? type}</span><span className={styles.typeCount}>{count}</span>
         </VButton>)}</div></div>
       {(graphSearchText || activeGraphNodeType) && <VButton variant="ghost" className={styles.graphClearFocusButton} onClick={reset}>{copy.graphClearFocus}</VButton>}
-      {graphSearchText && <div className="grid gap-1"><span className={styles.atlasEyebrow}>{slice.matches.length} 条匹配</span>{slice.matches.slice(0, 20).map(node =>
-        <VButton key={node.id} variant="ghost" className="justify-start text-left" onClick={() => select(node.id)}>{node.label}</VButton>)}</div>}
-      <p className="mt-auto pt-6 text-xs leading-relaxed text-[var(--fg-tertiary)]">{copy.graphReadOnly} · {copy.graphAcl}</p>
+      {graphSearchText && <div className={styles.searchResults}><span className={styles.atlasEyebrow}>{slice.matches.length} 条匹配</span>{slice.matches.slice(0, 20).map(node =>
+        <VButton key={node.id} variant="ghost" className={styles.searchResult} onClick={() => select(node.id)}>{node.label}</VButton>)}</div>}
+      <p className={styles.accessNote}>{copy.graphReadOnly} · {copy.graphAcl}</p>
     </VSurface>}
     canvas={<div className={styles.atlasMain} data-vui-region="memory-graph-canvas">
-      <div className={styles.atlasHeading}><div><p className={styles.atlasEyebrow}>MEMORY ATLAS</p><h2 className="mt-2 text-xl font-medium">{copy.knowledgeGraph}</h2><p className="mt-2 text-xs text-[var(--fg-secondary)]">从一个线索开始，沿着关系找到依据。</p></div>
-        <div className="flex items-center gap-1"><VButton variant="ghost" aria-pressed={!flat} onClick={() => setFlat(false)} icon={<Layers3 size={14} />}>3D</VButton><VButton variant="ghost" aria-pressed={flat} onClick={() => setFlat(true)} icon={<Network size={14} />}>平面</VButton></div></div>
+      <div className={styles.atlasHeading}><div><p className={styles.atlasEyebrow}>MEMORY ATLAS</p><h2 className={styles.canvasTitle}>{copy.knowledgeGraph}</h2><p className={styles.canvasHint}>从一个线索开始，沿着关系找到依据。</p></div>
+        <div className={styles.viewModes}><VButton variant="ghost" aria-pressed={!flat} onClick={() => setFlat(false)} icon={<Layers3 size={14} />}>3D</VButton><VButton variant="ghost" aria-pressed={flat} onClick={() => setFlat(true)} icon={<Network size={14} />}>平面</VButton></div></div>
       <div className={styles.atlasStage}>
         {!graphPayload && props.isGraphLoading ? <div role="status" className={styles.atlasEmpty}>{copy.loading}</div> : !graphPayload && props.graphError ? <div role="alert" className={styles.atlasEmpty}><strong>图谱加载失败</strong><p>{props.graphError}</p><VButton onClick={props.onRetryGraph}>重试</VButton></div> : slice.nodes.length ? <Suspense fallback={<div role="status" className={styles.atlasEmpty}>{copy.loading}</div>}>
           <MemoryGraphCanvas nodes={slice.nodes} edges={slice.edges} selectedNodeId={selectedId} onSelectNode={select}
@@ -131,13 +131,13 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
         </Suspense> : <div role="status" className={styles.atlasEmpty}><Network size={28} /><strong>{graphSearchText || activeGraphNodeType ? "没有找到相关内容" : "当前范围还没有可显示的图谱"}</strong><p>仅展示当前权限范围内已加载的节点。</p></div>}
         <div className={styles.atlasContext}>
           {graphSearchText && <div className={styles.atlasActionRow}><span>{slice.matches.length} 条匹配 · {Math.max(0, slice.nodes.length - slice.matches.length)} 条关联</span><VButton variant="ghost" aria-pressed={matchOnly} onClick={() => { setMatchOnly(value => !value); clearSelection(); }}>{matchOnly ? "恢复关联上下文" : "仅看匹配项"}</VButton></div>}
-          {selectedGraphNode && <div className={styles.atlasActionRow}><span className="max-w-48 truncate">{selectedGraphNode.label}</span><VButton variant="ghost" onClick={() => { setDepth(value => value ? 0 : 1); onClearGraphFilters(); }}>{depth ? "返回全部" : "只看相关"}</VButton>
+          {selectedGraphNode && <div className={styles.atlasActionRow}><span className={styles.selectedTitle}>{selectedGraphNode.label}</span><VButton variant="ghost" onClick={() => { setDepth(value => value ? 0 : 1); onClearGraphFilters(); }}>{depth ? "返回全部" : "只看相关"}</VButton>
             {depth === 1 && <VButton variant="ghost" onClick={() => setDepth(2)}>再展开一层</VButton>}{!detailOpen && <VButton variant="ghost" onClick={() => setDetailOpen(true)}>查看详情</VButton>}
             <VButton variant="ghost" aria-label="取消选择" icon={<X size={14} />} onClick={clearSelection} /></div>}
         </div>
         <div className={styles.atlasTools}><VButton variant="ghost" aria-label="恢复全景" icon={<Maximize2 size={16} />} onClick={reset} /><VButton variant="ghost" aria-label="聚焦选中节点" isDisabled={!selectedId} icon={<Focus size={16} />} onClick={() => setFocusToken(value => value + 1)} /><VButton variant="ghost" aria-label="节点列表" aria-pressed={showList} icon={<List size={16} />} onClick={() => setShowList(value => !value)} /></div>
       </div>
-      {graphPayload && props.graphError && <p role="alert" className="px-6 text-xs text-[var(--fg-secondary)]">刷新失败，当前显示上次加载的图谱。<VButton variant="ghost" onClick={props.onRetryGraph}>重试</VButton></p>}
+      {graphPayload && props.graphError && <p role="alert" className={styles.refreshError}>刷新失败，当前显示上次加载的图谱。<VButton variant="ghost" onClick={props.onRetryGraph}>重试</VButton></p>}
       <div className={styles.atlasFooter}><span>{copy.graphVisibleNodes}: {slice.nodes.length} · {copy.graphVisibleEdges}: {slice.edges.length}{graphPayload?.summary.truncated ? " · 已达到加载上限" : ""}</span><span>{flat ? "拖动平移" : "拖动旋转 · 右键平移"} · 滚轮缩放</span></div>
       {showList && <div className={styles.atlasNodeList} data-vui-region="memory-graph-node-list">{slice.nodes.map(node => <VButton key={node.id} variant="ghost" onClick={() => select(node.id)}>{node.label}</VButton>)}</div>}
     </div>} inspector={inspector} />;

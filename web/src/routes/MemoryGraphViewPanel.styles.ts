@@ -1,6 +1,17 @@
 import { vuiControlQuietClass } from "../design/vuiChromeRecipes";
 
 const styles = {
+  railTitle: "mt-2 text-base font-medium",
+  typeCount: "text-xs text-[var(--fg-tertiary)]",
+  searchResults: "grid gap-1",
+  searchResult: "justify-start text-left",
+  accessNote: "mt-auto pt-6 text-xs leading-relaxed text-[var(--fg-tertiary)]",
+  canvasTitle: "mt-2 text-xl font-medium",
+  canvasHint: "mt-2 text-xs text-[var(--fg-secondary)]",
+  viewModes: "flex items-center gap-1",
+  selectedTitle: "max-w-48 truncate",
+  refreshError: "px-6 text-xs text-[var(--fg-secondary)]",
+
   atlasRail: "!border-r !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-rail)]",
   atlasRailInner: "flex h-full min-h-0 flex-col gap-6 overflow-auto px-4 py-6",
   atlasEyebrow: "text-xs tracking-wide text-[var(--fg-tertiary)]",
