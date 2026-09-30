@@ -305,16 +305,15 @@ rules:
     paths:
       - "web/src/routes/ChatCodingRoute.tsx"
       - "web/src/routes/ChatCodingRoute.styles.ts"
-      - "web/src/routes/ChatCodingRoute.layout.test.ts"
       - "web/src/routes/ChatCodingRoute.*"
       - "web/src/routes/chat/**"
       - "web/src/components/conversation/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run src/routes/ChatCodingRoute.layout.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/routes/chat src/components/conversation --root web"
       - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts src/api/fullStackApiBoundary.test.ts --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "Small Chat UI changes keep a focused route test, the global VUI policy contracts, the zero-budget API boundary, and incremental typecheck; they do not imply backend pytest or a full build."
+      - "Chat UI changes run the route and conversation behavior tests, the global VUI policy contracts, the zero-budget API boundary, and incremental typecheck. They do not run a source-string layout file or backend pytest."
 
   - id: web-route-contract-coverage
     description: "Low-churn Web route modules share one importable public-route contract and a direct focused selector boundary."
@@ -659,15 +658,14 @@ rules:
     paths:
       - "web/src/routes/TeamsRoute.tsx"
       - "web/src/routes/TeamsRoute.styles.ts"
-      - "web/src/routes/TeamsRoute.layout.test.ts"
       - "web/src/routes/TeamsRoute.*"
       - "web/src/routes/teams/**"
     commands:
-      - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts --root web"
+      - "node web/node_modules/vitest/vitest.mjs run src/routes/teams --root web"
       - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts src/components/vui/vuiComponentDesignContract.test.ts src/components/vui/vuiImportBoundary.test.ts src/design/vuiSurfaceAlphaPolicy.test.ts src/api/fullStackApiBoundary.test.ts --root web"
       - "node web/node_modules/typescript/bin/tsc -b web/tsconfig.json --pretty false"
     notes:
-      - "Small Teams UI changes keep a focused route test, the global VUI policy contracts, the zero-budget API boundary, and incremental typecheck; they do not imply workflow pytest or a full build."
+      - "Teams UI changes run the route behavior tests, the global VUI policy contracts, the zero-budget API boundary, and incremental typecheck. They do not run a source-string layout file, workflow pytest, or a full build."
 
   - id: frontend-build-inputs
     description: "Frontend dependency, compiler, bundler, entrypoint, and static build inputs."

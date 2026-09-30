@@ -52,7 +52,7 @@ TeamsRoute (orchestration)
 
 ## Verification
 
-- Layout: `TeamsRoute.layout.test.ts` (includes Phase 1-3 source composites)
+- Behavior: `src/routes/teams/**`
 - Contracts: `useSourceCollectionWorkspace.contract.test.ts`, `useResearchExperimentWorkspace.contract.test.ts`, `useTeamsShellCanvasWorkspace.contract.test.ts`, `teamMutationSurface.contract.test.ts`, `composers.contract.test.ts`
 - Pure unit: `teamMutationSurface.test.ts`, F3 `presentation*.test.ts`
 - Backend: `tests/test_team_workflow_facade_contract.py`
@@ -130,7 +130,7 @@ SC presentation:
 | Presentation pipeline | pipeline orchestrator + mid + tail |
 | Shell phase | shell + research bag builder + canvas/board pages |
 
-**Verification:** `TeamsRoute.layout.test.ts` + `src/routes/teams/**` → **101 files / 402 tests green**.
+**Verification:** `src/routes/teams/**`.
 
 ## Out of scope for this ship (不再作为编排连环债)
 

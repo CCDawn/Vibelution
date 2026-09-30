@@ -461,7 +461,7 @@ def test_frontend_route_paths_recommend_targeted_validation(tmp_path: Path) -> N
     item = item_by_branch(report, "codex/teams")
 
     assert item.decision == "merge_ready"
-    assert "npm --prefix web run test -- TeamsRoute.layout.test.ts" in item.recommended_validations
+    assert "npm --prefix web run test -- src/routes/teams" in item.recommended_validations
     assert "npm --prefix web run build" in item.recommended_validations
     assert "frontend_surface" in item.risk_reasons
 
