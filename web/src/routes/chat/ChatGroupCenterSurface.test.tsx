@@ -220,6 +220,79 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).not.toContain("暂无通知。");
   });
 
+  it("labels the project-bus view as a broadcast instead of borrowing room metadata", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          projectBusActive: true,
+          standardGroupRoomActive: false,
+          projectBusTimeline: { events: [], activeAgentCount: 3 } as never,
+        })}
+      />,
+    );
+
+    expect(html).toContain("全局广播");
+    expect(html).toContain("3 位 active Agent");
+    expect(html).not.toContain("round_robin");
+    expect(html).not.toContain("discussion");
+  });
+
+  it("does not report group participants as the project-bus active agent count", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          projectBusActive: true,
+          standardGroupRoomActive: false,
+          projectBusTimeline: undefined,
+          availableGroupParticipantCount: 7,
+        })}
+      />,
+    );
+
+    expect(html).toContain("正在统计 active Agent");
+    expect(html).not.toContain("7 位 active Agent");
+  });
+
+  it("keeps group-room rounds out of an empty project-bus notice stream", () => {
+    const baseRoom = baseProps().activeGroupRoom!;
+    const room = {
+      ...baseRoom,
+      rounds: [{
+        roundId: "r1",
+        status: "completed",
+        mode: "round_robin",
+        purpose: "discussion",
+        topic: "群聊议题不应出现在广播流",
+        startedAt: "2026-07-20T00:00:00Z",
+        updatedAt: "2026-07-20T00:01:00Z",
+        speakerOrder: [],
+        messages: [],
+      }],
+    } as never;
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          projectBusActive: true,
+          standardGroupRoomActive: false,
+          activeGroupRoom: room,
+          projectBusTimeline: { events: [], activeAgentCount: 0 } as never,
+        })}
+      />,
+    );
+
+    expect(html).toContain("暂无通知。");
+    expect(html).not.toContain("群聊议题不应出现在广播流");
+    expect(html).not.toContain("第 1 轮");
+  });
+
+  it("keeps the standard group-room header on room mode and purpose labels", () => {
+    const html = renderToStaticMarkup(<ChatGroupCenterSurface {...baseProps()} />);
+
+    expect(html).toContain("轮询讨论");
+    expect(html).toContain("讨论");
+    expect(html).not.toContain("全局广播");
+  });
+
   it("renders a completed group round topic and message bubble", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface

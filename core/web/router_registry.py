@@ -29,6 +29,7 @@ _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.session_export",
     "core.web.routes.chat_rooms",
     "core.web.routes.cli_agents",
+    "core.web.routes.runtime_tasks",
     "core.web.routes.project_agent_bus",
     "core.web.routes.external_agent",
     "core.web.routes.kernel",
