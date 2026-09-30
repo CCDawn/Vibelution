@@ -86,6 +86,12 @@ def format_blocked_reason(
         return f"迭代决策无效：{detail}" if detail else "迭代决策无效"
     if code == "auto_advance_not_ready":
         return f"自动推进未就绪：{detail}" if detail else "自动推进未就绪"
+    if code == "consecutive_errors_paused":
+        return (
+            f"连续错误暂停：{detail}" if detail else "连续错误达到阈值，调度已暂停"
+        )
+    if code == "deadlock_paused":
+        return f"图调度死锁暂停：{detail}" if detail else "图调度死锁，调度已暂停"
     if code == "graph_dispatch_invalid":
         return detail or "图调度失败"
     if detail:

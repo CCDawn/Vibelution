@@ -7,7 +7,7 @@ import json
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -1137,6 +1137,70 @@ def _runtime_state_path() -> Path:
     )
 
 
+def _pid_is_alive(pid: int) -> bool:
+    normalized_pid = int(pid or 0)
+    if normalized_pid <= 0:
+        return False
+    try:
+        import psutil
+
+        return bool(psutil.pid_exists(normalized_pid))
+    except Exception:
+        return False
+
+
+def _parse_snapshot_updated_at(state: dict) -> datetime | None:
+    raw = str(state.get("updatedAt") or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+# Runtime Manager refreshes state.json at sub-second cadence while its loop
+# runs (DAEMON_LOOP_INTERVAL_SECONDS = 0.45) and on every command, so a
+# 15-minute-old snapshot means the writer is gone or the file is orphaned.
+# The threshold sits far above any legitimate refresh gap (system suspend,
+# heavy load) yet far below the multi-day staleness observed in the field,
+# where a dead daemon kept serving workbench pids that no longer existed.
+RUNTIME_MANAGER_SNAPSHOT_MAX_AGE_SECONDS = 900
+
+
+def _runtime_manager_workbench_observation_trustworthy(state: dict, manager_pid: int) -> bool:
+    """Decide whether the daemon snapshot's workbench observation bits are live evidence.
+
+    Two independent failure modes invalidate them:
+
+    - daemon dead: state.json outlives its writer by days and then only freezes
+      stale pids while still claiming ``backendAlive``.
+    - snapshot stale: a live daemon refreshes state.json continuously, so an
+      ``updatedAt`` older than the threshold means nobody is maintaining it.
+
+    A snapshot that claims backend observation while its ``backendPid`` is
+    provably dead is equally falsified (backend crashed after the last write).
+    """
+
+    if int(manager_pid or 0) <= 0:
+        return False
+    updated_at = _parse_snapshot_updated_at(state)
+    if updated_at is None:
+        return False
+    age = datetime.now(timezone.utc) - updated_at
+    if age > timedelta(seconds=RUNTIME_MANAGER_SNAPSHOT_MAX_AGE_SECONDS):
+        return False
+    workbench = state.get("workbench")
+    if isinstance(workbench, dict) and bool(workbench.get("backendObserved")):
+        claimed_backend_pid = int(workbench.get("backendPid") or 0)
+        if claimed_backend_pid > 0 and not _pid_is_alive(claimed_backend_pid):
+            return False
+    return True
+
+
 def _load_runtime_manager_snapshot() -> dict:
     """Return a shell-safe runtime-manager summary without live process inventory."""
 
@@ -1152,6 +1216,19 @@ def _load_runtime_manager_snapshot() -> dict:
     payload["managerPid"] = manager_pid
     payload["runtimeState"] = "running" if manager_pid > 0 else str(payload.get("runtimeState") or "idle")
     payload["projectRoot"] = str(PROJECT_ROOT)
+    if not _runtime_manager_workbench_observation_trustworthy(payload, manager_pid):
+        # The persisted state.json outlives its daemon (or its backend) and
+        # then only carries frozen observation: dead pids advertised as alive.
+        # Drop just the live-observation bits; durable lifecycle fields such as
+        # desiredState/observedState keep feeding the status lines, and the
+        # summary request self-attestation re-observes the live backend below.
+        workbench = payload.get("workbench")
+        if isinstance(workbench, dict):
+            workbench["backendPid"] = 0
+            workbench["backendPortOwnerPid"] = 0
+            workbench["backendAlive"] = False
+            workbench["backendHealthy"] = False
+            workbench["backendObserved"] = False
     payload.setdefault("workbench", {})
     payload.setdefault("runtimeManager", {})
     payload.setdefault("residualProcesses", {"count": 0, "items": [], "mode": "not_scanned_for_summary"})
@@ -1992,15 +2069,22 @@ def _observe_backend_from_summary_request(workbench: dict) -> dict:
     must not downgrade the workbench to "backend missing" while it is visibly
     answering. Only apply while the workbench is expected open and the port is
     not owned by a conflicting process.
+
+    First-hand evidence also outranks a snapshot that claims observation for a
+    different pid: a frozen daemon state can advertise long-dead pids as alive
+    for days. When the claimed ``backendPid`` does not match this process,
+    replace the observation with the identity of the process actually
+    answering instead of letting the stale claim suppress the correction.
     """
 
     if str(workbench.get("desiredState") or "").strip() != "open":
         return workbench
     if bool(workbench.get("backendPortConflict")):
         return workbench
-    if bool(workbench.get("backendObserved")) and bool(workbench.get("backendAlive")):
-        return workbench
     own_pid = os.getpid()
+    claimed_pid = int(workbench.get("backendPid") or 0)
+    if claimed_pid == own_pid and bool(workbench.get("backendObserved")) and bool(workbench.get("backendAlive")):
+        return workbench
     observed = dict(workbench)
     observed.update(
         {
@@ -2008,8 +2092,8 @@ def _observe_backend_from_summary_request(workbench: dict) -> dict:
             "backendAlive": True,
             "backendHealthy": True,
             "backendPortListening": True,
-            "backendPid": int(workbench.get("backendPid") or 0) or own_pid,
-            "backendPortOwnerPid": int(workbench.get("backendPortOwnerPid") or 0) or own_pid,
+            "backendPid": own_pid,
+            "backendPortOwnerPid": own_pid,
             "backendPortOwnerTrusted": True,
             "backendObservedSource": "summary_request",
         }

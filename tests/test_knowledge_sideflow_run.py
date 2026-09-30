@@ -1657,8 +1657,9 @@ def test_knowledge_delivery_query_is_not_limited_to_first_500_events(
         harness.close()
 
 
-def test_ledger_schema_is_v9() -> None:
-    assert SCHEMA_VERSION == 9
+def test_ledger_schema_is_v10() -> None:
+    # v10 (P2-e) rebuilt workflow_runs to add the recoverable 'paused' status.
+    assert SCHEMA_VERSION == 10
 
 
 def test_problem_understanding_trigger_accepts_stage_one_pinned_run(

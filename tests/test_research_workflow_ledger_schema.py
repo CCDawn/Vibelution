@@ -413,3 +413,89 @@ def _prepare_legacy_v5(path: Path) -> None:
         (V5_LEGACY_CHECKSUM,),
     )
     connection.close()
+
+
+def test_v10_rebuild_adds_paused_status_and_preserves_data(tmp_path: Path) -> None:
+    """P2-e: the workflow_runs rebuild exposes the recoverable 'paused' status.
+
+    A ledger that already carries rows (the upgrade path) is rebuilt without
+    losing them, and every other table's foreign keys still resolve.
+    """
+    import apsw
+
+    from core.research.workflow.ledger.database import _utc_now_ms
+    from core.research.workflow.ledger.schema import MIGRATIONS
+
+    path = tmp_path / "ledger-v9.sqlite3"
+    # Build a v9-shaped ledger by hand: apply migrations 1..9 only, then put
+    # rows in workflow_runs and its children.
+    connection = apsw.Connection(str(path))
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          version INTEGER PRIMARY KEY,
+          checksum TEXT NOT NULL,
+          applied_at_ms INTEGER NOT NULL
+        )
+        """
+    )
+    for migration in MIGRATIONS:
+        if migration.version > 9:
+            continue
+        for statement in migration.statements:
+            connection.execute(statement)
+        connection.execute(
+            "INSERT INTO schema_migrations (version, checksum, applied_at_ms) "
+            "VALUES (?, ?, ?)",
+            (migration.version, migration.checksum, _utc_now_ms()),
+        )
+    connection.execute(
+        """
+        INSERT INTO workflow_runs (
+          run_id, team_id, workflow_id, workflow_version_id, thread_id,
+          project_id, question_id, status, run_version, last_event_sequence,
+          input_snapshot_json, input_snapshot_hash, safety_limits_json,
+          binding_snapshot_set_id, active_node_id, parent_run_id,
+          forked_from_checkpoint_id, completion_kind, terminal_reason,
+          blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms,
+          structure_hash
+        ) VALUES ('run-v9', 'research-team', 'challenge-cup-research', 'wv-x',
+                  'run-v9', 'proj', 'q', 'running', 1, 0, '{}', 'h', '{}',
+                  'b', NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, NULL, '')
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO workflow_commands (
+          command_id, run_id, team_id, node_id, command_kind,
+          expected_run_version, accepted_run_version, idempotency_key,
+          request_hash, request_json, requested_by_json, status,
+          created_at_ms
+        ) VALUES ('cmd-v9', 'run-v9', 'research-team', NULL, 'start_node',
+                  1, 1, 'key-v9', 'rh', '{}', '{}', 'accepted', 1)
+        """
+    )
+    connection.execute("COMMIT")
+    connection.close()
+
+    store = open_ledger_store(path)
+    try:
+        assert store.initialize()["schemaVersion"] == 10
+        run = store.get_run("run-v9")
+        assert run is not None and run.status == "running"
+
+        # The rebuild did not strand child rows: FK enforcement is back on
+        # and the ledger accepts the new recoverable status.
+        def pause(uow):
+            ok = uow.repository.update_run_status(
+                "run-v9", "research-team", "paused", 1234
+            )
+            sequence = uow.repository.advance_last_sequence("run-v9", 1, 1234)
+            return ok, sequence
+
+        assert store.submit(pause, force_flush=True).result(timeout=10) == (True, 1)
+        assert store.get_run("run-v9").status == "paused"
+    finally:
+        store.close()

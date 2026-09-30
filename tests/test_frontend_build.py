@@ -93,6 +93,46 @@ def test_build_key_tracks_production_inputs_but_not_git_audit(monkeypatch: pytes
     assert frontend_build.compute_build_key(after_vite_environment) != frontend_build.compute_build_key(changed_vite_environment)
 
 
+def test_build_inputs_scans_once_and_detects_added_changed_and_removed_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    original_scan = frontend_build._production_input_paths
+    scan_count = 0
+
+    def count_scans(web_dir: Path) -> list[Path]:
+        nonlocal scan_count
+        scan_count += 1
+        return original_scan(web_dir)
+
+    monkeypatch.setattr(frontend_build, "_production_input_paths", count_scans)
+
+    initial = frontend_build.build_inputs(tmp_path)
+    assert scan_count == 1
+
+    app = web / "src" / "App.tsx"
+    app.write_text("export const app = 2;\n", encoding="utf-8")
+    changed = frontend_build.build_inputs(tmp_path)
+    assert scan_count == 2
+    assert changed["productionInputDigest"] != initial["productionInputDigest"]
+    assert frontend_build.compute_build_key(changed) != frontend_build.compute_build_key(initial)
+
+    added_file = web / "src" / "NewModule.ts"
+    added_file.write_text("export const value = 1;\n", encoding="utf-8")
+    added = frontend_build.build_inputs(tmp_path)
+    assert scan_count == 3
+    assert added["productionInputCount"] == changed["productionInputCount"] + 1
+    assert frontend_build.compute_build_key(added) != frontend_build.compute_build_key(changed)
+
+    added_file.unlink()
+    removed = frontend_build.build_inputs(tmp_path)
+    assert scan_count == 4
+    assert removed["productionInputCount"] == changed["productionInputCount"]
+    assert frontend_build.compute_build_key(removed) == frontend_build.compute_build_key(changed)
+
+
 def test_schema_one_release_is_not_reused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _write_project(tmp_path)
     _stub_build_identity(monkeypatch)

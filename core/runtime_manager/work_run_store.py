@@ -298,6 +298,19 @@ def _snapshot_blocks_active_index(payload: dict[str, Any]) -> bool:
     return active_work_payload_blocks_lifecycle(payload)
 
 
+def snapshot_is_settled(payload: dict[str, Any] | None) -> bool:
+    """True when a snapshot is terminal under the shared lifecycle rules.
+
+    Deliberately reuses ``active_work_payload_blocks_lifecycle`` so reads and
+    the index writer agree on what counts as finished (a non-empty
+    ``finishedAt``/``endedAt`` or a terminal status); no second status list.
+    """
+
+    if not isinstance(payload, dict):
+        return False
+    return not active_work_payload_blocks_lifecycle(payload)
+
+
 def _parse_datetime(value: str) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -667,17 +680,95 @@ class WorkRunStore:
         return payload or None
 
     def load_active_run_ids(self, run_kind: str) -> list[str]:
-        """Return the active-run-id set for a kind, newest mark last."""
+        """Return the active-run-id set for a kind, newest mark last.
 
-        return _bounded_active_run_ids(_index_active_run_ids(self.load_run_index(run_kind)))
+        Settled (terminal) ids can survive in the index when a final persist
+        raced an older writer, so reads self-heal: settled ids are pruned and
+        the repaired set is persisted once.  A terminal run is never revived,
+        which makes the prune safe; latest/history entries stay untouched.
+        """
+
+        with _STORE_LOCK:
+            active_run_ids = _bounded_active_run_ids(_index_active_run_ids(self.load_run_index(run_kind)))
+            if not active_run_ids:
+                return []
+            remaining: list[str] = []
+            pruned_run_ids: list[str] = []
+            for run_id in active_run_ids:
+                if snapshot_is_settled(self.load_snapshot(run_kind, run_id)):
+                    pruned_run_ids.append(run_id)
+                else:
+                    remaining.append(run_id)
+            if not pruned_run_ids:
+                return active_run_ids
+            if self._prune_settled_active_run_ids(run_kind, remaining=remaining, pruned_run_ids=pruned_run_ids):
+                return remaining
+            # Index repair failed: fall back to the raw ids; snapshot reads
+            # still filter settled payloads so callers never see one active.
+            return active_run_ids
+
+    def _prune_settled_active_run_ids(
+        self,
+        run_kind: str,
+        *,
+        remaining: list[str],
+        pruned_run_ids: list[str],
+    ) -> bool:
+        """Persist the active index without settled ids.  Returns success."""
+
+        last_pruned_run_id = pruned_run_ids[-1] if pruned_run_ids else ""
+        try:
+            index = self.load_run_index(run_kind)
+            self.save_run_index(
+                run_kind,
+                active_run_ids=remaining,
+                latest_run_id=str(index.get("latestRunId") or "").strip(),
+                emit_event=False,
+            )
+        except Exception as exc:
+            _record_work_run_event(
+                "state",
+                "work_run.index.settled_active_prune_failed",
+                run_kind=run_kind,
+                run_id=last_pruned_run_id,
+                fields={
+                    "prunedRunIds": pruned_run_ids,
+                    "errorType": type(exc).__name__,
+                },
+                message="Work run store could not prune settled ids from the active index.",
+                outcome="failed",
+                level="warning",
+            )
+            return False
+        _record_work_run_event(
+            "state",
+            "work_run.index.settled_active_pruned",
+            run_kind=run_kind,
+            run_id=last_pruned_run_id,
+            fields={
+                "prunedRunIds": pruned_run_ids,
+                "remainingActiveRunIds": remaining,
+                "indexPath": str(self.index_path(run_kind)),
+            },
+            message="Work run store pruned settled run ids from the active index.",
+            outcome="repaired",
+            level="warning",
+            lifecycle=True,
+        )
+        return True
 
     def load_active_snapshot(self, run_kind: str) -> dict[str, Any] | None:
-        """Return the most recent resolvable active snapshot for a kind."""
+        """Return the most recent resolvable active snapshot for a kind.
+
+        Settled snapshots are skipped even when their id is still listed so a
+        failed index repair can never resurface a terminal run as active.
+        """
 
         for run_id in reversed(self.load_active_run_ids(run_kind)):
             payload = self.load_snapshot(run_kind, run_id)
-            if payload is not None:
-                return payload
+            if payload is None or snapshot_is_settled(payload):
+                continue
+            return payload
         return None
 
     def load_active_snapshots(self, run_kind: str) -> list[dict[str, Any]]:
@@ -686,8 +777,9 @@ class WorkRunStore:
         snapshots: list[dict[str, Any]] = []
         for run_id in self.load_active_run_ids(run_kind):
             payload = self.load_snapshot(run_kind, run_id)
-            if payload is not None:
-                snapshots.append(payload)
+            if payload is None or snapshot_is_settled(payload):
+                continue
+            snapshots.append(payload)
         return snapshots
 
     def load_active_snapshot_for_run(self, run_kind: str, run_id: str) -> dict[str, Any] | None:
@@ -699,7 +791,10 @@ class WorkRunStore:
             return None
         if normalized not in self.load_active_run_ids(run_kind):
             return None
-        return self.load_snapshot(run_kind, normalized)
+        payload = self.load_snapshot(run_kind, normalized)
+        if payload is None or snapshot_is_settled(payload):
+            return None
+        return payload
 
     def load_latest_snapshot(self, run_kind: str) -> dict[str, Any] | None:
         latest_run_id = str(self.load_run_index(run_kind).get("latestRunId") or "").strip()

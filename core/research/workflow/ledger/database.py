@@ -150,6 +150,15 @@ class WorkflowLedgerDatabase:
         return str(row[0]) if row else "unknown"
 
     def _apply_migrations(self, connection: Any) -> None:
+        # Migrations are the one place where schema surgery is legitimate:
+        # the v10 table rebuild needs foreign key enforcement disabled for
+        # the window. When anything was applied, the result is verified with
+        # PRAGMA foreign_key_check BEFORE the commit, so a rebuild that loses
+        # a referenced parent row fails startup instead of corrupting
+        # silently. The runtime FK guarantee for normal operation is
+        # restored in the finally block.
+        connection.execute("PRAGMA foreign_keys = OFF")
+        applied_any = False
         connection.execute("BEGIN IMMEDIATE")
         try:
             connection.execute(
@@ -188,6 +197,14 @@ class WorkflowLedgerDatabase:
                     "VALUES (?, ?, ?)",
                     (migration.version, migration.checksum, _utc_now_ms()),
                 )
+                applied_any = True
+            if applied_any:
+                dangling = connection.execute("PRAGMA foreign_key_check").fetchall()
+                if dangling:
+                    raise WorkflowLedgerSchemaError(
+                        "Workflow Ledger migration left dangling references: "
+                        + ", ".join(str(tuple(row[:2])) for row in dangling[:5])
+                    )
             connection.execute("COMMIT")
         except WorkflowLedgerSchemaError:
             connection.execute("ROLLBACK")
@@ -195,6 +212,8 @@ class WorkflowLedgerDatabase:
         except Exception as exc:
             connection.execute("ROLLBACK")
             raise WorkflowLedgerMigrationError(f"ledger migration failed: {exc}") from exc
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
 
     def _validate_v5_catalog_schema(self, connection: Any) -> None:
         """Fail closed unless the v5 authorization DDL is exactly supported.

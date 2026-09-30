@@ -15,6 +15,11 @@ class RunStatus(str, Enum):
     RUNNING = "running"
     WAITING_HUMAN = "waiting_human"
     BLOCKED = "blocked"
+    # Recoverable scheduler hold (P2-e): the pump stopped scheduling new node
+    # dispatches for this run (consecutive-error threshold or deadlock). Not
+    # terminal, and deliberately never entered FROM blocked — an ordinary
+    # blocked run keeps its own recovery offers.
+    PAUSED = "paused"
     RECONCILIATION_REQUIRED = "reconciliation_required"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -75,12 +80,21 @@ class BudgetReceiptStatus(str, Enum):
 
 _TERMINAL_RUN = {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.ARCHIVED}
 
+_RUN_PAUSEABLE = frozenset(
+    {RunStatus.CREATED, RunStatus.RUNNING, RunStatus.WAITING_HUMAN}
+)
+
+# PAUSED is a recoverable hold, not a failure: ordinary start/retry/resume
+# entries move it back to a live status, and operator overrides may still
+# cancel / fail / archive it. SUCCEEDED is deliberately NOT reachable so a
+# paused run can never be silently closed as a success.
 RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CREATED: frozenset(
         {
             RunStatus.RUNNING,
             RunStatus.WAITING_HUMAN,
             RunStatus.BLOCKED,
+            RunStatus.PAUSED,
             RunStatus.RECONCILIATION_REQUIRED,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
@@ -90,6 +104,7 @@ RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         {
             RunStatus.WAITING_HUMAN,
             RunStatus.BLOCKED,
+            RunStatus.PAUSED,
             RunStatus.RECONCILIATION_REQUIRED,
             RunStatus.SUCCEEDED,
             RunStatus.FAILED,
@@ -100,6 +115,7 @@ RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         {
             RunStatus.RUNNING,
             RunStatus.BLOCKED,
+            RunStatus.PAUSED,
             RunStatus.RECONCILIATION_REQUIRED,
             RunStatus.SUCCEEDED,
             RunStatus.FAILED,
@@ -114,6 +130,17 @@ RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
             RunStatus.SUCCEEDED,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
+        }
+    ),
+    RunStatus.PAUSED: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.WAITING_HUMAN,
+            RunStatus.BLOCKED,
+            RunStatus.RECONCILIATION_REQUIRED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.ARCHIVED,
         }
     ),
     RunStatus.RECONCILIATION_REQUIRED: frozenset(
@@ -132,6 +159,11 @@ RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CANCELLED: frozenset({RunStatus.ARCHIVED}),
     RunStatus.ARCHIVED: frozenset(),
 }
+
+
+def can_pause_run(current: RunStatus) -> bool:
+    """Whether the scheduler governance may park this run as PAUSED."""
+    return current in _RUN_PAUSEABLE
 
 
 def can_transition_run(current: RunStatus, target: RunStatus) -> bool:
