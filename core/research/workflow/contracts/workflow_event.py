@@ -35,6 +35,8 @@ class WorkflowEventType(str, Enum):
     RUN_FORKED = "run_forked"
     REVISION_FORKED = "revision_forked"
     RUN_BLOCKED = "run_blocked"
+    RUN_PAUSED = "run_paused"
+    RUN_RESUMED = "run_resumed"
     RUN_SUCCEEDED = "run_succeeded"
     RECONCILIATION_REQUIRED = "reconciliation_required"
     DELIVERY_ORCHESTRATION_COMPLETED = "delivery_orchestration_completed"
