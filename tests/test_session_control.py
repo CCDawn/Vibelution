@@ -143,3 +143,129 @@ def test_queued_stop_still_persists_snapshot_and_returns_detail(monkeypatch) -> 
     assert order.index("release") < order.index("publish")
     assert payload["currentPhase"] == "stopping"
     assert turn_control.stop_requested is True
+
+
+def _cascade_registry(tmp_path, monkeypatch):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    store = runtime_tasks.store_for(tmp_path / "cascade-runtime-tasks")
+    monkeypatch.setattr(runtime_tasks, "default_store", lambda: store)
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", lambda *args, **kwargs: None)
+    return store
+
+
+def _register_cascade_task(store, task_id, *, parent, kind, status="running"):
+    from core.web.services import runtime_task_registry as runtime_tasks
+
+    return store.register_task(
+        runtime_tasks.new_snapshot(
+            kind=kind,
+            task_id=task_id,
+            status=status,
+            source_session_id="",
+            parent_session_id=parent,
+        )
+    )
+
+
+def test_running_stop_cascades_two_level_descendants_and_seals(monkeypatch, tmp_path) -> None:
+    order: list[str] = []
+    turn_control = session_service.SessionTurnControl(session_id="session-root", turn_id="turn-1")
+    _install_running_stop_fixtures(
+        monkeypatch,
+        turn_control=turn_control,
+        order=order,
+        queued_turn_cancelled=False,
+        publish=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(session_service, "get_session_detail", lambda session_id, **kwargs: {"id": session_id})
+    store = _cascade_registry(tmp_path, monkeypatch)
+    _register_cascade_task(store, "child-1", parent="session-root", kind="child_session")
+    _register_cascade_task(store, "cli-1", parent="session-root", kind="cli_agent")
+    _register_cascade_task(store, "cli-2", parent="child-1", kind="cli_agent")
+
+    # Intercept only the descendant stop primitive: the root call keeps the
+    # real function, whose internal recursion resolves the patched name.
+    real_stop = control.request_stop_session_turn
+    descendant_stops: list[tuple[str, bool]] = []
+
+    def tracked_descendant_stop(session_id, **kwargs):
+        descendant_stops.append((session_id, bool(kwargs.get("cascade"))))
+        return {"id": session_id}
+
+    monkeypatch.setattr(control, "request_stop_session_turn", tracked_descendant_stop)
+
+    payload = real_stop("session-root", expected_turn_id="turn-1")
+
+    assert turn_control.stop_requested is True
+    assert descendant_stops == [("child-1", False)]
+    assert payload["id"] == "session-root"
+
+    for task_id in ("child-1", "cli-1", "cli-2"):
+        state = store.load_state(task_id)
+        assert state["notificationSealed"] is True, task_id
+        assert state["notificationSealedReason"] == "parent_turn_cancelled"
+        assert state["notificationSealedByTurnId"] == "turn-1"
+        assert state["stopInitiator"] == "user"
+        assert state["cascadeStop"]["cascadedFrom"] == "session-root"
+
+
+def test_running_stop_without_descendants_is_registry_neutral(monkeypatch, tmp_path) -> None:
+    order: list[str] = []
+    turn_control = session_service.SessionTurnControl(session_id="session-live", turn_id="turn-1")
+    _install_running_stop_fixtures(
+        monkeypatch,
+        turn_control=turn_control,
+        order=order,
+        queued_turn_cancelled=False,
+        publish=lambda *_args, **_kwargs: order.append("publish"),
+    )
+    monkeypatch.setattr(session_service, "get_session_detail", lambda session_id, **kwargs: {"id": session_id})
+    store = _cascade_registry(tmp_path, monkeypatch)
+
+    def forbidden_seal(*args, **kwargs):
+        raise AssertionError("a session without descendants must not touch the registry")
+
+    monkeypatch.setattr(store, "seal_and_request_stop", forbidden_seal)
+
+    payload = control.request_stop_session_turn("session-live", expected_turn_id="turn-1")
+
+    assert payload["id"] == "session-live"
+    assert store.active_task_ids() == []
+    assert turn_control.stop_requested is True
+
+
+def test_cascade_stop_isolates_per_target_failures(monkeypatch, tmp_path) -> None:
+    turn_control = session_service.SessionTurnControl(session_id="session-root", turn_id="turn-1")
+    _install_running_stop_fixtures(
+        monkeypatch,
+        turn_control=turn_control,
+        order=[],
+        queued_turn_cancelled=False,
+        publish=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(session_service, "get_session_detail", lambda session_id, **kwargs: {"id": session_id})
+    store = _cascade_registry(tmp_path, monkeypatch)
+    _register_cascade_task(store, "child-broken", parent="session-root", kind="child_session")
+    _register_cascade_task(store, "cli-healthy", parent="session-root", kind="cli_agent")
+
+    real_seal = store.seal_and_request_stop
+
+    def flaky_seal(task_id, **kwargs):
+        if task_id == "child-broken":
+            raise RuntimeError("registry write failed")
+        return real_seal(task_id, **kwargs)
+
+    monkeypatch.setattr(store, "seal_and_request_stop", flaky_seal)
+    real_stop = control.request_stop_session_turn
+    monkeypatch.setattr(
+        control,
+        "request_stop_session_turn",
+        lambda session_id, **kwargs: (_ for _ in ()).throw(AssertionError("broken child must not be stopped")),
+    )
+
+    real_stop("session-root", expected_turn_id="turn-1")
+
+    assert store.load_state("cli-healthy")["notificationSealed"] is True
+    assert store.load_state("cli-healthy")["stopInitiator"] == "user"
+    assert store.load_state("child-broken")["notificationSealed"] is False

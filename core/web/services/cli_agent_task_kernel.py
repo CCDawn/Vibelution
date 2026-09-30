@@ -347,11 +347,32 @@ def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
     # completion drops the notification. The audit fields land on the task
     # snapshot either way.
     allowed = store.apply_completion_fencing(task_state)
+    # Notification sealing stacks on top of fencing: a task sealed by the
+    # cascade stop of its owning session turn loses its completion wake even
+    # when the generation still matches. Same dropped channel, distinct
+    # audit, snapshot updated either way.
+    outcome = ""
+    if allowed:
+        task_id = str(task_state.get("taskId") or "").strip()
+        try:
+            sealed = store.is_notification_sealed(task_id)
+        except Exception:
+            sealed = False
+        if sealed:
+            allowed = False
+            outcome = "sealed_dropped"
+            task_state.update(
+                {
+                    "notificationDropAuditedAt": _now_iso(),
+                    "notificationDropDecision": "dropped",
+                    "notificationDropReason": "sealed",
+                }
+            )
     store.save_state(task_state)
     if not allowed:
         cli_agent_service._record_event(
             "cli_agent.task.result_fenced",
-            outcome="fenced_dropped",
+            outcome=outcome or "fenced_dropped",
             fields={
                 "taskId": str(task_state.get("taskId") or ""),
                 "terminalSessionId": str(task_state.get("terminalSessionId") or ""),
@@ -360,6 +381,8 @@ def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
                 "fencingReason": str(task_state.get("fencingReason") or ""),
                 "taskBranchGeneration": task_state.get("fencingTaskBranchGeneration"),
                 "currentBranchGeneration": task_state.get("fencingCurrentBranchGeneration"),
+                "notificationSealedReason": str(task_state.get("notificationSealedReason") or ""),
+                "notificationSealedByTurnId": str(task_state.get("notificationSealedByTurnId") or ""),
             },
         )
         return
