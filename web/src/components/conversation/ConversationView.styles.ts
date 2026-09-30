@@ -1208,8 +1208,11 @@ timeline:
     "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-2.5",
   timelineVirtualSpacer:
     "vui-components-conversationview timelineVirtualSpacer pointer-events-none min-w-0 shrink-0",
+  // Translated into one shared layer. content-visibility would size-contain
+  // the row at the 120px estimate while the text still paints, so the next
+  // row covers it. Code blocks keep that treatment; the row must not.
   timelineVirtualRow:
-    "vui-components-conversationview timelineVirtualRow min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_120px]",
+    "vui-components-conversationview timelineVirtualRow min-w-0",
   timelineAssistantTextCell:
     `vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-vui-sm leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] mx-auto ${transcriptMeasure}`,
   timelineCellDetailButton:

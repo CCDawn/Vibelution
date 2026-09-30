@@ -254,6 +254,20 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 测量式（scrollHeight + ResizeObserver）而非行数预算；不复制 `ConversationMarkdownRenderer` 的 `<details>` 行预算折叠。
 - 按钮复用 `VNativeButton`，禁止第二套展开钮、渐隐样式或直连 shadcn renderer。
 
+## 时间线虚拟行
+
+### 功能
+历史消息按量到的行高绝对定位。还没量到时，间距先用 120px 估算；量到之后按正文自己的高度排开，下一条不得盖住上一条。
+
+### 视觉与状态
+- 行本身不用 `content-visibility`，也不用 120px 的 `contain-intrinsic-size`。那会把行的边框锁在估算高度，正文仍然画出来，下一条的位移就压在上一条上面。
+- 代码块仍可以对屏幕外的块使用 `content-visibility`，避免测量抖动。这只作用在代码块，不作用在整行。
+- 用户消息超过 120px 后的折叠是气泡内部的钳制，不代替行高。
+
+### 实现落点
+- 样式：`ConversationView.styles.ts` 的 `timelineVirtualRow`
+- 估算常量：`conversationTimelineFollowState.ts` 的 `CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX`
+
 ## ChatComposerPlusMenu
 
 ### 功能
