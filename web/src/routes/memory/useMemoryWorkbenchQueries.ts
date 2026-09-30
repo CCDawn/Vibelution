@@ -164,7 +164,8 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: ({ signal }) => listAgentSummaries({ signal }),
-    enabled: isPersonalMemoryView(forcedView) || isTeamMemoryView(forcedView) || forcedView === "graph" || isManageMemoryView(forcedView),
+    // Personal views get both identity and selection from the memory inventory.
+    enabled: isTeamMemoryView(forcedView) || forcedView === "graph" || isManageMemoryView(forcedView),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
     staleTime: 60_000,
