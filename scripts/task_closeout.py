@@ -340,7 +340,9 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def resolve_context(task_worktree: Path | str, *, base: str = "main") -> CloseoutContext:
+def resolve_context(
+    task_worktree: Path | str, *, base: str = "main", retain_worktree: bool = False,
+) -> CloseoutContext:
     task_root = gate.repository_root(Path(task_worktree)).resolve()
     branch = gate.current_branch(task_root)
     if not branch or branch == base or not branch.startswith("codex/"):
@@ -355,12 +357,15 @@ def resolve_context(task_worktree: Path | str, *, base: str = "main") -> Closeou
     if gate.git_lines(task_root, "status", "--porcelain"):
         raise ManagedCloseoutError("dirty_worktree")
     expected_parent = (main_root / ".worktrees").resolve()
-    if task_root.parent != expected_parent:
+    context = CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
+    if retain_worktree and not worktree_is_registered(context):
+        raise ManagedCloseoutError("unregistered_task_worktree")
+    if task_root.parent != expected_parent and not retain_worktree:
         raise ManagedCloseoutError(
             "unsafe_worktree_path",
             f"managed cleanup requires a direct child of {expected_parent}",
         )
-    return CloseoutContext(main_root=main_root, task_root=task_root, branch=branch)
+    return context
 
 
 def discover_manifest(context: CloseoutContext) -> Path | None:
@@ -974,9 +979,10 @@ def run_managed_closeout(
     reserve_integration: bool = False,
     stale_retry_token: Path | str | None = None,
     integration_wait_seconds: float = INTEGRATION_WAIT_SECONDS,
+    retain_worktree: bool = False,
 ) -> ManagedCloseoutResult:
     try:
-        context = resolve_context(task_worktree, base=base)
+        context = resolve_context(task_worktree, base=base, retain_worktree=retain_worktree)
         claim_id, agent_id = resolve_claim_identity(
             context,
             claim_id=claim_id,
@@ -1230,23 +1236,27 @@ def run_managed_closeout(
             )
             integration_released = True
             cleanup_errors: list[str] = []
-            try:
-                cleanup_task_resources(context, agent_id=agent_id)
-            except (OSError, RuntimeError, ValueError) as error:
-                cleanup_errors.append(_bounded_error(error))
+            if not retain_worktree:
+                try:
+                    cleanup_task_resources(context, agent_id=agent_id)
+                except (OSError, RuntimeError, ValueError) as error:
+                    cleanup_errors.append(_bounded_error(error))
             try:
                 complete_agent(context, agent_id=agent_id, merge_sha=merge_sha)
                 prune_coordination(context)
             except (OSError, RuntimeError, ValueError) as error:
                 cleanup_errors.append(_bounded_error(error))
             result = ManagedCloseoutResult(
-                status="merged_cleanup_pending" if cleanup_errors else "merged_clean",
+                status="merged_cleanup_pending" if cleanup_errors or retain_worktree else "merged_clean",
                 exit_code=2 if cleanup_errors else 0,
                 merged=True,
                 merge_sha=merge_sha,
                 manifest_path=manifest_path_text,
                 retryable=bool(cleanup_errors),
-                next_action=("run_cleanup_only_from_main" if cleanup_errors else ""),
+                next_action=(
+                    "retain_worktree_until_owner_releases_it" if retain_worktree
+                    else "run_cleanup_only_from_main" if cleanup_errors else ""
+                ),
                 errors=cleanup_errors,
             )
     except (OSError, RuntimeError, ValueError) as error:
@@ -1297,10 +1307,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent-id", default="")
     parser.add_argument("--base", default="main")
     parser.add_argument("--branch", default="")
-    parser.add_argument(
+    cleanup_mode = parser.add_mutually_exclusive_group()
+    cleanup_mode.add_argument(
         "--cleanup-only",
         action="store_true",
         help="Resume safe local cleanup after a merge already succeeded.",
+    )
+    cleanup_mode.add_argument(
+        "--retain-worktree",
+        action="store_true",
+        help="Validate and merge a registered worktree without deleting it, its branch, or its dependency links.",
     )
     parser.add_argument(
         "--manifest",
@@ -1366,6 +1382,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reserve_integration=args.reserve_integration,
             stale_retry_token=args.stale_retry_token,
             integration_wait_seconds=args.integration_wait_seconds,
+            retain_worktree=args.retain_worktree,
         )
     print(json.dumps(asdict(result), ensure_ascii=True))
     return result.exit_code
