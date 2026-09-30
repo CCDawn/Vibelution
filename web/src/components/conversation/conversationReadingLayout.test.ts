@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import styles from "./ConversationView.styles";
 import agentStyles from "./AgentMessageTurnView.styles";
 import userStyles from "./AgentUserContentSectionView.styles";
+import todoStyles from "./ConversationTodoChecklist.styles";
 import streamStyles from "./ConversationStreamingResponseContent.styles";
 import { conversationMarkdownRendererStyles, conversationMarkdownCodeBlockStyles } from "./ConversationMarkdownRenderer.styles";
 
@@ -43,6 +44,8 @@ describe("approved conversation reading hierarchy", () => {
   it("aligns the composer rail and uses consistent bubble chrome", () => {
     expect(styles.composerCodex).toContain("max-w-[830px]");
     expect(styles.assistantTurn).toContain("max-w-[830px]");
+    // One spelling of the transcript measure across the whole surface.
+    expect(todoStyles.card).toContain("max-w-[830px]");
     for (const surface of [styles.composerCodex, styles.userMessageBody, userStyles.userMessageBody]) {
       expect(surface).toContain("rounded-xl");
       expect(surface).toContain("shadow-none");

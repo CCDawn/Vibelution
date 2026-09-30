@@ -13,6 +13,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -465,6 +466,32 @@ def get_active_session_detail() -> dict | None:
     return s.get_session_detail(active_id)
 
 
+# The ``list_session_runtime_ids()[0]`` fallback only exists to survive a
+# missing or broken active-session pointer. Serving an arbitrarily old stored
+# session as "active" lies about what the operator is looking at — a session
+# untouched for days is a leftover, not the active one — so the fallback row
+# must have been updated within this window before it may stand in for the
+# pointer. 24h covers the longest realistic "picked up again the next morning"
+# gap while still rejecting the multi-day leftovers observed in the field.
+ACTIVE_SESSION_SUMMARY_FALLBACK_MAX_AGE_SECONDS = 24 * 60 * 60
+
+
+def _fallback_session_row_is_fresh(raw_target: dict[str, Any] | None) -> bool:
+    """Whether a pointer-less fallback row may still stand in for "active"."""
+
+    if not isinstance(raw_target, dict):
+        return False
+    updated_at = parse_timestamp_utc(
+        raw_target.get("updated_at") or raw_target.get("updatedAt")
+    )
+    if updated_at is None:
+        # No usable timestamp means freshness cannot be proven; never serve an
+        # undated row as the active session.
+        return False
+    age = datetime.now(timezone.utc) - updated_at
+    return age <= timedelta(seconds=ACTIVE_SESSION_SUMMARY_FALLBACK_MAX_AGE_SECONDS)
+
+
 def get_active_session_summary(*, include_runtime_metrics: bool = False) -> dict | None:
     """Return the current active conversation summary for shell-level polling.
 
@@ -487,17 +514,20 @@ def get_active_session_summary(*, include_runtime_metrics: bool = False) -> dict
         if target is None:
             ids = s.list_session_runtime_ids(s.PROJECT_ROOT)
             fallback_id = str(ids[0] or "").strip() if ids else ""
-            if fallback_id:
-                raw_target = s.load_session_chat_state(s.PROJECT_ROOT, fallback_id)
-                if raw_target is not None:
-                    target = s._normalize_conversation(
-                        raw_target,
-                        agent_by_id=agent_by_id,
-                        hidden_team_member_agent_ids=s._agent_directory_stub_hidden_team_member_ids(),
-                        ensure_workspace=False,
-                        lightweight=True,
-                    )
-                    active_id = fallback_id
+            raw_target = (
+                s.load_session_chat_state(s.PROJECT_ROOT, fallback_id)
+                if fallback_id
+                else None
+            )
+            if _fallback_session_row_is_fresh(raw_target):
+                target = s._normalize_conversation(
+                    raw_target,
+                    agent_by_id=agent_by_id,
+                    hidden_team_member_agent_ids=s._agent_directory_stub_hidden_team_member_ids(),
+                    ensure_workspace=False,
+                    lightweight=True,
+                )
+                active_id = fallback_id
     if target is None:
         return None
     target = s._with_direct_session_agent_for_summary(target, agent_by_id=agent_by_id)

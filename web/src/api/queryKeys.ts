@@ -66,6 +66,11 @@ export const queryKeys = {
   chatRoomPurposes: () => ["chat-rooms", "purposes"] as const,
   kernelTasks: (status = "", limit = 80) => ["kernel", "tasks", status, limit] as const,
   kernelTaskTimeline: (taskId: string) => ["kernel", "tasks", taskId, "timeline"] as const,
+  // Aux runtime-task center — web/src/api/runtimeTasks.ts / /api/runtime-tasks.
+  // The bare "runtime-tasks" prefix is the invalidation root for list+detail.
+  runtimeTasks: (kind = "", parentSessionId = "") =>
+    ["runtime-tasks", kind, parentSessionId] as const,
+  runtimeTask: (taskId: string) => ["runtime-tasks", "detail", taskId] as const,
   projectAgentBus: () => ["project-agent-bus"] as const,
   projectAgentBusLatestEvent: () => ["project-agent-bus", "latest-event"] as const,
   teams: () => ["teams"] as const,
