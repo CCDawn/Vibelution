@@ -38,9 +38,11 @@ function runtimeWithActiveWork(active: {
   chat_turn?: Record<string, unknown> | null;
   chat_room_round?: Record<string, unknown> | null;
   self_evolution_run?: Record<string, unknown> | null;
+  self_evolution_autonomous_loop?: Record<string, unknown> | null;
   supervised_evolution_run?: Record<string, unknown> | null;
   supervised_worktree_evolution_run?: Record<string, unknown> | null;
   source_collection_run?: Record<string, unknown> | null;
+  formal_review?: Record<string, unknown> | null;
 }, extras: Record<string, unknown> = {}) {
   const { activeItems, ...runtimeExtras } = extras;
   return {
@@ -48,8 +50,10 @@ function runtimeWithActiveWork(active: {
       active: {
         chat_turn: null,
         self_evolution_run: null,
+        self_evolution_autonomous_loop: null,
         supervised_evolution_run: null,
         source_collection_run: null,
+        formal_review: null,
         ...active,
       },
       ...(activeItems && typeof activeItems === "object" ? { activeItems } : {}),
@@ -846,6 +850,182 @@ describe("systemStatus", () => {
       status: "queued",
       tone: "caution",
     });
+  });
+
+  it("shows a running formal review as counted active work linked to the teams board", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        formal_review: {
+          runId: "formal-review-abc123",
+          runKind: "formal_review",
+          status: "running",
+          currentPhase: "team_workflow_review",
+        },
+      }),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "formal_review",
+      label: "正式评审",
+      href: "/teams",
+      status: "running",
+      runId: "formal-review-abc123",
+      count: 1,
+      overflowCount: 0,
+    });
+    // The snapshot only carries invocation metadata; raw purpose ids must not
+    // leak into the chip copy.
+    expect(indicator?.summary).toBe("正式评审正在进行");
+    expect(indicator?.detail).not.toContain("team_workflow_review");
+  });
+
+  it("localizes the formal review label in English", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        formal_review: {
+          runId: "formal-review-abc123",
+          runKind: "formal_review",
+          status: "running",
+        },
+      }),
+      "en",
+    );
+
+    expect(indicator).toMatchObject({ kind: "formal_review", label: "Formal review" });
+  });
+
+  it("shows an autonomous self-evolution loop with its request goal and evolution route", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        self_evolution_autonomous_loop: {
+          runId: "auto-loop-1",
+          runKind: "self_evolution_autonomous_loop",
+          status: "running",
+          phase: "evolving",
+          request: { goal: "improve startup recovery", maxIterations: 1 },
+        },
+      }),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "self_evolution_autonomous_loop",
+      label: "自主进化",
+      summary: "improve startup recovery",
+      href: "/self-evolution",
+      status: "running",
+      runId: "auto-loop-1",
+      count: 1,
+    });
+  });
+
+  it("localizes the autonomous loop label in English", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        self_evolution_autonomous_loop: {
+          runId: "auto-loop-1",
+          runKind: "self_evolution_autonomous_loop",
+          status: "running",
+        },
+      }),
+      "en",
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "self_evolution_autonomous_loop",
+      label: "Self evolution",
+      summary: "Autonomous self-evolution loop is active",
+    });
+  });
+
+  it.each([
+    "failed",
+    "failed_runtime",
+    "error",
+  ])(
+    "keeps a %s formal review in the stale failure lane without counting it",
+    (status) => {
+      const indicator = deriveActiveWorkIndicator(
+        runtimeWithActiveWork({
+          formal_review: {
+            runId: `formal-review-${status}`,
+            runKind: "formal_review",
+            status,
+          },
+        }),
+      );
+
+      expect(indicator?.count).toBe(0);
+      expect(indicator?.items).toHaveLength(0);
+      expect(indicator?.staleFailures).toHaveLength(1);
+      const stale = indicator?.staleFailures[0];
+      expect(stale?.staleFailure).toBe(true);
+      expect(stale?.kind).toBe("formal_review");
+      expect(stale?.label).toContain("正式评审失败");
+      expect(stale?.tone).toBe("caution");
+      expect(stale?.href).toBe("/teams");
+    },
+  );
+
+  it("keeps a failed autonomous loop as a stale failure while preserving its goal", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        self_evolution_autonomous_loop: {
+          runId: "auto-loop-dead",
+          runKind: "self_evolution_autonomous_loop",
+          status: "failed",
+          request: { goal: "improve startup recovery" },
+        },
+      }),
+    );
+
+    expect(indicator?.count).toBe(0);
+    expect(indicator?.items).toHaveLength(0);
+    expect(indicator?.staleFailures).toHaveLength(1);
+    const stale = indicator?.staleFailures[0];
+    expect(stale?.staleFailure).toBe(true);
+    expect(stale?.kind).toBe("self_evolution_autonomous_loop");
+    expect(stale?.label).toContain("自主进化失败");
+    expect(stale?.summary).toBe("improve startup recovery");
+    expect(stale?.tone).toBe("caution");
+  });
+
+  it("counts both new work kinds alongside ordinary chat work", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork(
+        {
+          chat_turn: {
+            runId: "chat-1",
+            runKind: "chat_turn",
+            status: "running",
+            userMessage: "继续",
+          },
+          self_evolution_autonomous_loop: {
+            runId: "auto-loop-1",
+            runKind: "self_evolution_autonomous_loop",
+            status: "running",
+            request: { goal: "improve startup recovery" },
+          },
+        },
+        {
+          activeItems: {
+            formal_review: [
+              {
+                runId: "formal-review-a",
+                runKind: "formal_review",
+                status: "running",
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    expect(indicator).toMatchObject({ count: 3, overflowCount: 2 });
+    expect(indicator?.items.map((item) => item.kind)).toEqual([
+      "self_evolution_autonomous_loop",
+      "formal_review",
+      "chat",
+    ]);
   });
 
   it("shows research source collection before ordinary chat work", () => {

@@ -536,24 +536,30 @@ export type WorkRunSnapshot = {
 
 export type WorkRunSummary = {
   active: {
+    formal_review: WorkRunSnapshot | null;
     chat_turn: WorkRunSnapshot | null;
     chat_room_round: WorkRunSnapshot | null;
     self_evolution_run: WorkRunSnapshot | null;
+    self_evolution_autonomous_loop: WorkRunSnapshot | null;
     supervised_evolution_run: WorkRunSnapshot | null;
     supervised_worktree_evolution_run: WorkRunSnapshot | null;
   };
   activeItems?: {
+    formal_review?: WorkRunSnapshot[];
     chat_turn?: WorkRunSnapshot[];
     chat_room_round?: WorkRunSnapshot[];
     self_evolution_run?: WorkRunSnapshot[];
+    self_evolution_autonomous_loop?: WorkRunSnapshot[];
     supervised_evolution_run?: WorkRunSnapshot[];
     supervised_worktree_evolution_run?: WorkRunSnapshot[];
     [key: string]: WorkRunSnapshot[] | undefined;
   };
   latest: {
+    formal_review: WorkRunSnapshot | null;
     chat_turn: WorkRunSnapshot | null;
     chat_room_round: WorkRunSnapshot | null;
     self_evolution_run: WorkRunSnapshot | null;
+    self_evolution_autonomous_loop: WorkRunSnapshot | null;
     supervised_evolution_run: WorkRunSnapshot | null;
     supervised_worktree_evolution_run: WorkRunSnapshot | null;
   };
