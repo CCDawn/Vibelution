@@ -4983,6 +4983,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     agent_context = None
     result: dict[str, Any] | Any
+    slot_wait_started_at = _perf_counter()
     with session_service.reserve_session_execution_slot(
         agent_id=agent_id,
         run_id=round_id,
@@ -4990,6 +4991,13 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         owner="chat_room_round",
         wait_timeout_seconds=_challenge_room_execution_slot_wait_seconds(context),
     ):
+        # 准入 slot 的排队等待不计入 per-call 预算（09-03「排队不吃预算」
+        # 先例的 execution-slot 版）：槽位到手后按当前时刻重算 fence，否则
+        # 排队高峰会让讲者在真正开跑之前就被 per-call 围栏判死。等待时长
+        # 仍以 timings.executionSlotWaitMs 留审计，等待上限仍由
+        # _challenge_room_execution_slot_wait_seconds 的有界预算单独看管。
+        timings["executionSlotWaitMs"] = _elapsed_ms(slot_wait_started_at)
+        _refresh_per_call_fence(context)
         stop_reason = interrupt_checker()
         if stop_reason:
             raise RuntimeError(stop_reason)

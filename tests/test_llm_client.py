@@ -7711,6 +7711,123 @@ def test_normal_stream_completes_and_idle_watchdog_timers_are_cancelled(monkeypa
         assert timer.finished.is_set(), "watchdog timer leaked without cancellation"
 
 
+# ---------------------------------------------------------------------------
+# LLM 流 total deadline 的「排队等待不计入超时」（可暂停 deadline）：total
+# 的起算点在路由槽 admit 之后，进程级准入闸门的排队等待单独由
+# VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS 的有界预算看管；超时负载带累计
+# queuedMs 以区分「provider 慢」与「闸门等」（对齐 ZCode ToolDeadline 剩余
+# 时长守恒与 chat_room 09-03「排队不吃预算」先例）。
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_stream_route_slot_queue_wait_excluded_from_total_deadline(monkeypatch):
+    """路由槽排队 1.6s > total 1.0s：排队不计时，admit 后正常完成不误杀。"""
+
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", 1)
+    monkeypatch.setattr("core.llm.client._LLM_STREAM_TOTAL_DEADLINE_LIMIT", 1.0)
+
+    def backend(_payload):
+        def chunks():
+            yield {"choices": [{"delta": {"content": "hello"}}]}
+            yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+
+        return chunks()
+
+    client = _liveness_stream_client(backend)
+    route_key = _llm_route_concurrency_key(
+        client.provider, client.profile, profile_id=client.profile_id
+    )
+    gate = _llm_route_concurrency_gate(route_key, limit=1)
+    # 占住唯一路由槽，让 stream 在进程级准入闸门上排队。
+    assert gate.acquire(blocking=False)
+
+    result: dict = {}
+
+    def run():
+        try:
+            result["events"] = [
+                event.type
+                for event in client.stream_events([{"role": "user", "content": "ping"}])
+            ]
+        except BaseException as exc:  # noqa: BLE001 - 测试观测原样上抛
+            result["error"] = exc
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    # 排队 1.6s > total 1.0s：若排队计入 total，admit 时 deadline 已过期，
+    # 流会在到达 provider 之前就被逼成 LLMStreamTotalDeadlineError 假超时。
+    time.sleep(1.6)
+    gate.release()
+    thread.join(10.0)
+
+    assert "error" not in result, result.get("error")
+    assert result["events"] == ["text_delta", "done"]
+    # 槽位已归还：再次非阻塞获取必然成功。
+    assert gate.acquire(blocking=False)
+    gate.release()
+
+
+@pytest.mark.slow
+def test_stream_total_deadline_error_carries_route_queue_ms(monkeypatch):
+    """排队后超时：超时负载携带累计 queuedMs，便于区分「慢」与「等」。"""
+
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_GATES", {})
+    monkeypatch.setattr("core.llm.client._LLM_ROUTE_CONCURRENCY_LIMIT", 1)
+    monkeypatch.setattr("core.llm.client._LLM_STREAM_TOTAL_DEADLINE_LIMIT", 0.8)
+    monkeypatch.setattr(
+        "core.llm.client._retry_policy_max_attempts", lambda profile, role="": 1
+    )
+    force_closed = threading.Event()
+    unblock = threading.Event()
+
+    class SilentHungStream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if not unblock.wait(5.0):
+                raise AssertionError("total-deadline closer never fired")
+            raise RuntimeError("connection aborted by force close")
+
+        def close(self):
+            force_closed.set()
+            unblock.set()
+
+    client = _liveness_stream_client(lambda _payload: SilentHungStream())
+    route_key = _llm_route_concurrency_key(
+        client.provider, client.profile, profile_id=client.profile_id
+    )
+    gate = _llm_route_concurrency_gate(route_key, limit=1)
+    assert gate.acquire(blocking=False)
+
+    result: dict = {}
+
+    def run():
+        try:
+            list(client.stream_events([{"role": "user", "content": "ping"}]))
+        except BaseException as exc:  # noqa: BLE001 - 测试观测原样上抛
+            result["error"] = exc
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    time.sleep(0.3)
+    gate.release()
+    thread.join(15.0)
+
+    error = result.get("error")
+    assert isinstance(error, LLMStreamTotalDeadlineError)
+    assert error.category == "timeout"
+    assert error.retryable is True
+    assert error.deadline_seconds == 0.8
+    # 排队约 300ms 后才 admit，超时负载必须带上这段等待，且排队等待不计入
+    # deadline（流在 admit 后仍拿到完整的 0.8s，超时发生在排队之后）。
+    assert error.queued_ms is not None and error.queued_ms >= 150
+    assert "queuedMs" in str(error)
+    assert force_closed.wait(1.0)
+
+
 def test_cancel_llm_turn_scope_marks_cancel_reason_and_closes_registered_streams():
     """watchdog 置 turn 取消态后：同 turn 上下文观察到取消原因，登记的在途流被 close。"""
 
