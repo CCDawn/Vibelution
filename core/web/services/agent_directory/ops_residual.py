@@ -1752,6 +1752,32 @@ def registry_path(*, project_root: Path | None = None) -> Path:
         return s._workspace_path("agents", "agents.json")
 
 
+def save_registry_payload(
+    payload: dict[str, Any],
+    *,
+    project_root: Path | None = None,
+    enforce_shrink_guard: bool = True,
+) -> dict[str, Any]:
+    """Persist a pre-built registry payload through the canonical write gate.
+
+    Surgical field-level rewrites owned by other surfaces (model rebinding)
+    and the maintenance reset must share the registry lock, the
+    directory-resolved authority path and atomic replacement without
+    re-normalizing agent records the way ``save_state`` does.
+    ``enforce_shrink_guard`` stays enabled for rewrite callers; the confirmed
+    maintenance reset passes ``False`` because emptying the registry is its
+    documented semantics.
+    """
+    s = _service()
+    with s.scoped_project_root(project_root):
+        with s._STATE_LOCK:
+            if enforce_shrink_guard:
+                s._guard_against_suspicious_registry_shrink(payload)
+            s._atomic_write_json(s.registry_path(), payload)
+            s._invalidate_repaired_state_cache()
+            return payload
+
+
 def resolve_agent_workspace_territory(agent_id: str) -> dict[str, Any]:
     s = _service()
     state = s.load_state()
