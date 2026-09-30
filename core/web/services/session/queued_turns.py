@@ -728,7 +728,7 @@ def notify_parent_session_of_child_return(session_id: str, *, turn_id: str) -> d
         except (TypeError, ValueError):
             origin_generation = None
     try:
-        return enqueue_session_runtime_notice(
+        queued = enqueue_session_runtime_notice(
             parent_id,
             kind=KIND_SUBAGENT_MESSAGE,
             content="\n".join(lines),
@@ -738,6 +738,23 @@ def notify_parent_session_of_child_return(session_id: str, *, turn_id: str) -> d
         )
     except (s.SessionNotFoundError, s.SessionValidationError):
         return None
+    # Bookkeeping only: mirror the child's terminal return into the unified
+    # runtime task registry. The existing fencing above is untouched, and a
+    # registry failure never changes the notice outcome.
+    try:
+        from .. import runtime_task_registry as runtime_tasks
+
+        store = runtime_tasks.default_store()
+        if store.get_task(normalized_session_id):
+            dropped = str((queued or {}).get("dropped") or "")
+            store.mark_task_terminal(
+                normalized_session_id,
+                status="dropped" if dropped == "stale_branch" else "completed",
+                reason="child_session_return",
+            )
+    except Exception:
+        pass
+    return queued
 
 
 def _reset_stale_starting_rows(s: Any, rows: list[dict[str, Any]]) -> bool:
