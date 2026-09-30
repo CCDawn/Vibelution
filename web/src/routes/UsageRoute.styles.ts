@@ -1,76 +1,24 @@
-import {
-  vuiDenseRowClass,
-  vuiFlatPanelClass,
-  vuiOpaqueRowClass,
-} from "../design/vuiSurfaceRecipes";
-
-const panelSurface = vuiFlatPanelClass;
-const rowSurface = vuiOpaqueRowClass;
-
 const styles = {
-  technicalDetails: "min-w-0 [&>summary]:cursor-pointer [&>summary]:py-2 [&_strong]:!whitespace-normal [&_strong]:break-all",
-  page:
-    "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-y-auto max-[860px]:overflow-x-hidden",
-  header:
-    `mx-2 mt-1.5 min-w-0 max-w-full overflow-hidden ${panelSurface} max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:[&>div:last-child]:w-full max-[720px]:[&>div:last-child]:justify-self-start max-[720px]:[&>div:last-child]:justify-start`,
-  headerMeta:
-    "min-w-0 max-w-full flex flex-wrap items-center gap-1 max-[720px]:w-full [&_[data-vui=\"status-strip-item\"]]:max-w-full [&_[data-vui=\"status-strip-item\"]]:grid-cols-[auto_minmax(0,1fr)] [&_[data-vui=\"status-strip-item\"]_span]:min-w-0 [&_[data-vui=\"status-strip-item\"]_span]:overflow-hidden [&_[data-vui=\"status-strip-item\"]_span]:text-ellipsis [&_[data-vui=\"status-strip-item\"]_span]:whitespace-nowrap",
-  overviewBand:
-    "mx-2 mt-1.5 min-h-[52px] min-w-0 max-w-full overflow-x-auto",
-  emptyState:
-    "mx-2 mt-1.5 min-w-0 max-w-full",
-  metricBand:
-    "grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1fr)_clamp(260px,24vw,360px)] gap-1.5 overflow-hidden overflow-x-hidden p-[var(--route-workspace-padding)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-none max-[860px]:gap-2 max-[860px]:overflow-y-visible max-[860px]:overflow-x-hidden max-[520px]:px-2",
-  primaryColumn:
-    "grid min-h-0 min-w-0 max-w-full grid-rows-[minmax(0,1fr)_auto] gap-1.5 overflow-hidden max-[980px]:grid-rows-none max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden",
-  compositionPanel:
-    `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden ${panelSurface} p-2`,
-  rollupPanel:
-    `grid min-h-0 min-w-0 max-w-full gap-1.5 overflow-hidden ${panelSurface} p-2`,
-  recordPanel:
-    `grid min-h-0 min-w-0 max-w-full content-start gap-3 overflow-auto ${panelSurface} p-2 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden`,
-  panelHeader:
-    "flex min-w-0 max-w-full flex-wrap items-center justify-between gap-1.5 [&>div]:min-w-0 [&_h2]:m-0 [&_h2]:min-w-0 [&_h2]:overflow-hidden [&_h2]:text-ellipsis [&_h2]:whitespace-nowrap [&_h2]:text-vui-xs [&_h2]:leading-tight [&_h2]:text-vui-fg-primary",
-  panelEyebrow:
-    "m-0 mb-0.5 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [font-size:var(--vui-font-xs)] uppercase tracking-[0.06em] text-vui-fg-tertiary",
-  countPill:
-    "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-2 [font-size:var(--vui-font-xs)] text-[var(--accent-cool)] [&_svg]:flex-none",
-  sourceGrid:
-    "grid min-w-0 max-w-full grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2 max-[520px]:grid-cols-1",
-  sourceTile:
-    `grid min-h-[50px] min-w-0 max-w-full gap-0.5 ${rowSurface} px-2 py-1.5 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-vui-xs [&_strong]:leading-tight [&_strong]:text-vui-fg-primary`,
-  sourceTileObserved:
-    "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row))]",
-  sourceTileEstimated:
-    "border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))]",
-  sourceTileMissing:
-    "border-[color-mix(in_srgb,var(--state-warning)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_9%,var(--vui-surface-row))]",
-  sourceTileEmpty:
-    "border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] !bg-[var(--vui-surface-row)]",
-  usageList:
-    "grid min-h-0 min-w-0 max-w-full content-start gap-1 overflow-auto overflow-x-hidden pr-1",
-  rollupGrid:
-    "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[720px]:grid-cols-1",
-  usageRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.2fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${vuiDenseRowClass} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
-  usageRowWide:
-    "grid grid-cols-[minmax(104px,1fr)_auto] max-[620px]:grid-cols-[minmax(0,1fr)]",
-  refreshButton:
-    "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
-  progressTrack:
-    "h-1.5 min-w-0 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)]",
-  progressFill:
-    "block h-full rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_58%,var(--state-success)_22%)]",
-  quietState:
-    `m-0 min-w-0 max-w-full ${rowSurface} px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-tight text-vui-fg-tertiary [overflow-wrap:anywhere]`,
-  detailGrid:
-    "grid min-h-0 min-w-0 max-w-full content-start gap-1 overflow-auto overflow-x-hidden pr-1",
-  detailRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.5fr)_minmax(0,1fr)] gap-1.5 ${rowSurface} px-2 py-1.5 max-[520px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
-  breakdownList:
-    "grid min-h-0 min-w-0 max-w-full content-start gap-1 overflow-auto overflow-x-hidden pr-1",
-  breakdownRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 ${rowSurface} px-2 py-1.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
+  outputSegment: "flex-1",
+  page: "h-full min-h-0 min-w-0 max-w-full overflow-y-auto overflow-x-hidden bg-vui-surface-canvas px-4 py-5 max-[700px]:px-2 max-[700px]:py-2",
+  sheet: "mx-auto w-full max-w-[1120px] min-w-0 rounded-vui-panel border border-vui-border-subtle bg-vui-surface-panel px-10 py-7 max-[700px]:px-4 max-[700px]:py-4",
+  breadcrumb: "mb-6 flex min-w-0 items-center gap-2 text-vui-xs text-vui-fg-tertiary [&_a]:!p-0 [&_a]:!bg-transparent [&_a]:!border-0",
+  recipe: "!h-auto !overflow-visible !bg-transparent",
+  header: "[&_[data-vui=route-header]]:!border-0 [&_[data-vui=route-header]]:!bg-transparent [&_[data-vui=route-header]]:!p-0 [&_[data-vui=route-header]]:!shadow-none [&_[data-vui=route-header]]:!backdrop-blur-none [&_h1]:!text-[24px] [&_h1]:!font-semibold [&_h1+span]:!font-normal [&_h1+span]:!whitespace-normal [&_[data-vui=route-header]>div:first-child>div]:!flex-col [&_[data-vui=route-header]>div:first-child>div]:!items-start",
+  body: "!block !overflow-visible",
+  rangeRow: "mt-7 flex min-w-0 flex-wrap items-center justify-between gap-3 [&>span]:text-vui-xs [&>span]:text-vui-fg-tertiary",
+  metrics: "my-7 grid min-w-0 grid-cols-[1.25fr_1fr_1fr] gap-6 border-b border-vui-border-subtle pb-7 max-[700px]:grid-cols-2 [&>div:first-child]:border-0 [&>div:first-child]:pl-0 max-[700px]:[&>div:first-child]:col-span-2 max-[700px]:[&>div:nth-child(2)]:border-0 max-[700px]:[&>div:nth-child(2)]:pl-0",
+  metric: "flex min-w-0 min-h-[96px] flex-col gap-2 border-l border-vui-border-subtle pl-6 [&>span]:text-vui-xs [&>span]:text-vui-fg-secondary [&>strong]:break-words [&>strong]:text-[clamp(20px,2.2vw,30px)] [&>strong]:font-semibold [&>strong]:tabular-nums [&>small]:text-[11px] [&>small]:text-vui-fg-tertiary",
+  sectionHeading: "mb-4 flex min-w-0 items-start justify-between gap-3 [&>h2]:m-0 [&>h2]:text-vui-sm [&>h2]:font-semibold [&>span]:text-[11px] [&>span]:text-vui-fg-tertiary [&>span]:text-right",
+  composition: "mb-4 flex h-1.5 min-w-0 overflow-hidden rounded-full gap-0.5 [&>span:first-child]:bg-[var(--accent-cool)] [&>span:last-child]:bg-[var(--state-success)]",
+  tokenRow: "flex min-w-0 items-center justify-between gap-3 border-b border-vui-border-subtle py-3 text-vui-xs [&>div]:flex [&>div]:min-w-0 [&>div]:items-center [&>div]:gap-5 [&_strong]:font-medium [&>div>span]:text-[11px] [&>div>span]:text-vui-fg-tertiary max-[700px]:[&>div>span]:hidden [&>span]:shrink-0 [&>span]:tabular-nums",
+  subset: "pl-4 text-vui-fg-tertiary",
+  sources: "mt-7",
+  sourceRow: "grid min-w-0 grid-cols-[1fr_auto_1fr] items-center gap-x-5 gap-y-1 py-2 text-vui-xs [&>span:first-child]:text-vui-fg-secondary [&>strong]:font-medium [&>strong]:tabular-nums [&>strong]:text-right [&>span:last-child]:text-right [&>span:last-child]:text-[11px] [&>span:last-child]:text-vui-fg-tertiary max-[700px]:grid-cols-[1fr_auto] max-[700px]:[&>span:last-child]:col-span-2 max-[700px]:[&>span:last-child]:text-left",
+  diagnostics: "mt-6 border-t border-vui-border-subtle pt-3",
+  diagnosticsToggle: "!w-full !justify-start !border-0 !bg-transparent !px-0 !shadow-none !font-normal !text-vui-xs !text-vui-fg-secondary [&>small]:ml-auto [&>small]:text-vui-fg-tertiary max-[700px]:[&>small]:hidden",
+  details: "m-0 mt-3 rounded-vui-panel bg-vui-surface-row p-4 [&>div]:grid [&>div]:min-w-0 [&>div]:grid-cols-[140px_minmax(0,1fr)] [&>div]:gap-3 [&>div]:py-2 [&>div]:text-vui-xs [&_dt]:text-vui-fg-tertiary [&_dd]:m-0 [&_dd]:[overflow-wrap:anywhere] max-[700px]:[&>div]:grid-cols-[85px_minmax(0,1fr)]",
+  note: "mb-0 mt-5 text-[11px] leading-relaxed text-vui-fg-tertiary",
 } as const;
 
 export default styles;
