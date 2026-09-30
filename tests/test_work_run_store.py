@@ -610,3 +610,114 @@ def test_work_run_store_list_lifecycle_candidates_include_all_active_runs(tmp_pa
 
     candidates = {item["runId"] for item in store.list_lifecycle_candidate_snapshots(kind)}
     assert {"run_a", "run_b"} <= candidates
+
+
+def _pollute_active_index(store: WorkRunStore, kind: str, active_run_ids: list[str], *, latest_run_id: str = "") -> None:
+    """Re-introduce legacy index pollution: settled ids left in the active set."""
+
+    store.save_run_index(
+        kind,
+        active_run_ids=active_run_ids,
+        latest_run_id=latest_run_id or active_run_ids[-1],
+        emit_event=False,
+    )
+
+
+def test_work_run_store_active_read_filters_and_prunes_terminal_zombie(tmp_path):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _running_snapshot("run_live"), active_run_id="run_live")
+    store.persist_snapshot(kind, _terminal_snapshot("run_zombie"), active_run_id="run_zombie")
+    _pollute_active_index(store, kind, ["run_live", "run_zombie"])
+
+    # Settled ids never resurface as active, even while still listed.
+    assert store.load_active_snapshot(kind)["runId"] == "run_live"
+    assert [item["runId"] for item in store.load_active_snapshots(kind)] == ["run_live"]
+    assert store.load_active_snapshot_for_run(kind, "run_zombie") is None
+    assert store.load_active_snapshot_for_run(kind, "run_live")["runId"] == "run_live"
+
+    # Self-heal: the pruned set is persisted; history/latest stay untouched.
+    index = store.load_run_index(kind)
+    assert index["activeRunIds"] == ["run_live"]
+    assert index["activeRunId"] == "run_live"
+    assert index["latestRunId"] == "run_zombie"
+    assert store.load_snapshot(kind, "run_zombie")["runId"] == "run_zombie"
+
+
+def test_work_run_store_active_prune_is_idempotent(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _running_snapshot("run_live"), active_run_id="run_live")
+    store.persist_snapshot(kind, _terminal_snapshot("run_zombie"), active_run_id="run_zombie")
+    _pollute_active_index(store, kind, ["run_live", "run_zombie"])
+
+    assert store.load_active_run_ids(kind) == ["run_live"]
+
+    writes = []
+    original_atomic_write_json = work_run_store._atomic_write_json
+
+    def capture_write(path, payload):
+        writes.append(path)
+        original_atomic_write_json(path, payload)
+
+    monkeypatch.setattr(work_run_store, "_atomic_write_json", capture_write)
+
+    assert store.load_active_run_ids(kind) == ["run_live"]
+    assert store.load_active_snapshot(kind)["runId"] == "run_live"
+    assert store.load_active_snapshots(kind) != []
+    assert writes == []
+
+
+def test_work_run_store_active_prunes_when_all_ids_settled(tmp_path):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _terminal_snapshot("run_a"), active_run_id="")
+    store.persist_snapshot(kind, _terminal_snapshot("run_b"), active_run_id="")
+    _pollute_active_index(store, kind, ["run_a", "run_b"])
+
+    assert store.load_active_run_ids(kind) == []
+    assert store.load_active_snapshot(kind) is None
+    assert store.load_active_snapshots(kind) == []
+    index = store.load_run_index(kind)
+    assert index["activeRunIds"] == []
+    assert index["activeRunId"] == ""
+    assert index["latestRunId"] == "run_b"
+    # Latest projection still resolves after the heal.
+    assert store.load_latest_snapshot(kind)["runId"] == "run_b"
+
+
+def test_work_run_store_active_prune_keeps_dangling_ids(tmp_path):
+    # An id without a snapshot file is not a terminal zombie: the file may
+    # still be mid-write, so terminal-state self-heal must not prune it.
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _running_snapshot("run_live"), active_run_id="run_live")
+    _pollute_active_index(store, kind, ["run_live", "run_missing"])
+
+    assert store.load_active_run_ids(kind) == ["run_live", "run_missing"]
+    assert store.load_active_snapshot(kind)["runId"] == "run_live"
+
+
+def test_work_run_store_active_prune_failure_still_filters_reads(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path / "work_runs")
+    kind = "source_collection_run"
+
+    store.persist_snapshot(kind, _running_snapshot("run_live"), active_run_id="run_live")
+    store.persist_snapshot(kind, _terminal_snapshot("run_zombie"), active_run_id="run_zombie")
+    _pollute_active_index(store, kind, ["run_live", "run_zombie"])
+
+    def failing_write(path, payload):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(work_run_store, "_atomic_write_json", failing_write)
+
+    # Repair write failed: ids stay listed, but settled payloads are still
+    # filtered from every active read so no terminal run surfaces.
+    assert store.load_active_run_ids(kind) == ["run_live", "run_zombie"]
+    assert store.load_active_snapshot(kind)["runId"] == "run_live"
+    assert [item["runId"] for item in store.load_active_snapshots(kind)] == ["run_live"]
+    assert store.load_active_snapshot_for_run(kind, "run_zombie") is None
