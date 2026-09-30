@@ -398,3 +398,66 @@ def test_mark_terminal_closed_marks_active_task_as_failed_and_completes_to_sessi
     payload = delivered[0][1]["task_result"]
     assert payload["status"] == "failed"
     assert payload["code"] == "CLI_AGENT_TERMINAL_CLOSED"
+
+
+def test_finalize_result_drops_sealed_task_wake_with_audit(monkeypatch, tmp_path):
+    from core.web.services import cli_agent_service, runtime_task_registry, session_service
+
+    project_root = tmp_path / "Vibelution"
+    project_root.mkdir()
+    monkeypatch.setattr(task_kernel, "TASK_STATE_DIR", tmp_path / "rt-tasks")
+    store = task_kernel._task_store()
+    events: list[dict] = []
+    wakes: list[str] = []
+    monkeypatch.setattr(cli_agent_service, "_record_event", lambda event, **fields: events.append({"event": event, **fields}))
+    monkeypatch.setattr(
+        session_service,
+        "append_cli_agent_task_result_event",
+        lambda session_id, **kwargs: wakes.append(session_id) or {"id": session_id},
+    )
+
+    def _register(task_id):
+        return store.register_task(
+            runtime_task_registry.new_snapshot(
+                kind=runtime_task_registry.KIND_CLI_AGENT,
+                task_id=task_id,
+                status="running",
+                source_session_id="session-x",
+            )
+        )
+
+    def _finalize(task_id, *, sealed):
+        if sealed:
+            store.seal_and_request_stop(task_id, reason="parent_turn_cancelled")
+        task_state = dict(store.load_state(task_id))
+        task_state["status"] = "completed"
+        task_state["completionReason"] = "protocol_pattern"
+        task_kernel._finalize_task_result(task_state, reason="protocol_pattern")
+        return store.load_state(task_id)
+
+    # Sealed by the cascade: the wake never fires, the drop is audited.
+    _register("task-seal-final-1")
+    sealed_state = _finalize("task-seal-final-1", sealed=True)
+    assert wakes == []
+    assert events[-1]["event"] == "cli_agent.task.result_fenced"
+    assert events[-1]["outcome"] == "sealed_dropped"
+    assert sealed_state["notificationDropDecision"] == "dropped"
+    assert sealed_state["notificationDropReason"] == "sealed"
+
+    # Unsealed: fencing passes and the completion wake fires as before.
+    _register("task-seal-final-2")
+    open_state = _finalize("task-seal-final-2", sealed=False)
+    assert wakes == ["session-x"]
+    assert events[-1]["event"] == "cli_agent.task.result_ready"
+    assert "notificationDropDecision" not in open_state
+
+    # Stacking: fencing drops first, the sealed channel is not even reached.
+    _register("task-seal-final-3")
+    # Rewind happened after registration: the reader now reports a newer
+    # generation, so fencing drops before the sealed channel is reached.
+    store._branch_generation_reader = lambda _session_id: 42
+    fenced_state = _finalize("task-seal-final-3", sealed=True)
+    assert wakes == ["session-x"]
+    assert events[-1]["event"] == "cli_agent.task.result_fenced"
+    assert events[-1]["outcome"] == "fenced_dropped"
+    assert fenced_state["fencingReason"] == "stale_branch_generation"
