@@ -21,11 +21,14 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import parse_qsl, quote, unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener
+
+from core.infrastructure.url_guard import validate_public_http_url
 
 # Crossref DOI pattern: `10.` + registrant code + `/` + suffix.  Used both to
 # recognize explicit DOIs and to reject accidental matches from free text.
@@ -70,6 +73,85 @@ class DefinitiveDoiRejection(RuntimeError):
 
 def _is_definitive_http_rejection(status_code: int) -> bool:
     return 400 <= int(status_code) < 500 and int(status_code) not in (408, 429)
+
+
+# DOI 拼 URL path 的安全字符白名单（字母/数字/`.` `_` `/` `(` `)` `:` `-`）。
+# 白名单外的字符（`%`、`?`、`#`、`@`、空白、控制字符等）一律拒绝而不是编码
+# 放行——这些字符出现在 DOI suffix 里要么是提取噪声，要么是路径注入载荷。
+_DOI_URL_SAFE_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/():-"
+)
+
+
+def sanitize_doi_for_url(doi: str) -> str:
+    """Return a URL-path-safe DOI, or "" when the value carries injection risk.
+
+    ``normalize_doi`` 只做形状校验（``\\S+``），放得过 ``../``、``%2e%2e``、
+    ``#``、``?`` 等会改写请求路径/查询/分段的 token。这里在拼 URL 前再做一层
+    严格清洗：白名单字符 + 拒绝 ``..`` 与空/点路径段，之后调用方再
+    ``quote(..., safe="/")`` 编码一次（纵深防御）。
+    """
+    normalized = normalize_doi(doi)
+    if not normalized or not set(normalized) <= _DOI_URL_SAFE_CHARS:
+        return ""
+    if ".." in normalized:
+        return ""
+    suffix_segments = normalized.split("/")[1:]
+    if any(segment in {"", ".", ".."} for segment in suffix_segments):
+        return ""
+    return normalized
+
+
+class _EgressGuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """DOI registry 查询的受控重定向：每一跳都必须通过 url_guard。
+
+    * ``allowed_hosts`` 非空（Crossref API）：重定向只允许回到白名单宿主——
+      registry API 不应把元数据查询改道到第三方主机；
+    * ``allowed_hosts`` 为 None（doi.org content negotiation）：doi.org 的
+      正常工作方式就是 302 到出版商内容主机，宿主白名单会破坏其功能，因此
+      允许任意「公网单播」目标，由 url_guard 拒绝内网/本机/保留段落点。
+
+    拒绝时抛 ``HTTPError``（urllib 的标准拒绝通道），上层按既有 fail-closed
+    语义吞掉；redirect code（30x）不会落进 definitive-rejection 判定。
+    """
+
+    def __init__(self, allowed_hosts: frozenset[str] | None) -> None:
+        super().__init__()
+        self._allowed_hosts = allowed_hosts
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        error = validate_public_http_url(str(newurl))
+        if error:
+            raise HTTPError(
+                newurl, code, f"egress guard rejected redirect target: {error}", headers, fp
+            )
+        if self._allowed_hosts is not None:
+            host = (urlparse(str(newurl)).hostname or "").lower().rstrip(".")
+            if host not in self._allowed_hosts:
+                raise HTTPError(
+                    newurl, code, f"redirect host not allowed: {host}", headers, fp
+                )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open_registry_url(
+    url: str,
+    *,
+    headers: Mapping[str, str],
+    allowed_redirect_hosts: frozenset[str] | None,
+    timeout: float,
+):
+    """Open a registry URL after egress validation; raises on rejection."""
+    error = validate_public_http_url(url)
+    if error:
+        raise ValueError(f"egress guard rejected URL: {error}: {url}")
+    request = Request(
+        url,
+        headers=headers,
+    )
+    opener = build_opener(_EgressGuardedRedirectHandler(allowed_redirect_hosts))
+    return opener.open(request, timeout=timeout)
+
 
 # Bounded fan-out: the observed failing batches are 8-12 publisher URLs; a
 # package build or re-verification pass must never sweep an unbounded list.
@@ -157,12 +239,20 @@ def _read_json_response(response: Any) -> Mapping[str, Any] | None:
 def _crossref_metadata(
     doi: str, timeout: float, *, raise_definitive_rejections: bool = False
 ) -> Mapping[str, Any] | None:
-    request = Request(  # noqa: S310 - fixed https registry host
-        _CROSSREF_WORKS_URL.format(doi=quote(doi, safe="/")),
-        headers={"Accept": "application/json", "User-Agent": "Vibelution-citation-verify/1.0"},
-    )
+    safe_doi = sanitize_doi_for_url(doi)
+    if not safe_doi:
+        return None
+    # 宿主白名单断言：URL 只允许指向 api.crossref.org；拼装被改坏时 fail closed。
+    url = _CROSSREF_WORKS_URL.format(doi=quote(safe_doi, safe="/"))
+    if (urlparse(url).hostname or "").lower() != "api.crossref.org":
+        return None
     try:
-        response = urlopen(request, timeout=timeout)  # noqa: S310 - see above
+        response = _open_registry_url(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "Vibelution-citation-verify/1.0"},
+            allowed_redirect_hosts=frozenset({"api.crossref.org"}),
+            timeout=timeout,
+        )
     except HTTPError as exc:
         if raise_definitive_rejections and _is_definitive_http_rejection(exc.code):
             raise DefinitiveDoiRejection(doi, exc.code) from exc
@@ -181,12 +271,22 @@ def _crossref_metadata(
 def _doi_org_metadata(
     doi: str, timeout: float, *, raise_definitive_rejections: bool = False
 ) -> Mapping[str, Any] | None:
-    request = Request(  # noqa: S310 - fixed https registry host
-        _DOI_ORG_URL.format(doi=quote(doi, safe="/")),
-        headers={"Accept": _CSL_JSON_ACCEPT, "User-Agent": "Vibelution-citation-verify/1.0"},
-    )
+    safe_doi = sanitize_doi_for_url(doi)
+    if not safe_doi:
+        return None
+    # 宿主白名单断言：入口 URL 只允许指向 doi.org。
+    url = _DOI_ORG_URL.format(doi=quote(safe_doi, safe="/"))
+    if (urlparse(url).hostname or "").lower() != "doi.org":
+        return None
     try:
-        response = urlopen(request, timeout=timeout)  # noqa: S310 - see above
+        response = _open_registry_url(
+            url,
+            headers={"Accept": _CSL_JSON_ACCEPT, "User-Agent": "Vibelution-citation-verify/1.0"},
+            # doi.org 的功能就是重定向到出版商内容主机，宿主白名单会破坏
+            # content negotiation；重定向目标只受 url_guard 公网单播约束。
+            allowed_redirect_hosts=None,
+            timeout=timeout,
+        )
     except HTTPError as exc:
         if raise_definitive_rejections and _is_definitive_http_rejection(exc.code):
             raise DefinitiveDoiRejection(doi, exc.code) from exc
@@ -298,5 +398,6 @@ __all__ = [
     "extract_doi",
     "fetch_doi_metadata",
     "normalize_doi",
+    "sanitize_doi_for_url",
     "verify_failed_receipt_dois",
 ]

@@ -80,6 +80,7 @@ function Harness({
     activeReferenceAttachments: [],
     mentalModelEnabledForNextTurn: true,
     runtimeStatusEnabledForNextTurn: false,
+    turnModelSelection: null,
     resolvedEditTarget: null,
     activeEditTarget: null,
     composerDisabled: false,

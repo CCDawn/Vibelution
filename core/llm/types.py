@@ -396,6 +396,10 @@ class LLMStreamTotalDeadlineError(LLMError):
     表示即使流仍在产出（或被保活字节喂养），整个 attempt 也必须强制收卷。
     分类为 ``timeout`` 且 ``retryable=True``：超时后连接已被强制关闭，重试
     是安全且可能有意义的。
+
+    ``queued_ms`` 是本 attempt 在进程级路由闸门排队等待的累计毫秒数（排队
+    等待不计入 total deadline）；超时负载带它以便诊断区分「provider 慢」
+    与「闸门等」——queuedMs 大说明瓶颈在准入排队而不是模型本身。
     """
 
     def __init__(
@@ -404,18 +408,30 @@ class LLMStreamTotalDeadlineError(LLMError):
         deadline_seconds: float,
         provider: str = "",
         model: str = "",
+        queued_ms: int | None = None,
     ) -> None:
+        queued_suffix = ""
+        if queued_ms is not None:
+            queued_suffix = (
+                f" (queuedMs={max(0, int(queued_ms))}; route-slot queue wait is "
+                "excluded from the deadline)"
+            )
         super().__init__(
             "timeout",
             (
                 f"LLM stream exceeded its total wall-clock deadline of "
                 f"{float(deadline_seconds):g}s and was force-closed"
+                f"{queued_suffix}"
             ),
             retryable=True,
             provider=provider,
             model=model,
+            details=(
+                {"queuedMs": max(0, int(queued_ms))} if queued_ms is not None else None
+            ),
         )
         self.deadline_seconds = float(deadline_seconds)
+        self.queued_ms = None if queued_ms is None else max(0, int(queued_ms))
 
 
 class LLMStreamIdleDeadlineError(LLMError):

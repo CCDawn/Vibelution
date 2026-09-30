@@ -19,12 +19,18 @@ from langchain_core.messages import AIMessage, ToolMessage
 from core.llm.types import CanonicalToolCall, CanonicalToolResult
 from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_result import (
+    DEFAULT_MAX_CHARS,
     infer_tool_business_success,
     infer_tool_execution_success,
     package_tool_result_facts,
     project_runtime_tool_metadata,
     render_tool_result_for_model,
     RuntimeToolMetadata,
+)
+from core.infrastructure.tool_result_budget import (
+    ToolResultBudgetOutcome,
+    apply_tool_result_budget,
+    get_tool_result_budget,
 )
 from core.logging import debug as _debug_logger
 from core.logging.unified_logger import logger
@@ -500,15 +506,45 @@ class ToolLifecycleBridge:
         """将工具结果回写到消息历史。"""
         call = _as_mapping(tool_call)
         tool_name = _tool_call_name(call)
-        facts = package_tool_result_facts(
-            result,
-            tool_name=tool_name,
-            action=action,
-        )
-        result_str = render_tool_result_for_model(facts)
+        tool_call_id = _tool_call_id(call)
+        budget = get_tool_result_budget(tool_name)
+        budget_outcome: Optional[ToolResultBudgetOutcome] = None
+        if budget is not None:
+            # 声明了预算的工具：先按声明落盘/截断，再进入既有打包渲染路径。
+            budgeted_result, budget_outcome = apply_tool_result_budget(
+                result,
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+            )
+            budget_input = budgeted_result
+            clamp = max(DEFAULT_MAX_CHARS, budget.packaging_max_chars)
+            facts = package_tool_result_facts(
+                budget_input,
+                tool_name=tool_name,
+                action=action,
+                max_chars=clamp,
+            )
+            if budget_outcome is not None:
+                facts.truncated = True
+                facts.original_length = budget_outcome.original_chars
+                facts.strategy = budget_outcome.strategy
+            result_str = render_tool_result_for_model(facts, max_chars=clamp)
+        else:
+            # 未声明预算：与既有路径逐字节等价。
+            facts = package_tool_result_facts(
+                result,
+                tool_name=tool_name,
+                action=action,
+            )
+            result_str = render_tool_result_for_model(facts)
+        if budget_outcome is not None:
+            ToolLifecycleBridge._record_tool_result_budget_event(
+                tool_call=call,
+                tool_name=tool_name,
+                outcome=budget_outcome,
+            )
         if action in ("restart", "skip", "hibernated"):
             logger.log_action(action, {"tool": tool_name})
-        tool_call_id = _tool_call_id(call)
         canonical_call = call.get("canonical_tool_call") or call.get("canonicalToolCall")
         canonical_result: Optional[CanonicalToolResult] = None
         if isinstance(canonical_call, CanonicalToolCall):
@@ -594,6 +630,61 @@ class ToolLifecycleBridge:
         except Exception as exc:
             _debug_logger.warning(
                 f"[工具生命周期] 记录工具结果绑定失败: {type(exc).__name__}: {exc}",
+                tag="TOOL",
+            )
+
+    @staticmethod
+    def _record_tool_result_budget_event(
+        *,
+        tool_call: Dict[str, Any],
+        tool_name: str,
+        outcome: ToolResultBudgetOutcome,
+    ) -> None:
+        """Emit one content-free audit record when a result budget fires.
+
+        落盘回退（artifact_fallback_truncate）与其他预算执行一样只记录策略、
+        字符数与引用，不携带结果内容。
+        """
+        try:
+            from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+            canonical_call = tool_call.get("canonical_tool_call") or tool_call.get("canonicalToolCall")
+            identity = getattr(canonical_call, "identity", None)
+            fields: dict[str, Any] = {
+                "toolCallId": _tool_call_id(tool_call),
+                "toolName": _coerce_text(tool_name).strip(),
+                "strategy": _coerce_text(outcome.strategy).strip(),
+                "originalChars": max(0, int(outcome.original_chars)),
+                "modelChars": max(0, int(outcome.model_chars)),
+                "previewDirection": _coerce_text(outcome.preview_direction).strip(),
+            }
+            if outcome.artifact_ref:
+                fields["artifactRef"] = outcome.artifact_ref[:160]
+            if outcome.artifact_sha256:
+                fields["artifactSha256"] = outcome.artifact_sha256[:64]
+            if outcome.fallback_reason:
+                fields["fallbackReason"] = outcome.fallback_reason[:200]
+            for source_name, field_name in (
+                ("session_id", "sessionId"),
+                ("turn_id", "turnId"),
+                ("invocation_id", "invocationId"),
+            ):
+                value = _coerce_text(getattr(identity, source_name, "")).strip()
+                if value:
+                    fields[field_name] = value
+            record_runtime_scene_event(
+                "tool_lifecycle",
+                "result_budget",
+                "tool.result.budget",
+                message="Tool result budget applied.",
+                level="warning" if outcome.fallback_reason else "info",
+                outcome="fallback_truncate" if outcome.fallback_reason else outcome.strategy,
+                fields=fields,
+                lifecycle=False,
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具生命周期] 记录工具结果预算事件失败: {type(exc).__name__}: {exc}",
                 tag="TOOL",
             )
 

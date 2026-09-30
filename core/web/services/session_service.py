@@ -221,6 +221,7 @@ from .session.submit import (
     _accepted_session_turn_payload,
     _resolve_user_message_content,
     _session_submit_admit_lock,
+    SessionModelSelectionError,
     edit_and_resubmit_session_message,
     regenerate_session_message,
     submit_session_guidance,

@@ -13,6 +13,7 @@ from typing import Any
 from core.research.workflow.contracts.research_team_role_contract import (
     CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
 )
+from core.web.services import runtime_task_registry as runtime_tasks
 
 SCHEMA_VERSION = 2
 TASK_STORE_FILE_NAME = "research_project_agent_tasks.json"
@@ -1577,6 +1578,22 @@ def start_research_project_agent_task(
         tasks.append(task)
         store["tasks"] = tasks
         _write_store(normalized_team_id, normalized_project_id, store)
+        # Ledger registration in the unified runtime task registry; the
+        # branchGeneration fence is stamped from the task's project Agent
+        # session. Registration failures never block task creation.
+        try:
+            runtime_tasks.default_store().register_task(
+                runtime_tasks.new_snapshot(
+                    kind=runtime_tasks.KIND_RESEARCH_TASK,
+                    task_id=task_id,
+                    status="queued",
+                    source_session_id=str(task.get("sessionId") or ""),
+                    label=str(contract.get("title") or ""),
+                    output=str(task.get("taskTitle") or ""),
+                )
+            )
+        except Exception:
+            pass
 
     try:
         turn = s.session_service.submit_session_message(
@@ -1647,6 +1664,21 @@ def start_research_project_agent_task(
         stored["failureCode"] = failure_code
         stored["updatedAt"] = s.utc_now_iso()
         _write_store(normalized_team_id, normalized_project_id, store)
+        # Mirror the post-submit status into the runtime task registry;
+        # blocked/failed leave the active index, running stays watched.
+        try:
+            registry_store = runtime_tasks.default_store()
+            if registry_store.get_task(task_id):
+                registry_store.update_task(
+                    task_id,
+                    lambda snapshot: {
+                        **snapshot,
+                        "status": next_status,
+                        "updatedAt": stored["updatedAt"],
+                    },
+                )
+        except Exception:
+            pass
         task = stored
 
     s._record_workflow_event(
@@ -1721,6 +1753,23 @@ def update_research_project_agent_task_status(
         task["failureCode"] = _text(failure_code, limit=120)
         task["updatedAt"] = s.utc_now_iso()
         _write_store(normalized_team_id, normalized_project_id, store)
+        # Mirror trusted reconciler status updates into the runtime task
+        # registry when the task is registered there (update-if-present:
+        # pre-registry tasks are not backfilled).
+        try:
+            registry_store = runtime_tasks.default_store()
+            if registry_store.get_task(normalized_task_id):
+                registry_store.update_task(
+                    normalized_task_id,
+                    lambda snapshot: {
+                        **snapshot,
+                        "status": normalized_status,
+                        "resultSummary": ";".join(normalized_refs)[:400],
+                        "updatedAt": task["updatedAt"],
+                    },
+                )
+        except Exception:
+            pass
         return _public_task(task)
 
 

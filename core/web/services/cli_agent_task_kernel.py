@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import threading
 import time
 import uuid
@@ -13,6 +12,7 @@ from typing import Any
 
 from . import cli_agent_protocols as protocols
 from . import cli_agent_service
+from . import runtime_task_registry as task_registry
 from vibelution_storage import resolve_project_runtime_home
 
 
@@ -20,12 +20,30 @@ PROJECT_ROOT = cli_agent_service.PROJECT_ROOT
 TASK_STATE_DIR = resolve_project_runtime_home(PROJECT_ROOT) / "cli_agents" / "tasks"
 MAX_TASK_OUTPUT_CHARS = 180_000
 WATCH_INTERVAL_SECONDS = 1.0
+# The watchdog reconciles the active-task index from a full directory scan
+# once per minute; every other tick reads only index-listed active tasks.
+_RECONCILE_EVERY_TICKS = 60
 
 ACTIVE_STATUSES = {"queued", "sent", "running"}
 TERMINAL_CLOSED_STATUSES = {"closed", "stopped", "exited", "stale"}
 
 _TASK_LOCK = threading.RLock()
 _WATCHER_STARTED = False
+_WATCH_MTIME_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_STORE_CACHE: dict[str, task_registry.RuntimeTaskStore] = {}
+_STORE_CACHE_LOCK = threading.Lock()
+
+
+def _task_store() -> task_registry.RuntimeTaskStore:
+    """Store rooted at the current ``TASK_STATE_DIR`` (tests repoint it)."""
+
+    root = str(TASK_STATE_DIR)
+    with _STORE_CACHE_LOCK:
+        store = _STORE_CACHE.get(root)
+        if store is None:
+            store = task_registry.RuntimeTaskStore(root)
+            _STORE_CACHE[root] = store
+        return store
 
 
 def submit_cli_agent_task(
@@ -77,7 +95,11 @@ def submit_cli_agent_task(
             source=source,
             created_at=now,
         )
-        _write_task_state(task_state)
+        # Registration goes through the unified runtime task registry: the
+        # branchGeneration fencing stamp is mandatory there (missing session
+        # stamps 0 instead of None), so late completions after a session
+        # rewind can always be dropped deterministically.
+        task_state = _task_store().register_task(task_state)
 
     payload = protocols.task_input_for_adapter(
         adapter_id,
@@ -179,7 +201,7 @@ def active_cli_agent_task_for_terminal(terminal_session_id: str) -> dict[str, An
 
 
 def task_state_path(task_id: str) -> Path:
-    return TASK_STATE_DIR / f"{_safe_filename(task_id)}.json"
+    return _task_store().task_state_path(task_id)
 
 
 def _ensure_watcher_started() -> None:
@@ -193,11 +215,19 @@ def _ensure_watcher_started() -> None:
 
 
 def _watch_active_tasks() -> None:
+    tick = 0
     while True:
         finalized: list[dict[str, Any]] = []
         with _TASK_LOCK:
             now = time.time()
-            for task_state in _iter_task_states():
+            if tick % _RECONCILE_EVERY_TICKS == 0:
+                # Full directory scan (heals index drift, adopts legacy
+                # snapshots); every other tick reads only active tasks.
+                _WATCH_MTIME_CACHE.clear()
+                task_states = _task_store().reconcile_index()
+            else:
+                task_states = _task_store().active_task_states(mtime_cache=_WATCH_MTIME_CACHE)
+            for task_state in task_states:
                 if str(task_state.get("status") or "").strip().lower() not in ACTIVE_STATUSES:
                     continue
                 status = _task_timeout_or_idle_status(task_state, now=now)
@@ -221,6 +251,7 @@ def _watch_active_tasks() -> None:
                 finalized.append(dict(task_state))
         for task_state in finalized:
             _finalize_task_result(task_state, reason=str(task_state.get("completionReason") or "watchdog"))
+        tick += 1
         time.sleep(WATCH_INTERVAL_SECONDS)
 
 
@@ -250,21 +281,6 @@ def _task_timeout_or_idle_status(task_state: dict[str, Any], *, now: float) -> s
     return ""
 
 
-def _capture_branch_generation(session_id: str) -> int | None:
-    """Generation at task start. Missing sessions stay unstamped."""
-
-    normalized = str(session_id or "").strip()
-    if not normalized:
-        return None
-    try:
-        from . import session_service
-
-        value = session_service.session_branch_generation(normalized)
-        return max(0, int(value))
-    except (OSError, ValueError, TypeError, RuntimeError, ImportError, AttributeError):
-        return None
-
-
 def _initial_task_state(
     *,
     terminal_session: dict[str, Any],
@@ -291,7 +307,6 @@ def _initial_task_state(
         "cliRunId": str(terminal_session.get("cliRunId") or "").strip(),
         "lockKey": str(terminal_session.get("lockKey") or "").strip(),
         "sourceSessionId": str(terminal_session.get("sourceSessionId") or "").strip(),
-        "branchGeneration": _capture_branch_generation(str(terminal_session.get("sourceSessionId") or "").strip()),
         "sourceMessageId": str(terminal_session.get("sourceMessageId") or "").strip(),
         "sourceRunId": str(terminal_session.get("sourceRunId") or "").strip(),
         "cliSessionId": str(terminal_session.get("cliSessionId") or "").strip(),
@@ -327,6 +342,27 @@ def _complete_task_state(task_state: dict[str, Any], *, status: str, code: str, 
 
 
 def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
+    store = _task_store()
+    # Unified completion fencing: a session rewind between task start and
+    # completion drops the notification. The audit fields land on the task
+    # snapshot either way.
+    allowed = store.apply_completion_fencing(task_state)
+    store.save_state(task_state)
+    if not allowed:
+        cli_agent_service._record_event(
+            "cli_agent.task.result_fenced",
+            outcome="fenced_dropped",
+            fields={
+                "taskId": str(task_state.get("taskId") or ""),
+                "terminalSessionId": str(task_state.get("terminalSessionId") or ""),
+                "adapterId": str(task_state.get("adapterId") or ""),
+                "completionReason": str(task_state.get("completionReason") or reason or ""),
+                "fencingReason": str(task_state.get("fencingReason") or ""),
+                "taskBranchGeneration": task_state.get("fencingTaskBranchGeneration"),
+                "currentBranchGeneration": task_state.get("fencingCurrentBranchGeneration"),
+            },
+        )
+        return
     session_id = str(task_state.get("sourceSessionId") or "").strip()
     cli_agent_service._record_event(
         "cli_agent.task.result_ready",
@@ -337,6 +373,7 @@ def _finalize_task_result(task_state: dict[str, Any], *, reason: str) -> None:
             "adapterId": str(task_state.get("adapterId") or ""),
             "completionReason": str(task_state.get("completionReason") or reason or ""),
             "resultSegmentCount": len(list(task_state.get("resultSegments") or [])),
+            "fencingDecision": str(task_state.get("fencingDecision") or ""),
         },
     )
     if not session_id:
@@ -628,9 +665,11 @@ def _active_task_for_terminal(terminal_session_id: str) -> dict[str, Any]:
     normalized = str(terminal_session_id or "").strip()
     if not normalized:
         return {}
+    # Index-driven: only currently active tasks are read, never the full
+    # task directory (which keeps complete task history).
     candidates = [
         task
-        for task in _iter_task_states()
+        for task in _task_store().active_task_states()
         if str(task.get("terminalSessionId") or "").strip() == normalized
         and str(task.get("status") or "").strip().lower() in ACTIVE_STATUSES
     ]
@@ -644,37 +683,15 @@ def _active_task_for_terminal(terminal_session_id: str) -> dict[str, Any]:
 
 
 def _iter_task_states() -> list[dict[str, Any]]:
-    if not TASK_STATE_DIR.exists():
-        return []
-    result: list[dict[str, Any]] = []
-    for path in TASK_STATE_DIR.glob("*.json"):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if isinstance(payload, dict):
-            result.append(payload)
-    return result
+    return _task_store().iter_task_states()
 
 
 def _read_task_state(task_id: str) -> dict[str, Any]:
-    path = task_state_path(task_id)
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return _task_store().load_state(task_id)
 
 
 def _write_task_state(task_state: dict[str, Any]) -> None:
-    task_id = str(task_state.get("taskId") or "").strip()
-    if not task_id:
-        return
-    path = task_state_path(task_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(task_state, ensure_ascii=False, indent=2), encoding="utf-8")
+    _task_store().save_state(task_state)
 
 
 def _bounded_output(text: str) -> str:
@@ -713,10 +730,6 @@ def _parse_iso_epoch(value: str) -> float | None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _safe_filename(value: str) -> str:
-    return "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(value or ""))[:120] or "task"
 
 
 def _relative_to_project(path: Path) -> str:

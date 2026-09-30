@@ -2805,6 +2805,26 @@ def create_child_session(
         last_preview=request_text,
         status="queued" if auto_start else "ready",
     )
+    # Register the child session as a runtime task so the unified registry
+    # (not a projection guess) is the ledger for its lifecycle. The fencing
+    # stamp reuses originBranchGeneration captured above.
+    try:
+        from .. import runtime_task_registry as runtime_tasks
+
+        runtime_tasks.default_store().register_task(
+            runtime_tasks.new_snapshot(
+                kind=runtime_tasks.KIND_CHILD_SESSION,
+                task_id=child_id,
+                status="queued" if auto_start else "idle",
+                source_session_id=root_id,
+                parent_session_id=root_id,
+                branch_generation=child_snapshot.get("originBranchGeneration"),
+                label=title,
+                output=request_text,
+            )
+        )
+    except Exception:
+        pass
     s._append_session_conversation_event(
         root_id,
         f"child-session-{child_id}",

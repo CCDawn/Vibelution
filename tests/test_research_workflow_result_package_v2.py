@@ -3287,14 +3287,14 @@ def test_fetch_doi_metadata_falls_back_from_crossref_to_doi_org(monkeypatch) -> 
 
     seen_urls: list[str] = []
 
-    def _fake_urlopen(request, timeout=None):
-        seen_urls.append(request.full_url)
-        if "api.crossref.org" in request.full_url:
-            raise urllib.error.HTTPError(request.full_url, 404, "not found", hdrs=None, fp=None)
-        assert request.get_header("Accept") == dmv._CSL_JSON_ACCEPT
+    def _fake_open_registry_url(url, *, headers, allowed_redirect_hosts, timeout):
+        seen_urls.append(url)
+        if "api.crossref.org" in url:
+            raise urllib.error.HTTPError(url, 404, "not found", hdrs=None, fp=None)
+        assert headers["Accept"] == dmv._CSL_JSON_ACCEPT
         return _FakeResponse(json.dumps({"DOI": "10.1/x", "title": ["T"]}).encode())
 
-    monkeypatch.setattr(dmv, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(dmv, "_open_registry_url", _fake_open_registry_url)
 
     metadata = dmv.fetch_doi_metadata("10.1103/PhysRevLett.88.237901")
 
@@ -3308,10 +3308,10 @@ def test_fetch_doi_metadata_falls_back_from_crossref_to_doi_org(monkeypatch) -> 
 def test_fetch_doi_metadata_all_failures_collapse_to_none(monkeypatch) -> None:
     from core.web.services.team_workflow import doi_metadata_verification as dmv
 
-    def _timeout(_request, timeout=None):
+    def _timeout(_url, **_kwargs):
         raise TimeoutError("network unreachable")
 
-    monkeypatch.setattr(dmv, "urlopen", _timeout)
+    monkeypatch.setattr(dmv, "_open_registry_url", _timeout)
     assert dmv.fetch_doi_metadata("10.1103/PhysRevLett.88.237901") is None
     # A non-DOI argument never reaches the network layer.
     assert dmv.fetch_doi_metadata("not-a-doi") is None

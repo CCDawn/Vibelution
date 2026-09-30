@@ -357,6 +357,7 @@ from .agent_directory.ops_residual import (
     resolve_agent_workspace_territory,
     resolve_project_memory_update_proposal,
     revoke_agent_inbox_message,
+    save_registry_payload,
     scan_wakeable_agent_inbox_messages,
     utc_now_iso,
     write_agent_inbox_message,

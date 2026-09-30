@@ -13,8 +13,26 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from config.settings import get_network_config
+from core.infrastructure.url_guard import validate_public_http_url
 
 from .models import SourceKind, SourceReliability, new_id
+
+# 固定检索端点（均为硬编码公网宿主）。出口常量断言：一旦有人把这些端点改成
+# 内网/非法目标，import 即失败。verify_ssl 降级等网络行为不在本断言范围。
+_FIXED_EGRESS_ENDPOINTS = (
+    "https://export.arxiv.org/api/query",
+    "https://api.github.com/search/repositories",
+    "https://huggingface.co/api/datasets",
+    "https://lite.duckduckgo.com/lite/",
+)
+for _FIXED_EGRESS_ENDPOINT in _FIXED_EGRESS_ENDPOINTS:
+    _FIXED_EGRESS_ERROR = validate_public_http_url(_FIXED_EGRESS_ENDPOINT)
+    if _FIXED_EGRESS_ERROR:
+        raise RuntimeError(
+            "research providers 固定端点未通过出口校验: "
+            f"{_FIXED_EGRESS_ENDPOINT}: {_FIXED_EGRESS_ERROR}"
+        )
+del _FIXED_EGRESS_ENDPOINT, _FIXED_EGRESS_ERROR
 
 
 @dataclass(frozen=True)
