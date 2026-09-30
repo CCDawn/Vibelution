@@ -30,7 +30,7 @@ import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import launcherApiSource from "../api/launcher.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
-import utilityMenuSource from "../app/AppShellUtilityMenu.tsx?raw";
+import settingsMenuSource from "../app/AppShellSettingsMenu.tsx?raw";
 import launcherShellSource from "../app/LauncherShell.tsx?raw";
 import launcherShellStylesSource from "../app/LauncherShell.styles.ts?raw";
 
@@ -131,9 +131,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routerSource).toContain('guardedLazyElement(<LauncherRoute />, "launcher")');
     expect(routerSource).not.toContain('{ path: "launcher", element: lazyElement(<LauncherRoute />) }');
     expect(shellSource).toContain("LazyAppShellSettingsMenu");
-    expect(utilityMenuSource).toContain('href="/launcher"');
-    expect(utilityMenuSource).toContain('target="_blank"');
-    expect(utilityMenuSource).toContain('lang === "zh" ? "启动器" : "Launcher"');
+    // The launcher hand-off lives in the settings gear menu (the retired
+    // utility menu held the same link).
+    expect(settingsMenuSource).toContain('href="/launcher"');
+    expect(settingsMenuSource).toContain('target="_blank"');
+    expect(settingsMenuSource).toContain('zh ? "打开启动器" : "Open launcher"');
     expect(launcherShellSource).toContain('data-shell="launcher"');
     expect(launcherShellSource).toContain('data-browser-role="launcher_control_surface"');
     expect(launcherShellSource).toContain('reason: "launcher_shell_mounted"');
