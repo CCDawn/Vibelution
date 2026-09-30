@@ -31,10 +31,10 @@ export const conversationMarkdownCodeBlockStyles = {
     "vui-components-conversationview markdownCodeBlockHeaderButton inline-grid h-6 w-6 place-items-center border-0 bg-transparent p-0 text-[var(--fg-tertiary)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)]",
   headerButtonActive:
     "vui-components-conversationview markdownCodeBlockHeaderButtonActive text-[var(--accent-cool)] hover:text-[var(--accent-cool)]",
-  // Axis-specific overrides (mt / rounded-t / border-t) win the Tailwind
-  // cascade over the host map's shorthand (my / rounded / border).
+  // Explicit overrides keep the seam joined even when production CSS chunk
+  // order places the host's border/radius shorthand after this style map.
   preAttached:
-    "vui-components-conversationview markdownCodeBlockPre mt-0 rounded-t-none border-t-0",
+    "vui-components-conversationview markdownCodeBlockPre mt-0 !rounded-t-none !border-t-0",
   preWrapped:
     "vui-components-conversationview markdownCodeBlockPreWrapped whitespace-pre-wrap break-words",
 } as const;
