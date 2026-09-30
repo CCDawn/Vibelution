@@ -13,6 +13,9 @@ import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 
 const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
+// The folder must not be named `aux` — AUX is a reserved device name on
+// Windows and git cannot index files under it.
+const AuxConversationsRoute = lazyRoute(() => import("../routes/auxConversations/AuxConversationsRoute").then((module) => ({ default: module.AuxConversationsRoute })));
 type ChatCodingRouteModule = typeof import("../routes/ChatCodingRoute");
 
 export function loadChatCodingRouteChunk(
@@ -220,6 +223,7 @@ export const router = createBrowserRouter([
       { path: "memory/graph", ...guardedLazyElement(<MemoryRoute forcedView="graph" />) },
       { path: "teams", ...guardedLazyElement(<TeamsRoute />, "workbench", "teams") },
       { path: "kernel", ...guardedLazyElement(<KernelTaskCenterRoute />) },
+      { path: "aux", ...guardedLazyElement(<AuxConversationsRoute />) },
       { path: "git", ...guardedLazyElement(<GitRoute />) },
       { path: "usage", ...guardedLazyElement(<UsageRoute />) },
       { path: "logs", ...guardedLazyElement(<LogsRoute />) },
