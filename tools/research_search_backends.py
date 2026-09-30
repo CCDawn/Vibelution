@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from core.infrastructure.url_guard import validate_public_http_url
 from tools.research_search_quality import filter_search_results
 
 _HTTP_TIMEOUT_SECONDS = 10.0
@@ -18,6 +19,22 @@ _OPENALEX_URL = "https://api.openalex.org/works"
 _ARXIV_URL = "https://export.arxiv.org/api/query"
 _GITHUB_REPOSITORY_SEARCH_URL = "https://api.github.com/search/repositories"
 _GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
+
+# 固定检索端点的出口常量断言：这些 URL 全部硬编码在模块内，若未来有人把
+# 某个端点改成内网/非法目标，import 即失败（fail closed），而不是运行时静默
+# 把检索流量打到内网。SearxNG 是环境变量入口，在调用时校验（见 searxng_search）。
+for _FIXED_EGRESS_URL in (
+    _OPENALEX_URL,
+    _ARXIV_URL,
+    _GITHUB_REPOSITORY_SEARCH_URL,
+    _GOOGLE_NEWS_RSS_URL,
+):
+    _FIXED_EGRESS_ERROR = validate_public_http_url(_FIXED_EGRESS_URL)
+    if _FIXED_EGRESS_ERROR:
+        raise RuntimeError(
+            f"research_search_backends 固定端点未通过出口校验: {_FIXED_EGRESS_URL}: {_FIXED_EGRESS_ERROR}"
+        )
+del _FIXED_EGRESS_URL, _FIXED_EGRESS_ERROR
 
 
 def _provider_event(provider: str, status: str, *, result_count: int = 0, error: str = "") -> dict[str, Any]:
@@ -31,7 +48,21 @@ def _provider_event(provider: str, status: str, *, result_count: int = 0, error:
     return payload
 
 
+def _guard_initial_url(url: str) -> None:
+    """出站前置校验：初始 URL 必须过 url_guard，否则拒绝发请求。
+
+    固定端点已由 import 期常量断言兜底；这里覆盖运行时拼装/环境变量入口
+    （SearxNG）以及未来新增的调用点。httpx 默认自动跟随重定向，重定向目标
+    不经过本校验——检索后端均为固定可信宿主，重定向跟随维持现状；环境变量
+    入口在 searxng_search 层单独拒绝内网目标。
+    """
+    error = validate_public_http_url(url)
+    if error:
+        raise ValueError(f"egress guard rejected URL: {error}: {url}")
+
+
 def _http_get_json(url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    _guard_initial_url(url)
     with httpx.Client(timeout=_HTTP_TIMEOUT_SECONDS) as client:
         response = client.get(url, params=params or {}, headers=headers or {"User-Agent": _USER_AGENT})
         response.raise_for_status()
@@ -40,6 +71,7 @@ def _http_get_json(url: str, *, params: dict[str, Any] | None = None, headers: d
 
 
 def _http_get_text(url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> str:
+    _guard_initial_url(url)
     with httpx.Client(timeout=_HTTP_TIMEOUT_SECONDS) as client:
         response = client.get(url, params=params or {}, headers=headers or {"User-Agent": _USER_AGENT})
         response.raise_for_status()
@@ -159,6 +191,14 @@ def searxng_search(query: str, *, max_results: int, category: str = "general") -
     base_url = os.environ.get("VIBELUTION_SEARXNG_URL", "").strip().rstrip("/")
     if not base_url:
         return [], _provider_event("searxng", "skipped", error="VIBELUTION_SEARXNG_URL not configured")
+    guard_error = validate_public_http_url(f"{base_url}/search")
+    if guard_error:
+        # 环境变量指向本机/内网/非法目标：按出口防护拒绝，不发起请求。
+        return [], _provider_event(
+            "searxng",
+            "skipped",
+            error=f"SearxNG URL rejected by egress guard: {guard_error}: {base_url}",
+        )
     try:
         payload = _http_get_json(
             f"{base_url}/search",

@@ -20,13 +20,16 @@ import time
 import hashlib
 import base64
 import html as html_lib
-import ipaddress
 import re
 import threading
 from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 from typing import List, Dict, Any
 
 import httpx
+
+from core.infrastructure.url_guard import (
+    validate_public_http_url as _guard_validate_public_http_url,
+)
 
 
 # ============================================================================
@@ -84,7 +87,6 @@ _FETCH_ACCEPT_LANGUAGE_HEADER = "en;q=0.9,zh;q=0.8"
 # 仅改写 GET 抓取路径，搜索阶段（providers/facade_helpers 的 export API 调用）不受影响。
 _ARXIV_MIRROR_HOSTS = ("arxiv.org", "www.arxiv.org")
 _ARXIV_EXPORT_HOST = "export.arxiv.org"
-_BLOCKED_HOST_SUFFIXES = (".localhost", ".local", ".internal")
 _TOKEN_HEALTH_CACHE: dict[str, Any] = {"checkedAt": 0.0, "status": None, "refreshing": False}
 _TOKEN_HEALTH_CACHE_LOCK = threading.Lock()
 _SITE_QUERY_RE = re.compile(r"(?i)(?:^|[\s(])site:([A-Za-z0-9.-]+)")
@@ -509,23 +511,11 @@ def _format_public_search_quality_failure(
 
 
 def _validate_public_http_url(url: str) -> str:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        return "URL 必须使用 http:// 或 https://"
-    if not parsed.hostname:
-        return "URL 缺少主机名"
-    if parsed.username or parsed.password:
-        return "URL 不能包含用户名或密码"
-    host = parsed.hostname.strip().lower()
-    if host in {"localhost", "127.0.0.1", "::1"} or host.endswith(_BLOCKED_HOST_SUFFIXES):
-        return "出于安全原因，不允许访问本机或内部网络地址"
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return ""
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
-        return "出于安全原因，不允许访问私有、环回或保留 IP 地址"
-    return ""
+    """出站 URL 字面量校验；策略统一收敛在 core.infrastructure.url_guard。
+
+    保留本函数名作为模块内调用点与旧引用的稳定入口，不再复制判定逻辑。
+    """
+    return _guard_validate_public_http_url(url)
 
 
 def _clean_html_fragment(fragment: str) -> str:
@@ -634,6 +624,10 @@ def public_web_search(
         return "[错误] 搜索关键词不能为空"
     limit = _clamp_int(max_results, default=10, minimum=1, maximum=_PUBLIC_SEARCH_MAX_RESULTS)
     search_url = f"{_PUBLIC_SEARCH_URL}?q={quote_plus(query.strip())}&count={limit}"
+    guard_error = _guard_validate_public_http_url(search_url)
+    if guard_error:
+        # 固定搜索端点被改成内网/非法目标时 fail closed，不发请求。
+        return f"[错误] {guard_error}: {search_url}"
     try:
         with httpx.Client(timeout=_PUBLIC_SEARCH_TIMEOUT, follow_redirects=True) as client:
             try:
