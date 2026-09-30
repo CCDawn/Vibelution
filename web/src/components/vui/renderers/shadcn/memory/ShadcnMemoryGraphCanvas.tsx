@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ShadcnButton } from "../ShadcnButton";
 
 import type { VMemoryGraphCanvasProps } from "../../../product/memory/VMemoryGraphCanvas";
 import { layoutMemoryKnowledgeGraph } from "../../../product/memory/memoryGraphModel";
@@ -186,7 +187,7 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
           <ul className={styles.fallbackList}>
             {nodes.map((node) => (
               <li key={node.id} className={styles.fallbackItem}>
-                <button
+                <ShadcnButton
                   type="button"
                   className={styles.fallbackButton}
                   aria-pressed={selectedNodeId === node.id}
@@ -196,7 +197,7 @@ export function ShadcnMemoryGraphCanvas(props: VMemoryGraphCanvasProps) {
                   <span className={styles.fallbackSummary}>
                     {node.type}{node.summary ? " · " + node.summary : ""}
                   </span>
-                </button>
+                </ShadcnButton>
               </li>
             ))}
           </ul>
