@@ -46,6 +46,10 @@ REFRESH_COOLDOWN_SECONDS = 900.0
 # a helper crash. Live holders remain authoritative even when a rebuild is
 # longer than this grace period.
 REFRESH_LOCK_MALFORMED_GRACE_SECONDS = 30.0
+# A recycled PID is created after the lock it now fronts. Allow a few seconds
+# of clock jitter before judging the live holder to be an impostor, so a
+# holder that started in the same second as its lock is never evicted.
+REFRESH_LOCK_PID_REUSE_TOLERANCE_SECONDS = 3.0
 
 CREATE_NEW_PROCESS_GROUP = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
@@ -217,7 +221,24 @@ def _refresh_lock_is_stale(path: Path) -> bool:
         # A dead holder is definitive even when its lock file is young. A live
         # PID remains authoritative: a long rebuild is not stale merely due to
         # age.
-        return not _pid_alive(pid)
+        if not _pid_alive(pid):
+            return True
+        # PID reuse: an OS can hand the holder's PID to an unrelated process
+        # after a hard kill, which would keep a leaked lock alive forever. The
+        # recycled process is created after the lock's startedAt, so it cannot
+        # be the holder. When the holder's creation time cannot be determined
+        # (no psutil or access denied), stay conservative and keep treating
+        # the live PID as authoritative so a long rebuild is never evicted.
+        if started_at is None:
+            return False
+        try:
+            started_epoch = started_at.timestamp()
+        except (OSError, OverflowError, ValueError):
+            return False
+        create_time = _process_create_time(pid)
+        if create_time is None:
+            return False
+        return create_time > started_epoch + REFRESH_LOCK_PID_REUSE_TOLERANCE_SECONDS
 
     try:
         age_anchor = started_at.timestamp() if started_at is not None else path.stat().st_mtime
@@ -1117,6 +1138,26 @@ def _windows_pid_exists(pid: int) -> bool:
         ctypes.windll.kernel32.CloseHandle(handle)
         return True
     return False
+
+
+def _process_create_time(pid: int) -> float | None:
+    """Return when the PID's current process was created, as epoch seconds.
+
+    ``None`` means unknown: psutil is missing, the process vanished, or the
+    query was denied. Callers treat ``None`` conservatively instead of
+    claiming a recycled PID.
+    """
+
+    if pid <= 0:
+        return None
+    try:
+        import psutil
+    except Exception:
+        return None
+    try:
+        return float(psutil.Process(int(pid)).create_time())
+    except Exception:
+        return None
 
 
 def _append_refresh_log(project_root: Path, event: str, **fields: Any) -> None:
