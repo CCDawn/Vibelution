@@ -113,7 +113,7 @@ export function UsageRoute() {
           <div className={styles.sectionHeading}><h2>{copy("Token 构成", "Token composition")}</h2><span>{rangeLabel}</span></div>
           {rollup && rollup.inputTokens + rollup.outputTokens > 0 && <div className={styles.composition} aria-hidden="true">
             {/* Data-driven chart width, not layout styling. */}
-            <span style={{ width: (rollup.inputTokens / (rollup.inputTokens + rollup.outputTokens) * 100) + "%" }} /><span className="flex-1" />
+            <span style={{ width: (rollup.inputTokens / (rollup.inputTokens + rollup.outputTokens) * 100) + "%" }} /><span className={styles.outputSegment} />
           </div>}
           <div>{tokenRows.map(row => <div key={row.name} className={row.subset ? styles.tokenRow + " " + styles.subset : styles.tokenRow}>
             <div><strong>{row.name}</strong><span>{row.hint}</span></div><span>{value(row.amount)}</span>
