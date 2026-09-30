@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   Database,
   Ellipsis,
   History,
@@ -24,6 +26,7 @@ import {
   VStringSelect,
   VTabs,
 } from "../components/vui";
+import { persistPaneVisibility, readPaneVisibility } from "../components/layout/paneVisibilityPersistence";
 import styles from "./SupervisedConversationWorkspace.styles";
 
 export type SupervisedConversationWorkspaceStep = {
@@ -45,6 +48,7 @@ export type EvolutionWorkspaceRun = {
   title: string;
   status: string;
   selected: boolean;
+  history?: boolean;
   onSelect: () => void;
 };
 
@@ -52,6 +56,7 @@ export type EvolutionWorkspaceRunGroup = {
   id: EvolutionTrack;
   label: string;
   runs: readonly EvolutionWorkspaceRun[];
+  onHistory?: () => void;
 };
 
 export type SupervisedConversationWorkspaceProps = {
@@ -124,6 +129,8 @@ function labelsFor(lang: "zh" | "en") {
       navigation: "Run context",
       progress: "Phase progress",
       noRuns: "No runs yet",
+      historyRuns: "History",
+      viewAllHistory: (count: number) => `View all history (${count})`,
     };
   }
   return {
@@ -149,6 +156,8 @@ function labelsFor(lang: "zh" | "en") {
     navigation: "运行导航",
     progress: "阶段进度",
     noRuns: "暂无运行",
+    historyRuns: "历史记录",
+    viewAllHistory: (count: number) => `查看全部历史（${count}）`,
   };
 }
 
@@ -206,7 +215,10 @@ export function SupervisedConversationWorkspace({
   const narrow = workspaceWidth < 880;
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [desktopNavigationOpen, setDesktopNavigationOpen] = useState(true);
+  const [desktopNavigationOpen, setDesktopNavigationOpen] = useState(() =>
+    readPaneVisibility(WORKBENCH_LAYOUT_IDS.evolution, "run-navigation", true),
+  );
+  const [expandedHistoryGroups, setExpandedHistoryGroups] = useState<Record<string, boolean>>({});
   const [selectedEvidenceTabId, setSelectedEvidenceTabId] = useState("");
   const evidenceTab = evidenceTabs.find((tab) => tab.id === selectedEvidenceTabId)
     ?? evidenceTabs[0];
@@ -215,6 +227,10 @@ export function SupervisedConversationWorkspace({
   const showMobileEvidence = showEvidence && !showDesktopEvidence;
   const showDesktopNavigation = desktopNavigationOpen && (!showDesktopEvidence || workspaceWidth >= 1200);
   const showTrackSwitcher = activeTrack !== undefined && onTrackChange !== undefined;
+
+  useEffect(() => {
+    persistPaneVisibility(WORKBENCH_LAYOUT_IDS.evolution, "run-navigation", desktopNavigationOpen);
+  }, [desktopNavigationOpen]);
   const trackItems = [
     {
       id: "supervised",
@@ -283,37 +299,87 @@ export function SupervisedConversationWorkspace({
     <VSurface as="aside" padding="none" className={styles.contextPanel} aria-label={labels.navigation}>
       {hasRunGroups ? (
         <nav aria-label={labels.navigation} className={styles.contextRunGroups}>
-          {runGroups?.map((group) => (
-            <section key={group.id} className={styles.runGroup} aria-label={group.label}>
-              <h2 className={styles.runGroupHeading}>
-                <span>{group.label}</span>
-                <span className={styles.runGroupCount}>{group.runs.length}</span>
-              </h2>
-              {group.runs.length ? (
-                <div className={styles.runGroupItems}>
-                  {group.runs.map((run) => (
-                    <VButton
-                      key={run.id}
-                      contentLayout="plain"
-                      variant="ghost"
-                      className={styles.runItem}
-                      aria-pressed={run.selected}
-                      aria-current={run.selected ? "page" : undefined}
-                      title={run.title}
-                      onPress={() => { run.onSelect(); closeNavigation(); }}
-                    >
-                      <span className={styles.runItemText}>
-                        <span className={styles.runItemTitle}>{run.title}</span>
-                        <span className={styles.runItemStatus}>{run.status}</span>
-                      </span>
-                    </VButton>
-                  ))}
-                </div>
-              ) : (
-                <p className={styles.runGroupEmpty}>{labels.noRuns}</p>
-              )}
-            </section>
-          ))}
+          {runGroups?.map((group) => {
+            const currentRuns = group.runs.filter((run) => !run.history || run.selected);
+            const historyRuns = group.runs.filter((run) => run.history && !run.selected);
+            const historyExpanded = expandedHistoryGroups[group.id] === true;
+            const selectRun = (run: EvolutionWorkspaceRun) => (
+              <VButton
+                key={run.id}
+                contentLayout="plain"
+                variant="ghost"
+                className={styles.runItem}
+                aria-pressed={run.selected}
+                aria-current={run.selected ? "page" : undefined}
+                title={run.title}
+                onPress={() => { run.onSelect(); closeNavigation(); }}
+              >
+                <span className={styles.runItemText}>
+                  <span className={styles.runItemTitle}>{run.title}</span>
+                  <span className={styles.runItemStatus}>{run.status}</span>
+                </span>
+              </VButton>
+            );
+            return (
+              <section key={group.id} className={styles.runGroup} aria-label={group.label}>
+                <h2 className={styles.runGroupHeading}>
+                  <span>{group.label}</span>
+                  <span className={styles.runGroupCount}>{group.runs.length}</span>
+                </h2>
+                {group.runs.length ? (
+                  <>
+                    {currentRuns.length ? (
+                      <div className={styles.runGroupItems}>{currentRuns.map(selectRun)}</div>
+                    ) : null}
+                    {historyRuns.length ? (
+                      <div className={styles.runHistory}>
+                        <VButton
+                          contentLayout="plain"
+                          variant="ghost"
+                          className={styles.runHistoryToggle}
+                          aria-expanded={historyExpanded}
+                          aria-controls={`evolution-history-${group.id}`}
+                          onPress={() => setExpandedHistoryGroups((current) => ({
+                            ...current,
+                            [group.id]: !historyExpanded,
+                          }))}
+                        >
+                          <span className={styles.runHistoryLabel}>
+                            {historyExpanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+                            <span>{labels.historyRuns}</span>
+                          </span>
+                          <span className={styles.runGroupCount}>{historyRuns.length}</span>
+                        </VButton>
+                        <div
+                          id={`evolution-history-${group.id}`}
+                          className={`${styles.runGroupItems} ${historyExpanded ? "" : "hidden"}`}
+                          hidden={!historyExpanded}
+                        >
+                          {historyRuns.slice(0, 5).map(selectRun)}
+                          {historyRuns.length > 5 ? (
+                            <VButton
+                              contentLayout="plain"
+                              variant="ghost"
+                              className={styles.runHistoryAll}
+                              onPress={() => {
+                                closeNavigation();
+                                if (group.onHistory) group.onHistory();
+                                else onHistory();
+                              }}
+                            >
+                              {labels.viewAllHistory(historyRuns.length)}
+                            </VButton>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className={styles.runGroupEmpty}>{labels.noRuns}</p>
+                )}
+              </section>
+            );
+          })}
         </nav>
       ) : null}
       {trackContext != null ? <section className={styles.trackContext}>{trackContext}</section> : null}

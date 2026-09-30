@@ -34,6 +34,33 @@ export type BuildUnifiedEvolutionRunsInput = {
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "paused", "stopping"]);
 
+const ENDED_STATUSES = new Set(["done", "completed", "failed", "cancelled", "canceled", "stopped", "succeeded"]);
+const REVIEW_OUTCOMES = new Set([
+  "needs_manual_decision", "awaiting_user_approval", "awaiting_agent_approval",
+  "integration_committed", "activation_pending", "activation_failed", "rollback_activation_pending",
+]);
+
+/** Only known terminal records may collapse; pending review and unknown states stay visible. */
+export function isEvolutionRunHistory(run: UnifiedEvolutionRun): boolean {
+  const worktree = run.worktreeRun;
+  if (worktree && (
+    REVIEW_OUTCOMES.has(normalizedText(worktree.outcome).toLowerCase())
+    || worktree.actionStates?.approveReview?.enabled
+    || worktree.actionStates?.runAgentApproval?.enabled
+  )) return false;
+  return ENDED_STATUSES.has(normalizedText(run.status).toLowerCase());
+}
+
+export function evolutionRunTimestamp(run: UnifiedEvolutionRun): number {
+  const source = run.worktreeRun ?? run.activeRun ?? run.autonomousRun ?? run.observationRun;
+  if (!source) return 0;
+  for (const field of ["updatedAt", "finishedAt", "startedAt"] as const) {
+    const timestamp = Date.parse(String((source as unknown as Record<string, unknown>)[field] ?? ""));
+    if (Number.isFinite(timestamp)) return timestamp;
+  }
+  return 0;
+}
+
 function normalizedText(value: unknown): string {
   return String(value ?? "").trim();
 }

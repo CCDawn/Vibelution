@@ -47,6 +47,12 @@ const styles = {
   runGroupCount:
     "flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--vui-control-muted)] text-vui-micro-10 font-medium text-[var(--fg-tertiary)]",
   runGroupItems: "flex min-w-0 flex-col gap-0.5",
+  runHistory: "mt-1 border-t border-[var(--vui-border-subtle)] pt-1",
+  runHistoryToggle:
+    "!flex !h-auto !min-h-9 !w-full !justify-between !px-2 !text-[length:var(--vui-font-xs)] !text-[var(--fg-secondary)]",
+  runHistoryLabel: "flex min-w-0 items-center gap-1.5",
+  runHistoryAll:
+    "!flex !h-auto !min-h-9 !w-full !justify-start !px-2 !text-left !text-[length:var(--vui-font-xs)] !text-[var(--fg-secondary)]",
   runItem:
     "!flex !h-auto !min-h-10 !w-full !min-w-0 !justify-start !px-2 !py-1.5 text-left aria-pressed:!bg-[var(--vui-surface-panel)] max-[879px]:!min-h-11",
   runItemText: "flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left",

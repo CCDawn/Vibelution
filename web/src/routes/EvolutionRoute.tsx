@@ -111,7 +111,7 @@ import {
 
 import { getEffectiveIntakeMode, SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedConversationWorkspace, type EvolutionWorkspaceRunGroup } from "./SupervisedConversationWorkspace";
-import { buildUnifiedEvolutionRuns, selectUnifiedEvolutionRun } from "./unifiedEvolutionRuns";
+import { buildUnifiedEvolutionRuns, evolutionRunTimestamp, isEvolutionRunHistory, selectUnifiedEvolutionRun } from "./unifiedEvolutionRuns";
 import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationPanel";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import {
@@ -2153,9 +2153,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     .map((track) => ({
       id: track,
       label: track === "supervised" ? t("supervisedEvolutionMode") : (lang === "zh" ? "自进化 · 当前与最近" : "Self-evolution · current and latest"),
-      runs: unifiedRuns.filter((run) => run.track === track).map((run) => ({
+      onHistory: () => {
+        changeWorkspaceTrack(track);
+        if (track === "supervised") goToSupervisedView("runs");
+        else setSelfDetailsOpen(true);
+      },
+      runs: unifiedRuns.filter((run) => run.track === track)
+        .sort((left, right) => evolutionRunTimestamp(right) - evolutionRunTimestamp(left)).map((run) => ({
         id: run.key,
         title: run.title,
+        history: isEvolutionRunHistory(run),
         status: `${statusLabel(run.status)} · ${run.runId.slice(-8)}`,
         selected: activeTrack === track && run.key === (track === "supervised" ? selectedSupervisedWorkspaceRun?.key : selectedSelfWorkspaceRun?.key),
         onSelect: () => {

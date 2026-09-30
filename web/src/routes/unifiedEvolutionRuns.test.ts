@@ -9,8 +9,37 @@ import type {
 } from "../api/types";
 import {
   buildUnifiedEvolutionRuns,
+  evolutionRunTimestamp,
+  isEvolutionRunHistory,
   selectUnifiedEvolutionRun,
 } from "./unifiedEvolutionRuns";
+
+describe("run navigation history classification", () => {
+  it.each(["done", "completed", "failed", "cancelled"])("collapses ended %s records", (status) => {
+    const [run] = buildUnifiedEvolutionRuns({ supervisedWorktreeRuns: [worktreeRun("old", { status, approvalDecision: { status: "pending" } })] });
+    expect(isEvolutionRunHistory(run)).toBe(true);
+  });
+  it.each(["running", "queued", "paused", "awaiting_user_approval", "unknown"])("keeps %s visible", (status) => {
+    const [run] = buildUnifiedEvolutionRuns({ supervisedWorktreeRuns: [worktreeRun("current", { status })] });
+    expect(isEvolutionRunHistory(run)).toBe(false);
+  });
+  it("keeps terminal candidates requiring approval or activation visible", () => {
+    for (const outcome of ["awaiting_user_approval", "awaiting_agent_approval", "needs_manual_decision", "activation_failed"]) {
+      const [run] = buildUnifiedEvolutionRuns({ supervisedWorktreeRuns: [worktreeRun("review", { outcome })] });
+      expect(isEvolutionRunHistory(run)).toBe(false);
+    }
+  });
+  it("uses valid update time and falls back to finish time", () => {
+    const [run] = buildUnifiedEvolutionRuns({ supervisedWorktreeRuns: [worktreeRun("recent", { updatedAt: "invalid", finishedAt: "2026-10-01T00:00:00Z" })] });
+    expect(evolutionRunTimestamp(run)).toBe(Date.parse("2026-10-01T00:00:00Z"));
+  });
+  it("keeps a service-enabled approval visible even on a terminal run", () => {
+    const [run] = buildUnifiedEvolutionRuns({ supervisedWorktreeRuns: [worktreeRun("approve", {
+      actionStates: { approveReview: { enabled: true, reason: "" } },
+    })] });
+    expect(isEvolutionRunHistory(run)).toBe(false);
+  });
+});
 
 function worktreeRun(
   runId: string,
