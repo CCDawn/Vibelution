@@ -1,4 +1,5 @@
 import type { BackendHealth, CodeFreshnessVerdict, RuntimeSummary, WorkRunSnapshot } from "../api/types";
+import { shellDictionary, type ShellTranslationKey } from "../i18n/shellDictionary";
 
 export type SystemStatusTone = "idle" | "running" | "failed" | "caution";
 
@@ -17,12 +18,23 @@ export type ActiveWorkIndicatorItem = {
   href: string;
   detail: string;
   tone: SystemStatusTone;
+  /** Terminal failed run left in the active slot — never counted as active work. */
+  staleFailure?: boolean;
 };
 
 export type ActiveWorkIndicator = ActiveWorkIndicatorItem & {
   count: number;
   overflowCount: number;
   items: ActiveWorkIndicatorItem[];
+  /** Terminal failed runs still parked in the active slot; rendered in their own caution section. */
+  staleFailures: ActiveWorkIndicatorItem[];
+};
+
+export type SystemStatusCard = {
+  id: "frontend" | "backend" | "runtime";
+  label: string;
+  value: string;
+  tone: SystemStatusTone;
 };
 
 export type StartupProgressState = {
@@ -433,7 +445,7 @@ export function deriveActiveWorkIndicator(
     ? null
     : active.chat_turn;
 
-  const candidates = [
+  const built = [
     ...activeWorkCandidatesFromItems(
       "supervised",
       activeItems?.supervised_worktree_evolution_run,
@@ -454,8 +466,23 @@ export function deriveActiveWorkIndicator(
     ...activeWorkCandidatesFromItems("chat", visibleChatItems, runtime, lang, visibleChatFallback),
   ].filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
 
-  if (!candidates.length) {
+  // Terminal failed runs parked in the active slot are stale leftovers, not
+  // active work: they never count toward "N running" but stay visible so a
+  // dead round cannot disappear without a trace.
+  const staleFailures = built.filter((item) => item.staleFailure);
+  const candidates = built.filter((item) => !item.staleFailure);
+  if (!candidates.length && !staleFailures.length) {
     return null;
+  }
+
+  if (!candidates.length) {
+    return {
+      ...staleFailures[0],
+      count: 0,
+      overflowCount: 0,
+      items: [],
+      staleFailures,
+    };
   }
 
   return {
@@ -463,6 +490,42 @@ export function deriveActiveWorkIndicator(
     count: candidates.length,
     overflowCount: Math.max(0, candidates.length - 1),
     items: candidates,
+    staleFailures,
+  };
+}
+
+const systemStatusTonePriority: Record<SystemStatusTone, number> = {
+  failed: 0,
+  caution: 1,
+  running: 2,
+  idle: 3,
+};
+
+/** Worst-tone card wins; ties keep the earlier card (frontend first). */
+export function pickPrimarySystemStatusCard(cards: SystemStatusCard[]): SystemStatusCard {
+  return cards.reduce((selected, item) =>
+    systemStatusTonePriority[item.tone] < systemStatusTonePriority[selected.tone] ? item : selected,
+  cards[0]);
+}
+
+/**
+ * The runtime-summary feed is down (health is fine, /api/runtime/summary keeps
+ * failing): the runtime card must stop reading as a neutral "unmanaged" idle
+ * and speak the truth at caution grade, so the primary status can never stay
+ * a pure green "connected" while the backend is half dead.
+ */
+export function applyRuntimeSummaryOutage(
+  card: SystemStatusCard,
+  unavailable: boolean,
+  unavailableValue: string,
+): SystemStatusCard {
+  if (!unavailable) {
+    return card;
+  }
+  return {
+    ...card,
+    value: unavailableValue,
+    tone: card.tone === "failed" ? card.tone : "caution",
   };
 }
 
@@ -571,18 +634,25 @@ function buildActiveWorkCandidate(
   }
 
   const status = normalizeWorkRunStatus(run);
-  if (isTerminalWorkRunStatus(status)) {
+  const terminal = isTerminalWorkRunStatus(status);
+  if (terminal && !isFailedWorkRunStatus(status)) {
     return null;
   }
-
-  const label = activeWorkKindLabel(kind, lang);
-  const fullSummary = activeWorkSummary(kind, run, runtime, lang, options);
+  // A failed round left in the active slot becomes a stale-failure item: it
+  // renders in its own caution section instead of counting as running work.
+  const staleFailure = terminal;
+  const label = staleFailure
+    ? staleWorkKindLabel(kind, lang)
+    : activeWorkKindLabel(kind, lang);
+  const fullSummary = staleFailure
+    ? staleWorkSummary(kind, run)
+    : activeWorkSummary(kind, run, runtime, lang, options);
   // Chat turns and room rounds surface raw diagnostic text; compact them so the
   // chip and the popover read like sentences instead of log dumps. The full
   // text stays on the item for tooltips and the linked surface.
-  const summary = kind === "chat_room"
+  const summary = !staleFailure && kind === "chat_room"
     ? compactActiveWorkSummary(fullSummary)
-    : kind === "chat"
+    : !staleFailure && kind === "chat"
       ? compactActiveWorkSummary(fullSummary, 96)
       : fullSummary;
   const runId = textValue(run.runId);
@@ -599,7 +669,8 @@ function buildActiveWorkCandidate(
     runId,
     href,
     detail: detailParts.join(" · "),
-    tone: activeWorkTone(status),
+    tone: staleFailure ? "caution" : activeWorkTone(status),
+    staleFailure: staleFailure || undefined,
   };
 }
 
@@ -640,6 +711,40 @@ function isTerminalWorkRunStatus(status: string): boolean {
     "superseded",
     "error",
   ]).has(status);
+}
+
+/** Only genuine failures become visible stale leftovers; neutral finals stay hidden. */
+function isFailedWorkRunStatus(status: string): boolean {
+  return ["failed", "failed_provider", "failed_runtime", "error"].includes(status);
+}
+
+const staleWorkLabelKeys: Record<ActiveWorkKind, ShellTranslationKey> = {
+  supervised: "activeWorkStale_supervised",
+  self: "activeWorkStale_self",
+  source_collection: "activeWorkStale_source_collection",
+  chat_room: "activeWorkStale_chat_room",
+  chat: "activeWorkStale_chat",
+};
+
+function staleWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
+  return shellDictionary[lang][staleWorkLabelKeys[kind]];
+}
+
+function staleWorkSummary(kind: ActiveWorkKind, run: ActiveWorkRunSnapshot): string {
+  const lastToolError = recordTextValue(run["lastToolError"], ["summary", "errorPreview", "toolName"]);
+  if (kind === "source_collection") {
+    const topic = firstTextValue(run, ["topic", "title"]);
+    const summary = firstTextValue(run, ["summary", "currentTask"]) || lastToolError;
+    if (topic && summary) {
+      return `${topic}: ${summary}`;
+    }
+    return summary || topic;
+  }
+  if (kind === "chat") {
+    return firstTextValue(run, ["summary", "currentTask"]) || lastToolError || firstTextValue(run, ["userMessage"]);
+  }
+  return firstTextValue(run, ["topic", "summary", "currentTask", "currentGoal", "goal"])
+    || lastToolError;
 }
 
 function activeWorkTone(status: string): SystemStatusTone {

@@ -196,38 +196,35 @@ def _production_input_paths(web_dir: Path) -> list[Path]:
     return sorted({path.resolve() for path in paths}, key=lambda item: item.as_posix().lower())
 
 
-def _digest_inputs(web_dir: Path) -> tuple[str, int]:
-    digest = hashlib.sha256()
-    count = 0
-    for path in _production_input_paths(web_dir):
-        relative = path.relative_to(web_dir.resolve()).as_posix()
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-        count += 1
-    return digest.hexdigest(), count
+def _scan_production_inputs(web_dir: Path) -> tuple[str, int, str]:
+    """Read each build input once for both content and mutation fingerprints.
 
-
-def _input_state_digest(web_dir: Path) -> str:
-    """Capture ordinary source mutations that return to the same content mid-build.
-
-    This value does not participate in the content-addressed BuildKey.  It is
-    compared only before publication so an edit-save-revert while Vite is
-    reading inputs cannot activate a release compiled from the transient state.
+    The content digest determines the BuildKey.  The stat digest detects
+    save-and-revert edits while a build is running, so keep sampling metadata
+    after each file read and compare a fresh scan before publication.
     """
 
-    digest = hashlib.sha256()
+    source_digest = hashlib.sha256()
+    state_digest = hashlib.sha256()
+    input_count = 0
+    resolved_web_dir = web_dir.resolve()
     for path in _production_input_paths(web_dir):
+        relative = path.relative_to(resolved_web_dir).as_posix()
+        relative_bytes = relative.encode("utf-8")
+        source_digest.update(relative_bytes)
+        source_digest.update(b"\0")
+        source_digest.update(path.read_bytes())
+        source_digest.update(b"\0")
+
         stat = path.stat()
-        relative = path.relative_to(web_dir.resolve()).as_posix()
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(str(stat.st_size).encode("ascii"))
-        digest.update(b"\0")
-        digest.update(str(stat.st_mtime_ns).encode("ascii"))
-        digest.update(b"\0")
-    return digest.hexdigest()
+        state_digest.update(relative_bytes)
+        state_digest.update(b"\0")
+        state_digest.update(str(stat.st_size).encode("ascii"))
+        state_digest.update(b"\0")
+        state_digest.update(str(stat.st_mtime_ns).encode("ascii"))
+        state_digest.update(b"\0")
+        input_count += 1
+    return source_digest.hexdigest(), input_count, state_digest.hexdigest()
 
 
 def _build_environment_inputs() -> dict[str, Any]:
@@ -302,11 +299,11 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
     command = shutil.which("bun" if manager == "bun" else ("node.exe" if os.name == "nt" else "node")) or (
         "bun" if manager == "bun" else ("node.exe" if os.name == "nt" else "node")
     )
-    source_digest, input_count = _digest_inputs(web_dir)
+    source_digest, input_count, input_state_digest = _scan_production_inputs(web_dir)
     inputs = {
         "productionInputDigest": source_digest,
         "productionInputCount": input_count,
-        "productionInputStateDigest": _input_state_digest(web_dir),
+        "productionInputStateDigest": input_state_digest,
         "nodeVersion": _run_version(command),
         "packageManager": manager,
         "buildCommand": (

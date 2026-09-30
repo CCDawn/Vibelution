@@ -294,6 +294,59 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   return (await response.json()) as T;
 }
 
+/**
+ * Bounded waits for the shell heartbeat probes. A hung backend (accepts the
+ * connection, never answers) must degrade the top-bar status instead of
+ * keeping the query pending forever. Opt-in per call site — fetchJson keeps
+ * no global default timeout so unrelated callers stay unchanged.
+ */
+export const BACKEND_HEALTH_TIMEOUT_MS = 8_000;
+export const RUNTIME_SUMMARY_TIMEOUT_MS = 10_000;
+
+/**
+ * fetchJson with a hard timeout, composed manually with the caller-provided
+ * signal (AbortSignal.any is not guaranteed in the Electron Chromium builds
+ * this shell runs on, so an AbortController fan-in is used instead).
+ * A timeout abort rejects like any other fetch failure; react-query callers
+ * observe it as a request error.
+ */
+export async function fetchJsonWithTimeout<T>(
+  input: string,
+  init: RequestInit & { timeoutMs: number },
+): Promise<T> {
+  const { timeoutMs, ...restInit } = init;
+  const controller = new AbortController();
+  const externalSignal = restInit.signal ?? null;
+  const abortFromExternal = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      abortFromExternal();
+    } else {
+      externalSignal.addEventListener("abort", abortFromExternal);
+    }
+  }
+  const timeoutHandle = setTimeout(
+    () => controller.abort(createTimeoutAbortReason(timeoutMs)),
+    timeoutMs,
+  );
+  try {
+    return await fetchJson<T>(input, { ...restInit, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutHandle);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", abortFromExternal);
+    }
+  }
+}
+
+function createTimeoutAbortReason(timeoutMs: number): unknown {
+  try {
+    return new DOMException(`Request timed out after ${timeoutMs}ms`, "TimeoutError");
+  } catch {
+    return new Error(`Request timed out after ${timeoutMs}ms`);
+  }
+}
+
 type FailureDetails = {
   message: string;
   code: string | null;

@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # v5 was first deployed with a checksum that is already present in user
 # ledgers.  It is accepted only together with an independent schema-shape
@@ -608,6 +608,83 @@ MIGRATIONS: tuple[Migration, ...] = (
                 "ALTER TABLE outbox_actions "
                 "ADD COLUMN lease_recovery_count INTEGER NOT NULL DEFAULT 0"
             ),
+        ),
+    ),
+    # P2-e scheduling governance: workflow_runs gains the recoverable
+    # 'paused' status. CHECK constraints cannot be altered in place, so this
+    # is the documented SQLite table-rebuild procedure (create → copy → drop
+    # → rename → re-index); database.py runs migrations with foreign key
+    # enforcement off and verifies PRAGMA foreign_key_check before the
+    # commit, so the rebuild is safe for populated ledgers. Column set and
+    # order stay identical to the migrated v9 shape (structure_hash was
+    # appended last by v6); only the status CHECK gains 'paused'.
+    Migration(
+        version=10,
+        statements=(
+            """
+            CREATE TABLE workflow_runs_v10 (
+              run_id TEXT PRIMARY KEY,
+              team_id TEXT NOT NULL,
+              workflow_id TEXT NOT NULL,
+              workflow_version_id TEXT NOT NULL,
+              thread_id TEXT NOT NULL UNIQUE,
+              project_id TEXT NOT NULL,
+              question_id TEXT NOT NULL,
+              status TEXT NOT NULL CHECK (status IN (
+                'created','running','waiting_human','blocked','paused',
+                'reconciliation_required','succeeded','failed','cancelled','archived'
+              )),
+              run_version INTEGER NOT NULL CHECK (run_version >= 1),
+              last_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_event_sequence >= 0),
+              input_snapshot_json TEXT NOT NULL CHECK (json_valid(input_snapshot_json)),
+              input_snapshot_hash TEXT NOT NULL,
+              safety_limits_json TEXT NOT NULL CHECK (json_valid(safety_limits_json)),
+              binding_snapshot_set_id TEXT NOT NULL,
+              active_node_id TEXT,
+              parent_run_id TEXT,
+              forked_from_checkpoint_id TEXT,
+              completion_kind TEXT,
+              terminal_reason TEXT,
+              blocked_problem_json TEXT CHECK (
+                blocked_problem_json IS NULL OR json_valid(blocked_problem_json)
+              ),
+              created_at_ms INTEGER NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              completed_at_ms INTEGER,
+              structure_hash TEXT NOT NULL DEFAULT '',
+              FOREIGN KEY (parent_run_id) REFERENCES workflow_runs(run_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            INSERT INTO workflow_runs_v10 (
+              run_id, team_id, workflow_id, workflow_version_id, thread_id,
+              project_id, question_id, status, run_version, last_event_sequence,
+              input_snapshot_json, input_snapshot_hash, safety_limits_json,
+              binding_snapshot_set_id, active_node_id, parent_run_id,
+              forked_from_checkpoint_id, completion_kind, terminal_reason,
+              blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms,
+              structure_hash
+            )
+            SELECT
+              run_id, team_id, workflow_id, workflow_version_id, thread_id,
+              project_id, question_id, status, run_version, last_event_sequence,
+              input_snapshot_json, input_snapshot_hash, safety_limits_json,
+              binding_snapshot_set_id, active_node_id, parent_run_id,
+              forked_from_checkpoint_id, completion_kind, terminal_reason,
+              blocked_problem_json, created_at_ms, updated_at_ms, completed_at_ms,
+              structure_hash
+            FROM workflow_runs
+            """,
+            "DROP TABLE workflow_runs",
+            "ALTER TABLE workflow_runs_v10 RENAME TO workflow_runs",
+            """
+            CREATE INDEX idx_workflow_runs_team_recent
+            ON workflow_runs(team_id, workflow_id, created_at_ms DESC, run_id DESC)
+            """,
+            """
+            CREATE INDEX idx_workflow_runs_status
+            ON workflow_runs(status, updated_at_ms, run_id)
+            """,
         ),
     ),
 )

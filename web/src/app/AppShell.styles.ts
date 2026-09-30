@@ -53,6 +53,10 @@ const styles = {
     "vui-app-appshell activeWorkPopoverContent z-[95] w-[min(370px,calc(100vw-20px))] max-h-[min(400px,calc(100dvh-70px))] overflow-y-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   activeWorkSlot:
     "vui-app-appshell activeWorkSlot min-w-0 shrink-0",
+  activeWorkStaleHeader:
+    "vui-app-appshell activeWorkStaleHeader m-0 flex min-w-0 items-center gap-1.5 px-2 text-[var(--state-warning)] [&_span]:mt-0 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:font-semibold",
+  activeWorkStaleSection:
+    "vui-app-appshell activeWorkStaleSection mt-1 min-w-0 border-t border-[var(--vui-border-subtle)] pt-1.5",
   activeWorkTrigger:
     `vui-app-appshell activeWorkTrigger !h-7 !min-h-7 !px-2 !text-vui-xs ${vuiControlQuietChromeClass}`,
   activeWorkTriggerContent:

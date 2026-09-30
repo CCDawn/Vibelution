@@ -1,17 +1,96 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  BACKEND_HEALTH_TIMEOUT_MS,
   fetchJson,
+  fetchJsonWithTimeout,
   fetchWithControl,
   isFetchJsonHttpError,
   isFetchAbortError,
   resetControlTokenForTests,
+  RUNTIME_SUMMARY_TIMEOUT_MS,
+  seedControlTokenForTests,
   setFetchJsonFailureReporter,
 } from "./client";
 import {
   pushClientOperationContext,
   resetClientOperationContextForTests,
 } from "../app/clientOperationContext";
+
+describe("fetchJsonWithTimeout", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetControlTokenForTests();
+  });
+
+  it("keeps bounded heartbeat timeouts exported as finite constants", () => {
+    expect(BACKEND_HEALTH_TIMEOUT_MS).toBe(8_000);
+    expect(RUNTIME_SUMMARY_TIMEOUT_MS).toBe(10_000);
+  });
+
+  it("resolves when the response lands before the timeout", async () => {
+    seedControlTokenForTests();
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: "ok" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchJsonWithTimeout<{ status: string }>("/api/health", { timeoutMs: 5_000 }),
+    ).resolves.toEqual({ status: "ok" });
+  });
+
+  it("rejects a hung request once the timeout elapses", async () => {
+    seedControlTokenForTests();
+    const fetchMock = vi.fn((_input: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchJsonWithTimeout<{ status: string }>("/api/health", { timeoutMs: 20 }),
+    ).rejects.toThrow();
+    // The timeout aborted the request instead of leaving it pending.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still honors the caller-provided abort signal", async () => {
+    seedControlTokenForTests();
+    // Emulate real fetch: an already-aborted signal rejects immediately.
+    const fetchMock = vi.fn((_input: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const rejectAborted = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+        const signal = init?.signal;
+        if (!signal || signal.aborted) {
+          rejectAborted();
+          return;
+        }
+        signal.addEventListener("abort", rejectAborted);
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    const pending = fetchJsonWithTimeout<{ status: string }>("/api/runtime/summary", {
+      timeoutMs: 60_000,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+  });
+
+  it("classifies a timeout abort as a reportable failure rather than a user abort", () => {
+    // The timeout reason carries a TimeoutError name and no "abort" message,
+    // so the transport telemetry reports it as a network failure instead of
+    // staying silent like a caller-initiated abort.
+    expect(isFetchAbortError(new DOMException("Request timed out after 8000ms", "TimeoutError"))).toBe(false);
+    expect(isFetchAbortError(new DOMException("The operation was aborted.", "AbortError"))).toBe(true);
+  });
+});
 
 describe("fetchJson control token", () => {
   afterEach(() => {
