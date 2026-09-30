@@ -58,6 +58,23 @@ def _stub_frontend_build_preflight(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_live_process_inventory(monkeypatch):
+    """Keep lifecycle tests off a full psutil walk of every python/node process.
+
+    Snapshot and reconcile call that walk even when the test already replaced
+    the payload. Tests that assert a specific process row replace these stubs.
+    Classification tests call process_inventory directly with a fake process list.
+    """
+
+    monkeypatch.setattr(daemon, "list_repo_runtime_processes", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        daemon,
+        "residual_process_payload",
+        lambda **_kwargs: {"count": 0, "items": []},
+    )
+
+
 def _repeat_last(items):
     values = list(items)
     iterator = iter(values)

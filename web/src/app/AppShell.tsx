@@ -3,7 +3,7 @@ import { lazy, Suspense, type CSSProperties, type MouseEvent as ReactMouseEvent,
 import { Link, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
-  BellRing,
+  Bell,
   GitBranch,
   ChevronDown,
   ChevronRight,
@@ -22,6 +22,14 @@ import {
   type FetchJsonFailureReport,
 } from "../api/client";
 import { fetchPublicConfig } from "../api/config";
+import { fetchGitStatus } from "../api/git";
+import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
+import {
+  agentBroadcastEventTimeMs,
+  hasUnseenAgentBroadcast,
+  readStoredAgentBroadcastReadAtMs,
+  storeAgentBroadcastReadAtMs,
+} from "./agentBroadcastBadge";
 import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { queryKeys } from "../api/queryKeys";
@@ -822,6 +830,58 @@ export function AppShell() {
     staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
+
+  // Top-bar read-only badges: Git merge pressure and unseen agent broadcasts.
+  // Both share existing endpoints with their owning pages and poll gently —
+  // the git status cache is shared with /git, the bus badge reads a single
+  // latest event against a localStorage cursor (see agentBroadcastBadge).
+  const shellGitStatusQuery = useQuery({
+    queryKey: queryKeys.gitStatus(),
+    queryFn: ({ signal }) => fetchGitStatus({ limit: 500, signal }),
+    enabled: shellStartupDataReady,
+    refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
+  });
+  const agentBroadcastLatestQuery = useQuery({
+    queryKey: queryKeys.projectAgentBusLatestEvent(),
+    queryFn: ({ signal }) => listProjectAgentBusTimeline(1, { signal }),
+    enabled: shellStartupDataReady,
+    refetchInterval: resolvePollingInterval(shellPollingVisible, 60_000),
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
+  });
+  const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState(() => readStoredAgentBroadcastReadAtMs());
+  const agentBroadcastLatestEvent = useMemo(() => {
+    const events = agentBroadcastLatestQuery.data?.events;
+    return events && events.length ? events[events.length - 1] : undefined;
+  }, [agentBroadcastLatestQuery.data]);
+  const agentBroadcastLatestEventMs = useMemo(
+    () => agentBroadcastEventTimeMs(agentBroadcastLatestEvent),
+    [agentBroadcastLatestEvent],
+  );
+  const agentBroadcastHasUnread = hasUnseenAgentBroadcast(agentBroadcastLatestEventMs, agentBroadcastReadAtMs);
+  const agentBroadcastLabel = t("agentBroadcastLabel");
+  const agentBroadcastTriggerLabel = agentBroadcastHasUnread
+    ? `${agentBroadcastLabel}，${t("agentBroadcastUnread")}`
+    : agentBroadcastLabel;
+  const markAgentBroadcastSeen = useCallback(() => {
+    // Advance to the latest known event; a newer event landing after this
+    // query snapshot still counts as unseen, so nothing is silently swallowed.
+    const nextCursorMs = agentBroadcastLatestEventMs > 0 ? agentBroadcastLatestEventMs : Date.now();
+    storeAgentBroadcastReadAtMs(nextCursorMs);
+    setAgentBroadcastReadAtMs(nextCursorMs);
+  }, [agentBroadcastLatestEventMs]);
+  const shellGitStatus = shellGitStatusQuery.data;
+  const shellGitNeedsAttention = Boolean(
+    shellGitStatus?.available
+    && ((shellGitStatus.worktrees?.withCommits ?? 0) > 0 || (shellGitStatus.upstream?.ahead ?? 0) > 0),
+  );
+  const shellGitTriggerTitle = shellGitStatus?.available && shellGitStatus.summary
+    ? `${t("navGit")}：${shellGitStatus.summary}`
+    : t("navGit");
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
 
@@ -2511,13 +2571,24 @@ export function AppShell() {
           <span>{effectivePrimaryStatusCard.value}</span>
         </span>
 
-        <VRouteLinkButton to="/git" variant="ghost" className={styles.settingsTrigger} aria-label="Git" title="Git"><GitBranch size={17} /></VRouteLinkButton>
-        <VRouteLinkButton to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }} variant="ghost" className={styles.settingsTrigger} aria-label={lang === "zh" ? "助手通知" : "Agent notices"} title={lang === "zh" ? "助手通知" : "Agent notices"} onClick={(event) => {
+        <VRouteLinkButton to="/git" variant="ghost" className={styles.settingsTrigger} aria-label={t("navGit")} title={shellGitTriggerTitle}>
+          <span className={styles.settingsTriggerIconSlot}>
+            <GitBranch size={17} />
+            {shellGitNeedsAttention ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}
+          </span>
+        </VRouteLinkButton>
+        <VRouteLinkButton to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }} variant="ghost" className={styles.settingsTrigger} aria-label={agentBroadcastTriggerLabel} title={agentBroadcastTriggerLabel} onClick={(event) => {
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
+          markAgentBroadcastSeen();
           chatRoute.openProjectBus({ telemetrySource: "shell_settings" });
           closeUtilityMenu();
-        }}><BellRing size={17} /></VRouteLinkButton>
+        }}>
+          <span className={styles.settingsTriggerIconSlot}>
+            <Bell size={17} />
+            {agentBroadcastHasUnread ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}
+          </span>
+        </VRouteLinkButton>
 
         <VPopover
           open={utilityOpen}

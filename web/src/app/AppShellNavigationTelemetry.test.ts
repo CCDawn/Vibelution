@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 import { routeLocationKey } from "./AppShell";
 import appShellSource from "./AppShell.tsx?raw";
-import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
 
 function isWindowHistoryExpression(node: ts.Expression): boolean {
   return ts.isPropertyAccessExpression(node)
@@ -224,19 +223,15 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).not.toContain('t("navChatRooms")');
   });
 
-  it("does not embed a file tree or chat shortcut in the workbench utility menu", () => {
+  it("keeps the retired utility file tree out of the shell and the project-bus shortcut wired", () => {
     expect(appShellSource).toContain("LazyAppShellSettingsMenu");
     expect(appShellSource).not.toContain("filterUtilityFileTree");
     expect(appShellSource).not.toContain("renderUtilityFileTree");
-    expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');
-    expect(utilityMenuSource).not.toContain("AppShell.styles");
-    expect(utilityMenuSource).not.toContain("filterUtilityFileTree");
-    expect(utilityMenuSource).not.toContain("renderUtilityFileTree");
-    expect(utilityMenuSource).not.toContain("utility-file-navigator");
-    expect(utilityMenuSource).not.toContain('to="/chat"');
-    expect(utilityMenuSource).toContain('serializeChatRouteSelection("", { kind: "project_bus" })');
-    expect(utilityMenuSource).toContain('chatRoute.openProjectBus({ telemetrySource: "shell_settings" })');
-    expect(utilityMenuSource).not.toContain("{t(\"files\")}");
+    expect(appShellSource).not.toContain("utility-file-navigator");
+    // The retired AppShellUtilityMenu kept the bus entry behind a navigation
+    // click; the shell bell now owns the same telemetry semantics directly.
+    expect(appShellSource).toContain('serializeChatRouteSelection("", { kind: "project_bus" })');
+    expect(appShellSource).toContain('chatRoute.openProjectBus({ telemetrySource: "shell_settings" })');
   });
 
   it("keeps Agent management top-level while memory is a separate primary surface", () => {

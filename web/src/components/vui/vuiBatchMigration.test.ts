@@ -54,10 +54,6 @@ const rawControlAllowedFiles = new Set([
 
 const migrationTargets = [
   {
-    path: "app/AppShellUtilityMenu.tsx",
-    expectedPrimitive: "VRouteLinkButton",
-  },
-  {
     path: "components/layout/PaneCollapseHandle.tsx",
     expectedPrimitive: "VIconButton",
   },

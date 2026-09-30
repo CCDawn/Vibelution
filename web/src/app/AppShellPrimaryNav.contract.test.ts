@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isShellPrimaryNavActive } from "./AppShell";
 import appShellSource from "./AppShell.tsx?raw";
-import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
+import settingsMenuSource from "./AppShellSettingsMenu.tsx?raw";
 import paletteSource from "./GlobalCommandSurfaces.tsx?raw";
 
 /** P2 nav collapse (approved): the six top-level entries in their fixed order. */
@@ -30,8 +30,8 @@ describe("AppShell primary nav collapse (P2: 8 -> 6 entries)", () => {
     expect(appShellSource).not.toContain('to="/self-evolution"');
     expect(appShellSource).not.toContain('to="/kernel"');
     // Kernel survives as a settings-gear entry instead of disappearing.
-    expect(utilityMenuSource).toContain('to="/kernel"');
-    expect(utilityMenuSource).toMatch(/>\s*Kernel\s*<\/VRouteLinkButton>/);
+    expect(settingsMenuSource).toContain('to="/kernel"');
+    expect(settingsMenuSource).toContain("<Cpu size={16} />");
   });
 
   it("gates the aggregated Evolution entry on either evolution mode flag", () => {

@@ -10,7 +10,6 @@ vi.mock("../app/pollingPolicy", () => ({ resolvePollingInterval: () => false, us
 vi.mock("../i18n/useAppI18n", () => ({ useAppI18n: () => ({ lang: query.lang }) }));
 import { UsageRoute } from "./UsageRoute";
 import routeSource from "./UsageRoute.tsx?raw";
-import utilitySource from "../app/AppShellUtilityMenu.tsx?raw";
 import settingsSource from "../app/AppShellSettingsMenu.tsx?raw";
 import styles from "./UsageRoute.styles";
 
@@ -59,7 +58,6 @@ describe("Usage settings page", () => {
     expect(host.querySelector('[data-vui-recipe="settings-form-page"]')).not.toBeNull();
     expect(host.querySelector('a[href="/config"]')).not.toBeNull();
     expect(settingsSource).toContain('to="/usage"');
-    expect(utilitySource).not.toContain('to="/usage"');
     expect(styles.page).toContain("overflow-y-auto");
     expect(styles.metrics).toContain("max-[700px]:grid-cols-2");
   });
