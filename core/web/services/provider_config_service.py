@@ -47,7 +47,12 @@ from core.chat.chat_task_types import trim_lines
 from core.llm.provider_discovery.service import discover_provider_models
 
 from .config_service import (
+    ConfigConflictError,
     _assert_base_hash_matches,
+    _config_values_equal,
+    _get_config_path,
+    _merge_submitted_config_changes,
+    _with_config_workspace_defaults,
     _build_workspace,
     _drop_api_key_state,
     _move_pending_api_key_token,
@@ -274,15 +279,32 @@ def _current_draft(
     public_config: dict[str, Any],
     *,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
+    provider_id: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     if not str(base_hash or "").strip():
         raise ValueError("baseHash is required")
     saved = load_public_config()
-    current_hash = _assert_base_hash_matches(
-        base_hash,
-        saved,
-        _resolve_workspace_language(saved),
-    )
+    lang = _resolve_workspace_language(saved)
+    if base_config is None:
+        # Older clients keep the strict whole-config guard.
+        current_hash = _assert_base_hash_matches(base_hash, saved, lang)
+    else:
+        # Keep the original edit baseline paired; do not adopt unrelated disk
+        # changes into the draft, which would turn them into local edits on apply.
+        current_hash = _assert_base_hash_matches(base_hash, base_config, lang)
+        latest = _with_config_workspace_defaults(saved)
+        _merge_submitted_config_changes(
+            base_config=base_config, submitted=public_config, old_public=latest, lang=lang,
+        )
+        if provider_id is not None:
+            path = ("llm", "providers", provider_id)
+            if not _config_values_equal(_get_config_path(base_config, path), _get_config_path(latest, path)):
+                raise ConfigConflictError(
+                    "当前供应商已被其他页面或进程改动，未保存草稿已保留；请核对后重新加载配置。"
+                    if lang == "zh" else
+                    "This provider changed in another page or process. Your draft is preserved; review before reloading."
+                )
     if not isinstance(public_config, dict):
         raise ValueError("publicConfig must be an object")
     return copy.deepcopy(public_config), current_hash
@@ -697,9 +719,10 @@ def suggest_draft_provider_id(
     public_config: dict[str, Any],
     *,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider: dict[str, Any],
 ) -> dict[str, str]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config)
     llm = current.get("llm", {})
     providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
     existing_ids = providers.keys() if isinstance(providers, dict) else ()
@@ -711,11 +734,12 @@ def draft_add_provider(
     *,
     draft_meta: dict[str, Any] | None,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider_id: str,
     provider: dict[str, Any],
     credential_value: str = "",
 ) -> dict[str, Any]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config, provider_id=provider_id)
     updated = add_llm_provider(current, provider_id, provider)
     _validate_draft(updated)
     meta = _credential_meta(draft_meta, provider, credential_value)
@@ -741,10 +765,11 @@ def preview_draft_provider_route(
     public_config: dict[str, Any],
     *,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider_id: str,
     provider: dict[str, Any],
 ) -> dict[str, Any]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config, provider_id=provider_id)
     preview = preview_provider_route_replacement(current, provider_id, provider)
     model_refs = [str(item) for item in preview.get("modelRefs", [])]
     if len(model_refs) > _MAX_REFERENCE_SCAN_MODELS:
@@ -786,12 +811,13 @@ def draft_update_provider(
     *,
     draft_meta: dict[str, Any] | None,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider_id: str,
     provider: dict[str, Any],
     credential_value: str = "",
     route_preview_token: str = "",
 ) -> dict[str, Any]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config, provider_id=provider_id)
     current_provider = _provider(current, provider_id)
     provider_payload = copy.deepcopy(provider)
     provider_payload["models"] = copy.deepcopy(current_provider.get("models", {}))
@@ -837,9 +863,10 @@ def draft_delete_provider(
     *,
     draft_meta: dict[str, Any] | None,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider_id: str,
 ) -> dict[str, Any]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config, provider_id=provider_id)
     provider = _provider(current, provider_id)
     if provider.get("models"):
         raise ValueError("provider must have no pinned models before deletion")
@@ -877,13 +904,14 @@ def draft_pin_provider_model(
     *,
     draft_meta: dict[str, Any] | None,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider_id: str,
     upstream_id: str,
     model_key: str = "",
     label: str = "",
     overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config, provider_id=provider_id)
     updated = pin_llm_model(
         current,
         provider_id,
@@ -921,10 +949,11 @@ def draft_unpin_provider_model(
     *,
     draft_meta: dict[str, Any] | None,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider_id: str,
     model_key: str,
 ) -> dict[str, Any]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config, provider_id=provider_id)
     model_ref = make_model_ref(provider_id, model_key)
     impact = _bounded_impact(
         scan_model_references(model_ref, public_config=current)
@@ -952,10 +981,11 @@ def discover_draft_provider(
     *,
     draft_meta: dict[str, Any] | None,
     base_hash: str,
+    base_config: dict[str, Any] | None = None,
     provider_id: str,
     credential_value: str = "",
 ) -> dict[str, Any]:
-    current, _ = _current_draft(public_config, base_hash=base_hash)
+    current, _ = _current_draft(public_config, base_hash=base_hash, base_config=base_config, provider_id=provider_id)
     _provider(current, provider_id)
     started_at = time.monotonic()
     try:

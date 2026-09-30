@@ -360,6 +360,141 @@ def test_provider_draft_mutations_require_nonempty_current_base_hash(monkeypatch
         )
 
 
+def test_provider_draft_allows_unrelated_saved_changes_without_rebasing_draft(monkeypatch) -> None:
+    base = _v2_with_provider()
+    current = copy.deepcopy(base)
+    current["language"] = "en"
+    _patch_saved(monkeypatch, current)
+    draft = copy.deepcopy(base)
+    draft["llm"]["providers"]["relay_a"]["context_window"] = 64000
+    result, _ = provider_config_service._current_draft(
+        draft, base_hash=public_config_hash(base), base_config=base, provider_id="relay_a",
+    )
+    assert result == draft
+    assert current["language"] == "en"
+
+
+def test_provider_draft_rejects_changed_target_even_before_local_edit(monkeypatch) -> None:
+    base = _v2_with_provider()
+    current = copy.deepcopy(base)
+    current["llm"]["providers"]["relay_a"]["base_url"] = "https://changed.example"
+    _patch_saved(monkeypatch, current)
+    with pytest.raises(config_service.ConfigConflictError):
+        provider_config_service._current_draft(base, base_hash=public_config_hash(base), base_config=base, provider_id="relay_a")
+
+
+def test_provider_draft_rejects_unpaired_baseline_and_keeps_legacy_guard(monkeypatch) -> None:
+    base = _v2_with_provider()
+    _patch_saved(monkeypatch, base)
+    with pytest.raises(config_service.ConfigConflictError):
+        provider_config_service._current_draft(base, base_hash="wrong-hash", base_config=base, provider_id="relay_a")
+    with pytest.raises(config_service.ConfigConflictError):
+        provider_config_service._current_draft(base, base_hash="wrong-hash")
+
+
+def test_provider_draft_rejects_conflicting_pending_field(monkeypatch) -> None:
+    base = _v2_with_provider()
+    base["language"] = "zh"
+    current = copy.deepcopy(base)
+    current["language"] = "en"
+    draft = copy.deepcopy(base)
+    draft["language"] = "fr"
+    _patch_saved(monkeypatch, current)
+    with pytest.raises(config_service.ConfigConflictError):
+        provider_config_service._current_draft(draft, base_hash=public_config_hash(base), base_config=base, provider_id="relay_a")
+
+
+def test_provider_draft_repeated_pins_keep_original_baseline_and_apply_three_way_merge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = config_service._with_config_workspace_defaults(_v2_with_provider())
+    base["language"] = "zh"
+    latest = copy.deepcopy(base)
+    latest["language"] = "en"
+    _patch_saved(monkeypatch, latest)
+    monkeypatch.setattr(provider_config_service, "_record_provider_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "_record_config_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "_read_raw_public_config", lambda: "")
+
+    base_hash = public_config_hash(base)
+    first = provider_config_service.draft_pin_provider_model(
+        base,
+        draft_meta={},
+        base_hash=base_hash,
+        base_config=base,
+        provider_id="relay_a",
+        upstream_id="model-one",
+        model_key="model-one",
+    )
+    second = provider_config_service.draft_pin_provider_model(
+        first["publicConfig"],
+        draft_meta=first["draftMeta"],
+        base_hash=base_hash,
+        base_config=base,
+        provider_id="relay_a",
+        upstream_id="model-two",
+        model_key="model-two",
+    )
+
+    persisted = {"value": copy.deepcopy(latest)}
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(persisted["value"]))
+    monkeypatch.setattr(
+        config_service,
+        "save_public_config",
+        lambda value: persisted.update(value=copy.deepcopy(value)),
+    )
+    monkeypatch.setattr(config_service, "reload_config", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "_set_user_env_var", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "_delete_user_env_var", lambda *_args, **_kwargs: None)
+
+    config_service.apply_config_workspace(
+        second["publicConfig"],
+        base_config=base,
+        draft_meta=second["draftMeta"],
+        base_hash=base_hash,
+    )
+
+    applied = persisted["value"]
+    assert applied["language"] == "en"
+    models = applied["llm"]["providers"]["relay_a"]["models"]
+    assert {"model-one", "model-two"} <= set(models)
+
+
+@pytest.mark.parametrize("external_change", ["provider_added", "provider_deleted"])
+def test_provider_draft_rejects_external_provider_add_or_delete(
+    monkeypatch: pytest.MonkeyPatch,
+    external_change: str,
+) -> None:
+    base = config_service._with_config_workspace_defaults(_v2_with_provider())
+    latest = copy.deepcopy(base)
+    if external_change == "provider_added":
+        latest["llm"]["providers"]["relay_b"] = _provider(
+            "env:VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY"
+        )
+        operation_provider_id = "relay_b"
+        operation = lambda: provider_config_service.draft_add_provider(
+            base,
+            draft_meta={},
+            base_hash=public_config_hash(base),
+            base_config=base,
+            provider_id=operation_provider_id,
+            provider=_provider("env:VIBELUTION_LLM_PROVIDER_RELAY_B_API_KEY"),
+        )
+    else:
+        latest["llm"]["providers"].pop("relay_a")
+        operation = lambda: provider_config_service.draft_delete_provider(
+            base,
+            draft_meta={},
+            base_hash=public_config_hash(base),
+            base_config=base,
+            provider_id="relay_a",
+        )
+    _patch_saved(monkeypatch, latest)
+
+    with pytest.raises(config_service.ConfigConflictError, match="当前供应商"):
+        operation()
+
+
 def test_provider_route_update_requires_single_use_preview_token(monkeypatch) -> None:
     config = _v2_with_provider()
     _patch_saved(monkeypatch, config)

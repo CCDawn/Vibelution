@@ -11,7 +11,6 @@ import {
   addDraftProvider,
   deleteDraftProvider,
   discoverDraftProvider,
-  fetchConfigWorkspace,
   pinDraftProviderModel,
   previewDraftProviderRoute,
   suggestDraftProviderId,
@@ -149,6 +148,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       draftMeta: latestDraft.draftMeta,
       // Always prefer the frozen edit baseline hash over any draft response hash.
       baseHash: editBaselineRef.current.baseHash || latestDraft.baseHash || baselineHash,
+      baseConfig: editBaselineRef.current.baseConfig,
       ...extra,
     };
   }, [baseHash, draftConfig, draftMeta, editBaselineRef, loadFailedMessage, providerDraftRequestRef]);
@@ -173,14 +173,8 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
       return models;
     } catch (error) {
       const detail = providerDiscoveryFailureDetail(error);
-      const message = providerDiscoveryFailureMessage(detail).slice(0, 480);
-      try {
-        const refreshed = await fetchConfigWorkspace();
-        // Full reload: disk is the new baseline after a failed discover reconciliation.
-        syncWorkspace(refreshed, "neutral", { resetBase: true });
-      } catch {
-        // Preserve the scoped discovery failure; a workspace refresh is only a best-effort status reconciliation.
-      }
+      // A failed discovery must never replace unsaved config or pending credentials.
+      const message = (detail ? providerDiscoveryFailureMessage(detail) : readableErrorMessage(error)).slice(0, 480);
       setProviderActionFeedback({ kind: "discover", providerId, phase: "error", message });
       throw new Error(message);
     } finally {
@@ -191,6 +185,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     copy,
     providerDiscoveryFailureDetail,
     providerDiscoveryFailureMessage,
+    readableErrorMessage,
     setBusyAction,
     setProviderActionError,
     setProviderActionFeedback,
@@ -307,6 +302,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
             publicConfig: currentConfig,
             draftMeta: currentMeta,
             baseHash: currentBaseHash,
+            baseConfig: editBaselineRef.current.baseConfig,
             providerId,
             upstreamId,
             modelKey,

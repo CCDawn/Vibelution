@@ -18,5 +18,6 @@ describe("config workspace queries contract", () => {
     expect(routeSource).not.toContain("const healthDiagnosticsQuery = useQuery({");
     expect(routeSource).toContain("workspaceQuery");
     expect(routeSource).toContain("healthDiagnosticsQuery");
+    expect(routeSource).toContain("workspaceQuery.data && !editBaselineRef.current.baseConfig");
   });
 });
