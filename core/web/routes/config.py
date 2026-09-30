@@ -557,6 +557,7 @@ def config_draft_provider_id_suggestion(
         return provider_config_service.suggest_draft_provider_id(
             payload.publicConfig,
             base_hash=payload.baseHash,
+            base_config=payload.baseConfig,
             provider=payload.provider,
         )
     except Exception as exc:  # pragma: no cover - routed below
@@ -574,6 +575,7 @@ def config_draft_add_provider(payload: ConfigProviderDraftPayload) -> dict:
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             base_hash=payload.baseHash,
+            base_config=payload.baseConfig,
             provider_id=payload.providerId,
             provider=payload.provider,
             credential_value=payload.credentialValue,
@@ -596,6 +598,7 @@ def config_draft_update_provider(
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             base_hash=payload.baseHash,
+            base_config=payload.baseConfig,
             provider_id=provider_id,
             provider=payload.provider,
             credential_value=payload.credentialValue,
@@ -619,6 +622,7 @@ def config_draft_delete_provider(
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             base_hash=payload.baseHash,
+            base_config=payload.baseConfig,
             provider_id=provider_id,
         )
     except Exception as exc:  # pragma: no cover - routed below
@@ -639,6 +643,7 @@ def config_draft_preview_provider_route(
             provider_config_service.preview_draft_provider_route(
                 payload.publicConfig,
                 base_hash=payload.baseHash,
+                base_config=payload.baseConfig,
                 provider_id=provider_id,
                 provider=payload.provider,
             )
@@ -661,6 +666,7 @@ def config_draft_discover_provider(
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             base_hash=payload.baseHash,
+            base_config=payload.baseConfig,
             provider_id=provider_id,
             credential_value=payload.credentialValue,
         )
@@ -682,6 +688,7 @@ def config_draft_pin_provider_model(
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             base_hash=payload.baseHash,
+            base_config=payload.baseConfig,
             provider_id=provider_id,
             upstream_id=payload.upstreamId,
             model_key=payload.modelKey,
@@ -707,6 +714,7 @@ def config_draft_unpin_provider_model(
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             base_hash=payload.baseHash,
+            base_config=payload.baseConfig,
             provider_id=provider_id,
             model_key=model_key,
         )

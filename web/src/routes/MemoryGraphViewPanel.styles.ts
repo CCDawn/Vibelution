@@ -26,7 +26,9 @@ const styles = {
   atlasTools: "absolute bottom-3 left-5 z-20 flex items-center gap-1 rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-1",
   atlasFooter: "flex shrink-0 flex-wrap justify-between gap-2 px-6 py-3 text-vui-2xs leading-4 text-[var(--fg-tertiary)]",
   atlasEmpty: "grid h-full min-h-48 place-content-center justify-items-center gap-3 px-6 text-center text-vui-xs leading-5 text-[var(--fg-secondary)]",
-  atlasNodeList: "grid max-h-48 shrink-0 grid-cols-1 gap-1 overflow-auto border-t border-[var(--vui-border-subtle)] px-4 py-2 sm:grid-cols-2 [&_button]:justify-start",
+  atlasNodeList: "grid h-[var(--pane-h-graph-node-list,168px)] shrink-0 grid-cols-1 gap-1 overflow-auto border-t border-[var(--vui-border-subtle)] px-4 py-2 sm:grid-cols-2 [&_button]:justify-start",
+  // Wave 6B: PaneHeightResizeHandle owns row-resize visual; placement only.
+  graphNodeListResizeHandle: "graphNodeListResizeHandle",
   atlasInspectorHost: "!border-l !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)]",
   atlasInspector: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
   atlasDetailHeader: "flex shrink-0 items-center justify-between border-b border-[var(--vui-border-subtle)] px-5 py-3 text-vui-2xs leading-4 text-[var(--fg-secondary)]",

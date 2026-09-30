@@ -1,6 +1,9 @@
 import { Focus, Layers3, List, Maximize2, Network, Search, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { MemoryKnowledgeGraphNode, MemoryKnowledgeGraphPayload } from "../api/types";
+import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
+import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VCanvasWorkbenchPage, VNativeInput, VSurface } from "../components/vui";
 import { GRAPH_NODE_TYPE_LABELS, MemoryGraphNodeInspectorPanel, type MemoryGraphNodeInspectorCopy, type MemoryGraphRelation } from "./MemoryGraphNodeInspectorPanel";
@@ -10,6 +13,15 @@ import styles from "./MemoryGraphViewPanel.styles";
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then(module => ({ default: module.MemoryGraphCanvas })));
 
 export type { MemoryGraphRelation } from "./MemoryGraphNodeInspectorPanel";
+
+// Wave 6B: the graph node list keeps a shared persisted height pane.
+const MEMORY_GRAPH_NODE_LIST_PANE: PaneHeightSpec = {
+  id: "graph-node-list",
+  defaultHeight: 168,
+  minHeight: 96,
+  maxHeight: 360,
+};
+const MEMORY_GRAPH_HEIGHT_PANES: PaneHeightSpec[] = [MEMORY_GRAPH_NODE_LIST_PANE];
 
 type MemoryGraphContentItem = MemoryKnowledgeGraphNode["contentItems"][number];
 
@@ -71,6 +83,15 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
   const [focusToken, setFocusToken] = useState(0);
   const lastTrigger = useRef<HTMLElement | null>(null);
   const selectedId = selectedGraphNode?.id ?? "";
+  const {
+    registerSplitContainer: registerGraphContainer,
+    paneVariablesStyle: graphPaneVariablesStyle,
+    heights: graphHeights,
+    draggingPaneId: graphHeightDraggingPaneId,
+    startResize: startGraphHeightResize,
+    onResizeKeyDown: onGraphHeightResizeKeyDown,
+  } = usePersistedPaneHeight({ layoutId: WORKBENCH_LAYOUT_IDS.memory, panes: MEMORY_GRAPH_HEIGHT_PANES });
+  const graphNodeListHeight = graphHeights["graph-node-list"] ?? MEMORY_GRAPH_NODE_LIST_PANE.defaultHeight;
   const center = depth ? selectedId : "";
   const slice = useMemo(() => memoryGraphSlice(graphPayload?.nodes ?? [], graphPayload?.edges ?? [],
     graphSearchText, activeGraphNodeType, { matchOnly, center, depth }),
@@ -120,7 +141,7 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
         <VButton key={node.id} variant="ghost" className={styles.searchResult} onClick={() => select(node.id)}>{node.label}</VButton>)}</div>}
       <p className={styles.accessNote}>{copy.graphReadOnly} · {copy.graphAcl}</p>
     </VSurface>}
-    canvas={<div className={styles.atlasMain} data-vui-region="memory-graph-canvas">
+    canvas={<div ref={registerGraphContainer} className={styles.atlasMain} style={graphPaneVariablesStyle} data-vui-region="memory-graph-canvas">
       <div className={styles.atlasHeading}><div><p className={styles.atlasEyebrow}>MEMORY ATLAS</p><h2 className={styles.canvasTitle}>{copy.knowledgeGraph}</h2><p className={styles.canvasHint}>从一个线索开始，沿着关系找到依据。</p></div>
         <div className={styles.viewModes}><VButton variant="ghost" aria-pressed={!flat} onClick={() => setFlat(false)} icon={<Layers3 size={14} />}>3D</VButton><VButton variant="ghost" aria-pressed={flat} onClick={() => setFlat(true)} icon={<Network size={14} />}>平面</VButton></div></div>
       <div className={styles.atlasStage}>
@@ -139,6 +160,13 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
       </div>
       {graphPayload && props.graphError && <p role="alert" className={styles.refreshError}>刷新失败，当前显示上次加载的图谱。<VButton variant="ghost" onClick={props.onRetryGraph}>重试</VButton></p>}
       <div className={styles.atlasFooter}><span>{copy.graphVisibleNodes}: {slice.nodes.length} · {copy.graphVisibleEdges}: {slice.edges.length}{graphPayload?.summary.truncated ? " · 已达到加载上限" : ""}</span><span>{flat ? "拖动平移" : "360° 拖动环绕 · 右键平移"} · 滚轮缩放</span></div>
-      {showList && <div className={styles.atlasNodeList} data-vui-region="memory-graph-node-list">{slice.nodes.map(node => <VButton key={node.id} variant="ghost" onClick={() => select(node.id)}>{node.label}</VButton>)}</div>}
+      {showList && <>
+        <PaneHeightResizeHandle label={copy.graphNodes} valueNow={graphNodeListHeight}
+          valueMin={MEMORY_GRAPH_NODE_LIST_PANE.minHeight} valueMax={MEMORY_GRAPH_NODE_LIST_PANE.maxHeight}
+          active={graphHeightDraggingPaneId === "graph-node-list"} className={styles.graphNodeListResizeHandle}
+          onPointerDown={event => startGraphHeightResize("graph-node-list", event, { direction: 1 })}
+          onKeyDown={event => onGraphHeightResizeKeyDown("graph-node-list", event, { direction: 1 })} />
+        <div className={styles.atlasNodeList} data-vui-region="memory-graph-node-list">{slice.nodes.map(node => <VButton key={node.id} variant="ghost" onClick={() => select(node.id)}>{node.label}</VButton>)}</div>
+      </>}
     </div>} inspector={inspector} />;
 }
