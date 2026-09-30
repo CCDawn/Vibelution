@@ -24,6 +24,13 @@ from core.logging import debug as _debug_logger
 # 默认截断阈值
 DEFAULT_MAX_CHARS = 4000
 
+# 空输出的模型可见占位：泛化 shell "[命令执行完成，无输出]" 到所有工具，
+# 防止模型把空结果误读为静默成功。不包含 shell 既有标记文本。
+EMPTY_TOOL_OUTPUT_PLACEHOLDER = (
+    "[工具空输出] 工具调用已完成且未返回任何文本输出；"
+    "这是正常送达的空结果，不是静默失败，也不存在需要猜测的隐藏内容。"
+)
+
 BUSINESS_FAILURE_STATUSES = {
     "blocked",
     "fail",
@@ -1274,9 +1281,16 @@ def render_tool_result_for_model(
 
     ``facts`` 之前的原始结果仍由工具观察器、事件与 journal 持有；这里的
     限长只作用于送回模型的 ToolMessage，避免事实头叠加后重新越过上下文边界。
+
+    空 content 的结果渲染为统一空输出占位（泛化 shell ``[命令执行完成，无输出]``
+    的语义到非 shell 工具），防止模型把空结果误读为静默成功或缺失工具结果；
+    shell 既有标记位于非空 content 内，不受影响。
     """
     bounded_limit = max(1, int(max_chars or DEFAULT_MAX_CHARS))
     effective_truncated = bool(facts.truncated)
+    model_content = str(facts.content or "")
+    if not model_content.strip():
+        model_content = EMPTY_TOOL_OUTPUT_PLACEHOLDER
 
     def _render(content: str, *, truncated: bool) -> str:
         lines = ["[Tool Result Facts]"]
@@ -1299,7 +1313,7 @@ def render_tool_result_for_model(
         lines.extend(["", "Result:", content])
         return "\n".join(lines)
 
-    rendered = _render(facts.content, truncated=effective_truncated)
+    rendered = _render(model_content, truncated=effective_truncated)
     if len(rendered) <= bounded_limit:
         return rendered
 
@@ -1316,9 +1330,9 @@ def render_tool_result_for_model(
         head = max(0, excerpt_budget * 2 // 3)
         tail = max(0, excerpt_budget - head)
         if tail:
-            excerpt = f"{facts.content[:head]}\n{facts.content[-tail:]}"
+            excerpt = f"{model_content[:head]}\n{model_content[-tail:]}"
         else:
-            excerpt = facts.content[:head]
+            excerpt = model_content[:head]
         bounded_content = f"{excerpt}\n{marker}" if excerpt else marker
     return _render(bounded_content, truncated=True)[:bounded_limit]
 
@@ -1450,4 +1464,5 @@ __all__ = [
     "compact_tool_output_for_diagnosis",
     "infer_result_from_tool_outputs",
     "DEFAULT_MAX_CHARS",
+    "EMPTY_TOOL_OUTPUT_PLACEHOLDER",
 ]
