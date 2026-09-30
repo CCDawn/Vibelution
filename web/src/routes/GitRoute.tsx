@@ -735,7 +735,7 @@ export function GitRoute() {
           </>
         ) : noChangedFiles ? (
           <>
-            <main className={styles.gitOverviewPanel}>
+            <section className={styles.gitOverviewPanel}>
               <VNativeButton type="button" className={styles.cleanStateStrip} onClick={selectCurrentBranch}>
                 <div>
                   <p className={styles.panelEyebrow}>{lang === "zh" ? "状态" : "Status"}</p>
@@ -798,8 +798,8 @@ export function GitRoute() {
                   </div>
                 </section>
               </div>
-            </main>
-            <VSurface as="main" ariaLabel={t("gitFileDiff")} className={styles.objectDetailPanel} elevation="panel" padding="none" tone="rail">
+            </section>
+            <VSurface as="section" ariaLabel={t("gitFileDiff")} className={styles.objectDetailPanel} elevation="panel" padding="none" tone="rail">
               {activeObject ? (
                 <GitDiffView
                   path={activeObject.label}
@@ -833,7 +833,7 @@ export function GitRoute() {
           </>
         ) : (
           <>
-            <VSurface as="aside" ariaLabel={t("gitChangedScope")} className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} elevation="panel" padding="none" tone="rail" aria-hidden={changePanelCollapsed}>
+            <VSurface as="aside" ariaLabel={t("gitChangedScope")} className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} elevation="panel" padding="none" tone="rail" aria-hidden={changePanelCollapsed} inert={changePanelCollapsed}>
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
@@ -921,7 +921,7 @@ export function GitRoute() {
               onKeyDown={handleChangePanelResizeKeyDown}
             />
 
-            <VSurface as="main" ariaLabel={t("gitFileDiff")} className={styles.diffPanel} elevation="panel" padding="none" tone="rail">
+            <VSurface as="section" ariaLabel={t("gitFileDiff")} className={styles.diffPanel} elevation="panel" padding="none" tone="rail">
               {activeObject ? (
                 <GitDiffView
                   path={activeObject.label}
