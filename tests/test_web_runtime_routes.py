@@ -879,6 +879,196 @@ def test_runtime_summary_uses_light_runtime_manager_snapshot(monkeypatch):
     assert payload["lifecycleProof"]["projectRootMatches"] is True
 
 
+def _daemon_state_payload(
+    *,
+    updated_at: str,
+    workbench: dict,
+    runtime_state: str = "running",
+) -> dict:
+    return {
+        "version": 1,
+        "runtimeState": runtime_state,
+        "managerPid": 0,
+        "updatedAt": updated_at,
+        "workbench": workbench,
+    }
+
+
+def test_runtime_manager_snapshot_gate_resets_stale_observation_bits(monkeypatch):
+    """Frozen daemon evidence must not pass as live workbench observation."""
+
+    fresh = datetime.now(timezone.utc).isoformat()
+    stale = (datetime.now(timezone.utc) - timedelta(hours=18)).isoformat()
+    observed_workbench = {
+        "desiredState": "open",
+        "observedState": "open",
+        "phase": "steady",
+        "backendPid": 41880,
+        "backendPortOwnerPid": 24860,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8000,
+        "url": "http://127.0.0.1:8000",
+    }
+
+    def _load(state: dict, manager_pid: int) -> dict:
+        monkeypatch.setattr(runtime_service, "load_runtime_manager_state", lambda: state)
+        monkeypatch.setattr(runtime_service, "current_runtime_manager_pid", lambda project_root: manager_pid)
+        return runtime_service._load_runtime_manager_snapshot()
+
+    # Daemon dead: state.json outlives its writer and freezes observation.
+    payload = _load(_daemon_state_payload(updated_at=fresh, workbench=dict(observed_workbench)), 0)
+    assert payload["daemonRunning"] is False
+    assert payload["workbench"]["backendPid"] == 0
+    assert payload["workbench"]["backendPortOwnerPid"] == 0
+    assert payload["workbench"]["backendAlive"] is False
+    assert payload["workbench"]["backendHealthy"] is False
+    assert payload["workbench"]["backendObserved"] is False
+    assert payload["workbench"]["desiredState"] == "open"
+
+    # Daemon alive but snapshot stale: nobody is maintaining the file.
+    payload = _load(_daemon_state_payload(updated_at=stale, workbench=dict(observed_workbench)), 9912)
+    assert payload["daemonRunning"] is True
+    assert payload["workbench"]["backendAlive"] is False
+    assert payload["workbench"]["backendObserved"] is False
+    assert payload["workbench"]["backendPid"] == 0
+
+    # Snapshot claims observation for a provably dead backend pid.
+    monkeypatch.setattr(runtime_service, "_pid_is_alive", lambda pid: pid == 9912)
+    payload = _load(_daemon_state_payload(updated_at=fresh, workbench=dict(observed_workbench)), 9912)
+    assert payload["workbench"]["backendAlive"] is False
+    assert payload["workbench"]["backendObserved"] is False
+
+    # Fresh, alive, and consistent: durable lifecycle fields are untouched and
+    # observation passes through to the durable-field projection.
+    monkeypatch.setattr(runtime_service, "_pid_is_alive", lambda pid: True)
+    payload = _load(_daemon_state_payload(updated_at=fresh, workbench=dict(observed_workbench)), 9912)
+    assert payload["workbench"]["backendPid"] == 41880
+    assert payload["workbench"]["backendAlive"] is True
+    assert payload["workbench"]["backendObserved"] is True
+
+
+def test_runtime_summary_replaces_stale_daemon_observation_with_own_process(monkeypatch):
+    """A dead daemon's frozen workbench pids must not mask the live backend."""
+
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    stale_updated_at = (datetime.now(timezone.utc) - timedelta(hours=18)).isoformat()
+    monkeypatch.setattr(
+        runtime_service,
+        "load_runtime_manager_state",
+        lambda: _daemon_state_payload(
+            updated_at=stale_updated_at,
+            workbench={
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 41880,
+                "backendPortOwnerPid": 24860,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "url": "http://127.0.0.1:8000",
+            },
+        ),
+    )
+    monkeypatch.setattr(runtime_service, "current_runtime_manager_pid", lambda project_root: 0)
+
+    payload = runtime_service.get_runtime_summary()
+
+    own_pid = os.getpid()
+    workbench = payload["workbench"]
+    assert workbench["backendPid"] == own_pid
+    assert workbench["backendPortOwnerPid"] == own_pid
+    assert workbench["backendAlive"] is True
+    assert workbench["backendObserved"] is True
+    assert workbench["backendObservedSource"] == "summary_request"
+    backend_component = next(
+        item for item in payload["lifecycleProof"]["components"] if item["id"] == "backend"
+    )
+    assert backend_component["pid"] == own_pid
+    assert f"backend pid {own_pid}" in backend_component["detail"]
+
+
+def test_runtime_summary_keeps_fresh_consistent_snapshot_observation(monkeypatch):
+    """A fresh snapshot naming the answering process stays untouched."""
+
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    own_pid = os.getpid()
+    monkeypatch.setattr(
+        runtime_service,
+        "load_runtime_manager_state",
+        lambda: _daemon_state_payload(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            workbench={
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": own_pid,
+                "backendPortOwnerPid": own_pid,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "url": "http://127.0.0.1:8000",
+            },
+        ),
+    )
+    monkeypatch.setattr(runtime_service, "current_runtime_manager_pid", lambda project_root: 9912)
+
+    payload = runtime_service.get_runtime_summary()
+
+    workbench = payload["workbench"]
+    assert workbench["backendPid"] == own_pid
+    assert workbench["backendPortOwnerPid"] == own_pid
+    assert workbench["backendAlive"] is True
+    assert workbench["backendObserved"] is True
+    assert "backendObservedSource" not in workbench
+
+
+def test_runtime_summary_corrects_snapshot_pid_that_differs_from_answering_process(monkeypatch):
+    """First-hand evidence outranks a snapshot naming a different backend pid."""
+
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "load_runtime_manager_state",
+        lambda: _daemon_state_payload(
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            workbench={
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3001,
+                "backendPortOwnerPid": 3001,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "url": "http://127.0.0.1:8000",
+            },
+        ),
+    )
+    monkeypatch.setattr(runtime_service, "current_runtime_manager_pid", lambda project_root: 9912)
+    # Keep the snapshot gate "fresh and trusted" deterministically: the claimed
+    # pid must look alive so only the self-attestation mismatch branch fires.
+    monkeypatch.setattr(runtime_service, "_pid_is_alive", lambda pid: True)
+
+    payload = runtime_service.get_runtime_summary()
+
+    own_pid = os.getpid()
+    workbench = payload["workbench"]
+    assert workbench["backendPid"] == own_pid
+    assert workbench["backendPortOwnerPid"] == own_pid
+    assert workbench["backendAlive"] is True
+    assert workbench["backendObserved"] is True
+    assert workbench["backendObservedSource"] == "summary_request"
+
+
 def test_runtime_summary_labels_launcher_control_surface_separately(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})

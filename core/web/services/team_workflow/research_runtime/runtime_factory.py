@@ -202,6 +202,11 @@ class WorkflowRuntime:
         handled += self.event_publish_worker.run_once(limit=limit)
         handled += self.delivery_worker.run_once(limit=limit)
         handled += self.graph_worker.run_repairs_once()
+        # P2-e deadlock sweep: classify stranded live runs (nothing ready,
+        # nothing active, blocked inventory non-empty) and park them as
+        # PAUSED(deadlock). Serial lane, idempotent, disabled via
+        # VIBELUTION_WORKFLOW_DEADLOCK_PAUSE=0.
+        handled += self.graph_worker.run_governance_sweep()
         handled += self.adapter_worker.run_repairs_once(limit=limit)
         self._recover_missing_knowledge_sideflows_best_effort(limit=limit)
         self._recover_dead_turn_knowledge_children_best_effort(limit=limit)

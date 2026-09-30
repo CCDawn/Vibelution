@@ -47,6 +47,13 @@ from .block_projection import (
     terminal_facts_for_run,
 )
 from .blocked_reason import format_blocked_reason, problem_from_graph_error
+from .dispatch_governance import (
+    GATED_DISPATCH_RETRY_MS,
+    WIP_GATE_RETRY_MS,
+    GovernancePolicy,
+    active_attempt_counts_by_node,
+    maybe_pause_for_consecutive_errors,
+)
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
 from .operator_terminal_policy import operator_round_terminal_policy
@@ -171,11 +178,16 @@ class GraphDispatchWorker:
         readiness_context: Callable[[], Any] | None = None,
         commit_hook: Callable[[], None] | None = None,
         node_success_hook: Callable[..., Any] | None = None,
+        governance: GovernancePolicy | None = None,
     ) -> None:
         self._store = store
         self._coordinator = coordinator
         self._owner = owner_id
         self._lease_ms = lease_ms
+        # P2-e scheduling guardrails (consecutive-error pause, deadlock sweep,
+        # per-node-type WIP cap). None resolves from env; pass
+        # ``GovernancePolicy.disabled()`` for the pre-P2-e behavior.
+        self._governance = governance or GovernancePolicy.from_env()
         # ``created_start_deadline_ms`` is an explicit compatibility alias for
         # callers that name the state being reconciled.  Both values are kept
         # local to the worker; no path or global clock is assumed.
@@ -267,6 +279,107 @@ class GraphDispatchWorker:
         itself fans out; repairs stay single-threaded.
         """
         return self._repair_created_without_start() + self._run_post_lease_repairs()
+
+    def run_governance_sweep(self) -> int:
+        """P2-e deadlock sweep; serial maintenance lane only.
+
+        Classifies live runs (nothing ready, nothing active, blocked
+        inventory non-empty) and parks them as ``PAUSED(deadlock)`` with the
+        blocked inventory attached. Idempotent — already-paused runs are
+        never re-judged.
+        """
+        from .dispatch_governance import run_deadlock_sweep
+
+        try:
+            return run_deadlock_sweep(
+                self._store,
+                policy=self._governance,
+                now_ms=self._now(),
+                actor_id=self._owner,
+            )
+        except Exception as exc:  # noqa: BLE001 - governance must not break maintenance
+            # Governance must never break the maintenance lane; the next tick
+            # re-evaluates from ledger truth.
+            debug.warning(
+                "graph governance sweep skipped: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return 0
+
+    def _run_is_paused(self, run_id: str) -> bool:
+        run = self._store.get_run(run_id)
+        return run is not None and str(run.status) == "paused"
+
+    def _node_type_wip_full(
+        self, node_id: str, node_run_id: str, wip_limit: int
+    ) -> bool:
+        """Whether the node type's in-flight cap is reached.
+
+        The dispatch's OWN attempt is excluded: the ``start`` command creates
+        the attempt row before the graph dispatch is leased, so counting it
+        would livelock a cap of 1.
+        """
+
+        def load(repository: Any) -> int:
+            # The type-level aggregate minus this dispatch's own attempt row
+            # (created by the start command before leasing).
+            counts = active_attempt_counts_by_node(repository)
+            rows = repository.execute(
+                """
+                SELECT 1 FROM node_attempts
+                WHERE node_run_id = ?
+                  AND status IN ('starting', 'dispatching', 'running')
+                """,
+                (node_run_id,),
+            ).fetchall()
+            own_correction = 1 if rows else 0
+            return counts.get(node_id, 0) - own_correction
+
+        try:
+            in_flight = self._store.read(load)
+        except Exception:  # noqa: BLE001 - fail open rather than wedge dispatch
+            # A governance read failure must not wedge dispatch: fail open
+            # and let the normal path proceed.
+            return False
+        return in_flight >= wip_limit
+
+    def _defer_gated_dispatch(
+        self,
+        action: Any,
+        dispatch: GraphDispatch,
+        *,
+        retry_ms: int,
+        problem: dict[str, Any],
+        event_code: str,
+        outcome: str,
+    ) -> None:
+        """Requeue a ``start`` dispatch the governance gate held back.
+
+        The action stays pending (never failed, never acked) so the ready
+        node is picked up on a later round after resume or WIP relief; no
+        attempt, node-run or run row is touched here.
+        """
+        now_ms = self._now()
+        _record_scene_event(
+            event_code,
+            outcome=outcome,
+            fields={
+                "teamId": str(dispatch.team_id or ""),
+                "runId": str(dispatch.run_id or ""),
+                "nodeId": str(dispatch.node_id or ""),
+                "actionId": str(getattr(action, "action_id", "") or ""),
+                "retryAtMs": now_ms + retry_ms,
+                "problemCode": str(problem.get("code") or ""),
+            },
+        )
+        outbox_api.requeue_action(
+            self._store,
+            action.action_id,
+            self._owner,
+            now_ms,
+            retry_at_ms=now_ms + retry_ms,
+            problem_json=json.dumps(problem, ensure_ascii=False),
+        )
 
     def _run_post_lease_repairs(self) -> int:
         repaired = self._repair_dispatching_without_adapter()
@@ -486,6 +599,47 @@ class GraphDispatchWorker:
         except ChallengeCupMaintenanceError as exc:
             self._defer_for_maintenance(action, dispatch, str(exc))
             return
+        # P2-e governance gates. Only NEW work (a ``start`` dispatch) is
+        # gated: settlement receipts of in-flight nodes keep landing so a
+        # paused run waits for its in-flight work to settle, exactly like the
+        # reference scheduler drains its active loops before pausing.
+        if dispatch.dispatch_kind == "start":
+            if self._governance.pause_gates_enabled and self._run_is_paused(
+                dispatch.run_id
+            ):
+                self._defer_gated_dispatch(
+                    action,
+                    dispatch,
+                    retry_ms=GATED_DISPATCH_RETRY_MS,
+                    problem={
+                        "code": "run_paused",
+                        "detail": "run is paused; dispatch deferred until resume",
+                    },
+                    event_code="graph_dispatch.paused_deferred",
+                    outcome="paused_deferred",
+                )
+                return
+            if self._governance.wip_enabled:
+                wip_limit = self._governance.wip_limit_for(dispatch.node_id)
+                if wip_limit is not None and self._node_type_wip_full(
+                    dispatch.node_id, dispatch.node_run_id, wip_limit
+                ):
+                    self._defer_gated_dispatch(
+                        action,
+                        dispatch,
+                        retry_ms=WIP_GATE_RETRY_MS,
+                        problem={
+                            "code": "node_type_wip_limit",
+                            "detail": (
+                                f"node type {dispatch.node_id} is at its "
+                                f"in-flight cap ({wip_limit}); requeued"
+                            ),
+                            "wipLimit": wip_limit,
+                        },
+                        event_code="graph_dispatch.wip_deferred",
+                        outcome="wip_deferred",
+                    )
+                    return
         if (
             dispatch.dispatch_kind in ("resume_action", "resume_human")
             and dispatch.receipt is not None
@@ -992,6 +1146,14 @@ class GraphDispatchWorker:
                 acked = uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
                 if not acked:
                     return
+            # P2-e: a pause committed between the pre-invoke gate and this
+            # successor commit must hold — the paused run does not gain new
+            # node dispatches. The upstream accept already committed, so the
+            # graph checkpoint simply waits interrupted at this successor
+            # until an ordinary retry/resume redrive re-derives the dispatch.
+            paused_run = uow.repository.get_run(dispatch.run_id)
+            if paused_run is not None and str(paused_run.status) == "paused":
+                return
             latest = uow.repository.latest_attempt(dispatch.run_id, pending.node_id)
             if latest is not None and latest.attempt == pending.attempt:
                 # Already created (crash recovery idempotent path).
@@ -1278,6 +1440,20 @@ class GraphDispatchWorker:
                 outcome=outcome,
                 now_ms=now_ms,
             )
+            # P2-e: a FAILED attempt ticks the run's consecutive-error streak;
+            # at the threshold the run parks as PAUSED inside this same
+            # transaction (streak read + pause write serialized against every
+            # other dispatch commit). In-flight work elsewhere is untouched.
+            if outcome == "failed":
+                maybe_pause_for_consecutive_errors(
+                    uow.repository,
+                    run_id=dispatch.run_id,
+                    policy=self._governance,
+                    now_ms=now_ms,
+                    actor_id=self._owner,
+                    last_node_id=str(dispatch.node_id or ""),
+                    last_node_run_id=str(dispatch.node_run_id or ""),
+                )
 
         self._submit(mutate, force_flush=True).result(timeout=30)
 

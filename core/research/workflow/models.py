@@ -28,6 +28,12 @@ class WorkflowRunStatus(str, Enum):
     RUNNING = "running"
     WAITING_HUMAN = "waiting_human"
     BLOCKED = "blocked"
+    # Recoverable scheduler hold (P2-e): the graph dispatched its in-flight
+    # work and then stopped scheduling new nodes — consecutive dispatch
+    # errors reached the configured threshold, or readiness hit a deadlock
+    # (nothing ready, nothing active, blocked inventory non-empty). A paused
+    # run is NOT a failure: the existing start/retry/resume entries clear it.
+    PAUSED = "paused"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
