@@ -5,20 +5,21 @@ import { VButton } from "../components/vui";
 import styles from "./MemoryGraphNodeInspectorPanel.styles";
 
 export const GRAPH_NODE_TYPE_LABELS: Record<string, string> = {
-  project: "Project",
-  team: "Team",
+  project: "项目",
+  team: "团队",
   agent: "Agent",
-  agent_private_memory: "Memory",
-  knowledge_base: "KB",
-  knowledge_item: "Item",
-  source_artifact: "Source",
-  refinement_proposal: "Proposal",
-  knowledge_batch: "Batch",
-  rating_suggestion: "Rating",
-  runtime_scene: "Runtime",
-  evolution: "Evolution",
-  supervision: "Supervision",
-  tag: "Tag",
+  agent_private_memory: "私有记忆",
+  knowledge_base: "知识库",
+  knowledge_item: "知识",
+  source_artifact: "来源",
+  refinement_proposal: "改进建议",
+  knowledge_batch: "知识批次",
+  rating_suggestion: "评价建议",
+  runtime_scene: "运行记录",
+  evolution: "自主进化",
+  supervision: "监督进化",
+  tag: "标签",
+  concept: "概念",
 };
 
 export type MemoryGraphRelation = {
@@ -59,6 +60,7 @@ type MemoryGraphNodeInspectorPanelProps = {
   isGraphNodeDetailFetching: boolean;
   formatTimestamp: (value: string) => string;
   onFocusGraphNode: (nodeId: string) => void;
+  onSelectRelation?: (edgeId: string) => void;
 };
 
 export function MemoryGraphNodeInspectorPanel({
@@ -70,6 +72,7 @@ export function MemoryGraphNodeInspectorPanel({
   isGraphNodeDetailFetching,
   formatTimestamp,
   onFocusGraphNode,
+  onSelectRelation,
 }: MemoryGraphNodeInspectorPanelProps) {
   return (
     <aside className={styles.detailPanel}>
@@ -80,7 +83,7 @@ export function MemoryGraphNodeInspectorPanel({
       {selectedGraphNode ? (
         <>
           <section className={styles.selectedConfigSummary}>
-            <strong>{selectedGraphNode.type}</strong>
+            <strong>{GRAPH_NODE_TYPE_LABELS[selectedGraphNode.type] ?? selectedGraphNode.type}</strong>
             <p>{selectedGraphNode.summary || selectedGraphNode.id}</p>
           </section>
           <section className={styles.graphResponsibilityPanel}>
@@ -162,7 +165,7 @@ export function MemoryGraphNodeInspectorPanel({
                       type="button"
                       data-node-type={relation.neighbor.type}
                       data-agent-category={String(relation.neighbor.visual?.agentCategory || relation.neighbor.metadata?.agentCategory || "")}
-                      onClick={() => onFocusGraphNode(relation.neighbor.id)}
+                      onClick={() => onSelectRelation ? onSelectRelation(relation.edge.id) : onFocusGraphNode(relation.neighbor.id)}
                     >
                       <small>{relation.edge.label || relation.edge.type}</small>
                       <strong>{relation.neighbor.label}</strong>
@@ -177,7 +180,7 @@ export function MemoryGraphNodeInspectorPanel({
                       type="button"
                       data-node-type={relation.neighbor.type}
                       data-agent-category={String(relation.neighbor.visual?.agentCategory || relation.neighbor.metadata?.agentCategory || "")}
-                      onClick={() => onFocusGraphNode(relation.neighbor.id)}
+                      onClick={() => onSelectRelation ? onSelectRelation(relation.edge.id) : onFocusGraphNode(relation.neighbor.id)}
                     >
                       <small>{relation.edge.label || relation.edge.type}</small>
                       <strong>{relation.neighbor.label}</strong>

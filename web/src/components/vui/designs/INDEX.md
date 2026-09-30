@@ -12,6 +12,7 @@
 | `SelfEvolutionConversationWorkspace` | [product/evolution.md](./product/evolution.md#selfevolutionconversationworkspace) |
 | `EvolutionSupervisedLiveSetupPanel` | [product/evolution.md](./product/evolution.md#evolutionsupervisedlivesetuppanel) |
 | `VWorkflowCanvas` | [product/workflow.md](./product/workflow.md#vworkflowcanvas) |
+| `VMemoryGraphCanvas` | [product/memory-graph.md](./product/memory-graph.md#vmemorygraphcanvas) |
 | 假说先行区域 | [product/workflow.md](./product/workflow.md#假说先行区域) |
 | 知识侧流程区域 | [product/workflow.md](./product/workflow.md#知识侧流程区域) |
 | 阶段未激活区域 | [product/workflow.md](./product/workflow.md#阶段未激活区域) |

@@ -8,12 +8,12 @@ const styles = {
     "detailHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
   detailMeta:
     "detailMeta min-w-0 flex flex-wrap items-center gap-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  detailPanel: `detailPanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
+  detailPanel: `detailPanel min-w-0 min-h-0 flex-1 space-y-5 overflow-auto ${vuiFlatPanelClass} p-5 [&_h2]:text-xl [&_h2]:leading-relaxed [&_p]:leading-relaxed`,
   emptyDetail:
     "emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   graphKnowledgeContent:
     "graphKnowledgeContent min-w-0 whitespace-pre-wrap break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  graphKnowledgeItem: `graphKnowledgeItem min-w-0 ${vuiOpaqueRowClass} p-2 line-clamp-3`,
+  graphKnowledgeItem: `graphKnowledgeItem min-w-0 space-y-3 ${vuiOpaqueRowClass} p-3`,
   graphKnowledgeList:
     "graphKnowledgeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   graphKnowledgePanel: `graphKnowledgePanel min-w-0 ${vuiFlatPanelClass} p-2`,

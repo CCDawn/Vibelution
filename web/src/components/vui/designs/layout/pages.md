@@ -255,6 +255,8 @@ import { VBoardWorkbenchPage } from "@/components/vui";
 
 ## VCanvasWorkbenchPage
 
+记忆图谱可设置 `responsive.inspector.narrowPlacement="bottom"`：窄屏阅读栏从底部展开，最高占 64dvh；复用 VDialog 的 Escape、焦点约束与返回焦点。默认仍是侧栏，不改变其他画布页。
+
 ### 功能
 可选 rail + 画布主区 + inspector 的图/流程工作台 recipe。
 
