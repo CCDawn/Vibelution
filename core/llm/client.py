@@ -5051,6 +5051,7 @@ class LLMClient:
         scene_identity: Optional[Dict[str, Any]] = None,
         request_messages: Optional[List[Any]] = None,
         stream_deadline_at: float | None = None,
+        queued_ms: int | None = None,
         receipt_builder: Optional[
             Callable[[TurnOutcome, UsageStats | None], TurnOutcome]
         ] = None,
@@ -5133,6 +5134,7 @@ class LLMClient:
                     deadline_seconds=_llm_stream_total_deadline_seconds(),
                     provider=self.provider.kind,
                     model=self.profile.model,
+                    queued_ms=queued_ms,
                 )
 
         def events() -> Iterator[StreamChunk]:
@@ -5337,6 +5339,7 @@ class LLMClient:
                             deadline_seconds=_llm_stream_total_deadline_seconds(),
                             provider=self.provider.kind,
                             model=self.profile.model,
+                            queued_ms=queued_ms,
                         ) from exc
                     if (
                         idle_fired.is_set()
@@ -5473,9 +5476,13 @@ class LLMClient:
                 )
             start = time.time()
             # 流式总时长硬上限按单次 attempt 计：litellm 重试循环的每次重试
-            # 都在这里重新起算，不跨 attempt 泄漏。
+            # 都在这里重新起算，不跨 attempt 泄漏。deadline 的起算点在路由
+            # 槽到手之后（admit 后续走）：进程级准入闸门的排队等待不计入
+            # total 超时，否则排队高峰会把合法流在到达 provider 之前就逼成
+            # 假超时（对齐 ZCode ToolDeadline 剩余时长守恒与 chat_room
+            # 09-03「排队不吃预算」先例）。
             stream_total_deadline_seconds = _llm_stream_total_deadline_seconds()
-            stream_deadline_at = time.monotonic() + stream_total_deadline_seconds
+            stream_deadline_at: float | None = None
             emitted = False
             chunk_count = 0
             text_delta_count = 0
@@ -5537,6 +5544,10 @@ class LLMClient:
                     tool_count=tool_count,
                 ) as route_gate_wait_ms:
                     _raise_if_llm_cancelled()
+                    # admit 后起算：排队等待已由上面的 route gate 有界预算
+                    # 单独看管（VIBELUTION_LLM_ROUTE_GATE_WAIT_SECONDS），
+                    # total deadline 从这里才开始流逝。
+                    stream_deadline_at = time.monotonic() + stream_total_deadline_seconds
                     stop_cache_keepalive = self._start_qwen_inflight_cache_keepalive(
                         payload,
                         metadata=event_metadata,
@@ -5555,6 +5566,7 @@ class LLMClient:
                             invocation_scope=invocation_scope,
                             protocol_event_sink=protocol_event_sink,
                             stream_deadline_at=stream_deadline_at,
+                            queued_ms=route_gate_wait_ms,
                             scene_identity={
                                 "role": self.role,
                                 "profileId": self.profile_id,
@@ -5596,6 +5608,7 @@ class LLMClient:
                                     deadline_seconds=stream_total_deadline_seconds,
                                     provider=self.provider.kind,
                                     model=self.profile.model,
+                                    queued_ms=route_gate_wait_ms,
                                 )
                             now = time.time()
                             elapsed_ms = int((now - start) * 1000)
