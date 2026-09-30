@@ -27,6 +27,7 @@ vi.mock("../../api/chat", () => ({
   submitSessionMessage: vi.fn(),
   switchSessionHead: vi.fn(),
   uploadSessionImageAttachment: vi.fn(),
+  applySessionTurnRewind: vi.fn(),
 }));
 vi.mock("./chatSubmitTelemetry", () => ({ postSubmitTelemetry: vi.fn() }));
 vi.mock("../../app/userActionTelemetry", () => ({
