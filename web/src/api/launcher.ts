@@ -261,7 +261,7 @@ export type LauncherStatus = Omit<BaseLauncherStatus, "settings"> & {
 };
 
 export type LauncherBranchInstanceRuntime = {
-  lifecycleState: "closed" | "starting" | "running" | "stopping" | "restarting" | "partial" | "error";
+  lifecycleState: "closed" | "building" | "starting" | "running" | "stopping" | "restarting" | "partial" | "error";
   desiredState: string;
   observedState: string;
   phase: string;
@@ -389,7 +389,9 @@ function legacyBranchInstanceRuntime(item: LauncherBranchInstancePayload): Launc
   const backendAlive = Boolean(item.alive || backendPid > 0);
   const windowOpen = windowPid > 0;
   let lifecycleState: LauncherBranchInstanceRuntime["lifecycleState"] = "closed";
-  if (["opening", "starting"].includes(observedState)) {
+  if (["building"].includes(observedState)) {
+    lifecycleState = "building";
+  } else if (["opening", "starting"].includes(observedState)) {
     lifecycleState = "starting";
   } else if (["restarting", "restart"].includes(observedState)) {
     lifecycleState = "restarting";

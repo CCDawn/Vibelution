@@ -11,6 +11,7 @@ export type CleanupRecommendation = {
 
 export function runtimeStatusExplanation(state: InstanceRuntimeState, isZh: boolean): string {
   const zh: Record<InstanceRuntimeState, string> = {
+    building: "Launcher 正在构建该实例的前端新版本；构建完成后才会启动运行组件。",
     starting: "Launcher 正在启动该实例的运行组件。",
     running: "该实例的后端或 Workbench 窗口仍在运行。",
     partial: "该实例只有部分运行组件就绪，需要先检查运行状态。",
@@ -20,6 +21,7 @@ export function runtimeStatusExplanation(state: InstanceRuntimeState, isZh: bool
     stopped: "该实例当前没有运行中的组件。",
   };
   const en: Record<InstanceRuntimeState, string> = {
+    building: "Launcher is building a new frontend for this instance; runtime components start once the build finishes.",
     starting: "Launcher is starting the runtime components for this instance.",
     running: "The backend or Workbench window for this instance is still running.",
     partial: "Only some runtime components are ready; inspect the runtime state first.",

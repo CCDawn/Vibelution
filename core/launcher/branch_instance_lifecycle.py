@@ -370,6 +370,11 @@ def _instance_lifecycle_state(
     # in-flight start claims (see _registry_entry_stale_in_flight_start).
     if start_supervisor_lost and not backend_ready and not window_open:
         return "error", "start_supervisor_lost"
+    # A frontend build gate runs before the supervisor claims the intent; the
+    # Electron overlay stamps phase="building" from its in-process marker so
+    # the row keeps one shared projection channel for in-flight work.
+    if normalized_phase == "building" or normalized_status == "building":
+        return "building", ""
     if normalized_phase in {"restarting", "restart"} or normalized_status == "restarting":
         return "restarting", ""
     if normalized_phase in {"closing", "stopping", "force_stopping"} or normalized_status == "stopping":

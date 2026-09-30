@@ -18,7 +18,7 @@ export function reconcileMainLineIdle(input: MainLineIdleReconcileInput): MainLi
     return null;
   }
   const state = input.observation.lifecycleState;
-  if (state === "starting" || state === "restarting" || state === "stopping") {
+  if (state === "building" || state === "starting" || state === "restarting" || state === "stopping") {
     return null;
   }
   const live = Boolean(

@@ -5,12 +5,18 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { recordAdmissionOutcome, resetAdmissionCacheForTests } from "../src/lifecycle/instanceAdmissionStore.js";
 import {
+  beginFrontendBuild,
+  endFrontendBuild,
+  resetFrontendBuildStateForTests,
+} from "../src/lifecycle/frontendBuildState.js";
+import {
   overlayLauncherWindowTruth,
   type LauncherWindowTruth,
 } from "../src/windows/launcherWindowTruthOverlay.js";
 
 afterEach(() => {
   resetAdmissionCacheForTests();
+  resetFrontendBuildStateForTests();
 });
 
 const truth = (overrides: Partial<LauncherWindowTruth> = {}): LauncherWindowTruth => ({
@@ -413,6 +419,112 @@ describe("launcher branch-instances window truth overlay", () => {
     const item = (overlaid.items as Record<string, unknown>[])[0];
     expect((item.runtime as Record<string, unknown>).lifecycleState).toBe("partial");
     expect(item.startable).toBe(false);
+  });
+});
+
+describe("frontend build gate overlay", () => {
+  it("reports the main bundle as building during ensureFrontendRelease and falls back afterwards", () => {
+    const payload = {
+      projectBundle: {
+        observedState: "closed",
+        phase: "steady",
+        backend: { alive: false, healthy: false, portListening: false, portConflict: false },
+        browser: { managed: false, windowPid: 0, alive: false },
+        components: [],
+      },
+    };
+    const before = overlayLauncherWindowTruth("status", structuredClone(payload), truth()) as Record<string, unknown>;
+    expect((before.projectBundle as Record<string, unknown>).phase).toBe("steady");
+
+    beginFrontendBuild("main", "start");
+    const during = overlayLauncherWindowTruth("status", structuredClone(payload), truth()) as Record<string, unknown>;
+    expect((during.projectBundle as Record<string, unknown>).phase).toBe("building");
+
+    endFrontendBuild("main");
+    const after = overlayLauncherWindowTruth("status", structuredClone(payload), truth()) as Record<string, unknown>;
+    expect((after.projectBundle as Record<string, unknown>).phase).toBe("steady");
+  });
+
+  it("keeps a branch row in building and not startable until the build gate settles", () => {
+    const payload = {
+      items: [
+        {
+          id: "worktree:task",
+          current: false,
+          alive: false,
+          startable: true,
+          runtime: {
+            lifecycleState: "closed",
+            phase: "steady",
+            observedState: "closed",
+            desiredState: "closed",
+            registryStatus: "closed",
+            backend: { alive: false, healthy: false, listening: false, portConflict: false },
+            frontend: { ready: true },
+            window: { open: false, pid: 0 },
+          },
+        },
+      ],
+    };
+    const during = overlayLauncherWindowTruth(
+      "branch-instances",
+      structuredClone(payload),
+      truth()
+    ) as Record<string, unknown>;
+    expect(((during.items as Record<string, unknown>[])[0].runtime as Record<string, unknown>).lifecycleState).toBe("closed");
+
+    beginFrontendBuild("worktree:task", "start");
+    const building = overlayLauncherWindowTruth(
+      "branch-instances",
+      structuredClone(payload),
+      truth()
+    ) as Record<string, unknown>;
+    const buildingItem = (building.items as Record<string, unknown>[])[0];
+    expect((buildingItem.runtime as Record<string, unknown>).lifecycleState).toBe("building");
+    expect(buildingItem.startable).toBe(false);
+
+    endFrontendBuild("worktree:task");
+    const after = overlayLauncherWindowTruth(
+      "branch-instances",
+      structuredClone(payload),
+      truth()
+    ) as Record<string, unknown>;
+    const afterItem = (after.items as Record<string, unknown>[])[0];
+    expect((afterItem.runtime as Record<string, unknown>).lifecycleState).toBe("closed");
+    expect(afterItem.startable).toBe(true);
+  });
+
+  it("keeps building ahead of the window-truth re-projection for a live restart", () => {
+    const payload = {
+      items: [
+        {
+          id: "worktree:task",
+          current: false,
+          alive: true,
+          startable: false,
+          runtime: {
+            lifecycleState: "restarting",
+            phase: "restarting",
+            observedState: "open",
+            desiredState: "open",
+            registryStatus: "restarting",
+            backend: { alive: true, healthy: true, listening: true, portConflict: false },
+            frontend: { ready: true },
+            window: { open: true, pid: 0 },
+          },
+        },
+      ],
+    };
+    beginFrontendBuild("worktree:task", "restart");
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ instances: [{ instanceId: "worktree:task", open: true, rendererProcessId: 4242 }] })
+    ) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    expect((item.runtime as Record<string, unknown>).lifecycleState).toBe("building");
+    expect(item.startable).toBe(false);
+    endFrontendBuild("worktree:task");
   });
 });
 

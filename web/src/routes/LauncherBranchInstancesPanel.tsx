@@ -215,6 +215,8 @@ export function LauncherBranchInstancesPanel({
         pending: "正在清理所选实例…",
         done: "清理完成",
         failed: "部分实例未能清理",
+        building: "构建中…",
+        buildingHint: "前端代码有更新，正在构建新版本，约需几分钟。",
       }
     : {
         all: "All",
@@ -274,6 +276,8 @@ export function LauncherBranchInstancesPanel({
         pending: "Cleaning selected instances…",
         done: "Cleanup finished",
         failed: "Some instances could not be cleaned",
+        building: "Building…",
+        buildingHint: "The frontend has updates and a new build is running. This takes a few minutes.",
       };
 
   const [activeTab, setActiveTab] = useState<BranchTableTab>("all");
@@ -458,10 +462,14 @@ export function LauncherBranchInstancesPanel({
     const windowOpen = instanceWindowOpen(item);
     const startBusy = shouldHoldOpenClickGuard(state);
     const stopBusy = state === "stopping";
+    const building = state === "building";
     const startingOrRestarting = state === "starting" || state === "restarting";
     const openLabel = state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
     const admissionBlocked = isAdmissionBlocked(item);
-    const showOpen = canRequestOpenInstance(item, pendingOperation);
+    // While a frontend build gates the start, the primary control stays
+    // visible but disabled with a pending spinner so the wait reads as
+    // progress instead of a frozen button.
+    const showOpen = canRequestOpenInstance(item, pendingOperation) || building;
     const showStop = canStopInstance(item, pendingOperation) || stopBusy;
     const showForceStop = canForceStopInstance(item);
     const forceStopPending = lifecyclePending && Boolean(resolveItemPending(item, pendingOperation));
@@ -488,7 +496,7 @@ export function LauncherBranchInstancesPanel({
       <div className={styles.actionStack}>
       <VActionGroup
         ariaLabel={labels.actions}
-        aria-busy={startingOrRestarting || stopBusy || undefined}
+        aria-busy={building || startingOrRestarting || stopBusy || undefined}
         className={styles.actionButtons}
         onClick={(event) => event.stopPropagation()}
       >
@@ -497,26 +505,32 @@ export function LauncherBranchInstancesPanel({
             type="button"
             variant="primary"
             density="compact"
-            isDisabled={startBusy || admissionBlocked}
+            isDisabled={building || startBusy || admissionBlocked}
+            isPending={building}
             onPress={requestOpen}
           >
-            {openLabel}
+            {building ? labels.building : openLabel}
           </VButton>
         ) : null}
-        {showOpen && admissionBlocked ? (
+        {showOpen && !building && admissionBlocked ? (
           <span className={styles.errorReason}>{formatAdmissionReason(item, zh)}</span>
         ) : null}
-        {showOpen && openReject?.id === item.id ? (
+        {showOpen && !building && openReject?.id === item.id ? (
           <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
+        ) : null}
+        {building ? (
+          <span className={styles.rowFeedback} title={labels.buildingHint}>
+            {labels.buildingHint}
+          </span>
         ) : null}
         {showStop ? (
           <VButton
             type="button"
-            variant={startingOrRestarting ? "primary" : "secondary"}
+            variant={startingOrRestarting || building ? "primary" : "secondary"}
             density="compact"
             isDisabled={stopBusy}
             isPending={stopBusy}
-            icon={startingOrRestarting ? (
+            icon={startingOrRestarting || building ? (
               <LoaderCircle
                 size={14}
                 strokeWidth={2.25}
@@ -524,10 +538,12 @@ export function LauncherBranchInstancesPanel({
                 aria-hidden="true"
               />
             ) : undefined}
-            tooltip={startingOrRestarting
+            tooltip={startingOrRestarting || building
               ? (state === "restarting"
                 ? (zh ? "正在重启，点击可停止" : "Restarting — click to stop")
-                : (zh ? "正在启动，点击可停止" : "Starting — click to stop"))
+                : (building
+                  ? (zh ? "正在构建前端，点击可停止" : "Building frontend — click to stop")
+                  : (zh ? "正在启动，点击可停止" : "Starting — click to stop")))
               : undefined}
             onPress={() => {
               if (stopBusy) {
@@ -558,7 +574,7 @@ export function LauncherBranchInstancesPanel({
             type="button"
             variant="danger"
             density="compact"
-            isDisabled={cleanupMutation.isPending || startingOrRestarting || stopBusy}
+            isDisabled={cleanupMutation.isPending || building || startingOrRestarting || stopBusy}
             onPress={() => askCleanup([item.id])}
           >
             {labels.cleanup}
