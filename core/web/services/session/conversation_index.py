@@ -13,10 +13,12 @@ import json
 import re
 import threading
 import time
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from core.infrastructure.atomic_io import atomic_write_json
 from core.web.services import agent_directory_service
 
 
@@ -96,6 +98,224 @@ def _conversation_agent_binding_probe_completed(
             _CONVERSATION_AGENT_PROBE_STATE[key] = (signature, frozenset({normalized_session_id}))
             return
         _CONVERSATION_AGENT_PROBE_STATE[key] = (signature, current[1] | {normalized_session_id})
+
+
+_SESSION_CREATE_IDEMPOTENCY_SCHEMA_VERSION = 1
+_SESSION_CREATE_IDEMPOTENCY_MAX_KEY_LENGTH = 200
+
+
+def _session_create_idempotency_path(project_root: Path, key_hash: str) -> Path:
+    """Keep retry receipts beside the active ConversationStore in app data."""
+
+    from . import directory_runtime
+
+    store_path = directory_runtime.conversation_store_path(Path(project_root))
+    return store_path.with_name("session_create_idempotency") / f"{key_hash}.json"
+
+
+def _normalize_session_create_idempotency_key(value: Any) -> str:
+    s = _service()
+    key = str(value or "").strip()
+    if len(key) > _SESSION_CREATE_IDEMPOTENCY_MAX_KEY_LENGTH:
+        raise s.SessionValidationError("Idempotency-Key exceeds 200 characters.")
+    return key
+
+
+def _session_create_request_digest(*, agent_id: str, title: str) -> str:
+    canonical = json.dumps(
+        {"agentId": str(agent_id or "").strip(), "title": str(title or "").strip()},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _read_session_create_idempotency_record(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("not a regular file")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        raise RuntimeError("Session creation idempotency record is unavailable.") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError("Session creation idempotency record is unavailable.")
+    session_id = str(payload.get("sessionId") or "").strip()
+    agent_id = str(payload.get("agentId") or "").strip()
+    request_digest = str(payload.get("requestDigest") or "").strip()
+    state = str(payload.get("state") or "").strip()
+    if (
+        payload.get("schemaVersion") != _SESSION_CREATE_IDEMPOTENCY_SCHEMA_VERSION
+        or not session_id
+        or len(request_digest) != 64
+        or state not in {"pending", "committed"}
+    ):
+        raise RuntimeError("Session creation idempotency record is unavailable.")
+    return {
+        "sessionId": session_id,
+        "agentId": agent_id,
+        "requestDigest": request_digest,
+        "state": state,
+    }
+
+
+def _write_session_create_idempotency_record(
+    path: Path,
+    *,
+    session_id: str,
+    agent_id: str = "",
+    request_digest: str,
+    state: str,
+) -> None:
+    atomic_write_json(
+        path,
+        {
+            "schemaVersion": _SESSION_CREATE_IDEMPOTENCY_SCHEMA_VERSION,
+            "sessionId": str(session_id or "").strip(),
+            "agentId": str(agent_id or "").strip(),
+            "requestDigest": str(request_digest or "").strip(),
+            "state": state,
+        },
+        sort_keys=True,
+        strict_replace=True,
+    )
+
+
+@contextmanager
+def _timed_session_create_state_lock(
+    s: Any,
+    timings: dict[str, int],
+    *,
+    serialize_agent_lifecycle: bool = False,
+):
+    waiting_started = time.perf_counter()
+    with s._CHAT_STATE_LOCK:
+        acquired_at = time.perf_counter()
+        timings["chatStateLockWaitMs"] = timings.get("chatStateLockWaitMs", 0) + max(
+            0, int((acquired_at - waiting_started) * 1000)
+        )
+        try:
+            if serialize_agent_lifecycle:
+                with s.agent_directory_service.agent_session_lifecycle_transaction():
+                    yield
+            else:
+                yield
+        finally:
+            timings["chatStateLockHoldMs"] = timings.get("chatStateLockHoldMs", 0) + max(
+                0, int((time.perf_counter() - acquired_at) * 1000)
+            )
+
+
+def _record_session_create_timing(
+    s: Any,
+    *,
+    started_at: float,
+    timings: dict[str, int],
+    session_id: str = "",
+    lightweight: bool,
+    idempotency_enabled: bool,
+    idempotency_replay: bool,
+    outcome: str = "succeeded",
+    failure_stage: str = "",
+    error_type: str = "",
+) -> None:
+    fields: dict[str, Any] = {
+        "sessionId": str(session_id or "").strip(),
+        "lightweight": bool(lightweight),
+        "idempotencyEnabled": bool(idempotency_enabled),
+        "idempotencyReplay": bool(idempotency_replay),
+        "stageDurationsMs": dict(timings),
+        "totalMs": max(0, int((time.perf_counter() - started_at) * 1000)),
+    }
+    if failure_stage:
+        fields["failureStage"] = str(failure_stage)[:80]
+    if error_type:
+        fields["errorType"] = str(error_type)[:80]
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "session_lifecycle",
+            "conversation.session.create.timing",
+            level="warning" if outcome != "succeeded" else "info",
+            outcome=outcome,
+            message="Session create request timing.",
+            fields=fields,
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
+def _accumulate_session_create_stage_ms(
+    timings: dict[str, int],
+    name: str,
+    started_at: float,
+) -> None:
+    timings[name] = timings.get(name, 0) + max(
+        0,
+        int((time.perf_counter() - started_at) * 1000),
+    )
+
+
+def _commit_session_create_idempotency_record(
+    path: Path,
+    *,
+    session_id: str,
+    agent_id: str,
+    request_digest: str,
+    timings: dict[str, int],
+) -> None:
+    started_at = time.perf_counter()
+    _write_session_create_idempotency_record(
+        path,
+        session_id=session_id,
+        agent_id=agent_id,
+        request_digest=request_digest,
+        state="committed",
+    )
+    _accumulate_session_create_stage_ms(timings, "idempotencyStoreWriteMs", started_at)
+
+
+def _session_create_response(
+    s: Any,
+    conversation: dict[str, Any],
+    *,
+    session_id: str,
+    agent_id: str,
+    title: str,
+    lightweight: bool,
+) -> dict[str, Any]:
+    if not lightweight:
+        return s.get_session_detail(session_id) or {}
+    normalized = s._normalize_conversation(conversation, lightweight=True)
+    detail = s._build_lightweight_session_detail(normalized) if isinstance(normalized, dict) else None
+    if not isinstance(detail, dict):
+        return {"id": session_id, "messages": [], "createdLightweight": True}
+    detail.setdefault("messages", [])
+    detail.setdefault("id", session_id)
+    if agent_id and not str(detail.get("agentId") or "").strip():
+        detail["agentId"] = agent_id
+    if title and not str(detail.get("title") or "").strip():
+        detail["title"] = title
+    detail["createdLightweight"] = True
+    return detail
+
+
+def _sync_session_create_directory_state(
+    s: Any,
+    conversation: dict[str, Any],
+    timings: dict[str, int],
+) -> None:
+    from . import directory_bridge
+
+    directory_sync_started_at = time.perf_counter()
+    directory_bridge.sync_conversation_record(conversation)
+    _accumulate_session_create_stage_ms(timings, "directorySyncMs", directory_sync_started_at)
+    cache_invalidate_started_at = time.perf_counter()
+    s._invalidate_session_list_cache()
+    _accumulate_session_create_stage_ms(timings, "listCacheInvalidateMs", cache_invalidate_started_at)
 
 
 def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> bool:
@@ -1412,6 +1632,7 @@ def create_chat_session(
     forked_from: dict[str, Any] | None = None,
     lightweight: bool = False,
     activate: bool = True,
+    idempotency_key: str = "",
 ) -> dict:
     """Create a new empty chat session, active by default.
 
@@ -1425,9 +1646,13 @@ def create_chat_session(
     task pointers can be audited without storing prompts or arbitrary payloads.
     """
     s = _service()
+    create_started_at = time.perf_counter()
+    timings: dict[str, int] = {}
+    normalize_started_at = time.perf_counter()
 
     lang = s.get_web_language()
-    normalized_agent_id = str(agent_id or "").strip()
+    requested_agent_id = str(agent_id or "").strip()
+    normalized_agent_id = requested_agent_id
     normalized_index_kind = str(conversation_index_kind or "").strip()
     if not activate and normalized_index_kind != agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
         raise s.SessionValidationError("Non-activating sessions must use the hidden conversation index kind.")
@@ -1521,14 +1746,8 @@ def create_chat_session(
         except DiscussionScopeBindingError as exc:
             raise s.SessionValidationError(str(exc)) from exc
     binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
-    if binding_agent_id and binding_agent_id != normalized_agent_id:
+    if binding_agent_id and binding_agent_id != requested_agent_id:
         raise s.SessionValidationError("Experiment binding Agent id does not match the bound Agent.")
-    bound_agent: dict[str, Any] | None = None
-    if normalized_agent_id:
-        s._sync_agent_directory_project_root()
-        bound_agent = s.get_agent(normalized_agent_id, include_archived=False)
-        if not bound_agent:
-            raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
     explicit_title = s.trim_lines(title or "", max_lines=1).strip()
     # A new session always starts from one placeholder label; the first user
     # turn generates the real title (see session/title_generation.py). The
@@ -1538,69 +1757,309 @@ def create_chat_session(
     declared_title_source = str(title_source or "").strip().lower()
     if declared_title_source not in {"placeholder", "auto", "manual"}:
         declared_title_source = "manual" if explicit_title else "placeholder"
-    with s._CHAT_STATE_LOCK:
-        existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
-        now = s._now_timestamp()
-        session_id = s._new_conversation_id(existing_ids)
-        conversation = s._make_empty_conversation(
-            session_id,
-            title=normalized_title,
-            timestamp=now,
-            conversation_index_kind=conversation_index_kind,
-            # An Agent display-name fallback is still a create placeholder: the
-            # first user turn may replace it with a generated title.
-            title_source=declared_title_source,
-        )
-        if normalized_session_metadata:
-            conversation["metadata"] = normalized_session_metadata
-        normalized_forked_from = _normalize_forked_from_metadata(forked_from)
-        if normalized_forked_from:
-            conversation["forkedFrom"] = normalized_forked_from
-        if bound_agent is not None:
-            conversation.update(
-                {
-                    "agent_id": normalized_agent_id,
-                    "agentId": normalized_agent_id,
-                    "session_role": "workspace",
-                    "sessionRole": "workspace",
-                }
-            )
-            if normalized_experiment_binding:
-                conversation["experiment_binding"] = normalized_experiment_binding
-                conversation["experimentBinding"] = normalized_experiment_binding
-        s._ensure_conversation_workspace_metadata(conversation)
-        if bound_agent is None:
-            s._sync_agent_directory_project_root()
-            agent = s.ensure_agent_for_session(
-                session_id,
-                display_name=normalized_title if not s._is_default_empty_session_title(normalized_title) else "",
-                llm_bindings=normalized_llm_bindings,
-                session_workspace_path=str(
-                    conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)
-                ),
-                created_by=created_by,
-                conversation_index_kind=conversation_index_kind,
-            )
-            normalized_agent_id = str(agent.get("agentId") or "").strip()
-            if normalized_agent_id:
-                conversation["agent_id"] = normalized_agent_id
-                conversation["agentId"] = normalized_agent_id
-                conversation["session_role"] = "primary"
-                conversation["sessionRole"] = "primary"
-        s.save_session_chat_state(
-            s.PROJECT_ROOT,
-            session_id,
-            conversation,
-            activate=activate,
-        )
-        created_conversation = dict(conversation)
-    from . import directory_bridge
 
-    directory_bridge.sync_conversation_record(created_conversation)
-    s._invalidate_session_list_cache()
+    normalized_idempotency_key = _normalize_session_create_idempotency_key(idempotency_key)
+    idempotency_enabled = bool(normalized_idempotency_key)
+    idempotency_key_hash = (
+        hashlib.sha256(normalized_idempotency_key.encode("utf-8")).hexdigest()
+        if idempotency_enabled
+        else ""
+    )
+    request_digest = _session_create_request_digest(
+        agent_id=requested_agent_id,
+        title=explicit_title,
+    )
+    idempotency_path = (
+        _session_create_idempotency_path(Path(s.PROJECT_ROOT), idempotency_key_hash)
+        if idempotency_enabled
+        else None
+    )
+    _accumulate_session_create_stage_ms(timings, "requestNormalizationMs", normalize_started_at)
+
+    reserved_session_id = ""
+    reserved_agent_id = ""
+    replay_conversation: dict[str, Any] | None = None
+    replay_needs_directory_sync = False
+    if idempotency_path is not None:
+        lookup_started_at = time.perf_counter()
+        try:
+            with _timed_session_create_state_lock(s, timings):
+                idempotency_record = _read_session_create_idempotency_record(idempotency_path)
+                if idempotency_record is not None:
+                    if idempotency_record["requestDigest"] != request_digest:
+                        raise s.SessionIdempotencyConflictError(
+                            "Idempotency-Key is already bound to another session creation request."
+                        )
+                    reserved_session_id = str(idempotency_record["sessionId"])
+                    reserved_agent_id = str(idempotency_record.get("agentId") or "")
+                    replay_conversation = s.load_session_chat_state(s.PROJECT_ROOT, reserved_session_id)
+                    if s._is_session_workspace_intentionally_deleted(reserved_session_id):
+                        if idempotency_record["state"] == "pending":
+                            _commit_session_create_idempotency_record(
+                                idempotency_path,
+                                session_id=reserved_session_id,
+                                agent_id=reserved_agent_id,
+                                request_digest=request_digest,
+                                timings=timings,
+                            )
+                        raise s.SessionIdempotencyReplayGoneError(
+                            "The session previously created for this Idempotency-Key no longer exists."
+                        )
+                    if replay_conversation is None and idempotency_record["state"] == "committed":
+                        raise s.SessionIdempotencyReplayGoneError(
+                            "The session previously created for this Idempotency-Key no longer exists."
+                        )
+                    replay_needs_directory_sync = bool(
+                        replay_conversation is not None
+                        and idempotency_record["state"] == "pending"
+                    )
+        finally:
+            _accumulate_session_create_stage_ms(timings, "idempotencyLookupMs", lookup_started_at)
+
+        if replay_conversation is not None:
+            replay_agent_id = str(
+                replay_conversation.get("agent_id")
+                or replay_conversation.get("agentId")
+                or reserved_agent_id
+            ).strip()
+            if replay_needs_directory_sync:
+                _sync_session_create_directory_state(s, replay_conversation, timings)
+                with _timed_session_create_state_lock(s, timings):
+                    replay_conversation = s.load_session_chat_state(
+                        s.PROJECT_ROOT,
+                        reserved_session_id,
+                    )
+                    replay_was_deleted = (
+                        replay_conversation is None
+                        or s._is_session_workspace_intentionally_deleted(reserved_session_id)
+                    )
+                if replay_was_deleted:
+                    from . import directory_bridge
+
+                    directory_bridge.archive_directory_session_safe(
+                        reserved_session_id,
+                        wait=True,
+                    )
+                    cache_invalidate_started_at = time.perf_counter()
+                    s._invalidate_session_list_cache()
+                    _accumulate_session_create_stage_ms(
+                        timings,
+                        "listCacheInvalidateMs",
+                        cache_invalidate_started_at,
+                    )
+                    _commit_session_create_idempotency_record(
+                        idempotency_path,
+                        session_id=reserved_session_id,
+                        agent_id=replay_agent_id,
+                        request_digest=request_digest,
+                        timings=timings,
+                    )
+                    raise s.SessionIdempotencyReplayGoneError(
+                        "The session previously created for this Idempotency-Key no longer exists."
+                    )
+                replay_agent_id = str(
+                    replay_conversation.get("agent_id")
+                    or replay_conversation.get("agentId")
+                    or replay_agent_id
+                ).strip()
+                _commit_session_create_idempotency_record(
+                    idempotency_path,
+                    session_id=reserved_session_id,
+                    agent_id=replay_agent_id,
+                    request_digest=request_digest,
+                    timings=timings,
+                )
+            replay_started_at = time.perf_counter()
+            try:
+                response = _session_create_response(
+                    s,
+                    replay_conversation,
+                    session_id=reserved_session_id,
+                    agent_id=replay_agent_id,
+                    title=str(replay_conversation.get("title") or normalized_title).strip(),
+                    lightweight=lightweight,
+                )
+            finally:
+                _accumulate_session_create_stage_ms(timings, "responseProjectionMs", replay_started_at)
+            _record_session_create_timing(
+                s,
+                started_at=create_started_at,
+                timings=timings,
+                session_id=reserved_session_id,
+                lightweight=lightweight,
+                idempotency_enabled=True,
+                idempotency_replay=True,
+            )
+            return response
+
+    agent_lookup_started_at = time.perf_counter()
+    bound_agent: dict[str, Any] | None = None
+    if requested_agent_id:
+        s._sync_agent_directory_project_root()
+        bound_agent = s.get_agent(requested_agent_id, include_archived=False)
+        if not bound_agent:
+            raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
+    _accumulate_session_create_stage_ms(timings, "agentLookupMs", agent_lookup_started_at)
+
+    session_id = ""
+    created_conversation: dict[str, Any] = {}
+    idempotency_replay = False
+    idempotency_directory_sync_required = False
+    with _timed_session_create_state_lock(
+        s,
+        timings,
+        serialize_agent_lifecycle=idempotency_path is not None,
+    ):
+        idempotency_record = (
+            _read_session_create_idempotency_record(idempotency_path)
+            if idempotency_path is not None
+            else None
+        )
+        if idempotency_record is not None:
+            if idempotency_record["requestDigest"] != request_digest:
+                raise s.SessionIdempotencyConflictError(
+                    "Idempotency-Key is already bound to another session creation request."
+                )
+            session_id = str(idempotency_record["sessionId"])
+            reserved_agent_id = str(idempotency_record.get("agentId") or reserved_agent_id or "")
+            existing_conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+            if existing_conversation is not None:
+                if idempotency_record["state"] == "pending":
+                    idempotency_directory_sync_required = True
+                created_conversation = dict(existing_conversation)
+                idempotency_replay = True
+            elif (
+                idempotency_record["state"] == "committed"
+                or s._is_session_workspace_intentionally_deleted(session_id)
+            ):
+                if idempotency_record["state"] == "pending":
+                    _commit_session_create_idempotency_record(
+                        idempotency_path,
+                        session_id=session_id,
+                        agent_id=reserved_agent_id,
+                        request_digest=request_digest,
+                        timings=timings,
+                    )
+                raise s.SessionIdempotencyReplayGoneError(
+                    "The session previously created for this Idempotency-Key no longer exists."
+                )
+        else:
+            existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
+            session_id = s._new_conversation_id(existing_ids)
+            if idempotency_path is not None:
+                store_write_started_at = time.perf_counter()
+                _write_session_create_idempotency_record(
+                    idempotency_path,
+                    session_id=session_id,
+                    request_digest=request_digest,
+                    state="pending",
+                )
+                _accumulate_session_create_stage_ms(timings, "idempotencyStoreWriteMs", store_write_started_at)
+
+        if not idempotency_replay:
+            idempotency_directory_sync_required = idempotency_path is not None
+            now = s._now_timestamp()
+            conversation = s._make_empty_conversation(
+                session_id,
+                title=normalized_title,
+                timestamp=now,
+                conversation_index_kind=conversation_index_kind,
+                # An Agent display-name fallback is still a create placeholder: the
+                # first user turn may replace it with a generated title.
+                title_source=declared_title_source,
+            )
+            if normalized_session_metadata:
+                conversation["metadata"] = normalized_session_metadata
+            normalized_forked_from = _normalize_forked_from_metadata(forked_from)
+            if normalized_forked_from:
+                conversation["forkedFrom"] = normalized_forked_from
+            if bound_agent is not None:
+                conversation.update(
+                    {
+                        "agent_id": normalized_agent_id,
+                        "agentId": normalized_agent_id,
+                        "session_role": "workspace",
+                        "sessionRole": "workspace",
+                    }
+                )
+                if normalized_experiment_binding:
+                    conversation["experiment_binding"] = normalized_experiment_binding
+                    conversation["experimentBinding"] = normalized_experiment_binding
+            s._ensure_conversation_workspace_metadata(conversation)
+            if bound_agent is None:
+                s._sync_agent_directory_project_root()
+                agent_started_at = time.perf_counter()
+                agent = None
+                if idempotency_path is not None and reserved_agent_id:
+                    reserved_agent = s.get_agent(reserved_agent_id, include_archived=False)
+                    reserved_direct_session_id = str(
+                        (reserved_agent or {}).get("directSessionId") or ""
+                    ).strip()
+                    if reserved_agent is not None and reserved_direct_session_id == session_id:
+                        agent = reserved_agent
+                    else:
+                        # A pending receipt must never pull an Agent away from a
+                        # different session. Re-resolve by this reserved session
+                        # id (creating a replacement Agent if necessary) while the
+                        # shared Agent lifecycle lock is held.
+                        reserved_agent_id = ""
+                if agent is None:
+                    agent = s.ensure_agent_for_session(
+                        session_id,
+                        display_name=normalized_title if not s._is_default_empty_session_title(normalized_title) else "",
+                        llm_bindings=normalized_llm_bindings,
+                        session_workspace_path=str(
+                            conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)
+                        ),
+                        created_by=created_by,
+                        conversation_index_kind=conversation_index_kind,
+                    )
+                normalized_agent_id = str(agent.get("agentId") or "").strip()
+                if idempotency_path is not None and normalized_agent_id:
+                    store_write_started_at = time.perf_counter()
+                    _write_session_create_idempotency_record(
+                        idempotency_path,
+                        session_id=session_id,
+                        agent_id=normalized_agent_id,
+                        request_digest=request_digest,
+                        state="pending",
+                    )
+                    _accumulate_session_create_stage_ms(timings, "idempotencyStoreWriteMs", store_write_started_at)
+                _accumulate_session_create_stage_ms(timings, "agentInitializationMs", agent_started_at)
+                if normalized_agent_id:
+                    conversation["agent_id"] = normalized_agent_id
+                    conversation["agentId"] = normalized_agent_id
+                    conversation["session_role"] = "primary"
+                    conversation["sessionRole"] = "primary"
+            save_started_at = time.perf_counter()
+            s.save_session_chat_state(
+                s.PROJECT_ROOT,
+                session_id,
+                conversation,
+                activate=activate,
+            )
+            _accumulate_session_create_stage_ms(timings, "sessionPersistMs", save_started_at)
+            created_conversation = dict(conversation)
+        else:
+            normalized_agent_id = str(
+                created_conversation.get("agent_id")
+                or created_conversation.get("agentId")
+                or ""
+            ).strip()
+    if not idempotency_replay or idempotency_directory_sync_required:
+        _sync_session_create_directory_state(s, created_conversation, timings)
+    if idempotency_directory_sync_required and idempotency_path is not None:
+        _commit_session_create_idempotency_record(
+            idempotency_path,
+            session_id=session_id,
+            agent_id=normalized_agent_id or reserved_agent_id,
+            request_digest=request_digest,
+            timings=timings,
+        )
 
     # Prompt snapshot warm must not block create latency.
-    if normalized_agent_id:
+    if normalized_agent_id and not idempotency_replay:
+        prompt_warm_started_at = time.perf_counter()
         warm_agent_snapshot = bound_agent if isinstance(bound_agent, dict) else None
         warm_agent_id = normalized_agent_id
         warm_session_id = session_id
@@ -1621,41 +2080,50 @@ def create_chat_session(
             ).start()
         except Exception:
             _warm_prompt_snapshot()
+        _accumulate_session_create_stage_ms(timings, "promptSnapshotDispatchMs", prompt_warm_started_at)
 
-    try:
-        s.record_runtime_scene_event(
-            "conversation",
-            "session_lifecycle",
-            "conversation.session.created",
-            level="info",
-            outcome="succeeded",
-            message="Chat session created.",
-            fields={
-                "sessionId": session_id,
-                "agentId": normalized_agent_id,
-                "sessionRole": "workspace" if bound_agent is not None else "primary",
-                "createdAgent": bound_agent is None,
-                "lightweight": bool(lightweight),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        pass
+    if not idempotency_replay:
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "session_lifecycle",
+                "conversation.session.created",
+                level="info",
+                outcome="succeeded",
+                message="Chat session created.",
+                fields={
+                    "sessionId": session_id,
+                    "agentId": normalized_agent_id,
+                    "sessionRole": "workspace" if bound_agent is not None else "primary",
+                    "createdAgent": bound_agent is None,
+                    "lightweight": bool(lightweight),
+                    "stageDurationsMs": dict(timings),
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            pass
 
-    if lightweight:
-        normalized = s._normalize_conversation(created_conversation) or created_conversation
-        detail = s._build_lightweight_session_detail(normalized)
-        if isinstance(detail, dict):
-            detail.setdefault("messages", [])
-            detail.setdefault("id", session_id)
-            if normalized_agent_id and not str(detail.get("agentId") or "").strip():
-                detail["agentId"] = normalized_agent_id
-            if normalized_title and not str(detail.get("title") or "").strip():
-                detail["title"] = normalized_title
-            detail["createdLightweight"] = True
-        return detail if isinstance(detail, dict) else {"id": session_id, "messages": []}
-
-    return s.get_session_detail(session_id) or {}
+    projection_started_at = time.perf_counter()
+    response = _session_create_response(
+        s,
+        created_conversation,
+        session_id=session_id,
+        agent_id=normalized_agent_id,
+        title=normalized_title,
+        lightweight=lightweight,
+    )
+    _accumulate_session_create_stage_ms(timings, "responseProjectionMs", projection_started_at)
+    _record_session_create_timing(
+        s,
+        started_at=create_started_at,
+        timings=timings,
+        session_id=session_id,
+        lightweight=lightweight,
+        idempotency_enabled=idempotency_enabled,
+        idempotency_replay=idempotency_replay,
+    )
+    return response
 
 
 

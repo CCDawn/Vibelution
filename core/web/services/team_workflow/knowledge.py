@@ -2789,6 +2789,8 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
                 summary=ingestion_payload["sourceSummary"],
                 actor_agent_id=proposed_by_agent_id,
                 local_file_paths=local_file_paths,
+                _idempotency_key=f"steward-pack:{normalized_candidate_id}",
+                _team_steward_pack_proposer_agent_id=proposed_by_agent_id,
             )
         except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
             raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
@@ -3433,6 +3435,18 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     reviewer_agent_id = s._trim_text(payload.get("reviewerAgentId"), max_length=160) or s._resolve_team_review_agent_id(
         team_detail, exclude_agent_id=steward_agent_id
     )
+    team_member_ids = {
+        s._trim_text(member.get("agentId"), max_length=160)
+        for member in (team_detail.get("members") or [])
+        if isinstance(member, dict)
+    }
+    # An explicit reviewer override still has to be a distinct member of this
+    # team.  Emptying an invalid reviewer keeps the source/proposal pending
+    # instead of granting review access to an arbitrary Agent or the proposer.
+    if reviewer_agent_id and (
+        reviewer_agent_id == steward_agent_id or reviewer_agent_id not in team_member_ids
+    ):
+        reviewer_agent_id = ""
     target_domain = s._trim_text(payload.get("targetDomain"), max_length=240) or "神经机制启发神经网络算法"
     max_candidates = s._normalize_int(payload.get("maxCandidates"), default=80, minimum=1, maximum=200)
     force_review = bool(payload.get("forceReview"))
@@ -3601,11 +3615,16 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     if not scoped_knowledge_base_id:
         raise s.TeamWorkflowOrchestrationError("Knowledge base id is required before knowledge collection ingestion.")
 
-    # 职责分离下让 coordinator/lead 审批：给该审批人补一条 per-base review 授权，
-    # 对新建或既有知识库都生效，避免最终审批关因角色不在 REVIEW_ROLES 而无人可过。
-    if auto_approve and reviewer_agent_id:
+    # 职责分离下由独立团队成员审核：只对选定的 reviewer 补来源/知识库审核授权，
+    # 对新建或既有知识库都生效；没有合格 reviewer 时保持待审，不回退到 steward 自审。
+    if auto_submit and reviewer_agent_id and (auto_review_source or auto_approve):
         try:
-            s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, reviewer_agent_id)
+            if auto_review_source:
+                s.team_knowledge_service.ensure_owner_source_review_grant(
+                    "team", normalized_team_id, reviewer_agent_id
+                )
+            if auto_approve:
+                s.team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, reviewer_agent_id)
         except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
             raise s.TeamWorkflowOrchestrationError(f"Knowledge review grant failed: {exc}") from exc
 
@@ -3637,15 +3656,15 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             detail="资料入库包已进入团队来源收件箱。",
             artifact_id=inbox_source_id,
         )
-        if auto_review_source and inbox_source_id:
+        if auto_review_source and reviewer_agent_id and inbox_source_id:
             try:
                 source_review = s.team_knowledge_service.review_owner_inbox_source(
                     "team",
                     normalized_team_id,
                     inbox_source_id,
                     decision="accepted",
-                    reviewed_by_agent_id=steward_agent_id,
-                    resolution_note="一键入库流程由知识治理 Agent 接受资料入库包来源。",
+                    reviewed_by_agent_id=reviewer_agent_id,
+                    resolution_note="一键入库流程由独立团队审核人接受资料入库包来源。",
                 )
             except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
                 raise s.TeamWorkflowOrchestrationError(f"Source review failed: {exc}") from exc

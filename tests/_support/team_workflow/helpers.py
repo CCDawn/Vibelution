@@ -377,7 +377,9 @@ def _steward_pack_output(*, candidate_ids=None, confidence=0.61):
         "requiresReview": True,
     }
 
-def _submit_steward_pack_through_source_review(team_id: str, candidate_id: str, knowledge_base_id: str, steward_agent_id: str) -> dict:
+def _submit_steward_pack_through_source_review(
+    team_id: str, candidate_id: str, knowledge_base_id: str, steward_agent_id: str, reviewer_agent_id: str,
+) -> dict:
     source_pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
         team_id,
         candidate_id,
@@ -389,7 +391,7 @@ def _submit_steward_pack_through_source_review(team_id: str, candidate_id: str, 
         team_id,
         inbox_source_id,
         decision="accepted",
-        reviewed_by_agent_id=steward_agent_id,
+        reviewed_by_agent_id=reviewer_agent_id,
     )
     knowledge_pending = team_workflow_orchestration_service.submit_steward_pack_to_knowledge_ingestion(
         team_id,

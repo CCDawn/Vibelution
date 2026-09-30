@@ -219,15 +219,19 @@ export function fetchSessionDetail(
   });
 }
 
-export function createChatSession(payload: {
-  agentId?: string;
-  title?: string;
-}): Promise<SessionDetail> {
+export function createChatSession(
+  payload: {
+    agentId?: string;
+    title?: string;
+  },
+  idempotencyKey?: string,
+): Promise<SessionDetail> {
   return fetchJson<SessionDetail>("/api/sessions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Prefer: "respond-async",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: JSON.stringify(payload),
   });

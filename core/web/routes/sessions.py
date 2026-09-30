@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
@@ -65,6 +66,8 @@ from core.web.services.session_service import (
     SESSION_USER_IMAGE_MAX_BYTES,
     SessionBusyError,
     SessionChatReviewCandidateExistsError,
+    SessionIdempotencyConflictError,
+    SessionIdempotencyReplayGoneError,
     SessionMessageCurationStateError,
     SessionNotFoundError,
     SessionRewindConflictError,
@@ -432,18 +435,122 @@ def session_bootstrap(
     status_code=status.HTTP_201_CREATED,
     response_model=SessionCatalogItem,
     response_model_exclude_unset=True,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "description": "Idempotency-Key was already used for a different session create request."
+        },
+        status.HTTP_410_GONE: {
+            "description": "The session previously created for this Idempotency-Key no longer exists."
+        },
+    },
 )
 def session_create(
     request: Request,
     payload: SessionCreatePayload | None = None,
+    idempotency_key: str = Header(
+        default="",
+        alias="Idempotency-Key",
+        description="Optional retry key for creating one session; maximum 200 characters.",
+    ),
 ) -> dict:
     prefer = str(request.headers.get("prefer") or "").lower()
     lightweight = "respond-async" in prefer
-    return create_chat_session(
-        agent_id=str(payload.agentId or "").strip() if payload is not None else "",
-        title=str(payload.title or "").strip() if payload is not None else "",
+    idempotency_key = str(idempotency_key or "").strip()
+    started_at = time.perf_counter()
+    if len(idempotency_key) > 200:
+        _record_session_create_request_timing(
+            started_at,
+            lightweight=lightweight,
+            idempotency_enabled=True,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            outcome="rejected",
+            error_type="invalid_idempotency_key",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Idempotency-Key exceeds 200 characters.",
+        )
+    try:
+        result = create_chat_session(
+            agent_id=str(payload.agentId or "").strip() if payload is not None else "",
+            title=str(payload.title or "").strip() if payload is not None else "",
+            lightweight=lightweight,
+            idempotency_key=idempotency_key,
+        )
+    except SessionIdempotencyConflictError as exc:
+        _record_session_create_request_timing(
+            started_at,
+            lightweight=lightweight,
+            idempotency_enabled=bool(idempotency_key),
+            status_code=status.HTTP_409_CONFLICT,
+            outcome="conflict",
+            error_type=type(exc).__name__,
+        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SessionIdempotencyReplayGoneError as exc:
+        _record_session_create_request_timing(
+            started_at,
+            lightweight=lightweight,
+            idempotency_enabled=bool(idempotency_key),
+            status_code=status.HTTP_410_GONE,
+            outcome="gone",
+            error_type=type(exc).__name__,
+        )
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail=str(exc)) from exc
+    except Exception as exc:
+        _record_session_create_request_timing(
+            started_at,
+            lightweight=lightweight,
+            idempotency_enabled=bool(idempotency_key),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            outcome="failed",
+            error_type=type(exc).__name__,
+        )
+        raise
+    _record_session_create_request_timing(
+        started_at,
         lightweight=lightweight,
+        idempotency_enabled=bool(idempotency_key),
+        status_code=status.HTTP_201_CREATED,
+        outcome="succeeded",
+        session_id=str(result.get("id") or ""),
     )
+    return result
+
+
+def _record_session_create_request_timing(
+    started_at: float,
+    *,
+    lightweight: bool,
+    idempotency_enabled: bool,
+    status_code: int,
+    outcome: str,
+    session_id: str = "",
+    error_type: str = "",
+) -> None:
+    fields: dict[str, object] = {
+        "durationMs": max(0, int((time.perf_counter() - started_at) * 1000)),
+        "lightweight": bool(lightweight),
+        "idempotencyEnabled": bool(idempotency_enabled),
+        "statusCode": int(status_code),
+    }
+    if session_id:
+        fields["sessionId"] = session_id[:160]
+    if error_type:
+        fields["errorType"] = str(error_type)[:80]
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_lifecycle",
+            "conversation.session.create.request",
+            level="warning" if outcome not in {"succeeded"} else "info",
+            outcome=outcome,
+            message="Session create HTTP request timing.",
+            fields=fields,
+            lifecycle=True,
+        )
+    except Exception:
+        pass
 
 
 @router.get(

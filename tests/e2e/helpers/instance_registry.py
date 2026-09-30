@@ -219,8 +219,13 @@ def fetch_health(port: int, timeout_seconds: float = 10.0) -> dict[str, Any]:
         raise InstanceRegistryError(f"health 响应非 JSON: {url} body[:200]={body[:200]!r}") from exc
 
 
-def assert_health_serves_worktree(health: dict[str, Any], project_root: str | os.PathLike[str]) -> None:
-    """就绪二次确认：routesReady、workspaceRoot 精确等于 worktree、前端构建标识非空。"""
+def assert_health_serves_worktree(
+    health: dict[str, Any],
+    project_root: str | os.PathLike[str],
+    *,
+    data_home: str | os.PathLike[str],
+) -> None:
+    """就绪二次确认：代码、数据根和前端构建均属于目标实例。"""
     problems: list[str] = []
     if health.get("routesReady") is not True:
         problems.append(f"routesReady={health.get('routesReady')!r}")
@@ -229,6 +234,19 @@ def assert_health_serves_worktree(health: dict[str, Any], project_root: str | os
     workspace_root = health.get("workspaceRoot")
     if normalize_path(workspace_root or "") != normalize_path(project_root):
         problems.append(f"workspaceRoot={workspace_root!r} != {project_root}")
+    from vibelution_storage import ProjectIdentityError, load_project_identity
+
+    try:
+        load_project_identity(project_root)
+    except ProjectIdentityError as exc:
+        problems.append(f"project identity 无效: {exc}")
+    if not str(data_home or "").strip():
+        problems.append("registry dataHome 为空")
+    else:
+        expected_storage = Path(data_home) / "workspace"
+        storage_root = health.get("storageWorkspaceRoot")
+        if normalize_path(storage_root or "") != normalize_path(expected_storage):
+            problems.append(f"storageWorkspaceRoot={storage_root!r} != {expected_storage}")
     if not frontend.get("builtFromCommit"):
         problems.append(f"serving.frontend.builtFromCommit 为空: {frontend!r}")
     if problems:

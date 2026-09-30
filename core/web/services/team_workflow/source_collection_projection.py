@@ -533,6 +533,23 @@ def source_collection_stage_user_summary(
         next_action = trim_text(action.get("actionLabel"), max_length=120) or "继续这次任务"
         detail = latest_summary or "Agent 会话已停止，尚未调用阶段写回工具。"
         return f"{detail} 本阶段已中断，尚未回写最终产物。建议：{next_action}。"
+    closure = {}
+    if isinstance(latest_task, dict):
+        writeback = latest_task.get("writeback") if isinstance(latest_task.get("writeback"), dict) else {}
+        result = latest_task.get("result") if isinstance(latest_task.get("result"), dict) else {}
+        closure = (
+            writeback.get("closureSummary")
+            if isinstance(writeback.get("closureSummary"), dict)
+            else result.get("closureSummary")
+            if isinstance(result.get("closureSummary"), dict)
+            else {}
+        )
+    # Pending independent review is a governance handoff, not missing input
+    # for the ingestor to retry. Show that instruction before coverage text.
+    if stage_id == "ingestion" and closure.get("artifactStatus") == "knowledge_review_pending":
+        message = trim_text(closure.get("message"), max_length=500)
+        next_action = trim_text(closure.get("retryInstruction") or closure.get("nextAction"), max_length=500)
+        return f"{message}建议：{next_action}" if next_action else message
     if (
         card_status == "partial_current_inputs"
         and bool(current_coverage.get("applicable"))
@@ -552,17 +569,6 @@ def source_collection_stage_user_summary(
         invalid_text = f"无效 ID {invalid} 条。" if invalid > 0 else ""
         next_action = trim_text(action.get("actionLabel"), max_length=120) or source_collection_stage_action_label(stage_id, "continue")
         return f"{source_collection_stage_readable_object_label(stage_id)}已处理 {processed}/{total}，还有 {missing} 条需要补齐。{invalid_text}建议：{next_action}。"
-    closure = {}
-    if isinstance(latest_task, dict):
-        writeback = latest_task.get("writeback") if isinstance(latest_task.get("writeback"), dict) else {}
-        result = latest_task.get("result") if isinstance(latest_task.get("result"), dict) else {}
-        closure = (
-            writeback.get("closureSummary")
-            if isinstance(writeback.get("closureSummary"), dict)
-            else result.get("closureSummary")
-            if isinstance(result.get("closureSummary"), dict)
-            else {}
-        )
     if trim_text(closure.get("message"), max_length=500):
         retry_instruction = trim_text(closure.get("retryInstruction") or closure.get("nextAction"), max_length=500)
         return (

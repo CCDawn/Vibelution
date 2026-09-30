@@ -260,6 +260,62 @@ def test_auto_review_runs_contained_workspace_command_without_prompt(monkeypatch
     assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
 
 
+def test_agent_private_memory_search_runs_without_per_call_approval(monkeypatch):
+    _runtime(monkeypatch, permission_preset="request_approval")
+    _install(("search_agent_private_memory_tool", "never", "read"))
+    calls = []
+    executor = ToolExecutor()
+    executor.register_tool(
+        "search_agent_private_memory_tool",
+        lambda **kwargs: calls.append(kwargs) or "private-memory-results",
+    )
+
+    result, action = executor.execute(
+        "search_agent_private_memory_tool",
+        {"query": "saved preference"},
+        tool_call_id="call-private-memory-search",
+    )
+
+    assert result == "private-memory-results"
+    assert action is None
+    assert calls == [{"query": "saved preference"}]
+    assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
+
+
+def test_session_attachment_staging_waits_for_per_call_approval(monkeypatch):
+    _runtime(monkeypatch, permission_preset="request_approval")
+    _install(("knowledge_stage_session_attachment_tool", "on_request", "write"))
+    calls = []
+    executor = ToolExecutor()
+    executor.register_tool(
+        "knowledge_stage_session_attachment_tool",
+        lambda **kwargs: calls.append(kwargs) or "staged",
+    )
+    result_box = {}
+
+    worker = threading.Thread(
+        target=lambda: (
+            _install(("knowledge_stage_session_attachment_tool", "on_request", "write")),
+            result_box.setdefault(
+                "value",
+                executor.execute(
+                    "knowledge_stage_session_attachment_tool",
+                    {"attachment_id": "attachment-1"},
+                    tool_call_id="call-stage-attachment",
+                ),
+            ),
+        )
+    )
+    worker.start()
+    request = _wait_for_pending()
+    tool_approvals.resolve_tool_approval_request("session-a", request["requestId"], decision="accept")
+    worker.join(timeout=2)
+
+    assert result_box["value"] == ("staged", None)
+    assert calls == [{"attachment_id": "attachment-1"}]
+    assert request["toolName"] == "knowledge_stage_session_attachment_tool"
+
+
 def test_request_approval_auto_approves_safe_readonly_git_cli(monkeypatch):
     """Models often call git via cli_tool; pure reads should not force a popup."""
     _runtime(monkeypatch, permission_preset="request_approval")

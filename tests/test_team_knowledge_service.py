@@ -1,5 +1,6 @@
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -141,6 +142,87 @@ def _source_ids_for_env(knowledge_env: dict, *, title: str = "Test source") -> l
     return [source["sourceArtifactId"]]
 
 
+def test_central_source_artifact_idempotency_is_persisted_and_serializes_concurrent_replays(
+    knowledge_env,
+    monkeypatch,
+):
+    central_source = _promote_central_source(
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        reviewer_agent_id=knowledge_env["lead"]["agentId"],
+        title="Idempotent source",
+    )
+    base_id = knowledge_env["base"]["knowledgeBaseId"]
+    actor_id = knowledge_env["member"]["agentId"]
+    barrier = threading.Barrier(8)
+    observed_events: list[dict] = []
+    observed_lock = threading.Lock()
+
+    def record_event(event_code, owner, knowledge_base_id, **kwargs):
+        with observed_lock:
+            observed_events.append({"eventCode": event_code, **kwargs})
+
+    monkeypatch.setattr(team_knowledge_service, "_record_event", record_event)
+
+    def create_once(_index: int) -> dict:
+        barrier.wait(timeout=5)
+        return team_knowledge_service.create_source_artifact_from_central_source(
+            base_id,
+            central_source["centralSourceId"],
+            actor_agent_id=actor_id,
+            title="Idempotent source",
+            summary="Stable request payload",
+            idempotency_key="kb-artifact-retry-001",
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(create_once, range(8)))
+
+    artifact_ids = {item["sourceArtifactId"] for item in results}
+    assert len(artifact_ids) == 1
+    assert all("_idempotency" not in item for item in results)
+
+    owner = team_knowledge_service._require_base_with_owner(base_id)[0]
+    stored = team_knowledge_service._read_jsonl(team_knowledge_service._source_artifacts_path_for_owner(owner))
+    persisted = [
+        item
+        for item in stored
+        if str(item.get("sourceArtifactId") or "") in artifact_ids
+    ]
+    assert len(persisted) == 1
+    assert persisted[0]["_idempotency"]["scopeHash"]
+    assert "kb-artifact-retry-001" not in json.dumps(persisted[0])
+
+    replay = team_knowledge_service.create_source_artifact_from_central_source(
+        base_id,
+        central_source["centralSourceId"],
+        actor_agent_id=actor_id,
+        title="Idempotent source",
+        summary="Stable request payload",
+        idempotency_key="kb-artifact-retry-001",
+    )
+    assert replay["sourceArtifactId"] == next(iter(artifact_ids))
+    with pytest.raises(team_knowledge_service.TeamKnowledgeIdempotencyConflictError):
+        team_knowledge_service.create_source_artifact_from_central_source(
+            base_id,
+            central_source["centralSourceId"],
+            actor_agent_id=actor_id,
+            title="Changed source title",
+            summary="Stable request payload",
+            idempotency_key="kb-artifact-retry-001",
+        )
+
+    timing_events = [
+        event
+        for event in observed_events
+        if str(event.get("eventCode") or "").startswith("knowledge.source.")
+    ]
+    assert timing_events
+    assert all(event["fields"]["phaseTimingsMs"]["total"] >= 0 for event in timing_events)
+    assert all("kb-artifact-retry-001" not in json.dumps(event) for event in timing_events)
+
+
 def test_team_member_can_register_source_and_submit_proposal(knowledge_env):
     source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],
@@ -242,6 +324,30 @@ def test_scoped_proposal_cannot_be_self_reviewed(knowledge_env):
             status="approved",
             reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
         )
+
+
+def test_team_proposal_without_designated_reviewer_still_requires_independent_review(knowledge_env):
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=_source_ids_for_env(knowledge_env, title="Unassigned reviewer source"),
+        proposed_by_agent_id=knowledge_env["lead"]["agentId"],
+        title="Team review separation",
+        content="A Team lead cannot approve their own proposal when no reviewer was designated.",
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="other than the proposer"):
+        team_knowledge_service.review_refinement_proposal(
+            knowledge_env["base"]["knowledgeBaseId"],
+            proposal["proposalId"],
+            status="approved",
+            reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        )
+
+    owner = team_knowledge_service._require_base_with_owner(knowledge_env["base"]["knowledgeBaseId"])[0]
+    stored_proposals = team_knowledge_service._read_jsonl(team_knowledge_service._proposals_path_for_owner(owner))
+    stored = team_knowledge_service._find_by_id(stored_proposals, "proposalId", proposal["proposalId"])
+    assert stored is not None
+    assert stored["status"] == "pending"
 
 
 def test_scoped_search_filters_questions_and_chinese_bm25_prefers_phrases(knowledge_env):
@@ -535,6 +641,253 @@ def test_owner_source_review_directly_ingests_accepted_source_into_formal_knowle
     assert items["summary"]["itemCount"] == 1
     assert items["items"][0]["knowledgeItemId"] == direct["item"]["knowledgeItemId"]
     assert governance["summary"]["proposalReviewCount"] == 0
+
+
+def test_source_reviewer_without_base_review_cannot_direct_ingest_team_knowledge(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    outsider_id = knowledge_env["outsider"]["agentId"]
+    team_knowledge_service.ensure_owner_source_review_grant("team", team_id, outsider_id)
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        source_type="manual_user_entry",
+        source_ref={"note": "source-review-only"},
+        original_content="A source reviewer must not publish to an unrelated knowledge base ACL.",
+        title="Source-review-only candidate",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="review this knowledge base"):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            team_id,
+            inbox_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=outsider_id,
+            ingest_on_accept=True,
+            knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+            knowledge_title="Must remain pending",
+            knowledge_content="Source-review permission alone cannot publish formal Team knowledge.",
+        )
+
+    inbox = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=knowledge_env["lead"]["agentId"])
+    items = team_knowledge_service.list_knowledge_items(
+        knowledge_env["base"]["knowledgeBaseId"],
+        agent_id=knowledge_env["lead"]["agentId"],
+    )
+    assert inbox["sources"][0]["status"] == "pending"
+    assert items["summary"]["itemCount"] == 0
+
+
+def test_agent_owner_can_direct_ingest_and_read_private_knowledge(knowledge_env):
+    owner_id = knowledge_env["outsider"]["agentId"]
+    private_base = team_knowledge_service.create_agent_knowledge_base(
+        owner_id, name="Private Direct Memory", actor_agent_id=owner_id
+    )
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "agent",
+        owner_id,
+        source_type="agent_authored",
+        source_ref={"note": "private-direct-memory"},
+        original_content="The owning Agent can persist and read its own private formal memory.",
+        title="Private direct memory",
+        actor_agent_id=owner_id,
+    )
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        owner_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=owner_id,
+        ingest_on_accept=True,
+        knowledge_base_id=private_base["knowledgeBaseId"],
+        knowledge_title="Private direct memory",
+        knowledge_content="The owning Agent can persist and read its own private formal memory.",
+    )
+    owner_items = team_knowledge_service.list_knowledge_items(
+        private_base["knowledgeBaseId"], agent_id=owner_id
+    )
+    assert reviewed["directIngestion"]["status"] == "ingested"
+    assert owner_items["summary"]["itemCount"] == 1
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError):
+        team_knowledge_service.list_knowledge_items(
+            private_base["knowledgeBaseId"], agent_id=knowledge_env["lead"]["agentId"]
+        )
+
+
+def test_source_collection_retry_reuses_appended_source_without_resetting_review_state(knowledge_env, monkeypatch):
+    team_id = knowledge_env["team"]["teamId"]
+    member_id = knowledge_env["member"]["agentId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    original_record_event = team_knowledge_service._record_event
+
+    def fail_after_inbox_append(event_type, *args, **kwargs):
+        if event_type == "knowledge.source_inbox.collected":
+            raise RuntimeError("simulated crash before steward-pack receipt")
+        return original_record_event(event_type, *args, **kwargs)
+
+    monkeypatch.setattr(team_knowledge_service, "_record_event", fail_after_inbox_append)
+    request = {
+        "source_type": "agent_authored",
+        "source_ref": {"candidateId": "candidate-retry-1", "contentTrust": "untrusted_source_material"},
+        "original_content": "The same staged candidate must not create a second inbox source after a receipt failure.",
+        "original_filename": "candidate-retry.txt",
+        "title": "Retry-safe candidate",
+        "summary": "A stable candidate identity is used across attempts.",
+        "actor_agent_id": member_id,
+        "_idempotency_key": "steward-pack:candidate-retry-1",
+        "_team_steward_pack_proposer_agent_id": member_id,
+    }
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        team_knowledge_service.collect_source_to_inbox("team", team_id, **request)
+    monkeypatch.setattr(team_knowledge_service, "_record_event", original_record_event)
+
+    before_review = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+    assert before_review["summary"]["pendingSourceCount"] == 1
+    original_id = before_review["sources"][0]["inboxSourceId"]
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team_id,
+        original_id,
+        decision="accepted",
+        reviewed_by_agent_id=lead_id,
+    )
+
+    replayed = team_knowledge_service.collect_source_to_inbox("team", team_id, **request)
+    after_retry = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+
+    assert replayed["inboxSourceId"] == original_id
+    assert replayed["status"] == "accepted"
+    assert replayed["reviewedByAgentId"] == lead_id
+    assert reviewed["source"]["status"] == "accepted"
+    assert len(after_retry["sources"]) == 1
+    assert after_retry["sources"][0]["inboxSourceId"] == original_id
+
+
+def test_source_collection_idempotency_key_conflicts_on_changed_payload(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    member_id = knowledge_env["member"]["agentId"]
+    shared = {
+        "source_type": "agent_authored",
+        "source_ref": {"candidateId": "candidate-conflict-1"},
+        "original_filename": "candidate-conflict.txt",
+        "title": "Conflicting candidate",
+        "summary": "The same key cannot name changed content.",
+        "actor_agent_id": member_id,
+        "_idempotency_key": "steward-pack:candidate-conflict-1",
+        "_team_steward_pack_proposer_agent_id": member_id,
+    }
+    first = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        original_content="First candidate content.",
+        **shared,
+    )
+
+    with pytest.raises(team_knowledge_service.TeamKnowledgeIdempotencyConflictError):
+        team_knowledge_service.collect_source_to_inbox(
+            "team",
+            team_id,
+            original_content="Changed candidate content.",
+            **shared,
+        )
+
+    inbox = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+    assert len(inbox["sources"]) == 1
+    assert inbox["sources"][0]["inboxSourceId"] == first["inboxSourceId"]
+
+
+def test_source_collection_idempotency_serializes_concurrent_replays(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    member_id = knowledge_env["member"]["agentId"]
+    barrier = threading.Barrier(6)
+
+    def collect_candidate():
+        barrier.wait(timeout=5)
+        return team_knowledge_service.collect_source_to_inbox(
+            "team",
+            team_id,
+            source_type="agent_authored",
+            source_ref={"candidateId": "candidate-concurrent-1"},
+            original_content="Concurrent retries should append one source under the owner lock.",
+            original_filename="candidate-concurrent.txt",
+            title="Concurrent candidate",
+            actor_agent_id=member_id,
+            _idempotency_key="steward-pack:candidate-concurrent-1",
+            _team_steward_pack_proposer_agent_id=member_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        sources = list(pool.map(lambda _: collect_candidate(), range(6)))
+
+    inbox = team_knowledge_service.list_owner_source_inbox("team", team_id, agent_id=member_id)
+    source_ids = {source["inboxSourceId"] for source in sources}
+    assert len(source_ids) == 1
+    assert len(inbox["sources"]) == 1
+    assert inbox["sources"][0]["inboxSourceId"] in source_ids
+
+
+def test_steward_pack_team_proposer_cannot_self_review_but_private_owner_flow_is_unchanged(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+    team_knowledge_service.update_owner_source_governance(
+        "team",
+        team_id,
+        local_steward_agent_ids=[member_id],
+        actor_agent_id=lead_id,
+    )
+    team_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        team_id,
+        source_type="agent_authored",
+        source_ref={"candidateId": "self-review-candidate"},
+        original_content="A Team steward-pack proposer must not approve their own staged candidate.",
+        title="Self-review candidate",
+        actor_agent_id=lead_id,
+        _idempotency_key="steward-pack:self-review-candidate",
+        _team_steward_pack_proposer_agent_id=lead_id,
+    )
+
+    assert "_teamStewardPackProposerAgentId" not in team_source
+    with pytest.raises(team_knowledge_service.TeamKnowledgePermissionError, match="own staged steward-pack"):
+        team_knowledge_service.review_owner_inbox_source(
+            "team",
+            team_id,
+            team_source["inboxSourceId"],
+            decision="accepted",
+            reviewed_by_agent_id=lead_id,
+        )
+    approved_by_other = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        team_id,
+        team_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=member_id,
+    )
+
+    private_source = team_knowledge_service.collect_source_to_inbox(
+        "agent",
+        member_id,
+        source_type="agent_authored",
+        source_ref={"note": "private source"},
+        original_content="The Agent owner can still review their own private source.",
+        title="Private owner source",
+        actor_agent_id=member_id,
+    )
+    private_review = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        member_id,
+        private_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=member_id,
+    )
+
+    assert approved_by_other["source"]["reviewedByAgentId"] == member_id
+    assert private_review["source"]["status"] == "accepted"
+    assert private_review["source"]["reviewedByAgentId"] == member_id
 
 
 def test_global_knowledge_steward_can_direct_ingest_screened_team_source(knowledge_env):
@@ -955,9 +1308,16 @@ def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     first_agent = agent_directory_service.create_agent_instance(display_name="First KB Owner")
+    first_reviewer = agent_directory_service.create_agent_instance(display_name="First KB Reviewer")
     second_agent = agent_directory_service.create_agent_instance(display_name="Second KB Owner")
     viewer = agent_directory_service.create_agent_instance(display_name="Duplicate KB Viewer")
-    first_team = team_service.create_team(name="First KB Team", members=[{"agentId": first_agent["agentId"], "role": "lead"}])
+    first_team = team_service.create_team(
+        name="First KB Team",
+        members=[
+            {"agentId": first_agent["agentId"], "role": "lead"},
+            {"agentId": first_reviewer["agentId"], "role": "steward"},
+        ],
+    )
     second_team = team_service.create_team(name="Second KB Team", members=[{"agentId": second_agent["agentId"], "role": "lead"}])
     first_base = team_knowledge_service.create_knowledge_base(
         first_team["teamId"],
@@ -1001,7 +1361,7 @@ def test_duplicate_knowledge_base_ids_require_owner_scope(tmp_path, monkeypatch)
         first_base["scopedKnowledgeBaseId"],
         proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=first_agent["agentId"],
+        reviewed_by_agent_id=first_reviewer["agentId"],
     )
     scoped_items = team_knowledge_service.list_knowledge_items(
         first_base["scopedKnowledgeBaseId"],
@@ -1132,7 +1492,14 @@ def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     lead = agent_directory_service.create_agent_instance(display_name="Lead Agent")
-    team = team_service.create_team(name="Knowledge Team", members=[{"agentId": lead["agentId"], "role": "lead"}])
+    reviewer = agent_directory_service.create_agent_instance(display_name="Knowledge Reviewer")
+    team = team_service.create_team(
+        name="Knowledge Team",
+        members=[
+            {"agentId": lead["agentId"], "role": "lead"},
+            {"agentId": reviewer["agentId"], "role": "steward"},
+        ],
+    )
     base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Shared Decisions",
@@ -1157,7 +1524,7 @@ def test_team_knowledge_memory_section_summary_uses_lightweight_disk_counts(tmp_
         base["knowledgeBaseId"],
         proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=lead["agentId"],
+        reviewed_by_agent_id=reviewer["agentId"],
     )
     pending_source = _create_central_source_artifact(
         base["knowledgeBaseId"],

@@ -14,6 +14,7 @@ import {
 } from "../process/workbenchBackendRetire.js";
 import { createPythonOwnedProcessTreeTerminator, type PythonProcessIdentity } from "../process/pythonJsonBridge.js";
 import { knownPidIsAlive, probeTcpConnect } from "./mainLine/observation.js";
+import { instanceIdForProject, normalizeInstanceKey, resolveDataHomeForProject } from "./projectStoragePaths.js";
 
 /** Isolated-instance lifecycle operations Electron main owns end to end. */
 export type BranchInstanceOperation =
@@ -223,6 +224,11 @@ async function claimResolvedIsolatedStart(
       instanceId: target.instanceId,
       projectRoot: target.projectRoot,
       branch: target.branch,
+      slotFields: {
+        slotKey: normalizeInstanceKey(target.projectRoot),
+        slotId: instanceIdForProject(target.projectRoot),
+        dataHome: resolveDataHomeForProject(target.projectRoot)
+      },
       operation: input.operation || "start",
       commandId: input.commandId,
       deadlineAt: isolatedStartDeadlineAt(nowMs),

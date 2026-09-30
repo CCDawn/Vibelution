@@ -474,6 +474,8 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
         ],
         PERSONAL_MEMORY_APPEND_TOOL_NAME,
         PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
+        "search_agent_private_memory_tool",
+        "knowledge_stage_session_attachment_tool",
         *PROJECT_OPERATION_TOOL_NAMES,
         "github_project_library_search_tool",
         "github_project_library_clone_tool",
