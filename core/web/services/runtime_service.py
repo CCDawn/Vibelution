@@ -43,6 +43,7 @@ from core.orchestration.cache_diagnostics import normalize_runtime_llm_usage
 from .i18n import get_web_language, text_for
 from .avatar_image_service import avatar_image_url
 from .runtime_manager_control_service import current_runtime_manager_pid
+from .session.timebase import parse_timestamp_utc
 from .session_service import (
     cancel_agent_execution_reservation,
     get_active_session_summary,
@@ -236,12 +237,15 @@ def get_runtime_summary() -> dict:
     status = _derive_web_status(current_phase, runtime_state)
     session_state = _derive_session_state(lang, active_session, runtime_state)
     active_tools = _active_tools(active_session, runtime_state)
-    context_usage = _context_usage(runtime_state)
-    cache_usage = _runtime_cache_usage(runtime_state)
-    last_llm_usage = _runtime_last_llm_usage(runtime_state)
-    last_context_composition = _runtime_last_context_composition(runtime_state)
+    # Usage projections must not fall back to ui_runtime_state.json counters
+    # whose CLI writer is gone for hours; see RUNTIME_USAGE_STATE_MAX_AGE_SECONDS.
+    usage_state = _runtime_usage_state(runtime_state)
+    context_usage = _context_usage(usage_state)
+    cache_usage = _runtime_cache_usage(usage_state)
+    last_llm_usage = _runtime_last_llm_usage(usage_state)
+    last_context_composition = _runtime_last_context_composition(usage_state)
     last_cache_composition = _runtime_last_cache_composition(
-        runtime_state,
+        usage_state,
         last_llm_usage=last_llm_usage,
     )
     (
@@ -258,20 +262,40 @@ def get_runtime_summary() -> dict:
         last_context_composition=last_context_composition,
         last_cache_composition=last_cache_composition,
     )
-    context_compression = _context_compression_summary(runtime_state, context_usage, active_session)
+    # contextCompression keeps its documented snapshot semantics: it reads the
+    # raw runtime_state (not the age-gated usage fallback above) so a
+    # compression snapshot from the last CLI session stays visible and labeled.
+    context_compression = _context_compression_summary(
+        runtime_state,
+        _context_usage(runtime_state),
+        active_session,
+    )
     runtime_manager = _load_runtime_manager_snapshot()
     work_runs = _work_run_summary()
     workbench = _observe_backend_from_summary_request(_workbench_payload(lang, runtime_manager))
     lifecycle_proof = _runtime_lifecycle_proof(lang, runtime_manager, workbench, work_runs)
     user_profile = _user_profile_payload(public_config)
+    active_session_id = str(active_session.get("id") or "").strip()
+    session_pointer_mismatch = _summary_session_pointer_mismatch(active_session_id, work_runs)
     task_summary = (
-        active_session.get("taskSummary")
-        or text_for(
-            lang,
-            zh="等待新的任务进入工作台",
-            en="Waiting for the next task to enter the workbench",
+        _pending_session_sync_text(lang)
+        if session_pointer_mismatch
+        else (
+            active_session.get("taskSummary")
+            or text_for(
+                lang,
+                zh="等待新的任务进入工作台",
+                en="Waiting for the next task to enter the workbench",
+            )
         )
     )
+    if session_pointer_mismatch:
+        session_state = {
+            **session_state,
+            "line": _pending_session_sync_text(lang),
+            "needs_response": False,
+            "tool_name": "",
+        }
     session_updated_at = str(
         active_session.get("updatedAt")
         or active_session.get("lastActive")
@@ -295,7 +319,12 @@ def get_runtime_summary() -> dict:
         "agentName": "Vibelution",
         "userName": _display_user_name(public_config),
         "userProfile": user_profile,
-        "agentStatusLine": _agent_status_line(lang, status, current_phase),
+        "agentStatusLine": (
+            _pending_session_sync_text(lang)
+            if session_pointer_mismatch
+            else _agent_status_line(lang, status, current_phase)
+        ),
+        "activeSessionId": active_session_id,
         "sessionTitle": active_session.get("title")
         or text_for(lang, zh="网页工作台 Shell", en="Web workbench shell"),
         "taskSummary": task_summary,
@@ -314,7 +343,11 @@ def get_runtime_summary() -> dict:
         "contextCompression": context_compression,
         "activeTools": active_tools,
         "changedFilesCount": len(active_session.get("changedFiles") or []),
-        "recentAction": _recent_action(lang, active_session, runtime_state),
+        "recentAction": (
+            _pending_session_sync_text(lang)
+            if session_pointer_mismatch
+            else _recent_action(lang, active_session, runtime_state)
+        ),
         "runtimeManager": {
             "running": bool(runtime_manager.get("daemonRunning")),
             "runtimeState": str(runtime_manager.get("runtimeState") or "idle"),
@@ -1169,6 +1202,39 @@ def _parse_snapshot_updated_at(state: dict) -> datetime | None:
 # heavy load) yet far below the multi-day staleness observed in the field,
 # where a dead daemon kept serving workbench pids that no longer existed.
 RUNTIME_MANAGER_SNAPSHOT_MAX_AGE_SECONDS = 900
+
+
+# ui_runtime_state.json is written by the legacy CLI shell (core/ui/cli_ui.py),
+# not by the web backend. Days after the CLI closes, the file still holds its
+# last usage counters, and the web shell must not present them as current
+# usage (field-observed: a six-week-old leftover still fed lastLlmUsage /
+# contextUsage / cacheUsage as fallback). Six hours comfortably covers an
+# interactive CLI session, including long turns and suspend/resume, while
+# rejecting day-scale leftovers. contextCompression deliberately keeps the
+# snapshot value — it has no per-turn source — and is not gated here.
+RUNTIME_USAGE_STATE_MAX_AGE_SECONDS = 6 * 60 * 60
+
+
+def _runtime_usage_state(runtime_state: dict) -> dict:
+    """Return the CLI runtime state only when its writer is recent enough.
+
+    An empty dict means "no trustworthy fallback": the usage projections then
+    yield their neutral values (zeroed usage, ``None`` compositions) instead
+    of the last CLI session's counters. A state without any parsable
+    ``updated_at`` cannot prove freshness and is treated the same way.
+    """
+
+    if not isinstance(runtime_state, dict) or not runtime_state:
+        return {}
+    updated_at = parse_timestamp_utc(
+        runtime_state.get("updated_at") or runtime_state.get("updatedAt")
+    )
+    if updated_at is None:
+        return {}
+    age = datetime.now(timezone.utc) - updated_at
+    if age > timedelta(seconds=RUNTIME_USAGE_STATE_MAX_AGE_SECONDS):
+        return {}
+    return runtime_state
 
 
 def _runtime_manager_workbench_observation_trustworthy(state: dict, manager_pid: int) -> bool:
@@ -2514,6 +2580,34 @@ def _agent_status_line(lang: str, status: str, task_status: object) -> str:
     if status == "running":
         return text_for(lang, zh="正在推进当前任务", en="working through the current task")
     return text_for(lang, zh="稳定待命", en="steady and ready")
+
+
+def _pending_session_sync_text(lang: str) -> str:
+    """Neutral stand-in for summary fields whose session of record is unclear."""
+
+    return text_for(
+        lang,
+        zh="状态待同步，请切换到对应会话查看",
+        en="State pending sync; open the matching session for details",
+    )
+
+
+def _summary_session_pointer_mismatch(active_session_id: str, work_runs: dict) -> bool:
+    """True when the active chat-turn work run belongs to another session.
+
+    taskSummary / recentAction are projected from the active-session pointer
+    (the global shell single pointer), while ``workRuns.active.chat_turn``
+    records the session that actually owns the running/last turn. When the
+    two disagree — e.g. the user is viewing session A while the pointer still
+    rests on session B — the projected chat fragments would describe the
+    wrong conversation, so the caller degrades that summary family to a
+    neutral pending-sync state instead of showing cross-session content.
+    """
+
+    chat_turn = ((work_runs or {}).get("active") or {}).get("chat_turn")
+    run_session_id = str((chat_turn or {}).get("sessionId") or "").strip()
+    pointer_id = str(active_session_id or "").strip()
+    return bool(pointer_id) and bool(run_session_id) and pointer_id != run_session_id
 
 
 def _derive_session_state(lang: str, active_session: dict, runtime_state: dict) -> dict[str, str]:

@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import queue
 import threading
@@ -298,6 +299,99 @@ def test_active_session_summary_normalizes_only_the_active_conversation(tmp_path
 
     assert summary == {"id": "session-active"}
     assert normalized_ids == ["session-active"]
+
+
+def _install_active_summary_fallback_stubs(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", lambda: {})
+    monkeypatch.setattr(
+        session_service,
+        "_agent_directory_stub_hidden_team_member_ids",
+        lambda: set(),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_ensure_agent_directory_conversation_materialized",
+        lambda *_, **__: False,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_with_direct_session_agent_for_summary",
+        lambda conversation, *, agent_by_id: conversation,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_build_session_summary",
+        lambda conversation, *, hydrate_agent, **__: {"id": conversation["id"]},
+    )
+
+
+def test_active_session_summary_rejects_stale_pointerless_fallback(tmp_path, monkeypatch):
+    # Broken pointer (row missing) plus a single stored session last touched
+    # beyond the fallback window: the leftover must not impersonate the active
+    # session, so the summary degrades to None and the shell shows neutral text.
+    stale_updated = (
+        datetime.now(timezone.utc) - timedelta(hours=30)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-missing-pointer",
+            "updated_at": stale_updated,
+            "conversations": [
+                {
+                    "conversation_id": "session-leftover",
+                    "title": "两天前的旧会话",
+                    "updated_at": stale_updated,
+                },
+            ],
+        },
+    )
+    _install_active_summary_fallback_stubs(monkeypatch, tmp_path)
+    normalized_ids: list[str] = []
+
+    def normalize_target(raw, **_kwargs):
+        normalized_ids.append(str(raw.get("conversation_id") or ""))
+        return {"id": raw.get("conversation_id"), "messages": []}
+
+    monkeypatch.setattr(session_service, "_normalize_conversation", normalize_target)
+
+    summary = session_service.get_active_session_summary()
+
+    assert summary is None
+    assert normalized_ids == []
+
+
+def test_active_session_summary_allows_recent_pointerless_fallback(tmp_path, monkeypatch):
+    fresh_updated = (
+        datetime.now(timezone.utc) - timedelta(hours=1)
+    ).strftime("%Y-%m-%dT%H:%M:%S")
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-missing-pointer",
+            "updated_at": fresh_updated,
+            "conversations": [
+                {
+                    "conversation_id": "session-recent",
+                    "title": "最近的会话",
+                    "updated_at": fresh_updated,
+                },
+            ],
+        },
+    )
+    _install_active_summary_fallback_stubs(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_normalize_conversation",
+        lambda raw, **_kwargs: {"id": raw.get("conversation_id"), "messages": []},
+    )
+
+    summary = session_service.get_active_session_summary()
+
+    assert summary == {"id": "session-recent"}
 
 
 def test_delete_session_restores_direct_agent_binding_when_chat_save_fails(tmp_path, monkeypatch):
