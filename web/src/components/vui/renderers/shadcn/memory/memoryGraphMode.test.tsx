@@ -2,11 +2,11 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import type { MemoryKnowledgeGraphNode } from "../../../../api/types";
-import { ShadcnMemoryGraphCanvas } from "../../renderers/shadcn/memory/ShadcnMemoryGraphCanvas";
-import { createMemoryGraphEngine } from "../../renderers/shadcn/memory/MemoryGraphEngine";
+import type { MemoryKnowledgeGraphNode } from "../../../../../api/types";
+import { ShadcnMemoryGraphCanvas } from "./ShadcnMemoryGraphCanvas";
+import { createMemoryGraphEngine } from "./MemoryGraphEngine";
 
-vi.mock("../../renderers/shadcn/memory/MemoryGraphEngine", () => ({
+vi.mock("./MemoryGraphEngine", () => ({
   createMemoryGraphEngine: vi.fn(() => ({ updateSelection: vi.fn(), updateHighlights: vi.fn(),
     updateFlat: vi.fn(), refreshTheme: vi.fn(), updateLabels: vi.fn(), focus: vi.fn(), dispose: vi.fn() })),
 }));
