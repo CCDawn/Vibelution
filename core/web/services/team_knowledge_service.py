@@ -279,6 +279,36 @@ def list_team_knowledge_bases(team_id: str, *, agent_id: str = "", internal: boo
 
 def list_agent_knowledge_bases(agent_id: str, *, actor_agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     agent = _require_agent(agent_id)
+    return _agent_knowledge_bases_payload(agent, actor_agent_id=actor_agent_id, internal=internal)
+
+
+def _list_agent_knowledge_bases_from_snapshot(
+    agent_snapshot: dict[str, Any],
+    *,
+    actor_agent_id: str = "",
+    internal: bool = False,
+) -> dict[str, Any]:
+    """Build the Agent knowledge projection from a trusted service-side Agent snapshot.
+
+    Callers must pass an Agent returned by ``agent_directory_service.list_agents``.
+    This is an internal read-path optimization; request data must never supply this snapshot.
+    """
+
+    _sync_roots()
+    return _agent_knowledge_bases_payload(agent_snapshot, actor_agent_id=actor_agent_id, internal=internal)
+
+
+def _agent_knowledge_bases_payload(
+    agent: dict[str, Any],
+    *,
+    actor_agent_id: str,
+    internal: bool,
+) -> dict[str, Any]:
+    if not isinstance(agent, dict):
+        raise TeamKnowledgeNotFoundError("Agent not found.")
+    normalized_agent_id = str(agent.get("agentId") or "").strip()
+    if not normalized_agent_id:
+        raise TeamKnowledgeError("Agent id is required.")
     owner = _owner_context("agent", agent["agentId"], agent=agent)
     bases = []
     for base in _knowledge_bases_for_owner(owner):
@@ -293,7 +323,7 @@ def list_agent_knowledge_bases(agent_id: str, *, actor_agent_id: str = "", inter
             )
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "agentId": agent["agentId"],
+        "agentId": normalized_agent_id,
         "knowledgeBases": bases,
         "summary": {"knowledgeBaseCount": len(bases)},
         "updatedAt": utc_now_iso(),

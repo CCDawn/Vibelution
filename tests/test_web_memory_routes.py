@@ -925,6 +925,60 @@ def test_agent_memory_inventory_lists_private_workspace_without_content(tmp_path
     assert detail_items["nested/facts.json"]["contentType"] == "json"
 
 
+def test_agent_memory_inventory_reuses_agent_summary_for_formal_knowledge(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Inventory Snapshot Owner")
+    base = team_knowledge_service.create_agent_knowledge_base(
+        agent["agentId"],
+        name="Snapshot Owner Knowledge",
+        actor_agent_id=agent["agentId"],
+    )
+    expected = team_knowledge_service.list_agent_knowledge_bases(
+        agent["agentId"],
+        actor_agent_id=agent["agentId"],
+        internal=True,
+    )
+    get_agent_calls: list[str] = []
+    original_get_agent = agent_directory_service.get_agent
+
+    def tracked_get_agent(agent_id: str, **kwargs):
+        get_agent_calls.append(agent_id)
+        return original_get_agent(agent_id, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", tracked_get_agent)
+
+    response = client.get("/api/memory/agents")
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    entry = next(item for item in payload["agents"] if item["agentId"] == agent["agentId"])
+    expected_bases = expected["knowledgeBases"]
+    assert entry["knowledgeSummary"] == {
+        "knowledgeBaseCount": 1,
+        "itemCount": sum(int((base_item.get("stats") or {}).get("itemCount") or 0) for base_item in expected_bases),
+        "sourceArtifactCount": sum(
+            int((base_item.get("stats") or {}).get("sourceArtifactCount") or 0) for base_item in expected_bases
+        ),
+        "pendingProposalCount": sum(
+            int((base_item.get("stats") or {}).get("pendingProposalCount") or 0) for base_item in expected_bases
+        ),
+        "knowledgeBases": [
+            {
+                "knowledgeBaseId": str(base_item.get("knowledgeBaseId") or ""),
+                "scopedKnowledgeBaseId": str(base_item.get("scopedKnowledgeBaseId") or ""),
+                "name": str(base_item.get("name") or ""),
+                "description": str(base_item.get("description") or ""),
+                "stats": base_item.get("stats") if isinstance(base_item.get("stats"), dict) else {},
+            }
+            for base_item in expected_bases
+        ],
+    }
+    assert entry["knowledgeSummary"]["knowledgeBases"][0]["knowledgeBaseId"] == base["knowledgeBaseId"]
+    assert get_agent_calls == []
+
+
 def test_agent_memory_inventory_unknown_agent_returns_404(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)

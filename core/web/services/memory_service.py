@@ -2171,7 +2171,7 @@ def _agent_memory_inventory_entry(
 
     byte_count = sum(int(item.get("sizeBytes") or 0) for item in items)
     latest_updated_at = _latest_item_timestamp(items)
-    knowledge_summary = _agent_formal_knowledge_summary(agent_id, team_knowledge_service)
+    knowledge_summary = _agent_formal_knowledge_summary(agent, team_knowledge_service)
     return {
         "agentId": agent_id,
         "agentCode": str(agent.get("agentCode") or "").strip(),
@@ -2268,7 +2268,8 @@ def _agent_private_memory_item(
     return item
 
 
-def _agent_formal_knowledge_summary(agent_id: str, team_knowledge_service: Any) -> dict[str, Any]:
+def _agent_formal_knowledge_summary(agent: dict[str, Any], team_knowledge_service: Any) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
     if not agent_id:
         return {
             "knowledgeBaseCount": 0,
@@ -2278,7 +2279,11 @@ def _agent_formal_knowledge_summary(agent_id: str, team_knowledge_service: Any) 
             "knowledgeBases": [],
         }
     try:
-        payload = team_knowledge_service.list_agent_knowledge_bases(agent_id, actor_agent_id=agent_id, internal=True)
+        payload = team_knowledge_service._list_agent_knowledge_bases_from_snapshot(
+            agent,
+            actor_agent_id=agent_id,
+            internal=True,
+        )
     except Exception as exc:
         return {
             "knowledgeBaseCount": 0,
