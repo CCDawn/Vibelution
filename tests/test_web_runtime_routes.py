@@ -395,6 +395,67 @@ def test_runtime_cache_usage_preserves_explicit_zero_cache_hit():
     assert cache_usage["totalSource"] == "provider_usage"
 
 
+def test_runtime_summary_refuses_stale_cli_usage_fallback(monkeypatch):
+    stale_ts = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "current_context_tokens": 7000,
+            "context_token_limit": 12000,
+            "last_llm_usage": {
+                "source": "provider_usage",
+                "inputTokens": 1234,
+                "cachedInputTokens": 1000,
+                "cacheUsageObserved": True,
+            },
+            "last_tool_name": "stale_tool",
+            "updated_at": stale_ts,
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["contextUsage"] == {"used": 0, "limit": 128000}
+    assert payload["lastLlmUsage"] is None
+    assert payload["lastContextComposition"] is None
+    assert payload["lastCacheComposition"] is None
+    assert payload["cacheUsage"]["source"] == "missing"
+    # contextCompression keeps its documented snapshot semantics: the raw
+    # runtime_state snapshot stays visible and labeled even when the usage
+    # fallback has been refused as stale.
+    assert payload["contextCompression"]["currentTokens"] == 7000
+
+
+def test_runtime_summary_keeps_fresh_cli_usage_fallback(monkeypatch):
+    fresh_ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "current_context_tokens": 7000,
+            "context_token_limit": 12000,
+            "last_llm_usage": {
+                "source": "provider_usage",
+                "inputTokens": 1234,
+                "cachedInputTokens": 1000,
+                "cacheUsageObserved": True,
+            },
+            "updated_at": fresh_ts,
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["contextUsage"] == {"used": 7000, "limit": 12000}
+    assert payload["lastLlmUsage"]["source"] == "provider_usage"
+    assert payload["lastLlmUsage"]["inputTokens"] == 1234
+    assert payload["cacheUsage"]["source"] == "provider_usage"
+    assert payload["contextCompression"]["currentTokens"] == 7000
+
+
 def test_runtime_last_cache_composition_hides_legacy_zero_cache_calibration():
     composition = runtime_service._runtime_last_cache_composition(
         {
@@ -477,6 +538,112 @@ def test_runtime_summary_uses_light_active_session_summary(monkeypatch):
     assert payload["sessionTitle"] == "Light session"
     assert payload["taskSummary"] == "light task"
     assert payload["currentPhase"] == "running"
+
+
+def test_runtime_summary_degrades_session_family_when_pointer_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda **_: {
+            "id": "session-viewing",
+            "title": "正在查看的会话",
+            "taskSummary": "查看会话 B 的摘要",
+            "currentPhase": "ready",
+            "updatedAt": "2026-06-07T09:30:00+00:00",
+        },
+    )
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": {
+                    "runId": "turn-mismatch",
+                    "sessionId": "session-running",
+                    "status": "failed",
+                },
+            },
+            "latest": {"chat_turn": None},
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+    neutral = runtime_service._pending_session_sync_text(runtime_service.get_web_language())
+
+    assert payload["activeSessionId"] == "session-viewing"
+    assert payload["taskSummary"] == neutral
+    assert payload["recentAction"] == neutral
+    assert payload["agentStatusLine"] == neutral
+    assert payload["sessionStateLine"] == neutral
+    assert payload["sessionNeedsResponse"] is False
+    assert payload["sessionToolName"] == ""
+    # Pointer-session facts that stay truthful under the mismatch are kept.
+    assert payload["sessionTitle"] == "正在查看的会话"
+
+
+def test_runtime_summary_keeps_session_family_when_pointer_matches(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda **_: {
+            "id": "session-viewing",
+            "title": "正在查看的会话",
+            "taskSummary": "查看会话的最新摘要",
+            "currentPhase": "ready",
+            "updatedAt": "2026-06-07T09:30:00+00:00",
+        },
+    )
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": {
+                    "runId": "turn-matched",
+                    "sessionId": "session-viewing",
+                    "status": "running",
+                },
+            },
+            "latest": {"chat_turn": None},
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["activeSessionId"] == "session-viewing"
+    assert payload["taskSummary"] == "查看会话的最新摘要"
+    assert payload["recentAction"] == "查看会话的最新摘要"
+    assert payload["agentStatusLine"] == runtime_service._agent_status_line(
+        runtime_service.get_web_language(), "success", "ready"
+    )
+    assert payload["sessionNeedsResponse"] is True
+
+
+def test_runtime_summary_without_chat_turn_keeps_session_family(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda **_: {
+            "id": "session-viewing",
+            "title": "正在查看的会话",
+            "taskSummary": "查看会话的最新摘要",
+            "currentPhase": "ready",
+        },
+    )
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {"active": {"chat_turn": None}, "latest": {"chat_turn": None}},
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["activeSessionId"] == "session-viewing"
+    assert payload["taskSummary"] == "查看会话的最新摘要"
+    assert payload["sessionNeedsResponse"] is True
 
 def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch):
     public_config = copy.deepcopy(load_public_config())

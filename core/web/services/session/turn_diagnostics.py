@@ -1392,11 +1392,17 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         # Submit marks the session running before the scheduler admits it; a
         # turn still held in a scheduler queue must stay visibly "queued"
         # instead of being projected as running.
-        status = (
-            "queued"
-            if (session_id, run_id) in queued_scheduler_turns
-            else active_statuses.get(session_id) or "running"
-        )
+        if (session_id, run_id) in queued_scheduler_turns:
+            status = "queued"
+        else:
+            status = active_statuses.get(session_id, "")
+        if not status:
+            # No durable snapshot status and no live turn-control vouch:
+            # the running-set entry is a residual from an abnormal worker
+            # path, not evidence of live work. Projecting it as a
+            # finishedAt-less "running" item would fabricate a lifecycle
+            # blocker, so the session is left out of the active set.
+            continue
         item: dict[str, Any] = {
             "runId": run_id,
             "runKind": "chat_turn",
@@ -1405,13 +1411,23 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
             "currentPhase": status,
             "leases": active_leases.get(session_id) or ["readonly_chat"],
         }
-        snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", run_id) or {}
+        try:
+            snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", run_id) or {}
+        except Exception as exc:
+            read_health.note_session_read_degraded(
+                source="active turn snapshot",
+                error_type=type(exc).__name__,
+            )
+            snapshot = {}
         user_message = str(snapshot.get("userMessage") or "").strip()
         summary = str(snapshot.get("summary") or "").strip()
         if user_message:
             item["userMessage"] = user_message
         if summary:
             item["summary"] = summary
+        finished_at = str(snapshot.get("finishedAt") or snapshot.get("endedAt") or "").strip()
+        if finished_at:
+            item["finishedAt"] = finished_at
         last_tool_error = snapshot.get("lastToolError")
         if isinstance(last_tool_error, dict) and last_tool_error:
             item["lastToolError"] = last_tool_error
@@ -1465,17 +1481,69 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
 
 
 def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
-    """Map live session ids to a work-run status without touching chat_state.
+    """Map live session ids to a truthful work-run status without touching chat_state.
 
     Runtime summary polls this on the hot path while submit/select hold
-    ``_CHAT_STATE_LOCK``. The in-memory running set already selected
-    ``session_ids``; queued/stopping can stay ``running`` for lease/UI dots.
+    ``_CHAT_STATE_LOCK``. The in-memory running set only nominates *which*
+    sessions to ask; the status itself comes from the session's own work-run
+    snapshot. A snapshot that is missing or status-less only counts as live
+    work when the session's turn control — created at submit, cleared at
+    terminal — still owns the active turn. A residual running-set entry with
+    no such evidence must not be projected as a blocking "running": that
+    fabrication could stall destructive restarts for a worker that already
+    died. When the snapshot store itself is unreadable the conservative
+    memory projection is kept so a degraded read never hides live work.
     """
-    return {
-        session_id: "running"
-        for session_id in session_ids
-        if str(session_id or "").strip()
-    }
+    s = _service()
+    from . import read_health
+
+    statuses: dict[str, str] = {}
+    for session_id in session_ids:
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            continue
+        with s._RUNNING_SESSIONS_LOCK:
+            active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
+        status = ""
+        try:
+            snapshot = (
+                s._WORK_RUN_STORE.load_snapshot("chat_turn", active_turn_id)
+                if active_turn_id
+                else None
+            )
+        except Exception as exc:
+            # The durable authority is unreadable: falling back to the
+            # historical memory projection keeps a possibly-live turn
+            # visible instead of silently dropping it.
+            read_health.note_session_read_degraded(
+                source="active turn snapshot",
+                error_type=type(exc).__name__,
+            )
+            statuses[normalized_session_id] = "running"
+            continue
+        if isinstance(snapshot, dict):
+            status = str(snapshot.get("status") or snapshot.get("currentPhase") or "").strip().lower()
+        if status:
+            statuses[normalized_session_id] = status
+            continue
+        # Snapshot missing or status-less: only a live turn control that
+        # still owns this session's active turn may vouch for in-flight
+        # work; stop-requested controls read as "stopping".
+        if not active_turn_id:
+            continue
+        try:
+            control = s._get_session_turn_control(normalized_session_id)
+        except Exception:
+            control = None
+        if control is None:
+            continue
+        if str(getattr(control, "turn_id", "") or "").strip() != active_turn_id:
+            continue
+        if bool(getattr(control, "stop_requested", False)):
+            statuses[normalized_session_id] = "stopping"
+        else:
+            statuses[normalized_session_id] = "running"
+    return statuses
 
 
 def load_chat_turn_work_run_summary() -> dict[str, Any]:
@@ -1492,7 +1560,28 @@ def load_chat_turn_work_run_summary() -> dict[str, Any]:
     active_items = list_active_session_work_runs(reconcile=False)
     active = s._WORK_RUN_STORE.load_active_snapshot("chat_turn")
     if not active and active_items:
-        active = active_items[0]
+        # The durable index has no resolvable active run, so the only
+        # candidates are memory items that may belong to any session. Only
+        # a run from the workspace's currently active session may fill the
+        # single ``active`` slot; anything else would present another
+        # session's turn as "the" active chat turn, so the slot stays empty.
+        active_session_id = ""
+        try:
+            active_session_id = str(s.load_active_conversation_id(s.PROJECT_ROOT) or "").strip()
+        except Exception as exc:
+            read_health.note_session_read_degraded(
+                source="active conversation pointer",
+                error_type=type(exc).__name__,
+            )
+        if active_session_id:
+            active = next(
+                (
+                    item
+                    for item in active_items
+                    if str(item.get("sessionId") or "").strip() == active_session_id
+                ),
+                None,
+            )
     return {
         "active": active,
         "activeItems": active_items,
