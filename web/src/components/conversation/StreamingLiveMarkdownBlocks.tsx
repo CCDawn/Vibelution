@@ -12,6 +12,7 @@ import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 import type { MarkdownBlock } from "./streamingMarkdown";
 import styles from "./StreamingLiveMarkdownBlocks.styles";
+import { conversationMarkdownCodeBlockStyles as codeStyles } from "./ConversationMarkdownRenderer.styles";
 
 export type StreamingLiveMarkdownBlocksProps = {
   blocks: MarkdownBlock[];
@@ -69,14 +70,17 @@ function LiveBlock({
       // details-expand budget).
       const tail = tailLines(formattedCodeBlockContent(block.content, block.language), LIVE_CODE_MAX_VISIBLE_LINES);
       return (
-        <>
-          {tail.overflowCount > 0 ? (
-            <div className={styles.liveCodeInflowHint}>{`…已流入 ${tail.overflowCount} 行`}</div>
-          ) : null}
-          <pre className={classNames.responseSegmentPre}>
+        <div className={codeStyles.shell}>
+          <div className={codeStyles.header} data-streaming-code-header="true">
+            <span className={codeStyles.language}>{block.language?.trim().toLowerCase() || "text"}</span>
+            {tail.overflowCount > 0 ? (
+              <span className={styles.liveCodeInflowHint}>{`…已流入 ${tail.overflowCount} 行`}</span>
+            ) : null}
+          </div>
+          <pre className={`${classNames.responseSegmentPre} ${codeStyles.preAttached}`}>
             <code>{tail.visible}</code>
           </pre>
-        </>
+        </div>
       );
     }
     case "table": {

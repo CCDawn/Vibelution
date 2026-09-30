@@ -2,8 +2,27 @@ import { describe, expect, it } from "vitest";
 import styles from "./ConversationView.styles";
 import agentStyles from "./AgentMessageTurnView.styles";
 import userStyles from "./AgentUserContentSectionView.styles";
+import streamStyles from "./ConversationStreamingResponseContent.styles";
+import { conversationMarkdownRendererStyles, conversationMarkdownCodeBlockStyles } from "./ConversationMarkdownRenderer.styles";
 
 describe("approved conversation reading hierarchy", () => {
+  it("shares every Markdown style across stable, live and settled transcript paths", () => {
+    for (const [key, value] of Object.entries(conversationMarkdownRendererStyles)) {
+      expect(streamStyles[key as keyof typeof conversationMarkdownRendererStyles]).toBe(value);
+    }
+    expect(streamStyles.messageBody).toContain("mb-3");
+    expect(streamStyles.messageBody).toContain("last:mb-0");
+    expect(streamStyles.markdownBody).toContain("leading-[1.8]");
+    expect(streamStyles.streamingResponseText).not.toContain("text-vui-chat");
+  });
+  it("keeps code chrome complete and long output independently scrollable", () => {
+    expect(streamStyles.responseSegmentPre).toContain("max-h-80");
+    expect(streamStyles.responseSegmentPre).toContain("overflow-auto");
+    expect(streamStyles.responseSegmentPre).toContain("px-4");
+    expect(streamStyles.responseSegmentPre).toContain("border-[var(--vui-border-subtle)]");
+    expect(conversationMarkdownCodeBlockStyles.preAttached).toContain("mt-0");
+    expect(conversationMarkdownCodeBlockStyles.preAttached).toContain("border-t-0");
+  });
   it("uses the shared type scale for Markdown headings", () => {
     ["xl", "lg", "md", "sm"].forEach((size, index) => {
       const heading = [styles.markdownHeading1, styles.markdownHeading2, styles.markdownHeading3, styles.markdownHeading4][index];

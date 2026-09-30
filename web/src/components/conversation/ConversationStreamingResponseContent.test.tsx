@@ -22,6 +22,17 @@ const classNames = {
 };
 
 describe("ConversationStreamingResponseContent", () => {
+  it("keeps live code inside shared chrome before the fence closes", async () => {
+    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
+    const html = renderToStaticMarkup(
+      <ConversationStreamingResponseContent content={'```python\nprint("hello")'} />,
+    );
+    expect(html).toContain('data-streaming-code-header="true"');
+    expect(html).toContain('markdownCodeBlockPre');
+    expect(html).toContain('max-h-80');
+    expect(html).toContain('python');
+    expect(html).not.toContain('复制代码');
+  });
   it("keeps streaming markdown projection out of the heavy ConversationView module", () => {
     expect(existsSync(new URL("./ConversationStreamingResponseContent.tsx", import.meta.url))).toBe(true);
     expect(conversationViewSource).toContain('from "./ConversationStreamingResponseContent"');
@@ -132,7 +143,7 @@ describe("ConversationStreamingResponseContent", () => {
   });
 
   it("keeps streaming text bounded for long tokens while preserving the table width override", () => {
-    expect(styles.markdownBody).toContain("max-w-[min(100%,128ch)]");
+    expect(styles.markdownBody).toContain("max-w-full");
     expect(styles.markdownBody).toContain("whitespace-normal");
     expect(styles.markdownBody).toContain("break-words");
     expect(styles.markdownBody).toContain("[overflow-wrap:anywhere]");
