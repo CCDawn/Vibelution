@@ -30,6 +30,17 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<textarea\b/);
   });
 
+  it("keeps the Git workspace free of nested main landmarks and collapses the change panel out of focus", () => {
+    // AppShell already renders the page <main>; Git panes must stay section-level.
+    expect(routeSource).not.toMatch(/<main\b/);
+    expect(routeSource).not.toContain("</main>");
+    expect(routeSource).not.toContain('as="main"');
+    expect(routeSource).toContain('<section className={styles.gitOverviewPanel}>');
+    expect(routeSource).toContain('as="section"');
+    // The collapsed change panel must be aria-hidden and inert so keyboard focus cannot enter it.
+    expect(routeSource).toContain("aria-hidden={changePanelCollapsed} inert={changePanelCollapsed}");
+  });
+
   it("uses VUI metrics, state, and action grouping without changing Git ownership", () => {
     expect(routeSource).toContain("VMetricStrip");
     expect(routeSource).toContain("VStateSurface");
