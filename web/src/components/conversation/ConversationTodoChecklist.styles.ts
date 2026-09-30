@@ -7,7 +7,7 @@ function cv(key: string, ...classNames: string[]) {
 const styles = {
   card: cv(
     "card",
-    "min-w-0 max-w-[min(100%,830px)] rounded-[14px] border border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,var(--vui-surface-workspace))] px-3 py-2 text-[var(--fg-secondary)] shadow-none",
+    "min-w-0 max-w-[830px] rounded-xl border border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,var(--vui-surface-workspace))] px-3 py-2 text-[var(--fg-secondary)] shadow-none",
   ),
   header: cv(
     "header",

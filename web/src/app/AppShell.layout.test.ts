@@ -9,9 +9,7 @@ import shellSource from "./AppShell.tsx?raw";
 import launcherShellSource from "./LauncherShell.tsx?raw";
 import documentLanguageSource from "./documentLanguage.ts?raw";
 import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
-import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
-import utilityMenuStylesSource from "./AppShellUtilityMenu.styles.ts?raw";
-import utilityMenuStyles from "./AppShellUtilityMenu.styles";
+import { shellDictionary } from "../i18n/shellDictionary";
 
 const shellStyles = readFileSync(fileURLToPath(new URL("../design/workbench-shell.css", import.meta.url)), "utf8");
 
@@ -215,7 +213,6 @@ describe("AppShell layout contract", () => {
       styles.settingsChoiceButton,
       styles.utilityButton,
       styles.utilityFileButton,
-      utilityMenuStyles.utilityButton,
     ];
 
     for (const value of shellControlStyles) {
@@ -265,6 +262,48 @@ describe("AppShell layout contract", () => {
     expect(styles.settingsTrigger).toContain("!rounded-md");
     expect(shellStyles).not.toContain(".settingsDock");
     expect(shellSource).toContain("[location.key, closeUtilityMenu]");
+  });
+
+  it("keeps the focus ring alive on the settings trigger family", () => {
+    // VUI focus indication rides on box-shadow (vuiButtonFocusClass), so any
+    // !shadow-none on the trigger would make keyboard focus invisible.
+    expect(styles.settingsTrigger).not.toContain("!shadow-none");
+    expect(styles.settingsTrigger).not.toContain("shadow-none");
+    // The active-work trigger is the consistency baseline and never suppressed it.
+    expect(styles.activeWorkTrigger).not.toContain("shadow-none");
+  });
+
+  it("wires the git trigger to status-aware labels, summary title and a pending-work dot", () => {
+    expect(shellSource).toContain('aria-label={t("navGit")}');
+    expect(shellSource).toContain("const shellGitNeedsAttention = Boolean(");
+    expect(shellSource).toContain("shellGitStatus.worktrees?.withCommits ?? 0) > 0 || (shellGitStatus.upstream?.ahead ?? 0) > 0");
+    expect(shellSource).toContain("`${t(\"navGit\")}：${shellGitStatus.summary}`");
+    expect(shellSource).toContain("queryKeys.gitStatus()");
+    expect(shellSource).toContain("fetchGitStatus({ limit: 500, signal })");
+    expect(shellSource).toContain("styles.settingsTriggerAlertDot");
+    // Low-frequency, foreground-only shell poll (shares the /git cache).
+    expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000)");
+  });
+
+  it("renames the bell to the agent broadcast and tracks unseen broadcasts via a cursor", () => {
+    expect(shellSource).toContain("<Bell size={17} />");
+    expect(shellSource).not.toContain("BellRing");
+    expect(shellSource).toContain("t(\"agentBroadcastLabel\")");
+    expect(shellSource).toContain("queryKeys.projectAgentBusLatestEvent()");
+    expect(shellSource).toContain("listProjectAgentBusTimeline(1, { signal })");
+    expect(shellSource).toContain("markAgentBroadcastSeen()");
+    expect(shellSource).toContain("hasUnseenAgentBroadcast(agentBroadcastLatestEventMs, agentBroadcastReadAtMs)");
+    // Gentle foreground-only poll; no background churn for a badge.
+    expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 60_000)");
+    expect(styles.settingsTriggerIconSlot).toContain("relative");
+    expect(styles.settingsTriggerAlertDot).toContain("bg-[var(--accent-cool)]");
+  });
+
+  it("defines the agent broadcast copy for both shell languages", () => {
+    expect(shellDictionary.zh.agentBroadcastLabel).toBe("助手广播");
+    expect(shellDictionary.zh.agentBroadcastUnread).toBe("有新广播");
+    expect(shellDictionary.en.agentBroadcastLabel).toBe("Agent broadcast");
+    expect(shellDictionary.en.agentBroadcastUnread).toBe("new broadcasts");
   });
 
   it("exposes a shell-level semantic return action without visible helper copy", () => {

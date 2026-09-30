@@ -72,6 +72,7 @@ export const queryKeys = {
     ["runtime-tasks", kind, parentSessionId] as const,
   runtimeTask: (taskId: string) => ["runtime-tasks", "detail", taskId] as const,
   projectAgentBus: () => ["project-agent-bus"] as const,
+  projectAgentBusLatestEvent: () => ["project-agent-bus", "latest-event"] as const,
   teams: () => ["teams"] as const,
   teamDetails: (id: string) => ["teams", id, "detail"] as const,
   team: (id: string, detail = "full") => ["teams", id, "detail", detail] as const,

@@ -1,7 +1,11 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import styles from "./ConversationView.styles";
 import agentStyles from "./AgentMessageTurnView.styles";
 import userStyles from "./AgentUserContentSectionView.styles";
+import todoStyles from "./ConversationTodoChecklist.styles";
 import streamStyles from "./ConversationStreamingResponseContent.styles";
 import { conversationMarkdownRendererStyles, conversationMarkdownCodeBlockStyles } from "./ConversationMarkdownRenderer.styles";
 
@@ -40,10 +44,24 @@ describe("approved conversation reading hierarchy", () => {
   it("aligns the composer rail and uses consistent bubble chrome", () => {
     expect(styles.composerCodex).toContain("max-w-[830px]");
     expect(styles.assistantTurn).toContain("max-w-[830px]");
+    // One spelling of the transcript measure across the whole surface.
+    expect(todoStyles.card).toContain("max-w-[830px]");
     for (const surface of [styles.composerCodex, styles.userMessageBody, userStyles.userMessageBody]) {
       expect(surface).toContain("rounded-xl");
       expect(surface).toContain("shadow-none");
       expect(surface).toContain("border-[var(--vui-border-subtle)]");
     }
+  });
+  // Split literal: the scan must not match its own source text.
+  const STRANDED_RADIUS = "rounded-" + "[14px]";
+  it("keeps every conversation corner on the approved radius ladder", () => {
+    // 14px was a second bubble radius beside the approved rounded-xl; it must not return.
+    const offenders: string[] = [];
+    for (const file of readdirSync(import.meta.dirname)) {
+      if (!file.endsWith(".ts")) continue;
+      const source = readFileSync(resolve(import.meta.dirname, file), "utf8");
+      if (source.includes(STRANDED_RADIUS)) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
   });
 });

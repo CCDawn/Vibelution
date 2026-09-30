@@ -69,7 +69,6 @@ const styles = {
     "vui-app-appshell brandBlock min-w-0",
   brandGate:
     "vui-app-appshell brandGate min-w-0",
-  // Git mini-panel styles live in AppShellUtilityMenu.styles (VUI composition).
   lifecycleMenuCluster:
     "vui-app-appshell lifecycleMenuCluster min-w-0",
   lifecycleMenuClusterOpen:
@@ -133,8 +132,14 @@ const styles = {
     "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-vui-xs text-[var(--fg-tertiary)] [&>span:last-child]:hidden sm:[&>span:last-child]:inline sm:[&>span:last-child]:max-w-28 sm:[&>span:last-child]:truncate",
   settingsThemeChoices:
     "vui-app-appshell settingsThemeChoices grid min-w-0 gap-0 border-l border-[var(--vui-border-subtle)] pl-2 ml-7",
+  // No !shadow-none here: VUI focus indication rides on box-shadow
+  // (vuiButtonFocusClass), so suppressing shadows kills focus-visible entirely.
   settingsTrigger:
-    "vui-app-appshell settingsTrigger !size-8 !min-h-8 !min-w-8 !justify-center !rounded-md !border-0 !bg-transparent !p-0 !shadow-none text-[var(--fg-secondary)] hover:!bg-[var(--bg-active)]",
+    "vui-app-appshell settingsTrigger !size-8 !min-h-8 !min-w-8 !justify-center !rounded-md !border-0 !bg-transparent !p-0 text-[var(--fg-secondary)] hover:!bg-[var(--bg-active)]",
+  settingsTriggerAlertDot:
+    "vui-app-appshell settingsTriggerAlertDot absolute -right-0.5 -top-0.5 block size-1.5 rounded-full bg-[var(--accent-cool)]",
+  settingsTriggerIconSlot:
+    "vui-app-appshell settingsTriggerIconSlot relative inline-flex items-center justify-center",
   settingsTriggerOpen:
     "vui-app-appshell settingsTriggerOpen !bg-[var(--bg-active)]",
   shell: `vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)]`,

@@ -605,6 +605,7 @@ from core.web.services.session.image_attachments import (
 )
 from core.web.services.session.queued_turns import (
     advance_session_branch_generation,
+    enqueue_session_control_notice,
     enqueue_session_queued_turn,
     enqueue_session_runtime_notice,
     list_session_queued_turns,
