@@ -13,7 +13,14 @@ import {
   X,
 } from "lucide-react";
 
-import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
+import {
+  BACKEND_HEALTH_TIMEOUT_MS,
+  fetchJson,
+  fetchJsonWithTimeout,
+  RUNTIME_SUMMARY_TIMEOUT_MS,
+  setFetchJsonFailureReporter,
+  type FetchJsonFailureReport,
+} from "../api/client";
 import { fetchPublicConfig } from "../api/config";
 import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
@@ -49,6 +56,7 @@ import {
   type BrowserTelemetryEventInput,
 } from "./browserTelemetry";
 import {
+  applyRuntimeSummaryOutage,
   backendSystemTone,
   codeFreshnessStale,
   deriveActiveWorkIndicator,
@@ -59,8 +67,11 @@ import {
   deriveStartupLoadingState,
   deriveStartupProgressState,
   frontendSystemTone,
+  pickPrimarySystemStatusCard,
   runtimeControllerTone,
   shouldRenderStartupOverlay,
+  type ActiveWorkIndicatorItem,
+  type SystemStatusCard,
   type SystemStatusTone,
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
@@ -766,9 +777,11 @@ export function AppShell() {
   const backendHealthQuery = useQuery({
     queryKey: queryKeys.backendHealth(),
     queryFn: ({ signal }) =>
-      fetchJson<BackendHealth>("/api/health", {
+      fetchJsonWithTimeout<BackendHealth>("/api/health", {
         cache: "no-store",
         signal,
+        // A hung backend must degrade to offline instead of pending forever.
+        timeoutMs: BACKEND_HEALTH_TIMEOUT_MS,
       }),
     refetchInterval: runtimeRefetchInterval,
     refetchIntervalInBackground: shellStartupWarmupActive,
@@ -785,7 +798,11 @@ export function AppShell() {
   }, [backendHealthQuery.data, configQuery.data]);
   const runtimeQuery = useQuery<RuntimeSummary>({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
+    queryFn: ({ signal }) =>
+      fetchJsonWithTimeout<RuntimeSummary>("/api/runtime/summary", {
+        signal,
+        timeoutMs: RUNTIME_SUMMARY_TIMEOUT_MS,
+      }),
     enabled: shellStartupDataReady,
     refetchInterval: runtimeRefetchInterval,
     refetchIntervalInBackground: shellStartupWarmupActive,
@@ -981,6 +998,16 @@ export function AppShell() {
   const activeWorkUnavailable = !runtimeQuery.data && (backendHealthQuery.isError || configQuery.isError || runtimeQuery.isError);
   const activeWorkLoading = !runtimeQuery.data && !activeWorkUnavailable;
   const activeWorkCountDisplay = activeWorkUnavailable ? "—" : activeWorkLoading ? "…" : String(activeWorkIndicator?.count ?? 0);
+  // Terminal failed runs parked in the active slot: caution-grade leftovers,
+  // never counted as running work but always visible in the popover.
+  const activeWorkStaleFailures = activeWorkIndicator?.staleFailures ?? [];
+  const activeWorkTriggerTone: SystemStatusTone = activeWorkUnavailable
+    ? "failed"
+    : activeWorkStaleFailures.length
+      ? "caution"
+      : activeWorkIndicator
+        ? "running"
+        : "idle";
   // Human-readable only (no raw session ids). Used for shutdown/restart copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   // Update banner: main moved ahead of the running backend, so a restart is
@@ -1000,7 +1027,8 @@ export function AppShell() {
   );
   const updateBannerRestartActionLabel = updateBannerRestartLabel(lang);
   const updateBannerDismissActionLabel = updateBannerDismissLabel(lang);
-  const updateBannerRestartBlockedByWork = Boolean(activeWorkIndicator);
+  // Only genuinely running work blocks a restart; stale failures do not.
+  const updateBannerRestartBlockedByWork = (activeWorkIndicator?.items.length ?? 0) > 0;
   const updateBannerRestartDisabled =
     updateBannerRestartBlockedByWork
     || restartRequested
@@ -2123,12 +2151,11 @@ export function AppShell() {
 
   useEffect(() => clearRestartCompletionDismissTimer, [clearRestartCompletionDismissTimer]);
 
-  const rightStatusCards: Array<{
-    id: "frontend" | "backend" | "runtime";
-    label: string;
-    value: string;
-    tone: SystemStatusTone;
-  }> = [
+  // Health passing while /api/runtime/summary keeps failing means a half-dead
+  // backend: the runtime card must say "status unavailable" at caution grade
+  // instead of letting the shell stay a pure green "connected".
+  const runtimeSummaryUnavailable = runtimeQuery.isError && !runtimeQuery.data;
+  const rightStatusCards: SystemStatusCard[] = [
     {
       id: "frontend",
       label: t("systemFrontend"),
@@ -2141,17 +2168,18 @@ export function AppShell() {
       value: backendStateLabel,
       tone: backendSystemTone(backendState),
     },
-    {
-      id: "runtime",
-      label: t("systemRuntime"),
-      value: runtimeControllerLabel,
-      tone: runtimeControllerTone(runtimeControllerState),
-    },
+    applyRuntimeSummaryOutage(
+      {
+        id: "runtime",
+        label: t("systemRuntime"),
+        value: runtimeControllerLabel,
+        tone: runtimeControllerTone(runtimeControllerState),
+      },
+      runtimeSummaryUnavailable,
+      t("systemRuntime_unavailable"),
+    ),
   ];
-  const statusPriority = { failed: 0, caution: 1, running: 2, idle: 3 } satisfies Record<SystemStatusTone, number>;
-  const primaryStatusCard = rightStatusCards.reduce((selected, item) =>
-    statusPriority[item.tone] < statusPriority[selected.tone] ? item : selected,
-  rightStatusCards[0]);
+  const primaryStatusCard = pickPrimarySystemStatusCard(rightStatusCards);
   // Code-freshness: a behind instance is a caution-grade system condition the
   // user should act on (restart), without masking a real failure.
   const codeStale = codeFreshnessStale(codeFreshnessQuery.data?.verdict);
@@ -2159,6 +2187,36 @@ export function AppShell() {
     ? { ...primaryStatusCard, tone: "caution" as const }
     : primaryStatusCard;
   const statusSummaryTitle = rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · ");
+  // Shared renderer for active-work rows and stale-failure rows so both
+  // sections in the popover stay one visual language.
+  const renderActiveWorkItem = (item: ActiveWorkIndicatorItem) => {
+    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
+    const detailCopy = (
+      <div className={styles.activeWorkDetailCopy}>
+        <div className={styles.activeWorkDetailTitle}><strong>{item.label}</strong></div>
+        {item.summary ? <p title={item.fullSummary || item.summary}>{item.summary}</p> : null}
+      </div>
+    );
+    return (
+      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
+        <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass(item.tone)}`} aria-hidden="true" />
+        {item.href ? (
+          <Link
+            className={styles.activeWorkDetailLink}
+            to={item.href}
+            aria-label={item.staleFailure ? `${detailAria} · ${t("activeWorkStaleFailureHint")}` : detailAria}
+            title={item.staleFailure ? t("activeWorkStaleFailureHint") : undefined}
+            onClick={closeActiveWorkMenu}
+          >
+            {detailCopy}
+          </Link>
+        ) : detailCopy}
+        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
+          {statusLabel(item.status)}
+        </VStatusChip>
+      </li>
+    );
+  };
 
   return (
     <div
@@ -2386,7 +2444,7 @@ export function AppShell() {
                   ? `${activeConversationsLabel}，${lang === "en" ? "unavailable" : "状态暂不可用"}`
                   : activeWorkLoading
                     ? `${activeConversationsLabel}，${lang === "en" ? "checking" : "正在检查"}`
-                    : `${activeConversationsLabel}，${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}`}
+                    : `${activeConversationsLabel}，${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}${activeWorkStaleFailures.length ? `，${t("activeWorkStaleFailureSection")}` : ""}`}
                 aria-busy={activeWorkLoading}
                 title={activeConversationsLabel}
                 onPointerDownCapture={() => {
@@ -2396,7 +2454,7 @@ export function AppShell() {
                 }}
               >
                 <span className={styles.activeWorkTriggerContent}>
-                  <span className={`${styles.activeWorkTriggerDot} ${systemToneToDotClass(activeWorkUnavailable ? "failed" : activeWorkIndicator ? "running" : "idle")}`} aria-hidden="true" />
+                  <span className={`${styles.activeWorkTriggerDot} ${systemToneToDotClass(activeWorkTriggerTone)}`} aria-hidden="true" />
                   <span className={styles.activeWorkTriggerLabel}>{lang === "en" ? "Active" : "进行中"}</span>
                   <strong>{activeWorkCountDisplay}</strong>
                   <ChevronDown size={13} aria-hidden="true" />
@@ -2413,32 +2471,29 @@ export function AppShell() {
                     ? (lang === "en" ? "Checking" : "正在检查")
                     : `${activeWorkCountDisplay} ${t("activeWorkCountSuffix")}`}</span>
               </div>
-              {activeWorkIndicator ? (
+              {activeWorkIndicator && activeWorkIndicator.items.length ? (
                 <ul className={styles.activeWorkDetailList}>
-                  {activeWorkIndicator.items.map((item) => {
-                    const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
-                    const detailCopy = (
-                      <div className={styles.activeWorkDetailCopy}>
-                        <div className={styles.activeWorkDetailTitle}><strong>{item.label}</strong></div>
-                        {item.summary ? <p title={item.fullSummary || item.summary}>{item.summary}</p> : null}
-                      </div>
-                    );
-                    return (
-                      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
-                        <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass(item.tone)}`} aria-hidden="true" />
-                        {item.href ? <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={detailAria} onClick={closeActiveWorkMenu}>{detailCopy}</Link> : detailCopy}
-                        <VStatusChip tone={systemToneToStatus(item.tone)} className={styles.activeWorkItemToneChip}>
-                          {statusLabel(item.status)}
-                        </VStatusChip>
-                      </li>
-                    );
-                  })}
+                  {activeWorkIndicator.items.map(renderActiveWorkItem)}
                 </ul>
-              ) : <p className={styles.activeWorkEmpty}>{activeWorkUnavailable
+              ) : null}
+              {activeWorkStaleFailures.length ? (
+                <div className={styles.activeWorkStaleSection}>
+                  <div className={styles.activeWorkStaleHeader}>
+                    <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass("caution")}`} aria-hidden="true" />
+                    <strong>{t("activeWorkStaleFailureSection")}</strong>
+                  </div>
+                  <ul className={styles.activeWorkDetailList}>
+                    {activeWorkStaleFailures.map(renderActiveWorkItem)}
+                  </ul>
+                </div>
+              ) : null}
+              {!activeWorkIndicator?.items.length ? <p className={styles.activeWorkEmpty}>{activeWorkUnavailable
                 ? (lang === "en" ? "Unable to read active conversations." : "暂时无法读取进行中的会话。")
                 : activeWorkLoading
                   ? (lang === "en" ? "Checking active conversations…" : "正在检查进行中的会话…")
-                  : (lang === "en" ? "No conversations are active." : "当前没有进行中的会话。")}</p>}
+                  : activeWorkIndicator && activeWorkStaleFailures.length
+                    ? t("activeWorkEmptyStaleFailure")
+                    : t("activeWorkEmpty")}</p> : null}
             </section>
           </VPopover>
         </div>

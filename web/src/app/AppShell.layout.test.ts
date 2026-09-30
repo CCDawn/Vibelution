@@ -356,7 +356,8 @@ describe("AppShell layout contract", () => {
   it("moves active work details into a title-bar popover", () => {
     expect(shellSource).not.toContain("settingsActiveWork");
     expect(shellSource).toContain("activeWorkIndicator.items.map");
-    expect(shellSource).toContain("<Link className={styles.activeWorkDetailLink} to={item.href}");
+    expect(shellSource).toContain("className={styles.activeWorkDetailLink}");
+    expect(shellSource).toContain("to={item.href}");
     expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
     expect(shellSource).toContain('data-shell-group="active-work"');
     expect(shellSource).not.toContain('data-vui="active-work-popover"');
@@ -371,6 +372,38 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
     expect(styles.activeWorkDetailLink).toContain("block");
     expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");
+  });
+
+  it("tells the truth when the backend is half dead", () => {
+    // Health passes but /api/runtime/summary keeps failing: the runtime card
+    // speaks at caution grade so the primary status cannot stay a pure green
+    // "connected" driven by the frontend card.
+    expect(shellSource).toContain("runtimeSummaryUnavailable");
+    expect(shellSource).toContain("applyRuntimeSummaryOutage(");
+    expect(shellSource).toContain('t("systemRuntime_unavailable")');
+    expect(shellSource).toContain("pickPrimarySystemStatusCard(rightStatusCards)");
+    // Heartbeat probes carry bounded timeouts; a hung backend degrades instead
+    // of pending forever.
+    expect(shellSource).toContain("fetchJsonWithTimeout<BackendHealth>");
+    expect(shellSource).toContain("fetchJsonWithTimeout<RuntimeSummary>");
+    expect(shellSource).toContain("timeoutMs: BACKEND_HEALTH_TIMEOUT_MS");
+    expect(shellSource).toContain("timeoutMs: RUNTIME_SUMMARY_TIMEOUT_MS");
+  });
+
+  it("renders terminal failed runs as a caution leftover section instead of hiding them", () => {
+    expect(shellSource).toContain("activeWorkStaleFailures");
+    expect(shellSource).toContain("activeWorkStaleFailures.map(renderActiveWorkItem)");
+    expect(shellSource).toContain("className={styles.activeWorkStaleSection}");
+    expect(shellSource).toContain('t("activeWorkStaleFailureSection")');
+    expect(shellSource).toContain('t("activeWorkEmptyStaleFailure")');
+    expect(shellSource).toContain('t("activeWorkEmpty")');
+    // The trigger dot turns caution while leftover failures exist.
+    expect(shellSource).toContain("activeWorkTriggerTone");
+    // Only genuinely running work blocks a restart; stale failures do not.
+    expect(shellSource).toContain("updateBannerRestartBlockedByWork = (activeWorkIndicator?.items.length ?? 0) > 0");
+
+    expect(styles.activeWorkStaleSection).toContain("border-t");
+    expect(styles.activeWorkStaleHeader).toContain("var(--state-warning)");
   });
 
   it("bounds active work details inside their own popover", () => {
@@ -394,7 +427,8 @@ describe("AppShell layout contract", () => {
     expect(titleBar).toContain("activeWorkSlot");
     expect(titleBar).toContain('data-shell-group="active-work"');
     expect(titleBar.indexOf('data-shell-group="window-drag-region"')).toBeLessThan(titleBar.indexOf('data-shell-group="active-work"'));
-    expect(shellSource).toContain('当前没有进行中的会话。');
+    // Empty states live in the shell dictionary (zh/en) via t("activeWorkEmpty").
+    expect(shellSource).toContain('t("activeWorkEmpty")');
     expect(shellSource).toContain('activeWorkUnavailable ? "—"');
   });
 
@@ -534,7 +568,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("diskHead: updateBannerDiskHead");
 
     // Active work keeps the restart action from even trying: guard copy surfaces.
-    expect(shellSource).toContain("updateBannerRestartBlockedByWork = Boolean(activeWorkIndicator)");
+    expect(shellSource).toContain("updateBannerRestartBlockedByWork = (activeWorkIndicator?.items.length ?? 0) > 0");
 
     expect(shellSource).not.toContain("UPDATE_BANNER_MAIN_AREA_STYLE");
     expect(shellSource).not.toContain("UPDATE_BANNER_SHELL_GRID_ROWS");

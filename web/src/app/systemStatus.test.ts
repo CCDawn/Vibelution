@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyRuntimeSummaryOutage,
   backendSystemTone,
   codeFreshnessStale,
   deriveActiveWorkIndicator,
@@ -13,6 +14,7 @@ import {
   frontendSystemTone,
   lifecycleStateLabel,
   lifecycleStateTone,
+  pickPrimarySystemStatusCard,
   runtimeControllerTone,
   shouldRenderStartupOverlay,
 } from "./systemStatus";
@@ -1201,8 +1203,6 @@ describe("systemStatus", () => {
     "needs_continue",
     "paused_limit",
     "stopped_by_user",
-    "failed_provider",
-    "failed_runtime",
     "superseded",
   ])(
     "ignores %s active work snapshots left behind by shutdown",
@@ -1221,6 +1221,115 @@ describe("systemStatus", () => {
       ).toBeNull();
     },
   );
+
+  it.each([
+    "failed",
+    "failed_provider",
+    "failed_runtime",
+    "error",
+  ])(
+    "surfaces a %s snapshot as a stale failure without counting it as active work",
+    (status) => {
+      const indicator = deriveActiveWorkIndicator(
+        runtimeWithActiveWork({
+          chat_turn: {
+            runId: `chat-${status}`,
+            runKind: "chat_turn",
+            status,
+            sessionId: "sess-stale",
+            userMessage: "帮我总结这份报表",
+          },
+        }),
+      );
+      expect(indicator).not.toBeNull();
+      expect(indicator?.count).toBe(0);
+      expect(indicator?.items).toHaveLength(0);
+      expect(indicator?.staleFailures).toHaveLength(1);
+      const stale = indicator?.staleFailures[0];
+      expect(stale?.staleFailure).toBe(true);
+      expect(stale?.tone).toBe("caution");
+      expect(stale?.href).toBe("/chat?session=sess-stale");
+      expect(stale?.label).toContain("失败");
+      expect(stale?.summary).toContain("报表");
+    },
+  );
+
+  it("keeps live runs counted while a leftover failure rides along in its own list", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork(
+        { chat_turn: null },
+        {
+          activeItems: {
+            chat_turn: [
+              {
+                runId: "chat-live",
+                runKind: "chat_turn",
+                status: "answering",
+                sessionId: "sess-live",
+                userMessage: "正在生成结论",
+              },
+              {
+                runId: "chat-dead",
+                runKind: "chat_turn",
+                status: "failed_provider",
+                sessionId: "sess-dead",
+                summary: "模型调用超时",
+              },
+            ],
+          },
+        },
+      ),
+    );
+    expect(indicator?.count).toBe(1);
+    expect(indicator?.items).toHaveLength(1);
+    expect(indicator?.items[0]?.runId).toBe("chat-live");
+    expect(indicator?.staleFailures).toHaveLength(1);
+    expect(indicator?.staleFailures[0]?.runId).toBe("chat-dead");
+    expect(indicator?.staleFailures[0]?.tone).toBe("caution");
+  });
+});
+
+describe("system status cards", () => {
+  const healthyCards = [
+    { id: "frontend", label: "前端", value: "已连接", tone: "running" },
+    { id: "backend", label: "后端", value: "正常", tone: "running" },
+    { id: "runtime", label: "运行器", value: "托管中", tone: "running" },
+  ] as const;
+
+  it("keeps the frontend card winning while every feed is healthy", () => {
+    expect(pickPrimarySystemStatusCard([...healthyCards]).id).toBe("frontend");
+  });
+
+  it("never keeps a pure green connected status when health passes but the runtime summary feed keeps failing", () => {
+    const cards = healthyCards.map((card) =>
+      card.id === "runtime"
+        ? applyRuntimeSummaryOutage({ ...card }, true, "状态不可用")
+        : card);
+    const primary = pickPrimarySystemStatusCard(cards);
+    expect(primary.id).toBe("runtime");
+    expect(primary.tone).toBe("caution");
+    expect(primary.value).toBe("状态不可用");
+    expect(primary.tone === "running" && primary.value === "已连接").toBe(false);
+  });
+
+  it("keeps a failed primary status when the backend is offline, outage or not", () => {
+    const primary = pickPrimarySystemStatusCard([
+      { id: "frontend", label: "前端", value: "已连接", tone: "running" },
+      { id: "backend", label: "后端", value: "离线", tone: "failed" },
+      applyRuntimeSummaryOutage(
+        { id: "runtime", label: "运行器", value: "未接管", tone: "idle" },
+        true,
+        "状态不可用",
+      ),
+    ]);
+    expect(primary.id).toBe("backend");
+    expect(primary.tone).toBe("failed");
+  });
+
+  it("leaves cards untouched when the runtime summary feed is fine", () => {
+    const card = { id: "runtime" as const, label: "运行器", value: "托管中", tone: "running" as const };
+    expect(applyRuntimeSummaryOutage(card, false, "状态不可用")).toEqual(card);
+  });
 });
 
 describe("codeFreshnessStale", () => {
