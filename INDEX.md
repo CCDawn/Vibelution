@@ -12,7 +12,7 @@
 ```text
 Vibelution/
 ├── AGENTS.md                   # Agent 红线与路由入口
-├── agent.py                    # Agent composition root（新逻辑进 core/）
+├── agent.py                    # Agent composition root（新逻辑进 core/orchestration/）
 ├── config/                     # 配置模型库、provider、runtime defaults
 ├── core/                       # 运行时核心（chat / llm / orchestration / web / …）
 ├── desktop/                    # Electron Launcher 控制面

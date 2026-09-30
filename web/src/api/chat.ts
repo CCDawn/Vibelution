@@ -19,6 +19,7 @@ import type {
   SessionMessageCurationAction,
   SessionMessageCurationMutationResponse,
   SessionMessageCurationResponse,
+  SessionModelSelection,
   SessionQueryResponse,
   SessionQueuedTurn,
   SessionRewindApplyPayload,
@@ -470,6 +471,8 @@ export function submitSessionMessage(
     turnStatusTail?: unknown;
     /** Opt in to the server queue when a turn is already running. */
     queueIfBusy?: boolean;
+    /** One-shot per-turn model override; absent/undefined follows the session default. */
+    modelSelection?: SessionModelSelection | null;
   },
 ): Promise<SessionTurnAcceptedResponse> {
   return fetchJson<SessionTurnAcceptedResponse>(

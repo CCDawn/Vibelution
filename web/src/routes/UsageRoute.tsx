@@ -1,152 +1,27 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 
 import { fetchUsageSummary } from "../api/usage";
 import { queryKeys } from "../api/queryKeys";
-import type { TokenUsageBreakdownItem, TokenUsageRollup, UsageSource, UsageSummaryResponse } from "../api/types";
+import type { UsageSource } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { deriveQueryPresentation } from "../app/queryPresentation";
-import { VButton, VDenseOpsPage, VIconButton, VLoadingValue, VMetricStrip, VStateSurface, VStatusStrip, VSurface } from "../components/vui";
+import { VButton, VLoadingValue, VRouteLinkButton, VSettingsFormPage, VStateSurface, VTabs } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./UsageRoute.styles";
 
-const SOURCE_KEYS: UsageSource[] = ["provider_usage", "estimated", "missing", "not_called"];
-
-const EMPTY_ROLLUP: TokenUsageRollup = {
-  inputTokens: 0,
-  cachedInputTokens: 0,
-  cacheReadInputTokens: 0,
-  cacheCreationInputTokens: 0,
-  uncachedInputTokens: 0,
-  outputTokens: 0,
-  reasoningOutputTokens: 0,
-  totalTokens: 0,
-  callCount: 0,
-  observedCallCount: 0,
-  estimatedCallCount: 0,
-  missingCallCount: 0,
-  notCalledCount: 0,
-  latencyMs: 0,
-  cacheHitRate: 0,
-};
-
-function label(lang: "zh" | "en", zh: string, en: string) {
-  return lang === "zh" ? zh : en;
-}
-
-function numberText(value: number | undefined) {
-  return new Intl.NumberFormat().format(Math.max(0, Math.round(Number(value ?? 0))));
-}
-
-function percentText(value: number | undefined) {
-  return `${Math.round(Math.max(0, Math.min(1, Number(value ?? 0))) * 100)}%`;
-}
-
-function formatTimestamp(value: string | undefined, lang: "zh" | "en") {
-  const text = String(value || "").trim();
-  if (!text) {
-    return label(lang, "未记录", "Not recorded");
-  }
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) {
-    return text;
-  }
-  return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(parsed);
-}
-
-function sourceLabel(source: UsageSource, lang: "zh" | "en") {
-  if (source === "provider_usage") {
-    return label(lang, "供应商返回", "Provider usage");
-  }
-  if (source === "estimated") {
-    return label(lang, "本地估算", "Estimated");
-  }
-  if (source === "missing") {
-    return label(lang, "缺少用量", "Missing usage");
-  }
-  if (source === "not_called") {
-    return label(lang, "尚未调用", "Not called");
-  }
-  return String(source || "-").replaceAll("_", " ");
-}
-
-function sourceCount(rollup: TokenUsageRollup, source: UsageSource) {
-  if (source === "provider_usage") {
-    return rollup.observedCallCount;
-  }
-  if (source === "estimated") {
-    return rollup.estimatedCallCount;
-  }
-  if (source === "missing") {
-    return rollup.missingCallCount;
-  }
-  if (source === "not_called") {
-    return rollup.notCalledCount;
-  }
-  return 0;
-}
-
-function sourceClassName(source: UsageSource) {
-  if (source === "provider_usage") {
-    return `${styles.sourceTile} ${styles.sourceTileObserved}`;
-  }
-  if (source === "estimated") {
-    return `${styles.sourceTile} ${styles.sourceTileEstimated}`;
-  }
-  if (source === "missing") {
-    return `${styles.sourceTile} ${styles.sourceTileMissing}`;
-  }
-  return `${styles.sourceTile} ${styles.sourceTileEmpty}`;
-}
-
-function usageValue(state: boolean | "unavailable", value: number | undefined, loadingLabel: string) {
-  if (state === "unavailable") {
-    return "不可用";
-  }
-  return state ? <VLoadingValue label={loadingLabel} /> : numberText(value);
-}
-
-function renderUsageRow(labelText: string, value: number, total: number, detail: string) {
-  const ratio = total > 0 ? value / total : 0;
-  return (
-    <div className={styles.usageRow}>
-      <span>{labelText}</span>
-      <div className={styles.progressTrack} aria-hidden="true">
-        <span className={styles.progressFill} style={{ width: percentText(ratio) }} />
-      </div>
-      <strong>{numberText(value)}</strong>
-      <code>{detail}</code>
-    </div>
-  );
-}
-
-function renderBreakdownList(items: TokenUsageBreakdownItem[], emptyLabel: string) {
-  if (!items.length) {
-    return <p className={styles.quietState}>{emptyLabel}</p>;
-  }
-  return (
-    <div className={styles.breakdownList}>
-      {items.map((item) => (
-        <div key={`${item.key}:${item.label}`} className={styles.breakdownRow}>
-          <strong>{item.label || item.key}</strong>
-          <span>{numberText(item.totalTokens)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+type UsageRange = "today" | "last7Days" | "allTime";
+const numberText = (value: number) => new Intl.NumberFormat().format(value);
+const percentage = (part: number, total: number) => (part / total * 100).toFixed(1) + "%";
 
 export function UsageRoute() {
   const { lang } = useAppI18n({ domains: ["core"] });
-  const queryClient = useQueryClient();
+  const copy = (zh: string, en: string) => lang === "zh" ? zh : en;
+  const [range, setRange] = useState<UsageRange>("last7Days");
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const pageVisible = usePageVisibility();
   const usageQuery = useQuery({
     queryKey: queryKeys.usageSummary("global"),
@@ -154,256 +29,114 @@ export function UsageRoute() {
     refetchInterval: resolvePollingInterval(pageVisible, 10_000, { backgroundMs: 60_000 }),
     refetchIntervalInBackground: false,
   });
-
   const summary = usageQuery.data;
-  const globalTokenUsage = summary?.globalTokenUsage;
-  const lastTokenUsage = summary?.lastTokenUsage;
-  const usagePresentation = deriveQueryPresentation({
-    hasData: Boolean(summary),
-    isError: usageQuery.isError,
-    isFetching: usageQuery.isFetching,
-    isPending: usageQuery.isPending,
+  const rollup = summary?.globalTokenUsage?.[range];
+  const last = summary?.lastTokenUsage;
+  const presentation = deriveQueryPresentation({
+    hasData: Boolean(summary), isError: usageQuery.isError,
+    isFetching: usageQuery.isFetching, isPending: usageQuery.isPending,
   });
-  const initialUsageLoading = usagePresentation === "initial-loading";
-  const hasUsageData = Boolean(summary);
-  const usageUnavailable = usagePresentation === "error-empty";
-  const usageValueState = usageUnavailable ? "unavailable" : initialUsageLoading;
-  const allTime = globalTokenUsage?.allTime;
-  const today = globalTokenUsage?.today;
-  const last7Days = globalTokenUsage?.last7Days;
-  const sessionUsage = summary?.sessionTokenUsage;
-  const agentUsage = summary?.agentTokenUsage;
-  const scopeUsage = summary?.scopeTokenUsage;
-  const loadedRollup = (rollup: TokenUsageRollup | undefined) => rollup ?? EMPTY_ROLLUP;
-  const allTimeLoaded = loadedRollup(allTime);
-  const sessionRollupLabel = summary?.rollupFilters?.sessionId || "-";
-  const agentRollupLabel = summary?.rollupFilters?.agentId || "-";
-  const totalTokens = allTimeLoaded.totalTokens;
-  const lastSource = lastTokenUsage?.source ?? "not_called";
-  const sourceStatus = initialUsageLoading ? label(lang, "加载中", "Loading") : sourceLabel(lastSource, lang);
-  const observedRatio = allTimeLoaded.callCount > 0 ? allTimeLoaded.observedCallCount / allTimeLoaded.callCount : 0;
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.usageSummary("global") });
-  };
-  const retry = () => {
-    void usageQuery.refetch();
-  };
-  const emptyBreakdownLabel = label(
-    lang,
-    "当前接口尚未提供真实细分；这里保留为后续模型/来源聚合入口。",
-    "The current API does not expose real breakdown rows yet.",
-  );
+  const loading = presentation === "initial-loading";
+  const ranges = [
+    { id: "today", label: copy("今日", "Today") },
+    { id: "last7Days", label: copy("最近 7 天", "Last 7 days") },
+    { id: "allTime", label: copy("全部时间", "All time") },
+  ];
+  const rangeLabel = ranges.find(item => item.id === range)!.label;
+  const value = (n: number | undefined) => loading
+    ? <VLoadingValue label={copy("正在加载用量", "Loading usage")} />
+    : n === undefined ? "—" : numberText(n);
+  const cacheKnown = Boolean(rollup && rollup.cacheUsageObserved !== false);
+  const sourceLabel = (source: UsageSource | undefined) => ({
+    provider_usage: copy("供应商返回", "Provider usage"),
+    estimated: copy("本地估算", "Estimated"),
+    missing: copy("缺少用量", "Missing usage"),
+    not_called: copy("尚未调用", "Not called"),
+  })[source ?? ""] ?? source ?? "—";
+  const tokenRows = [
+    { name: copy("输入", "Input"), hint: copy("发送给模型的 Token", "Tokens sent to the model"), amount: rollup?.inputTokens },
+    { name: copy("其中缓存输入", "Cached input subset"), hint: copy("已包含在输入中，不重复计入总量", "Included in input, not added again"), amount: cacheKnown ? rollup?.cachedInputTokens : undefined, subset: true },
+    { name: copy("输出", "Output"), hint: copy("模型生成的 Token", "Tokens generated by the model"), amount: rollup?.outputTokens },
+    { name: copy("其中推理输出", "Reasoning output subset"), hint: copy("已包含在输出中，不重复计入总量", "Included in output, not added again"), amount: rollup?.reasoningOutputTokens, subset: true },
+  ];
+  const sourceRows = [
+    { name: copy("供应商返回用量", "Provider-reported usage"), amount: rollup ? numberText(rollup.observedCallCount) + " / " + numberText(rollup.callCount) : undefined,
+      hint: rollup && rollup.callCount > 0 ? percentage(rollup.observedCallCount, rollup.callCount) + " " + copy("覆盖率", "coverage") : copy("暂无可计算比例", "No ratio available") },
+    { name: copy("本地估算", "Local estimates"), amount: rollup && numberText(rollup.estimatedCallCount), hint: copy("没有供应商用量时的补充", "Used when provider usage is absent") },
+    { name: copy("缺少用量", "Missing usage"), amount: rollup && numberText(rollup.missingCallCount), hint: copy("不应解读为零消耗", "Does not mean zero consumption") },
+  ];
+  const diagnostics = [
+    [copy("服务 / 模型", "Provider / model"), [last?.provider, last?.model].filter(Boolean).join(" / ") || "—"],
+    [copy("最近一次用量", "Latest usage"), last && last.source !== "missing" && last.source !== "not_called" && last.totalTokens !== undefined ? numberText(last.totalTokens) + " tokens · " + sourceLabel(last.source) : sourceLabel(last?.source)],
+    [copy("记录时间", "Recorded at"), last?.recordedAt || "—"],
+    [copy("账本", "Ledger"), summary?.diagnostics?.source || "—"],
+    [copy("账本版本", "Schema version"), summary?.diagnostics?.schemaVersion ?? "—"],
+    [copy("跳过记录", "Skipped records"), summary?.diagnostics?.skippedRecordCount ?? "—"],
+    [copy("事件 ID", "Event ID"), last?.eventId || "—"],
+    [copy("会话 ID", "Session ID"), summary?.rollupFilters?.sessionId || "—"],
+    [copy("Agent ID", "Agent ID"), summary?.rollupFilters?.agentId || "—"],
+  ];
 
-  return (
-    <VDenseOpsPage
-      className={styles.page}
-      headerClassName={styles.header}
-      ariaLabel={label(lang, "全局 Token 用量", "Global token usage")}
-      aria-busy={initialUsageLoading}
-      eyebrow="Token"
-      title={label(lang, "全局 Token 用量", "Global token usage")}
-      meta={label(lang, "查看今日、最近七日与累计用量。", "Review today, seven-day and cumulative usage.")}
-      actions={(
-        <VStatusStrip
-          className={styles.headerMeta}
-          items={[
-            { label: label(lang, "来源", "Source"), value: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" },
-            { label: label(lang, "刷新", "Refresh"), value: usagePresentation === "refreshing" ? label(lang, "同步中", "Syncing") : label(lang, "自动", "Auto"), tone: usageQuery.isError ? "danger" : "neutral" },
-            { label: label(lang, "账本", "Ledger"), value: initialUsageLoading ? label(lang, "加载中", "Loading") : summary?.diagnostics?.source ?? "usage_ledger", tone: "info" },
-          ]}
-        />
-      )}
-      toolbarSlot={(
-        <VMetricStrip
-          ariaLabel={label(lang, "Token 用量概览", "Token usage overview")}
-          className={styles.overviewBand}
-          metrics={[
-            { id: "all-time", label: label(lang, "全局累计", "All time"), value: usageValue(usageValueState, allTime?.totalTokens, label(lang, "正在加载全局累计", "Loading all-time usage")) },
-            { id: "today", label: label(lang, "今日", "Today"), value: usageValue(usageValueState, today?.totalTokens, label(lang, "正在加载今日用量", "Loading today's usage")) },
-            { id: "last-seven-days", label: label(lang, "最近七日", "Last 7 days"), value: usageValue(usageValueState, last7Days?.totalTokens, label(lang, "正在加载七日用量", "Loading seven-day usage")) },
-            { id: "latest", label: label(lang, "最近一次", "Latest"), value: usageValue(usageValueState, lastTokenUsage?.totalTokens, label(lang, "正在加载最近用量", "Loading latest usage")), detail: initialUsageLoading ? label(lang, "加载中", "Loading") : formatTimestamp(lastTokenUsage?.recordedAt, lang) },
-          ]}
-          status={{ label: sourceStatus, tone: lastSource === "provider_usage" ? "success" : lastSource === "missing" ? "warning" : "info" }}
-        />
-      )}
-    >
-      {usagePresentation === "error-with-data" ? (
-        <VStateSurface
-          actions={<VButton type="button" onPress={retry}>{label(lang, "重试", "Retry")}</VButton>}
-          className={styles.emptyState}
-          title={label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
-          tone="error"
-        >
-          {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
-        </VStateSurface>
-      ) : usageUnavailable ? (
-        <VStateSurface
-          className={styles.emptyState}
-          title={label(lang, "Token 用量暂不可用", "Token usage unavailable")}
-          tone="error"
-          actions={<VButton type="button" onPress={retry}>{label(lang, "重试", "Retry")}</VButton>}
-        >
-          {usageQuery.error instanceof Error ? usageQuery.error.message : label(lang, "用量摘要读取失败。", "Usage summary failed to load.")}
-        </VStateSurface>
-      ) : initialUsageLoading ? (
-        <VStateSurface
-          busy
-          className={styles.emptyState}
-          skeletonLines={2}
-          title={label(lang, "正在加载 Token 用量", "Loading token usage")}
-          tone="loading"
-        />
-      ) : !summary || lastSource === "not_called" ? (
-        <VStateSurface
-          busy={usageQuery.isFetching}
-          className={styles.emptyState}
-          skeletonLines={usageQuery.isFetching}
-          title={label(lang, "尚未调用", "Not called yet")}
-          tone={usageQuery.isFetching ? "loading" : "info"}
-        >
-          {label(lang, "当前没有可用的 Token 用量记录。", "No token usage record is available yet.")}
-        </VStateSurface>
-      ) : lastSource === "missing" ? (
-        <VStateSurface
-          className={styles.emptyState}
-          title={label(lang, "缺少用量", "Missing usage")}
-          tone="unavailable"
-        >
-          {label(lang, "最近一次调用未返回用量；0 不代表成功用量。", "The latest call did not return usage; zero is not successful usage.")}
-        </VStateSurface>
-      ) : null}
-
-      <div className={styles.metricBand}>
-        <div className={styles.primaryColumn}>
-          <VSurface as="section" className={styles.compositionPanel} elevation="panel" tone="rail">
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{label(lang, "可信度", "Reliability")}</p>
-                <h2>{label(lang, "Token 构成", "Token composition")}</h2>
-              </div>
-              <span className={styles.countPill}>{usageUnavailable ? label(lang, "不可用", "Unavailable") : initialUsageLoading ? <VLoadingValue label={label(lang, "正在加载可信度", "Loading reliability")} /> : percentText(observedRatio)}</span>
-            </div>
-            {!hasUsageData ? (
-              <VStateSurface
-                tone={usageUnavailable ? "unavailable" : "loading"}
-                title={usageUnavailable ? label(lang, "Token 构成不可用", "Token composition unavailable") : label(lang, "正在加载 Token 构成", "Loading token composition")}
-                skeletonLines={usageUnavailable ? undefined : 3}
-              />
-            ) : <><div className={styles.sourceGrid}>
-              {SOURCE_KEYS.map((source) => (
-                <section key={source} className={sourceClassName(source)}>
-                  <span>{sourceLabel(source, lang)}</span>
-                  <strong>{usageValue(usageValueState, sourceCount(allTimeLoaded, source), label(lang, "正在加载来源计数", "Loading source count"))}</strong>
-                </section>
-              ))}
-            </div>
-            <div className={styles.usageList}>
-              {renderUsageRow(label(lang, "输入", "Input"), allTimeLoaded.inputTokens, totalTokens, "")}
-              {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTimeLoaded.cachedInputTokens, allTimeLoaded.inputTokens, percentText(allTimeLoaded.cacheHitRate))}
-              {renderUsageRow(label(lang, "输出", "Output"), allTimeLoaded.outputTokens, totalTokens, "")}
-              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTimeLoaded.reasoningOutputTokens, totalTokens, "")}
-            </div></>}
-          </VSurface>
-
-          <VSurface as="section" className={styles.rollupPanel} elevation="panel" tone="rail">
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{label(lang, "汇总", "Rollups")}</p>
-                <h2>{label(lang, "计数概览", "Counting overview")}</h2>
-              </div>
-              <VIconButton
-                type="button"
-                className={styles.refreshButton}
-                label={label(lang, "刷新 Token 用量", "Refresh token usage")}
-                icon={<RefreshCw size={16} />}
-                onPress={refresh}
-              />
-            </div>
-            {!hasUsageData ? (
-              <VStateSurface
-                tone={usageUnavailable ? "unavailable" : "loading"}
-                title={usageUnavailable ? label(lang, "计数概览不可用", "Counting overview unavailable") : label(lang, "正在加载计数概览", "Loading counting overview")}
-                skeletonLines={usageUnavailable ? undefined : 3}
-              />
-            ) : <div className={styles.rollupGrid}>
-              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-                <span>{label(lang, "当前范围", "Current scope")}</span>
-                <strong>{usageValue(usageValueState, scopeUsage?.totalTokens, label(lang, "正在加载范围用量", "Loading scope usage"))}</strong>
-              </div>
-              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-                <span>{label(lang, "最近会话", "Latest session")}</span>
-                <strong>{usageValue(usageValueState, sessionUsage?.totalTokens, label(lang, "正在加载会话用量", "Loading session usage"))}</strong>
-              </div>
-              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-                <span>{label(lang, "最近 Agent", "Latest agent")}</span>
-                <strong>{usageValue(usageValueState, agentUsage?.totalTokens, label(lang, "正在加载 Agent 用量", "Loading agent usage"))}</strong>
-              </div>
-              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-                <span>{label(lang, "上下文窗口", "Context window")}</span>
-                <strong>{usageValue(usageValueState, summary?.modelContextWindow, label(lang, "正在加载上下文窗口", "Loading context window"))}</strong>
-              </div>
-              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-                <span>{label(lang, "延迟累计", "Latency total")}</span>
-                <strong>{usageValue(usageValueState, allTime?.latencyMs, label(lang, "正在加载延迟", "Loading latency"))} ms</strong>
-              </div>
-            </div>}
-          </VSurface>
+  return <div className={styles.page}>
+    <div className={styles.sheet}>
+      <nav className={styles.breadcrumb} aria-label={copy("设置导航", "Settings navigation")}>
+        <VRouteLinkButton to="/config" variant="ghost" icon={<ArrowLeft size={15} />}>
+          {copy("设置", "Settings")}
+        </VRouteLinkButton><ChevronRight size={13} aria-hidden="true" /><span>{copy("用量统计", "Usage")}</span>
+      </nav>
+      <VSettingsFormPage title={copy("用量统计", "Usage statistics")} ariaLabel={copy("用量统计", "Usage statistics")}
+        meta={copy("查看全局模型消耗与统计来源。", "Review global model usage and its sources.")}
+        className={styles.recipe} headerClassName={styles.header} bodyClassName={styles.body} aria-busy={loading}
+        actions={<VButton variant="secondary" icon={<RefreshCw size={15} />} isDisabled={usageQuery.isFetching}
+          onPress={() => { void usageQuery.refetch(); }}>{copy("刷新", "Refresh")}</VButton>}>
+        <div className={styles.rangeRow}>
+          <VTabs aria-label={copy("统计时间范围", "Usage time range")} value={range}
+            onValueChange={id => setRange(id as UsageRange)} items={ranges} />
+          <span role="status">{loading ? copy("正在加载统计…", "Loading usage…")
+            : usageQuery.isError ? copy("更新失败", "Update failed")
+              : presentation === "refreshing" ? copy("同步中", "Refreshing") : copy("自动更新", "Auto-updating")}</span>
         </div>
-
-        <VSurface as="aside" className={styles.recordPanel} elevation="panel" tone="rail">
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{label(lang, "最近记录", "Latest record")}</p>
-              <h2>{sourceStatus}</h2>
-            </div>
-            <span className={styles.countPill}>
-              <Database size={13} />
-              {usageUnavailable
-                ? label(lang, "不可用", "Unavailable")
-                : initialUsageLoading
-                  ? <VLoadingValue label={label(lang, "正在加载 schema 版本", "Loading schema version")} />
-                  : summary?.diagnostics?.schemaVersion ?? "-"}
-            </span>
-          </div>
-          {!hasUsageData ? (
-            <VStateSurface
-              tone={usageUnavailable ? "unavailable" : "loading"}
-              title={usageUnavailable ? label(lang, "最近记录不可用", "Latest record unavailable") : label(lang, "正在加载最近记录", "Loading latest record")}
-              skeletonLines={usageUnavailable ? undefined : 3}
-            />
-          ) : <><div className={styles.detailGrid}>
-            <div className={styles.detailRow}>
-              <span>{label(lang, "服务与模型", "Provider / model")}</span>
-              <strong>{[lastTokenUsage?.provider, lastTokenUsage?.model].filter(Boolean).join(" / ") || "-"}</strong>
-            </div>
-            <div className={styles.detailRow}>
-              <span>{label(lang, "缓存读取", "Cache read")}</span>
-              <strong>{numberText(lastTokenUsage?.cacheReadInputTokens)}</strong>
-            </div>
-            <div className={styles.detailRow}>
-              <span>{label(lang, "未缓存输入", "Uncached input")}</span>
-              <strong>{numberText(lastTokenUsage?.uncachedInputTokens)}</strong>
-            </div>
-            <div className={styles.detailRow}>
-              <span>{label(lang, "跳过记录", "Skipped rows")}</span>
-              <strong>{numberText(summary?.diagnostics?.skippedRecordCount)}</strong>
-            </div>
-          </div>
-          <details className={styles.technicalDetails}>
-            <summary>{label(lang, "记录与诊断详情", "Record and diagnostic details")}</summary>
-            <div className={styles.detailGrid}>
-              <div className={styles.detailRow}>
-                <span>event</span>
-                <strong>{lastTokenUsage?.eventId || "-"}</strong>
-              </div>
-              <div className={styles.detailRow}><span>{label(lang, "会话 ID", "Session ID")}</span><strong>{sessionRollupLabel}</strong></div>
-              <div className={styles.detailRow}><span>{label(lang, "Agent ID", "Agent ID")}</span><strong>{agentRollupLabel}</strong></div>
-              <div className={styles.detailRow}><span>{label(lang, "统计范围", "Scope")}</span><strong>{summary?.scope ?? "global"}</strong></div>
-            </div>
-          </details>
-          {renderBreakdownList(summary?.breakdowns?.models ?? [], emptyBreakdownLabel)}</>}
-        </VSurface>
-      </div>
-    </VDenseOpsPage>
-  );
+        {usageQuery.isError && <VStateSurface tone="error" title={summary
+          ? copy("更新失败，保留上次成功读取的数据", "Update failed; showing the last successful snapshot")
+          : copy("用量暂不可用", "Usage unavailable")}>
+          {usageQuery.error instanceof Error ? usageQuery.error.message : copy("请点击刷新重试。", "Select Refresh to retry.")}
+        </VStateSurface>}
+        {loading && <span className="sr-only">{copy("正在加载 Token 用量", "Loading token usage")}</span>}
+        {!loading && !usageQuery.isError && !rollup && <VStateSurface tone="unavailable" title={copy("此时间范围的统计暂不可用", "Usage for this range is unavailable")} />}
+        {rollup?.callCount === 0 && <VStateSurface tone="info" title={copy("此时间范围内暂无调用", "No calls in this time range")} />}
+        <section className={styles.metrics} aria-label={copy("用量概览", "Usage overview")}>
+          <div className={styles.metric}><span>{copy("Token 总量", "Total tokens")}</span><strong data-testid="usage-total">{value(rollup?.totalTokens)}</strong><small>tokens · {copy("账本汇总", "Ledger total")}</small></div>
+          <div className={styles.metric}><span>{copy("调用次数", "Calls")}</span><strong data-testid="usage-calls">{value(rollup?.callCount)}</strong><small>{rangeLabel} · {copy("按账本记录统计", "Ledger records")}</small></div>
+          <div className={styles.metric}><span>{copy("缓存输入占比", "Cached input share")}</span><strong data-testid="usage-cache-share">{loading ? <VLoadingValue label={copy("正在加载用量", "Loading usage")} /> : cacheKnown && rollup && rollup.inputTokens > 0 ? percentage(rollup.cachedInputTokens, rollup.inputTokens) : "—"}</strong><small>{copy("缓存输入 ÷ 全部输入", "Cached input / all input")}</small></div>
+        </section>
+        <section>
+          <div className={styles.sectionHeading}><h2>{copy("Token 构成", "Token composition")}</h2><span>{rangeLabel}</span></div>
+          {rollup && rollup.inputTokens + rollup.outputTokens > 0 && <div className={styles.composition} aria-hidden="true">
+            {/* Data-driven chart width, not layout styling. */}
+            <span style={{ width: (rollup.inputTokens / (rollup.inputTokens + rollup.outputTokens) * 100) + "%" }} /><span className={styles.outputSegment} />
+          </div>}
+          <div>{tokenRows.map(row => <div key={row.name} className={row.subset ? styles.tokenRow + " " + styles.subset : styles.tokenRow}>
+            <div><strong>{row.name}</strong><span>{row.hint}</span></div><span>{value(row.amount)}</span>
+          </div>)}</div>
+          {rollup && (rollup.cacheUsageObserved === false || rollup.cacheUsageComplete === false) && <p className={styles.note}>
+            {copy("部分或全部调用未返回缓存明细；已记录的缓存输入不代表完整缓存用量。", "Some calls lack cache details; recorded cached input may be incomplete.")}
+          </p>}
+        </section>
+        <section className={styles.sources}>
+          <div className={styles.sectionHeading}><h2>{copy("统计来源", "Usage sources")}</h2><span>{copy("按调用次数，不是准确率评分", "By calls, not an accuracy score")}</span></div>
+          {sourceRows.map(row => <div className={styles.sourceRow} key={row.name}><span>{row.name}</span><strong>{loading ? <VLoadingValue label={copy("正在加载用量", "Loading usage")} /> : row.amount === undefined ? "—" : row.amount + " " + copy("次", "calls")}</strong><span>{row.hint}</span></div>)}
+        </section>
+        <div className={styles.diagnostics}>
+          <VButton variant="ghost" contentLayout="plain" className={styles.diagnosticsToggle} aria-expanded={diagnosticsOpen}
+            aria-controls="usage-diagnostics" onPress={() => setDiagnosticsOpen(!diagnosticsOpen)}>
+            {diagnosticsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}<span>{copy("最近一次调用与诊断", "Latest call and diagnostics")}</span><small>{copy("独立于上方时间范围", "Independent of the selected range")}</small>
+          </VButton>
+          {diagnosticsOpen && <dl id="usage-diagnostics" className={styles.details}>
+            {diagnostics.map(([name, detail]) => <div key={name}><dt>{name}</dt><dd>{loading ? <VLoadingValue label={copy("正在加载用量", "Loading usage")} /> : detail}</dd></div>)}
+          </dl>}
+        </div>
+        <p className={styles.note}>{copy("仅展示已记录的用量，不等同于供应商账单；缓存与推理 Token 是输入、输出的子项。", "Recorded usage only, not a provider invoice. Cached and reasoning tokens are subsets of input and output.")}</p>
+      </VSettingsFormPage>
+    </div>
+  </div>;
 }

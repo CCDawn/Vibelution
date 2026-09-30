@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import React, {act} from "react";
 import {createRoot, type Root} from "react-dom/client";
+import {MemoryRouter} from "react-router-dom";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {ConfigSettingsIndex} from "./ConfigSettingsIndex";
 import {ConfigDesktopPetSettings} from "./ConfigDesktopPetSettings";
@@ -15,14 +16,24 @@ beforeEach(async () => {
   vi.stubGlobal("vibelutionLauncher",{controlDesktopPet:control});
   control.mockReset().mockResolvedValue({open:false,busyElsewhere:false}); navigate.mockReset();
   host=document.createElement("div");document.body.append(host);root=createRoot(host);
-  await act(async()=>root.render(<ConfigSettingsIndex groups={groups} sections={sections} language="zh" onNavigate={navigate}/>));
+  await act(async()=>root.render(<MemoryRouter><ConfigSettingsIndex groups={groups} sections={sections} language="zh" onNavigate={navigate}/></MemoryRouter>));
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
 function button(text:string){return [...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.includes(text) || b.getAttribute("aria-label") === text)!;}
+it("does not duplicate usage inside unrelated settings categories", async()=>{
+  await act(async()=>root.render(<MemoryRouter><ConfigSettingsIndex groups={groups} sections={sections} language="zh" onNavigate={navigate} showUsage={false}/></MemoryRouter>));
+  expect(host.querySelector('a[href="/usage"]')).toBeNull();
+});
 it("renders one entry per existing feature and navigates without replacing its editor", async()=>{
   expect(host.querySelectorAll("button")).toHaveLength(3);
   await act(async()=>button("个人资料").click());
   expect(navigate).toHaveBeenCalledWith("avatar-pet","identity-profile","user-profile");
+});
+it("keeps usage statistics as its own settings row linking to the existing usage page",()=>{
+  const link=host.querySelector<HTMLAnchorElement>('a[href="/usage"]');
+  expect(host.textContent).toContain("使用与诊断");
+  expect(link?.textContent).toContain("用量统计");
+  expect(link?.textContent).toContain("查看 Token 用量与请求统计");
 });
 it("uses actual pet state and can reopen after a close", async()=>{
   expect(host.textContent).toContain("已关闭");

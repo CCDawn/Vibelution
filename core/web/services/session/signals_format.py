@@ -926,14 +926,27 @@ def _make_provider_failure_chat_message(
     *,
     error_type: str,
     turn_id: str,
+    llm_usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
-    return s._make_turn_error_chat_message(
+    message = s._make_turn_error_chat_message(
         turn_error,
         error_type=error_type,
         turn_id=turn_id,
         provider_failure=str(error_type or "").strip() != "prompt_cache_unsupported",
     )
+    if isinstance(llm_usage, dict) and llm_usage:
+        # Failed-turn DTO carries the usage its attempt produced so the turn
+        # timeline shows real token facts instead of only successful turns.
+        # Normalize here so raw snake_case provider payloads still land the
+        # camelCase DTO contract.
+        normalized = s._normalize_turn_llm_usage(llm_usage)
+        if normalized is not None:
+            message["metadata"] = {
+                **(message.get("metadata") if isinstance(message.get("metadata"), dict) else {}),
+                "llmUsage": normalized,
+            }
+    return message
 
 
 def _merge_continuation_visible_result(
