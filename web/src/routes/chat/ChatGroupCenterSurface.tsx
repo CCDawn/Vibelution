@@ -553,11 +553,7 @@ export function ChatGroupCenterSurface({
           density="surface"
           titleRowClassName={styles.groupConversationTitleRow}
           eyebrow={(
-            <p>
-              {activeGroupRoom?.mode ?? "round_robin"}
-              {" · "}
-              {activeGroupRoom?.purpose ?? "discussion"}
-            </p>
+            <p>{lang === "zh" ? "全局广播" : "Project-wide broadcast"}</p>
           )}
           title={(
             <>
@@ -573,7 +569,9 @@ export function ChatGroupCenterSurface({
           )}
           meta={(
             <span>
-              {projectBusTimeline?.activeAgentCount ?? availableGroupParticipantCount} {lang === "zh" ? "位 active Agent" : "active agents"}
+              {projectBusTimeline
+                ? `${projectBusTimeline.activeAgentCount} ${lang === "zh" ? "位 active Agent" : "active agents"}`
+                : (lang === "zh" ? "正在统计 active Agent" : "Counting active agents")}
               {" · "}
               {lang === "zh" ? "全局广播与投递观察" : "broadcasts and delivery observation"}
             </span>
@@ -669,26 +667,6 @@ export function ChatGroupCenterSurface({
                 </article>
               );
             })
-          ) : rounds.length ? (
-            <GroupRoundsTimeline
-              rounds={rounds}
-              purposeFallback={activeGroupRoom?.purpose ?? "discussion"}
-              userDisplayName={userDisplayName}
-              lang={lang}
-              formatTime={formatTime}
-              statusLabel={statusLabel}
-              activeGroupParticipantById={activeGroupParticipantById}
-              groupParticipantIdentity={groupParticipantIdentity}
-              renderAgentAvatar={renderAgentAvatar}
-              avatarInitials={avatarInitials}
-              expandedGroupMessageIds={expandedGroupMessageIds}
-              chatMentionTargets={chatMentionTargets}
-              groupStreamConnected={groupStreamConnected}
-              groupSpeakerStreams={groupSpeakerStreams}
-              groupSpeakerProgress={groupSpeakerProgress}
-              onOpenMentionTarget={onOpenMentionTarget}
-              onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
-            />
           ) : (
             <div className={styles.groupEmptyState}>
               <BellRing size={28} />

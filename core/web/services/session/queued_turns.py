@@ -23,11 +23,24 @@ QUEUED_TURN_STATE_KEY = "queued_turns"
 BRANCH_GENERATION_KEY = "branchGeneration"
 MAX_QUEUED_TURNS_PER_SESSION = 20
 MAX_RUNTIME_NOTICES_PER_SESSION = 20
+# Conservative ceiling on rows merged into ONE model turn for any drain run
+# that merges child returns (a mixed run, or a run of subagent returns); it
+# keeps interleaved background and child-session results from blowing up a
+# single turn's context. Pure ``task_notification`` runs keep the historical
+# unbounded behavior (they stay bounded only by the session notice cap).
+MAX_NOTICE_BATCH_PER_TURN = 8
 DRAINED_TURN_MESSAGE_SOURCE = "queued_turn"
+DRAINED_NOTICE_BATCH_SOURCE = "queued_notice_batch"
+DRAINED_CONTROL_NOTICE_SOURCE = "queued_turn_control_notice"
 KIND_USER = "user"
 KIND_TASK_NOTIFICATION = "task_notification"
 KIND_SUBAGENT_MESSAGE = "subagent_message"
+KIND_CONTROL_NOTICE = "control_notice"
 RUNTIME_NOTICE_KINDS = frozenset({KIND_TASK_NOTIFICATION, KIND_SUBAGENT_MESSAGE})
+# Machine-queued rows that carry branchGeneration fencing and share the
+# session notice cap. Control notices additionally drain journal-only: they
+# record a user decision without starting a model turn.
+MACHINE_NOTICE_KINDS = RUNTIME_NOTICE_KINDS | {KIND_CONTROL_NOTICE}
 
 # A claim normally settles within seconds: the submit either accepts the turn,
 # keeps the row queued on a busy race, or fails it into "blocked". Only a
@@ -72,7 +85,7 @@ def _normalize_queued_references(items: Any) -> list[dict[str, Any]]:
 
 def _row_kind(item: dict[str, Any]) -> str:
     kind = str(item.get("kind") or KIND_USER).strip() or KIND_USER
-    if kind in RUNTIME_NOTICE_KINDS or kind == KIND_USER:
+    if kind in MACHINE_NOTICE_KINDS or kind == KIND_USER:
         return kind
     return KIND_USER
 
@@ -98,7 +111,7 @@ def branch_generation_from_conversation(conversation: dict[str, Any] | None) -> 
 
 
 def _notice_is_stale(row: dict[str, Any], current_generation: int) -> bool:
-    if _row_kind(row) not in RUNTIME_NOTICE_KINDS:
+    if _row_kind(row) not in MACHINE_NOTICE_KINDS:
         return False
     generation = _row_generation(row)
     return generation is not None and generation != current_generation
@@ -570,10 +583,11 @@ def session_branch_generation(session_id: str) -> int:
 def advance_session_branch_generation(session_id: str, *, publish: bool = True) -> int:
     """Move the session to the next rewind generation and drop stale notices.
 
-    User-authored queued turns stay. Background-task and child-session notices
-    stamped with an older generation are removed, including ones that arrive
-    after the rewind. Callers that already publish a session snapshot pass
-    ``publish=False`` so a later failure does not emit an extra snapshot.
+    User-authored queued turns stay. Background-task, child-session, and
+    control notices stamped with an older generation are removed, including
+    ones that arrive after the rewind. Callers that already publish a session
+    snapshot pass ``publish=False`` so a later failure does not emit an extra
+    snapshot.
     """
 
     s = _service()
@@ -664,7 +678,7 @@ def enqueue_session_runtime_notice(
         for row in rows:
             if str(row.get("sourceId") or "").strip() == normalized_source_id:
                 return row
-        notice_count = sum(1 for row in rows if _row_kind(row) in RUNTIME_NOTICE_KINDS)
+        notice_count = sum(1 for row in rows if _row_kind(row) in MACHINE_NOTICE_KINDS)
         if notice_count >= MAX_RUNTIME_NOTICES_PER_SESSION:
             return {
                 "id": "",
@@ -696,6 +710,146 @@ def enqueue_session_runtime_notice(
     return row
 
 
+def _sealed_child_return_drop(child_session_id: str, turn_id: str) -> dict[str, Any] | None:
+    """Drop a child return whose notifications were sealed, without waking the parent.
+
+    The seal is written by the cascade stop when the owning parent turn was
+    explicitly cancelled. A return arriving afterwards goes through the same
+    dropped shape as the stale-branch channel (``dropped=sealed``) and never
+    touches the parent queue, so a settled turn is not woken. Registry
+    unavailability fails open (behave as unsealed), mirroring the fencing
+    philosophy: the drop decision needs a readable ledger.
+    """
+
+    try:
+        from .. import runtime_task_registry as runtime_tasks
+
+        store = runtime_tasks.default_store()
+        if not store.is_notification_sealed(child_session_id):
+            return None
+    except Exception:
+        return None
+    dropped_at = datetime.now(timezone.utc).isoformat()
+    try:
+        store.update_task(
+            child_session_id,
+            lambda state: {
+                **state,
+                "lastNotificationDrop": {
+                    "dropped": "sealed",
+                    "at": dropped_at,
+                    "turnId": str(turn_id or "").strip(),
+                },
+            },
+        )
+        store.mark_task_terminal(
+            child_session_id,
+            status="canceled",
+            reason="notification_sealed",
+        )
+    except Exception:
+        pass
+    return {
+        "id": "",
+        "kind": KIND_SUBAGENT_MESSAGE,
+        "status": "dropped",
+        "dropped": "sealed",
+        "sourceId": f"child-return:{child_session_id}:{turn_id}",
+        "childSessionId": child_session_id,
+    }
+
+
+def enqueue_session_control_notice(
+    session_id: str,
+    *,
+    content: str,
+    source_id: str,
+    branch_generation: int | None = None,
+    lang: str = "",
+) -> dict[str, Any]:
+    """Queue one control-only user decision row (journal-only on drain).
+
+    GUI actions that resolve while a turn is busy (for example a direct start
+    recorded from a panel) append a ``control_notice`` row instead of sending
+    a message. The row keeps queue order and, on drain, only appends a
+    ``user_message`` journal event with ``visible_in_model`` disabled: the
+    decision stays audit-visible in the session journal but never enters
+    model prompt history and never starts a model turn. Generation fencing
+    and the session notice cap match runtime notices, so a rewind drops a
+    control notice recorded against an older branch.
+    """
+
+    s = _service()
+    lang = str(lang or "").strip() or s.get_web_language()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_source_id = str(source_id or "").strip()
+    text = str(content or "").strip()
+    if not normalized_session_id:
+        raise s.SessionNotFoundError(
+            s.text_for(lang, zh="未找到当前会话。", en="Session not found.")
+        )
+    if not normalized_source_id or not text:
+        raise s.SessionValidationError(
+            s.text_for(lang, zh="控制记录缺少内容或来源。", en="A control notice needs text and a source id.")
+        )
+    stamped_generation: int | None
+    if branch_generation is None:
+        stamped_generation = None
+    else:
+        try:
+            stamped_generation = max(0, int(branch_generation))
+        except (TypeError, ValueError):
+            stamped_generation = None
+    with s._CHAT_STATE_LOCK:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if conversation is None:
+            raise s.SessionNotFoundError(
+                s.text_for(lang, zh="未找到当前会话。", en="Session not found.")
+            )
+        s._ensure_session_mutable(normalized_session_id, conversation=conversation)
+        current_generation = branch_generation_from_conversation(conversation)
+        if stamped_generation is not None and stamped_generation != current_generation:
+            return {
+                "id": "",
+                "kind": KIND_CONTROL_NOTICE,
+                "status": "dropped",
+                "dropped": "stale_branch",
+                "sourceId": normalized_source_id,
+                "branchGeneration": current_generation,
+            }
+        rows = session_queued_turn_rows(conversation)
+        for row in rows:
+            if str(row.get("sourceId") or "").strip() == normalized_source_id:
+                return row
+        notice_count = sum(1 for row in rows if _row_kind(row) in MACHINE_NOTICE_KINDS)
+        if notice_count >= MAX_RUNTIME_NOTICES_PER_SESSION:
+            return {
+                "id": "",
+                "kind": KIND_CONTROL_NOTICE,
+                "status": "dropped",
+                "dropped": "queue_full",
+                "sourceId": normalized_source_id,
+                "branchGeneration": current_generation,
+            }
+        row = {
+            "id": _new_queued_turn_id(),
+            "kind": KIND_CONTROL_NOTICE,
+            "sourceId": normalized_source_id,
+            "content": text,
+            "attachments": [],
+            "references": [],
+            "status": "queued",
+            "branchGeneration": current_generation if stamped_generation is None else stamped_generation,
+            "createdAt": s._now_timestamp(),
+            "updatedAt": s._now_timestamp(),
+        }
+        _write_queued_turn_rows(s, normalized_session_id, conversation, [*rows, row])
+    s._publish_session_detail_snapshot(normalized_session_id)
+    s._schedule_session_queued_turn_drain(normalized_session_id)
+    row["position"] = len(rows) + 1
+    return row
+
+
 def notify_parent_session_of_child_return(session_id: str, *, turn_id: str) -> dict[str, Any] | None:
     """Queue a child session's finished turn onto its parent, once per turn."""
 
@@ -714,6 +868,9 @@ def notify_parent_session_of_child_return(session_id: str, *, turn_id: str) -> d
     ).strip()
     if not parent_id or parent_id == normalized_session_id:
         return None
+    sealed_drop = _sealed_child_return_drop(normalized_session_id, normalized_turn_id)
+    if sealed_drop is not None:
+        return sealed_drop
     title = str(conversation.get("task_title") or conversation.get("title") or "子对话").strip() or "子对话"
     summary = ""
     try:
@@ -826,10 +983,16 @@ def _claim_next_queued_turn(session_id: str) -> dict[str, Any] | None:
 
 
 def _claim_drain_batch(session_id: str) -> list[dict[str, Any]]:
-    """Claim the next drainable unit: one user or child return, or a notice batch.
+    """Claim the next drainable unit: one user, control, or notice run.
 
-    Contiguous queued ``task_notification`` rows leave together so one model
-    turn absorbs the whole batch. Stale notices are removed before selection.
+    A run of queued machine notices (``task_notification`` and
+    ``subagent_message`` in any mix) leaves together so one model turn absorbs
+    the whole run; a real user row always cuts the run and keeps its own turn.
+    A run that merges child returns (any run that is not pure
+    ``task_notification``) is capped at ``MAX_NOTICE_BATCH_PER_TURN`` rows —
+    pure ``task_notification`` runs keep the historical unbounded behavior —
+    and stale notices are removed before selection. ``control_notice`` rows
+    never join a run: they drain one at a time as journal-only records.
     """
 
     s = _service()
@@ -855,13 +1018,19 @@ def _claim_drain_batch(session_id: str) -> list[dict[str, Any]]:
         index = next((i for i, row in enumerate(rows) if row["status"] == "queued"), -1)
         if index >= 0:
             end = index + 1
-            if _row_kind(rows[index]) == KIND_TASK_NOTIFICATION:
+            if _row_kind(rows[index]) in RUNTIME_NOTICE_KINDS:
                 while (
                     end < len(rows)
                     and rows[end]["status"] == "queued"
-                    and _row_kind(rows[end]) == KIND_TASK_NOTIFICATION
+                    and _row_kind(rows[end]) in RUNTIME_NOTICE_KINDS
                 ):
                     end += 1
+                window = rows[index:end]
+                # Only a pure task_notification run keeps the historical
+                # unbounded behavior; any run that merges child returns
+                # (mixed or subagent-only) is capped per turn.
+                if {_row_kind(row) for row in window} != {KIND_TASK_NOTIFICATION}:
+                    end = index + min(len(window), max(1, MAX_NOTICE_BATCH_PER_TURN))
             claimed = [dict(row) for row in rows[index:end]]
             claimed_at = s._now_timestamp()
             for offset in range(index, end):
@@ -908,6 +1077,35 @@ def _settle_claimed_queued_turn(
         s._publish_session_detail_snapshot(session_id)
 
 
+def _journal_control_notice_row(session_id: str, row: dict[str, Any]) -> None:
+    """Append a control notice's user decision to the journal, model-invisible.
+
+    The event is a ``user_message`` with ``visible_in_model`` disabled, so the
+    action stays audit-visible in the session journal while
+    ``model_visible_messages_from_events`` keeps it out of prompt history. No
+    model turn starts; the queued row is the only queue artifact.
+    """
+
+    s = _service()
+    s._append_session_conversation_event(
+        session_id,
+        str(row.get("id") or "").strip(),
+        s.EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={
+            "content": str(row.get("content") or ""),
+            "attachments": [],
+            "references": [],
+            "metadata": {
+                "kind": KIND_CONTROL_NOTICE,
+                "sourceId": str(row.get("sourceId") or ""),
+            },
+        },
+        source=DRAINED_CONTROL_NOTICE_SOURCE,
+        visible_in_model=False,
+    )
+
+
 def drain_session_queued_turns(session_id: str) -> bool:
     """Start the next queued turn once the session is idle.
 
@@ -927,10 +1125,34 @@ def drain_session_queued_turns(session_id: str) -> bool:
         batch = _claim_drain_batch(normalized_session_id)
         if not batch:
             return False
-        queued_turn_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "").strip()]
         head = batch[0]
         kind = _row_kind(head)
-        if kind == KIND_TASK_NOTIFICATION:
+        if kind == KIND_CONTROL_NOTICE:
+            queued_turn_id = str(head.get("id") or "").strip()
+            try:
+                _journal_control_notice_row(normalized_session_id, head)
+            except Exception as exc:  # noqa: BLE001 - a control row must fail visibly
+                _settle_claimed_queued_turn(
+                    normalized_session_id,
+                    queued_turn_id,
+                    error=exc,
+                    keep_queued=False,
+                )
+            else:
+                _settle_claimed_queued_turn(
+                    normalized_session_id,
+                    queued_turn_id,
+                    error=None,
+                    keep_queued=False,
+                )
+            return True
+        queued_turn_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "").strip()]
+        batch_kinds: list[str] = []
+        for item in batch:
+            item_kind = _row_kind(item)
+            if item_kind not in batch_kinds:
+                batch_kinds.append(item_kind)
+        if kind == KIND_TASK_NOTIFICATION and batch_kinds == [KIND_TASK_NOTIFICATION]:
             content = "\n\n".join(
                 str(item.get("content") or "").strip()
                 for item in batch
@@ -946,7 +1168,7 @@ def drain_session_queued_turns(session_id: str) -> bool:
                 "write_intent": False,
                 "message_metadata": message_metadata,
             }
-        elif kind == KIND_SUBAGENT_MESSAGE:
+        elif kind == KIND_SUBAGENT_MESSAGE and len(batch) == 1:
             content = str(head.get("content") or "")
             message_source = KIND_SUBAGENT_MESSAGE
             submit_kwargs = {
@@ -956,6 +1178,32 @@ def drain_session_queued_turns(session_id: str) -> bool:
                     "sourceId": str(head.get("sourceId") or ""),
                     "childSessionId": str(head.get("childSessionId") or ""),
                 },
+            }
+        elif kind in RUNTIME_NOTICE_KINDS:
+            # Mixed machine-notice run: task results and child returns are
+            # both background bookkeeping, so they report in one model turn,
+            # keeping queue order. ``merged_kinds`` audits which kinds rode
+            # together.
+            content = "\n\n".join(
+                str(item.get("content") or "").strip()
+                for item in batch
+                if str(item.get("content") or "").strip()
+            )
+            message_source = DRAINED_NOTICE_BATCH_SOURCE
+            message_metadata = {
+                "kind": DRAINED_NOTICE_BATCH_SOURCE,
+                "merged_kinds": batch_kinds,
+                "sourceIds": [str(item.get("sourceId") or "") for item in batch],
+                "taskIds": [str(item.get("taskId") or "") for item in batch if str(item.get("taskId") or "").strip()],
+                "childSessionIds": [
+                    str(item.get("childSessionId") or "")
+                    for item in batch
+                    if str(item.get("childSessionId") or "").strip()
+                ],
+            }
+            submit_kwargs = {
+                "write_intent": False,
+                "message_metadata": message_metadata,
             }
         else:
             content = str(head.get("content") or "")

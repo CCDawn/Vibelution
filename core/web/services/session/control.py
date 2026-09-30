@@ -23,6 +23,7 @@ def request_stop_session_turn(
     *,
     expected_turn_id: str = "",
     fast_ack: bool = False,
+    cascade: bool = True,
 ) -> dict:
     """Interrupt the active web chat turn after optional identity validation.
 
@@ -36,6 +37,12 @@ def request_stop_session_turn(
     request (provider abort or the next cooperative checkpoint), so the HTTP
     response no longer scales with transcript size or projection congestion.
     Internal callers keep the hydrated-detail response by default.
+
+    With ``cascade`` (the default) the active descendant task subtree — child
+    sessions and background tasks registered under this session in the unified
+    runtime task registry — is stopped and sealed so late completions cannot
+    wake the settled turn. A session without active descendants behaves
+    exactly as before.
     """
     s = _service()
 
@@ -73,13 +80,23 @@ def request_stop_session_turn(
         )
     )
     stop_snapshot = controller.snapshot()
+    stop_turn_id = str(stop_snapshot.get("turnId") or controller.turn_id)
+    if cascade:
+        # Explicit cancel of this turn closes the whole descendant subtree:
+        # stop each active descendant task and seal its completion
+        # notifications so a late return can never wake the settled turn.
+        # Failures inside the cascade never fail the user-facing stop.
+        try:
+            _cascade_stop_descendant_runtime_tasks(conversation_id, turn_id=stop_turn_id)
+        except Exception:
+            pass
     queued_turn_cancelled = s._cancel_queued_session_turn(
         conversation_id,
-        str(stop_snapshot.get("turnId") or controller.turn_id),
+        stop_turn_id,
     )
     s._record_chat_next_state_signal(
         session_id=conversation_id,
-        turn_id=str(stop_snapshot.get("turnId") or controller.turn_id),
+        turn_id=stop_turn_id,
         source="user",
         kind="user_stops",
         polarity="negative",
@@ -125,6 +142,78 @@ def request_stop_session_turn(
         "stopRequested": True,
         "activeTurnId": str(stop_snapshot.get("turnId") or controller.turn_id),
     }
+
+
+def _cascade_stop_descendant_runtime_tasks(session_id: str, *, turn_id: str) -> list[dict[str, Any]]:
+    """Stop and seal the active descendant task subtree of one session.
+
+    The registry owns the ledger: targets are collected breadth-first via
+    ``parentSessionId`` (child-session tasks recurse into their own session
+    id, cycle-safe, depth-capped). Each target is sealed before it is stopped
+    so its own settle-time return notification is already sealed when it
+    fires. Child sessions go through the single-session stop primitive with
+    ``cascade=False`` — their own subtree is already part of the collected
+    list — while other task kinds get a ledger stop intent (no native worker
+    cancel API exists for them yet). Every stopped task is annotated with
+    ``cascadeStop`` audit fields and the whole manifest is reported to the
+    caller for the session lifecycle event.
+    """
+
+    from .. import runtime_task_registry as runtime_tasks
+
+    s = _service()
+    root_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not root_session_id:
+        return []
+    store = runtime_tasks.default_store()
+    targets = store.collect_cascade_targets(root_session_id)
+    if not targets:
+        return []
+    report: list[dict[str, Any]] = []
+    for target in targets:
+        task_id = str(target.get("taskId") or "").strip()
+        kind = str(target.get("kind") or "").strip()
+        entry: dict[str, Any] = {
+            "taskId": task_id,
+            "kind": kind,
+            "cascadeDepth": target.get("cascadeDepth"),
+            "stopResult": "",
+            "sealed": False,
+            "error": "",
+        }
+        try:
+            store.seal_and_request_stop(
+                task_id,
+                reason=runtime_tasks.SEAL_REASON_PARENT_TURN_CANCELLED,
+                turn_id=normalized_turn_id,
+                cascaded_from=root_session_id,
+                initiator="user",
+            )
+            entry["sealed"] = True
+            if kind == runtime_tasks.KIND_CHILD_SESSION:
+                request_stop_session_turn(task_id, cascade=False)
+                entry["stopResult"] = "session_stop_requested"
+            else:
+                entry["stopResult"] = "stop_intent_recorded"
+        except Exception as exc:
+            entry["error"] = type(exc).__name__
+        report.append(entry)
+    try:
+        s._record_session_turn_lifecycle_event(
+            root_session_id,
+            "descendant_cascade_stop",
+            turn_id=normalized_turn_id,
+            outcome="requested",
+            fields={
+                "cascadedFrom": root_session_id,
+                "targetCount": len(report),
+                "targets": report,
+            },
+        )
+    except Exception:
+        pass
+    return report
 
 
 def _persist_session_interrupted_snapshot(
