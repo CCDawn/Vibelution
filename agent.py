@@ -2923,19 +2923,21 @@ class AgentRuntime:
                                 trigger_tokens=micro_trigger_tokens,
                                 metering=gate_metering,
                             )
-                        if micro_compact_state.get("applied"):
-                            current_tokens = estimate_messages_tokens_for_threshold(
-                                messages,
-                                compress_threshold_tokens,
-                            )
-                            try:
-                                ui.note_context_window(current_tokens, context_limit)
-                            except Exception:
-                                pass
-                            if current_tokens > compress_threshold_tokens:
-                                compression_triggered = True
-                                compression_trigger_source = "auto"
-                                compression_reason = "微压缩后仍高于全量压缩触发线"
+                            # 只在投影分支内消费 state：gate_tokens 低于触发线时
+                            # micro_compact_state 保持 None，不得对其求值。
+                            if micro_compact_state.get("applied"):
+                                current_tokens = estimate_messages_tokens_for_threshold(
+                                    messages,
+                                    compress_threshold_tokens,
+                                )
+                                try:
+                                    ui.note_context_window(current_tokens, context_limit)
+                                except Exception:
+                                    pass
+                                if current_tokens > compress_threshold_tokens:
+                                    compression_triggered = True
+                                    compression_trigger_source = "auto"
+                                    compression_reason = "微压缩后仍高于全量压缩触发线"
                 if not compression_triggered and is_compression_requested():
                     requested_source = compression_request_source() or "manual"
                     compression_reason = consume_compression_request() or "provider context limit"
