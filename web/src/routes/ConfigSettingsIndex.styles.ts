@@ -1,4 +1,5 @@
 const styles = {
+  usageLink: "!h-auto !min-h-16 [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-content]]:!gap-3 [&_[data-slot=vui-button-label]]:!flex-1 [&_[data-slot=vui-button-label]]:!whitespace-normal",
   root: "grid min-w-0 w-full max-w-[64rem] content-start gap-6",
   group: "grid min-w-0 gap-2",
   title: "m-0 px-1 text-vui-xs font-semibold text-vui-fg-secondary",
