@@ -57,6 +57,8 @@ import type {
   AgentMemoryInventoryPayload,
 } from "./agentMemoryView";
 
+import { resolveDefaultAgentMemoryId } from "./agentMemoryView";
+
 export type { AgentMemoryInventoryAgent, AgentMemoryInventoryPayload } from "./agentMemoryView";
 
 export type MemoryRouteView =
@@ -178,10 +180,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
 
   const knowledgeActorAgents = agentsQuery.data ?? [];
   const agentMemoryInventoryAgents = agentMemoryInventoryQuery.data?.agents ?? [];
-  const requestedAgentMemoryAgent = requestedKnowledgeActorAgentId
-    ? agentMemoryInventoryAgents.find((agent) => agent.agentId === requestedKnowledgeActorAgentId) ?? null
-    : null;
-  const selectedAgentMemoryAgentId = requestedAgentMemoryAgent?.agentId || "";
+  const selectedAgentMemoryAgentId = resolveDefaultAgentMemoryId(agentMemoryInventoryAgents, requestedKnowledgeActorAgentId);
   const fallbackKnowledgeActorAgentId =
     requestedKnowledgeActorAgentId
     || knowledgeActorAgents.find((agent) => agent.status !== "archived")?.agentId

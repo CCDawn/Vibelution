@@ -155,13 +155,15 @@ describe("MemoryRoute layout contract", () => {
     expect(workbenchQueriesSource).toContain("fetchMemoryAgents<AgentMemoryInventoryPayload>({ signal })");
     expect(workbenchQueriesSource).toContain("fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId, {");
     expect(workbenchQueriesSource).toContain("includeContent: true");
+    expect(workbenchQueriesSource).toContain(
+      "resolveDefaultAgentMemoryId(agentMemoryInventoryAgents, requestedKnowledgeActorAgentId)",
+    );
     expect(routeSource).toContain("toAgentMemoryAgentView");
     expect(routeSource).toContain("agentMemorySelectPrompt:");
     expect(memoryApiSource).toContain("/api/memory/agents/${encodeURIComponent(agentId)}");
     expect(routeSource).toContain("selectedAgentMemoryAgentId");
     expect(routeSource).toContain("createAgentMemoryPanel()");
     expect(routeSource).toContain("copy.personalView");
-    expect(agentMemoryPanelSource).toContain("copy.memoryCount");
     expect(routeSource).toContain("styles.browseViewStack");
     expect(memoryCssSource).toContain(".browseViewStack");
     expect(memoryCssSource).toContain(".agentMemoryWorkspace");
@@ -173,8 +175,11 @@ describe("MemoryRoute layout contract", () => {
     expect(contentBrowsePanelSource).toContain("VSkeleton");
     expect(contentBrowsePanelSource).toContain("toReadableMemoryBlocks");
     expect(contentBrowsePanelSource).not.toContain("VSplitWorkspace");
+    expect(agentMemoryPanelSource).toContain("VSplitWorkspace");
+    expect(agentMemoryPanelSource).not.toContain("<MemoryContentBrowsePanel");
     expect(agentMemoryPanelSource).toContain("styles.agentMemoryWorkspace");
-    expect(agentMemoryPanelSource).toContain("copy.agentMemorySelectPrompt");
+    expect(agentMemoryPanelSource).toContain('aria-expanded={expanded}');
+    expect(agentMemoryPanelSource).toContain('setShowMobileAgents(true)');
     expect(agentMemoryPanelSource).not.toContain("useQuery");
     expect(agentMemoryPanelSource).not.toContain("useMutation");
     expect(agentMemoryPanelSource).not.toContain("fetchJson");
@@ -379,9 +384,10 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("PaneResizeHandle");
     expect(styles).not.toHaveProperty("paneResizeHandleLeft");
     expect(styles).not.toHaveProperty("paneResizeHandleRight");
-    expect(agentMemoryPanelStyles.detailPanel).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.detailPanel).toContain("overflow-auto");
-    expect(agentMemoryPanelStyles.emptyDetail).toContain("min-h-[96px]");
+    expect(agentMemoryPanelStyles.reader).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.readingScroll).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.readingScroll).toContain("overflow-y-auto");
+    expect(agentMemoryPanelStyles.workspace).toContain("max-md:[&>[data-vui=split-sidebar]]:!hidden");
     expect(styles.controlStrip).toContain("overflow-x-auto");
     expect(styles.controlStrip).not.toContain("overflow-hidden");
     expect(styles.subnav).toContain("w-fit");
@@ -564,15 +570,10 @@ describe("MemoryRoute layout contract", () => {
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("h-full");
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("min-h-0");
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("overflow-auto");
-    // After panel ownership, source/item shells are scrollports; list grids live on itemList.
-    expect(agentMemoryPanelStyles.sourcePanel).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.sourcePanel).toMatch(/overflow/);
-    expect(agentMemoryPanelStyles.itemPanel).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.itemPanel).toMatch(/overflow/);
-    expect(agentMemoryPanelStyles.itemList).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.itemList).toContain("overflow-auto");
-    expect(agentMemoryPanelStyles.itemList).toContain("grid");
-    expect(agentMemoryPanelStyles.itemList).toContain("content-start");
+    // Personal memory now reads in one scrollable document pane beside the Agent rail.
+    expect(agentMemoryPanelStyles.reader).toContain("flex-col");
+    expect(agentMemoryPanelStyles.readingScroll).toContain("overflow-y-auto");
+    expect(agentMemoryPanelStyles.documents).toContain("grid");
   });
 
   it("keeps restored MemoryRoute grids from the CSS module migration", () => {

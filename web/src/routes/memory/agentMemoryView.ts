@@ -169,3 +169,9 @@ export function toSelectedAgentMemoryItemView(
     content: item.content || "",
   };
 }
+
+/** Keep explicit links scoped; only an unselected personal view gets a default. */
+export function resolveDefaultAgentMemoryId(agents: AgentMemoryInventoryAgent[], requestedId: string): string {
+  if (requestedId) return agents.find((agent) => agent.agentId === requestedId)?.agentId || "";
+  return (agents.find((agent) => agent.hasPrivateMemory || agentPrivateFileCount(agent) > 0) ?? agents[0])?.agentId || "";
+}

@@ -3,12 +3,36 @@ import { describe, expect, it } from "vitest";
 import {
   agentFormalBaseCount,
   agentPrivateFileCount,
+  resolveDefaultAgentMemoryId,
   toAgentMemoryAgentView,
   toAgentMemorySummaryView,
   toSelectedAgentMemoryView,
+  type AgentMemoryInventoryAgent,
 } from "./agentMemoryView";
 
 describe("agentMemoryView", () => {
+  it("defaults to the first Agent with private memory and otherwise the first Agent", () => {
+    const agents: AgentMemoryInventoryAgent[] = [
+      { agentId: "empty-first", hasPrivateMemory: false, fileCount: 0 },
+      { agentId: "private-first", hasPrivateMemory: true, fileCount: 2 },
+      { agentId: "private-second", hasPrivateMemory: true, fileCount: 1 },
+    ];
+
+    expect(resolveDefaultAgentMemoryId(agents, "")).toBe("private-first");
+    expect(resolveDefaultAgentMemoryId([], "")).toBe("");
+    expect(resolveDefaultAgentMemoryId([{ agentId: "only-agent" }], "")).toBe("only-agent");
+  });
+
+  it("preserves an explicit Agent selection and does not fall back for an invalid id", () => {
+    const agents: AgentMemoryInventoryAgent[] = [
+      { agentId: "with-memory", hasPrivateMemory: true, fileCount: 1 },
+      { agentId: "without-memory", hasPrivateMemory: false, fileCount: 0 },
+    ];
+
+    expect(resolveDefaultAgentMemoryId(agents, "without-memory")).toBe("without-memory");
+    expect(resolveDefaultAgentMemoryId(agents, "missing-agent")).toBe("");
+  });
+
   it("prefers backend fileCount and knowledgeSummary over leftover aliases", () => {
     const agent = {
       agentId: "agent-1",
