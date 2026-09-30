@@ -4258,6 +4258,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.header}
+      hideHeader={isPersonalMemoryView(forcedView)}
       data-vui-domain-recipe="memory-knowledge-workbench"
       data-vui-layout-id={MEMORY_LAYOUT_ID}
       ariaLabel={memoryViewLabel(copy, forcedView)}
