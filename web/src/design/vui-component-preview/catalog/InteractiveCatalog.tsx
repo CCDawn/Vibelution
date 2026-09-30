@@ -15,16 +15,49 @@ import {
   VTooltip,
   VWorkbenchPowerMenu,
 } from "../../../components/vui";
+import { ConversationTurnModelControl } from "../../../components/conversation/ConversationTurnModelControl";
+import type { SessionLlmModelOption, SessionModelSelection } from "../../../api/types";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
+
+const turnModelChoices: SessionLlmModelOption[] = [
+  {
+    modelId: "qwen3-max", modelRef: "qwen3-max", model: "qwen3-max", label: "Qwen3 Max",
+    providerId: "dashscope", providerLabel: "DashScope", providerKind: "openai", apiKeyConfigured: true, missingApiKey: false,
+    supportsReasoningEffort: true, reasoningEffortValues: ["low", "medium", "high"],
+    reasoningEffortOptions: [], defaultReasoningEffort: "medium", isDefault: true,
+  },
+  {
+    modelId: "deepseek-v3.2", modelRef: "deepseek-v3.2", model: "deepseek-v3.2", label: "DeepSeek V3.2",
+    providerId: "deepseek", providerLabel: "DeepSeek", providerKind: "openai", apiKeyConfigured: true, missingApiKey: false,
+    supportsReasoningEffort: false, reasoningEffortValues: [], reasoningEffortOptions: [],
+    defaultReasoningEffort: "", isDefault: false,
+  },
+  {
+    modelId: "glm-5.3", modelRef: "glm-5.3", model: "glm-5.3", label: "GLM-5.3",
+    providerId: "bigmodel", providerLabel: "BigModel", providerKind: "anthropic", apiKeyConfigured: true, missingApiKey: false,
+    supportsReasoningEffort: true, reasoningEffortValues: ["low", "medium", "high"],
+    reasoningEffortOptions: [], defaultReasoningEffort: "high", isDefault: false,
+  },
+];
 
 export function InteractiveCatalog() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [turnModelSelection, setTurnModelSelection] = useState<SessionModelSelection | null>(null);
 
   return (
     <VuiPreviewSection title="Interactive">
+      <VuiPreviewCard name="ConversationTurnModelControl">
+        <ConversationTurnModelControl
+          choices={turnModelChoices}
+          sessionDefaultModelId="qwen3-max"
+          selection={turnModelSelection}
+          disabled={false}
+          onSelectionChange={setTurnModelSelection}
+        />
+      </VuiPreviewCard>
       <VuiPreviewCard name="VRouteLinkButton">
         <VRouteLinkButton to="/agents">打开</VRouteLinkButton>
       </VuiPreviewCard>

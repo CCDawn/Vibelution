@@ -1798,3 +1798,195 @@ def test_formal_turn_pin_falls_back_when_frozen_model_unresolvable(
     ]
     assert len(warnings) == 1
     assert warnings[0]["fields"]["expectedModelRef"] == "dashscope_main/qwen3.6-plus"
+
+
+def test_per_turn_model_selection_pins_dialogue_llm_for_one_turn(monkeypatch) -> None:
+    """A user per-turn override rebinds only this turn's slot resolution."""
+
+    def _resolve_by_binding(agent, slot, *, reasoning_effort=None):
+        binding = (agent or {}).get("llmBindings", {}).get(slot, {}).get("modelId", "")
+        return _resolved_llm_stub(binding or "autodl/GLM-5.3-flash")
+
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=_resolve_by_binding,
+    )
+
+    resolved = _resolved_llm_stub("autodl/GLM-5.3-flash")
+    result = worker._apply_per_turn_model_selection(
+        resolved,
+        {"modelId": "dashscope_main/qwen3.6-plus", "providerId": "dashscope_main"},
+        {},
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+        reasoning_effort="high",
+    )
+
+    assert result is not resolved
+    assert result.model_ref == "dashscope_main/qwen3.6-plus"
+    assert len(resolve_calls) == 1
+    pinned_agent, pinned_slot, pinned_effort = resolve_calls[0]
+    assert pinned_agent["llmBindings"]["dialogue"] == {"modelId": "dashscope_main/qwen3.6-plus"}
+    assert pinned_slot == "dialogue"
+    assert pinned_effort == "high"
+    applied = [kwargs for phase, kwargs in lifecycle if phase == "per_turn_model_override_applied"]
+    assert len(applied) == 1
+    assert applied[0]["fields"]["requestedModelRef"] == "dashscope_main/qwen3.6-plus"
+    # The Agent binding passed to the resolver is a throwaway copy: the
+    # session default must stay untouched.
+    assert _PIN_AGENT["llmBindings"]["dialogue"] == {"modelId": "autodl/GLM-5.3-flash"}
+
+
+def test_per_turn_model_selection_noop_when_model_already_resolved(monkeypatch) -> None:
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=lambda _agent, _slot, *, reasoning_effort=None: pytest.fail(
+            "same-model override must not re-resolve"
+        ),
+    )
+
+    resolved = _resolved_llm_stub("dashscope_main/qwen3.6-plus")
+    result = worker._apply_per_turn_model_selection(
+        resolved,
+        {"modelId": "dashscope_main/qwen3.6-plus"},
+        {},
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert result is resolved
+    assert resolve_calls == []
+    assert lifecycle == []
+
+
+def test_per_turn_model_selection_yields_to_challenge_frozen_route(monkeypatch) -> None:
+    """A formal research turn keeps its frozen route; the override is skipped."""
+
+    lifecycle, resolve_calls = _patch_pin_collaborators(
+        monkeypatch,
+        resolve=lambda _agent, _slot, *, reasoning_effort=None: pytest.fail(
+            "challenge route must outrank the user override"
+        ),
+    )
+
+    resolved = _resolved_llm_stub("autodl/GLM-5.3-flash")
+    result = worker._apply_per_turn_model_selection(
+        resolved,
+        {"modelId": "dashscope_main/qwen3.6-plus"},
+        _PIN_CONTEXT,
+        agent_instance=_PIN_AGENT,
+        session_id="session-1",
+        turn_id="turn-1",
+        llm_slot="dialogue",
+    )
+
+    assert result is resolved
+    assert resolve_calls == []
+    skipped = [kwargs for phase, kwargs in lifecycle if phase == "per_turn_model_override_skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["fields"]["reason"] == "challenge_frozen_route_wins"
+
+
+def test_continuation_loop_stop_at_agent_return_carries_usage(tmp_path, monkeypatch) -> None:
+    """A cooperative stop must land the completed invocation's usage fact."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+
+    def fake_run_existing_agent_single_turn(_agent, **_kwargs):
+        return {
+            "status": "completed",
+            "summary": "还在推进中",
+            "raw_output": "还在推进中",
+            "outcome": "progress",
+            "tool_call_count": 1,
+            "tool_trace": [{"name": "task_update_tool", "status": "done", "summary": "progress"}],
+            "llm_usage": {"source": "provider_usage", "input_tokens": 80, "output_tokens": 40},
+        }
+
+    monkeypatch.setattr(
+        session_service,
+        "run_existing_agent_single_turn",
+        fake_run_existing_agent_single_turn,
+    )
+
+    turn_control = session_service._create_session_turn_control("session-stop-usage")
+
+    real_run = session_service.run_existing_agent_single_turn
+
+    def stop_after_first_turn(agent, **kwargs):
+        result = real_run(agent, **kwargs)
+        turn_control.request_stop("user_requested")
+        return result
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", stop_after_first_turn)
+
+    try:
+        result = worker._run_session_continuation_loop(
+            object(),
+            context={},
+            session_id="session-stop-usage",
+            turn_control=turn_control,
+            initial_prompt="开始长任务",
+            history_messages=[],
+        )
+    finally:
+        session_service._clear_session_turn_control(
+            "session-stop-usage",
+            turn_id=turn_control.turn_id,
+        )
+
+    assert result["status"] == "stopped"
+    assert result["llm_usage"]["input_tokens"] == 80
+    assert result["llm_usage"]["output_tokens"] == 40
+
+
+def test_continuation_loop_preflight_stop_keeps_last_observed_usage(tmp_path, monkeypatch) -> None:
+    """Preflight stop after a finished iteration carries that iteration's usage."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+
+    turn_control = session_service._create_session_turn_control("session-preflight-stop")
+
+    def fake_run_existing_agent_single_turn(_agent, **_kwargs):
+        turn_control.request_stop("user_requested")
+        return {
+            "status": "completed",
+            "summary": "仍在推进",
+            "raw_output": "仍在推进",
+            "outcome": "progress",
+            "tool_call_count": 1,
+            "tool_trace": [{"name": "task_update_tool", "status": "done", "summary": "progress"}],
+            "llm_usage": {"source": "provider_usage", "input_tokens": 10, "output_tokens": 5},
+        }
+
+    monkeypatch.setattr(
+        session_service,
+        "run_existing_agent_single_turn",
+        fake_run_existing_agent_single_turn,
+    )
+
+    try:
+        result = worker._run_session_continuation_loop(
+            object(),
+            context={},
+            session_id="session-preflight-stop",
+            turn_control=turn_control,
+            initial_prompt="开始长任务",
+            history_messages=[],
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=5,
+        )
+    finally:
+        session_service._clear_session_turn_control(
+            "session-preflight-stop",
+            turn_id=turn_control.turn_id,
+        )
+
+    assert result["status"] == "stopped"
+    assert result["llm_usage"]["input_tokens"] == 10

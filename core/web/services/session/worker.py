@@ -754,6 +754,86 @@ def _pin_resolved_agent_llm_to_challenge_route(
     return pinned
 
 
+def _apply_per_turn_model_selection(
+    resolved_agent_llm: Any,
+    model_selection: dict[str, Any] | None,
+    context: dict[str, Any],
+    *,
+    agent_instance: dict[str, Any] | None,
+    session_id: str,
+    turn_id: str,
+    llm_slot: str,
+    reasoning_effort: str | None = None,
+) -> Any:
+    """Pin this single turn's dialogue LLM to the user's per-turn override.
+
+    The override is one-shot submit-payload state (ZCode per-turn
+    ``modelSelection``): it changes only the model slot binding for this turn
+    and never writes back to the Agent binding or the session default. A formal
+    research turn keeps its server-frozen challenge route — the challenge pin
+    outranks the user override, so the override is skipped (never silently
+    re-applied) whenever a frozen route is present. Resolution failures raise:
+    failing open to the default model would run the turn on a model the user
+    did not choose.
+    """
+
+    s = _service()
+    if resolved_agent_llm is None or not isinstance(model_selection, dict) or not model_selection:
+        return resolved_agent_llm
+    expected_ref = str(model_selection.get("modelRef") or model_selection.get("modelId") or "").strip()
+    if not expected_ref:
+        return resolved_agent_llm
+    # Challenge frozen route wins: research-turn model selection is
+    # server-owned and user overrides must not divert formal evidence turns.
+    if _challenge_expected_model_route(context, session_id=session_id, turn_id=turn_id):
+        s._record_session_turn_lifecycle_event(
+            session_id,
+            "per_turn_model_override_skipped",
+            turn_id=turn_id,
+            outcome="skipped",
+            fields={
+                "reason": "challenge_frozen_route_wins",
+                "requestedModelRef": expected_ref,
+                "llmSlot": str(llm_slot or "").strip(),
+            },
+        )
+        return resolved_agent_llm
+    current_ref = str(getattr(resolved_agent_llm, "model_ref", "") or "").strip()
+    if current_ref.casefold() == expected_ref.casefold():
+        return resolved_agent_llm
+    normalized_slot = str(llm_slot or s.SESSION_LLM_SLOT_DIALOGUE).strip() or s.SESSION_LLM_SLOT_DIALOGUE
+    pinned_agent = dict(agent_instance or {})
+    bindings = (
+        dict(pinned_agent.get("llmBindings"))
+        if isinstance(pinned_agent.get("llmBindings"), dict)
+        else {}
+    )
+    bindings[normalized_slot] = {"modelId": expected_ref}
+    pinned_agent["llmBindings"] = bindings
+    # Raises SessionValidationError on an unresolvable override model: the
+    # surrounding resolve-stage handler persists it as the turn failure.
+    pinned = s._resolve_session_agent_llm(
+        pinned_agent,
+        normalized_slot,
+        reasoning_effort=reasoning_effort,
+    )
+    s._record_session_turn_lifecycle_event(
+        session_id,
+        "per_turn_model_override_applied",
+        turn_id=turn_id,
+        outcome="completed",
+        fields={
+            "requestedModelRef": expected_ref,
+            "providerId": str(model_selection.get("providerId") or "").strip(),
+            "resolvedModelId": str(getattr(pinned, "model_id", "") or "").strip(),
+            "agentModelRef": current_ref,
+            "llmSlot": normalized_slot,
+            "reasoningEffort": str(reasoning_effort or "").strip(),
+        },
+    )
+    return pinned
+
+
 def _service():
     """Late-bound facade module (avoids import cycles at package import time)."""
 
@@ -1381,11 +1461,33 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     if agent_instance:
         stage_started_at = s._perf_counter()
         try:
+            per_turn_model_selection = context.get("model_selection")
+            per_turn_model_selection = (
+                dict(per_turn_model_selection)
+                if isinstance(per_turn_model_selection, dict) and per_turn_model_selection
+                else None
+            )
             session_reasoning_effort = s._session_reasoning_effort_snapshot(session_id)
+            # A pinned per-turn reasoning effort outranks the session default;
+            # an override without one keeps the session-level effort.
+            turn_reasoning_effort = (
+                str((per_turn_model_selection or {}).get("reasoningEffort") or "").strip()
+                or session_reasoning_effort
+            )
             resolved_agent_llm = s._resolve_session_agent_llm(
                 agent_instance,
                 llm_slot,
-                reasoning_effort=session_reasoning_effort,
+                reasoning_effort=turn_reasoning_effort,
+            )
+            resolved_agent_llm = _apply_per_turn_model_selection(
+                resolved_agent_llm,
+                per_turn_model_selection,
+                context,
+                agent_instance=agent_instance,
+                session_id=session_id,
+                turn_id=turn_id,
+                llm_slot=llm_slot,
+                reasoning_effort=turn_reasoning_effort,
             )
             resolved_agent_llm = _pin_resolved_agent_llm_to_challenge_route(
                 resolved_agent_llm,
@@ -1530,6 +1632,9 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             "mentalModelEnabled": mental_model_enabled,
             "llmSlot": llm_slot,
             "llmModelId": llm_model_id_for_turn,
+            "perTurnModelRef": str(
+                ((context.get("model_selection") or {}) if isinstance(context.get("model_selection"), dict) else {}).get("modelRef") or ""
+            ),
             "agentId": agent_id,
             "agentWorkspacePath": agent_workspace,
             "agentMemoryRoot": memory_root,
@@ -2542,7 +2647,18 @@ def _run_session_continuation_loop(
                     "stopReason": trim_lines(stop_reason, max_lines=2),
                 },
             )
-            return s._build_stopped_turn_result(stop_reason)
+            stopped_result = s._build_stopped_turn_result(stop_reason)
+            # Preflight stop after an earlier continuation iteration: carry the
+            # last observed invocation usage so the stopped turn still lands
+            # its usage fact (no new attempt happened here).
+            remembered_usage = (
+                last_visible_result.get("llm_usage")
+                if isinstance(last_visible_result, dict)
+                else None
+            )
+            if isinstance(remembered_usage, dict) and remembered_usage:
+                stopped_result["llm_usage"] = remembered_usage
+            return stopped_result
 
         # Work-run heartbeat at the continuation-loop boundary (throttled
         # inside the helper): proves worker liveness so the stale sweep's
@@ -2708,7 +2824,15 @@ def _run_session_continuation_loop(
                     "llmElapsedMs": llm_elapsed_ms,
                 },
             )
-            return s._build_stopped_turn_result(return_stop_reason)
+            stopped_result = s._build_stopped_turn_result(return_stop_reason)
+            # Cooperative stop must not lose the usage the completed invocation
+            # already reported (ZCode usage fact on cancelled turns): fold it
+            # into the stopped result so the persist path lands it on the turn
+            # record and the usage aggregation still counts this attempt.
+            stopped_usage = result.get("llm_usage") if isinstance(result, dict) else None
+            if isinstance(stopped_usage, dict) and stopped_usage:
+                stopped_result["llm_usage"] = stopped_usage
+            return stopped_result
 
         # LLM receipt is in hand: fold this invocation's usage into the
         # session-turn token counter checked by the real-time fuse below.

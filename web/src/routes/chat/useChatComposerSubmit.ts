@@ -28,6 +28,7 @@ import type {
   ConversationMessage,
   SessionDetail,
   SessionGuidanceMode,
+  SessionModelSelection,
   SessionQueuedTurn,
   SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
@@ -147,6 +148,8 @@ export type SubmitTurnVariables = {
   references?: SessionReferenceAttachment[];
   requestStartedAtMs: number;
   queuedBehindActiveTurn?: boolean;
+  /** One-shot per-turn model override; null/undefined follows the session default. */
+  modelSelection?: SessionModelSelection | null;
 };
 
 type ChatSubmitAcceptedResponse = SessionTurnAcceptedResponse & {
@@ -378,6 +381,7 @@ export function useChatComposerTurnMutations({
         attachmentIds,
         references,
         queuedBehindActiveTurn,
+        modelSelection,
       }: SubmitTurnVariables,
     ) => {
       const resolvedTail = turnStatusTail ?? loadTurnStatusTailConfig(sessionId);
@@ -403,6 +407,7 @@ export function useChatComposerTurnMutations({
         mentalModelEnabled,
         runtimeStatusEnabled,
         turnStatusTail: resolvedTail,
+        modelSelection: modelSelection ?? undefined,
       };
       if (companionAgentId) {
         return submitVirtualHumanConversationMessage(companionAgentId, sessionId, payload);
@@ -1092,6 +1097,8 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   activeReferenceAttachments: SessionReferenceAttachment[];
   mentalModelEnabledForNextTurn: boolean;
   runtimeStatusEnabledForNextTurn: boolean;
+  /** Sticky per-turn model override for the next send; null follows the session default. */
+  turnModelSelection: SessionModelSelection | null;
   resolvedEditTarget: ChatEditTarget | null;
   activeEditTarget: ChatEditTarget | null;
   composerDisabled: boolean;
@@ -1173,6 +1180,7 @@ export function useChatComposerSubmitActions({
   activeReferenceAttachments,
   mentalModelEnabledForNextTurn,
   runtimeStatusEnabledForNextTurn,
+  turnModelSelection,
   resolvedEditTarget,
   activeEditTarget,
   composerDisabled,
@@ -1582,6 +1590,7 @@ export function useChatComposerSubmitActions({
     runtimeStatusEnabled: boolean,
     clientSubmissionId: string,
     queuedBehindActiveTurn = false,
+    modelSelection: SessionModelSelection | null = null,
   ) => {
     if (imageUploadInFlightRef.current[sessionId]) {
       postSubmitTelemetry(
@@ -1720,6 +1729,7 @@ export function useChatComposerSubmitActions({
         references,
         requestStartedAtMs: chatStreamPerformanceNowMs(),
         queuedBehindActiveTurn,
+        modelSelection,
       });
     } catch (error) {
       // Defense net only: attachment uploads settle per attachment above, so
@@ -2111,6 +2121,7 @@ export function useChatComposerSubmitActions({
         runtimeStatusEnabledForNextTurn,
         createClientSubmissionId(activeSessionId),
         true,
+        turnModelSelection,
       );
       return;
     }
@@ -2314,6 +2325,8 @@ export function useChatComposerSubmitActions({
       mentalModelEnabledForNextTurn,
       runtimeStatusEnabledForNextTurn,
       clientSubmissionId,
+      false,
+      turnModelSelection,
     );
   }, [
     activeAgentImageInputUnsupported,
@@ -2339,6 +2352,7 @@ export function useChatComposerSubmitActions({
     sessionFollowupQueues,
     sessionGuidanceMutation,
     sessionStopping,
+    turnModelSelection,
     setSessionComposerErrors,
     setSessionDrafts,
     setSessionImageUploadPending,

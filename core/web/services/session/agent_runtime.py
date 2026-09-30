@@ -195,6 +195,9 @@ def get_session_llm_options(session_id: str) -> dict[str, Any]:
         "currentModelId": str(model.get("modelRef") or model.get("modelId") or "").strip(),
         "currentReasoningEffort": s.normalize_reasoning_effort(current_reasoning_effort),
         "model": model,
+        # Full selectable list for per-turn overrides (composer "send once with
+        # model" menu). Same candidate projection as the session default.
+        "choices": s._session_llm_model_choices(),
     }
 
 

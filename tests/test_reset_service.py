@@ -343,6 +343,33 @@ def test_reset_can_clear_sessions_rooms_teams_agents_and_bus(reset_project: Path
     assert (reset_project / "workspace" / "shared" / "keep.txt").exists()
 
 
+def test_agents_reset_writes_registry_through_surface_gate(reset_project: Path, monkeypatch: pytest.MonkeyPatch):
+    _write(reset_project / "workspace" / "agents" / "agents.json", json.dumps({"agents": [{"id": "agent-a"}]}))
+    _write(reset_project / "workspace" / "agents" / "agent-a" / "events" / "event.jsonl", "{}\n")
+
+    from core.web.services.agent_directory import ops_residual
+
+    calls: list[dict] = []
+    original = ops_residual.save_registry_payload
+
+    def _spy(payload, **kwargs):
+        calls.append({"payload": payload, **kwargs})
+        return original(payload, **kwargs)
+
+    monkeypatch.setattr(ops_residual, "save_registry_payload", _spy)
+
+    result = reset_service.execute_reset(["agents"], confirmed=True)
+
+    assert result["totals"]["failedCount"] == 0
+    assert len(calls) == 1
+    assert calls[0]["payload"] == {"version": 1, "agents": []}
+    assert calls[0]["project_root"] == reset_project
+    assert calls[0]["enforce_shrink_guard"] is False
+    registry_path = reset_project / "workspace" / "agents" / "agents.json"
+    assert list(reset_project.rglob("agents.json")) == [registry_path]
+    assert json.loads(registry_path.read_text(encoding="utf-8"))["agents"] == []
+
+
 def test_generated_tools_reset_keeps_source_tools(reset_project: Path):
     generated_tools = _write(
         reset_project / "workspace" / "tool_registry" / "generated_tools.json",
