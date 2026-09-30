@@ -3,17 +3,17 @@ const styles = {
     "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-canvas)] text-[var(--fg-primary)]",
   header:
     "relative z-20 grid h-12 min-h-12 shrink-0 grid-cols-[minmax(120px,1fr)_minmax(340px,430px)_auto] grid-rows-[48px] items-center gap-4 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 max-[879px]:!grid-cols-[minmax(0,1fr)_auto] max-[879px]:!gap-x-2 max-[879px]:!gap-y-0 max-[879px]:!px-2.5",
-  headerWithNavigation: "max-[879px]:!h-[88px] max-[879px]:!min-h-[88px] max-[879px]:!grid-rows-[44px_44px]",
-  narrowHeader: "!grid-cols-[minmax(0,1fr)_auto] !gap-x-2 !gap-y-0 !px-2.5 [&_[data-vui=button]]:!min-h-11",
-  narrowHeaderWithNavigation: "!h-[88px] !min-h-[88px] !grid-rows-[44px_44px]",
+  headerWithNavigation: "!grid max-[879px]:!h-[88px] max-[879px]:!min-h-[88px] max-[879px]:!grid-rows-[44px_44px]",
+  narrowHeader: "!grid !grid-cols-[minmax(0,1fr)_auto] !gap-x-2 !gap-y-0 !px-2.5 [&_[data-vui=button]]:!min-h-11",
+  narrowHeaderWithNavigation: "!grid !h-[88px] !min-h-[88px] !grid-rows-[44px_44px]",
   narrowPhaseNavigation: "!col-span-2 !col-start-1 !row-start-2 !justify-start",
   narrowToolbar: "!col-start-2",
   headerWithoutNavigation:
-    "!grid-cols-[minmax(0,1fr)_auto] max-[879px]:!h-11 max-[879px]:!min-h-11 max-[879px]:!grid-rows-[44px]",
+    "!grid !grid-cols-[minmax(0,1fr)_auto] max-[879px]:!h-11 max-[879px]:!min-h-11 max-[879px]:!grid-rows-[44px]",
   runIdentity:
     "col-start-1 row-start-1 flex min-h-0 min-w-0 items-center gap-3 [&_[data-vui=button]]:!min-h-8 [&_[data-vui=button]]:!w-fit [&_[data-vui=button]]:!max-w-full [&_[data-vui=button]]:!gap-1.5 [&_[data-vui=button]]:!px-2 [&_[data-vui=button]]:!text-[length:var(--vui-font-xs)] max-[879px]:[&_[data-vui=button]]:!min-h-11 max-[879px]:[&_[data-vui=button]]:!px-1.5 [&_[data-vui=button]>span]:min-w-0 [&_[data-vui=button]>span]:truncate",
   title:
-    "m-0 min-w-0 flex-1 truncate text-[13px] font-semibold leading-tight tracking-[-0.01em] text-[var(--fg-primary)]",
+    "m-0 min-w-0 flex-1 truncate text-vui-micro-13 font-semibold leading-tight tracking-[-0.01em] text-[var(--fg-primary)]",
   titleWithSource: "max-[879px]:hidden",
   sourceButton:
     "!inline-flex !min-h-8 !w-fit min-w-0 max-w-[min(280px,45vw)] shrink items-center justify-start gap-1.5 whitespace-nowrap !px-2 text-[length:var(--vui-font-xs)] font-medium !text-[var(--fg-secondary)] hover:!bg-[var(--vui-surface-row)] max-[879px]:!min-h-11 max-[879px]:!px-1.5",
@@ -45,13 +45,13 @@ const styles = {
   runGroupHeading:
     "m-0 mb-1.5 flex items-center justify-between gap-2 text-[length:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
   runGroupCount:
-    "flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--vui-control-muted)] text-[10px] font-medium text-[var(--fg-tertiary)]",
+    "flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--vui-control-muted)] text-vui-micro-10 font-medium text-[var(--fg-tertiary)]",
   runGroupItems: "flex min-w-0 flex-col gap-0.5",
   runItem:
     "!flex !h-auto !min-h-10 !w-full !min-w-0 !justify-start !px-2 !py-1.5 text-left aria-pressed:!bg-[var(--vui-surface-panel)] max-[879px]:!min-h-11",
   runItemText: "flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left",
   runItemTitle: "w-full truncate text-left text-[length:var(--vui-font-xs)] text-[var(--fg-primary)]",
-  runItemStatus: "w-full truncate text-left text-[10px] font-normal text-[var(--fg-tertiary)]",
+  runItemStatus: "w-full truncate text-left text-vui-micro-10 font-normal text-[var(--fg-tertiary)]",
   runGroupEmpty: "m-0 px-2 py-1 text-[length:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
   trackContext: "shrink-0 border-b border-[var(--vui-border-subtle)] py-3 text-[length:var(--vui-font-xs)]",
   contextSourceButton: "!flex !h-auto !min-h-10 !w-full !justify-start !gap-2 !px-1 !py-2 !text-[length:var(--vui-font-xs)] !whitespace-normal",
@@ -60,9 +60,9 @@ const styles = {
   contextPhases: "shrink-0 py-4",
   contextPhase:
     "!flex !h-auto !min-h-10 !w-full !justify-start !gap-2 !px-1.5 !py-2 !text-[length:var(--vui-font-xs)] aria-pressed:!bg-[var(--vui-surface-panel)] max-[879px]:!min-h-11",
-  phaseNumber: "flex size-5 shrink-0 items-center justify-center rounded-full border border-[var(--vui-border-subtle)] text-[10px]",
+  phaseNumber: "flex size-5 shrink-0 items-center justify-center rounded-full border border-[var(--vui-border-subtle)] text-vui-micro-10",
   contextPhaseName: "min-w-0 flex-1 whitespace-normal text-left",
-  contextPhaseStatus: "shrink-0 text-[10px] text-[var(--fg-tertiary)]",
+  contextPhaseStatus: "shrink-0 text-vui-micro-10 text-[var(--fg-tertiary)]",
   contextLinks: "flex shrink-0 flex-col gap-1 border-t border-[var(--vui-border-subtle)] pt-2",
   contextLink: "!flex !min-h-10 !w-full !justify-start !gap-2 !px-2 !text-[length:var(--vui-font-xs)] max-[879px]:!min-h-11",
   mobileNavigationDialog:

@@ -110,7 +110,7 @@ const styles = {
   settingsPopoverBody:
     "vui-app-appshell settingsPopoverBody grid min-w-0 gap-0 p-1",
   settingsPopoverContent:
-    "vui-app-appshell settingsPopoverContent z-[95] w-[min(280px,calc(100vw-20px))] max-h-[min(650px,calc(100dvh-90px))] overflow-y-auto rounded-[10px] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+    "vui-app-appshell settingsPopoverContent z-[95] w-[min(280px,calc(100vw-20px))] max-h-[min(650px,calc(100dvh-90px))] overflow-y-auto rounded-[var(--vui-radius-soft)] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   settingsPopoverHeader:
     "vui-app-appshell settingsPopoverHeader flex min-w-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1.5 [&_strong]:text-vui-xs [&_strong]:font-semibold",
   settingsSection:
