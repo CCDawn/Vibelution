@@ -9,7 +9,9 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import cached_property
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -52,6 +54,17 @@ GIT_SNAPSHOT_CACHE_TTL_SECONDS = 3.0
 GIT_SNAPSHOT_CACHE_LOCK = Lock()
 GIT_SNAPSHOT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
 SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
+
+
+@dataclass(frozen=True)
+class _AgentMemoryPathContext:
+    project_root: Path
+    allowed_roots: tuple[Path, ...]
+
+    @cached_property
+    def workspace_root(self) -> Path:
+        # Keep seeding lazy, as in _rel, and reuse it only within this request.
+        return _sandboxed_workspace_path(self.project_root).resolve()
 
 
 def _developer_sandbox_cache_token(root: Path) -> str:
@@ -236,6 +249,7 @@ def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = Fa
                 "agents": [],
             }
 
+    path_context = _agent_memory_path_context(root) if agents else None
     agent_entries: list[dict[str, Any]] = []
     for agent in agents:
         entry = _agent_memory_inventory_entry(
@@ -244,6 +258,7 @@ def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = Fa
             include_content=include_content,
             team_knowledge_service=team_knowledge_service,
             warnings=warnings,
+            path_context=path_context,
         )
         agent_entries.append(entry)
 
@@ -2157,17 +2172,20 @@ def _agent_memory_inventory_entry(
     include_content: bool,
     team_knowledge_service: Any,
     warnings: list[str],
+    path_context: _AgentMemoryPathContext | None = None,
 ) -> dict[str, Any]:
     agent_id = str(agent.get("agentId") or "").strip()
     workspace_path = str(agent.get("workspacePath") or _fallback_agent_workspace_path(agent_id)).strip()
-    memory_root = _resolve_agent_memory_root(root, workspace_path)
+    memory_root = _resolve_agent_memory_root(root, workspace_path, path_context=path_context)
     items: list[dict[str, Any]] = []
     if memory_root is None:
         warnings.append(f"Agent workspace is outside project root: {agent_id or '-'}")
         private_memory_root = ""
     else:
-        private_memory_root = _rel(root, memory_root)
-        items = _agent_private_memory_items(root, agent_id, memory_root, include_content=include_content)
+        private_memory_root = _rel(root, memory_root, path_context=path_context)
+        items = _agent_private_memory_items(
+            root, agent_id, memory_root, include_content=include_content, path_context=path_context
+        )
 
     byte_count = sum(int(item.get("sizeBytes") or 0) for item in items)
     latest_updated_at = _latest_item_timestamp(items)
@@ -2193,7 +2211,14 @@ def _agent_memory_inventory_entry(
     }
 
 
-def _agent_private_memory_items(root: Path, agent_id: str, memory_root: Path, *, include_content: bool) -> list[dict[str, Any]]:
+def _agent_private_memory_items(
+    root: Path,
+    agent_id: str,
+    memory_root: Path,
+    *,
+    include_content: bool,
+    path_context: _AgentMemoryPathContext | None = None,
+) -> list[dict[str, Any]]:
     if not memory_root.exists() or not memory_root.is_dir():
         return []
     files: list[Path] = []
@@ -2204,7 +2229,11 @@ def _agent_private_memory_items(root: Path, agent_id: str, memory_root: Path, *,
     files.sort(key=_path_mtime_seconds, reverse=True)
     items: list[dict[str, Any]] = []
     for path in files[:AGENT_MEMORY_FILE_LIMIT]:
-        items.append(_agent_private_memory_item(root, agent_id, memory_root, path, include_content=include_content))
+        items.append(
+            _agent_private_memory_item(
+                root, agent_id, memory_root, path, include_content=include_content, path_context=path_context
+            )
+        )
     return items
 
 
@@ -2215,6 +2244,7 @@ def _agent_private_memory_item(
     path: Path,
     *,
     include_content: bool,
+    path_context: _AgentMemoryPathContext | None = None,
 ) -> dict[str, Any]:
     try:
         relative_path = path.resolve().relative_to(memory_root.resolve()).as_posix()
@@ -2242,7 +2272,7 @@ def _agent_private_memory_item(
         title=relative_path,
         kind="agent_private_memory_file",
         source="agent_private_workspace",
-        path=_rel(root, path),
+        path=_rel(root, path, path_context=path_context),
         updated_at=_mtime(path),
         agent_visible=True,
         in_prompt=False,
@@ -2259,7 +2289,7 @@ def _agent_private_memory_item(
         {
             "agentId": agent_id,
             "relativePath": relative_path,
-            "privateMemoryRoot": _rel(root, memory_root),
+            "privateMemoryRoot": _rel(root, memory_root, path_context=path_context),
             "sizeBytes": size_bytes,
             "contentDeferred": content_deferred,
             "contentLength": len(content) if include_content else size_bytes,
@@ -2312,7 +2342,21 @@ def _agent_formal_knowledge_summary(agent: dict[str, Any], team_knowledge_servic
     }
 
 
-def _resolve_agent_memory_root(root: Path, workspace_path: str) -> Path | None:
+def _agent_memory_path_context(root: Path) -> _AgentMemoryPathContext:
+    resolved_root = root.resolve()
+    return _AgentMemoryPathContext(
+        project_root=resolved_root,
+        allowed_roots=(
+            resolved_root,
+            developer_sandbox.formal_workspace_path(root).resolve(),
+            developer_sandbox.sandboxed_workspace_path(root).resolve(),
+        ),
+    )
+
+
+def _resolve_agent_memory_root(
+    root: Path, workspace_path: str, *, path_context: _AgentMemoryPathContext | None = None
+) -> Path | None:
     workspace = str(workspace_path or "").strip()
     if not workspace:
         return None
@@ -2321,11 +2365,7 @@ def _resolve_agent_memory_root(root: Path, workspace_path: str) -> Path | None:
         resolved = candidate.resolve()
     except OSError:
         return None
-    allowed_roots = [
-        root.resolve(),
-        developer_sandbox.formal_workspace_path(root).resolve(),
-        developer_sandbox.sandboxed_workspace_path(root).resolve(),
-    ]
+    allowed_roots = (path_context or _agent_memory_path_context(root)).allowed_roots
     if not any(_path_is_within(resolved, allowed_root) for allowed_root in allowed_roots):
         return None
     return resolved / "memory"
@@ -3104,15 +3144,16 @@ def _item_id(prefix: str, path: Path) -> str:
     return f"{prefix}-{slug[-80:] or 'item'}"
 
 
-def _rel(root: Path, path: Path) -> str:
+def _rel(root: Path, path: Path, *, path_context: _AgentMemoryPathContext | None = None) -> str:
     resolved = path.resolve()
-    workspace_root = _sandboxed_workspace_path(root).resolve()
+    workspace_root = path_context.workspace_root if path_context else _sandboxed_workspace_path(root).resolve()
     try:
         return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
     except (OSError, ValueError):
         pass
     try:
-        return resolved.relative_to(root.resolve()).as_posix()
+        project_root = path_context.project_root if path_context else root.resolve()
+        return resolved.relative_to(project_root).as_posix()
     except (OSError, ValueError):
         return str(path)
 
