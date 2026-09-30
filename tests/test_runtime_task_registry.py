@@ -405,3 +405,113 @@ def test_normalize_snapshot_adopts_legacy_rows_as_cli_agent():
 def test_new_snapshot_rejects_unknown_kind():
     with pytest.raises(ValueError):
         registry.new_snapshot(kind="mystery", task_id="t", status="queued")
+
+
+def test_seal_and_request_stop_seals_idempotently_with_cascade_audit(tmp_path):
+    store = _store(tmp_path)
+    store.register_task(
+        registry.new_snapshot(
+            kind=registry.KIND_CHILD_SESSION,
+            task_id="child-seal-1",
+            status="running",
+            source_session_id="",
+        )
+    )
+
+    first = store.seal_and_request_stop(
+        "child-seal-1",
+        reason=registry.SEAL_REASON_PARENT_TURN_CANCELLED,
+        turn_id="turn-1",
+        cascaded_from="root-session",
+    )
+    second = store.seal_and_request_stop(
+        "child-seal-1",
+        reason="later_attempt",
+        turn_id="turn-2",
+        cascaded_from="other-session",
+    )
+
+    assert first["notificationSealed"] is True
+    assert first["notificationSealedReason"] == registry.SEAL_REASON_PARENT_TURN_CANCELLED
+    assert first["notificationSealedByTurnId"] == "turn-1"
+    assert first["stopInitiator"] == "user"
+    assert first["cascadeStop"]["cascadedFrom"] == "root-session"
+    # Keep-first: the second seal neither moves the audit nor re-arms the stop.
+    assert second["notificationSealedAt"] == first["notificationSealedAt"]
+    assert second["notificationSealedReason"] == registry.SEAL_REASON_PARENT_TURN_CANCELLED
+    assert second["cascadeStop"]["cascadedFrom"] == "root-session"
+    assert store.is_notification_sealed("child-seal-1") is True
+    assert store.is_notification_sealed("task-never-sealed") is False
+
+    with pytest.raises(ValueError):
+        store.seal_and_request_stop("child-seal-1", reason="")
+
+
+def test_seal_lands_on_terminal_task_without_rearming_stop(tmp_path):
+    store = _store(tmp_path)
+    store.register_task(
+        registry.new_snapshot(
+            kind=registry.KIND_CLI_AGENT,
+            task_id="task-seal-term-1",
+            status="running",
+            source_session_id="",
+        )
+    )
+    store.mark_task_terminal("task-seal-term-1", status="completed", stop_initiator="model")
+
+    state = store.seal_and_request_stop(
+        "task-seal-term-1",
+        reason=registry.SEAL_REASON_PARENT_TURN_CANCELLED,
+    )
+
+    assert state["notificationSealed"] is True
+    # A settled task keeps its original terminal outcome and initiator.
+    assert state["status"] == "completed"
+    assert state["stopInitiator"] == "model"
+
+
+def test_collect_cascade_targets_walks_two_levels_breaks_cycles_and_caps_depth(tmp_path):
+    store = _store(tmp_path)
+
+    def register(task_id, *, parent, kind):
+        store.register_task(
+            registry.new_snapshot(
+                kind=kind,
+                task_id=task_id,
+                status="running",
+                source_session_id="",
+                parent_session_id=parent,
+            )
+        )
+
+    # Two-level tree under the root: child session + cli task, and a
+    # grandchild cli task spawned by the child session.
+    register("child-1", parent="root", kind=registry.KIND_CHILD_SESSION)
+    register("cli-1", parent="root", kind=registry.KIND_CLI_AGENT)
+    register("cli-2", parent="child-1", kind=registry.KIND_CLI_AGENT)
+    # Corrupted cycle: two child-session tasks that are each other's parent.
+    register("SA", parent="SB", kind=registry.KIND_CHILD_SESSION)
+    register("SB", parent="SA", kind=registry.KIND_CHILD_SESSION)
+    # Deep chain beyond the default cap.
+    register("chain-1", parent="root", kind=registry.KIND_CHILD_SESSION)
+    register("chain-2", parent="chain-1", kind=registry.KIND_CHILD_SESSION)
+    register("chain-3", parent="chain-2", kind=registry.KIND_CHILD_SESSION)
+    register("chain-4", parent="chain-3", kind=registry.KIND_CHILD_SESSION)
+
+    targets = store.collect_cascade_targets("root", max_depth=3)
+
+    assert [state["taskId"] for state in targets] == [
+        "child-1",
+        "cli-1",
+        "chain-1",
+        "cli-2",
+        "chain-2",
+        "chain-3",
+    ]
+    assert [state["cascadeDepth"] for state in targets] == [0, 0, 0, 1, 1, 2]
+    # Terminal tasks never join the cascade.
+    store.mark_task_terminal("cli-1", status="completed")
+    remaining = store.collect_cascade_targets("root", max_depth=3)
+    assert "cli-1" not in [state["taskId"] for state in remaining]
+    assert store.collect_cascade_targets("") == []
+    assert store.collect_cascade_targets("root", max_depth=0) == []

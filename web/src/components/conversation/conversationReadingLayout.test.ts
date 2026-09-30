@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 import styles from "./ConversationView.styles";
 import agentStyles from "./AgentMessageTurnView.styles";
@@ -45,5 +48,17 @@ describe("approved conversation reading hierarchy", () => {
       expect(surface).toContain("shadow-none");
       expect(surface).toContain("border-[var(--vui-border-subtle)]");
     }
+  });
+  // Split literal: the scan must not match its own source text.
+  const STRANDED_RADIUS = "rounded-" + "[14px]";
+  it("keeps every conversation corner on the approved radius ladder", () => {
+    // 14px was a second bubble radius beside the approved rounded-xl; it must not return.
+    const offenders: string[] = [];
+    for (const file of readdirSync(import.meta.dirname)) {
+      if (!file.endsWith(".ts")) continue;
+      const source = readFileSync(resolve(import.meta.dirname, file), "utf8");
+      if (source.includes(STRANDED_RADIUS)) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
   });
 });

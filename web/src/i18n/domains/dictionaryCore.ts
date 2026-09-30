@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: core (474 keys). */
+/** Route/domain dictionary slice: core (506 keys). */
 export const dictionaryCore = {
   zh: {
     appTitle: "Vibelution 工作台",
@@ -68,11 +68,15 @@ export const dictionaryCore = {
     activeWorkStaleFailureHint: "点击查看来源会话",
     activeWorkStale_supervised: "最近一次监督进化失败",
     activeWorkStale_self: "最近一次自进化失败",
+    activeWorkStale_self_evolution_autonomous_loop: "最近一次自主进化失败",
+    activeWorkStale_formal_review: "最近一次正式评审失败",
     activeWorkStale_source_collection: "最近一次资料搜集失败",
     activeWorkStale_chat_room: "最近一轮群聊失败",
     activeWorkStale_chat: "最近一轮对话失败",
     agentBroadcastLabel: "助手广播",
     agentBroadcastUnread: "有新广播",
+    activeWorkLabel_self_evolution_autonomous_loop: "自主进化",
+    activeWorkLabel_formal_review: "正式评审",
     lifecycleProofTitle: "生命周期证明",
     lifecycleProofUnavailable: "还没有拿到生命周期证明。",
     lifecycleProofVerifiedAt: "验证时间",
@@ -574,11 +578,15 @@ export const dictionaryCore = {
     activeWorkStaleFailureHint: "Open the source conversation",
     activeWorkStale_supervised: "Last supervised evolution run failed",
     activeWorkStale_self: "Last self-evolution run failed",
+    activeWorkStale_self_evolution_autonomous_loop: "Last self evolution run failed",
+    activeWorkStale_formal_review: "Last formal review failed",
     activeWorkStale_source_collection: "Last knowledge collection run failed",
     activeWorkStale_chat_room: "Last agent room round failed",
     activeWorkStale_chat: "Last chat turn failed",
     agentBroadcastLabel: "Agent broadcast",
     agentBroadcastUnread: "new broadcasts",
+    activeWorkLabel_self_evolution_autonomous_loop: "Self evolution",
+    activeWorkLabel_formal_review: "Formal review",
     lifecycleProofTitle: "Lifecycle proof",
     lifecycleProofUnavailable: "Lifecycle proof is not available yet.",
     lifecycleProofVerifiedAt: "Verified at",

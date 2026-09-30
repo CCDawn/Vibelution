@@ -6,7 +6,14 @@ export type SystemStatusTone = "idle" | "running" | "failed" | "caution";
 export type FrontendSystemState = "connected" | "background" | "offline";
 export type BackendSystemState = "checking" | "healthy" | "offline" | "unhealthy";
 export type RuntimeControllerState = "managed" | "closing" | "unmanaged" | "failed";
-export type ActiveWorkKind = "supervised" | "self" | "source_collection" | "chat" | "chat_room";
+export type ActiveWorkKind =
+  | "supervised"
+  | "self"
+  | "self_evolution_autonomous_loop"
+  | "formal_review"
+  | "source_collection"
+  | "chat"
+  | "chat_room";
 
 export type ActiveWorkIndicatorItem = {
   kind: ActiveWorkKind;
@@ -80,17 +87,21 @@ type RuntimeWorkSnapshot = {
       chat_turn?: ActiveWorkRunSnapshot | null;
       chat_room_round?: ActiveWorkRunSnapshot | null;
       self_evolution_run?: ActiveWorkRunSnapshot | null;
+      self_evolution_autonomous_loop?: ActiveWorkRunSnapshot | null;
       supervised_evolution_run?: ActiveWorkRunSnapshot | null;
       supervised_worktree_evolution_run?: ActiveWorkRunSnapshot | null;
       source_collection_run?: ActiveWorkRunSnapshot | null;
+      formal_review?: ActiveWorkRunSnapshot | null;
     } | null;
     activeItems?: {
       chat_turn?: ActiveWorkRunSnapshot[] | null;
       chat_room_round?: ActiveWorkRunSnapshot[] | null;
       self_evolution_run?: ActiveWorkRunSnapshot[] | null;
+      self_evolution_autonomous_loop?: ActiveWorkRunSnapshot[] | null;
       supervised_evolution_run?: ActiveWorkRunSnapshot[] | null;
       supervised_worktree_evolution_run?: ActiveWorkRunSnapshot[] | null;
       source_collection_run?: ActiveWorkRunSnapshot[] | null;
+      formal_review?: ActiveWorkRunSnapshot[] | null;
     } | null;
   } | null;
   taskSummary?: string | null;
@@ -461,6 +472,15 @@ export function deriveActiveWorkIndicator(
       active.supervised_evolution_run,
     ),
     buildActiveWorkCandidate("self", active.self_evolution_run, runtime, lang),
+    // The autonomous loop keeps a single active snapshot (no activeItems list
+    // on the backend); formal review fans out per provider invocation.
+    buildActiveWorkCandidate(
+      "self_evolution_autonomous_loop",
+      active.self_evolution_autonomous_loop,
+      runtime,
+      lang,
+    ),
+    ...activeWorkCandidatesFromItems("formal_review", activeItems?.formal_review, runtime, lang, active.formal_review),
     ...activeWorkCandidatesFromItems("source_collection", activeItems?.source_collection_run, runtime, lang, active.source_collection_run),
     ...activeWorkCandidatesFromItems("chat_room", activeItems?.chat_room_round, runtime, lang, active.chat_room_round),
     ...activeWorkCandidatesFromItems("chat", visibleChatItems, runtime, lang, visibleChatFallback),
@@ -721,6 +741,8 @@ function isFailedWorkRunStatus(status: string): boolean {
 const staleWorkLabelKeys: Record<ActiveWorkKind, ShellTranslationKey> = {
   supervised: "activeWorkStale_supervised",
   self: "activeWorkStale_self",
+  self_evolution_autonomous_loop: "activeWorkStale_self_evolution_autonomous_loop",
+  formal_review: "activeWorkStale_formal_review",
   source_collection: "activeWorkStale_source_collection",
   chat_room: "activeWorkStale_chat_room",
   chat: "activeWorkStale_chat",
@@ -732,6 +754,9 @@ function staleWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
 
 function staleWorkSummary(kind: ActiveWorkKind, run: ActiveWorkRunSnapshot): string {
   const lastToolError = recordTextValue(run["lastToolError"], ["summary", "errorPreview", "toolName"]);
+  if (kind === "self_evolution_autonomous_loop") {
+    return recordTextValue(run["request"], ["goal"]) || lastToolError;
+  }
   if (kind === "source_collection") {
     const topic = firstTextValue(run, ["topic", "title"]);
     const summary = firstTextValue(run, ["summary", "currentTask"]) || lastToolError;
@@ -754,28 +779,48 @@ function activeWorkTone(status: string): SystemStatusTone {
   return "running";
 }
 
+/** Newer kinds resolve their labels through the shared shell dictionary. */
+const activeWorkLabelKeys: Partial<Record<ActiveWorkKind, ShellTranslationKey>> = {
+  formal_review: "activeWorkLabel_formal_review",
+  self_evolution_autonomous_loop: "activeWorkLabel_self_evolution_autonomous_loop",
+};
+
+/** Kinds predating the shell-dictionary labels keep their inline copy. */
+const legacyActiveWorkLabels: Partial<Record<ActiveWorkKind, string>> = {
+  supervised: "监督进化",
+  self: "自进化",
+  source_collection: "资料搜集",
+  chat_room: "Agent 群聊",
+  chat: "对话",
+};
+
+const legacyActiveWorkLabelsEn: Partial<Record<ActiveWorkKind, string>> = {
+  supervised: "Supervised evolution",
+  self: "Self evolution",
+  source_collection: "Knowledge collection",
+  chat_room: "Agent room",
+  chat: "Chat",
+};
+
 function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
-  if (lang === "en") {
-    return {
-      supervised: "Supervised evolution",
-      self: "Self evolution",
-      source_collection: "Knowledge collection",
-      chat_room: "Agent room",
-      chat: "Chat",
-    }[kind];
+  const dictionaryKey = activeWorkLabelKeys[kind];
+  if (dictionaryKey) {
+    return shellDictionary[lang][dictionaryKey];
   }
-  return {
-    supervised: "监督进化",
-    self: "自进化",
-    source_collection: "资料搜集",
-    chat_room: "Agent 群聊",
-    chat: "对话",
-  }[kind];
+  return (lang === "en" ? legacyActiveWorkLabelsEn : legacyActiveWorkLabels)[kind] ?? kind;
 }
 
 function activeWorkHref(kind: ActiveWorkKind, run: ActiveWorkRunSnapshot): string {
   if (kind === "supervised") {
     return "/supervised-evolution";
+  }
+  if (kind === "self_evolution_autonomous_loop") {
+    return "/self-evolution";
+  }
+  // Formal review is a team-workflow provider invocation; its bound session is
+  // a hidden child session, so the stable entry surface is the teams board.
+  if (kind === "formal_review") {
+    return "/teams";
   }
   if (kind === "chat") {
     const sessionId = firstTextValue(run, ["sessionId", "sourceSessionId", "conversationId", "directSessionId"]);
@@ -815,6 +860,18 @@ function activeWorkSummary(
       "summary",
       "currentTask",
     ]) || (lang === "en" ? "Self-evolution pass is active" : "自进化任务正在运行");
+  }
+
+  if (kind === "self_evolution_autonomous_loop") {
+    // The goal lives under request (see the autonomous-loop service snapshot).
+    return recordTextValue(run["request"], ["goal"])
+      || (lang === "en" ? "Autonomous self-evolution loop is active" : "自主进化正在运行");
+  }
+
+  if (kind === "formal_review") {
+    // The snapshot only carries invocation metadata (purpose/lease ids); keep
+    // raw ids out of user-facing copy and use a stable sentence instead.
+    return lang === "en" ? "Formal review is running" : "正式评审正在进行";
   }
 
   if (kind === "chat_room") {
