@@ -2626,33 +2626,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const governanceTasks = governanceTasksQuery.data?.tasks ?? [];
   const ingestionAdapters = ingestionAdaptersQuery.data?.adapters ?? [];
   const graphPayload = memoryKnowledgeGraphQuery.data;
-  const graphSearch = graphSearchText.trim().toLowerCase();
-  const graphNodesMatchingSearch = useMemo(() => {
-    const nodes = graphPayload?.nodes ?? [];
-    if (!graphSearch) {
-      return nodes;
-    }
-    return nodes.filter((node) =>
-      [
-        node.label,
-        node.type,
-        node.status,
-        node.summary,
-        node.responsibilityQuestion,
-        ...(node.contentItems ?? []).map((item) => `${item.title} ${item.summary} ${item.knowledgeBaseName ?? ""}`),
-      ].some((value) => String(value || "").toLowerCase().includes(graphSearch)),
-    );
-  }, [graphPayload?.nodes, graphSearch]);
-  const filteredGraphNodes = useMemo(
-    () => graphNodesMatchingSearch.filter((node) => (activeGraphNodeType ? node.type === activeGraphNodeType : true)),
-    [activeGraphNodeType, graphNodesMatchingSearch],
-  );
-  const graphVisibleNodeIds = useMemo(() => new Set(filteredGraphNodes.map((node) => node.id)), [filteredGraphNodes]);
-  const filteredGraphEdges = useMemo(
-    () => (graphPayload?.edges ?? []).filter((edge) => graphVisibleNodeIds.has(edge.source) && graphVisibleNodeIds.has(edge.target)),
-    [graphPayload?.edges, graphVisibleNodeIds],
-  );
-  const selectedGraphNode = selectedGraphNodeId ? filteredGraphNodes.find((node) => node.id === selectedGraphNodeId) ?? null : null;
+  const selectedGraphNode = selectedGraphNodeId ? graphPayload?.nodes.find((node) => node.id === selectedGraphNodeId) ?? null : null;
   const selectedGraphDetailItems = memoryKnowledgeGraphNodeDetailQuery.data?.contentItems ?? selectedGraphNode?.contentItems ?? [];
   const graphNodeById = useMemo(() => new Map((graphPayload?.nodes ?? []).map((node) => [node.id, node])), [graphPayload?.nodes]);
   const selectedGraphRelations = useMemo(() => {
@@ -2700,10 +2674,10 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     }
   }, [activeGraphNodeType, graphTypeEntries]);
   useEffect(() => {
-    if (selectedGraphNodeId && !filteredGraphNodes.some((node) => node.id === selectedGraphNodeId)) {
+    if (graphPayload && selectedGraphNodeId && !graphPayload.nodes.some((node) => node.id === selectedGraphNodeId)) {
       setSelectedGraphNodeId("");
     }
-  }, [filteredGraphNodes, selectedGraphNodeId]);
+  }, [graphPayload?.nodes, selectedGraphNodeId]);
   const allPairs = useMemo(() => flattenSections(sections), [sections]);
   const runtimePairs = useMemo(
     () =>
@@ -4229,8 +4203,9 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       <MemoryGraphViewPanel
         copy={copy}
         graphPayload={graphPayload}
-        filteredGraphNodes={filteredGraphNodes}
-        filteredGraphEdges={filteredGraphEdges}
+        isGraphLoading={memoryKnowledgeGraphQuery.isFetching && !graphPayload}
+        graphError={memoryKnowledgeGraphQuery.error instanceof Error ? memoryKnowledgeGraphQuery.error.message : ""}
+        onRetryGraph={() => { void memoryKnowledgeGraphQuery.refetch(); }}
         graphSearchText={graphSearchText}
         activeGraphNodeType={activeGraphNodeType}
         graphTypeEntries={graphTypeEntries}

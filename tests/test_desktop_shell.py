@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import types
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -12,6 +15,7 @@ from core.infrastructure.branch_workspace import (
     BranchWorkspaceLayout,
 )
 from core.launcher import desktop_shell
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 
 def _write_packaged_shell(root: Path, *, tree_hash: str, asar_mtime: float | None = None) -> None:
@@ -94,10 +98,146 @@ def test_refresh_lock_keeps_live_holder_and_foreign_release_is_ignored(tmp_path,
         encoding="utf-8",
     )
     monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    # The holder process predates the lock, so it is the real holder, not a
+    # recycled PID.
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: 0.0)
 
     assert desktop_shell._acquire_desktop_shell_refresh_lock(tmp_path) is False
     desktop_shell._release_desktop_shell_refresh_lock(tmp_path)
     assert lock_path.is_file()
+
+
+def test_refresh_lock_stale_when_holder_pid_is_dead(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99127, "startedAt": "2026-09-30T07:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: False)
+
+    assert desktop_shell._refresh_lock_is_stale(lock_path) is True
+
+
+def test_refresh_lock_live_holder_predating_lock_is_not_stale(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99128, "startedAt": "2026-09-30T07:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    started_epoch = datetime(2026, 9, 30, 7, 0, 0, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: started_epoch - 100.0)
+
+    assert desktop_shell._refresh_lock_is_stale(lock_path) is False
+
+
+def test_refresh_lock_keeps_holder_created_within_reuse_tolerance(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99129, "startedAt": "2026-09-30T07:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    started_epoch = datetime(2026, 9, 30, 7, 0, 0, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: started_epoch + 2.0)
+
+    assert desktop_shell._refresh_lock_is_stale(lock_path) is False
+
+
+def test_refresh_lock_stale_when_create_time_exceeds_reuse_tolerance(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99130, "startedAt": "2026-09-30T07:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    started_epoch = datetime(2026, 9, 30, 7, 0, 0, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: started_epoch + 10.0)
+
+    assert desktop_shell._refresh_lock_is_stale(lock_path) is True
+
+
+def test_refresh_lock_conservative_when_holder_create_time_unknown(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99131, "startedAt": "2026-01-01T00:00:00Z"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: None)
+
+    assert desktop_shell._refresh_lock_is_stale(lock_path) is False
+
+
+def test_refresh_lock_conservative_when_live_holder_has_no_started_at(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(json.dumps({"pid": 99132}), encoding="utf-8")
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: None)
+
+    assert desktop_shell._refresh_lock_is_stale(lock_path) is False
+
+
+def test_refresh_lock_reclaims_recycled_pid_created_after_lock(tmp_path, monkeypatch):
+    """A live PID created after the lock was taken is a recycled PID.
+
+    Regression for the 2026-09-30 leak: a hard-killed scheduler left the lock
+    behind, Windows handed its PID to an unrelated conhost.exe, and the
+    refresh lock then blocked restarts forever.
+    """
+
+    pytest.importorskip("psutil")
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        **no_window_subprocess_kwargs(),
+    )
+    try:
+        import psutil
+
+        child_create_time = psutil.Process(child.pid).create_time()
+        lock_path = desktop_shell._refresh_lock_path(tmp_path)
+        lock_path.parent.mkdir(parents=True)
+        stale_started_at = (
+            datetime.fromtimestamp(child_create_time, tz=timezone.utc) - timedelta(seconds=60)
+        ).isoformat()
+        lock_path.write_text(
+            json.dumps({"pid": child.pid, "startedAt": stale_started_at}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+
+        assert desktop_shell._refresh_lock_is_stale(lock_path) is True
+        assert desktop_shell._acquire_desktop_shell_refresh_lock(tmp_path) is True
+    finally:
+        child.kill()
+        child.wait(timeout=10)
+
+
+def test_process_create_time_uses_psutil(monkeypatch):
+    class FakeProcess:
+        def create_time(self) -> float:
+            return 1234.5
+
+    class FakePsutil:
+        @staticmethod
+        def Process(pid: int) -> FakeProcess:
+            assert pid == 42
+            return FakeProcess()
+
+    monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
+    assert desktop_shell._process_create_time(42) == 1234.5
+    assert desktop_shell._process_create_time(0) is None
+
+
+def test_process_create_time_returns_none_without_psutil(monkeypatch):
+    monkeypatch.setitem(sys.modules, "psutil", None)
+    assert desktop_shell._process_create_time(42) is None
 
 
 def test_refresh_lock_does_not_quarantine_fresh_lock_after_stale_observation(tmp_path, monkeypatch):

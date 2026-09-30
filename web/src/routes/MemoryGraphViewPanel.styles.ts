@@ -1,61 +1,37 @@
-import {
-  vuiControlPillClass,
-  vuiControlQuietClass,
-} from "../design/vuiChromeRecipes";
-
-import {
-  vuiOpaqueRowClass,
-  vuiStateSelectedRowClass,
-  vuiWorkspaceFillClass,
-} from "../design/vuiSurfaceRecipes";
+import { vuiControlQuietClass } from "../design/vuiChromeRecipes";
 
 const styles = {
-  countPill:
-    `countPill min-w-0 ${vuiControlPillClass}`,
-  graphCanvasFallback:
-    "graphCanvasFallback min-w-0 grid min-h-0 gap-2 p-2",
-  graphCanvasPanel:
-    "graphCanvasPanel grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto_var(--pane-h-graph-node-list,168px)] gap-0 overflow-hidden",
-  graphCanvasToolbar:
-    "graphCanvasToolbar min-w-0 flex flex-wrap items-center justify-between gap-1.5 px-1 py-0.5 [&>div]:min-w-0 [&_strong]:break-words",
-  graphClearFocusButton:
-    `graphClearFocusButton min-w-0 ${vuiControlQuietClass}`,
-  graphInteractionHint:
-    "graphInteractionHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  // Wave 6B: PaneHeightResizeHandle owns row-resize visual; placement only.
-  graphNodeListResizeHandle:
-    "graphNodeListResizeHandle",
-  graphNodeList:
-    "graphNodeList min-w-0 grid h-full min-h-0 content-start gap-1.5 overflow-auto pt-1 [&_[data-vui=\"button\"]]:w-full",
-  graphNodeTypeMark:
-    "graphNodeTypeMark min-w-0",
-  graphTypeList:
-    "graphTypeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_button]:w-full [&_[data-active=true]]:border-[var(--accent-cool)]",
-  graphWorkspace:
-    "graphWorkspace min-w-0 grid h-full min-h-0 gap-0 overflow-hidden",
-  graphMetricToolbar:
-    "graphMetricToolbar min-w-0 shrink-0 border-0 bg-transparent px-0 py-0",
-  graphCanvasInner:
-    "graphCanvasInner grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto_var(--pane-h-graph-node-list,168px)] gap-0 overflow-hidden",
-  graphInspectorHost:
-    "graphInspectorHost min-h-0 min-w-0 overflow-hidden border-0 bg-transparent shadow-none",
-  graphInspectorInner:
-    "graphInspectorInner grid h-full min-h-0 min-w-0 overflow-hidden",
-  itemButton: `itemButton min-w-0 w-full max-w-full ${vuiOpaqueRowClass} p-2 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_small]:min-w-0 [&_small]:truncate`,
-  itemButtonActive: `itemButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
-  managementPanel:
-    "managementPanel gap-1.5 border-t border-[var(--vui-border-hairline)] pt-1.5",
-  panelEyebrow:
-    "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  panelHeader:
-    "panelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
-  searchBox: `searchBox min-w-0 ${vuiOpaqueRowClass} p-1.5`,
-  sourcePanel:
-    "sourcePanel min-h-0 overflow-hidden border-0 bg-transparent shadow-none",
-  sourcePanelInner:
-    "sourcePanelInner grid h-full min-h-0 content-start gap-1.5 overflow-auto p-1.5",
-  workspace:
-    `workspace min-w-0 grid h-full min-h-0 flex-1 gap-0 overflow-hidden ${vuiWorkspaceFillClass}`,
+  railTitle: "mt-2 text-base font-medium",
+  typeCount: "text-xs text-[var(--fg-tertiary)]",
+  searchResults: "grid gap-1",
+  searchResult: "justify-start text-left",
+  accessNote: "mt-auto pt-6 text-xs leading-relaxed text-[var(--fg-tertiary)]",
+  canvasTitle: "mt-2 text-xl font-medium",
+  canvasHint: "mt-2 text-xs text-[var(--fg-secondary)]",
+  viewModes: "flex items-center gap-1",
+  selectedTitle: "max-w-48 truncate",
+  refreshError: "px-6 text-xs text-[var(--fg-secondary)]",
+
+  atlasRail: "!border-r !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-rail)]",
+  atlasRailInner: "flex h-full min-h-0 flex-col gap-6 overflow-auto px-4 py-6",
+  atlasEyebrow: "text-xs tracking-wide text-[var(--fg-tertiary)]",
+  atlasSearch: "flex min-w-0 items-center gap-2 rounded-md border border-[var(--vui-border-subtle)] px-2 py-1 text-[var(--fg-secondary)] [&_input]:min-w-0 [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:text-sm",
+  atlasFilters: "mt-3 grid gap-1 [&_button]:w-full [&_button]:justify-between [&_button]:gap-3 [&_button]:!border-transparent [&_[data-active=true]]:bg-[var(--vui-control-hover-bg)]",
+  atlasCanvas: "!bg-[var(--vui-surface-workspace)]",
+  atlasMain: "flex h-full min-h-0 min-w-0 flex-col",
+  atlasHeading: "flex shrink-0 flex-wrap items-center justify-between gap-4 px-6 pb-4 pt-6",
+  atlasStage: "relative min-h-48 min-w-0 flex-1 overflow-hidden",
+  atlasContext: "pointer-events-none absolute inset-x-4 top-3 z-20 flex flex-wrap items-start justify-between gap-2",
+  atlasActionRow: "pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-1.5 text-xs text-[var(--fg-secondary)] shadow-sm",
+  atlasTools: "absolute bottom-3 left-5 z-20 flex items-center gap-1 rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-1",
+  atlasFooter: "flex shrink-0 flex-wrap justify-between gap-2 px-6 py-3 text-xs text-[var(--fg-tertiary)]",
+  atlasEmpty: "grid h-full min-h-48 place-content-center justify-items-center gap-3 px-6 text-center text-sm text-[var(--fg-secondary)]",
+  atlasNodeList: "grid max-h-48 shrink-0 grid-cols-1 gap-1 overflow-auto border-t border-[var(--vui-border-subtle)] px-4 py-2 sm:grid-cols-2 [&_button]:justify-start",
+  atlasInspectorHost: "!border-l !border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)]",
+  atlasInspector: "flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
+  atlasDetailHeader: "flex shrink-0 items-center justify-between border-b border-[var(--vui-border-subtle)] px-5 py-3 text-xs text-[var(--fg-secondary)]",
+  graphWorkspace: "min-w-0 h-full min-h-0 overflow-hidden",
+  graphClearFocusButton: vuiControlQuietClass,
 } as const;
 
 export default styles;

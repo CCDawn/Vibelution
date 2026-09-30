@@ -1,0 +1,17 @@
+export const memoryGraphRendererStyles = {
+  rendererRoot: "relative isolate flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+  canvas: "absolute inset-0 h-full w-full touch-none",
+  labels: "pointer-events-none absolute inset-0 overflow-hidden",
+  loading: "absolute inset-0 z-20 grid place-items-center bg-[var(--vui-surface-workspace)]/65 text-vui-sm text-[var(--fg-tertiary)]",
+  fallback: "absolute inset-0 z-10 overflow-auto bg-[var(--vui-surface-workspace)] p-3",
+  fallbackIntro: "mb-3 rounded-lg border border-vui-border-subtle bg-[var(--vui-surface-panel)] px-3 py-2 text-vui-sm text-[var(--fg-secondary)]",
+  fallbackList: "m-0 grid list-none gap-1 p-0",
+  fallbackItem: "min-w-0",
+  fallbackButton: "!h-auto flex min-h-10 w-full min-w-0 flex-col items-start justify-center gap-0.5 rounded-lg border border-vui-border-subtle bg-[var(--vui-surface-panel)] px-3 py-2 text-left text-vui-sm text-[var(--fg-primary)] hover:bg-[var(--vui-surface-row-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] aria-pressed:border-[var(--accent-cool)]",
+  fallbackSummary: "max-w-full truncate text-vui-xs text-[var(--fg-tertiary)]",
+  nodeLabel: "group pointer-events-auto absolute left-0 top-0 z-10 grid max-w-[min(250px,62vw)] -translate-x-1/2 -translate-y-1/2 gap-0.5 rounded-md border !border-transparent bg-transparent px-1.5 py-1 text-left text-vui-xs text-[var(--fg-secondary)] shadow-none transition-[opacity,border-color,background-color] hover:rounded-lg hover:!border-vui-border-subtle hover:bg-[var(--vui-surface-panel)]/95 hover:text-[var(--fg-primary)] hover:shadow-[var(--vui-elevation-1)] focus-visible:rounded-lg focus-visible:!border-vui-border-subtle focus-visible:bg-[var(--vui-surface-panel)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] data-[selected=true]:rounded-lg data-[selected=true]:!border-vui-border-subtle data-[selected=true]:bg-[var(--vui-surface-panel)] data-[selected=true]:text-[var(--fg-primary)] data-[selected=true]:shadow-[var(--vui-elevation-1)] data-[highlighted=true]:rounded-lg data-[highlighted=true]:!border-vui-border-subtle data-[highlighted=true]:bg-[var(--vui-surface-panel)] data-[highlighted=true]:text-[var(--fg-primary)] data-[highlighted=true]:shadow-[var(--vui-elevation-1)]",
+  nodeLabelTitle: "max-w-full truncate font-semibold leading-tight",
+  nodeLabelSummary: "hidden max-w-full truncate text-vui-xs leading-tight text-[var(--fg-tertiary)] group-hover:block group-focus-visible:block group-data-[selected=true]:block group-data-[highlighted=true]:block",
+  clusterLabel: "pointer-events-none absolute left-0 top-0 z-[1] whitespace-nowrap -translate-x-1/2 -translate-y-1/2 rounded-full border border-vui-border-subtle bg-[var(--vui-surface-workspace)]/70 px-2.5 py-1 text-vui-xs font-semibold tracking-wide text-[var(--fg-tertiary)]",
+  edgeLabel: "pointer-events-auto absolute left-0 top-0 z-20 w-max max-w-[min(220px,55vw)] -translate-x-1/2 -translate-y-1/2 whitespace-normal rounded-full border border-vui-border-subtle bg-[var(--vui-surface-panel)]/95 px-2 py-1 text-vui-xs leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-elevation-1)] hover:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] hover:text-[var(--fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] disabled:cursor-default disabled:opacity-60",
+} as const;

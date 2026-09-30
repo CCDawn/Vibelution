@@ -849,6 +849,17 @@ describe("LauncherBranchInstancesPanel contracts", () => {
       },
     });
     expect(instanceRuntimeState(building)).toBe("building");
+    // The start IPC blocks for the whole frontend build, so the accepted
+    // start intent stays active while the payload already reports building;
+    // payload truth must win over the optimistic starting label or the whole
+    // build window renders as 正在启动 again.
+    const startIntent = { instanceId: "worktree:building", operation: "start" as const };
+    expect(instanceRuntimeState(building, startIntent)).toBe("building");
+    expect(
+      instanceRuntimeState(building, { instanceId: "worktree:building", operation: "restart" as const })
+    ).toBe("building");
+    // The disabled pending button contract is keyed off this state: the row
+    // above with a live start intent renders isPending + 构建中… through it.
     expect(instanceRuntimeStateLabel("building", true)).toBe("构建中");
     expect(instanceRuntimeStateLabel("building", false)).toBe("Building");
     expect(shouldHoldOpenClickGuard("building")).toBe(true);
@@ -870,5 +881,23 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("Building frontend — click to stop");
     // Build state keeps the row out of attention and out of cleanup.
     expect(panelSource).toContain("isDisabled={cleanupMutation.isPending || building || startingOrRestarting || stopBusy}");
+  });
+
+  it("keeps the optimistic starting label for a starting payload with a start intent", () => {
+    // Regression: only the building payload overrides the pending intent; a
+    // payload that already started keeps the existing optimistic semantics.
+    const starting = instance({
+      id: "worktree:starting",
+      shortName: "starting",
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "starting",
+        phase: "opening",
+        observedState: "starting",
+      },
+    });
+    expect(instanceRuntimeState(starting, { instanceId: "worktree:starting", operation: "start" })).toBe("starting");
+    expect(instanceRuntimeState(starting)).toBe("starting");
+    expect(instanceRuntimeStateLabel("starting", true)).toBe("正在启动");
   });
 });

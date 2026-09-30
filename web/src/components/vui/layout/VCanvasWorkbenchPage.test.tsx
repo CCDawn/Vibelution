@@ -151,6 +151,15 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
     expect(document.activeElement).toBe(toggle);
   });
 
+  it("supports an opt-in narrow bottom inspector while retaining the dialog boundary", () => {
+    renderPage(390, true);
+    act(() => root?.render(<VCanvasWorkbenchPage title="Memory" canvas={<div>Graph</div>}
+      inspector={<div>Evidence</div>} responsive={{ enabled: true, inspector: { label: "Details", open: true, narrowPlacement: "bottom" } }} />));
+    const drawer = document.body.querySelector('[data-vui-region="canvas-workbench-drawer"]');
+    expect(drawer?.textContent).toContain("Evidence");
+    expect(drawer?.closest('[data-vui="dialog-content"]')?.className).toContain("!h-[64dvh]");
+  });
+
   it("turns both side slots into independently toggled drawers below 900px", () => {
     const container = renderPage(800, true);
 
