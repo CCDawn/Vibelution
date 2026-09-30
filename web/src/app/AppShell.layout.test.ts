@@ -434,6 +434,71 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("timeoutMs: RUNTIME_SUMMARY_TIMEOUT_MS");
   });
 
+  it("makes the status chip speak the code-freshness verdict and retryable on failure", () => {
+    // B-4: a behind build must say "restart recommended" (and an unknown
+    // version must stop reading as a green "connected"), not only change color.
+    expect(shellSource).toContain("codeFreshnessCardOverride(codeFreshnessQuery.data?.verdict)");
+    expect(shellSource).toContain("value: t(codeFreshnessOverride.valueKey)");
+    expect(shellSource).toContain('t("codeFreshnessTitle")');
+    // Freshness rides both the tooltip summary and the accessible name.
+    expect(shellSource).toContain("const statusSummaryAriaLabel = codeFreshnessOverride");
+    expect(shellSource).toContain("codeFreshnessStatusPart");
+    // Caution never overrides a real failed primary card.
+    expect(shellSource).toContain('primaryStatusCard.tone !== "failed"');
+    // B-7: a failed primary card turns the chip into an explicit retry control.
+    expect(shellSource).toContain("const statusRetryable = effectivePrimaryStatusCard.tone === \"failed\";");
+    expect(shellSource).toContain("role={statusRetryable ? \"button\" : undefined}");
+    expect(shellSource).toContain("tabIndex={statusRetryable ? 0 : undefined}");
+    expect(shellSource).toContain('t("systemStatusRetryHint")');
+    expect(shellSource).toContain("queryKeys.backendHealth()");
+    expect(shellSource).toContain("queryKeys.runtimeSummary()");
+    expect(shellSource).toContain("event.key === \"Enter\" || event.key === \" \"");
+    expect(styles.settingsStatusRetry).toContain("cursor-pointer");
+    expect(styles.settingsStatusRetry).toContain("focus-visible:ring-2");
+  });
+
+  it("refreshes the shell status probes as soon as the window returns to the foreground", () => {
+    // A-7: background tabs throttle timers, so the first paint after refocus
+    // otherwise shows minutes-old health/runtime state.
+    const effectStart = shellSource.indexOf("function handleVisibleRefetch");
+    expect(effectStart).toBeGreaterThan(0);
+    const refetchEffect = shellSource.slice(effectStart, shellSource.indexOf("}, [queryClient]);", effectStart));
+    expect(refetchEffect).toContain('document.visibilityState !== "visible"');
+    expect(refetchEffect).toContain("invalidateQueries({ queryKey: queryKeys.backendHealth() })");
+    expect(refetchEffect).toContain("invalidateQueries({ queryKey: queryKeys.runtimeSummary() })");
+    expect(shellSource).toContain("document.addEventListener(\"visibilitychange\", handleVisibleRefetch)");
+  });
+
+  it("tracks popover-switch grace timers in a ref and clears them on open changes", () => {
+    // A-8: the 80ms switch timer must not resurrect a popover after the user
+    // clicked somewhere else.
+    expect(shellSource).toContain("const popoverSwitchTimerRef = useRef<number | null>(null);");
+    expect(shellSource).toContain("schedulePopoverSwitch(() => setActiveWorkOpen(true))");
+    expect(shellSource).toContain("schedulePopoverSwitch(() => setUtilityOpen(true))");
+    expect(shellSource).not.toContain("window.setTimeout(() => setActiveWorkOpen(true), 80)");
+    expect(shellSource).not.toContain("window.setTimeout(() => setUtilityOpen(true), 80)");
+    const onOpenChangeBlocks = shellSource.match(/clearPopoverSwitchTimer\(\);/g) ?? [];
+    expect(onOpenChangeBlocks.length).toBeGreaterThanOrEqual(2);
+    expect(shellSource).toContain("useEffect(() => clearPopoverSwitchTimer, [clearPopoverSwitchTimer])");
+  });
+
+  it("uniquifies active-work rows and deep-links self evolution to its board", () => {
+    // A-6: kind+runId can repeat when the backend mirrors one run in both the
+    // active snapshot and its activeItems list.
+    expect(shellSource).toContain("key={`${item.kind}-${item.runId || item.status}-${index}`}");
+    expect(shellSource).toContain("(item: ActiveWorkIndicatorItem, index: number)");
+  });
+
+  it("distinguishes a dirty-workspace behind banner from a moved-ahead main", () => {
+    // B-6: behindCount null/0 with a behind verdict = uncommitted changes only.
+    const bannerCall = shellSource.match(/const updateBannerText = updateBannerCopy\([\s\S]*?\);/)?.[0] ?? "";
+    expect(bannerCall).toContain("updateBannerVerdict === \"backend_and_frontend_behind\"");
+    expect(bannerCall).toContain("codeFreshnessQuery.data?.backend.behindCount ?? null");
+    expect(shellDictionary.zh.updateBannerDirtyTitle).toBe("工作区有未提交变化，重启后生效");
+    expect(shellDictionary.zh.updateBannerDirtyDetail).toContain("工作区");
+    expect(shellDictionary.en.updateBannerDirtyTitle).toBe("Working tree changed — restart to apply");
+  });
+
   it("renders terminal failed runs as a caution leftover section instead of hiding them", () => {
     expect(shellSource).toContain("activeWorkStaleFailures");
     expect(shellSource).toContain("activeWorkStaleFailures.map(renderActiveWorkItem)");

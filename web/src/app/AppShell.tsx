@@ -66,7 +66,7 @@ import {
 import {
   applyRuntimeSummaryOutage,
   backendSystemTone,
-  codeFreshnessStale,
+  codeFreshnessCardOverride,
   deriveActiveWorkIndicator,
   deriveBackendSystemState,
   deriveFrontendSystemState,
@@ -1084,6 +1084,9 @@ export function AppShell() {
     lang,
     updateBannerDiskHead,
     updateBannerVerdict === "backend_and_frontend_behind",
+    // null/0 with a behind verdict = dirty-digest-only: the banner copy must
+    // speak about uncommitted workspace changes, not a moved-ahead main.
+    codeFreshnessQuery.data?.backend.behindCount ?? null,
   );
   const updateBannerRestartActionLabel = updateBannerRestartLabel(lang);
   const updateBannerDismissActionLabel = updateBannerDismissLabel(lang);
@@ -1120,6 +1123,27 @@ export function AppShell() {
   const closeActiveWorkMenu = useCallback(() => {
     setActiveWorkOpen(false);
   }, []);
+
+  // Popover-switch grace timer (one click switches popovers, incl. touch):
+  // tracked in a ref and cleared whenever either popover's open state changes
+  // or the shell unmounts, so a click elsewhere cannot resurrect a popover
+  // 80ms after the switch intent was abandoned.
+  const popoverSwitchTimerRef = useRef<number | null>(null);
+  const clearPopoverSwitchTimer = useCallback(() => {
+    if (popoverSwitchTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(popoverSwitchTimerRef.current);
+    popoverSwitchTimerRef.current = null;
+  }, []);
+  useEffect(() => clearPopoverSwitchTimer, [clearPopoverSwitchTimer]);
+  const schedulePopoverSwitch = useCallback((open: () => void) => {
+    clearPopoverSwitchTimer();
+    popoverSwitchTimerRef.current = window.setTimeout(() => {
+      popoverSwitchTimerRef.current = null;
+      open();
+    }, 80);
+  }, [clearPopoverSwitchTimer]);
 
   const frontendStateLabel = {
     connected: t("systemFrontend_connected"),
@@ -1845,6 +1869,22 @@ export function AppShell() {
     };
   }, [emitBrowserTelemetry]);
 
+  // Background tabs throttle timers, so the health/runtime polls can be
+  // minutes old when the window returns to the foreground: refresh both
+  // probes immediately on visible. The regular poll cadence is untouched.
+  useEffect(() => {
+    function handleVisibleRefetch() {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.backendHealth() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    }
+
+    document.addEventListener("visibilitychange", handleVisibleRefetch);
+    return () => document.removeEventListener("visibilitychange", handleVisibleRefetch);
+  }, [queryClient]);
+
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
       const navLink = shellNavAnchorFromEventTarget(event.target);
@@ -2244,16 +2284,46 @@ export function AppShell() {
     ),
   ];
   const primaryStatusCard = pickPrimarySystemStatusCard(rightStatusCards);
-  // Code-freshness: a behind instance is a caution-grade system condition the
-  // user should act on (restart), without masking a real failure.
-  const codeStale = codeFreshnessStale(codeFreshnessQuery.data?.verdict);
-  const effectivePrimaryStatusCard = codeStale && primaryStatusCard.tone !== "failed"
-    ? { ...primaryStatusCard, tone: "caution" as const }
+  // Code-freshness: a behind instance must say "restart recommended" at
+  // caution grade (never overriding a real failure); an undetectable version
+  // stops reading as a green "connected" and says it cannot be measured.
+  const codeFreshnessOverride = codeFreshnessCardOverride(codeFreshnessQuery.data?.verdict);
+  const effectivePrimaryStatusCard = codeFreshnessOverride
+    ? {
+        ...primaryStatusCard,
+        value: t(codeFreshnessOverride.valueKey),
+        ...(codeFreshnessOverride.tone && primaryStatusCard.tone !== "failed"
+          ? { tone: codeFreshnessOverride.tone }
+          : {}),
+      }
     : primaryStatusCard;
-  const statusSummaryTitle = rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · ");
+  const codeFreshnessStatusPart = codeFreshnessOverride
+    ? `${t("codeFreshnessTitle")}: ${t(codeFreshnessOverride.valueKey)}`
+    : "";
+  const statusSummaryTitle = [
+    rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · "),
+    codeFreshnessStatusPart,
+  ].filter(Boolean).join(" · ");
+  const statusSummaryAriaLabel = codeFreshnessOverride
+    ? statusSummaryTitle
+    : `${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`;
+  // Dead-indicator rescue: when the primary card reads failed, the status chip
+  // becomes an explicit retry affordance that re-probes backend health and the
+  // runtime summary immediately; normal states stay display-only.
+  const statusRetryable = effectivePrimaryStatusCard.tone === "failed";
+  const retryStatusProbes = useCallback(() => {
+    emitBrowserTelemetry({
+      phase: "api",
+      eventCode: "browser.user_action.status_probe_retry_requested",
+      message: "User requested a status probe retry from the top bar.",
+      fields: { action: "status_retry" },
+    });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.backendHealth() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+  }, [emitBrowserTelemetry, queryClient]);
   // Shared renderer for active-work rows and stale-failure rows so both
   // sections in the popover stay one visual language.
-  const renderActiveWorkItem = (item: ActiveWorkIndicatorItem) => {
+  const renderActiveWorkItem = (item: ActiveWorkIndicatorItem, index: number) => {
     const detailAria = [item.label, statusLabel(item.status), item.summary].filter(Boolean).join(" · ");
     const detailCopy = (
       <div className={styles.activeWorkDetailCopy}>
@@ -2262,7 +2332,9 @@ export function AppShell() {
       </div>
     );
     return (
-      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
+      // Index suffix: kind+runId can repeat when the backend mirrors one run in
+      // both the active snapshot and its activeItems list.
+      <li key={`${item.kind}-${item.runId || item.status}-${index}`} className={styles.activeWorkDetailItem}>
         <span className={`${styles.activeWorkItemDot} ${systemToneToDotClass(item.tone)}`} aria-hidden="true" />
         {item.href ? (
           <Link
@@ -2489,6 +2561,7 @@ export function AppShell() {
           <VPopover
             open={activeWorkOpen}
             onOpenChange={(open) => {
+              clearPopoverSwitchTimer();
               setActiveWorkOpen(open);
               if (open) closeUtilityMenu();
             }}
@@ -2513,7 +2586,7 @@ export function AppShell() {
                 title={activeConversationsLabel}
                 onPointerDownCapture={() => {
                   // Let Radix finish closing the other popover before opening this one.
-                  if (utilityOpen) window.setTimeout(() => setActiveWorkOpen(true), 80);
+                  if (utilityOpen) schedulePopoverSwitch(() => setActiveWorkOpen(true));
                   closeUtilityMenu();
                 }}
               >
@@ -2563,9 +2636,24 @@ export function AppShell() {
         </div>
       <div className={styles.settingsSlot} data-shell-group="settings">
         <span
-          className={styles.settingsStatus}
-          title={statusSummaryTitle}
-          aria-label={`${effectivePrimaryStatusCard.label} ${effectivePrimaryStatusCard.value}`}
+          className={statusRetryable
+            ? `${styles.settingsStatus} ${styles.settingsStatusRetry}`
+            : styles.settingsStatus}
+          title={statusRetryable ? `${statusSummaryTitle} · ${t("systemStatusRetryHint")}` : statusSummaryTitle}
+          aria-label={statusRetryable
+            ? `${statusSummaryAriaLabel}，${t("systemStatusRetryHint")}`
+            : statusSummaryAriaLabel}
+          role={statusRetryable ? "button" : undefined}
+          tabIndex={statusRetryable ? 0 : undefined}
+          onClick={statusRetryable ? retryStatusProbes : undefined}
+          onKeyDown={statusRetryable
+            ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                retryStatusProbes();
+              }
+            }
+            : undefined}
         >
           <span aria-hidden="true" className={`${styles.statusSummaryDot} ${systemToneToDotClass(effectivePrimaryStatusCard.tone)}`} />
           <span>{effectivePrimaryStatusCard.value}</span>
@@ -2593,6 +2681,7 @@ export function AppShell() {
         <VPopover
           open={utilityOpen}
           onOpenChange={(open) => {
+            clearPopoverSwitchTimer();
             setUtilityOpen(open);
             if (open) setActiveWorkOpen(false);
             else {
@@ -2616,7 +2705,7 @@ export function AppShell() {
               title={settingsLabel}
               onPointerDownCapture={() => {
                 // Switching popovers should take one click, including on touch screens.
-                if (activeWorkOpen) window.setTimeout(() => setUtilityOpen(true), 80);
+                if (activeWorkOpen) schedulePopoverSwitch(() => setUtilityOpen(true));
                 setActiveWorkOpen(false);
               }}
             >

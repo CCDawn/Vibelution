@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyRuntimeSummaryOutage,
   backendSystemTone,
+  codeFreshnessCardOverride,
   codeFreshnessStale,
   deriveActiveWorkIndicator,
   deriveBackendSystemState,
@@ -342,6 +343,59 @@ describe("systemStatus", () => {
         },
       }),
     ).toBe("managed");
+  });
+
+  it("treats an aligned Electron open window as managed even without window flags or a manager daemon", () => {
+    // The backend lifecycle proof already counts electron management as
+    // verified runtime-manager evidence; the top bar must not read
+    // "unmanaged" for a hosted Electron session whose window flags lagged.
+    expect(
+      deriveRuntimeControllerState({
+        runtimeManager: {
+          running: false,
+          runtimeState: "idle",
+          managerPid: 0,
+          stateVersion: 3,
+        },
+        workbench: {
+          ...runtimeWorkbenchBase,
+          desiredState: "open",
+          observedState: "open",
+          phase: "steady",
+          windowProvider: "electron",
+          windowManaged: false,
+          browserManaged: false,
+          url: "http://127.0.0.1:8000",
+          lastReason: "",
+          statusLine: "Workbench is open.",
+          failureMessage: "",
+        },
+      }),
+    ).toBe("managed");
+    // Without the electron provider the same unflagged snapshot stays idle.
+    expect(
+      deriveRuntimeControllerState({
+        runtimeManager: {
+          running: true,
+          runtimeState: "running",
+          managerPid: 1001,
+          stateVersion: 3,
+        },
+        workbench: {
+          ...runtimeWorkbenchBase,
+          desiredState: "open",
+          observedState: "open",
+          phase: "steady",
+          windowProvider: "none",
+          windowManaged: false,
+          browserManaged: false,
+          url: "http://127.0.0.1:8000",
+          lastReason: "",
+          statusLine: "Workbench is open.",
+          failureMessage: "",
+        },
+      }),
+    ).toBe("unmanaged");
   });
 
   it("flags a missing Electron-owned window as failed even without the Edge browserManaged alias", () => {
@@ -831,6 +885,69 @@ describe("systemStatus", () => {
     expect(indicator?.items).toHaveLength(1);
   });
 
+  it("keeps a live child conversation visible when its supervised parent is terminal", () => {
+    // A terminal parent is a leftover (or gone), not a live supervisor: the
+    // hidden child-session set must come from live candidates only, or a
+    // surviving child would vanish from the top bar entirely.
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        supervised_worktree_evolution_run: {
+          runId: "swte-candidate-1",
+          runKind: "supervised_worktree_evolution_run",
+          status: "failed",
+          workflowSteps: [
+            {
+              id: "baseline_eval",
+              conversationSessionId: "session-supervised-baseline",
+            },
+          ],
+        },
+        chat_turn: {
+          runId: "turn-supervised-baseline",
+          runKind: "chat_turn",
+          status: "running",
+          sessionId: "session-supervised-baseline",
+          userMessage: "Run this supervised baseline",
+        },
+      }),
+    );
+
+    expect(indicator).not.toBeNull();
+    expect(indicator?.count).toBe(1);
+    expect(indicator?.items.map((item) => item.kind)).toEqual(["chat"]);
+    expect(indicator?.items[0]?.runId).toBe("turn-supervised-baseline");
+    // The failed parent still surfaces as a stale leftover beside it.
+    expect(indicator?.staleFailures.map((item) => item.kind)).toEqual(["supervised"]);
+  });
+
+  it("hides a child conversation while its supervised parent is genuinely live", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        supervised_worktree_evolution_run: {
+          runId: "swte-candidate-1",
+          runKind: "supervised_worktree_evolution_run",
+          status: "running",
+          workflowSteps: [
+            {
+              id: "baseline_eval",
+              conversationSessionId: "session-supervised-baseline",
+            },
+          ],
+        },
+        chat_turn: {
+          runId: "turn-supervised-baseline",
+          runKind: "chat_turn",
+          status: "running",
+          sessionId: "session-supervised-baseline",
+          userMessage: "Run this supervised baseline",
+        },
+      }),
+    );
+
+    expect(indicator?.count).toBe(1);
+    expect(indicator?.items.map((item) => item.kind)).toEqual(["supervised"]);
+  });
+
   it("uses self-evolution goals as summaries and marks queued work as caution", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork({
@@ -849,6 +966,8 @@ describe("systemStatus", () => {
       summary: "improve lifecycle recovery",
       status: "queued",
       tone: "caution",
+      // The chip deep-links to the owning self-evolution board.
+      href: "/self-evolution",
     });
   });
 
@@ -1342,7 +1461,9 @@ describe("systemStatus", () => {
     ]);
   });
 
-  it("keeps the top-bar room summary compact while preserving the full topic for details", () => {
+  it("keeps non-failure room topics whole within the budget and truncates by length only", () => {
+    // Content colons (title separators, URLs) are no longer sentence
+    // boundaries: only a known leading failure label may cut early.
     const fullTopic = "假说评审第 3 轮（批评与修订）：逐条批评上一轮观点、补充证据或新分歧；没有新内容请回复 pass。";
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork({
@@ -1356,9 +1477,46 @@ describe("systemStatus", () => {
       }),
     );
 
-    expect(indicator?.summary).toBe("假说评审第 3 轮（批评与修订）");
+    expect(indicator?.summary).toBe(fullTopic);
     expect(indicator?.fullSummary).toBe(fullTopic);
     expect(indicator?.items[0]?.fullSummary).toBe(fullTopic);
+
+    const longTopic = "跨团队联调排期讨论：先对齐后端接口字段命名，再确认前端轮询与退避策略，最后核对回归清单与发布顺序，避免再次出现联调窗口互相等待的情况；同时把每一步的结论沉淀到共享文档里，方便缺席的同学会后补齐上下文。";
+    const longIndicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        chat_room_round: {
+          runId: "room-review-r4",
+          runKind: "chat_room_round",
+          status: "running",
+          roomId: "room-review",
+          topic: longTopic,
+        },
+      }),
+    );
+    expect(longTopic.length).toBeGreaterThan(72);
+    expect(longIndicator?.summary).toBe(`${longTopic.slice(0, 71).trimEnd()}…`);
+    expect(longIndicator?.fullSummary).toBe(longTopic);
+  });
+
+  it("never lets an English error colon or a URL colon act as a summary boundary", () => {
+    const rawError = "TypeError: Cannot read properties of undefined — see http://127.0.0.1:8000/api";
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        chat_turn: {
+          runId: "turn-typeerror",
+          runKind: "chat_turn",
+          status: "running",
+          summary: rawError,
+        },
+      }),
+    );
+
+    // No failure label at the head, so the whole text fits the 96-char chat
+    // budget and must come through uncut at "TypeError:" or the URL colon.
+    expect(rawError.length).toBeLessThan(96);
+    expect(indicator?.summary).toBe(rawError);
+    expect(indicator?.summary).toContain("Cannot read properties");
+    expect(indicator?.summary).toContain("http://127.0.0.1:8000/api");
   });
 
   it("ignores terminal active work snapshots", () => {
@@ -1547,5 +1705,29 @@ describe("codeFreshnessStale", () => {
     expect(codeFreshnessStale("unknown")).toBe(false);
     expect(codeFreshnessStale(undefined)).toBe(false);
     expect(codeFreshnessStale(null)).toBe(false);
+  });
+});
+
+describe("codeFreshnessCardOverride", () => {
+  it("speaks the behind verdict and wears caution instead of only tinting the card", () => {
+    for (const verdict of ["backend_behind", "frontend_behind", "backend_and_frontend_behind"] as const) {
+      expect(codeFreshnessCardOverride(verdict)).toEqual({
+        valueKey: "codeFreshnessBehind",
+        tone: "caution",
+      });
+    }
+  });
+
+  it("says when the code version cannot be measured without forcing a tone", () => {
+    expect(codeFreshnessCardOverride("unknown")).toEqual({
+      valueKey: "codeFreshnessUnknown",
+      tone: null,
+    });
+  });
+
+  it("leaves current and missing verdicts untouched", () => {
+    expect(codeFreshnessCardOverride("current")).toBeNull();
+    expect(codeFreshnessCardOverride(undefined)).toBeNull();
+    expect(codeFreshnessCardOverride(null)).toBeNull();
   });
 });

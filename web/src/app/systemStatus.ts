@@ -178,6 +178,14 @@ export function deriveRuntimeControllerState(runtime: RuntimeSnapshot | null | u
   if (managerRunning && windowOwned && observedState === "open") {
     return "managed";
   }
+  // Electron main owns the workbench window lifecycle; the backend lifecycle
+  // proof already counts electron management as verified runtime-manager
+  // evidence, so an aligned open/open Electron session must not read as an
+  // idle "unmanaged" chip just because the window flags stayed false.
+  const windowProvider = String(runtime?.workbench?.windowProvider ?? "").trim().toLowerCase();
+  if (windowProvider === "electron" && desiredState === "open" && observedState === "open") {
+    return "managed";
+  }
   return "unmanaged";
 }
 
@@ -443,7 +451,14 @@ export function deriveActiveWorkIndicator(
       active.supervised_evolution_run,
     ),
   ];
-  const supervisedSessionIds = supervisedChildSessionIds(supervisedRuns);
+  // Terminal supervised runs are leftovers, not live supervisors: derive the
+  // hidden child-session set from live candidates only, so a surviving child
+  // conversation stays visible instead of vanishing behind a parent that
+  // already finished or failed.
+  const liveSupervisedRuns = supervisedRuns.filter(
+    (run) => !isTerminalWorkRunStatus(normalizeWorkRunStatus(run)),
+  );
+  const supervisedSessionIds = supervisedChildSessionIds(liveSupervisedRuns);
   const visibleChatItems = Array.isArray(activeItems?.chat_turn)
     ? activeItems.chat_turn.filter((run) =>
       !supervisedSessionIds.has(
@@ -694,13 +709,34 @@ function buildActiveWorkCandidate(
   };
 }
 
+/**
+ * Known failure labels that may keep their "label: first phrase" boundary.
+ * Everything else truncates by length alone, so an English error ("TypeError:
+ * ...") is never swallowed by an early colon and a URL ("http://host:8000")
+ * never cuts the line.
+ */
+const activeWorkFailureLabelPattern = /^(?:工具|执行|命令|调用|任务)失败[：:]/;
+const activeWorkEnglishFailureLabelPattern = /^(?:tool failed|tool error|execution failed|command failed)[：:]/i;
+/** A failing tool tag ("writeback_tool 失败：detail…") compacts to the tag itself. */
+const activeWorkFailureTagPattern = /^[\w./-]{1,64}\s*失败[：:]/;
+
 function compactActiveWorkSummary(value: string, maxLength = 72): string {
   const normalized = value.replace(/\s+/g, " ").trim();
-  // Skip an early label separator (e.g. "工具失败：") so the first sentence
-  // boundary after the leading label wins instead of the whole dump.
-  const boundary = normalized.slice(6).search(/[：:。；;！？!?]/) + 6;
-  if (boundary >= 6 && boundary < maxLength) {
-    return normalized.slice(0, boundary).trim();
+  const labelMatch = normalized.match(activeWorkFailureLabelPattern)
+    ?? normalized.match(activeWorkEnglishFailureLabelPattern);
+  if (labelMatch) {
+    const labelEnd = labelMatch[0].length;
+    // After a known failure label the first sentence boundary wins; ":" is
+    // deliberately excluded so exit-code and URL colons cannot truncate.
+    const boundary = normalized.slice(labelEnd).search(/[。；;！？!?]/) + labelEnd;
+    if (boundary > labelEnd && boundary < maxLength) {
+      return normalized.slice(0, boundary).trim();
+    }
+  } else {
+    const tagMatch = normalized.match(activeWorkFailureTagPattern);
+    if (tagMatch && tagMatch[0].length < maxLength) {
+      return tagMatch[0].replace(/[：:]$/, "").trim();
+    }
   }
   if (normalized.length <= maxLength) {
     return normalized;
@@ -813,6 +849,11 @@ function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
 function activeWorkHref(kind: ActiveWorkKind, run: ActiveWorkRunSnapshot): string {
   if (kind === "supervised") {
     return "/supervised-evolution";
+  }
+  if (kind === "self") {
+    // The self-evolution board route exists and is mode-guarded; deep-linking
+    // the chip lands on the owning surface instead of a dead href.
+    return "/self-evolution";
   }
   if (kind === "self_evolution_autonomous_loop") {
     return "/self-evolution";
@@ -982,4 +1023,31 @@ export function codeFreshnessStale(
     || verdict === "frontend_behind"
     || verdict === "backend_and_frontend_behind"
   );
+}
+
+export type CodeFreshnessCardOverride = {
+  valueKey: "codeFreshnessBehind" | "codeFreshnessUnknown";
+  /**
+   * Tone the primary card must wear for this verdict; null keeps the card's
+   * own tone (an undetectable version alone is not a caution-grade failure).
+   */
+  tone: SystemStatusTone | null;
+};
+
+/**
+ * The primary status card must speak the code-freshness verdict, not just
+ * tint it: a behind build says "restart recommended" and wears caution (never
+ * overriding a real failure), while an undetectable version stops reading as
+ * a green "connected" and says it cannot be measured.
+ */
+export function codeFreshnessCardOverride(
+  verdict: CodeFreshnessVerdict | undefined | null,
+): CodeFreshnessCardOverride | null {
+  if (codeFreshnessStale(verdict)) {
+    return { valueKey: "codeFreshnessBehind", tone: "caution" };
+  }
+  if (verdict === "unknown") {
+    return { valueKey: "codeFreshnessUnknown", tone: null };
+  }
+  return null;
 }

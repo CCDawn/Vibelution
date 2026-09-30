@@ -1,4 +1,5 @@
 import type { CodeFreshnessVerdict } from "../api/types";
+import { shellDictionary } from "../i18n/shellDictionary";
 
 /**
  * Workbench update banner (backend is behind disk HEAD): the running backend
@@ -48,11 +49,23 @@ export function updateBannerHeadToken(diskHead: string | undefined | null): stri
   return `@${head.slice(0, UPDATE_BANNER_HEAD_TOKEN_LENGTH)}`;
 }
 
+/**
+ * Banner copy for the two distinct "behind" shapes:
+ * - `commitsBehind > 0`: main moved ahead by real commits — the classic copy.
+ * - `commitsBehind === null || 0` with a behind verdict: only the dirty-tree
+ *   digest differs (uncommitted workspace changes), so the copy must speak
+ *   about the working tree instead of a moved-ahead main.
+ * A caller that cannot tell (argument omitted) keeps the moved-ahead framing.
+ */
 export function updateBannerCopy(
   lang: string,
   diskHead: string | undefined | null,
   frontendAlsoBehind: boolean,
+  commitsBehind?: number | null,
 ): { title: string; detail: string } {
+  if (commitsBehind !== undefined && (commitsBehind === null || commitsBehind <= 0)) {
+    return updateBannerDirtyWorkspaceCopy(lang, frontendAlsoBehind);
+  }
   const token = updateBannerHeadToken(diskHead);
   if (lang === "en") {
     return {
@@ -68,6 +81,20 @@ export function updateBannerCopy(
     detail: [
       token ? `main 已前进到 ${token}。` : "main 已前进。",
       frontendAlsoBehind ? "重启会同时加载新的前端构建。" : "",
+    ].filter(Boolean).join(" "),
+  };
+}
+
+function updateBannerDirtyWorkspaceCopy(
+  lang: string,
+  frontendAlsoBehind: boolean,
+): { title: string; detail: string } {
+  const pack = lang === "en" ? shellDictionary.en : shellDictionary.zh;
+  return {
+    title: pack.updateBannerDirtyTitle,
+    detail: [
+      pack.updateBannerDirtyDetail,
+      frontendAlsoBehind ? (lang === "en" ? "The restart also loads the new frontend build." : "重启会同时加载新的前端构建。") : "",
     ].filter(Boolean).join(" "),
   };
 }

@@ -130,6 +130,10 @@ const styles = {
     "vui-app-appshell settingsRowChevronOpen shrink-0 rotate-90 text-[var(--fg-tertiary)] transition-transform",
   settingsStatus:
     "vui-app-appshell settingsStatus flex min-w-0 items-center gap-1.5 text-vui-xs text-[var(--fg-tertiary)] [&>span:last-child]:hidden sm:[&>span:last-child]:inline sm:[&>span:last-child]:max-w-28 sm:[&>span:last-child]:truncate",
+  // Failed-primary retry affordance: same footprint as the plain status chip,
+  // plus pointer/focus affordances (role=button lives on the span in AppShell).
+  settingsStatusRetry:
+    "vui-app-appshell settingsStatusRetry cursor-pointer rounded-[var(--radius-control)] outline-none transition-colors hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
   settingsThemeChoices:
     "vui-app-appshell settingsThemeChoices grid min-w-0 gap-0 border-l border-[var(--vui-border-subtle)] pl-2 ml-7",
   // No !shadow-none here: VUI focus indication rides on box-shadow

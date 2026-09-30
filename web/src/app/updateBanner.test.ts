@@ -92,6 +92,35 @@ describe("updateBannerCopy", () => {
     expect(updateBannerHeadToken("")).toBe("");
     expect(updateBannerCopy("zh", "", false).detail).toBe("main 已前进。");
   });
+
+  it("speaks about uncommitted workspace changes when only the dirty digest differs", () => {
+    // behindCount null/0 with a behind verdict = no new commits on main; the
+    // copy must not claim that main moved ahead.
+    for (const commitsBehind of [null, 0]) {
+      const zh = updateBannerCopy("zh", "e91a851dfabc", false, commitsBehind);
+      expect(zh.title).toBe("工作区有未提交变化，重启后生效");
+      expect(zh.detail).toContain("工作区");
+      expect(zh.detail).not.toContain("main 已前进");
+
+      const en = updateBannerCopy("en", "e91a851dfabc", false, commitsBehind);
+      expect(en.title).toBe("Working tree changed — restart to apply");
+      expect(en.detail).toContain("working-tree state");
+      expect(en.detail).not.toContain("main has moved ahead");
+    }
+  });
+
+  it("keeps the moved-ahead copy for real commit divergence and unknown counts", () => {
+    expect(updateBannerCopy("zh", "e91a851dfabc", false, 3).detail).toBe("main 已前进到 @e91a851。");
+    // A caller that cannot tell keeps the previous framing.
+    expect(updateBannerCopy("zh", "e91a851dfabc", false, undefined).detail).toBe("main 已前进到 @e91a851。");
+  });
+
+  it("still mentions the frontend build in the dirty-workspace variant when it is also behind", () => {
+    expect(updateBannerCopy("zh", "e91a851dfabc", true, null).detail)
+      .toBe("运行中的代码基于较早的工作区状态，重启后会按当前代码运行。 重启会同时加载新的前端构建。");
+    expect(updateBannerCopy("en", "e91a851dfabc", true, null).detail)
+      .toBe("The running code was loaded from an earlier working-tree state; restart to serve the current changes. The restart also loads the new frontend build.");
+  });
 });
 
 describe("updateBanner dismissed-head storage", () => {
