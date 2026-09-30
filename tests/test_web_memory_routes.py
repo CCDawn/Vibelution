@@ -403,7 +403,14 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Graph Agent", direct_session_id="session-graph")
-    team = team_service.create_team(name="Graph Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    reviewer = agent_directory_service.create_agent_instance(display_name="Graph Reviewer Agent")
+    team = team_service.create_team(
+        name="Graph Team",
+        members=[
+            {"agentId": agent["agentId"], "role": "lead"},
+            {"agentId": reviewer["agentId"], "role": "steward"},
+        ],
+    )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Graph Knowledge",
@@ -421,7 +428,7 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
         knowledge_base["knowledgeBaseId"],
         proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=agent["agentId"],
+        reviewed_by_agent_id=reviewer["agentId"],
     )
 
     response = client.get("/api/memory/knowledge-graph", params={"agentId": agent["agentId"]})
@@ -436,7 +443,8 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert payload["summary"]["nodeTypeCounts"].get("knowledge_item", 0) == 0
     team_node = next(node for node in payload["nodes"] if node["type"] == "team")
     agent_node = next(node for node in payload["nodes"] if node["type"] == "agent" and node["metadata"]["agentId"] == agent["agentId"])
-    assert team_node["childNodeIds"] == [agent_node["id"]]
+    reviewer_node = next(node for node in payload["nodes"] if node["type"] == "agent" and node["metadata"]["agentId"] == reviewer["agentId"])
+    assert set(team_node["childNodeIds"]) == {agent_node["id"], reviewer_node["id"]}
     assert team_node["responsibilityQuestion"]
     assert agent_node["visual"]["size"] == "leaf"
     assert team_node["contentItems"][0]["title"] == "Graph API proposal"
@@ -481,7 +489,14 @@ def test_memory_knowledge_graph_endpoint_requires_actor_agent(tmp_path, monkeypa
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Anonymous Graph Guard Agent")
-    team = team_service.create_team(name="Anonymous Graph Guard Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    reviewer = agent_directory_service.create_agent_instance(display_name="Anonymous Graph Guard Reviewer")
+    team = team_service.create_team(
+        name="Anonymous Graph Guard Team",
+        members=[
+            {"agentId": agent["agentId"], "role": "lead"},
+            {"agentId": reviewer["agentId"], "role": "steward"},
+        ],
+    )
     base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Anonymous Graph Guard Knowledge",
@@ -499,7 +514,7 @@ def test_memory_knowledge_graph_endpoint_requires_actor_agent(tmp_path, monkeypa
         base["knowledgeBaseId"],
         proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=agent["agentId"],
+        reviewed_by_agent_id=reviewer["agentId"],
     )
 
     response = client.get("/api/memory/knowledge-graph")
@@ -544,9 +559,16 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     agent = agent_directory_service.create_agent_instance(display_name="Graph Detail Agent", direct_session_id="session-graph-detail")
+    reviewer = agent_directory_service.create_agent_instance(display_name="Graph Detail Reviewer")
     outsider = agent_directory_service.create_agent_instance(display_name="Graph Detail Outsider")
     hidden_agent = agent_directory_service.create_agent_instance(display_name="Graph Detail Hidden Agent")
-    team = team_service.create_team(name="Graph Detail Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    team = team_service.create_team(
+        name="Graph Detail Team",
+        members=[
+            {"agentId": agent["agentId"], "role": "lead"},
+            {"agentId": reviewer["agentId"], "role": "steward"},
+        ],
+    )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Graph Detail Knowledge",
@@ -564,7 +586,7 @@ def test_memory_knowledge_graph_node_detail_endpoint_returns_selected_node_conte
         knowledge_base["knowledgeBaseId"],
         proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=agent["agentId"],
+        reviewed_by_agent_id=reviewer["agentId"],
     )
 
     graph_response = client.get("/api/memory/knowledge-graph", params={"agentId": agent["agentId"]})
@@ -620,8 +642,22 @@ def test_memory_knowledge_graph_uses_owner_scoped_knowledge_node_ids(tmp_path, m
     first_agent = agent_directory_service.create_agent_instance(display_name="Graph Owner One")
     second_agent = agent_directory_service.create_agent_instance(display_name="Graph Owner Two")
     graph_viewer = agent_directory_service.create_agent_instance(display_name="Graph Cross-Team Viewer")
-    first_team = team_service.create_team(name="Graph Owner Team One", members=[{"agentId": first_agent["agentId"], "role": "lead"}])
-    second_team = team_service.create_team(name="Graph Owner Team Two", members=[{"agentId": second_agent["agentId"], "role": "lead"}])
+    first_reviewer = agent_directory_service.create_agent_instance(display_name="Graph Owner One Reviewer")
+    second_reviewer = agent_directory_service.create_agent_instance(display_name="Graph Owner Two Reviewer")
+    first_team = team_service.create_team(
+        name="Graph Owner Team One",
+        members=[
+            {"agentId": first_agent["agentId"], "role": "lead"},
+            {"agentId": first_reviewer["agentId"], "role": "steward"},
+        ],
+    )
+    second_team = team_service.create_team(
+        name="Graph Owner Team Two",
+        members=[
+            {"agentId": second_agent["agentId"], "role": "lead"},
+            {"agentId": second_reviewer["agentId"], "role": "steward"},
+        ],
+    )
     first_base = team_knowledge_service.create_knowledge_base(
         first_team["teamId"],
         name="Shared Graph KB",
@@ -661,13 +697,13 @@ def test_memory_knowledge_graph_uses_owner_scoped_knowledge_node_ids(tmp_path, m
         first_scoped_base_id,
         first_proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=first_agent["agentId"],
+        reviewed_by_agent_id=first_reviewer["agentId"],
     )["item"]
     second_reviewed = team_knowledge_service.review_refinement_proposal(
         second_scoped_base_id,
         second_proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=second_agent["agentId"],
+        reviewed_by_agent_id=second_reviewer["agentId"],
     )["item"]
     first_reviewed.setdefault("metadata", {})["officialResearchGraph"] = {
         "status": "synced",
@@ -906,7 +942,14 @@ def test_memory_global_overviews_do_not_expose_formal_knowledge_bodies(tmp_path,
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
     team_agent = agent_directory_service.create_agent_instance(display_name="Global Overview Team Agent")
     private_agent = agent_directory_service.create_agent_instance(display_name="Global Overview Private Agent")
-    team = team_service.create_team(name="Global Overview Team", members=[{"agentId": team_agent["agentId"], "role": "lead"}])
+    team_reviewer = agent_directory_service.create_agent_instance(display_name="Global Overview Team Reviewer")
+    team = team_service.create_team(
+        name="Global Overview Team",
+        members=[
+            {"agentId": team_agent["agentId"], "role": "lead"},
+            {"agentId": team_reviewer["agentId"], "role": "steward"},
+        ],
+    )
     team_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Global Overview Team KB",
@@ -964,7 +1007,7 @@ def test_memory_global_overviews_do_not_expose_formal_knowledge_bodies(tmp_path,
         team_base["knowledgeBaseId"],
         team_proposal["proposalId"],
         status="approved",
-        reviewed_by_agent_id=team_agent["agentId"],
+        reviewed_by_agent_id=team_reviewer["agentId"],
     )
     team_knowledge_service.review_refinement_proposal(
         agent_base["knowledgeBaseId"],
