@@ -23,13 +23,14 @@ type SelfEvolutionAutonomousLoopPanelProps = {
   run?: SelfEvolutionAutonomousLoopRun | null;
   pending: boolean;
   error: string;
+  hideActions?: boolean;
   onAction: (
     action: "approve" | "reject" | "retry_cleanup",
     comment?: string,
   ) => void;
 };
 
-const PHASES = [
+export const SELF_EVOLUTION_AUTONOMOUS_PHASES = [
   { id: "observing", zh: "观察现状", en: "Observe" },
   { id: "planning", zh: "制定计划", en: "Plan" },
   { id: "evolving", zh: "隔离进化", en: "Evolve" },
@@ -38,14 +39,14 @@ const PHASES = [
   { id: "completed", zh: "闭环完成", en: "Complete" },
 ] as const;
 
-function phaseIndex(phase: string): number {
+export function selfEvolutionAutonomousPhaseIndex(phase: string): number {
   const normalized = String(phase || "").trim().toLowerCase();
   if (normalized === "queued") {
     return -1;
   }
   if (normalized.endsWith("_interrupted")) {
     const base = normalized.replace(/_interrupted$/, "");
-    const baseIndex = PHASES.findIndex((item) => item.id === base || item.id.startsWith(base));
+    const baseIndex = SELF_EVOLUTION_AUTONOMOUS_PHASES.findIndex((item) => item.id === base || item.id.startsWith(base));
     if (baseIndex >= 0) {
       return baseIndex;
     }
@@ -74,7 +75,7 @@ function phaseIndex(phase: string): number {
   if (normalized === "cleanup_pending" || normalized === "cleanup_failed") {
     return 4;
   }
-  return PHASES.findIndex((item) => item.id === normalized);
+  return SELF_EVOLUTION_AUTONOMOUS_PHASES.findIndex((item) => item.id === normalized);
 }
 
 function compactRevision(value: string | null | undefined): string {
@@ -140,9 +141,10 @@ export function SelfEvolutionAutonomousLoopPanel({
   run,
   pending,
   error,
+  hideActions = false,
   onAction,
 }: SelfEvolutionAutonomousLoopPanelProps) {
-  const currentIndex = phaseIndex(run?.phase ?? "");
+  const currentIndex = selfEvolutionAutonomousPhaseIndex(run?.phase ?? "");
   const changedFiles = run?.candidate?.changedFiles ?? [];
   const verification = run?.candidate?.verification ?? [];
   const awaitingReview = run?.status === "awaiting_user_approval";
@@ -232,7 +234,7 @@ export function SelfEvolutionAutonomousLoopPanel({
           title={lang === "zh" ? "自动闭环未完成" : "Autonomous loop did not complete"}
           tone="error"
           icon={<X size={14} />}
-          actions={integrationFailed ? (
+          actions={!hideActions && integrationFailed ? (
             <VButton
               type="button"
               variant="primary"
@@ -268,7 +270,7 @@ export function SelfEvolutionAutonomousLoopPanel({
       ) : null}
 
       <div className={styles.phaseGrid} aria-label={lang === "zh" ? "闭环阶段" : "Loop phases"} data-testid="self-loop-phase-stepper">
-        {PHASES.map((item, index) => {
+        {SELF_EVOLUTION_AUTONOMOUS_PHASES.map((item, index) => {
           const done = completed || index < currentIndex;
           const current = index === currentIndex;
           const interrupted = failed && current;
@@ -389,7 +391,7 @@ export function SelfEvolutionAutonomousLoopPanel({
               value: run.candidate?.branchName || "--",
             },
           ]}
-          actions={(
+          actions={hideActions ? undefined : (
             <>
               <VButton
                 type="button"
@@ -424,7 +426,7 @@ export function SelfEvolutionAutonomousLoopPanel({
           title={lang === "zh" ? "Git 已提交，候选清理未完成" : "Git committed; candidate cleanup incomplete"}
           tone="error"
           icon={<RotateCcw size={14} />}
-          actions={(
+          actions={hideActions ? undefined : (
             <VButton
               type="button"
               variant="danger"

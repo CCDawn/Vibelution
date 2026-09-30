@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   BookOpen,
@@ -38,11 +38,35 @@ export type SupervisedConversationEvidenceTab = {
   content: ReactNode;
 };
 
+export type EvolutionTrack = "supervised" | "self";
+
+export type EvolutionWorkspaceRun = {
+  id: string;
+  title: string;
+  status: string;
+  selected: boolean;
+  onSelect: () => void;
+};
+
+export type EvolutionWorkspaceRunGroup = {
+  id: EvolutionTrack;
+  label: string;
+  runs: readonly EvolutionWorkspaceRun[];
+};
+
 export type SupervisedConversationWorkspaceProps = {
   lang: "zh" | "en";
   title: string;
   sourceLabel: string;
+  sourceTitle?: string;
+  sourceIcon?: ReactNode;
   sourceSummary?: ReactNode;
+  trackContext?: ReactNode;
+  activeTrack?: EvolutionTrack;
+  onTrackChange?: (track: EvolutionTrack) => void;
+  trackAvailability?: Partial<Record<EvolutionTrack, boolean>>;
+  runGroups?: readonly EvolutionWorkspaceRunGroup[];
+  setupTitle?: string;
   phases?: readonly { id: string; label: string; statusLabel: string; current: boolean; disabled?: boolean }[];
   selectedStepId: string;
   steps: readonly SupervisedConversationWorkspaceStep[];
@@ -79,6 +103,10 @@ function labelsFor(lang: "zh" | "en") {
   if (lang === "en") {
     return {
       product: "Supervised evolution",
+      selfProduct: "Self evolution",
+      trackNavigation: "Evolution type",
+      supervisedTrack: "Supervised",
+      selfTrack: "Self",
       newRun: "New run",
       dataset: "Dataset",
       evidence: "Evidence",
@@ -95,10 +123,15 @@ function labelsFor(lang: "zh" | "en") {
       evidenceTitle: "Run evidence",
       navigation: "Run context",
       progress: "Phase progress",
+      noRuns: "No runs yet",
     };
   }
   return {
     product: "监督进化",
+    selfProduct: "自进化",
+    trackNavigation: "进化类型",
+    supervisedTrack: "监督",
+    selfTrack: "自进化",
     newRun: "新建",
     dataset: "评估集",
     evidence: "证据",
@@ -115,29 +148,39 @@ function labelsFor(lang: "zh" | "en") {
     evidenceTitle: "运行证据",
     navigation: "运行导航",
     progress: "阶段进度",
+    noRuns: "暂无运行",
   };
 }
 
-function useNarrowViewport() {
-  const [narrow, setNarrow] = useState(
-    () => typeof window !== "undefined" && window.innerWidth < 880,
-  );
+function useWorkspaceWidth() {
+  const rootRef = useRef<HTMLElement>(null);
+  const [width, setWidth] = useState(() => typeof window !== "undefined" ? window.innerWidth : 1280);
 
   useEffect(() => {
-    const update = () => setNarrow(window.innerWidth < 880);
+    const update = () => setWidth(rootRef.current?.getBoundingClientRect().width || window.innerWidth);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    if (rootRef.current) observer?.observe(rootRef.current);
     window.addEventListener("resize", update);
     update();
-    return () => window.removeEventListener("resize", update);
+    return () => { window.removeEventListener("resize", update); observer?.disconnect(); };
   }, []);
 
-  return narrow;
+  return { rootRef, width };
 }
 
 export function SupervisedConversationWorkspace({
   lang,
   title,
   sourceLabel,
+  sourceTitle,
+  sourceIcon,
   sourceSummary,
+  trackContext,
+  activeTrack,
+  onTrackChange,
+  trackAvailability,
+  runGroups,
+  setupTitle,
   phases = [],
   selectedStepId,
   steps,
@@ -158,7 +201,9 @@ export function SupervisedConversationWorkspace({
   hasRun,
 }: SupervisedConversationWorkspaceProps) {
   const labels = labelsFor(lang);
-  const narrow = useNarrowViewport();
+  const workspaceLabel = activeTrack === "self" ? labels.selfProduct : labels.product;
+  const { rootRef, width: workspaceWidth } = useWorkspaceWidth();
+  const narrow = workspaceWidth < 880;
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [desktopNavigationOpen, setDesktopNavigationOpen] = useState(true);
@@ -166,8 +211,22 @@ export function SupervisedConversationWorkspace({
   const evidenceTab = evidenceTabs.find((tab) => tab.id === selectedEvidenceTabId)
     ?? evidenceTabs[0];
   const showEvidence = !setupOpen && evidenceOpen && hasRun && evidenceTabs.length > 0;
-  const showDesktopEvidence = showEvidence && !narrow;
-  const showMobileEvidence = showEvidence && narrow;
+  const showDesktopEvidence = showEvidence && workspaceWidth >= 960;
+  const showMobileEvidence = showEvidence && !showDesktopEvidence;
+  const showDesktopNavigation = desktopNavigationOpen && (!showDesktopEvidence || workspaceWidth >= 1200);
+  const showTrackSwitcher = activeTrack !== undefined && onTrackChange !== undefined;
+  const trackItems = [
+    {
+      id: "supervised",
+      label: labels.supervisedTrack,
+      disabled: trackAvailability?.supervised === false,
+    },
+    {
+      id: "self",
+      label: labels.selfTrack,
+      disabled: trackAvailability?.self === false,
+    },
+  ];
 
   useEffect(() => {
     if (setupOpen) {
@@ -215,35 +274,77 @@ export function SupervisedConversationWorkspace({
     label: step.label,
     disabled: step.disabled,
   }));
-  const showNavigation = !setupOpen && hasRun && navigationOptions.length > 0;
-  const showContext = !setupOpen && hasRun;
+  const showPhaseNavigation = !setupOpen && hasRun && navigationOptions.length > 0;
+  const hasRunGroups = Boolean(runGroups?.length);
+  const showNavigation = hasRunGroups || trackContext != null || (!setupOpen && hasRun);
+  const showContext = showNavigation;
   const closeNavigation = () => setNavigationOpen(false);
   const contextPanel = (
     <VSurface as="aside" padding="none" className={styles.contextPanel} aria-label={labels.navigation}>
-      <section className={styles.sourceSection}>
-        <h2 className={styles.contextHeading}>{labels.dataset}</h2>
-        <VButton aria-label={labels.dataset} title={sourceLabel} contentLayout="plain" variant="ghost" className={styles.contextSourceButton}
-          onPress={() => { closeNavigation(); onSource(); }} icon={<Database size={15} />}>
-          <span className={styles.contextSourceName}>{sourceLabel || labels.dataset}</span>
-        </VButton>
-        {sourceSummary ? <div className={styles.sourceSummary}>{sourceSummary}</div> : null}
-      </section>
-      <nav aria-label={labels.progress} className={styles.contextPhases}>
-        <h2 className={styles.contextHeading}>{labels.progress}</h2>
-        {phases.map((phase, index) => (
-          <VButton key={phase.id} contentLayout="plain" variant="ghost" className={styles.contextPhase}
-            aria-pressed={selectedStepId === phase.id} aria-current={phase.current ? "step" : undefined}
-            isDisabled={phase.disabled} onPress={() => { onSelectStep(phase.id); closeNavigation(); }}>
-            <span className={styles.phaseNumber}>{index + 1}</span>
-            <span className={styles.contextPhaseName}>{phase.label}</span>
-            <span className={styles.contextPhaseStatus}>{phase.statusLabel}</span>
-          </VButton>
-        ))}
-      </nav>
-      <div className={styles.contextLinks}>
-        <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<History size={15} />} onPress={() => { closeNavigation(); onHistory(); }}>{labels.history}</VButton>
-        <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<Settings2 size={15} />} onPress={() => { closeNavigation(); onSettings(); }}>{labels.settings}</VButton>
-      </div>
+      {hasRunGroups ? (
+        <nav aria-label={labels.navigation} className={styles.contextRunGroups}>
+          {runGroups?.map((group) => (
+            <section key={group.id} className={styles.runGroup} aria-label={group.label}>
+              <h2 className={styles.runGroupHeading}>
+                <span>{group.label}</span>
+                <span className={styles.runGroupCount}>{group.runs.length}</span>
+              </h2>
+              {group.runs.length ? (
+                <div className={styles.runGroupItems}>
+                  {group.runs.map((run) => (
+                    <VButton
+                      key={run.id}
+                      contentLayout="plain"
+                      variant="ghost"
+                      className={styles.runItem}
+                      aria-pressed={run.selected}
+                      aria-current={run.selected ? "page" : undefined}
+                      title={run.title}
+                      onPress={() => { run.onSelect(); closeNavigation(); }}
+                    >
+                      <span className={styles.runItemText}>
+                        <span className={styles.runItemTitle}>{run.title}</span>
+                        <span className={styles.runItemStatus}>{run.status}</span>
+                      </span>
+                    </VButton>
+                  ))}
+                </div>
+              ) : (
+                <p className={styles.runGroupEmpty}>{labels.noRuns}</p>
+              )}
+            </section>
+          ))}
+        </nav>
+      ) : null}
+      {trackContext != null ? <section className={styles.trackContext}>{trackContext}</section> : null}
+      {!setupOpen && hasRun ? (
+        <>
+          <section className={styles.sourceSection}>
+            <h2 className={styles.contextHeading}>{sourceTitle || labels.dataset}</h2>
+            <VButton aria-label={sourceTitle || labels.dataset} title={sourceLabel} contentLayout="plain" variant="ghost" className={styles.contextSourceButton}
+              onPress={() => { closeNavigation(); onSource(); }} icon={sourceIcon ?? <Database size={15} />}>
+              <span className={styles.contextSourceName}>{sourceLabel || sourceTitle || labels.dataset}</span>
+            </VButton>
+            {sourceSummary ? <div className={styles.sourceSummary}>{sourceSummary}</div> : null}
+          </section>
+          <nav aria-label={labels.progress} className={styles.contextPhases}>
+            <h2 className={styles.contextHeading}>{labels.progress}</h2>
+            {phases.map((phase, index) => (
+              <VButton key={phase.id} contentLayout="plain" variant="ghost" className={styles.contextPhase}
+                aria-pressed={selectedStepId === phase.id} aria-current={phase.current ? "step" : undefined}
+                isDisabled={phase.disabled} onPress={() => { onSelectStep(phase.id); closeNavigation(); }}>
+                <span className={styles.phaseNumber}>{index + 1}</span>
+                <span className={styles.contextPhaseName}>{phase.label}</span>
+                <span className={styles.contextPhaseStatus}>{phase.statusLabel}</span>
+              </VButton>
+            ))}
+          </nav>
+          <div className={styles.contextLinks}>
+            <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<History size={15} />} onPress={() => { closeNavigation(); onHistory(); }}>{labels.history}</VButton>
+            <VButton contentLayout="plain" variant="ghost" className={styles.contextLink} icon={<Settings2 size={15} />} onPress={() => { closeNavigation(); onSettings(); }}>{labels.settings}</VButton>
+          </div>
+        </>
+      ) : null}
     </VSurface>
   );
 
@@ -309,48 +410,68 @@ export function SupervisedConversationWorkspace({
 
   return (
     <section
-      aria-label={labels.product}
+      ref={rootRef}
+      aria-label={workspaceLabel}
       className={styles.root}
       data-has-run={hasRun ? "true" : "false"}
       data-vui-region="supervised-conversation-workspace"
     >
-      <header className={`${styles.header} ${showNavigation ? styles.headerWithNavigation : styles.headerWithoutNavigation}`}>
+      <header className={`${styles.header} ${showTrackSwitcher || showPhaseNavigation ? styles.headerWithNavigation : styles.headerWithoutNavigation} ${narrow ? styles.narrowHeader : ""} ${narrow && (showTrackSwitcher || showPhaseNavigation) ? styles.narrowHeaderWithNavigation : ""}`}>
         <div className={styles.runIdentity} data-has-source={!setupOpen && sourceLabel ? "true" : "false"}>
           {showContext ? <VIconButton label={labels.navigation} variant="ghost" icon={<PanelLeft size={16} />}
-            aria-expanded={narrow ? navigationOpen : desktopNavigationOpen}
-            onPress={() => narrow ? setNavigationOpen((open) => !open) : setDesktopNavigationOpen((open) => !open)} /> : null}
-          <h1 className={styles.title} title={setupOpen ? labels.setupTitle : title}>
-            {setupOpen ? labels.setupTitle : title}
+            aria-expanded={narrow ? navigationOpen : showDesktopNavigation}
+            onPress={() => {
+              if (narrow) setNavigationOpen((open) => !open);
+              else if (desktopNavigationOpen && !showDesktopNavigation) setEvidenceOpen(false);
+              else setDesktopNavigationOpen((open) => !open);
+            }} /> : null}
+          <h1 className={styles.title} title={setupOpen ? setupTitle || labels.setupTitle : title}>
+            {setupOpen ? setupTitle || labels.setupTitle : title}
           </h1>
           {!setupOpen && !hasRun ? (
             <VButton
-              aria-label={labels.dataset}
-              title={sourceLabel || labels.dataset}
+              aria-label={sourceTitle || labels.dataset}
+              title={sourceLabel || sourceTitle || labels.dataset}
               contentLayout="plain"
               variant="ghost"
               className={styles.sourceButton}
               onPress={onSource}
-              icon={<Database size={14} />}
+              icon={sourceIcon ?? <Database size={14} />}
             >
-              <span>{labels.dataset}</span>
+              <span>{sourceTitle || labels.dataset}</span>
               {sourceLabel ? <span className={styles.sourceValue}>{sourceLabel}</span> : null}
             </VButton>
           ) : null}
         </div>
 
-        {showNavigation ? (
-          <div className={styles.phaseNavigation}>
-            <VStringSelect
-              ariaLabel={labels.phaseNavigation}
-              className={styles.phaseSelect}
-              value={selectedStepId}
-              onValueChange={onSelectStep}
-              options={navigationOptions}
-            />
+        {showTrackSwitcher || showPhaseNavigation ? (
+          <div className={`${styles.phaseNavigation} ${narrow ? styles.narrowPhaseNavigation : ""}`}>
+            {showTrackSwitcher ? (
+              <VTabs
+                aria-label={labels.trackNavigation}
+                className={styles.trackTabs}
+                listClassName={styles.trackTabList}
+                triggerClassName={styles.trackTabTrigger}
+                value={activeTrack}
+                onValueChange={(value) => {
+                  if (value === "self" || value === "supervised") onTrackChange?.(value);
+                }}
+                items={trackItems}
+              />
+            ) : null}
+            {showPhaseNavigation ? (
+              <VStringSelect
+                ariaLabel={labels.phaseNavigation}
+                className={styles.phaseSelect}
+                value={selectedStepId}
+                onValueChange={onSelectStep}
+                options={navigationOptions}
+              />
+            ) : null}
           </div>
         ) : null}
 
-        <div className={`${styles.toolbar} ${showNavigation ? "" : styles.toolbarWithoutNavigation}`} role="toolbar" aria-label={labels.product}>
+        <div className={`${styles.toolbar} ${showTrackSwitcher || showPhaseNavigation ? "" : styles.toolbarWithoutNavigation} ${narrow ? styles.narrowToolbar : ""}`} role="toolbar" aria-label={workspaceLabel}>
           {!setupOpen ? (
             <>
               <VButton
@@ -397,7 +518,7 @@ export function SupervisedConversationWorkspace({
       </header>
 
       <div className={styles.workspaceBody}>
-      {showContext && !narrow && desktopNavigationOpen ? contextPanel : null}
+      {showContext && !narrow && showDesktopNavigation ? contextPanel : null}
       <VSplitWorkspace
         aside={desktopEvidence}
         className={styles.splitWorkspace}

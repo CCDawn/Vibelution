@@ -2,8 +2,12 @@ const styles = {
   root:
     "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-canvas)] text-[var(--fg-primary)]",
   header:
-    "relative z-20 grid h-12 min-h-12 shrink-0 grid-cols-[minmax(120px,1fr)_minmax(240px,320px)_auto] grid-rows-[48px] items-center gap-4 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 max-[879px]:!grid-cols-[minmax(0,1fr)_auto] max-[879px]:!gap-x-2 max-[879px]:!gap-y-0 max-[879px]:!px-2.5",
+    "relative z-20 grid h-12 min-h-12 shrink-0 grid-cols-[minmax(120px,1fr)_minmax(340px,430px)_auto] grid-rows-[48px] items-center gap-4 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 max-[879px]:!grid-cols-[minmax(0,1fr)_auto] max-[879px]:!gap-x-2 max-[879px]:!gap-y-0 max-[879px]:!px-2.5",
   headerWithNavigation: "max-[879px]:!h-[88px] max-[879px]:!min-h-[88px] max-[879px]:!grid-rows-[44px_44px]",
+  narrowHeader: "!grid-cols-[minmax(0,1fr)_auto] !gap-x-2 !gap-y-0 !px-2.5 [&_[data-vui=button]]:!min-h-11",
+  narrowHeaderWithNavigation: "!h-[88px] !min-h-[88px] !grid-rows-[44px_44px]",
+  narrowPhaseNavigation: "!col-span-2 !col-start-1 !row-start-2 !justify-start",
+  narrowToolbar: "!col-start-2",
   headerWithoutNavigation:
     "!grid-cols-[minmax(0,1fr)_auto] max-[879px]:!h-11 max-[879px]:!min-h-11 max-[879px]:!grid-rows-[44px]",
   runIdentity:
@@ -16,9 +20,13 @@ const styles = {
   sourceValue:
     "min-w-0 truncate text-[var(--fg-tertiary)] max-[600px]:hidden",
   phaseNavigation:
-    "col-start-2 row-start-1 flex min-w-0 items-center justify-center max-[879px]:col-span-2 max-[879px]:col-start-1 max-[879px]:row-start-2",
+    "col-start-2 row-start-1 flex min-w-0 items-center justify-center gap-2 max-[879px]:col-span-2 max-[879px]:col-start-1 max-[879px]:row-start-2 max-[879px]:justify-start",
+  trackTabs: "!flex !min-w-0 !shrink-0 !gap-0",
+  trackTabList: "!flex-nowrap !gap-0.5 !p-0.5",
+  trackTabTrigger:
+    "!min-h-7 !px-2 !text-[length:var(--vui-font-xs)] max-[879px]:!min-h-10 max-[879px]:!px-2.5",
   phaseSelect:
-    "!w-full !min-w-0 [&_button]:!h-8 [&_button]:!min-h-8 [&_button]:!rounded-[var(--radius-control)] [&_button]:!border-[var(--vui-border-subtle)] [&_button]:!bg-[var(--vui-surface-panel)] [&_button]:!px-2.5 [&_button]:!text-[length:var(--vui-font-xs)] max-[879px]:[&_button]:!h-11 max-[879px]:[&_button]:!min-h-11",
+    "!w-full !min-w-0 !flex-1 [&_button]:!h-8 [&_button]:!min-h-8 [&_button]:!rounded-[var(--radius-control)] [&_button]:!border-[var(--vui-border-subtle)] [&_button]:!bg-[var(--vui-surface-panel)] [&_button]:!px-2.5 [&_button]:!text-[length:var(--vui-font-xs)] max-[879px]:[&_button]:!h-11 max-[879px]:[&_button]:!min-h-11",
   toolbar:
     "col-start-3 row-start-1 flex min-w-0 shrink-0 items-center justify-end gap-1 max-[879px]:col-start-2",
   toolbarWithoutNavigation: "!col-start-2",
@@ -32,6 +40,20 @@ const styles = {
     "flex h-full min-h-0 w-[248px] shrink-0 flex-col overflow-y-auto !rounded-none !border-0 border-r border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] !p-3 max-[879px]:!w-full",
   sourceSection: "shrink-0 border-b border-[var(--vui-border-subtle)] pb-4",
   contextHeading: "m-0 mb-2 text-[length:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
+  contextRunGroups: "flex shrink-0 flex-col gap-3 border-b border-[var(--vui-border-subtle)] pb-3",
+  runGroup: "min-w-0",
+  runGroupHeading:
+    "m-0 mb-1.5 flex items-center justify-between gap-2 text-[length:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
+  runGroupCount:
+    "flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--vui-control-muted)] text-[10px] font-medium text-[var(--fg-tertiary)]",
+  runGroupItems: "flex min-w-0 flex-col gap-0.5",
+  runItem:
+    "!flex !h-auto !min-h-10 !w-full !min-w-0 !justify-start !px-2 !py-1.5 text-left aria-pressed:!bg-[var(--vui-surface-panel)] max-[879px]:!min-h-11",
+  runItemText: "flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left",
+  runItemTitle: "w-full truncate text-left text-[length:var(--vui-font-xs)] text-[var(--fg-primary)]",
+  runItemStatus: "w-full truncate text-left text-[10px] font-normal text-[var(--fg-tertiary)]",
+  runGroupEmpty: "m-0 px-2 py-1 text-[length:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
+  trackContext: "shrink-0 border-b border-[var(--vui-border-subtle)] py-3 text-[length:var(--vui-font-xs)]",
   contextSourceButton: "!flex !h-auto !min-h-10 !w-full !justify-start !gap-2 !px-1 !py-2 !text-[length:var(--vui-font-xs)] !whitespace-normal",
   contextSourceName: "min-w-0 flex-1 break-words text-left [overflow-wrap:anywhere]",
   sourceSummary: "mt-1 text-[length:var(--vui-font-xs)] text-[var(--fg-tertiary)]",

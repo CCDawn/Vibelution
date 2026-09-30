@@ -24,6 +24,7 @@ const previewExemptDesignSections = new Set([
   // Route-owned compositions: source/run/session state is supplied by EvolutionRoute.
   // Covered by their interaction tests and the isolated supervised workspace preview.
   "SupervisedConversationWorkspace",
+  "SelfEvolutionConversationWorkspace",
   "EvolutionSupervisedLiveSetupPanel",
 ]);
 

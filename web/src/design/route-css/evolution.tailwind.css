@@ -14,6 +14,8 @@
 @source "../../routes/SupervisedAgentConversationPanel.styles.ts";
 @source "../../routes/SupervisedConversationWorkspace.tsx";
 @source "../../routes/SupervisedConversationWorkspace.styles.ts";
+@source "../../routes/SelfEvolutionConversationWorkspace.tsx";
+@source "../../routes/SelfEvolutionConversationWorkspace.styles.ts";
 @source "../../routes/SupervisedApprovalDecisionPanel.tsx";
 @source "../../routes/SupervisedApprovalDecisionPanel.styles.ts";
 @source "../../routes/SelfEvolutionTrack.tsx";
