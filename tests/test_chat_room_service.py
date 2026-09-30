@@ -2,6 +2,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -6504,6 +6505,79 @@ def test_parallel_batch_queue_wait_excluded_from_budget_and_total_speaker_ms(
         - contexts["session-alpha"]["challengePerCallDeadlineAtMs"]
     )
     assert fence_delta_ms >= 1_000
+
+
+def test_execution_slot_queue_wait_excluded_from_per_call_budget(
+    tmp_path, monkeypatch
+):
+    """execution slot 的准入排队不计入 per-call 预算：槽位到手后重算 fence。
+
+    09-03「排队不吃预算」先例的 execution-slot 版：讲者可能在准入 slot 上
+    排队并跨过 launch 时刻设定的 per-call fence；slot 到手后按当前时刻重算
+    fence，避免合法讲者在真正开跑之前就被围栏判死；等待时长以
+    ``timings.executionSlotWaitMs`` 留审计，等待上限仍由既有有界预算看管。
+    """
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    session = session_service.create_chat_session(title="槽位排队发言者")
+    session_id = str(session.get("id") or "").strip()
+    assert session_id
+    room = chat_room_service.create_chat_room(
+        title="槽位排队群聊",
+        participant_session_ids=[session_id],
+    )
+    participant = next(
+        p for p in room["participants"] if str(p.get("sessionId") or "") == session_id
+    )
+    prompt = chat_room_service._build_participant_prompt(
+        room={"roomId": str(room.get("roomId") or ""), "title": "槽位排队群聊"},
+        round_payload={"topic": "槽位排队", "mode": "round_robin", "purpose": "discussion"},
+        participant=participant,
+        prior_messages=[],
+    )
+
+    real_reserve = session_service.reserve_session_execution_slot
+
+    @contextmanager
+    def slow_reserve(**kwargs):
+        # 模拟准入 slot 的排队等待：跨过 launch 时刻的 per-call fence。
+        time.sleep(0.4)
+        with real_reserve(**kwargs):
+            yield
+
+    monkeypatch.setattr(session_service, "reserve_session_execution_slot", slow_reserve)
+
+    runner_now_ms: dict[str, int] = {}
+
+    def fake_runner(_agent, **kwargs):
+        runner_now_ms["value"] = int(time.time() * 1000)
+        return {"status": "completed", "raw_output": "ok", "summary": "ok"}
+
+    monkeypatch.setattr(chat_room_service, "run_existing_agent_single_turn", fake_runner)
+
+    context = {
+        "roomId": str(room.get("roomId") or ""),
+        "roundId": "round-slot-wait",
+        "topic": "槽位排队",
+        "purpose": "discussion",
+        "_perCallBudgetMs": 60_000,
+        # launch 时刻的 fence 只剩 50ms：0.4s 的槽位排队必然跨过它。若 slot
+        # 到手后不重算，interrupt_checker 会在真正开跑之前就以 per-call 停止
+        # 原因判死本次讲者调用。
+        chat_room_service._CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY: (
+            int(time.time() * 1000) + 50
+        ),
+    }
+    result = chat_room_service._run_participant_agent(participant, prompt, context)
+
+    assert result["status"] == "completed"
+    fence_ms = int(
+        context[chat_room_service._CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY]
+    )
+    # fence 在槽位到手（排队结束）之后重算：相对 runner 开跑时刻仍有一个
+    # 完整预算，而不是 launch 时刻的旧锚点。
+    assert fence_ms - runner_now_ms["value"] >= 58_000
+    assert result["timings"]["executionSlotWaitMs"] >= 300
 
 
 def test_zero_output_failed_turn_retries_once_even_without_fence_spend(
