@@ -894,8 +894,9 @@ The existing `ConversationTurnNavigator` is a left-side, container-responsive
 reading aid, not a second transcript. VNativeButton owns dense 36×18 pointer/keyboard
 targets; VHoverCard opens to the right with a two-line prompt and three-line answer.
 The 12×2 mark grows on hover/focus with two adjacent levels; reduced motion disables
-transitions. Below 864px conversation width the rail disappears and transcript
-padding becomes symmetric. Sessions under six turns keep the existing hidden rule.
+transitions. Below 864px conversation width the rail disappears without adding
+left padding. The existing right-side clearance for the back-to-bottom button is
+preserved. Sessions under six turns keep the existing hidden rule.
 React Virtual bounds mounted marks; current-turn changes and container restoration
 reveal the active mark. Existing timeline navigation, reduced-motion scrolling,
 message projection and conversation data remain unchanged.
