@@ -771,6 +771,7 @@ def test_session_detail_exposes_recent_next_state_signal_summaries(tmp_path, mon
 
 
 def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
@@ -805,6 +806,7 @@ def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeyp
 
 
 def test_create_session_invalidates_agent_index_cache_after_project_root_switch(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
     old_root = tmp_path / "old-project"
     new_root = tmp_path / "new-project"
     _seed_chat_state(old_root)
@@ -1197,6 +1199,7 @@ def test_delete_bound_direct_session_rebinds_agent_without_reviving_old_session(
 
 
 def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
