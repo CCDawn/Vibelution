@@ -31,11 +31,51 @@ describe("AuxConversationsRoute layout contract", () => {
     expect(presentationSource).toContain('running: "运行中"');
   });
 
-  it("keeps task rows as status dot + title + kind badge + relative time", () => {
-    expect(routeSource).toContain("auxTaskStatusTone(task.status)");
-    expect(routeSource).toContain("<VChip");
+  it("keeps directory rows as neutral icon + title + status word + kind/summary + relative time", () => {
+    expect(routeSource).toContain("auxTaskStatusIcon(task.status)");
+    expect(routeSource).toContain("auxTaskStatusLabel(task.status, lang)");
     expect(routeSource).toContain("auxTaskKindLabel(task.kind, lang)");
-    expect(routeSource).toContain("formatRelativeTime(task.startedAt, lang)");
+    // Ended rows age from endedAt, running rows from startedAt; no ticking seconds.
+    expect(routeSource).toContain('String(task.endedAt || "").trim() || task.startedAt');
+    expect(routeSource).toContain("formatRelativeTime(timestamp, lang)");
+    // Row-level presentation stays neutral: no tone dots or kind chips.
+    expect(routeSource).not.toContain("auxTaskStatusTone(task.status)");
+    expect(routeSource).not.toContain("<VChip");
+    expect(routeSource).not.toContain("statusDotChipClass");
+  });
+
+  it("renders the seven-state glyph map from the presentation module", () => {
+    expect(presentationSource).toContain("LoaderCircle");
+    expect(presentationSource).toContain("PauseCircle");
+    expect(presentationSource).toContain("CheckCircle2");
+    expect(presentationSource).toContain("CircleAlert");
+    expect(presentationSource).toContain("Ban");
+    expect(presentationSource).toContain("CircleDashed");
+    expect(routeSource).toContain("styles.taskRowIconSpinClass");
+  });
+
+  it("keeps the running-row stop action outside the row button", () => {
+    expect(routeSource).toContain("onAskStop");
+    expect(routeSource).toContain("event.stopPropagation()");
+    expect(routeSource).toContain('aria-label={stopLabel}');
+    // Ended rows carry no inline actions.
+    expect(routeSource).toContain("if (!onAskStop)");
+  });
+
+  it("pages the ended directory 20 at a time", () => {
+    expect(routeSource).toContain("AUX_ENDED_PAGE_SIZE = 20");
+    expect(routeSource).toContain("limit: AUX_ENDED_PAGE_SIZE");
+    expect(routeSource).toContain('loadMore: "再显示 20 个"');
+  });
+
+  it("keeps a running-section empty line and drops the ended-section copy", () => {
+    expect(routeSource).toContain('noRunningTasks: "没有正在运行的任务"');
+    expect(routeSource).not.toContain("noEndedTasks");
+  });
+
+  it("writes the section counts inline after the section titles", () => {
+    expect(routeSource).toContain("{copy.running} · {runningTasks.length}");
+    expect(routeSource).toContain("{copy.ended} · {endedTotal}");
   });
 
   it("polls only while the page is visible on the 4s beat", () => {
