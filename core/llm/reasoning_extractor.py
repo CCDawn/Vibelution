@@ -128,12 +128,19 @@ def extract_reasoning_text(
     text_extractor: TextExtractor,
     *,
     include_content_tags: bool = True,
+    is_stream_delta: bool = False,
 ) -> ReasoningExtraction:
     """Extract provider reasoning text from common response shapes.
 
     This keeps provider-specific field drift in one place. It deliberately
     avoids treating normal assistant content as reasoning unless the provider
     wrapped it in an explicit think/thinking tag.
+
+    ``is_stream_delta=True`` marks the payload as ONE streamed chunk: field
+    text must be returned verbatim, because trimming each chunk's boundary
+    whitespace silently eats the inter-word spaces of the reassembled
+    reasoning stream (the despaced-thinking defect). Full-response callers
+    keep the default trim, which only touches the block's outer edges.
     """
     payload_dict = _as_dict(payload)
     if not isinstance(payload_dict, dict):
@@ -150,13 +157,13 @@ def extract_reasoning_text(
             return ReasoningExtraction(details_text, "additional_kwargs.reasoning_details")
 
     for key in REASONING_FIELD_CANDIDATES:
-        extracted = _extract_field(payload_dict, key, text_extractor)
+        extracted = _extract_field(payload_dict, key, text_extractor, is_stream_delta=is_stream_delta)
         if extracted:
             return ReasoningExtraction(extracted, key)
 
     if isinstance(additional, dict):
         for key in REASONING_FIELD_CANDIDATES:
-            extracted = _extract_field(additional, key, text_extractor)
+            extracted = _extract_field(additional, key, text_extractor, is_stream_delta=is_stream_delta)
             if extracted:
                 return ReasoningExtraction(extracted, f"additional_kwargs.{key}")
 
@@ -438,11 +445,19 @@ def _looks_like_partial_close_tag(fragment: str) -> bool:
     return bool(re.match(r"</[a-zA-Z][a-zA-Z0-9-]*\Z", fragment))
 
 
-def _extract_field(payload: dict[str, Any], key: str, text_extractor: TextExtractor) -> str:
+def _extract_field(
+    payload: dict[str, Any],
+    key: str,
+    text_extractor: TextExtractor,
+    *,
+    is_stream_delta: bool = False,
+) -> str:
     if key not in payload:
         return ""
     text = text_extractor(payload.get(key))
-    if key in REASONING_DELTA_FIELD_CANDIDATES:
+    if is_stream_delta or key in REASONING_DELTA_FIELD_CANDIDATES:
+        # Streamed chunks must stay verbatim: stripping a chunk's boundary
+        # whitespace deletes the stream's inter-word spaces on reassembly.
         return text
     return text.strip()
 
