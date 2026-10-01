@@ -216,16 +216,21 @@ describe("MemoryRoute layout contract", () => {
     expect(userContentPanelStyles.code).toContain("whitespace-pre-wrap");
   });
 
-  it("supports returning from Agent Center deep links", () => {
-    expect(routeSource).toContain("safeAgentCenterReturnToPath");
-    expect(routeSource).toContain("const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get(\"returnTo\")), [searchParamText])");
-    expect(routeSource).toContain("const returnToLabel = searchParams.get(\"returnLabel\") === \"agents\" ? copy.returnToAgents : copy.returnToSource");
+  it("hides the memory page header on every view and keeps the view switcher", () => {
+    expect(routeSource).toContain("hideHeader");
+    expect(routeSource).not.toContain("hideHeader={isPersonalMemoryView");
+    expect(routeSource).not.toContain("safeAgentCenterReturnToPath");
+    expect(routeSource).not.toContain("className={styles.returnButton}");
+    expect(routeSource).not.toContain("className={styles.refreshButton}");
+    expect(routeSource).not.toContain("memoryViewSubtitle");
+    expect(routeSource).toContain("data-vui-region=\"memory-subnav\"");
+    expect(routeSource).toContain("styles.subnav");
     expect(routeSource).toContain("<VRouteLinkButton");
-    expect(routeSource).toContain("className={styles.returnButton}");
-    expect(routeSource).toContain("to={returnToPath}");
     expect(routeSource).not.toContain('import { Link, NavLink');
-    expect(styles.returnButton).toBeTypeOf("string");
-    expect(styles.headerActions).toContain("justify-end");
+    expect(styles).not.toHaveProperty("header");
+    expect(styles).not.toHaveProperty("headerActions");
+    expect(styles).not.toHaveProperty("refreshButton");
+    expect(styles).not.toHaveProperty("returnButton");
   });
 
   it("exposes manual memory management actions through guarded API mutations", () => {
@@ -393,10 +398,6 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.subnav).toContain("w-fit");
     expect(styles.subnav).toContain("overflow-x-auto");
     expect(styles.subnavLink).toContain("shrink-0");
-    expect(styles.headerActions).toContain("[&_[data-vui=\"button\"]]:w-fit");
-    expect(styles.headerActions).toContain("[&_[data-vui=\"button\"]]:max-w-full");
-    expect(styles.refreshButton).toContain("shrink-0");
-    expect(styles.returnButton).toContain("shrink-0");
     expect(overviewPanelStyles.overviewGrid).toContain("grid-cols-1");
     expect(overviewPanelStyles.overviewGrid).not.toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
     expect(overviewPanelSource).not.toContain("reviewMemoryList");
@@ -1112,7 +1113,8 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
-    expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
+    expect(routeSource).not.toContain("memoryViewSubtitle");
+    expect(routeSource).not.toContain("meta={memoryViewSubtitle(copy, forcedView)}");
     expect(projectMemoryQueuePanelSource).toContain('<VTooltip content={copy.projectMemoryQueueHint} width="wide">');
     expect(projectMemoryQueuePanelSource).not.toContain('title={copy.projectMemoryQueueHint}');
     expect(overviewPanelSource).toContain('tooltip={copy.reviewQueueHint}');

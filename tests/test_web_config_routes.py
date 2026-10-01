@@ -3211,9 +3211,13 @@ def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch)
     }
 
 
-def test_config_workspace_read_never_performs_model_discovery_http(monkeypatch):
+def test_config_workspace_read_never_performs_model_discovery_http(monkeypatch, tmp_path):
     import tools.Key_Tools as key_tools
 
+    # get_config_workspace opportunistically sweeps the derived model-catalog
+    # state file; pin the state path into tmp so the suite never rewrites
+    # operator data even when the real config/state pair has drifted.
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
     public_config = copy.deepcopy(load_public_config())
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
     monkeypatch.setattr(key_tools, "_is_autoglm_search_tool_available", lambda: False)
