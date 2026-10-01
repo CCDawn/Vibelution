@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import ctypes
+import dataclasses
 import hashlib
 import os
 import queue
@@ -14,6 +15,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -49,6 +51,7 @@ from config.model_catalog import (
     record_model_verification,
     save_model_catalog_state,
 )
+from config.paths import resolve_config_path, resolve_model_catalog_state_path
 from core.chat.chat_task_types import trim_lines
 from core.infrastructure.feature_gate import feature_config_snapshot
 from core.llm import LLMInvocationContext, invoke_llm
@@ -997,7 +1000,7 @@ def _persist_saved_model_verification(
             http_status=verification["http_status"],
             message=str(verification.get("message") or ""),
         )
-        save_model_catalog_state(updated)
+        _save_model_catalog_state_and_invalidate(updated)
     except (OSError, ValueError):
         return False
     return True
@@ -1038,7 +1041,7 @@ def _persist_saved_model_reasoning_contract(
             ok=ok,
             error_type=error_type,
         )
-        save_model_catalog_state(updated)
+        _save_model_catalog_state_and_invalidate(updated)
     except (OSError, ValueError):
         return False
     return True
@@ -1793,7 +1796,7 @@ def _sweep_absent_model_catalog_providers(public_config: dict[str, Any]) -> list
     if not pruned_ids:
         return []
     try:
-        save_model_catalog_state(pruned_state)
+        _save_model_catalog_state_and_invalidate(pruned_state)
     except (OSError, ValueError):
         return pruned_ids
     return pruned_ids
@@ -2318,8 +2321,120 @@ def _resolve_apply_base_config(
     )
 
 
-def get_config_summary() -> dict[str, Any]:
-    """Return a condensed config summary for shell-wide consumers."""
+# ---------------------------------------------------------------------------
+# Result-level cache for GET /api/config/workspace and GET /api/config/public.
+#
+# Why: both endpoints rebuild their whole payload per request (2x AppConfig
+# pydantic validation, per-model ProviderConfig/LLMProfile.model_validate for
+# every model, multiple full-config deepcopies, hash recomputation, and a
+# raw config.toml re-read for rawToml). Idle cost is ~90ms and GIL contention
+# under agent load historically amplified it to seconds. load_public_config's
+# mtime+size cache only removes the TOML parse, not the rebuild.
+#
+# Cache key = on-disk signature (config.toml mtime_ns+size, plus the sibling
+# model-catalog-state.json) + the bound load_public_config callable + TTL.
+# Signature covers every file-derived input; the bound loader participates in
+# the key so any rebinding of config_service.load_public_config (test
+# monkeypatching, alternate sources) can never be served a stale entry. The
+# TTL only bounds the file-independent volatile inputs, which are:
+#   - scan_model_alias_usage (scans sessions/decisions/run files under the
+#     project root) — advisory deletion-impact counters; the deletion gate
+#     re-scans fresh synchronously via assert_model_delete_safe at apply time,
+#   - user env-var / pending API-key display state inside modelOptions — only
+#     mutated through the apply path, which invalidates explicitly.
+# TTL = 90s (mid-upper end of the 60-120s design window). The frontend
+# react-query staleTime is 30s, so any backend TTL >= 30s introduces no new
+# user-visible staleness; every in-process write path invalidates explicitly
+# and external hand-edits are caught by the mtime+size signature immediately,
+# so the TTL never delays visibility of an actual config change.
+#
+# Concurrency: these getters run on the sync threadpool. We use lock-free
+# compute-then-swap — each thread may compute a full payload and the dict
+# store is atomic under the GIL, so worst case two threads compute the same
+# entry concurrently and the last store wins (idempotent). Readers always get
+# a deep copy, so a stored payload is never handed out mutably.
+# ---------------------------------------------------------------------------
+
+_CONFIG_RESULT_CACHE_TTL_SECONDS = 90.0
+_CONFIG_RESULT_CACHE: dict[str, "_ConfigResultCacheEntry"] = {}
+
+
+@dataclasses.dataclass(frozen=True)
+class _ConfigResultCacheEntry:
+    signature: tuple[Any, ...]
+    expires_at: float
+    payload: dict[str, Any]
+
+
+def _config_result_cache_file_signature(path: Path) -> tuple[str, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _config_result_cache_signature() -> tuple[Any, ...]:
+    """Signature of everything the cached payloads are derived from.
+
+    Files feeding the payloads: rawToml and publicConfig both come from
+    load_public_config (import-time CONFIG_PATH in production), and
+    modelCatalog reads the sibling model-catalog-state.json of the dynamically
+    resolved config path (VIBELUTION_CONFIG_PATH). Path strings are part of the
+    signature so same-size same-mtime files in different directories (pytest
+    tmp dirs) never share an entry, and the bound load_public_config callable
+    itself is included so rebinding the loader (tests) always misses.
+    """
+    return (
+        load_public_config,
+        _config_result_cache_file_signature(CONFIG_PATH),
+        _config_result_cache_file_signature(resolve_config_path()),
+        _config_result_cache_file_signature(resolve_model_catalog_state_path()),
+    )
+
+
+def _invalidate_config_result_cache() -> None:
+    """Drop cached workspace/summary payloads after any config-file write."""
+    _CONFIG_RESULT_CACHE.clear()
+
+
+def _config_result_cache_hit(key: str, signature: tuple[Any, ...]) -> dict[str, Any] | None:
+    entry = _CONFIG_RESULT_CACHE.get(key)
+    if entry is None or entry.signature != signature:
+        return None
+    if time.monotonic() >= entry.expires_at:
+        return None
+    return copy.deepcopy(entry.payload)
+
+
+def _store_config_result_cache(key: str, signature: tuple[Any, ...], payload: dict[str, Any]) -> None:
+    _CONFIG_RESULT_CACHE[key] = _ConfigResultCacheEntry(
+        signature=signature,
+        expires_at=time.monotonic() + _CONFIG_RESULT_CACHE_TTL_SECONDS,
+        payload=payload,
+    )
+
+
+def _save_public_config_and_invalidate(public_config: dict[str, Any]) -> None:
+    """Persist config.toml and drop the result-level cache.
+
+    Every config_service write path must go through this wrapper (or
+    _save_model_catalog_state_and_invalidate) so a save never leaves a stale
+    cached workspace/summary behind. Writers outside this module are covered by
+    the mtime+size signature instead.
+    """
+    save_public_config(public_config)
+    _invalidate_config_result_cache()
+
+
+def _save_model_catalog_state_and_invalidate(state: dict[str, Any]) -> None:
+    """Persist model-catalog-state.json and drop the result-level cache."""
+    save_model_catalog_state(state)
+    _invalidate_config_result_cache()
+
+
+def _build_config_summary() -> dict[str, Any]:
+    """Build the condensed config summary payload for shell-wide consumers."""
 
     public_config = _with_config_workspace_defaults(load_public_config())
     diagnostics = inspect_public_config(public_config)
@@ -2354,16 +2469,70 @@ def get_config_summary() -> dict[str, Any]:
     }
 
 
-def get_config_workspace() -> dict[str, Any]:
-    """Return the full config workspace payload for the Config route."""
+def _compute_config_summary_payload(pre_signature: tuple[Any, ...]) -> tuple[dict[str, Any], tuple[Any, ...]]:
+    payload = _build_config_summary()
+    post_signature = _config_result_cache_signature()
+    if post_signature != pre_signature:
+        # A concurrent writer moved a file mid-compute: rebuild once so the
+        # stored signature matches the file state the payload was built from.
+        payload = _build_config_summary()
+        post_signature = _config_result_cache_signature()
+    return payload, post_signature
 
+
+def get_config_summary() -> dict[str, Any]:
+    """Return a condensed config summary for shell-wide consumers.
+
+    Result-level cached (see the cache section above); callers must treat the
+    returned dict as read-only — the cache always hands out deep copies.
+    """
+
+    signature = _config_result_cache_signature()
+    cached = _config_result_cache_hit("summary", signature)
+    if cached is not None:
+        return cached
+    payload, signature = _compute_config_summary_payload(signature)
+    _store_config_result_cache("summary", signature, payload)
+    return copy.deepcopy(payload)
+
+
+def _compute_config_workspace_payload(pre_signature: tuple[Any, ...]) -> tuple[dict[str, Any], tuple[Any, ...]]:
+    """Load, sweep, and build the full workspace payload (uncached slow path).
+
+    The opportunistic catalog sweep may rewrite model-catalog-state.json, which
+    changes the on-disk signature mid-compute; in that case rebuild once so the
+    signature stored with the payload matches the file state it was built from.
+    """
     public_config = _with_config_workspace_defaults(load_public_config())
     # Saved-config reader: opportunistically sweep derived catalog entries whose
     # provider no longer exists (legacy stock and removals that bypass the apply
     # path). Persist happens only when something was pruned; see
     # _sweep_absent_model_catalog_providers for why draft views must not sweep.
     _sweep_absent_model_catalog_providers(public_config)
-    return _build_workspace(public_config)
+    payload = _build_workspace(public_config)
+    post_signature = _config_result_cache_signature()
+    if post_signature != pre_signature:
+        public_config = _with_config_workspace_defaults(load_public_config())
+        _sweep_absent_model_catalog_providers(public_config)
+        payload = _build_workspace(public_config)
+        post_signature = _config_result_cache_signature()
+    return payload, post_signature
+
+
+def get_config_workspace() -> dict[str, Any]:
+    """Return the full config workspace payload for the Config route.
+
+    Result-level cached (see the cache section above); callers must treat the
+    returned dict as read-only — the cache always hands out deep copies.
+    """
+
+    signature = _config_result_cache_signature()
+    cached = _config_result_cache_hit("workspace", signature)
+    if cached is not None:
+        return cached
+    payload, signature = _compute_config_workspace_payload(signature)
+    _store_config_result_cache("workspace", signature, payload)
+    return copy.deepcopy(payload)
 
 
 def get_agent_model_options_workspace() -> dict[str, Any]:
@@ -2398,7 +2567,7 @@ def update_intake_mode(intake_mode: str) -> dict[str, Any]:
     public_config = _with_config_workspace_defaults(load_public_config())
     evolution_cfg = public_config.setdefault("evolution", {})
     evolution_cfg["intake_mode"] = intake_mode
-    save_public_config(public_config)
+    _save_public_config_and_invalidate(public_config)
     summary = get_config_summary()
     _record_config_scene_event(
         "persist",
@@ -2420,7 +2589,7 @@ def update_language(language: str) -> dict[str, Any]:
     public_config = _with_config_workspace_defaults(load_public_config())
     ui_cfg = public_config.setdefault("ui", {})
     ui_cfg["language"] = "en" if str(language or "").strip().lower() == "en" else "zh"
-    save_public_config(public_config)
+    _save_public_config_and_invalidate(public_config)
     summary = get_config_summary()
     _record_config_scene_event(
         "persist",
@@ -3675,7 +3844,7 @@ def apply_config_workspace(
             lifecycle=True,
         )
     build_effective_config(merged)
-    save_public_config(merged)
+    _save_public_config_and_invalidate(merged)
 
     normalized_meta = _normalize_draft_meta(draft_meta)
     cleared_envs = [str(env_name) for env_name in normalized_meta.get("pending_cleared_api_keys", [])]
