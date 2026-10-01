@@ -729,11 +729,11 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
       expect(skeletonClass).not.toMatch(/(?:^|\s)p-2(?:\s|$)/);
     }
 
-expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
+expect(styles.timeline).toContain("px-[clamp(1rem,3vw,3rem)]");
     // The floating back-to-bottom control sits in the timeline's bottom-right
     // corner, so the right edge keeps a reserved corridor wider than the
     // control itself; text must never end up underneath it.
-    expect(styles.timeline).toContain("pr-[clamp(3rem,3vw,3.5rem)]");
+    expect(styles.timeline).toContain("@min-[864px]/conversation:pl-14");
     expect(styles.timeline).not.toContain("px-[clamp(1rem,3vw,3rem)]");
     expect(styles.timeline).not.toContain("px-3");    expect(styles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
     expect(styles.assistantTurn).toContain("w-full max-w-[830px]");
