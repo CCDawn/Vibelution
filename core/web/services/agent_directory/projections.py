@@ -599,14 +599,32 @@ def _list_agents(*, include_archived: bool, detail: str) -> list[dict[str, Any]]
     hydration_timings: dict[str, float] = {}
     if normalized_detail == "summary":
         timings["hydrate"] = 0.0
-        stage_started = time.perf_counter()
-        avatar_url_cache: dict[str, str] = {}
-        available_avatars = s._available_agent_avatar_filenames()
-        agents = [
-            s._agent_to_api_summary(item, avatar_url_cache=avatar_url_cache, available_avatar_filenames=available_avatars)
-            for item in raw_agents
-        ]
-        timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
+        summary_signature = s._registry_state_signature()
+        cached_summaries = _get_cached_agent_summaries(
+            include_archived=include_archived,
+            signature=summary_signature,
+            now=time.perf_counter(),
+        )
+        if cached_summaries is not None:
+            timings["summary_cache"] = 1.0
+            timings["to_api"] = 0.0
+            agents = cached_summaries
+        else:
+            timings["summary_cache"] = 0.0
+            stage_started = time.perf_counter()
+            avatar_url_cache: dict[str, str] = {}
+            available_avatars = s._available_agent_avatar_filenames()
+            agents = [
+                s._agent_to_api_summary(item, avatar_url_cache=avatar_url_cache, available_avatar_filenames=available_avatars)
+                for item in raw_agents
+            ]
+            timings["to_api"] = round((time.perf_counter() - stage_started) * 1000, 1)
+            _remember_agent_summaries(
+                include_archived=include_archived,
+                signature=summary_signature,
+                agents=agents,
+                now=time.perf_counter(),
+            )
     elif normalized_detail == "config":
         stage_started = time.perf_counter()
         hydration = s._build_agent_api_config_hydration_context(state, raw_agents, timings=hydration_timings)
@@ -1188,6 +1206,61 @@ def _get_agent_api_hydration_cache(signature: tuple[Any, ...]) -> Any | None:
         if s._AGENT_API_HYDRATION_CACHE_SIGNATURE == signature:
             return s._AGENT_API_HYDRATION_CACHE
     return None
+
+
+# summary 投影进程内缓存：
+# - GET /agents?detail=summary 是导航热点路径。summary 虽无活动 hydration，
+#   但重建要跑 85-agent 全量规范化扫描（repair miss 时叠加秒级 repair，且
+#   全程持有 _STATE_LOCK）加每 agent 投影；线上后台 agent 活跃时被 GIL 争用
+#   放大至 ~1s/次（实测 to_api p50≈1.0s、repair p90≈2.6s）。
+# - 失效 = 注册表文件签名（path+mtime_ns+size，任何 agent 写路径都会重写
+#   注册表，自动覆盖创建/更新/删除/归档）+ 短 TTL 兜底（覆盖 avatar 图片
+#   版本参数、模型库上下文窗口等不写注册表的外部输入）。
+# - 命中返回深拷贝，保持 list_agents 调用方可自由修改返回值的历史语义。
+_AGENT_SUMMARY_CACHE_LOCK = threading.RLock()
+_AGENT_SUMMARY_CACHE: dict[
+    tuple[bool, tuple[str, bool, int, int]],
+    tuple[list[dict[str, Any]], float],
+] = {}
+_AGENT_SUMMARY_CACHE_LIMIT = 4
+_AGENT_SUMMARY_CACHE_TTL_SECONDS = 5.0
+
+
+def _reset_agent_summary_cache() -> None:
+    """测试专用：清空 summary 投影缓存。"""
+
+    with _AGENT_SUMMARY_CACHE_LOCK:
+        _AGENT_SUMMARY_CACHE.clear()
+
+
+def _get_cached_agent_summaries(
+    *,
+    include_archived: bool,
+    signature: tuple[str, bool, int, int],
+    now: float,
+) -> list[dict[str, Any]] | None:
+    with _AGENT_SUMMARY_CACHE_LOCK:
+        entry = _AGENT_SUMMARY_CACHE.get((include_archived, signature))
+        if entry is None:
+            return None
+        cached_agents, stored_at = entry
+        if now - stored_at > _AGENT_SUMMARY_CACHE_TTL_SECONDS:
+            return None
+        return copy.deepcopy(cached_agents)
+
+
+def _remember_agent_summaries(
+    *,
+    include_archived: bool,
+    signature: tuple[str, bool, int, int],
+    agents: list[dict[str, Any]],
+    now: float,
+) -> None:
+    with _AGENT_SUMMARY_CACHE_LOCK:
+        _AGENT_SUMMARY_CACHE[(include_archived, signature)] = (agents, now)
+        while len(_AGENT_SUMMARY_CACHE) > _AGENT_SUMMARY_CACHE_LIMIT:
+            oldest_key = min(_AGENT_SUMMARY_CACHE, key=lambda key: _AGENT_SUMMARY_CACHE[key][1])
+            _AGENT_SUMMARY_CACHE.pop(oldest_key, None)
 
 
 def _agent_api_hydration_event_version() -> int:

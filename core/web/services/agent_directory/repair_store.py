@@ -518,6 +518,13 @@ def _ensure_agent_workspace(path_value: str, *, ensure_shared: bool = True) -> P
 
 def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
     s = _service()
+    # Profileless session agent 的 persona/taskProfile 会被存储规范化剥除
+    # （_normalize_agent_record_for_storage 的 _is_profileless_session_agent
+    # 分支）。在这里注入必然在保存时被抹平：repair 每轮都看到"有变更"，
+    # 注册表被无条件重写（mtime 抖动 + 750KB 写放大），读路径 repair 缓存
+    # 反复失效，GET /agents 冷读直接叠加秒级修复耗时。
+    if s._is_profileless_session_agent(agent):
+        return False
     metadata = dict(agent.get("metadata") or {})
     if str(metadata.get("challengeCupTeamId") or "").strip():
         return False
