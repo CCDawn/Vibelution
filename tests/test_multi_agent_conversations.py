@@ -70,6 +70,21 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
 
 
+def _stamp_session_context_window(monkeypatch, limit: int = 128000) -> None:
+    # Operator config may name a model with no context_window. These tests
+    # check session admission, not model discovery.
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda conversation, _limit=limit: {"limit": _limit},
+    )
+
+
+@pytest.fixture(autouse=True)
+def _operator_context_window(monkeypatch):
+    _stamp_session_context_window(monkeypatch)
+
+
 def _allow_agent_message_tool(agent_id: str) -> None:
     agent = agent_directory_service.get_agent(agent_id, include_archived=True) or {}
     policy = dict(agent.get("toolPolicy") or {})

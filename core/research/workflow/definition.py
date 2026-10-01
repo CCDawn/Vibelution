@@ -297,6 +297,9 @@ def _canonical_payload(definition: WorkflowDefinition) -> dict[str, Any]:
 
 
 def definition_structure_hash(definition: WorkflowDefinition) -> str:
+    from .node_route import validate_definition_routes
+
+    validate_definition_routes(definition)
     payload = _canonical_payload(definition)
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

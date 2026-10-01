@@ -196,7 +196,7 @@ describe("AppShell navigation telemetry", () => {
       ),
     ).toEqual([]);
     expect(appShellSource).toContain('chrome="shell-nav"');
-    expect(appShellSource).toContain('to="/companions"');
+    expect(appShellSource).toContain("SpecialistAgentMenu");
     expect(appShellSource).toContain('t("navCompanions")');
     expect(appShellSource).not.toContain("<NavLink");
   });
@@ -230,7 +230,9 @@ describe("AppShell navigation telemetry", () => {
     // Event codes follow the browser.chat_route.preload_* pattern per route key.
     expect(appShellSource).toContain('`browser.${key}_route.preload_${kind}`');
     expect(appShellSource).toContain('"teams" | "companions" | "evolution" | "memory" | "agents"');
-    for (const route of ["teams", "companions", "evolution", "memory", "agents"]) {
+    // The companions nav slot is a SpecialistAgentMenu (no shell-level link to
+    // hang handlers on), so its chunk is warmed by the idle pass below instead.
+    for (const route of ["teams", "evolution", "memory", "agents"]) {
       expect(appShellSource).toContain(`preloadPrimaryRouteChunkForNav("${route}", "pointerenter")`);
       expect(appShellSource).toContain(`preloadPrimaryRouteChunkForNav("${route}", "focus")`);
     }

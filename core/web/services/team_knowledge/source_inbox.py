@@ -776,6 +776,12 @@ def review_owner_inbox_source(
                 )
             if not s._is_global_knowledge_steward(reviewer_id):
                 s._require_permission(target_owner, target_base, reviewer_id, "review")
+            s._tk_financial.validate_financial_source(
+                target_base,
+                str(source.get("sourceType") or ""),
+                source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {},
+                content=trim_lines(knowledge_content or "", max_lines=120).strip(),
+            )
         central_source: dict[str, Any] | None = None
         promotion: dict[str, Any] | None = None
         if normalized_decision == "accepted":
@@ -989,6 +995,12 @@ def _direct_ingest_accepted_source_locked(
         title=normalized_title,
         summary=normalized_summary,
     )
+    financial_tags = s._tk_financial.validate_financial_proposal(
+        owner,
+        base,
+        [source_artifact["sourceArtifactId"]],
+        normalized_content,
+    )
     batch = {
         "batchId": s._new_event_id("kbatch"),
         "ownerType": owner["ownerType"],
@@ -1017,7 +1029,7 @@ def _direct_ingest_accepted_source_locked(
         "title": normalized_title,
         "summary": normalized_summary,
         "content": normalized_content,
-        "tags": s._unique_strings(tags or [])[:24],
+        "tags": s._unique_strings(s._tk_financial.merge_financial_tags(financial_tags, tags))[:24],
         "importanceLevel": "medium",
         "confidence": 0.75,
         "stability": "evolving",

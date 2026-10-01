@@ -147,6 +147,20 @@ describe("Launcher branch workspace interactions", () => {
     expect(button("打开窗口").disabled).toBe(false);
   });
 
+  it("surfaces the window hint only when a running backend has no window", async () => {
+    await renderPanel([
+      instance({ id: "worktree:opened", branch: "codex/open", windowOpen: true }),
+      instance({ id: "worktree:headless", branch: "codex/headless" }),
+      instance({ id: "worktree:closed", branch: "codex/closed", state: "closed", alive: false }),
+    ]);
+
+    const rows = [...host.querySelectorAll('[role="row"]')];
+    const rowOf = (branch: string) => rows.find((row) => row.textContent?.includes(branch));
+    expect(rowOf("codex/headless")?.textContent).toContain("窗口未打开");
+    expect(rowOf("codex/open")?.textContent).not.toContain("窗口未打开");
+    expect(rowOf("codex/closed")?.textContent).not.toContain("窗口未打开");
+  });
+
   it("confirms ordinary Stop before dispatching the stop request", async () => {
     const running = instance({ id: "worktree:running", branch: "codex/running" });
     await renderPanel([running]);

@@ -124,6 +124,11 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(stateIndex).toBeGreaterThan(-1);
     expect(gitIndex).toBeGreaterThan(stateIndex);
     expect(panelSource.slice(stateIndex, gitIndex)).toContain("instanceWindowOpen(item)");
+    // Single-line state cell: the window hint rides the same line and only
+    // appears when it contradicts a running backend (row otherwise grows tall).
+    expect(panelSource.slice(stateIndex, gitIndex)).toContain('state === "running" && !instanceWindowOpen(item)');
+    expect(panelStyles.runtimeStack).toContain("flex");
+    expect(panelStyles.runtimeStack).not.toContain("grid");
     expect(panelSource).toContain("<VDropdownMenu aria-label={zh ? \"更多操作\" : \"More actions\"}");
     // Compact columns still keep the path inside the branch tooltip, not a wide fill column.
     expect(panelSource).toContain("path || item.displayPath || item.id");

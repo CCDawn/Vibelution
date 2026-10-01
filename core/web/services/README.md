@@ -28,9 +28,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**79**
+- Facade `*_service.py`：**81**
 - 有 pack README：**6**
-- 仅单文件 facade：**73**
+- 仅单文件 facade：**75**
 
 ## Domain 速查
 
@@ -39,13 +39,13 @@
 | Session / Chat hot path (`session`) | 2 |
 | Team workflow / SC / experiment (`team_workflow`) | 1 |
 | Team registry / canvas (`team`) | 3 |
-| Agent directory / config (`agent`) | 17 |
+| Agent directory / config (`agent`) | 18 |
 | Chat room / conversation index (`chat`) | 3 |
 | Knowledge / RAG (`knowledge`) | 4 |
 | Memory (`memory`) | 4 |
 | Research / Challenge Cup (`research`) | 5 |
 | Self / Supervised evolution (`evolution`) | 12 |
-| Runtime / runtime scene (`runtime`) | 3 |
+| Runtime / runtime scene (`runtime`) | 4 |
 | Launcher / Reset (`launcher`) | 2 |
 | Config / Provider / Model / Theme (`config`) | 7 |
 | Workbench contract / preferences (`workbench`) | 2 |
@@ -94,6 +94,7 @@
 | `agent_model_candidate_service.py` | Read-only projection of configured and observed Provider models for Agents. | — | — | `test_session_llm_selection.py`, `test_agent_model_candidate_service.py` |
 | `agent_model_promotion_service.py` | Atomic promotion of one observed Provider model into one Agent binding. | — | `agents.py` | `test_agent_config_workspace_routes.py`, `test_agent_model_promotion_service.py` |
 | `agent_operation_service.py` | Shared Agent catalog operations for HTTP routes and governed tools. | — | `agents.py` | `test_project_operation_tools.py` |
+| `financial_assistant_service.py` | Financial specialist entry and explicit setup over native Agent/Session/knowledge lifecycle. | — | `financial_assistant.py` | `test_financial_assistant_service.py` |
 | `agent_plugin_service.py` | Trusted first-party Agent plugin catalog and binding facade. | — | `agent_plugins.py` | `test_virtual_human_life_api.py` |
 | `agent_role_tool_profile_service.py` | Single source of truth for fixed-role Agent tool profiles. | — | — | `test_tool_policy_evaluator.py`, `test_tool_authorization_contract.py`, `test_agent_role_tool_profile_service.py` |
 | `agent_tool_governance_service.py` | Controlled Agent tool-permission governance. | — | `agents.py` | `test_agent_support_route_contract.py`, `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py` |
@@ -163,6 +164,7 @@
 | `runtime_manager_control_service.py` | Lightweight runtime-manager control checks for web services. | — | — | `test_runtime_manager_control_service.py`, `test_select_tests.py` |
 | `runtime_scene_service.py` | Structured runtime scene bundles for frontend inspection and agent diagnosis. | `runtime_scene/` | `agents.py`, `knowledge.py`, `launcher.py`, `logs.py`, `runtime.py` | `test_storage_migration.py`, `test_web_app.py`, `test_chat_next_state_signals.py` |
 | `runtime_service.py` | Runtime summary helpers for the web shell. | — | `runtime.py` | `test_web_app.py`, `test_supervised_candidate_runtime_service.py`, `test_research_workflow_meeting_driver_recovery.py` |
+| `runtime_task_query_service.py` | Read-only query projection over the unified runtime task registry. | — | `runtime_tasks.py` | `test_runtime_tasks_routes.py` |
 
 ## Launcher / Reset
 

@@ -144,6 +144,7 @@ import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryS
 import { serializeChatRouteSelection } from "../routes/chat/chatSelectionProjection";
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
+import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
 
 const LazyAppShellSettingsMenu = lazy(() =>
   import("./AppShellSettingsMenu")
@@ -1338,6 +1339,7 @@ export function AppShell() {
   }, [lang, location.search, returnNavigationTarget]);
   const activePrimaryRouteLabel = useMemo(() => {
     const pathname = location.pathname;
+    if (pathname.startsWith("/finance")) return lang === "en" ? "Investment assistant" : "炒股智能体";
     if (pathname.startsWith("/companions")) return t("navCompanions");
     if (pathname.startsWith("/chat")) return t("navChat");
     if (pathname.startsWith("/supervised-evolution")) return t("navEvolution");
@@ -2896,23 +2898,13 @@ export function AppShell() {
               {t("navChat")}
             </span>
           )}
-          {chatEnabled ? (
-            <VRouteLinkButton
-              chrome="shell-nav"
-              to="/companions"
-              className={shellPrimaryNavClass(location.pathname, "/companions")}
-              aria-current={isShellPrimaryNavActive(location.pathname, "/companions") ? "page" : undefined}
-              onPointerEnter={() => preloadPrimaryRouteChunkForNav("companions", "pointerenter")}
-              onFocus={() => preloadPrimaryRouteChunkForNav("companions", "focus")}
-              onClick={(event) => handlePrimaryNavClick(event, "/companions")}
-            >
-              {t("navCompanions")}
-            </VRouteLinkButton>
-          ) : (
-            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Chat is disabled" : "对话未启用"}>
-              {t("navCompanions")}
-            </span>
-          )}
+          <SpecialistAgentMenu
+            lang={lang}
+            enabled={chatEnabled}
+            className={styles.navLink}
+            activeClassName={`${styles.navLink} ${styles.navLinkActive}`}
+            onNavigate={navigatePrimaryNav}
+          />
           <VRouteLinkButton
             chrome="shell-nav"
             to="/teams"
@@ -3218,11 +3210,16 @@ export function AppShell() {
                   {t("navChat")}
                 </VRouteLinkButton>
               ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navChat")}</span>}
-              {chatEnabled ? (
-                <VRouteLinkButton chrome="shell-nav" to="/companions" className={shellMobileNavClass(location.pathname, "/companions")} aria-current={isShellPrimaryNavActive(location.pathname, "/companions") ? "page" : undefined} onClick={closeUtilityMenu}>
-                  {t("navCompanions")}
-                </VRouteLinkButton>
-              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navCompanions")}</span>}
+              <SpecialistAgentMenu
+                lang={lang}
+                enabled={chatEnabled}
+                className={styles.mobileRouteLink}
+                activeClassName={`${styles.mobileRouteLink} ${styles.mobileRouteLinkActive}`}
+                onNavigate={(to) => {
+                  closeUtilityMenu();
+                  navigatePrimaryNav(to);
+                }}
+              />
               <VRouteLinkButton chrome="shell-nav" to="/teams" className={shellMobileNavClass(location.pathname, "/teams")} aria-current={isShellPrimaryNavActive(location.pathname, "/teams") ? "page" : undefined} onClick={closeUtilityMenu}>{t("navTeams")}</VRouteLinkButton>
               {supervisedEvolutionEnabled || selfEvolutionEnabled ? (
                 <VRouteLinkButton chrome="shell-nav" to="/evolution/workspace" className={shellMobileNavClass(location.pathname, "/evolution/workspace")} aria-current={isShellPrimaryNavActive(location.pathname, "/evolution/workspace") ? "page" : undefined} onClick={closeUtilityMenu}>
