@@ -196,7 +196,7 @@ describe("AppShell navigation telemetry", () => {
       ),
     ).toEqual([]);
     expect(appShellSource).toContain('chrome="shell-nav"');
-    expect(appShellSource).toContain('to="/companions"');
+    expect(appShellSource).toContain("SpecialistAgentMenu");
     expect(appShellSource).toContain('t("navCompanions")');
     expect(appShellSource).not.toContain("<NavLink");
   });

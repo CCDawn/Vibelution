@@ -51,10 +51,11 @@ _INT_LIKE_PATTERN = re.compile(r"^-?(0|[1-9]\d*)$")
 _FLOAT_LIKE_PATTERN = re.compile(r"^-?(0|[1-9]\d*)\.\d+$")
 
 
-def _coerce_tool_arg_value(value: Any) -> Any:
+def _coerce_tool_arg_value(value: Any, *, string_fields: frozenset[str] = frozenset()) -> Any:
     """对 LLM/XML 工具参数做轻量标量归一化。"""
     if isinstance(value, dict):
-        return {k: _coerce_tool_arg_value(v) for k, v in value.items()}
+        return {k: v if k in string_fields and isinstance(v, str) else _coerce_tool_arg_value(v)
+                for k, v in value.items()}
     if isinstance(value, list):
         return [_coerce_tool_arg_value(item) for item in value]
     if not isinstance(value, str):
@@ -81,28 +82,70 @@ def _coerce_tool_arg_value(value: Any) -> Any:
     return value
 
 
-def parse_tool_args(tool_args: Any) -> dict:
+_STRING_FIELDS_CACHE: tuple[object, dict[str, frozenset[str]]] | None = None
+
+
+def _string_fields_from_schema(schema: dict) -> frozenset[str]:
+    return frozenset(
+        name for name, field in schema.get("properties", {}).items()
+        if isinstance(field, dict)
+        and (
+            field.get("type") == "string"
+            or any(
+                isinstance(option, dict) and option.get("type") == "string"
+                for option in field.get("anyOf", [])
+            )
+        )
+    )
+
+
+def _registered_string_fields(tool_name: str) -> frozenset[str]:
+    """Read string types from the cached tool schema, without copying the tool list."""
+    if not tool_name:
+        return frozenset()
+    return _cached_string_fields_by_tool().get(tool_name, frozenset())
+
+
+def _cached_string_fields_by_tool() -> dict[str, frozenset[str]]:
+    global _STRING_FIELDS_CACHE
+    from tools.Key_Tools import _cached_key_tools
+
+    cached = _cached_key_tools()
+    if _STRING_FIELDS_CACHE is not None and _STRING_FIELDS_CACHE[0] is cached:
+        return _STRING_FIELDS_CACHE[1]
+    fields = {
+        definition.name: _string_fields_from_schema(definition.args_schema.model_json_schema())
+        for definition in cached
+        if getattr(definition, "name", "")
+    }
+    _STRING_FIELDS_CACHE = (cached, fields)
+    return fields
+
+
+def parse_tool_args(tool_args: Any, *, tool_name: str = "") -> dict:
     """将工具参数解析为 dict。
 
     支持传入 str（JSON）、dict 或其他类型。
 
     Args:
         tool_args: 原始工具参数
+        tool_name: 已注册工具名；按 canonical schema 保留原始字符串（证券代码、原文等）
 
     Returns:
         解析后的 dict，失败返回空 dict
     """
+    string_fields = _registered_string_fields(tool_name)
     if isinstance(tool_args, dict):
-        return _coerce_tool_arg_value(tool_args)
+        return _coerce_tool_arg_value(tool_args, string_fields=string_fields)
     if isinstance(tool_args, str):
         try:
             parsed = json.loads(tool_args)
-            return _coerce_tool_arg_value(parsed) if isinstance(parsed, dict) else {}
+            return _coerce_tool_arg_value(parsed, string_fields=string_fields) if isinstance(parsed, dict) else {}
         except (json.JSONDecodeError, TypeError):
             return {}
     try:
         parsed = json.loads(str(tool_args))
-        return _coerce_tool_arg_value(parsed) if isinstance(parsed, dict) else {}
+        return _coerce_tool_arg_value(parsed, string_fields=string_fields) if isinstance(parsed, dict) else {}
     except (json.JSONDecodeError, TypeError):
         return {}
 

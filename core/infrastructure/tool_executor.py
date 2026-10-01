@@ -591,6 +591,8 @@ class ToolExecutor:
         self._register_default_tools()
 
     _READ_ONLY_BLOCKED_TOOLS = {
+        "financial_evidence_stage_tool",
+        "financial_evidence_withdraw_tool",
         "spawn_agent_tool",
         "apply_patch_tool",
         "apply_diff_edit_tool",
@@ -653,6 +655,8 @@ class ToolExecutor:
         self._tool_map["spawn_agent_tool"] = spawn_agent_tool
 
         self._timeout_map = {
+            # Leave headroom for the finance socket budget and a final in-flight read.
+            "financial_report_query_tool": 300,
             "cli_tool": 60,
             "exec_command": 60,
             "write_stdin": 35,
@@ -750,7 +754,7 @@ class ToolExecutor:
                 result: 工具执行结果
                 action: 特殊动作 (如 "restart", "hibernated", None)
         """
-        tool_args = parse_tool_args(tool_args or {})
+        tool_args = parse_tool_args(tool_args or {}, tool_name=tool_name)
         call_id = str(tool_call_id or "").strip()
 
         runtime_identity: dict[str, str] = {}

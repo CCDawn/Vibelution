@@ -53,10 +53,19 @@ def list_indexable_knowledge_items(*, agent_id: str = "", internal: bool = False
             continue
         team_id = str(payload.get("teamId") or base.get("teamId") or "").strip()
         knowledge_base = payload.get("knowledgeBase") if isinstance(payload.get("knowledgeBase"), dict) else {}
+        financial_items = None
+        if knowledge_base.get("profile") == "financial_reports_v1":
+            owner, stored_base = team_knowledge_service._require_base_with_owner(base_id)
+            artifacts = {a["sourceArtifactId"]: a for a in team_knowledge_service._source_artifacts_for_base(owner, stored_base["knowledgeBaseId"])}
+            financial_items = team_knowledge_service.eligible_financial_items(owner, stored_base, list(payload.get("items") or []), artifacts)
         for item in list(payload.get("items") or []):
             if not isinstance(item, dict):
                 continue
             knowledge_item_id = str(item.get("knowledgeItemId") or "").strip()
+            if financial_items is not None and knowledge_item_id not in financial_items:
+                continue
+            if financial_items is not None:
+                item = team_knowledge_service.financial_item_projection(item, financial_items[knowledge_item_id])
             if not knowledge_item_id:
                 continue
             source_artifact_ids = [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()]

@@ -1561,7 +1561,8 @@ class AgentRuntime:
         tool_name = str((_tool_call or {}).get("name") or "").strip()
         tool_call_id = str((_tool_call or {}).get("id") or "").strip()
         tool_args = parse_tool_args(
-            (_tool_call or {}).get("args") or (_tool_call or {}).get("arguments") or {}
+            (_tool_call or {}).get("args") or (_tool_call or {}).get("arguments") or {},
+            tool_name=tool_name,
         )
         record = {
             "name": tool_name,
@@ -1914,7 +1915,7 @@ class AgentRuntime:
         tool_name = str(call.get("name") or "").strip()
         try:
             tool_args = parse_tool_args(
-                call.get("args") or call.get("arguments") or {}
+                call.get("args") or call.get("arguments") or {}, tool_name=tool_name
             )
         except Exception:
             tool_args = {}

@@ -35,6 +35,7 @@
 | `dataProcessing.ts` | `/api/data-processing/*` |
 | `diagnostics.ts` | `/api/diagnostics/*` |
 | `evolution.ts` | `/api/evolution/*` supervised/review JSON |
+| `financialAssistant.ts` | `/api/financial-assistants`, projection/setup over native Agent Directory |
 | `files.ts` | `/api/files/content` |
 | `git.ts` | `/api/git/*` |
 | `hypothesisFirst.ts` | `/api/teams/.../workflow-orchestration/hypothesis-first/*`, `meeting-rounds`, `hypothesis-rounds` (HF-5) |

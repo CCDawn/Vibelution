@@ -9,6 +9,7 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 
 | Task type | Prefer these files | Avoid |
 |-----------|-------------------|--------|
+| Financial evidence profile / private finance library | `financial.py` (re-exported by facade) | Separate database/index writers; generated answers promoted as facts |
 | Source types / enums / BM25 params | `constants.py` | IO; permission checks |
 | Search tokenize / BM25 / filters | `search_ranking.py` | store paths; ACL |
 | Paths / JSONL / owner context / id helpers | `store.py` | promotion domain; ACL policy |
@@ -41,3 +42,13 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 - Facade: `core/web/services/team_knowledge_service.py`
 - Routes: knowledge-related web routes
 - Structure pattern: `core/web/services/team/README.md`
+
+## Financial evidence profile
+
+`financial_reports_v1` is an Agent-owned base in the existing owner store. The profile adds bounded PDF provenance, exact-excerpt validation, reviewed-version supersession and live expiry/withdrawal guards shared by native search and vector-index eligibility. `financial.py` is the sole profile owner; canonical persistence/audit/ACL remain on the facade and store.
+
+- `stage_financial_evidence` only collects a source in the existing owner inbox; it does not approve or ingest
+- Existing source review / proposal review create formal evidence only when the content hash matches the source excerpt
+- Existing RAG and unified-memory projections preserve `financialEvidence` citation metadata
+- Hard deletion stays on `memory_cleanup_service` preview/confirmation/execute; no profile-specific purge path
+- Profile-specific API data is additive; ordinary knowledge-base contracts do not gain empty profile fields

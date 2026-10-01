@@ -15,6 +15,27 @@ default:
     - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
+  - id: financial-report-knowledge-integration
+    description: "Financial report transport, owner-scoped evidence profile, native RAG provenance, and schema-aware tool arguments."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/financial_assistant_service.py"
+      - "core/web/routes/financial_assistant.py"
+      - "tests/test_financial_assistant_service.py"
+      - "tools/financial_report_tools.py"
+      - "tools/financial_memory_tools.py"
+      - "core/web/services/team_knowledge/financial.py"
+      - "core/web/services/rag_retrieval_service.py"
+      - "core/web/services/rag_vector_index_service.py"
+      - "core/web/services/unified_knowledge_search_service.py"
+      - "core/infrastructure/llm_utils.py"
+      - "tests/test_financial_*.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_assistant_service.py tests/test_financial_report_tools.py tests/test_financial_report_registry.py tests/test_financial_knowledge_service.py tests/test_financial_tool_runtime.py tests/test_rag_retrieval_service.py tests/test_rag_vector_index_service.py tests/test_team_knowledge_tools.py tests/test_tool_authorization_execution.py -q"
+    notes:
+      - "No real model is called. Loopback HTTP fixtures and native governed-store fixtures are not RAGFlow end-to-end verification."
   - id: operator-optimization
     description: "Independent operator contracts, CUDA admission, canonical artifacts and workflow bridges."
     executionLayers:
