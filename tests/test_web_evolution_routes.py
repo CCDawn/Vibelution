@@ -468,6 +468,7 @@ def test_evolution_runs_route_exposes_case_type_and_expected_outcome(tmp_path, m
     assert by_case["impossible_missing_permission"]["expectedInfeasibleOutcome"]["status"] == "infeasible"
 
 def test_evolution_runs_route_labels_inconclusive_as_complete_terminal_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(evolution_service, "get_web_language", lambda: "zh")
     _write_supervised_decision_record(
         tmp_path,
         "web_inconclusive_run",
@@ -917,6 +918,7 @@ def test_evolution_workspace_snapshot_slow_event_includes_stage_timings(monkeypa
     assert event["fields"]["includeSelf"] is False
 
 def test_evolution_library_exposes_self_evolution_candidates_as_pending_review_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(evolution_service, "get_web_language", lambda: "zh")
     append_candidate_record(
         {
             "candidate_id": "prompt_candidate:web-self-review",
