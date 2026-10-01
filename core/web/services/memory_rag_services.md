@@ -68,6 +68,8 @@
 
 `GET /api/memory/agents` 的 `Server-Timing` 响应头仅含毫秒耗时：`memory-directory` 为 Agent 目录读取（含修复、等待与摘要投影），`memory-paths` 为共享路径上下文解析，`memory-scan` 为逐 Agent 文件扫描与正式知识统计，`memory-total` 为完整 service 计算。JSON 内容与权限契约保持原样；这些计时不含 HTTP 调度、响应模型序列化和传输，不能直接当成浏览器总等待时间，也不会触发额外日志写入。
 
+单次 inventory 调用复用按项目分区的正式工作区根解析；调用结束即释放，下次调用重新解析存储位置。沙箱选择与补种仍逐路径执行，路径包含性检查仍使用实际解析结果；该快照不用于跨请求缓存文件或知识内容。
+
 ```powershell
 # 矩阵 memory-cleanup 行
 .\.venv\Scripts\python.exe -m pytest tests\test_memory_cleanup_service.py tests\test_web_memory_routes.py tests\test_reset_service.py -q

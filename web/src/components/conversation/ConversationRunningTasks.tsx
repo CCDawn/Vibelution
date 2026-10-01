@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircle, StopCircle } from "lucide-react";
+import { CheckCircle2, ChevronRight, LoaderCircle, StopCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -27,6 +27,7 @@ const COPY = {
   zh: {
     section: "后台任务",
     open: "打开",
+    ended: "已结束",
     stop: "停止",
     stopPending: "停止中…",
     stopConfirmTitle: "停止该任务？",
@@ -37,6 +38,7 @@ const COPY = {
   en: {
     section: "Background tasks",
     open: "Open",
+    ended: "Ended",
     stop: "Stop",
     stopPending: "Stopping…",
     stopConfirmTitle: "Stop this task?",
@@ -49,10 +51,12 @@ const COPY = {
 /**
  * Tail-of-timeline strip for background runtime tasks parented to the current
  * session (ZCode ConversationStatusPanel shape): one compact row per live task
- * with a jump-seconds elapsed counter and a stop action. Stop only records the
- * intent — the row flips to 停止中… and the polled list decides the terminal
- * state (the row leaves the running bucket once `endedAt` exists). Empty or
- * not-yet-loaded lists render null: zero placeholder, no layout tax.
+ * with a jump-seconds elapsed counter and a stop action, plus a footer
+ * directory row ("已结束 · N ›") into the aux center when this session has
+ * ended tasks. Stop only records the intent — the row flips to 停止中… and the
+ * polled list decides the terminal state (the row leaves the running bucket
+ * once `endedAt` exists). With neither running rows nor an ended count the
+ * strip renders null: zero placeholder, no layout tax.
  */
 export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
   const { lang } = useShellI18n();
@@ -74,6 +78,23 @@ export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
     refetchIntervalInBackground: false,
   });
   const runningTasks = listQuery.data?.running ?? [];
+
+  // Ended directory count for the session (ZCode EndedDirectoryRow shape):
+  // one page-one probe is enough — `ended.total` is the full ended count.
+  const endedKey = queryKeys.runtimeTasks("ended", sessionId);
+  const endedQuery = useQuery({
+    queryKey: endedKey,
+    queryFn: ({ signal }) =>
+      listRuntimeTasksRevisionAware(
+        { status: "ended", parentSessionId: sessionId, limit: 1 },
+        queryClient.getQueryData<RuntimeTaskListPayload>(endedKey),
+        signal,
+      ),
+    enabled: Boolean(sessionId),
+    refetchInterval: resolvePollingInterval(pageVisible, CONVERSATION_RUNNING_TASKS_POLL_MS),
+    refetchIntervalInBackground: false,
+  });
+  const endedTotal = endedQuery.data?.ended?.total ?? 0;
 
   // Stop only records the intent: the id stays "requested" until the polled
   // list drops the task from the running bucket, so the row shows 停止中…
@@ -107,7 +128,7 @@ export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
     return () => window.clearInterval(timer);
   }, [hasRunningTasks]);
 
-  if (!hasRunningTasks) {
+  if (!hasRunningTasks && endedTotal <= 0) {
     return null;
   }
 
@@ -119,25 +140,40 @@ export function ConversationRunningTasks({ sessionId }: { sessionId: string }) {
       data-conversation-running-tasks="true"
       aria-label={copy.section}
     >
-      <div className={styles.list}>
-        {runningTasks.map((task) => (
-          <RunningTaskRow
-            key={task.taskId}
-            task={task}
-            lang={lang}
-            nowMs={nowMs}
-            stopRequested={stopRequestedIds.includes(task.taskId)}
-            stopPending={stopMutation.isPending && stopMutation.variables === task.taskId}
-            onAskStop={() => setStopTargetId(task.taskId)}
-            copy={copy}
-          />
-        ))}
-        {stopMutation.isError ? (
-          <span role="alert">{stopMutation.error instanceof Error && stopMutation.error.message
-            ? stopMutation.error.message
-            : copy.stopFailed}</span>
-        ) : null}
-      </div>
+      {hasRunningTasks ? (
+        <div className={styles.list}>
+          {runningTasks.map((task) => (
+            <RunningTaskRow
+              key={task.taskId}
+              task={task}
+              lang={lang}
+              nowMs={nowMs}
+              stopRequested={stopRequestedIds.includes(task.taskId)}
+              stopPending={stopMutation.isPending && stopMutation.variables === task.taskId}
+              onAskStop={() => setStopTargetId(task.taskId)}
+              copy={copy}
+            />
+          ))}
+          {stopMutation.isError ? (
+            <span role="alert">{stopMutation.error instanceof Error && stopMutation.error.message
+              ? stopMutation.error.message
+              : copy.stopFailed}</span>
+          ) : null}
+        </div>
+      ) : null}
+      {endedTotal > 0 ? (
+        <VRouteLinkButton
+          to={AUX_CENTER_HREF}
+          variant="ghost"
+          density="compact"
+          className={styles.endedRow}
+          data-testid="conversation-running-tasks-ended-row"
+        >
+          <CheckCircle2 size={14} className={styles.endedIcon} aria-hidden="true" />
+          <span className={styles.endedLabel}>{copy.ended} · {endedTotal}</span>
+          <ChevronRight size={14} className={styles.endedChevron} aria-hidden="true" />
+        </VRouteLinkButton>
+      ) : null}
       <VConfirmDialog
         open={Boolean(stopTargetTask)}
         onOpenChange={(open) => {

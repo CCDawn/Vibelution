@@ -2,7 +2,10 @@ import { vuiWorkspaceFillClass } from "../../design/vuiSurfaceRecipes";
 
 const panelSurface = "!rounded-none !border-0 !shadow-none";
 const cardSurface = "rounded-[var(--radius-control)] border-0 bg-vui-surface-row p-2 shadow-none";
-const rowSurface = "rounded-[var(--radius-control)] border-0 bg-vui-surface-row p-2 shadow-none";
+// Directory row anatomy (ZCode SubagentDirectorySidePane.tsx:64-102):
+// [neutral status icon] [title + status word / kind + summary] [relative time].
+const rowSurface = "!rounded-[var(--radius-control)] !border-0 !bg-vui-surface-row px-2 py-1.5 !shadow-none text-vui-fg-primary hover:!bg-[var(--vui-surface-row-hover)]";
+const rowGrid = "grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 whitespace-normal text-left";
 
 const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden !bg-vui-surface-panel";
 const headerClass = "mx-2 mt-1.5 min-w-0 !rounded-none !border-0 !bg-transparent !shadow-none !backdrop-blur-none";
@@ -21,13 +24,22 @@ const taskSectionClass = "grid min-w-0 gap-1.5";
 const taskSectionHeaderClass = "flex items-center justify-between gap-2 px-0.5";
 const taskSectionTitleClass = "m-0 text-vui-xs text-vui-fg-primary";
 const taskSectionCountClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
-const taskRowClass = "grid !h-auto !min-h-[60px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal !rounded-[var(--radius-control)] !border-0 !bg-vui-surface-row px-2 py-1.5 text-left text-vui-fg-primary !shadow-none hover:!bg-[var(--vui-surface-row-hover)]";
+const taskRowClass = `!h-auto !min-h-[56px] max-w-full ${rowSurface} ${rowGrid} overflow-hidden`;
 const taskRowSelectedClass = "!bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
-const taskRowTopClass = "grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2";
-const taskRowTitleClass = "min-w-0 truncate text-left [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-primary";
-const taskRowMetaClass = "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
-const statusDotChipClass = "!min-h-4 !w-4 !min-w-4 !justify-center !px-0 !text-vui-micro-10";
-const kindChipClass = "max-w-full truncate !min-h-[20px] !px-1.5 ![font-size:var(--vui-font-xs)]";
+const taskRowLiveClass = `relative !h-auto !min-h-[56px] grid max-w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 ${rowSurface}`;
+const taskRowOverlayClass = "absolute inset-0 z-0 !rounded-[var(--radius-control)]";
+const taskRowContentClass = `pointer-events-none relative z-[1] min-w-0 ${rowGrid}`;
+const taskRowStopClass = "!h-7 !min-h-7 !w-7 !min-w-7 !justify-center !px-0 !bg-transparent pointer-events-auto relative z-[2] shrink-0 text-vui-fg-tertiary hover:!bg-[var(--vui-surface-row-hover)] hover:text-vui-fg-primary";
+const taskRowIconClass = "mt-0.5 shrink-0 text-vui-fg-tertiary";
+const taskRowIconSpinClass = "animate-spin";
+const taskRowMainClass = "grid min-w-0 content-start gap-0.5";
+const taskRowTopClass = "flex min-w-0 items-center gap-2";
+const taskRowTitleClass = "min-w-0 truncate text-left [font-size:var(--vui-font-xs)] font-medium text-vui-fg-primary";
+const taskRowStatusWordClass = "shrink-0 [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-tertiary";
+const taskRowMetaClass = "flex min-w-0 items-center gap-2 [font-size:var(--vui-font-xs)] leading-[1.35]";
+const taskRowKindClass = "shrink-0 text-vui-fg-secondary";
+const taskRowSummaryClass = "min-w-0 truncate text-vui-fg-secondary";
+const taskRowTimeClass = "shrink-0 self-start pt-0.5 text-right [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-tertiary";
 const loadMoreRowClass = "grid min-w-0 justify-items-start px-0.5";
 const detailPaneClass = `${paneClass} grid max-w-full grid-rows-[minmax(0,1fr)] p-2`;
 const detailContentClass = "grid min-h-0 min-w-0 max-w-full content-start gap-2 overflow-auto overflow-x-hidden pr-1";
@@ -67,11 +79,20 @@ const styles = {
   taskSectionCountClass,
   taskRowClass,
   taskRowSelectedClass,
+  taskRowLiveClass,
+  taskRowOverlayClass,
+  taskRowContentClass,
+  taskRowStopClass,
+  taskRowIconClass,
+  taskRowIconSpinClass,
+  taskRowMainClass,
   taskRowTopClass,
   taskRowTitleClass,
+  taskRowStatusWordClass,
   taskRowMetaClass,
-  statusDotChipClass,
-  kindChipClass,
+  taskRowKindClass,
+  taskRowSummaryClass,
+  taskRowTimeClass,
   loadMoreRowClass,
   detailPaneClass,
   detailContentClass,

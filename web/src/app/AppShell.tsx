@@ -7,6 +7,7 @@ import {
   GitBranch,
   ChevronDown,
   ChevronRight,
+  ListTree,
   LoaderCircle,
   Menu,
   Settings,
@@ -24,6 +25,7 @@ import {
 import { fetchPublicConfig } from "../api/config";
 import { fetchGitStatus } from "../api/git";
 import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
+import { listRuntimeTasksRevisionAware, type RuntimeTaskListPayload } from "../api/runtimeTasks";
 import {
   agentBroadcastEventTimeMs,
   readStoredAgentBroadcastReadAtMs,
@@ -862,6 +864,25 @@ export function AppShell() {
     staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
+  // Aux-center running badge: a global active-only runtime-task list (the
+  // title-bar icon only reads running.length). The key reuses the existing
+  // runtimeTasks shape with a shell scope marker so this payload never shares
+  // a cache entry with the /aux all-status list (["runtime-tasks", kind, ""])
+  // or per-session strips (["runtime-tasks", "", sessionId]).
+  const shellAuxTasksQuery = useQuery({
+    queryKey: queryKeys.runtimeTasks("", "shell"),
+    queryFn: ({ signal }) =>
+      listRuntimeTasksRevisionAware(
+        { status: "active" },
+        queryClient.getQueryData<RuntimeTaskListPayload>(queryKeys.runtimeTasks("", "shell")),
+        signal,
+      ),
+    enabled: shellStartupDataReady,
+    refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000),
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
+  });
   const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState<number | null>(() => readStoredAgentBroadcastReadAtMs());
   const agentBroadcastLatestEvent = useMemo(() => {
     const events = agentBroadcastLatestQuery.data?.events;
@@ -904,6 +925,12 @@ export function AppShell() {
   const shellGitTriggerTitle = shellGitStatus?.available && shellGitStatus.summary
     ? `${t("navGit")}：${shellGitStatus.summary}`
     : t("navGit");
+  // Aux-center entry + running badge (text count, ZCode badge shape; >9 clamps).
+  const shellAuxRunningCount = shellAuxTasksQuery.data?.running.length ?? 0;
+  const shellAuxRunningBadge = shellAuxRunningCount > 0
+    ? (shellAuxRunningCount > 9 ? "9+" : String(shellAuxRunningCount))
+    : "";
+  const auxCenterLabel = lang === "en" ? "Background tasks" : "后台任务";
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
 
@@ -982,8 +1009,9 @@ export function AppShell() {
     if (pathname.startsWith("/usage")) return t("navUsage");
     if (pathname.startsWith("/logs")) return t("navLogs");
     if (pathname.startsWith("/git")) return t("navGit");
+    if (pathname.startsWith("/aux")) return auxCenterLabel;
     return t("appTitle");
-  }, [location.pathname, t]);
+  }, [auxCenterLabel, location.pathname, t]);
   const handleReturnNavigation = useCallback(() => {
     if (!returnNavigationTarget) {
       return;
@@ -2726,6 +2754,14 @@ export function AppShell() {
           <span className={styles.settingsTriggerIconSlot}>
             <GitBranch size={17} />
             {shellGitNeedsAttention ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}
+          </span>
+        </VRouteLinkButton>
+        <VRouteLinkButton to="/aux" variant="ghost" className={styles.settingsTrigger} aria-label={auxCenterLabel} title={auxCenterLabel}>
+          <span className={styles.settingsTriggerIconSlot}>
+            <ListTree size={17} />
+            {shellAuxRunningBadge ? (
+              <span className={styles.settingsTriggerCountBadge} aria-hidden="true">{shellAuxRunningBadge}</span>
+            ) : null}
           </span>
         </VRouteLinkButton>
         <VRouteLinkButton to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }} variant="ghost" className={styles.settingsTrigger} aria-label={agentBroadcastTriggerLabel} title={agentBroadcastTriggerLabel} onClick={(event) => {

@@ -82,4 +82,6 @@ npx tsc -b --pretty false
 npm test -- --run launcher
 ```
 
-产品用户测的是 `dist\desktop\win-unpacked\Vibelution.exe`。Launcher 在 packaged 启动时对照 `package-provenance.json` 的 `electronTreeHash` 与当前 `HEAD:desktop/electron`；壳过期就先退出，由无控制台 helper 重建 `win-unpacked` 再拉起当前 checkout。不要让用户手跑 `package:dir`。只 `stop` Python `:8765` 不会加载新 `app.asar`。托盘版本行走同一套 `desktop-shell-status`，不要求工作台后端在线。
+产品用户测的是 `dist\desktop\win-unpacked\Vibelution.exe`。版本检查同时核对桌面壳源码与包内真实 `resources/web-dist`：前端内容摘要、构建来源和当前 production inputs 必须一致，不能用 `HEAD:web` 标签代替实际打包内容。`package:dir` 复用已验证的 active frontend release，不再直接复制旧 `web/dist`。旧包缺少前端内容证明时需要重建。
+
+Launcher 首页和工具页共用顶栏更新入口，收起详情不会隐藏提醒；当前只比较本地代码，不检测远端发布。确认更新后，先检查任务、准备前端与桌面壳，再检查一次任务；准备失败或普通停止被拒绝时不安排换版。最后由无控制台 helper 在旧壳退出后完成 `win-unpacked` 换版。不要让用户手跑 `package:dir`。只 `stop` Python `:8765` 不会加载新 `app.asar`。

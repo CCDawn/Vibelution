@@ -13,6 +13,7 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
+import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
@@ -36,6 +37,7 @@ export function LauncherShell() {
 
     const invalidateBranchInstances = () => {
       void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherFreshness() });
     };
     const unsubscribe = onLauncherStateChanged(() => {
       invalidateBranchInstances();
@@ -79,7 +81,8 @@ export function LauncherShell() {
       data-shell="launcher"
       data-browser-role="launcher_control_surface"
     >
-      <Outlet />
+      <LauncherUpdateTopbar lang={lang} branchName={branchInstancesQuery.data?.currentShortName} />
+      <div className="min-h-0 min-w-0 overflow-auto"><Outlet /></div>
     </div>
   );
 }
