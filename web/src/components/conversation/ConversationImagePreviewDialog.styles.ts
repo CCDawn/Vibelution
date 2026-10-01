@@ -18,8 +18,6 @@ const styles = {
     "vui-components-conversationview imagePreviewViewportGrabbing cursor-grabbing active:cursor-grabbing",
   zoomToolbar:
     "vui-components-conversationview zoomToolbar flex items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
-  zoomControlButton:
-    "vui-components-conversationview zoomControlButton inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-transparent text-[var(--fg-secondary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:pointer-events-none disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
   zoomLevelLabel:
     "vui-components-conversationview zoomLevelLabel min-w-[3rem] text-center text-vui-xs font-semibold tabular-nums text-[var(--fg-primary)]",
   imagePreviewFooter:

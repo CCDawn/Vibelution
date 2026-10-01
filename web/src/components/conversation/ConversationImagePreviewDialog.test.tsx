@@ -61,10 +61,14 @@ describe("ConversationImagePreviewDialog", () => {
     // Reset on image swap and on load.
     expect(dialogSource).toContain("[image.src, resetPreviewTransform]");
     expect(dialogSource).toContain("onLoad={resetPreviewTransform}");
-    // Toolbar: zoom out / percent / zoom in / reset next to the download link.
+    // Toolbar: zoom out / percent / zoom in / reset next to the download link,
+    // rendered through the VUI product API (no raw <button> in business TSX).
+    expect(dialogSource).toContain("<VButton");
+    expect(dialogSource).toContain('variant="ghost"');
+    expect(dialogSource).toContain("isIconOnly");
     expect(dialogSource).toContain("styles.zoomToolbar");
-    expect(dialogSource).toContain("styles.zoomControlButton");
     expect(dialogSource).toContain("styles.zoomLevelLabel");
+    expect(dialogSource).not.toContain("<button");
     expect(dialogSource).toContain("aria-live=\"polite\"");
     expect(dialogSource).toContain('aria-label={zoomInLabel}');
     expect(dialogSource).toContain('aria-label={zoomOutLabel}');

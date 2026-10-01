@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-import { VDialog } from "../vui";
+import { VButton, VDialog } from "../vui";
 import {
   clampImagePreviewOffset,
   clampImageScale,
@@ -379,19 +379,20 @@ export function ConversationImagePreviewDialog({
             className={styles.zoomToolbar}
             role="group"
           >
-            <button
+            <VButton
               type="button"
-              className={styles.zoomControlButton}
-              disabled={previewScale <= IMAGE_PREVIEW_MIN_SCALE}
+              density="compact"
+              variant="ghost"
+              isIconOnly
+              isDisabled={previewScale <= IMAGE_PREVIEW_MIN_SCALE}
               title={zoomOutLabel}
               aria-label={zoomOutLabel}
-              onClick={() =>
+              icon={<ZoomOut size={14} aria-hidden="true" />}
+              onPress={() =>
                 applyPreviewZoom(
                   nextImagePreviewStepScale(previewScale, -1),
                 )}
-            >
-              <ZoomOut size={14} aria-hidden="true" />
-            </button>
+            />
             <span
               className={styles.zoomLevelLabel}
               title={zoomLevelTitle}
@@ -399,29 +400,31 @@ export function ConversationImagePreviewDialog({
             >
               {zoomPercentLabel}
             </span>
-            <button
+            <VButton
               type="button"
-              className={styles.zoomControlButton}
-              disabled={previewScale >= IMAGE_PREVIEW_MAX_SCALE}
+              density="compact"
+              variant="ghost"
+              isIconOnly
+              isDisabled={previewScale >= IMAGE_PREVIEW_MAX_SCALE}
               title={zoomInLabel}
               aria-label={zoomInLabel}
-              onClick={() =>
+              icon={<ZoomIn size={14} aria-hidden="true" />}
+              onPress={() =>
                 applyPreviewZoom(
                   nextImagePreviewStepScale(previewScale, 1),
                 )}
-            >
-              <ZoomIn size={14} aria-hidden="true" />
-            </button>
-            <button
+            />
+            <VButton
               type="button"
-              className={styles.zoomControlButton}
-              disabled={isAtDefaultTransform}
+              density="compact"
+              variant="ghost"
+              isIconOnly
+              isDisabled={isAtDefaultTransform}
               title={resetZoomLabel}
               aria-label={resetZoomLabel}
-              onClick={resetPreviewTransform}
-            >
-              <RotateCcw size={14} aria-hidden="true" />
-            </button>
+              icon={<RotateCcw size={14} aria-hidden="true" />}
+              onPress={resetPreviewTransform}
+            />
           </div>
           <a
             className={styles.imageDownloadButton}
