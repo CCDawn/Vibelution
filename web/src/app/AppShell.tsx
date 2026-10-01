@@ -325,6 +325,192 @@ function preloadChatRouteForNav(trigger: "pointerenter" | "focus" | "click") {
   }
 }
 
+type PrimaryRoutePreloadKey = "teams" | "companions" | "evolution" | "memory" | "agents";
+type PrimaryRoutePreloadTrigger = "pointerenter" | "focus";
+
+/**
+ * Route chunk loaders live in router.tsx (single source of the dynamic import
+ * specifiers) and are resolved through a dynamic import so the shell module
+ * graph stays free of the router singleton (node-env source tests import
+ * AppShell without a DOM; the router chunk is already in the entry graph, so
+ * the lazy module lookup costs nothing at runtime).
+ */
+function routerRouteChunkLoaders(): Promise<typeof import("./router")> {
+  return import("./router");
+}
+
+/** Same loaders the lazy route graph uses, so a preload warms the exact chunk the navigation consumes. */
+const primaryRoutePreloadLoaders: Record<PrimaryRoutePreloadKey, () => Promise<() => Promise<unknown>>> = {
+  teams: () => routerRouteChunkLoaders().then((module) => module.loadTeamsRouteChunk),
+  companions: () => routerRouteChunkLoaders().then((module) => module.loadCompanionsRouteChunk),
+  evolution: () => routerRouteChunkLoaders().then((module) => module.loadEvolutionRouteChunk),
+  memory: () => routerRouteChunkLoaders().then((module) => module.loadMemoryRouteChunk),
+  agents: () => routerRouteChunkLoaders().then((module) => module.loadAgentsRouteChunk),
+};
+
+const primaryRoutePreloadPromises: Partial<Record<PrimaryRoutePreloadKey, Promise<unknown> | null>> = {};
+/** Soft hover/focus preload handles — one per route, never stacked. */
+const primaryRouteSoftPreloadHandles: Partial<Record<PrimaryRoutePreloadKey, number | null>> = {};
+
+function primaryRoutePreloadEventCode(key: PrimaryRoutePreloadKey, kind: "requested" | "loaded" | "failed"): string {
+  return `browser.${key}_route.preload_${kind}`;
+}
+
+function cancelPrimaryRouteSoftPreload(key: PrimaryRoutePreloadKey) {
+  const handle = primaryRouteSoftPreloadHandles[key];
+  if (handle == null || typeof window === "undefined") {
+    primaryRouteSoftPreloadHandles[key] = null;
+    return;
+  }
+  const idleCancel = (window as Window & {
+    cancelIdleCallback?: (handle: number) => void;
+  }).cancelIdleCallback;
+  if (typeof idleCancel === "function") {
+    idleCancel(handle);
+  } else {
+    window.clearTimeout(handle);
+  }
+  primaryRouteSoftPreloadHandles[key] = null;
+}
+
+function startPrimaryRoutePreloadImport(key: PrimaryRoutePreloadKey, trigger: PrimaryRoutePreloadTrigger) {
+  if (primaryRoutePreloadPromises[key]) {
+    return;
+  }
+  const startedAt = browserNowMs();
+  primaryRoutePreloadPromises[key] = primaryRoutePreloadLoaders[key]()
+    .then(() => {
+      postBrowserTelemetry({
+        phase: "navigation",
+        eventCode: primaryRoutePreloadEventCode(key, "loaded"),
+        message: `${key} route preload loaded.`,
+        fields: {
+          trigger,
+          durationMs: browserElapsedMs(startedAt),
+          pathname: window.location.pathname,
+        },
+      });
+    })
+    .catch((error: unknown) => {
+      // Clear the memo so a later trigger can retry the fetch.
+      primaryRoutePreloadPromises[key] = null;
+      postBrowserTelemetry({
+        phase: "navigation",
+        eventCode: primaryRoutePreloadEventCode(key, "failed"),
+        message: `${key} route preload failed.`,
+        level: "warning",
+        fields: {
+          trigger,
+          durationMs: browserElapsedMs(startedAt),
+          pathname: window.location.pathname,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      });
+    });
+}
+
+/**
+ * Generalized chat-style F1 preload for the non-chat primary nav entries:
+ * pointerenter/focus → soft idle chunk import (does not compete with first
+ * paint). Clicks navigate directly; React.lazy consumes the warmed chunk.
+ */
+function preloadPrimaryRouteChunkForNav(key: PrimaryRoutePreloadKey, trigger: PrimaryRoutePreloadTrigger) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const alreadyStarted = Boolean(primaryRoutePreloadPromises[key]);
+  postBrowserTelemetry({
+    phase: "navigation",
+    eventCode: primaryRoutePreloadEventCode(key, "requested"),
+    message: `${key} route preload requested from navigation.`,
+    fields: {
+      trigger,
+      alreadyStarted,
+      soft: true,
+      pathname: window.location.pathname,
+    },
+  });
+  if (alreadyStarted) {
+    return;
+  }
+
+  // Soft path: schedule once; do not stack multiple idle timers.
+  if (primaryRouteSoftPreloadHandles[key] != null) {
+    return;
+  }
+  const scheduleSoft = () => {
+    primaryRouteSoftPreloadHandles[key] = null;
+    if (primaryRoutePreloadPromises[key]) {
+      return;
+    }
+    startPrimaryRoutePreloadImport(key, trigger);
+  };
+  const idleRequest = (window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (typeof idleRequest === "function") {
+    primaryRouteSoftPreloadHandles[key] = idleRequest(scheduleSoft, { timeout: 1_200 });
+  } else {
+    primaryRouteSoftPreloadHandles[key] = window.setTimeout(scheduleSoft, 250);
+  }
+}
+
+/**
+ * Startup idle warm (F1 follow-up): once the shell has mounted and the main
+ * thread goes idle, import every primary nav route chunk one after another —
+ * low priority, yielding between chunks, silent on failure. The per-chunk
+ * dynamic imports dedupe against hover preloads and real navigations.
+ */
+let primaryNavIdleWarmStarted = false;
+
+function schedulePrimaryNavIdleWork(callback: () => void, timeoutMs: number) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const idleRequest = (window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (typeof idleRequest === "function") {
+    idleRequest(callback, { timeout: timeoutMs });
+    return;
+  }
+  window.setTimeout(callback, 250);
+}
+
+function warmPrimaryNavRouteChunkAt(index: number) {
+  // Nav order; chat warms through the telemetry-free shared import so the
+  // warm pass never emits navigation chunk telemetry outside a real navigation.
+  const warmLoaders: Array<() => Promise<() => Promise<unknown>>> = [
+    () => routerRouteChunkLoaders().then((module) => module.importChatCodingRouteChunk),
+    () => routerRouteChunkLoaders().then((module) => module.loadCompanionsRouteChunk),
+    () => routerRouteChunkLoaders().then((module) => module.loadTeamsRouteChunk),
+    () => routerRouteChunkLoaders().then((module) => module.loadEvolutionRouteChunk),
+    () => routerRouteChunkLoaders().then((module) => module.loadMemoryRouteChunk),
+    () => routerRouteChunkLoaders().then((module) => module.loadAgentsRouteChunk),
+  ];
+  if (index >= warmLoaders.length) {
+    return;
+  }
+  schedulePrimaryNavIdleWork(() => {
+    void warmLoaders[index]()
+      .then((loadChunk) => loadChunk())
+      .catch(() => undefined)
+      .then(() => warmPrimaryNavRouteChunkAt(index + 1));
+  }, 8_000);
+}
+
+function startPrimaryNavIdleWarm() {
+  if (primaryNavIdleWarmStarted || typeof window === "undefined") {
+    return;
+  }
+  // Test/jsdom environments have no real idle budget; keep suites silent.
+  if (import.meta.env.MODE === "test") {
+    return;
+  }
+  primaryNavIdleWarmStarted = true;
+  warmPrimaryNavRouteChunkAt(0);
+}
+
 type SettingsPreloadTarget = "settings-menu" | "config-route";
 type SettingsPreloadTrigger = "pointerenter" | "focus" | "open";
 
@@ -1098,6 +1284,11 @@ export function AppShell() {
   // Project-local layout memory (port/origin stable) + F11/windowed size memory.
   useEffect(() => startWorkbenchUiPreferencesSync(), []);
   useEffect(() => startWorkbenchWindowMemory(), []);
+
+  // Warm the primary nav route chunks once the shell is idle (serial, silent).
+  useEffect(() => {
+    startPrimaryNavIdleWarm();
+  }, []);
 
   useEffect(() => {
     const previous = previousReturnLocationRef.current;
@@ -2711,6 +2902,8 @@ export function AppShell() {
               to="/companions"
               className={shellPrimaryNavClass(location.pathname, "/companions")}
               aria-current={isShellPrimaryNavActive(location.pathname, "/companions") ? "page" : undefined}
+              onPointerEnter={() => preloadPrimaryRouteChunkForNav("companions", "pointerenter")}
+              onFocus={() => preloadPrimaryRouteChunkForNav("companions", "focus")}
               onClick={(event) => handlePrimaryNavClick(event, "/companions")}
             >
               {t("navCompanions")}
@@ -2725,6 +2918,8 @@ export function AppShell() {
             to="/teams"
             className={shellPrimaryNavClass(location.pathname, "/teams")}
             aria-current={isShellPrimaryNavActive(location.pathname, "/teams") ? "page" : undefined}
+            onPointerEnter={() => preloadPrimaryRouteChunkForNav("teams", "pointerenter")}
+            onFocus={() => preloadPrimaryRouteChunkForNav("teams", "focus")}
             onClick={(event) => handlePrimaryNavClick(event, "/teams")}
           >
             {t("navTeams")}
@@ -2735,6 +2930,8 @@ export function AppShell() {
               to="/evolution/workspace"
               className={shellPrimaryNavClass(location.pathname, "/evolution/workspace")}
               aria-current={isShellPrimaryNavActive(location.pathname, "/evolution/workspace") ? "page" : undefined}
+              onPointerEnter={() => preloadPrimaryRouteChunkForNav("evolution", "pointerenter")}
+              onFocus={() => preloadPrimaryRouteChunkForNav("evolution", "focus")}
               onClick={(event) => handlePrimaryNavClick(event, "/evolution/workspace")}
             >
               {t("navEvolution")}
@@ -2749,6 +2946,8 @@ export function AppShell() {
             to="/memory"
             className={shellPrimaryNavClass(location.pathname, "/memory")}
             aria-current={isShellPrimaryNavActive(location.pathname, "/memory") ? "page" : undefined}
+            onPointerEnter={() => preloadPrimaryRouteChunkForNav("memory", "pointerenter")}
+            onFocus={() => preloadPrimaryRouteChunkForNav("memory", "focus")}
             onClick={(event) => handlePrimaryNavClick(event, "/memory")}
           >
             {t("navMemory")}
@@ -2760,11 +2959,13 @@ export function AppShell() {
             aria-current={isShellPrimaryNavActive(location.pathname, "/agents") ? "page" : undefined}
             onClick={(event) => handlePrimaryNavClick(event, "/agents")}
             onPointerEnter={() => {
+              preloadPrimaryRouteChunkForNav("agents", "pointerenter");
               // C1.1: soft-warm Agents structured workbench copy (not flat TranslationKey).
               void import("../i18n/loadAgentsWorkbenchCopy").then((module) => {
                 module.prefetchAgentsWorkbenchCopy();
               });
             }}
+            onFocus={() => preloadPrimaryRouteChunkForNav("agents", "focus")}
           >
             {t("navAgents")}
           </VRouteLinkButton>

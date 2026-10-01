@@ -18,7 +18,16 @@ vi.mock("./browserTelemetry", () => ({
   postBrowserTelemetry: postBrowserTelemetryMock,
 }));
 
-import { loadChatCodingRouteChunk, router } from "./router";
+import {
+  importChatCodingRouteChunk,
+  loadAgentsRouteChunk,
+  loadCompanionsRouteChunk,
+  loadChatCodingRouteChunk,
+  loadEvolutionRouteChunk,
+  loadMemoryRouteChunk,
+  loadTeamsRouteChunk,
+  router,
+} from "./router";
 
 type CapturedRouter = {
   routes: RouteObject[];
@@ -202,5 +211,21 @@ describe("router route contracts", () => {
     const chatRoute = findWorkbenchRoute("chat");
     expectRouteErrorSurface(chatRoute, "workbench");
     expect(lazyFallbackMarkup(chatRoute)).toContain('data-vui="chat-session-workbench-shell"');
+  });
+
+  it("exports primary nav chunk loaders for the shell preload and idle warm", () => {
+    // AppShell's hover/focus preload and idle warm reuse these loaders, so a
+    // preload warms the exact chunk the route graph consumes.
+    for (const loader of [
+      loadTeamsRouteChunk,
+      loadCompanionsRouteChunk,
+      loadEvolutionRouteChunk,
+      loadMemoryRouteChunk,
+      loadAgentsRouteChunk,
+    ]) {
+      expect(typeof loader).toBe("function");
+    }
+    // The warm pass uses the telemetry-free chat import (no chunk telemetry).
+    expect(typeof importChatCodingRouteChunk).toBe("function");
   });
 });

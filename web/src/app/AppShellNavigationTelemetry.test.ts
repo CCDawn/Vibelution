@@ -218,6 +218,41 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain("browser.primary_nav.click");
   });
 
+  it("preloads every non-chat primary nav route chunk from hover/focus with chat-style telemetry", () => {
+    expect(appShellSource).toContain("function preloadPrimaryRouteChunkForNav");
+    expect(appShellSource).toContain("function startPrimaryRoutePreloadImport");
+    expect(appShellSource).toContain("function cancelPrimaryRouteSoftPreload");
+    // Loaders come from the router module (resolved through a dynamic import
+    // so the shell graph stays free of the router singleton) — preloads warm
+    // the exact chunks the lazy route graph consumes.
+    expect(appShellSource).toContain('import("./router")');
+    expect(appShellSource).toContain("loadTeamsRouteChunk");
+    // Event codes follow the browser.chat_route.preload_* pattern per route key.
+    expect(appShellSource).toContain('`browser.${key}_route.preload_${kind}`');
+    expect(appShellSource).toContain('"teams" | "companions" | "evolution" | "memory" | "agents"');
+    for (const route of ["teams", "companions", "evolution", "memory", "agents"]) {
+      expect(appShellSource).toContain(`preloadPrimaryRouteChunkForNav("${route}", "pointerenter")`);
+      expect(appShellSource).toContain(`preloadPrimaryRouteChunkForNav("${route}", "focus")`);
+    }
+    // Agents keeps its dictionary warm alongside the chunk preload.
+    expect(appShellSource).toContain('import("../i18n/loadAgentsWorkbenchCopy")');
+    // Failure clears the memo so a later trigger can retry.
+    expect(appShellSource).toContain("primaryRoutePreloadPromises[key] = null");
+  });
+
+  it("warms all primary nav route chunks on idle after mount, silently in tests", () => {
+    expect(appShellSource).toContain("function startPrimaryNavIdleWarm");
+    expect(appShellSource).toContain("function warmPrimaryNavRouteChunkAt");
+    expect(appShellSource).toContain("function schedulePrimaryNavIdleWork");
+    expect(appShellSource).toContain("startPrimaryNavIdleWarm();");
+    // Low-priority idle scheduling with a setTimeout degradation path.
+    expect(appShellSource).toContain("requestIdleCallback");
+    // Test/jsdom environments skip the warm pass entirely.
+    expect(appShellSource).toContain('import.meta.env.MODE === "test"');
+    // Chat warms through the telemetry-free shared import, never chunk telemetry.
+    expect(appShellSource).toContain("importChatCodingRouteChunk");
+  });
+
   it("preloads the settings chunk chain so the first gear open has no blank suspense or route waterfall", () => {
     expect(appShellSource).toContain("function preloadSettingsSurfaceChunk");
     expect(appShellSource).toContain("browser.settings_menu.preload_requested");

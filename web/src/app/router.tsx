@@ -12,14 +12,23 @@ import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 
-const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
+const AgentsRoute = lazyRoute(loadAgentsRouteChunk);
 // The folder must not be named `aux` — AUX is a reserved device name on
 // Windows and git cannot index files under it.
 const AuxConversationsRoute = lazyRoute(() => import("../routes/auxConversations/AuxConversationsRoute").then((module) => ({ default: module.AuxConversationsRoute })));
 type ChatCodingRouteModule = typeof import("../routes/ChatCodingRoute");
 
+/**
+ * Telemetry-free chat chunk import, shared by the lazy route graph and the
+ * shell's idle warm pass (the warm pass must not emit navigation chunk
+ * telemetry outside a real navigation).
+ */
+export function importChatCodingRouteChunk(): Promise<ChatCodingRouteModule> {
+  return import("../routes/ChatCodingRoute");
+}
+
 export function loadChatCodingRouteChunk(
-  loader: () => Promise<ChatCodingRouteModule> = () => import("../routes/ChatCodingRoute"),
+  loader: () => Promise<ChatCodingRouteModule> = importChatCodingRouteChunk,
 ) {
   const startedAt = nowMs();
   postBrowserTelemetry({
@@ -45,24 +54,50 @@ export function loadChatCodingRouteChunk(
 }
 
 const ChatCodingRoute = lazyRoute(loadChatCodingRouteChunk);
-const CompanionsRoute = lazyRoute(() => import("../routes/CompanionsRoute").then((module) => ({ default: module.CompanionsRoute })));
+const CompanionsRoute = lazyRoute(loadCompanionsRouteChunk);
 const ConfigRoute = lazyRoute(() => import("../routes/ConfigRoute").then((module) => ({ default: module.ConfigRoute })));
-const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute })));
+const EvolutionRoute = lazyRoute(loadEvolutionRouteChunk);
 const GitRoute = lazyRoute(() => import("../routes/GitRoute").then((module) => ({ default: module.GitRoute })));
 const KernelTaskCenterRoute = lazyRoute(() => import("../routes/KernelTaskCenterRoute").then((module) => ({ default: module.KernelTaskCenterRoute })));
 const LauncherRoute = lazyRoute(() => import("../routes/LauncherRoute").then((module) => ({ default: module.LauncherRoute })));
 const LauncherToolsRoute = lazyRoute(() => import("../routes/LauncherToolsRoute").then((module) => ({ default: module.LauncherToolsRoute })));
 const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) => ({ default: module.LogsRoute })));
-const MemoryRoute = lazyRoute(() => import("../routes/MemoryRoute").then((module) => ({ default: module.MemoryRoute })));
+const MemoryRoute = lazyRoute(loadMemoryRouteChunk);
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
 const DesktopPetRoute = lazyRoute(() => import("../routes/desktopPet/DesktopPetRoute").then((module) => ({ default: module.DesktopPetRoute })));
 const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
 const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
 const SkillsRoute = lazyRoute(() => import("../routes/SkillsRoute").then((module) => ({ default: module.SkillsRoute })));
 const SupervisedReviewRoute = lazyRoute(() => import("../routes/SupervisedReviewRoute").then((module) => ({ default: module.SupervisedReviewRoute })));
-const TeamsRoute = lazyRoute(() => import("../routes/TeamsRoute").then((module) => ({ default: module.TeamsRoute })));
+const TeamsRoute = lazyRoute(loadTeamsRouteChunk);
 const ToolsRoute = lazyRoute(() => import("../routes/ToolsRoute").then((module) => ({ default: module.ToolsRoute })));
 const UsageRoute = lazyRoute(() => import("../routes/UsageRoute").then((module) => ({ default: module.UsageRoute })));
+
+/**
+ * Primary navigation chunk loaders, shared by the lazy route graph above and
+ * the shell's hover/focus preload + idle warm pass (AppShell.tsx). Keeping the
+ * dynamic import specifiers here means a preload warms the exact chunk the
+ * route navigation will consume.
+ */
+export function loadAgentsRouteChunk() {
+  return import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute }));
+}
+
+export function loadCompanionsRouteChunk() {
+  return import("../routes/CompanionsRoute").then((module) => ({ default: module.CompanionsRoute }));
+}
+
+export function loadEvolutionRouteChunk() {
+  return import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute }));
+}
+
+export function loadMemoryRouteChunk() {
+  return import("../routes/MemoryRoute").then((module) => ({ default: module.MemoryRoute }));
+}
+
+export function loadTeamsRouteChunk() {
+  return import("../routes/TeamsRoute").then((module) => ({ default: module.TeamsRoute }));
+}
 
 function lazyRoute<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) {
   return lazy(() =>

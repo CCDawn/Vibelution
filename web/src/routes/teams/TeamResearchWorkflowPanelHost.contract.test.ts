@@ -42,4 +42,10 @@ describe("TeamResearchWorkflowPanelHost extraction contract", () => {
     expect(hostSource).toContain("Select research-team to view the Challenge Cup workflow.");
     expect(hostSource).toContain("children");
   });
+
+  it("preloads the lazy SC phase chunk in parallel with the foundation query", () => {
+    // The warm import runs at route-chunk evaluation so the heavy workbench
+    // module never forms a second waterfall behind the loading shell.
+    expect(routeModelSource).toContain('void import("./TeamsWorkbenchWithScPhase")');
+  });
 });
