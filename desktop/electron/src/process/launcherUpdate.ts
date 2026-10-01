@@ -5,6 +5,8 @@ import type { DesktopShellStatus } from "./desktopShellFreshness.js";
 
 /** A version read is not permission to stop a workspace. Recheck after preparation. */
 export async function executeLauncherUpdate(input: {
+  /** Explicit operator refresh saves active tasks through stopWorkspaces. */
+  interruptActiveWork?: boolean;
   activeWork: () => Promise<ActiveWorkStatus>;
   prepare: () => Promise<unknown>;
   stopWorkspaces: () => Promise<void>;
@@ -17,7 +19,7 @@ export async function executeLauncherUpdate(input: {
     } catch {
       status = { state: "unknown", message: "" };
     }
-    if (status.state === "idle") return null;
+    if (status.state === "idle" || (status.state === "active" && input.interruptActiveWork)) return null;
     return {
       schemaVersion: 1,
       accepted: false,

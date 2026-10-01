@@ -581,20 +581,11 @@ Any Agent changing running UI code, backend code, launcher lifecycle code, runti
 
 Before any Launcher restart, check whether Vibelution has active work using Launcher status or lifecycle evidence when available.
 
-If any chat turn, group round, evolution run, supervised run, worktree task, or other project task is active, Launcher restart is forbidden by default. Do not silently pass `confirmedActiveWork`, do not kill processes to bypass the guard, and first report:
+An explicit operator restart (UI button, tray, CLI, or a clear user instruction) has priority over active work. Show a concise interruption notice, keep restart actionable, then use Electron's serialized lifecycle path to stop task owners and persist their partial state before retiring and restarting the backend. The user's restart action is the authorization; do not require an additional confirmation phrase or convert it to a deferred restart merely because work is active.
 
-`有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。`
+Automatic updates and Agent-driven refresh without user restart authorization still defer until idle. Keep operator versus forwarded provenance explicit; do not silently grant interruption permission to automatic commands. Ordinary shutdown and force-stop retain their separate contracts.
 
-After reporting the block, an Agent may request controlled force takeover when the user is asking for immediate runtime refresh or release/runtime verification and waiting would materially block the operator. The request must include:
-
-- the active work or active claim list that would be interrupted;
-- the likely interruption risk, such as lost in-flight output, cancelled work runs, dirty worktrees, or stale claim state;
-- safer alternatives, such as wait, stop a named task first, or defer refresh;
-- the exact confirmation phrase `确认强制接管并刷新 Vibelution`.
-
-Do not execute force takeover unless the user replies with that exact confirmation phrase in the current thread after seeing the risk list. A vague "force", "continue", or "yes" is not enough.
-
-When confirmed, use the existing Runtime Manager or Launcher force-stop / force-close / confirmed-active-work path before restart. Do not use ad hoc process killing, `taskkill.exe`, raw port cleanup, or direct `uvicorn`/`npm` restarts as the normal takeover path. Record the confirmation phrase, interrupted work identifiers, force-stop result, restart result, and follow-up cleanup or claim state in runtime evidence and the final report; sync project memory when the takeover changes governance state.
+Chat turns use the existing stop/cascade and interrupted journal snapshot owner. Other task owners settle with their existing stopped/cancelled status; no task is marked completed or promised automatic resumption. A cleanup/persistence or startup failure is a technical failure that must be reported, rather than a policy refusal or a successful restart. Record task identifiers and cleanup/restart results in bounded runtime evidence. Do not use ad hoc process killing, `taskkill.exe`, raw port cleanup, or direct `uvicorn`/`npm` restarts as the normal path.
 
 Preferred refresh paths:
 
@@ -1096,12 +1087,12 @@ Prefer:
 - `scripts/vibelution_launcher.ps1` or `scripts/vibelution_launcher.py` for local runtime restart decisions;
 - runtime-manager APIs and existing process registry behavior for UI-controlled lifecycle actions;
 - explicit refresh decisions in final reports: `not needed`, `recommended before user testing`, or `required before release/runtime verification`;
-- active-work guards before restarting when work is running.
+- operator restart task cleanup and saved partials; active-work guards for automatic or unapproved Agent refresh.
 
 Avoid:
 
 - raw `uvicorn`, `npm`, process-kill, or port-kill flows as the normal refresh mechanism;
-- restarting Vibelution while Launcher active-work guards report an active task;
+- bypassing task cleanup or granting automatic refresh the user's interruption authority;
 - hiding skipped refresh decisions in final reports.
 
 Validation anchor: lifecycle changes require a launcher/runtime-manager test, smoke check, or explicit reason why runtime verification is deferred.

@@ -73,6 +73,9 @@ class SelfEvolutionAutonomousLoopOrchestrator:
     def retry_cleanup(self, run_id: str) -> dict[str, Any]:
         return self._service.retry_cleanup(run_id)
 
+    def interrupt_active_for_restart(self, reason: str) -> list[dict[str, Any]]:
+        return self._service.interrupt_active_for_restart(reason)
+
     def get(self, run_id: str) -> dict[str, Any]:
         return self._service.load(run_id)
 
@@ -194,6 +197,12 @@ def default_orchestrator() -> SelfEvolutionAutonomousLoopOrchestrator:
 
 def start_autonomous_self_evolution(payload: dict[str, Any]) -> dict[str, Any]:
     return default_orchestrator().start(payload)
+
+
+def interrupt_active_autonomous_self_evolution_for_restart(
+    reason: str,
+) -> list[dict[str, Any]]:
+    return default_orchestrator().interrupt_active_for_restart(reason)
 
 
 def get_autonomous_self_evolution_run(run_id: str) -> dict[str, Any]:

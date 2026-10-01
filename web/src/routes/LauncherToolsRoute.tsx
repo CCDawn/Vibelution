@@ -947,7 +947,7 @@ export function LauncherToolsRoute() {
         startDisabledBusy: "正在处理上一个生命周期操作",
         startDisabledRunning: "项目已在运行",
         startDisabledChanging: "项目正在切换",
-        lifecycleActionDisabledActiveWork: "有进行中的任务，无法停止或重启 Vibelution",
+        lifecycleActionDisabledActiveWork: "有进行中的任务，无法停止工作台",
         stopDisabledClosed: "项目已经关闭",
         stopDisabledInFlight: "关闭命令已经在处理中",
         restartDisabledClosed: "项目已经关闭；请使用启动",
@@ -957,11 +957,11 @@ export function LauncherToolsRoute() {
         projectStatus: "项目状态",
         launcherStatus: "Launcher 维护",
         lifecycleStatus: "生命周期",
-        activeWork: "任务保护",
+        activeWork: "活动任务",
         activeTasks: "进行中任务",
         noActiveWork: "无进行中任务",
-        restartProtected: "有任务，禁止重启",
-        restartClear: "可安全重启",
+        restartWithActiveWork: "重启会中断任务并保存已有记录",
+        restartClear: "可以重启",
         userAction: "下一步",
         projectRunning: "项目正在运行",
         projectClosed: "项目已关闭",
@@ -1092,7 +1092,7 @@ export function LauncherToolsRoute() {
         advancedDetails: "技术细节",
         notBlocking: "不影响项目使用",
         maintenanceScopeSummary: "Launcher 正在维护项目启动、停止、重启、后端、窗口和日志证据。",
-        activeWorkSummary: "有任务运行时，Launcher 会拒绝停止或重启，避免打断会话或进化任务。",
+        activeWorkSummary: "停止工作台仍受活动任务保护；重启会中断任务并保存已有记录。",
         noActiveWorkSummary: "当前没有进行中的项目任务，生命周期操作不会打断运行任务。",
         openWorkbenchSummary: "工作台已就绪，可继续开发或查看页面。",
         startProjectSummary: "项目未运行时，从这里统一启动前后端和窗口。",
@@ -1131,9 +1131,9 @@ export function LauncherToolsRoute() {
         invalidPort: "端口必须是 1-65535 的整数",
         userGuide: "当前建议",
         userGuideReady: "可以继续使用",
-        userGuideReadyDetail: "项目已就绪；打开工作台继续使用。需要重启前，先确认没有进行中的任务。",
-        userGuideBlocked: "先等任务完成",
-        userGuideBlockedDetail: "有任务正在运行，停止和重启已自动锁定，避免打断当前会话或进化任务。",
+        userGuideReadyDetail: "项目已就绪；打开工作台继续使用。重启会中断当前任务，保存的记录可在启动后回到会话查看。",
+        userGuideBlocked: "有活动任务",
+        userGuideBlockedDetail: "重启仍可执行，会中断活动任务并保存已有记录；停止工作台仍需等任务收口。",
         userGuideClosed: "可以启动项目",
         userGuideClosedDetail: "项目当前关闭；点击启动会统一拉起后端、前端资源和工作台窗口。",
         userGuidePartial: "重新打开工作台",
@@ -1142,8 +1142,8 @@ export function LauncherToolsRoute() {
         userGuideChangingDetail: "Launcher 正在处理生命周期操作；完成后状态会自动刷新。",
         userGuideProblem: "需要查看诊断",
         userGuideProblemDetail: "当前状态证据不完整或异常；展开高级诊断查看最近命令和现场日志。",
-        actionsLocked: "停止/重启已保护",
-        actionsAvailable: "停止/重启可用",
+        actionsLocked: "生命周期操作处理中",
+        actionsAvailable: "生命周期操作可用",
         actionsStartOnly: "项目已关闭，仅启动可用",
         diagnosticsCollapsedHint: "排查时展开",
         developerModeTitle: "无痕开发沙盒",
@@ -1225,7 +1225,7 @@ export function LauncherToolsRoute() {
         startDisabledBusy: "A lifecycle command is still settling",
         startDisabledRunning: "Project is already running",
         startDisabledChanging: "Project lifecycle is changing",
-        lifecycleActionDisabledActiveWork: "Active work is running; Vibelution cannot stop or restart",
+        lifecycleActionDisabledActiveWork: "Active work is running; the workbench cannot stop",
         stopDisabledClosed: "Project is already closed",
         stopDisabledInFlight: "A close command is already running",
         restartDisabledClosed: "Project is already closed; use Start",
@@ -1235,11 +1235,11 @@ export function LauncherToolsRoute() {
         projectStatus: "Project Status",
         launcherStatus: "Launcher Care",
         lifecycleStatus: "Lifecycle",
-        activeWork: "Work Guard",
+        activeWork: "Active Work",
         activeTasks: "Active Tasks",
         noActiveWork: "No active tasks",
-        restartProtected: "Blocked by work",
-        restartClear: "Safe to restart",
+        restartWithActiveWork: "Restart will interrupt active work and preserve saved records",
+        restartClear: "Ready to restart",
         userAction: "Next Step",
         projectRunning: "Project is running",
         projectClosed: "Project is closed",
@@ -1370,7 +1370,7 @@ export function LauncherToolsRoute() {
         advancedDetails: "Technical details",
         notBlocking: "Not blocking project use",
         maintenanceScopeSummary: "Launcher maintains project start, stop, restart, backend, window, and runtime evidence.",
-        activeWorkSummary: "When tasks are running, Launcher rejects stop and restart requests so chat or evolution work is not interrupted.",
+        activeWorkSummary: "Stopping the workbench remains guarded while work is active; restart will interrupt tasks and preserve saved records.",
         noActiveWorkSummary: "There are no active project tasks, so lifecycle actions will not interrupt running work.",
         openWorkbenchSummary: "Workbench is ready for development or inspection.",
         startProjectSummary: "When closed, start frontend, backend, and window from here.",
@@ -1409,9 +1409,9 @@ export function LauncherToolsRoute() {
         invalidPort: "Ports must be integers from 1 to 65535",
         userGuide: "Current guidance",
         userGuideReady: "Keep working",
-        userGuideReadyDetail: "The project is ready. Open the workbench and continue. Before restarting, make sure no task is running.",
-        userGuideBlocked: "Wait for work to finish",
-        userGuideBlockedDetail: "A task is running, so stop and restart are locked to avoid interrupting chat or evolution work.",
+        userGuideReadyDetail: "The project is ready. Open the workbench and continue. Restart will interrupt active tasks; saved records remain available when you return to the session.",
+        userGuideBlocked: "Active tasks are running",
+        userGuideBlockedDetail: "Restart remains available and will interrupt active tasks while preserving saved records; stopping the workbench still waits for the task to settle.",
         userGuideClosed: "Start the project",
         userGuideClosedDetail: "The project is closed. Start will bring up backend, frontend assets, and the workbench window together.",
         userGuidePartial: "Reopen the workbench",
@@ -1420,8 +1420,8 @@ export function LauncherToolsRoute() {
         userGuideChangingDetail: "Launcher is processing a lifecycle operation. The state will refresh when it settles.",
         userGuideProblem: "Check diagnostics",
         userGuideProblemDetail: "The current evidence is incomplete or abnormal. Expand diagnostics for recent commands and scene logs.",
-        actionsLocked: "Stop/restart protected",
-        actionsAvailable: "Stop/restart available",
+        actionsLocked: "Lifecycle operation in progress",
+        actionsAvailable: "Lifecycle operation available",
         actionsStartOnly: "Project is closed; Start is the only lifecycle action",
         diagnosticsCollapsedHint: "Open when troubleshooting",
         developerModeTitle: "No-trace Dev Sandbox",
@@ -2016,7 +2016,7 @@ export function LauncherToolsRoute() {
   const activeWorkSummary = restartQueueActive
     ? copy.lifecycleRestarting
     : activeWorkCount > 0
-      ? copy.restartProtected
+      ? copy.restartWithActiveWork
       : projectIsClosed
         ? copy.noActiveWork
       : copy.restartClear;
@@ -2025,28 +2025,28 @@ export function LauncherToolsRoute() {
     || trackedCommand?.operation === "force-stop"
     || controlPlaneHasCommandType(evidence, ["close_workbench", "force_close_workbench"]);
   const destructiveActionDisabled = selectedIsCurrent
-    ? busy || !controlPlaneIdle || activeWorkCount > 0 || projectIsChanging || projectIsClosed
+    ? busy || !controlPlaneIdle || projectIsChanging || projectIsClosed
     : controlMutation.isPending;
   const destructiveActionDisabledReason = selectedIsCurrent
-    ? activeWorkCount > 0
-      ? copy.lifecycleActionDisabledActiveWork
-      : projectIsClosed
-        ? copy.restartDisabledClosed
-        : projectIsChanging
-          ? copy.startDisabledChanging
-          : copy.startDisabledBusy
+    ? projectIsClosed
+      ? copy.restartDisabledClosed
+      : projectIsChanging
+        ? copy.startDisabledChanging
+        : copy.startDisabledBusy
     : controlMutation.isPending
       ? copy.startDisabledBusy
       : "";
   const stopDisabled = selectedIsCurrent
-    ? destructiveActionDisabled || closeCommandInFlight
+    ? destructiveActionDisabled || activeWorkCount > 0 || closeCommandInFlight
     : controlMutation.isPending;
   const stopDisabledReason = selectedIsCurrent
-    ? projectIsClosed
-      ? copy.stopDisabledClosed
-      : closeCommandInFlight
-        ? copy.stopDisabledInFlight
-        : destructiveActionDisabledReason
+    ? activeWorkCount > 0
+      ? copy.lifecycleActionDisabledActiveWork
+      : projectIsClosed
+        ? copy.stopDisabledClosed
+        : closeCommandInFlight
+          ? copy.stopDisabledInFlight
+          : destructiveActionDisabledReason
     : controlMutation.isPending
       ? copy.stopDisabledInFlight
       : "";

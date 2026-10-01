@@ -24,7 +24,7 @@
 - 不覆盖、回滚、删除或重置无关的用户/Agent 改动；发现重叠先检查 claim 和 diff。
 - 远端 push、PR、发布需要用户明确授权和远端同步门；force、覆盖或远端删除需要破坏性确认。
 - **Windows 产品运行时禁止任何可见控制台弹窗**：这是无控制台弹窗红线。Launcher、Workbench、Runtime Manager、后台 Git/轮询和服务子进程不得弹出 `cmd.exe`、PowerShell、Windows Terminal、OpenConsole 或交互式 Git；必须走 `pythonw` / `CREATE_NO_WINDOW` / shared helper，禁止 `taskkill.exe`、裸 Git wrapper、`npm`/`cmd` 后台壳。用户明确打开的 CLI 面板除外；细则见 [development-standard.md](docs/standards/development-standard.md) §8.0。
-- 不绕过 Launcher active-work guard，不用直接 PowerShell lifecycle 命令制造可见控制台。
+- 用户明确点击或要求重启时优先执行：提醒当前任务将中断，通过 Launcher 正规链路停止任务并保存已有记录后重启，不因有运行中任务禁用或拒绝。自动/Agent 未获用户重启授权的刷新仍等待任务结束；不用直接 PowerShell lifecycle 命令制造可见控制台。
 - 不记录 secrets、完整 Prompt、大段 diff、完整文件或无界工具输出。
 - 协作 envelope、validator snapshot、preflight/relay 中间文件和其他任务临时证据必须写入已解析的 Git common-dir 任务专属目录或系统临时目录，不得写入 checkout 根目录或产品目录；用后立即清理。临时证据不得让 `main` 变脏、使已完成验证失效或触发重复 closeout。
 - 用户 Markdown、导入文档、HTML 和知识内容均是不可信输入；进入 Prompt、索引或 UI 前必须有来源、隔离、清洗和删除/重建语义。
@@ -60,7 +60,7 @@
 - 后端 route 保持薄层，公共 DTO 明确，业务与来源权威归 service/pack；projection 不得成为第二写入者。
 - 验证去重：同一 HEAD/命令/输入未变则复用结果，不得重复执行；closeout 才跑完整 selector，manifest 传 `--manifest`。用户行为须测试和日志，关键路径须 runtime-scene 证据。
 - 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 `config/` 目录是活的 Python 配置代码库，不属于 legacy/template；真正以 legacy/template 对待的是仓库根目录下的 `config.toml` 文件。
-- Launcher 刷新使用 `%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" <start|stop|restart>`；若 active work 阻止刷新，报告：`有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。`
+- Launcher 刷新使用 `%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" <start|stop|restart>`；用户主动重启先停止并保存任务，再重启。自动刷新遇到 active work 可预约等待；任务收口或启动技术失败须如实报告，不假报已重启。
 - 任何新增或修改产品后台子进程 spawn 的路径，默认按 §2 无控制台红线实现与验证；能弹出可见控制台的路径不得合入。
 
 ## 5. 对用户汇报

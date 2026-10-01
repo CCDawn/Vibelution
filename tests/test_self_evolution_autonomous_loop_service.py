@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from copy import deepcopy
 
 import pytest
@@ -222,6 +224,168 @@ def test_queue_returns_before_agent_work_and_worker_resumes_persisted_run(tmp_pa
     assert awaiting_review["phase"] == "reporting"
 
 
+def test_restart_persists_stop_and_late_worker_cannot_advance(tmp_path):
+    evolve_started = threading.Event()
+    release_evolve = threading.Event()
+
+    def evolve(context):
+        calls.append(("evolve", deepcopy(context)))
+        evolve_started.set()
+        assert release_evolve.wait(timeout=5)
+        return {
+            "summary": "候选工作树在中断前已经生成。",
+            "branch": "codex/self-loop-candidate",
+            "worktreePath": "C:/workspace/self-loop-candidate",
+            "baseCommit": "a" * 40,
+            "headCommit": "a" * 40,
+            "changedFiles": [
+                {"path": "core/example.py", "changeType": "modified"},
+            ],
+            "verification": [
+                {"command": "pytest tests/test_example.py", "outcome": "passed"},
+            ],
+            "conversationSessionId": "session-executor",
+            "variantId": "variant-001",
+        }
+
+    service, calls = _build_service(
+        tmp_path,
+        hook_overrides={"evolve": evolve},
+    )
+    queued = service.queue({"goal": "重启期间停止旧 worker"})
+    worker_results = []
+    worker = threading.Thread(
+        target=lambda: worker_results.append(
+            service.run_until_review(str(queued["runId"]))
+        ),
+        daemon=True,
+    )
+    worker.start()
+
+    assert evolve_started.wait(timeout=3)
+    stopped = service.interrupt_active_for_restart("operator requested restart")
+
+    assert len(stopped) == 1
+    assert stopped[0]["status"] == "stopped"
+    assert stopped[0]["phase"] == "evolving"
+    assert stopped[0]["interruptedByRestart"] is True
+    assert stopped[0]["stopReason"] == "operator requested restart"
+    assert service.load_active() is None
+
+    release_evolve.set()
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    persisted = service.load("self-loop-001")
+    assert worker_results == [persisted]
+    assert persisted["status"] == "stopped"
+    assert persisted["phase"] == "evolving"
+    assert persisted["candidate"]["worktreePath"] == (
+        "C:/workspace/self-loop-candidate"
+    )
+    assert persisted["resultReport"]["summary"] == (
+        "候选工作树在中断前已经生成。"
+    )
+    assert persisted["interruptedByRestart"] is True
+    assert [name for name, _ in calls] == ["observe", "plan", "evolve"]
+
+
+def test_restart_waits_for_inflight_integration_and_preserves_receipt(tmp_path):
+    integration_started = threading.Event()
+    release_integration = threading.Event()
+
+    def integrate(context):
+        calls.append(("integrate", deepcopy(context)))
+        integration_started.set()
+        assert release_integration.wait(timeout=5)
+        candidate = context["candidate"]
+        return {
+            "status": "committed",
+            "mechanism": "git_merge_ff",
+            "baseCommit": candidate["baseCommit"],
+            "commitSha": "d" * 40,
+            "candidateVariantId": candidate["variantId"],
+            "changedFiles": [item["path"] for item in candidate["changedFiles"]],
+            "rollbackManifestPath": "C:/workspace/manifests/self-loop-001.json",
+            "committedAt": "2026-08-01T00:00:00+00:00",
+        }
+
+    service, calls = _build_service(
+        tmp_path,
+        hook_overrides={"integrate": integrate},
+    )
+    service.start({"goal": "在重启边界保留 Git receipt"})
+    approval_results = []
+    approve_worker = threading.Thread(
+        target=lambda: approval_results.append(
+            service.approve(
+                "self-loop-001",
+                decision={"actorType": "user", "actorId": "local-user"},
+            )
+        ),
+        daemon=True,
+    )
+    approve_worker.start()
+
+    assert integration_started.wait(timeout=3)
+    interrupt_results = []
+    interrupt_errors = []
+
+    def interrupt():
+        try:
+            interrupt_results.extend(
+                service.interrupt_active_for_restart("operator requested restart")
+            )
+        except Exception as exc:  # pragma: no cover - failure is asserted below
+            interrupt_errors.append(exc)
+
+    interrupt_worker = threading.Thread(target=interrupt, daemon=True)
+    interrupt_worker.start()
+    deadline = time.monotonic() + 3
+    while (
+        "self-loop-001" not in service._restart_requests
+        and interrupt_worker.is_alive()
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+    assert "self-loop-001" in service._restart_requests
+
+    release_integration.set()
+    interrupt_worker.join(timeout=3)
+    approve_worker.join(timeout=3)
+
+    assert not interrupt_worker.is_alive()
+    assert not approve_worker.is_alive()
+    assert interrupt_errors == []
+    assert len(interrupt_results) == 1
+    stopped = interrupt_results[0]
+    assert stopped["status"] == "stopped"
+    assert stopped["phase"] == "cleanup_pending"
+    assert stopped["integration"]["status"] == "committed"
+    assert stopped["integration"]["commitSha"] == "d" * 40
+    assert stopped["stopReason"] == "operator requested restart"
+    assert approval_results == [stopped]
+    assert [name for name, _ in calls] == [
+        "observe",
+        "plan",
+        "evolve",
+        "integrate",
+    ]
+    assert "cleanup" not in stopped
+    assert service.load_active() is None
+
+    with pytest.raises(AutonomousLoopConflictError, match="retiring"):
+        service.retry_cleanup("self-loop-001")
+
+    restarted_service, restarted_calls = _build_service(tmp_path)
+    completed = restarted_service.retry_cleanup("self-loop-001")
+
+    assert completed["status"] == "completed"
+    assert completed["integration"]["commitSha"] == "d" * 40
+    assert completed["cleanup"]["status"] == "cleaned"
+    assert [name for name, _ in restarted_calls] == ["cleanup"]
+
+
 def test_only_explicit_user_approval_can_merge_then_cleanup(tmp_path):
     owner_service, owner_calls = _build_service(tmp_path, process_id=111)
     owner_service.start({"goal": "建立自动闭环"})
@@ -355,6 +519,150 @@ def test_explicit_user_reapproval_retries_failed_integration_then_cleans(tmp_pat
     ]
 
 
+def test_restart_reports_real_completion_when_inflight_cleanup_succeeds(tmp_path):
+    cleanup_started = threading.Event()
+    release_cleanup = threading.Event()
+
+    def cleanup(context):
+        calls.append(("cleanup", deepcopy(context)))
+        cleanup_started.set()
+        assert release_cleanup.wait(timeout=5)
+        return {
+            "status": "cleaned",
+            "worktreeRemoved": True,
+            "localBranchDeleted": True,
+        }
+
+    service, calls = _build_service(
+        tmp_path,
+        hook_overrides={"cleanup": cleanup},
+    )
+    service.start({"goal": "原子清理收口后再重启"})
+    approval_results = []
+    approve_worker = threading.Thread(
+        target=lambda: approval_results.append(
+            service.approve(
+                "self-loop-001",
+                decision={"actorType": "user", "actorId": "local-user"},
+            )
+        ),
+        daemon=True,
+    )
+    approve_worker.start()
+    assert cleanup_started.wait(timeout=3)
+
+    interrupt_results = []
+    interrupt_errors = []
+
+    def interrupt():
+        try:
+            interrupt_results.extend(
+                service.interrupt_active_for_restart("operator requested restart")
+            )
+        except Exception as exc:  # pragma: no cover - failure is asserted below
+            interrupt_errors.append(exc)
+
+    interrupt_worker = threading.Thread(target=interrupt, daemon=True)
+    interrupt_worker.start()
+    deadline = time.monotonic() + 3
+    while (
+        "self-loop-001" not in service._restart_requests
+        and interrupt_worker.is_alive()
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+    assert "self-loop-001" in service._restart_requests
+
+    release_cleanup.set()
+    interrupt_worker.join(timeout=3)
+    approve_worker.join(timeout=3)
+
+    assert not interrupt_worker.is_alive()
+    assert not approve_worker.is_alive()
+    assert interrupt_errors == []
+    assert len(interrupt_results) == 1
+    assert interrupt_results == approval_results
+    assert interrupt_results[0]["status"] == "completed"
+    assert interrupt_results[0]["integration"]["status"] == "committed"
+    assert interrupt_results[0]["cleanup"]["status"] == "cleaned"
+    assert [name for name, _ in calls] == [
+        "observe",
+        "plan",
+        "evolve",
+        "integrate",
+        "cleanup",
+    ]
+
+
+def test_restart_preserves_cleanup_debt_when_inflight_cleanup_fails(tmp_path):
+    cleanup_started = threading.Event()
+    release_cleanup = threading.Event()
+
+    def cleanup(context):
+        calls.append(("cleanup", deepcopy(context)))
+        cleanup_started.set()
+        assert release_cleanup.wait(timeout=5)
+        raise RuntimeError("candidate branch is still checked out")
+
+    service, calls = _build_service(
+        tmp_path,
+        hook_overrides={"cleanup": cleanup},
+    )
+    service.start({"goal": "重启期间保留未完成清理债务"})
+    approval_results = []
+    approve_worker = threading.Thread(
+        target=lambda: approval_results.append(
+            service.approve(
+                "self-loop-001",
+                decision={"actorType": "user", "actorId": "local-user"},
+            )
+        ),
+        daemon=True,
+    )
+    approve_worker.start()
+
+    assert cleanup_started.wait(timeout=3)
+    interrupt_results = []
+    interrupt_errors = []
+
+    def interrupt():
+        try:
+            interrupt_results.extend(
+                service.interrupt_active_for_restart("operator requested restart")
+            )
+        except Exception as exc:  # pragma: no cover - failure is asserted below
+            interrupt_errors.append(exc)
+
+    interrupt_worker = threading.Thread(target=interrupt, daemon=True)
+    interrupt_worker.start()
+    deadline = time.monotonic() + 3
+    while (
+        "self-loop-001" not in service._restart_requests
+        and interrupt_worker.is_alive()
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+    assert "self-loop-001" in service._restart_requests
+
+    release_cleanup.set()
+    interrupt_worker.join(timeout=3)
+    approve_worker.join(timeout=3)
+
+    assert not interrupt_worker.is_alive()
+    assert not approve_worker.is_alive()
+    assert interrupt_errors == []
+    stopped = service.load("self-loop-001")
+    assert interrupt_results == [stopped]
+    assert approval_results == [stopped]
+    assert stopped["status"] == "stopped"
+    assert stopped["phase"] == "cleanup_failed"
+    assert stopped["integration"]["status"] == "committed"
+    assert stopped["integration"]["commitSha"] == "d" * 40
+    assert stopped["error"]["message"] == "candidate branch is still checked out"
+    assert "cleanup" not in stopped
+    assert service.load_active() is None
+
+
 def test_cleanup_failure_preserves_merged_fact_and_can_be_retried(tmp_path):
     cleanup_attempts = 0
 
@@ -472,6 +780,46 @@ def test_startup_reconciliation_preserves_user_review_boundary(tmp_path):
 
     assert reconciled == pending
     assert service.load_active()["runId"] == "self-loop-001"
+
+
+def test_operator_restart_preserves_user_review_boundary(tmp_path):
+    service, _calls = _build_service(tmp_path)
+    pending = service.start({"goal": "等待用户审批"})
+
+    stopped = service.interrupt_active_for_restart("operator requested restart")
+
+    assert stopped == []
+    assert service.load_active() == pending
+    assert service.load("self-loop-001")["status"] == "awaiting_user_approval"
+    with pytest.raises(AutonomousLoopConflictError, match="retiring"):
+        service.queue({"goal": "重启期间不能再排队"})
+    with pytest.raises(AutonomousLoopConflictError, match="retiring"):
+        service.approve(
+            "self-loop-001",
+            decision={"actorType": "user", "actorId": "local-user"},
+        )
+    assert service.load("self-loop-001") == pending
+
+
+def test_operator_restart_does_not_stop_another_process_owner(tmp_path):
+    owner_service, _calls = _build_service(
+        tmp_path,
+        process_id=111,
+        process_alive=lambda pid: pid == 111,
+    )
+    queued = owner_service.queue({"goal": "由另一个后端进程运行"})
+    observer_service, _calls = _build_service(
+        tmp_path,
+        process_id=222,
+        process_alive=lambda pid: pid == 111,
+    )
+
+    stopped = observer_service.interrupt_active_for_restart(
+        "operator requested restart"
+    )
+
+    assert stopped == []
+    assert observer_service.load_active() == queued
 
 
 def test_persisted_evidence_is_bounded_and_redacts_common_credentials(tmp_path):

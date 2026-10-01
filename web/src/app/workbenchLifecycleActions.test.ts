@@ -23,8 +23,10 @@ describe("workbenchLifecycleActions", () => {
       "launcher_route_force_stop_button",
     );
     expect(resolveWorkbenchLifecycleTrigger("start", "launcher_route")).toBeUndefined();
-    expect(resolveWorkbenchLifecycleTrigger("restart", "app_shell")).toBeUndefined();
+    expect(resolveWorkbenchLifecycleTrigger("restart", "app_shell")).toBe("app_shell_restart_button");
+    expect(resolveWorkbenchLifecycleTrigger("restart", "launcher_route")).toBe("launcher_route_restart_button");
     expect(resolveWorkbenchLifecycleTrigger("stop", "app_shell", "custom_trigger")).toBe("custom_trigger");
+    expect(resolveWorkbenchLifecycleTrigger("restart", "app_shell", "custom_restart")).toBe("custom_restart");
   });
 
   it("routes all lifecycle operations through one request helper", async () => {
@@ -61,11 +63,13 @@ describe("workbenchLifecycleActions", () => {
     await requestWorkbenchLifecycleOperation("stop", { source: "app_shell" });
     await requestWorkbenchLifecycleOperation("force-stop", { source: "launcher_route" });
     await requestWorkbenchLifecycleOperation("restart", { source: "app_shell" });
+    await requestWorkbenchLifecycleOperation("restart", { source: "launcher_route" });
 
     expect(start).toHaveBeenCalledOnce();
     expect(stop).toHaveBeenCalledWith("app_shell_shutdown_button");
     expect(forceStop).toHaveBeenCalledWith("launcher_route_force_stop_button");
-    expect(restart).toHaveBeenCalledOnce();
+    expect(restart).toHaveBeenNthCalledWith(1, "app_shell_restart_button");
+    expect(restart).toHaveBeenNthCalledWith(2, "launcher_route_restart_button");
   });
 
   it("parses active-work blocked details and formats run summaries", () => {

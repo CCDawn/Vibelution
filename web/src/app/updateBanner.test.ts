@@ -128,12 +128,18 @@ describe("updateBannerRestartReloadsDocument", () => {
   it("reloads the open document after an accepted restart so the new frontend build loads", () => {
     expect(updateBannerRestartReloadsDocument(undefined)).toBe(true);
     expect(updateBannerRestartReloadsDocument("")).toBe(true);
-    expect(updateBannerRestartReloadsDocument("restart_accepted")).toBe(true);
+    expect(updateBannerRestartReloadsDocument("restart_accepted", true)).toBe(true);
   });
 
   it("leaves the current document in place when the restart was only queued", () => {
     expect(updateBannerRestartReloadsDocument("restart_queued")).toBe(false);
     expect(updateBannerRestartReloadsDocument(" restart_queued ")).toBe(false);
+    expect(updateBannerRestartReloadsDocument("restart_queued", true)).toBe(false);
+  });
+
+  it("leaves the current document in place when the Launcher rejects the restart", () => {
+    expect(updateBannerRestartReloadsDocument("user_restart_pause_failed", false)).toBe(false);
+    expect(updateBannerRestartReloadsDocument("unexpected_rejection", false)).toBe(false);
   });
 });
 

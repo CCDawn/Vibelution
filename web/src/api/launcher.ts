@@ -579,9 +579,13 @@ export function forceStopLauncherBundle(trigger = "launcher_route_force_stop_but
   });
 }
 
-export function restartLauncherBundle() {
+export function restartLauncherBundle(trigger?: string) {
+  const normalizedTrigger = String(trigger ?? "").trim();
   return invokeLauncherLifecycleJson<LauncherControlResponse>("restart", {
     method: "POST",
+    ...(normalizedTrigger
+      ? { headers: { "X-Vibelution-Launcher-Trigger": normalizedTrigger } }
+      : {}),
   });
 }
 

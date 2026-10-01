@@ -736,20 +736,38 @@ export function restartRequestUnconfirmedBody(lang: string): string {
     : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
 }
 
-export function restartActiveWorkBlockedMessage(lang: string, activeWorkDetails: string): string {
-  const details = activeWorkDetails.trim();
+export function restartActiveWorkBlockedMessage(lang: string, activeWorkLabels: string): string {
+  const details = activeWorkLabels.trim();
   if (lang === "en") {
     return [
-      "Vibelution cannot restart while work is still running.",
-      details ? `Running now: ${details}` : "",
-      "Wait for the task to finish or stop it first.",
+      "The running backend still rejected this restart under its active-work guard (HTTP 409).",
+      details ? `Affected work: ${details}` : "",
+      "Close this notice to retry.",
     ].filter(Boolean).join("\n\n");
   }
   return [
-    "有进行中的任务，无法重启 Vibelution。",
-    details ? `正在运行：${details}` : "",
-    "请等待任务完成，或先停止任务。",
+    "当前运行中的后端仍按活动任务保护规则拒绝了这次重启（HTTP 409）。",
+    details ? `受影响任务：${details}` : "",
+    "关闭此提示后可以重试。",
   ].filter(Boolean).join("\n\n");
+}
+
+export function restartActiveWorkNoticeMessage(lang: string, activeWorkLabels: string): string {
+  const details = activeWorkLabels.trim();
+  if (lang === "en") {
+    return [
+      "Restarting will interrupt current tasks and preserve their saved records. After startup, you can return to the session to review the saved progress and continue.",
+      details ? `Affected work: ${details}` : "",
+    ].filter(Boolean).join("\n\n");
+  }
+  return [
+    "重启会中断当前任务并保存已有记录；启动后可回到会话查看记录并继续。",
+    details ? `受影响任务：${details}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function restartDetailWithActiveWorkNotice(detail: string, notice: string): string {
+  return notice ? `${detail}\n\n${notice}` : detail;
 }
 
 export function shutdownActiveWorkBlockedMessage(lang: string, activeWorkDetails: string): string {
@@ -1110,6 +1128,7 @@ export function AppShell() {
   const activeConversationsLabel = lang === "en" ? "Active conversations" : "进行中的会话";
   const cancelShutdownLabel = lang === "en" ? "Cancel close" : "取消关闭";
   const cancelRestartLabel = lang === "en" ? "Cancel restart" : "取消重启";
+  const closeLifecycleNoticeLabel = lang === "en" ? "Close notice" : "关闭提示";
   const cancellingLifecycleLabel = lang === "en" ? "Cancelling..." : "正在取消...";
   const returnNavigationTarget = useMemo(
     () => resolveReturnTarget(routeLocationFromRouter(location), returnNavigationStack),
@@ -1255,8 +1274,9 @@ export function AppShell() {
       : activeWorkIndicator
         ? "running"
         : "idle";
-  // Human-readable only (no raw session ids). Used for shutdown/restart copy and aria, not native title.
+  // Human-readable only (no raw session ids). Used for shutdown copy and aria, not native title.
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
+  const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label) ?? [])].join(" · ");
   // Update banner: main moved ahead of the running backend, so a restart is
   // needed to apply the new code. Rides the existing 120s code-freshness poll
   // (data is in its notifyOnChangeProps whitelist) — no extra ticker here.
@@ -1277,16 +1297,14 @@ export function AppShell() {
   );
   const updateBannerRestartActionLabel = updateBannerRestartLabel(lang);
   const updateBannerDismissActionLabel = updateBannerDismissLabel(lang);
-  // Only genuinely running work blocks a restart; stale failures do not.
-  const updateBannerRestartBlockedByWork = (activeWorkIndicator?.items.length ?? 0) > 0;
+  const activeWorkRestartNotice = (activeWorkIndicator?.items.length ?? 0) > 0
+    ? restartActiveWorkNoticeMessage(lang, activeWorkLabels)
+    : "";
   const updateBannerRestartDisabled =
-    updateBannerRestartBlockedByWork
-    || restartRequested
+    restartRequested
     || shutdownRequested
     || (shutdownOpen && !shutdownSettled);
-  const updateBannerRestartGuard = updateBannerRestartBlockedByWork
-    ? restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle)
-    : "";
+  const updateBannerRestartNotice = activeWorkRestartNotice;
   const dismissUpdateBanner = useCallback(() => {
     setUpdateBannerDismissedHead(updateBannerDiskHead);
     storeUpdateBannerDismissedHead(updateBannerDiskHead);
@@ -1691,7 +1709,7 @@ export function AppShell() {
       setLifecycleCommandId("");
       setLifecycleCancelPending(false);
       setShutdownTitle(restartHeading);
-      setShutdownDetail(restartBody);
+      setShutdownDetail(restartDetailWithActiveWorkNotice(restartBody, activeWorkRestartNotice));
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
       const payload = await requestLifecycle("restart");
@@ -1703,7 +1721,7 @@ export function AppShell() {
         return;
       }
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
-      if (!updateBannerRestartReloadsDocument(payload.code)) {
+      if (!updateBannerRestartReloadsDocument(payload.code, payload.accepted)) {
         restartWaitsForDocumentReloadRef.current = false;
         setRestartRequested(false);
         setShutdownRequested(false);
@@ -1713,7 +1731,12 @@ export function AppShell() {
         setLifecycleCommandId(payload.commandId ?? "");
         setLifecycleCancelPending(false);
         setShutdownTitle(restartHeading);
-        setShutdownDetail(payload.message || restartBody);
+        const taskPauseFailed = payload.code === "user_restart_pause_failed";
+        setShutdownDetail(taskPauseFailed
+          ? (lang === "en"
+            ? "Task state could not be saved before restart. Existing records are retained; close this notice and retry."
+            : "重启前未能保存任务状态，已有记录仍保留。关闭此提示后可以重试。")
+          : payload.message || restartBody);
         return;
       }
       markControlledProjectLifecycleOperation("restart");
@@ -1733,7 +1756,7 @@ export function AppShell() {
       const blocked = parseRuntimeControlBlockedDetail(error);
       if (isActiveWorkRestartBlocked(blocked)) {
         lifecycleOverlayDismissedRef.current = false;
-        const blockedDetails = formatActiveWorkRunsDetail(blocked?.activeWorkRuns);
+        const blockedLabels = activeWorkLabels || (lang === "en" ? "active tasks" : "进行中的任务");
         setRestartRequested(false);
         setShutdownRequested(false);
         setShutdownOpen(true);
@@ -1742,7 +1765,7 @@ export function AppShell() {
         setLifecycleCommandId("");
         setLifecycleCancelPending(false);
         setShutdownTitle(restartHeading);
-        setShutdownDetail(restartActiveWorkBlockedMessage(lang, blockedDetails || activeWorkDetailsTitle));
+        setShutdownDetail(restartActiveWorkBlockedMessage(lang, blockedLabels));
         emitBrowserTelemetry(
           {
             phase: "restart",
@@ -1766,7 +1789,12 @@ export function AppShell() {
       setShutdownSettled(false);
       setLifecycleAction("restart");
       setShutdownTitle(restartHeading);
-      setShutdownDetail(restartUnconfirmedBody);
+      const taskCleanupFailed = /explicit user restart.*not confirmed|user_restart_pause_failed/i.test(errorMessage);
+      setShutdownDetail(taskCleanupFailed
+        ? (lang === "en"
+          ? "Task state could not be saved before restart. Existing records are retained; close this notice and retry."
+          : "重启前未能保存任务状态，已有记录仍保留。关闭此提示后可以重试。")
+        : restartUnconfirmedBody);
       emitBrowserTelemetry(buildRestartRequestUnconfirmedTelemetry(errorMessage), { preferBeacon: true });
     }).finally(() => {
       restartPromiseRef.current = null;
@@ -1775,7 +1803,8 @@ export function AppShell() {
     restartPromiseRef.current = task;
     return task;
   }, [
-    activeWorkDetailsTitle,
+    activeWorkLabels,
+    activeWorkRestartNotice,
     cancelSupersededLifecycleCommand,
     clearRestartCompletionDismissTimer,
     emitBrowserTelemetry,
@@ -2417,7 +2446,7 @@ export function AppShell() {
       setShutdownOpen(true);
       setShutdownSettled(false);
       setShutdownTitle(restartHeading);
-      setShutdownDetail(workbench.statusLine || restartBody);
+      setShutdownDetail(restartDetailWithActiveWorkNotice(workbench.statusLine || restartBody, activeWorkRestartNotice));
       return;
     }
 
@@ -2440,7 +2469,7 @@ export function AppShell() {
       setShutdownOpen(true);
       setShutdownSettled(false);
       setShutdownTitle(restartHeading);
-      setShutdownDetail(workbench.statusLine || restartBody);
+      setShutdownDetail(restartDetailWithActiveWorkNotice(workbench.statusLine || restartBody, activeWorkRestartNotice));
       return;
     }
 
@@ -2466,8 +2495,9 @@ export function AppShell() {
     setShutdownOpen(true);
     setShutdownSettled(false);
     setShutdownTitle(restartHeading);
-    setShutdownDetail(workbench.statusLine || restartBody);
+    setShutdownDetail(restartDetailWithActiveWorkNotice(workbench.statusLine || restartBody, activeWorkRestartNotice));
   }, [
+    activeWorkRestartNotice,
     restartBody,
     restartCompleteBody,
     restartCompleteTitle,
@@ -2634,7 +2664,9 @@ export function AppShell() {
                   {lifecycleCancelPending
                     ? cancellingLifecycleLabel
                     : lifecycleAction === "restart"
-                      ? cancelRestartLabel
+                      ? !restartRequested && !lifecycleCommandId.trim()
+                        ? closeLifecycleNoticeLabel
+                        : cancelRestartLabel
                       : cancelShutdownLabel}
                 </VButton>
               ) : null}
@@ -2759,14 +2791,14 @@ export function AppShell() {
                 <strong className={styles.updateBannerTitle}>{updateBannerText.title}</strong>
                 <span className={styles.updateBannerDetail}>{updateBannerText.detail}</span>
               </div>
-              {updateBannerRestartGuard ? (
-                <span className={styles.updateBannerNote}>{updateBannerRestartGuard}</span>
+              {updateBannerRestartNotice ? (
+                <span className={styles.updateBannerNote}>{updateBannerRestartNotice}</span>
               ) : null}
               <div className={styles.updateBannerActions}>
                 <VButton type="button" variant="secondary"
                   className={styles.updateBannerRestartButton}
                   onPress={beginRestart} isDisabled={updateBannerRestartDisabled}
-                  title={updateBannerRestartGuard || updateBannerRestartActionLabel}>
+                  title={updateBannerRestartNotice || updateBannerRestartActionLabel}>
                   {updateBannerRestartActionLabel}
                 </VButton>
                 <VButton type="button" variant="ghost" onPress={dismissUpdateBanner}
