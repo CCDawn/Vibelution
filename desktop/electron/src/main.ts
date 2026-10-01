@@ -3313,10 +3313,14 @@ async function orchestrateLauncherLifecycle(
     }
     if (refreshBeforeLifecycle) {
       notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在更新后再执行…");
-      return await restartLauncherToLatestBuild(
-        operation === "restart" && provenance === "operator",
-        lifecycleOperation
-      );
+      try {
+        return await restartLauncherToLatestBuild(
+          operation === "restart" && provenance === "operator",
+          lifecycleOperation
+        );
+      } finally {
+        launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
+      }
     }
   }
   // Snapshot the pre-mutation backend identity so the post-start verification
