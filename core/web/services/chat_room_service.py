@@ -5848,7 +5848,49 @@ def _sync_group_context_events(room: dict[str, Any], round_payload: dict[str, An
     )
 
 
+def _meeting_transcript_stays_on_room(
+    room: Mapping[str, Any],
+    round_payload: Mapping[str, Any],
+) -> bool:
+    """Formal meetings keep the transcript on the room.
+
+    The confirmed digest stays on the meeting record for the next stage.
+    Participant sessions do not receive a copy of the round while the
+    room-owned model view is enabled. Turning
+    ``VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED`` off restores the
+    legacy session copy so meeting history layering still has its source
+    messages. Ordinary group chats are unchanged.
+    """
+
+    from core.chatroom.context_runtime import chat_room_structured_context_enabled
+
+    if not chat_room_structured_context_enabled():
+        return False
+    round_config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    if str(round_config.get("meetingRoundId") or "").strip():
+        return True
+    if str(round_config.get("meetingType") or "").strip():
+        return True
+    room_config = room.get("config") if isinstance(room.get("config"), Mapping) else {}
+    return bool(str(room_config.get("meetingRoundId") or "").strip())
+
+
 def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payload: dict[str, Any]) -> None:
+    if _meeting_transcript_stays_on_room(room, round_payload):
+        _record_room_event(
+            "group_context",
+            "group_context.session_transcript_kept_on_room",
+            room,
+            round_payload,
+            fields={"syncedSessionCount": 0},
+            outcome="skipped",
+            lifecycle=True,
+        )
+        return
     participants = [
         item for item in list(room.get("participants") or [])
         if isinstance(item, dict) and str(item.get("sessionId") or item.get("directSessionId") or "").strip()
@@ -5954,8 +5996,11 @@ def _sync_stopped_round_to_sessions_if_needed(room: dict[str, Any], round_payloa
 
     The happy path syncs at round completion; without this the transcript and
     group-context events for completed messages never reach participant
-    sessions when the round is stopped or fails midway. Both sync helpers are
-    idempotent per room+round, so double closure paths stay safe.
+    sessions when the round is stopped or fails midway. Formal meetings with
+    the room-owned view skip the session transcript inside
+    ``_sync_group_round_to_participant_sessions`` and keep it on the room.
+    Both sync helpers are idempotent per room+round, so double closure paths
+    stay safe.
     """
 
     has_completed = any(

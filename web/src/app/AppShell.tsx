@@ -325,6 +325,131 @@ function preloadChatRouteForNav(trigger: "pointerenter" | "focus" | "click") {
   }
 }
 
+type SettingsPreloadTarget = "settings-menu" | "config-route";
+type SettingsPreloadTrigger = "pointerenter" | "focus" | "open";
+
+const settingsPreloadPromises: Partial<Record<SettingsPreloadTarget, Promise<unknown> | null>> = {};
+/** Soft hover/focus preload — cancelled when the popover opens (hard path). */
+let settingsSoftPreloadHandle: number | null = null;
+
+function cancelSettingsSoftPreload() {
+  if (settingsSoftPreloadHandle == null || typeof window === "undefined") {
+    settingsSoftPreloadHandle = null;
+    return;
+  }
+  const idleCancel = (window as Window & {
+    cancelIdleCallback?: (handle: number) => void;
+  }).cancelIdleCallback;
+  if (typeof idleCancel === "function") {
+    idleCancel(settingsSoftPreloadHandle);
+  } else {
+    window.clearTimeout(settingsSoftPreloadHandle);
+  }
+  settingsSoftPreloadHandle = null;
+}
+
+function startSettingsPreloadImport(trigger: SettingsPreloadTrigger, target: SettingsPreloadTarget) {
+  if (settingsPreloadPromises[target]) {
+    return;
+  }
+  const startedAt = browserNowMs();
+  // "../routes/ConfigRoute" is the same module the lazy route graph imports,
+  // so preloading here warms the exact chunk "全部设置" navigates to.
+  const chunkImport = target === "settings-menu"
+    ? import("./AppShellSettingsMenu")
+    : import("../routes/ConfigRoute");
+  settingsPreloadPromises[target] = chunkImport
+    .then(() => {
+      postBrowserTelemetry({
+        phase: "navigation",
+        eventCode: "browser.settings_menu.preload_loaded",
+        message: "Settings surface preload loaded.",
+        fields: {
+          trigger,
+          target,
+          durationMs: browserElapsedMs(startedAt),
+          pathname: window.location.pathname,
+        },
+      });
+    })
+    .catch((error: unknown) => {
+      // Clear the memo so a later trigger can retry the fetch.
+      settingsPreloadPromises[target] = null;
+      postBrowserTelemetry({
+        phase: "navigation",
+        eventCode: "browser.settings_menu.preload_failed",
+        message: "Settings surface preload failed.",
+        level: "warning",
+        fields: {
+          trigger,
+          target,
+          durationMs: browserElapsedMs(startedAt),
+          pathname: window.location.pathname,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      });
+    });
+}
+
+/**
+ * Balanced preload for the settings chain (mirrors the chat route F1 pattern):
+ * - gear pointerenter/focus → soft idle import of the settings menu chunk
+ * - popover open (covers touch/no-hover direct clicks) → hard import of the
+ *   settings menu chunk plus the config route chunk behind "全部设置".
+ */
+function preloadSettingsSurfaceChunk(
+  trigger: SettingsPreloadTrigger,
+  target: SettingsPreloadTarget,
+  options: { soft?: boolean } = {},
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const soft = options.soft === true;
+  const alreadyStarted = Boolean(settingsPreloadPromises[target]);
+  postBrowserTelemetry({
+    phase: "navigation",
+    eventCode: "browser.settings_menu.preload_requested",
+    message: "Settings surface preload requested.",
+    fields: {
+      trigger,
+      target,
+      alreadyStarted,
+      soft,
+      pathname: window.location.pathname,
+    },
+  });
+  if (alreadyStarted) {
+    return;
+  }
+
+  if (!soft) {
+    cancelSettingsSoftPreload();
+    startSettingsPreloadImport(trigger, target);
+    return;
+  }
+
+  // Soft path: schedule once; do not stack multiple idle timers.
+  if (settingsSoftPreloadHandle != null) {
+    return;
+  }
+  const scheduleSoft = () => {
+    settingsSoftPreloadHandle = null;
+    if (settingsPreloadPromises[target]) {
+      return;
+    }
+    startSettingsPreloadImport(trigger, target);
+  };
+  const idleRequest = (window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (typeof idleRequest === "function") {
+    settingsSoftPreloadHandle = idleRequest(scheduleSoft, { timeout: 1_200 });
+  } else {
+    settingsSoftPreloadHandle = window.setTimeout(scheduleSoft, 250);
+  }
+}
+
 type RouteLocationLike = {
   pathname: string;
   search: string;
@@ -829,6 +954,16 @@ export function AppShell() {
       setShellStartupDataReady(true);
     }
   }, [backendHealthQuery.data, configQuery.data]);
+  // Opening the gear popover is the hard trigger for the settings chunk chain:
+  // it covers touch/no-hover devices that never fire pointerenter, and warms
+  // the config route chunk so "全部设置" navigates with zero chunk wait.
+  useEffect(() => {
+    if (!utilityOpen) {
+      return;
+    }
+    preloadSettingsSurfaceChunk("open", "settings-menu");
+    preloadSettingsSurfaceChunk("open", "config-route");
+  }, [utilityOpen]);
   const runtimeQuery = useQuery<RuntimeSummary>({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: ({ signal }) =>
@@ -2834,6 +2969,8 @@ export function AppShell() {
               aria-expanded={utilityOpen}
               aria-label={settingsLabel}
               title={settingsLabel}
+              onPointerEnter={() => preloadSettingsSurfaceChunk("pointerenter", "settings-menu", { soft: true })}
+              onFocus={() => preloadSettingsSurfaceChunk("focus", "settings-menu", { soft: true })}
               onPointerDownCapture={() => {
                 // Switching popovers should take one click, including on touch screens.
                 if (activeWorkOpen) schedulePopoverSwitch(() => setUtilityOpen(true));

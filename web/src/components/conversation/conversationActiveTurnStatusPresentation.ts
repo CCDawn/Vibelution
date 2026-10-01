@@ -270,6 +270,8 @@ export function activeTurnStageLabel(stage: string, lang: "zh" | "en" | string) 
       return zh ? "请求失败" : "Request failed";
     case "running":
       return zh ? "处理中" : "Working";
+    case "stopping":
+      return zh ? "正在终止" : "Stopping";
     default:
       return zh ? "处理中" : "Working";
   }

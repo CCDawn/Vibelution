@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """会议参会者历史的确定性分层压缩投影。
 
-评审会议每轮结束后，``chat_room_service._sync_group_round_to_participant_sessions``
-把本轮全部发言拼成一条「[群聊同步]」assistant 消息追加到每个参会者 session
-ledger。多轮会议之后，参会者历史 seed 会全量重放所有轮次原文，历史重放占据
-单轮 prompt 的绝大部分。本模块在历史 seed 上做一层**纯投影**：
+默认的会议室投影开启时，正式会议不再把整轮发言抄进参会者 session。
+只有关掉 ``VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED`` 时，
+``chat_room_service._sync_group_round_to_participant_sessions`` 仍会把本轮
+发言拼成一条「[群聊同步]」assistant 消息追加到每个参会者 session ledger。
+本模块只投影已经存在的这些同步消息：最近若干轮保留原文，更早的轮次收成
+固定回顾。
 
 - 最近 M 轮「[群聊同步]」消息逐字保留（M 由环境变量
   ``VIBELUTION_MEETING_HISTORY_VERBATIM_ROUNDS`` 控制，默认 2，0=禁用）；

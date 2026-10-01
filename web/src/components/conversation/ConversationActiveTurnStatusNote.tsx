@@ -31,6 +31,8 @@ export type ConversationActiveTurnStatusNoteProps = {
   statusLabel?: string;
   /** Companion sessions intentionally collapse all in-flight detail to one chat affordance. */
   companionMode?: boolean;
+  /** Session phase. `"stopping"` replaces the heartbeat on the first paint. */
+  phase?: string;
 };
 
 /**
@@ -43,15 +45,18 @@ export function ConversationActiveTurnStatusNote({
   lang,
   statusLabel,
   companionMode = false,
+  phase = "",
 }: ConversationActiveTurnStatusNoteProps) {
   const resolvedStage = resolveActiveTurnProgressStage(message);
-  const [stage, setStage] = useState(resolvedStage);
+  const stopping = phase === "stopping";
+  const [stage, setStage] = useState(stopping ? "stopping" : resolvedStage);
+  const displayStage = stopping ? "stopping" : stage;
   const stageShownAtRef = useRef(Date.now());
   const [nowMs, setNowMs] = useState(() => Date.now());
   const streamState = useActiveTurnStreamState();
 
   useEffect(() => {
-    if (companionMode) {
+    if (companionMode || stopping) {
       return undefined;
     }
     const plan = planActiveTurnStageSwitch(stage, resolvedStage, Date.now() - stageShownAtRef.current);
@@ -68,7 +73,7 @@ export function ConversationActiveTurnStatusNote({
       setStage(resolvedStage);
     }, plan.delayMs);
     return () => window.clearTimeout(timer);
-  }, [resolvedStage, stage, companionMode]);
+  }, [resolvedStage, stage, companionMode, stopping]);
 
   useEffect(() => {
     if (companionMode) {
@@ -104,17 +109,19 @@ export function ConversationActiveTurnStatusNote({
       ?? (activeTurnStageBarPhase(stage) === "thinking" ? nowMs : null),
     nowMs,
   });
-  const retryProgress = stage === "model_retry" || stage === "retrying"
+  const retryProgress = displayStage === "model_retry" || displayStage === "retrying"
     ? resolveActiveTurnRetryProgress(message)
     : null;
   // ZCode semantics: retries 1-2 stay silent on the heartbeat; from the third
   // attempt the counter becomes visible and earns the shimmer treatment.
-  const visibleRetryProgress = companionMode
+  const visibleRetryProgress = companionMode || displayStage === "stopping"
     ? null
     : visibleActiveTurnRetryProgress(retryProgress);
-  const heartbeatText = companionMode
-    ? (lang === "en" ? "Typing…" : "正在输入…")
-    : formatActiveTurnHeartbeatText(stage, thinkingSegmentSeconds ?? elapsedSeconds, lang, retryProgress);
+  const heartbeatText = displayStage === "stopping"
+    ? formatActiveTurnHeartbeatText("stopping", elapsedSeconds, lang)
+    : companionMode
+      ? (lang === "en" ? "Typing…" : "正在输入…")
+      : formatActiveTurnHeartbeatText(stage, thinkingSegmentSeconds ?? elapsedSeconds, lang, retryProgress);
   const resolvedStatusLabel = statusLabel
     || (lang === "en" ? "Status" : "状态");
 
@@ -142,7 +149,7 @@ export function ConversationActiveTurnStatusNote({
     });
   // Thinking/tool/queue silence is the normal agentic shape; only the
   // body-streaming stage surfaces the "no output — you can stop" hint.
-  const showNoOutputStall = stallSeconds !== null && shouldShowNoOutputStall(stage);
+  const showNoOutputStall = stallSeconds !== null && shouldShowNoOutputStall(displayStage);
   const routeFallback = companionMode ? null : resolveActiveTurnRouteFallback(message);
 
   // Manual reconnect affordance: only while a real reconnect loop is showing
@@ -191,7 +198,7 @@ export function ConversationActiveTurnStatusNote({
       role="status"
       aria-live="polite"
       aria-label={companionMode ? undefined : [resolvedStatusLabel, heartbeatText].filter(Boolean).join(" · ")}
-      data-active-turn-stage={stage}
+      data-active-turn-stage={displayStage}
       data-active-turn-elapsed-seconds={elapsedSeconds ?? ""}
       data-active-turn-retry-attempt={visibleRetryProgress ? visibleRetryProgress.attempt : undefined}
       data-active-turn-disconnected={disconnectSeconds !== null ? "true" : undefined}
