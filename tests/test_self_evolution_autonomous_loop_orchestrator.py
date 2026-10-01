@@ -179,8 +179,15 @@ def test_restart_facade_forwards_to_default_orchestrator(monkeypatch):
 
 
 def test_runtime_dependencies_create_integrate_and_cleanup_one_owned_candidate(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
+    from tests.test_supervised_candidate_integration_service import install_validation_authority
+
+    # This verifies real Git integration/cleanup through the runtime adapter;
+    # governed validation itself is covered by the integration service tests.
+    for name in _git(Path(__file__).resolve().parents[1], "rev-parse", "--local-env-vars").splitlines():
+        monkeypatch.delenv(name, raising=False)
+    install_validation_authority(monkeypatch, tmp_path)
     root = _repo(tmp_path)
     dependencies = build_runtime_dependencies(
         project_root=root,
