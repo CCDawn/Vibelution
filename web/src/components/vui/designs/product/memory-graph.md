@@ -38,6 +38,10 @@ import { VMemoryGraphCanvas } from "../components/vui";
 
 ### 实现落点
 
+拖动热路径使用 GPU 批量绘制：同形状、大小与主题颜色的节点和光环共用实例批次，关系曲线合为 LineSegments，选中关系方向箭头只提交可见实例。实例透明度保持节点选择、邻域与搜索高亮语义；较大的点击命中球保留空间位置和选中缩放，仅用于 Raycaster，不进入渲染场景。节点材质、三维坐标与体积星云采样保持现有视觉契约。
+
+标签尺寸、候选顺序及状态按输入变化缓存，读尺寸与写位置分批处理；字体、主题几何、宽度以及摘要展开会失效缓存。候选保留选中优先与星域公平顺序，遍历全部视口内节点直到填满显示预算，避免密集星域因候选截断丢失标签；选中标签无空位时仍保留可见位置。字体加载、标签 hover/focus 可以唤醒按需画布，卸载时释放监听。图谱仍使用原 VUI product API 与同一 renderer，不新增第二套图谱实现。
+
 领域 API：`product/memory/VMemoryGraphCanvas.tsx`；交互与 Three 实现：`renderers/shadcn/memory/`；页面：`routes/MemoryGraphViewPanel.tsx`。Three 投影坐标与 canvas 绘制为受控 inline 几何例外，其他界面使用 Tailwind 与 VUI。
 
 ### 反冗余
