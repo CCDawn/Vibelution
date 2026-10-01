@@ -26,6 +26,15 @@ const styles = {
   actions: cv("actions", "ml-auto inline-flex shrink-0 items-center gap-1"),
   openLink: cv("openLink", "shrink-0"),
   stopButton: cv("stopButton", "shrink-0"),
+  // Ended directory footer row (ZCode EndedDirectoryRow shape): neutral icon,
+  // "已结束 · N" meta text and a trailing chevron, one quiet link to /aux.
+  endedRow: cv(
+    "endedRow",
+    "mt-0.5 flex w-full min-w-0 items-center gap-1.5 text-left text-vui-sm text-[var(--fg-tertiary)] hover:text-[var(--fg-secondary)]",
+  ),
+  endedIcon: cv("endedIcon", "shrink-0"),
+  endedLabel: cv("endedLabel", "min-w-0 truncate"),
+  endedChevron: cv("endedChevron", "ml-auto shrink-0"),
 } as const;
 
 export default styles;
