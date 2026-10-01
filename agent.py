@@ -288,6 +288,7 @@ from core.orchestration.turn_llm_adapter import (
     AgentLlmTurnHooks,
     invoke_agent_llm_turn,
 )
+from core.orchestration.turn_stop_signal import bind_stop_probe
 
 
 def _record_llm_route_success(*args, **kwargs):
@@ -3789,15 +3790,14 @@ class AgentRuntime:
             # Session turns mark the checker to enable provider HTTP abort, so
             # a user stop interrupts an in-flight Chat Completions stream
             # instead of waiting for the next cooperative checkpoint. Checkers
-            # without the marker keep the prior behavior.
+            # without the marker keep the prior behavior. The context stores
+            # this bound method, which cannot keep the session stop event, so
+            # the probe copies that event across.
+            source = getattr(self, "_turn_interrupt_checker", None)
             return llm_cancel_context(
-                checker,
+                bind_stop_probe(checker, source),
                 enable_chat_provider_abort=bool(
-                    getattr(
-                        getattr(self, "_turn_interrupt_checker", None),
-                        "_vibelution_chat_provider_abort_enabled",
-                        False,
-                    )
+                    getattr(source, "_vibelution_chat_provider_abort_enabled", False)
                 ),
             )
 
@@ -3905,7 +3905,7 @@ class AgentRuntime:
             # Cached chat Agents can resume on a different worker thread. Bind the
             # checker in that thread's ContextVar so an active tool sees stop now.
             set_cancel_checker(
-                self._current_turn_stop_reason if callable(checker) else None,
+                bind_stop_probe(self._current_turn_stop_reason, checker) if callable(checker) else None,
                 owner=self,
             )
 

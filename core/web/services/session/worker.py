@@ -24,6 +24,7 @@ from core.infrastructure.tool_execution_scope import (
 )
 from core.llm.error_classification import PERMANENT
 from core.orchestration.context_engine import AgentContextInterrupted
+from core.orchestration.turn_stop_signal import attach_stop_event
 from core.web.services.session.research_thinking_budget import (
     build_research_thinking_budget_segment,
 )
@@ -1315,6 +1316,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
     # Chat Completions stream is still in flight; Challenge turns additionally
     # abort on their deadline through the same checker.
     interrupt_checker._vibelution_chat_provider_abort_enabled = True
+    attach_stop_event(interrupt_checker, getattr(turn_control, "stop_event", None))
     try:
         agent_prompt_snapshot = (
             s._ensure_session_agent_prompt_snapshot(

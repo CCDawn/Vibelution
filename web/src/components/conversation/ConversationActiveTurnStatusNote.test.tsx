@@ -62,6 +62,46 @@ describe("ConversationActiveTurnStatusNote canonical turn items", () => {
     expect(html).not.toContain("aria-label=");
   });
 
+  it("shows 正在终止 on the first paint when the session is stopping", () => {
+    const html = renderToStaticMarkup(
+      <ConversationActiveTurnStatusNote
+        lang="zh"
+        phase="stopping"
+        statusLabel="状态"
+        message={{
+          timestamp: new Date(Date.now() - 3_000).toISOString(),
+          status: "running",
+          metadata: { processStage: "working" },
+          turnItems: [],
+        }}
+      />,
+    );
+
+    expect(html).toContain('data-active-turn-stage="stopping"');
+    expect(html).toContain("正在终止");
+    expect(html).not.toContain("处理中");
+  });
+
+  it("shows Stopping on the companion typing note while the session is stopping", () => {
+    const html = renderToStaticMarkup(
+      <ConversationActiveTurnStatusNote
+        lang="en"
+        phase="stopping"
+        companionMode
+        statusLabel="Status"
+        message={{
+          timestamp: new Date().toISOString(),
+          status: "running",
+          turnItems: [],
+        }}
+      />,
+    );
+
+    expect(html).toContain('data-companion-typing-status="true"');
+    expect(html).toContain("Stopping");
+    expect(html).not.toContain("Typing");
+  });
+
   it("keeps the first two retries silent on the heartbeat", () => {
     const html = renderToStaticMarkup(
       <ConversationActiveTurnStatusNote
