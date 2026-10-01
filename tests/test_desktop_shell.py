@@ -609,6 +609,7 @@ def test_inspect_unpackaged_electron_missing_binary(tmp_path, monkeypatch):
 def test_resolve_desktop_shell_launch_prefers_current_packaged(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
     assert spec["kind"] == "packaged"
@@ -832,6 +833,7 @@ def test_desktop_shell_electron_args_default_keeps_hidden_presentation_off(tmp_p
 def test_resolve_desktop_shell_launch_default_omits_hidden_presentation(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
     assert spec["kind"] == "packaged"
@@ -841,6 +843,7 @@ def test_resolve_desktop_shell_launch_default_omits_hidden_presentation(tmp_path
 def test_resolve_desktop_shell_launch_forwards_hidden_presentation(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     packaged = desktop_shell.resolve_desktop_shell_launch(
         tmp_path, then_lifecycle="start", open_workbench=True, hidden_presentation=True
@@ -899,6 +902,7 @@ def test_resolve_desktop_shell_launch_forwards_worktree_as_project_slot(tmp_path
     worktree.mkdir(parents=True)
     tree = "a" * 40
     _write_packaged_shell(integration, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, integration)
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     monkeypatch.setattr(
         "core.infrastructure.branch_workspace.resolve_branch_workspace",
