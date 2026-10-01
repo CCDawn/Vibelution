@@ -57,6 +57,33 @@ def test_close_releases_pooled_reader_connections(tmp_path: Path) -> None:
     assert unlink_error is None, f"file still locked after close: {unlink_error}"
 
 
+def test_overflow_readers_do_not_over_release_the_pool(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    store = open_ledger_store(path, read_pool_capacity=1)
+    store.submit(
+        lambda uow: uow.repository.insert_run(build_run_record()),
+        force_flush=True,
+    ).result(timeout=10)
+    barrier = threading.Barrier(6)
+    errors: list[BaseException] = []
+
+    def read() -> None:
+        try:
+            barrier.wait(timeout=10)
+            for _ in range(8):
+                store.get_run("run-test")
+        except BaseException as exc:  # pragma: no cover - failure path
+            errors.append(exc)
+
+    threads = [threading.Thread(target=read) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not errors
+    store.close()
+
+
 def test_close_is_idempotent_and_store_can_reopen(tmp_path: Path) -> None:
     path = tmp_path / "ledger.sqlite3"
     store = open_ledger_store(path)
