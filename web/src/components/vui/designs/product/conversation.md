@@ -468,13 +468,59 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 - 复用 `VConfirmDialog` + `VSelect`，不新建 `V*` 导出组件。
 - 危险确认走 `VConfirmDialog` danger tone；本弹窗非破坏性（源会话只读），保持 neutral。
 
+## ConversationFileDeliveries
+
+### 功能
+一轮对话尾部的文件改动摘要条。折叠态默认只占一行：项目文件数 + 项目文件 `+A −D` 合计 +（若有）弱化的「另有 N 个工作区脚本」注记，右侧保留「回退本轮文件」入口；点击行其余区域展开逐文件明细。展开态按「项目改动」与「工作区脚本」两组呈现，工作区脚本组整体弱化，仅写可验证事实（位于 Agent 工作区内），不做过多的回退/版本断言；文件列表外层限高滚动，避免大轮次倾泻。
+
+### 适用范围
+- **适用**：直连会话时间线中任一已完成助手轮的文件交付呈现（`ConversationView` 按消息尾部挂载）。
+- **不适用**：Companion 私聊、群聊 transcript、替代 Rewind 弹窗（回退仍走 `ConversationFileRewindDialog` 预览确认流）。
+- **分类权威**：后端 ledger 的 `display_path`（项目内=相对路径，项目外=绝对路径）；前端仅对 transcript-only 行用绝对路径启发式兜底（`classifyDeliveryFiles`）。
+
+### 使用方式
+
+```tsx
+<ConversationFileDeliveries
+  cells={cells}
+  language={language}
+  onContinue={handleContinue}
+  changedFiles={changedFiles}
+  sessionId={sessionId}
+  turnId={turnId}
+/>
+```
+
+| 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| 折叠摘要行 | chevron + 「本轮文件 · P」/「工作区脚本 · W」 + `+A −D`（仅项目文件） + 弱化工作区注记 | `aria-expanded` 标注；整行可点切换；`useState(false)` 默认折叠、不持久化 |
+| 回退入口 | 行右侧 `VButton` ghost「回退本轮文件」 | stopPropagation，不触发展开；语义仍归 Rewind 弹窗 |
+| 项目改动组 | 逐文件卡：图标 + 路径 + `+N −M` + 状态徽标 + 查看/继续修改 | 展开后才渲染；P=0 时整组不渲染 |
+| 工作区脚本组 | 同卡片元素，muted 弱化 + 一行「Agent 工作区内的文件。」说明 | W=0 时整组不渲染；组说明不做未验证断言 |
+| 文件列表容器 | `max-height` 约 360px + overflow auto | 大轮次不倾泻；折叠态零展开内容 |
+
+### 视觉与状态
+- 折叠行 hover 用 surface-row-hover 反馈可点；chevron 随展开旋转。
+- 无任何文件条目时整个面板 render null，与旧契约一致。
+- `+A −D` 永远只合计项目文件，工作区脚本只计数不进 +/-。
+
+### 实现落点
+- 面板：`web/src/components/conversation/ConversationFileDeliveries.tsx`
+- 分类与合并：`web/src/components/conversation/conversationFileDeliveryModel.ts`（`classifyDeliveryFiles` / `mergeConversationFileDeliveries`）
+- 样式：`web/src/components/conversation/ConversationFileDeliveries.styles.ts`
+
+### 反冗余
+- 复用 `VSurface`/`VButton`/`VDialog`，不新建 `V*` primitive。
+- 复用 `isAbsoluteFileSystemPath`（`api/desktopPlatform`）与 `sameDeliveryPath`，不另写路径判定。
+- 破坏性回退不在此面板实现，统一走 `ConversationFileRewindDialog`。
+
 ## ConversationFileRewindDialog
 
 ### 功能
 整轮回退弹窗：把某一轮写入的项目文件恢复到该轮开始前的状态。打开时拉取服务端逐文件预览（分类徽标 + 将执行的动作 + 当前大小），默认 strict 应用整批；服务端 409 时列出被拒文件明细并提供「仍恢复安全文件」force 次按钮；成功与幂等重放都以计数反馈。服务端是唯一安全权威，弹窗只做呈现与转发。
 
 ### 适用范围
-- **适用**：直连会话时间线里带磁盘检查点（`metadata.changedFiles` 非空）的已完成助手轮，从「本轮文件」面板头部入口进入。
+- **适用**：直连会话时间线里带磁盘检查点（`metadata.changedFiles` 非空）的已完成助手轮，从「本轮文件」面板折叠摘要行右侧入口进入。
 - **不适用**：Companion 私聊、群聊 transcript、流式中的轮次、没有 `sessionId`/`turnId` 锚点的渲染（入口直接隐藏）。
 
 ### 使用方式
@@ -491,7 +537,7 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 
 | 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
-| 入口 | 面板头部 `VButton` ghost「回退本轮文件」 | 仅 `changedFiles?.length && sessionId && turnId` 齐备时显示 |
+| 入口 | 面板折叠摘要行右侧 `VButton` ghost「回退本轮文件」 | 仅 `changedFiles?.length && sessionId && turnId` 齐备时显示；stopPropagation 不触发展开 |
 | 预览列表 | 逐文件行：路径 + `VChip` 分类 + 动作说明 + 当前大小 | 分类文案用人话（`external_modified` → 「写入后被其他程序修改」） |
 | 说明行 | 服务端 `capabilityNote` 原文 | 有值才显示 |
 | 确认/force | strict 主按钮；409 后出现 force 次按钮 | pending 时禁用关闭；结果反馈替换动作区 |

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useMemo, useState } from "react";
-import { FileText } from "lucide-react";
+import { ChevronRight, FileText } from "lucide-react";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
+  classifyDeliveryFiles,
   mergeConversationFileDeliveries,
   type ConversationChangedFileSummary,
   type ConversationFileDeliveryView,
@@ -29,44 +30,101 @@ export function ConversationFileDeliveries({ cells, language, onContinue, change
   turnId?: string;
 }) {
   const { files, patches } = useMemo(() => mergeConversationFileDeliveries(cells, changedFiles), [cells, changedFiles]);
+  const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [rewindOpen, setRewindOpen] = useState(false);
+  const { project, workspace } = useMemo(() => classifyDeliveryFiles(files, changedFiles), [files, changedFiles]);
   const file: ConversationFileDeliveryView | undefined = files.find((entry) => entry.path === selected);
   const rewindAvailable = Boolean(sessionId && turnId && changedFiles?.length);
   const zh = language === "zh";
   if (!files.length) return null;
+
+  // +/− only ever aggregate project files; workspace scripts stay count-only.
+  const projectAdditions = project.reduce((sum, entry) => sum + (entry.additions ?? 0), 0);
+  const projectDeletions = project.reduce((sum, entry) => sum + (entry.deletions ?? 0), 0);
+  const summaryLabel = project.length
+    ? (zh ? `本轮文件 · ${project.length}` : `Files from this turn · ${project.length}`)
+    : (zh ? `工作区脚本 · ${workspace.length}` : `Workspace scripts · ${workspace.length}`);
+  const toggle = () => setExpanded((value) => !value);
+
+  const renderCard = (entry: ConversationFileDeliveryView, muted: boolean) => (
+    <VSurface key={entry.path} tone="card" className={muted ? styles.cardMuted : styles.card}>
+      <FileText size={16} aria-hidden="true" />
+      <span className={styles.path} title={entry.path}>{entry.path}</span>
+      {entry.additions != null || entry.deletions != null ? (
+        <span className={styles.diffStat}>{`+${entry.additions ?? 0} −${entry.deletions ?? 0}`}</span>
+      ) : null}
+      {!entry.deleted && entry.state ? (
+        <span className={styles.caption}>
+          {zh
+            ? (STATE_PRESENTATION[entry.state] ?? STATE_PRESENTATION.modified).zh
+            : (STATE_PRESENTATION[entry.state] ?? STATE_PRESENTATION.modified).en}
+        </span>
+      ) : null}
+      {entry.deleted ? <span className={styles.caption}>{zh ? "已删除" : "Deleted"}</span> : (
+        <div className={styles.actions}>
+          {entry.content !== undefined ? <VButton onPress={() => setSelected(entry.path)}>{zh ? "查看内容" : "View content"}</VButton> : null}
+          {onContinue ? <VButton variant="ghost" onPress={() => onContinue(entry.path)}>{zh ? "继续修改" : "Continue editing"}</VButton> : null}
+        </div>
+      )}
+    </VSurface>
+  );
+
   return (
     <section className={styles.root} aria-label={zh ? "本轮文件" : "Files from this turn"} data-conversation-file-deliveries="true">
-      <div className={styles.header}>
-        <p className={styles.caption}>{zh ? `本轮文件 · ${files.length}` : `Files from this turn · ${files.length}`}</p>
-        {rewindAvailable ? (
-          <VButton variant="ghost" onPress={() => setRewindOpen(true)}>{zh ? "回退本轮文件" : "Rewind files"}</VButton>
+      <div
+        className={styles.summaryRow}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        data-file-deliveries-summary="true"
+        onClick={toggle}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        <ChevronRight size={14} aria-hidden="true" className={expanded ? styles.chevronExpanded : styles.chevron} />
+        <p className={styles.caption}>{summaryLabel}</p>
+        {project.length ? <span className={styles.diffStat}>{`+${projectAdditions} −${projectDeletions}`}</span> : null}
+        {project.length && workspace.length ? (
+          <span className={styles.workspaceNote}>{zh ? `另有 ${workspace.length} 个工作区脚本` : `and ${workspace.length} workspace scripts`}</span>
         ) : null}
+        <div className={styles.headerActions} onClick={(event) => event.stopPropagation()}>
+          {rewindAvailable ? (
+            <VButton
+              variant="ghost"
+              onPress={(event) => {
+                event.stopPropagation();
+                setRewindOpen(true);
+              }}
+            >
+              {zh ? "回退本轮文件" : "Rewind files"}
+            </VButton>
+          ) : null}
+        </div>
       </div>
-      {files.map((entry) => (
-        <VSurface key={entry.path} tone="card" className={styles.card}>
-          <FileText size={16} aria-hidden="true" />
-          <span className={styles.path} title={entry.path}>{entry.path}</span>
-          {entry.additions != null || entry.deletions != null ? (
-            <span className={styles.diffStat}>{`+${entry.additions ?? 0} −${entry.deletions ?? 0}`}</span>
-          ) : null}
-          {!entry.deleted && entry.state ? (
-            <span className={styles.caption}>
-              {zh
-                ? (STATE_PRESENTATION[entry.state] ?? STATE_PRESENTATION.modified).zh
-                : (STATE_PRESENTATION[entry.state] ?? STATE_PRESENTATION.modified).en}
-            </span>
-          ) : null}
-          {entry.deleted ? <span className={styles.caption}>{zh ? "已删除" : "Deleted"}</span> : (
-            <div className={styles.actions}>
-              {entry.content !== undefined ? <VButton onPress={() => setSelected(entry.path)}>{zh ? "查看内容" : "View content"}</VButton> : null}
-              {onContinue ? <VButton variant="ghost" onPress={() => onContinue(entry.path)}>{zh ? "继续修改" : "Continue editing"}</VButton> : null}
+      {expanded ? (
+        <div className={styles.fileList}>
+          {project.length ? (
+            <div className={styles.group}>
+              <p className={styles.groupCaption}>{zh ? `项目改动 · ${project.length}` : `Project changes · ${project.length}`}</p>
+              {project.map((entry) => renderCard(entry, false))}
             </div>
-          )}
-        </VSurface>
-      ))}
-      {patches.length ? <VButton variant="ghost" onPress={() => setShowDiff(true)}>{zh ? "查看本轮补丁" : "View this turn’s patches"}</VButton> : null}
+          ) : null}
+          {workspace.length ? (
+            <div className={styles.group}>
+              <p className={styles.groupCaption}>{zh ? `工作区脚本 · ${workspace.length}` : `Workspace scripts · ${workspace.length}`}</p>
+              <p className={styles.groupNote}>{zh ? "Agent 工作区内的文件。" : "Files inside the agent workspace."}</p>
+              {workspace.map((entry) => renderCard(entry, true))}
+            </div>
+          ) : null}
+          {patches.length ? <VButton variant="ghost" onPress={() => setShowDiff(true)}>{zh ? "查看本轮补丁" : "View this turn’s patches"}</VButton> : null}
+        </div>
+      ) : null}
       {sessionId && turnId && changedFiles?.length ? (
         <ConversationFileRewindDialog
           open={rewindOpen}

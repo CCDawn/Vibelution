@@ -18,9 +18,11 @@ import {
 } from "../../../components/vui";
 import { ConversationFollowupQueueBar } from "../../../components/conversation/ConversationFollowupQueueBar";
 import { ConversationTodoChecklist } from "../../../components/conversation/ConversationTodoChecklist";
+import { ConversationFileDeliveries } from "../../../components/conversation/ConversationFileDeliveries";
 import { ConversationMarkdownCodeBlock } from "../../../components/conversation/ConversationMarkdownRenderer";
 import conversationViewStyles from "../../../components/conversation/ConversationView.styles";
 import type { TodoChecklistSnapshot } from "../../../components/conversation/conversationTodoChecklistModel";
+import type { CodexTranscriptCell } from "../../../components/conversation/codexTranscriptCells";
 import { ConversationTranscriptLoadingState } from "../../../components/conversation/ConversationTranscriptLoadingState";
 import {
   ComposerContextRing,
@@ -122,6 +124,20 @@ const conversationTodoChecklistPreviewSnapshot: TodoChecklistSnapshot = {
   hasUnfinished: true,
 };
 
+const conversationFileDeliveriesPreviewCells: CodexTranscriptCell[] = [
+  {
+    id: "preview-delivery-write", messageId: "preview-turn", kind: "tool_call", status: "completed", tone: "neutral",
+    toolLifecycleModel: {
+      toolCalls: [{
+        toolCallId: "preview-delivery-write", rawOperationId: "preview-delivery-write", rawToolName: "write_file_tool",
+        arguments: { file_path: "web/src/demo.ts", content: "export const demo = 1;\n" },
+        status: "completed", title: "写入文件", runtimeKind: "tool",
+      }],
+      terminalOperations: [], terminalSessions: [], modelObservations: [],
+    },
+  },
+];
+
 const sessionSearchPreviewItems: VSessionSearchDialogItem[] = [
   {
     id: "session-preview-1",
@@ -220,6 +236,14 @@ export function StructureCatalog() {
             snapshot={conversationTodoChecklistPreviewSnapshot}
             lang="zh"
             turnSettled={false}
+          />
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationFileDeliveries" className="col-span-full min-h-0">
+        <div className="w-full max-w-[520px] rounded-xl border border-vui-border-subtle bg-vui-surface-panel p-3">
+          <ConversationFileDeliveries
+            cells={conversationFileDeliveriesPreviewCells}
+            language="zh"
           />
         </div>
       </VuiPreviewCard>

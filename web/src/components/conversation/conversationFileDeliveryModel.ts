@@ -1,4 +1,5 @@
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
+import { isAbsoluteFileSystemPath } from "../../api/desktopPlatform";
 import { buildConversationPatchDiff, patchTextFromArguments } from "./conversationPatchModel";
 
 export type ConversationFileDelivery = {
@@ -191,4 +192,34 @@ export function mergeConversationFileDeliveries(
     if (!matched.has(entry)) files.push(entry);
   }
   return { files, patches: extracted.patches };
+}
+
+/** Delivery rows split across the project vs agent-workspace boundary. */
+export type ClassifiedConversationFileDeliveries = {
+  project: ConversationFileDeliveryView[];
+  workspace: ConversationFileDeliveryView[];
+};
+
+/**
+ * Project vs agent-workspace split for the turn summary bar. The ledger's
+ * `display_path` is authoritative (project-relative under the project root,
+ * absolute elsewhere): an entry is matched back to its summary by path first,
+ * so a tool that wrote a project file through an absolute path is not misread
+ * as workspace. Transcript-only rows fall back to the absolute-path heuristic.
+ */
+export function classifyDeliveryFiles(
+  files: readonly ConversationFileDeliveryView[],
+  changedFiles?: readonly ConversationChangedFileSummary[] | null,
+): ClassifiedConversationFileDeliveries {
+  const summaries = (changedFiles ?? []).filter(
+    (entry) => entry && typeof entry.path === "string" && entry.path.trim(),
+  );
+  const project: ConversationFileDeliveryView[] = [];
+  const workspace: ConversationFileDeliveryView[] = [];
+  for (const entry of files) {
+    const summary = summaries.find((candidate) => sameDeliveryPath(entry.path, candidate.path));
+    const anchor = summary ? summary.path : entry.path;
+    (isAbsoluteFileSystemPath(anchor) ? workspace : project).push(entry);
+  }
+  return { project, workspace };
 }
