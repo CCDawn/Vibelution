@@ -240,7 +240,7 @@ describe("LauncherRoute layout contract", () => {
     expect(branchInstancesPanelSource).toContain("startingOrRestarting");
     expect(branchInstancesPanelSource).toContain("openClickGuardsRef");
     expect(branchInstancesPanelSource).toContain("const startBusy");
-    expect(branchInstancesPanelSource).toContain("disabled: stopBusy");
+    expect(branchInstancesPanelSource).toContain("isDisabled={stopBusy}");
   });
 
   it("keeps recovery actions available for a non-current instance with stale health", () => {
@@ -265,7 +265,7 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("onLifecycle={requestInstanceLifecycle}");
     expect(branchInstancesPanelSource).toContain("canForceStopInstance");
     expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "force-stop")');
-    expect(branchInstancesPanelSource).toContain("disabled: lifecyclePending");
+    expect(branchInstancesPanelSource).toContain("isDisabled={lifecyclePending}");
     expect(branchInstancesPanelSource).toContain("setForceStopId(item.id)");
     expect(branchInstancesPanelSource).toContain("canForceStopInstance(item)");
     expect(branchInstancesPanelSource).toContain("forceStopId");
