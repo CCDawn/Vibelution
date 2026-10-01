@@ -28,9 +28,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**79**
+- Facade `*_service.py`：**81**
 - 有 pack README：**6**
-- 仅单文件 facade：**73**
+- 仅单文件 facade：**75**
 
 ## Domain 速查
 
@@ -39,13 +39,13 @@
 | Session / Chat hot path (`session`) | 2 |
 | Team workflow / SC / experiment (`team_workflow`) | 1 |
 | Team registry / canvas (`team`) | 3 |
-| Agent directory / config (`agent`) | 17 |
+| Agent directory / config (`agent`) | 18 |
 | Chat room / conversation index (`chat`) | 3 |
 | Knowledge / RAG (`knowledge`) | 4 |
 | Memory (`memory`) | 4 |
 | Research / Challenge Cup (`research`) | 5 |
 | Self / Supervised evolution (`evolution`) | 12 |
-| Runtime / runtime scene (`runtime`) | 3 |
+| Runtime / runtime scene (`runtime`) | 4 |
 | Launcher / Reset (`launcher`) | 2 |
 | Config / Provider / Model / Theme (`config`) | 7 |
 | Workbench contract / preferences (`workbench`) | 2 |
@@ -164,6 +164,7 @@
 | `runtime_manager_control_service.py` | Lightweight runtime-manager control checks for web services. | — | — | `test_runtime_manager_control_service.py`, `test_select_tests.py` |
 | `runtime_scene_service.py` | Structured runtime scene bundles for frontend inspection and agent diagnosis. | `runtime_scene/` | `agents.py`, `knowledge.py`, `launcher.py`, `logs.py`, `runtime.py` | `test_storage_migration.py`, `test_web_app.py`, `test_chat_next_state_signals.py` |
 | `runtime_service.py` | Runtime summary helpers for the web shell. | — | `runtime.py` | `test_web_app.py`, `test_supervised_candidate_runtime_service.py`, `test_research_workflow_meeting_driver_recovery.py` |
+| `runtime_task_query_service.py` | Read-only query projection over the unified runtime task registry. | — | `runtime_tasks.py` | `test_runtime_tasks_routes.py` |
 
 ## Launcher / Reset
 
