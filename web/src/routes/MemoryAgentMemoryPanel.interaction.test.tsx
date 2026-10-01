@@ -187,7 +187,7 @@ describe("MemoryAgentMemoryPanel interaction", () => {
     await act(async () => setInputValue(search!, "Beta"));
 
     expect(buttonContaining(host, "Beta Agent")).not.toBeNull();
-    expect(buttonContaining(host, "Alpha Agent")).toBeNull();
+    expect(host.querySelector('button[aria-pressed="true"]')?.textContent).not.toContain("Alpha Agent");
     expect(host.textContent).toContain("Alpha saved memory body");
     expect(onSelectAgent).not.toHaveBeenCalled();
   });
@@ -196,7 +196,7 @@ describe("MemoryAgentMemoryPanel interaction", () => {
     const onSelectAgent = vi.fn();
     const host = await mount(<MemoryAgentMemoryPanel {...baseProps} onSelectAgent={onSelectAgent} />, container!, root!);
 
-    await act(async () => buttonContaining(host, copy.privateMemorySwitchAgent)?.click());
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="切换 Agent"]')?.click());
 
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog).not.toBeNull();
@@ -208,7 +208,62 @@ describe("MemoryAgentMemoryPanel interaction", () => {
     expect(onSelectAgent).toHaveBeenCalledWith("agent-beta");
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
+
+  it("searches full memory content and dispatches item selection", async () => {
+    const onSelectItem = vi.fn();
+    const second = { ...baseProps.items[0], id: "second", title: "other.md", active: false, content: "Unique needle deep in the file" };
+    const host = await mount(<MemoryAgentMemoryPanel {...baseProps} items={[...baseProps.items, second]} onSelectItem={onSelectItem} />, container!, root!);
+    const search = host.querySelector<HTMLInputElement>('input[aria-label="搜索记忆正文"]')!;
+    await act(async () => setInputValue(search, "needle"));
+    expect(buttonContaining(host, "preferences.md")).toBeNull();
+    expect(host.querySelector('[role="tabpanel"]')?.textContent).toContain("Unique needle");
+    await act(async () => buttonContaining(host, "other.md")?.click());
+    expect(onSelectItem).toHaveBeenCalledWith("second");
+    await act(async () => setInputValue(search, "absent"));
+    expect(host.textContent).toContain("没有匹配的记忆");
+    expect(host.querySelector('[role="tabpanel"]')).toBeNull();
+  });
+
+  it("does not invent source history or usage and escapes raw content", async () => {
+    const content = '<img src=x onerror="alert(1)">';
+    const host = await mount(<MemoryAgentMemoryPanel {...baseProps} items={[{...baseProps.items[0], content}]} />, container!, root!);
+    await selectTab(host, "来源与变化");
+    expect(host.textContent).toContain("未提供来源会话或修改历史");
+    await act(async () => buttonContaining(host, copy.rawContent)?.click());
+    expect(host.querySelector("pre")?.textContent).toBe(content);
+    expect(host.querySelector("img")).toBeNull();
+    await selectTab(host, "对话使用记录");
+    expect(host.textContent).toContain("暂未提供使用证据");
+    expect(host.textContent).not.toContain("最近一次使用");
+  });
+
+  it("clears filters, tab and raw expansion when the selected owner changes", async () => {
+    const host = await mount(<MemoryAgentMemoryPanel {...baseProps} />, container!, root!);
+    await act(async () => setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="搜索记忆正文"]')!, "Alpha"));
+    await selectTab(host, "来源与变化");
+    await act(async () => buttonContaining(host, copy.rawContent)?.click());
+    await mount(<MemoryAgentMemoryPanel {...baseProps} selectedAgent={{...baseProps.selectedAgent!, name: "Beta", privateRoot: "C:/beta"}}
+      items={[{...baseProps.items[0], id: "beta", content: "Beta only"}]} />, container!, root!);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="搜索记忆正文"]')?.value).toBe("");
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("正文");
+    expect(host.querySelector("pre")).toBeNull();
+    expect(host.textContent).not.toContain("Alpha saved memory body");
+    expect(host.textContent).toContain("Beta only");
+  });
+
+  it("hides stale body during loading or failed detail reads", async () => {
+    const host = await mount(<MemoryAgentMemoryPanel {...baseProps} detailPending />, container!, root!);
+    expect(host.textContent).not.toContain("Alpha saved memory body");
+    await mount(<MemoryAgentMemoryPanel {...baseProps} detailErrorText="Access denied" />, container!, root!);
+    expect(host.textContent).toContain("Access denied");
+    expect(host.textContent).not.toContain("Alpha saved memory body");
+  });
 });
+
+async function selectTab(host: ParentNode, label: string) {
+  const tab = Array.from(host.querySelectorAll<HTMLElement>('[role="tab"]')).find((node) => node.textContent === label)!;
+  await act(async () => tab.focus());
+}
 
 function SearchHarness({ onSelectAgent }: { onSelectAgent: (agentId: string) => void }) {
   const [searchText, setSearchText] = useState("");

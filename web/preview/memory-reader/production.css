@@ -1,0 +1,8 @@
+@import "../../src/design/tokens.css";
+@import "../../src/design/base.css";
+@import "../../src/design/tailwind.css";
+@import "../../src/design/route-css/memory.tailwind.css";
+@import "../../src/design/vui-provider-theme.css";
+@import "../../src/design/vui-native-controls.css";
+.production-test { height: 100dvh; display: flex; flex-direction: column; background:var(--vui-surface-panel); color:var(--fg-primary); }
+.production-test > header { flex:none; padding:10px 16px; border-bottom:1px solid var(--vui-border-subtle); font-size:12px; color:var(--fg-tertiary); }

@@ -3708,6 +3708,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     );
     return (
       <MemoryAgentMemoryPanel
+        lang={lang}
+        selectedAgentId={selectedAgentMemoryAgentId}
         copy={copy}
         summary={toAgentMemorySummaryView(summary, formatByteCount(summary?.privateByteCount ?? 0))}
         searchText={searchText}

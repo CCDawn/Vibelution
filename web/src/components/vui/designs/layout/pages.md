@@ -424,6 +424,11 @@ import { VTrackWorkbenchPage, VTabs } from "@/components/vui";
 
 ## VSplitWorkspace
 
+个人记忆阅读页组合两层分栏：Agent rail → 记忆文件列表 → 正文阅读。
+列表搜索与记录类型筛选共用一行，阅读区只保留「正文 / 来源与变化 / 对话使用记录」。
+沿用 `WORKBENCH_LAYOUT_IDS.memory`，pane ids 为 `agent-list` 和 `private-memory-list`；窄屏先列表、点选后阅读并可返回。
+正文复用现有安全文本转换，初始化文件明确标识；来源历史及使用证据未提供时展示不可用状态，不从文件时间推断。
+
 ### 功能
 底层可拖分栏（sidebar / main / aside），供 recipe 或过渡期 domain 壳组合。
 

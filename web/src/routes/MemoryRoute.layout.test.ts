@@ -390,9 +390,9 @@ describe("MemoryRoute layout contract", () => {
     expect(styles).not.toHaveProperty("paneResizeHandleLeft");
     expect(styles).not.toHaveProperty("paneResizeHandleRight");
     expect(agentMemoryPanelStyles.reader).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.readingScroll).toContain("min-h-0");
-    expect(agentMemoryPanelStyles.readingScroll).toContain("overflow-y-auto");
-    expect(agentMemoryPanelStyles.workspace).toContain("max-md:[&>[data-vui=split-sidebar]]:!hidden");
+    expect(agentMemoryPanelStyles.tabContent).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.tabContent).toContain("overflow-y-auto");
+    expect(agentMemoryPanelStyles.workspace).toContain("max-lg:[&>[data-vui=split-sidebar]]:!hidden");
     expect(styles.controlStrip).toContain("overflow-x-auto");
     expect(styles.controlStrip).not.toContain("overflow-hidden");
     expect(styles.subnav).toContain("w-fit");
@@ -571,10 +571,12 @@ describe("MemoryRoute layout contract", () => {
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("h-full");
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("min-h-0");
     expect(cleanupPanelStyles.cleanupWorkspace).toContain("overflow-auto");
-    // Personal memory now reads in one scrollable document pane beside the Agent rail.
+    // Personal memory keeps independent list and reader scroll beside the Agent rail.
     expect(agentMemoryPanelStyles.reader).toContain("flex-col");
-    expect(agentMemoryPanelStyles.readingScroll).toContain("overflow-y-auto");
-    expect(agentMemoryPanelStyles.documents).toContain("grid");
+    expect(agentMemoryPanelStyles.tabContent).toContain("overflow-y-auto");
+    expect(agentMemoryPanelStyles.listScroll).toContain("overflow-y-auto");
+    expect(agentMemoryPanelSource).toContain('id: "private-memory-list"');
+    expect(agentMemoryPanelStyles.mobileListing).toContain("max-md:");
   });
 
   it("keeps restored MemoryRoute grids from the CSS module migration", () => {
