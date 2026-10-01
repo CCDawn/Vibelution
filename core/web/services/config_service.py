@@ -3796,6 +3796,52 @@ def _pinned_provider_model_refs(public_config: dict[str, Any]) -> set[str]:
     return refs
 
 
+def _stored_ui_language(public_config: dict[str, Any] | None) -> str | None:
+    """Return the operator's persisted ui.language, or None when it has none."""
+
+    ui = public_config.get("ui") if isinstance(public_config, dict) else None
+    if not isinstance(ui, dict):
+        return None
+    value = str(ui.get("language") or "").strip()
+    return value or None
+
+
+def _preserve_stored_ui_language_on_apply(merged: dict[str, Any], stored_language: str | None) -> None:
+    """ui.language anti-drift guard for whole-config apply persistence.
+
+    Whole-config apply paths (apply_config_workspace) persist a client-submitted
+    public config, so a stale or cross-page payload can silently rewrite
+    ui.language and flip the whole product UI. ui.language's only legitimate
+    writer is update_language (PUT /api/config/language). When the stored
+    operator config already carries ui.language, force the persisted value back
+    to it (fail-open: the apply itself never fails on this) and record a scene
+    event whenever a submitted value was suppressed, closing the forensics gap.
+    A stored config without ui.language passes the submitted value through.
+    """
+
+    if not stored_language:
+        return
+    ui_cfg = merged.get("ui")
+    if not isinstance(ui_cfg, dict):
+        ui_cfg = {}
+        merged["ui"] = ui_cfg
+    submitted_language = str(ui_cfg.get("language") or "").strip() or None
+    if submitted_language != stored_language:
+        _record_config_scene_event(
+            "persist",
+            "config.language.apply_drift_suppressed",
+            message="Whole-config apply tried to rewrite ui.language; the stored value was kept.",
+            outcome="suppressed",
+            fields={
+                "submittedLanguage": submitted_language or "",
+                "storedLanguage": stored_language,
+                "configPath": str(CONFIG_PATH),
+            },
+            lifecycle=True,
+        )
+    ui_cfg["language"] = stored_language
+
+
 def apply_config_workspace(
     public_config: dict[str, Any] | None,
     *,
@@ -3844,6 +3890,7 @@ def apply_config_workspace(
             lifecycle=True,
         )
     build_effective_config(merged)
+    _preserve_stored_ui_language_on_apply(merged, _stored_ui_language(old_public))
     _save_public_config_and_invalidate(merged)
 
     normalized_meta = _normalize_draft_meta(draft_meta)
