@@ -726,6 +726,17 @@ class ToolExecutor:
         except Exception:
             return ""
 
+    def _bind_tool_cancel_checker(self, checker: Optional[Callable[[], str]]) -> Callable[[], str]:
+        """Copy the session stop event onto the callable injected into the tool."""
+
+        def probe() -> str:
+            return self._current_cancel_reason(checker)
+
+        event = getattr(checker, "_vibelution_stop_event", None)
+        if isinstance(event, threading.Event):
+            setattr(probe, "_vibelution_stop_event", event)
+        return probe
+
     def execute(self, tool_name: str, tool_args: dict, *, tool_call_id: str = "") -> tuple:
         """
         执行工具
@@ -992,7 +1003,7 @@ class ToolExecutor:
             return (argument_error, None)
         cancel_checker = self._snapshot_cancel_checker()
         if _tool_accepts_cancel_checker(func) and "_cancel_checker" not in call_args:
-            call_args["_cancel_checker"] = lambda: self._current_cancel_reason(cancel_checker)
+            call_args["_cancel_checker"] = self._bind_tool_cancel_checker(cancel_checker)
 
         executor = ThreadPoolExecutor(max_workers=1)
         future = None
@@ -1074,7 +1085,7 @@ class ToolExecutor:
                 if remaining <= 0:
                     raise TimeoutError()
                 try:
-                    result = future.result(timeout=min(0.2, remaining))
+                    result = future.result(timeout=min(0.05, remaining))
                     cancel_reason = self._current_cancel_reason(cancel_checker)
                     if cancel_reason:
                         error_msg = f"[取消] {tool_name} 已因停止请求中断：{cancel_reason}"

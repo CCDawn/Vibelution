@@ -29,6 +29,8 @@ describe("conversationActiveTurnStatusPresentation", () => {
     expect(activeTurnStageLabel("server_thinking", "en")).toBe("Thinking");
     expect(activeTurnStageLabel("model_request", "zh")).toBe("请求模型");
     expect(activeTurnStageLabel("working", "zh")).toBe("处理中");
+    expect(activeTurnStageLabel("stopping", "zh")).toBe("正在终止");
+    expect(activeTurnStageLabel("stopping", "en")).toBe("Stopping");
     expect(activeTurnStageLabel("thinking", "en")).toBe("Thinking");
     expect(activeTurnStageLabel("queued", "zh")).toBe("排队中");
     expect(activeTurnOptimisticStageSummary("user_submit", "zh")).toBe("已发送，正在连接");
@@ -37,6 +39,7 @@ describe("conversationActiveTurnStatusPresentation", () => {
 
   it("builds heartbeat text with elapsed seconds", () => {
     expect(formatActiveTurnHeartbeatText("model_thinking", 12, "zh")).toBe("思考中 · 12s");
+    expect(formatActiveTurnHeartbeatText("stopping", 3, "zh")).toBe("正在终止 · 3s");
     expect(formatActiveTurnHeartbeatText("agent_prepare", null, "en")).toBe("Preparing agent");
     expect(activeTurnElapsedSeconds("2026-08-02T10:00:00.000Z", Date.parse("2026-08-02T10:00:08.400Z"))).toBe(8);
     expect(activeTurnElapsedSeconds("bad", Date.now())).toBeNull();

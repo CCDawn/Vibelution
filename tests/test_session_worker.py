@@ -863,7 +863,10 @@ def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
         # stop interrupts an in-flight model stream instead of waiting for the
         # next cooperative checkpoint.
         assert getattr(checker, "_vibelution_chat_provider_abort_enabled", None) is True
+        assert getattr(checker, "_vibelution_stop_event", None) is control.stop_event
+        assert control.stop_event.is_set() is False
         control.request_stop("operator requested stop")
+        assert control.stop_event.is_set() is True
         raise AgentContextInterrupted(
             "operator requested stop",
             stage="prepare_agent_context.group_context_events",
