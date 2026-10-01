@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from threading import RLock
 import uuid
 from datetime import datetime, timezone
@@ -125,6 +128,9 @@ _RESOLVED_ROOT_CACHE: dict[str, Path] = {}
 _RESOLVED_CONFIG_PATH_CACHE: dict[tuple[str | None, str], Path] = {}
 _ACTIVE_STATE_CACHE: dict[str, tuple[tuple[str, int | None, int | None], dict[str, Any]]] = {}
 _PATH_CACHE_LIMIT = 256
+_FORMAL_WORKSPACE_SNAPSHOT: ContextVar[dict[Path, Path] | None] = ContextVar(
+    "formal_workspace_snapshot", default=None
+)
 
 
 class DeveloperSandboxConfigConflict(ValueError):
@@ -338,13 +344,34 @@ def sandbox_workspace_path(project_root: Path, *parts: str) -> Path | None:
     return root.joinpath("workspace", *parts)
 
 
+@contextmanager
+def snapshot_formal_workspace_paths() -> Iterator[None]:
+    """Reuse formal root resolution within one read; refresh it on the next read.
+
+    Only the formal root is snapshotted. Sandbox selection, lazy seeding, and
+    candidate containment checks retain their existing per-path behavior.
+    """
+    token = _FORMAL_WORKSPACE_SNAPSHOT.set({})
+    try:
+        yield
+    finally:
+        _FORMAL_WORKSPACE_SNAPSHOT.reset(token)
+
+
 def formal_workspace_path(project_root: Path, *parts: str) -> Path:
     root = _project_root(project_root)
+    snapshot = _FORMAL_WORKSPACE_SNAPSHOT.get()
+    if snapshot is not None and root in snapshot:
+        return snapshot[root].joinpath(*parts)
     try:
         load_project_identity(root)
     except ProjectIdentityError:
-        return resolve_workspace_home().joinpath(*parts)
-    return resolve_project_workspace_home(root).joinpath(*parts)
+        workspace = resolve_workspace_home()
+    else:
+        workspace = resolve_project_workspace_home(root)
+    if snapshot is not None:
+        snapshot[root] = workspace
+    return workspace.joinpath(*parts)
 
 
 def sandboxed_workspace_path(project_root: Path, *parts: str) -> Path:

@@ -219,6 +219,7 @@ def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
     return overview
 
 
+@developer_sandbox.snapshot_formal_workspace_paths()
 def get_agent_memory_inventory(
     *,
     agent_id: str = "",
