@@ -142,6 +142,10 @@ const styles = {
     "vui-app-appshell settingsTrigger !size-8 !min-h-8 !min-w-8 !justify-center !rounded-md !border-0 !bg-transparent !p-0 text-[var(--fg-secondary)] hover:!bg-[var(--bg-active)]",
   settingsTriggerAlertDot:
     "vui-app-appshell settingsTriggerAlertDot absolute -right-0.5 -top-0.5 block size-1.5 rounded-full bg-[var(--accent-cool)]",
+  // Running-count pill on the aux-center trigger: same corner anchor as the
+  // alert dot, sized up so a digit (capped at "9+") stays readable.
+  settingsTriggerCountBadge:
+    "vui-app-appshell settingsTriggerCountBadge absolute -right-1.5 -top-1.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-[var(--accent-cool)] px-1 text-[9px] font-semibold leading-none text-white",
   settingsTriggerIconSlot:
     "vui-app-appshell settingsTriggerIconSlot relative inline-flex items-center justify-center",
   settingsTriggerOpen:

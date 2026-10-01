@@ -108,6 +108,10 @@ const AgentContextSectionsView = React.lazy(() =>
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
+  navigatePromptHistory,
+  readPromptHistory,
+} from "./conversationPromptHistory";
+import {
   MAX_COMPOSER_STARTERS,
   resolveComposerPlaceholder,
   shouldAcceptComposerGhost,
@@ -1229,6 +1233,10 @@ export const ConversationView = React.memo(function ConversationView({
   const toolApprovalConsumedRef = useRef(false);
   toolApprovalConsumedRef.current = false;
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Prompt history browse state (ArrowUp/Down on an empty draft). Refs instead
+  // of state so the keydown closure never reads a stale index or stash.
+  const promptHistoryIndexRef = useRef<number | null>(null);
+  const promptHistoryDraftRef = useRef<string | null>(null);
   const inlineEditInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
@@ -3426,7 +3434,61 @@ export const ConversationView = React.memo(function ConversationView({
     });
   }
 
+  function exitComposerPromptHistoryBrowse() {
+    promptHistoryIndexRef.current = null;
+    promptHistoryDraftRef.current = null;
+  }
+
+  /**
+   * ZCode parity: ArrowUp/ArrowDown on an empty draft (or while already
+   * browsing) recall recently sent prompts. Runs after find-bar/slash/ghost/
+   * typeahead/IME claims, so it never steals their arrow navigation, and it
+   * leaves multi-line caret movement alone for a non-empty draft.
+   */
+  function handleComposerPromptHistoryNavigation(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ): boolean {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      return false;
+    }
+    if (event.nativeEvent.isComposing || composerComposing) {
+      return false;
+    }
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+      return false;
+    }
+    // History navigation only takes over from an empty draft or while
+    // already browsing; a non-empty draft keeps native caret movement.
+    if (promptHistoryIndexRef.current === null && composerValue.length > 0) {
+      return false;
+    }
+    const result = navigatePromptHistory(
+      readPromptHistory(),
+      promptHistoryIndexRef.current,
+      event.key === "ArrowUp" ? "up" : "down",
+    );
+    if (!result.shouldHandle) {
+      return false;
+    }
+    event.preventDefault();
+    if (result.nextIndex === null) {
+      // Past the newest entry: hand the composer back to the stashed draft.
+      const stashedDraft = promptHistoryDraftRef.current ?? "";
+      exitComposerPromptHistoryBrowse();
+      onComposerChange(stashedDraft);
+      return true;
+    }
+    if (promptHistoryIndexRef.current === null) {
+      // Entering browse mode: stash the (empty) draft for later restore.
+      promptHistoryDraftRef.current = composerValue;
+    }
+    promptHistoryIndexRef.current = result.nextIndex;
+    onComposerChange(result.nextValue);
+    return true;
+  }
+
   function handleSendAndFollowLatest() {
+    exitComposerPromptHistoryBrowse();
     pinFollowLatestForSubmit();
     onSubmit();
   }
@@ -7154,6 +7216,9 @@ export const ConversationView = React.memo(function ConversationView({
                   : undefined
             }
             onChange={(event) => {
+              // Any manual edit (typing, IME, cut) leaves the history browse
+              // mode; programmatic history fills do not go through onChange.
+              exitComposerPromptHistoryBrowse();
               onComposerChange(event.target.value);
               syncComposerReferenceCaret(event.currentTarget);
             }}
@@ -7260,6 +7325,13 @@ export const ConversationView = React.memo(function ConversationView({
                   handleReferenceTypeaheadDismiss();
                   return;
                 }
+              }
+              // Prompt history recall: claims bare ArrowUp/Down only when the
+              // draft is empty (or browsing is already active); everything
+              // above (find bar, ghost, slash, typeahead) already had its
+              // chance, and IME composition is excluded inside.
+              if (handleComposerPromptHistoryNavigation(event)) {
+                return;
               }
               // Yield-aware Esc→stop: ghost/slash/typeahead branches above
               // return when they consume Escape; this fallback only fires when

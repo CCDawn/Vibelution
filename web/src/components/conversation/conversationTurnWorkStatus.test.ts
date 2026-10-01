@@ -11,6 +11,14 @@ import {
 
 let itemSeq = 0;
 
+/** Backend-projected turn header fields (additive wire fields, batch A). */
+type TurnHeaderOverrides = {
+  turnState?: string;
+  turnStartedAt?: string;
+  turnEndedAt?: string;
+  turnActiveMs?: number;
+};
+
 function toolItem(overrides: Partial<Extract<SessionTurnItem, { type: "tool_call" }>> = {}):
 Extract<SessionTurnItem, { type: "tool_call" }> {
   itemSeq += 1;
@@ -121,6 +129,74 @@ describe("conversationTurnWorkStatus", () => {
       toolCallCount: 2,
       toolDurationMs: 65_000,
     });
+  });
+
+  it("prefers the authoritative backend turn header (turnActiveMs)", () => {
+    // The backend-measured work time wins over the heuristic span even when
+    // item stamps would tell a different (less complete) story.
+    const message = turn({
+      turnItems: [
+        toolItem({
+          metadata: { executionStartedAtEpochMs: Date.parse("2026-09-16T10:00:01.000Z"), durationMs: 3_000 },
+        }),
+        { ...answerItem(), createdAt: "2026-09-16T10:00:05.000Z", updatedAt: "2026-09-16T10:00:09.000Z" },
+      ],
+    }) as AssistantConversationTurn & TurnHeaderOverrides;
+    message.turnState = "completed";
+    message.turnStartedAt = "2026-09-16T10:00:00.000Z";
+    message.turnEndedAt = "2026-09-16T10:01:30.000Z";
+    message.turnActiveMs = 90_000;
+    const summary = resolveConversationTurnWorkSummary(message);
+    expect(summary).toEqual({
+      durationMs: 90_000,
+      basis: "turn_header",
+      toolCallCount: 1,
+      toolDurationMs: 3_000,
+    });
+  });
+
+  it("derives the header span from turnStartedAt/turnEndedAt when activeMs is absent", () => {
+    const message = turn({
+      turnItems: [toolItem({ metadata: {} })],
+    }) as AssistantConversationTurn & TurnHeaderOverrides;
+    message.turnState = "completed";
+    message.turnStartedAt = "2026-09-16T10:00:00.000Z";
+    message.turnEndedAt = "2026-09-16T10:02:30.000Z";
+    const summary = resolveConversationTurnWorkSummary(message);
+    expect(summary).toEqual({
+      durationMs: 150_000,
+      basis: "turn_header",
+      toolCallCount: 1,
+      toolDurationMs: null,
+    });
+  });
+
+  it("keeps the honest degradation for running turns even with a header", () => {
+    // Live turns have no settled span; the header alone must not fabricate one.
+    const message = turn({
+      turnItems: [toolItem({ metadata: { durationMs: 40_000 } })],
+    }) as AssistantConversationTurn & TurnHeaderOverrides;
+    message.turnState = "running";
+    message.turnStartedAt = "2026-09-16T10:00:00.000Z";
+    message.turnActiveMs = 90_000;
+    const summary = resolveConversationTurnWorkSummary(message);
+    expect(summary).toEqual({
+      durationMs: 40_000,
+      basis: "tool_durations",
+      toolCallCount: 1,
+      toolDurationMs: 40_000,
+    });
+  });
+
+  it("reads the first-class tool durationMs before the metadata fallback", () => {
+    const summary = resolveConversationTurnWorkSummary(turn({
+      turnItems: [
+        toolItem({ metadata: { durationMs: 40_000 }, durationMs: 9_000 } as Partial<Extract<SessionTurnItem, { type: "tool_call" }>>),
+      ],
+    }));
+    expect(summary?.basis).toBe("tool_durations");
+    expect(summary?.durationMs).toBe(9_000);
+    expect(summary?.toolDurationMs).toBe(9_000);
   });
 
   it("drops sub-threshold turns and turns without any time facts", () => {

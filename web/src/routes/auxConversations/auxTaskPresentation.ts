@@ -1,3 +1,14 @@
+import {
+  Ban,
+  CheckCircle2,
+  CircleAlert,
+  CircleDashed,
+  Clock,
+  LoaderCircle,
+  PauseCircle,
+  type LucideIcon,
+} from "lucide-react";
+
 import type { VStatusTone } from "../../components/vui";
 
 /**
@@ -68,6 +79,42 @@ export function auxTaskStatusTone(status: string): VStatusTone {
     return "warning";
   }
   return "neutral";
+}
+
+/**
+ * Neutral directory glyph per status word. The icon never carries color —
+ * semantics live in the status label next to the title — and only the live
+ * `running` state spins; `stopping` shows the same glyph, static.
+ * Mirrors ZCode SubagentDirectorySidePane.tsx:45-62.
+ */
+export type AuxTaskStatusIcon = {
+  Icon: LucideIcon;
+  spin: boolean;
+};
+
+export function auxTaskStatusIcon(status: string): AuxTaskStatusIcon {
+  const normalized = String(status || "").trim().toLowerCase();
+  switch (normalized) {
+    case "running":
+      return { Icon: LoaderCircle, spin: true };
+    case "stopping":
+      return { Icon: LoaderCircle, spin: false };
+    case "queued":
+      return { Icon: Clock, spin: false };
+    case "waiting":
+      return { Icon: PauseCircle, spin: false };
+    case "succeeded":
+    case "completed":
+      return { Icon: CheckCircle2, spin: false };
+    case "failed":
+    case "timed_out":
+      return { Icon: CircleAlert, spin: false };
+    case "cancelled":
+    case "stopped":
+      return { Icon: Ban, spin: false };
+    default:
+      return { Icon: CircleDashed, spin: false };
+  }
 }
 
 /**

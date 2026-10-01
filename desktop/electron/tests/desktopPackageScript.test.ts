@@ -9,6 +9,8 @@ const workbenchCloseCanaryScriptPath = fileURLToPath(
   new URL("../../../scripts/verify_desktop_workbench_close.ps1", import.meta.url)
 );
 const electronBuilderConfigPath = fileURLToPath(new URL("../electron-builder.json", import.meta.url));
+const provenanceWriterPath = fileURLToPath(new URL("../src/scripts/writePackageProvenance.ts", import.meta.url));
+const frontendBundlePath = fileURLToPath(new URL("../src/packaging/frontendBundle.ts", import.meta.url));
 
 describe("desktop package script", () => {
   it("does not mask npm or node failures before writing the launch profile", () => {
@@ -55,6 +57,27 @@ describe("desktop package script", () => {
 
     expect(packageJson.scripts?.["write:provenance"]).toContain("writePackageProvenance.js");
     expect(packageJson.scripts?.["package:dir"]).toContain("npm run write:provenance");
+  });
+
+  it("packages the verified active frontend release and binds its copied bytes", () => {
+    const config = JSON.parse(readFileSync(electronBuilderConfigPath, "utf8")) as {
+      extraResources?: Array<{ from?: string; to?: string }>;
+    };
+    const writer = readFileSync(provenanceWriterPath, "utf8");
+    const frontendBundle = readFileSync(frontendBundlePath, "utf8");
+    const packageJson = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(config.extraResources).toContainEqual({
+      from: "node_modules/.cache/vibelution-package-web-dist",
+      to: "web-dist"
+    });
+    expect(config.extraResources?.some((entry) => entry.from === "../../web/dist")).toBe(false);
+    expect(writer).toContain("preparePackagedFrontend");
+    expect(frontendBundle).toContain("ensure-frontend-build");
+    expect(frontendBundle).toContain("frontendContentSha256");
+    expect(packageJson.scripts?.["package:linux-arm64:dir"]).toContain("npm run write:provenance");
   });
 
   it("provides a reusable package verification entrypoint", () => {

@@ -225,7 +225,7 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         source="session_live_overlay",
         stage=stage,
     )
-    return {
+    message = {
         "id": message_id,
         "role": "assistant",
         "timestamp": timestamp,
@@ -238,6 +238,16 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
             "ledgerSeq": s._session_ledger_sequence(session_id),
         },
     }
+    # ZCode turnHeader 对齐：live 阶段至少给 running + startedAt。
+    turn_header = s._assistant_turn_header_fields(
+        session_id,
+        turn_id,
+        streaming=True,
+        fallback_status="running",
+    )
+    if turn_header:
+        message.update(turn_header)
+    return message
 
 
 def _set_session_live_output(

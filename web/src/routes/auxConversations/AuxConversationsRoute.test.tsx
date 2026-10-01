@@ -42,7 +42,9 @@ vi.mock("../../app/browserTelemetry", () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const NOW = Date.parse("2026-10-01T12:00:00Z");
+// Module-load time, not a fixed stamp: relative-time assertions ("刚刚",
+// "2 小时前") stay deterministic no matter when the suite runs.
+const NOW = Date.now();
 
 function task(overrides: Partial<RuntimeTaskCard> & { taskId: string }): RuntimeTaskCard {
   return {
@@ -136,6 +138,15 @@ describe("AuxConversationsRoute", () => {
     return found!;
   }
 
+  function buttonIn(scope: Element | null, label: string): HTMLButtonElement {
+    expect(scope, "scoped root should exist").toBeTruthy();
+    const found = [...scope!.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent?.includes(label) || candidate.getAttribute("aria-label") === label,
+    );
+    expect(found, `button "${label}" should exist in scope`).toBeTruthy();
+    return found!;
+  }
+
   beforeEach(() => {
     pollingState.visible = true;
     runtimeApi.listRuntimeTasksRevisionAware.mockReset().mockResolvedValue(listPayload());
@@ -165,22 +176,29 @@ describe("AuxConversationsRoute", () => {
     document.querySelectorAll('[data-vui="dialog-content"]').forEach((node) => node.remove());
   });
 
-  it("renders running and ended sections with status dots, titles, kind badges and relative time", async () => {
+  it("renders running and ended sections with neutral icons, titles, status words and relative time", async () => {
     await mountRoute();
     await flushUntil(() => runtimeApi.listRuntimeTasksRevisionAware.mock.calls.length > 0);
     expect(host!.textContent).toContain("正在运行");
     expect(host!.textContent).toContain("已结束");
     expect(host!.querySelector('section[aria-label="正在运行"]')?.textContent).toContain("子任务：调研资料");
     expect(host!.querySelector('section[aria-label="正在运行"]')?.textContent).toContain("子会话");
+    expect(host!.querySelector('section[aria-label="正在运行"]')?.textContent).toContain("运行中");
+    expect(host!.querySelector('section[aria-label="正在运行"]')?.textContent).toContain("正在汇总候选资料");
     expect(host!.querySelector('section[aria-label="已结束"]')?.textContent).toContain("CLI 修复构建");
     expect(host!.querySelector('section[aria-label="已结束"]')?.textContent).toContain("CLI agent");
+    // Ended rows age from endedAt (2h ago), running rows from startedAt (刚刚).
+    expect(host!.querySelector('section[aria-label="已结束"]')?.textContent).toContain("2 小时前");
+    expect(host!.querySelector('section[aria-label="已结束"]')?.textContent).not.toContain("3 小时前");
     expect(host!.textContent).toContain("刚刚");
+    // Only the running row carries an inline stop action.
+    expect(host!.querySelectorAll('button[aria-label="停止任务"]').length).toBe(1);
     // Detail pane starts with the empty selection state.
     expect(host!.textContent).toContain("选择一个任务查看详情");
     // The list fetch receives the default (unfiltered) kind and the seeded
     // payload as the revision baseline.
     expect(runtimeApi.listRuntimeTasksRevisionAware).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "all", kind: undefined }),
+      expect.objectContaining({ status: "all", kind: undefined, limit: 20 }),
       expect.objectContaining({ revision: "rev-1" }),
       expect.anything(),
     );
@@ -224,7 +242,8 @@ describe("AuxConversationsRoute", () => {
       button("子任务：调研资料").click();
     });
     await act(async () => {
-      button("停止任务").click();
+      // The detail-pane stop button; the row-level one is covered separately.
+      buttonIn(host!.querySelector('section[aria-label="详情"]'), "停止任务").click();
     });
     const dialog = document.querySelector('[data-vui="dialog-content"]');
     expect(dialog, "confirm dialog should open").toBeTruthy();
@@ -245,6 +264,30 @@ describe("AuxConversationsRoute", () => {
     expect(host!.textContent).toContain("已请求停止，等待任务结束");
   });
 
+  it("opens stop from the running row without selecting the row", async () => {
+    await mountRoute();
+    await flushUntil(() => runtimeApi.listRuntimeTasksRevisionAware.mock.calls.length > 0);
+    const rowStop = [...(host?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      (candidate) => candidate.getAttribute("aria-label") === "停止任务",
+    );
+    expect(rowStop, "row-level stop button should exist").toBeTruthy();
+    await act(async () => {
+      rowStop!.click();
+    });
+    // stopPropagation + overlay-sibling anatomy: the dialog opens while the
+    // row stays unselected.
+    expect(document.querySelector('[data-vui="dialog-content"]')).toBeTruthy();
+    expect(host!.textContent).toContain("选择一个任务查看详情");
+    const dialog = document.querySelector('[data-vui="dialog-content"]')!;
+    const confirmButton = [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent?.includes("停止任务"),
+    );
+    await act(async () => {
+      confirmButton!.click();
+    });
+    await vi.waitFor(() => expect(runtimeApi.stopRuntimeTask).toHaveBeenCalledWith("task-running-1"));
+  });
+
   it("loads more ended tasks with the cursor and keeps extras until the revision changes", async () => {
     const secondPageTask = task({
       taskId: "task-ended-2",
@@ -261,17 +304,33 @@ describe("AuxConversationsRoute", () => {
     );
     expect(host!.querySelector('section[aria-label="已结束"]')?.textContent).not.toContain("研究任务：补证据");
     await act(async () => {
-      button("加载更多").click();
+      button("再显示 20 个").click();
     });
     await vi.waitFor(() =>
       expect(runtimeApi.listRuntimeTasks).toHaveBeenCalledWith(
-        expect.objectContaining({ status: "ended", cursor: "cursor-1", kind: undefined }),
+        expect.objectContaining({ status: "ended", cursor: "cursor-1", kind: undefined, limit: 20 }),
       ),
     );
     await flushUntil(() =>
       Boolean(host?.querySelector('section[aria-label="已结束"]')?.textContent?.includes("研究任务：补证据")),
     );
     expect(host!.querySelector('section[aria-label="已结束"]')?.textContent).toContain("研究任务：补证据");
+  });
+
+  it("shows a weak empty line for an empty running section", async () => {
+    const payload = listPayload({ running: [] });
+    runtimeApi.listRuntimeTasksRevisionAware.mockResolvedValue(payload);
+    await mountRoute("/aux", payload);
+    await flushUntil(() => runtimeApi.listRuntimeTasksRevisionAware.mock.calls.length > 0);
+    expect(host!.querySelector('section[aria-label="正在运行"]')?.textContent).toContain("没有正在运行的任务");
+  });
+
+  it("leaves an empty ended section without copy", async () => {
+    const payload = listPayload({ ended: { items: [], total: 0, nextCursor: "" } });
+    runtimeApi.listRuntimeTasksRevisionAware.mockResolvedValue(payload);
+    await mountRoute("/aux", payload);
+    await flushUntil(() => runtimeApi.listRuntimeTasksRevisionAware.mock.calls.length > 0);
+    expect(host!.querySelector('section[aria-label="已结束"]')?.textContent?.trim()).toBe("已结束 · 0");
   });
 
   it("polls the list every 4s while visible and stops polling when hidden", async () => {

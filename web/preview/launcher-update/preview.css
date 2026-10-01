@@ -1,0 +1,10 @@
+@import "../../src/design/tokens.css";
+@import "../../src/design/base.css";
+@import "../../src/design/tailwind.css";
+@import "../../src/design/vui-provider-theme.css";
+@import "../../src/design/vui-native-controls.css";
+@import "../../src/design/route-css/workbench-secondary.tailwind.css";
+@source "./main.tsx";
+
+/* Preview-only document framing; product controls use the existing VUI tokens. */
+html, body, #root { min-width: 320px; overflow: auto; }

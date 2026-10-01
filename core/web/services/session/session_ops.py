@@ -1357,6 +1357,9 @@ def _session_turn_item_from_codex_cell(
             "executionStartedAtEpochMs": s._coerce_tool_number(
                 cell.get("executionStartedAtEpochMs") or cell.get("execution_started_at_epoch_ms")
             ),
+            # Live and settled items must agree on tool cost: the capture entry
+            # already measures the call, so pass it through verbatim.
+            "durationMs": s._coerce_tool_number(cell.get("durationMs") or cell.get("duration_ms")),
             "attempt": s._coerce_nonnegative_int(cell.get("attempt")) or None,
             "maxAttempts": s._coerce_nonnegative_int(
                 cell.get("maxAttempts") or cell.get("max_attempts")

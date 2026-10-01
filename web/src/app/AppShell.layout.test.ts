@@ -309,6 +309,29 @@ describe("AppShell layout contract", () => {
     expect(shellDictionary.en.agentBroadcastUnread).toBe("new broadcasts");
   });
 
+  it("exposes the aux task center from the title bar with a running-count badge", () => {
+    // The entry sits in the settings trigger family next to the git shortcut.
+    expect(shellSource).toContain('to="/aux"');
+    expect(shellSource).toContain("<ListTree size={17} />");
+    expect(shellSource).toContain("const auxCenterLabel = lang === \"en\" ? \"Background tasks\" : \"后台任务\";");
+    expect(shellSource).toContain('aria-label={auxCenterLabel}');
+    // Global active-only badge poll: revision-aware payload, gentle foreground
+    // beat, no background churn, cache entry distinct from /aux and strips.
+    expect(shellSource).toContain('queryKeys.runtimeTasks("", "shell")');
+    expect(shellSource).toContain('listRuntimeTasksRevisionAware(\n        { status: "active" }');
+    expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000)");
+    expect(shellSource).toContain("refetchIntervalInBackground: false");
+    // Badge reads running.length: digit when busy, hidden at zero, 9+ clamp.
+    expect(shellSource).toContain('shellAuxRunningCount > 9 ? "9+" : String(shellAuxRunningCount)');
+    expect(shellSource).toContain("{shellAuxRunningBadge ? (");
+    expect(shellSource).toContain("styles.settingsTriggerCountBadge");
+    expect(styles.settingsTriggerCountBadge).toContain("absolute");
+    expect(styles.settingsTriggerCountBadge).toContain("bg-[var(--accent-cool)]");
+    expect(styles.settingsTriggerCountBadge).toContain("rounded-full");
+    // /aux stops falling back to the app title in the return-navigation label.
+    expect(shellSource).toContain('if (pathname.startsWith("/aux")) return auxCenterLabel;');
+  });
+
   it("exposes a shell-level semantic return action without visible helper copy", () => {
     expect(shellSource).toContain("resolveReturnTarget(routeLocationFromRouter(location), returnNavigationStack)");
     expect(shellSource).toContain("consumeReturnNavigationTarget(current, targetPath)");
