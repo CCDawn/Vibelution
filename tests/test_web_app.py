@@ -302,6 +302,16 @@ def _install_session_turn_scheduler(monkeypatch, *, max_active_per_agent: int):
 
 
 @pytest.fixture(autouse=True)
+def use_isolated_session_config(monkeypatch: pytest.MonkeyPatch):
+    config = session_service.get_config().model_copy(deep=True)
+    for entry in config.llm.model_library.values():
+        if isinstance(entry, dict) and int(entry.get("context_window") or entry.get("contextWindow") or 0) <= 0:
+            entry["context_window"] = 200000
+    monkeypatch.setattr(session_service, "get_config", lambda **_kwargs: config)
+    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
+
+
+@pytest.fixture(autouse=True)
 def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
@@ -771,7 +781,6 @@ def test_session_detail_exposes_recent_next_state_signal_summaries(tmp_path, mon
 
 
 def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
@@ -806,7 +815,6 @@ def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeyp
 
 
 def test_create_session_invalidates_agent_index_cache_after_project_root_switch(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
     old_root = tmp_path / "old-project"
     new_root = tmp_path / "new-project"
     _seed_chat_state(old_root)
@@ -1199,7 +1207,6 @@ def test_delete_bound_direct_session_rebinds_agent_without_reviving_old_session(
 
 
 def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_service, "get_web_language", lambda: "zh")
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
@@ -2204,6 +2211,7 @@ def test_submit_session_message_rejects_archived_agent_without_mutating_session(
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     detail = session_service.create_chat_session(title="归档 Agent")
+    _bind_seeded_submittable_agent(tmp_path, session_id=detail["id"])
     agent_directory_service.archive_agent_instance(detail["agentId"])
     events = []
     monkeypatch.setattr(
