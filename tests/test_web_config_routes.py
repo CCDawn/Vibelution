@@ -3617,6 +3617,9 @@ def test_config_workspace_model_discovery_rejects_localhost(monkeypatch):
 
 def test_config_workspace_apply_rejects_stale_base_hash(monkeypatch):
     original = copy.deepcopy(load_public_config())
+    # Normalize the fixture language: the stale-hash contrast below must not be
+    # washed out when the live operator config already carries ui.language="en".
+    original.setdefault("ui", {})["language"] = "zh"
     stale_hash = public_config_hash(original)
     external = copy.deepcopy(original)
     external.setdefault("ui", {})["language"] = "en"
