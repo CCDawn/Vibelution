@@ -3,9 +3,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import core.web.services.self_evolution_autonomous_loop_orchestrator as orchestrator_module
 from core.web.services.self_evolution_autonomous_loop_orchestrator import (
     SelfEvolutionAutonomousLoopOrchestrator,
     build_runtime_dependencies,
+    interrupt_active_autonomous_self_evolution_for_restart,
 )
 from core.web.services.self_evolution_autonomous_loop_runtime import (
     build_autonomous_loop_hooks,
@@ -53,6 +55,10 @@ class _FakeService:
     def retry_cleanup(self, run_id):
         self.calls.append(("retry_cleanup", run_id))
         return {"runId": run_id, "status": "completed"}
+
+    def interrupt_active_for_restart(self, reason):
+        self.calls.append(("interrupt_active_for_restart", reason))
+        return [{"runId": "self-loop-async", "status": "stopped"}]
 
     def load(self, run_id):
         self.calls.append(("load", run_id))
@@ -139,6 +145,37 @@ def test_orchestrator_exposes_user_decision_and_recovery_actions():
     assert orchestrator.get("self-loop-async")["runId"] == "self-loop-async"
     assert orchestrator.get_active()["phase"] == "queued"
     assert orchestrator.get_latest()["status"] == "queued"
+
+
+def test_orchestrator_exposes_operator_restart_interruption():
+    service = _FakeService()
+    orchestrator = SelfEvolutionAutonomousLoopOrchestrator(
+        service=service,
+        executor=_ImmediateExecutor(),
+    )
+
+    stopped = orchestrator.interrupt_active_for_restart("operator restart")
+
+    assert stopped == [{"runId": "self-loop-async", "status": "stopped"}]
+    assert service.calls == [
+        ("interrupt_active_for_restart", "operator restart"),
+    ]
+
+
+def test_restart_facade_forwards_to_default_orchestrator(monkeypatch):
+    class _RestartOwner:
+        def interrupt_active_for_restart(self, reason):
+            return [{"runId": reason, "status": "stopped"}]
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "default_orchestrator",
+        lambda: _RestartOwner(),
+    )
+
+    assert interrupt_active_autonomous_self_evolution_for_restart(
+        "operator restart"
+    ) == [{"runId": "operator restart", "status": "stopped"}]
 
 
 def test_runtime_dependencies_create_integrate_and_cleanup_one_owned_candidate(

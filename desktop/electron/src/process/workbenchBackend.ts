@@ -113,6 +113,8 @@ export type ExecuteMainLineWorkbenchInput = {
   terminateProcessTree?: (pid: number, expectedIdentity?: PythonProcessIdentity) => boolean | Promise<boolean>;
   expectedIdentities?: Readonly<Record<string, PythonProcessIdentity>>;
   controlToken?: string;
+  /** Explicit operator restart consent to pause active work through graceful shutdown. */
+  interruptActiveWork?: boolean;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   ownedDirectPids?: readonly number[];
   readDaemonPid?: (workspaceRoot: string) => number;
@@ -761,6 +763,8 @@ export async function reclaimStaleWorkbenchBackend(input: {
   /** Inventory-based port owner resolution; see classifyWorkbenchPortOccupant. */
   resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
   controlToken?: string;
+  /** Explicit operator restart consent to pause active work through graceful shutdown. */
+  interruptActiveWork?: boolean;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
   forceRetireOnActiveWorkRefusal?: boolean;
@@ -911,6 +915,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         host: input.host,
         backendPid: occupant.pid,
         controlToken: input.controlToken,
+        interruptActiveWork: input.interruptActiveWork,
         healthVerified: true,
         signal: input.signal,
         pidAlive,
@@ -922,6 +927,17 @@ export async function reclaimStaleWorkbenchBackend(input: {
       if (gracefulCompleted) {
         await closeTrackedWorkbenchJob(input.workspaceRoot);
       }
+    }
+    const restartPauseConfirmed = graceful?.status === 202 && graceful.requested;
+    if (!gracefulCompleted && input.interruptActiveWork && !restartPauseConfirmed) {
+      return {
+        reclaimed: false,
+        activeWorkBlocked: graceful?.status === 409,
+        reason: graceful?.reason
+          ? `explicit user restart shutdown was not confirmed: ${graceful.reason}`
+          : "explicit user restart shutdown was not confirmed; verified process-tree retirement was withheld",
+        verifiedPid: occupant.pid
+      };
     }
     if (
       !gracefulCompleted
@@ -1042,6 +1058,8 @@ export async function resolveBindableWorkbenchPort(input: {
   /** Inventory-based port owner resolution for a wedged backend. */
   resolvePortOwner?: (port: number) => Promise<WorkbenchPortOwnerResolution | null>;
   controlToken?: string;
+  /** Explicit operator restart consent to pause active work through graceful shutdown. */
+  interruptActiveWork?: boolean;
   gracefulShutdown?: typeof requestGracefulWorkbenchShutdown;
   /** Only an explicitly authorized force-stop may bypass an HTTP 409 active-work refusal. */
   forceRetireOnActiveWorkRefusal?: boolean;
@@ -1070,6 +1088,11 @@ export async function resolveBindableWorkbenchPort(input: {
       );
     }
     const reclaim = await reclaimStaleWorkbenchBackend({ ...input, port: preferred, host });
+    if (input.interruptActiveWork && !reclaim.reclaimed) {
+      throw new Error(
+        `workbench backend port ${preferred} was not rebound because explicit user restart cleanup was not confirmed (${reclaim.reason}).`
+      );
+    }
     if (await connect(preferred, host)) {
       throw new Error(
         `workbench backend port ${preferred} is still held by stale backend pid ${occupant.pid} of this project `
@@ -1365,7 +1388,7 @@ export async function executeMainLineWorkbench(
   };
 
   if (operation === "stop" || operation === "force-stop" || operation === "shutdown") {
-    if (operation === "stop" || operation === "shutdown") {
+    if ((operation === "stop" || operation === "shutdown") && !input.interruptActiveWork) {
       const blocked = blockLifecycleIfActiveWork(
         "stop",
         (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
@@ -1452,6 +1475,7 @@ export async function executeMainLineWorkbench(
         resolvePortOwner: resolveCurrentPortOwner,
         controlToken: input.controlToken,
         gracefulShutdown,
+        interruptActiveWork: input.interruptActiveWork,
         forceRetireOnActiveWorkRefusal: operation === "force-stop",
         registeredPids: retainedBackendTreePids,
         extraPids: retainedExtraPids
@@ -1460,6 +1484,16 @@ export async function executeMainLineWorkbench(
       staleReclaim = {
         reclaimed: false,
         reason: "backend retirement is pending registered-handle cleanup"
+      };
+    }
+    if (input.interruptActiveWork && !staleReclaim.reclaimed) {
+      return {
+        schemaVersion: 1,
+        accepted: false,
+        operation,
+        commandId,
+        code: "user_restart_pause_failed",
+        message: `explicit user restart shutdown was not confirmed: ${staleReclaim.reason}`
       };
     }
     const unverifiedHandles: number[] = [];
@@ -1629,10 +1663,12 @@ export async function executeMainLineWorkbench(
   }
 
   if (operation === "restart") {
-    const blocked = blockLifecycleIfActiveWork(
-      "restart",
-      (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
-    );
+    const blocked = input.interruptActiveWork
+      ? null
+      : blockLifecycleIfActiveWork(
+          "restart",
+          (input.listActiveWork ?? (() => listActiveWorkRuns(input.workspaceRoot)))()
+        );
     if (blocked) {
       const intent = queueDeferredRestartIntent(input.workspaceRoot, {
         reason: blocked.message,
@@ -1757,9 +1793,9 @@ export async function executeMainLineWorkbench(
       );
     }
     // Classify and, when necessary, gracefully retire the port occupant before
-    // touching registered handles.  A backend HTTP 409 is an active-work
-    // protection decision; ordinary restart must not kill its process tree
-    // merely because the port needs to be rebound.
+    // touching registered handles. An explicit operator restart can ask the
+    // backend to pause and persist active work; any process-tree fallback still
+    // requires a 202 pause acknowledgement plus verified process ownership.
     resolved = await resolveBindableWorkbenchPort({
       preferred,
       host,
@@ -1774,6 +1810,7 @@ export async function executeMainLineWorkbench(
       captureProcessIdentity: captureCurrentBackendIdentity,
       resolvePortOwner: resolveCurrentPortOwner,
       gracefulShutdown,
+      interruptActiveWork: input.interruptActiveWork,
       forceRetireOnActiveWorkRefusal: false
     });
     try {

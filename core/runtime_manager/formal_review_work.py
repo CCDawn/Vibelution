@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import os
+import threading
 from typing import Any, Mapping
 
 import psutil
@@ -12,6 +13,31 @@ import psutil
 from .work_run_store import WorkRunStore
 
 KIND = "formal_review"
+_LIFECYCLE_LOCK = threading.RLock()
+_restart_requested = False
+
+
+class FormalReviewInterrupted(RuntimeError):
+    """Do not promote an invocation result after operator restart interruption."""
+
+
+def interrupt_active_for_restart(reason: str) -> list[dict[str, Any]]:
+    """Seal this backend's review invocations before its process retires."""
+    global _restart_requested
+    with _LIFECYCLE_LOCK:
+        _restart_requested = True
+        store = _store()
+        stopped = []
+        ended = datetime.now(timezone.utc).isoformat()
+        for snapshot in store.load_active_snapshots(KIND):
+            if int(snapshot.get("ownerPid") or 0) != os.getpid() or not is_live(snapshot):
+                continue
+            stopped.append(store.persist_snapshot(KIND, {
+                **snapshot, "status": "stopped", "currentPhase": "interrupted_by_restart",
+                "interruptedByRestart": True, "stopReason": reason,
+                "updatedAt": ended, "finishedAt": ended, "leases": [],
+            }))
+        return stopped
 
 
 def _store() -> WorkRunStore:
@@ -51,12 +77,21 @@ def active_formal_review(receipt_context: Mapping[str, Any], *, purpose: str):
         **{key: str(binding.get(key) or "") for key in
            ("workflowRunId", "questionId", "sessionId", "turnId")},
     }
-    store.persist_snapshot(KIND, snapshot, active_run_id=run_id)
+    with _LIFECYCLE_LOCK:
+        if _restart_requested:
+            raise FormalReviewInterrupted("The backend is retiring for an operator restart.")
+        store.persist_snapshot(KIND, snapshot, active_run_id=run_id)
     status = "failed"
     try:
         yield
         status = "completed"
     finally:
         ended = datetime.now(timezone.utc).isoformat()
-        store.persist_snapshot(KIND, {**snapshot, "status": status,
-                                     "updatedAt": ended, "finishedAt": ended})
+        with _LIFECYCLE_LOCK:
+            current = store.load_snapshot(KIND, run_id) or {}
+            if current.get("interruptedByRestart"):
+                if status == "completed":
+                    raise FormalReviewInterrupted("The review was interrupted by an operator restart.")
+            else:
+                store.persist_snapshot(KIND, {**snapshot, "status": status,
+                                             "updatedAt": ended, "finishedAt": ended})

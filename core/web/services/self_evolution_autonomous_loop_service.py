@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import uuid
 import re
 from copy import deepcopy
@@ -29,6 +30,7 @@ MAX_CHANGED_FILES = 400
 MAX_VERIFICATION_ITEMS = 100
 MAX_EVIDENCE_TEXT_LENGTH = 8_000
 MAX_EVIDENCE_DEPTH = 6
+RESTART_HOOK_SETTLE_TIMEOUT_SECONDS = 10.0
 _SECRET_KEY_MARKERS = {
     "api_key",
     "apikey",
@@ -92,6 +94,9 @@ class SelfEvolutionAutonomousLoopService:
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
         self._process_id = int(process_id or os.getpid())
         self._process_alive = process_alive or _default_process_alive
+        self._inflight_atomic_hooks: dict[str, tuple[str, threading.Event]] = {}
+        self._restart_requests: dict[str, str] = {}
+        self._retiring = False
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         """Run observe, plan, and evolve phases, then stop for user review."""
@@ -104,6 +109,7 @@ class SelfEvolutionAutonomousLoopService:
 
         normalized_request = _normalize_request(request)
         with _LOCK:
+            self._ensure_not_retiring()
             active = self._store.load_active_snapshot(RUN_KIND)
             if active is not None:
                 raise AutonomousLoopConflictError(
@@ -136,6 +142,10 @@ class SelfEvolutionAutonomousLoopService:
 
         with _LOCK:
             snapshot = self._load_required(run_id)
+            if _is_restart_interrupted(snapshot):
+                return snapshot
+            if self._retiring:
+                return snapshot
             _require_phase(snapshot, "queued", status="queued")
             snapshot = self._advance(
                 snapshot,
@@ -152,12 +162,16 @@ class SelfEvolutionAutonomousLoopService:
                 phase="planning",
                 updates={"observation": observation},
             )
+            if _is_restart_interrupted(snapshot):
+                return snapshot
             plan = _normalize_plan(self._hooks.plan(_phase_context(snapshot)))
             snapshot = self._advance(
                 snapshot,
                 phase="evolving",
                 updates={"plan": plan},
             )
+            if _is_restart_interrupted(snapshot):
+                return snapshot
             candidate = _normalize_candidate(
                 self._hooks.evolve(_phase_context(snapshot))
             )
@@ -175,13 +189,22 @@ class SelfEvolutionAutonomousLoopService:
                 },
             )
         except Exception as exc:
-            return self._fail(snapshot, phase=f"{snapshot['phase']}_failed", exc=exc)
+            with _LOCK:
+                current = self._load_required(run_id)
+                if _is_restart_interrupted(current):
+                    return current
+                return self._fail(
+                    current,
+                    phase=f"{current['phase']}_failed",
+                    exc=exc,
+                )
 
     def approve(self, run_id: str, *, decision: dict[str, Any]) -> dict[str, Any]:
         """Apply explicit user approval, integrate, and clean local candidate state."""
 
         approval = _normalize_user_decision(decision, expected="approve")
         with _LOCK:
+            self._ensure_not_retiring()
             snapshot = self._load_required(run_id)
             integration_retry = (
                 str(snapshot.get("status") or "") == "failed"
@@ -225,20 +248,76 @@ class SelfEvolutionAutonomousLoopService:
                 },
             )
 
+        run_key = str(snapshot["runId"])
+        integration_event = threading.Event()
+        with _LOCK:
+            current = self._load_required(run_id)
+            if _is_restart_interrupted(current):
+                return current
+            self._inflight_atomic_hooks[run_key] = (
+                "integrating",
+                integration_event,
+            )
+
+        with _LOCK:
+            current = self._load_required(run_id)
+            if _is_restart_interrupted(current):
+                self._finish_atomic_hook(run_key, integration_event)
+                return current
+            restart_reason = self._restart_requests.get(run_key)
+            if restart_reason:
+                result = self._mark_interrupted(current, restart_reason)
+                self._finish_atomic_hook(run_key, integration_event)
+                return result
+
         try:
             integration = _normalize_integration(
                 self._hooks.integrate(_phase_context(snapshot)),
                 candidate=snapshot["candidate"],
             )
+        except Exception as exc:
+            with _LOCK:
+                current = self._load_required(run_id)
+                if _is_restart_interrupted(current):
+                    result = current
+                else:
+                    restart_reason = self._restart_requests.get(run_key)
+                    result = self._fail(
+                        current,
+                        phase="integration_failed",
+                        exc=exc,
+                        status="stopped" if restart_reason else "failed",
+                        restart_reason=restart_reason,
+                    )
+                self._finish_atomic_hook(run_key, integration_event)
+                return result
+
+        with _LOCK:
+            current = self._load_required(run_id)
+            if _is_restart_interrupted(current):
+                self._finish_atomic_hook(run_key, integration_event)
+                return current
             snapshot = self._advance(
-                snapshot,
+                current,
                 phase="cleanup_pending",
                 updates={"integration": integration},
             )
-        except Exception as exc:
-            return self._fail(snapshot, phase="integration_failed", exc=exc)
+            if _is_restart_interrupted(snapshot):
+                self._finish_atomic_hook(run_key, integration_event)
+                return snapshot
+            restart_reason = self._restart_requests.get(run_key)
+            if restart_reason:
+                result = self._mark_interrupted(snapshot, restart_reason)
+                self._finish_atomic_hook(run_key, integration_event)
+                return result
+            cleanup_event = threading.Event()
+            self._inflight_atomic_hooks[run_key] = (
+                "cleanup_pending",
+                cleanup_event,
+            )
+            integration_event.set()
 
-        return self._run_cleanup(snapshot)
+        return self._run_cleanup(snapshot, atomic_event=cleanup_event)
 
     def reject(self, run_id: str, *, decision: dict[str, Any]) -> dict[str, Any]:
         """Record a user rejection while preserving the candidate for follow-up."""
@@ -265,8 +344,16 @@ class SelfEvolutionAutonomousLoopService:
         """Retry cleanup only after a persisted successful merge."""
 
         with _LOCK:
+            self._ensure_not_retiring()
             snapshot = self._load_required(run_id)
-            _require_phase(snapshot, "cleanup_failed", status="partial")
+            restart_cleanup_retry = (
+                str(snapshot.get("status") or "") == "stopped"
+                and bool(snapshot.get("interruptedByRestart"))
+                and str(snapshot.get("phase") or "")
+                in {"cleanup_pending", "cleanup_failed"}
+            )
+            if not restart_cleanup_retry:
+                _require_phase(snapshot, "cleanup_failed", status="partial")
             if str((snapshot.get("integration") or {}).get("status") or "") != "committed":
                 raise AutonomousLoopConflictError(
                     "Cleanup retry requires a persisted committed integration."
@@ -274,12 +361,26 @@ class SelfEvolutionAutonomousLoopService:
             snapshot = deepcopy(snapshot)
             snapshot.pop("error", None)
             snapshot.pop("finishedAt", None)
-            snapshot = self._advance(
-                snapshot,
-                status="running",
-                phase="cleanup_pending",
-                updates={"runtimeOwner": {"pid": self._process_id}},
-            )
+            if restart_cleanup_retry:
+                snapshot.pop("interruptedByRestart", None)
+                snapshot.pop("stopReason", None)
+                snapshot.pop("interruptedAt", None)
+                snapshot.update(
+                    {
+                        "status": "running",
+                        "phase": "cleanup_pending",
+                        "runtimeOwner": {"pid": self._process_id},
+                        "updatedAt": self._now(),
+                    }
+                )
+                snapshot = self._persist(snapshot, active=True)
+            else:
+                snapshot = self._advance(
+                    snapshot,
+                    status="running",
+                    phase="cleanup_pending",
+                    updates={"runtimeOwner": {"pid": self._process_id}},
+                )
         return self._run_cleanup(snapshot)
 
     def load(self, run_id: str) -> dict[str, Any]:
@@ -290,6 +391,97 @@ class SelfEvolutionAutonomousLoopService:
 
     def load_latest(self) -> dict[str, Any] | None:
         return self._store.load_latest_snapshot(RUN_KIND)
+
+    def interrupt_active_for_restart(self, reason: str) -> list[dict[str, Any]]:
+        """Persist stops for this process's active runs before operator restart."""
+
+        normalized_reason = _redact_text(
+            _trim_text(reason, MAX_SUMMARY_LENGTH)
+        )
+        if not normalized_reason:
+            raise AutonomousLoopValidationError(
+                "A restart interruption reason is required."
+            )
+
+        with _LOCK:
+            self._retiring = True
+        stopped: dict[str, dict[str, Any]] = {}
+        waiting_run_ids: set[str] = set()
+        deadline = time.monotonic() + RESTART_HOOK_SETTLE_TIMEOUT_SECONDS
+        while True:
+            waits: list[tuple[str, threading.Event]] = []
+            with _LOCK:
+                for snapshot in self._store.load_active_snapshots(RUN_KIND):
+                    if str(snapshot.get("status") or "") not in {"queued", "running"}:
+                        continue
+                    owner = snapshot.get("runtimeOwner")
+                    try:
+                        owner_pid = int(owner.get("pid") or 0) if isinstance(owner, dict) else 0
+                    except (TypeError, ValueError):
+                        owner_pid = 0
+                    if owner_pid != self._process_id:
+                        continue
+
+                    run_id = str(snapshot.get("runId") or "")
+                    atomic_hook = self._inflight_atomic_hooks.get(run_id)
+                    if atomic_hook is not None:
+                        _phase, settled = atomic_hook
+                        self._restart_requests[run_id] = normalized_reason
+                        waiting_run_ids.add(run_id)
+                        waits.append((run_id, settled))
+                        continue
+
+                    stopped[run_id] = self._mark_interrupted(
+                        snapshot,
+                        normalized_reason,
+                    )
+
+            if not waits:
+                with _LOCK:
+                    for run_id in waiting_run_ids:
+                        snapshot = self._store.load_snapshot(RUN_KIND, run_id)
+                        if snapshot is not None:
+                            stopped[run_id] = snapshot
+                return list(stopped.values())
+
+            for _run_id, settled in waits:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not settled.wait(timeout=remaining):
+                    raise RuntimeError(
+                        "integration in-flight; cannot confirm persisted stop yet"
+                    )
+
+    def _mark_interrupted(
+        self,
+        snapshot: dict[str, Any],
+        reason: str,
+    ) -> dict[str, Any]:
+        now = self._now()
+        next_snapshot = deepcopy(snapshot)
+        next_snapshot.update(
+            {
+                "status": "stopped",
+                "interruptedByRestart": True,
+                "stopReason": _redact_text(
+                    _trim_text(reason, MAX_SUMMARY_LENGTH)
+                ),
+                "interruptedAt": now,
+                "updatedAt": now,
+                "finishedAt": now,
+            }
+        )
+        return self._persist(next_snapshot, active=False)
+
+    def _finish_atomic_hook(
+        self,
+        run_id: str,
+        event: threading.Event,
+    ) -> None:
+        current = self._inflight_atomic_hooks.get(run_id)
+        if current is not None and current[1] is event:
+            self._inflight_atomic_hooks.pop(run_id, None)
+        self._restart_requests.pop(run_id, None)
+        event.set()
 
     def reconcile_interrupted_on_startup(self) -> dict[str, Any] | None:
         """Release stale process-owned phases while preserving user review."""
@@ -371,25 +563,66 @@ class SelfEvolutionAutonomousLoopService:
             return self._run_cleanup(snapshot)
         return snapshot
 
-    def _run_cleanup(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+    def _run_cleanup(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        atomic_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        run_id = str(snapshot.get("runId") or "")
+        with _LOCK:
+            current = self._load_required(run_id)
+            if _is_restart_interrupted(current):
+                if atomic_event is not None:
+                    self._finish_atomic_hook(run_id, atomic_event)
+                return current
+            restart_reason = self._restart_requests.get(run_id)
+            if restart_reason:
+                result = self._mark_interrupted(current, restart_reason)
+                if atomic_event is not None:
+                    self._finish_atomic_hook(run_id, atomic_event)
+                return result
+            snapshot = current
+            if atomic_event is None:
+                atomic_event = threading.Event()
+                self._inflight_atomic_hooks[run_id] = (
+                    "cleanup_pending",
+                    atomic_event,
+                )
         try:
             cleanup = _normalize_cleanup(
                 self._hooks.cleanup(_phase_context(snapshot))
             )
-            return self._advance(
-                snapshot,
-                status="completed",
-                phase="completed",
-                terminal=True,
-                updates={"cleanup": cleanup},
-            )
         except Exception as exc:
-            return self._fail(
-                snapshot,
-                phase="cleanup_failed",
-                exc=exc,
-                status="partial",
-            )
+            with _LOCK:
+                current = self._load_required(run_id)
+                if _is_restart_interrupted(current):
+                    result = current
+                else:
+                    restart_reason = self._restart_requests.get(run_id)
+                    result = self._fail(
+                        current,
+                        phase="cleanup_failed",
+                        exc=exc,
+                        status="stopped" if restart_reason else "partial",
+                        restart_reason=restart_reason,
+                    )
+                self._finish_atomic_hook(run_id, atomic_event)
+                return result
+        with _LOCK:
+            current = self._load_required(run_id)
+            if _is_restart_interrupted(current):
+                result = current
+            else:
+                result = self._advance(
+                    current,
+                    status="completed",
+                    phase="completed",
+                    terminal=True,
+                    updates={"cleanup": cleanup},
+                )
+            self._finish_atomic_hook(run_id, atomic_event)
+            return result
 
     def _load_required(self, run_id: str) -> dict[str, Any]:
         snapshot = self._store.load_snapshot(RUN_KIND, str(run_id or "").strip())
@@ -398,6 +631,12 @@ class SelfEvolutionAutonomousLoopService:
                 f"Unknown self-evolution autonomous loop: {run_id}"
             )
         return snapshot
+
+    def _ensure_not_retiring(self) -> None:
+        if self._retiring:
+            raise AutonomousLoopConflictError(
+                "The self-evolution service is retiring for an operator restart."
+            )
 
     def _advance(
         self,
@@ -408,15 +647,30 @@ class SelfEvolutionAutonomousLoopService:
         updates: dict[str, Any] | None = None,
         terminal: bool = False,
     ) -> dict[str, Any]:
-        next_snapshot = deepcopy(snapshot)
-        next_snapshot["phase"] = phase
-        next_snapshot["status"] = status or str(snapshot.get("status") or "running")
-        next_snapshot["updatedAt"] = self._now()
-        if updates:
-            next_snapshot.update(deepcopy(updates))
-        if terminal:
-            next_snapshot["finishedAt"] = self._now()
-        return self._persist(next_snapshot, active=not terminal)
+        with _LOCK:
+            run_id = str(snapshot.get("runId") or "")
+            current = self._store.load_snapshot(RUN_KIND, run_id)
+            if current is not None and _is_restart_interrupted(current):
+                late_updates = {
+                    key: value
+                    for key, value in (updates or {}).items()
+                    if key in {"observation", "plan", "candidate", "resultReport"}
+                }
+                if late_updates and current.get("phase") == snapshot.get("phase"):
+                    preserved = deepcopy(current)
+                    preserved.update(deepcopy(late_updates))
+                    preserved["updatedAt"] = self._now()
+                    return self._persist(preserved, active=False)
+                return current
+            next_snapshot = deepcopy(snapshot)
+            next_snapshot["phase"] = phase
+            next_snapshot["status"] = status or str(snapshot.get("status") or "running")
+            next_snapshot["updatedAt"] = self._now()
+            if updates:
+                next_snapshot.update(deepcopy(updates))
+            if terminal:
+                next_snapshot["finishedAt"] = self._now()
+            return self._persist(next_snapshot, active=not terminal)
 
     def _fail(
         self,
@@ -425,20 +679,33 @@ class SelfEvolutionAutonomousLoopService:
         phase: str,
         exc: Exception,
         status: str = "failed",
+        restart_reason: str | None = None,
     ) -> dict[str, Any]:
+        updates = {
+            "error": {
+                "type": type(exc).__name__,
+                "message": _redact_text(
+                    _trim_text(str(exc), MAX_SUMMARY_LENGTH)
+                ),
+            }
+        }
+        if restart_reason:
+            now = self._now()
+            updates.update(
+                {
+                    "interruptedByRestart": True,
+                    "stopReason": _redact_text(
+                        _trim_text(restart_reason, MAX_SUMMARY_LENGTH)
+                    ),
+                    "interruptedAt": now,
+                }
+            )
         return self._advance(
             snapshot,
-            status=status,
+            status="stopped" if restart_reason else status,
             phase=phase,
             terminal=True,
-            updates={
-                "error": {
-                    "type": type(exc).__name__,
-                    "message": _redact_text(
-                        _trim_text(str(exc), MAX_SUMMARY_LENGTH)
-                    ),
-                }
-            },
+            updates=updates,
         )
 
     def _persist(self, snapshot: dict[str, Any], *, active: bool) -> dict[str, Any]:
@@ -690,6 +957,12 @@ def _result_report(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def _phase_context(snapshot: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(snapshot)
+
+
+def _is_restart_interrupted(snapshot: dict[str, Any]) -> bool:
+    return bool(snapshot.get("interruptedByRestart")) or str(
+        snapshot.get("status") or ""
+    ) in {"stopped", "cancelled"}
 
 
 def _default_process_alive(pid: int) -> bool:

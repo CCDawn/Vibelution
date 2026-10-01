@@ -3481,7 +3481,10 @@ def test_runtime_restart_blocks_without_stopping_active_work(monkeypatch):
     assert calls == []
 
 @pytest.mark.skipif(os.name != "nt", reason="monkeypatches os.name=nt; delayed module imports dispatch WindowsPath on POSIX")
-def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
+@pytest.mark.parametrize("user_restart", [False, True])
+def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path, monkeypatch, user_restart):
+    monkeypatch.setattr(runtime_service, "get_web_language", lambda: "zh")
+    monkeypatch.setattr(runtime_service, "_stop_additional_work_for_restart", lambda **kwargs: [])
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -3525,6 +3528,8 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
     monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(runtime_service, "_schedule_local_backend_exit", lambda: calls.append("local_exit"))
+    monkeypatch.setattr(runtime_service, "_stop_active_source_collection_runs_before_shutdown", lambda **kwargs: [])
     monkeypatch.setattr(
         runtime_service,
         "submit_command",
@@ -3547,16 +3552,44 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
             tool_calls=[{"name": "read_file_tool", "status": "done", "summary": "runtime_service.py"}],
         )
 
-        response = client.post("/api/runtime/shutdown")
-
-        assert response.status_code == 409
-        detail = response.json()["detail"]
-        assert detail["code"] == "active_work_stop_blocked"
-        assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
-        assert detail["activeWorkRuns"][0]["runId"] == turn_control.turn_id
-        assert calls == []
-        active = session_service.load_chat_turn_work_run_summary()["active"]
-        assert active["runId"] == turn_control.turn_id
+        if user_restart:
+            response = client.post("/api/runtime/shutdown", json={
+                "source": "electron_user_restart", "reason": "user_restart", "interruptActiveWork": True,
+            })
+            assert response.status_code == 202
+            assert response.json()["mode"] == "local_retire"
+            assert calls == ["local_exit"]  # No daemon command or second lifecycle writer.
+            assert session_service.load_chat_turn_work_run_summary()["active"] is None
+            detail = session_service.get_session_detail("session-live")
+            assert detail["currentPhase"] == "ready"
+            events = session_service.load_conversation_events(tmp_path, "session-live")
+            assistant = next(event for event in events if event.event_type == session_service.EVENT_ASSISTANT_MESSAGE and event.turn_id == turn_control.turn_id)
+            assert "当前回答已经输出了一半。" in assistant.payload["content"]
+            assert assistant.status == "stopped"
+            # Read the durable state and journal rather than only the controller.
+            persisted = session_service.load_session_chat_state(tmp_path, "session-live")
+            assert persisted["last_turn_terminal_reason"] == "stopped_by_user"
+            from core.chat.turn_journal import turn_has_terminal_event
+            assert turn_has_terminal_event(tmp_path, "session-live", turn_control.turn_id)
+            # A worker finishing after interruption must not append its answer
+            # or change the saved stopped turn to a completed one.
+            before = [(event.event_id, event.event_type) for event in events]
+            session_service._persist_session_turn_result(
+                "session-live", {"status": "completed", "summary": "late worker answer"},
+                turn_id=turn_control.turn_id,
+            )
+            after = session_service.load_conversation_events(tmp_path, "session-live")
+            assert [(event.event_id, event.event_type) for event in after] == before
+        else:
+            response = client.post("/api/runtime/shutdown")
+            assert response.status_code == 409
+            detail = response.json()["detail"]
+            assert detail["code"] == "active_work_stop_blocked"
+            assert detail["message"] == "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
+            assert detail["activeWorkRuns"][0]["runId"] == turn_control.turn_id
+            assert calls == []
+            active = session_service.load_chat_turn_work_run_summary()["active"]
+            assert active["runId"] == turn_control.turn_id
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -3810,6 +3843,49 @@ def test_runtime_shutdown_blocks_active_chat_turn_when_stop_fails(tmp_path, monk
     assert detail["forceChannelHint"]
     assert stop_calls == []
     assert calls == []
+
+@pytest.mark.parametrize("source,reason,interrupt", [
+    ("web_ui", "user_restart", True),
+    ("electron_user_restart", "web_close_button", True),
+    ("electron_user_restart", "user_restart", False),
+])
+def test_runtime_shutdown_pause_flag_does_not_authorize_other_sources(monkeypatch, source, reason, interrupt):
+    calls = []
+    monkeypatch.setattr(runtime_service, "_restart_guard_active_work_runs", lambda: [{"kind": "chat_turn", "runId": "r", "status": "running"}])
+    monkeypatch.setattr(runtime_service, "_retire_for_user_restart", lambda lang: calls.append("retire"))
+    response = client.post("/api/runtime/shutdown", json={"source": source, "reason": reason, "interruptActiveWork": interrupt})
+    assert response.status_code == 409
+    assert calls == []
+
+
+def test_runtime_user_restart_cleanup_failure_preserves_backend(monkeypatch):
+    monkeypatch.setattr(runtime_service, "_stop_additional_work_for_restart", lambda **kwargs: [])
+    calls = []
+    deadlines = []
+    monkeypatch.setattr(runtime_service, "_stop_active_chat_room_rounds_before_shutdown", lambda **kwargs: deadlines.append(kwargs["deadline"]) or [])
+    monkeypatch.setattr(runtime_service, "_stop_active_chat_turns_before_shutdown", lambda **kwargs: deadlines.append(kwargs["deadline"]) or [{"kind": "chat_turn", "runId": "r", "status": "timeout", "error": "chat_turn_stop_wait_timeout"}])
+    monkeypatch.setattr(runtime_service, "_stop_active_source_collection_runs_before_shutdown", lambda **kwargs: deadlines.append(kwargs["deadline"]) or [])
+    monkeypatch.setattr(runtime_service, "_stop_active_evolution_runs_before_shutdown", lambda **kwargs: deadlines.append(kwargs["deadline"]) or [])
+    monkeypatch.setattr(runtime_service, "_schedule_local_backend_exit", lambda: calls.append("exit"))
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("daemon"))
+    response = client.post("/api/runtime/shutdown", json={"source": "electron_user_restart", "reason": "user_restart", "interruptActiveWork": True})
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "user_restart_pause_failed"
+    assert len(deadlines) == 4 and len(set(deadlines)) == 1
+    assert calls == []
+
+
+def test_runtime_user_restart_rechecks_unsettled_task_owner(monkeypatch):
+    calls = []
+    for name in ("_stop_additional_work_for_restart", "_stop_active_chat_room_rounds_before_shutdown", "_stop_active_chat_turns_before_shutdown", "_stop_active_source_collection_runs_before_shutdown", "_stop_active_evolution_runs_before_shutdown"):
+        monkeypatch.setattr(runtime_service, name, lambda **kwargs: [])
+    monkeypatch.setattr(runtime_service, "_restart_guard_active_work_runs", lambda: [{"kind": "formal_review", "runId": "unsettled", "status": "running"}])
+    monkeypatch.setattr(runtime_service, "_schedule_local_backend_exit", lambda: calls.append("exit"))
+    response = client.post("/api/runtime/shutdown", json={"source": "electron_user_restart", "reason": "user_restart", "interruptActiveWork": True})
+    assert response.status_code == 503
+    assert response.json()["detail"]["pauseResults"][0]["error"] == "restart_pause_not_settled"
+    assert calls == []
+
 
 def test_runtime_shutdown_does_not_enter_a_wedged_room_stop_channel(monkeypatch):
     """Normal shutdown guards before the stop channel and returns promptly."""

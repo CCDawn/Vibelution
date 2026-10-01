@@ -66,7 +66,7 @@ try {
 
 已有可信 unpackaged 主壳时，Launcher 的 main `start/restart/rebuild-and-start` 只转发指令，构建和受保护重启由常驻壳判断。入口不得提前编译并消耗 `rebuilt` 信号，否则会出现磁盘产物更新但旧壳未退出。
 
-已有 CDP 时，完整退出通过可信页面已有的 `window.vibelutionLauncher.requestDesktopShellExit()`，等待实际退出，再由官方 Launcher `start` 启动。页面可能先断开导致 evaluate 抛错，必须检查进程退出结果，不能凭该异常判定失败或重复退出。不得发送 `Browser.close`、强杀或绕过 active-work guard。存在进行中的工作或 guard 无法确认时停止刷新并报告。
+已有 CDP 时，用户明确要求更新重启可通过可信 Launcher 页面已有的 `restart-latest-shell` 正规入口：构建完成后停止任务 owner、保存已有记录，再替换桌面壳；活动任务提醒不阻拦用户重启。自动刷新仍等待空闲。普通完整退出通过 `window.vibelutionLauncher.requestDesktopShellExit()`，等待实际退出，再由官方 Launcher `start` 启动。页面可能先断开导致 evaluate 抛错，必须检查进程退出结果，不能凭该异常判定失败或重复退出。不得发送 `Browser.close` 或强杀；状态不可确认、保存任务或启动技术失败须保留现场并报告。
 
 每次完整重启后重新运行发现命令、创建新的 `connectOverCDP` 连接，并重新识别页面。不得复用旧端口、WebSocket 地址或 Page 句柄。仅后台重连不会打开 DevTools 或激活窗口；产品正常启动是否显示工作台由既有 Launcher 行为决定。
 

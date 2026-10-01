@@ -260,6 +260,8 @@ export async function prepareIsolatedStart(input: {
   signal?: AbortSignal;
   pythonPath?: string;
   isCurrent?: () => boolean;
+  /** User-authorized restart may pause and persist active work before retirement. */
+  interruptActiveWork?: boolean;
   retireDependencies?: Partial<IsolatedStartRetireDependencies>;
 }): Promise<IsolatedStartPreparationResult> {
   const target = resolveIsolatedClaimTarget(input.branchInstances, input.instanceId);
@@ -281,6 +283,7 @@ export async function prepareIsolatedStart(input: {
     signal: input.signal,
     pythonPath: input.pythonPath,
     isCurrent: input.isCurrent,
+    interruptActiveWork: input.interruptActiveWork,
     dependencies: input.retireDependencies
   });
   if (!retired.ok) {
@@ -368,6 +371,8 @@ export async function retireIsolatedRuntimeBeforeStart(input: {
   signal?: AbortSignal;
   pythonPath?: string;
   isCurrent?: () => boolean;
+  /** User-authorized restart may pause and persist active work before retirement. */
+  interruptActiveWork?: boolean;
   dependencies?: Partial<IsolatedStartRetireDependencies>;
 }): Promise<IsolatedStartRetireResult> {
   const registryPath = input.registryPath || instancesRegistryPath();
@@ -434,6 +439,7 @@ export async function retireIsolatedRuntimeBeforeStart(input: {
     signal: input.signal,
     pythonPath: input.pythonPath,
     isCurrent: input.isCurrent,
+    interruptActiveWork: input.interruptActiveWork,
     desiredStateOnFailure: "open",
     dependencies
   });
@@ -463,6 +469,8 @@ export async function retireClaimedIsolatedRuntime(input: {
   isCurrent?: () => boolean;
   /** Only the explicitly authorized force-stop may bypass backend HTTP 409. */
   forceRetireOnActiveWorkRefusal?: boolean;
+  /** Explicit user restart consent to pause active work through graceful shutdown. */
+  interruptActiveWork?: boolean;
   desiredStateOnFailure: "open" | "closed";
   successFailureMessage?: string;
   retainedWindowPid?: number;
@@ -562,6 +570,7 @@ export async function retireClaimedIsolatedRuntime(input: {
           terminateProcessTree,
           gracefulShutdown: requestGracefulWorkbenchShutdown,
           forceRetireOnActiveWorkRefusal: input.forceRetireOnActiveWorkRefusal === true,
+          interruptActiveWork: input.interruptActiveWork,
           signal: input.signal,
           pidAlive: dependencies.pidAlive,
           connect: dependencies.connect

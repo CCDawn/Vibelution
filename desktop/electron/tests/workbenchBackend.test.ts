@@ -197,6 +197,61 @@ describe("workbenchBackendRetire", () => {
         headers: { "X-Vibelution-Control-Token": "test-control-token" }
       })
     );
+    expect(request.mock.calls[0]?.[1]).not.toHaveProperty("body");
+  });
+
+  it("sends the explicit user-restart pause authorization only when requested", async () => {
+    const request = vi.fn().mockResolvedValue({ status: 202 });
+    await expect(requestGracefulWorkbenchShutdown({
+      port: 8000,
+      controlToken: "test-control-token",
+      interruptActiveWork: true,
+      request,
+      connect: async () => false
+    })).resolves.toMatchObject({ requested: true, completed: true, status: 202 });
+    expect(request).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/runtime/shutdown",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "X-Vibelution-Control-Token": "test-control-token",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          source: "electron_user_restart",
+          reason: "user_restart",
+          interruptActiveWork: true
+        })
+      })
+    );
+  });
+
+  it("keeps a 20s graceful window for persisting interrupted work", async () => {
+    vi.useFakeTimers();
+    let settled = false;
+    const request = vi.fn((_url: string, options: { signal: AbortSignal }) => new Promise<{ status: number }>((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+    }));
+    const shutdown = requestGracefulWorkbenchShutdown({
+      port: 8000,
+      controlToken: "test-control-token",
+      interruptActiveWork: true,
+      request,
+      connect: async () => true
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(shutdown).resolves.toMatchObject({
+      requested: false,
+      completed: false,
+      reason: "graceful shutdown timed out"
+    });
+    vi.useRealTimers();
   });
 
   it("treats active-work refusal as a fallback signal without polling", async () => {
@@ -1909,6 +1964,39 @@ describe("runWorkbenchLifecycle", () => {
     expect(terminateProcessTree).toHaveBeenCalledWith(77, expect.objectContaining({ pid: 77 }));
   });
 
+  it("does not defer an explicitly authorized restart when work is active and forwards the flag", async () => {
+    const { spawnImpl, input } = harness();
+    const result = await runWorkbenchLifecycle({
+      ...input,
+      operation: "restart",
+      interruptActiveWork: true,
+      listActiveWork: () => [{ kind: "chat_turn", runId: "run-user-restart", status: "running", sessionId: "s1" }]
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation: "restart" });
+    expect(result.code).not.toBe("restart_queued");
+    expect(spawnImpl).toHaveBeenCalledOnce();
+  });
+
+  it("leaves forwarded and automatic restarts deferred while work is active", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-forwarded-restart-"));
+    const { spawnImpl, input } = harness();
+    try {
+      const result = await runWorkbenchLifecycle({
+        ...input,
+        workspaceRoot: root,
+        operation: "restart",
+        queue: createMainLineCommandQueue(),
+        listActiveWork: () => [{ kind: "chat_turn", runId: "run-forwarded-restart", status: "running", sessionId: "s1" }]
+      });
+
+      expect(result).toMatchObject({ accepted: true, code: "restart_queued" });
+      expect(spawnImpl).not.toHaveBeenCalled();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("does not kill a backend during ordinary restart when its HTTP shutdown is protected", async () => {
     const terminateProcessTree = vi.fn(async () => false);
     let written: Record<string, unknown> = {};
@@ -1951,6 +2039,97 @@ describe("runWorkbenchLifecycle", () => {
 
     expect(terminateProcessTree).not.toHaveBeenCalled();
     expect(written).toMatchObject({ backendPid: 51, observedState: "failed" });
+  });
+
+  it.each(["restart", "shutdown"] as const)("passes user interruption through to graceful backend cleanup during %s", async (operation) => {
+    let oldBackendAlive = true;
+    let newBackendSpawned = false;
+    const gracefulShutdown = vi.fn(async (_shutdownInput: Parameters<typeof requestGracefulWorkbenchShutdown>[0]) => {
+      oldBackendAlive = false;
+      return { requested: true, completed: true, status: 202, reason: "active work paused and backend closed" };
+    });
+    const spawnImpl = vi.fn(() => {
+      newBackendSpawned = true;
+      return fakeBackendChild(4242);
+    });
+    const terminateProcessTree = vi.fn(async () => false);
+    const result = await executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation,
+      interruptActiveWork: true,
+      command: { commandId: "cmd_user_restart", type: "restart", operation: "restart", noBrowser: true },
+      readState: () => ({ backendPort: 8000 }),
+      writeState: () => undefined,
+      ensureFrontend: async () => undefined,
+      listActiveWork: () => [{ kind: "chat_turn", runId: "run-user-restart", status: "running", sessionId: "s1" }],
+      connect: async () => oldBackendAlive || newBackendSpawned,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => oldBackendAlive
+          ? { status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" }
+          : { status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" }
+      }),
+      pidAlive: (pid) => pid === 51 && oldBackendAlive,
+      gracefulShutdown,
+      terminateProcessTree,
+      spawnImpl,
+      fileExists: (path) => path.endsWith("pythonw.exe") || path.endsWith("index.html"),
+      captureProcessIdentity: async ({ pid }) => ({
+        pid,
+        createTime: 1,
+        executable: "C:/Python/pythonw.exe"
+      })
+    });
+
+    expect(result).toMatchObject({ accepted: true, operation });
+    expect(gracefulShutdown).toHaveBeenCalledWith(expect.objectContaining({ interruptActiveWork: true }));
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(spawnImpl).toHaveBeenCalledTimes(operation === "restart" ? 1 : 0);
+  });
+
+  it.each(["restart", "shutdown"] as const)("does not retire the process tree when an authorized user pause is not confirmed during %s", async (operation) => {
+    let listening = true;
+    const terminateProcessTree = vi.fn(async () => false);
+    const gracefulShutdown = vi.fn(async () => {
+      listening = false;
+      return {
+        requested: false,
+        completed: false,
+        status: 503,
+        reason: "user_restart_pause_failed"
+      };
+    });
+    const spawnImpl = vi.fn(() => fakeBackendChild(4242));
+    const task = executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation,
+      interruptActiveWork: true,
+      command: { commandId: "cmd_user_restart_pause_failed", type: "restart", operation: "restart", noBrowser: true },
+      readState: () => ({ backendPort: 8000 }),
+      writeState: () => undefined,
+      ensureFrontend: async () => undefined,
+      listActiveWork: () => [{ kind: "chat_turn", runId: "run-user-restart", status: "running", sessionId: "s1" }],
+      connect: async () => listening,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 51, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: () => true,
+      gracefulShutdown,
+      terminateProcessTree,
+      spawnImpl
+    });
+    if (operation === "restart") {
+      await expect(task).rejects.toThrow(/explicit user restart shutdown was not confirmed.*user_restart_pause_failed/);
+    } else {
+      expect(await task).toMatchObject({ accepted: false, code: "user_restart_pause_failed" });
+    }
+
+    expect(gracefulShutdown).toHaveBeenCalledWith(expect.objectContaining({ interruptActiveWork: true }));
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
   });
 
   it("ordinary stop also retires the Runtime Manager daemon pid", async () => {

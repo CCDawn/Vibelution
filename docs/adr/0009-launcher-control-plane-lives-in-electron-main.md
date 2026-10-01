@@ -37,7 +37,7 @@ The Launcher should be an independent product whose **service and frontend stay 
 6. **Preserve already-shipped contracts** while moving ownership:
    - leftover workbench windows of the same origin are adopted; extras are destroyed; isolated instance windows are not destroyed as leftovers;
    - Close leftover ≠ 维护与清理; Close does not delete worktrees or uncommitted files;
-   - active-work guard still blocks refresh with the fixed Chinese sentence in `AGENTS.md` §4;
+   - explicit operator restart stops task owners and saves partial state before refresh; automatic or unapproved Agent refresh retains the active-work guard (amended 2026-10-01, `AGENTS.md` §4);
    - Windows product paths remain no-console (`AGENTS.md` §2 / development-standard §8.0).
 7. **Migrate with a strangler**, not a one-shot rewrite of `core/launcher/service.py`. The execution ledger is archived at [`docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md`](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md) and is not living procedure. Living ownership: [`desktop/electron/README.md`](../../desktop/electron/README.md) and [`core/web/services/launcher_runtime.md`](../../core/web/services/launcher_runtime.md).
 

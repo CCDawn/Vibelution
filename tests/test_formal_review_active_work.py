@@ -35,3 +35,20 @@ def test_launcher_active_probe_sees_formal_review(tmp_path, monkeypatch):
     with work.active_formal_review({"invocationId": "review:guard"}, purpose="reflection"):
         assert any(item["kind"] == "formal_review" for item in daemon._runtime_manager_active_work_runs())
     assert daemon._runtime_manager_active_work_runs() == []
+
+
+def test_user_restart_seals_review_and_rejects_late_result(tmp_path, monkeypatch):
+    store = WorkRunStore(root=tmp_path)
+    monkeypatch.setattr(work, "_store", lambda: store)
+    monkeypatch.setattr(work, "_restart_requested", False)
+    with pytest.raises(work.FormalReviewInterrupted):
+        with work.active_formal_review({"invocationId": "review:restart"}, purpose="reflection"):
+            saved = work.interrupt_active_for_restart("User requested restart.")
+            assert len(saved) == 1
+            assert saved[0]["status"] == "stopped"
+            assert work.summary()["activeItems"] == []
+            assert WorkRunStore(root=tmp_path).load_snapshot(work.KIND, saved[0]["runId"])["interruptedByRestart"] is True
+    assert work.summary()["latest"]["status"] == "stopped"
+    with pytest.raises(work.FormalReviewInterrupted):
+        with work.active_formal_review({"invocationId": "review:late"}, purpose="reflection"):
+            pytest.fail("A retiring backend must not admit a new review.")
