@@ -16,6 +16,7 @@ import {
   VWorkbenchPowerMenu,
 } from "../../../components/vui";
 import { ConversationTurnModelControl } from "../../../components/conversation/ConversationTurnModelControl";
+import { ConversationTurnNavigator } from "../../../components/conversation/ConversationTurnNavigator";
 import type { SessionLlmModelOption, SessionModelSelection } from "../../../api/types";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
@@ -42,6 +43,7 @@ const turnModelChoices: SessionLlmModelOption[] = [
 ];
 
 export function InteractiveCatalog() {
+  const [turnIndex, setTurnIndex] = useState(3);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -49,6 +51,21 @@ export function InteractiveCatalog() {
 
   return (
     <VuiPreviewSection title="Interactive">
+      <VuiPreviewCard name="ConversationTurnNavigator" className="col-span-full">
+        <div className="@container/conversation relative h-64 w-full">
+          <ConversationTurnNavigator
+            entries={Array.from({ length: 120 }, (_, index) => ({
+              turnIndex: index, anchorRowIndex: index, userRowKey: `preview-user-${index}`,
+              assistantRowKey: `preview-assistant-${index}`, label: `跳转到第 ${index + 1} 轮`,
+              userPreviewText: `第 ${index + 1} 轮：优化对话阅读体验`,
+              assistantPreviewText: "左侧短横线导航，悬停查看摘要，点击定位；窄屏隐藏。",
+            }))}
+            currentIndex={turnIndex} ariaLabel="示例会话轮次导航" onNavigate={(entry) => setTurnIndex(entry.turnIndex)}
+          />
+          <p className="pl-14 pt-4" role="status">当前第 {turnIndex + 1} 轮 · 拖窄容器可验证导航隐藏</p>
+          <VButton className="ml-14 mt-4" onPress={() => setTurnIndex(119)}>定位第 120 轮</VButton>
+        </div>
+      </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTurnModelControl">
         <ConversationTurnModelControl
           choices={turnModelChoices}
