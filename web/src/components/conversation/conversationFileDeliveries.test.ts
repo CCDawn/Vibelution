@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { buildCodexTranscriptCells } from "./codexTranscriptCells";
 import {
+  classifyDeliveryFiles,
   collectConversationFileDeliveries,
   conversationChangedFilesFromMetadata,
   fileDeliveryFollowupDraft,
@@ -173,5 +174,48 @@ describe("conversationChangedFilesFromMetadata", () => {
     expect(conversationChangedFilesFromMetadata({})).toEqual([]);
     expect(conversationChangedFilesFromMetadata({ changedFiles: "nope" })).toEqual([]);
     expect(conversationChangedFilesFromMetadata({ changedFiles: [] })).toEqual([]);
+  });
+});
+
+describe("classifyDeliveryFiles", () => {
+  const projectWrite = cell("p", "write_file_tool", { file_path: "C:\\proj\\web\\src\\a.ts", content: "export const a = 1;" });
+  const workspaceWrite = cell("w", "write_file_tool", { file_path: "C:\\Users\\dev\\.worktrees\\demo\\_finish.py", content: "print(1)" });
+  const relativeWrite = cell("r", "write_file_tool", { file_path: "notes/todo.md", content: "hi" });
+
+  it("trusts the backend display_path for merged rows, so an absolute tool path onto a project file is not misread as workspace", () => {
+    const changedFiles: ConversationChangedFileSummary[] = [{ path: "web/src/a.ts", additions: 1, deletions: 0, state: "modified" }];
+    const { files } = mergeConversationFileDeliveries([projectWrite], changedFiles);
+    const { project, workspace } = classifyDeliveryFiles(files, changedFiles);
+    expect(project.map((entry) => entry.path)).toEqual(["C:\\proj\\web\\src\\a.ts"]);
+    expect(workspace).toEqual([]);
+  });
+
+  it("sends an absolute ledger display_path (agent workspace file) to workspace", () => {
+    const changedFiles: ConversationChangedFileSummary[] = [{ path: "C:/Users/dev/.worktrees/demo/_finish.py", state: "created" }];
+    const { files } = mergeConversationFileDeliveries([workspaceWrite], changedFiles);
+    const { project, workspace } = classifyDeliveryFiles(files, changedFiles);
+    expect(project).toEqual([]);
+    expect(workspace.map((entry) => entry.path)).toEqual(["C:\\Users\\dev\\.worktrees\\demo\\_finish.py"]);
+  });
+
+  it("falls back to the absolute-path heuristic for transcript-only rows", () => {
+    const { files } = mergeConversationFileDeliveries([projectWrite, workspaceWrite, relativeWrite], null);
+    const { project, workspace } = classifyDeliveryFiles(files, null);
+    expect(project.map((entry) => entry.path)).toEqual(["notes/todo.md"]);
+    expect(workspace.map((entry) => entry.path)).toEqual(["C:\\proj\\web\\src\\a.ts", "C:\\Users\\dev\\.worktrees\\demo\\_finish.py"]);
+  });
+
+  it("keeps summary-only rows classified by their ledger path", () => {
+    const { files } = mergeConversationFileDeliveries([], [
+      { path: "src/kept.ts", state: "created" },
+      { path: "C:/ws/outside.log", state: "created" },
+    ]);
+    const { project, workspace } = classifyDeliveryFiles(files, undefined);
+    expect(project.map((entry) => entry.path)).toEqual(["src/kept.ts"]);
+    expect(workspace.map((entry) => entry.path)).toEqual(["C:/ws/outside.log"]);
+  });
+
+  it("returns empty buckets for an empty row set", () => {
+    expect(classifyDeliveryFiles([], null)).toEqual({ project: [], workspace: [] });
   });
 });

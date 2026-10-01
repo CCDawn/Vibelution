@@ -137,6 +137,7 @@
 | `ConversationTodoChecklist` | [product/conversation.md](./product/conversation.md#conversationtodochecklist) |
 | `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
 | `ConversationMessageVersionSwitcher` | [product/conversation.md](./product/conversation.md#conversationmessageversionswitcher) |
+| 本轮文件面板（`ConversationFileDeliveries`） | [product/conversation.md](./product/conversation.md#conversationfiledeliveries) |
 | 用户消息折叠（`AgentUserContentSectionView`） | [product/conversation.md](./product/conversation.md#agentusercontentsectionview-用户消息折叠) |
 | Composer 引用候选（@ type-ahead） | [product/conversation.md](./product/conversation.md#composer-引用候选-type-ahead) |
 | Composer 图片附件上传失败态与重试 | [product/conversation.md](./product/conversation.md#composer-图片附件上传失败态与重试) |
