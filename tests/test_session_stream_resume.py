@@ -99,6 +99,20 @@ def test_resume_plan_degrades_to_partial_when_gap_exceeds_retention_window(journ
     assert plan["replayedCount"] == 0
 
 
+def test_resume_plan_degrades_to_partial_when_the_journal_is_unreadable(journal, monkeypatch):
+    journal["events"] = []
+    journal["watermark"] = 9
+
+    def _raise(session_id: str) -> list:
+        raise OSError("journal unavailable")
+
+    monkeypatch.setattr(session_service, "_load_session_conversation_events_cached", _raise)
+    plan = build_session_stream_resume("s1", 2)
+    # An empty replay must not masquerade as covered.
+    assert plan["resume"] == "partial"
+    assert plan["events"] == []
+
+
 def test_resume_frames_replay_journal_events_then_close_with_marker(journal):
     journal["events"] = [journal_event(n) for n in range(1, 4)]
     journal["watermark"] = 3

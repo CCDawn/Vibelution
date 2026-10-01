@@ -1007,6 +1007,11 @@ def build_session_stream_resume(
         events = list(s._load_session_conversation_events_cached(normalized_session_id) or [])
     except Exception:
         events = []
+    if not events and watermark > 0:
+        # The journal is unreadable while the watermark advanced: replaying an
+        # empty window must not masquerade as covered — degrade honestly.
+        plan["resume"] = "partial"
+        return plan
     missed = sorted(
         (
             _session_stream_journal_event_attributes(event)
