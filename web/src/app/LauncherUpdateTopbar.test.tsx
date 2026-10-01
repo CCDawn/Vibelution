@@ -43,6 +43,7 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   host?.remove();
   client?.clear();
+  vi.useRealTimers();
 });
 
 describe("shared Launcher update topbar", () => {
@@ -66,12 +67,48 @@ describe("shared Launcher update topbar", () => {
     expect(host.querySelector("[data-testid='launcher-update-trigger']")?.textContent).toContain("正在更新");
   });
 
-  it.each(["active", "unknown"])("blocks the update button when task status is %s", async (state) => {
-    api.getLauncherFreshness.mockResolvedValue({ ...available, activeWorkState: state, activeWorkCount: state === "active" ? 2 : 0 });
+  it("keeps operator update available while warning about active tasks", async () => {
+    api.getLauncherFreshness.mockResolvedValue({ ...available, activeWorkState: "active", activeWorkCount: 2 });
     await mount();
     await click("有新版本 · 请更新");
-    expect(button(state === "active" ? "任务完成后更新" : "更新并重启").disabled).toBe(true);
+    expect(button("更新并重启").disabled).toBe(false);
+    expect(document.body.textContent).toContain("更新会中断任务并保存已有记录");
+    await click("更新并重启");
+    await click("确认更新");
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
+  it("blocks an update when task status cannot be confirmed", async () => {
+    api.getLauncherFreshness.mockResolvedValue({ ...available, activeWorkState: "unknown" });
+    await mount();
+    await click("有新版本 · 请更新");
+    expect(button("更新并重启").disabled).toBe(true);
     expect(api.restartLatestLauncher).not.toHaveBeenCalled();
+  });
+
+  it("allows confirmation using cached freshness while a background read is pending", async () => {
+    api.getLauncherFreshness.mockResolvedValueOnce(available).mockImplementation(() => new Promise(() => {}));
+    await mount();
+    await click("有新版本 · 请更新");
+    expect(button("更新并重启").disabled).toBe(false);
+    await click("更新并重启");
+    expect(button("确认更新").disabled).toBe(false);
+    await click("确认更新");
+    expect(api.restartLatestLauncher).toHaveBeenCalledOnce();
+  });
+
+  it("pauses polling during confirmation and resumes after cancellation", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    await click("有新版本 · 请更新");
+    await click("更新并重启");
+    const callsBefore = api.getLauncherFreshness.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(api.getLauncherFreshness).toHaveBeenCalledTimes(callsBefore);
+    expect(button("确认更新").disabled).toBe(false);
+    await click("取消");
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_100); });
+    expect(api.getLauncherFreshness.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 
   it("treats accepted:false as a visible failure and allows a confirmed retry", async () => {

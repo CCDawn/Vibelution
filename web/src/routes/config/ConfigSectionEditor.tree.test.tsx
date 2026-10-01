@@ -95,6 +95,7 @@ async function renderEditor(
           onUiStateChange={onUiStateChange}
           onSaveSection={onSaveSection}
           onImmediateFieldChange={vi.fn()}
+          onLanguageChange={vi.fn()}
           immediateFieldStatus={{}}
           onAvatarImageUpload={vi.fn()}
           onThemeBackgroundImageUpload={vi.fn()}
