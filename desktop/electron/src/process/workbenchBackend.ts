@@ -862,6 +862,12 @@ export async function reclaimStaleWorkbenchBackend(input: {
     return [...new Set([...candidates.filter((pid) => pidAlive(pid)), ...failedTreePids])];
   };
   if (occupant.kind === "free") {
+    if (input.interruptActiveWork && (registeredPids.length > 0 || extraPids.length > 0)) {
+      return {
+        reclaimed: false,
+        reason: "explicit user restart shutdown was not confirmed; registered trees remain without a reachable backend"
+      };
+    }
     const registeredStillPresent = await retireRegistered();
     if (registeredStillPresent.length > 0) {
       return {
@@ -885,6 +891,12 @@ export async function reclaimStaleWorkbenchBackend(input: {
     };
   }
   if (occupant.kind !== "same-project-backend") {
+    if (input.interruptActiveWork) {
+      return {
+        reclaimed: false,
+        reason: `explicit user restart shutdown was not confirmed; port ${port} occupant is ${occupant.kind}`
+      };
+    }
     const extrasStillAlive = await retireExtras();
     return {
       reclaimed: false,
@@ -985,6 +997,13 @@ export async function reclaimStaleWorkbenchBackend(input: {
     // Health identified a same-project backend, but its root disappeared before
     // retirement began.  Root-PID death does not prove that descendants were
     // reaped; only the identity-checked tree verifier can establish closure.
+    if (input.interruptActiveWork) {
+      return {
+        reclaimed: false,
+        reason: `explicit user restart shutdown was not confirmed; backend pid ${occupant.pid} exited before saving tasks`,
+        verifiedPid: occupant.pid
+      };
+    }
     if (!input.terminateProcessTree) {
       return {
         reclaimed: false,
@@ -1776,8 +1795,16 @@ export async function executeMainLineWorkbench(
           workspaceRoot: input.workspaceRoot,
           allowedKinds: ["managed_workbench_backend", "runtime_manager_daemon"]
         }));
-  const gracefulShutdown = input.gracefulShutdown
+  const gracefulShutdownImpl = input.gracefulShutdown
     ?? (input.killPid ? undefined : requestGracefulWorkbenchShutdown);
+  let restartPauseConfirmed = false;
+  const gracefulShutdown: typeof requestGracefulWorkbenchShutdown | undefined = gracefulShutdownImpl
+    ? async (shutdownInput) => {
+        const result = await gracefulShutdownImpl(shutdownInput);
+        restartPauseConfirmed = result.requested && result.status === 202;
+        return result;
+      }
+    : undefined;
   const unverifiedHandles: number[] = [];
   let resolved: { port: number; note: string };
   let unretiredRegisteredNote = "";
@@ -1813,6 +1840,10 @@ export async function executeMainLineWorkbench(
       interruptActiveWork: input.interruptActiveWork,
       forceRetireOnActiveWorkRefusal: false
     });
+    if (input.interruptActiveWork && !restartPauseConfirmed
+      && (retainedBackendTreePids.length > 0 || retainedExtraPids.length > 0)) {
+      throw new Error("explicit user restart shutdown was not confirmed; registered trees were retained before a new backend could start");
+    }
     try {
       await retireRegisteredHandles({
         pids: retainedRegisteredHandles,

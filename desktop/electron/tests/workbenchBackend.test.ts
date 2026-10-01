@@ -632,6 +632,29 @@ describe("classifyWorkbenchPortOccupant", () => {
 });
 
 describe("reclaimStaleWorkbenchBackend", () => {
+  it.each(["root_exited", "empty_listener"] as const)("keeps registered trees without a saved pause when %s", async (scene) => {
+    const terminateProcessTree = vi.fn(async () => true);
+    const gracefulShutdown = vi.fn();
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      interruptActiveWork: true,
+      registeredPids: [4242],
+      connect: async () => scene === "root_exited",
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+      }),
+      pidAlive: () => false,
+      expectedIdentities: { "4242": { pid: 4242, createTime: 1, executable: "C:/Python/pythonw.exe" } },
+      terminateProcessTree,
+      gracefulShutdown
+    });
+    expect(result).toMatchObject({ reclaimed: false, reason: expect.stringContaining("explicit user restart shutdown was not confirmed") });
+    expect(gracefulShutdown).not.toHaveBeenCalled();
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+  });
+
   it("prefers graceful shutdown after health identity is verified", async () => {
     const alive = new Set([4242]);
     const terminateProcessTree = vi.fn();
@@ -2128,6 +2151,36 @@ describe("runWorkbenchLifecycle", () => {
     }
 
     expect(gracefulShutdown).toHaveBeenCalledWith(expect.objectContaining({ interruptActiveWork: true }));
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(["restart", "shutdown"] as const)("does not kill a live registered tree behind an empty listener during user %s", async (operation) => {
+    const terminateProcessTree = vi.fn(async () => true);
+    const gracefulShutdown = vi.fn();
+    const spawnImpl = vi.fn(() => fakeBackendChild(4242));
+    const task = executeMainLineWorkbench({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      operation,
+      interruptActiveWork: true,
+      command: { commandId: "cmd-empty-listener", type: "restart", operation: "restart", noBrowser: true },
+      readState: () => ({ backendPort: 8000, backendPid: 51, backendCreateTime: 1, backendExecutable: "C:/Python/pythonw.exe" }),
+      writeState: () => undefined,
+      ensureFrontend: async () => undefined,
+      listActiveWork: () => [{ kind: "chat_turn", runId: "run-empty-listener", status: "running", sessionId: "s1" }],
+      connect: async () => false,
+      pidAlive: () => true,
+      gracefulShutdown,
+      terminateProcessTree,
+      spawnImpl
+    });
+    if (operation === "restart") {
+      await expect(task).rejects.toThrow("explicit user restart shutdown was not confirmed");
+    } else {
+      expect(await task).toMatchObject({ accepted: false, code: "user_restart_pause_failed" });
+    }
+    expect(gracefulShutdown).not.toHaveBeenCalled();
     expect(terminateProcessTree).not.toHaveBeenCalled();
     expect(spawnImpl).not.toHaveBeenCalled();
   });
