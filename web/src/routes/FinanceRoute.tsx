@@ -30,13 +30,13 @@ export function FinanceRoute() {
     bodyClassName={styles.body}>
     <div className={styles.sections} data-vui-domain-recipe="financial-assistant-entry">
       <VStateSurface title={zh ? "当前能力" : "Current capabilities"} tone="info">
-        {zh ? "原生会话、身份配置与独立财报知识库已适配。财报服务需单独配置并验证；分钟行情和 K 线尚未接入，新闻跨团队委派默认关闭。" : "Native chat, identity settings and a separate report library are integrated. The report service requires configuration and verification. Minute quotes/charts are not connected; cross-team news delegation is disabled."}
+        {zh ? "原生会话、身份配置与独立财报知识库已适配。财报服务需单独配置并验证；分钟行情和 K 线尚未接入。公开新闻可由助手检索作参考，并自行判断真伪；新闻不写入财报库，跨团队委派保持关闭。" : "Native chat, identity settings and a separate report library are integrated. The report service requires configuration and verification. Minute quotes and K-line charts are not connected. The assistant may search public news as reference and judge whether it is credible. News is not filed in the report library, and cross-team delegation stays off."}
       </VStateSurface>
       {assistants.isPending ? <VStateSurface title={zh ? "正在载入" : "Loading"} tone="loading" busy />
         : assistants.isError ? <VStateSurface title={zh ? "载入失败" : "Could not load"} tone="error"
             actions={<VButton onPress={() => assistants.refetch()}>{zh ? "重试" : "Retry"}</VButton>} />
         : rows.length === 0 ? <VStateSurface title={zh ? "还没有金融助手" : "No financial assistant yet"} tone="empty" actions={setupButton}>
-            {zh ? "创建独立身份、原生会话和空的财报库。默认只授予两项财报只读工具；不会连接券商或创建交易权限。" : "Create a separate identity, native session and empty report library with two read-only evidence tools. No brokerage connection or trading access is created."}
+            {zh ? "创建独立身份、原生会话和空的财报库。默认授予财报只读工具和公开新闻检索；不会连接券商或创建交易权限。" : "Create a separate identity, native session and empty report library. The default grant is read-only report tools plus public news search. No brokerage connection or trading access is created."}
           </VStateSurface>
         : rows.map((item) => <VStateSurface key={item.agentId} title={`${item.displayName} · ${item.agentCode}`}
             actions={<div className={styles.actions}>

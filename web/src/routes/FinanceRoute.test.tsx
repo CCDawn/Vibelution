@@ -25,6 +25,7 @@ describe("financial assistant entry", () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([]); await render();
     expect(createFinancialAssistant).not.toHaveBeenCalled();
     expect(container.textContent).toContain("分钟行情和 K 线尚未接入");
+    expect(container.textContent).toContain("自行判断真伪");
     expect(container.textContent).toContain("尚未接入账户、持仓和现金流账本");
     expect(button("创建").disabled).toBe(false);
   });

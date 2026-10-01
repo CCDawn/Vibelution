@@ -40,6 +40,9 @@ def test_explicit_setup_uses_native_identity_session_and_private_read_policy(ent
     assert agent["personaProfile"]["identityNotes"] == service.PERSONA["identityNotes"]
     assert agent["taskProfile"]["constraints"] == service.TASK["constraints"]
     assert set(agent["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
+    assert "news_search_tool" in agent["toolPolicy"]["allowedTools"]
+    assert "financial_evidence_stage_tool" not in agent["toolPolicy"]["allowedTools"]
+    assert "自行判断真伪" in agent["taskProfile"]["constraints"]
     assert agent["toolPolicyId"] == "tool-" + row["agentId"]
     assert agent["memoryPolicy"]["readKnowledgeBaseIds"] == [row["knowledgeBaseId"]]
     for field in (
@@ -248,3 +251,103 @@ def test_ready_entry_does_not_recreate_a_deleted_library(entry_env):
     )
     refreshed = service.create_financial_assistant()["assistant"]
     assert not refreshed["knowledgeBaseId"] and not refreshed["knowledgeReadable"]
+
+
+_STAGE_ONE_TASK = {
+    "responsibilities": "使用财报工具时明确公司证券代码和报告期，保留来源、页码与版本；证据不足则明确说明。",
+    "preferredTasks": "财报检索、来源对照、风险因素梳理和投资需求澄清。",
+    "avoidTasks": "不得交易、下单、代管账户、承诺收益；不把新闻或模型摘要当公告或财报原文。",
+    "constraints": "行情和新闻委派尚未接入，不声称获得实时分钟行情。个人现金流、持仓、目标、投入意愿和风险承受能力未知时不得猜测；不得把这些私密信息发送给搜索工具或公共知识库。",
+    "handoffNotes": "财报专库只收经审核的原始 PDF 证据；待审来源和历史生成答案不能作为财报事实。新闻跨团队委派默认关闭，须独立授权。",
+}
+
+
+def _rewind_stage_one(agent_id: str, *, max_calls: int = 8) -> None:
+    agent = directory.get_agent(agent_id)
+    directory.update_agent_instance(
+        agent_id,
+        tool_policy={
+            "allowedTools": [
+                "financial_report_query_tool",
+                "financial_evidence_search_tool",
+            ],
+            "preferredTools": [
+                "financial_report_query_tool",
+                "financial_evidence_search_tool",
+            ],
+            "networkAccess": "controlled",
+            "mutationAccess": "none",
+            "maxCallsPerTurn": max_calls,
+        },
+        task_profile={**agent["taskProfile"], **_STAGE_ONE_TASK},
+        persona_profile={
+            **agent["personaProfile"],
+            "expertise": ["A股财报证据", "个人投资目标澄清", "风险分析"],
+        },
+    )
+
+
+def test_listing_upgrades_untouched_stage_one_assistant_once(entry_env):
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_stage_one(row["agentId"], max_calls=3)
+    before = directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"]
+    listed = service.list_financial_assistants()
+    agent = directory.get_agent(row["agentId"])
+    assert listed[0]["newsDelegationStatus"] == "disabled"
+    assert agent["metadata"]["delegationPolicy"]["allowSubagents"] is False
+    assert set(agent["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
+    assert set(agent["toolPolicy"]["preferredTools"]) == set(service.READ_TOOLS)
+    assert agent["toolPolicy"]["maxCallsPerTurn"] == 3
+    assert agent["toolPolicy"]["policyVersion"] == before + 1
+    assert agent["taskProfile"]["constraints"] == service.TASK["constraints"]
+    assert agent["taskProfile"]["avoidTasks"] == service.TASK["avoidTasks"]
+    assert "公开新闻真伪判断" in agent["personaProfile"]["expertise"]
+    service.list_financial_assistants()
+    assert directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before + 1
+
+
+def test_create_upgrades_untouched_ready_assistant_without_renaming(entry_env):
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_stage_one(row["agentId"])
+    again = service.create_financial_assistant("新名字不会覆盖")
+    agent = directory.get_agent(row["agentId"])
+    assert again["created"] is False
+    assert again["assistant"]["displayName"] == row["displayName"]
+    assert "news_search_tool" in agent["toolPolicy"]["allowedTools"]
+    assert agent["taskProfile"]["handoffNotes"] == service.TASK["handoffNotes"]
+
+
+def test_cleared_or_custom_policies_do_not_gain_news_search(entry_env):
+    cleared = service.create_financial_assistant()["assistant"]
+    cleared_agent = directory.get_agent(cleared["agentId"])
+    directory.update_agent_instance(
+        cleared["agentId"],
+        tool_policy={"allowedTools": []},
+        task_profile={**cleared_agent["taskProfile"], "constraints": "用户改过的约束"},
+    )
+    service.list_financial_assistants()
+    kept = directory.get_agent(cleared["agentId"])
+    assert kept["toolPolicy"]["allowedTools"] == []
+    assert kept["taskProfile"]["constraints"] == "用户改过的约束"
+
+    custom = service.create_financial_assistant()["assistant"]
+    # The cleared assistant above is the only project assistant; reuse it.
+    assert custom["agentId"] == cleared["agentId"]
+    directory.update_agent_instance(
+        custom["agentId"],
+        tool_policy={
+            "allowedTools": ["financial_report_query_tool"],
+            "preferredTools": ["financial_report_query_tool"],
+            "networkAccess": "controlled",
+            "mutationAccess": "none",
+            "maxCallsPerTurn": 8,
+        },
+        task_profile={
+            **directory.get_agent(custom["agentId"])["taskProfile"],
+            "constraints": _STAGE_ONE_TASK["constraints"],
+        },
+    )
+    service.list_financial_assistants()
+    refreshed = directory.get_agent(custom["agentId"])
+    assert refreshed["toolPolicy"]["allowedTools"] == ["financial_report_query_tool"]
+    assert refreshed["taskProfile"]["constraints"] == service.TASK["constraints"]
