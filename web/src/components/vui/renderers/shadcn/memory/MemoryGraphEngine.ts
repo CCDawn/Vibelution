@@ -15,6 +15,7 @@ import {
   type MemoryGraphLabelElements,
 } from "./memoryGraphLabels";
 import { nebulaMaterial } from "./NebulaField";
+import { createMemoryGraphBatches } from "./MemoryGraphBatches";
 import { memoryGraphRendererStyles as styles } from "./memoryGraphRenderer.styles";
 
 type ThreeApi = typeof import("three");
@@ -388,33 +389,16 @@ function initializeMemoryGraphEngine(
   };
 
   const theme = readTheme(THREE, host, clusters);
-  const nodeGroups = new Map<string, import("three").Group>();
-  const nodeMaterials = new Map<string, {
-    body: import("three").MeshStandardMaterial;
-    ring: import("three").MeshBasicMaterial;
-    clusterKey: MemoryGraphClusterKey;
-  }>();
   const clusterMaterials = new Map<MemoryGraphClusterKey, {
     nebula: import("three").ShaderMaterial;
     dust: import("three").PointsMaterial;
   }>();
-  const hitObjects = new Map<string, import("three").Mesh>();
   const edgePaths: MemoryGraphEdgePath[] = [];
-  const edgeVisuals: Array<{
-    edge: MemoryKnowledgeGraphEdge;
-    material: import("three").LineBasicMaterial;
-    arrow: import("three").Mesh;
-    arrowMaterial: import("three").MeshBasicMaterial;
-  }> = [];
   const adjacency = buildMemoryGraphAdjacency(nodes, edges);
   runtime.addCleanup(() => {
     positions.clear();
-    nodeGroups.clear();
-    nodeMaterials.clear();
     clusterMaterials.clear();
-    hitObjects.clear();
     edgePaths.length = 0;
-    edgeVisuals.length = 0;
     adjacency.adjacent.clear();
     adjacency.degree.clear();
   });
@@ -511,90 +495,16 @@ function initializeMemoryGraphEngine(
     const middle = start.clone().add(end).multiplyScalar(0.5);
     if (!options.flat) middle.z += 0.22 + Math.min(0.32, start.distanceTo(end) * 0.02);
     const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
-    const lineMaterial = disposeMaterial(
-      new THREE.LineBasicMaterial({
-        color: theme.edgeColor,
-        transparent: true,
-        opacity: 0.15,
-        depthWrite: false,
-      }),
-    );
-    const line = new THREE.Line(
-      disposeGeometry(new THREE.BufferGeometry().setFromPoints(curve.getPoints(20))),
-      lineMaterial,
-    );
-    line.frustumCulled = false;
-    scene.add(line);
-
-    const arrowMaterial = disposeMaterial(
-      new THREE.MeshBasicMaterial({
-        color: theme.selectedColor,
-        transparent: true,
-        opacity: 0.9,
-        depthWrite: false,
-      }),
-    );
-    const arrow = new THREE.Mesh(
-      disposeGeometry(new THREE.ConeGeometry(0.075, 0.22, 8)),
-      arrowMaterial,
-    );
-    const arrowPosition = 0.78;
-    arrow.position.copy(curve.getPoint(arrowPosition));
-    arrow.quaternion.setFromUnitVectors(
-      new THREE.Vector3(0, 1, 0),
-      curve.getTangent(arrowPosition).normalize(),
-    );
-    arrow.visible = false;
-    arrow.renderOrder = 1;
-    scene.add(arrow);
-
     edgePaths.push({ edge, curve });
-    edgeVisuals.push({ edge, material: lineMaterial, arrow, arrowMaterial });
   }
 
-  for (const node of nodes) {
-    const colorHex = theme.clusterColors.get(node.clusterKey) ?? theme.selectedColor;
-    const group = new THREE.Group();
-    group.position.set(node.x, node.y, node.z);
-    const bodyMaterial = disposeMaterial(
-      new THREE.MeshStandardMaterial({
-        color: colorHex,
-        roughness: 0.96,
-        metalness: 0,
-        emissive: colorHex,
-        emissiveIntensity: theme.lightSurface ? 0.02 : 0.09,
-        transparent: true,
-        opacity: 0.88,
-      }),
-    );
-    const ringMaterial = disposeMaterial(
-      new THREE.MeshBasicMaterial({
-        color: colorHex,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.1,
-        depthWrite: false,
-      }),
-    );
-    const body = new THREE.Mesh(disposeGeometry(createNodeGeometry(THREE, node.source)), bodyMaterial);
-    const scale = getNodeScale(node.source);
-    const ring = new THREE.Mesh(
-      disposeGeometry(new THREE.TorusGeometry(0.3 * scale, 0.012, 6, 32)),
-      ringMaterial,
-    );
-    const hitArea = new THREE.Mesh(
-      disposeGeometry(new THREE.SphereGeometry(0.44 * scale, 8, 8)),
-      disposeMaterial(
-        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
-      ),
-    );
-    hitArea.userData.nodeId = node.id;
-    group.add(ring, body, hitArea);
-    scene.add(group);
-    nodeGroups.set(node.id, group);
-    nodeMaterials.set(node.id, { body: bodyMaterial, ring: ringMaterial, clusterKey: node.clusterKey });
-    hitObjects.set(node.id, hitArea);
-  }
+  const batches = createMemoryGraphBatches({
+    THREE, scene, nodes, edgePaths, theme,
+    createNodeGeometry: (node) => createNodeGeometry(THREE, node),
+    getNodeScale, disposeGeometry, disposeMaterial,
+  });
+  runtime.addCleanup(() => batches.dispose());
+  const hitObjects = batches.hits;
 
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -614,27 +524,7 @@ function initializeMemoryGraphEngine(
     if (runtime.disposed) return;
     selectedNodeId = id;
     const neighbors = adjacency.adjacent.get(id) ?? new Set<string>();
-    const hasContext = Boolean(id) || highlightedIds.size > 0;
-    for (const node of nodes) {
-      const selected = node.id === id;
-      const neighbor = neighbors.has(node.id);
-      const highlighted = highlightedIds.has(node.id);
-      const group = nodeGroups.get(node.id);
-      const appearance = nodeMaterials.get(node.id);
-      if (group) group.scale.setScalar(selected ? 1.14 : neighbor || highlighted ? 1.05 : hasContext ? 0.9 : 1);
-      if (appearance) {
-        appearance.body.opacity = selected ? 1 : neighbor || highlighted ? 0.98 : hasContext ? 0.28 : 0.86;
-        appearance.ring.opacity = selected ? 0.76 : neighbor || highlighted ? 0.4 : hasContext ? 0.035 : 0.08;
-      }
-    }
-    for (const visual of edgeVisuals) {
-      const connected = Boolean(id && (visual.edge.source === id || visual.edge.target === id));
-      const highlighted =
-        highlightedIds.has(visual.edge.source) || highlightedIds.has(visual.edge.target);
-      visual.material.opacity = connected ? 0.56 : highlighted ? 0.36 : hasContext ? 0.035 : 0.15;
-      visual.arrow.visible = connected;
-      visual.arrowMaterial.opacity = connected ? 0.94 : 0;
-    }
+    batches.updateSelection(id, neighbors, highlightedIds);
     invalidate();
   }
 
@@ -652,26 +542,12 @@ function initializeMemoryGraphEngine(
     theme.edgeColor = next.edgeColor;
     theme.selectedColor = next.selectedColor;
 
-    for (const appearance of nodeMaterials.values()) {
-      const color = theme.clusterColors.get(appearance.clusterKey) ?? theme.selectedColor;
-      appearance.body.color.setHex(color);
-      appearance.ring.color.setHex(color);
-    }
-    for (const appearance of nodeMaterials.values()) {
-      appearance.body.emissive.setHex(
-        theme.clusterColors.get(appearance.clusterKey) ?? theme.selectedColor,
-      );
-      appearance.body.emissiveIntensity = next.lightSurface ? 0.02 : 0.09;
-    }
+    batches.refreshTheme(next);
     for (const [key, appearance] of clusterMaterials) {
       const color = theme.clusterColors.get(key) ?? theme.selectedColor;
       appearance.nebula.uniforms.tint.value.setHex(color);
       appearance.nebula.uniforms.strength.value = next.lightSurface ? 0.65 : 1;
       appearance.dust.color.setHex(color);
-    }
-    for (const visual of edgeVisuals) {
-      visual.material.color.setHex(theme.edgeColor);
-      visual.arrowMaterial.color.setHex(theme.selectedColor);
     }
     invalidate();
   }
@@ -878,6 +754,8 @@ function initializeMemoryGraphEngine(
     }
   };
   const onControlsChange = () => invalidate();
+  const onFontsLoaded = () => invalidate();
+  const labelEvents = ["pointerover", "pointerout", "focusin", "focusout"] as const;
   const onResize = () => runSafely(resize);
   const onCanvasClickSafely = (event: MouseEvent) => runSafely(() => onCanvasClick(event));
   const onPointerDownSafely = (event: PointerEvent) => runSafely(() => onPointerDown(event));
@@ -890,6 +768,8 @@ function initializeMemoryGraphEngine(
   runtime.addCleanup(() => {
     window.removeEventListener("resize", onResize);
     controls.removeEventListener("change", onControlsChange);
+    document.fonts?.removeEventListener("loadingdone", onFontsLoaded);
+    for (const event of labelEvents) labelLayer.removeEventListener(event, onControlsChange);
     canvas.removeEventListener("pointerdown", onPointerDownSafely);
     canvas.removeEventListener("pointercancel", onPointerCancelSafely);
     canvas.removeEventListener("click", onCanvasClickSafely);
@@ -899,6 +779,8 @@ function initializeMemoryGraphEngine(
   });
 
   controls.addEventListener("change", onControlsChange);
+  document.fonts?.addEventListener("loadingdone", onFontsLoaded);
+  for (const event of labelEvents) labelLayer.addEventListener(event, onControlsChange);
   canvas.addEventListener("pointerdown", onPointerDownSafely);
   canvas.addEventListener("pointercancel", onPointerCancelSafely);
   canvas.addEventListener("click", onCanvasClickSafely);

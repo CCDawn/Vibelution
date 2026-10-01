@@ -70,10 +70,12 @@ export function createMemoryGraphLabelElements(
   const nodeButtons = new Map<string, HTMLButtonElement>();
   const edgeButtons = new Map<string, HTMLButtonElement>();
   const clusterHeadings = new Map<string, HTMLDivElement>();
+  const summaryElements = new Map<string, HTMLElement>();
 
   for (const cluster of clusters) {
     const heading = document.createElement("div");
     heading.className = styles.clusterLabel;
+    heading.style.display = "none";
     heading.dataset.clusterKey = cluster.key;
     heading.setAttribute("role", "heading");
     heading.setAttribute("aria-level", "2");
@@ -86,6 +88,7 @@ export function createMemoryGraphLabelElements(
     const button = document.createElement("button");
     button.type = "button";
     button.className = styles.edgeLabel;
+    button.style.display = "none";
     button.dataset.edgeId = edge.id;
     button.dataset.edgeType = edge.type;
     button.setAttribute("aria-label", "选择关系：" + (edge.label || edge.type) + "（" + edge.type + "）");
@@ -101,6 +104,7 @@ export function createMemoryGraphLabelElements(
     const button = document.createElement("button");
     button.type = "button";
     button.className = styles.nodeLabel;
+    button.style.display = "none";
     button.dataset.nodeId = node.id;
     button.dataset.nodeType = node.type;
     button.dataset.clusterKey = viewNode.clusterKey;
@@ -121,6 +125,7 @@ export function createMemoryGraphLabelElements(
       summary.className = styles.nodeLabelSummary;
       summary.textContent = oneLine(node.summary, 82);
       button.append(summary);
+      summaryElements.set(node.id, summary);
     }
 
     button.addEventListener("click", () => onSelectNode(node.id));
@@ -128,7 +133,9 @@ export function createMemoryGraphLabelElements(
     nodeButtons.set(node.id, button);
   }
 
-  return { nodeButtons, edgeButtons, clusterHeadings };
+  const elements = { nodeButtons, edgeButtons, clusterHeadings };
+  labelLayoutStates.set(elements, createLabelLayoutState(summaryElements));
+  return elements;
 }
 
 export function buildMemoryGraphAdjacency(
@@ -152,7 +159,189 @@ export function buildMemoryGraphAdjacency(
   return { adjacent, degree };
 }
 
-function rectangle(x: number, y: number, width: number, height: number) {
+type LabelRect = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+type NodeCircle = { x: number; y: number; radius: number };
+type LabelSize = { width: number; height: number };
+type CachedLabelSize = LabelSize & { version: number; variant: string };
+type CardKind = "node" | "edge" | "cluster";
+type CardPosition = { x: number; y: number };
+
+type CardRequest = {
+  kind: CardKind;
+  id: string;
+  element: HTMLElement;
+  x: number;
+  y: number;
+  radius: number;
+  exceptNodeId?: string;
+  variant: string;
+  size?: LabelSize;
+  position?: CardPosition;
+};
+
+type CandidateCache = {
+  nodes: readonly PositionedMemoryKnowledgeGraphNode[];
+  adjacent: Map<string, Set<string>>;
+  degree: Map<string, number>;
+  clusters: readonly MemoryGraphCluster[];
+  selectedNodeId: string;
+  highlightIds: ReadonlySet<string>;
+  zoom: MemoryGraphZoomLevel;
+  areaScale: number;
+  ids: string[];
+  budget: number;
+};
+
+type LayoutEnvironment = {
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  devicePixelRatio: number;
+  fontStatus: string;
+  fontReady: Promise<FontFaceSet> | undefined;
+  themeFingerprint: string;
+  styleSignature: string;
+};
+
+type MemoryGraphLabelLayoutState = {
+  sizes: WeakMap<HTMLElement, CachedLabelSize>;
+  summaryElements: Map<string, HTMLElement>;
+  visibleNodes: Set<string>;
+  visibleEdges: Set<string>;
+  visibleClusters: Set<string>;
+  nodeVisualStates: Map<string, string>;
+  edgeVisualStates: Map<string, string>;
+  lastNodeVisualNodes: readonly PositionedMemoryKnowledgeGraphNode[] | null;
+  lastNodeVisualSelected: string | null;
+  lastNodeVisualHighlights: ReadonlySet<string> | null;
+  lastEdgeVisualPaths: readonly MemoryGraphEdgePath[] | null;
+  lastEdgeVisualSelected: string | null;
+  lastEdgeSelectable: boolean | null;
+  nodesRef: readonly PositionedMemoryKnowledgeGraphNode[] | null;
+  clustersRef: readonly MemoryGraphCluster[] | null;
+  nodesById: Map<string, PositionedMemoryKnowledgeGraphNode>;
+  clusterAnchors: Map<string, { center: { x: number; y: number; z: number }; topMemberY: number }>;
+  candidateCache: CandidateCache | null;
+  edgePathsRef: readonly MemoryGraphEdgePath[] | null;
+  relatedEdgesByNode: Map<string, MemoryGraphEdgePath[]>;
+  layoutVersion: number;
+  layoutEnvironment: LayoutEnvironment | null;
+  zoom: MemoryGraphZoomLevel | null;
+};
+
+const labelLayoutStates = new WeakMap<MemoryGraphLabelElements, MemoryGraphLabelLayoutState>();
+const EMPTY_NODE_IDS: ReadonlySet<string> = new Set();
+const MAX_VISIBLE_NODE_LABELS = 32;
+
+function createLabelLayoutState(
+  summaryElements: Map<string, HTMLElement>,
+): MemoryGraphLabelLayoutState {
+  return {
+    sizes: new WeakMap(),
+    summaryElements,
+    visibleNodes: new Set(),
+    visibleEdges: new Set(),
+    visibleClusters: new Set(),
+    nodeVisualStates: new Map(),
+    edgeVisualStates: new Map(),
+    lastNodeVisualNodes: null,
+    lastNodeVisualSelected: null,
+    lastNodeVisualHighlights: null,
+    lastEdgeVisualPaths: null,
+    lastEdgeVisualSelected: null,
+    lastEdgeSelectable: null,
+    nodesRef: null,
+    clustersRef: null,
+    nodesById: new Map(),
+    clusterAnchors: new Map(),
+    candidateCache: null,
+    edgePathsRef: null,
+    relatedEdgesByNode: new Map(),
+    layoutVersion: 0,
+    layoutEnvironment: null,
+    zoom: null,
+  };
+}
+
+function stateFor(elements: MemoryGraphLabelElements): MemoryGraphLabelLayoutState {
+  let state = labelLayoutStates.get(elements);
+  if (!state) {
+    state = createLabelLayoutState(new Map());
+    labelLayoutStates.set(elements, state);
+  }
+  return state;
+}
+
+function refreshStaticLabelInputs(
+  state: MemoryGraphLabelLayoutState,
+  nodes: readonly PositionedMemoryKnowledgeGraphNode[],
+  clusters: readonly MemoryGraphCluster[],
+): void {
+  if (state.nodesRef === nodes && state.clustersRef === clusters) return;
+  state.nodesRef = nodes;
+  state.clustersRef = clusters;
+  state.nodesById = new Map(nodes.map((node) => [node.id, node]));
+  state.clusterAnchors = new Map();
+  for (const cluster of clusters) {
+    let topMember: PositionedMemoryKnowledgeGraphNode | undefined;
+    for (const id of cluster.nodeIds) {
+      const node = state.nodesById.get(id);
+      if (node && (!topMember || node.y > topMember.y)) topMember = node;
+    }
+    if (topMember) {
+      state.clusterAnchors.set(cluster.key, {
+        center: cluster.center,
+        topMemberY: topMember.y,
+      });
+    }
+  }
+  state.candidateCache = null;
+  state.nodeVisualStates.clear();
+  state.lastNodeVisualNodes = null;
+  state.lastNodeVisualSelected = null;
+  state.lastNodeVisualHighlights = null;
+}
+
+function refreshRelatedEdges(
+  state: MemoryGraphLabelLayoutState,
+  edgePaths: readonly MemoryGraphEdgePath[],
+): void {
+  if (state.edgePathsRef === edgePaths) return;
+  state.edgePathsRef = edgePaths;
+  const related = new Map<string, MemoryGraphEdgePath[]>();
+  for (const path of edgePaths) {
+    const { source, target } = path.edge;
+    const sourcePaths = related.get(source) ?? [];
+    sourcePaths.push(path);
+    related.set(source, sourcePaths);
+    if (target !== source) {
+      const targetPaths = related.get(target) ?? [];
+      targetPaths.push(path);
+      related.set(target, targetPaths);
+    }
+  }
+  state.relatedEdgesByNode = new Map();
+  for (const [id, paths] of related) {
+    paths.sort((left, right) => {
+      const weightDelta = (right.edge.weight ?? 0) - (left.edge.weight ?? 0);
+      return weightDelta || (left.edge.id < right.edge.id ? -1 : left.edge.id > right.edge.id ? 1 : 0);
+    });
+    state.relatedEdgesByNode.set(id, paths.slice(0, 4));
+  }
+  state.edgeVisualStates.clear();
+  state.lastEdgeVisualPaths = null;
+  state.lastEdgeVisualSelected = null;
+  state.lastEdgeSelectable = null;
+}
+
+function rectangle(x: number, y: number, width: number, height: number): LabelRect {
   return {
     left: x - width / 2 - 5,
     right: x + width / 2 + 5,
@@ -160,8 +349,6 @@ function rectangle(x: number, y: number, width: number, height: number) {
     bottom: y + height / 2 + 4,
   };
 }
-
-type LabelRect = ReturnType<typeof rectangle>;
 
 function projectWorldPosition(
   camera: Camera,
@@ -178,21 +365,352 @@ function projectWorldPosition(
   };
 }
 
-function placeCard(
-  element: HTMLElement,
-  x: number,
-  y: number,
-  radius: number,
+function computedLabelStyleSignature(element: HTMLElement | undefined): string {
+  if (!element || typeof window === "undefined" || typeof window.getComputedStyle !== "function") return "";
+  const style = window.getComputedStyle(element);
+  return [
+    style.font,
+    style.fontFamily,
+    style.fontSize,
+    style.fontStyle,
+    style.fontWeight,
+    style.lineHeight,
+    style.letterSpacing,
+    style.paddingTop,
+    style.paddingRight,
+    style.paddingBottom,
+    style.paddingLeft,
+    style.borderTopWidth,
+    style.borderRightWidth,
+    style.borderBottomWidth,
+    style.borderLeftWidth,
+    style.maxWidth,
+    style.minWidth,
+    style.boxSizing,
+    style.whiteSpace,
+  ].join("\u001f");
+}
+
+function themeFingerprint(labelLayer: HTMLElement): string {
+  const parts: string[] = [];
+  let element: HTMLElement | null = labelLayer;
+  while (element) {
+    parts.push(
+      element.tagName,
+      element.getAttribute("class") ?? "",
+      element.getAttribute("style") ?? "",
+      element.getAttribute("data-theme") ?? "",
+      element.getAttribute("data-vui-theme") ?? "",
+      element.getAttribute("data-color-scheme") ?? "",
+      element.getAttribute("data-mode") ?? "",
+    );
+    if (typeof document !== "undefined" && element === document.documentElement) break;
+    element = element.parentElement;
+  }
+  if (typeof window !== "undefined") {
+    parts.push(String(Boolean(window.matchMedia?.("(prefers-color-scheme: dark)")?.matches)));
+  }
+  return parts.join("\u001f");
+}
+
+function labelLayoutVersion(
+  state: MemoryGraphLabelLayoutState,
+  elements: MemoryGraphLabelElements,
+  labelLayer: HTMLDivElement,
+  width: number,
+  height: number,
+): number {
+  const fontSet = typeof document === "undefined" ? undefined : document.fonts;
+  const fontReady = fontSet?.ready;
+  const previous = state.layoutEnvironment;
+  const theme = themeFingerprint(labelLayer);
+  const baseChanged =
+    !previous ||
+    previous.width !== width ||
+    previous.height !== height ||
+    previous.viewportWidth !== (typeof window === "undefined" ? width : window.innerWidth) ||
+    previous.viewportHeight !== (typeof window === "undefined" ? height : window.innerHeight) ||
+    previous.devicePixelRatio !== (typeof window === "undefined" ? 1 : window.devicePixelRatio || 1) ||
+    previous.fontStatus !== (fontSet?.status ?? "unsupported") ||
+    previous.fontReady !== fontReady ||
+    previous.themeFingerprint !== theme;
+  const styleSignature = baseChanged
+    ? [
+        computedLabelStyleSignature(elements.nodeButtons.values().next().value),
+        computedLabelStyleSignature(elements.edgeButtons.values().next().value),
+        computedLabelStyleSignature(elements.clusterHeadings.values().next().value),
+        labelLayer.className,
+      ].join("\u001e")
+    : previous.styleSignature;
+  const environment: LayoutEnvironment = {
+    width,
+    height,
+    viewportWidth: typeof window === "undefined" ? width : window.innerWidth,
+    viewportHeight: typeof window === "undefined" ? height : window.innerHeight,
+    devicePixelRatio: typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+    fontStatus: fontSet?.status ?? "unsupported",
+    fontReady,
+    themeFingerprint: theme,
+    styleSignature,
+  };
+  if (
+    baseChanged ||
+    previous?.styleSignature !== environment.styleSignature
+  ) {
+    state.layoutVersion += 1;
+    state.layoutEnvironment = environment;
+  }
+  return state.layoutVersion;
+}
+
+function updateNodeVisualState(
+  state: MemoryGraphLabelLayoutState,
+  elements: MemoryGraphLabelElements,
+  nodes: readonly PositionedMemoryKnowledgeGraphNode[],
+  adjacent: Map<string, Set<string>>,
+  selectedNodeId: string,
+  highlightIds: ReadonlySet<string>,
+): void {
+  if (
+    state.lastNodeVisualNodes === nodes &&
+    state.lastNodeVisualSelected === selectedNodeId &&
+    state.lastNodeVisualHighlights === highlightIds
+  ) return;
+  const selectedNeighbors = adjacent.get(selectedNodeId) ?? EMPTY_NODE_IDS;
+  const hasContext = Boolean(selectedNodeId) || highlightIds.size > 0;
+  for (const node of nodes) {
+    const button = elements.nodeButtons.get(node.id);
+    if (!button) continue;
+    const selected = node.id === selectedNodeId;
+    const neighbor = selectedNeighbors.has(node.id);
+    const highlighted = highlightIds.has(node.id);
+    const muted = hasContext && !selected && !neighbor && !highlighted;
+    const signature = `${Number(selected)}${Number(neighbor)}${Number(highlighted)}${Number(muted)}`;
+    if (state.nodeVisualStates.get(node.id) === signature) continue;
+    state.nodeVisualStates.set(node.id, signature);
+    button.setAttribute("aria-pressed", String(selected));
+    button.dataset.selected = String(selected);
+    button.dataset.highlighted = String(highlighted);
+    button.classList.toggle("is-selected", selected);
+    button.classList.toggle("is-neighbor", neighbor);
+    button.classList.toggle("is-highlighted", highlighted);
+    button.classList.toggle("is-muted", muted);
+  }
+  state.lastNodeVisualNodes = nodes;
+  state.lastNodeVisualSelected = selectedNodeId;
+  state.lastNodeVisualHighlights = highlightIds;
+}
+
+function updateEdgeVisualState(
+  state: MemoryGraphLabelLayoutState,
+  elements: MemoryGraphLabelElements,
+  edgePaths: readonly MemoryGraphEdgePath[],
+  selectedNodeId: string,
+  edgeSelectable: boolean,
+): void {
+  if (
+    state.lastEdgeVisualPaths === edgePaths &&
+    state.lastEdgeVisualSelected === selectedNodeId &&
+    state.lastEdgeSelectable === edgeSelectable
+  ) return;
+  for (const { edge } of edgePaths) {
+    const button = elements.edgeButtons.get(edge.id);
+    if (!button) continue;
+    const connected = Boolean(selectedNodeId) && (edge.source === selectedNodeId || edge.target === selectedNodeId);
+    const signature = `${Number(connected)}${Number(edgeSelectable)}`;
+    if (state.edgeVisualStates.get(edge.id) === signature) continue;
+    state.edgeVisualStates.set(edge.id, signature);
+    button.classList.toggle("is-selected", connected);
+    button.disabled = !edgeSelectable;
+  }
+  state.lastEdgeVisualPaths = edgePaths;
+  state.lastEdgeVisualSelected = selectedNodeId;
+  state.lastEdgeSelectable = edgeSelectable;
+}
+
+function candidatesForFrame(
+  state: MemoryGraphLabelLayoutState,
+  nodes: readonly PositionedMemoryKnowledgeGraphNode[],
+  adjacent: Map<string, Set<string>>,
+  degree: Map<string, number>,
+  clusters: readonly MemoryGraphCluster[],
+  selectedNodeId: string,
+  highlightIds: ReadonlySet<string>,
+  zoom: MemoryGraphZoomLevel,
+  areaScale: number,
+): CandidateCache {
+  const cached = state.candidateCache;
+  if (
+    cached &&
+    cached.nodes === nodes &&
+    cached.adjacent === adjacent &&
+    cached.degree === degree &&
+    cached.clusters === clusters &&
+    cached.selectedNodeId === selectedNodeId &&
+    cached.highlightIds === highlightIds &&
+    cached.zoom === zoom &&
+    cached.areaScale === areaScale
+  ) return cached;
+
+  const selectedNeighbors = adjacent.get(selectedNodeId) ?? EMPTY_NODE_IDS;
+  const priorities = new Map<string, number>();
+  for (const node of nodes) priorities.set(node.id, (degree.get(node.id) ?? 0) * 10);
+
+  if (zoom === "overview") {
+    for (const cluster of clusters) {
+      let anchor: PositionedMemoryKnowledgeGraphNode | undefined;
+      for (const id of cluster.nodeIds) {
+        const candidate = state.nodesById.get(id);
+        if (!candidate) continue;
+        if (
+          !anchor ||
+          (degree.get(candidate.id) ?? 0) > (degree.get(anchor.id) ?? 0) ||
+          ((degree.get(candidate.id) ?? 0) === (degree.get(anchor.id) ?? 0) && candidate.id < anchor.id)
+        ) anchor = candidate;
+      }
+      if (anchor) priorities.set(anchor.id, Math.max(priorities.get(anchor.id) ?? 0, 1200));
+    }
+  }
+
+  if (selectedNodeId) {
+    priorities.set(selectedNodeId, 10_000);
+    for (const id of selectedNeighbors) priorities.set(id, Math.max(priorities.get(id) ?? 0, 8_000));
+  }
+  for (const id of highlightIds) priorities.set(id, Math.max(priorities.get(id) ?? 0, 9_500));
+
+  const importantCount = Math.min(24, Number(Boolean(selectedNodeId)) + selectedNeighbors.size + highlightIds.size);
+  const baseBudget = Math.max(3, Math.round(LABEL_BUDGETS[zoom] * areaScale));
+  const budget = Math.min(nodes.length, MAX_VISIBLE_NODE_LABELS, Math.max(baseBudget, importantCount));
+  const comparePriority = (left: string, right: string) => {
+    const priorityDelta = (priorities.get(right) ?? 0) - (priorities.get(left) ?? 0);
+    return priorityDelta || (left < right ? -1 : left > right ? 1 : 0);
+  };
+  const clusterOrder = [...new Set([...clusters.map((cluster) => cluster.key), ...nodes.map((node) => node.clusterKey)])];
+  const byCluster = new Map<string, string[]>(clusterOrder.map((key) => [key, []]));
+  for (const node of nodes) byCluster.get(node.clusterKey)?.push(node.id);
+  for (const idsInCluster of byCluster.values()) idsInCluster.sort(comparePriority);
+
+  const ids: string[] = [];
+  const included = new Set<string>();
+  const include = (id: string) => {
+    if (included.has(id) || !state.nodesById.has(id)) return;
+    included.add(id);
+    ids.push(id);
+  };
+  // Keep the selected node first, then reserve each cluster's best candidate.
+  // A cluster's best uses the same score as the old global order, so a selected
+  // neighbor or search highlight stays ahead of an ordinary cluster anchor.
+  include(selectedNodeId);
+  const clusterLeaders = clusterOrder
+    .map((key) => byCluster.get(key)?.[0])
+    .filter((id): id is string => Boolean(id))
+    .sort(comparePriority);
+  for (const id of clusterLeaders) include(id);
+
+  // Complete the selected-neighbor/highlight tier before round-robin fallback.
+  // This preserves context priority after giving each cluster its first choice.
+  for (const id of [...priorities.keys()].sort(comparePriority)) {
+    if ((priorities.get(id) ?? 0) >= 8_000) include(id);
+  }
+
+  const clusterOffsets = new Map(clusterOrder.map((key) => [key, 0]));
+  let added = true;
+  while (added) {
+    added = false;
+    for (const key of clusterOrder) {
+      const idsInCluster = byCluster.get(key) ?? [];
+      let offset = clusterOffsets.get(key) ?? 0;
+      while (offset < idsInCluster.length && included.has(idsInCluster[offset])) offset += 1;
+      clusterOffsets.set(key, offset + 1);
+      if (offset >= idsInCluster.length) continue;
+      include(idsInCluster[offset]);
+      added = true;
+    }
+  }
+  const next: CandidateCache = {
+    nodes,
+    adjacent,
+    degree,
+    clusters,
+    selectedNodeId,
+    highlightIds,
+    zoom,
+    areaScale,
+    ids,
+    budget,
+  };
+  state.candidateCache = next;
+  return next;
+}
+
+function requestNodeVariant(
+  button: HTMLButtonElement,
+  selected: boolean,
+  neighbor: boolean,
+  highlighted: boolean,
+  muted: boolean,
+): string {
+  return [
+    selected,
+    neighbor,
+    highlighted,
+    muted,
+    button.matches(":hover"),
+    button.matches(":focus-visible"),
+  ].map(Number).join("");
+}
+
+function nodeSummaryExpanded(
+  state: MemoryGraphLabelLayoutState,
+  id: string,
+  button: HTMLButtonElement,
+  selected: boolean,
+  highlighted: boolean,
+): boolean {
+  if (!state.summaryElements.has(id)) return false;
+  return selected || highlighted || button.matches(":hover") || button.matches(":focus-visible");
+}
+
+function prepareCardMeasurements(
+  state: MemoryGraphLabelLayoutState,
+  requests: readonly CardRequest[],
+  version: number,
+): { node: Set<string>; edge: Set<string>; cluster: Set<string> } {
+  const staged = { node: new Set<string>(), edge: new Set<string>(), cluster: new Set<string>() };
+  const misses: CardRequest[] = [];
+  for (const request of requests) {
+    const cached = state.sizes.get(request.element);
+    if (cached && cached.version === version && cached.variant === request.variant) {
+      request.size = { width: cached.width, height: cached.height };
+      continue;
+    }
+    // Match the class-declared node grid and block card modes before measuring.
+    // All misses are staged before any offset read forces layout.
+    request.element.style.display = request.kind === "node" ? "grid" : "block";
+    staged[request.kind].add(request.id);
+    misses.push(request);
+  }
+  for (const request of misses) {
+    const size = {
+      width: request.element.offsetWidth || 148,
+      height: request.element.offsetHeight || 26,
+    };
+    request.size = size;
+    state.sizes.set(request.element, { ...size, version, variant: request.variant });
+  }
+  return staged;
+}
+
+function findCardPosition(
+  request: CardRequest,
   width: number,
   height: number,
   occupied: LabelRect[],
-  nodeCircles: Map<string, { x: number; y: number; radius: number }>,
-  exceptNodeId?: string,
-): boolean {
-  element.style.display = "block";
-  element.style.visibility = "hidden";
-  const cardWidth = element.offsetWidth || 148;
-  const cardHeight = element.offsetHeight || 26;
+  nodeCircles: Map<string, NodeCircle>,
+): CardPosition | null {
+  const cardWidth = request.size?.width ?? 148;
+  const cardHeight = request.size?.height ?? 26;
+  const { x, y, radius } = request;
   const options = [
     { x: x + cardWidth / 2 + radius + 8, y },
     { x: x - cardWidth / 2 - radius - 8, y },
@@ -220,7 +738,7 @@ function placeCard(
 
     let overlapsNode = false;
     for (const [id, circle] of nodeCircles) {
-      if (id === exceptNodeId) continue;
+      if (id === request.exceptNodeId) continue;
       const nearestX = Math.max(rect.left, Math.min(circle.x, rect.right));
       const nearestY = Math.max(rect.top, Math.min(circle.y, rect.bottom));
       if (Math.hypot(circle.x - nearestX, circle.y - nearestY) < circle.radius + 3) {
@@ -231,64 +749,57 @@ function placeCard(
     if (overlapsNode) continue;
 
     occupied.push(rect);
-    element.style.left = centerX + "px";
-    element.style.top = centerY + "px";
-    element.style.visibility = "visible";
-    return true;
+    return { x: centerX, y: centerY };
   }
-
-  element.style.display = "none";
-  element.style.visibility = "";
-  return false;
+  return null;
 }
 
-function candidateNodeIds(
-  nodes: readonly PositionedMemoryKnowledgeGraphNode[],
-  adjacency: Map<string, Set<string>>,
-  degree: Map<string, number>,
-  clusters: readonly MemoryGraphCluster[],
-  selectedNodeId: string,
-  highlightIds: ReadonlySet<string>,
-  zoom: MemoryGraphZoomLevel,
-  areaScale: number,
-): { ids: string[]; budget: number } {
-  const selectedNeighbors = adjacency.get(selectedNodeId) ?? new Set<string>();
-  const priorities = new Map<string, number>();
-  const sourceById = new Map(nodes.map((node) => [node.id, node]));
+function firstClampedCardPosition(request: CardRequest, width: number, height: number): CardPosition {
+  const cardWidth = request.size?.width ?? 148;
+  const cardHeight = request.size?.height ?? 26;
+  const left = cardWidth / 2 + 8;
+  const right = width - cardWidth / 2 - 8;
+  const top = cardHeight / 2 + 8;
+  const bottom = height - cardHeight / 2 - 8;
+  const desiredX = request.x + cardWidth / 2 + request.radius + 8;
+  return {
+    x: right < left ? width / 2 : Math.max(left, Math.min(right, desiredX)),
+    y: bottom < top ? height / 2 : Math.max(top, Math.min(bottom, request.y)),
+  };
+}
 
-  for (const node of nodes) {
-    priorities.set(node.id, (degree.get(node.id) ?? 0) * 10);
+function hideCard(element: HTMLElement | undefined): void {
+  if (!element) return;
+  if (element.style.display !== "none") element.style.display = "none";
+  if (element.style.visibility !== "") element.style.visibility = "";
+}
+
+function showPlacedCards<T extends HTMLElement>(
+  previous: Set<string>,
+  staged: Set<string>,
+  placements: Map<string, CardRequest>,
+  elements: Map<string, T>,
+): Set<string> {
+  for (const id of previous) {
+    if (!placements.has(id)) hideCard(elements.get(id));
   }
-
-  if (zoom === "overview") {
-    for (const cluster of clusters) {
-      const anchor = cluster.nodeIds
-        .map((id) => sourceById.get(id))
-        .filter((node): node is PositionedMemoryKnowledgeGraphNode => Boolean(node))
-        .sort((left, right) => {
-          const degreeDelta = (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0);
-          return degreeDelta || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
-        })[0];
-      if (anchor) priorities.set(anchor.id, Math.max(priorities.get(anchor.id) ?? 0, 1200));
-    }
+  for (const id of staged) {
+    if (!placements.has(id)) hideCard(elements.get(id));
   }
-
-  if (selectedNodeId) {
-    priorities.set(selectedNodeId, 10_000);
-    for (const id of selectedNeighbors) priorities.set(id, Math.max(priorities.get(id) ?? 0, 8_000));
+  const visible = new Set<string>();
+  for (const [id, request] of placements) {
+    const position = request.position;
+    if (!position) continue;
+    const display = request.kind === "node" ? "grid" : "block";
+    if (request.element.style.display !== display) request.element.style.display = display;
+    if (request.element.style.visibility !== "visible") request.element.style.visibility = "visible";
+    const left = position.x + "px";
+    const top = position.y + "px";
+    if (request.element.style.left !== left) request.element.style.left = left;
+    if (request.element.style.top !== top) request.element.style.top = top;
+    visible.add(id);
   }
-  for (const id of highlightIds) priorities.set(id, Math.max(priorities.get(id) ?? 0, 9_500));
-
-  const importantCount = Math.min(24, Number(Boolean(selectedNodeId)) + selectedNeighbors.size + highlightIds.size);
-  const baseBudget = Math.max(3, Math.round(LABEL_BUDGETS[zoom] * areaScale));
-  const budget = Math.min(nodes.length, 32, Math.max(baseBudget, importantCount));
-  const ids = [...priorities.entries()]
-    .sort((left, right) => {
-      const priorityDelta = right[1] - left[1];
-      return priorityDelta || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0);
-    })
-    .map(([id]) => id);
-  return { ids, budget };
+  return visible;
 }
 
 export function positionMemoryGraphLabels(options: {
@@ -333,21 +844,36 @@ export function positionMemoryGraphLabels(options: {
   const height = host.clientHeight;
   if (!width || !height) return "overview";
 
+  const state = stateFor(elements);
+  refreshStaticLabelInputs(state, nodes, clusters);
+  refreshRelatedEdges(state, edgePaths);
   const areaScale = Math.max(0.58, Math.min(1.18, Math.sqrt((width * height) / 600_000)));
   const zoomScale = (overviewDistance / Math.max(1, camera.position.distanceTo(cameraTarget))) * areaScale;
   const zoom: MemoryGraphZoomLevel = zoomScale < 1.38 ? "overview" : zoomScale < 2.35 ? "topic" : "detail";
-  labelLayer.parentElement?.setAttribute("data-zoom-level", zoom);
+  if (state.zoom !== zoom) {
+    labelLayer.parentElement?.setAttribute("data-zoom-level", zoom);
+    state.zoom = zoom;
+  }
 
-  const nodeCircles = new Map<string, { x: number; y: number; radius: number }>();
+  updateNodeVisualState(state, elements, nodes, adjacent, selectedNodeId, highlightIds);
+  const edgeSelectable = canSelectEdge();
+  updateEdgeVisualState(state, elements, edgePaths, selectedNodeId, edgeSelectable);
+
+  const placedNodes = new Map<string, CardRequest>();
+  const placedEdges = new Map<string, CardRequest>();
+  const placedClusters = new Map<string, CardRequest>();
+  if (!labelsVisible) {
+    state.visibleNodes = showPlacedCards(state.visibleNodes, new Set(), placedNodes, elements.nodeButtons);
+    state.visibleEdges = showPlacedCards(state.visibleEdges, new Set(), placedEdges, elements.edgeButtons);
+    state.visibleClusters = showPlacedCards(state.visibleClusters, new Set(), placedClusters, elements.clusterHeadings);
+    return zoom;
+  }
+
+  const layoutVersion = labelLayoutVersion(state, elements, labelLayer, width, height);
+  const nodeCircles = new Map<string, NodeCircle>();
   const tangent = Math.tan((fieldOfView * Math.PI) / 360);
   for (const node of nodes) {
-    const projected = projectWorldPosition(
-      camera,
-      scratch.set(node.x, node.y, node.z),
-      scratch,
-      width,
-      height,
-    );
+    const projected = projectWorldPosition(camera, scratch.set(node.x, node.y, node.z), scratch, width, height);
     if (projected.z < -1 || projected.z > 1) continue;
     if (projected.x < -50 || projected.x > width + 50 || projected.y < -50 || projected.y > height + 50) continue;
     const depth = Math.max(
@@ -362,57 +888,35 @@ export function positionMemoryGraphLabels(options: {
     nodeCircles.set(node.id, { x: projected.x, y: projected.y, radius });
   }
 
-  const selectedNeighbors = adjacent.get(selectedNodeId) ?? new Set<string>();
-  const occupied: LabelRect[] = [];
-
-  for (const [id, button] of elements.nodeButtons) {
-    const selected = id === selectedNodeId;
-    const neighbor = selectedNeighbors.has(id);
-    const highlighted = highlightIds.has(id);
-    button.setAttribute("aria-pressed", String(selected));
-    button.dataset.selected = String(selected);
-    button.dataset.highlighted = String(highlighted);
-    button.classList.toggle("is-selected", selected);
-    button.classList.toggle("is-neighbor", neighbor);
-    button.classList.toggle("is-highlighted", highlighted);
-    button.classList.toggle("is-muted", Boolean(selectedNodeId || highlightIds.size) && !selected && !neighbor && !highlighted);
-    button.style.display = "none";
-  }
-
-  for (const heading of elements.clusterHeadings.values()) heading.style.display = "none";
-  for (const edgePath of edgePaths) {
-    const button = elements.edgeButtons.get(edgePath.edge.id);
-    if (!button) continue;
-    const connected =
-      Boolean(selectedNodeId) &&
-      (edgePath.edge.source === selectedNodeId || edgePath.edge.target === selectedNodeId);
-    button.classList.toggle("is-selected", connected);
-    button.disabled = !canSelectEdge();
-    button.style.display = "none";
-  }
-
-  if (!labelsVisible) return zoom;
-
+  const clusterRequests: CardRequest[] = [];
   if (zoom !== "detail") {
-    const clusterCenters = new Map(clusters.map((cluster) => [cluster.key, cluster.center]));
     for (const cluster of clusters) {
       const heading = elements.clusterHeadings.get(cluster.key);
-      const center = clusterCenters.get(cluster.key);
-      if (!heading || !center) continue;
-      const topMember = cluster.nodeIds
-        .map((id) => nodes.find((node) => node.id === id))
-        .filter((node): node is PositionedMemoryKnowledgeGraphNode => Boolean(node))
-        .sort((left, right) => right.y - left.y)[0];
-      if (!topMember) continue;
-      const headingWorld = scratch.set(center.x, topMember.y + 1.15, center.z + 0.18);
-      const projected = projectWorldPosition(camera, headingWorld, scratch, width, height);
+      const anchor = state.clusterAnchors.get(cluster.key);
+      if (!heading || !anchor) continue;
+      const projected = projectWorldPosition(
+        camera,
+        scratch.set(anchor.center.x, anchor.topMemberY + 1.15, anchor.center.z + 0.18),
+        scratch,
+        width,
+        height,
+      );
       if (projected.z < -1 || projected.z > 1) continue;
       if (projected.x < -24 || projected.x > width + 24 || projected.y < -24 || projected.y > height + 24) continue;
-      placeCard(heading, projected.x, projected.y, 0, width, height, occupied, nodeCircles);
+      clusterRequests.push({
+        kind: "cluster",
+        id: cluster.key,
+        element: heading,
+        x: projected.x,
+        y: projected.y,
+        radius: 0,
+        variant: "",
+      });
     }
   }
 
-  const candidates = candidateNodeIds(
+  const candidates = candidatesForFrame(
+    state,
     nodes,
     adjacent,
     degree,
@@ -422,33 +926,84 @@ export function positionMemoryGraphLabels(options: {
     zoom,
     areaScale,
   );
-  let placed = 0;
-  for (const id of candidates.ids) {
-    if (placed >= candidates.budget) break;
+  const visibleCandidateIds = candidates.ids
+    .filter((id) => nodeCircles.has(id));
+  const selectedNeighbors = adjacent.get(selectedNodeId) ?? EMPTY_NODE_IDS;
+  const nodeRequests: CardRequest[] = [];
+  for (const id of visibleCandidateIds) {
     const button = elements.nodeButtons.get(id);
     const circle = nodeCircles.get(id);
     if (!button || !circle) continue;
-    if (placeCard(button, circle.x, circle.y, circle.radius, width, height, occupied, nodeCircles, id)) placed += 1;
+    const selected = id === selectedNodeId;
+    const neighbor = selectedNeighbors.has(id);
+    const highlighted = highlightIds.has(id);
+    const muted = Boolean(selectedNodeId || highlightIds.size) && !selected && !neighbor && !highlighted;
+    const variant = requestNodeVariant(button, selected, neighbor, highlighted, muted);
+    nodeRequests.push({
+      kind: "node",
+      id,
+      element: button,
+      x: circle.x,
+      y: circle.y,
+      radius: circle.radius,
+      exceptNodeId: id,
+      variant,
+    });
+    const last = nodeRequests[nodeRequests.length - 1];
+    last.variant += nodeSummaryExpanded(state, id, button, selected, highlighted) ? "e" : "c";
   }
 
-  if (!selectedNodeId) return zoom;
-  const related = edgePaths
-    .filter(
-      ({ edge }) =>
-        edge.source === selectedNodeId || edge.target === selectedNodeId,
-    )
-    .sort((left, right) => {
-      const weightDelta = (right.edge.weight ?? 0) - (left.edge.weight ?? 0);
-      return weightDelta || (left.edge.id < right.edge.id ? -1 : left.edge.id > right.edge.id ? 1 : 0);
-    })
-    .slice(0, 4);
-  for (const path of related) {
-    const button = elements.edgeButtons.get(path.edge.id);
-    if (!button) continue;
-    const point = path.curve.getPoint(0.54);
-    const projected = projectWorldPosition(camera, point, scratch, width, height);
-    if (projected.z < -1 || projected.z > 1) continue;
-    placeCard(button, projected.x, projected.y, 0, width, height, occupied, nodeCircles);
+  const edgeRequests: CardRequest[] = [];
+  if (selectedNodeId) {
+    for (const path of state.relatedEdgesByNode.get(selectedNodeId) ?? []) {
+      const button = elements.edgeButtons.get(path.edge.id);
+      if (!button) continue;
+      const point = path.curve.getPoint(0.54);
+      const projected = projectWorldPosition(camera, point, scratch, width, height);
+      if (projected.z < -1 || projected.z > 1) continue;
+      edgeRequests.push({
+        kind: "edge",
+        id: path.edge.id,
+        element: button,
+        x: projected.x,
+        y: projected.y,
+        radius: 0,
+        variant: `${Number(edgeSelectable)}${Number(path.edge.source === selectedNodeId || path.edge.target === selectedNodeId)}`,
+      });
+    }
   }
+
+  const requests = [...clusterRequests, ...nodeRequests, ...edgeRequests];
+  const staged = prepareCardMeasurements(state, requests, layoutVersion);
+  const occupied: LabelRect[] = [];
+  for (const request of clusterRequests) {
+    const position = findCardPosition(request, width, height, occupied, nodeCircles);
+    if (!position) continue;
+    request.position = position;
+    placedClusters.set(request.id, request);
+  }
+  let placedNodeCount = 0;
+  for (const request of nodeRequests) {
+    if (placedNodeCount >= candidates.budget) break;
+    let position = findCardPosition(request, width, height, occupied, nodeCircles);
+    if (!position && request.id === selectedNodeId) {
+      position = firstClampedCardPosition(request, width, height);
+      occupied.push(rectangle(position.x, position.y, request.size?.width ?? 148, request.size?.height ?? 26));
+    }
+    if (!position) continue;
+    request.position = position;
+    placedNodeCount += 1;
+    placedNodes.set(request.id, request);
+  }
+  for (const request of edgeRequests) {
+    const position = findCardPosition(request, width, height, occupied, nodeCircles);
+    if (!position) continue;
+    request.position = position;
+    placedEdges.set(request.id, request);
+  }
+
+  state.visibleClusters = showPlacedCards(state.visibleClusters, staged.cluster, placedClusters, elements.clusterHeadings);
+  state.visibleNodes = showPlacedCards(state.visibleNodes, staged.node, placedNodes, elements.nodeButtons);
+  state.visibleEdges = showPlacedCards(state.visibleEdges, staged.edge, placedEdges, elements.edgeButtons);
   return zoom;
 }
