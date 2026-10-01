@@ -535,10 +535,10 @@ def _dev_team_template() -> dict[str, Any]:
             "nodePrefix": "dev-team-node",
             "positions": [(400, 60), (160, 260), (640, 260), (400, 460)],
             "edges": [
-                {"id": "planner-dev-a", "source": "dev-team-node-1", "target": "dev-team-node-2", "type": "communication", "label": "任务派发"},
-                {"id": "planner-dev-b", "source": "dev-team-node-1", "target": "dev-team-node-3", "type": "communication", "label": "任务派发"},
-                {"id": "dev-a-reviewer", "source": "dev-team-node-2", "target": "dev-team-node-4", "type": "communication", "label": "提审"},
-                {"id": "dev-b-reviewer", "source": "dev-team-node-3", "target": "dev-team-node-4", "type": "communication", "label": "提审"},
+                {"id": "planner-dev-a", "source": "dev-team-node-1", "target": "dev-team-node-2", "type": "delegates_to", "label": "任务派发"},
+                {"id": "planner-dev-b", "source": "dev-team-node-1", "target": "dev-team-node-3", "type": "delegates_to", "label": "任务派发"},
+                {"id": "dev-a-reviewer", "source": "dev-team-node-2", "target": "dev-team-node-4", "type": "reports_to", "label": "提审"},
+                {"id": "dev-b-reviewer", "source": "dev-team-node-3", "target": "dev-team-node-4", "type": "reports_to", "label": "提审"},
             ],
         },
         "roles": [
