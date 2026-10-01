@@ -26,8 +26,8 @@ import { fetchGitStatus } from "../api/git";
 import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
 import {
   agentBroadcastEventTimeMs,
-  hasUnseenAgentBroadcast,
   readStoredAgentBroadcastReadAtMs,
+  resolveAgentBroadcastBadgeState,
   storeAgentBroadcastReadAtMs,
 } from "./agentBroadcastBadge";
 import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
@@ -816,6 +816,10 @@ export function AppShell() {
     refetchIntervalInBackground: shellStartupWarmupActive,
     // Heartbeat-only field churn must not re-render the whole shell + route tree.
     structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
+    // One retry absorbs transient blips, but a hung backend flips isError (the
+    // half-dead warning) fast instead of eating the default retry+backoff wait;
+    // health polls with retry:false every few seconds remain the recovery path.
+    retry: 1,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
   // Running-code freshness: compare the commit this backend was started from
@@ -853,7 +857,7 @@ export function AppShell() {
     staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
-  const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState(() => readStoredAgentBroadcastReadAtMs());
+  const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState<number | null>(() => readStoredAgentBroadcastReadAtMs());
   const agentBroadcastLatestEvent = useMemo(() => {
     const events = agentBroadcastLatestQuery.data?.events;
     return events && events.length ? events[events.length - 1] : undefined;
@@ -862,7 +866,20 @@ export function AppShell() {
     () => agentBroadcastEventTimeMs(agentBroadcastLatestEvent),
     [agentBroadcastLatestEvent],
   );
-  const agentBroadcastHasUnread = hasUnseenAgentBroadcast(agentBroadcastLatestEventMs, agentBroadcastReadAtMs);
+  const agentBroadcastBadgeState = useMemo(
+    () => resolveAgentBroadcastBadgeState(agentBroadcastLatestEventMs, agentBroadcastReadAtMs),
+    [agentBroadcastLatestEventMs, agentBroadcastReadAtMs],
+  );
+  // First visit (no stored cursor): silently adopt the observed latest event
+  // as the read baseline instead of flagging the whole broadcast history
+  // unread — only events landing after the baseline light the bell.
+  useEffect(() => {
+    if (agentBroadcastBadgeState.adoptedBaseline) {
+      storeAgentBroadcastReadAtMs(agentBroadcastBadgeState.cursorMs);
+      setAgentBroadcastReadAtMs(agentBroadcastBadgeState.cursorMs);
+    }
+  }, [agentBroadcastBadgeState]);
+  const agentBroadcastHasUnread = agentBroadcastBadgeState.unread;
   const agentBroadcastLabel = t("agentBroadcastLabel");
   const agentBroadcastTriggerLabel = agentBroadcastHasUnread
     ? `${agentBroadcastLabel}，${t("agentBroadcastUnread")}`
@@ -2666,9 +2683,14 @@ export function AppShell() {
           </span>
         </VRouteLinkButton>
         <VRouteLinkButton to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }} variant="ghost" className={styles.settingsTrigger} aria-label={agentBroadcastTriggerLabel} title={agentBroadcastTriggerLabel} onClick={(event) => {
+          // Any left click counts as "went to look" — modifier clicks hand the
+          // navigation to the browser's new-tab behaviour, which still shows
+          // the broadcast surface. Right click (context menu) does not.
+          if (event.button === 0) {
+            markAgentBroadcastSeen();
+          }
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
-          markAgentBroadcastSeen();
           chatRoute.openProjectBus({ telemetrySource: "shell_settings" });
           closeUtilityMenu();
         }}>
