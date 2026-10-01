@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 
 from config.model_catalog import (
+    MODEL_CATALOG_SCHEMA_VERSION,
     empty_model_catalog_state,
     import_legacy_capability_cache,
     load_model_catalog_state,
     merge_capability_observations,
+    prune_absent_provider_entries,
     provider_catalog_refresh_due,
     record_model_reasoning_contract,
     record_model_verification,
@@ -457,6 +459,45 @@ def test_legacy_capability_import_runs_once_and_is_auditable() -> None:
 def test_empty_legacy_import_still_completes_once() -> None:
     imported = import_legacy_capability_cache(empty_model_catalog_state(), {"schemaVersion": 1}, {})
     assert imported["metadata"]["legacyCapabilityImportCompleted"] is True
+
+
+def test_prune_absent_provider_entries_removes_only_dead_entries() -> None:
+    state = empty_model_catalog_state()
+    state["providers"] = {
+        "relay_keep": {"status": "reachable", "models": {}},
+        "relay_dead": {"status": "reachable", "models": {"observed-a": {"upstreamId": "observed-a"}}},
+    }
+    state["metadata"]["custom"] = {"keep": True}
+
+    pruned, pruned_ids = prune_absent_provider_entries(state, configured_provider_ids={"relay_keep"})
+
+    assert pruned_ids == ["relay_dead"]
+    assert set(pruned["providers"]) == {"relay_keep"}
+    assert pruned["providers"]["relay_keep"] == state["providers"]["relay_keep"]
+    assert pruned["metadata"] == state["metadata"]
+    assert pruned["schemaVersion"] == MODEL_CATALOG_SCHEMA_VERSION
+    # Pure: the input state is untouched.
+    assert set(state["providers"]) == {"relay_keep", "relay_dead"}
+
+
+def test_prune_absent_provider_entries_is_idempotent_noop() -> None:
+    state = empty_model_catalog_state()
+    state["providers"]["relay_keep"] = {"status": "reachable", "models": {}}
+
+    once, ids_once = prune_absent_provider_entries(state, configured_provider_ids={"relay_keep"})
+    assert ids_once == []
+    assert once is state
+
+    twice, ids_twice = prune_absent_provider_entries(once, configured_provider_ids={"relay_keep"})
+    assert ids_twice == []
+    assert twice is once
+
+
+def test_prune_absent_provider_entries_noop_on_empty_providers() -> None:
+    state = empty_model_catalog_state()
+    pruned, pruned_ids = prune_absent_provider_entries(state, configured_provider_ids=set())
+    assert pruned_ids == []
+    assert pruned is state
 
 
 def test_catalog_path_is_sibling_of_selected_operator_config(tmp_path) -> None:

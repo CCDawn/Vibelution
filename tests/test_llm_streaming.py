@@ -203,3 +203,23 @@ def test_stream_normalizer_reasoning_details_match_wire_chain_behavior():
         "reasoning_details",
     ]
     assert "".join(event.text for event in events if event.type == "text_delta") == "结论"
+
+
+def test_stream_normalizer_reasoning_content_keeps_inter_word_spaces():
+    normalizer = LiteLLMStreamNormalizer()
+
+    events = list(
+        normalizer.events(
+            [
+                {"choices": [{"delta": {"reasoning_content": "The user"}}]},
+                {"choices": [{"delta": {"reasoning_content": " wants"}}]},
+                {"choices": [{"delta": {"reasoning_content": " "}}]},
+                {"choices": [{"delta": {"reasoning_content": "to find where"}}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+            ]
+        )
+    )
+
+    reasoning_events = [event for event in events if event.type == "reasoning_delta"]
+
+    assert "".join(event.text for event in reasoning_events) == "The user wants to find where"

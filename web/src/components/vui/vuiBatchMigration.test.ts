@@ -3,7 +3,7 @@ import { relative, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import utilityMenuStyles from "../../app/AppShellUtilityMenu.styles";
+import settingsMenuStyles from "../../app/AppShellSettingsMenu.styles";
 import agentStyles from "../../routes/AgentsRoute.styles";
 import evolutionStyles from "../../routes/EvolutionRoute.styles";
 import evolutionRunRecordsStyles from "../../routes/EvolutionRunRecordsPanel.styles";
@@ -531,11 +531,11 @@ describe("VUI batch migration", () => {
     expect(source).not.toContain(".module.css");
   });
 
-  it("app/AppShellUtilityMenu.styles.ts keeps VUI list button grid on internal slots", () => {
-    expect(utilityMenuStyles.gitSummaryRow).toContain("[&_[data-slot=vui-button-content]]:w-full");
-    expect(utilityMenuStyles.gitSummaryRow).toContain("[&_[data-slot=vui-button-label]]:inline-flex");
-    expect(utilityMenuStyles.utilityButton).toContain("[&_[data-slot=vui-button-content]]:w-full");
-    expect(utilityMenuStyles.utilityButton).toContain("[&_[data-slot=vui-button-label]]:inline-flex");
+  it("app/AppShellSettingsMenu.styles.ts keeps VUI list button grid on internal slots", () => {
+    expect(settingsMenuStyles.row).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(settingsMenuStyles.row).toContain("[&_[data-slot=vui-button-label]]:flex");
+    expect(settingsMenuStyles.row).toContain("[&_[data-slot=vui-button-label]]:w-full");
+    expect(settingsMenuStyles.label).toContain("min-w-0 flex-1 text-left");
   });
 
   it("routes/SkillsRoute.tsx keeps multiline VUI list buttons on a natural-height root grid", () => {

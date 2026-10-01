@@ -291,8 +291,11 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("t(\"agentBroadcastLabel\")");
     expect(shellSource).toContain("queryKeys.projectAgentBusLatestEvent()");
     expect(shellSource).toContain("listProjectAgentBusTimeline(1, { signal })");
-    expect(shellSource).toContain("markAgentBroadcastSeen()");
-    expect(shellSource).toContain("hasUnseenAgentBroadcast(agentBroadcastLatestEventMs, agentBroadcastReadAtMs)");
+    // Every left click (modifier or not) counts as having looked at the bell.
+    expect(shellSource).toContain("if (event.button === 0) {\n            markAgentBroadcastSeen();\n          }");
+    // First visit silently adopts the baseline instead of flagging all history.
+    expect(shellSource).toContain("resolveAgentBroadcastBadgeState(agentBroadcastLatestEventMs, agentBroadcastReadAtMs)");
+    expect(shellSource).toContain("agentBroadcastBadgeState.adoptedBaseline");
     // Gentle foreground-only poll; no background churn for a badge.
     expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 60_000)");
     expect(styles.settingsTriggerIconSlot).toContain("relative");
