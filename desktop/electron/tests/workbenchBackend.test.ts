@@ -849,6 +849,43 @@ describe("reclaimStaleWorkbenchBackend", () => {
     expect(terminateProcessTree).toHaveBeenCalledWith(4242, expect.objectContaining({ pid: 4242 }));
   });
 
+  it("retires a dead registered pid that predates identity capture on a released port", async () => {
+    const terminateProcessTree = vi.fn(async () => true);
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => false,
+      registeredPids: [4242],
+      pidAlive: () => false,
+      terminateProcessTree
+    });
+
+    expect(result).toMatchObject({
+      reclaimed: true,
+      reason: expect.stringContaining("already released"),
+      verifiedPid: 4242
+    });
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+  });
+
+  it("keeps failing a live registered pid that has no persisted identity on a released port", async () => {
+    const terminateProcessTree = vi.fn(async () => true);
+    const result = await reclaimStaleWorkbenchBackend({
+      port: 8012,
+      workspaceRoot: "C:/repo",
+      connect: async () => false,
+      registeredPids: [4242],
+      pidAlive: () => true,
+      terminateProcessTree
+    });
+
+    expect(result).toMatchObject({
+      reclaimed: false,
+      reason: expect.stringContaining("retirement was not verified")
+    });
+    expect(terminateProcessTree).not.toHaveBeenCalled();
+  });
+
   it("does not confirm close when a verified backend pid survives port release", async () => {
     let clock = 0;
     let listening = true;

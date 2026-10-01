@@ -134,6 +134,7 @@ import {
   upsert
 } from "./lifecycle/instanceRegistryStore.js";
 import { reconcileOrphanedInstanceRegistry } from "./lifecycle/instanceRegistryRecovery.js";
+import { knownPidIsAlive } from "./lifecycle/mainLine/observation.js";
 import {
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
@@ -2175,7 +2176,7 @@ async function captureShutdownIsolatedInstanceIds(): Promise<string[]> {
     ? captureRunningInstanceIds(listedResult.value).filter((instanceId) => instanceId !== "main")
     : [];
   const registryIds = registryResult.status === "fulfilled"
-    ? captureShutdownInstanceIds(registryEntriesToShutdownInstanceSnapshots(registryResult.value.instances))
+    ? captureShutdownInstanceIds(registryEntriesToShutdownInstanceSnapshots(registryResult.value.instances, knownPidIsAlive))
     : [];
   if (snapshotResult.status === "rejected") {
     console.warn(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : String(snapshotResult.reason));

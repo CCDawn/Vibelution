@@ -826,6 +826,14 @@ export async function reclaimStaleWorkbenchBackend(input: {
       // identity. Old state without that identity remains visible rather than
       // risking a PID-reuse kill.
       if (!expectedIdentity) {
+        // A legacy pre-identity entry whose process is already gone has
+        // nothing to verify or terminate: a dead pid cannot be one of our
+        // leaked backends, and no live process sits behind the pid for a
+        // PID-reuse mis-kill to hit. If the owned port is also free, no
+        // live listener remains to account for either.
+        if (!pidAlive(pid)) {
+          return true;
+        }
         failedTreePids.add(pid);
         return false;
       }
