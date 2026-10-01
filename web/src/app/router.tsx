@@ -42,6 +42,7 @@ export function loadChatCodingRouteChunk(
 }
 
 const ChatCodingRoute = lazyRoute(loadChatCodingRouteChunk);
+const FinanceRoute = lazyRoute(() => import("../routes/FinanceRoute").then((module) => ({ default: module.FinanceRoute })));
 const CompanionsRoute = lazyRoute(() => import("../routes/CompanionsRoute").then((module) => ({ default: module.CompanionsRoute })));
 const ConfigRoute = lazyRoute(() => import("../routes/ConfigRoute").then((module) => ({ default: module.ConfigRoute })));
 const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute })));
@@ -144,6 +145,10 @@ export const router = createBrowserRouter([
           "workbench",
           "chat",
         ),
+      },
+      {
+        path: "finance",
+        ...guardedLazyElement(<WorkbenchDomainRoute domain="chat"><FinanceRoute /></WorkbenchDomainRoute>),
       },
       {
         path: "companions",

@@ -140,7 +140,7 @@ def _tool_call_args(call: Mapping[str, Any]) -> dict:
         raw = bytes(raw).decode("utf-8", errors="replace")
     elif isinstance(raw, Mapping):
         raw = dict(raw)
-    return parse_tool_args(raw if raw not in (None, "") else {})
+    return parse_tool_args(raw if raw not in (None, "") else {}, tool_name=_tool_call_name(call))
 
 
 def _coerce_positive_workers(value: Any, *, default: int) -> int:

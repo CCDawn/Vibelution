@@ -23,6 +23,7 @@ export const queryKeys = {
   toolImage2Models: () => ["tools", "image2", "models"] as const,
   gitCommits: () => ["git", "commits"] as const,
   gitDiff: (path: string) => ["git", "diff", path] as const,
+  financialAssistants: () => ["financial-assistants"] as const,
   agents: () => ["agents"] as const,
   agentSummary: (includeArchived = false) => ["agents", "summary", includeArchived] as const,
   agentConfigWorkspace: () => ["agents", "config-workspace"] as const,

@@ -194,3 +194,9 @@
 | 候选 | 聚类 | 为何不立刻建 | 设计占位 |
 | --- | --- | --- | --- |
 | `VFilterListDetailPage` | Agents 筛选+列表+详情 | 先塞进 ListDetail 的 list 槽 | [layout/planned.md](./layout/planned.md#vfilterlistdetailpage) |
+
+## Financial specialist entry
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `SpecialistAgentMenu` / `FinanceRoute` | [product/financial-assistant.md](./product/financial-assistant.md) |

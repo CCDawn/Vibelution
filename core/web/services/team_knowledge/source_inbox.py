@@ -295,6 +295,9 @@ def review_owner_inbox_source(
         current_status = str(source.get("status") or "")
         if current_status not in {"pending", "needs_more_context"}:
             raise s.TeamKnowledgeError("Only pending or needs_more_context inbox sources can be reviewed.")
+        if wants_direct_ingest:
+            _, target_base = s._require_base_with_owner(knowledge_base_id)
+            s._tk_financial.validate_financial_source(target_base, str(source.get("sourceType") or ""), source.get("sourceRef") or {}, content=knowledge_content)
         central_source: dict[str, Any] | None = None
         promotion: dict[str, Any] | None = None
         if normalized_decision == "accepted":
@@ -504,6 +507,7 @@ def _direct_ingest_accepted_source_locked(
         title=normalized_title,
         summary=normalized_summary,
     )
+    financial_tags = s._tk_financial.validate_financial_proposal(owner, base, [source_artifact["sourceArtifactId"]], normalized_content)
     batch = {
         "batchId": s._new_event_id("kbatch"),
         "ownerType": owner["ownerType"],
@@ -532,7 +536,7 @@ def _direct_ingest_accepted_source_locked(
         "title": normalized_title,
         "summary": normalized_summary,
         "content": normalized_content,
-        "tags": s._unique_strings(tags or [])[:24],
+        "tags": s._unique_strings(s._tk_financial.merge_financial_tags(financial_tags, tags))[:24],
         "importanceLevel": "medium",
         "confidence": 0.75,
         "stability": "evolving",

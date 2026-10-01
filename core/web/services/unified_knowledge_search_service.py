@@ -410,6 +410,7 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
     knowledge_item_id = str(item.get("knowledgeItemId") or "").strip()
     excerpt = _excerpt(_knowledge_text(item), max_chars=900)
     return {
+        **({"financialEvidence": item["financialEvidence"]} if item.get("financialEvidence") else {}),
         "resultId": _result_id("knowledge_item", knowledge_item_id, rank),
         "resultType": "knowledge_item",
         "title": str(item.get("title") or "").strip(),
@@ -451,6 +452,7 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
     metadata = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
     knowledge_item_id = str(source.get("knowledgeItemId") or "").strip()
     return {
+        **({"financialEvidence": source["financialEvidence"]} if source.get("financialEvidence") else {}),
         "resultId": str(context.get("contextId") or _result_id("rag_context", knowledge_item_id, rank)).strip(),
         "resultType": "rag_context",
         "title": str(context.get("title") or "").strip(),
@@ -564,6 +566,7 @@ def _citations_for_results(results: list[dict[str, Any]]) -> list[dict[str, Any]
 def _citation_from_rag_result(result: dict[str, Any], *, rank: int) -> dict[str, Any]:
     metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
     return {
+        **({"financialEvidence": result["financialEvidence"]} if result.get("financialEvidence") else {}),
         "contextId": str(result.get("resultId") or "").strip(),
         "rank": rank,
         "title": str(result.get("title") or "").strip(),
@@ -606,6 +609,7 @@ def _result_updated_at(item: dict[str, Any]) -> str:
 def _citation_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str, Any]:
     source = context.get("source") if isinstance(context.get("source"), dict) else {}
     return {
+        **({"financialEvidence": source["financialEvidence"]} if source.get("financialEvidence") else {}),
         "contextId": str(context.get("contextId") or "").strip(),
         "rank": rank,
         "title": str(context.get("title") or "").strip(),

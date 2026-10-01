@@ -51,6 +51,8 @@ Model 可见性
 | `git_tools.py` | `get_git_status_summary_tool` · `get_recent_changes_tool` · `get_entity_history_tool` · `explain_current_worktree_tool` · `open_evolution_transaction_tool` · `close_evolution_transaction_tool` · `get_evolution_fitness_tool` | `test_agent_protocol.py` |
 | `source_collection_stage_tools.py` | `source_collection_context_tool` · `source_collection_stage_writeback_tool` | `test_agent_tool_contracts.py` |
 | `challenge_cup_operations_tools.py` | `challenge_cup_experiment_*` · `challenge_cup_iteration_*` · `challenge_cup_versioning_*`（context/writeback 各 3） | `test_challenge_cup_operations_tools.py` |
+| `financial_memory_tools.py` | `financial_evidence_search_tool` · `financial_evidence_stage_tool` · `financial_evidence_withdraw_tool`（复用原生RAG/来源待审/Agent私有知识库） | `test_financial_knowledge_service.py` · `test_financial_tool_runtime.py` |
+| `financial_report_tools.py` | `financial_report_query_tool`（需显式授权；按公司/报告期调用外部财报助手） | `test_financial_report_tools.py` · `test_financial_report_registry.py` |
 | `research_knowledge_tools.py` | `research_knowledge_query_tool` | `test_research_knowledge_tools.py` |
 | `research_organization_tools.py` | `research_agent_creation_proposal_tool` · `research_communication_edge_proposal_tool` · `research_proposal_apply_tool` | `test_research_organization_tools.py` |
 | `agent_message_tools.py` | `agent_message_tool` | `test_agent_tool_contracts.py` |
@@ -131,3 +133,5 @@ Model 可见性
 | [`core/web/services/memory_rag_services.md`](../core/web/services/memory_rag_services.md) | unified_memory / knowledge 工具落 service 侧 |
 | [`docs/guides/agent-dev-roi-backlog.md`](../docs/guides/agent-dev-roi-backlog.md) | R14 DoD |
 | [`core/web/services/README.md`](../core/web/services/README.md) | backend facade 索引（仿本表结构） |
+
+财报服务配置与证据边界：[金融 Agent 接入指南](../docs/ops/config/financial-report-agent.md)。
