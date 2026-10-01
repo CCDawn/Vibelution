@@ -20,6 +20,7 @@ from .team_knowledge import store as _tk_store
 from .team_knowledge import permissions as _tk_permissions
 from .team_knowledge import source_inbox as _tk_source_inbox
 from .team_knowledge import public_catalog as _tk_public_catalog
+from .team_knowledge import financial as _tk_financial
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -507,7 +508,10 @@ def _create_knowledge_base_for_owner(
     description: str = "",
     actor_agent_id: str = "",
     acl: dict[str, Any] | None = None,
+    profile: str = "",
 ) -> dict[str, Any]:
+    if profile not in {"", _tk_financial.PROFILE}:
+        raise TeamKnowledgeError("Unsupported knowledge profile.")
     normalized_name = trim_lines(name or "", max_lines=1).strip()
     if not normalized_name:
         raise TeamKnowledgeError("Knowledge base name is required.")
@@ -520,6 +524,7 @@ def _create_knowledge_base_for_owner(
         knowledge_base_id = _new_id("kb", existing_ids, normalized_name)
         base = {
             "knowledgeBaseId": knowledge_base_id,
+            **({"profile": profile} if profile else {}),
             "ownerType": owner_type,
             "ownerId": owner_id,
             "teamId": owner_id if owner_type == "team" else "",
@@ -613,6 +618,9 @@ def create_source_artifact(
         source_ref = central_ref
         source_created_at = str(central_source.get("sourceCreatedAt") or source_created_at or "")
         source_hash = str(central_source.get("sourceHash") or source_hash or "")
+    if base.get("profile") == _tk_financial.PROFILE:
+        normalized_ref = source_ref if isinstance(source_ref, dict) else {}
+        _tk_financial.validate_financial_source(base, normalized_type, normalized_ref)
     if normalized_type not in SOURCE_TYPES:
         raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
     now = utc_now_iso()
@@ -706,6 +714,7 @@ def create_refinement_proposal(
         str((artifacts_by_id.get(item_id) or {}).get("centralSourceId") or "")
         for item_id in artifact_ids
     )
+    financial_tags = _tk_financial.validate_financial_proposal(owner, base, artifact_ids, normalized_content)
     now = utc_now_iso()
     proposal = {
         "proposalId": _new_event_id("kprop"),
@@ -728,7 +737,7 @@ def create_refinement_proposal(
         "title": normalized_title,
         "summary": trim_lines(summary or "", max_lines=6).strip(),
         "content": normalized_content,
-        "tags": _unique_strings(tags or [])[:24],
+        "tags": _unique_strings(_tk_financial.merge_financial_tags(financial_tags, tags))[:24],
         "createdAt": now,
         "updatedAt": now,
         "reviewedAt": "",
@@ -872,6 +881,8 @@ def review_refinement_proposal(
             raise TeamKnowledgePermissionError("This proposal must be reviewed by its designated reviewer.")
         if required_reviewer_id and proposer_id and reviewer_id == proposer_id:
             raise TeamKnowledgePermissionError("A designated reviewer cannot review their own proposal.")
+        if normalized_status != "rejected":
+            _tk_financial.validate_financial_proposal(owner, base, list(proposal.get("sourceArtifactIds") or []), str(proposal.get("content") or ""))
         now = utc_now_iso()
         proposal["status"] = "rejected" if normalized_status == "rejected" else "applied"
         proposal["updatedAt"] = now
@@ -1801,7 +1812,13 @@ def search_knowledge_items(
                 str(item.get("sourceArtifactId") or ""): item
                 for item in _source_artifacts_for_base(owner, base_id)
             }
-            for item in _read_jsonl(_items_path_for_owner(owner)):
+            stored_items = _read_jsonl(_items_path_for_owner(owner))
+            financial_items = _tk_financial.eligible_financial_items(owner, base, stored_items, artifacts_by_id)
+            for item in stored_items:
+                if financial_items is not None and item.get("knowledgeItemId") not in financial_items:
+                    continue
+                if financial_items is not None:
+                    item = _tk_financial.financial_item_projection(item, financial_items[item["knowledgeItemId"]])
                 if str(item.get("knowledgeBaseId") or "") != base_id:
                     continue
                 if not _item_matches_filters(
@@ -1822,6 +1839,8 @@ def search_knowledge_items(
                 ):
                     continue
                 view = _search_item_view(item, base, owner, artifacts_by_id)
+                if financial_items is not None:
+                    view["financialEvidence"] = financial_items[item["knowledgeItemId"]]
                 if score_after_scan:
                     view["semanticScore"] = 1.0 if not normalized_query else 0.0
                     view["searchMode"] = normalized_search_mode
@@ -2567,6 +2586,7 @@ def _knowledge_base_to_api(base: dict[str, Any], owner_value: dict[str, Any]) ->
     agent = owner.get("agent") if isinstance(owner.get("agent"), dict) else {}
     scoped_id = _owner_scoped_knowledge_base_id(owner, str(base.get("knowledgeBaseId") or ""))
     return {
+        **({"profile": base["profile"]} if base.get("profile") else {}),
         "knowledgeBaseId": str(base.get("knowledgeBaseId") or "").strip(),
         "scopedKnowledgeBaseId": scoped_id,
         "ownerType": owner_type,
@@ -2777,6 +2797,13 @@ _is_global_knowledge_steward = _tk_permissions._is_global_knowledge_steward
 _permission_explain = _tk_permissions._permission_explain
 _member_role = _tk_permissions._member_role
 _normalize_acl = _tk_permissions._normalize_acl
+
+get_financial_knowledge_base = _tk_financial.get_financial_knowledge_base
+stage_financial_evidence = _tk_financial.stage_financial_evidence
+search_financial_evidence = _tk_financial.search_financial_evidence
+withdraw_financial_evidence = _tk_financial.withdraw_financial_evidence
+eligible_financial_items = _tk_financial.eligible_financial_items
+financial_item_projection = _tk_financial.financial_item_projection
 
 update_owner_source_governance = _tk_source_inbox.update_owner_source_governance
 ensure_owner_source_review_grant = _tk_source_inbox.ensure_owner_source_review_grant
@@ -3236,6 +3263,7 @@ def _repair_base_for_owner(owner_value: Any, base: dict[str, Any]) -> dict[str, 
     owner_type = str(base.get("ownerType") or owner.get("ownerType") or "team").strip()
     owner_id = _safe_token(base.get("ownerId"), default=str(owner.get("ownerId") or ""), max_length=128)
     return {
+        **({"profile": base["profile"]} if base.get("profile") else {}),
         "knowledgeBaseId": _safe_token(base.get("knowledgeBaseId"), default=_new_event_id("kb"), max_length=128),
         "ownerType": owner_type,
         "ownerId": owner_id,

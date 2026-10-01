@@ -122,6 +122,7 @@ import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
+import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 
 const LazyAppShellUtilityMenu = lazy(() =>
@@ -858,6 +859,7 @@ export function AppShell() {
   }, [lang, location.search, returnNavigationTarget]);
   const activePrimaryRouteLabel = useMemo(() => {
     const pathname = location.pathname;
+    if (pathname.startsWith("/finance")) return lang === "en" ? "Investment assistant" : "炒股智能体";
     if (pathname.startsWith("/companions")) return t("navCompanions");
     if (pathname.startsWith("/chat")) return t("navChat");
     if (pathname.startsWith("/supervised-evolution")) return t("navSupervisedEvolution");
@@ -2244,21 +2246,9 @@ export function AppShell() {
               {t("navChat")}
             </span>
           )}
-          {chatEnabled ? (
-            <VRouteLinkButton
-              chrome="shell-nav"
-              to="/companions"
-              className={shellPrimaryNavClass(location.pathname, "/companions")}
-              aria-current={isShellPrimaryNavActive(location.pathname, "/companions") ? "page" : undefined}
-              onClick={(event) => handlePrimaryNavClick(event, "/companions")}
-            >
-              {t("navCompanions")}
-            </VRouteLinkButton>
-          ) : (
-            <span className={`${styles.navLink} ${styles.navLinkDisabled}`} aria-disabled="true" title={lang === "en" ? "Chat is disabled" : "对话未启用"}>
-              {t("navCompanions")}
-            </span>
-          )}
+          <SpecialistAgentMenu lang={lang} enabled={chatEnabled}
+            className={styles.navLink} activeClassName={`${styles.navLink} ${styles.navLinkActive}`}
+            onNavigate={navigatePrimaryNav} />
           {supervisedEvolutionEnabled ? (
             <VRouteLinkButton
               chrome="shell-nav"
@@ -2539,11 +2529,9 @@ export function AppShell() {
                   {t("navChat")}
                 </VRouteLinkButton>
               ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navChat")}</span>}
-              {chatEnabled ? (
-                <VRouteLinkButton chrome="shell-nav" to="/companions" className={shellMobileNavClass(location.pathname, "/companions")} aria-current={isShellPrimaryNavActive(location.pathname, "/companions") ? "page" : undefined} onClick={closeUtilityMenu}>
-                  {t("navCompanions")}
-                </VRouteLinkButton>
-              ) : <span className={styles.mobileRouteLink} aria-disabled="true">{t("navCompanions")}</span>}
+              <SpecialistAgentMenu lang={lang} enabled={chatEnabled}
+                className={styles.mobileRouteLink} activeClassName={`${styles.mobileRouteLink} ${styles.mobileRouteLinkActive}`}
+                onNavigate={(to) => { closeUtilityMenu(); navigatePrimaryNav(to); }} />
               {supervisedEvolutionEnabled ? (
                 <VRouteLinkButton chrome="shell-nav" to="/supervised-evolution" className={shellMobileNavClass(location.pathname, "/supervised-evolution")} aria-current={isShellPrimaryNavActive(location.pathname, "/supervised-evolution") ? "page" : undefined} onClick={closeUtilityMenu}>
                   {t("navSupervisedEvolution")}

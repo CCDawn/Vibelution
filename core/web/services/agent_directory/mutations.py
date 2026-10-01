@@ -320,6 +320,7 @@ def create_agent_instance(
     created_by: str = "user",
     metadata: dict[str, Any] | None = None,
     context_compression_policy: dict[str, Any] | None = None,
+    initial_tool_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     with s._STATE_LOCK:
@@ -365,12 +366,18 @@ def create_agent_instance(
         agent_workspace = workspace_path or s._agent_workspace_relative_path(agent_id)
         s._ensure_agent_workspace(agent_workspace)
         tool_policy_id = s._default_tool_policy_id_for_agent(agent_id, normalized_primary_mode)
+        # Explicit domain setup starts with a private policy, never overwriting
+        # the shared default or briefly exposing the coding tool bundle.
+        if initial_tool_policy is not None:
+            tool_policy_id = f"tool-{agent_id}"
         memory_policy_id = f"memory-{agent_id}"
         tool_policy = s._default_tool_policy_for_agent(
             tool_policy_id,
             normalized_primary_mode,
             role_key=normalized_role_key,
         )
+        if initial_tool_policy is not None:
+            tool_policy = s.normalize_tool_policy(initial_tool_policy, tool_policy_id)
         memory_policy = s.default_memory_policy(memory_policy_id, agent_workspace)
         metadata_payload["delegationPolicy"] = s.normalize_delegation_policy(
             metadata_payload.get("delegationPolicy")

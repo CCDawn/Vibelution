@@ -716,7 +716,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('aria-haspopup="dialog"');
     expect(shellSource).toContain("shellMobileNavClass");
     expect(shellSource).toContain("closeUtilityMenu");
-    expect(shellSource).toContain('to="/companions"');
+    expect(shellSource).toContain("SpecialistAgentMenu");
     expect(shellStyles).toContain("@media (max-width: 639px)");
     expect(shellStyles).not.toContain("padding-bottom: var(--shell-settings-dock-height)");
     expect(shellSource).not.toContain('data-shell-group="settings-dock"');

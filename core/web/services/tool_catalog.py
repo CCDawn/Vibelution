@@ -129,6 +129,10 @@ MEDIUM_PERMISSION_TIER = "medium"
 HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
+    "financial_report_query_tool",
+    "financial_evidence_search_tool",
+    "financial_evidence_stage_tool",
+    "financial_evidence_withdraw_tool",
     "cli_agent_run_tool",
     "computer_use_session_tool",
     "computer_use_task_tool",
@@ -785,6 +789,30 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["computer_control", "external_automation", "session_state_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "financial_evidence_search_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["financial_reports", "rag_retrieval", "citations", "read_only"],
+        "riskTags": ["team_knowledge_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "financial_evidence_stage_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["financial_reports", "source_staging", "review_required"],
+        "riskTags": ["memory_write", "team_knowledge_proposal"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "financial_evidence_withdraw_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["financial_reports", "evidence_withdrawal"],
+        "riskTags": ["memory_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "financial_report_query_tool": {
+        "category": "web_research",
+        "capabilityTags": ["financial_reports", "rag_retrieval", "citations", "read_only"],
+        "riskTags": ["network_access", "model_cost"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "research_knowledge_query_tool": {
         "category": "media_research",
         "capabilityTags": ["research_database", "read_only"],
@@ -928,6 +956,14 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "bundleId": "financial_reports",
+        "label": "财报证据问答包",
+        "description": "连接已配置的 RAGFlow 财报助手；按公司/报告期检索，提供来源与页码，可能产生模型费用。",
+        "category": "research",
+        "toolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_evidence_stage_tool", "financial_evidence_withdraw_tool"],
+        "preferredToolNames": ["financial_report_query_tool", "financial_evidence_search_tool"],
+    },
     {
         "bundleId": "virtual_human_life",
         "label": "虚拟人生活工具包",

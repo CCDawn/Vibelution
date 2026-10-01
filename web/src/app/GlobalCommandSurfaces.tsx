@@ -149,7 +149,7 @@ export function GlobalCommandSurfaces() {
     const navItems: { to: string; label: string; keywords: string }[] = [
       ...(chatEnabled ? [{ to: "/chat", label: t("navChat"), keywords: "chat 对话 会话" }] : []),
       ...(chatEnabled
-        ? [{ to: "/companions", label: t("navCompanions"), keywords: "companions 伴侣 虚拟人" }]
+        ? [{ to: "/finance", label: lang === "zh" ? "炒股智能体" : "Investment assistant", keywords: "finance 金融 炒股" }, { to: "/companions", label: t("navCompanions"), keywords: "companions 伴侣 虚拟人" }]
         : []),
       ...(supervisedEvolutionEnabled
         ? [{ to: "/supervised-evolution", label: t("navSupervisedEvolution"), keywords: "supervised 监督进化" }]

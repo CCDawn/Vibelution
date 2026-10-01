@@ -1128,7 +1128,7 @@ def _timeout_metadata(timed_out: bool, timeout_seconds: float, duration_ms: int)
 
 
 def _agent_parse_tool_args(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-    return parse_tool_args(json.dumps(args if isinstance(args, dict) else {}, ensure_ascii=False))
+    return parse_tool_args(json.dumps(args if isinstance(args, dict) else {}, ensure_ascii=False), tool_name=tool_name)
 
 
 def _build_tool_message_compatibility(
@@ -1293,6 +1293,7 @@ def _canonical_registry_descriptors(items: list[dict[str, Any]]) -> tuple[ToolDe
 def _builtin_tool_items() -> list[dict[str, Any]]:
     from tools.Key_Tools import create_key_tools, create_llm_facing_tools
     from tools.web_search_tool import autoglm_search_tool_availability
+    from tools.financial_report_tools import financial_report_availability
 
     built_tools = create_key_tools()
     llm_visible_names = {str(tool.name) for tool in create_llm_facing_tools() if getattr(tool, "name", "")}
@@ -1311,6 +1312,12 @@ def _builtin_tool_items() -> list[dict[str, Any]]:
             if not web_search_dependency.get("available"):
                 llm_visible = False
                 block_reason = str(web_search_dependency.get("blockReason") or "AutoGLM token service unavailable.")
+        if name == "financial_report_query_tool":
+            finance_dependency = financial_report_availability()
+            dependency_fields["dependencyStatus"] = finance_dependency
+            if not finance_dependency["available"]:
+                llm_visible = False
+                block_reason = finance_dependency["blockReason"]
         items.append(
             {
                 "id": name,
