@@ -55,21 +55,21 @@ export function LauncherUpdateTopbarView({
 
   return (
     <VToolbar ariaLabel={zh ? "Launcher 顶栏" : "Launcher top bar"} wrap={false} className={styles.toolbar} data-testid="launcher-topbar">
-      <Monitor size={16} className="shrink-0 text-vui-fg-secondary" aria-hidden="true" />
-      <strong className={styles.title}>Vibelution <span className="max-[600px]:hidden">Launcher</span></strong>
+      <Monitor size={16} className={styles.appIcon} aria-hidden="true" />
+      <strong className={styles.title}>Vibelution <span className={styles.launcherName}>Launcher</span></strong>
       {branchName ? <span className={styles.branch}><GitBranch size={13} aria-hidden="true" />{branchName}</span> : null}
-      <div className="min-w-0 flex-1" />
+      <div className={styles.spacer} />
       <VPopover open={open} onOpenChange={changeOpen} side="bottom" align="end" sideOffset={8}
         aria-label={zh ? "Launcher 更新详情" : "Launcher update details"} contentClassName={styles.popover}
-        trigger={<VButton variant="ghost" contentLayout="plain" className={`${styles.button} ${styles.trigger} ${hasUpdate || failure ? "text-[var(--accent-primary)]" : "text-vui-fg-secondary"}`} aria-label={label} data-testid="launcher-update-trigger">
-          {busy || checking ? <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        trigger={<VButton variant="ghost" contentLayout="plain" className={`${styles.button} ${styles.trigger} ${hasUpdate || failure ? styles.updateTone : styles.mutedTone}`} aria-label={label} data-testid="launcher-update-trigger">
+          {busy || checking ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" />
             : hasUpdate || failure ? <ArrowUpCircle size={14} aria-hidden="true" />
               : unknown ? <RefreshCw size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />}
           <span>{label}</span><ChevronDown size={12} aria-hidden="true" />
         </VButton>}>
         <div className={styles.content} role="status" aria-live="polite">
-          <div className="grid gap-1.5">
-            <strong className="text-vui-sm font-semibold">{title}</strong>
+          <div className={styles.heading}>
+            <strong className={styles.headingTitle}>{title}</strong>
             <p className={styles.description}>{unknown && !hasUpdate
               ? (zh ? "检测失败不代表已经是最新版本，请稍后重新检测。" : "A failed check does not mean you are up to date. Please check again.")
               : (zh ? "桌面壳和启动器前端一起检查，与本地最新代码比较。工作区配置不会改变。" : "The desktop shell and Launcher frontend are compared with local code. Workspace settings are preserved.")}</p>
@@ -78,10 +78,10 @@ export function LauncherUpdateTopbarView({
             <dt className={styles.metadata}>{zh ? "当前版本" : "Running"}</dt><dd className={styles.version}>{freshness.runningShort ? `@${freshness.runningShort}` : (zh ? "未知" : "Unknown")}</dd>
             <dt className={styles.metadata}>{zh ? "本地最新" : "Local code"}</dt><dd className={styles.version}>{freshness.headShort ? `@${freshness.headShort}` : (zh ? "未知" : "Unknown")}</dd>
           </dl> : null}
-          {active ? <p className={`${styles.description} text-[var(--state-warning)]`}>{zh ? `有 ${freshness?.activeWorkCount || 1} 个进行中的任务。请等待任务完成后更新，当前不会重启。` : "Active tasks block updates. Wait until they finish; no restart will occur."}</p> : null}
-          {hasUpdate && taskUnknown && !busy ? <p className={`${styles.description} text-[var(--state-warning)]`}>{zh ? "暂时无法确认任务状态，更新已暂停。请重新检测。" : "Task status is unavailable. Updates are paused; please check again."}</p> : null}
-          {busy ? <p className={`${styles.description} flex items-center gap-2`}><LoaderCircle size={14} className="shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />{zh ? "正在构建前端和桌面壳。准备完成后关闭窗口，在后台完成换版并重新打开。" : "Building the frontend and desktop shell. The windows will close for final replacement and reopen afterwards."}</p> : null}
-          {failure ? <p className={`${styles.description} break-words text-[var(--state-error)]`}>{failure}</p> : null}
+          {active ? <p className={`${styles.description} ${styles.warning}`}>{zh ? `有 ${freshness?.activeWorkCount || 1} 个进行中的任务。请等待任务完成后更新，当前不会重启。` : "Active tasks block updates. Wait until they finish; no restart will occur."}</p> : null}
+          {hasUpdate && taskUnknown && !busy ? <p className={`${styles.description} ${styles.warning}`}>{zh ? "暂时无法确认任务状态，更新已暂停。请重新检测。" : "Task status is unavailable. Updates are paused; please check again."}</p> : null}
+          {busy ? <p className={`${styles.description} ${styles.busyDescription}`}><LoaderCircle size={14} className={styles.busyIcon} aria-hidden="true" />{zh ? "正在构建前端和桌面壳。准备完成后关闭窗口，在后台完成换版并重新打开。" : "Building the frontend and desktop shell. The windows will close for final replacement and reopen afterwards."}</p> : null}
+          {failure ? <p className={`${styles.description} ${styles.failure}`}>{failure}</p> : null}
           {confirm && !busy ? <div className={styles.confirmation}>
             <p className={styles.description}>{zh ? "更新会关闭 Launcher 和工作区窗口。确认当前任务已结束？" : "Updating closes Launcher and workbench windows. Have all tasks finished?"}</p>
             <div className={styles.actions}>
