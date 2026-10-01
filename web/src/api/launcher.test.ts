@@ -375,11 +375,35 @@ describe("launcher api helpers", () => {
     });
     stubLauncherIpcBridge(invoke);
 
-    const payload = await restartLauncherBundle();
+    const payload = await restartLauncherBundle("app_shell_restart_button");
 
     expect(payload.commandId).toBe("cmd-1");
     expect(fetchMock).not.toHaveBeenCalled();
-    expect((invoke.mock.calls[0][0] as { path: string }).path).toBe("restart");
+    const request = invoke.mock.calls[0][0] as {
+      path: string;
+      init: { method: string; headers: Record<string, string> };
+    };
+    expect(request.path).toBe("restart");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers["x-vibelution-launcher-trigger"]).toBe("app_shell_restart_button");
+  });
+
+  it("keeps restart callable without a provenance trigger", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "restart", commandId: "cmd-legacy" },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    const payload = await restartLauncherBundle();
+
+    expect(payload.commandId).toBe("cmd-legacy");
+    const request = invoke.mock.calls[0][0] as { path: string; init: { method: string; headers?: Record<string, string> } };
+    expect(request.path).toBe("restart");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers).toBeUndefined();
   });
 
   it("force closes the bundle through the preload IPC bridge", async () => {

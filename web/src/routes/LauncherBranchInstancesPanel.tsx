@@ -412,12 +412,35 @@ export function LauncherBranchInstancesPanel({
         {showOpen && !building && openReject?.id === item.id ? (
           <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
         ) : null}
+        {/* Lifecycle controls stay on the row: stop must be reachable without opening the overflow menu. */}
+        {showStop ? (
+          <VButton
+            type="button"
+            variant="secondary"
+            density="compact"
+            isDisabled={stopBusy}
+            isPending={stopBusy}
+            onPress={() => askBatchStop([item.id], "stop")}
+          >
+            {instanceStopLabel(item, zh, pendingOperation)}
+          </VButton>
+        ) : null}
+        {showForceStop ? (
+          <VButton
+            type="button"
+            variant="danger"
+            density="compact"
+            title={labels.forceStopHint}
+            isDisabled={lifecyclePending}
+            onPress={() => setForceStopId(item.id)}
+          >
+            {labels.forceStop}
+          </VButton>
+        ) : null}
         <VDropdownMenu aria-label={zh ? "更多操作" : "More actions"} align="end"
           trigger={<VButton isIconOnly variant="ghost" aria-label={`${launcherBranchDisplayName(item)} ${zh ? "更多操作" : "More actions"}`} icon={<Ellipsis size={16} />} />}
           items={[
             { id: "details", label: zh ? "查看详情" : "View details", onSelect: () => { onSelect(item.id); setDetailId(item.id); } },
-            ...(showStop ? [{ id: "stop", label: instanceStopLabel(item, zh, pendingOperation), disabled: stopBusy, onSelect: () => askBatchStop([item.id], "stop") }] : []),
-            ...(showForceStop ? [{ id: "force-stop", label: labels.forceStop, danger: true, disabled: lifecyclePending, onSelect: () => setForceStopId(item.id) }] : []),
             ...(isCleanupEligible(item) ? [{ id: "cleanup", label: labels.cleanup, danger: true, disabled: cleanupMutation.isPending || building || startingOrRestarting || stopBusy, onSelect: () => askCleanup([item.id]) }] : []),
           ]} />
       </VActionGroup>
@@ -486,8 +509,8 @@ export function LauncherBranchInstancesPanel({
       id: "actions",
       header: "",
       align: "right",
-      width: 166,
-      minWidth: 150,
+      width: 320,
+      minWidth: 250,
       truncate: false,
       className: styles.actionCell,
       render: renderLifecycleActions,

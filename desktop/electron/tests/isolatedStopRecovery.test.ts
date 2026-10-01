@@ -40,7 +40,7 @@ describe("isolated lifecycle recovery", () => {
     expect(stopReturn).toContain("const commandId = String(claimed.entry.commandId || stopCommandId)");
     expect(stopReturn).toContain("      commandId,");
     expect(stopReturn).toContain("backend_retire_incomplete");
-    expect(stopReturn).toContain('desiredStateOnFailure: "closed"');
+    expect(stopReturn).toContain('desiredStateOnFailure: input.interruptActiveWork ? "open" : "closed"');
   });
 
   it("admits once before retiring and claiming a new isolated start", () => {

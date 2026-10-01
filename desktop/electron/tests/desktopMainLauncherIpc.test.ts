@@ -104,7 +104,7 @@ describe("Electron main Launcher IPC facade", () => {
     const branchBody = mainSource.slice(branchStart, mainSource.indexOf("async function orchestrateLauncherApi"));
     expect(branchBody).toContain('operation === "start" || operation === "restart"');
     expect(branchBody).toContain("isCurrentCheckoutInstance(instanceId)");
-    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload)");
+    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload, provenance)");
     expect(branchBody).toContain("superviseIsolatedInstanceStart");
     expect(branchBody).toContain("deadlineAt: result.deadlineAt");
     expect(branchBody).toContain("renewIsolatedOwnerLease");
@@ -290,6 +290,31 @@ describe("Electron main Launcher IPC facade", () => {
     const secondStart = mainSource.indexOf("async function requestOpenWorkbenchFromSecondInstance");
     const secondBody = mainSource.slice(secondStart, secondStart + 900);
     expect(secondBody).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
+  });
+
+  it("authorizes interruption only for an operator-requested restart", () => {
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleEnd = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, lifecycleEnd);
+    expect(lifecycleBody).toContain(
+      'interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")'
+    );
+  });
+
+  it("preserves restart provenance through isolated branch retirement", () => {
+    const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
+    const branchEnd = mainSource.indexOf("async function", branchStart + 1);
+    const branchBody = mainSource.slice(branchStart, branchEnd);
+    expect(branchBody).toContain('provenance: LauncherLifecycleProvenance = "operator"');
+    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload, provenance)");
+    expect(branchBody).toContain(
+      'interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")'
+    );
+
+    const slotStart = mainSource.indexOf("async function applyPendingProjectSlot");
+    const slotEnd = mainSource.indexOf("async function", slotStart + 1);
+    const slotBody = mainSource.slice(slotStart, slotEnd);
+    expect(slotBody).toContain("}, provenance);");
   });
 
   it("never lets a window-level or forwarded stop abort an in-flight restart", () => {

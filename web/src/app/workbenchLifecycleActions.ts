@@ -18,7 +18,7 @@ export type WorkbenchLifecycleSource = "app_shell" | "launcher_route";
 
 export type WorkbenchLifecycleRequestOptions = {
   source: WorkbenchLifecycleSource;
-  /** Optional override for stop / force-stop X-Vibelution-Launcher-Trigger. */
+  /** Optional override for the lifecycle request provenance header. */
   trigger?: string;
 };
 
@@ -32,9 +32,14 @@ const DEFAULT_FORCE_STOP_TRIGGERS: Record<WorkbenchLifecycleSource, string> = {
   launcher_route: "launcher_route_force_stop_button",
 };
 
+const DEFAULT_RESTART_TRIGGERS: Record<WorkbenchLifecycleSource, string> = {
+  app_shell: "app_shell_restart_button",
+  launcher_route: "launcher_route_restart_button",
+};
+
 /**
- * Resolve the launcher trigger header for stop / force-stop provenance.
- * Start and restart do not send a trigger header today.
+ * Resolve the launcher trigger header for user-initiated lifecycle provenance.
+ * Start remains untagged; stop, force-stop, and restart identify their surface.
  */
 export function resolveWorkbenchLifecycleTrigger(
   operation: LauncherOperation,
@@ -50,6 +55,9 @@ export function resolveWorkbenchLifecycleTrigger(
   }
   if (operation === "force-stop") {
     return DEFAULT_FORCE_STOP_TRIGGERS[source];
+  }
+  if (operation === "restart") {
+    return DEFAULT_RESTART_TRIGGERS[source];
   }
   return undefined;
 }
@@ -72,7 +80,7 @@ export async function requestWorkbenchLifecycleOperation(
   if (operation === "force-stop") {
     return forceStopLauncherBundle(trigger ?? DEFAULT_FORCE_STOP_TRIGGERS[options.source]);
   }
-  return restartLauncherBundle();
+  return restartLauncherBundle(trigger);
 }
 
 /**

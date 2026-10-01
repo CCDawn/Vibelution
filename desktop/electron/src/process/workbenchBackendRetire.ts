@@ -5,6 +5,7 @@ export const PORT_RELEASE_WAIT_MS = 8_000;
 export const PORT_RELEASE_POLL_MS = 100;
 export const PID_TERMINATE_WAIT_MS = 8_000;
 export const GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS = 12_000;
+export const USER_RESTART_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 20_000;
 
 const HANDLE_KEYS = [
   "backendPid",
@@ -133,15 +134,17 @@ export type GracefulWorkbenchShutdownResult = {
 
 /**
  * Ask a verified workbench backend to run its own shutdown cleanup, then wait
- * for both its process and listener to disappear. A 409 is a deliberate
- * active-work refusal and must be left for the caller to handle by its normal
- * force-retire path.
+ * for both its process and listener to disappear. A 409 remains an active-work
+ * refusal. An interrupted user restart may use verified process-tree retirement
+ * after a 202 confirms the active-work snapshot was saved.
  */
 export async function requestGracefulWorkbenchShutdown(input: {
   port: number;
   host?: string;
   backendPid?: number;
   controlToken?: string;
+  /** An explicit user restart authorizes the backend to pause active work. */
+  interruptActiveWork?: boolean;
   /** The caller has already matched /api/health to this project's workspace. */
   healthVerified?: boolean;
   signal?: AbortSignal;
@@ -152,6 +155,7 @@ export async function requestGracefulWorkbenchShutdown(input: {
       method: "GET" | "POST";
       signal: AbortSignal;
       headers?: Record<string, string>;
+      body?: string;
     }
   ) => Promise<GracefulWorkbenchShutdownResponse>;
   pidAlive?: (pid: number) => boolean;
@@ -165,7 +169,10 @@ export async function requestGracefulWorkbenchShutdown(input: {
     return { requested: false, completed: false, reason: "backend port is unavailable" };
   }
   const host = input.host?.trim() || "127.0.0.1";
-  const timeoutMs = Math.max(1, Math.round(input.timeoutMs ?? GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS));
+  const defaultTimeoutMs = input.interruptActiveWork
+    ? USER_RESTART_GRACEFUL_SHUTDOWN_TIMEOUT_MS
+    : GRACEFUL_WORKBENCH_SHUTDOWN_TIMEOUT_MS;
+  const timeoutMs = Math.max(1, Math.round(input.timeoutMs ?? defaultTimeoutMs));
   const now = input.now ?? Date.now;
   const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
   let controlToken = String(input.controlToken ?? process.env.VIBELUTION_WEB_CONTROL_TOKEN ?? "").trim();
@@ -205,8 +212,18 @@ export async function requestGracefulWorkbenchShutdown(input: {
       method: "POST",
       signal: controller.signal,
       headers: {
-        "X-Vibelution-Control-Token": controlToken
-      }
+        "X-Vibelution-Control-Token": controlToken,
+        ...(input.interruptActiveWork ? { "Content-Type": "application/json" } : {})
+      },
+      ...(input.interruptActiveWork
+        ? {
+            body: JSON.stringify({
+              source: "electron_user_restart",
+              reason: "user_restart",
+              interruptActiveWork: true
+            })
+          }
+        : {})
     });
     if (response.status === 409) {
       return {

@@ -97,9 +97,12 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("<VActionGroup");
     expect(panelSource).toContain('aria-label={zh ? "更多操作" : "More actions"}');
     expect(panelSource).toContain('{ id: "details"');
-    expect(panelSource).toContain('{ id: "stop"');
-    expect(panelSource).toContain('{ id: "force-stop"');
     expect(panelSource).toContain('{ id: "cleanup"');
+    // Stop and force-stop are row-level controls, not overflow items.
+    expect(panelSource).toMatch(/\{showStop \? \(\s*<VButton[\s\S]{0,400}?askBatchStop\(\[item\.id\], "stop"\)/);
+    expect(panelSource).toMatch(/\{showForceStop \? \(\s*<VButton[\s\S]{0,400}?variant="danger"[\s\S]{0,400}?setForceStopId\(item\.id\)/);
+    expect(panelSource).not.toContain('{ id: "stop"');
+    expect(panelSource).not.toContain('{ id: "force-stop"');
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
@@ -747,18 +750,19 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("const startBusy");
     expect(panelSource).toContain("const stopBusy");
     expect(panelSource).toContain("isDisabled={startBusy || stopBusy || admissionBlocked}");
-    expect(panelSource).toContain("disabled: stopBusy");
+    expect(panelSource).toContain("isDisabled={stopBusy}\n            isPending={stopBusy}");
     expect(panelSource).not.toContain("disabled: lifecyclePending || inFlight");
+    expect(panelSource).not.toContain("isDisabled={lifecyclePending || startBusy || stopBusy}");
     expect(panelSource).toContain("if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id))");
     expect(panelSource).not.toContain("if (clickGuardRef.current || startBusy)");
     expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
   });
 
-  it("keeps Stop available from More actions while a start is in flight", () => {
+  it("keeps Stop available as a row-level control while a start is in flight", () => {
     const startable = instance({ id: "worktree:startable", shortName: "startable" });
     expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy");
     expect(panelSource).toContain("const showStop = canStopInstance(item, pendingOperation) || stopBusy");
-    expect(panelSource).toContain("{ id: \"stop\", label: instanceStopLabel(item, zh, pendingOperation), disabled: stopBusy");
+    expect(panelSource).toContain("{instanceStopLabel(item, zh, pendingOperation)}\n          </VButton>");
     expect(panelSource).toContain("isPending={startBusy || stopBusy}");
     expect(panelSource).toContain("<VActionGroup");
     expect(canStopInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(true);

@@ -117,13 +117,6 @@ function button(label: string, scope: ParentNode = document): HTMLButtonElement 
   return found;
 }
 
-function menuItem(label: string): HTMLElement {
-  const found = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-    .find((candidate) => candidate.textContent?.trim() === label);
-  if (!found) throw new Error(`menu item not found: ${label}`);
-  return found;
-}
-
 async function click(element: HTMLElement) {
   await act(async () => {
     element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false }));
@@ -131,13 +124,6 @@ async function click(element: HTMLElement) {
     element.click();
     await Promise.resolve();
   });
-}
-
-async function openActions(label: string) {
-  const trigger = [...host.querySelectorAll<HTMLButtonElement>("button")]
-    .find((candidate) => candidate.getAttribute("aria-label") === label);
-  if (!trigger) throw new Error(`action menu not found: ${label}`);
-  await click(trigger);
 }
 
 beforeEach(() => {
@@ -165,8 +151,7 @@ describe("Launcher branch workspace interactions", () => {
     const running = instance({ id: "worktree:running", branch: "codex/running" });
     await renderPanel([running]);
 
-    await openActions("codex/running 更多操作");
-    await click(menuItem("停止"));
+    await click(button("停止"));
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("确认停止这些工作台");
     await click(button("停止", document.querySelector('[role="dialog"]')!));
 
@@ -178,8 +163,7 @@ describe("Launcher branch workspace interactions", () => {
     const stoppedWorktree = instance({ id: "worktree:stale", branch: "codex/stale", state: "stopping", alive: false });
     await renderPanel([stoppedWorktree]);
 
-    await openActions("codex/stale 更多操作");
-    await click(menuItem("强制停止"));
+    await click(button("强制停止"));
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("普通停止无法收口时使用");
     await click(button("强制停止", document.querySelector('[role="dialog"]')!));
 
@@ -196,10 +180,9 @@ describe("Launcher branch workspace interactions", () => {
     await click(openAction);
     expect(onLifecycle).not.toHaveBeenCalled();
 
-    await openActions("codex/building 更多操作");
-    const stopItem = menuItem("停止");
-    expect(stopItem.getAttribute("aria-disabled")).not.toBe("true");
-    await click(stopItem);
+    const stopAction = button("停止");
+    expect(stopAction.disabled).toBe(false);
+    await click(stopAction);
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("确认停止这些工作台");
     expect(button("停止", document.querySelector('[role="dialog"]')!).disabled).toBe(false);
     await click(button("停止", document.querySelector('[role="dialog"]')!));
