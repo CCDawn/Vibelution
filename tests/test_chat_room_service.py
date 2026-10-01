@@ -1490,6 +1490,7 @@ def test_meeting_round_copies_transcript_when_room_view_is_off(tmp_path, monkeyp
 
 
 def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1991,6 +1992,7 @@ def test_start_chat_room_round_projects_mixed_results_as_partial(tmp_path, monke
 
 
 def test_start_chat_room_round_preserves_all_partial_results(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
