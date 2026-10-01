@@ -160,6 +160,8 @@ export const queryKeys = {
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
+  memoryAgentInventory: () => ["memory", "agents", "inventory"] as const,
+  memoryAgentDetail: (agentId: string, revision: string) => ["memory", "agents", agentId, "detail", revision] as const,
   memoryCleanupPreview: () => ["memory", "cleanup", "preview"] as const,
   userMarkdownSpaces: (userId: string) => ["user-content", "markdown-spaces", userId] as const,
   userMarkdownSpacePages: (userId: string, spaceId: string, query = "", tag = "") =>

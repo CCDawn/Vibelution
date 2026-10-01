@@ -1013,6 +1013,39 @@ def test_agent_memory_inventory_unknown_agent_returns_404(tmp_path, monkeypatch)
     assert response.json()["detail"] == "Agent memory not found."
 
 
+@pytest.mark.parametrize(
+    ("agent_id", "actor_id", "include_content", "expected_status", "reads_content"),
+    [
+        ("known", "known", True, 200, True),
+        ("known", "", True, 422, False),
+        ("known", "outsider", True, 422, False),
+        ("known", "", False, 200, False),
+        ("missing", "", True, 404, False),
+        ("missing", "missing", True, 404, True),
+    ],
+)
+def test_agent_memory_detail_reads_inventory_once_without_exposing_content(
+    monkeypatch, agent_id, actor_id, include_content, expected_status, reads_content
+):
+    calls = []
+
+    def inventory(*, agent_id, include_content):
+        calls.append((agent_id, include_content))
+        return {
+            "selectedAgent": {"agentId": agent_id} if agent_id == "known" else None,
+            "agents": [],
+        }
+
+    monkeypatch.setattr(memory_routes, "get_agent_memory_inventory", inventory)
+    response = client.get(
+        f"/api/memory/agents/{agent_id}",
+        params={"actorAgentId": actor_id, "includeContent": str(include_content).lower()},
+    )
+
+    assert response.status_code == expected_status
+    assert calls == [(agent_id, reads_content)]
+
+
 def test_memory_global_overviews_do_not_expose_formal_knowledge_bodies(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)

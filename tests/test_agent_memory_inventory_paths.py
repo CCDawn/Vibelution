@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from core.infrastructure import developer_sandbox
@@ -124,6 +126,31 @@ def test_empty_inventory_does_not_resolve_workspace_roots(inventory_paths):
 
     assert memory_service.get_agent_memory_inventory()["agents"] == []
     assert calls["formal"] == calls["active"] == calls["relative_root"] == 0
+
+
+def test_private_memory_revision_detects_same_second_same_size_updates(inventory_paths):
+    _, roots, _, _ = inventory_paths
+    memory = roots["active"] / "agents" / "first" / "memory"
+    memory.mkdir(parents=True)
+    path = memory / "lesson.md"
+    second = 1_790_000_000_000_000_000
+    path.write_text("before", encoding="utf-8")
+    os.utime(path, ns=(second + 100_000_000, second + 100_000_000))
+    before = memory_service.get_agent_memory_inventory(agent_id="first")["selectedAgent"]["items"][0]
+    unchanged = memory_service.get_agent_memory_inventory(agent_id="first")["selectedAgent"]["items"][0]
+
+    path.write_text("after!", encoding="utf-8")
+    os.utime(path, ns=(second + 200_000_000, second + 200_000_000))
+    after = memory_service.get_agent_memory_inventory(agent_id="first")["selectedAgent"]["items"][0]
+    detail = memory_service.get_agent_memory_inventory(agent_id="first", include_content=True)
+
+    assert before["updatedAt"] == after["updatedAt"]
+    assert before["sizeBytes"] == after["sizeBytes"]
+    assert before["revision"] == unchanged["revision"]
+    assert before["revision"] != after["revision"]
+    assert before["content"] == after["content"] == ""
+    assert detail["selectedAgent"]["items"][0]["revision"] == after["revision"]
+    assert detail["selectedAgent"]["items"][0]["content"] == "after!"
 
 
 @pytest.mark.parametrize("agent_id", ["", "missing"])
