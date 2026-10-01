@@ -139,9 +139,19 @@ class MedicalConsultationPanelScheduler:
 
 @dataclass(frozen=True)
 class PlannedScheduler:
-    mode: str
-    label: str
-    status: str = "planned"
+    """Manager-dispatch scheduling with alternating turns driven by @mentions.
+
+    The manager plans alone until its latest message marks assignees with
+    ``@<teamRole|agentCode|participantId>``; the mentioned members then speak
+    in mention order.  Once anyone has spoken after the manager's last
+    message, the floor returns to the manager, so the room alternates between
+    dispatch and report rounds until the manager re-assigns (e.g. to a
+    reviewer) or keeps planning.
+    """
+
+    mode: str = "planned"
+    status: str = "ready"
+    label: str = "计划分派"
 
     def select_speakers(
         self,
@@ -151,7 +161,18 @@ class PlannedScheduler:
         history: list[dict[str, Any]],
         config: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        raise RuntimeError(f"Chat room mode {self.mode} is not ready.")
+        limit = _positive_int(config.get("maxSpeakers") or config.get("max_speakers"))
+        enabled = [item for item in participants if item.get("enabled", True)]
+        if not enabled:
+            return []
+        manager = _resolve_planned_manager(enabled, config)
+        static_order = _string_list(config.get("speakerOrder") or config.get("speaker_order"))
+        if static_order:
+            speakers = _resolve_ordered_participants(enabled, static_order)
+            if speakers:
+                return speakers[:limit] if limit > 0 else speakers
+        speakers = _planned_dispatch_speakers(enabled, manager, history)
+        return speakers[:limit] if limit > 0 else speakers
 
 
 class SchedulerRegistry:
@@ -217,6 +238,157 @@ def _find_participant(participants: list[dict[str, Any]], candidate_id: str) -> 
     return None
 
 
+def _resolve_planned_manager(participants: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
+    manager_role = str(config.get("managerTeamRole") or config.get("manager_team_role") or "").strip()
+    if manager_role:
+        for participant in participants:
+            if str(participant.get("teamRole") or "").strip() == manager_role:
+                return participant
+    for key in (
+        "managerParticipantKey",
+        "manager_participant_key",
+        "managerAgentCode",
+        "manager_agent_code",
+    ):
+        candidate = _find_participant(participants, str(config.get(key) or ""))
+        if candidate is not None:
+            return candidate
+    return participants[0]
+
+
+def _planned_dispatch_speakers(
+    participants: list[dict[str, Any]],
+    manager: dict[str, Any],
+    history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    # Alternating turns: assignees only speak while nobody has talked after
+    # the manager's latest message; otherwise the floor returns to the
+    # manager so it can summarize, re-assign, or hand off (e.g. to a
+    # reviewer).  Without this the first dispatch would repeat forever.
+    content, spoke_after = _latest_manager_dispatch(manager, history)
+    speakers = (
+        _resolve_mentioned_participants(participants, manager, content)
+        if content and not spoke_after
+        else []
+    )
+    return speakers or [manager]
+
+
+def _latest_manager_dispatch(manager: dict[str, Any], history: list[dict[str, Any]]) -> tuple[str, bool]:
+    """Return the latest manager message content and whether anyone spoke after it.
+
+    room["rounds"] is appended chronologically, so a single pass suffices: a
+    manager message refreshes the content and resets the flag, any other
+    message sets it.
+    """
+    manager_keys = _identity_keys(
+        manager,
+        ("participantId", "sessionId", "directSessionId", "agentId", "agentCode"),
+    )
+    if not manager_keys:
+        return "", False
+    content = ""
+    spoke_after = False
+    for round_payload in history or []:
+        if not isinstance(round_payload, dict):
+            continue
+        for message in round_payload.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            message_keys = _identity_keys(
+                message, ("participantId", "sessionId", "agentId", "speakerCode")
+            )
+            if message_keys & manager_keys:
+                content = str(message.get("content") or "")
+                spoke_after = False
+            else:
+                spoke_after = True
+    return content, spoke_after
+
+
+def _identity_keys(value: dict[str, Any], fields: tuple[str, ...]) -> set[str]:
+    return {
+        str(value.get(field) or "").strip().lower()
+        for field in fields
+        if str(value.get(field) or "").strip()
+    }
+
+
+def _resolve_mentioned_participants(
+    participants: list[dict[str, Any]],
+    manager: dict[str, Any],
+    content: str,
+) -> list[dict[str, Any]]:
+    haystack = _mention_haystack(content)
+    if "@" not in haystack:
+        return []
+    manager_id = str(manager.get("participantId") or "").strip().lower()
+    candidates: list[tuple[dict[str, Any], str, list[str]]] = []
+    for participant in participants:
+        participant_id = str(participant.get("participantId") or "").strip().lower()
+        if not participant_id or participant_id == manager_id:
+            continue
+        keys = [
+            key
+            for key in (
+                _mention_haystack(participant.get("teamRole")),
+                _mention_haystack(participant.get("agentCode")),
+                _mention_haystack(participant.get("participantId")),
+            )
+            if key
+        ]
+        if keys:
+            candidates.append((participant, participant_id, keys))
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    cursor = 0
+    while True:
+        at = haystack.find("@", cursor)
+        if at < 0:
+            break
+        cursor = at + 1
+        # Greedy longest key wins each mention so a shorter role that prefixes
+        # a longer one ("开发工程师" vs "开发工程师 A") cannot steal the turn.
+        best: tuple[int, dict[str, Any], str] | None = None
+        for participant, participant_id, keys in candidates:
+            if participant_id in seen:
+                continue
+            matched = max(
+                (len(key) for key in keys if haystack.startswith(key, at + 1)),
+                default=0,
+            )
+            if matched and (best is None or matched > best[0]):
+                best = (matched, participant, participant_id)
+        if best is None:
+            continue
+        selected.append(best[1])
+        seen.add(best[2])
+        cursor = at + 1 + best[0]
+    return selected
+
+
+def _mention_haystack(value: Any) -> str:
+    text = str(value or "").replace("＠", "@")
+    return "".join(text.split()).lower()
+
+
+def _resolve_ordered_participants(
+    participants: list[dict[str, Any]], keys: list[str]
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for key in keys:
+        participant = _find_participant(participants, key)
+        if participant is None:
+            continue
+        participant_id = str(participant.get("participantId") or "").strip()
+        if not participant_id or participant_id in seen:
+            continue
+        seen.add(participant_id)
+        selected.append(participant)
+    return selected
+
+
 def _medical_consultation_buckets() -> list[tuple[str, ...]]:
     return [
         ("问诊主持", "主持", "协调", "coordinator", "moderator", "host", "navigator"),
@@ -249,6 +421,7 @@ _REGISTRY = SchedulerRegistry(
         RoundRobinScheduler(),
         OpportunisticScheduler(),
         MedicalConsultationPanelScheduler(),
+        PlannedScheduler(),
     ]
 )
 

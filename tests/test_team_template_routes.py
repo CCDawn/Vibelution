@@ -203,8 +203,9 @@ def test_team_template_routes_list_includes_dev_team_template(tmp_path, monkeypa
     assert dev_team["defaultTeamName"] == "开发团队"
     assert dev_team["roleCount"] == 4
     assert dev_team["roleCount"] == len(dev_template["roles"])
-    assert dev_team["chatRoom"]["mode"] == "round_robin"
+    assert dev_team["chatRoom"]["mode"] == "planned"
     assert dev_team["chatRoom"]["purpose"] == "meeting"
+    assert dev_team["chatRoom"]["config"]["managerTeamRole"] == "规划师"
 
 
 def test_team_template_instantiate_creates_dev_team(tmp_path, monkeypatch):
@@ -231,7 +232,7 @@ def test_team_template_instantiate_creates_dev_team(tmp_path, monkeypatch):
     assert team["teamTemplateId"] == "dev-team"
     assert team["memberCount"] == 4
     assert len(payload["createdAgents"]) == 4
-    assert team["linkedChatRoom"]["mode"] == "round_robin"
+    assert team["linkedChatRoom"]["mode"] == "planned"
     assert team["linkedChatRoom"]["purpose"] == "meeting"
     assert {member["role"] for member in team["members"]} == {
         "规划师",
@@ -241,11 +242,12 @@ def test_team_template_instantiate_creates_dev_team(tmp_path, monkeypatch):
     }
 
     room = client.get(f"/api/chat-rooms/{team['linkedChatRoomId']}").json()
-    assert room["mode"] == "round_robin"
+    assert room["mode"] == "planned"
     assert room["purpose"] == "meeting"
     assert room["config"]["teamKind"] == "template_demo"
     assert room["config"]["teamTemplateId"] == "dev-team"
     assert room["config"]["devTeamTemplate"] is True
+    assert room["config"]["managerTeamRole"] == "规划师"
     assert len(room["participants"]) == expected_count
     assert {
         "规划师",

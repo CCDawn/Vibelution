@@ -127,7 +127,9 @@ _CHALLENGE_PRIOR_SEMANTIC_MEETING_TYPES = frozenset(
 )
 # Speaker delta fan-out scope (MVP): only ordinary rounds stream answer
 # deltas.  Challenge rooms keep receipt semantics and stay silent.
-_CHAT_ROOM_SPEAKER_DELTA_ROUND_MODES = frozenset({"round_robin", "meeting", "discussion"})
+_CHAT_ROOM_SPEAKER_DELTA_ROUND_MODES = frozenset(
+    {"round_robin", "meeting", "discussion", "planned"}
+)
 _CASUAL_CHAT_TOPIC_RE = re.compile(
     r"^\s*(?:你们好|大家好|你好|您好|hello|hi|hey|嗨|哈喽|在吗|有人吗|辛苦了)[。！!,.，\s]*$",
     re.IGNORECASE,
@@ -5432,6 +5434,13 @@ def _build_participant_prompt(
         and not structured_meeting_message
         else []
     )
+    # Planned dispatch: the mention lexicon here must stay identical to what
+    # PlannedScheduler parses in core/chatroom/scheduler.py.
+    planned_dispatch_line = (
+        "计划分派模式：规划角色完成规划后，派发任务时请用 @成员角色名 标注下一轮负责人（如 @开发工程师 A）；没有可识别的 @ 指派时，视为仍在规划；被指派成员发言后，下一轮回到规划角色汇总并决定后续指派。"
+        if str(round_payload.get("mode") or room.get("mode") or DEFAULT_MODE).strip().lower() == "planned"
+        else ""
+    )
     response_contract_lines = (
         ["严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。"]
         if structured_room_context
@@ -5446,6 +5455,7 @@ def _build_participant_prompt(
             f"群聊: {room.get('title') or room.get('roomId')}",
             f"当前议题: {round_payload.get('topic') or ''}",
             f"调度模式: {round_payload.get('mode') or DEFAULT_MODE}",
+            *([planned_dispatch_line] if planned_dispatch_line else []),
             f"对话目的: {purpose}",
             f"本轮推进模式: {effective_purpose}",
             f"你的发言视角: {role_view}",

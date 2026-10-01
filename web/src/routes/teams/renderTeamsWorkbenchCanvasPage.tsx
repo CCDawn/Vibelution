@@ -5,7 +5,7 @@ import type { CSSProperties, MutableRefObject, ReactNode } from "react";
 import type { Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import { TeamsCanvasComposer } from "./TeamsCanvasComposer";
-import { TeamOrganizationCanvasSurface } from "./TeamOrganizationCanvasSurface";
+import { TeamOrganizationCanvasSurface, type TeamCanvasAuthoringProps } from "./TeamOrganizationCanvasSurface";
 import { TEAMS_LAYOUT_ID } from "./teamsWorkbenchChrome";
 import type { PaneSpec } from "../../components/layout/paneLayoutPersistence";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
@@ -76,6 +76,7 @@ export type TeamsWorkbenchCanvasPageProps = {
   onNodePointerMove: any;
   onNodePointerUp: any;
   onNodePointerCancel: any;
+  canvasAuthoring?: TeamCanvasAuthoringProps;
 };
 
 export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPageProps) {
@@ -159,6 +160,7 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
           onNodePointerMove={p.onNodePointerMove}
           onNodePointerUp={p.onNodePointerUp}
           onNodePointerCancel={p.onNodePointerCancel}
+          canvasAuthoring={p.canvasAuthoring}
         />
       )}
     />

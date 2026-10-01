@@ -12,9 +12,13 @@ import {
   buildCanvasWithAppliedNodeDraft,
   buildCanvasWithDeletedNode,
   buildCanvasWithDraggedNode,
+  buildCanvasWithEdge,
   buildCanvasWithLeadConnection,
   buildCanvasWithNewNode,
+  buildCanvasWithRelabeledEdge,
+  buildCanvasWithRelabeledNode,
   buildCanvasWithUnboundNode,
+  buildCanvasWithoutEdge,
 } from "./teamCanvasNodeModel";
 import type { NodeDraft, NodeDragState } from "./useTeamsShellCanvasWorkspace";
 
@@ -124,6 +128,65 @@ export function createTeamCanvasNodeEditing(ctx: TeamCanvasNodeEditingContext) {
     saveCanvas(next);
   }
 
+  function connectNodes(sourceNodeId: string, targetNodeId: string) {
+    if (!durableCanvas || researchCanvasReadOnly) {
+      return;
+    }
+    const next = buildCanvasWithEdge({
+      canvas: durableCanvas,
+      sourceNodeId,
+      targetNodeId,
+    });
+    if (!next) {
+      return;
+    }
+    saveCanvas(next);
+  }
+
+  function deleteSelectedEdge(edgeId: string) {
+    if (!durableCanvas || !edgeId || researchCanvasReadOnly) {
+      return;
+    }
+    const next = buildCanvasWithoutEdge({
+      canvas: durableCanvas,
+      edgeId,
+    });
+    if (!next) {
+      return;
+    }
+    saveCanvas(next);
+  }
+
+  function relabelSelectedEdge(edgeId: string, label: string) {
+    if (!durableCanvas || !edgeId || researchCanvasReadOnly) {
+      return;
+    }
+    const next = buildCanvasWithRelabeledEdge({
+      canvas: durableCanvas,
+      edgeId,
+      label,
+    });
+    if (!next) {
+      return;
+    }
+    saveCanvas(next);
+  }
+
+  function relabelSelectedNode(nodeId: string, label: string) {
+    if (!durableCanvas || !nodeId || researchCanvasReadOnly) {
+      return;
+    }
+    const next = buildCanvasWithRelabeledNode({
+      canvas: durableCanvas,
+      nodeId,
+      label,
+    });
+    if (!next) {
+      return;
+    }
+    saveCanvas(next);
+  }
+
   function commitNodeDragPosition(dragState: NodeDragState) {
     setNodePositionDrafts((current) => {
       const currentPosition = current[dragState.nodeId];
@@ -218,6 +281,10 @@ export function createTeamCanvasNodeEditing(ctx: TeamCanvasNodeEditingContext) {
     unbindSelectedNode,
     deleteSelectedNode,
     connectFromLead,
+    connectNodes,
+    deleteSelectedEdge,
+    relabelSelectedEdge,
+    relabelSelectedNode,
     startNodeDrag,
     moveNodeDrag,
     finishNodeDrag,
