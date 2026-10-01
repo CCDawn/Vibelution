@@ -487,7 +487,11 @@ export function LauncherBranchInstancesPanel({
           <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
             <span className={state === "running" ? styles.runtimeRunning : state === "failed" ? styles.runtimeFailed : styles.runtimeOther}>{instanceRuntimeStateLabel(state, zh)}</span>
           </LauncherBranchStatusHelp>
-          <span className={styles.windowState}>{instanceWindowOpen(item) ? (zh ? "窗口已打开" : "Window open") : (zh ? "窗口未打开" : "Window closed")}</span>
+          {state === "running" && !instanceWindowOpen(item) ? (
+            // The window hint only adds information when it contradicts a live
+            // backend; every other case is already conveyed by the row actions.
+            <span className={styles.windowState}>{zh ? "窗口未打开" : "Window closed"}</span>
+          ) : null}
         </div>;
       },
     },
