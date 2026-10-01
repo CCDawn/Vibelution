@@ -73,9 +73,16 @@ describe("Electron main Launcher IPC facade", () => {
     const bridgeStart = apiBody.indexOf("const raw = await runPythonJsonBridge");
     const bridgeBody = apiBody.slice(bridgeStart, apiBody.indexOf("const parsed", bridgeStart));
 
-    expect(bridgeBody).toContain('path === "branch-instances/cleanup"');
-    expect(bridgeBody).toContain("PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS");
+    expect(bridgeBody).toContain("launcherApiBridgeTimeoutMs(path, method)");
     expect(bridgeBody).toContain('mutation: method !== "GET"');
+    // The budget table lives beside the constants in pythonJsonBridge.ts and
+    // is behaviorally locked by launcherApiBridgeTimeoutMs unit tests.
+    const bridgeModuleSource = readFileSync(
+      fileURLToPath(new URL("../src/process/pythonJsonBridge.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(bridgeModuleSource).toContain('path === "branch-instances/cleanup"');
+    expect(bridgeModuleSource).toContain("PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS");
   });
 
   it("refreshes state from debounced file hints and stat-only safety checks", () => {

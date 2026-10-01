@@ -150,11 +150,8 @@ import {
 import {
   invalidPythonJsonBridgePayload,
   LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
+  launcherApiBridgeTimeoutMs,
   parsePythonJsonBridgePayload,
-  PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
-  PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS,
-  PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
-  PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
   runPythonJsonBridge,
   capturePythonProcessIdentity,
   createPythonOwnedProcessTreeTerminator
@@ -4319,14 +4316,7 @@ async function orchestrateLauncherApi(
     cwd: paths.workspaceRoot,
     failureLabel: "launcher api bridge",
     maxBytes: LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
-    timeoutMs:
-      path === "maintenance/reset/apply"
-        ? PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS
-        : path === "branch-instances/cleanup"
-          ? PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS
-          : method === "GET"
-            ? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS
-            : PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+    timeoutMs: launcherApiBridgeTimeoutMs(path, method),
     killPolicy: "child",
     mutation: method !== "GET"
   });

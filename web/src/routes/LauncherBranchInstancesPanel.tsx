@@ -154,6 +154,8 @@ export function LauncherBranchInstancesPanel({
         pending: "正在清理所选实例…",
         done: "清理完成",
         failed: "部分实例未能清理",
+        cleanupMetadataError: "读取分支实例失败，无法确认合入状态。",
+        retryMetadata: "重试读取",
         building: "构建中…",
         buildingHint: "前端代码有更新，正在构建新版本，约需几分钟。",
       }
@@ -215,6 +217,8 @@ export function LauncherBranchInstancesPanel({
         pending: "Cleaning selected instances…",
         done: "Cleanup finished",
         failed: "Some instances could not be cleaned",
+        cleanupMetadataError: "Could not read branch instances to confirm merge status.",
+        retryMetadata: "Retry",
         building: "Building…",
         buildingHint: "The frontend has updates and a new build is running. This takes a few minutes.",
       };
@@ -241,6 +245,10 @@ export function LauncherBranchInstancesPanel({
   });
   const waitingUnmergedMetadata = Boolean(filters.unmerged) && cleanupMetadataQuery.isPending;
   const waitingCleanupConfirmMetadata = Boolean(pendingIds?.length) && !cleanupMetadataQuery.isSuccess;
+  // Merge status is the only warning layer before deleting an unmerged
+  // branch, so a failed metadata read keeps confirm disabled — but it must
+  // surface an error with a retry instead of spinning forever.
+  const cleanupConfirmMetadataFailed = Boolean(pendingIds?.length) && cleanupMetadataQuery.isError;
   const annotatedItems = useMemo(
     () => overlayCleanupMetadata(items, cleanupMetadataQuery.data?.items),
     [cleanupMetadataQuery.data?.items, items],
@@ -607,7 +615,21 @@ export function LauncherBranchInstancesPanel({
         }}
       >
         <ul className={styles.confirmList}>
-          {waitingCleanupConfirmMetadata ? (
+          {cleanupConfirmMetadataFailed ? (
+            <li className={styles.confirmItem}>
+              <p className={styles.confirmName}>{labels.cleanupMetadataError}</p>
+              <VButton
+                variant="secondary"
+                density="compact"
+                isDisabled={cleanupMetadataQuery.isFetching}
+                onPress={() => {
+                  void cleanupMetadataQuery.refetch();
+                }}
+              >
+                {labels.retryMetadata}
+              </VButton>
+            </li>
+          ) : waitingCleanupConfirmMetadata ? (
             <li className={styles.confirmItem}>
               <p className={styles.confirmName}>{labels.listLoadingTitle}</p>
             </li>
