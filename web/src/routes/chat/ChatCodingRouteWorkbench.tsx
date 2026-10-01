@@ -312,7 +312,11 @@ import {
   cliAgentRunTabId,
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
-import { readStoredSessionDrafts, removeStoredSessionDraft } from "./chatDraftPersistence";
+import {
+  readStoredSessionDraftState,
+  removeStoredSessionDraft,
+  scheduleSessionDraftMetaSave,
+} from "./chatDraftPersistence";
 import {
   buildFileReferencePayload,
   buildKnowledgeBaseReferencePayload,
@@ -613,7 +617,10 @@ export function ChatCodingRouteWorkbench() {
   const sessionListSort = sessionListSortQueryValue(sessionListPrefs.sortBy);
   const [railSectionCollapsed, setRailSectionCollapsed] = useState<Record<string, boolean>>({});
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
-  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(() => readStoredSessionDrafts());
+  // One storage read hydrates text + rich draft fields (per-turn model
+  // selection and reference chips) for every remembered session.
+  const [storedDraftState] = useState(() => readStoredSessionDraftState());
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(storedDraftState.drafts);
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const composerFocusSequenceRef = useRef(0);
   const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
@@ -636,7 +643,7 @@ export function ChatCodingRouteWorkbench() {
     ));
   }, []);
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({});
-  const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({});
+  const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>(storedDraftState.referenceAttachments);
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -679,7 +686,21 @@ export function ChatCodingRouteWorkbench() {
   // Sticky per-turn model override (ZCode modelSelection semantics): follows
   // the session default until the user pins a model, then stays pinned across
   // sends until changed or restored. Keyed per session.
-  const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>({});
+  const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>(storedDraftState.turnModelSelections);
+  // Rich draft persistence: per-turn model selection and reference chips ride
+  // the same debounced store as the draft text (ZCode draft parity). The
+  // composer-change text save stays in useChatComposerSubmit; only this effect
+  // reports meta. Images/files never enter the store (text metadata only).
+  useEffect(() => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    scheduleSessionDraftMetaSave(sessionId, {
+      turnModelSelection: turnModelSelections[sessionId] ?? null,
+      referenceAttachments: sessionReferenceAttachments[sessionId] ?? [],
+    });
+  }, [activeSessionId, turnModelSelections, sessionReferenceAttachments]);
   const [groupManageDialogOpen, setGroupManageDialogOpen] = useState(false);
   const {
     groupComposerOpen,
