@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import {
-  DEFAULT_RUNTIME_TASK_PAGE_LIMIT,
   childSessionHref,
   getRuntimeTask,
   listRuntimeTasks,
@@ -19,7 +18,6 @@ import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds
 import {
   VActionGroup,
   VButton,
-  VChip,
   VConfirmDialog,
   VIconButton,
   VListDetailPage,
@@ -37,6 +35,7 @@ import styles from "./AuxConversationsRoute.styles";
 import {
   AUX_TASK_KINDS,
   auxTaskKindLabel,
+  auxTaskStatusIcon,
   auxTaskStatusLabel,
   auxTaskStatusTone,
   formatRelativeTime,
@@ -46,6 +45,8 @@ import {
 
 /** Foreground poll beat for the task list; hidden pages stop polling. */
 export const AUX_TASKS_POLL_MS = 4_000;
+/** Ended-directory page size, matching the ZCode directory's 20-per-page. */
+export const AUX_ENDED_PAGE_SIZE = 20;
 const ALL_KIND_KEY = "all";
 
 const COPY = {
@@ -59,12 +60,11 @@ const COPY = {
     allKinds: "全部类型",
     refresh: "刷新",
     noTasks: "暂无辅助任务",
-    noRunningTasks: "暂无正在运行的任务",
-    noEndedTasks: "暂无已结束的任务",
+    noRunningTasks: "没有正在运行的任务",
     loading: "读取中",
     loadFailed: "读取失败",
     selectTask: "选择一个任务查看详情",
-    loadMore: "加载更多",
+    loadMore: "再显示 20 个",
     loadingMore: "加载中…",
     loadMoreFailed: "加载更多失败，请重试",
     stopTask: "停止任务",
@@ -93,11 +93,10 @@ const COPY = {
     refresh: "Refresh",
     noTasks: "No aux tasks",
     noRunningTasks: "No running tasks",
-    noEndedTasks: "No ended tasks",
     loading: "Loading",
     loadFailed: "Load failed",
     selectTask: "Select a task to inspect details",
-    loadMore: "Load more",
+    loadMore: "Show 20 more",
     loadingMore: "Loading…",
     loadMoreFailed: "Load more failed; retry",
     stopTask: "Stop task",
@@ -161,7 +160,7 @@ export function AuxConversationsRoute() {
         {
           status: "all",
           kind: kindParam || undefined,
-          limit: DEFAULT_RUNTIME_TASK_PAGE_LIMIT,
+          limit: AUX_ENDED_PAGE_SIZE,
         },
         queryClient.getQueryData<RuntimeTaskListPayload>(listKey),
         signal,
@@ -263,7 +262,7 @@ export function AuxConversationsRoute() {
         status: "ended",
         kind: kindParam || undefined,
         cursor: endedCursor,
-        limit: DEFAULT_RUNTIME_TASK_PAGE_LIMIT,
+        limit: AUX_ENDED_PAGE_SIZE,
       });
       setEndedExtras((current) => [...current, ...(page.ended?.items ?? [])]);
       setEndedCursor(page.ended?.nextCursor ?? "");
@@ -283,7 +282,22 @@ export function AuxConversationsRoute() {
     [copy.allKinds, lang],
   );
 
-  const renderTaskRow = useCallback(
+  const renderRunningTaskRow = useCallback(
+    (task: RuntimeTaskCard) => (
+      <TaskRow
+        key={task.taskId}
+        task={task}
+        lang={lang}
+        selected={task.taskId === requestedTaskId}
+        onSelect={() => updateSelectedTaskId(task.taskId)}
+        stopLabel={copy.stopTask}
+        onAskStop={() => setStopTargetId(task.taskId)}
+      />
+    ),
+    [copy.stopTask, lang, requestedTaskId, updateSelectedTaskId],
+  );
+
+  const renderEndedTaskRow = useCallback(
     (task: RuntimeTaskCard) => (
       <TaskRow
         key={task.taskId}
@@ -299,13 +313,12 @@ export function AuxConversationsRoute() {
   const runningSection = (
     <section className={styles.taskSectionClass} aria-label={copy.running}>
       <div className={styles.taskSectionHeaderClass}>
-        <h3 className={styles.taskSectionTitleClass}>{copy.running}</h3>
-        <span className={styles.taskSectionCountClass}>{runningTasks.length}</span>
+        <h3 className={styles.taskSectionTitleClass}>{copy.running} · {runningTasks.length}</h3>
       </div>
       {runningTasks.length === 0 && !initialLoad ? (
         <p className={styles.mutedLineClass}>{copy.noRunningTasks}</p>
       ) : (
-        runningTasks.map(renderTaskRow)
+        runningTasks.map(renderRunningTaskRow)
       )}
     </section>
   );
@@ -313,25 +326,20 @@ export function AuxConversationsRoute() {
   const endedSection = (
     <section className={styles.taskSectionClass} aria-label={copy.ended}>
       <div className={styles.taskSectionHeaderClass}>
-        <h3 className={styles.taskSectionTitleClass}>{copy.ended}</h3>
-        <span className={styles.taskSectionCountClass}>{endedTotal}</span>
+        <h3 className={styles.taskSectionTitleClass}>{copy.ended} · {endedTotal}</h3>
       </div>
-      {endedPageItems.length === 0 && endedExtras.length === 0 && !initialLoad ? (
-        <p className={styles.mutedLineClass}>{copy.noEndedTasks}</p>
-      ) : (
-        <>
-          {endedPageItems.map(renderTaskRow)}
-          {endedExtras.map(renderTaskRow)}
-          {endedCursor ? (
-            <div className={styles.loadMoreRowClass}>
-              <VButton variant="ghost" density="compact" isPending={loadingMore} onPress={() => void loadMoreEnded()}>
-                {loadingMore ? copy.loadingMore : copy.loadMore}
-              </VButton>
-              {loadMoreError ? <span className={styles.mutedLineClass}>{copy.loadMoreFailed}</span> : null}
-            </div>
-          ) : null}
-        </>
-      )}
+      {/* An empty ended directory stays silent — only the running section
+          carries an empty line (ZCode SubagentDirectorySidePane.tsx:169-200). */}
+      {endedPageItems.map(renderEndedTaskRow)}
+      {endedExtras.map(renderEndedTaskRow)}
+      {endedCursor ? (
+        <div className={styles.loadMoreRowClass}>
+          <VButton variant="ghost" density="compact" isPending={loadingMore} onPress={() => void loadMoreEnded()}>
+            {loadingMore ? copy.loadingMore : copy.loadMore}
+          </VButton>
+          {loadMoreError ? <span className={styles.mutedLineClass}>{copy.loadMoreFailed}</span> : null}
+        </div>
+      ) : null}
     </section>
   );
 
@@ -523,38 +531,88 @@ function TaskRow({
   lang,
   selected,
   onSelect,
+  stopLabel,
+  onAskStop,
 }: {
   task: RuntimeTaskCard;
   lang: "zh" | "en";
   selected: boolean;
   onSelect: () => void;
+  /** Present only on running rows; ended rows carry no inline actions. */
+  stopLabel?: string;
+  onAskStop?: () => void;
 }) {
+  const { Icon, spin } = auxTaskStatusIcon(task.status);
+  // Directory rows never tick seconds: ended rows age from endedAt, live rows
+  // from startedAt (ZCode SubagentDirectorySidePane.tsx:72).
+  const timestamp = String(task.endedAt || "").trim() || task.startedAt;
+  const body = (
+    <>
+      <span className={styles.taskRowIconClass} aria-hidden="true">
+        <Icon size={16} className={spin ? styles.taskRowIconSpinClass : undefined} />
+      </span>
+      <span className={styles.taskRowMainClass}>
+        <span className={styles.taskRowTopClass}>
+          <strong className={styles.taskRowTitleClass} title={task.title}>
+            {task.title || task.taskId}
+          </strong>
+          <span className={styles.taskRowStatusWordClass}>{auxTaskStatusLabel(task.status, lang)}</span>
+        </span>
+        <span className={styles.taskRowMetaClass}>
+          <span className={styles.taskRowKindClass}>{auxTaskKindLabel(task.kind, lang)}</span>
+          {task.summary?.trim() ? (
+            <span className={styles.taskRowSummaryClass} title={task.summary}>
+              {task.summary}
+            </span>
+          ) : null}
+        </span>
+      </span>
+      <span className={styles.taskRowTimeClass}>{formatRelativeTime(timestamp, lang)}</span>
+    </>
+  );
+
+  if (!onAskStop) {
+    return (
+      <VNativeButton
+        type="button"
+        className={selected ? `${styles.taskRowClass} ${styles.taskRowSelectedClass}` : styles.taskRowClass}
+        onClick={onSelect}
+        aria-pressed={selected}
+      >
+        {body}
+      </VNativeButton>
+    );
+  }
+
+  // A running row holds both "open detail" and "stop": a whole-row button
+  // would nest two buttons, so a transparent sibling overlay takes the select
+  // hit while the stop button stays an independent layer that stops
+  // propagation (ZCode ConversationStatusPanel.tsx:1410-1443).
   return (
-    <VNativeButton
-      type="button"
-      className={selected ? `${styles.taskRowClass} ${styles.taskRowSelectedClass}` : styles.taskRowClass}
-      onClick={onSelect}
-      aria-pressed={selected}
+    <div
+      className={
+        selected ? `${styles.taskRowLiveClass} ${styles.taskRowSelectedClass}` : styles.taskRowLiveClass
+      }
     >
-      <span className={styles.taskRowTopClass}>
-        <VStatusChip
-          tone={auxTaskStatusTone(task.status)}
-          className={styles.statusDotChipClass}
-          aria-hidden="true"
-        >
-          ·
-        </VStatusChip>
-        <strong className={styles.taskRowTitleClass} title={task.title}>
-          {task.title || task.taskId}
-        </strong>
-        <VChip tone="neutral" className={styles.kindChipClass}>
-          {auxTaskKindLabel(task.kind, lang)}
-        </VChip>
-      </span>
-      <span className={styles.taskRowMetaClass}>
-        <span>{auxTaskStatusLabel(task.status, lang)}</span>
-        <span>{formatRelativeTime(task.startedAt, lang)}</span>
-      </span>
-    </VNativeButton>
+      <VNativeButton
+        type="button"
+        className={styles.taskRowOverlayClass}
+        onClick={onSelect}
+        aria-pressed={selected}
+        aria-label={task.title || task.taskId}
+      />
+      <div className={styles.taskRowContentClass}>{body}</div>
+      <VNativeButton
+        type="button"
+        className={styles.taskRowStopClass}
+        aria-label={stopLabel}
+        onClick={(event) => {
+          event.stopPropagation();
+          onAskStop();
+        }}
+      >
+        <StopCircle size={14} aria-hidden="true" />
+      </VNativeButton>
+    </div>
   );
 }
