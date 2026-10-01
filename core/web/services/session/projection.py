@@ -1790,6 +1790,14 @@ def _normalize_messages(
                 "metadata": dict(metadata) if isinstance(metadata, dict) else {},
                 **({"usageStats": usage_stats} if usage_stats else {}),
             }
+            turn_header = s._assistant_turn_header_fields(
+                conversation_id,
+                turn_id,
+                streaming=bool(raw.get("streaming")),
+                fallback_status=assistant_status,
+            )
+            if turn_header:
+                entry.update(turn_header)
         node_id = str(raw.get("nodeId") or "").strip()
         if node_id:
             entry["nodeId"] = node_id
@@ -2563,6 +2571,13 @@ def _merge_live_tool_start_metadata_into_turn_items(
             metadata = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}
             metadata["executionStartedAtEpochMs"] = exact_start
             item["metadata"] = metadata
+        # Live cells measure the completed call; settled journal items carry the
+        # same number from tool_result timestamps.  Fill only the gap so the
+        # authoritative journal value is never overwritten by a stale cell.
+        if s._coerce_tool_number(item.get("durationMs")) is None:
+            live_duration = s._coerce_tool_number(cell.get("durationMs") or cell.get("duration_ms"))
+            if live_duration is not None:
+                item["durationMs"] = live_duration
         if not str(item.get("input") or "").strip():
             live_input = s._session_turn_item_input_from_codex_cell(live_cell)
             if live_input:
@@ -3018,6 +3033,7 @@ def _canonicalize_session_turn_items_for_protocol(
                 "terminal", "callId", "toolName", "title", "summary", "text", "diagnosticSummary",
                 "source", "sourceCellId", "sourceCellKind", "sourceItemId", "metadata", "code",
                 "input", "output", "createdAt", "updatedAt", "semanticStatus",
+                "durationMs", "error",
             }
         }
         if raw_item_metadata:
@@ -3051,6 +3067,17 @@ def _canonicalize_session_turn_items_for_protocol(
             item["input"] = str(raw.get("input") or "").strip() or None
             item["output"] = text or None
             item["semanticStatus"] = semantic_status or None
+            # Tool cost and structured failure are first-class wire facts; the
+            # journal derives them from event timestamps, live cells carry the
+            # capture-measured numbers.  None values are compacted away.
+            item["durationMs"] = s._coerce_tool_number(
+                raw.get("durationMs") or raw.get("duration_ms")
+            )
+            raw_error = raw.get("error") if isinstance(raw.get("error"), dict) else {}
+            error_code = s.trim_lines(str(raw_error.get("code") or ""), max_lines=1)
+            error_message = s.trim_lines(str(raw_error.get("message") or ""), max_lines=4)
+            if status == "failed" and error_code and error_message:
+                item["error"] = {"code": error_code, "message": error_message}
         elif item_type == "retry":
             item["attempt"] = max(1, int(raw.get("attempt") or raw.get("iteration") or 1))
             item["targetItemId"] = str(raw.get("targetItemId") or raw.get("sourceItemId") or item_id).strip()
@@ -3078,6 +3105,110 @@ def _canonicalize_session_turn_items_for_protocol(
             final_answer_offset += 1
             item["sequence"] = process_max_sequence + final_answer_offset
     return sorted(canonical, key=lambda item: (int(item.get("sequence") or 0), str(item.get("itemId") or "")))
+
+
+# ZCode turnHeader 对齐（参考仓 rows.ts turnHeaderRowSchema）：轮级 state/工时
+# 以附加字段投影在 assistant 消息 envelope 上，不改既有 DTO 契约。只消费
+# journal 终态事件与 work-run 快照这些已有权威数据，不改其写入。
+_ASSISTANT_TURN_HEADER_FAILED_STATUSES = {"failed", "failed_provider", "failed_runtime"}
+_ASSISTANT_TURN_HEADER_INTERRUPTED_STATUSES = {
+    "stopped", "stopped_by_user", "cancelled", "superseded", "paused_limit", "interrupted",
+}
+_ASSISTANT_TURN_HEADER_ACTIVE_STATUSES = {"queued", "running", "stopping", "paused"}
+
+
+def _assistant_turn_header_terminal_event_types() -> set[str]:
+    s = _service()
+    return {s.EVENT_TURN_COMPLETED, s.EVENT_TURN_FAILED, s.EVENT_TURN_INTERRUPTED}
+
+
+def _assistant_turn_header_fields(
+    session_id: str,
+    turn_id: str,
+    *,
+    streaming: bool = False,
+    fallback_status: str = "",
+) -> dict[str, Any]:
+    """Project the turn-level work header (state/startedAt/endedAt/activeMs).
+
+    - ``turnStartedAt``/``turnEndedAt``: journal ``turn_started`` / terminal
+      event instants, falling back to the chat_turn work-run snapshot.
+    - ``turnState``: terminal status vocabulary mapped onto ZCode's four-state
+      algebra (running | completed | failed | interrupted).
+    - ``turnActiveMs``: end−start of the worked span.  The durable ledger does
+      not record wait segments (queue/permission waits carry no boundaries
+      today), so this currently equals the span; once writers record wait
+      boundaries this projection refines without a wire change.
+    """
+
+    s = _service()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_turn_id:
+        return {}
+    started_at = ""
+    ended_at = ""
+    terminal_status = ""
+    terminal_event_types = _assistant_turn_header_terminal_event_types()
+    try:
+        for event in s._load_session_conversation_events_cached(str(session_id or "").strip()):
+            if str(getattr(event, "turn_id", "") or "").strip() != normalized_turn_id:
+                continue
+            event_type = str(getattr(event, "event_type", "") or "").strip()
+            timestamp = str(getattr(event, "timestamp", "") or "").strip()
+            if event_type == s.EVENT_TURN_STARTED:
+                started_at = started_at or timestamp
+            elif event_type in terminal_event_types:
+                terminal_status = str(getattr(event, "status", "") or "").strip().lower()
+                if timestamp:
+                    ended_at = timestamp
+    except Exception:
+        started_at = ""
+        ended_at = ""
+        terminal_status = ""
+    work_run: dict[str, Any] = {}
+    try:
+        snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", normalized_turn_id)
+        if isinstance(snapshot, dict):
+            work_run = snapshot
+    except Exception:
+        work_run = {}
+    if not started_at:
+        started_at = str(work_run.get("startedAt") or "").strip()
+    if not ended_at:
+        ended_at = str(work_run.get("finishedAt") or work_run.get("endedAt") or "").strip()
+    if terminal_status:
+        if terminal_status in _ASSISTANT_TURN_HEADER_FAILED_STATUSES:
+            state = "failed"
+        elif terminal_status in _ASSISTANT_TURN_HEADER_INTERRUPTED_STATUSES:
+            state = "interrupted"
+        else:
+            state = "completed"
+    elif streaming or str(work_run.get("status") or "").strip().lower() in _ASSISTANT_TURN_HEADER_ACTIVE_STATUSES:
+        state = "running"
+    else:
+        state = {
+            "running": "running",
+            "failed": "failed",
+            "failed_provider": "failed",
+            "failed_runtime": "failed",
+            "stopped": "interrupted",
+            "stopped_by_user": "interrupted",
+            "cancelled": "interrupted",
+            "superseded": "interrupted",
+            "paused_limit": "interrupted",
+        }.get(str(fallback_status or "").strip().lower(), "completed" if ended_at else "running")
+    header: dict[str, Any] = {
+        "turnState": state,
+        "turnStartedAt": started_at,
+    }
+    if ended_at:
+        header["turnEndedAt"] = ended_at
+    if state != "running":
+        started_parsed = parse_timestamp_utc(started_at)
+        ended_parsed = parse_timestamp_utc(ended_at)
+        if started_parsed is not None and ended_parsed is not None and ended_parsed >= started_parsed:
+            header["turnActiveMs"] = max(0, int((ended_parsed - started_parsed).total_seconds() * 1000))
+    return header
 
 
 def _slim_session_turn_item_input(raw_input: str, *, max_chars: int = 12000) -> str:

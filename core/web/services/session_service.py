@@ -974,6 +974,7 @@ from core.web.services.session.projection import (
     _session_detail_window_requested,
     _build_session_turn_items_projection,
     _canonicalize_session_turn_items_for_protocol,
+    _assistant_turn_header_fields,
     _stamp_turn_items_message_id,
     _slim_session_turn_items_for_window_payload,
     _build_codex_transcript_from_turn_items,
