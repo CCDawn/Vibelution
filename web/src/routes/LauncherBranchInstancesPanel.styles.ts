@@ -1,6 +1,6 @@
 const styles = {
   currentMarker: "ml-2 font-normal text-vui-xs text-vui-fg-tertiary",
-  runtimeStack: "grid gap-1",
+  runtimeStack: "flex min-w-0 items-center gap-2",
   windowState: "text-vui-xs text-vui-fg-tertiary",
   heading: "m-0 text-xl font-semibold",
   description: "mb-0 mt-1 text-vui-xs text-vui-fg-secondary",
