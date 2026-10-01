@@ -1029,6 +1029,8 @@ from core.web.services.session.publish import (
     get_session_stream_initial_state,
     resolve_session_stream_initial_payload,
     normalize_session_stream_initial_mode,
+    parse_session_stream_last_event_id,
+    build_session_stream_resume,
     _session_stream_initial_latest_message_payload,
     _latest_session_stream_preview_message,
     _session_stream_preview_message_components,

@@ -756,7 +756,16 @@ def sessions_bulk_delete(payload: SessionBulkDeletePayload) -> dict:
 
 
 @router.get("/sessions/{session_id}/events", response_class=StreamingResponse)
-async def session_events(session_id: str, initial: str = Query("light")) -> StreamingResponse:
+async def session_events(
+    session_id: str,
+    initial: str = Query("light"),
+    request: Request = None,
+) -> StreamingResponse:
+    raw_last_event_id = request.headers.get("last-event-id") if request is not None else None
+    try:
+        last_event_id = session_service.parse_session_stream_last_event_id(raw_last_event_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         initial_mode, detail, initial_state = await asyncio.get_running_loop().run_in_executor(
             _SESSION_STREAM_EXECUTOR,
@@ -772,6 +781,7 @@ async def session_events(session_id: str, initial: str = Query("light")) -> Stre
             initial_detail=detail,
             initial=initial_mode,
             initial_state=initial_state,
+            last_event_id=last_event_id,
         ),
         media_type="text/event-stream",
         headers={
