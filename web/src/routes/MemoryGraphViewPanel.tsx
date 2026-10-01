@@ -5,7 +5,7 @@ import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHan
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VCanvasWorkbenchPage, VNativeInput, VSurface } from "../components/vui";
+import { VButton, VCanvasWorkbenchPage, VNativeInput, VNativeSelect, VSurface } from "../components/vui";
 import { GRAPH_NODE_TYPE_LABELS, MemoryGraphNodeInspectorPanel, type MemoryGraphNodeInspectorCopy, type MemoryGraphRelation } from "./MemoryGraphNodeInspectorPanel";
 import { memoryGraphSlice } from "./memory/memoryGraphSlice";
 import { MemoryGraphRelationInspector } from "./MemoryGraphRelationInspector";
@@ -52,6 +52,11 @@ type MemoryGraphViewPanelProps = {
   isGraphLoading?: boolean;
   graphError?: string;
   onRetryGraph?: () => void;
+  graphActorAgentId?: string;
+  graphActorChoices?: Array<{ agentId: string; displayName: string }>;
+  graphTeamId?: string;
+  onGraphActorChange?: (agentId: string) => void;
+  onGraphTeamChange?: (teamId: string) => void;
   graphSearchText: string;
   activeGraphNodeType: string;
   graphTypeEntries: Array<[string, number]>;
@@ -83,6 +88,9 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
   const [focusToken, setFocusToken] = useState(0);
   const lastTrigger = useRef<HTMLElement | null>(null);
   const selectedId = selectedGraphNode?.id ?? "";
+  const actorChoices = props.graphActorChoices ?? [];
+  const teamChoices = (graphPayload?.nodes ?? []).filter(node => node.type === "team");
+  const hasKnowledge = graphPayload?.nodes.some(node => node.type === "knowledge_item" || node.type === "agent_private_memory");
   const {
     registerSplitContainer: registerGraphContainer,
     paneVariablesStyle: graphPaneVariablesStyle,
@@ -110,6 +118,17 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
   }, []);
   const clearSelection = () => { onSelectGraphNode(""); setDepth(0); setEdgeId(""); setDetailOpen(false); };
+  const changeScope = (change: () => void) => {
+    clearSelection(); onClearGraphFilters(); setMatchOnly(false); change();
+  };
+  const scope = `${props.graphActorAgentId ?? ""}\0${props.graphTeamId ?? ""}`;
+  const lastScope = useRef(scope);
+  useEffect(() => {
+    if (lastScope.current !== scope) {
+      lastScope.current = scope;
+      setDetailOpen(false); setEdgeId(""); setDepth(0); setMatchOnly(false);
+    }
+  }, [scope]);
   const edge = graphPayload?.edges.find(item => item.id === edgeId);
   const inspector = (selectedGraphNode || edge) && detailOpen ? <div className={styles.atlasInspector} data-vui-region="memory-graph-inspector">
     <div className={styles.atlasDetailHeader}><span>{edge ? "关系与依据" : copy.graphSelectedNode}</span>
@@ -143,7 +162,23 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
     </VSurface>}
     canvas={<div ref={registerGraphContainer} className={styles.atlasMain} style={graphPaneVariablesStyle} data-vui-region="memory-graph-canvas">
       <div className={styles.atlasHeading}><div><p className={styles.atlasEyebrow}>MEMORY ATLAS</p><h2 className={styles.canvasTitle}>{copy.knowledgeGraph}</h2><p className={styles.canvasHint}>从一个线索开始，沿着关系找到依据。</p></div>
-        <div className={styles.viewModes}><VButton variant="ghost" aria-pressed={!flat} onClick={() => setFlat(false)} icon={<Layers3 size={14} />}>3D</VButton><VButton variant="ghost" aria-pressed={flat} onClick={() => setFlat(true)} icon={<Network size={14} />}>平面</VButton></div></div>
+        <div className={styles.scopeControls}>
+          {props.onGraphActorChange && <label className={styles.scopeField}>读取身份<VNativeSelect aria-label="读取身份" className={styles.scopeSelect}
+            value={props.graphActorAgentId ?? ""} onChange={event => changeScope(() => props.onGraphActorChange?.(event.target.value))}>
+            {!props.graphActorAgentId && <option value="">选择 Agent</option>}
+            {props.graphActorAgentId && !actorChoices.some(actor => actor.agentId === props.graphActorAgentId) && <option value={props.graphActorAgentId}>{props.graphActorAgentId}</option>}
+            {actorChoices.map(actor => <option key={actor.agentId} value={actor.agentId}>{actor.displayName}</option>)}
+          </VNativeSelect></label>}
+          {props.onGraphTeamChange && <label className={styles.scopeField}>团队范围<VNativeSelect aria-label="团队范围" className={styles.scopeSelect}
+            value={props.graphTeamId ?? ""} onChange={event => changeScope(() => props.onGraphTeamChange?.(event.target.value))}>
+            <option value="">全部可访问团队</option>
+            {props.graphTeamId && !teamChoices.some(team => String(team.metadata.teamId ?? "") === props.graphTeamId) && <option value={props.graphTeamId}>{props.graphTeamId}</option>}
+            {teamChoices.map(team => <option key={team.id} value={String(team.metadata.teamId ?? "")}>{team.label}</option>)}
+          </VNativeSelect></label>}
+          <div className={styles.viewModes}><VButton variant="ghost" aria-pressed={!flat} onClick={() => setFlat(false)} icon={<Layers3 size={14} />}>3D</VButton><VButton variant="ghost" aria-pressed={flat} onClick={() => setFlat(true)} icon={<Network size={14} />}>平面</VButton></div>
+        </div></div>
+      {graphPayload && graphPayload.nodes.length > 0 && !hasKnowledge && !graphPayload.summary.truncated && !props.isGraphLoading && !props.graphError &&
+        <p role="status" className={styles.scopeHint}>当前读取身份没有可见知识或私有记忆，可切换读取身份或团队范围。</p>}
       <div className={styles.atlasStage}>
         {!graphPayload && props.isGraphLoading ? <div role="status" className={styles.atlasEmpty}>{copy.loading}</div> : !graphPayload && props.graphError ? <div role="alert" className={styles.atlasEmpty}><strong>图谱加载失败</strong><p>{props.graphError}</p><VButton onClick={props.onRetryGraph}>重试</VButton></div> : slice.nodes.length ? <Suspense fallback={<div role="status" className={styles.atlasEmpty}>{copy.loading}</div>}>
           <MemoryGraphCanvas nodes={slice.nodes} edges={slice.edges} selectedNodeId={selectedId} onSelectNode={select}

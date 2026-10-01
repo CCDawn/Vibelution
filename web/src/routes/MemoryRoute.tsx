@@ -2658,6 +2658,18 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     setActiveGraphNodeType("");
     setSelectedGraphNodeId(nodeId);
   };
+  const changeGraphScope = (agentId: string, teamId = "") => {
+    setGraphSearchText("");
+    setActiveGraphNodeType("");
+    setSelectedGraphNodeId("");
+    const next = new URLSearchParams(searchParams);
+    next.set("agentId", agentId);
+    if (teamId) next.set("teamId", teamId);
+    else next.delete("teamId");
+    next.delete("knowledgeBaseId");
+    next.delete("nodeId");
+    setSearchParams(next);
+  };
   const graphTypeEntries = useMemo(
     () => Object.entries(graphPayload?.summary.nodeTypeCounts ?? {}).sort((left, right) => right[1] - left[1]),
     [graphPayload?.summary.nodeTypeCounts],
@@ -2899,6 +2911,9 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   }, [searchParamText]);
 
   useEffect(() => {
+    // Graph scope is URL-owned; the generic memory-list normalizer would
+    // otherwise strip teamId / knowledgeBaseId / nodeId from graph links.
+    if (forcedView === "graph") return;
     const next = buildMemorySearchParams(
       activeSectionId,
       activeItemId,
@@ -2912,6 +2927,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       setSearchParams(next, { replace: true });
     }
   }, [
+    forcedView,
     activeChannel,
     activeFilter,
     activeItemId,
@@ -4200,6 +4216,13 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         isGraphLoading={memoryKnowledgeGraphQuery.isFetching && !graphPayload}
         graphError={memoryKnowledgeGraphQuery.error instanceof Error ? memoryKnowledgeGraphQuery.error.message : ""}
         onRetryGraph={() => { void memoryKnowledgeGraphQuery.refetch(); }}
+        graphActorAgentId={fallbackKnowledgeActorAgentId}
+        graphActorChoices={knowledgeActorAgents
+          .filter(agent => agent.status !== "archived" || agent.agentId === fallbackKnowledgeActorAgentId)
+          .map(agent => ({ agentId: agent.agentId, displayName: agent.displayName || agent.agentId }))}
+        graphTeamId={requestedTeamId}
+        onGraphActorChange={agentId => changeGraphScope(agentId)}
+        onGraphTeamChange={teamId => changeGraphScope(fallbackKnowledgeActorAgentId, teamId)}
         graphSearchText={graphSearchText}
         activeGraphNodeType={activeGraphNodeType}
         graphTypeEntries={graphTypeEntries}

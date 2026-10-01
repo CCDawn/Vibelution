@@ -62,6 +62,8 @@ import { agentMemoryDetailRevision, resolveDefaultAgentMemoryId } from "./agentM
 
 export type { AgentMemoryInventoryAgent, AgentMemoryInventoryPayload } from "./agentMemoryView";
 
+const MEMORY_GRAPH_INCLUDE = "knowledge,privateMemory,officialResearchGraph";
+
 export type MemoryRouteView =
   | "personal"
   | "team"
@@ -229,11 +231,11 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     enabled: (isTeamMemoryView(forcedView) || isManageMemoryView(forcedView)) && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryKnowledgeGraphQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId),
+    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, MEMORY_GRAPH_INCLUDE, requestedTeamId),
     queryFn: ({ signal }) =>
       fetchMemoryKnowledgeGraph<MemoryKnowledgeGraphPayload>({
         agentId: fallbackKnowledgeActorAgentId,
-        include: "officialResearchGraph",
+        include: MEMORY_GRAPH_INCLUDE,
         teamId: requestedTeamId || undefined,
         signal,
       }),

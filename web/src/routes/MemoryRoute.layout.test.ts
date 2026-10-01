@@ -604,8 +604,8 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("keeps graph reads scoped to the active actor and fetches node bodies on demand", () => {
-    expect(workbenchQueriesSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
-    expect(workbenchQueriesSource).toContain('include: "officialResearchGraph"');
+    expect(workbenchQueriesSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, MEMORY_GRAPH_INCLUDE, requestedTeamId)');
+    expect(workbenchQueriesSource).toContain('include: MEMORY_GRAPH_INCLUDE');
     expect(workbenchQueriesSource).toContain("appendAgentParam(");
     expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraph<MemoryKnowledgeGraphPayload>({");
     expect(workbenchQueriesSource).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
@@ -1453,8 +1453,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("requestedTeamKnowledgeBase");
     expect(routeSource).toContain("setActiveKnowledgeBaseId(knowledgeBaseRequestId(requestedTeamKnowledgeBase))");
     expect(routeSource).toContain("useState(() => requestedGraphNodeId)");
-    expect(workbenchQueriesSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
-    expect(workbenchQueriesSource).toContain('include: "officialResearchGraph"');
+    expect(workbenchQueriesSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, MEMORY_GRAPH_INCLUDE, requestedTeamId)');
+    expect(workbenchQueriesSource).toContain('include: MEMORY_GRAPH_INCLUDE');
     expect(workbenchQueriesSource).toContain("teamId: requestedTeamId || undefined");
     expect(memoryApiSource).toContain('params.set("teamId", options.teamId)');
     expect(routeSource).toContain("requestedTeamId");
