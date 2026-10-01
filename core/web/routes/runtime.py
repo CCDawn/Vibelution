@@ -28,6 +28,7 @@ from core.web.services.code_freshness import (
 from core.web.services.runtime_scene_service import record_browser_telemetry
 from core.web.services.runtime_service import (
     RuntimeRestartActiveWorkBlocked,
+    RuntimeRestartPauseFailed,
     get_runtime_summary_http_future,
     request_runtime_restart,
     request_runtime_shutdown,
@@ -78,7 +79,13 @@ def runtime_shutdown(payload: RuntimeShutdownPayload | None = None) -> dict:
             source=str(payload.source or "") if payload else "",
             reason=str(payload.reason or "") if payload else "",
             stop_manager=bool(payload.stopManager) if payload else False,
+            interrupt_active_work=bool(payload.interruptActiveWork) if payload else False,
         )
+    except RuntimeRestartPauseFailed as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "user_restart_pause_failed", "message": exc.message, "pauseResults": exc.results},
+        ) from exc
     except RuntimeRestartActiveWorkBlocked as exc:
         raise HTTPException(
             status_code=409,

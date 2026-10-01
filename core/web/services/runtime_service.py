@@ -402,17 +402,103 @@ def _shutdown_request_fields(
     }
 
 
+class RuntimeRestartPauseFailed(Exception):
+    """Task cleanup failed; do not claim that a saved restart was completed."""
+
+    def __init__(self, results: list[dict[str, object]]) -> None:
+        self.results = results
+        self.message = text_for(
+            get_web_language(),
+            zh="重启前保存任务状态失败，请重试。已有记录仍保留。",
+            en="Could not save task state before restart. Please retry; existing records are retained.",
+        )
+        super().__init__(self.message)
+
+
+def _retire_for_user_restart(lang: str) -> dict[str, object]:
+    """Use task owners to stop work and persist partials before local exit.
+
+    This is the backend half of an operator restart in Electron's serialized
+    lifecycle queue. It must never enqueue another lifecycle operation.
+    """
+    deadline = time.monotonic() + SHUTDOWN_HARVEST_TOTAL_WAIT_SECONDS
+    # Stop orchestrators before their chat turns so they cannot enqueue a new
+    # child turn between the chat harvest and backend retirement.
+    additional = _stop_additional_work_for_restart(deadline=deadline)
+    evolution = _stop_active_evolution_runs_before_shutdown(deadline=deadline)
+    sources = _stop_active_source_collection_runs_before_shutdown(deadline=deadline)
+    rooms = _stop_active_chat_room_rounds_before_shutdown(deadline=deadline)
+    turns = _stop_active_chat_turns_before_shutdown(deadline=deadline, persist_partials=True)
+    results = [*rooms, *turns, *sources, *evolution, *additional]
+    failures = [item for item in results if item.get("error") or item.get("status") in {"failed", "timeout", "skipped"}]
+    # Never turn an incomplete/missing owner stop into a 202 pause receipt.
+    read_completed, remaining, read_error = _run_with_bounded_wait(
+        _restart_guard_active_work_runs, timeout_seconds=_remaining_harvest_seconds(deadline),
+    )
+    if not read_completed or read_error is not None:
+        failures.append({"kind": "active_work_readback", "status": "failed", "error": "restart_pause_readback_failed"})
+    else:
+        failures.extend({**item, "error": "restart_pause_not_settled"} for item in remaining or [])
+    _record_shutdown_event(
+        "runtime.shutdown.user_restart_paused" if not failures else "runtime.shutdown.user_restart_pause_failed",
+        message="Operator restart task cleanup settled." if not failures else "Operator restart task cleanup failed.",
+        outcome="accepted" if not failures else "failed",
+        level="info" if not failures else "error",
+        fields={"source": "electron_user_restart", "taskCount": len(results), "failedCount": len(failures), "pauseResults": results},
+    )
+    if failures:
+        raise RuntimeRestartPauseFailed(failures)
+    response = _electron_retire_local_shutdown(
+        lang,
+        stopped_chat_room_rounds=rooms,
+        stopped_chat_turns=turns,
+        stopped_source_collection_runs=sources,
+        stopped_evolution_runs=evolution,
+    )
+    response["otherWorkRuns"] = additional
+    return response
+
+
+def _stop_additional_work_for_restart(*, deadline: float) -> list[dict[str, object]]:
+    from core.runtime_manager.formal_review_work import interrupt_active_for_restart
+    from .self_evolution_autonomous_loop_orchestrator import interrupt_active_autonomous_self_evolution_for_restart
+
+    results = []
+    for kind, stopper in (
+        ("self_evolution_autonomous_loop", interrupt_active_autonomous_self_evolution_for_restart),
+        ("formal_review", interrupt_active_for_restart),
+    ):
+        completed, snapshots, error = _run_with_bounded_wait(
+            lambda target=stopper: target("Interrupted by an operator restart."),
+            timeout_seconds=(
+                max(0.05, deadline - time.monotonic())
+                if kind == "self_evolution_autonomous_loop"
+                else _remaining_harvest_seconds(deadline)
+            ),
+        )
+        if not completed or error is not None:
+            results.append({"kind": kind, "status": "timeout" if not completed else "failed", "error": type(error).__name__ if error else "restart_stop_wait_timeout"})
+        else:
+            results.extend({"kind": kind, "runId": str(item.get("runId") or ""), "status": str(item.get("status") or "")} for item in snapshots or [])
+    return results
+
+
 def request_runtime_shutdown(
     *,
     body_present: bool,
     source: str = "",
     reason: str = "",
     stop_manager: bool = False,
+    interrupt_active_work: bool = False,
 ) -> dict[str, object]:
     """Request the local workbench backend to stop.
 
     Request classes (ADR 0009: product lifecycle writes live in Electron main):
 
+    - Explicit operator restart retirement (source=electron_user_restart,
+      reason=user_restart, interruptActiveWork=true): task owners stop and
+      persist partial state, then this backend exits locally. Electron owns
+      the subsequent start; no daemon command is submitted here.
     - No body (Electron graceful retire, workbenchBackendRetire.ts): the backend
       schedules its own local exit after stopping in-flight work. Never spawns
       the daemon and never enqueues close_workbench; the retire poller waits for
@@ -437,6 +523,18 @@ def request_runtime_shutdown(
         stop_manager=stop_manager,
         body_present=body_present,
     )
+    # An explicit user restart has priority over active work. The protected
+    # shutdown API only accepts this mode with its exact local-retire source;
+    # normal shutdown and automatic restart retain their existing guards.
+    user_restart = (
+        body_present
+        and interrupt_active_work
+        and normalized_source == "electron_user_restart"
+        and normalized_reason == "user_restart"
+        and not stop_manager
+    )
+    if user_restart:
+        return _retire_for_user_restart(lang)
     observed_active_work_runs = _restart_guard_active_work_runs()
     _record_shutdown_event(
         "runtime.shutdown.requested",
@@ -1633,6 +1731,7 @@ def _stop_active_chat_room_rounds_before_shutdown(
 def _stop_active_chat_turns_before_shutdown(
     *,
     deadline: float | None = None,
+    persist_partials: bool = False,
 ) -> list[dict[str, object]]:
     """Persist active chat partials before the backend/launcher is closed."""
 
@@ -1674,7 +1773,11 @@ def _stop_active_chat_turns_before_shutdown(
         seen_session_ids.add(session_id)
         run_id = str(run.get("runId") or "").strip()
         stop_completed, _, stop_error = _run_with_bounded_wait(
-            lambda target_session_id=session_id: request_stop_session_turn(target_session_id),
+            lambda target_session_id=session_id: (
+                _stop_and_persist_chat_turn_for_restart(target_session_id)
+                if persist_partials
+                else request_stop_session_turn(target_session_id)
+            ),
             timeout_seconds=_remaining_harvest_seconds(deadline),
         )
         if not stop_completed:
@@ -1708,6 +1811,30 @@ def _stop_active_chat_turns_before_shutdown(
             }
         )
     return stopped
+
+
+def _stop_and_persist_chat_turn_for_restart(session_id: str) -> None:
+    """Seal the current turn through the existing journal interruption owner."""
+    from . import session_service
+    from core.chat.turn_journal import turn_has_terminal_event
+
+    # Stop current work (including descendants) before snapshot persistence.
+    # fast_ack avoids hydration; persistence below remains synchronous.
+    request_stop_session_turn(session_id, fast_ack=True)
+    controller = session_service._get_session_turn_control(session_id)
+    if controller is None:
+        return
+    snapshot = controller.snapshot()
+    turn_id = str(snapshot.get("turnId") or controller.turn_id)
+    with session_service._CHAT_STATE_LOCK:
+        if not session_service._is_session_turn_current(session_id, turn_id):
+            return
+        if not turn_has_terminal_event(session_service.PROJECT_ROOT, session_id, turn_id):
+            session_service._persist_session_interrupted_snapshot(
+                session_id, snapshot, lang=get_web_language(),
+            )
+        session_service._set_session_running(session_id, False, turn_id=turn_id)
+        controller.mark_released_to_user()
 
 
 def _stop_active_evolution_runs_before_shutdown(

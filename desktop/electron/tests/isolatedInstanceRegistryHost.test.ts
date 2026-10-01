@@ -721,6 +721,45 @@ describe("isolatedInstanceRegistryHost", () => {
     expect(stale).toEqual({ ok: true });
     expect(claimStopIfGeneration).toHaveBeenCalledOnce();
     expect(reclaimBackend).toHaveBeenCalledOnce();
+    expect(reclaimBackend.mock.calls[0]?.[0].interruptActiveWork).toBeUndefined();
+    expect(completed).toHaveBeenCalledOnce();
+  });
+
+  it("passes operator restart interruption through isolated pre-start retirement", async () => {
+    const oldEntry = {
+      projectRoot: "C:/wt/task",
+      host: "127.0.0.1",
+      port: 8003,
+      status: "steady",
+      desiredState: "open",
+      generation: 4,
+      commandId: "old-command"
+    };
+    const reclaimBackend = vi.fn(async () => ({ reclaimed: true, reason: "gracefully reclaimed", verifiedPid: 4242 }));
+    const completed = vi.fn(async () => ({ applied: true, entry: { status: "closed", generation: 5 } }));
+    const result = await retireIsolatedRuntimeBeforeStart({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      interruptActiveWork: true,
+      dependencies: {
+        readRegistry: async () => ({ schemaVersion: 3, instances: { "worktree:task": oldEntry } }),
+        claimStopIfGeneration: async () => ({
+          applied: true,
+          entry: { ...oldEntry, status: "stopping", desiredState: "closed", generation: 5 }
+        }),
+        reclaimBackend,
+        completeStop: completed,
+        clearRuntimeState: () => ({ cleared: true, removedCount: 2, failedCount: 0 }),
+        readDaemonPid: () => 0,
+        readDaemonIdentity: () => null,
+        connect: async () => false,
+        pidAlive: () => false
+      }
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(reclaimBackend).toHaveBeenCalledWith(expect.objectContaining({ interruptActiveWork: true }));
     expect(completed).toHaveBeenCalledOnce();
   });
 

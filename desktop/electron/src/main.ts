@@ -2132,7 +2132,7 @@ function trustedIpcOrigins(): string[] {
   );
 }
 
-async function stopMainRuntimeForApprovedShutdown(): Promise<void> {
+async function stopMainRuntimeForApprovedShutdown(interruptActiveWork = false): Promise<void> {
   const result = await orchestrateLauncherLifecycle("shutdown", {
     schemaVersion: 1,
     path: "desktop-shell-shutdown",
@@ -2140,7 +2140,7 @@ async function stopMainRuntimeForApprovedShutdown(): Promise<void> {
       method: "POST",
       body: { operatorIntent: "desktop_shell_shutdown" }
     }
-  });
+  }, interruptActiveWork ? "operator-restart" : "operator");
   if (!result.accepted) {
     throw new Error(result.message || result.code || "Launcher shutdown was not accepted.");
   }
@@ -2192,7 +2192,7 @@ async function captureShutdownIsolatedInstanceIds(): Promise<string[]> {
   return Array.from(new Set([...stateIds, ...listedIds, ...registryIds]));
 }
 
-async function stopIsolatedInstancesForApprovedShutdown(): Promise<void> {
+async function stopIsolatedInstancesForApprovedShutdown(interruptActiveWork = false): Promise<void> {
   let instanceIds: string[] = [];
   try {
     instanceIds = await captureShutdownIsolatedInstanceIds();
@@ -2220,8 +2220,8 @@ async function stopIsolatedInstancesForApprovedShutdown(): Promise<void> {
           method: "POST",
           body: { instanceId }
         }
-      }),
-      DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
+      }, interruptActiveWork ? "operator-restart" : "operator"),
+      interruptActiveWork ? 40_000 : DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
       `stop isolated instance ${instanceId}`
     );
     if (!result.accepted || result.code) {
@@ -2474,29 +2474,9 @@ async function recordTrayForceInterruptEvidence(eventCode: string, message: stri
 }
 
 async function stopAllManagedRuntimeTrees(): Promise<void> {
-  try {
-    await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  } catch (error: unknown) {
-    if (isForceLifecycleAuthorizationDenied(error)) {
-      throw error;
-    }
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止托管运行时失败，仍将重启 Launcher：${detail.slice(0, 220)}`, "warning");
-  }
-  await bestEffortStopIsolatedInstancesForShutdown("stop isolated instances before launcher restart");
-  try {
-    await stopManagedRuntime();
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将重启 Launcher：${detail.slice(0, 220)}`, "warning");
-  }
-  try {
-    await stopOwnedPythonLauncherService();
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止 Launcher 后端失败，仍将重启：${detail.slice(0, 220)}`, "warning");
-  }
+  await stopMainRuntimeForApprovedShutdown(true);
+  await stopIsolatedInstancesForApprovedShutdown(true);
+  await stopOwnedPythonLauncherService();
   const provider = windowProvider;
   if (provider !== null) {
     try {
@@ -2507,7 +2487,10 @@ async function stopAllManagedRuntimeTrees(): Promise<void> {
   }
 }
 
-async function restartLauncherToLatestBuild(): Promise<OrchestratedLifecycleResult> {
+async function restartLauncherToLatestBuild(
+  interruptActiveWork = true,
+  operationToRestore = "open"
+): Promise<OrchestratedLifecycleResult> {
   if (shellRefreshInFlight) {
     return {
       schemaVersion: 1,
@@ -2519,18 +2502,18 @@ async function restartLauncherToLatestBuild(): Promise<OrchestratedLifecycleResu
   shellRefreshInFlight = true;
   try {
     const result = await executeLauncherUpdate({
+      interruptActiveWork,
       activeWork: () => resolveLauncherUpdateActiveWork(true),
       prepare: () => ensureLatestLauncher({
         workspaceRoot: createDesktopPathsForApp().workspaceRoot,
         pythonPath: desktopPythonPath()
       }),
       stopWorkspaces: async () => {
-        // These normal lifecycle paths retain their own final admission guards.
-        // A refused stop aborts replacement; never degrade to best-effort/force.
-        await stopMainRuntimeForApprovedShutdown();
-        await stopIsolatedInstancesForApprovedShutdown();
+        // Each task owner must confirm saved state before replacement.
+        await stopMainRuntimeForApprovedShutdown(interruptActiveWork);
+        await stopIsolatedInstancesForApprovedShutdown(interruptActiveWork);
       },
-      scheduleReplacement: () => scheduleCurrentDesktopShellRefresh("open", {
+      scheduleReplacement: () => scheduleCurrentDesktopShellRefresh(operationToRestore, {
         force: true,
         shellKind: app.isPackaged ? "packaged" : "unpackaged"
       })
@@ -3318,35 +3301,26 @@ async function orchestrateLauncherLifecycle(
     }
   }
   if (app.isPackaged) {
+    let refreshBeforeLifecycle = false;
     try {
       const status = await inspectCurrentDesktopShell();
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
         return supersededLifecycleResult(operation);
       }
-      if (shouldRefreshBeforeLifecycle(lifecycleOperation, { isPackaged: true, stale: status.stale })) {
-        notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新后再执行…");
-        await scheduleCurrentDesktopShellRefresh(lifecycleOperation);
-        if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
-          return supersededLifecycleResult(operation);
-        }
-        await bestEffortStopIsolatedInstancesForShutdown("stop isolated instances before desktop shell refresh");
-        try {
-          await stopManagedRuntime();
-        } catch (error: unknown) {
-          const detail = error instanceof Error ? error.message : String(error);
-          notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将退出以便更新：${detail.slice(0, 220)}`, "warning");
-        }
-        shutdownApproved = true;
-        app.exit(0);
-        return {
-          schemaVersion: 1,
-          accepted: true,
-          operation,
-          message: "desktop shell refresh scheduled"
-        };
-      }
+      refreshBeforeLifecycle = shouldRefreshBeforeLifecycle(lifecycleOperation, { isPackaged: true, stale: status.stale });
     } catch (error: unknown) {
       console.warn(error instanceof Error ? error.message : String(error));
+    }
+    if (refreshBeforeLifecycle) {
+      notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在更新后再执行…");
+      try {
+        return await restartLauncherToLatestBuild(
+          operation === "restart" && provenance === "operator",
+          lifecycleOperation
+        );
+      } finally {
+        launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
+      }
     }
   }
   // Snapshot the pre-mutation backend identity so the post-start verification
@@ -3367,6 +3341,7 @@ async function orchestrateLauncherLifecycle(
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       operation: lifecycleOperation,
+      interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
       signal: intentLease.signal
     }),
     reconcile: async () => {
@@ -3514,7 +3489,7 @@ function supersededLifecycleResult(operation: string, commandId = ""): Orchestra
  * in-flight restart (2026-08-29: a forwarded stop kept superseding a CLI
  * restart 1-5s in, so the restart never settled and the backend stayed down).
  */
-type LauncherLifecycleProvenance = "operator" | "window-close" | "forwarded";
+type LauncherLifecycleProvenance = "operator" | "operator-restart" | "window-close" | "forwarded";
 
 type LauncherLifecycleStopJoinDecision = {
   /**
@@ -3844,6 +3819,7 @@ async function runIsolatedRegistryMutation(input: {
   operatorConfigPath: string;
   signal?: AbortSignal;
   isCurrent?: () => boolean;
+  interruptActiveWork?: boolean;
 }): Promise<OrchestratedBranchInstanceResult> {
   if (input.operation === "observe-error" || input.operation === "observe-ready") {
     throw new Error("isolated observe must use instanceRegistryStore, not the Python bridge");
@@ -3886,7 +3862,8 @@ async function runIsolatedRegistryMutation(input: {
         commandId: randomUUID(),
         pythonPath: input.pythonPath,
         signal: input.signal,
-        isCurrent: input.isCurrent
+        isCurrent: input.isCurrent,
+        interruptActiveWork: input.interruptActiveWork
       });
       if (!claimed.ok) {
         return {
@@ -4059,7 +4036,8 @@ async function runIsolatedRegistryMutation(input: {
       signal: input.signal,
       isCurrent: input.isCurrent,
       forceRetireOnActiveWorkRefusal: input.operation === "force-stop",
-      desiredStateOnFailure: "closed"
+      interruptActiveWork: input.interruptActiveWork,
+      desiredStateOnFailure: input.interruptActiveWork ? "open" : "closed"
     });
     const commandId = String(claimed.entry.commandId || stopCommandId);
     return {
@@ -4092,7 +4070,8 @@ async function runIsolatedRegistryMutation(input: {
 
 async function orchestrateBranchInstanceLifecycle(
   operation: string,
-  payload: LauncherIpcInvokePayload
+  payload: LauncherIpcInvokePayload,
+  provenance: LauncherLifecycleProvenance = "operator"
 ): Promise<OrchestratedBranchInstanceResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -4113,7 +4092,7 @@ async function orchestrateBranchInstanceLifecycle(
     throw new Error("branch instance id is required");
   }
   if (isCurrentCheckoutInstance(instanceId)) {
-    const mainResult = await orchestrateLauncherLifecycle(operation, payload);
+    const mainResult = await orchestrateLauncherLifecycle(operation, payload, provenance);
     return { ...mainResult, instanceId };
   }
   const forceAuthorization = await authorizeLauncherForceLifecycle({
@@ -4140,7 +4119,8 @@ async function orchestrateBranchInstanceLifecycle(
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       signal: intentLease.signal,
-      isCurrent: () => launcherLifecycleSupervisor.isCurrent(intentLease)
+      isCurrent: () => launcherLifecycleSupervisor.isCurrent(intentLease),
+      interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")
     }),
     reconcile: async () => {
       scheduleLauncherStatusCliRefresh();
@@ -4679,7 +4659,7 @@ async function applyPendingProjectSlot(
               ...(hiddenPresentation ? { hiddenPresentation: true } : {})
             }
           }
-        });
+        }, provenance);
       }
     }
     const windowAction = projectSlotWindowAction(plan);

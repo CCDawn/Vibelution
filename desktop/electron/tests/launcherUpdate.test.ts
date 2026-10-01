@@ -28,6 +28,28 @@ describe("guarded local Launcher update", () => {
     expect(input.stopWorkspaces).not.toHaveBeenCalled();
   });
 
+  it("lets an operator update save running tasks before replacing the shell", async () => {
+    const input = { ...updateInputs({ state: "active", count: 1, message: "" }), interruptActiveWork: true };
+    expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: true });
+    expect(input.prepare).toHaveBeenCalledOnce();
+    expect(input.stopWorkspaces).toHaveBeenCalledOnce();
+    expect(input.scheduleReplacement).toHaveBeenCalledOnce();
+    expect(input.stopWorkspaces.mock.invocationCallOrder[0]).toBeLessThan(input.scheduleReplacement.mock.invocationCallOrder[0]);
+  });
+
+  it("retains the shell when an operator task-save acknowledgement fails", async () => {
+    const input = { ...updateInputs({ state: "active", count: 1, message: "" }), interruptActiveWork: true };
+    input.stopWorkspaces.mockRejectedValue(new Error("user_restart_pause_failed"));
+    await expect(executeLauncherUpdate(input)).rejects.toThrow("user_restart_pause_failed");
+    expect(input.scheduleReplacement).not.toHaveBeenCalled();
+  });
+
+  it("still rejects an unknown owner state for an operator update", async () => {
+    const input = { ...updateInputs({ state: "unknown", message: "" }), interruptActiveWork: true };
+    expect(await executeLauncherUpdate(input)).toMatchObject({ accepted: false, code: "active_work_status_unavailable" });
+    expect(input.stopWorkspaces).not.toHaveBeenCalled();
+  });
+
   it("keeps windows alive on preparation failure", async () => {
     const input = updateInputs();
     input.prepare.mockRejectedValue(new Error("tsc failed"));

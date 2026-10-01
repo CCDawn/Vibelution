@@ -106,10 +106,16 @@ export function updateBannerRestartLabel(lang: string): string {
 /**
  * An accepted update-banner restart publishes the current frontend release
  * and replaces the backend, but the open window stays on the old document
- * until something reloads it. `restart_queued` only schedules that restart,
- * so this page must stay where it is.
+ * until something reloads it. Rejected requests and `restart_queued` do not
+ * complete that replacement, so this page must stay where it is.
  */
-export function updateBannerRestartReloadsDocument(code: string | null | undefined): boolean {
+export function updateBannerRestartReloadsDocument(
+  code: string | null | undefined,
+  accepted?: boolean | null,
+): boolean {
+  if (accepted === false) {
+    return false;
+  }
   return String(code ?? "").trim() !== "restart_queued";
 }
 
