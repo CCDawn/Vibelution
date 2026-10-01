@@ -27,6 +27,16 @@ from core.web.services.team_workflow.research_runtime import meeting_receipt_aut
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
+@pytest.fixture(autouse=True)
+def _pin_chat_room_service_language(monkeypatch):
+    """Chat-room copy in this file is the Chinese product default.
+
+    The operator UI language is host state and must not change these checks.
+    """
+
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
+
+
 # Room ops sync chat_room_service's own (possibly monkeypatched) PROJECT_ROOT
 # into sibling service modules with plain assignments, which monkeypatch never
 # records. Under a parallel lane those writes leak into later tests running in
@@ -209,6 +219,13 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_root)
+
+    def _configured_test_context_window(self):
+        self._context_window_limit = 200000
+        self.model_info = SimpleNamespace(context_window=200000, model="chat-room-test-model")
+        return 200000
+
+    monkeypatch.setattr(AgentRuntime, "_init_model_discovery", _configured_test_context_window)
 
 
 def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-test-model") -> dict[str, dict[str, str]]:
