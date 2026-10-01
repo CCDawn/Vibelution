@@ -49,4 +49,50 @@ describe("session event stream", () => {
     const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(requestInit.headers).get("X-Vibelution-Control-Token")).toBe("session-stream-token");
   });
+
+  it("mirrors the browser Last-Event-ID behavior: reconnects replay the last id line", async () => {
+    seedControlTokenForTests("session-stream-token");
+    vi.useFakeTimers();
+    try {
+      const firstPayload = JSON.stringify({ type: "session_detail", sessionId: "session-1" });
+      const firstBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(`id: 7\nevent: session_detail\ndata: ${firstPayload}\n\n`),
+          );
+          controller.close();
+        },
+      });
+      const secondBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(firstBody, { status: 200, headers: { "content-type": "text/event-stream" } }))
+        .mockResolvedValue(new Response(secondBody, { status: 200, headers: { "content-type": "text/event-stream" } }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const stream = createSessionEventStream("session-1");
+      const receivedLastEventId: string[] = [];
+      stream.addEventListener("session_detail", ((event: MessageEvent<string>) => {
+        receivedLastEventId.push(event.lastEventId);
+      }) as EventListener);
+
+      // First connection consumed; the guarded stream ends and schedules the
+      // 3s auto-reconnect (the fetch-stream equivalent of EventSource retry).
+      await vi.advanceTimersByTimeAsync(0);
+      expect(receivedLastEventId).toEqual(["7"]);
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const reconnectHeaders = new Headers((fetchMock.mock.calls[1]?.[1] as RequestInit).headers);
+      expect(reconnectHeaders.get("Last-Event-ID")).toBe("7");
+      stream.close();
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

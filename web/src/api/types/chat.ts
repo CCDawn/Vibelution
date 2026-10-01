@@ -1300,11 +1300,66 @@ export type SessionAssistantDeltaStreamEvent = {
   ledgerSeq?: number;
   stage: string;
   turnItems: SessionTurnItem[];
+  /**
+   * Append-only text fragments for text turn items (agent_message/reasoning)
+   * whose body verifiably grew since the last frame on this connection. Items
+   * represented here are omitted from `turnItems`; every entry must splice
+   * onto the consumer's cached text at exactly `baseLength`, otherwise the
+   * append chain is broken and the consumer falls back to a snapshot.
+   */
+  turnItemAppends?: SessionStreamAppendEntry[];
+  /** Present (append-v1) only on frames that use the append channel. */
+  streamEncoding?: string;
   updatedAt: string;
   done: boolean;
 };
 
-export type SessionStreamEvent = SessionDetailStreamEvent | SessionInitialStreamEvent | SessionAssistantDeltaStreamEvent;
+export type SessionStreamAppendEntry = {
+  kind: "append";
+  itemId: string;
+  itemType: string;
+  /** Length of the item text the consumer must already hold. */
+  baseLength: number;
+  appendedLength: number;
+  appendedText: string;
+};
+
+/** One replayed journal event from a Last-Event-ID resume window. */
+export type SessionJournalEventStreamEvent = {
+  type: "session_journal_event";
+  sessionId: string;
+  /** Authoritative journal sequence; matches the SSE id line. */
+  seq: number;
+  eventId: string;
+  turnId: string;
+  eventType: string;
+  status: string;
+  timestamp: string;
+  payload?: Record<string, unknown>;
+  payloadTruncated?: boolean;
+};
+
+/**
+ * Resume handover marker after a Last-Event-ID reconnect: `replayed` means the
+ * closed interval (fromSeq, toSeq] was fully replayed; `partial` means the gap
+ * exceeded the bounded retention window and the consumer must refetch the
+ * authoritative body. Live frames that follow carry ledgerSeq >= toSeq.
+ */
+export type SessionResumeStreamEvent = {
+  type: "stream_resume";
+  sessionId: string;
+  resume: "replayed" | "partial";
+  fromSeq: number;
+  toSeq: number;
+  replayedCount?: number;
+};
+
+export type SessionStreamEvent =
+  | SessionDetailStreamEvent
+  | SessionInitialStreamEvent
+  | SessionAssistantDeltaStreamEvent
+  | SessionJournalEventStreamEvent
+  | SessionResumeStreamEvent;
 
 export type SessionChatReviewCandidateResponse = {
   candidateId: string;
