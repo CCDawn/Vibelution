@@ -219,8 +219,11 @@ export function buildDirectSessionIndexViewModel({
     : "";
   const sessionIsChild = isChildSession(session);
   const sessionTitle = sessionListTitle(session) || sessionDisplay.name;
+  const searchSnippets = (session.searchSnippets ?? []).filter((snippet) => String(snippet || "").trim());
+  const snippetSummary = searchSnippets.length ? searchSnippets.join(" … ") : "";
   const sessionSummary =
-    (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
+    snippetSummary
+    || (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
     || (sessionIsChild
       ? (lang === "zh" ? "子对话独立工作中" : "Independent child session")
       : (lang === "zh" ? "暂无摘要" : "No summary yet"));

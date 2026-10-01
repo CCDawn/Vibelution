@@ -37,6 +37,10 @@ export type SessionSummary = {
   currentPhase: string;
   /** Session is retained in storage but intentionally absent from normal chat navigation. */
   hiddenFromIndex?: boolean;
+  /** Directory pin timestamp (ms epoch); set by the pin/unpin endpoints. */
+  pinnedAtMs?: number | null;
+  /** Match-centered transcript snippets attached when a search hit the body. */
+  searchSnippets?: string[];
   /** Archive metadata is authoritative when a session must not be reopened. */
   archiveState?: {
     status?: string;
@@ -827,6 +831,12 @@ export type SessionDeleteResponse = {
   deleted: boolean;
   deletedSessionId: string;
   nextActiveSessionId: string;
+};
+
+export type SessionPinResponse = {
+  id: string;
+  pinned: boolean;
+  pinnedAtMs?: number | null;
 };
 
 export type SessionBulkDeleteResponse = {

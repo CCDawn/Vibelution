@@ -55,6 +55,8 @@ export type ChatWorkbenchCatalogQueriesInput = {
   chatSecondaryPollPolicy: ChatSecondaryPollPolicy;
   chatLiveQueryPolicy: ChatLiveQueryPolicy;
   sessionQueryText: string;
+  /** Session index sort (backend whitelist value); empty keeps the default. */
+  sessionListSort?: string;
   activeSessionId: string;
   activeGroupRoomId: string;
   expandedGroupAgentSessionIds: string[];
@@ -78,6 +80,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     chatSecondaryPollPolicy,
     chatLiveQueryPolicy,
     sessionQueryText,
+    sessionListSort = "",
     activeSessionId,
     activeGroupRoomId,
     expandedGroupAgentSessionIds,
@@ -180,6 +183,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     enabled: sessionIndexQueryEnabled,
     refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+    sort: sessionListSort,
   });
   const visibleSessionsData = useMemo(
     () => rawSessionsQuery.data?.filter((session) => isVisibleDirectSession(session)),

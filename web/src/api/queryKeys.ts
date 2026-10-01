@@ -47,7 +47,8 @@ export const queryKeys = {
   // broad invalidations still reach this key).
   conversationsCatalogQuery: (limit = 100) => ["conversations", "query", limit] as const,
   sessions: () => ["sessions"] as const,
-  sessionQuery: (q = "", limit = 50, cursor = "") => ["sessions", "query", q, limit, cursor] as const,
+  sessionQuery: (q = "", limit = 50, cursor = "", sort = "") =>
+    ["sessions", "query", q, limit, cursor, sort] as const,
   // Archived-session listing; the "sessions" prefix keeps broad invalidations
   // (["sessions"]) reaching it after archive/unarchive mutations.
   sessionArchive: () => ["sessions", "archived"] as const,

@@ -23,6 +23,8 @@ type UseSessionIndexQueryOptions = {
   enabled: boolean;
   refetchInterval: false | number;
   refetchIntervalInBackground: boolean;
+  /** Backend sort value (e.g. updatedAt_desc); empty keeps the server default. */
+  sort?: string;
 };
 
 type SessionSummaryUpdater = (sessions: SessionSummary[] | undefined) => SessionSummary[] | undefined;
@@ -272,10 +274,12 @@ export function useSessionIndexQuery({
   enabled,
   refetchInterval,
   refetchIntervalInBackground,
+  sort = "",
 }: UseSessionIndexQueryOptions) {
   const normalizedQueryText = queryText.trim();
+  const normalizedSort = sort.trim();
   const query = useInfiniteQuery({
-    queryKey: queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE),
+    queryKey: queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE, "", normalizedSort),
     initialPageParam: "",
     enabled,
     queryFn: async ({ pageParam }) => {
@@ -283,10 +287,11 @@ export function useSessionIndexQuery({
         limit: SESSION_INDEX_PAGE_SIZE,
         cursor: String(pageParam || ""),
         q: normalizedQueryText,
+        sort: normalizedSort || undefined,
       });
       const existing = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
       const previousPages = queryClient.getQueryData<SessionQueryInfiniteData>(
-        queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE),
+        queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE, "", normalizedSort),
       );
       const previousPageItems = previousPages ? mergeSessionPages(previousPages.pages) : [];
       // Drop tombstoned rows, then re-attach optimistic / just-created tabs that a

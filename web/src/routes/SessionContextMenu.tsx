@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, BookPlus, Eraser, Pencil, Settings2, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BookPlus, Eraser, Pencil, Pin, PinOff, Settings2, Trash2 } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import type { SessionSummary } from "../api/types";
@@ -41,6 +41,8 @@ type SessionContextMenuProps = {
   clearHistoryVisible: boolean;
   deleteDisabled: boolean;
   lang: "zh" | "en";
+  pinDisabled?: boolean;
+  pinPending?: boolean;
   position: SessionContextMenuPosition;
   session: SessionSummary;
   t: (key: TranslationKey) => string;
@@ -50,6 +52,7 @@ type SessionContextMenuProps = {
   onDelete: (session: SessionSummary) => void;
   onOpenAgentConfig?: (session: SessionSummary) => void;
   onRename: (session: SessionSummary) => void;
+  onTogglePin?: (session: SessionSummary) => void;
   onDismiss?: () => void;
 };
 
@@ -63,6 +66,8 @@ export function SessionContextMenu({
   clearHistoryVisible,
   deleteDisabled,
   lang,
+  pinDisabled = false,
+  pinPending = false,
   position,
   session,
   t,
@@ -72,10 +77,12 @@ export function SessionContextMenu({
   onDelete,
   onOpenAgentConfig,
   onRename,
+  onTogglePin,
   onDismiss,
 }: SessionContextMenuProps) {
-  const busy = addToReviewPending || clearHistoryPending || archivePending;
+  const busy = addToReviewPending || clearHistoryPending || archivePending || pinPending;
   const archived = String(session.archiveState?.status || "").trim().toLowerCase() === "archived";
+  const pinned = Number(session.pinnedAtMs ?? 0) > 0;
   const addToReviewTitle = addToReviewPending
     ? t("addingSessionToReview")
     : addToReviewDisabled
@@ -113,6 +120,18 @@ export function SessionContextMenu({
         "aria-busy": busy ? "true" : undefined,
       }}
       items={[
+        {
+          id: "pin",
+          icon: pinned ? <PinOff size={14} /> : <Pin size={14} />,
+          disabled: pinDisabled || !onTogglePin,
+          title: pinPending
+            ? (pinned ? t("unpinningSession") : t("pinningSession"))
+            : (pinned ? t("unpinSession") : t("pinSession")),
+          label: pinned
+            ? (pinPending ? t("unpinningSession") : t("unpinSession"))
+            : (pinPending ? t("pinningSession") : t("pinSession")),
+          onSelect: () => onTogglePin?.(session),
+        },
         {
           id: "add-to-review",
           icon: <BookPlus size={14} />,
