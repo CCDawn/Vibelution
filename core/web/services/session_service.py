@@ -1357,17 +1357,21 @@ class SessionTurnControl:
     stop_requested_at: str = ""
     stop_reason: str = ""
     released_to_user: bool = False
+    stop_event: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def request_stop(self, reason: str) -> None:
         with self._lock:
-            if self.stop_requested:
-                if reason and not self.stop_reason:
-                    self.stop_reason = str(reason).strip()
-                return
-            self.stop_requested = True
-            self.stop_requested_at = _now_timestamp()
-            self.stop_reason = str(reason or "").strip()
+            if not self.stop_requested:
+                self.stop_requested = True
+                self.stop_requested_at = _now_timestamp()
+                self.stop_reason = str(reason or "").strip()
+            elif reason and not self.stop_reason:
+                self.stop_reason = str(reason).strip()
+        # Wake model and command waiters even when the flag was already set.
+        # The flag is published before the event, so a waiter that wakes here
+        # can already read the reason.
+        self.stop_event.set()
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
