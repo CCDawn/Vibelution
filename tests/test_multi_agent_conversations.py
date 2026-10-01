@@ -80,6 +80,11 @@ def _stamp_session_context_window(monkeypatch, limit: int = 128000) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _operator_context_window(monkeypatch):
+    _stamp_session_context_window(monkeypatch)
+
+
 def _allow_agent_message_tool(agent_id: str) -> None:
     agent = agent_directory_service.get_agent(agent_id, include_archived=True) or {}
     policy = dict(agent.get("toolPolicy") or {})
@@ -1372,7 +1377,6 @@ def test_agent_directory_direct_session_can_accept_messages_after_materializatio
         direct_session_id="session-research-ceo",
     )
     monkeypatch.setattr(session_service, "_submit_scheduled_session_turn", lambda context: None)
-    _stamp_session_context_window(monkeypatch)
 
     response = client.post(
         "/api/sessions/session-research-ceo/messages",
@@ -1927,7 +1931,6 @@ def test_session_submit_kernel_bridge_records_trace_without_agent_inbox_delivery
     )
     captured_contexts = []
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: captured_contexts.append(dict(context)))
-    _stamp_session_context_window(monkeypatch)
     detail = session_service.create_chat_session(title="Kernel Bridge Agent")
 
     accepted = session_service.submit_session_message(
