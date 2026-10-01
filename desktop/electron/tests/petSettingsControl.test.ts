@@ -3,12 +3,16 @@ import { createPetSettingsControl, petSettingsOrigin } from "../src/windows/petS
 import { closedWindowState } from "../src/windows/windowProviderTypes.js";
 
 describe("pet settings control", () => {
-  it("admits only registered workbench settings routes", () => {
+  it("admits any workbench route and rejects other roles or malformed urls", () => {
     expect(petSettingsOrigin("http://127.0.0.1:8001/config?section=avatar-pet", "branch-workbench")).toBe("http://127.0.0.1:8001");
+    expect(petSettingsOrigin("http://127.0.0.1:8000/chat?session=x", "main-workbench")).toBe("http://127.0.0.1:8000");
+    for (const url of ["http://127.0.0.1:8000/chat", "http://127.0.0.1:8000/knowledge/nested/page"]) {
+      expect(petSettingsOrigin(url, "branch-workbench")).toBe("http://127.0.0.1:8000");
+    }
     for (const role of ["launcher", "desktop-pet", "unknown"]) {
       expect(() => petSettingsOrigin("http://127.0.0.1:8000/config", role)).toThrow();
     }
-    expect(() => petSettingsOrigin("http://127.0.0.1:8000/chat", "main-workbench")).toThrow();
+    expect(() => petSettingsOrigin("not a url", "main-workbench")).toThrow();
   });
   it("reads actual state and closes or reopens using the requesting workspace", async () => {
     let pet = closedWindowState("pet");

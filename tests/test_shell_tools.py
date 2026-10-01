@@ -7,8 +7,10 @@ Shell 工具完整测试套件
 """
 
 import os
+import subprocess
 import sys
 import pytest
+import threading
 import time
 import tempfile
 import shutil
@@ -614,6 +616,70 @@ class TestExecuteShellCommand:
         assert result == "ok"
         assert "git" in str(calls[0][0]).lower()
         assert calls[0][1]["creationflags"] & 0x08000000
+
+    def test_windows_git_stop_event_kills_the_running_process(self, monkeypatch):
+        """A stop event ends a git command blocked inside communicate."""
+        killed = threading.Event()
+        stop = threading.Event()
+
+        class BlockingGit:
+            def __init__(self) -> None:
+                self.pid = 424242
+                self.returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def communicate(self, input=None, timeout=None):
+                if not killed.wait(2.0):
+                    raise subprocess.TimeoutExpired("git", timeout or 0.05)
+                return "partial\n", ""
+
+            def terminate(self) -> None:
+                self.returncode = -15
+                killed.set()
+
+            def kill(self) -> None:
+                self.terminate()
+
+            def wait(self, timeout=None):
+                killed.wait(1.0 if timeout is None else timeout)
+                return self.returncode
+
+        def fake_popen(command, **kwargs):
+            return BlockingGit()
+
+        def fake_stop(process) -> None:
+            process.terminate()
+
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+        monkeypatch.setattr(shell_tools_module.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(shell_tools_module, "_terminate_shell_process", fake_stop)
+        monkeypatch.setattr(shell_tools_module, "_signal_shell_process_stop", fake_stop)
+
+        def checker() -> str:
+            return "user stop" if stop.is_set() else ""
+
+        checker._vibelution_stop_event = stop
+        holder: dict[str, str] = {}
+
+        def run() -> None:
+            holder["result"] = execute_shell_command(
+                "git status",
+                cwd=str(Path.cwd()),
+                _cancel_checker=checker,
+            )
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        time.sleep(0.05)
+        started = time.monotonic()
+        stop.set()
+        thread.join(1.0)
+
+        assert thread.is_alive() is False
+        assert "取消" in holder.get("result", "")
+        assert time.monotonic() - started < 0.75
 
     def test_git_safe_directory_override_scopes_subprocess_environment(
         self,

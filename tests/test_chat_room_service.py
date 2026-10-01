@@ -27,6 +27,16 @@ from core.web.services.team_workflow.research_runtime import meeting_receipt_aut
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 
 
+@pytest.fixture(autouse=True)
+def _pin_chat_room_service_language(monkeypatch):
+    """Chat-room copy in this file is the Chinese product default.
+
+    The operator UI language is host state and must not change these checks.
+    """
+
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
+
+
 # Room ops sync chat_room_service's own (possibly monkeypatched) PROJECT_ROOT
 # into sibling service modules with plain assignments, which monkeypatch never
 # records. Under a parallel lane those writes leak into later tests running in
@@ -209,6 +219,13 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_root)
+
+    def _configured_test_context_window(self):
+        self._context_window_limit = 200000
+        self.model_info = SimpleNamespace(context_window=200000, model="chat-room-test-model")
+        return 200000
+
+    monkeypatch.setattr(AgentRuntime, "_init_model_discovery", _configured_test_context_window)
 
 
 def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-test-model") -> dict[str, dict[str, str]]:
@@ -1395,7 +1412,102 @@ def test_group_round_sync_materializes_agent_directory_only_sessions(tmp_path, m
     assert messages[-1]["metadata"]["sourceRoundId"] == "round-alpha"
 
 
+def test_meeting_round_keeps_transcript_on_the_room(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", raising=False)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="Alpha Agent")
+    room = {
+        "roomId": "room-meeting",
+        "title": "候选评审",
+        "participants": [
+            {
+                "participantId": "session-alpha",
+                "agentId": detail["agentId"],
+                "sessionId": detail["id"],
+                "directSessionId": detail["id"],
+                "title": "Alpha Agent",
+                "enabled": True,
+            }
+        ],
+    }
+    round_payload = {
+        "roundId": "round-meeting",
+        "roomId": "room-meeting",
+        "topic": "候选评审",
+        "summary": "纪要留在会议记录。",
+        "finishedAt": "2026-05-29T08:30:00+00:00",
+        "config": {
+            "meetingRoundId": "meeting-round-1",
+            "meetingType": "hypothesis_review",
+        },
+        "messages": [
+            {
+                "participantId": "session-alpha",
+                "speakerTitle": "Alpha Agent",
+                "status": "completed",
+                "content": "这一轮只留在会议室。",
+            }
+        ],
+    }
+
+    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+
+    messages = _session_ledger_messages(tmp_path, detail["id"])
+    assert all(
+        item.get("metadata", {}).get("kind") != "group_room_transcript"
+        for item in messages
+    )
+
+
+def test_meeting_round_copies_transcript_when_room_view_is_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", "0")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="Alpha Agent")
+    room = {
+        "roomId": "room-meeting",
+        "title": "候选评审",
+        "participants": [
+            {
+                "participantId": "session-alpha",
+                "agentId": detail["agentId"],
+                "sessionId": detail["id"],
+                "directSessionId": detail["id"],
+                "title": "Alpha Agent",
+                "enabled": True,
+            }
+        ],
+    }
+    round_payload = {
+        "roundId": "round-meeting",
+        "roomId": "room-meeting",
+        "topic": "候选评审",
+        "summary": "旧路径仍抄回会话。",
+        "finishedAt": "2026-05-29T08:30:00+00:00",
+        "config": {
+            "meetingRoundId": "meeting-round-1",
+            "meetingType": "hypothesis_review",
+        },
+        "messages": [
+            {
+                "participantId": "session-alpha",
+                "speakerTitle": "Alpha Agent",
+                "status": "completed",
+                "content": "关掉会议室投影后仍写回会话。",
+            }
+        ],
+    }
+
+    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+
+    messages = _session_ledger_messages(tmp_path, detail["id"])
+    assert messages[-1]["metadata"]["kind"] == "group_room_transcript"
+    assert messages[-1]["metadata"]["sourceRoundId"] == "round-meeting"
+
+
 def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -1897,6 +2009,7 @@ def test_start_chat_room_round_projects_mixed_results_as_partial(tmp_path, monke
 
 
 def test_start_chat_room_round_preserves_all_partial_results(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

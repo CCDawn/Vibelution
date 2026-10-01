@@ -1027,6 +1027,47 @@ def _chat_provider_abort_enabled(checker: Callable[[], str] | None) -> bool:
     return callable(checker) and _LLM_CHAT_PROVIDER_ABORT_CONTEXT.get()
 
 
+def _cancel_watch_reason(checker: Callable[[], str] | None) -> str:
+    """Reason that should close the in-flight provider request.
+
+    A set stop event counts even when the text reason is still empty, so the
+    watcher closes once and does not spin on an already-woken event.
+    """
+
+    try:
+        reason = str(checker() or "").strip() if callable(checker) else ""
+    except Exception:
+        reason = ""
+    if reason:
+        return reason
+    event = getattr(checker, "_vibelution_stop_event", None)
+    if isinstance(event, threading.Event) and event.is_set():
+        return "stop_requested"
+    return ""
+
+
+def _wait_cancel_watch_tick(
+    checker: Callable[[], str] | None,
+    finished: threading.Event,
+    timeout: float = 0.05,
+) -> bool:
+    """Return True when the provider request has finished.
+
+    Without a stop event this is the existing finish wait. With one, ``set``
+    wakes the watcher immediately instead of leaving it in the idle poll.
+    """
+
+    event = getattr(checker, "_vibelution_stop_event", None)
+    if not isinstance(event, threading.Event):
+        return finished.wait(timeout)
+    if finished.is_set():
+        return True
+    if event.is_set():
+        return False
+    event.wait(timeout)
+    return finished.is_set()
+
+
 def _publish_llm_status_event(status: str, **fields: Any) -> None:
     """Publish a small LLM status breadcrumb for live session surfaces."""
     context = dict(_LLM_STATUS_CONTEXT.get({}) or {})
@@ -2891,11 +2932,8 @@ class LLMClient:
         cleaned_up = False
 
         def watch_for_cancellation() -> None:
-            while not watcher_finished.wait(0.05):
-                try:
-                    reason = str(checker() or "").strip()
-                except Exception:
-                    reason = ""
+            while not _wait_cancel_watch_tick(checker, watcher_finished, 0.05):
+                reason = _cancel_watch_reason(checker)
                 if not reason:
                     continue
                 try:
@@ -2992,11 +3030,8 @@ class LLMClient:
         cleaned_up = False
 
         def watch_for_cancellation() -> None:
-            while not watcher_finished.wait(0.05):
-                try:
-                    reason = str(checker() or "").strip()
-                except Exception:
-                    reason = ""
+            while not _wait_cancel_watch_tick(checker, watcher_finished, 0.05):
+                reason = _cancel_watch_reason(checker)
                 if not reason:
                     continue
                 try:
@@ -3111,11 +3146,8 @@ class LLMClient:
         cleaned_up = False
 
         def watch_for_cancellation() -> None:
-            while not watcher_finished.wait(0.05):
-                try:
-                    reason = str(checker() or "").strip()
-                except Exception:
-                    reason = ""
+            while not _wait_cancel_watch_tick(checker, watcher_finished, 0.05):
+                reason = _cancel_watch_reason(checker)
                 if not reason:
                     continue
                 try:

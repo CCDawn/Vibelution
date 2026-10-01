@@ -44,6 +44,21 @@ from tests.helpers.web_runtime_scene import _runtime_scene_local_index_parts, _s
 pytestmark = pytest.mark.serial
 
 
+@pytest.fixture(autouse=True)
+def _pin_runtime_web_language_zh(monkeypatch):
+    """Pin runtime status texts to their zh variants.
+
+    runtime_service resolves every bilingual text_for() status line and
+    lifecycle block message through get_web_language(), which reads the live
+    operator config's ui.language.  Without a pin these tests inherit the
+    operator machine's locale (the machine language may already be "en"), so
+    pin the product default zh (i18n.DEFAULT_LANGUAGE).  Tests that exercise
+    English explicitly re-patch get_web_language locally and still win.
+    """
+
+    monkeypatch.setattr(runtime_service, "get_web_language", lambda: "zh")
+
+
 _TEST_SERVING_DIST = Path(__file__).resolve().parents[1] / "web"
 
 
