@@ -646,6 +646,14 @@ describe("AppShell layout contract", () => {
     // The update banner restart rides the same dormant shell lifecycle path
     // (beginRestart -> requestLifecycle) — never a direct restart API call.
     expect(shellSource).toContain("onPress={beginRestart}");
+    const restartRegion = shellSource.slice(
+      shellSource.indexOf("const beginRestart"),
+      shellSource.indexOf("const cancelLifecycleWait"),
+    );
+    expect(restartRegion).toContain("restartWaitsForDocumentReloadRef.current = true");
+    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code)");
+    expect(restartRegion).toContain("window.location.reload()");
+    expect(shellSource).toContain("ready && restartWaitsForDocumentReloadRef.current");
   });
 
   it("surfaces a dismissible update banner only when the backend is behind disk HEAD", () => {

@@ -53,6 +53,7 @@ import {
   updateBannerCopy,
   updateBannerDismissLabel,
   updateBannerRestartLabel,
+  updateBannerRestartReloadsDocument,
 } from "./updateBanner";
 import { useShellI18n } from "../i18n/useShellI18n";
 import {
@@ -736,6 +737,10 @@ export function AppShell() {
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
   const restartCompletionDismissTimerRef = useRef<number | null>(null);
+  // True from "立即重启" until this document reloads. The workbench snapshot
+  // stays "open and healthy" for the whole request, so it must not count as
+  // a finished restart.
+  const restartWaitsForDocumentReloadRef = useRef(false);
   const lifecycleRequestSeqRef = useRef(0);
   const lifecycleOverlayDismissedRef = useRef(false);
 
@@ -1512,6 +1517,7 @@ export function AppShell() {
     const task = (async () => {
       clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
+      restartWaitsForDocumentReloadRef.current = true;
       setRestartRequested(true);
       setShutdownRequested(false);
       setShutdownSettled(false);
@@ -1525,20 +1531,37 @@ export function AppShell() {
 
       const payload = await requestLifecycle("restart");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
+        restartWaitsForDocumentReloadRef.current = false;
         if (payload.commandId) {
           cancelSupersededLifecycleCommand(payload.commandId, "restart");
         }
         return;
       }
-      markControlledProjectLifecycleOperation("restart");
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
+      if (!updateBannerRestartReloadsDocument(payload.code)) {
+        restartWaitsForDocumentReloadRef.current = false;
+        setRestartRequested(false);
+        setShutdownRequested(false);
+        setShutdownOpen(true);
+        setShutdownSettled(false);
+        setLifecycleAction("restart");
+        setLifecycleCommandId(payload.commandId ?? "");
+        setLifecycleCancelPending(false);
+        setShutdownTitle(restartHeading);
+        setShutdownDetail(payload.message || restartBody);
+        return;
+      }
+      markControlledProjectLifecycleOperation("restart");
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
       }
-      if (payload.message) {
-        setShutdownDetail(payload.message);
-      }
+      // The launcher restart already published the current frontend release
+      // and replaced the backend. Reload this document onto it. The overlay
+      // stays on "正在重启" until the navigation clears this page.
+      allowNextWorkbenchWindowUnload();
+      window.location.reload();
     })().catch((error) => {
+      restartWaitsForDocumentReloadRef.current = false;
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
@@ -1572,7 +1595,7 @@ export function AppShell() {
         return;
       }
       const errorMessage = error instanceof Error ? error.message : String(error || "");
-      setRestartRequested(true);
+      setRestartRequested(false);
       setShutdownRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(false);
@@ -1623,6 +1646,7 @@ export function AppShell() {
     );
 
     const resetOverlay = () => {
+      restartWaitsForDocumentReloadRef.current = false;
       lifecycleOverlayDismissedRef.current = true;
       shutdownPromiseRef.current = null;
       restartPromiseRef.current = null;
@@ -2221,6 +2245,17 @@ export function AppShell() {
       && workbench.backendHealthy
       && workbench.browserWindowAlive;
 
+    if (failed && restartWaitsForDocumentReloadRef.current) {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
+      setShutdownOpen(true);
+      setShutdownSettled(false);
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(workbench.statusLine || restartBody);
+      return;
+    }
+
     if (failed) {
       if (lifecycleOverlayDismissedRef.current) {
         return;
@@ -2230,6 +2265,17 @@ export function AppShell() {
       setShutdownSettled(true);
       setShutdownTitle(restartHeading);
       setShutdownDetail(workbench.failureMessage || restartErrorBody);
+      return;
+    }
+
+    if (ready && restartWaitsForDocumentReloadRef.current) {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
+      setShutdownOpen(true);
+      setShutdownSettled(false);
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(workbench.statusLine || restartBody);
       return;
     }
 
