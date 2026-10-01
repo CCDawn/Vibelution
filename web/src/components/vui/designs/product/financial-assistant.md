@@ -26,6 +26,7 @@ pathname 决定当前项及按钮高亮。Radix 管理键盘、Esc、外点和�
 GET 无自动创建；POST 幂等且并发串行。异步创建只刷新缓存，不自动导航，避免完成时抢走新页面。
 只打开服务端验证 Agent/Session 绑定后返回的 sessionId，经 `useChatRouteSelection.openSession`。
 未配置/连接未验证、已归档、初始化失败、权限不足、服务未接入均可见；不假装有数据。
+公开新闻复用既有 `news_search_tool`，只在本会话作参考；助手判断真伪，不写入财报库，不开启跨团队委派。
 
 ### 非职责与反冗余
 不新增 VUI primitive、第二套身份/配置存储、聊天组件、transcript、SSE 或后台调度。
