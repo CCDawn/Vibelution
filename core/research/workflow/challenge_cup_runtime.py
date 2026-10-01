@@ -107,6 +107,8 @@ class ChallengeCupGraphState(TypedDict, total=False):
     binding_snapshot_id: str | None
     budget_policy_hash: str
     evidence_remediation_contract: dict[str, Any]
+    # Written only when an agent-routed node names its next station.
+    agent_next_node_id: str
 
 
 @dataclass(frozen=True)
@@ -610,6 +612,23 @@ def _route_after_linear(source: str, target: str):
     return route
 
 
+def _route_after_agent_choice(source: str, targets: tuple[str, ...]):
+    """Follow the agent's named station. A missing name does not take the first edge."""
+
+    allowed = tuple(targets)
+
+    def route(state: ChallengeCupGraphState) -> Literal["__end__"] | str:
+        if state.get("blocked_outcome"):
+            return END  # type: ignore[return-value]
+        chosen = str(state.get("agent_next_node_id") or "").strip()
+        if chosen in allowed:
+            return chosen
+        return END  # type: ignore[return-value]
+
+    route.__name__ = f"route_after_{source}"
+    return route
+
+
 def successor_map(workflow_version_id: str) -> dict[str, tuple[str, ...]]:
     """Deterministic successor set per node (drives worker attempt injection)."""
     definition = resolve_definition_for_version(workflow_version_id)
@@ -637,16 +656,34 @@ def build_formal_graph(definition: Any = None) -> StateGraph:
     for node_id in order:
         builder.add_node(node_id, _make_node_fn(node_id))
     builder.add_edge(START, order[0])
-    for source, target in graph_static_edge_pairs(resolved):
+    static_pairs = graph_static_edge_pairs(resolved)
+    for source, target in static_pairs:
         if source == "candidate_promotion":
             # Preserve the existing post-promotion terminal packaging step;
             # only the edge identity comes from the definition.
             builder.add_edge(source, target)
+    grouped: dict[str, list[str]] = {}
+    for source, target in static_pairs:
+        if source == "candidate_promotion":
             continue
+        bucket = grouped.setdefault(source, [])
+        if target not in bucket:
+            bucket.append(target)
+    for source, targets in grouped.items():
+        if len(targets) == 1:
+            target = targets[0]
+            builder.add_conditional_edges(
+                source,
+                _route_after_linear(source, target),
+                {target: target, END: END},
+            )
+            continue
+        path_map: dict[Any, Any] = {item: item for item in targets}
+        path_map[END] = END
         builder.add_conditional_edges(
             source,
-            _route_after_linear(source, target),
-            {target: target, END: END},
+            _route_after_agent_choice(source, tuple(targets)),
+            path_map,
         )
     if "iteration_decision" in order:
         builder.add_conditional_edges(

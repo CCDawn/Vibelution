@@ -984,7 +984,8 @@ class GraphDispatchWorker:
             self._submit(ack_only, force_flush=True).result(timeout=30)
             self._notify_node_succeeded(dispatch)
             return True
-        successor_id = successors[0]
+        recorded_target = str(handoff[4] or "")
+        successor_id = recorded_target if recorded_target in successors else successors[0]
         snapshot = self._coordinator.snapshot(dispatch.run_id, dispatch.workflow_version_id)
         if not _graph_at_node(snapshot, successor_id):
             # Ledger advanced (handoff accepted) but LangGraph is still at the

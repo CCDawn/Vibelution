@@ -335,7 +335,7 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         )
         if item and _SAFE_REF.fullmatch(item)
     ][:24]
-    return {
+    normalized = {
         "schemaVersion": SCHEMA_VERSION,
         "taskId": _text(payload.get("taskId")),
         "idempotencyKey": _text(payload.get("idempotencyKey"), limit=240),
@@ -423,6 +423,10 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         "createdAt": _text(payload.get("createdAt"), limit=120),
         "updatedAt": _text(payload.get("updatedAt"), limit=120),
     }
+    route_targets = _route_target_list(payload.get("agentRouteTargets"))
+    if route_targets:
+        normalized["agentRouteTargets"] = route_targets
+    return normalized
 
 
 def _read_store(team_id: str, research_project_id: str) -> dict[str, Any]:
@@ -545,6 +549,17 @@ def _resolve_role_agent(
     return member, agent
 
 
+def _route_target_list(raw: Any) -> list[str]:
+    if not isinstance(raw, (list, tuple)):
+        return []
+    seen: list[str] = []
+    for item in raw:
+        target = _text(item, limit=120)
+        if target and target not in seen:
+            seen.append(target)
+    return seen[:16]
+
+
 def _hypothesis_input_for_task(task: dict[str, Any]) -> dict[str, Any]:
     from .research_project_hypothesis_context import (
         bind_hypothesis_input_to_task,
@@ -660,12 +675,19 @@ def _task_message(
                 separators=(",", ":"),
             )
         )
+    route_line = ""
+    targets = task.get("agentRouteTargets")
+    if isinstance(targets, list) and len(targets) >= 2:
+        from core.research.workflow.node_route import route_choice_instruction
+
+        route_line = route_choice_instruction(tuple(targets))
     return (
         f"你正在处理研究项目“{task['experimentName']}”中的{task['roleLabel']}任务。"
         f"\n任务：{task['taskTitle']}{target_line}{retry_line}"
         f"\n目标：{contract.get('objective', '')}"
         f"\n完成检查：\n{checklist}"
         f"{authority_context}"
+        f"{route_line}"
         "\n请先读取受控项目上下文，再使用当前职责允许的工具完成写回。"
         "\n普通文本回答不能代替正式工具写回，也不得自动执行训练或扩大项目边界。"
     )
@@ -680,6 +702,7 @@ def _public_task(task: dict[str, Any]) -> dict[str, Any]:
     normalized.pop("modelInvocationReceiptBinding", None)
     normalized.pop("challengeTaskContract", None)
     normalized.pop("hypothesisInputBinding", None)
+    normalized.pop("agentRouteTargets", None)
     return {
         **normalized,
         "chatRoute": f"/chat?session={session_id}" if session_id else "",
@@ -1538,6 +1561,11 @@ def start_research_project_agent_task(
                 "sourceCollectionRunId": source_collection_run_id,
                 "experimentName": project.get("name"),
                 "targetRef": target_ref,
+                "agentRouteTargets": [
+                    str(item).strip()
+                    for item in list(request_payload.get("agentRouteTargets") or [])
+                    if str(item).strip()
+                ][:16],
                 "agentId": agent_id,
                 "teamRole": contract["teamRole"],
                 "roleKey": contract["roleKey"],

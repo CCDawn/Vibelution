@@ -1044,6 +1044,9 @@ class RealDomainPorts:
                 handle=handle,
                 snapshot=snapshot,
             )
+        route_targets = _route_targets_for_action(self._store, action)
+        if route_targets and _route_rejection_pending(self._store, action.node_run_id):
+            handle = _submit_agent_route_reask(action, handle, route_targets)
         completed = complete_agent_turn_outputs(
             action=action,
             handle=handle,
@@ -1051,6 +1054,8 @@ class RealDomainPorts:
             required_kinds=self.required_artifact_kinds(action),
             return_result=True,
         )
+        if route_targets and isinstance(completed, AgentTurnResult):
+            completed = _stamp_agent_route_choice(completed)
         from ..operator_optimization.knowledge_budget_runtime import is_operator_knowledge_run
         if is_operator_knowledge_run(self._store, action.run_id):
             from ..operator_optimization.model_budget import settle_model_budget
@@ -2134,6 +2139,82 @@ def _formal_project_retry_payload(
     return {}
 
 
+def _route_targets_for_action(store: Any, action: PendingAction) -> tuple[str, ...]:
+    get_run = getattr(store, "get_run", None)
+    if get_run is None:
+        return ()
+    run = get_run(action.run_id)
+    version_id = str(getattr(run, "workflow_version_id", "") or "")
+    from core.research.workflow.node_route import agent_route_targets_for_version
+
+    return agent_route_targets_for_version(version_id, action.node_id)
+
+
+def _route_rejection_pending(store: Any, node_run_id: str) -> bool:
+    attempt = store.submit(
+        lambda uow: uow.repository.get_attempt(node_run_id),
+        force_flush=True,
+    ).result(timeout=30)
+    raw = str(getattr(attempt, "problem_json", "") or "")
+    if not raw:
+        return False
+    try:
+        loaded = json.loads(raw)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(loaded, dict):
+        return False
+    return str(loaded.get("code") or "") == "agent_next_rejected"
+
+
+def _submit_agent_route_reask(
+    action: PendingAction,
+    handle: AgentTaskHandle,
+    targets: tuple[str, ...],
+) -> AgentTaskHandle:
+    from core.research.workflow.node_route import route_choice_instruction
+    from core.web.services.session_service import submit_session_message
+
+    started = submit_session_message(
+        handle.session_id,
+        "上一次写的 nextNodeId 不在已经画好的站点里。"
+        + route_choice_instruction(targets),
+        mental_model_enabled=False,
+        turn_mode="task",
+        write_intent=False,
+        message_source="agent_inbox",
+        include_started_turn_id=True,
+        client_submission_id=f"agent-route-retry:{action.node_run_id}",
+        message_metadata={
+            "kind": "agent_route_retry",
+            "nodeRunId": action.node_run_id,
+            "workflowNodeId": action.node_id,
+        },
+    )
+    turn_id = str(
+        (started or {}).get("startedTurnId") or (started or {}).get("turnId") or ""
+    ).strip()
+    if not turn_id:
+        raise RuntimeError("agent route retry did not start a turn")
+    return replace(handle, turn_id=turn_id)
+
+
+def _stamp_agent_route_choice(result: AgentTurnResult) -> AgentTurnResult:
+    from core.research.workflow.node_route import extract_next_node_id
+    from core.web.services.session.turn_diagnostics import (
+        get_session_turn_completion_snapshot,
+    )
+
+    snapshot = get_session_turn_completion_snapshot(
+        result.handle.session_id,
+        result.handle.turn_id,
+    )
+    chosen = extract_next_node_id(str(snapshot.get("assistantText") or ""))
+    if not chosen or chosen == result.handle.next_node_id:
+        return result
+    return replace(result, handle=replace(result.handle, next_node_id=chosen))
+
+
 def _create_real_agent_task(
     action: PendingAction,
     binding: BindingResolution,
@@ -2248,11 +2329,17 @@ def _create_real_agent_task(
             task_kind=spec.task_key,
             store=store,
         )
+        route_targets = _route_targets_for_action(store, action)
         started = start_research_project_agent_task(
             team_id,
             project_id,
             {
                 "taskKind": spec.task_key,
+                **(
+                    {"agentRouteTargets": list(route_targets)}
+                    if len(route_targets) >= 2
+                    else {}
+                ),
                 "agentId": binding.agent_id,
                 "idempotencyKey": idempotency_key,
                 "targetRef": f"node-run:{action.node_run_id}",
@@ -2373,6 +2460,9 @@ def _start_source_collection_agent_task(
             "formalRetry": False,
             "evidenceRemediationContract": evidence_remediation_contract,
     }
+    source_route_targets = _route_targets_for_action(store, action)
+    if len(source_route_targets) >= 2:
+        stage_task_payload["agentRouteTargets"] = list(source_route_targets)
     if operator_source_authority is not None:
         return start_source_collection_stage_session_task(
             team_id, source_run_id, stage_task_payload,

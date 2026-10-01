@@ -40,6 +40,8 @@ class AgentTaskHandle:
     meeting_room_id: str = ""
     meeting_round_id: str = ""
     meeting_participants: tuple[dict[str, str], ...] = ()
+    # Set only after an agent-routed turn names one designed next station.
+    next_node_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -65,6 +67,8 @@ class AgentTaskHandle:
             payload["meeting"] = {"roomId": self.meeting_room_id,
                 "roundId": self.meeting_round_id,
                 "participants": [dict(item) for item in self.meeting_participants]}
+        if self.next_node_id:
+            payload["nextNodeId"] = self.next_node_id
         return payload
 
 

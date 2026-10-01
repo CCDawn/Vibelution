@@ -16,6 +16,24 @@ class ActorKind(str, Enum):
     HUMAN = "human"
 
 
+class NodeRouteMode(str, Enum):
+    """How a finished node picks its next station.
+
+    ``specified`` keeps the designed edge. ``agent`` lets the agent that just
+    finished choose among the outgoing edges drawn for that node.
+    """
+
+    SPECIFIED = "specified"
+    AGENT = "agent"
+
+
+def _parse_route_mode(value: Any) -> NodeRouteMode:
+    raw = str(value or "").strip()
+    if not raw:
+        return NodeRouteMode.SPECIFIED
+    return NodeRouteMode(raw)
+
+
 class WorkflowStageId(str, Enum):
     PROBLEM_UNDERSTANDING = "problem_understanding"
     KNOWLEDGE_COLLECTION = "knowledge_collection"
@@ -155,9 +173,10 @@ class WorkflowNodeSpec:
     acceptsGateKinds: tuple[GateKind, ...] = ()
     producesArtifactKinds: tuple[str, ...] = ()
     sessionScopePolicy: NodeSessionScopePolicy = NodeSessionScopePolicy.NODE_SHARED
+    routeMode: NodeRouteMode = NodeRouteMode.SPECIFIED
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "nodeId": self.nodeId,
             "stageId": self.stageId.value,
             "label": self.label,
@@ -169,6 +188,11 @@ class WorkflowNodeSpec:
             "producesArtifactKinds": list(self.producesArtifactKinds),
             "sessionScopePolicy": self.sessionScopePolicy.value,
         }
+        # Default mode stays out of the canonical payload so published
+        # definitions keep their structure hash.
+        if self.routeMode is not NodeRouteMode.SPECIFIED:
+            payload["routeMode"] = self.routeMode.value
+        return payload
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> WorkflowNodeSpec:
@@ -185,6 +209,7 @@ class WorkflowNodeSpec:
             sessionScopePolicy=NodeSessionScopePolicy(
                 str(data.get("sessionScopePolicy") or NodeSessionScopePolicy.NODE_SHARED.value)
             ),
+            routeMode=_parse_route_mode(data.get("routeMode")),
         )
 
 

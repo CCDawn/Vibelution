@@ -766,6 +766,13 @@ def seed_source_collection_agent_session_context(
         message_content += _source_collection_problem_understanding_message(
             problem_understanding_context
         )
+    raw_route_targets = request_payload.get("agentRouteTargets")
+    if isinstance(raw_route_targets, list):
+        from core.research.workflow.node_route import route_choice_instruction
+
+        message_content += route_choice_instruction(
+            tuple(str(item) for item in raw_route_targets)
+        )
     message = s.session_service.append_session_assistant_artifact_message(
         session_id,
         message_content,
