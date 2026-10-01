@@ -166,7 +166,9 @@ def test_active_agent_runtime_applies_external_profile_end_to_end(monkeypatch) -
     assert runtime["permissionPreset"] == "request_approval"
     assert "apply_patch_tool" in runtime["toolPolicy"]["allowedTools"]
     assert "agent_message_tool" not in runtime["toolPolicy"]["allowedTools"]
-    assert visible == ["apply_patch_tool"]
+    # workspace_write 授权含只读工具（read_only capabilityTag），且 8261485be 起重新放行
+    # read_file_tool，故可见集合是持久 policy 与授权交集后的 read_file + apply_patch。
+    assert visible == ["read_file_tool", "apply_patch_tool"]
     assert runtime["toolPolicy"]["approvalOverrides"]["apply_patch_tool"] == "always"
     assert runtime["toolPolicy"]["runtimeToolSource"] == (
         "external_agent_task:workspace_write"
