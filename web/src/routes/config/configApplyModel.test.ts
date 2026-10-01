@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
+  isUiLanguageFieldPath,
   shouldImmediateApplyConfigPath,
   shouldImmediateApplyFieldKind,
+  UI_LANGUAGE_FIELD_PATH,
 } from "./configApplyModel";
 
 describe("configApplyModel", () => {
@@ -32,6 +34,16 @@ describe("configApplyModel", () => {
     expect(shouldImmediateApplyFieldKind("multiline")).toBe(false);
     expect(shouldImmediateApplyFieldKind("secret")).toBe(false);
     expect(shouldImmediateApplyFieldKind(undefined)).toBe(false);
+  });
+
+  it("excludes ui.language from the generic immediate-apply pipeline (dedicated language endpoint)", () => {
+    expect(UI_LANGUAGE_FIELD_PATH).toBe("ui.language");
+    expect(isUiLanguageFieldPath("ui.language")).toBe(true);
+    expect(isUiLanguageFieldPath("ui.show_welcome")).toBe(false);
+    // select 命中 ui.language 时不再是通用即时字段；其余 select 不受影响。
+    expect(shouldImmediateApplyFieldKind("select", "ui.language")).toBe(false);
+    expect(shouldImmediateApplyFieldKind("select", "ui.workbench_theme.background_readability")).toBe(true);
+    expect(shouldImmediateApplyFieldKind("select")).toBe(true);
   });
 
   it("prefers frozen baseline hash when applying a draft override", () => {
