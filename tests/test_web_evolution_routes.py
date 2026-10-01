@@ -3022,6 +3022,7 @@ def test_evolution_update_proposal_blocks_non_draft_states(tmp_path, monkeypatch
         assert "manual_overrides" not in proposal_payload
 
 def test_evolution_routes_expose_supervised_policy_observing_proposal(tmp_path, monkeypatch):
+    monkeypatch.setattr(evolution_service, "get_web_language", lambda: "zh")
     decision_path = _write_supervised_decision_record(
         tmp_path,
         "observing_policy_run",
