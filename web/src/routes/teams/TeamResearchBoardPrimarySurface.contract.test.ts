@@ -64,11 +64,18 @@ describe("TeamResearchBoardPrimarySurface extraction contract", () => {
     expect(boardPageSource).toContain("收起状态栏");
     expect(boardPageSource).toContain("展开状态栏");
     expect(readFileSync(new URL("./teamResearchPrimarySurfaceRenderers.tsx", import.meta.url), "utf8")).toContain("toolbarLeading");
-    expect(readFileSync(new URL("./research-workflow/ResearchProcessWorkspace.tsx", import.meta.url), "utf8")).toContain("leading={toolbarLeading}");
-    expect(readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8")).toContain("const statusCta = researchWorkflowTeamSelected && researchPrimaryAction");
+    expect(readFileSync(new URL("./research-workflow/ResearchProcessWorkspace.tsx", import.meta.url), "utf8")).toContain("leading={toolbarLeading}");    expect(readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8")).toContain("const statusCta = researchWorkflowTeamSelected && researchPrimaryAction");
     expect(readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8")).toMatch(
       /challengeCupResearchTeamSelected\s*&&\s*\(researchWorkspaceView === "workflow" \|\| researchWorkspaceView === "overview"\)/,
     );
+  });
+
+  it("research workflow toolbar keeps the new-team entry reachable from the board", () => {
+    const rendererSource = readFileSync(new URL("./teamResearchPrimarySurfaceRenderers.tsx", import.meta.url), "utf8");
+    // The workflow surface replaces the Teams shell toolbar, so it must mount the
+    // same create action itself or 新建团队 is unreachable from the default board.
+    expect(rendererSource).toContain('import { TeamCreateToolbarActions } from "./TeamCreateToolbarActions"');
+    expect(rendererSource).toMatch(/actions=\{<TeamCreateToolbarActions lang=\{lang\} onTeamCreated=\{selectTeamRecord\} \/>\}/);
   });
 
   it("surface progressive-fills overview shell; empty only when settled without workflow", () => {
