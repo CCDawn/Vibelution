@@ -55,16 +55,24 @@ type RenderHarness = {
   container: HTMLElement;
   root: Root;
   onImmediateFieldChange: ReturnType<typeof vi.fn>;
+  onLanguageChange: ReturnType<typeof vi.fn>;
   onUiStateChange: ReturnType<typeof vi.fn>;
   onSaveSection: ReturnType<typeof vi.fn>;
   rerender: (uiState: ConfigSectionUiState) => Promise<void>;
 };
 
-async function renderEditor(uiState: Partial<ConfigSectionUiState> = {}, value: unknown = COMMITTED_VALUE): Promise<RenderHarness> {
+async function renderEditor(
+  uiState: Partial<ConfigSectionUiState> = {},
+  value: unknown = COMMITTED_VALUE,
+  overrides: { section?: ConfigEditorSection; metaMap?: Record<string, ConfigEditorMeta> } = {},
+): Promise<RenderHarness> {
+  const section = overrides.section ?? SECTION;
+  const metaMap = overrides.metaMap ?? META_MAP;
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   const onImmediateFieldChange = vi.fn();
+  const onLanguageChange = vi.fn();
   const onSaveSection = vi.fn().mockResolvedValue(true);
   let currentState: ConfigSectionUiState = { ...defaultSectionUiState(SECTION.id), expanded: true, ...uiState };
   // 有状态 harness：onUiStateChange 后用新状态重渲染，模拟真实路由的 setState。
@@ -77,9 +85,9 @@ async function renderEditor(uiState: Partial<ConfigSectionUiState> = {}, value: 
     act(() => {
       root.render(
         <ConfigSectionEditor
-          section={SECTION}
+          section={section}
           value={value}
-          metaMap={META_MAP}
+          metaMap={metaMap}
           lang="zh"
           copy={CONFIG_COPY.zh}
           disabled={false}
@@ -87,6 +95,7 @@ async function renderEditor(uiState: Partial<ConfigSectionUiState> = {}, value: 
           onUiStateChange={onUiStateChange}
           onSaveSection={onSaveSection}
           onImmediateFieldChange={onImmediateFieldChange}
+          onLanguageChange={onLanguageChange}
           immediateFieldStatus={{}}
           onAvatarImageUpload={vi.fn()}
           onThemeBackgroundImageUpload={vi.fn()}
@@ -99,6 +108,7 @@ async function renderEditor(uiState: Partial<ConfigSectionUiState> = {}, value: 
     container,
     root,
     onImmediateFieldChange,
+    onLanguageChange,
     onUiStateChange,
     onSaveSection,
     async rerender(nextState: ConfigSectionUiState) {
@@ -235,6 +245,47 @@ describe("ConfigSectionEditor settings rows (wave 1)", () => {
       expect(harness.onSaveSection).not.toHaveBeenCalled();
     } finally {
       await cleanup(harness);
+    }
+  });
+});
+
+describe("ConfigSectionEditor ui.language dedicated toggle", () => {
+  const UI_SECTION: ConfigEditorSection = { id: "ui", path: "ui", title: "界面外观", summary: "", fieldCount: 2 };
+  const UI_VALUE = { language: "zh", show_welcome: true };
+  const UI_META: Record<string, ConfigEditorMeta> = {
+    ui: meta("ui", "object"),
+    "ui.language": meta("ui.language", "select", {
+      options: [{ value: "zh", label: "中文" }, { value: "en", label: "English" }],
+    }),
+    "ui.show_welcome": meta("ui.show_welcome", "boolean"),
+  };
+
+  it("hosts the language toggle in the view row and routes changes to onLanguageChange, never onImmediateFieldChange", async () => {
+    // ui.language 属 ui 分区高级层，需展开高级层才渲染该行。
+    const harness = await renderEditor({ advancedExpanded: true }, UI_VALUE, { section: UI_SECTION, metaMap: UI_META });
+    try {
+      const row = harness.container.querySelector('[data-testid="row-ui.language"]');
+      expect(row).not.toBeNull();
+      // 与通用 select 行同款 VStringSelect 触发器（VUI 产品控件呈现不变）。
+      const trigger = row?.querySelector<HTMLButtonElement>("[data-vui-select-trigger]");
+      expect(trigger?.textContent).toContain("中文");
+
+      await act(async () => {
+        trigger?.click();
+      });
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+        .find((item) => item.textContent?.includes("English"));
+      expect(option, "English option renders in the portal").toBeTruthy();
+      await act(async () => {
+        option?.click();
+      });
+
+      expect(harness.onLanguageChange).toHaveBeenCalledTimes(1);
+      expect(harness.onLanguageChange).toHaveBeenCalledWith("en");
+      expect(harness.onImmediateFieldChange).not.toHaveBeenCalled();
+    } finally {
+      await cleanup(harness);
+      document.querySelectorAll('[data-vui="select-content"]').forEach((node) => node.remove());
     }
   });
 });

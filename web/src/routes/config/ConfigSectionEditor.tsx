@@ -37,7 +37,11 @@ import {
   configSectionTierCounts,
   isCommonConfigSectionEntry,
 } from "../configSectionPresentation";
-import { shouldImmediateApplyFieldKind, type ImmediateFieldStatus } from "./configApplyModel";
+import {
+  isUiLanguageFieldPath,
+  shouldImmediateApplyFieldKind,
+  type ImmediateFieldStatus,
+} from "./configApplyModel";
 import type { ConfigCopy, ConfigLanguage } from "./configCopy";
 import {
   collectPendingDraftLeaves,
@@ -74,6 +78,8 @@ type ConfigSectionEditorProps = {
   onUiStateChange: (sectionId: string, nextState: ConfigSectionUiState) => void;
   onSaveSection: (path: string, nextValue: unknown) => Promise<boolean>;
   onImmediateFieldChange: (path: string, nextValue: unknown) => void;
+  /** ui.language 专用切换：走 PUT /api/config/language，不经通用 immediate-apply。 */
+  onLanguageChange: (next: ConfigLanguage) => void;
   immediateFieldStatus: Record<string, ImmediateFieldStatus>;
   onAvatarImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
   onThemeBackgroundImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
@@ -112,6 +118,16 @@ type AvatarCropDrag = {
 const AVATAR_CROP_FRAME_SIZE = 320;
 const AVATAR_CROP_PREVIEW_SIZE = 112;
 const AVATAR_CROP_OUTPUT_SIZE = 512;
+
+/**
+ * ui.language 专用双档选项：语言名用各自本名（endonym），与 UI 语言无关，
+ * 任何界面语言下都能认出目标语言；行标签/提示仍走 configSectionPresentation
+ * 既有「界面语言」文案。
+ */
+const UI_LANGUAGE_TOGGLE_OPTIONS = [
+  { value: "zh", label: "中文" },
+  { value: "en", label: "English" },
+] as const;
 
 function avatarImagePreviewUrl(value: unknown): string {
   const path = getString(value).replace(/\\/g, "/").trim();
@@ -166,6 +182,7 @@ export function ConfigSectionEditor({
   onUiStateChange,
   onSaveSection,
   onImmediateFieldChange,
+  onLanguageChange,
   immediateFieldStatus,
   onAvatarImageUpload,
   onThemeBackgroundImageUpload,
@@ -467,6 +484,22 @@ export function ConfigSectionEditor({
     return null;
   }
 
+  /** ui.language 专用控件：与通用 select 行同款 VStringSelect 呈现，但改动直达专用语言端点。 */
+  function renderLanguageToggleControl(label: string, fieldValue: unknown) {
+    return (
+      <VStringSelect
+        ariaLabel={label}
+        isDisabled={disabled}
+        value={getString(fieldValue)}
+        options={UI_LANGUAGE_TOGGLE_OPTIONS.map((option) => ({
+          value: option.value,
+          label: option.label,
+        }))}
+        onValueChange={(next) => onLanguageChange(next === "en" ? "en" : "zh")}
+      />
+    );
+  }
+
   function renderFieldView(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
     const kind = configEditorFieldKind(meta);
@@ -513,7 +546,7 @@ export function ConfigSectionEditor({
     const label = configLabel(metaMap, absolutePath, lang);
     const hint = configHint(metaMap, absolutePath, lang);
     // 即时类字段（布尔/下拉）在查看态行内直接可改：改动即走保存+apply。
-    const immediate = shouldImmediateApplyFieldKind(meta?.kind);
+    const immediate = shouldImmediateApplyFieldKind(meta?.kind, absolutePath);
     let control: ReactNode;
     if (kind === "boolean") {
       control = (
@@ -525,6 +558,10 @@ export function ConfigSectionEditor({
           onChange={(isSelected) => onImmediateFieldChange(absolutePath, isSelected)}
         />
       );
+    } else if (kind === "select" && isUiLanguageFieldPath(absolutePath)) {
+      // ui.language 专用切换：改值直达 PUT /api/config/language（见
+      // configApplyModel.UI_LANGUAGE_FIELD_PATH 单一写入方说明），不经 apply。
+      control = renderLanguageToggleControl(label, fieldValue);
     } else if (kind === "select") {
       control = (
         <VStringSelect
@@ -796,6 +833,9 @@ export function ConfigSectionEditor({
           onChange={(isSelected) => onImmediateFieldChange(absolutePath, isSelected)}
         />
       );
+    } else if (kind === "select" && isUiLanguageFieldPath(absolutePath)) {
+      // 编辑态同样直达专用语言端点（与查看态同一声明），不会滞留草稿。
+      control = renderLanguageToggleControl(label, fieldValue);
     } else if (kind === "select") {
       control = (
         <VStringSelect
