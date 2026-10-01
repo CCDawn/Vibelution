@@ -534,8 +534,18 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("activeWorkEmpty")');
     // The trigger dot turns caution while leftover failures exist.
     expect(shellSource).toContain("activeWorkTriggerTone");
-    // Only genuinely running work blocks a restart; stale failures do not.
-    expect(shellSource).toContain("updateBannerRestartBlockedByWork = (activeWorkIndicator?.items.length ?? 0) > 0");
+    // Running work shows an interruption notice; it never disables the user restart.
+    const restartDisabledRegion = shellSource.slice(
+      shellSource.indexOf("const updateBannerRestartDisabled"),
+      shellSource.indexOf("const updateBannerRestartNotice"),
+    );
+    expect(restartDisabledRegion).not.toContain("activeWork");
+    expect(restartDisabledRegion).toContain("restartRequested");
+    expect(restartDisabledRegion).toContain("shutdownRequested");
+    expect(restartDisabledRegion).toContain("shutdownOpen && !shutdownSettled");
+    expect(shellSource).toContain("restartActiveWorkNoticeMessage(lang, activeWorkLabels)");
+    expect(shellSource).toContain("activeWorkIndicator?.items.map((item) => item.label)");
+    expect(shellSource).not.toContain("restartActiveWorkNoticeMessage(lang, activeWorkDetailsTitle)");
 
     expect(styles.activeWorkStaleSection).toContain("border-t");
     expect(styles.activeWorkStaleHeader).toContain("var(--state-warning)");
@@ -659,6 +669,9 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain('"/api/runtime/restart"');
     expect(shellSource).not.toContain('"/api/runtime/shutdown"');
     expect(shellSource).toContain("restartActiveWorkBlockedMessage");
+    expect(shellSource).toContain("HTTP 409");
+    expect(shellSource).toContain("Close this notice to retry.");
+    expect(shellSource).toContain("关闭此提示后可以重试。");
     expect(shellSource).toContain("shutdownActiveWorkBlockedMessage");
     expect(shellSource).not.toContain("confirmedActiveWork");
     expect(shellSource).toContain("restart_blocked_active_work");
@@ -674,7 +687,9 @@ describe("AppShell layout contract", () => {
       shellSource.indexOf("const cancelLifecycleWait"),
     );
     expect(restartRegion).toContain("restartWaitsForDocumentReloadRef.current = true");
-    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code)");
+    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code, payload.accepted)");
+    expect(restartRegion).toContain('payload.code === "user_restart_pause_failed"');
+    expect(restartRegion).toContain("重启前未能保存任务状态，已有记录仍保留");
     expect(restartRegion).toContain("window.location.reload()");
     expect(shellSource).toContain("ready && restartWaitsForDocumentReloadRef.current");
   });
@@ -699,19 +714,25 @@ describe("AppShell layout contract", () => {
     expect(bannerRegion).toContain("updateBannerVisible ?");
     expect(bannerRegion).toContain("onPress={beginRestart}");
     expect(bannerRegion).toContain("isDisabled={updateBannerRestartDisabled}");
-    expect(bannerRegion).toContain("{updateBannerRestartGuard}");
-    // Active-work guard copy is the existing shell guard message, not new copy.
-    expect(shellSource).toContain("updateBannerRestartGuard = updateBannerRestartBlockedByWork");
-    expect(shellSource).toContain("? restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle)");
+    expect(bannerRegion).toContain("{updateBannerRestartNotice}");
+    expect(bannerRegion).toContain("title={updateBannerRestartNotice || updateBannerRestartActionLabel}");
+    expect(shellSource).toContain("activeWorkRestartNotice = (activeWorkIndicator?.items.length ?? 0) > 0");
+    expect(shellSource).toContain("updateBannerRestartNotice = activeWorkRestartNotice");
+    // The initial restart overlay explains interruption using task labels only.
+    expect(shellSource).toContain("restartActiveWorkNoticeMessage(lang, activeWorkLabels)");
+    expect(shellSource).toContain("const activeWorkLabels = [...new Set(activeWorkIndicator?.items.map((item) => item.label)");
+    const restartWaitEffect = shellSource.slice(
+      shellSource.indexOf('if (!restartRequested || !workbench)'),
+      shellSource.indexOf("useEffect(() => clearRestartCompletionDismissTimer"),
+    );
+    expect(restartWaitEffect).toContain("restartDetailWithActiveWorkNotice");
+    expect(restartWaitEffect).toContain("activeWorkRestartNotice,");
     expect(bannerRegion).toContain("onPress={dismissUpdateBanner}");
     expect(bannerRegion).not.toContain("/api/runtime/");
 
     // Dismissal is keyed to the disk HEAD commit, so a new commit re-prompts.
     expect(shellSource).toContain("dismissedHead: updateBannerDismissedHead");
     expect(shellSource).toContain("diskHead: updateBannerDiskHead");
-
-    // Active work keeps the restart action from even trying: guard copy surfaces.
-    expect(shellSource).toContain("updateBannerRestartBlockedByWork = (activeWorkIndicator?.items.length ?? 0) > 0");
 
     expect(shellSource).not.toContain("UPDATE_BANNER_MAIN_AREA_STYLE");
     expect(shellSource).not.toContain("UPDATE_BANNER_SHELL_GRID_ROWS");
@@ -737,6 +758,8 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("setLifecycleAction(\"restart\")");
     expect(shellSource).toContain("setLifecycleAction(\"shutdown\")");
     expect(shellSource).toContain("cancelRestartLabel");
+    expect(shellSource).toContain("closeLifecycleNoticeLabel");
+    expect(shellSource).toContain("!restartRequested && !lifecycleCommandId.trim()");
     expect(shellSource).toContain("cancelShutdownLabel");
     expect(shellSource).toContain("browser.user_action.lifecycle_wait_cancel_requested");
     expect(shellSource).toContain("browser.user_action.lifecycle_wait_cancel_completed");

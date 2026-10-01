@@ -61,7 +61,7 @@ VibelutionLauncher.exe = thin no-console shim
 Web: `core/web/routes/launcher.py` · `runtime.py` · `logs.py` → `launcher_service` / `runtime_service` / `runtime_scene_service`（薄委托）。
 
 - Operator config 真源：`%USERPROFILE%\Documents\Vibelution\config\config.toml`（ADR0003）。
-- active-work 挡 refresh：报告固定句（`AGENTS.md` §4），禁止强杀绕过。
+- 用户主动重启优先于 active-work：提醒将中断任务，正规 Electron 队列调用后端 task owner 停止并保存现场，再重启；自动/未获用户授权的 Agent refresh 继续预约等待（`AGENTS.md` §4），禁止强杀绕过。
 - Launcher refresh 命令见 `docs/guides/loop.md` §3。
 - 产品重启 wall-clock 基线约 **7.3s**。`restart_initial_observation_ms` 只在 RM daemon 仍执行 `restart_workbench` 文件队列时出现；Electron 在场的产品路径不再打这条探针，对照请用 Launcher 启停墙钟，不要把缺探针当成计时回归。
 

@@ -193,7 +193,13 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("startDisabledBusy");
     expect(routeSource).toContain("const destructiveActionDisabled = selectedIsCurrent");
     expect(routeSource).toContain("lifecycleActionDisabledActiveWork");
+    const lifecycleDisabledRegion = routeSource.slice(
+      routeSource.indexOf("const destructiveActionDisabled = selectedIsCurrent"),
+      routeSource.indexOf("const destructiveActionDisabledReason"),
+    );
+    expect(lifecycleDisabledRegion).not.toContain("activeWorkCount");
     expect(routeSource).toContain("const stopDisabled = selectedIsCurrent");
+    expect(routeSource).toContain("destructiveActionDisabled || activeWorkCount > 0 || closeCommandInFlight");
     expect(routeSource).toContain("const stopDisabledReason = selectedIsCurrent");
     expect(routeSource).toContain("stopDisabledClosed");
     expect(routeSource).toContain("stopDisabledInFlight");
@@ -375,7 +381,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("resolveLifecycleDisplay");
     expect(routeSource).toContain("isControlTokenError");
     expect(routeSource).toContain("activeWork");
-    expect(routeSource).toContain("restartProtected");
+    expect(routeSource).toContain("restartWithActiveWork");
     expect(routeSource).toContain("noActiveWork");
     expect(routeSource).toContain("userAction");
     expect(routeSource).toContain("projectRunning");
@@ -566,12 +572,16 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('advancedDiagnostics: "高级诊断"');
     expect(routeSource).toContain('userGuide: "当前建议"');
     expect(routeSource).toContain('userGuideReady: "可以继续使用"');
-    expect(routeSource).toContain('userGuideBlocked: "先等任务完成"');
-    expect(routeSource).toContain('actionsLocked: "停止/重启已保护"');
+    expect(routeSource).toContain('userGuideBlocked: "有活动任务"');
+    expect(routeSource).toContain('actionsLocked: "生命周期操作处理中"');
     expect(routeSource).toContain('diagnosticsCollapsedHint: "排查时展开"');
     expect(routeSource).toContain("托管进程与残留子进程");
     expect(routeSource).toContain("Launcher 正在维护项目启动、停止、重启、后端、窗口和日志证据。");
-    expect(routeSource).toContain("有任务运行时，Launcher 会拒绝停止或重启");
+    expect(routeSource).toContain("停止工作台仍受活动任务保护；重启会中断任务并保存已有记录。");
+    expect(routeSource).toContain("重启仍可执行，会中断活动任务并保存已有记录");
+    expect(routeSource).toContain("Stopping the workbench remains guarded while work is active; restart will interrupt tasks and preserve saved records.");
+    expect(routeSource).not.toContain("Before restarting, make sure no task is running.");
+    expect(routeSource).not.toContain("stop and restart are locked");
     expect(routeSource).not.toContain("任务结束后自动重启");
     expect(routeSource).toContain("内部迁移细节");
     expect(routeSource).not.toContain('controlPlane: "启动器职责"');

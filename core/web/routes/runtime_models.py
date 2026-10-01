@@ -33,6 +33,9 @@ class RuntimeShutdownPayload(BaseModel):
     A POST without a body stays the Electron graceful-retire contract
     (workbenchBackendRetire.ts): the backend schedules its own exit. A JSON
     body lets the caller declare window-level close versus operator stop.
+    Electron's explicit user restart uses source=electron_user_restart,
+    reason=user_restart and interruptActiveWork=true to save tasks and locally
+    retire without submitting a second lifecycle command.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -40,6 +43,8 @@ class RuntimeShutdownPayload(BaseModel):
     source: str = ""
     reason: str = ""
     stopManager: bool = False
+    # Only the Electron operator-restart retirement path consumes this flag.
+    interruptActiveWork: bool = False
 
 
 class RuntimeSummaryResponse(BaseModel):
@@ -105,6 +110,7 @@ class RuntimeLifecycleResponse(BaseModel):
     chatRoomRounds: list[Any] = Field(default_factory=list)
     sourceCollectionRuns: list[Any] = Field(default_factory=list)
     evolutionRuns: list[Any] = Field(default_factory=list)
+    otherWorkRuns: list[Any] = Field(default_factory=list)
 
 
 class RuntimeLifecycleCancelResponse(BaseModel):

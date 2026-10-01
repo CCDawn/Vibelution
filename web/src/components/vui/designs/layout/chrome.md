@@ -257,6 +257,11 @@ import { VWorkbenchPowerMenu } from "@/components/vui";
 ### 非职责
 - 不实现 beforeunload / active-work 文案；不替代 Electron 托盘开关或分支表行内启停。
 
+### 桌面工作台的用户重启行为
+- 用户从工作台发起重启时，进行中的任务只显示提醒，不禁用重启操作；Launcher 收口任务并保存已有记录后再重启。
+- 提醒只展示任务类型标签，不展示会话 Prompt、任务正文或内部 ID。重启后用户可以回到会话查看已保存记录并继续操作；界面不承诺自动恢复运行中的任务。
+- 停止工作台仍沿用活动任务保护；强制停止仍保留独立的明确操作入口。
+
 ### 实现落点
 - `product/workbench-shell/VWorkbenchPowerMenu.tsx`
 
