@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from core.infrastructure.codex_sandbox.process import terminate_process_tree
@@ -62,6 +63,9 @@ SERVING_FRONTEND_LEASE_SCHEMA_VERSION = 1
 FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS = 5.0
 _FRONTEND_PUBLISH_RETRY_INITIAL_DELAY_SECONDS = 0.05
 _FRONTEND_PUBLISH_RETRY_MAX_DELAY_SECONDS = 0.25
+_FRONTEND_TREE_CACHE_LIMIT = 64
+_FRONTEND_TREE_CACHE_LOCK = Lock()
+_FRONTEND_TREE_CACHE: dict[tuple[str, str], str] = {}
 
 
 def frontend_releases_dir(project_root: Path | str) -> Path:
@@ -292,6 +296,25 @@ def _capture_git(root: Path, args: list[str]) -> str:
     return str(result.stdout or "").strip() if int(result.returncode or 0) == 0 else ""
 
 
+def _frontend_tree_for_commit(root: Path, commit: str) -> str:
+    if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit):
+        return _capture_git(root, ["rev-parse", "HEAD:web"])
+    key = (str(root.resolve()), commit)
+    with _FRONTEND_TREE_CACHE_LOCK:
+        cached = _FRONTEND_TREE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    # A Git object ID pins immutable contents. Never cache HEAD, failures, or
+    # working-tree fingerprints, and do not hold the lock while running Git.
+    tree = _capture_git(root, ["rev-parse", f"{commit}:web"])
+    if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", tree):
+        with _FRONTEND_TREE_CACHE_LOCK:
+            _FRONTEND_TREE_CACHE[key] = tree
+            if len(_FRONTEND_TREE_CACHE) > _FRONTEND_TREE_CACHE_LIMIT:
+                _FRONTEND_TREE_CACHE.pop(next(iter(_FRONTEND_TREE_CACHE)))
+    return tree
+
+
 def build_inputs(project_root: Path | str, *, package_manager: str | None = None) -> dict[str, Any]:
     root = Path(project_root).resolve()
     web_dir = root / "web"
@@ -300,11 +323,13 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
         "bun" if manager == "bun" else ("node.exe" if os.name == "nt" else "node")
     )
     source_digest, input_count, input_state_digest = _scan_production_inputs(web_dir)
+    node_version = _run_version(command)
+    source_commit = _capture_git(root, ["rev-parse", "HEAD"])
     inputs = {
         "productionInputDigest": source_digest,
         "productionInputCount": input_count,
         "productionInputStateDigest": input_state_digest,
-        "nodeVersion": _run_version(command),
+        "nodeVersion": node_version,
         "packageManager": manager,
         "buildCommand": (
             "bun x tsc -b && bun x vite build --config vite.config.ts --outDir <staging>"
@@ -312,8 +337,8 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
             else "node tsc -b && node vite build --config vite.config.ts --outDir <staging>"
         ),
         "environment": _build_environment_inputs(),
-        "sourceCommit": _capture_git(root, ["rev-parse", "HEAD"]),
-        "frontendTree": _capture_git(root, ["rev-parse", "HEAD:web"]),
+        "sourceCommit": source_commit,
+        "frontendTree": _frontend_tree_for_commit(root, source_commit),
     }
     if manager == "bun":
         inputs["packageManagerVersion"] = _run_version("bun")

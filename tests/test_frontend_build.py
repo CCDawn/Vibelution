@@ -133,6 +133,84 @@ def test_build_inputs_scans_once_and_detects_added_changed_and_removed_files(
     assert frontend_build.compute_build_key(removed) == frontend_build.compute_build_key(changed)
 
 
+def test_build_inputs_caches_commit_tree_but_rescans_working_files(monkeypatch, tmp_path):
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    monkeypatch.setattr(frontend_build, "_FRONTEND_TREE_CACHE", {})
+    calls = []
+    commit = "a" * 40
+    tree = "b" * 40
+
+    def capture_git(_root, args):
+        calls.append(args)
+        if args == ["rev-parse", "HEAD"]:
+            return commit
+        assert args == ["rev-parse", f"{commit}:web"]
+        return tree
+
+    monkeypatch.setattr(frontend_build, "_capture_git", capture_git)
+    initial = frontend_build.build_inputs(tmp_path)
+    cached = frontend_build.build_inputs(tmp_path)
+    (web / "src" / "App.tsx").write_text("export const app = 99;\n", encoding="utf-8")
+    changed = frontend_build.build_inputs(tmp_path)
+
+    assert cached == initial
+    assert changed["sourceCommit"] == commit
+    assert changed["frontendTree"] == tree
+    assert frontend_build.compute_build_key(changed) != frontend_build.compute_build_key(initial)
+    assert changed["productionInputStateDigest"] != initial["productionInputStateDigest"]
+    assert calls.count(["rev-parse", "HEAD"]) == 3
+    assert calls.count(["rev-parse", f"{commit}:web"]) == 1
+
+
+@pytest.mark.parametrize("object_id_length", [40, 64])
+def test_commit_tree_cache_is_bound_to_checkout_and_pinned_commit(monkeypatch, tmp_path, object_id_length):
+    monkeypatch.setattr(frontend_build, "_FRONTEND_TREE_CACHE", {})
+    first_commit = "a" * object_id_length
+    second_commit = "b" * object_id_length
+    calls = []
+
+    def capture_git(root, args):
+        calls.append((root, args))
+        assert args[0] == "rev-parse"
+        assert args[1] in {f"{first_commit}:web", f"{second_commit}:web"}
+        return ("c" if args[1].startswith(first_commit) else "d") * object_id_length
+
+    monkeypatch.setattr(frontend_build, "_capture_git", capture_git)
+    other_checkout = tmp_path / "other"
+    assert frontend_build._frontend_tree_for_commit(tmp_path, first_commit) == "c" * object_id_length
+    assert frontend_build._frontend_tree_for_commit(tmp_path, first_commit) == "c" * object_id_length
+    assert frontend_build._frontend_tree_for_commit(tmp_path, second_commit) == "d" * object_id_length
+    assert frontend_build._frontend_tree_for_commit(other_checkout, first_commit) == "c" * object_id_length
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("failed_lookup", ["", "unavailable"])
+def test_commit_tree_lookup_retries_failures_without_caching(monkeypatch, tmp_path, failed_lookup):
+    monkeypatch.setattr(frontend_build, "_FRONTEND_TREE_CACHE", {})
+    results = iter([failed_lookup, "b" * 40])
+    calls = []
+
+    def capture_git(_root, args):
+        calls.append(args)
+        return next(results)
+
+    monkeypatch.setattr(frontend_build, "_capture_git", capture_git)
+    assert frontend_build._frontend_tree_for_commit(tmp_path, "a" * 40) == failed_lookup
+    assert frontend_build._frontend_tree_for_commit(tmp_path, "a" * 40) == "b" * 40
+    assert frontend_build._frontend_tree_for_commit(tmp_path, "a" * 40) == "b" * 40
+    assert len(calls) == 2
+
+
+def test_commit_tree_cache_is_bounded(monkeypatch, tmp_path):
+    monkeypatch.setattr(frontend_build, "_FRONTEND_TREE_CACHE", {})
+    monkeypatch.setattr(frontend_build, "_FRONTEND_TREE_CACHE_LIMIT", 2)
+    monkeypatch.setattr(frontend_build, "_capture_git", lambda root, args: "a" * 40)
+    for index in range(3):
+        frontend_build._frontend_tree_for_commit(tmp_path, f"{index:040x}")
+    assert len(frontend_build._FRONTEND_TREE_CACHE) == 2
+
+
 def test_schema_one_release_is_not_reused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _write_project(tmp_path)
     _stub_build_identity(monkeypatch)
