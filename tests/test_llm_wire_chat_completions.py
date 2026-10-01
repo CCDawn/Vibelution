@@ -582,6 +582,27 @@ def test_chat_explicit_reasoning_delta_fields_remain_direct_deltas():
     ]
 
 
+def test_chat_reasoning_content_stream_keeps_inter_word_spaces():
+    # DeepSeek-family relays stream reasoning in `reasoning_content`; the
+    # reassembled stream must keep the boundary spaces of each chunk
+    # (despaced-thinking defect regression guard).
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {"choices": [{"index": 0, "delta": {"reasoning_content": "The user"}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning_content": " wants"}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning_content": " "}}]},
+            {"choices": [{"index": 0, "delta": {"reasoning_content": "to find where"}}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        ],
+        route=route(),
+        scope=scope(),
+    )
+
+    events = [event for event in decoded if event.kind == "reasoning_delta"]
+
+    assert "".join(event.text for event in events) == "The user wants to find where"
+
+
 def test_chat_non_prefix_reasoning_replacement_is_emitted_whole():
     decoded = ChatCompletionsWireAdapter().decode_stream(
         [

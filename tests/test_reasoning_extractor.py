@@ -36,6 +36,33 @@ def test_complete_reasoning_still_trims_outer_whitespace():
     assert extracted.source == "additional_kwargs.reasoning_content"
 
 
+def test_stream_delta_reasoning_content_preserves_boundary_whitespace():
+    # OpenAI-compatible relays (DeepSeek family) stream reasoning in
+    # `reasoning_content`; stripping each chunk's boundary whitespace eats
+    # the reassembled stream's inter-word spaces (despaced-thinking defect).
+    extracted = extract_reasoning_text(
+        {"reasoning_content": " wants to find"},
+        _text,
+        include_content_tags=False,
+        is_stream_delta=True,
+    )
+
+    assert extracted.text == " wants to find"
+    assert extracted.source == "reasoning_content"
+
+
+def test_stream_delta_preserves_whitespace_for_all_reasoning_field_candidates():
+    extracted = extract_reasoning_text(
+        {"additional_kwargs": {"reasoning": " me", "thinking": " ", "thought": "now"}},
+        _text,
+        include_content_tags=False,
+        is_stream_delta=True,
+    )
+
+    assert extracted.text == " me"
+    assert extracted.source == "additional_kwargs.reasoning"
+
+
 def test_reasoning_details_joins_text_items_in_arrival_order():
     extracted = extract_reasoning_text(
         {

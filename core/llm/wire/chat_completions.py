@@ -497,7 +497,9 @@ class _ChatTurnAssembler:
 
     def _delta(self, choice_index: int, delta: Mapping[str, Any]) -> list[LLMProtocolEvent]:
         emitted: list[LLMProtocolEvent] = []
-        reasoning = extract_reasoning_text(delta, extract_text_content, include_content_tags=False)
+        reasoning = extract_reasoning_text(
+            delta, extract_text_content, include_content_tags=False, is_stream_delta=True
+        )
         reasoning_delta = self._reasoning_delta(choice_index, reasoning.source, reasoning.text)
         if reasoning_delta:
             emitted.append(
