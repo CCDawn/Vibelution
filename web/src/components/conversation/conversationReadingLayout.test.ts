@@ -10,6 +10,12 @@ import streamStyles from "./ConversationStreamingResponseContent.styles";
 import { conversationMarkdownRendererStyles, conversationMarkdownCodeBlockStyles } from "./ConversationMarkdownRenderer.styles";
 
 describe("approved conversation reading hierarchy", () => {
+  it("reserves navigation space only in wide conversation containers", () => {
+    expect(styles.timelineArea).toContain("@container/conversation");
+    expect(styles.timeline).toContain("@min-[864px]/conversation:pl-14");
+    // The existing bottom-right jump control still needs its safe corridor.
+    expect(styles.timeline).toContain("pr-[clamp(3rem,3vw,3.5rem)]");
+  });
   it("shares every Markdown style across stable, live and settled transcript paths", () => {
     for (const [key, value] of Object.entries(conversationMarkdownRendererStyles)) {
       expect(streamStyles[key as keyof typeof conversationMarkdownRendererStyles]).toBe(value);

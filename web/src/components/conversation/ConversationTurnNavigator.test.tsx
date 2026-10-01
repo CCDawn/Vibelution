@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VuiProvider } from "../vui/VuiProvider";
 import { ConversationTurnNavigator } from "./ConversationTurnNavigator";
@@ -26,7 +26,12 @@ function navEntry(overrides: Partial<ConversationTurnNavEntry> = {}): Conversati
 let root: Root | null = null;
 let container: HTMLElement;
 
-function mountNavigator(entries: ConversationTurnNavEntry[]) {
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(360);
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(36);
+});
+
+function mountNavigator(entries: ConversationTurnNavEntry[], onNavigate = vi.fn()) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -37,7 +42,7 @@ function mountNavigator(entries: ConversationTurnNavEntry[]) {
           entries={entries}
           currentIndex={0}
           ariaLabel="会话轮次导航"
-          onNavigate={() => undefined}
+          onNavigate={onNavigate}
         />
       </VuiProvider>,
     );
@@ -51,6 +56,7 @@ afterEach(() => {
   });
   root = null;
   container?.remove();
+  vi.restoreAllMocks();
 });
 
 function pointerOver(host: Element) {
@@ -58,6 +64,25 @@ function pointerOver(host: Element) {
 }
 
 describe("ConversationTurnNavigator turn rail hover previews", () => {
+  it("bounds long-session DOM and navigates on the first click", () => {
+    const navigate = vi.fn();
+    mountNavigator(Array.from({ length: 120 }, (_, turnIndex) => navEntry({ turnIndex, userPreviewText: `问题 ${turnIndex}` })), navigate);
+    const buttons = container.querySelectorAll<HTMLButtonElement>("nav button");
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.length).toBeLessThan(40);
+    act(() => { buttons[0].focus(); });
+    act(() => { buttons[0].click(); });
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate.mock.calls[0][0].turnIndex).toBe(0);
+  });
+
+  it("hides short sessions and reserves the left container-query rail", () => {
+    mountNavigator([navEntry()]);
+    expect(container.querySelector("nav")).toBeNull();
+    expect(styles.turnNavigatorRail).toContain("left-3");
+    expect(styles.turnNavigatorRail).toContain("@min-[864px]/conversation:block");
+    expect(styles.turnNavigatorDotMark).toContain("h-0.5 w-3");
+  });
   it("passes turn previews into the hover card and replaces the native title", async () => {
     vi.useFakeTimers();
     mountNavigator([
