@@ -3197,10 +3197,9 @@ def _assistant_turn_header_fields(
             "superseded": "interrupted",
             "paused_limit": "interrupted",
         }.get(str(fallback_status or "").strip().lower(), "completed" if ended_at else "running")
-    header: dict[str, Any] = {
-        "turnState": state,
-        "turnStartedAt": started_at,
-    }
+    header: dict[str, Any] = {"turnState": state}
+    if started_at:
+        header["turnStartedAt"] = started_at
     if ended_at:
         header["turnEndedAt"] = ended_at
     if state != "running":
