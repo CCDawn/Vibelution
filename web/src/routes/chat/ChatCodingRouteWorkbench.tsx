@@ -174,7 +174,9 @@ import {
 import {
   isChildSession,
 } from "../DirectSessionIndexItem";
-import { agentCenterConfigRoute } from "../agentCenterRoutes";
+import { agentCenterConfigRoute, agentCenterMemoryRoute } from "../agentCenterRoutes";
+import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
+import { useFinancialAssistants } from "../finance/useFinancialAssistants";
 import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
 import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
@@ -583,6 +585,7 @@ export function ChatCodingRouteWorkbench() {
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
+  const financialAssistants = useFinancialAssistants();
   const location = useLocation();
   // Committed React Router URL is the single authority for the current Chat selection.
   const {
@@ -3464,6 +3467,24 @@ export function ChatCodingRouteWorkbench() {
                 onClearHistory={handleClearSessionHistory}
                 onDelete={handleDeleteSession}
                 onOpenAgentConfig={openSessionAgentConfig}
+                onOpenReportLibrary={
+                  contextMenuSession && financialAssistants.data?.some((item) =>
+                    item.agentId === contextMenuSession.agentId && item.knowledgeBaseId)
+                    ? (session) => {
+                        const row = financialAssistants.data?.find((item) => item.agentId === session.agentId);
+                        if (!row?.knowledgeBaseId) {
+                          return;
+                        }
+                        setSessionContextMenu(null);
+                        navigate(agentCenterMemoryRoute({
+                          agentId: row.agentId,
+                          knowledgeBaseId: row.knowledgeBaseId,
+                          returnLabel: "chat",
+                          returnTo: `/chat?session=${encodeURIComponent(session.id)}`,
+                        }));
+                      }
+                    : undefined
+                }
                 onRename={beginRenameSession}
                 onDismiss={() => setSessionContextMenu(null)}
               />
@@ -4013,6 +4034,7 @@ export function ChatCodingRouteWorkbench() {
               invalidChildSessionLinkMessage={invalidChildSessionLinkMessage}
               lang={lang}
               loadingSessionLabel={t("loadingSession")}
+              preface={<FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}

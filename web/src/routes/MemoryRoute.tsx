@@ -10,6 +10,8 @@ import {
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
+import { FinancialAssistantStatusNote } from "./finance/FinancialAssistantStatusNote";
+
 import {
   deleteMemoryItem,
   fetchMemoryItemDetail,
@@ -3707,6 +3709,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       ].some((value) => String(value || "").toLowerCase().includes(agentSearch)),
     );
     return (
+      <>
+      <FinancialAssistantStatusNote agentId={selectedAgentMemoryAgentId} lang={lang} />
       <MemoryAgentMemoryPanel
         copy={copy}
         summary={toAgentMemorySummaryView(summary, formatByteCount(summary?.privateByteCount ?? 0))}
@@ -3738,6 +3742,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         onSelectAgent={selectMemoryAgent}
         onSelectItem={setSelectedAgentMemoryItemId}
       />
+      </>
     );
   };
 

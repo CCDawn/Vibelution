@@ -10,15 +10,17 @@ let container: HTMLDivElement;
 let root: Root;
 let navigate: NavigateFunction;
 const selected = vi.fn();
+const openFinance = vi.fn();
 function Harness({ enabled = true }: { enabled?: boolean }) {
   navigate = useNavigate();
   const location = useLocation();
   return <><SpecialistAgentMenu lang="zh" enabled={enabled} className="normal" activeClassName="active"
-    onNavigate={(to) => { selected(to); if (location.pathname !== to) navigate(to); }} />
+    onNavigate={(to) => { selected(to); if (location.pathname !== to) navigate(to); }}
+    onOpenFinance={openFinance} />
     <output>{location.pathname}{location.search}</output></>;
 }
 beforeEach(() => { container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container); });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); selected.mockClear(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); selected.mockClear(); openFinance.mockClear(); });
 async function render(path = "/chat", enabled = true) {
   await act(async () => root.render(<MemoryRouter initialEntries={[path]}><Harness enabled={enabled} /></MemoryRouter>));
 }
@@ -72,7 +74,8 @@ describe("specialist agent menu", () => {
     await pointer(trigger());
     await act(async () => (document.querySelector('[role="menuitem"]') as HTMLElement).click());
     await settle();
-    expect(selected).toHaveBeenCalledWith("/finance");
+    expect(openFinance).toHaveBeenCalledTimes(1);
+    expect(selected).not.toHaveBeenCalled();
     expect(container.querySelector("output")?.textContent).toBe("/finance");
     await pointer(trigger()); await act(async () => navigate("/companions"));
     expect(document.querySelector('[role="menu"]')).toBeNull();
