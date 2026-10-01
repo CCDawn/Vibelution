@@ -18,7 +18,7 @@
  *   pending drafts.
  */
 import type { ConfigEditorMeta } from "../../api/types";
-import { shouldImmediateApplyFieldKind } from "./configApplyModel";
+import { isUiLanguageFieldPath, shouldImmediateApplyFieldKind } from "./configApplyModel";
 
 /** Kinds whose editor buffers raw text in the draft instead of a runtime value. */
 export const RAW_TEXT_EDITOR_KINDS = new Set(["json", "number", "string_list"]);
@@ -295,6 +295,9 @@ export type PendingDraftLeaf = {
 /**
  * 待保存叶子收集（全局保存条计数与非法阻塞的口径）：
  * - 只统计草稿类字段（boolean/select 是即时类，永远不会滞留草稿）；
+ * - ui.language 是专用端点字段（单一写入方，不走草稿），同样永不滞留：
+ *   语言切换后工作区回读会把 committed 换成新语言值，若按普通字段比较，
+ *   未重开的分区草稿会把旧语言误报成「待保存」并折进下一次 apply；
  * - 原始文本 kinds 先按 schema 解析再与 committed 比较，"16000" 与 16000
  *   不会误报为已修改；解析失败的叶子计入 pending 且 valid=false。
  */
@@ -306,7 +309,7 @@ export function collectPendingDraftLeaves(options: {
 }): PendingDraftLeaf[] {
   const { draft, committed, path, metaAt } = options;
   const meta = metaAt(path);
-  if (meta && shouldImmediateApplyFieldKind(meta.kind)) {
+  if (meta && (shouldImmediateApplyFieldKind(meta.kind, path) || isUiLanguageFieldPath(path))) {
     return [];
   }
   if (isPlainRecord(draft) && isPlainRecord(committed)) {

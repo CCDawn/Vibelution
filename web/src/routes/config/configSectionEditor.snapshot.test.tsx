@@ -117,6 +117,7 @@ function serialize(root: Root, container: HTMLElement, uiState: ConfigSectionUiS
       onUiStateChange={vi.fn()}
       onSaveSection={vi.fn().mockResolvedValue(true)}
       onImmediateFieldChange={vi.fn()}
+      onLanguageChange={vi.fn()}
       immediateFieldStatus={{}}
       onAvatarImageUpload={vi.fn()}
       onThemeBackgroundImageUpload={vi.fn()}

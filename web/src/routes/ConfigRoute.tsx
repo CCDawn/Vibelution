@@ -34,6 +34,7 @@ import {
   applyConfigWorkspace,
   openConfigEnvironment,
   previewConfigDraft,
+  updateConfigLanguage,
   uploadConfigAvatarImage,
   uploadConfigThemeBackgroundImage,
 } from "../api/config";
@@ -98,8 +99,10 @@ import { useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
 import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
+  isUiLanguageFieldPath,
   shouldImmediateApplyConfigPath,
   shouldImmediateApplyFieldKind,
+  UI_LANGUAGE_FIELD_PATH,
   type ConfigApplyDraftOverride,
   type ImmediateFieldStatus,
 } from "./config/configApplyModel";
@@ -1317,6 +1320,11 @@ export function ConfigRoute() {
     if (structuredActionsDisabled) {
       return;
     }
+    if (isUiLanguageFieldPath(path)) {
+      // ui.language 单一写入方：语言只走专用端点（handleUiLanguageChange），
+      // 任何流入通用管线的调用在此拒绝（配套后端 apply 守卫保留存量语言）。
+      return;
+    }
     clearImmediateStatusTimer(path);
     setImmediateFieldStatus((current) => ({ ...current, [path]: "waiting" }));
     try {
@@ -1344,6 +1352,53 @@ export function ConfigRoute() {
       }, IMMEDIATE_APPLIED_BADGE_HOLD_MS);
     } catch {
       setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+    }
+  }
+
+  /**
+   * ui.language 专用切换（单一写入方，见 configApplyModel.UI_LANGUAGE_FIELD_PATH）：
+   * 改走 PUT /api/config/language（updateConfigLanguage）即改即生效，
+   * 不经 preview + 整份配置 apply 管线。成功后失效 configPublic 与配置
+   * workspace/draft 查询（AppShell 顶栏 useShellI18n/useAppI18n 随之重取），
+   * 再回读工作区对齐本路由基线，设置页自身文案不重载完成切换；
+   * 行徽标复用 immediateFieldStatus 的 waiting/applied/failed 生命周期。
+   */
+  async function handleUiLanguageChange(next: ConfigLanguage) {
+    if (structuredActionsDisabled) {
+      return;
+    }
+    const path = UI_LANGUAGE_FIELD_PATH;
+    clearImmediateStatusTimer(path);
+    setImmediateFieldStatus((current) => ({ ...current, [path]: "waiting" }));
+    setBusyAction(copy.applying);
+    try {
+      await updateConfigLanguage(next);
+      // configPublic 供 AppShell 级 i18n 消费；configWorkspace 是本路由的
+      // 工作区/draft 读模型（refetchType none：下方显式 refetch 一次拿全）。
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace(), refetchType: "none" }),
+      ]);
+      const fresh = await workspaceQuery.refetch();
+      if (fresh.data) {
+        syncWorkspace(fresh.data);
+      }
+      setImmediateFieldStatus((current) => ({ ...current, [path]: "applied" }));
+      immediateStatusTimersRef.current[path] = window.setTimeout(() => {
+        setImmediateFieldStatus((current) => {
+          if (current[path] !== "applied") {
+            return current;
+          }
+          const nextStatus = { ...current };
+          delete nextStatus[path];
+          return nextStatus;
+        });
+      }, IMMEDIATE_APPLIED_BADGE_HOLD_MS);
+    } catch (error) {
+      markError(error);
+      setImmediateFieldStatus((current) => ({ ...current, [path]: "failed" }));
+    } finally {
+      setBusyAction("");
     }
   }
 
@@ -2040,6 +2095,9 @@ export function ConfigRoute() {
               onUiStateChange={updateSectionUiState}
               onSaveSection={saveConfigSection}
               onImmediateFieldChange={handleImmediateFieldChange}
+              onLanguageChange={(next) => {
+                void handleUiLanguageChange(next);
+              }}
               immediateFieldStatus={immediateFieldStatus}
               onAvatarImageUpload={handleAvatarImageUpload}
               onThemeBackgroundImageUpload={handleThemeBackgroundImageUpload}
