@@ -106,6 +106,9 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute overlayPaneRight right-0",
   overlayPaneToggle:
     "vui-routes-chatcodingroute overlayPaneToggle inline-flex min-h-[var(--vui-control-height-sm)] items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]",
+  sessionListControlsRow:
+    "vui-routes-chatcodingroute sessionListControlsRow flex min-w-0 items-center gap-1 px-2 pb-1",
+  sessionListSortSelect: "vui-routes-chatcodingroute sessionListSortSelect min-w-0 flex-1",
   panelNotice:
     "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelState:

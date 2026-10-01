@@ -26,7 +26,9 @@ from .repository import (
     ConversationRepository,
     ConversationUnitOfWork,
     LAST_PREVIEW_MAX_CHARS,
+    directory_cursor_for_row,
     parse_directory_cursor,
+    parse_directory_cursor_entry,
 )
 from .store import ConversationStore
 from .writer import (
@@ -56,5 +58,7 @@ __all__ = [
     "LegacyChatStateImporter",
     "SqliteWalRuntimeAssessment",
     "assess_sqlite_wal_runtime",
+    "directory_cursor_for_row",
     "parse_directory_cursor",
+    "parse_directory_cursor_entry",
 ]

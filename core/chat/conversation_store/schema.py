@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -329,9 +329,25 @@ _SCHEMA_V4_STATEMENTS = (
 )
 
 
+# Version 5 adds user-facing session list powers: one nullable pin timestamp on
+# the directory row (pinned-first list ordering) plus a supporting index.
+# Transcript search stays outside SQLite: message bodies remain journaled in
+# session workspaces, never in this control plane.
+_SCHEMA_V5_STATEMENTS = (
+    """
+    ALTER TABLE sessions ADD COLUMN pinned_at_ms INTEGER
+    """,
+    """
+    CREATE INDEX idx_sessions_pinned_recency
+    ON sessions(archived_at_ms, hidden_from_index, pinned_at_ms, recency_at_ms DESC, session_id DESC)
+    """,
+)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, statements=_SCHEMA_V1_STATEMENTS),
     Migration(version=2, statements=_SCHEMA_V2_STATEMENTS),
     Migration(version=3, statements=_SCHEMA_V3_STATEMENTS),
     Migration(version=4, statements=_SCHEMA_V4_STATEMENTS),
+    Migration(version=5, statements=_SCHEMA_V5_STATEMENTS),
 )

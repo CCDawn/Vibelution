@@ -20,6 +20,7 @@ import type {
   SessionMessageCurationMutationResponse,
   SessionMessageCurationResponse,
   SessionModelSelection,
+  SessionPinResponse,
   SessionQueryResponse,
   SessionQueuedTurn,
   SessionRewindApplyPayload,
@@ -95,6 +96,20 @@ export type SessionQueryParams = {
   sort?: string;
   teamId?: string;
 };
+
+export function pinChatSession(sessionId: string): Promise<SessionPinResponse> {
+  return fetchJson<SessionPinResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/pin`,
+    { method: "POST" },
+  );
+}
+
+export function unpinChatSession(sessionId: string): Promise<SessionPinResponse> {
+  return fetchJson<SessionPinResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/unpin`,
+    { method: "POST" },
+  );
+}
 
 export function listSessionChildSessions(sessionId: string): Promise<SessionSummary[]> {
   return fetchJson<SessionSummary[]>(

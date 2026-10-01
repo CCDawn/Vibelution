@@ -22,7 +22,9 @@ from core.chat.conversation_store import (
     LegacyChatStateImporter,
     ChatStateImportError,
     assess_sqlite_wal_runtime,
+    directory_cursor_for_row,
     parse_directory_cursor,
+    parse_directory_cursor_entry,
 )
 
 
@@ -314,7 +316,8 @@ def test_existing_schema_v3_store_migrates_to_chat_state_tables(
     migrated = ConversationStore(database_path)
     try:
         metadata = migrated.open()
-        assert metadata["schemaVersion"] == 4
+        # The reopen replays every migration after v3, including the pin column.
+        assert metadata["schemaVersion"] == len(conversation_schema.MIGRATIONS)
         assert migrated.repository.get_chat_state() == {}
         migrated.repository.replace_chat_state(
             {"version": 1, "conversations": [{"conversation_id": "after-upgrade"}]}
@@ -378,7 +381,7 @@ def test_initialize_creates_canonical_schema_and_query_only_readers(
             }
             foreign_keys = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-        assert metadata["schemaVersion"] == 4
+        assert metadata["schemaVersion"] == conversation_schema.SCHEMA_VERSION
         assert metadata["quickCheck"] == "ok"
         assert {
             "agents",
@@ -1019,7 +1022,7 @@ def test_schema_v4_exposes_directory_columns_and_bounded_preview(
     store = _open_store(tmp_path)
     try:
         metadata = store.database.metadata()
-        assert metadata["schemaVersion"] == 4
+        assert metadata["schemaVersion"] == conversation_schema.SCHEMA_VERSION
         revision = _create_agent(store)
         long_preview = "x" * (LAST_PREVIEW_MAX_CHARS + 80)
         store.repository.upsert_directory_session(
@@ -1084,6 +1087,186 @@ def test_directory_list_uses_keyset_cursor_not_offset(
         assert second["nextCursor"] == ""
     finally:
         store.close()
+
+
+def _set_session_recency(store: ConversationStore, recency_by_session_id: dict[str, int]) -> None:
+    writer = store.database.open_writer()
+    try:
+        for session_id, recency in recency_by_session_id.items():
+            writer.execute(
+                "UPDATE sessions SET recency_at_ms=? WHERE session_id=?",
+                (recency, session_id),
+            )
+    finally:
+        writer.close()
+
+
+def test_directory_session_pin_orders_pinned_first_and_pages_without_duplicates(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store)
+        for index in range(5):
+            store.repository.create_session(
+                session_id=f"session-{index}",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                title=f"Session {index}",
+            ).result(timeout=3)
+        # Newest recency first: session-4, session-3, ..., session-0.
+        _set_session_recency(
+            store,
+            {f"session-{index}": 1_000 + index for index in range(5)},
+        )
+        pinned = store.repository.set_session_pinned("session-0", pinned=True).result(timeout=3)
+        assert pinned is not None
+        assert pinned["sessionId"] == "session-0"
+        assert int(pinned["pinnedAtMs"] or 0) > 0
+        # The pinned row leads the default list despite the oldest recency.
+        first_page = store.repository.list_directory_page(agent_id="agent-a", limit=2)
+        assert [row["sessionId"] for row in first_page["rows"]] == [
+            "session-0",
+            "session-4",
+        ]
+        # Full pinned-aware cursor walk: every row exactly once, pinned first.
+        visited: list[str] = []
+        cursor = ""
+        for _ in range(6):
+            page = store.repository.list_directory_page(
+                agent_id="agent-a",
+                limit=2,
+                before=parse_directory_cursor_entry(cursor) if cursor else None,
+            )
+            visited.extend(str(row["sessionId"]) for row in page["rows"])
+            cursor = str(page.get("nextCursor") or "")
+            if not cursor:
+                break
+        assert visited == ["session-0", "session-4", "session-3", "session-2", "session-1"]
+    finally:
+        store.close()
+
+
+def test_directory_session_pin_order_follows_pinned_at_ms_and_unpin_restores(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store)
+        for index in range(3):
+            store.repository.create_session(
+                session_id=f"session-{index}",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                title=f"Session {index}",
+            ).result(timeout=3)
+        _set_session_recency(
+            store,
+            {f"session-{index}": 1_000 + index for index in range(3)},
+        )
+        assert store.repository.set_session_pinned("session-0", pinned=True).result(timeout=3)
+        # Pin session-1 earlier than session-0: session-0 must stay on top.
+        writer = store.database.open_writer()
+        try:
+            writer.execute(
+                "UPDATE sessions SET pinned_at_ms=? WHERE session_id=?",
+                (100, "session-1"),
+            )
+        finally:
+            writer.close()
+        page = store.repository.list_directory_page(agent_id="agent-a", limit=3)
+        assert [row["sessionId"] for row in page["rows"]] == [
+            "session-0",
+            "session-1",
+            "session-2",
+        ]
+        unpinned = store.repository.set_session_pinned("session-0", pinned=False).result(timeout=3)
+        assert unpinned is not None
+        assert unpinned["pinnedAtMs"] is None
+        page = store.repository.list_directory_page(agent_id="agent-a", limit=3)
+        # session-1 stays pinned (earliest pin), then recency order resumes.
+        assert [row["sessionId"] for row in page["rows"]] == [
+            "session-1",
+            "session-2",
+            "session-0",
+        ]
+        assert store.repository.get_session("session-1") is not None
+        assert store.repository.get_session("session-1")["pinnedAtMs"] == 100
+    finally:
+        store.close()
+
+
+def test_directory_cursor_entry_parses_pinned_and_legacy_shapes():
+    assert parse_directory_cursor_entry("123:session-a") == (123, "session-a", None)
+    assert parse_directory_cursor_entry("p55:123:session-a") == (123, "session-a", 55)
+    assert parse_directory_cursor_entry("") is None
+    assert parse_directory_cursor_entry("garbage") is None
+    assert parse_directory_cursor_entry("pX:123:session-a") is None
+    assert parse_directory_cursor_entry("p-1:123:session-a") is None
+    assert directory_cursor_for_row({"recencyAtMs": 7, "sessionId": "s1"}) == "7:s1"
+    assert directory_cursor_for_row(
+        {"recencyAtMs": 7, "sessionId": "s1", "pinnedAtMs": 99}
+    ) == "p99:7:s1"
+
+
+def test_set_session_pinned_requires_existing_session(
+    tmp_path: Path,
+    safe_sqlite_runtime: None,
+):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store)
+        store.repository.create_session(
+            session_id="session-1",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Session 1",
+        ).result(timeout=3)
+        assert store.repository.set_session_pinned("missing", pinned=True).result(timeout=3) is None
+        pinned = store.repository.set_session_pinned("session-1", pinned=True).result(timeout=3)
+        assert pinned is not None and pinned["action"] == "pinned"
+    finally:
+        store.close()
+
+
+def test_existing_schema_v4_store_migrates_to_pin_column(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    database_path = tmp_path / "conversations.sqlite3"
+    with monkeypatch.context() as migration_patch:
+        migration_patch.setattr(
+            conversation_database,
+            "MIGRATIONS",
+            conversation_schema.MIGRATIONS[:4],
+        )
+        migration_patch.setattr(conversation_database, "SCHEMA_VERSION", 4)
+        v4_store = ConversationStore(database_path)
+        try:
+            assert v4_store.open()["schemaVersion"] == 4
+            revision = _create_agent(v4_store)
+            v4_store.repository.create_session(
+                session_id="session-v4",
+                agent_id="agent-a",
+                agent_config_revision_id=revision,
+                title="V4 session",
+            ).result(timeout=3)
+        finally:
+            v4_store.close()
+
+    migrated = ConversationStore(database_path)
+    try:
+        metadata = migrated.open()
+        assert metadata["schemaVersion"] == 5
+        row = migrated.repository.get_session("session-v4")
+        assert row is not None
+        assert row["pinnedAtMs"] is None
+        pinned = migrated.repository.set_session_pinned("session-v4", pinned=True).result(timeout=3)
+        assert pinned is not None and int(pinned["pinnedAtMs"] or 0) > 0
+    finally:
+        migrated.close()
 
 # ---------------------------------------------------------------------------
 # 会话删除单事务：archive_session_and_replace_chat_state

@@ -1737,7 +1737,16 @@ def _normalize_session_kind(value: Any) -> str:
 def _normalize_session_query_sort(value: str) -> str:
     s = _service()
     normalized = str(value or "").strip()
-    return normalized if normalized in {"updatedAt_desc", "updatedAt_asc", "title_asc", "title_desc"} else "updatedAt_desc"
+    if normalized in {
+        "updatedAt_desc",
+        "updatedAt_asc",
+        "createdAt_desc",
+        "createdAt_asc",
+        "title_asc",
+        "title_desc",
+    }:
+        return normalized
+    return "updatedAt_desc"
 
 
 def _normalize_session_runtime_notice(value: Any, *, index: int = 0) -> dict[str, Any] | None:
@@ -2187,8 +2196,11 @@ def _session_ledger_sequence(session_id: str) -> int:
 
 def _session_query_sort_key(sort: str):
     s = _service()
-    if sort.startswith("title"):
+    normalized = str(sort or "").strip()
+    if normalized.startswith("title"):
         return lambda item: str(item.get("title") or "").strip().lower()
+    if normalized.startswith("createdAt"):
+        return lambda item: s._timestamp_sort_key(item.get("createdAt") or item.get("updatedAt") or item.get("lastActive") or "")
     return lambda item: s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or "")
 
 
