@@ -1168,6 +1168,14 @@ backToBottomButton:
     "vui-components-conversationview slashCommandBuiltinBadge ml-auto shrink-0 rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-line),var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_var(--vui-alpha-wash),transparent)] px-1.5 py-px text-vui-xs leading-none text-[var(--accent-cool)]",
   slashCommandSuggestions:
     "vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-hairline)]",
+  // ZCode panel sections: quiet group headers between builtins and skills.
+  slashCommandSection:
+    "vui-components-conversationview slashCommandSection min-w-0",
+  slashCommandSectionHeader:
+    "vui-components-conversationview slashCommandSectionHeader px-2 pb-0.5 pt-1.5 text-vui-xs font-medium uppercase tracking-wide text-[var(--fg-tertiary)]",
+  // Catalog health line (loading/error/empty) under the sections.
+  slashCommandCatalogNotice:
+    "vui-components-conversationview slashCommandCatalogNotice px-2 py-1.5 text-vui-xs text-[var(--fg-tertiary)]",
   statusSpinner:
     "vui-components-conversationview statusSpinner min-w-0 animate-spin",
   stopButton:

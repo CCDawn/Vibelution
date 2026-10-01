@@ -278,6 +278,16 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     staleTime: 60_000,
   });
   const slashCommandSuggestions = skillsQuery.data?.skills ?? [];
+  /**
+   * Slash panel catalog state (ZCode slashCommandPanelSections parity): the
+   * panel renders loading/error placeholders for the skills section instead of
+   * silently showing an empty list when the skill library query fails.
+   */
+  const slashSkillsCatalogState: "ready" | "loading" | "error" = skillsQuery.isError
+    ? "error"
+    : skillsQuery.isPending
+      ? "loading"
+      : "ready";
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
     queryFn: () => listChatRoomModes(),
@@ -343,6 +353,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     agentsQuery,
     skillsQuery,
     slashCommandSuggestions,
+    slashSkillsCatalogState,
     chatRoomModesQuery,
     chatRoomPurposesQuery,
     activeGroupRoomQuery,

@@ -126,8 +126,10 @@ import {
 } from "./ConversationSlashCommandChip";
 import {
   insertSlashCommandSuggestion,
+  groupSlashCommandSuggestionsBySection,
   mergeSlashCommandSuggestions,
   moveSlashCommandActiveIndex,
+  shouldShowSlashCommandSuggestions,
   type BuiltinSlashCommand,
   type BuiltinSlashCommandId,
   type SlashCommandSuggestion,
@@ -1136,6 +1138,7 @@ export const ConversationView = React.memo(function ConversationView({
   composerAttachments = [],
   composerReferences = [],
   slashCommandSuggestions = [],
+  slashSkillsCatalogState = "ready",
   composerReferenceOptions = [],
   composerAttachmentInputDisabled,
   composerLeadingControl,
@@ -1624,7 +1627,10 @@ export const ConversationView = React.memo(function ConversationView({
   }, [composerValue]);
   const showSlashSuggestions = !composerDisabled
     && slashDismissedAtValue !== composerValue
-    && slashSuggestions.length > 0;
+    && (slashSuggestions.length > 0
+      // ZCode panel parity: a still-loading or failed skill catalog must not
+      // read as silence — the panel opens to say so instead of staying shut.
+      || (shouldShowSlashCommandSuggestions(composerValue) && slashSkillsCatalogState !== "ready"));
   const activeSlashIndex = showSlashSuggestions
     ? (slashActiveIndex >= 0 && slashActiveIndex < slashSuggestions.length ? slashActiveIndex : 0)
     : -1;
@@ -7119,49 +7125,92 @@ export const ConversationView = React.memo(function ConversationView({
               aria-label={lang === "zh" ? "斜杠指令" : "Slash commands"}
               className={styles.slashCommandSuggestions}
             >
-              {slashSuggestions.map((suggestion, index) => (
-                <div
-                  id={`${slashSuggestionListId}-option-${index}`}
-                  key={suggestion.key}
-                  role="option"
-                  aria-selected={index === activeSlashIndex}
-                  aria-label={suggestion.command}
-                  className={styles.slashCommandSuggestionOption}
-                  data-active={index === activeSlashIndex ? "true" : "false"}
-                >
-                  <VButton
-                    type="button"
-                    className={
-                      index === activeSlashIndex
-                        ? `${styles.slashCommandSuggestionButton} ${styles.slashCommandSuggestionButtonActive}`
-                        : styles.slashCommandSuggestionButton
-                    }
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => handleSlashCommandSuggestion(suggestion)}
-                  >
-                    {suggestion.builtin ? (
-                      <span className={styles.slashCommandSuggestionIcon} aria-hidden="true">
-                        {suggestion.builtinId === "new_session" ? (
-                          <CirclePlus size={13} />
-                        ) : suggestion.builtinId === "model" ? (
-                          <Cpu size={13} />
-                        ) : (
-                          <Gauge size={13} />
-                        )}
-                      </span>
+              {/* ZCode panel sections: two labeled groups (builtins vs skills);
+                  ArrowUp/Down and the active index stay flat over the merged
+                  ranked list, so option ids keep their flat positions. */}
+              {(() => {
+                let flatIndex = -1;
+                const sections = groupSlashCommandSuggestionsBySection(slashSuggestions);
+                return (
+                  <>
+                    {sections.map((section) => (
+                      <div
+                        key={section.id}
+                        role="group"
+                        aria-label={section.id === "commands" ? t("slashPanelCommandsSection") : t("slashPanelSkillsSection")}
+                        className={styles.slashCommandSection}
+                        data-slash-section={section.id}
+                      >
+                        <div className={styles.slashCommandSectionHeader} aria-hidden="true">
+                          {section.id === "commands" ? t("slashPanelCommandsSection") : t("slashPanelSkillsSection")}
+                        </div>
+                        {section.suggestions.map((suggestion) => {
+                          flatIndex += 1;
+                          const index = flatIndex;
+                          return (
+                            <div
+                              id={`${slashSuggestionListId}-option-${index}`}
+                              key={suggestion.key}
+                              role="option"
+                              aria-selected={index === activeSlashIndex}
+                              aria-label={suggestion.command}
+                              className={styles.slashCommandSuggestionOption}
+                              data-active={index === activeSlashIndex ? "true" : "false"}
+                            >
+                              <VButton
+                                type="button"
+                                className={
+                                  index === activeSlashIndex
+                                    ? `${styles.slashCommandSuggestionButton} ${styles.slashCommandSuggestionButtonActive}`
+                                    : styles.slashCommandSuggestionButton
+                                }
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => handleSlashCommandSuggestion(suggestion)}
+                              >
+                                {suggestion.builtin ? (
+                                  <span className={styles.slashCommandSuggestionIcon} aria-hidden="true">
+                                    {suggestion.builtinId === "new_session" ? (
+                                      <CirclePlus size={13} />
+                                    ) : suggestion.builtinId === "model" ? (
+                                      <Cpu size={13} />
+                                    ) : (
+                                      <Gauge size={13} />
+                                    )}
+                                  </span>
+                                ) : null}
+                                <code className={styles.slashCommandSuggestionCode}>
+                                  {suggestion.command}
+                                </code>
+                                <span className={styles.slashCommandSuggestionDescription}>{suggestion.description}</span>
+                                {suggestion.builtin ? (
+                                  <span className={styles.slashCommandBuiltinBadge} data-vui="slash-builtin-badge">
+                                    {t("slashBuiltinBadge")}
+                                  </span>
+                                ) : null}
+                              </VButton>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                    {/* Skills catalog health: a failed or still-loading library
+                        must not read as "no skills" — the section says so. */}
+                    {slashSkillsCatalogState === "loading" ? (
+                      <div className={styles.slashCommandCatalogNotice} data-slash-catalog-state="loading">
+                        {t("slashSkillsCatalogLoading")}
+                      </div>
+                    ) : slashSkillsCatalogState === "error" ? (
+                      <div className={styles.slashCommandCatalogNotice} data-slash-catalog-state="error" role="status">
+                        {t("slashSkillsCatalogError")}
+                      </div>
+                    ) : slashCommandSuggestions.length === 0 ? (
+                      <div className={styles.slashCommandCatalogNotice} data-slash-catalog-state="empty">
+                        {t("slashSkillsCatalogEmpty")}
+                      </div>
                     ) : null}
-                    <code className={styles.slashCommandSuggestionCode}>
-                      {suggestion.command}
-                    </code>
-                    <span className={styles.slashCommandSuggestionDescription}>{suggestion.description}</span>
-                    {suggestion.builtin ? (
-                      <span className={styles.slashCommandBuiltinBadge} data-vui="slash-builtin-badge">
-                        {t("slashBuiltinBadge")}
-                      </span>
-                    ) : null}
-                  </VButton>
-                </div>
-              ))}
+                  </>
+                );
+              })()}
             </div>
           ) : null}
           {showReferenceSuggestions ? (

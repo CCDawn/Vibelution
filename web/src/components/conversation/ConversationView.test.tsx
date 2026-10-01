@@ -141,6 +141,7 @@ function renderConversation(
       description?: string;
       aliases?: string[];
     }>;
+    slashSkillsCatalogState?: "ready" | "loading" | "error";
     configWorkspace?: {
       modelOptions: Array<{ model_id: string; label: string }>;
     };
@@ -198,6 +199,7 @@ function renderConversation(
         onRetryComposerAttachmentUploads={options.onRetryComposerAttachmentUploads}
         composerReferences={options.composerReferences}
         slashCommandSuggestions={options.slashCommandSuggestions}
+        slashSkillsCatalogState={options.slashSkillsCatalogState}
         nextStateSignals={options.nextStateSignals}
         userAvatarPreset={options.userAvatarPreset}
         userAvatarImageUrl={options.userAvatarImageUrl}
@@ -1472,6 +1474,59 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     expect(html).toContain('aria-autocomplete="list"');
     expect(html).toContain('id="conversation-session-1-slash-suggestions-option-0"');
     expect(html).toContain('role="option"');
+  });
+
+  it("splits the slash panel into labeled Commands/Skills sections and flags catalog health", () => {
+    const html = renderConversation([], {
+      composerValue: "/",
+      onOpenComposerContextDetail: () => undefined,
+      slashCommandSuggestions: [
+        {
+          directoryName: "ccdawn-brt",
+          name: "BRT",
+          command: "/brt",
+          description: "Intent routing",
+        },
+      ],
+    });
+
+    // Two labeled sections; option ids stay flat (0 = commands entry).
+    expect(html).toContain('data-slash-section="commands"');
+    expect(html).toContain('data-slash-section="skills"');
+    expect(html).toContain('aria-label="指令"');
+    expect(html).toContain('aria-label="技能"');
+    expect(html).toContain('id="conversation-session-1-slash-suggestions-option-0"');
+    expect(html).toContain('id="conversation-session-1-slash-suggestions-option-1"');
+    // Healthy catalog with skills present: no catalog notice line.
+    expect(html).not.toContain('data-slash-catalog-state');
+
+    // Ready + empty catalog: the panel opens only when builtin commands exist,
+    // and then the skills section's absence is stated instead of silent.
+    const emptyHtml = renderConversation([], {
+      composerValue: "/",
+      onOpenComposerContextDetail: () => undefined,
+      slashCommandSuggestions: [],
+      slashSkillsCatalogState: "ready",
+    });
+    expect(emptyHtml).toContain('data-slash-section="commands"');
+    expect(emptyHtml).toContain('data-slash-catalog-state="empty"');
+    expect(emptyHtml).toContain("暂无可用技能");
+
+    const loadingHtml = renderConversation([], {
+      composerValue: "/",
+      slashCommandSuggestions: [],
+      slashSkillsCatalogState: "loading",
+    });
+    expect(loadingHtml).toContain('data-slash-catalog-state="loading"');
+    expect(loadingHtml).toContain("技能目录加载中");
+
+    const errorHtml = renderConversation([], {
+      composerValue: "/",
+      slashCommandSuggestions: [],
+      slashSkillsCatalogState: "error",
+    });
+    expect(errorHtml).toContain('data-slash-catalog-state="error"');
+    expect(errorHtml).toContain("技能目录加载失败");
   });
 
   it("uses the configured user avatar preset for user turns", () => {
