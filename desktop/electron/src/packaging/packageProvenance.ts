@@ -8,6 +8,9 @@ export type DesktopPackageProvenanceInput = {
   sourceCommit: string;
   electronTreeHash: string;
   frontendTreeHash: string;
+  frontendContentSha256: string;
+  frontendBuildKey: string;
+  frontendSourceCommit: string;
   mainBundleSha256: string;
   preloadBundleSha256: string;
   builtAt: string;
@@ -23,6 +26,11 @@ export function createDesktopPackageProvenance(input: DesktopPackageProvenanceIn
   assertGitObjectHash("sourceCommit", input.sourceCommit);
   assertGitObjectHash("electronTreeHash", input.electronTreeHash);
   assertGitObjectHash("frontendTreeHash", input.frontendTreeHash);
+  assertGitObjectHash("frontendSourceCommit", input.frontendSourceCommit);
+  assertSha256("frontendContentSha256", input.frontendContentSha256);
+  if (!/^[0-9a-f]{64}$/i.test(input.frontendBuildKey)) {
+    throw new Error("frontendBuildKey must be a SHA-256 build key");
+  }
   assertSha256("mainBundleSha256", input.mainBundleSha256);
   assertSha256("preloadBundleSha256", input.preloadBundleSha256);
   if (Number.isNaN(Date.parse(input.builtAt))) {

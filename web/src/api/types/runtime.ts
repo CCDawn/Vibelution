@@ -1222,6 +1222,10 @@ export type LauncherFreshness = {
   shellStale?: boolean;
   shellReason?: string;
   updateAvailable?: boolean;
+  activeWorkState?: "idle" | "active" | "unknown";
+  activeWorkCount?: number;
+  updateInProgress?: boolean;
+  refreshError?: string;
 };
 
 export type WorkbenchWindowModeUpdateResponse = {

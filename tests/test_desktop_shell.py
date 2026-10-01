@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import types
@@ -18,6 +19,48 @@ from core.launcher import desktop_shell
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 
+def _write_frontend_release(root: Path, *, frontend_tree: str = "d" * 40) -> Path:
+    build_key = "e" * 64
+    release = root / "web" / ".vibelution-builds" / "release-current"
+    (release / "assets").mkdir(parents=True)
+    (release / "index.html").write_text("<main>launcher</main>\n", encoding="utf-8")
+    (release / "assets" / "launcher.js").write_text("export const launcher = true;\n", encoding="utf-8")
+    metadata = {
+        "schemaVersion": 2,
+        "buildKey": build_key,
+        "frontendTree": frontend_tree,
+        "sourceCommit": "f" * 40,
+    }
+    (release / ".vibelution-build.json").write_text(json.dumps(metadata), encoding="utf-8")
+    (release.parent / "active.json").write_text(
+        json.dumps({"release": release.name, "buildKey": build_key}), encoding="utf-8"
+    )
+    return release
+
+
+def _copy_frontend_release(source: Path, target: Path) -> None:
+    for path in source.rglob("*"):
+        if path.is_file():
+            output = target / path.relative_to(source)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, output)
+
+
+def _mock_frontend_inspection(monkeypatch, root: Path, *, current: bool = True, release: Path | None = None) -> None:
+    active = release or (root / "web" / ".vibelution-builds" / "release-current")
+    metadata = json.loads((active / ".vibelution-build.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_frontend_build",
+        lambda project_root: {
+            "current": current,
+            "dist": str(active),
+            "provenance": metadata,
+            "buildInputs": {"frontendTree": metadata["frontendTree"]},
+        },
+    )
+
+
 def _write_packaged_shell(root: Path, *, tree_hash: str, asar_mtime: float | None = None) -> None:
     exe = desktop_shell.packaged_desktop_exe(root)
     asar = desktop_shell.packaged_asar_path(root)
@@ -25,10 +68,18 @@ def _write_packaged_shell(root: Path, *, tree_hash: str, asar_mtime: float | Non
     provenance.parent.mkdir(parents=True)
     exe.write_bytes(b"mz")
     asar.write_bytes(b"asar")
-    provenance.write_text(
-        json.dumps({"electronTreeHash": tree_hash, "schemaVersion": 1}),
-        encoding="utf-8",
-    )
+    frontend_release = _write_frontend_release(root)
+    packaged_frontend = desktop_shell.packaged_frontend_dist(root)
+    _copy_frontend_release(frontend_release, packaged_frontend)
+    provenance.write_text(json.dumps({
+        "electronTreeHash": tree_hash,
+        "frontendTreeHash": "d" * 40,
+        "frontendContentSha256": desktop_shell._frontend_directory_content_sha256(packaged_frontend),
+        "frontendBuildKey": "e" * 64,
+        "frontendSourceCommit": "f" * 40,
+        "sourceCommit": "a" * 40,
+        "schemaVersion": 1,
+    }), encoding="utf-8")
     src = root / "desktop" / "electron" / "src"
     src.mkdir(parents=True)
     source_file = src / "main.ts"
@@ -47,32 +98,139 @@ def test_inspect_desktop_shell_missing_package_is_stale(tmp_path, monkeypatch):
     assert status["reason"] == "missing_package"
 
 
+def test_frontend_directory_digest_uses_shared_path_and_byte_sha256_format(tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "app.js").write_bytes(b"export{};\n")
+    (tmp_path / "index.html").write_bytes(b"<main>v</main>\n")
+
+    assert desktop_shell._frontend_directory_content_sha256(tmp_path) == (
+        "62e27c13de01ec035463d06ba40958d43b95919fcc7927dedab721b91998100b"
+    )
+
+
 def test_inspect_desktop_shell_provenance_mismatch_is_stale(tmp_path, monkeypatch):
     _write_packaged_shell(tmp_path, tree_hash="b" * 40)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: "a" * 40)
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is True
     assert status["reason"] == "provenance_mismatch"
 
 
+def test_inspect_desktop_shell_missing_current_electron_tree_is_not_current(tmp_path, monkeypatch):
+    _write_packaged_shell(tmp_path, tree_hash="a" * 40, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        desktop_shell,
+        "_git_tree_hash",
+        lambda root, spec: "" if spec == "HEAD:desktop/electron" else "a" * 40,
+    )
+
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+
+    assert status["stale"] is True
+    assert status["reason"] == "current_electron_tree_unavailable"
+
+
 def test_inspect_desktop_shell_current_when_hashes_match(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is False
     assert status["reason"] == "current"
+    assert status["packagedSourceCommit"] == "a" * 40
+    assert status["currentCommit"] == tree
+    assert status["packagedFrontendContentSha256"] == status["expectedFrontendContentSha256"]
 
 
 def test_inspect_desktop_shell_source_newer_than_asar(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=1_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
     newer = tmp_path / "desktop" / "electron" / "src" / "main.ts"
     newer.write_text("export const next = 1;\n", encoding="utf-8")
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is True
     assert status["reason"] == "source_newer_than_asar"
+
+
+def test_inspect_desktop_shell_package_frontend_bytes_must_match_provenance(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    (desktop_shell.packaged_frontend_dist(tmp_path) / "index.html").write_text("<main>tampered</main>\n", encoding="utf-8")
+
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+
+    assert status["stale"] is True
+    assert status["reason"] == "frontend_package_content_mismatch"
+
+
+def test_inspect_desktop_shell_requires_current_frontend_build_inputs(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path, current=False)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+
+    assert status["stale"] is True
+    assert status["reason"] == "frontend_source_stale"
+
+
+def test_inspect_desktop_shell_missing_current_frontend_tree_is_not_current(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_frontend_build",
+        lambda project_root: {
+            "current": True,
+            "dist": str(tmp_path / "web" / ".vibelution-builds" / "release-current"),
+            "provenance": {},
+            "buildInputs": {},
+        },
+    )
+
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+
+    assert status["stale"] is True
+    assert status["reason"] == "current_frontend_tree_unavailable"
+
+
+def test_inspect_desktop_shell_compares_package_to_latest_active_frontend_bytes(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    release = tmp_path / "web" / ".vibelution-builds" / "release-current"
+    _mock_frontend_inspection(monkeypatch, tmp_path, release=release)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    (release / "index.html").write_bytes(b"<main>new active frontend</main>\n")
+
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+
+    assert status["stale"] is True
+    assert status["reason"] == "frontend_release_mismatch"
+
+
+def test_inspect_desktop_shell_requires_packaged_frontend_content_proof(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    provenance_path = desktop_shell.packaged_provenance_path(tmp_path)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance.pop("frontendContentSha256")
+    provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+
+    assert status["stale"] is True
+    assert status["reason"] == "missing_frontend_provenance"
 
 
 def test_refresh_lock_reclaims_dead_holder_without_unlink_race(tmp_path, monkeypatch):

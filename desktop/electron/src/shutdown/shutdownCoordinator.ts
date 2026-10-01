@@ -170,6 +170,10 @@ export async function fetchLauncherActiveWorkStatus(input: {
     throw new Error(`launcher active-work status request failed: ${response.status}`);
   }
   const payload = (await response.json()) as Record<string, unknown>;
+  return activeWorkStatusFromLauncherStatus(payload);
+}
+
+export function activeWorkStatusFromLauncherStatus(payload: Record<string, unknown>): ActiveWorkStatus {
   const activeWorkCount = readActiveWorkCount(payload);
   if (activeWorkCount === null) {
     return {

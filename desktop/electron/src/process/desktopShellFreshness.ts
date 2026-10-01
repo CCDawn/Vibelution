@@ -19,6 +19,8 @@ export type DesktopShellStatus = {
   reason: string;
   packagedElectronTree?: string;
   currentElectronTree?: string;
+  packagedSourceCommit?: string;
+  currentCommit?: string;
   packagedExe?: string;
   sourceNewerThanAsar?: boolean;
   refreshBlocked?: boolean;
@@ -159,6 +161,8 @@ export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
     reason: String(parsed.reason || ""),
     ...(typeof parsed.packagedElectronTree === "string" ? { packagedElectronTree: parsed.packagedElectronTree } : {}),
     ...(typeof parsed.currentElectronTree === "string" ? { currentElectronTree: parsed.currentElectronTree } : {}),
+    ...(typeof parsed.packagedSourceCommit === "string" ? { packagedSourceCommit: parsed.packagedSourceCommit } : {}),
+    ...(typeof parsed.currentCommit === "string" ? { currentCommit: parsed.currentCommit } : {}),
     ...(typeof parsed.packagedExe === "string" ? { packagedExe: parsed.packagedExe } : {}),
     ...(typeof parsed.sourceNewerThanAsar === "boolean" ? { sourceNewerThanAsar: parsed.sourceNewerThanAsar } : {}),
     ...(typeof parsed.refreshBlocked === "boolean" ? { refreshBlocked: parsed.refreshBlocked } : {}),
