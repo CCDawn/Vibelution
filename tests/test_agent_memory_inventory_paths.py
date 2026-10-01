@@ -124,3 +124,41 @@ def test_empty_inventory_does_not_resolve_workspace_roots(inventory_paths):
 
     assert memory_service.get_agent_memory_inventory()["agents"] == []
     assert calls["formal"] == calls["active"] == calls["relative_root"] == 0
+
+
+@pytest.mark.parametrize("agent_id", ["", "missing"])
+def test_inventory_phase_timings_preserve_payload_and_measure_skipped_work(inventory_paths, monkeypatch, agent_id):
+    _, _, agents, _ = inventory_paths
+    now = [0.0]
+    monkeypatch.setattr(memory_service.time, "perf_counter", lambda: now[0])
+    monkeypatch.setattr(memory_service, "_now_iso", lambda: "2026-10-01T00:00:00Z")
+
+    def list_agents(**kwargs):
+        now[0] += 2.0
+        return agents
+
+    path_context = memory_service._agent_memory_path_context
+    inventory_entry = memory_service._agent_memory_inventory_entry
+
+    def timed_path_context(root):
+        now[0] += 0.5
+        return path_context(root)
+
+    def timed_inventory_entry(*args, **kwargs):
+        now[0] += 1.5
+        return inventory_entry(*args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "list_agents", list_agents)
+    monkeypatch.setattr(memory_service, "_agent_memory_path_context", timed_path_context)
+    monkeypatch.setattr(memory_service, "_agent_memory_inventory_entry", timed_inventory_entry)
+    baseline = memory_service.get_agent_memory_inventory(agent_id=agent_id)
+    phases = {"directory": -1.0, "paths": -1.0, "scan": -1.0, "total": -1.0}
+    measured = memory_service.get_agent_memory_inventory(agent_id=agent_id, phase_timings=phases)
+
+    assert measured == baseline
+    assert "phase_timings" not in measured
+    assert phases == (
+        {"directory": 2000.0, "paths": 500.0, "scan": 3000.0, "total": 5500.0}
+        if not agent_id
+        else {"directory": 2000.0, "paths": 0.0, "scan": 0.0, "total": 2000.0}
+    )

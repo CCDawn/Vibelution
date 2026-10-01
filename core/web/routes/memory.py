@@ -114,9 +114,24 @@ def memory_github_projects_write(payload: GithubProjectLibraryWritePayload) -> d
     "/memory/agents",
     response_model=MemoryRouteResponse,
     response_model_exclude_unset=True,
+    responses={
+        200: {
+            "headers": {
+                "Server-Timing": {
+                    "description": "Memory inventory service phases in milliseconds; excludes HTTP scheduling and serialization.",
+                    "schema": {"type": "string"},
+                }
+            }
+        }
+    },
 )
-def memory_agents(agentId: str = "", includeContent: bool = False) -> dict:
-    return get_agent_memory_inventory(agent_id=agentId, include_content=includeContent)
+def memory_agents(response: Response, agentId: str = "", includeContent: bool = False) -> dict:
+    phases: dict[str, float] = {}
+    payload = get_agent_memory_inventory(agent_id=agentId, include_content=includeContent, phase_timings=phases)
+    response.headers["Server-Timing"] = ", ".join(
+        f"memory-{phase};dur={phases[phase]:.1f}" for phase in ("directory", "paths", "scan", "total")
+    )
+    return payload
 
 
 @router.get(

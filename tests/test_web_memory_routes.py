@@ -979,6 +979,30 @@ def test_agent_memory_inventory_reuses_agent_summary_for_formal_knowledge(tmp_pa
     assert get_agent_calls == []
 
 
+def test_agent_memory_inventory_reports_only_duration_headers_without_changing_body(monkeypatch):
+    payload = {"schemaVersion": 1, "agents": [], "summary": {"agentCount": 0}}
+    calls = []
+
+    def inventory(*, agent_id, include_content, phase_timings):
+        calls.append((agent_id, include_content))
+        phase_timings.update(directory=10.0, paths=1.0, scan=2.0, total=14.0)
+        phase_timings["private-owner"] = 123.0
+        return payload
+
+    monkeypatch.setattr(memory_routes, "get_agent_memory_inventory", inventory)
+    response = client.get("/api/memory/agents?agentId=selected-agent&includeContent=false")
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert response.headers["Server-Timing"] == (
+        "memory-directory;dur=10.0, memory-paths;dur=1.0, memory-scan;dur=2.0, memory-total;dur=14.0"
+    )
+    assert calls == [("selected-agent", False)]
+    operation = client.app.openapi()["paths"]["/api/memory/agents"]["get"]
+    assert {parameter["name"] for parameter in operation["parameters"]} == {"agentId", "includeContent"}
+    assert "Server-Timing" in operation["responses"]["200"]["headers"]
+
+
 def test_agent_memory_inventory_unknown_agent_returns_404(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
