@@ -23,6 +23,10 @@ export type ChatConversationComposerBridgeLabels = {
   loadingSession: string;
   messageInputPlaceholder: string;
   saveAndRerunMessage: string;
+  /** ZCode followUpQueue state: empty queue, the draft will queue behind the running turn. */
+  sessionBusyQueuePlaceholder: string;
+  /** ZCode followUpQueue state: items already queued, further input appends. */
+  sessionBusyQueuedPlaceholder: string;
 };
 
 export type ChatConversationComposerBridgeInput = {
@@ -158,10 +162,16 @@ export function buildConversationComposerBridgeState(
       ? input.sessionStopping || input.stopPending
       : input.submitPending || (!hasDraftContent && !hasAttachments && !hasReferences)
   );
+  // ZCode chatPlaceholder tri-state parity: while a turn runs the composer
+  // always names the queueing semantics instead of going blank — the empty
+  // queue shows the plain "queues and sends after this turn" hint, and once
+  // items are queued the placeholder flips to the append hint.
   const placeholder = !hasSession
     ? input.labels.loadingSession
     : input.sessionBusy && !input.sessionStopping
-      ? ""
+      ? (input.followupQueue?.length
+        ? input.labels.sessionBusyQueuedPlaceholder
+        : input.labels.sessionBusyQueuePlaceholder)
       : isEditingMessage
         ? input.labels.editMessagePlaceholder
         : input.labels.messageInputPlaceholder;

@@ -72,6 +72,41 @@ export function resolveComposerPrimaryActionFlags(input: {
   };
 }
 
+export type ComposerEnterDelivery = "none" | "send" | "queue" | "steer";
+
+/**
+ * ZCode followupModeSettings.resolveOppositeFollowupDelivery parity (claim:
+ * composer action state). While a turn runs, bare Enter queues the draft and
+ * Ctrl/⌘+Enter flips the delivery to immediate (steer the draft into the
+ * running turn via the existing safe-guidance channel). When the immediate
+ * channel cannot carry the payload (no handler, or attachments/references
+ * riding the draft) the flip falls back to queueing instead of dropping the
+ * message. Idle behavior is unchanged: bare Enter sends, modifier Enter stays
+ * unbound. Pure: no React / DOM.
+ */
+export function resolveComposerEnterDelivery(input: {
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  isComposing: boolean;
+  actionMode: ComposerActionMode;
+  canDeliverImmediately: boolean;
+}): ComposerEnterDelivery {
+  if (input.isComposing || input.key !== "Enter" || input.shiftKey || input.altKey) {
+    return "none";
+  }
+  const modifierFlip = input.ctrlKey || input.metaKey;
+  if (input.actionMode === "stop") {
+    if (!modifierFlip) {
+      return "queue";
+    }
+    return input.canDeliverImmediately ? "steer" : "queue";
+  }
+  return modifierFlip ? "none" : "send";
+}
+
 /**
  * Fallback Esc→stop yield decision (claim: composer action state). The composer
  * keydown handler consumes Escape for ghost dismiss, slash suggestions, and

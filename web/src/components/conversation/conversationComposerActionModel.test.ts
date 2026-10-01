@@ -5,6 +5,7 @@ import {
   resolveComposerActionLabels,
   resolveComposerActionMode,
   resolveComposerEditMode,
+  resolveComposerEnterDelivery,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
   shouldStopComposerOnEscape,
@@ -88,5 +89,67 @@ describe("conversationComposerActionModel", () => {
     expect(shouldStopComposerOnEscape({ ...base, ghostVisible: true })).toBe(false);
     expect(shouldStopComposerOnEscape({ ...base, slashSuggestionsOpen: true })).toBe(false);
     expect(shouldStopComposerOnEscape({ ...base, referenceTypeaheadOpen: true })).toBe(false);
+  });
+  it("resolves enter delivery: idle bare Enter sends, idle modifier Enter stays unbound", () => {
+    const idle = {
+      key: "Enter",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      isComposing: false,
+      actionMode: "send" as const,
+      canDeliverImmediately: true,
+    };
+    expect(resolveComposerEnterDelivery(idle)).toBe("send");
+    expect(resolveComposerEnterDelivery({ ...idle, ctrlKey: true })).toBe("none");
+    expect(resolveComposerEnterDelivery({ ...idle, metaKey: true })).toBe("none");
+  });
+
+  it("resolves enter delivery: running bare Enter queues, Ctrl/⌘+Enter flips to steer", () => {
+    const running = {
+      key: "Enter",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      isComposing: false,
+      actionMode: "stop" as const,
+      canDeliverImmediately: true,
+    };
+    expect(resolveComposerEnterDelivery(running)).toBe("queue");
+    expect(resolveComposerEnterDelivery({ ...running, ctrlKey: true })).toBe("steer");
+    expect(resolveComposerEnterDelivery({ ...running, metaKey: true })).toBe("steer");
+  });
+
+  it("falls the Ctrl/⌘+Enter flip back to queueing when the payload cannot ride guidance", () => {
+    const running = {
+      key: "Enter",
+      shiftKey: false,
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      isComposing: false,
+      actionMode: "stop" as const,
+      canDeliverImmediately: false,
+    };
+    expect(resolveComposerEnterDelivery(running)).toBe("queue");
+  });
+
+  it("never submits during IME composition or with shift/alt held", () => {
+    const base = {
+      key: "Enter",
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      isComposing: false,
+      actionMode: "send" as const,
+      canDeliverImmediately: true,
+    };
+    expect(resolveComposerEnterDelivery({ ...base, isComposing: true })).toBe("none");
+    expect(resolveComposerEnterDelivery({ ...base, shiftKey: true })).toBe("none");
+    expect(resolveComposerEnterDelivery({ ...base, altKey: true })).toBe("none");
+    expect(resolveComposerEnterDelivery({ ...base, key: "a" })).toBe("none");
   });
 });

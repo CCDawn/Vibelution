@@ -407,6 +407,7 @@ import {
   resolveComposerActionLabels,
   resolveComposerActionMode,
   resolveComposerEditMode,
+  resolveComposerEnterDelivery,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
   shouldStopComposerOnEscape,
@@ -1233,6 +1234,21 @@ export const ConversationView = React.memo(function ConversationView({
   const toolApprovalConsumedRef = useRef(false);
   toolApprovalConsumedRef.current = false;
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Composer auto-height (ZCode parity): the codex composer grows with the
+  // draft and only scrolls internally once the CSS max-height clamp is hit —
+  // same auto→scrollHeight trick as the inline edit editor. min/max stay in
+  // the inputCodex style (48px/240px), the inline height never exceeds them.
+  useLayoutEffect(() => {
+    if (composerVariant !== "codex") {
+      return;
+    }
+    const el = composerInputRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [composerVariant, composerValue, composerDisabled]);
   // Prompt history browse state (ArrowUp/Down on an empty draft). Refs instead
   // of state so the keydown closure never reads a stale index or stash.
   const promptHistoryIndexRef = useRef<number | null>(null);
@@ -1541,6 +1557,11 @@ export const ConversationView = React.memo(function ConversationView({
   const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
     ? resolvedImmediateSteerLabel
     : resolvedQueueFollowupLabel;
+  // Tooltip carries the keyboard contract (ZCode opposite-delivery): bare Enter
+  // keeps the primary delivery, Ctrl/⌘+Enter flips queue ↔ immediate steer.
+  const resolvedBusyPrimaryHint = queuePrimaryIsImmediate
+    ? t("composerSteerEnterHint")
+    : t("composerQueueSteerEnterHint");
   const baseComposerPlaceholder = composerPlaceholder.trim()
     ? composerPlaceholder
     : resolvedActionMode === "stop"
@@ -6565,10 +6586,12 @@ export const ConversationView = React.memo(function ConversationView({
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
                 ? resolvedSafeGuidancePendingLabel
-                : resolvedBusyPrimaryLabel
+                : resolvedBusyPrimaryHint
               : composerPending
                 ? resolvedPendingLabel
-                : resolvedActionLabel
+                : primaryActionIsEditSubmit
+                  ? resolvedActionLabel
+                  : t("composerSendEnterHint")
           }
           aria-label={
             runningGuidanceActionsEnabled
@@ -7352,23 +7375,35 @@ export const ConversationView = React.memo(function ConversationView({
                 event.preventDefault();
                 onStop?.();
               }
-              if (
-                shouldSubmitComposerOnKeydown({
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  ctrlKey: event.ctrlKey,
-                  metaKey: event.metaKey,
-                  altKey: event.altKey,
-                  isComposing: event.nativeEvent.isComposing,
-                })
-              ) {
+              // ZCode opposite-followup-delivery: idle bare Enter sends; running
+              // bare Enter queues, and Ctrl/⌘+Enter flips to immediate delivery
+              // (steer via the existing safe-guidance channel). The flip falls
+              // back to queueing when the payload cannot ride guidance
+              // (attachments/references) or no guidance handler exists.
+              const composerEnterDelivery = resolveComposerEnterDelivery({
+                key: event.key,
+                shiftKey: event.shiftKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                altKey: event.altKey,
+                isComposing: event.nativeEvent.isComposing,
+                actionMode: resolvedActionMode,
+                canDeliverImmediately: Boolean(onSafeGuidance)
+                  && !hasComposerAttachments
+                  && !hasComposerReferences,
+              });
+              if (composerEnterDelivery !== "none") {
                 event.preventDefault();
                 if (
-                  resolvedActionMode === "send"
+                  composerEnterDelivery === "send"
                   && !resolvedActionDisabled
                   && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
                 ) {
                   handleSendAndFollowLatest();
+                } else if (composerEnterDelivery === "steer" && composerValue.trim() && onSafeGuidance) {
+                  if (!guidanceActionDisabled) {
+                    onSafeGuidance();
+                  }
                 } else if (
                   (queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
                   && !guidanceActionDisabled
