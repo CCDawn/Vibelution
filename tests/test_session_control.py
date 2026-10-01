@@ -72,6 +72,7 @@ def test_running_stop_fast_ack_skips_detail_rebuild_and_publish(monkeypatch) -> 
         "activeTurnId": "turn-1",
     }
     assert turn_control.stop_requested is True
+    assert turn_control.stop_event.is_set()
 
 
 def test_running_stop_default_still_returns_hydrated_detail(monkeypatch) -> None:

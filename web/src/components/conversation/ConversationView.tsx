@@ -2761,6 +2761,7 @@ export const ConversationView = React.memo(function ConversationView({
               <ConversationActiveTurnStatusNote
                 message={message}
                 lang={lang}
+                phase={phase}
                 statusLabel={lang === "zh" ? "状态" : "Status"}
               />
             ) : null;
@@ -6804,6 +6805,7 @@ export const ConversationView = React.memo(function ConversationView({
                   <ConversationActiveTurnStatusNote
                     message={companionTypingMessage}
                     lang={lang}
+                    phase={phase}
                     statusLabel={lang === "zh" ? "状态" : "Status"}
                     companionMode
                   />

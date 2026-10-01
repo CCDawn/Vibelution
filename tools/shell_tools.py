@@ -323,6 +323,68 @@ def _terminate_shell_process(process: subprocess.Popen) -> None:
                 pass
 
 
+def _stop_event_from_checker(checker: object) -> threading.Event | None:
+    event = getattr(checker, "_vibelution_stop_event", None)
+    return event if isinstance(event, threading.Event) else None
+
+
+def _read_shell_cancel_reason(checker: object) -> str:
+    if not callable(checker):
+        return ""
+    try:
+        return str(checker() or "").strip()
+    except Exception:
+        return ""
+
+
+def _signal_shell_process_stop(process: subprocess.Popen) -> None:
+    """Kill a running command without reading its pipes.
+
+    The command loop may already be inside ``communicate``. ``wait`` or
+    ``poll`` here would race that read, so this only signals the process tree.
+    """
+
+    pid = int(getattr(process, "pid", 0) or 0)
+    if pid > 0:
+        try:
+            from core.runtime_manager.process_inventory import terminate_process_descendants
+
+            terminate_process_descendants(pid, timeout_seconds=0.1)
+        except Exception as exc:
+            _debug_logger.warning(
+                f"signal_shell_process_stop: 终止子进程树失败 - {type(exc).__name__}: {exc}"
+            )
+    for stop in (process.terminate, process.kill):
+        try:
+            stop()
+        except OSError:
+            pass
+
+
+def _arm_shell_stop_kill(process: subprocess.Popen, checker: object) -> Callable[[], None]:
+    """Return a closer that stops watching when the command loop finishes.
+
+    The watcher blocks on the stop event and does not touch the process until
+    that event is set. The closer releases it after a normal exit so the
+    thread does not stay parked on a later turn.
+    """
+
+    event = _stop_event_from_checker(checker)
+    if event is None:
+        return lambda: None
+    done = threading.Event()
+
+    def _watch() -> None:
+        while not done.is_set():
+            if event.is_set():
+                _signal_shell_process_stop(process)
+                return
+            event.wait(0.05)
+
+    threading.Thread(target=_watch, name="vibelution-shell-stop", daemon=True).start()
+    return done.set
+
+
 def _collect_process_output(process: subprocess.Popen, *, timeout: float = 2.0) -> tuple[str, str]:
     try:
         stdout, stderr = process.communicate(timeout=max(0.1, float(timeout)))
@@ -1444,67 +1506,50 @@ def execute_shell_command(
             timeout_int = 60
 
         started_at = time.monotonic()
+        process_env = _with_git_safe_directory_env(os.environ.copy())
+        process_encoding = system_encoding
+        popen_kwargs: dict = {}
         # Pure git on Windows: never shell=True / bash trampoline (console flash root cause).
+        # The process stays in the same cancel loop as other commands so a stop
+        # can kill it after it has started.
         if route.route == "no_console_git":
-            from core.infrastructure.no_console_git import run_git
+            from core.infrastructure.no_console_git import (
+                apply_no_console_git_env,
+                no_console_subprocess_kwargs,
+                resolve_git_executable,
+            )
 
             git_args = parse_simple_git_argv(str(command or "").strip())
             if git_args is None:
                 git_args = parse_simple_git_argv(final_command) or []
-            if callable(_cancel_checker):
+            cancelled_early = _read_shell_cancel_reason(_cancel_checker)
+            if cancelled_early:
+                return f"[取消] 命令已因停止请求终止：{cancelled_early} (0ms)"
+            git_exe = resolve_git_executable()
+            process_env = apply_no_console_git_env(process_env, git_exe=git_exe)
+            process_encoding = "utf-8"
+            popen_command = [git_exe, *git_args]
+            use_shell = False
+            popen_kwargs = {
+                "stdin": subprocess.DEVNULL,
+                **no_console_subprocess_kwargs(),
+            }
+        else:
+            # When agent still hits git via bash/cmd (complex pipes), still apply no-console git env.
+            if re.match(r"^\s*git(?:\.exe)?\b", str(command or ""), flags=re.IGNORECASE):
                 try:
-                    cancelled_early = str(_cancel_checker() or "").strip()
+                    from core.infrastructure.no_console_git import apply_no_console_git_env, resolve_git_executable
+
+                    process_env = apply_no_console_git_env(process_env, git_exe=resolve_git_executable())
                 except Exception:
-                    cancelled_early = ""
-                if cancelled_early:
-                    return f"[取消] 命令已因停止请求终止：{cancelled_early} (0ms)"
-            try:
-                result = run_git(
-                    git_args,
-                    cwd=cwd,
-                    timeout=float(timeout_int),
-                    env=_with_git_safe_directory_env(os.environ.copy()),
-                )
-            except subprocess.TimeoutExpired:
-                return f"[超时] 命令执行超过 {timeout} 秒被强制终止。\n请检查命令是否陷入死循环。"
-            stdout = str(result.stdout or "").strip()
-            stderr = str(result.stderr or "").strip()
-            output_parts = []
-            if stdout:
-                output_parts.append(stdout)
-            if stderr:
-                output_parts.append(f"[STDERR]\n{stderr}")
-            if not output_parts:
-                output_parts.append("[命令执行完成，无输出]")
-            output = "\n\n".join(output_parts)
-            if int(result.returncode or 0) != 0:
-                has_error_keywords = any(
-                    kw in output.lower()
-                    for kw in [
-                        "error", "exception", "failed", "fail",
-                        "traceback", "syntaxerror", "indentationerror",
-                    ]
-                )
-                if has_error_keywords:
-                    return f"[EXEC FAILURE | Exit Code: {result.returncode}]\n{output}"
-                return f"[WARNING | Exit Code: {result.returncode}]\n{output}"
-            return output
-
-        process_env = _with_git_safe_directory_env(os.environ.copy())
-        # When agent still hits git via bash/cmd (complex pipes), still apply no-console git env.
-        if re.match(r"^\s*git(?:\.exe)?\b", str(command or ""), flags=re.IGNORECASE):
-            try:
-                from core.infrastructure.no_console_git import apply_no_console_git_env, resolve_git_executable
-
-                process_env = apply_no_console_git_env(process_env, git_exe=resolve_git_executable())
-            except Exception:
-                pass
-        # Prefer argv + shell=False on Windows. shell=True always goes through cmd.exe
-        # and is the main source of visible console flashes during agent turns.
-        popen_command, use_shell = _popen_command_for_route(
-            route,
-            rewritten_command=str(route.command or command or "").strip() or final_command,
-        )
+                    pass
+            # Prefer argv + shell=False on Windows. shell=True always goes through cmd.exe
+            # and is the main source of visible console flashes during agent turns.
+            popen_command, use_shell = _popen_command_for_route(
+                route,
+                rewritten_command=str(route.command or command or "").strip() or final_command,
+            )
+            popen_kwargs = _subprocess_no_window_kwargs()
         process = subprocess.Popen(
             popen_command,
             shell=use_shell,
@@ -1513,39 +1558,43 @@ def execute_shell_command(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            encoding=system_encoding,
-            errors='replace',
-            **_subprocess_no_window_kwargs(),
+            encoding=process_encoding,
+            errors="replace",
+            **popen_kwargs,
         )
+        stop_watching = _arm_shell_stop_kill(process, _cancel_checker)
         deadline = time.monotonic() + max(float(timeout_int), 0.1)
         cancelled_reason = ""
         stdout = ""
         stderr = ""
 
-        while True:
-            if callable(_cancel_checker):
-                try:
-                    cancelled_reason = str(_cancel_checker() or "").strip()
-                except Exception:
-                    cancelled_reason = ""
+        try:
+            while True:
+                cancelled_reason = _read_shell_cancel_reason(_cancel_checker)
                 if cancelled_reason:
                     _terminate_shell_process(process)
                     stdout, stderr = _collect_process_output(process)
                     break
 
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                _terminate_shell_process(process)
-                stdout, stderr = _collect_process_output(process)
-                return f"[超时] 命令执行超过 {timeout} 秒被强制终止。\n请检查命令是否陷入死循环。"
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    _terminate_shell_process(process)
+                    stdout, stderr = _collect_process_output(process)
+                    return f"[超时] 命令执行超过 {timeout} 秒被强制终止。\n请检查命令是否陷入死循环。"
 
-            try:
-                stdout, stderr = process.communicate(timeout=min(0.2, remaining))
-                stdout = stdout or ""
-                stderr = stderr or ""
-                break
-            except subprocess.TimeoutExpired:
-                continue
+                try:
+                    stdout, stderr = process.communicate(timeout=min(0.05, remaining))
+                    stdout = stdout or ""
+                    stderr = stderr or ""
+                    if not cancelled_reason:
+                        cancelled_reason = _read_shell_cancel_reason(_cancel_checker)
+                        if cancelled_reason and process.poll() is None:
+                            _terminate_shell_process(process)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            stop_watching()
 
         if cancelled_reason:
             output_preview = "\n\n".join(
