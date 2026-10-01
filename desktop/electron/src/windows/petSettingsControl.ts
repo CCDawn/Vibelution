@@ -7,8 +7,10 @@ type PetWindowOwner = {
 };
 
 export function petSettingsOrigin(url: string, role: string): string {
+  // Any SPA route inside a registered workbench window may control the pet; the
+  // settings popover mounts on arbitrary routes, so only the window role gates.
   const parsed = new URL(url);
-  if (!["main-workbench", "branch-workbench"].includes(role) || parsed.pathname !== "/config") {
+  if (!["main-workbench", "branch-workbench"].includes(role)) {
     throw new Error("Desktop pet controls require a registered settings window");
   }
   return parsed.origin;
