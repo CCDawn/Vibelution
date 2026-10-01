@@ -204,7 +204,9 @@ class LiteLLMStreamNormalizer:
             delta = self._extract_delta(raw_chunk)
             if not delta:
                 continue
-            reasoning = extract_reasoning_text(delta, extract_text_content, include_content_tags=False)
+            reasoning = extract_reasoning_text(
+                delta, extract_text_content, include_content_tags=False, is_stream_delta=True
+            )
             if reasoning.text:
                 reasoning_delta = self._normalize_reasoning_delta(reasoning.source, reasoning.text)
                 if reasoning_delta:
