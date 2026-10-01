@@ -60,9 +60,14 @@ import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import {
   pinSessionCreatePreserve,
+  takeSessionCreatePreserve,
   unpinSessionCreatePreserve,
 } from "../sessionCreatePreserve";
-import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
+import {
+  clearSessionDeleteTombstone,
+  isSessionDeleteTombstoned,
+  markSessionDeleteTombstone,
+} from "../sessionDeleteTombstone";
 import { createTempSessionId, isTempSessionId } from "../sessionOptimisticIds";
 import {
   createTempRoomId,
@@ -100,6 +105,23 @@ type ChatRouteLifecycleActions = {
   openRoom: (roomId: string) => void;
   replaceIfStillViewing: (expected: ChatRouteSelection, next: ChatRouteSelection) => boolean;
 };
+
+function dropDiscardedCreatedSession(queryClient: QueryClient, sessionId: string): void {
+  const id = String(sessionId || "").trim();
+  if (!id) {
+    return;
+  }
+  markSessionDeleteTombstone(id);
+  unpinSessionCreatePreserve(id);
+  updateSessionSummaryCaches(queryClient, (sessions) =>
+    (sessions ?? []).filter((session) => session.id !== id),
+  );
+  updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+    (sessions ?? []).filter((session) => session.id !== id),
+  );
+  removeSessionFromAgentSessionCaches(queryClient, id);
+  queryClient.removeQueries({ queryKey: queryKeys.session(id), exact: true });
+}
 
 /**
  * Drop the deleted session from its Agent's last-viewed pointer.
@@ -423,6 +445,24 @@ export function useChatWorkspaceLifecycle({
         const intent = createSessionIntentsRef.current.get(tempSessionId);
         if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
         telemetry?.failed(undefined, { reason: "missing_session_id" });
+        return;
+      }
+      // The user already closed this temp tab. Do not pin or insert the real
+      // id; delete the server row so a later list refetch cannot bring it back.
+      if (tempSessionId && isSessionDeleteTombstoned(tempSessionId)) {
+        forgetCreateSessionIntent(tempSessionId, String(context?.idempotencyKey || ""));
+        unpinSessionCreatePreserve(tempSessionId);
+        dropDiscardedCreatedSession(queryClient, tempSessionId);
+        if (nextId !== tempSessionId) {
+          dropDiscardedCreatedSession(queryClient, nextId);
+          void deleteChatSession(nextId).catch(() => undefined);
+        }
+        telemetry?.succeeded({
+          sessionId: nextId,
+          tempSessionId,
+          agentId: String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim(),
+          discardedAfterTempDelete: true,
+        });
         return;
       }
       forgetCreateSessionIntent(tempSessionId, String(context?.idempotencyKey || ""));
@@ -971,6 +1011,9 @@ export function useChatWorkspaceLifecycle({
       const telemetry = startUserAction("session_delete", { sessionId: variables.sessionId }, { destructive: true });
       // Do not await cancelQueries — waiting freezes tab switching while list
       // queries settle. Optimistic UI must apply immediately.
+      // Drop the create pin now. A later sessions refetch must not reattach a
+      // tab the user just closed. Keep the summary so a failed delete can pin it again.
+      const releasedCreatePreserve = takeSessionCreatePreserve(variables.sessionId);
       markSessionDeleteTombstone(variables.sessionId);
       void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
       void queryClient.cancelQueries({ queryKey: queryKeys.conversations() });
@@ -1048,6 +1091,7 @@ export function useChatWorkspaceLifecycle({
         previousRouteSessionId,
         optimisticNextActiveSessionId,
         deletedAgentId,
+        releasedCreatePreserve,
         telemetry,
       };
     },
@@ -1093,6 +1137,9 @@ export function useChatWorkspaceLifecycle({
       context?.telemetry?.failed(error, { sessionId: variables.sessionId });
       // Allow the row back into lists after a failed delete.
       clearSessionDeleteTombstone(variables.sessionId);
+      if (context?.releasedCreatePreserve) {
+        pinSessionCreatePreserve(context.releasedCreatePreserve);
+      }
       if (context?.previousSessions) {
         queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
       }
@@ -1122,6 +1169,10 @@ export function useChatWorkspaceLifecycle({
         { sessionIds: deletedSessionIds.join(",") },
         { destructive: true },
       );
+      const releasedCreatePreserves = deletedSessionIds.flatMap((sessionId) => {
+        const released = takeSessionCreatePreserve(sessionId);
+        return released ? [released] : [];
+      });
       deletedSessionIds.forEach((sessionId) => markSessionDeleteTombstone(sessionId));
       void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
       void queryClient.cancelQueries({ queryKey: queryKeys.conversations() });
@@ -1197,6 +1248,7 @@ export function useChatWorkspaceLifecycle({
         previousRouteSessionId,
         deletedSessionIds,
         optimisticNextActiveSessionId,
+        releasedCreatePreserves,
         telemetry,
       };
     },
@@ -1258,6 +1310,9 @@ export function useChatWorkspaceLifecycle({
       (context?.deletedSessionIds ?? variables.sessionIds).forEach((sessionId) => {
         clearSessionDeleteTombstone(sessionId);
       });
+      for (const summary of context?.releasedCreatePreserves ?? []) {
+        pinSessionCreatePreserve(summary);
+      }
       if (context?.previousSessions) {
         queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
       }

@@ -8,6 +8,7 @@
  */
 
 import type { SessionSummary } from "../api/types";
+import { isSessionDeleteTombstoned } from "./sessionDeleteTombstone";
 import { isTempSessionId } from "./sessionOptimisticIds";
 
 const DEFAULT_TTL_MS = 60_000;
@@ -50,6 +51,20 @@ export function unpinSessionCreatePreserve(sessionId: string): void {
   preservedBySessionId.delete(id);
 }
 
+/** Remove a pin and return its summary so a failed delete can put it back. */
+export function takeSessionCreatePreserve(sessionId: string): SessionSummary | null {
+  const id = cleanId(sessionId);
+  if (!id) {
+    return null;
+  }
+  const entry = preservedBySessionId.get(id);
+  if (!entry) {
+    return null;
+  }
+  preservedBySessionId.delete(id);
+  return { ...entry.summary };
+}
+
 export function clearExpiredSessionCreatePreserves(options: PreserveClock = {}): void {
   const nowMs = options.nowMs ?? Date.now();
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
@@ -81,16 +96,30 @@ export function isSessionCreatePreserved(
   return true;
 }
 
+function tombstoneClock(options: PreserveClock): { nowMs?: number } {
+  return options.nowMs === undefined ? {} : { nowMs: options.nowMs };
+}
+
+function isDeletedSession(sessionId: string, options: PreserveClock): boolean {
+  return isSessionDeleteTombstoned(sessionId, tombstoneClock(options));
+}
+
 /**
  * Re-attach pinned (and still-local temp) sessions missing from a server page.
- * Once the server includes an id, its pin is cleared.
+ * Once the server includes an id, its pin is cleared. A session the user
+ * already deleted is never re-attached, even while its create pin is live.
  */
 export function mergePreservedCreatedSessions<T extends { id?: string }>(
   serverItems: T[] | null | undefined,
   options: PreserveClock & { localItems?: Array<T | SessionSummary> | null } = {},
 ): T[] {
   clearExpiredSessionCreatePreserves(options);
-  const serverList = serverItems ?? [];
+  for (const id of [...preservedBySessionId.keys()]) {
+    if (isDeletedSession(id, options)) {
+      preservedBySessionId.delete(id);
+    }
+  }
+  const serverList = (serverItems ?? []).filter((item) => !isDeletedSession(cleanId(item.id), options));
   const serverIds = new Set(
     serverList.map((item) => cleanId(item.id)).filter(Boolean),
   );
@@ -118,7 +147,7 @@ export function mergePreservedCreatedSessions<T extends { id?: string }>(
 
   for (const item of options.localItems ?? []) {
     const id = cleanId(item.id);
-    if (!id || serverIds.has(id)) {
+    if (!id || serverIds.has(id) || isDeletedSession(id, options)) {
       continue;
     }
     if (isTempSessionId(id) || isSessionCreatePreserved(id, options)) {
