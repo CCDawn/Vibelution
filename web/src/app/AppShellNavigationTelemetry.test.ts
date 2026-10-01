@@ -218,6 +218,25 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain("browser.primary_nav.click");
   });
 
+  it("preloads the settings chunk chain so the first gear open has no blank suspense or route waterfall", () => {
+    expect(appShellSource).toContain("function preloadSettingsSurfaceChunk");
+    expect(appShellSource).toContain("browser.settings_menu.preload_requested");
+    expect(appShellSource).toContain("browser.settings_menu.preload_loaded");
+    expect(appShellSource).toContain("browser.settings_menu.preload_failed");
+    // Same modules the lazy declarations import, so the warm chunks are shared.
+    expect(appShellSource).toContain('import("./AppShellSettingsMenu")');
+    expect(appShellSource).toContain('import("../routes/ConfigRoute")');
+    // F1 mirror: soft idle preload on gear hover/focus; hard on popover open.
+    expect(appShellSource).toContain('onPointerEnter={() => preloadSettingsSurfaceChunk("pointerenter", "settings-menu", { soft: true })}');
+    expect(appShellSource).toContain('onFocus={() => preloadSettingsSurfaceChunk("focus", "settings-menu", { soft: true })}');
+    expect(appShellSource).toContain('preloadSettingsSurfaceChunk("open", "settings-menu")');
+    expect(appShellSource).toContain('preloadSettingsSurfaceChunk("open", "config-route")');
+    expect(appShellSource).toContain("cancelSettingsSoftPreload");
+    expect(appShellSource).toContain("startSettingsPreloadImport");
+    // Failure clears the memo so a later trigger can retry.
+    expect(appShellSource).toContain("settingsPreloadPromises[target] = null");
+  });
+
   it("keeps group chat out of the top navigation because it lives in the chat page", () => {
     expect(appShellSource).not.toContain('to="/chat-rooms"');
     expect(appShellSource).not.toContain('t("navChatRooms")');
