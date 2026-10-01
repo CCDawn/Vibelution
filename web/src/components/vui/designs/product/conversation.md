@@ -890,13 +890,16 @@ import { ConversationTurnModelControl } from "../../conversation/ConversationTur
 - 不与 `ConversationInferenceControl` 合并：一个管会话默认（强度），一个管单轮覆盖（模型+可选强度），语义不同。
 ## ConversationTurnNavigator
 
-The existing `ConversationTurnNavigator` is a left-side, container-responsive
-reading aid, not a second transcript. VNativeButton owns dense 36×18 pointer/keyboard
-targets; VHoverCard opens to the right with a two-line prompt and three-line answer.
-The 12×2 mark grows on hover/focus with two adjacent levels; reduced motion disables
-transitions. Below 864px conversation width the rail disappears without adding
-left padding. The existing right-side clearance for the back-to-bottom button is
-preserved. Sessions under six turns keep the existing hidden rule.
-React Virtual bounds mounted marks; current-turn changes and container restoration
-reveal the active mark. Existing timeline navigation, reduced-motion scrolling,
-message projection and conversation data remain unchanged.
+### 功能
+对话内容区左侧的轮次导航，不创建第二份会话记录。12×2 短横线在悬停或聚焦时伸长，邻近两项渐变；减少动态效果偏好下不播放过渡。
+
+### 适用范围
+- 六轮及以上的会话；对话容器宽度达到 864px 时显示。
+- 窄屏隐藏且不额外占用左侧空间；右侧仍为“回到最新”按钮保留安全间距。
+- 不用于会话列表、消息编辑或会话数据持久化。
+
+### 使用方式
+传入既有轮次目录 `entries`、当前轮次 `currentIndex`、本地化 `ariaLabel` 与既有 `onNavigate`。密集的 36×18 命中区使用 `VNativeButton`；`VHoverCard` 向右显示两行问题和三行回答。无摘要的项不挂空浮卡。
+
+### 实现与边界
+React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到当前标记。原有时间线跳转、减少动态效果滚动、消息投影及会话数据保持不变。
