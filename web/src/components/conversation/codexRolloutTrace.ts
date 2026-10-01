@@ -15,7 +15,7 @@ export type CodexRolloutTraceEventKind =
 
 export type CodexRolloutTraceRuntimeKind = "terminal" | "tool" | "status";
 
-export type CodexRolloutTraceStatus = "pending" | "running" | "completed" | "failed" | "degraded";
+export type CodexRolloutTraceStatus = "pending" | "running" | "completed" | "failed" | "degraded" | "cancelled";
 
 export type CodexRolloutTraceEvent = {
   id: string;

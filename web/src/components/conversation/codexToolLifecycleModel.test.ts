@@ -4,6 +4,7 @@ import type { AgentMessageOperation } from "./agentMessageOperations";
 import codexToolLifecycleModelSource from "./codexToolLifecycleModel.ts?raw";
 import {
   buildCodexToolLifecycleModel,
+  normalizeCodexToolLifecycleStatus,
   type CodexTerminalOperation,
   type CodexToolLifecycleModel,
 } from "./codexToolLifecycleModel";
@@ -244,5 +245,34 @@ describe("codexToolLifecycleModel", () => {
       terminalSessions: [],
       modelObservations: [],
     });
+  });
+  it("splits tool terminal states: cancelled neutral, failure red, unknown falls to failure", () => {
+    // The raw source carries the three-family contract explicitly.
+    expect(codexToolLifecycleModelSource).toContain('"cancelled", "canceled", "stopped", "denied", "aborted"');
+    expect(codexToolLifecycleModelSource).toContain('return "failed";');
+    // Known success words still resolve green.
+    expect(normalizeCodexToolLifecycleStatus("done")).toBe("completed");
+    expect(normalizeCodexToolLifecycleStatus("success")).toBe("completed");
+    expect(normalizeCodexToolLifecycleStatus("ready")).toBe("completed");
+    // User/permission-interrupted runs are neutral, not failures.
+    expect(normalizeCodexToolLifecycleStatus("cancelled")).toBe("cancelled");
+    expect(normalizeCodexToolLifecycleStatus("canceled")).toBe("cancelled");
+    expect(normalizeCodexToolLifecycleStatus("stopped")).toBe("cancelled");
+    expect(normalizeCodexToolLifecycleStatus("denied")).toBe("cancelled");
+    expect(normalizeCodexToolLifecycleStatus("aborted")).toBe("cancelled");
+    // Failures and timeouts stay red.
+    expect(normalizeCodexToolLifecycleStatus("failed")).toBe("failed");
+    expect(normalizeCodexToolLifecycleStatus("timeout")).toBe("failed");
+    // Unknown vocabulary: 宁红不绿 — never silently completed.
+    expect(normalizeCodexToolLifecycleStatus("mystery_status")).toBe("failed");
+    expect(normalizeCodexToolLifecycleStatus(undefined)).toBe("failed");
+  });
+
+  it("keeps a cancelled terminal op out of the red failure slot in the built model", () => {
+    const model = buildCodexToolLifecycleModel([
+      toolOperation({ id: "op-cancelled", status: "cancelled", error: "user interrupted" }),
+    ]);
+    expect(model.toolCalls[0]?.status).toBe("cancelled");
+    expect(model.toolCalls[0]?.error).toBe("user interrupted");
   });
 });
