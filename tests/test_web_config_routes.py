@@ -4152,6 +4152,11 @@ def test_llm_v2_migration_rollback_failure_emits_bounded_event(monkeypatch, exce
 def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     _ensure_preset_model(public_config, "deepseek_v4_pro")
+    # Normalize the fixture language: ui.language's only legitimate writer is
+    # the dedicated language endpoint, and the whole-config apply guard restores
+    # whatever the stored config carries. Pinning "en" here keeps this test's
+    # focus (env var writes) independent of the live operator config's language.
+    public_config.setdefault("ui", {})["language"] = "en"
     writes = []
     deletes = []
     reloads = []
