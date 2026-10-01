@@ -497,6 +497,39 @@ def record_model_reasoning_contract(
     return updated
 
 
+def prune_absent_provider_entries(
+    state: dict[str, Any],
+    *,
+    configured_provider_ids: frozenset[str] | set[str],
+) -> tuple[dict[str, Any], list[str]]:
+    """Drop catalog entries for providers no longer present in operator config.
+
+    Removing an LLM provider from config.toml never cleaned this derived file,
+    so the removed provider's discovery history stayed forever and leaked into
+    every catalog read. Pure and idempotent: returns ``(state, [])`` unchanged
+    when there is nothing to prune, otherwise a deep copy without the dead
+    entries plus their sorted ids. Only ``state["providers"]`` keys are
+    touched; schemaVersion, metadata and surviving entries are preserved as-is.
+    Callers gate this on schema-v2 configs only — schema-v1 legacy capability
+    records also live under ``state["providers"]`` and must never be swept.
+    """
+    if not isinstance(state, dict):
+        return state, []
+    providers = state.get("providers")
+    if not isinstance(providers, dict) or not providers:
+        return state, []
+    configured = {str(provider_id) for provider_id in configured_provider_ids}
+    pruned_ids = sorted(
+        str(provider_id) for provider_id in providers if str(provider_id) not in configured
+    )
+    if not pruned_ids:
+        return state, []
+    updated = copy.deepcopy(state)
+    for provider_id in pruned_ids:
+        updated["providers"].pop(provider_id, None)
+    return updated, pruned_ids
+
+
 def provider_catalog_refresh_due(
     state: dict[str, Any],
     provider_id: str,
@@ -599,6 +632,7 @@ __all__ = [
     "import_legacy_capability_cache",
     "load_model_catalog_state",
     "merge_capability_observations",
+    "prune_absent_provider_entries",
     "provider_catalog_refresh_due",
     "record_discovery_failure",
     "record_discovery_success",
