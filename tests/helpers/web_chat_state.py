@@ -21,8 +21,13 @@ def _bind_seeded_submittable_agent(project_root, *, session_id: str = "session-l
     """
     cfg = session_service.get_config()
     profile = cfg.llm.get_profile(role="primary")
-    primary_model_id, _entry = cfg.llm.get_model_library_entry_for_profile(profile)
+    primary_model_id, entry = cfg.llm.get_model_library_entry_for_profile(profile)
     dialogue_model_id = str(primary_model_id or "").strip()
+    # The live operator model can omit context_window. Stamp one on the
+    # in-memory library entry so submission tests can open a turn. This does
+    # not write the operator config file.
+    if isinstance(entry, dict) and int(entry.get("context_window") or entry.get("contextWindow") or 0) <= 0:
+        entry["context_window"] = 200000
     agent = agent_directory_service.ensure_agent_for_session(
         session_id,
         display_name="真实会话",
