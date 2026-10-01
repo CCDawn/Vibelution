@@ -161,6 +161,7 @@ import {
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
+import { ConversationRunningTasks } from "./ConversationRunningTasks";
 import {
   formatConversationTurnWorkBreakdown,
   formatConversationTurnWorkedFor,
@@ -6683,6 +6684,7 @@ export const ConversationView = React.memo(function ConversationView({
             {timelineRowPlan
               .filter((row) => row.virtualStartPx === null)
               .map((rowPlan) => renderTimelineRow(rowPlan))}
+            <ConversationRunningTasks sessionId={sessionId} />
             {companionTypingMessage ? (
               <div
                 className={styles.companionTypingTurn}
