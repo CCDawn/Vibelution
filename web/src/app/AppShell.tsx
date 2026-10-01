@@ -1719,7 +1719,7 @@ export function AppShell() {
         return;
       }
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
-      if (!updateBannerRestartReloadsDocument(payload.code)) {
+      if (!updateBannerRestartReloadsDocument(payload.code, payload.accepted)) {
         restartWaitsForDocumentReloadRef.current = false;
         setRestartRequested(false);
         setShutdownRequested(false);
@@ -1729,7 +1729,12 @@ export function AppShell() {
         setLifecycleCommandId(payload.commandId ?? "");
         setLifecycleCancelPending(false);
         setShutdownTitle(restartHeading);
-        setShutdownDetail(payload.message || restartBody);
+        const taskPauseFailed = payload.code === "user_restart_pause_failed";
+        setShutdownDetail(taskPauseFailed
+          ? (lang === "en"
+            ? "Task state could not be saved before restart. Existing records are retained; close this notice and retry."
+            : "重启前未能保存任务状态，已有记录仍保留。关闭此提示后可以重试。")
+          : payload.message || restartBody);
         return;
       }
       markControlledProjectLifecycleOperation("restart");

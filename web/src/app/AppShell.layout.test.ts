@@ -687,7 +687,9 @@ describe("AppShell layout contract", () => {
       shellSource.indexOf("const cancelLifecycleWait"),
     );
     expect(restartRegion).toContain("restartWaitsForDocumentReloadRef.current = true");
-    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code)");
+    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code, payload.accepted)");
+    expect(restartRegion).toContain('payload.code === "user_restart_pause_failed"');
+    expect(restartRegion).toContain("重启前未能保存任务状态，已有记录仍保留");
     expect(restartRegion).toContain("window.location.reload()");
     expect(shellSource).toContain("ready && restartWaitsForDocumentReloadRef.current");
   });
