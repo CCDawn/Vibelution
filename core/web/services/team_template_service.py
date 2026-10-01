@@ -522,14 +522,14 @@ def _dev_team_template() -> dict[str, Any]:
         "name": "开发团队",
         "defaultTeamName": "开发团队",
         "description": "四角色软件开发团队模板：规划师把需求拆成任务并派发，两名开发工程师在各自 worktree 实现并写测试，评审员独立审查 diff 并给出结论。",
-        "purpose": "按规划、开发、评审的流水线组织开发分工：规划师负责需求分析与任务派发，开发工程师负责编码实现与测试，评审员负责独立审查与质量把关；群聊按 round_robin 轮转交换进展与结论。",
+        "purpose": "按规划、开发、评审的流水线组织开发分工：规划师负责需求分析与任务派发，开发工程师负责编码实现与测试，评审员负责独立审查与质量把关；群聊按计划分派模式推进，规划师完成规划后用 @成员角色名 指派下一轮负责人，未指派时由规划师继续规划。",
         "safetyLevel": "dev_collaboration",
         "memberIdPrefix": "dev-team",
         "agentMetadata": {"devTeamTemplate": True},
         "chatRoom": {
-            "mode": "round_robin",
+            "mode": "planned",
             "purpose": "meeting",
-            "config": {"devTeamTemplate": True},
+            "config": {"devTeamTemplate": True, "managerTeamRole": "规划师"},
         },
         "canvas": {
             "nodePrefix": "dev-team-node",

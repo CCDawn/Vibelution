@@ -5319,6 +5319,114 @@ def test_opportunistic_chat_room_mode_prioritizes_configured_speakers(tmp_path, 
     assert [message["sessionId"] for message in latest_round["messages"]] == ["session-beta"]
 
 
+def test_planned_chat_room_mode_dispatches_via_manager_mentions(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    # A third member (reviewer) so the manager can hand off after reports.
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-alpha",
+            "conversations": [
+                {
+                    "conversation_id": "session-alpha",
+                    "title": "Alpha Agent",
+                    "updated_at": "2026-05-26T10:00:00",
+                },
+                {
+                    "conversation_id": "session-beta",
+                    "title": "Beta Agent",
+                    "updated_at": "2026-05-26T10:02:00",
+                },
+                {
+                    "conversation_id": "session-gamma",
+                    "title": "Gamma Agent",
+                    "updated_at": "2026-05-26T10:04:00",
+                },
+            ],
+        },
+    )
+    _append_session_ledger_message(
+        tmp_path,
+        "session-gamma",
+        {"role": "user", "content": "等待评审指派", "timestamp": "2026-05-26T10:04:00"},
+        turn_id="session-gamma-seed-1",
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    modes = {item["id"]: item["status"] for item in chat_room_service.list_chat_room_modes()}
+    assert modes["planned"] == "ready"
+
+    room = chat_room_service.create_chat_room(
+        title="计划分派群聊",
+        participant_session_ids=["session-alpha", "session-beta", "session-gamma"],
+        mode="planned",
+    )
+
+    manager_scripts = [
+        "本轮派发：@session-session-beta 负责实现。",
+        "汇报已收到，改派：@session-session-gamma 请评审。",
+        "评审结论已汇总，本轮先同步进展。",
+    ]
+    manager_spoke_count = {"count": 0}
+
+    def planned_runner(participant, prompt, context):
+        if participant["participantId"] == "session-session-alpha":
+            index = min(manager_spoke_count["count"], len(manager_scripts) - 1)
+            manager_spoke_count["count"] += 1
+            content = manager_scripts[index]
+        else:
+            content = f"{participant['participantId']} 已按指派推进并汇报。"
+        return {
+            "status": "completed",
+            "raw_output": content,
+            "summary": "ok",
+        }
+
+    planning_round = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "第一轮：规划",
+        agent_runner=planned_runner,
+    )["rounds"][-1]
+    assert planning_round["mode"] == "planned"
+    # No dispatch marker exists yet, so the manager keeps the floor alone.
+    assert planning_round["speakerOrder"] == ["session-session-alpha"]
+
+    dispatched_round = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "第二轮：按指派推进",
+        agent_runner=planned_runner,
+    )["rounds"][-1]
+    assert dispatched_round["speakerOrder"] == ["session-session-beta"]
+    assert [message["sessionId"] for message in dispatched_round["messages"]] == ["session-beta"]
+
+    # Someone spoke after the manager's last message, so the floor returns
+    # to the manager for a summary/re-assign round.
+    summary_round = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "第三轮：汇总改派",
+        agent_runner=planned_runner,
+    )["rounds"][-1]
+    assert summary_round["speakerOrder"] == ["session-session-alpha"]
+
+    review_round = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "第四轮：评审",
+        agent_runner=planned_runner,
+    )["rounds"][-1]
+    assert review_round["speakerOrder"] == ["session-session-gamma"]
+    assert [message["sessionId"] for message in review_round["messages"]] == ["session-gamma"]
+
+    # The alternation continues: after the reviewer reports, the manager
+    # regains the floor instead of the dispatch loop repeating.
+    wrap_up_round = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "第五轮：收尾",
+        agent_runner=planned_runner,
+    )["rounds"][-1]
+    assert wrap_up_round["speakerOrder"] == ["session-session-alpha"]
+
+
 def test_round_config_limits_speakers_without_dropping_room_participants(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

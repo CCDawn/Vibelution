@@ -23,6 +23,8 @@ def test_chat_room_modes_api_exposes_opportunistic_as_ready():
     modes = {item["id"]: item for item in response.json()}
     assert modes["round_robin"]["status"] == "ready"
     assert modes["opportunistic"]["status"] == "ready"
+    assert modes["planned"]["status"] == "ready"
+    assert modes["planned"]["label"] == "计划分派"
 
 
 def test_chat_room_purposes_api_exposes_conversation_purpose_modes():
