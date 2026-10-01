@@ -114,4 +114,55 @@ describe("tray restart-all coordinator", () => {
       "worktree:open"
     ]);
   });
+
+  it("drops registry rows whose spawn pid is dead when a liveness probe is provided", () => {
+    const registrySnapshots = registryEntriesToShutdownInstanceSnapshots(
+      {
+        "worktree:zombie": {
+          status: "failed",
+          desiredState: "closed",
+          phase: "failed",
+          spawnPid: 33144,
+          port: 8004,
+          windowPid: 0
+        }
+      },
+      () => false
+    );
+
+    expect(captureShutdownInstanceIds(registrySnapshots)).toEqual([]);
+  });
+
+  it("keeps registry rows whose spawn pid is alive when a liveness probe is provided", () => {
+    const registrySnapshots = registryEntriesToShutdownInstanceSnapshots(
+      {
+        "worktree:alive": {
+          status: "failed",
+          desiredState: "closed",
+          phase: "failed",
+          spawnPid: 33144,
+          port: 8004,
+          windowPid: 0
+        }
+      },
+      () => true
+    );
+
+    expect(captureShutdownInstanceIds(registrySnapshots)).toEqual(["worktree:alive"]);
+  });
+
+  it("treats registry spawn pids as alive when no liveness probe is provided", () => {
+    const registrySnapshots = registryEntriesToShutdownInstanceSnapshots({
+      "worktree:unprobed": {
+        status: "failed",
+        desiredState: "closed",
+        phase: "failed",
+        spawnPid: 33144,
+        port: 8004,
+        windowPid: 0
+      }
+    });
+
+    expect(captureShutdownInstanceIds(registrySnapshots)).toEqual(["worktree:unprobed"]);
+  });
 });

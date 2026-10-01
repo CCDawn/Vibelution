@@ -98,6 +98,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain('aria-label={zh ? "更多操作" : "More actions"}');
     expect(panelSource).toContain('{ id: "details"');
     expect(panelSource).toContain('{ id: "cleanup"');
+    // A failed cleanup-metadata read must surface an error with a retry, not
+    // an endless loading state on the confirm dialog.
+    expect(panelSource).toContain("cleanupConfirmMetadataFailed");
+    expect(panelSource).toContain("cleanupMetadataQuery.refetch()");
     // Stop and force-stop are row-level controls, not overflow items.
     expect(panelSource).toMatch(/\{showStop \? \(\s*<VButton[\s\S]{0,400}?askBatchStop\(\[item\.id\], "stop"\)/);
     expect(panelSource).toMatch(/\{showForceStop \? \(\s*<VButton[\s\S]{0,400}?variant="danger"[\s\S]{0,400}?setForceStopId\(item\.id\)/);

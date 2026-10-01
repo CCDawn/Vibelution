@@ -126,6 +126,38 @@ async function click(element: HTMLElement) {
   });
 }
 
+async function waitForDialog(condition: () => boolean, attempts = 80) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+  }
+  throw new Error('dialog condition not met; dialogs: ' + [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].map((d) => (d.textContent || '').slice(0, 120)).join(' || '));
+}
+
+async function openRowCleanupDialog(branch: string) {
+  const menuTrigger = [...host.querySelectorAll("button")].find(
+    (candidate) => (candidate.getAttribute("aria-label") || "").includes("更多操作"),
+  );
+  if (!menuTrigger) throw new Error(`row menu button not found for ${branch}`);
+  await click(menuTrigger);
+  const cleanupItem = [...document.querySelectorAll('[role="menuitem"]')].find(
+    (item) => item.textContent?.trim() === "清理",
+  );
+  if (!cleanupItem) throw new Error("cleanup menu item not found");
+  await click(cleanupItem);
+}
+
+function findDialogConfirmButton(scope: ParentNode | null | undefined): HTMLButtonElement | undefined {
+  if (!scope) return undefined;
+  return [...scope.querySelectorAll<HTMLButtonElement>("button")].find(
+    (candidate) => (candidate.textContent || "").trim().startsWith("清理"),
+  );
+}
+
 beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -159,6 +191,49 @@ describe("Launcher branch workspace interactions", () => {
     expect(rowOf("codex/headless")?.textContent).toContain("窗口未打开");
     expect(rowOf("codex/open")?.textContent).not.toContain("窗口未打开");
     expect(rowOf("codex/closed")?.textContent).not.toContain("窗口未打开");
+  });
+
+  it("surfaces a retry affordance when the cleanup metadata read fails instead of spinning forever", async () => {
+    const jsonResponse = (payload: unknown) =>
+      new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    let dataFetchCount = 0;
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async (input) => {
+        const url = String(input);
+        if (url.includes("/api/control-token")) {
+          return jsonResponse({ header: "X-Control-Token", controlToken: "test-control-token" });
+        }
+        dataFetchCount += 1;
+        if (dataFetchCount === 1) {
+          throw new TypeError("fetch failed");
+        }
+        return jsonResponse({ items: [] });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await renderPanel([instance({ id: "worktree:residue", branch: "codex/residue", state: "closed", alive: false })]);
+
+      const cleanupDialog = () =>
+        [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].find((node) =>
+          (node.textContent || "").includes("确认清理分支实例"),
+        );
+      await openRowCleanupDialog("codex/residue");
+      await waitForDialog(() => cleanupDialog()?.textContent?.includes("读取分支实例失败") === true);
+
+      // Merge status is the only warning before deleting an unmerged branch:
+      // a failed read keeps confirm locked but must explain and offer retry.
+      expect(cleanupDialog()?.textContent).toContain("重试读取");
+      const confirmInError = findDialogConfirmButton(cleanupDialog());
+      expect(confirmInError?.disabled).toBe(true);
+
+      await click(button("重试读取", cleanupDialog()!));
+      await waitForDialog(() => cleanupDialog()?.textContent?.includes("codex/residue") === true);
+      const confirmAfterRetry = findDialogConfirmButton(cleanupDialog());
+      expect(confirmAfterRetry?.disabled).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("confirms ordinary Stop before dispatching the stop request", async () => {

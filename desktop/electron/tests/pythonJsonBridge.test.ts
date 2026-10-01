@@ -4,10 +4,15 @@ import {
   DEFAULT_PYTHON_JSON_BRIDGE_MAX_BYTES,
   LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
   createPythonOwnedProcessTreeTerminator,
+  launcherApiBridgeTimeoutMs,
   parsePythonJsonBridgePayload,
   pythonJsonBridgeFailureMessage,
   PythonJsonBridgeError,
   runPythonJsonBridge,
+  PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
 } from "../src/process/pythonJsonBridge.js";
 
 function fakeSpawnWithOutput(output: string, exitCode = 0) {
@@ -442,5 +447,32 @@ describe("runPythonJsonBridge", () => {
     } catch (error: unknown) {
       expect(error).toMatchObject({ code: "invalid_payload" });
     }
+  });
+});
+
+describe("launcherApiBridgeTimeoutMs", () => {
+  it("keeps ordinary reads on the query budget", () => {
+    expect(launcherApiBridgeTimeoutMs("branch-instances", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
+    expect(launcherApiBridgeTimeoutMs("status", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
+  });
+
+  it("gives the cleanup-metadata read the command budget", () => {
+    // Spawning a fresh bridge plus the git ancestry scan exceeds the 5s
+    // query budget on real repos and dead-ends the cleanup confirm dialog.
+    expect(launcherApiBridgeTimeoutMs("branch-instances?cleanupMetadata=1", "GET")).toBe(
+      PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS
+    );
+  });
+
+  it("keeps the heavy launcher mutations on their own budgets", () => {
+    expect(launcherApiBridgeTimeoutMs("branch-instances/cleanup", "POST")).toBe(
+      PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS
+    );
+    expect(launcherApiBridgeTimeoutMs("maintenance/reset/apply", "POST")).toBe(
+      PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS
+    );
+    expect(launcherApiBridgeTimeoutMs("branch-instances/start", "POST")).toBe(
+      PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS
+    );
   });
 });
