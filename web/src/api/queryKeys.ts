@@ -75,6 +75,7 @@ export const queryKeys = {
   projectAgentBus: () => ["project-agent-bus"] as const,
   projectAgentBusLatestEvent: () => ["project-agent-bus", "latest-event"] as const,
   teams: () => ["teams"] as const,
+  teamTemplates: () => ["teams", "templates"] as const,
   teamDetails: (id: string) => ["teams", id, "detail"] as const,
   team: (id: string, detail = "full") => ["teams", id, "detail", detail] as const,
   teamCanvas: (id: string) => ["teams", id, "canvas"] as const,
