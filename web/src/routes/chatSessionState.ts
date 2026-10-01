@@ -957,5 +957,8 @@ export function shouldAcceptSessionStreamEvent(
   if (payload.type === "session_detail") {
     return Boolean(payload.detail && payload.detail.id === activeSessionId);
   }
-  return payload.type === "assistant_delta" || payload.type === "session_initial";
+  return payload.type === "assistant_delta"
+    || payload.type === "session_initial"
+    || payload.type === "session_journal_event"
+    || payload.type === "stream_resume";
 }

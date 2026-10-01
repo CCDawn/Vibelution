@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agentMemoryDetailRevision,
   agentFormalBaseCount,
   agentPrivateFileCount,
   resolveDefaultAgentMemoryId,
@@ -11,6 +12,20 @@ import {
 } from "./agentMemoryView";
 
 describe("agentMemoryView", () => {
+  it("tracks detail metadata without including file bodies or file ordering", () => {
+    const agent = {
+      agentId: "owner", displayName: "Owner",
+      items: [{ id: "b", revision: "b1", content: "private body" }, { id: "a", revision: "a1" }],
+      knowledgeSummary: { itemCount: 1 },
+    };
+    const revision = agentMemoryDetailRevision(agent);
+    expect(revision).toBe(agentMemoryDetailRevision({ ...agent, items: [...agent.items].reverse() }));
+    expect(revision).not.toContain("private body");
+    expect(revision).not.toBe(agentMemoryDetailRevision({ ...agent, items: [{ id: "b", revision: "b2" }] }));
+    expect(revision).not.toBe(agentMemoryDetailRevision({ ...agent, knowledgeSummary: { itemCount: 2 } }));
+    expect(agentMemoryDetailRevision(undefined)).toBe("");
+  });
+
   it("defaults to the first Agent with private memory and otherwise the first Agent", () => {
     const agents: AgentMemoryInventoryAgent[] = [
       { agentId: "empty-first", hasPrivateMemory: false, fileCount: 0 },

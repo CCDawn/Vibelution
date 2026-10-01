@@ -2276,8 +2276,10 @@ def _agent_private_memory_item(
     try:
         stat = path.stat()
         size_bytes = int(stat.st_size)
+        revision = f"{stat.st_mtime_ns}:{size_bytes}"
     except OSError:
         size_bytes = 0
+        revision = ""
     content_type = _content_type(path)
     if include_content:
         read = _read_text(path)
@@ -2314,6 +2316,7 @@ def _agent_private_memory_item(
             "relativePath": relative_path,
             "privateMemoryRoot": _rel(root, memory_root, path_context=path_context),
             "sizeBytes": size_bytes,
+            "revision": revision,
             "contentDeferred": content_deferred,
             "contentLength": len(content) if include_content else size_bytes,
         }

@@ -31,6 +31,7 @@ export type AgentMemoryInventoryItem = {
   path?: string;
   summary?: string;
   sizeBytes?: number;
+  revision?: string;
   contentType?: string;
   contentTruncated?: boolean;
   content?: string;
@@ -70,6 +71,24 @@ export type AgentMemoryInventoryPayload = {
   generatedAt?: string;
   selectedAgent?: AgentMemoryInventoryAgent | null;
 };
+
+/** Only selected detail metadata participates; poll timestamps and other Agents do not. */
+export function agentMemoryDetailRevision(agent: AgentMemoryInventoryAgent | undefined): string {
+  if (!agent) return "";
+  return JSON.stringify({
+    displayName: agent.displayName,
+    agentCode: agent.agentCode,
+    status: agent.status,
+    primaryMode: agent.primaryMode,
+    roleKey: agent.roleKey,
+    workspacePath: agent.workspacePath,
+    privateMemoryRoot: agent.privateMemoryRoot,
+    knowledgeSummary: agent.knowledgeSummary,
+    items: (agent.items ?? [])
+      .map((item) => [item.id, item.relativePath, item.path, item.revision, item.updatedAt, item.sizeBytes])
+      .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+  });
+}
 
 export function agentPrivateFileCount(agent: AgentMemoryInventoryAgent): number {
   return Number(agent.fileCount ?? agent.privateFileCount ?? 0);
