@@ -9,6 +9,8 @@ export type ConfigLanguage = "zh" | "en";
 export const CONFIG_COPY = {
   zh: {
     pageTitle: "设置",
+    uiLanguageEndonymZh: "中文",
+    uiLanguageEndonymEn: "English",
     subtitle: "结构化配置、模型资产与保存状态。启动设置在 Launcher 面板维护。",
     subtitleHint: "启动设置在 Launcher 面板维护；结构化编辑、完整配置检查和最终保存仍收口到外部 operator config.toml。",
     returnToAgents: "返回 Agent 配置",
@@ -777,6 +779,8 @@ export const CONFIG_COPY = {
   },
   en: {
     pageTitle: "Settings",
+    uiLanguageEndonymZh: "中文",
+    uiLanguageEndonymEn: "English",
     subtitle: "Structured config, model assets, and save state. Startup settings are maintained in Launcher.",
     subtitleHint: "Startup settings are maintained in Launcher; structured editing, full-config checks, and final writes still converge on the external operator config.toml.",
     returnToAgents: "Return to Agent config",

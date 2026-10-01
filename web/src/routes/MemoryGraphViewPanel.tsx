@@ -5,7 +5,7 @@ import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHan
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VCanvasWorkbenchPage, VNativeInput, VNativeSelect, VSurface } from "../components/vui";
+import { VButton, VCanvasWorkbenchPage, VNativeInput, VStringSelect, VSurface } from "../components/vui";
 import { GRAPH_NODE_TYPE_LABELS, MemoryGraphNodeInspectorPanel, type MemoryGraphNodeInspectorCopy, type MemoryGraphRelation } from "./MemoryGraphNodeInspectorPanel";
 import { memoryGraphSlice } from "./memory/memoryGraphSlice";
 import { MemoryGraphRelationInspector } from "./MemoryGraphRelationInspector";
@@ -163,18 +163,24 @@ export function MemoryGraphViewPanel(props: MemoryGraphViewPanelProps) {
     canvas={<div ref={registerGraphContainer} className={styles.atlasMain} style={graphPaneVariablesStyle} data-vui-region="memory-graph-canvas">
       <div className={styles.atlasHeading}><div><p className={styles.atlasEyebrow}>MEMORY ATLAS</p><h2 className={styles.canvasTitle}>{copy.knowledgeGraph}</h2><p className={styles.canvasHint}>从一个线索开始，沿着关系找到依据。</p></div>
         <div className={styles.scopeControls}>
-          {props.onGraphActorChange && <label className={styles.scopeField}>读取身份<VNativeSelect aria-label="读取身份" className={styles.scopeSelect}
-            value={props.graphActorAgentId ?? ""} onChange={event => changeScope(() => props.onGraphActorChange?.(event.target.value))}>
-            {!props.graphActorAgentId && <option value="">选择 Agent</option>}
-            {props.graphActorAgentId && !actorChoices.some(actor => actor.agentId === props.graphActorAgentId) && <option value={props.graphActorAgentId}>{props.graphActorAgentId}</option>}
-            {actorChoices.map(actor => <option key={actor.agentId} value={actor.agentId}>{actor.displayName}</option>)}
-          </VNativeSelect></label>}
-          {props.onGraphTeamChange && <label className={styles.scopeField}>团队范围<VNativeSelect aria-label="团队范围" className={styles.scopeSelect}
-            value={props.graphTeamId ?? ""} onChange={event => changeScope(() => props.onGraphTeamChange?.(event.target.value))}>
-            <option value="">全部可访问团队</option>
-            {props.graphTeamId && !teamChoices.some(team => String(team.metadata.teamId ?? "") === props.graphTeamId) && <option value={props.graphTeamId}>{props.graphTeamId}</option>}
-            {teamChoices.map(team => <option key={team.id} value={String(team.metadata.teamId ?? "")}>{team.label}</option>)}
-          </VNativeSelect></label>}
+          {props.onGraphActorChange && <label className={styles.scopeField}>读取身份<VStringSelect ariaLabel="读取身份" className={styles.scopeSelect}
+            value={props.graphActorAgentId ?? ""} placeholder="选择 Agent"
+            options={[
+              ...(!props.graphActorAgentId ? [{ value: "", label: "选择 Agent" }] : []),
+              ...(props.graphActorAgentId && !actorChoices.some(actor => actor.agentId === props.graphActorAgentId) ? [{ value: props.graphActorAgentId, label: props.graphActorAgentId }] : []),
+              ...actorChoices.map(actor => ({ value: actor.agentId, label: actor.displayName })),
+            ]}
+            onValueChange={value => changeScope(() => props.onGraphActorChange?.(value))} />
+          </label>}
+          {props.onGraphTeamChange && <label className={styles.scopeField}>团队范围<VStringSelect ariaLabel="团队范围" className={styles.scopeSelect}
+            value={props.graphTeamId ?? ""} placeholder="全部可访问团队"
+            options={[
+              { value: "", label: "全部可访问团队" },
+              ...(props.graphTeamId && !teamChoices.some(team => String(team.metadata.teamId ?? "") === props.graphTeamId) ? [{ value: props.graphTeamId, label: props.graphTeamId }] : []),
+              ...teamChoices.map(team => ({ value: String(team.metadata.teamId ?? ""), label: team.label })),
+            ]}
+            onValueChange={value => changeScope(() => props.onGraphTeamChange?.(value))} />
+          </label>}
           <div className={styles.viewModes}><VButton variant="ghost" aria-pressed={!flat} onClick={() => setFlat(false)} icon={<Layers3 size={14} />}>3D</VButton><VButton variant="ghost" aria-pressed={flat} onClick={() => setFlat(true)} icon={<Network size={14} />}>平面</VButton></div>
         </div></div>
       {graphPayload && graphPayload.nodes.length > 0 && !hasKnowledge && !graphPayload.summary.truncated && !props.isGraphLoading && !props.graphError &&

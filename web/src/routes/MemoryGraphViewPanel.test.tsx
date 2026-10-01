@@ -217,13 +217,14 @@ async function enterSearch(value: string) {
   });
 }
 
-async function chooseScope(label: string, value: string) {
-  const select = host?.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
-  if (!select) throw new Error("Expected graph scope selector");
-  await act(async () => {
-    select.value = value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+async function chooseScope(label: string, optionText: string) {
+  const trigger = host?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  if (!trigger) throw new Error("Expected graph scope selector");
+  await act(async () => { trigger.click(); });
+  const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+    .find((item) => item.textContent?.includes(optionText));
+  if (!option) throw new Error(`Expected option ${optionText}`);
+  await act(async () => { option.click(); });
 }
 
 beforeEach(() => {
@@ -242,18 +243,21 @@ describe("MemoryGraphViewPanel", () => {
     const actorChanged = vi.fn();
     const teamChanged = vi.fn();
     const view = await renderPanel({ withTeam: true, onActorChange: actorChanged, onTeamChange: teamChanged });
-    const teamSelect = view.querySelector<HTMLSelectElement>('select[aria-label="团队范围"]');
-    expect(Array.from(teamSelect?.options ?? []).map(option => option.value)).toEqual(["", "research-team"]);
+    const teamTrigger = view.querySelector<HTMLButtonElement>('button[aria-label="团队范围"]');
+    await act(async () => { teamTrigger?.click(); });
+    expect([...document.querySelectorAll<HTMLElement>('[role="option"]')].map(option => option.textContent?.trim()))
+      .toEqual(["全部可访问团队", "研究团队"]);
+    await act(async () => { teamTrigger?.click(); });
     await click(view.querySelector('[data-testid="canvas-node-alpha"]'));
     expect(view.textContent).toContain("完整正文仅在选中后读取");
-    await chooseScope("团队范围", "research-team");
+    await chooseScope("团队范围", "研究团队");
     expect(teamChanged).toHaveBeenCalledWith("research-team");
     expect(view.querySelector('[data-vui-region="memory-graph-inspector"]')).toBeNull();
     await enterSearch("Alpha");
     await click(view.querySelector('[data-testid="canvas-node-alpha"]'));
-    await chooseScope("读取身份", "actor-b");
+    await chooseScope("读取身份", "Agent B");
     expect(actorChanged).toHaveBeenCalledWith("actor-b");
-    expect(teamSelect?.value).toBe("");
+    expect(view.querySelector('button[aria-label="团队范围"]')?.textContent).toContain("全部可访问团队");
     expect(view.querySelector<HTMLInputElement>('input[aria-label="搜索记忆或来源"]')?.value).toBe("");
     expect(view.textContent).not.toContain("完整正文仅在选中后读取");
     expect(view.querySelector('[data-vui-region="memory-graph-inspector"]')).toBeNull();

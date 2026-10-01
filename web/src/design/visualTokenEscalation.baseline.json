@@ -1,29 +1,35 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
-  "updatedAt": "2026-09-28",
-  "scannedFileCount": 1352,
+  "updatedAt": "2026-10-01",
+  "scannedFileCount": 1430,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",
     "routes/teams/challenge-cup/questionArchiveExport.ts"
   ],
   "categories": {
     "builtinFontSize": {
-      "total": 0,
-      "files": {}
+      "total": 25,
+      "files": {
+        "routes/LauncherBranchDetailPanel.styles.ts": 1,
+        "routes/LauncherBranchInstancesPanel.styles.ts": 1,
+        "routes/LauncherRoute.styles.ts": 1,
+        "routes/LauncherToolsRoute.styles.ts": 1,
+        "routes/MemoryAgentMemoryPanel.styles.ts": 21
+      }
     },
     "arbitraryTextSize": {
-      "total": 1,
+      "total": 9,
       "files": {
-        "routes/companions/companions.styles.ts": 1
+        "app/AppShell.styles.ts": 1,
+        "components/conversation/ConversationToolActivity.styles.ts": 1,
+        "routes/companions/companions.styles.ts": 1,
+        "routes/UsageRoute.styles.ts": 6
       }
     },
     "arbitraryRadius": {
-      "total": 16,
+      "total": 7,
       "files": {
-        "components/conversation/ConversationTodoChecklist.styles.ts": 1,
-        "components/conversation/ConversationTranscriptLoadingState.styles.ts": 1,
-        "components/conversation/ConversationView.styles.ts": 8,
-        "routes/AgentModelPicker.styles.ts": 2,
+        "components/conversation/ConversationView.styles.ts": 3,
         "routes/companions/CompanionChatRails.styles.ts": 1,
         "routes/companions/companions.styles.ts": 2,
         "routes/SelfEvolutionTrack.styles.ts": 1

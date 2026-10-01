@@ -122,12 +122,14 @@ const AVATAR_CROP_OUTPUT_SIZE = 512;
 /**
  * ui.language 专用双档选项：语言名用各自本名（endonym），与 UI 语言无关，
  * 任何界面语言下都能认出目标语言；行标签/提示仍走 configSectionPresentation
- * 既有「界面语言」文案。
+ * 既有「界面语言」文案。本名放在 configCopy，两个界面语言用同一组字符串。
  */
-const UI_LANGUAGE_TOGGLE_OPTIONS = [
-  { value: "zh", label: "中文" },
-  { value: "en", label: "English" },
-] as const;
+function uiLanguageToggleOptions(copy: ConfigCopy) {
+  return [
+    { value: "zh", label: copy.uiLanguageEndonymZh },
+    { value: "en", label: copy.uiLanguageEndonymEn },
+  ];
+}
 
 function avatarImagePreviewUrl(value: unknown): string {
   const path = getString(value).replace(/\\/g, "/").trim();
@@ -491,10 +493,7 @@ export function ConfigSectionEditor({
         ariaLabel={label}
         isDisabled={disabled}
         value={getString(fieldValue)}
-        options={UI_LANGUAGE_TOGGLE_OPTIONS.map((option) => ({
-          value: option.value,
-          label: option.label,
-        }))}
+        options={uiLanguageToggleOptions(copy)}
         onValueChange={(next) => onLanguageChange(next === "en" ? "en" : "zh")}
       />
     );
