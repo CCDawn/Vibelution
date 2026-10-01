@@ -2,10 +2,8 @@ import "../design/route-css/memory.tailwind.css";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   Brain,
   CheckCircle2,
-  RefreshCw,
   TriangleAlert,
   Undo2,
 } from "lucide-react";
@@ -73,7 +71,6 @@ import {
   toSelectedAgentMemoryItemView,
   toSelectedAgentMemoryView,
 } from "./memory/agentMemoryView";
-import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import type { MemoryGraphRelation } from "./MemoryGraphViewPanel";
@@ -2050,25 +2047,6 @@ function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
   return copy.personalView;
 }
 
-function memoryViewSubtitle(copy: Copy, view: MemoryRouteView) {
-  if (view === "personal" || view === "agents") {
-    return copy.personalSubtitle;
-  }
-  if (view === "team" || view === "knowledge") {
-    return copy.teamSubtitle;
-  }
-  if (view === "library") {
-    return copy.librarySubtitle;
-  }
-  if (view === "graph") {
-    return copy.graphSubtitle;
-  }
-  if (view === "manage" || view === "sources" || view === "cleanup" || view === "effective" || view === "overview") {
-    return copy.manageSubtitle;
-  }
-  return copy.personalSubtitle;
-}
-
 function memoryPairPriority(pair: MemoryPair) {
   if (pair.item.managedState?.disabled || pair.item.managedState?.overridden) {
     return 0;
@@ -2297,8 +2275,6 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const pageVisible = usePageVisibility();
   const [searchParams, setSearchParams] = useSearchParams();
   const searchParamText = searchParams.toString();
-  const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get("returnTo")), [searchParamText]);
-  const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
   const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
   const [activeItemId, setActiveItemId] = useState(() => searchParams.get("item") ?? "");
   const [activeFilter, setActiveFilter] = useState<FilterMode>(() => normalizeFilterMode(searchParams.get("filter")));
@@ -4257,31 +4233,10 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   return (
     <VDenseOpsPage
       className={styles.route}
-      headerClassName={styles.header}
-      hideHeader={isPersonalMemoryView(forcedView)}
+      hideHeader
       data-vui-domain-recipe="memory-knowledge-workbench"
       data-vui-layout-id={MEMORY_LAYOUT_ID}
       ariaLabel={memoryViewLabel(copy, forcedView)}
-      title={memoryViewLabel(copy, forcedView)}
-      meta={memoryViewSubtitle(copy, forcedView)}
-      actions={(
-        <div className={styles.headerActions}>
-          <VButton type="button" className={styles.refreshButton} onClick={refresh}
-            icon={<RefreshCw size={16} />}
-          >
-            {copy.refresh}
-          </VButton>
-          {returnToPath ? (
-            <VRouteLinkButton
-              to={returnToPath}
-              className={styles.returnButton}
-              icon={<ArrowLeft size={16} />}
-            >
-              {returnToLabel}
-            </VRouteLinkButton>
-          ) : null}
-        </div>
-      )}
       toolbarSlot={(
         <div className={styles.controlStrip} data-vui-region="memory-subnav">
           {renderSubnav()}
