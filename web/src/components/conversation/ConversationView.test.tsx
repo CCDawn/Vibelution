@@ -832,7 +832,7 @@ expect(styles.timeline).toContain("pl-[clamp(1rem,3vw,3rem)]");
     expect(styles.composerAttachmentChip).toContain("overflow-hidden");
     expect(styles.composerAttachmentChip).toContain("rounded-xl");
     expect(styles.composerAttachmentPreview).toContain("!h-14");
-    expect(styles.composerAttachmentPreview).toContain("!rounded-[10px]");
+    expect(styles.composerAttachmentPreview).toContain("!rounded-[var(--vui-radius-soft)]");
     expect(styles.composerAttachmentThumb).toContain("size-full");
     expect(styles.composerAttachmentThumb).toContain("object-cover");
     expect(styles.composerAttachmentName).toContain("truncate");

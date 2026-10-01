@@ -220,7 +220,7 @@ export function ShadcnTooltip({
             sideOffset={6}
             collisionPadding={8}
             className={[
-              "z-[100] select-none whitespace-normal break-words rounded-[10px] border",
+              "z-[100] select-none whitespace-normal break-words rounded-[var(--vui-radius-soft)] border",
               "bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,transparent)] px-3 py-2",
               "[font-size:var(--vui-font-xs)] font-medium leading-[1.5]",
               "shadow-[var(--vui-elevation-overlay)] backdrop-blur-xl [text-wrap:pretty]",

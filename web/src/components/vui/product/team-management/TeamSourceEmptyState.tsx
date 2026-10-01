@@ -21,7 +21,7 @@ const PANEL =
   "border-[var(--vui-border-subtle)] bg-transparent px-6 py-7 text-center";
 
 const VISUAL =
-  "grid size-10 place-items-center rounded-[10px] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_var(--vui-border-subtle)]";
+  "grid size-10 place-items-center rounded-[var(--vui-radius-soft)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_var(--vui-border-subtle)]";
 const COPY = "grid max-w-sm min-w-0 justify-items-center gap-1";
 const TITLE = "min-w-0 text-vui-xs font-[680] leading-tight tracking-[-0.008em] text-[var(--fg-primary)]";
 const DESCRIPTION = "min-w-0 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-tertiary)]";

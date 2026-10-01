@@ -23,7 +23,7 @@ export type VErrorSummaryProps = Omit<ComponentPropsWithoutRef<"div">, "title"> 
 };
 
 const ROOT =
-  "grid min-w-0 w-full content-start gap-1 rounded-[10px] border border-l-[3px] px-3 py-2.5 " +
+  "grid min-w-0 w-full content-start gap-1 rounded-[var(--vui-radius-soft)] border border-l-[3px] px-3 py-2.5 " +
   "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] " +
   "text-left shadow-[var(--vui-elevation-1)] [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
 

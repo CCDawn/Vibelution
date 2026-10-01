@@ -317,7 +317,7 @@ backToBottomButton:
   composerAttachmentName:
     "vui-components-conversationview composerAttachmentName min-w-0 max-w-[16rem] truncate text-vui-sm font-semibold leading-tight text-[var(--fg-secondary)] group-hover:text-[var(--fg-primary)]",
   composerAttachmentPreview:
-    "vui-components-conversationview composerAttachmentPreview shrink-0 cursor-zoom-in !h-14 !min-h-14 !w-14 !min-w-14 !overflow-hidden !rounded-[10px] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
+    "vui-components-conversationview composerAttachmentPreview shrink-0 cursor-zoom-in !h-14 !min-h-14 !w-14 !min-w-14 !overflow-hidden !rounded-[var(--vui-radius-soft)] !bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] !p-0 shadow-none hover:!bg-[var(--vui-control-muted-hover)] hover:!shadow-none focus-visible:!ring-offset-0 [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-label]]:!block [&_[data-slot=vui-button-label]]:!size-full",
   composerAttachmentRemoveButton:
     "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0 text-[var(--fg-tertiary)] hover:!bg-[color-mix(in_srgb,var(--state-error)_var(--vui-alpha-wash-strong),var(--vui-control-muted-hover))] hover:!text-[var(--state-error)]",
   // Per-chip retry: same compact icon-button footprint as remove, but on the
@@ -331,13 +331,13 @@ backToBottomButton:
   composerAttachmentUploadingIcon:
     "vui-components-conversationview composerAttachmentUploadingIcon shrink-0 animate-spin",
   composerAttachmentThumbFrame:
-    "vui-components-conversationview composerAttachmentThumbFrame relative block size-full overflow-hidden rounded-[10px]",
+    "vui-components-conversationview composerAttachmentThumbFrame relative block size-full overflow-hidden rounded-[var(--vui-radius-soft)]",
   composerAttachmentThumb:
     "vui-components-conversationview composerAttachmentThumb block size-full shrink-0 object-cover transition-transform duration-150 ease-out group-hover:scale-[1.05]",
   composerAttachmentThumbHint:
     "vui-components-conversationview composerAttachmentThumbHint pointer-events-none absolute inset-0 grid place-items-center bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] text-[var(--fg-primary)] text-vui-2xs font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100",
   composerAttachmentFileBadge:
-    "vui-components-conversationview composerAttachmentFileBadge inline-grid size-14 shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] text-[var(--fg-tertiary)]",
+    "vui-components-conversationview composerAttachmentFileBadge inline-grid size-14 shrink-0 place-items-center rounded-[var(--vui-radius-soft)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,var(--vui-control-muted))] text-[var(--fg-tertiary)]",
   composerAttachmentTray:
     "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-2",
   // Busy composer keeps the queue/steer action and the stop button on one row
@@ -358,7 +358,7 @@ backToBottomButton:
   followupQueueTrayBleed:
     "vui-components-conversationview followupQueueTrayBleed -mx-3.5 -mt-2.5 rounded-t-[20px] border-b border-[color-mix(in_srgb,var(--border-hairline)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-3.5 pb-1 pt-1.5",
   followupQueueTrayInset:
-    "vui-components-conversationview followupQueueTrayInset rounded-[10px] border border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-2 pb-1 pt-1.5",
+    "vui-components-conversationview followupQueueTrayInset rounded-[var(--vui-radius-soft)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_var(--vui-alpha-veil),transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-2 pb-1 pt-1.5",
   followupQueueHeader:
     "vui-components-conversationview followupQueueHeader px-1.5 pb-0.5 pt-0.5 text-vui-2xs leading-tight text-[var(--fg-tertiary)]",
   followupQueueRows:
