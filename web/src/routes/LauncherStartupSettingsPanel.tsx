@@ -505,8 +505,8 @@ export function LauncherStartupSettingsPanel({
       <VSettingsFormPage
         title={text.pageTitle}
         ariaLabel={copy.startupSettings}
-        className="!h-auto flex-1"
-        headerClassName="hidden"
+        className={styles.standalonePage}
+        headerClassName={styles.standaloneHeader}
         bodyClassName={styles.settingsPageBody}
         footer={footer}
       >

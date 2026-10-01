@@ -3,6 +3,8 @@ import { vuiFlatPanelClass } from "../design/vuiSurfaceRecipes";
 const panelSurface = `${vuiFlatPanelClass}`;
 
 const styles = {
+  standalonePage: "!h-auto flex-1",
+  standaloneHeader: "hidden",
   settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 w-full max-w-full gap-2 overflow-hidden ${panelSurface} px-2 py-1.5`,
   settingsFold: "block min-w-0 w-full",
   settingsSummary:

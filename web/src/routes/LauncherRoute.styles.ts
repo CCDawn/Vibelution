@@ -19,6 +19,11 @@ const panelHeaderText =
   "[&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary";
 
 export const launcherRouteStyles = {
+  workspaceRail: "flex min-h-0 flex-1 flex-col",
+  settingsWorkspace: "flex h-full min-h-0 flex-col overflow-hidden px-7 py-4 max-[640px]:px-4",
+  settingsHeading: "mb-1 mt-0 shrink-0 text-xl font-semibold",
+  settingsDescription: "mb-5 mt-1 shrink-0 text-vui-xs text-vui-fg-secondary",
+  primary: "h-full min-h-0",
   route:
     `max-w-full text-vui-fg-primary [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap] ${vuiWorkspaceFillClass}`,
   routeBody:

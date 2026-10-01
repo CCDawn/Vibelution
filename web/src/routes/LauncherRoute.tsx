@@ -300,10 +300,10 @@ export function LauncherRoute() {
       data-vui-layout-id={LAUNCHER_LAYOUT_ID}
       ariaLabel={lang === "zh" ? "项目启动器" : "Project launcher"}
     >
-      <div className="flex min-h-0 flex-1 flex-col" data-vui-region="launcher-primary-rail">
-        <div hidden={!settingsVisible} className="flex h-full min-h-0 flex-col overflow-hidden px-7 py-4 max-[640px]:px-4" data-vui-region="launcher-settings-rail" aria-label={copy.startupSettings}>
-          <h1 className="mb-1 mt-0 shrink-0 text-xl font-semibold">{lang === "zh" ? "设置" : "Settings"}</h1>
-          <p className="mb-5 mt-1 shrink-0 text-vui-xs text-vui-fg-secondary">{lang === "zh" ? "管理启动行为和窗口偏好。" : "Manage startup behavior and window preferences."}</p>
+      <div className={styles.workspaceRail} data-vui-region="launcher-primary-rail">
+        <div hidden={!settingsVisible} className={styles.settingsWorkspace} data-vui-region="launcher-settings-rail" aria-label={copy.startupSettings}>
+          <h1 className={styles.settingsHeading}>{lang === "zh" ? "设置" : "Settings"}</h1>
+          <p className={styles.settingsDescription}>{lang === "zh" ? "管理启动行为和窗口偏好。" : "Manage startup behavior and window preferences."}</p>
           <LauncherStartupSettingsPanel
             key={settingsResetKey}
             standalone
@@ -319,7 +319,7 @@ export function LauncherRoute() {
             onSave={async (nextSetting) => (await startupSettingsMutation.mutateAsync(nextSetting)).setting}
           />
         </div>
-        <div hidden={settingsVisible} className="h-full min-h-0" data-vui-region="launcher-primary">
+        <div hidden={settingsVisible} className={styles.primary} data-vui-region="launcher-primary">
           <LauncherBranchInstancesPanel
             copy={copy}
             headerAction={(

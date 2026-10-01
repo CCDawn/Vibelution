@@ -1,3 +1,4 @@
+import styles from "./LauncherNavigation.styles";
 import { Activity, Box, GitBranch, Settings2, Wrench } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import type { LauncherBranchInstance } from "../api/launcher";
@@ -16,11 +17,11 @@ export function LauncherNavigation({ lang, items }: { lang: "zh" | "en"; items: 
     { id: "settings", label: lang === "zh" ? "设置" : "Settings", to: "/launcher?view=settings", Icon: Settings2 },
   ];
   const running = items.filter((item) => instanceRuntimeState(item) === "running").length;
-  return <nav aria-label={lang === "zh" ? "Launcher 功能导航" : "Launcher navigation"} className="flex h-full flex-col gap-1 border-r border-vui-border-subtle bg-vui-surface-workspace p-3 max-[700px]:flex-row max-[700px]:overflow-auto max-[700px]:border-b max-[700px]:border-r-0 max-[700px]:p-2">
-    <div className="mb-5 px-3 pt-2 max-[700px]:hidden"><p className="m-0 text-vui-xs text-vui-fg-tertiary">{lang === "zh" ? "本地项目" : "Local project"}</p><p className="mb-0 mt-2 flex items-center gap-2 text-vui-sm font-semibold"><GitBranch size={16} aria-hidden="true" />Vibelution</p></div>
-    {links.map(({ id, label, to, Icon }) => <div key={id} className={id === "settings" ? "mt-auto max-[700px]:mt-0" : ""}>
-      {id === "settings" ? <p className="mb-3 px-3 text-vui-xs text-vui-fg-tertiary max-[700px]:hidden">{lang === "zh" ? `本地运行 · ${running} 个工作区` : `${running} running workspaces`}</p> : null}
-      <VRouteLinkButton to={to} chrome="shell-nav" aria-current={selected === id ? "page" : undefined} className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 text-vui-sm font-medium max-[700px]:min-h-11 ${selected === id ? "bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]" : "text-vui-fg-secondary hover:bg-vui-surface-row-hover"}`} icon={<Icon size={17} aria-hidden="true" />}>{label}</VRouteLinkButton>
+  return <nav aria-label={lang === "zh" ? "Launcher 功能导航" : "Launcher navigation"} className={styles.root}>
+    <div className={styles.project}><p className={styles.projectLabel}>{lang === "zh" ? "本地项目" : "Local project"}</p><p className={styles.projectName}><GitBranch size={16} aria-hidden="true" />Vibelution</p></div>
+    {links.map(({ id, label, to, Icon }) => <div key={id} className={id === "settings" ? styles.settingsItem : ""}>
+      {id === "settings" ? <p className={styles.runningCount}>{lang === "zh" ? `本地运行 · ${running} 个工作区` : `${running} running workspaces`}</p> : null}
+      <VRouteLinkButton to={to} chrome="shell-nav" aria-current={selected === id ? "page" : undefined} className={`${styles.link} ${selected === id ? styles.selectedLink : styles.idleLink}`} icon={<Icon size={17} aria-hidden="true" />}>{label}</VRouteLinkButton>
     </div>)}
   </nav>;
 }

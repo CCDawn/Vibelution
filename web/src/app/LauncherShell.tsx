@@ -85,10 +85,10 @@ export function LauncherShell() {
     >
       <LauncherUpdateTopbar lang={lang} branchName={branchInstancesQuery.data?.currentShortName} />
       <VSplitWorkspace
-        className="!gap-0"
-        columnsClassName="grid-cols-[176px_minmax(0,1fr)] max-[700px]:grid-cols-1 max-[700px]:grid-rows-[auto_minmax(0,1fr)]"
+        className={styles.workspace}
+        columnsClassName={styles.columns}
         sidebar={<LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} />}
-        main={<div className="h-full min-h-0 min-w-0 overflow-hidden"><Outlet /></div>}
+        main={<div className={styles.main}><Outlet /></div>}
       />
     </div>
   );

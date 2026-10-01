@@ -449,7 +449,7 @@ export function LauncherBranchInstancesPanel({
       fill: true,
       render: (item: LauncherBranchInstance) => (
         <VTooltip content={`${item.shortName || item.branch || item.id} · ${item.branch || item.id} · ${item.path || item.displayPath || item.id}`} width="wide">
-          <span className={styles.branchName}>{launcherBranchDisplayName(item)}{item.current ? <small className="ml-2 font-normal text-vui-xs text-vui-fg-tertiary">{zh ? "当前" : "Current"}</small> : null}</span>
+          <span className={styles.branchName}>{launcherBranchDisplayName(item)}{item.current ? <small className={styles.currentMarker}>{zh ? "当前" : "Current"}</small> : null}</span>
         </VTooltip>
       ),
     },
@@ -460,11 +460,11 @@ export function LauncherBranchInstancesPanel({
       minWidth: 150,
       render: (item: LauncherBranchInstance) => {
         const state = instanceRuntimeState(item, pendingOperation);
-        return <div className="grid gap-1">
+        return <div className={styles.runtimeStack}>
           <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
-            <span className={state === "running" ? "text-[var(--state-success)]" : state === "failed" ? "text-[var(--state-error)]" : "text-vui-fg-secondary"}>{instanceRuntimeStateLabel(state, zh)}</span>
+            <span className={state === "running" ? styles.runtimeRunning : state === "failed" ? styles.runtimeFailed : styles.runtimeOther}>{instanceRuntimeStateLabel(state, zh)}</span>
           </LauncherBranchStatusHelp>
-          <span className="text-vui-xs text-vui-fg-tertiary">{instanceWindowOpen(item) ? (zh ? "窗口已打开" : "Window open") : (zh ? "窗口未打开" : "Window closed")}</span>
+          <span className={styles.windowState}>{instanceWindowOpen(item) ? (zh ? "窗口已打开" : "Window open") : (zh ? "窗口未打开" : "Window closed")}</span>
         </div>;
       },
     },
@@ -526,12 +526,12 @@ export function LauncherBranchInstancesPanel({
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
       {detailItem ? <LauncherBranchDetailPanel item={detailItem} zh={zh} pending={pendingOperation} actions={renderLifecycleActions(detailItem)} onBack={() => setDetailId(null)} /> : <>
       <header className={styles.panelHeader}>
-        <div><h1 className="m-0 text-xl font-semibold">{zh ? "分支" : "Branches"}</h1><p className="mb-0 mt-1 text-vui-xs text-vui-fg-secondary">{zh ? "管理工作区，打开窗口，继续工作。" : "Manage workspaces and continue your work."}</p></div>
-        <div className={styles.panelHeaderActions}>{launcherReading || !launcherOnline ? <span role="status" className="text-vui-xs text-vui-fg-secondary">{launcherReading ? labels.reading : labels.offline}</span> : null}{headerAction}</div>
+        <div><h1 className={styles.heading}>{zh ? "分支" : "Branches"}</h1><p className={styles.description}>{zh ? "管理工作区，打开窗口，继续工作。" : "Manage workspaces and continue your work."}</p></div>
+        <div className={styles.panelHeaderActions}>{launcherReading || !launcherOnline ? <span role="status" className={styles.connectionStatus}>{launcherReading ? labels.reading : labels.offline}</span> : null}{headerAction}</div>
       </header>
       <div className={styles.filterRow}>
-        <div className="relative min-w-40 flex-1"><Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-vui-fg-tertiary" /><VNativeInput aria-label={labels.search} className={styles.searchInput} placeholder={labels.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-        <VStringSelect ariaLabel={zh ? "分支筛选" : "Branch filter"} value={activeTab} className="!w-36 !shrink-0" onValueChange={(value) => setActiveTab(value as BranchTableTab)}
+        <div className={styles.searchField}><Search size={15} aria-hidden="true" className={styles.searchIcon} /><VNativeInput aria-label={labels.search} className={styles.searchInput} placeholder={labels.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+        <VStringSelect ariaLabel={zh ? "分支筛选" : "Branch filter"} value={activeTab} className={styles.filterSelect} onValueChange={(value) => setActiveTab(value as BranchTableTab)}
           options={[{value:"all",label:zh ? "可用工作区" : "Available"},{value:"running",label:labels.running},{value:"attention",label:labels.attention},{value:"startable",label:labels.startable},{value:"retired",label:zh ? "已退役" : "Retired"}]} />
         <VDropdownMenu aria-label={zh ? "更多筛选" : "More filters"} align="end" trigger={<VButton variant="ghost">{zh ? "筛选" : "Filters"}{filters.dirty || filters.unmerged ? " •" : ""}</VButton>} items={[
           { id: "dirty", label: `${filters.dirty ? "✓ " : ""}${labels.filterDirty}`, onSelect: () => setFilters((current) => ({...current, dirty: !current.dirty})) },
@@ -542,20 +542,20 @@ export function LauncherBranchInstancesPanel({
         {activeTab === "running" || activeTab === "attention" ? <VButton variant="secondary" isDisabled={activeRows.every((item) => !canStopInstance(item, pendingOperation))} onPress={() => askBatchStop(activeRows.map((item) => item.id), activeTab === "running" ? "stop" : "close")}>{activeTab === "running" ? labels.stopAll : labels.closeAll}</VButton> : null}
       </div>
       {notice ? <p role="status" className={noticeTone === "error" ? styles.noticeError : styles.notice}>{notice}</p> : null}
-      {listError && hasAnyItems ? <VStateSurface tone="error" className="mx-7 mb-3 shrink-0 max-[640px]:mx-4" title={listError} /> : null}
+      {listError && hasAnyItems ? <VStateSurface tone="error" className={styles.listError} title={listError} /> : null}
       {listError && !hasAnyItems ? <VStateSurface tone="error" className={styles.globalEmpty} title={listError} /> : showListLoading ? <VStateSurface className={styles.globalEmpty} tone="loading" title={labels.listLoadingTitle} skeletonLines={3} /> : !hasAnyItems ? <VEmptyState className={styles.globalEmpty} title={labels.globalEmptyTitle} icon={<GitBranch size={18} />}>{labels.globalEmptyHint}</VEmptyState> : filteredEmpty || activeRows.length === 0 ? <VEmptyState className={styles.globalEmpty} title={labels.filteredEmptyTitle} actions={<VButton variant="secondary" onPress={clearSearch}>{labels.clearSearch}</VButton>}>{labels.filteredEmptyHint}</VEmptyState> : (
         <div className={styles.tabBody}>
-          <div className="max-[700px]:hidden"><VDenseTable ariaLabel={activeHint} className={styles.statusTable} resizable rows={activeRows} emptyText={tabEmptyText} getRowKey={(item) => item.id}
+          <div className={styles.desktopList}><VDenseTable ariaLabel={activeHint} className={styles.statusTable} resizable rows={activeRows} emptyText={tabEmptyText} getRowKey={(item) => item.id}
             onRowClick={(item) => { onSelect(item.id); setDetailId(item.id); }}
             getRowState={(item) => ({selected: cleanupSelected.includes(item.id)})}
             columns={[selectColumn, ...primaryColumns]} /></div>
-          <div className="hidden max-[700px]:block" role="list" aria-label={activeHint}>{activeRows.map((item) => <div key={item.id} role="listitem" className="border-b border-vui-border-subtle px-3 py-3">
-            <VButton variant="ghost" className="!min-h-11 !max-w-full !justify-start !px-0" onPress={() => { onSelect(item.id); setDetailId(item.id); }}><span className="truncate">{launcherBranchDisplayName(item)}{item.current ? (zh ? " · 当前" : " · Current") : ""}</span></VButton>
-            <div className="flex flex-wrap items-center justify-between gap-2">{primaryColumns[1].render(item)}{renderLifecycleActions(item)}</div>
+          <div className={styles.mobileList} role="list" aria-label={activeHint}>{activeRows.map((item) => <div key={item.id} role="listitem" className={styles.mobileRow}>
+            <VButton variant="ghost" className={styles.mobileBranchButton} onPress={() => { onSelect(item.id); setDetailId(item.id); }}><span className={styles.mobileBranchName}>{launcherBranchDisplayName(item)}{item.current ? (zh ? " · 当前" : " · Current") : ""}</span></VButton>
+            <div className={styles.mobileActions}>{primaryColumns[1].render(item)}{renderLifecycleActions(item)}</div>
           </div>)}</div>
         </div>
       )}
-      <div className="flex shrink-0 justify-between border-t border-vui-border-subtle px-7 py-3 text-vui-xs text-vui-fg-tertiary"><span>{(!hasAnyItems && listError) || showListLoading ? "—" : activeRows.length} {zh ? "个工作区" : "workspaces"}</span><span>{zh ? "退役记录保留在筛选中" : "Retired workspaces remain in filters"}</span></div>
+      <div className={styles.listFooter}><span>{(!hasAnyItems && listError) || showListLoading ? "—" : activeRows.length} {zh ? "个工作区" : "workspaces"}</span><span>{zh ? "退役记录保留在筛选中" : "Retired workspaces remain in filters"}</span></div>
       </>}
       <VConfirmDialog open={forceStopId !== null} onOpenChange={(open) => { if (!open) setForceStopId(null); }} title={labels.forceStop} description={`${forceStopItem ? launcherBranchDisplayName(forceStopItem) : ""} · ${labels.forceStopHint}`} tone="danger" confirmLabel={labels.forceStop} cancelLabel={zh ? "取消" : "Cancel"} confirmDisabled={lifecyclePending || !items.some((item) => item.id === forceStopId && canForceStopInstance(item))} onConfirm={() => { if (lifecyclePending) return; const item = items.find((entry) => entry.id === forceStopId); if (item && canForceStopInstance(item)) onLifecycle?.(item.id, "force-stop"); setForceStopId(null); }} />
       <VConfirmDialog
