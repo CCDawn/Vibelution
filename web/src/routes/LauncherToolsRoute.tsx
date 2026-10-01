@@ -2,6 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   getLauncherBranchInstances,
@@ -50,7 +51,7 @@ import {
 } from "../app/projectCloseGuard";
 import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VDenseOpsPage, VRouteLinkButton, VStateSurface, VTooltip } from "../components/vui";
+import { VDenseOpsPage, VStateSurface, VTabs, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherToolsRouteStyles as styles } from "./LauncherToolsRoute.styles";
 
@@ -308,6 +309,9 @@ type LauncherCopy = {
   developerModeSettingsReadonly: string;
   developerModeUpdated: string;
   maintenanceTitle: string;
+  maintenancePanelTitle: string;
+  maintenanceEmptyItems: string;
+  maintenanceOwnerLauncher: string;
   maintenanceHint: string;
   maintenanceProfile: string;
   maintenanceCleanStart: string;
@@ -326,6 +330,7 @@ type LauncherCopy = {
   maintenanceApplied: string;
   maintenanceLoading: string;
   developerModeNoiseOverview: string;
+  developerModeNoiseEmpty: string;
   developerModeNoiseLoading: string;
   developerModeRefreshNoise: string;
   developerModeAction: string;
@@ -919,6 +924,7 @@ function controlPlaneHasCommandType(
 }
 
 export function LauncherToolsRoute() {
+  const [searchParams] = useSearchParams();
   const { lang } = useShellI18n({ configEnabled: false });
   const queryClient = useQueryClient();
   const { request: requestLifecycle } = useWorkbenchLifecycleActions("launcher_route");
@@ -1020,6 +1026,14 @@ export function LauncherToolsRoute() {
         controlEvidence: "证据",
         guardian: "托管明细",
         advancedDiagnostics: "高级诊断",
+        diagnosticsViewTitle: "诊断",
+        diagnosticsViewHint: "查看分支进程、端口配置和运行证据。",
+        maintenanceViewTitle: "维护",
+        maintenanceViewHint: "项目恢复与开发沙盒。执行操作前会继续校验现有计划和安全条件。",
+        processTab: "进程",
+        portsTab: "端口设置",
+        projectMaintenanceTab: "项目维护",
+        developerSandboxTab: "开发沙盒",
         queueAndEvents: "命令与事件",
         recovery: "恢复记录",
         recoveryIdle: "无恢复动作",
@@ -1146,6 +1160,9 @@ export function LauncherToolsRoute() {
         developerModeSettingsReadonly: "设置页只读展示，不能在工作台设置里改动",
         developerModeUpdated: "开发者沙盒已更新",
         maintenanceTitle: "恢复初始化",
+        maintenancePanelTitle: "项目维护",
+        maintenanceEmptyItems: "当前档位没有匹配的清理项。",
+        maintenanceOwnerLauncher: "启动器管理",
         maintenanceHint: "清理与恢复初始化由 Launcher 生成计划、校验档位和 planHash，并在执行前阻止 active work；默认保留用户会话和 Agent/Team 结构。",
         maintenanceProfile: "维护档位",
         maintenanceCleanStart: "干净启动",
@@ -1164,6 +1181,7 @@ export function LauncherToolsRoute() {
         maintenanceApplied: "Launcher 维护计划已执行",
         maintenanceLoading: "正在读取维护盘点",
         developerModeNoiseOverview: "噪声概览",
+        developerModeNoiseEmpty: "目前没有可清理的沙盒项。",
         developerModeNoiseLoading: "正在扫描噪声来源",
         developerModeRefreshNoise: "刷新概览",
         developerModeAction: "清理动作",
@@ -1286,6 +1304,14 @@ export function LauncherToolsRoute() {
         controlEvidence: "Evidence",
         guardian: "Managed Details",
         advancedDiagnostics: "Advanced Diagnostics",
+        diagnosticsViewTitle: "Diagnostics",
+        diagnosticsViewHint: "Review branch processes, port settings, and runtime evidence.",
+        maintenanceViewTitle: "Maintenance",
+        maintenanceViewHint: "Project recovery and the development sandbox. Existing plans and safety checks remain in effect.",
+        processTab: "Processes",
+        portsTab: "Port settings",
+        projectMaintenanceTab: "Project maintenance",
+        developerSandboxTab: "Dev sandbox",
         queueAndEvents: "Commands and Events",
         recovery: "Recovery",
         recoveryIdle: "No recovery action",
@@ -1412,6 +1438,9 @@ export function LauncherToolsRoute() {
         developerModeSettingsReadonly: "Settings shows this read-only and cannot change it",
         developerModeUpdated: "Developer sandbox updated",
         maintenanceTitle: "Restore initialization",
+        maintenancePanelTitle: "Project maintenance",
+        maintenanceEmptyItems: "No cleanup items match this profile.",
+        maintenanceOwnerLauncher: "Managed by Launcher",
         maintenanceHint: "Cleanup and restore initialization are planned by Launcher, validated with profile and planHash, and blocked when active work exists. The default keeps user sessions and Agent/Team structure.",
         maintenanceProfile: "Maintenance profile",
         maintenanceCleanStart: "Clean start",
@@ -1430,6 +1459,7 @@ export function LauncherToolsRoute() {
         maintenanceApplied: "Launcher maintenance plan applied",
         maintenanceLoading: "Reading maintenance inventory",
         developerModeNoiseOverview: "Noise overview",
+        developerModeNoiseEmpty: "There are no sandbox items to clean up.",
         developerModeNoiseLoading: "Scanning noise sources",
         developerModeRefreshNoise: "Refresh overview",
         developerModeAction: "Cleanup action",
@@ -1457,6 +1487,10 @@ export function LauncherToolsRoute() {
         lifecycleEvidenceIncomplete: "Lifecycle evidence is incomplete; expand diagnostics for raw state.",
       };
 
+  const routeSection = searchParams.get("view") === "maintenance" ? "maintenance" : "diagnostics";
+  const routeHeading = routeSection === "maintenance" ? copy.maintenanceViewTitle : copy.diagnosticsViewTitle;
+  const routeHint = routeSection === "maintenance" ? copy.maintenanceViewHint : copy.diagnosticsViewHint;
+  const requestedInstanceId = searchParams.get("instance")?.trim() ?? "";
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
   const [lastControlOperation, setLastControlOperation] = useState<LauncherOperation | null>(null);
   const [trackedCommand, setTrackedCommand] = useState<LauncherTrackedCommand | null>(null);
@@ -1467,6 +1501,8 @@ export function LauncherToolsRoute() {
   const [cleanupPlan, setCleanupPlan] = useState<LauncherDeveloperCleanupPlan | null>(null);
   const [maintenanceProfile, setMaintenanceProfile] = useState<LauncherMaintenanceProfileId>("clean_start");
   const [maintenancePlansByProfile, setMaintenancePlansByProfile] = useState<Partial<Record<LauncherMaintenanceProfileId, LauncherMaintenancePlan>>>({});
+  const [diagnosticsTab, setDiagnosticsTab] = useState("processes");
+  const [maintenanceTab, setMaintenanceTab] = useState("project");
   const maintenancePlan = maintenancePlansByProfile[maintenanceProfile] ?? null;
   const stateBridgeAvailable = hasLauncherStateBridge();
   const stateQuery = useQuery({
@@ -1511,6 +1547,9 @@ export function LauncherToolsRoute() {
     });
   }, [queryClient, stateBridgeAvailable]);
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
+  useEffect(() => {
+    setSelectedInstanceId(requestedInstanceId);
+  }, [requestedInstanceId]);
   const branchItems = branchInstancesQuery.data?.items ?? [];
   const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
   const selectedBranchId = branchItems.some((item) => item.id === selectedInstanceId)
@@ -2275,7 +2314,9 @@ export function LauncherToolsRoute() {
     row.id === "launcher_control" || row.id === "runtime_manager" || row.id === "frontend" || row.id.startsWith("residual-")
   ));
   const selectedProcessRows = [...instanceProcessRows, ...sharedProcessRows];
-  const selectedProcessHint = uiLang === "zh" ? "全部已打开分支的进程" : "Processes for every checked-out instance";
+  const selectedProcessHint = uiLang === "zh"
+    ? "各分支的运行状态（含已停止实例）"
+    : "Runtime status across branches, including stopped instances";
   const selectedResidualCount = residualCount;
   const diagnosticStatusRows = statusRows.filter((row) => row.id === "runtime_manager");
   const activeCommand = evidence?.state.activeCommand;
@@ -2514,32 +2555,14 @@ export function LauncherToolsRoute() {
       fill
       hideHeader
       data-vui-domain-recipe="launcher-workbench"
-      ariaLabel={copy.advancedDiagnostics}
+      ariaLabel={routeHeading}
     >
       <header className={styles.toolsPageHeader} data-vui-region="launcher-tools-header">
         <div>
-          <p className={styles.panelEyebrow}>{copy.eyebrow}</p>
-          <h1 className={styles.toolsPageTitle}>{copy.advancedDiagnostics}</h1>
-          <p className={styles.toolsPageHint}>{copy.advancedFoldHint}</p>
+          <h1 className={styles.toolsPageTitle}>{routeHeading}</h1>
+          <p className={styles.toolsPageHint}>{routeHint}</p>
         </div>
-        <VRouteLinkButton to="/launcher" variant="ghost" density="compact">
-          {lang === "zh" ? "返回启动器" : "Back to launcher"}
-        </VRouteLinkButton>
       </header>
-
-      {stateBridgeAvailable && stateQuery.data ? (
-        <LauncherRegistryDiagnosticsBanner
-          className={styles.notice}
-          uiLang={uiLang}
-          locale={locale}
-          snapshot={stateQuery.data}
-          classifications={registryClassifications}
-          canRecheck={stateRefreshAvailable}
-          rechecking={recheckRegistryMutation.isPending}
-          onRecheck={() => recheckRegistryMutation.mutate()}
-          onNotice={(next) => setNotice(next)}
-        />
-      ) : null}
 
       {statusQuery.isError && !launcherControlPlaneStarting ? (
         <VStateSurface
@@ -2577,81 +2600,180 @@ export function LauncherToolsRoute() {
         data-vui-region="launcher-workspace"
       >
           <div className={styles.toolsWorkspace}>
-            <LauncherPortSettingsPanel
-              copy={copy}
-              setting={startupSettings}
-              controlPortOverride={controlPortOverride}
-              backendPortOverride={backendPortOverride}
-              frontendPortOverride={frontendPortOverride}
-              pending={startupSettingsMutation.isPending}
-              onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
-            />
-            <LauncherProcessMonitorPanel
-              copy={{
-                ...copy,
-                processMonitorHint: selectedProcessHint,
-              }}
-              rows={selectedProcessRows}
-              residualCount={selectedResidualCount}
-              selectedId={selectedBranchId}
-            />
-            <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
-              <LauncherProjectMaintenancePanel
-                copy={copy}
-                summary={maintenanceSummaryQuery.data}
-                maintenanceProfile={maintenanceProfile}
-                plan={maintenancePlan}
-                loading={maintenanceSummaryQuery.isLoading || maintenanceSummaryQuery.isFetching}
-                previewPending={maintenancePreviewMutation.isPending}
-                applyPending={maintenanceApplyMutation.isPending}
-                onProfileChange={(profile) => {
-                  setMaintenanceProfile(profile);
-                }}
-                onPreview={previewMaintenancePlan}
-                onApply={applyMaintenancePlan}
+            <section
+              className={styles.toolsView}
+              data-launcher-tools-view="diagnostics"
+              hidden={routeSection !== "diagnostics"}
+              style={{ display: routeSection === "diagnostics" ? "grid" : "none" }}
+            >
+              <VTabs
+                aria-label={copy.diagnosticsViewTitle}
+                value={diagnosticsTab}
+                onValueChange={setDiagnosticsTab}
+                className={styles.toolsTabs}
+                listClassName={styles.toolsTabList}
+                triggerClassName={styles.toolsTabTrigger}
+                items={[
+                  { id: "processes", label: copy.processTab },
+                  { id: "ports", label: copy.portsTab },
+                  { id: "advanced", label: copy.advancedDiagnostics },
+                ]}
               />
-              <LauncherDeveloperModePanel
-                copy={copy}
-                setting={developerModeSetting}
-                noiseOverview={developerNoiseQuery.data}
-                selectedAction={selectedCleanupAction}
-                plan={cleanupPlan}
-                pending={developerModeMutation.isPending}
-                noiseLoading={developerNoiseQuery.isFetching}
-                previewPending={cleanupPreviewMutation.isPending}
-                applyPending={cleanupApplyMutation.isPending}
-                resetPending={resetDeveloperSandboxMutation.isPending}
-                onToggle={toggleDeveloperMode}
-                onReset={resetDeveloperSandbox}
-                onRefreshNoise={() => void developerNoiseQuery.refetch()}
-                onSelectAction={(action) => {
-                  setSelectedCleanupAction(action);
-                  setCleanupPlan(null);
-                }}
-                onPreview={previewDeveloperCleanup}
-                onApply={applyDeveloperCleanup}
+              <div className={styles.toolsTabPanels}>
+                <div
+                  className={styles.toolsTabPanel}
+                  role="tabpanel"
+                  aria-label={copy.processTab}
+                  tabIndex={0}
+                  hidden={diagnosticsTab !== "processes"}
+                >
+                  <LauncherProcessMonitorPanel
+                    copy={{
+                      ...copy,
+                      processMonitorHint: selectedProcessHint,
+                    }}
+                    rows={selectedProcessRows}
+                    residualCount={selectedResidualCount}
+                    selectedId={selectedBranchId}
+                  />
+                </div>
+                <div
+                  className={styles.toolsTabPanel}
+                  role="tabpanel"
+                  aria-label={copy.portsTab}
+                  tabIndex={0}
+                  hidden={diagnosticsTab !== "ports"}
+                >
+                  <LauncherPortSettingsPanel
+                    copy={copy}
+                    setting={startupSettings}
+                    controlPortOverride={controlPortOverride}
+                    backendPortOverride={backendPortOverride}
+                    frontendPortOverride={frontendPortOverride}
+                    pending={startupSettingsMutation.isPending}
+                    onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
+                  />
+                </div>
+                <div
+                  className={styles.toolsTabPanel}
+                  role="tabpanel"
+                  aria-label={copy.advancedDiagnostics}
+                  tabIndex={0}
+                  hidden={diagnosticsTab !== "advanced"}
+                >
+                  {stateBridgeAvailable && stateQuery.data ? (
+                    <LauncherRegistryDiagnosticsBanner
+                      className={styles.notice}
+                      uiLang={uiLang}
+                      locale={locale}
+                      snapshot={stateQuery.data}
+                      classifications={registryClassifications}
+                      canRecheck={stateRefreshAvailable}
+                      rechecking={recheckRegistryMutation.isPending}
+                      onRecheck={() => recheckRegistryMutation.mutate()}
+                      onNotice={(next) => setNotice(next)}
+                    />
+                  ) : null}
+                  <LauncherDiagnosticsPanel
+                    copy={copy}
+                    controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
+                    controlPlaneSpecs={controlPlaneSpecs}
+                    controlEvidenceStatus={evidence?.state.runtimeState || "-"}
+                    controlEvidenceSpecs={controlEvidenceSpecs}
+                    recoveryLine={recoveryLine}
+                    activeCommandLine={activeCommandLine}
+                    queueItemCount={recentResults.length + recentEvents.length}
+                    queueItems={diagnosticQueueItems}
+                    guardianProgress={guardianProgress}
+                    guardianOwnedCount={guardian?.ownedCount ?? 0}
+                    guardianAdapterCount={guardian?.adapterCount ?? 0}
+                    guardianRows={guardianResponsibilityRows}
+                    diagnosticSpecs={diagnosticSpecs}
+                    busy={busy}
+                    canRequestSupervisorReattach={canRequestSupervisorReattach}
+                    supervisorPending={supervisorMutation.isPending}
+                    onReattachSupervisor={() => supervisorMutation.mutate()}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section
+              className={styles.toolsView}
+              data-launcher-tools-view="maintenance"
+              hidden={routeSection !== "maintenance"}
+              style={{ display: routeSection === "maintenance" ? "grid" : "none" }}
+            >
+              <VTabs
+                aria-label={copy.maintenanceViewTitle}
+                value={maintenanceTab}
+                onValueChange={setMaintenanceTab}
+                className={styles.toolsTabs}
+                listClassName={styles.toolsTabList}
+                triggerClassName={styles.toolsTabTrigger}
+                items={[
+                  { id: "project", label: copy.projectMaintenanceTab },
+                  { id: "sandbox", label: copy.developerSandboxTab },
+                ]}
               />
-              <LauncherDiagnosticsPanel
-                copy={copy}
-                controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
-                controlPlaneSpecs={controlPlaneSpecs}
-                controlEvidenceStatus={evidence?.state.runtimeState || "-"}
-                controlEvidenceSpecs={controlEvidenceSpecs}
-                recoveryLine={recoveryLine}
-                activeCommandLine={activeCommandLine}
-                queueItemCount={recentResults.length + recentEvents.length}
-                queueItems={diagnosticQueueItems}
-                guardianProgress={guardianProgress}
-                guardianOwnedCount={guardian?.ownedCount ?? 0}
-                guardianAdapterCount={guardian?.adapterCount ?? 0}
-                guardianRows={guardianResponsibilityRows}
-                diagnosticSpecs={diagnosticSpecs}
-                busy={busy}
-                canRequestSupervisorReattach={canRequestSupervisorReattach}
-                supervisorPending={supervisorMutation.isPending}
-                onReattachSupervisor={() => supervisorMutation.mutate()}
-              />
-            </Suspense>
+              <div className={styles.toolsTabPanels}>
+                <div
+                  className={styles.toolsTabPanel}
+                  role="tabpanel"
+                  aria-label={copy.projectMaintenanceTab}
+                  tabIndex={0}
+                  hidden={maintenanceTab !== "project"}
+                >
+                  <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
+                    <LauncherProjectMaintenancePanel
+                      copy={copy}
+                      summary={maintenanceSummaryQuery.data}
+                      maintenanceProfile={maintenanceProfile}
+                      plan={maintenancePlan}
+                      loading={maintenanceSummaryQuery.isLoading || maintenanceSummaryQuery.isFetching}
+                      previewPending={maintenancePreviewMutation.isPending}
+                      applyPending={maintenanceApplyMutation.isPending}
+                      onProfileChange={(profile) => {
+                        setMaintenanceProfile(profile);
+                      }}
+                      onPreview={previewMaintenancePlan}
+                      onApply={applyMaintenancePlan}
+                    />
+                  </Suspense>
+                </div>
+                <div
+                  className={styles.toolsTabPanel}
+                  role="tabpanel"
+                  aria-label={copy.developerSandboxTab}
+                  tabIndex={0}
+                  hidden={maintenanceTab !== "sandbox"}
+                >
+                  <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
+                    <LauncherDeveloperModePanel
+                      copy={copy}
+                      setting={developerModeSetting}
+                      noiseOverview={developerNoiseQuery.data}
+                      selectedAction={selectedCleanupAction}
+                      plan={cleanupPlan}
+                      pending={developerModeMutation.isPending}
+                      noiseLoading={developerNoiseQuery.isFetching}
+                      previewPending={cleanupPreviewMutation.isPending}
+                      applyPending={cleanupApplyMutation.isPending}
+                      resetPending={resetDeveloperSandboxMutation.isPending}
+                      onToggle={toggleDeveloperMode}
+                      onReset={resetDeveloperSandbox}
+                      onRefreshNoise={() => void developerNoiseQuery.refetch()}
+                      onSelectAction={(action) => {
+                        setSelectedCleanupAction(action);
+                        setCleanupPlan(null);
+                      }}
+                      onPreview={previewDeveloperCleanup}
+                      onApply={applyDeveloperCleanup}
+                    />
+                  </Suspense>
+                </div>
+              </div>
+            </section>
           </div>
       </div>
     </VDenseOpsPage>

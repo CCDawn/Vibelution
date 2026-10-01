@@ -8,26 +8,27 @@ const rowSurface = `${vuiOpaqueRowClass}`;
 const mutedControl =
   "inline-flex min-h-7 w-fit max-w-full flex-none items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-vui-border-soft bg-vui-control-muted px-2 [font-size:var(--vui-font-xs)] leading-none text-vui-fg-secondary no-underline hover:border-vui-border-soft hover:bg-vui-control-muted-hover hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55 [&[data-vui]]:min-w-0";
 const primaryControl =
-  "inline-flex min-h-7 w-fit max-w-full flex-none items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-primary)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-primary)_12%,var(--vui-control-muted))] px-2 [font-size:var(--vui-font-xs)] leading-none text-vui-fg-primary no-underline hover:border-[color-mix(in_srgb,var(--accent-primary)_44%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent-primary)_18%,var(--vui-control-muted))] disabled:cursor-default disabled:opacity-55 [&[data-vui]]:min-w-0";
+  "min-h-7 w-fit max-w-full flex-none gap-1.5 px-2 [font-size:var(--vui-font-xs)] leading-none [&[data-vui]]:min-w-0";
 const dangerControl =
   "border-[color-mix(in_srgb,var(--danger)_34%,transparent)] bg-[color-mix(in_srgb,var(--danger)_9%,var(--vui-control-muted))] text-[color-mix(in_srgb,var(--danger)_74%,var(--vui-fg-primary))] hover:border-[color-mix(in_srgb,var(--danger)_52%,transparent)] hover:bg-[color-mix(in_srgb,var(--danger)_14%,var(--vui-control-muted))] hover:text-vui-fg-primary";
 
 const styles = {
   cleanupActions: "flex min-w-0 flex-wrap items-center justify-start gap-1.5",
   // Wave 6F: height from PersistedHeightListShell, not fixed max-h.
-  cleanupConsole: `grid min-h-0 min-w-0 gap-1.5 overflow-auto ${rowSurface} p-2 [scrollbar-gutter:stable]`,
+  cleanupConsole: `col-span-full grid min-h-0 min-w-0 gap-1.5 overflow-auto ${rowSurface} p-2 [scrollbar-gutter:stable]`,
   cleanupConsoleResizeHandle:
     "cleanupConsoleResizeHandle",
   cleanupMetrics: "flex min-w-0 flex-wrap items-center gap-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)] max-[620px]:grid max-[620px]:grid-cols-[minmax(0,1fr)]",
   cleanupPlan: "grid min-w-0 gap-1 rounded-md border border-[color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color-mix(in_srgb,var(--state-warning)_6%,var(--vui-surface-row))] p-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)] [&_li]:min-w-0 [&_li]:truncate [&_li]:[font-size:var(--vui-font-xs)] [&_li]:text-[var(--fg-secondary)] [&_ul]:m-0 [&_ul]:grid [&_ul]:min-w-0 [&_ul]:gap-0.5 [&_ul]:pl-4",
   compactButton: "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1 rounded-[var(--radius-control)] border border-vui-border-soft bg-vui-control-muted px-1.5 py-1 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:bg-vui-control-muted-hover disabled:cursor-default disabled:opacity-60 [&[data-vui]]:min-w-0",
   dangerButton: dangerControl,
-  developerGrid: "grid min-h-0 min-w-0 grid-cols-[clamp(120px,14vw,160px)_minmax(0,1fr)_clamp(240px,22vw,360px)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
+  developerGrid: "grid min-h-0 min-w-0 grid-cols-[minmax(160px,0.7fr)_minmax(0,2fr)] gap-1.5 max-[860px]:grid-cols-[minmax(0,1fr)]",
   developerNoise: `grid min-h-0 min-w-0 gap-1.5 overflow-hidden ${rowSurface} p-2`,
   developerNoiseHeader: "flex min-w-0 items-center justify-between gap-2 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)]",
   developerPanel: `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-1.5 overflow-hidden ${panelSurface} px-2 py-1.5 data-[enabled=true]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)]`,
   developerPanelHeader: "flex min-w-0 items-center justify-between gap-2 max-[860px]:flex-col max-[860px]:items-start [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
   developerStatus: `grid min-w-0 content-start gap-1 ${rowSurface} p-2 data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
+  emptyList: "min-w-0 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
   iconButton: mutedControl,
   noiseItem: "grid min-w-0 gap-0.5 rounded-md border border-[color-mix(in_srgb,var(--border-soft)_72%,transparent)] px-1.5 py-1 data-[protected=true]:opacity-80 [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-secondary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)]",
   // Wave 6G: height from PersistedHeightListShell, not fixed max-h.

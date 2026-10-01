@@ -41,7 +41,7 @@ function LauncherUpdatePreview() {
         onCheck={() => { setScene("current"); setNotice("模拟检测已完成；未请求真实版本服务。"); }}
         onUpdate={() => setScene("building")} />
       <VDenseOpsPage hideHeader fill={false} ariaLabel="Launcher 主界面" className="min-w-0" bodyClassName="gap-3 p-3 max-[600px]:p-2">
-        <LauncherStartupSettingsPanel copy={startupCopy} uiLang="zh" setting={undefined} configuredWindowMode="windowed" effectiveWindowModeLabel="窗口化" windowModeDetail="" pending={false} pendingWindowMode="" onSave={() => setNotice("预览不会保存真实设置。")} onWindowModeChange={() => setNotice("预览不会调整真实窗口。")} />
+        <LauncherStartupSettingsPanel copy={startupCopy} uiLang="zh" setting={undefined} configuredWindowMode="windowed" effectiveWindowModeLabel="窗口化" windowModeDetail="" pending={false} pendingWindowMode="" onSave={async (settings) => { setNotice("预览不会保存真实设置。"); return settings; }} onWindowModeChange={() => setNotice("预览不会调整真实窗口。")} />
         <section className="min-w-0 rounded-[var(--vui-radius-panel-soft)] border border-vui-border-subtle bg-vui-surface-panel p-3">
           <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2"><strong className="text-vui-sm font-medium">分支实例</strong><VButton className={compact} variant="ghost" onPress={() => setNotice("工具页不在本次预览范围内。")}>工具与诊断</VButton></div>
           <VDenseTable ariaLabel="分支实例预览" rows={rows} getRowKey={(row) => row.branch} columns={columns} className="min-w-0 overflow-x-auto text-vui-xs" />

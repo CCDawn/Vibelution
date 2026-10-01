@@ -38,6 +38,7 @@ type LauncherDeveloperModeCopy = {
   developerModeHint: string;
   developerModeLastUpdated: string;
   developerModeNoiseLoading: string;
+  developerModeNoiseEmpty: string;
   developerModeNoiseOverview: string;
   developerModeOff: string;
   developerModeOn: string;
@@ -196,14 +197,17 @@ export function LauncherDeveloperModePanel({
             label={copy.developerModeNoiseOverview}
             className={styles.noiseItemGrid}
             resizeHandleClassName={styles.noiseItemGridResizeHandle}
+            expandToContent
           >
-            {(noiseOverview?.items ?? []).slice(0, 4).map((item) => (
-              <div key={item.id} className={styles.noiseItem} data-protected={item.protected}>
-                <span>{item.label}</span>
-                <strong>{formatBytes(item.sizeBytes)}</strong>
-                <small>{item.targetCount} {copy.cleanupTargets}{item.skippedCount ? ` · ${item.skippedCount} ${copy.cleanupSkipped}` : ""}</small>
-              </div>
-            ))}
+            {noiseOverview?.items.length ? noiseOverview.items.slice(0, 4).map((item) => (
+                <div key={item.id} className={styles.noiseItem} data-protected={item.protected}>
+                  <span>{item.label}</span>
+                  <strong>{formatBytes(item.sizeBytes)}</strong>
+                  <small>{item.targetCount} {copy.cleanupTargets}{item.skippedCount ? ` · ${item.skippedCount} ${copy.cleanupSkipped}` : ""}</small>
+                </div>
+              )) : (
+                <small className={styles.emptyList}>{noiseLoading ? copy.developerModeNoiseLoading : copy.developerModeNoiseEmpty}</small>
+              )}
           </PersistedHeightListShell>
         </div>
         <PersistedHeightListShell
@@ -212,6 +216,7 @@ export function LauncherDeveloperModePanel({
           label={copy.developerModeAction}
           className={styles.cleanupConsole}
           resizeHandleClassName={styles.cleanupConsoleResizeHandle}
+          expandToContent
         >
           <VTooltip content={selectedOption.detail} width="wide">
             <label className={styles.settingField}>

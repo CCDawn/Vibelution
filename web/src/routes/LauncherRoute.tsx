@@ -2,25 +2,28 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { useBlocker, useSearchParams } from "react-router-dom";
+import { RefreshCw } from "lucide-react";
 
 import {
   getLauncherBranchInstances,
   getLauncherStatus,
   isLauncherControlPlaneNotReady,
   requestBranchInstanceLifecycle,
-  saveLauncherWorkbenchWindowMode,
   updateLauncherStartupSettings,
 } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import type { LauncherOperation } from "../api/types";
 import { useWorkbenchLifecycleActions } from "../app/useWorkbenchLifecycleActions";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VDenseOpsPage, VRouteLinkButton, VStateSurface } from "../components/vui";
+import { VButton, VConfirmDialog, VDenseOpsPage, VStateSurface } from "../components/vui";
+import { useStableBeforeUnload } from "../app/useStableBeforeUnload";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
 import {
   acceptLifecycleIntent,
   lifecycleIntentRejectMessage,
+  shouldApplyLifecycleMutationFeedback,
   settleLifecycleIntentTable,
   type LifecycleIntentTable,
   type LifecycleRequestOutcome,
@@ -98,6 +101,15 @@ function startupCopy(lang: "zh" | "en") {
 }
 
 export function LauncherRoute() {
+  const [searchParams] = useSearchParams();
+  const settingsVisible = searchParams.get("view") === "settings";
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsResetKey, setSettingsResetKey] = useState(0);
+  const leaveBlocker = useBlocker(({ currentLocation, nextLocation }) => settingsDirty &&
+    `${currentLocation.pathname}${currentLocation.search}` !== `${nextLocation.pathname}${nextLocation.search}`);
+  useStableBeforeUnload((event) => {
+    if (settingsDirty) { event.preventDefault(); event.returnValue = ""; }
+  });
   const { lang } = useShellI18n({ configEnabled: false });
   const queryClient = useQueryClient();
   const { request: requestWorkbenchLifecycle } = useWorkbenchLifecycleActions("launcher_route");
@@ -140,6 +152,10 @@ export function LauncherRoute() {
         : requestBranchInstanceLifecycle(instanceId, operation, "launcher_route_panel");
     },
     onSuccess: (response, request) => {
+      if (!shouldApplyLifecycleMutationFeedback(lifecycleIntentsRef.current, request)) {
+        refreshLauncherData();
+        return;
+      }
       if (!response.accepted) {
         setLifecycleIntents((current) => {
           const next = { ...current };
@@ -178,6 +194,10 @@ export function LauncherRoute() {
       refreshLauncherData();
     },
     onError: (error, request) => {
+      if (!shouldApplyLifecycleMutationFeedback(lifecycleIntentsRef.current, request)) {
+        refreshLauncherData();
+        return;
+      }
       setLifecycleIntents((current) => {
         const next = { ...current };
         delete next[request.instanceId];
@@ -198,20 +218,19 @@ export function LauncherRoute() {
     },
   });
   const startupSettingsMutation = useMutation({
-    mutationFn: updateLauncherStartupSettings,
+    mutationFn: async (next: Parameters<typeof updateLauncherStartupSettings>[0]) => {
+      const response = await updateLauncherStartupSettings(next);
+      if (!response.ok) throw new Error(response.message || "Startup settings were not saved");
+      return response;
+    },
     onSuccess: (response) => {
       showNotice(response.message || (lang === "zh" ? "启动设置已保存。" : "Startup settings saved."));
       refreshLauncherData();
     },
-    onError: (error) => showNotice(error instanceof Error ? error.message : String(error), "error"),
-  });
-  const windowModeMutation = useMutation({
-    mutationFn: saveLauncherWorkbenchWindowMode,
-    onSuccess: (response) => {
-      showNotice(response.message || (lang === "zh" ? "启动窗口模式已保存。" : "Startup window mode saved."));
-      refreshLauncherData();
+    onError: (error) => {
+      showNotice(error instanceof Error ? error.message : String(error), "error");
+      void statusQuery.refetch();
     },
-    onError: (error) => showNotice(error instanceof Error ? error.message : String(error), "error"),
   });
 
   const status = statusQuery.data;
@@ -281,28 +300,30 @@ export function LauncherRoute() {
       data-vui-layout-id={LAUNCHER_LAYOUT_ID}
       ariaLabel={lang === "zh" ? "项目启动器" : "Project launcher"}
     >
-      <div className={styles.primaryRail} data-vui-region="launcher-primary-rail">
-        <aside className={styles.settingsRail} data-vui-region="launcher-settings-rail" aria-label={copy.startupSettings}>
+      <div className="flex min-h-0 flex-1 flex-col" data-vui-region="launcher-primary-rail">
+        <div hidden={!settingsVisible} className="flex h-full min-h-0 flex-col overflow-hidden px-7 py-4 max-[640px]:px-4" data-vui-region="launcher-settings-rail" aria-label={copy.startupSettings}>
+          <h1 className="mb-1 mt-0 shrink-0 text-xl font-semibold">{lang === "zh" ? "设置" : "Settings"}</h1>
+          <p className="mb-5 mt-1 shrink-0 text-vui-xs text-vui-fg-secondary">{lang === "zh" ? "管理启动行为和窗口偏好。" : "Manage startup behavior and window preferences."}</p>
           <LauncherStartupSettingsPanel
+            key={settingsResetKey}
+            standalone
+            onDirtyChange={setSettingsDirty}
             copy={copy}
             uiLang={uiLang}
             setting={setting}
             configuredWindowMode={configuredWindowMode}
             effectiveWindowModeLabel={effectiveWindowMode === "windowed" ? copy.windowModeWindowed : copy.windowModeFullscreen}
             windowModeDetail={lang === "zh" ? "下次启动或重启工作台生效" : "Takes effect when the workbench next starts or restarts"}
-            pending={startupSettingsMutation.isPending || windowModeMutation.isPending}
-            pendingWindowMode={windowModeMutation.isPending ? effectiveWindowMode : ""}
-            onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
-            onWindowModeChange={(request) => windowModeMutation.mutate(request)}
+            pending={startupSettingsMutation.isPending}
+            pendingWindowMode=""
+            onSave={async (nextSetting) => (await startupSettingsMutation.mutateAsync(nextSetting)).setting}
           />
-        </aside>
-        <div className={styles.primaryColumn} data-vui-region="launcher-primary">
+        </div>
+        <div hidden={settingsVisible} className="h-full min-h-0" data-vui-region="launcher-primary">
           <LauncherBranchInstancesPanel
             copy={copy}
             headerAction={(
-              <VRouteLinkButton to="/launcher/tools" variant="ghost" density="compact">
-                {lang === "zh" ? "工具与诊断" : "Tools and diagnostics"}
-              </VRouteLinkButton>
+              <VButton variant="ghost" isIconOnly aria-label={lang === "zh" ? "刷新工作区列表" : "Refresh workspaces"} isPending={branchInstancesQuery.isFetching} onPress={refreshLauncherData} icon={<RefreshCw size={15} />} />
             )}
             items={branchItems}
             selectedId={selectedId}
@@ -311,6 +332,7 @@ export function LauncherRoute() {
             launcherOnline={Boolean(status && !statusQuery.isError && !controlPlaneStarting)}
             launcherReading={statusQuery.isPending || controlPlaneStarting}
             listLoading={branchInstancesQuery.isPending || (branchInstancesQuery.isFetching && !branchInstancesQuery.data)}
+            listError={branchInstancesQuery.isError ? (lang === "zh" ? "工作区读取失败，请刷新重试。" : "Workspaces could not be loaded. Please refresh.") : undefined}
             pendingOperation={lifecycleIntents}
             lifecyclePending={lifecycleMutation.isPending || controlPlaneStarting}
             onLifecycle={requestInstanceLifecycle}
@@ -322,6 +344,11 @@ export function LauncherRoute() {
       {notice ? <VStateSurface className={styles.notice} tone={noticeTone} title={notice} /> : null}
       {controlPlaneStarting ? <VStateSurface className={styles.notice} tone="loading" title={lang === "zh" ? "Launcher 正在启动控制面。" : "Launcher control plane is starting."} skeletonLines={2} /> : null}
       {statusQuery.isError && !controlPlaneStarting ? <VStateSurface className={styles.notice} tone="error" title={lang === "zh" ? "Launcher 状态读取失败" : "Launcher status could not be read"} /> : null}
+      <VConfirmDialog open={leaveBlocker.state === "blocked"} onOpenChange={(open) => { if (!open && leaveBlocker.state === "blocked") leaveBlocker.reset(); }}
+        title={lang === "zh" ? "还有未保存的设置" : "Unsaved settings"}
+        description={lang === "zh" ? "离开设置前请先保存。直接离开将放弃本次修改。" : "Save before leaving, or discard these changes."}
+        confirmLabel={lang === "zh" ? "放弃并离开" : "Discard and leave"} cancelLabel={lang === "zh" ? "继续编辑" : "Keep editing"}
+        onConfirm={() => { if (leaveBlocker.state === "blocked") { setSettingsDirty(false); setSettingsResetKey((value) => value + 1); leaveBlocker.proceed(); } }} />
     </VDenseOpsPage>
   );
 }

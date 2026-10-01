@@ -6,7 +6,7 @@ import type {
   LauncherMaintenanceSummary,
 } from "../api/types";
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
-import { VButton, VTabs, VTooltip } from "../components/vui";
+import { VButton, VTabs } from "../components/vui";
 import styles from "./LauncherProjectMaintenancePanel.styles";
 import {
   LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
@@ -18,10 +18,13 @@ type LauncherProjectMaintenanceCopy = {
   maintenanceActiveWorkPolicy: string;
   maintenanceApply: string;
   maintenanceCleanStart: string;
+  maintenanceEmptyItems: string;
   maintenanceEstimated: string;
   maintenanceFactoryRuntime: string;
   maintenanceHint: string;
   maintenanceLoading: string;
+  maintenanceOwnerLauncher: string;
+  maintenancePanelTitle: string;
   maintenancePlanEmpty: string;
   maintenancePlanMissingForProfile: string;
   maintenancePlanProfileMismatch: string;
@@ -80,8 +83,7 @@ export function LauncherProjectMaintenancePanel({
   onPreview,
   onApply,
 }: LauncherProjectMaintenancePanelProps) {
-  const profiles = summary?.profiles ?? [];
-  const selectedProfile = profiles.find((profile) => profile.id === maintenanceProfile);
+  const selectedProfile = summary?.profiles?.find((profile) => profile.id === maintenanceProfile);
   const selectedItemIds = selectedProfile?.itemIds ?? [];
   const selectedItems = (summary?.items ?? []).filter((item) => selectedItemIds.includes(item.id));
   const estimatedBytes = selectedItems.reduce((total, item) => total + Number(item.sizeBytes || 0), 0);
@@ -105,13 +107,7 @@ export function LauncherProjectMaintenancePanel({
       data-endpoint-preview="maintenance/reset/preview"
       data-endpoint-apply="maintenance/reset/apply"
     >
-      <div className={styles.developerPanelHeader}>
-        <VTooltip content={copy.maintenanceHint} width="wide">
-          <div tabIndex={0}>
-            <p className={styles.panelEyebrow}>Launcher 维护中心</p>
-            <strong>{copy.maintenanceTitle}</strong>
-          </div>
-        </VTooltip>
+      <div className={styles.maintenanceActions}>
         <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} disabledReason={loading ? copy.maintenanceLoading : copy.maintenanceHint} tooltip={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
           <span>{copy.maintenancePreview}</span>
         </VButton>
@@ -120,15 +116,13 @@ export function LauncherProjectMaintenancePanel({
         </VButton>
       </div>
       <div className={styles.developerGrid}>
-        <div className={styles.developerStatus} data-tone="warning">
-          <span>{copy.maintenanceProfile}</span>
-          <strong>{selectedProfile?.label || copy.maintenanceFactoryRuntime}</strong>
-          <small>{copy.maintenanceActiveWorkPolicy}</small>
-        </div>
         <div className={styles.developerNoise}>
           <div className={styles.developerNoiseHeader}>
-            <span>{copy.maintenanceProfile}</span>
-            <small>{loading ? copy.maintenanceLoading : summary?.executionOwner || "launcher"}</small>
+            <div className={styles.profileHeading}>
+              <span>{copy.maintenanceProfile}</span>
+              <small>{copy.maintenanceActiveWorkPolicy}</small>
+            </div>
+            {loading ? <small>{copy.maintenanceLoading}</small> : summary?.executionOwner ? <small>{summary.executionOwner === "launcher" ? copy.maintenanceOwnerLauncher : summary.executionOwner}</small> : null}
           </div>
           <VTabs
             aria-label={copy.maintenanceProfile}
@@ -138,7 +132,7 @@ export function LauncherProjectMaintenancePanel({
                 onProfileChange(value as LauncherMaintenanceProfileId);
               }
             }}
-            className="min-w-0"
+            className="w-full min-w-0"
             listClassName={styles.segmentedControl}
             triggerClassName={styles.segmentedTrigger}
             items={[
@@ -160,14 +154,17 @@ export function LauncherProjectMaintenancePanel({
             label={copy.maintenanceTitle}
             className={styles.noiseItemGrid}
             resizeHandleClassName={styles.noiseItemGridResizeHandle}
+            expandToContent
           >
-            {selectedItems.slice(0, 4).map((item) => (
-              <div key={item.id} className={styles.noiseItem} data-protected="false">
-                <span>{item.name}</span>
-                <strong>{item.size}</strong>
-                <small>{item.candidateCount} {copy.maintenanceTargets}</small>
-              </div>
-            ))}
+            {selectedItems.length ? selectedItems.slice(0, 4).map((item) => (
+                <div key={item.id} className={styles.noiseItem} data-protected="false">
+                  <span>{item.name}</span>
+                  <strong>{item.size}</strong>
+                  <small>{item.candidateCount} {copy.maintenanceTargets}</small>
+                </div>
+              )) : (
+                <small className={styles.emptyList}>{loading ? copy.maintenanceLoading : copy.maintenanceEmptyItems}</small>
+              )}
           </PersistedHeightListShell>
         </div>
         <PersistedHeightListShell
@@ -176,6 +173,7 @@ export function LauncherProjectMaintenancePanel({
           label={copy.maintenanceTitle}
           className={styles.cleanupConsole}
           resizeHandleClassName={styles.cleanupConsoleResizeHandle}
+          expandToContent
         >
           <div className={styles.cleanupMetrics}>
             <span>{copy.maintenanceEstimated}: <strong>{formatBytes(visiblePlan?.estimatedBytes ?? estimatedBytes)}</strong></span>

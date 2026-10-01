@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import navigationSource from "../app/LauncherNavigation.tsx?raw";
 import homeRouteSource from "./LauncherRoute.tsx?raw";
 import routeSource from "./LauncherToolsRoute.tsx?raw";
 import developerModePanelSource from "./LauncherDeveloperModePanel.tsx?raw";
@@ -80,7 +81,7 @@ describe("LauncherRoute layout contract", () => {
     expect(developerModePanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VButton");
     expect(portSettingsPanelSource).toContain("<VButton");
-    expect(startupSettingsPanelSource).toContain("<VNativeInput");
+    expect(startupSettingsPanelSource).toContain("<VSettingsRow");
     expect(developerModePanelSource).toContain("<VStringSelect");
     expect(startupSettingsPanelSource).toContain("<VStringSelect");
     expect(portSettingsPanelSource).toContain("<VNativeInput");
@@ -153,7 +154,7 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("branch-instances");
     expect(launcherApiSource).toContain("requestBranchInstanceCleanup");
     expect(branchInstancesPanelSource).toContain("VConfirmDialog");
-    expect(branchInstancesPanelSource).toContain("BRANCH_INSTANCE_PAGE_SIZE");
+    expect(branchInstancesPanelSource).not.toContain("BRANCH_INSTANCE_PAGE_SIZE");
     // Lifecycle start/stop/force-stop/restart share one action path with AppShell.
     expect(routeSource).toContain('useWorkbenchLifecycleActions("launcher_route")');
     expect(routeSource).toContain("requestLifecycle(operation)");
@@ -228,12 +229,12 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("requestInstanceLifecycle");
     expect(homeRouteSource).toContain("pendingOperation={lifecycleIntents}");
     expect(routeSource.match(/shouldApplyLifecycleMutationFeedback/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
-    expect(branchInstancesPanelSource).toContain("isPending={stopBusy}");
+    expect(branchInstancesPanelSource).toContain("isPending={startBusy || stopBusy}");
     expect(branchInstancesPanelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
     expect(branchInstancesPanelSource).toContain("startingOrRestarting");
     expect(branchInstancesPanelSource).toContain("openClickGuardsRef");
     expect(branchInstancesPanelSource).toContain("const startBusy");
-    expect(branchInstancesPanelSource).toContain("isDisabled={stopBusy}");
+    expect(branchInstancesPanelSource).toContain("disabled: stopBusy");
   });
 
   it("keeps recovery actions available for a non-current instance with stale health", () => {
@@ -258,12 +259,10 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("onLifecycle={requestInstanceLifecycle}");
     expect(branchInstancesPanelSource).toContain("canForceStopInstance");
     expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "force-stop")');
-    expect(branchInstancesPanelSource).toContain("isDisabled={lifecyclePending}");
-    const forceStopStart = branchInstancesPanelSource.indexOf("{showForceStop ? (");
-    expect(forceStopStart).toBeGreaterThanOrEqual(0);
-    const forceStopEnd = branchInstancesPanelSource.indexOf('onPress={() => onLifecycle?.(item.id, "force-stop")}', forceStopStart);
-    expect(forceStopEnd).toBeGreaterThan(forceStopStart);
-    expect(branchInstancesPanelSource.slice(forceStopStart, forceStopEnd)).not.toContain("stopBusy");
+    expect(branchInstancesPanelSource).toContain("disabled: lifecyclePending");
+    expect(branchInstancesPanelSource).toContain("setForceStopId(item.id)");
+    expect(branchInstancesPanelSource).toContain("canForceStopInstance(item)");
+    expect(branchInstancesPanelSource).toContain("forceStopId");
   });
 
   it("names the branch and raises the notice tone when a lifecycle request is refused", () => {
@@ -300,12 +299,12 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("LauncherStartupSettingsPanel");
     expect(startupSettingsPanelSource).toContain("settingsStrip");
     expect(startupSettingsPanelSource).toContain("settingsTitle");
-    expect(startupSettingsPanelSource).toContain("settingsWindow");
-    expect(startupSettingsPanelSource).toContain("settingField");
-    expect(startupSettingsPanelSource).toContain("settingToggle");
-    expect(startupSettingsPanelSource).toContain("settingsSaveButton");
-    expect(startupSettingsPanelSource).toContain("<VTabs");
-    expect(startupSettingsPanelSource).toContain("windowModeTabs");
+
+
+
+
+
+
     expect(startupSettingsPanelSource).not.toContain("segmentedControl");
     expect(routeSource).toContain("LauncherDeveloperModePanel");
     expect(developerModePanelSource).toContain("developerPanel");
@@ -317,15 +316,7 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.advancedFold).toBeTypeOf("string");
     expect(processMonitorPanelStyles.statusTable).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsStrip).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingsPrimary).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingsSecondary).toBeTypeOf("string");
     expect(startupSettingsPanelStyles.settingsTitle).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingsWindow).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingField).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingToggle).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.settingsSaveButton).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.windowModeTabsList).toBeTypeOf("string");
-    expect(startupSettingsPanelStyles.windowModeTabsTrigger).toContain("data-[state=active]");
     expect(developerModePanelStyles.developerPanel).toBeTypeOf("string");
     expect(developerModePanelStyles.developerGrid).toBeTypeOf("string");
     expect(developerModePanelStyles.cleanupConsole).toBeTypeOf("string");
@@ -351,7 +342,7 @@ describe("LauncherRoute layout contract", () => {
     const diagnosticsIndex = routeSource.indexOf("<LauncherDiagnosticsPanel");
     expect(branchIndex).toBeGreaterThan(0);
     expect(settingsIndex).toBeGreaterThan(0);
-    expect(homeRouteSource).toContain('to="/launcher/tools"');
+    expect(navigationSource).toContain('to: "/launcher/tools?view=diagnostics"');
     expect(homeRouteSource).toContain("headerAction={(");
     expect(homeRouteSource).not.toContain("toolsLinkRow");
     expect(branchInstancesPanelSource).toContain("headerAction?: ReactNode");
@@ -360,16 +351,16 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).not.toContain("LauncherProjectMaintenancePanel");
     expect(homeRouteSource).not.toContain("LauncherDeveloperModePanel");
     expect(homeRouteSource).not.toContain("LauncherDiagnosticsPanel");
-    expect(routeSource).toContain('to="/launcher"');
+    expect(navigationSource).toContain('to: "/launcher"');
     expect(processIndex).toBeGreaterThan(0);
-    expect(maintenanceIndex).toBeGreaterThan(processIndex);
+    expect(maintenanceIndex).toBeGreaterThan(0);
     expect(developerIndex).toBeGreaterThan(maintenanceIndex);
-    expect(diagnosticsIndex).toBeGreaterThan(developerIndex);
+    expect(diagnosticsIndex).toBeGreaterThan(0);
     expect(routeSource).not.toContain("className={styles.advancedFold}");
     expect(routeSource).not.toContain("toolbarSlot");
     expect(routeSource).not.toContain("<details open");
     expect(routeSource).toContain("residualProcesses");
-    expect(startupSettingsPanelSource).toContain("settingsPrimary");
+    expect(startupSettingsPanelSource).toContain("<VSettingsGroupCard");
     expect(portSettingsPanelSource).toContain("differingOverride");
     expect(developerModePanelStyles.dangerButton).toBeTypeOf("string");
     expect(launcherPanelStylesSource).toContain("settingsStrip");
@@ -469,8 +460,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("px-2");
     expect(routeStylesSource).toContain("w-fit");
     expect(routeStylesSource).toContain("whitespace-nowrap");
-    expect(launcherShellStylesSource).toContain("var(--vui-gradient-route-soft)");
-    expect(launcherShellStylesSource).toContain("var(--fg-primary)");
+    expect(launcherShellStylesSource).toContain("bg-vui-surface-panel");
+    expect(launcherShellStylesSource).toContain("text-vui-fg-primary");
   });
 
   it("keeps the Launcher route root and header background-aware", () => {
@@ -490,14 +481,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("useLayoutEffect(() => pinLauncherDocumentViewport(document), [])");
     expect(routeSource).toContain("fill");
     expect(routeStylesSource).toContain("routeBody:");
-    expect(routeStylesSource).toContain("overflow-y-auto");
-    expect(routeStylesSource).toContain("overflow-x-clip");
-    expect(routeStylesSource).toContain("overscroll-contain");
-    expect(routeStylesSource).toContain("[scrollbar-gutter:stable]");
-    expect(routeStylesSource).toContain("pb-[max(12px,env(safe-area-inset-bottom))]");
-    expect(routeStylesSource).toContain("pb-[max(14px,env(safe-area-inset-bottom))]");
-    expect(routeStylesSource).toContain("overflow-visible");
-    expect(routeStylesSource).not.toContain("grid-rows-[auto_auto_auto_auto_auto_minmax(0,1fr)]");
+    expect(styles.routeBody).toContain("min-h-0");
+    expect(branchInstancesPanelStyles.tabBody).toContain("overflow-auto");
+    expect(startupSettingsPanelStyles.settingsBody).toContain("overflow-y-auto");
   });
 
   it("keeps Launcher strips and actions from overflowing narrow windows", () => {
@@ -527,14 +513,10 @@ describe("LauncherRoute layout contract", () => {
 
     expect(startupSettingsPanelStyles.settingsStrip).toContain("mx-2");
     expect(startupSettingsPanelStyles.settingsStrip).toContain("overflow-hidden");
-    expect(startupSettingsPanelStyles.settingsPrimary).toContain("grid-cols-");
-    expect(startupSettingsPanelStyles.settingsPrimary).toContain("minmax(160px,0.34fr)");
-    expect(startupSettingsPanelStyles.settingsPrimary).toContain("max-[620px]:grid-cols-[minmax(0,1fr)]");
     expect(startupSettingsPanelStyles.settingsBody).toContain("max-h-[46vh]");
     expect(startupSettingsPanelStyles.settingsBody).toContain("overflow-y-auto");
     expect(startupSettingsPanelStyles.settingsBody).toContain("overscroll-contain");
     expect(startupSettingsPanelStyles.settingsBody).toContain("scrollbar-gutter:stable");
-    expect(startupSettingsPanelStyles.settingsSaveButton).toContain("justify-self-end");
     expect(startupSettingsPanelStyles.settingsStrip).not.toContain("mx-3");
 
     for (const panelStyles of [developerModePanelStyles, projectMaintenancePanelStyles]) {
@@ -669,8 +651,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("<ExternalLink size={15} />");
     expect(routeSource).not.toContain("VWorkbenchPowerMenu");
     expect(routeSource).not.toContain("<Square size={15} />");
-    expect(startupSettingsPanelSource).toContain("<Maximize2 size={14}");
-    expect(startupSettingsPanelSource).toContain("<Minimize2 size={14}");
+    expect(startupSettingsPanelSource).toContain("<VStringSelect");
+
     expect(routeSource).not.toContain('controlMutation.mutate("start")');
     expect(routeSource).not.toContain('controlMutation.mutate("stop")');
     expect(routeSource).not.toContain('controlMutation.mutate("force-stop")');
@@ -678,9 +660,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("controlMutation.mutate({");
     expect(routeSource).toContain("requestId: accepted.intent.requestId");
     expect(routeSource).toContain("localRevision: accepted.intent.localRevision");
-    expect(startupSettingsPanelSource).toContain('id: "fullscreen"');
-    expect(startupSettingsPanelSource).toContain('id: "windowed"');
-    expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
+    expect(startupSettingsPanelSource).toContain('mode: "fullscreen"');
+    expect(startupSettingsPanelSource).toContain('mode: "windowed"');
+    expect(startupSettingsPanelSource).toContain("patchDraft({ workbench: { ...draft.workbench, windowMode } })");
     expect(routeSource).toContain("supervisorMutation.mutate()");
   });
 
@@ -693,7 +675,7 @@ describe("LauncherRoute layout contract", () => {
 
     expect(homeRouteSource).not.toContain("statusBarActions");
     expect(homeRouteSource).not.toContain("VWorkbenchPowerMenu");
-    expect(homeRouteSource).not.toContain("statusQuery.refetch()");
+    expect(homeRouteSource).toContain("statusQuery.refetch()");
     expect(homeRouteSource).not.toContain('controlMutation.mutate("start")');
     expect(homeRouteSource).not.toContain("powerMenu");
     expect(homeRouteSource).not.toContain("styles.dangerZone");
@@ -738,18 +720,18 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("LauncherStartupSettingsPanel");
     expect(startupSettingsPanelSource).toContain("export function LauncherStartupSettingsPanel");
     expect(homeRouteSource).toContain("startupSettingsMutation");
-    expect(homeRouteSource).toContain("mutationFn: updateLauncherStartupSettings");
+    expect(homeRouteSource).toContain("await updateLauncherStartupSettings(next)");
     expect(startupSettingsPanelSource).toContain("WorkbenchWindowModeUpdateRequest");
     expect(homeRouteSource).toContain("settings?.startup");
     expect(launcherApiSource).toContain("baseHash: setting.configHash");
     expect(launcherApiSource).toContain("WorkbenchWindowModeUpdateRequest");
-    expect(startupSettingsPanelSource).toContain("onWindowModeChange({ mode, baseHash: current.configHash })");
-    expect(homeRouteSource).toContain("const windowModeMutation = useMutation({");
-    expect(homeRouteSource).toContain("saveLauncherWorkbenchWindowMode");
+    expect(startupSettingsPanelSource).toContain("onSave");
+    expect(homeRouteSource).not.toContain("const windowModeMutation = useMutation({");
+
     expect(homeRouteSource).toContain("queryKeys.launcherStatus()");
     expect(startupSettingsPanelSource).toContain("configHash");
     expect(startupSettingsPanelSource).toContain("runtimeProfile");
-    expect(startupSettingsPanelSource).toContain("settingsWindow");
+
     expect(startupSettingsPanelSource).toContain("settingsTitle");
     expect(startupSettingsPanelSource).not.toContain("launcherControlPort");
     expect(startupSettingsPanelSource).not.toContain("backendPortHint");
@@ -773,7 +755,7 @@ describe("LauncherRoute layout contract", () => {
     expect(homeRouteSource).toContain("effectiveWindowMode");
     expect(launcherApiSource).toContain("controlPort: setting.launcher.controlPort");
     expect(launcherApiSource).toContain("windowSize: setting.workbench.windowSize");
-    expect(homeRouteSource).toContain("windowModeMutation");
+    expect(homeRouteSource).not.toContain("windowModeMutation");
   });
 
   it("collapses startup settings into an accessible summary of only the active operating choices", () => {
@@ -793,7 +775,7 @@ describe("LauncherRoute layout contract", () => {
     // The editable form stays inside the fold body with save/window-mode semantics intact.
     expect(startupSettingsPanelSource).toContain("settingsBody");
     expect(startupSettingsPanelSource).toContain("saveDraft");
-    expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
+    expect(startupSettingsPanelSource).toContain("patchDraft({ workbench: { ...draft.workbench, windowMode } })");
     expect(startupSettingsPanelSource).toContain("controlsDisabled");
     expect(portSettingsPanelSource).toContain("<details");
     expect(portSettingsPanelSource).toContain("copy.portSettingsHint");
@@ -802,38 +784,15 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelStyles.settingsTitle).toContain("whitespace-nowrap");
   });
 
-  it("keeps branch management and startup settings stacked without an empty side rail", () => {
-    expect(homeRouteSource).toContain("styles.primaryRail");
-    expect(homeRouteSource).toContain("styles.primaryColumn");
-    expect(homeRouteSource).toContain("styles.settingsRail");
-    expect(homeRouteSource).toContain('data-vui-region="launcher-primary-rail"');
-    expect(homeRouteSource).toContain('data-vui-region="launcher-primary"');
-    expect(homeRouteSource).toContain('data-vui-region="launcher-settings-rail"');
-    const railStart = homeRouteSource.indexOf("className={styles.primaryRail}");
-    const statusErrorIndex = homeRouteSource.indexOf("{statusQuery.isError && !controlPlaneStarting ?");
-    expect(railStart).toBeGreaterThan(0);
-    expect(statusErrorIndex).toBeGreaterThan(railStart);
-    expect(homeRouteSource.slice(railStart, statusErrorIndex)).toContain("<LauncherBranchInstancesPanel");
-    expect(homeRouteSource.slice(railStart, statusErrorIndex)).toContain("<LauncherStartupSettingsPanel");
-    const settingsIndex = homeRouteSource.indexOf("<LauncherStartupSettingsPanel");
-    const branchIndex = homeRouteSource.indexOf("<LauncherBranchInstancesPanel");
-    expect(settingsIndex).toBeGreaterThan(railStart);
-    expect(branchIndex).toBeGreaterThan(railStart);
-    expect(statusErrorIndex).toBeGreaterThan(settingsIndex);
-    // Collapsed settings sit in an auto-height top strip; expanded fields stay in that
-    // full-width strip but scroll within their viewport budget, leaving the branch table usable.
-    expect(styles.primaryRail).toContain("grid-cols-1");
-    expect(styles.primaryRail).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(styles.primaryRail).not.toContain("minmax(250px,");
-    expect(styles.primaryRail).toContain("flex-1");
-    expect(styles.primaryColumn).toContain("min-w-0");
-    expect(styles.primaryColumn).toContain("flex-col");
-    expect(styles.primaryColumn).toContain("row-start-2");
-    expect(styles.settingsRail).toContain("min-w-0");
-    expect(styles.settingsRail).toContain("row-start-1");
-    expect(styles.settingsRail).not.toContain("col-span-full");
-    expect(startupSettingsPanelStyles.settingsStrip).not.toContain("self-start");
-    expect(startupSettingsPanelStyles.settingsStrip).toContain("w-full");
+  it("separates branches and settings with a persistent navigation rail and draft guard", () => {
+    expect(launcherShellSource).toContain("<LauncherNavigation");
+    expect(launcherShellSource).toContain("<VSplitWorkspace");
+    expect(navigationSource).toContain('to: "/launcher?view=settings"');
+    expect(homeRouteSource).toContain("hidden={!settingsVisible}");
+    expect(homeRouteSource).toContain("hidden={settingsVisible}");
+    expect(homeRouteSource).toContain("useBlocker");
+    expect(homeRouteSource).toContain("useStableBeforeUnload");
+    expect(homeRouteSource).toContain("onDirtyChange={setSettingsDirty}");
   });
 
   it("keeps developer mode launcher-owned with preview and plan-hash cleanup guards", () => {
@@ -875,7 +834,8 @@ describe("LauncherRoute layout contract", () => {
     expect(projectMaintenancePanelSource).toContain("maintenance/reset/summary");
     expect(projectMaintenancePanelSource).toContain("maintenance/reset/preview");
     expect(projectMaintenancePanelSource).toContain("maintenance/reset/apply");
-    expect(projectMaintenancePanelSource).toContain("Launcher 维护中心");
+    expect(projectMaintenancePanelSource).not.toContain("Launcher 维护中心");
+    expect(projectMaintenancePanelSource).not.toContain("selectedProfile?.label || copy.maintenanceFactoryRuntime");
     expect(routeSource).toContain("恢复初始化");
     expect(routeSource).toContain("active work");
     expect(launcherApiSource).toContain("maintenance/reset/summary");

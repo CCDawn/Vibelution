@@ -14,6 +14,8 @@ import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelem
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { LauncherUpdateTopbar } from "./LauncherUpdateTopbar";
+import { LauncherNavigation } from "./LauncherNavigation";
+import { VSplitWorkspace } from "../components/vui";
 import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
 import { applyUiFontBasePx, readStoredUiFontBasePx } from "./uiFontPreference";
@@ -82,7 +84,12 @@ export function LauncherShell() {
       data-browser-role="launcher_control_surface"
     >
       <LauncherUpdateTopbar lang={lang} branchName={branchInstancesQuery.data?.currentShortName} />
-      <div className="min-h-0 min-w-0 overflow-auto"><Outlet /></div>
+      <VSplitWorkspace
+        className="!gap-0"
+        columnsClassName="grid-cols-[176px_minmax(0,1fr)] max-[700px]:grid-cols-1 max-[700px]:grid-rows-[auto_minmax(0,1fr)]"
+        sidebar={<LauncherNavigation lang={lang} items={branchInstancesQuery.data?.items ?? []} />}
+        main={<div className="h-full min-h-0 min-w-0 overflow-hidden"><Outlet /></div>}
+      />
     </div>
   );
 }

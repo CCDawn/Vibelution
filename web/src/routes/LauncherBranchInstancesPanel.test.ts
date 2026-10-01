@@ -77,49 +77,29 @@ function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBran
 }
 
 describe("LauncherBranchInstancesPanel contracts", () => {
-  it("renders one primary VDenseTable at a time through VTabs for all/running/attention/startable", () => {
+  it("renders a compact branch table with a branch filter and status-driven actions", () => {
     expect(panelSource).toContain("from \"../components/vui\"");
-    expect(panelSource).toContain("<VTabs");
-    expect(panelSource).toContain('id: "all"');
-    expect(panelSource).toContain('id: "running"');
-    expect(panelSource).toContain('id: "attention"');
-    expect(panelSource).toContain('id: "startable"');
-    expect(panelSource).toContain("value={activeTab}");
+    expect(panelSource).toContain("<VStringSelect");
+    expect(panelSource).toContain('value:"all"');
+    expect(panelSource).toContain('value:"running"');
+    expect(panelSource).toContain('value:"attention"');
+    expect(panelSource).toContain('value:"startable"');
+    expect(panelSource).not.toContain("<VTabs");
     expect(panelSource).toContain("rows={activeRows}");
-    expect(panelSource).toContain("grouped.running.length");
-    expect(panelSource).toContain("grouped.attention.length");
-    expect(panelSource).toContain("grouped.startable.length");
-    expect(panelSource).toContain("labels.allHint");
-    expect(panelSource).toContain("labels.runningHint");
-    expect(panelSource).toContain("labels.attentionHint");
-    expect(panelSource).toContain("labels.startableHint");
+    expect(panelSource).toContain('activeTab === "running" ? grouped.running');
+    expect(panelSource).toContain('activeTab === "attention" ? grouped.attention');
+    expect(panelSource).toContain(": grouped.startable");
     expect(panelSource).toContain("LauncherBranchStatusHelp");
     expect(panelSource).toContain("正在运行");
     expect(panelSource).toContain("需要处理");
     expect(panelSource).toContain("可启动");
-    expect(panelSource).toContain("停止全部");
-    expect(panelSource).toContain("全部关闭");
     expect(panelSource).toContain("<VNativeInput");
-    expect(panelSource).toContain("<VToolbar");
-    expect(panelSource).toContain("Launcher 控制窗口");
-    expect(panelSource).toContain("读取中");
-    expect(panelSource).toContain("headerAction?: ReactNode");
-    expect(panelSource).toContain("{headerAction}");
-    expect(panelSource).toContain("launcherReading || !launcherOnline");
-    expect(panelSource).toContain('tone={launcherReading ? "neutral" : "warning"}');
-    expect(panelSource).toContain("tone={runtimeTone(state)}");
-    expect(panelSource).toContain('<VStatusChip tone="success">{labels.ready}</VStatusChip>');
-    expect(panelSource).toContain('variant="primary"');
-    expect(panelSource).toContain('variant="danger"');
     expect(panelSource).toContain("<VActionGroup");
-    expect(panelSource).toContain("startingOrRestarting");
-    expect(panelSource).toContain("isPending={stopBusy}");
-    expect(panelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
-    expect(panelSource).toContain("openClickGuardsRef");
-    expect(panelSource).toContain("kind === \"startable\" && state === \"stopped\"");
-    expect(panelSource).toContain("isAdmissionBlocked");
-    expect(panelSource).toContain("formatAdmissionReason");
-    expect(panelSource).toContain("isDisabled={building || startBusy || admissionBlocked}");
+    expect(panelSource).toContain('aria-label={zh ? "更多操作" : "More actions"}');
+    expect(panelSource).toContain('{ id: "details"');
+    expect(panelSource).toContain('{ id: "stop"');
+    expect(panelSource).toContain('{ id: "force-stop"');
+    expect(panelSource).toContain('{ id: "cleanup"');
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
@@ -127,23 +107,21 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(BRANCH_INSTANCE_PAGE_SIZE).toBe(8);
   });
 
-  it("keeps the default table focused on branch actions and puts runtime specifics in attention help", () => {
+  it("keeps runtime and window status together, with Git and secondary actions in their own columns", () => {
     expect(panelSource).toContain("header: copy.branchColumn");
     expect(panelSource).toContain("header: copy.instanceState");
     expect(panelSource).not.toContain("header: labels.backend");
     expect(panelSource).not.toContain("header: labels.frontend");
-    expect(panelSource).toContain("header: labels.workbench");
     expect(panelSource).toContain("header: labels.git");
-    expect(panelSource).toContain("header: labels.actions");
     expect(panelSource).not.toContain("formatBackendStatus");
     expect(panelSource).not.toContain("formatFrontendStatus");
-    expect(panelSource).toContain("formatWorkbenchStatus");
     expect(panelSource).toContain("formatGitStatus");
-    expect(panelSource).toContain("formatAttentionReason");
-    expect(panelSource).toContain("instanceRuntimeStateLabel");
-    expect(panelSource).toContain("Workbench 窗口");
-    expect(panelSource).toContain("启动工作台");
-    expect(panelSource).toContain("styles.actionButtons");
+    const stateIndex = panelSource.indexOf('id: "state"');
+    const gitIndex = panelSource.indexOf('id: "git"', stateIndex);
+    expect(stateIndex).toBeGreaterThan(-1);
+    expect(gitIndex).toBeGreaterThan(stateIndex);
+    expect(panelSource.slice(stateIndex, gitIndex)).toContain("instanceWindowOpen(item)");
+    expect(panelSource).toContain("<VDropdownMenu aria-label={zh ? \"更多操作\" : \"More actions\"}");
     // Compact columns still keep the path inside the branch tooltip, not a wide fill column.
     expect(panelSource).toContain("path || item.displayPath || item.id");
     // Narrow widths: the resizable table scrolls inside its own container so the
@@ -154,37 +132,23 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelStyles.panel).toContain("min-w-0");
     expect(panelStyles.panelBody).toContain("min-w-0");
     expect(panelStyles.tabBody).toContain("min-w-0");
-    expect(panelStyles.panelHeaderActions).toContain("ml-auto");
-    expect(panelStyles.panelHeaderActions).toContain("flex-wrap");
-    expect(panelStyles.tabHeaderActions).toContain("ml-auto");
-    expect(panelSource).toContain("minWidth: 150");
     expect(panelSource).toContain('id: "branch"');
     expect(panelSource).toMatch(/id: "branch"[\s\S]{0,180}?fill: true/);
-    const workbenchIdx = panelSource.indexOf('id: "workbench"');
-    const gitIdx = panelSource.indexOf('id: "git"', workbenchIdx);
-    expect(workbenchIdx).toBeGreaterThan(-1);
-    expect(gitIdx).toBeGreaterThan(workbenchIdx);
-    expect(panelSource.slice(workbenchIdx, gitIdx)).not.toContain("fill: true");
+    expect(panelSource).not.toContain('id: "workbench"');
     expect(panelStyles.actionCell).not.toContain("sticky");
-    expect(panelStyles.actionCell).toContain("min-w-0");
-    expect(panelStyles.actionButtons).toContain("!flex-nowrap");
-    expect(panelStyles.actionCell).not.toContain("!overflow-visible");
     expect(panelStyles.statusTable).not.toContain("overflow-auto");
   });
 
-  it("keeps branch filters and status tabs in one responsive control row", () => {
+  it("keeps search, branch selector, and secondary filters in one responsive control row", () => {
     const filterRowIndex = panelSource.indexOf('<div className={styles.filterRow}>');
-    const toolbarIndex = panelSource.indexOf("<VToolbar", filterRowIndex);
-    const tabsIndex = panelSource.indexOf("<VTabs", filterRowIndex);
 
     expect(filterRowIndex).toBeGreaterThan(-1);
-    expect(toolbarIndex).toBeGreaterThan(filterRowIndex);
-    expect(tabsIndex).toBeGreaterThan(toolbarIndex);
+    expect(panelSource.indexOf("<VNativeInput", filterRowIndex)).toBeGreaterThan(filterRowIndex);
+    expect(panelSource.indexOf("<VStringSelect", filterRowIndex)).toBeGreaterThan(filterRowIndex);
+    expect(panelSource.indexOf("<VDropdownMenu", filterRowIndex)).toBeGreaterThan(filterRowIndex);
+    expect(panelSource.indexOf("<VTabs", filterRowIndex)).toBe(-1);
     expect(panelStyles.filterRow).toContain("flex-wrap");
     expect(panelStyles.filterRow).toContain("items-center");
-    expect(panelStyles.filterBar).not.toContain("mt-");
-    expect(panelStyles.tabBar).not.toContain("mt-");
-    expect(panelStyles.tabBar).toContain("flex-none");
   });
 
   it("renders one global empty surface for zero items and a distinct recoverable filtered miss", () => {
@@ -199,9 +163,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("const hasAnyItems = items.length > 0");
     expect(panelSource).toContain("const showListLoading = (listLoading && !hasAnyItems) || waitingUnmergedMetadata");
     expect(panelSource).toContain("const filteredEmpty = hasAnyItems && visibleItems.length === 0 && !waitingUnmergedMetadata");
-    expect(panelSource).toContain("{showListLoading ? (");
+    expect(panelSource).toContain("showListLoading ? <VStateSurface");
     expect(panelSource).toContain('tone="loading"');
-    expect(panelSource).toContain("!hasAnyItems ? (");
+    expect(panelSource).toContain(": !hasAnyItems ? <VEmptyState");
     expect(panelSource).toContain("labels.filteredEmptyTitle");
     expect(panelSource).toContain("labels.filteredEmptyHint");
     expect(panelSource).toContain("labels.clearSearch");
@@ -227,20 +191,24 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("pendingIds");
     expect(panelSource).toContain("batchStopIds");
     expect(panelSource).toContain("onStopMany");
+    expect(panelSource).toContain("const batchStopPending = batchStopItems.some((item) => instanceRuntimeState(item, pendingOperation) === \"stopping\")");
+    expect(panelSource).toContain("confirmPending={batchStopPending}");
+    expect(panelSource).toContain("batchStopItems.filter((item) => canStopInstance(item, pendingOperation))");
+    expect(panelSource).not.toContain("confirmPending={lifecyclePending}");
+    expect(panelSource).toContain("confirmDisabled={lifecyclePending || !items.some((item) => item.id === forceStopId && canForceStopInstance(item))}");
     expect(panelSource).toContain("needsCleanupMetadata");
     expect(panelSource).toContain("overlayCleanupMetadata");
     expect(panelSource).toContain("waitingCleanupConfirmMetadata");
   });
 
-  it("folds cleanup into the all-tab table so the full list owns maintenance", () => {
+  it("keeps cleanup selection in the active branch list without pagination", () => {
     expect(panelSource).toContain("...grouped.maintenance]");
-    expect(panelSource).toContain('activeTab === "all" ? [selectColumn, ...primaryColumns] : primaryColumns');
+    expect(panelSource).toContain("columns={[selectColumn, ...primaryColumns]}");
     expect(panelSource).toContain("isCleanupEligible(item) ? (");
     expect(panelSource).toContain("labels.cleanupSelected");
-    expect(panelSource).toContain('activeTab === "all" && cleanupSelected.length > 0');
-    expect(panelSource).toContain('activeTab === "all" ? null : <p className={styles.tabHint}>{activeHint}</p>');
-    expect(panelSource).not.toContain("<strong>{page}/{pageCount}</strong>");
-    expect(panelSource).toContain("pageEligible = pagedAll.items.filter(isCleanupEligible)");
+    expect(panelSource).toContain("pageEligible = activeRows.filter(isCleanupEligible)");
+    expect(panelSource).not.toContain("pageCount");
+    expect(panelSource).not.toContain("pagedAll");
     expect(panelStyles.selectCell).toContain("w-9");
   });
 
@@ -778,24 +746,20 @@ describe("LauncherBranchInstancesPanel contracts", () => {
   it("does not globally disable stop while a start is in flight", () => {
     expect(panelSource).toContain("const startBusy");
     expect(panelSource).toContain("const stopBusy");
-    expect(panelSource).toContain("isDisabled={building || startBusy || admissionBlocked}");
-    expect(panelSource).toContain("isDisabled={stopBusy}");
-    expect(panelSource).not.toContain("isDisabled={lifecyclePending || inFlight}");
+    expect(panelSource).toContain("isDisabled={startBusy || stopBusy || admissionBlocked}");
+    expect(panelSource).toContain("disabled: stopBusy");
+    expect(panelSource).not.toContain("disabled: lifecyclePending || inFlight");
     expect(panelSource).toContain("if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id))");
     expect(panelSource).not.toContain("if (clickGuardRef.current || startBusy)");
     expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
   });
 
-  it("turns the starting control into a clickable Stop instead of a disabled Starting label", () => {
+  it("keeps Stop available from More actions while a start is in flight", () => {
     const startable = instance({ id: "worktree:startable", shortName: "startable" });
-    expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation)");
-    expect(panelSource).not.toContain("|| state === \"starting\" || state === \"restarting\"");
-    expect(panelSource).toContain("variant={startingOrRestarting || building ? \"primary\" : \"secondary\"}");
-    expect(panelSource).toContain("isPending={stopBusy}");
-    expect(panelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
-    expect(panelSource).toContain("LoaderCircle");
-    expect(panelSource).toContain("正在启动，点击可停止");
-    expect(panelSource).toContain("正在重启，点击可停止");
+    expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy");
+    expect(panelSource).toContain("const showStop = canStopInstance(item, pendingOperation) || stopBusy");
+    expect(panelSource).toContain("{ id: \"stop\", label: instanceStopLabel(item, zh, pendingOperation), disabled: stopBusy");
+    expect(panelSource).toContain("isPending={startBusy || stopBusy}");
     expect(panelSource).toContain("<VActionGroup");
     expect(canStopInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(true);
   });
@@ -867,20 +831,19 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStartInstance(building)).toBe(false);
     expect(groupBranchInstances([building]).running.map((item) => item.id)).toEqual(["worktree:building"]);
     expect(groupBranchInstances([building]).attention).toEqual([]);
-    // The primary control stays visible but disabled with the pending spinner
-    // plus a one-line build hint, instead of vanishing like a frozen button.
-    expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || building;");
-    expect(panelSource).toContain("isPending={building}");
-    expect(panelSource).toContain("isDisabled={building || startBusy || admissionBlocked}");
-    expect(panelSource).toContain("{building ? labels.building : openLabel}");
+    // The primary control stays visible but disabled with a pending spinner;
+    // the long build explanation is carried by its tooltip, not inline text.
+    expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy");
+    expect(panelSource).toContain("isPending={startBusy || stopBusy}");
+    expect(panelSource).toContain("isDisabled={startBusy || stopBusy || admissionBlocked}");
+    expect(panelSource).toContain("{startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}");
+    expect(panelSource).toContain("title={building ? labels.buildingHint : undefined}");
     expect(panelSource).toContain('building: "构建中…"');
     expect(panelSource).toContain('building: "Building…"');
     expect(panelSource).toContain("buildingHint: \"前端代码有更新，正在构建新版本，约需几分钟。\"");
     expect(panelSource).toContain("buildingHint: \"The frontend has updates and a new build is running. This takes a few minutes.\"");
-    expect(panelSource).toContain("正在构建前端，点击可停止");
-    expect(panelSource).toContain("Building frontend — click to stop");
     // Build state keeps the row out of attention and out of cleanup.
-    expect(panelSource).toContain("isDisabled={cleanupMutation.isPending || building || startingOrRestarting || stopBusy}");
+    expect(panelSource).toContain("disabled: cleanupMutation.isPending || building || startingOrRestarting || stopBusy");
   });
 
   it("keeps the optimistic starting label for a starting payload with a start intent", () => {

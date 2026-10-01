@@ -1,23 +1,20 @@
-import { GitBranch, LoaderCircle, ShieldAlert } from "lucide-react";
+import { GitBranch, Ellipsis, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getLauncherBranchInstances, requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import { VActionGroup, VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStateSurface, VStatusChip, VTabs, VToolbar, VTooltip, type VDenseTableColumn } from "../components/vui";
+import { VActionGroup, VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStateSurface, VStringSelect, VDropdownMenu, VTooltip, type VDenseTableColumn } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
 import { LauncherBranchStatusHelp } from "./LauncherBranchStatusHelp";
 import {
-  BRANCH_INSTANCE_PAGE_SIZE,
   canRequestOpenInstance,
   canForceStopInstance,
   canStopInstance,
   cleanupRiskLabels,
   filterBranchInstances,
   formatAdmissionReason,
-  formatAttentionReason,
   formatGitStatus,
-  formatWorkbenchStatus,
   groupBranchInstances,
   instanceRuntimeState,
   instanceRuntimeStateLabel,
@@ -26,17 +23,15 @@ import {
   isAdmissionBlocked,
   isCleanupEligible,
   overlayCleanupMetadata,
-  paginateItems,
   lifecycleIntentRejectMessage,
-  resolveItemPending,
   summarizeLifecycleFeedback,
   shouldHoldOpenClickGuard,
   type InstanceListFilters,
   type LifecyclePendingInput,
   type LifecycleRequestOutcome,
-  type InstanceRuntimeState,
 } from "./LauncherBranchInstancesPanel.model";
 import styles from "./LauncherBranchInstancesPanel.styles";
+import { LauncherBranchDetailPanel, launcherBranchDisplayName } from "./LauncherBranchDetailPanel";
 
 type LauncherBranchInstancesCopy = {
   branchInstances: string;
@@ -62,6 +57,7 @@ type LauncherBranchInstancesPanelProps = {
   launcherOnline?: boolean;
   launcherReading?: boolean;
   listLoading?: boolean;
+  listError?: string;
   lifecyclePending?: boolean;
   onLifecycle?: (
     instanceId: string,
@@ -75,80 +71,23 @@ type LauncherBranchInstancesPanelProps = {
   } | null;
 };
 
-type BranchTableTab = "all" | "running" | "attention" | "startable";
+type BranchTableTab = "all" | "running" | "attention" | "startable" | "retired";
 
 function isZhCopy(copy: LauncherBranchInstancesCopy): boolean {
-  return copy.branchInstances !== "Branch instances";
-}
-
-function runtimeTone(state: InstanceRuntimeState): "neutral" | "success" | "warning" {
-  if (state === "running") {
-    return "success";
-  }
-  if (state === "partial" || state === "failed") {
-    return "warning";
-  }
-  return "neutral";
-}
-
-function SectionPager({
-  ariaLabel,
-  page,
-  pageCount,
-  start,
-  end,
-  total,
-  previousLabel,
-  nextLabel,
-  onPrevious,
-  onNext,
-}: {
-  ariaLabel: string;
-  page: number;
-  pageCount: number;
-  start: number;
-  end: number;
-  total: number;
-  previousLabel: string;
-  nextLabel: string;
-  onPrevious: () => void;
-  onNext: () => void;
-}) {
-  return (
-    <div className={styles.pager} aria-label={ariaLabel}>
-      <span className={styles.rangeLabel}>
-        {start + (end > start ? 1 : 0)}-{end} / {total}
-      </span>
-      <VButton type="button" density="compact" variant="secondary" isDisabled={page <= 1} onPress={onPrevious}>
-        {previousLabel}
-      </VButton>
-      <VButton type="button" density="compact" variant="secondary" isDisabled={page >= pageCount} onPress={onNext}>
-        {nextLabel}
-      </VButton>
-    </div>
-  );
-}
-
-function TabLabel({ text, count }: { text: string; count: number }) {
-  return (
-    <span className={styles.tabLabel}>
-      <span>{text}</span>
-      <strong className={styles.tabCount}>{count}</strong>
-    </span>
-  );
+  return !/^Branch/.test(copy.branchInstances);
 }
 
 export function LauncherBranchInstancesPanel({
   copy,
   headerAction,
   items,
-  selectedId,
   onSelect,
   pendingOperation,
   launcherTitle,
   launcherOnline = false,
   launcherReading = false,
   listLoading = false,
+  listError,
   lifecyclePending = false,
   onLifecycle,
   onStopMany,
@@ -186,7 +125,7 @@ export function LauncherBranchInstancesPanel({
         cleanupConfirmHint: "只删除本地 worktree 和本地分支，不会删除远端。",
         previous: "上一页",
         next: "下一页",
-        selectPage: "选择本页可清理项",
+        selectPage: "选择当前列表可清理项",
         actions: "操作",
         frontendMode: "前端模式",
         workbench: "Workbench 窗口",
@@ -247,7 +186,7 @@ export function LauncherBranchInstancesPanel({
         cleanupConfirmHint: "This deletes local worktrees and local branches only. Remotes are not deleted.",
         previous: "Previous",
         next: "Next",
-        selectPage: "Select cleanable items on this page",
+        selectPage: "Select cleanable items in this list",
         actions: "Actions",
         frontendMode: "Frontend mode",
         workbench: "Workbench window",
@@ -283,8 +222,8 @@ export function LauncherBranchInstancesPanel({
   const [activeTab, setActiveTab] = useState<BranchTableTab>("all");
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<InstanceListFilters>({});
-  const [allPage, setAllPage] = useState(1);
-  const [startablePage, setStartablePage] = useState(1);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [forceStopId, setForceStopId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<string[] | null>(null);
   const [batchStopIds, setBatchStopIds] = useState<string[] | null>(null);
@@ -313,29 +252,13 @@ export function LauncherBranchInstancesPanel({
   );
   const grouped = useMemo(() => groupBranchInstances(visibleItems, pendingOperation), [pendingOperation, visibleItems]);
   const allItems = useMemo(
-    () => [...grouped.running, ...grouped.attention, ...grouped.startable, ...grouped.maintenance],
+    () => [...grouped.running, ...grouped.attention, ...grouped.startable, ...grouped.maintenance]
+      .filter((item) => item.kind !== "retired")
+      .sort((a, b) => Number(b.current || b.kind === "main") - Number(a.current || a.kind === "main")),
     [grouped],
   );
   const eligibleItems = useMemo(() => visibleItems.filter(isCleanupEligible), [visibleItems]);
-  const pagedAll = useMemo(
-    () => paginateItems(allItems, allPage, BRANCH_INSTANCE_PAGE_SIZE),
-    [allItems, allPage],
-  );
-  const pagedStartable = useMemo(
-    () => paginateItems(grouped.startable, startablePage, BRANCH_INSTANCE_PAGE_SIZE),
-    [grouped.startable, startablePage],
-  );
-
-  useEffect(() => {
-    if (pagedAll.page !== allPage) {
-      setAllPage(pagedAll.page);
-    }
-  }, [allPage, pagedAll.page]);
-  useEffect(() => {
-    if (pagedStartable.page !== startablePage) {
-      setStartablePage(pagedStartable.page);
-    }
-  }, [pagedStartable.page, startablePage]);
+  const activeRows = activeTab === "all" ? allItems : activeTab === "running" ? grouped.running : activeTab === "attention" ? grouped.attention : activeTab === "retired" ? visibleItems.filter((item) => item.kind === "retired") : grouped.startable;
   useEffect(() => {
     const guards = openClickGuardsRef.current;
     for (const id of [...guards]) {
@@ -354,45 +277,14 @@ export function LauncherBranchInstancesPanel({
       setOpenReject(null);
     }
   }, [annotatedItems, openReject, pendingOperation]);
-  // 仅在选中动作发生时跟随翻页：轮询刷新会重建 allItems，若每次列表变化都
-  // 跟随，选中项跨页（分组变化）会把用户正在浏览的页闪跳回去。
-  const lastFollowedSelectionRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (lastFollowedSelectionRef.current === selectedId) {
-      return;
-    }
-    lastFollowedSelectionRef.current = selectedId;
-    const allIndex = allItems.findIndex((item) => item.id === selectedId);
-    if (allIndex >= 0) {
-      setAllPage(Math.floor(allIndex / BRANCH_INSTANCE_PAGE_SIZE) + 1);
-    }
-    const startableIndex = grouped.startable.findIndex((item) => item.id === selectedId);
-    if (startableIndex >= 0) {
-      setStartablePage(Math.floor(startableIndex / BRANCH_INSTANCE_PAGE_SIZE) + 1);
-    }
-  }, [allItems, grouped.startable, selectedId]);
-
-  const kindById = useMemo(() => {
-    const map = new Map<string, "running" | "attention" | "startable">();
-    for (const item of grouped.running) {
-      map.set(item.id, "running");
-    }
-    for (const item of grouped.attention) {
-      map.set(item.id, "attention");
-    }
-    for (const item of grouped.startable) {
-      map.set(item.id, "startable");
-    }
-    return map;
-  }, [grouped]);
-
   const knownIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
   const cleanupSelected = selectedIds.filter((id) => knownIds.has(id) && eligibleItems.some((item) => item.id === id));
-  const pageEligible = pagedAll.items.filter(isCleanupEligible);
+  const pageEligible = activeRows.filter(isCleanupEligible);
   const pageSelectedCount = pageEligible.filter((item) => cleanupSelected.includes(item.id)).length;
   const allPageSelected = pageEligible.length > 0 && pageSelectedCount === pageEligible.length;
   const pendingItems = pendingIds ? annotatedItems.filter((item) => pendingIds.includes(item.id)) : [];
   const batchStopItems = batchStopIds ? annotatedItems.filter((item) => batchStopIds.includes(item.id)) : [];
+  const batchStopPending = batchStopItems.some((item) => instanceRuntimeState(item, pendingOperation) === "stopping");
 
   const cleanupMutation = useMutation({
     mutationFn: (instanceIds: string[]) => requestBranchInstanceCleanup(instanceIds, true),
@@ -455,6 +347,7 @@ export function LauncherBranchInstancesPanel({
   const clearSearch = () => {
     setQuery("");
     setFilters({});
+    setActiveTab("all");
   };
 
   const renderLifecycleActions = (item: LauncherBranchInstance) => {
@@ -469,10 +362,9 @@ export function LauncherBranchInstancesPanel({
     // While a frontend build gates the start, the primary control stays
     // visible but disabled with a pending spinner so the wait reads as
     // progress instead of a frozen button.
-    const showOpen = canRequestOpenInstance(item, pendingOperation) || building;
+    const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy;
     const showStop = canStopInstance(item, pendingOperation) || stopBusy;
     const showForceStop = canForceStopInstance(item);
-    const forceStopPending = lifecyclePending && Boolean(resolveItemPending(item, pendingOperation));
     const requestOpen = () => {
       if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id)) {
         return;
@@ -499,17 +391,19 @@ export function LauncherBranchInstancesPanel({
         aria-busy={building || startingOrRestarting || stopBusy || undefined}
         className={styles.actionButtons}
         onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
       >
         {showOpen ? (
           <VButton
             type="button"
-            variant="primary"
+            variant="secondary"
             density="compact"
-            isDisabled={building || startBusy || admissionBlocked}
-            isPending={building}
+            isDisabled={startBusy || stopBusy || admissionBlocked}
+            isPending={startBusy || stopBusy}
+            title={building ? labels.buildingHint : undefined}
             onPress={requestOpen}
           >
-            {building ? labels.building : openLabel}
+            {startBusy || stopBusy ? instanceRuntimeStateLabel(state, zh) : openLabel}
           </VButton>
         ) : null}
         {showOpen && !building && admissionBlocked ? (
@@ -518,68 +412,14 @@ export function LauncherBranchInstancesPanel({
         {showOpen && !building && openReject?.id === item.id ? (
           <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
         ) : null}
-        {building ? (
-          <span className={styles.rowFeedback} title={labels.buildingHint}>
-            {labels.buildingHint}
-          </span>
-        ) : null}
-        {showStop ? (
-          <VButton
-            type="button"
-            variant={startingOrRestarting || building ? "primary" : "secondary"}
-            density="compact"
-            isDisabled={stopBusy}
-            isPending={stopBusy}
-            icon={startingOrRestarting || building ? (
-              <LoaderCircle
-                size={14}
-                strokeWidth={2.25}
-                className="animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
-            ) : undefined}
-            tooltip={startingOrRestarting || building
-              ? (state === "restarting"
-                ? (zh ? "正在重启，点击可停止" : "Restarting — click to stop")
-                : (building
-                  ? (zh ? "正在构建前端，点击可停止" : "Building frontend — click to stop")
-                  : (zh ? "正在启动，点击可停止" : "Starting — click to stop")))
-              : undefined}
-            onPress={() => {
-              if (stopBusy) {
-                return;
-              }
-              onLifecycle?.(item.id, "stop");
-            }}
-          >
-            {stopBusy ? instanceRuntimeStateLabel(state, zh) : instanceStopLabel(item, zh, pendingOperation)}
-          </VButton>
-        ) : null}
-        {showForceStop ? (
-          <VButton
-            type="button"
-            variant="danger"
-            density="compact"
-            isIconOnly
-            aria-label={labels.forceStop}
-            tooltip={labels.forceStopHint}
-            isDisabled={lifecyclePending}
-            isPending={forceStopPending}
-            icon={<ShieldAlert size={14} aria-hidden="true" />}
-            onPress={() => onLifecycle?.(item.id, "force-stop")}
-          />
-        ) : null}
-        {isCleanupEligible(item) ? (
-          <VButton
-            type="button"
-            variant="danger"
-            density="compact"
-            isDisabled={cleanupMutation.isPending || building || startingOrRestarting || stopBusy}
-            onPress={() => askCleanup([item.id])}
-          >
-            {labels.cleanup}
-          </VButton>
-        ) : null}
+        <VDropdownMenu aria-label={zh ? "更多操作" : "More actions"} align="end"
+          trigger={<VButton isIconOnly variant="ghost" aria-label={`${launcherBranchDisplayName(item)} ${zh ? "更多操作" : "More actions"}`} icon={<Ellipsis size={16} />} />}
+          items={[
+            { id: "details", label: zh ? "查看详情" : "View details", onSelect: () => { onSelect(item.id); setDetailId(item.id); } },
+            ...(showStop ? [{ id: "stop", label: instanceStopLabel(item, zh, pendingOperation), disabled: stopBusy, onSelect: () => askBatchStop([item.id], "stop") }] : []),
+            ...(showForceStop ? [{ id: "force-stop", label: labels.forceStop, danger: true, disabled: lifecyclePending, onSelect: () => setForceStopId(item.id) }] : []),
+            ...(isCleanupEligible(item) ? [{ id: "cleanup", label: labels.cleanup, danger: true, disabled: cleanupMutation.isPending || building || startingOrRestarting || stopBusy, onSelect: () => askCleanup([item.id]) }] : []),
+          ]} />
       </VActionGroup>
       {feedback ? (
         <span
@@ -596,43 +436,10 @@ export function LauncherBranchInstancesPanel({
   const hasAnyItems = items.length > 0;
   const showListLoading = (listLoading && !hasAnyItems) || waitingUnmergedMetadata;
   const filteredEmpty = hasAnyItems && visibleItems.length === 0 && !waitingUnmergedMetadata;
-  const activePager = activeTab === "all" ? pagedAll : activeTab === "startable" ? pagedStartable : null;
-  const activeTotal = activeTab === "all"
-    ? allItems.length
-    : activeTab === "running"
-      ? grouped.running.length
-      : activeTab === "attention"
-        ? grouped.attention.length
-        : grouped.startable.length;
-  const activeRows = activeTab === "all"
-    ? pagedAll.items
-    : activeTab === "running"
-      ? grouped.running
-      : activeTab === "attention"
-        ? grouped.attention
-        : pagedStartable.items;
-  const activeHint = activeTab === "all"
-    ? labels.allHint
-    : activeTab === "running"
-      ? labels.runningHint
-      : activeTab === "attention"
-        ? labels.attentionHint
-        : labels.startableHint;
-  const tabEmptyText = activeTab === "all"
-    ? labels.emptyAll
-    : activeTab === "running"
-      ? labels.emptyRunning
-      : activeTab === "attention"
-        ? labels.emptyAttention
-        : labels.emptyStartable;
-
-  const tabItems: Array<{ id: BranchTableTab; label: ReactNode; title: string }> = [
-    { id: "all", label: <TabLabel text={labels.all} count={allItems.length} />, title: labels.allHint },
-    { id: "running", label: <TabLabel text={labels.running} count={grouped.running.length} />, title: labels.runningHint },
-    { id: "attention", label: <TabLabel text={labels.attention} count={grouped.attention.length} />, title: labels.attentionHint },
-    { id: "startable", label: <TabLabel text={labels.startable} count={grouped.startable.length} />, title: labels.startableHint },
-  ];
-
+  const activeHint = zh ? "工作区分支列表" : "Workspace branches";
+  const tabEmptyText = labels.filteredEmptyTitle;
+  const detailItem = annotatedItems.find((item) => item.id === detailId);
+  const forceStopItem = items.find((item) => item.id === forceStopId);
   const primaryColumns: VDenseTableColumn<LauncherBranchInstance>[] = [
     {
       id: "branch",
@@ -642,52 +449,24 @@ export function LauncherBranchInstancesPanel({
       fill: true,
       render: (item: LauncherBranchInstance) => (
         <VTooltip content={`${item.shortName || item.branch || item.id} · ${item.branch || item.id} · ${item.path || item.displayPath || item.id}`} width="wide">
-          <span className={styles.branchName}>{item.shortName || item.branch || item.id}</span>
+          <span className={styles.branchName}>{launcherBranchDisplayName(item)}{item.current ? <small className="ml-2 font-normal text-vui-xs text-vui-fg-tertiary">{zh ? "当前" : "Current"}</small> : null}</span>
         </VTooltip>
       ),
     },
     {
       id: "state",
       header: copy.instanceState,
-      width: 108,
-      minWidth: 92,
+      width: 176,
+      minWidth: 150,
       render: (item: LauncherBranchInstance) => {
         const state = instanceRuntimeState(item, pendingOperation);
-        const kind = kindById.get(item.id);
-        if (kind === "startable" && state === "stopped") {
-          return (
-            <LauncherBranchStatusHelp item={item} state="stopped" isZh={zh} kind="runtime">
-              <VStatusChip tone="success">{labels.ready}</VStatusChip>
-            </LauncherBranchStatusHelp>
-          );
-        }
-        if (kind === "attention") {
-          return (
-            <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
-              <span>
-                <VStatusChip tone={runtimeTone(state)}>
-                  {instanceRuntimeStateLabel(state, zh)}
-                </VStatusChip>
-                <span className={styles.errorReason}>{formatAttentionReason(item, zh)}</span>
-              </span>
-            </LauncherBranchStatusHelp>
-          );
-        }
-        return (
+        return <div className="grid gap-1">
           <LauncherBranchStatusHelp item={item} state={state} isZh={zh} kind="runtime">
-            <VStatusChip tone={runtimeTone(state)}>
-              {instanceRuntimeStateLabel(state, zh)}
-            </VStatusChip>
+            <span className={state === "running" ? "text-[var(--state-success)]" : state === "failed" ? "text-[var(--state-error)]" : "text-vui-fg-secondary"}>{instanceRuntimeStateLabel(state, zh)}</span>
           </LauncherBranchStatusHelp>
-        );
+          <span className="text-vui-xs text-vui-fg-tertiary">{instanceWindowOpen(item) ? (zh ? "窗口已打开" : "Window open") : (zh ? "窗口未打开" : "Window closed")}</span>
+        </div>;
       },
-    },
-    {
-      id: "workbench",
-      header: labels.workbench,
-      width: 200,
-      minWidth: 140,
-      render: (item: LauncherBranchInstance) => formatWorkbenchStatus(item, zh),
     },
     {
       id: "git",
@@ -705,9 +484,9 @@ export function LauncherBranchInstancesPanel({
     },
     {
       id: "actions",
-      header: labels.actions,
+      header: "",
       align: "right",
-      width: 226,
+      width: 166,
       minWidth: 150,
       truncate: false,
       className: styles.actionCell,
@@ -745,173 +524,40 @@ export function LauncherBranchInstancesPanel({
 
   return (
     <section className={styles.panel} data-vui-region="launcher-branch-instances" aria-label={copy.branchInstances}>
-      <div className={styles.panelHeader}>
-        <p className={styles.panelEyebrow}>{copy.branchInstances}</p>
-        {headerAction || launcherReading || !launcherOnline ? (
-          <div className={styles.panelHeaderActions}>
-            {launcherReading || !launcherOnline ? (
-              <p className={styles.controlWindow} role="status">
-                <span>{labels.controlWindow}</span>
-                <strong>{launcherTitle || "-"}</strong>
-                <VStatusChip tone={launcherReading ? "neutral" : "warning"}>
-                  {launcherReading ? labels.reading : labels.offline}
-                </VStatusChip>
-              </p>
-            ) : null}
-            {headerAction}
-          </div>
-        ) : null}
+      {detailItem ? <LauncherBranchDetailPanel item={detailItem} zh={zh} pending={pendingOperation} actions={renderLifecycleActions(detailItem)} onBack={() => setDetailId(null)} /> : <>
+      <header className={styles.panelHeader}>
+        <div><h1 className="m-0 text-xl font-semibold">{zh ? "分支" : "Branches"}</h1><p className="mb-0 mt-1 text-vui-xs text-vui-fg-secondary">{zh ? "管理工作区，打开窗口，继续工作。" : "Manage workspaces and continue your work."}</p></div>
+        <div className={styles.panelHeaderActions}>{launcherReading || !launcherOnline ? <span role="status" className="text-vui-xs text-vui-fg-secondary">{launcherReading ? labels.reading : labels.offline}</span> : null}{headerAction}</div>
+      </header>
+      <div className={styles.filterRow}>
+        <div className="relative min-w-40 flex-1"><Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-vui-fg-tertiary" /><VNativeInput aria-label={labels.search} className={styles.searchInput} placeholder={labels.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+        <VStringSelect ariaLabel={zh ? "分支筛选" : "Branch filter"} value={activeTab} className="!w-36 !shrink-0" onValueChange={(value) => setActiveTab(value as BranchTableTab)}
+          options={[{value:"all",label:zh ? "可用工作区" : "Available"},{value:"running",label:labels.running},{value:"attention",label:labels.attention},{value:"startable",label:labels.startable},{value:"retired",label:zh ? "已退役" : "Retired"}]} />
+        <VDropdownMenu aria-label={zh ? "更多筛选" : "More filters"} align="end" trigger={<VButton variant="ghost">{zh ? "筛选" : "Filters"}{filters.dirty || filters.unmerged ? " •" : ""}</VButton>} items={[
+          { id: "dirty", label: `${filters.dirty ? "✓ " : ""}${labels.filterDirty}`, onSelect: () => setFilters((current) => ({...current, dirty: !current.dirty})) },
+          { id: "unmerged", label: `${filters.unmerged ? "✓ " : ""}${labels.filterUnmerged}`, onSelect: () => setFilters((current) => ({...current, unmerged: !current.unmerged})) },
+          { id: "clear", label: labels.clearSearch, onSelect: clearSearch },
+        ]} />
+        {cleanupSelected.length > 0 ? <VButton variant="danger" isDisabled={cleanupMutation.isPending} onPress={() => askCleanup(cleanupSelected)}>{labels.cleanupSelected} ({cleanupSelected.length})</VButton> : null}
+        {activeTab === "running" || activeTab === "attention" ? <VButton variant="secondary" isDisabled={activeRows.every((item) => !canStopInstance(item, pendingOperation))} onPress={() => askBatchStop(activeRows.map((item) => item.id), activeTab === "running" ? "stop" : "close")}>{activeTab === "running" ? labels.stopAll : labels.closeAll}</VButton> : null}
       </div>
-
-      {showListLoading ? (
-        <VStateSurface
-          className={styles.globalEmpty}
-          tone="loading"
-          title={labels.listLoadingTitle}
-          skeletonLines={3}
-        />
-      ) : !hasAnyItems ? (
-        <VEmptyState
-          align="start"
-          className={styles.globalEmpty}
-          title={labels.globalEmptyTitle}
-          icon={<GitBranch size={18} aria-hidden="true" />}
-        >
-          {labels.globalEmptyHint}
-        </VEmptyState>
-      ) : (
-        <div className={styles.panelBody}>
-          <div className={styles.filterRow}>
-            <VToolbar ariaLabel={labels.search} className={styles.filterBar}>
-              <VNativeInput
-                aria-label={labels.search}
-                className={styles.searchInput}
-                placeholder={labels.searchPlaceholder}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <VButton
-                type="button"
-                density="compact"
-                variant={filters.dirty ? "secondary" : "ghost"}
-                onPress={() => setFilters((current) => ({ ...current, dirty: !current.dirty }))}
-              >
-                {labels.filterDirty}
-              </VButton>
-              <VButton
-                type="button"
-                density="compact"
-                variant={filters.unmerged ? "secondary" : "ghost"}
-                onPress={() => setFilters((current) => ({ ...current, unmerged: !current.unmerged }))}
-              >
-                {labels.filterUnmerged}
-              </VButton>
-              {notice ? (
-                <span className={noticeTone === "error" ? styles.noticeError : styles.notice} role="status">
-                  {notice}
-                </span>
-              ) : null}
-            </VToolbar>
-
-            <VTabs
-              density="compact"
-              className={styles.tabBar}
-              aria-label={copy.branchInstances}
-              value={activeTab}
-              onValueChange={(value) => setActiveTab(value as BranchTableTab)}
-              items={tabItems}
-            />
-          </div>
-
-          {filteredEmpty ? (
-            <VEmptyState
-              align="start"
-              className={styles.globalEmpty}
-              title={labels.filteredEmptyTitle}
-              actions={
-                <VButton type="button" density="compact" variant="secondary" onPress={clearSearch}>
-                  {labels.clearSearch}
-                </VButton>
-              }
-            >
-              {labels.filteredEmptyHint}
-            </VEmptyState>
-          ) : (
-            <div className={styles.tabBody}>
-              <div className={styles.tabHeader}>
-                {activeTab === "all" ? null : <p className={styles.tabHint}>{activeHint}</p>}
-                <div className={styles.tabHeaderActions}>
-                  {activeTab === "all" && cleanupSelected.length > 0 ? (
-                    <VButton
-                      type="button"
-                      variant="danger"
-                      density="compact"
-                      isDisabled={cleanupMutation.isPending}
-                      onPress={() => askCleanup(cleanupSelected)}
-                    >
-                      {labels.cleanupSelected}
-                      {cleanupSelected.length > 0 ? ` (${cleanupSelected.length})` : ""}
-                    </VButton>
-                  ) : null}
-                  {activeTab === "running" ? (
-                    <VButton
-                      type="button"
-                      density="compact"
-                      variant="secondary"
-                      isDisabled={grouped.running.every((item) => !canStopInstance(item, pendingOperation))}
-                      onPress={() => askBatchStop(grouped.running.map((item) => item.id), "stop")}
-                    >
-                      {labels.stopAll}
-                    </VButton>
-                  ) : null}
-                  {activeTab === "attention" ? (
-                    <VButton
-                      type="button"
-                      density="compact"
-                      variant="secondary"
-                      isDisabled={grouped.attention.every((item) => !canStopInstance(item, pendingOperation))}
-                      onPress={() => askBatchStop(grouped.attention.map((item) => item.id), "close")}
-                    >
-                      {labels.closeAll}
-                    </VButton>
-                  ) : null}
-                  {activePager ? (
-                    <SectionPager
-                      ariaLabel={activeHint}
-                      page={activePager.page}
-                      pageCount={activePager.pageCount}
-                      start={activePager.start}
-                      end={activePager.end}
-                      total={activeTotal}
-                      previousLabel={labels.previous}
-                      nextLabel={labels.next}
-                      onPrevious={() => (activeTab === "all" ? setAllPage((current) => current - 1) : setStartablePage((current) => current - 1))}
-                      onNext={() => (activeTab === "all" ? setAllPage((current) => current + 1) : setStartablePage((current) => current + 1))}
-                    />
-                  ) : null}
-                </div>
-              </div>
-
-              <VDenseTable
-                ariaLabel={activeHint}
-                className={styles.statusTable}
-                resizable
-                rows={activeRows}
-                emptyText={tabEmptyText}
-                getRowKey={(item) => item.id}
-                onRowClick={(item) => onSelect(item.id)}
-                getRowState={(item) => ({
-                  selected: item.id === selectedId,
-                  tone: runtimeTone(instanceRuntimeState(item, pendingOperation)),
-                })}
-                columns={activeTab === "all" ? [selectColumn, ...primaryColumns] : primaryColumns}
-              />
-            </div>
-          )}
-
+      {notice ? <p role="status" className={noticeTone === "error" ? styles.noticeError : styles.notice}>{notice}</p> : null}
+      {listError && hasAnyItems ? <VStateSurface tone="error" className="mx-7 mb-3 shrink-0 max-[640px]:mx-4" title={listError} /> : null}
+      {listError && !hasAnyItems ? <VStateSurface tone="error" className={styles.globalEmpty} title={listError} /> : showListLoading ? <VStateSurface className={styles.globalEmpty} tone="loading" title={labels.listLoadingTitle} skeletonLines={3} /> : !hasAnyItems ? <VEmptyState className={styles.globalEmpty} title={labels.globalEmptyTitle} icon={<GitBranch size={18} />}>{labels.globalEmptyHint}</VEmptyState> : filteredEmpty || activeRows.length === 0 ? <VEmptyState className={styles.globalEmpty} title={labels.filteredEmptyTitle} actions={<VButton variant="secondary" onPress={clearSearch}>{labels.clearSearch}</VButton>}>{labels.filteredEmptyHint}</VEmptyState> : (
+        <div className={styles.tabBody}>
+          <div className="max-[700px]:hidden"><VDenseTable ariaLabel={activeHint} className={styles.statusTable} resizable rows={activeRows} emptyText={tabEmptyText} getRowKey={(item) => item.id}
+            onRowClick={(item) => { onSelect(item.id); setDetailId(item.id); }}
+            getRowState={(item) => ({selected: cleanupSelected.includes(item.id)})}
+            columns={[selectColumn, ...primaryColumns]} /></div>
+          <div className="hidden max-[700px]:block" role="list" aria-label={activeHint}>{activeRows.map((item) => <div key={item.id} role="listitem" className="border-b border-vui-border-subtle px-3 py-3">
+            <VButton variant="ghost" className="!min-h-11 !max-w-full !justify-start !px-0" onPress={() => { onSelect(item.id); setDetailId(item.id); }}><span className="truncate">{launcherBranchDisplayName(item)}{item.current ? (zh ? " · 当前" : " · Current") : ""}</span></VButton>
+            <div className="flex flex-wrap items-center justify-between gap-2">{primaryColumns[1].render(item)}{renderLifecycleActions(item)}</div>
+          </div>)}</div>
         </div>
       )}
-
+      <div className="flex shrink-0 justify-between border-t border-vui-border-subtle px-7 py-3 text-vui-xs text-vui-fg-tertiary"><span>{(!hasAnyItems && listError) || showListLoading ? "—" : activeRows.length} {zh ? "个工作区" : "workspaces"}</span><span>{zh ? "退役记录保留在筛选中" : "Retired workspaces remain in filters"}</span></div>
+      </>}
+      <VConfirmDialog open={forceStopId !== null} onOpenChange={(open) => { if (!open) setForceStopId(null); }} title={labels.forceStop} description={`${forceStopItem ? launcherBranchDisplayName(forceStopItem) : ""} · ${labels.forceStopHint}`} tone="danger" confirmLabel={labels.forceStop} cancelLabel={zh ? "取消" : "Cancel"} confirmDisabled={lifecyclePending || !items.some((item) => item.id === forceStopId && canForceStopInstance(item))} onConfirm={() => { if (lifecyclePending) return; const item = items.find((entry) => entry.id === forceStopId); if (item && canForceStopInstance(item)) onLifecycle?.(item.id, "force-stop"); setForceStopId(null); }} />
       <VConfirmDialog
         open={pendingIds !== null}
         onOpenChange={(open) => {
@@ -960,7 +606,7 @@ export function LauncherBranchInstancesPanel({
       <VConfirmDialog
         open={batchStopIds !== null}
         onOpenChange={(open) => {
-          if (!open && !lifecyclePending) {
+          if (!open && !batchStopPending) {
             setBatchStopIds(null);
           }
         }}
@@ -970,11 +616,12 @@ export function LauncherBranchInstancesPanel({
         size="md"
         confirmLabel={batchStopKind === "close" ? labels.close : labels.stop}
         cancelLabel={zh ? "取消" : "Cancel"}
-        confirmPending={lifecyclePending}
+        confirmPending={batchStopPending}
         confirmDisabled={batchStopItems.length === 0}
         onConfirm={() => {
-          if (batchStopIds && batchStopIds.length > 0) {
-            onStopMany?.(batchStopIds);
+          const eligible = batchStopItems.filter((item) => canStopInstance(item, pendingOperation)).map((item) => item.id);
+          if (eligible.length > 0) {
+            onStopMany?.(eligible);
             setBatchStopIds(null);
           }
         }}

@@ -666,7 +666,8 @@ export function canStopInstance(item: LauncherBranchInstance, pending?: Lifecycl
   if (state === "stopping") {
     return false;
   }
-  const startingOrRestarting = state === "starting" || state === "restarting";
+  // Frontend build is part of an admitted start, even before backend/window PIDs exist.
+  const startingOrRestarting = state === "building" || state === "starting" || state === "restarting";
   if (isUnknownRegistryInstance(item) && !instanceHasLiveRuntime(item) && !startingOrRestarting) {
     const dismissableMissingWorktree = state === "failed" && instanceErrorMessage(item) === "worktree_path_missing";
     if (!dismissableMissingWorktree) {
