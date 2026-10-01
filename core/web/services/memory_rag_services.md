@@ -62,6 +62,13 @@
 
 改 Agent Prompt 注入 memory 时，先查 tool/route 是否经 `unified_knowledge_search_service` 或 `rag_retrieval_service`，不要在 chat route 平行拼检索。
 
+个人记忆列表的文件 metadata 包含可选 `revision`（文件 `mtime_ns:size`）；它复用已有 stat，
+不读取正文，也不是内容哈希。旧 `updatedAt` 仍保持秒级显示格式。前端详情 cache key 使用
+选中 Agent 的文件 revision、路径和知识摘要；列表轮询发现变化后更新正文，未变时不增加
+正文请求。改写并保留原始 mtime 和 size 的外部工具不在该 metadata 标识的检测能力内。
+详情接口每次只读取一次 inventory；不匹配的 actor 只读取 metadata，保持 unknown Agent
+先返回 404、已知 Agent 的无效 actor 返回 422 的现有顺序。
+
 ---
 
 ## 主测（可复制）

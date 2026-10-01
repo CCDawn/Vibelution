@@ -68,7 +68,7 @@ describe("memory workbench queries contract", () => {
     );
 
     const detailQuery = extractQueryBlock("agentMemoryDetailQuery");
-    expect(detailQuery).toContain('queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"]');
+    expect(detailQuery).toContain("queryKey: queryKeys.memoryAgentDetail(selectedAgentMemoryAgentId, selectedAgentMemoryRevision)");
     expect(detailQuery).toContain("fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId");
     expect(detailQuery).toContain("includeContent: true");
     expect(detailQuery).toContain("enabled: isPersonalMemoryView(forcedView) && Boolean(selectedAgentMemoryAgentId)");

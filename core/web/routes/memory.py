@@ -140,16 +140,15 @@ def memory_agents(response: Response, agentId: str = "", includeContent: bool = 
     response_model_exclude_unset=True,
 )
 def memory_agent_detail(agent_id: str, includeContent: bool = True, actorAgentId: str = "") -> dict:
-    if includeContent:
-        index_payload = get_agent_memory_inventory(agent_id=agent_id, include_content=False)
-        if index_payload.get("selectedAgent") is None:
-            raise HTTPException(status_code=404, detail="Agent memory not found.")
     normalized_actor_agent_id = str(actorAgentId or "").strip()
-    if includeContent and normalized_actor_agent_id != str(agent_id or "").strip():
-        raise HTTPException(status_code=422, detail="actorAgentId must match agent_id when includeContent is true.")
-    payload = get_agent_memory_inventory(agent_id=agent_id, include_content=includeContent)
+    actor_matches = normalized_actor_agent_id == str(agent_id or "").strip()
+    # A mismatched actor may inspect metadata for the existing 404/422 order,
+    # but must never cause a private body read. Valid detail reads scan once.
+    payload = get_agent_memory_inventory(agent_id=agent_id, include_content=includeContent and actor_matches)
     if payload.get("selectedAgent") is None:
         raise HTTPException(status_code=404, detail="Agent memory not found.")
+    if includeContent and not actor_matches:
+        raise HTTPException(status_code=422, detail="actorAgentId must match agent_id when includeContent is true.")
     return payload
 
 
