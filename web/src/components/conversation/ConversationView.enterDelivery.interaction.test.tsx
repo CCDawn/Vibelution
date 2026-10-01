@@ -26,7 +26,7 @@ function typeIntoTextarea(textarea: HTMLTextAreaElement, value: string, caretInd
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-describe("composer Enter delivery (ZCode opposite follow-up delivery)", () => {
+describe("composer Enter delivery (running Enter sends immediately)", () => {
   let root: Root | null = null;
   let container: HTMLDivElement | null = null;
 
@@ -107,7 +107,7 @@ describe("composer Enter delivery (ZCode opposite follow-up delivery)", () => {
     }));
   }
 
-  it("queues on bare Enter and steers immediately on Ctrl/⌘+Enter while a turn runs", async () => {
+  it("steers immediately on Enter while a turn runs, with or without modifiers", async () => {
     const onSubmit = vi.fn();
     const onSafeGuidance = vi.fn();
     const textarea = await renderEnterDeliveryComposer({
@@ -116,28 +116,31 @@ describe("composer Enter delivery (ZCode opposite follow-up delivery)", () => {
       onSafeGuidance,
     });
 
-    typeIntoTextarea(textarea, "追加一条");
+    typeIntoTextarea(textarea, "立刻引导");
     await act(async () => {
       pressEnter(textarea);
     });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSafeGuidance).not.toHaveBeenCalled();
+    expect(onSafeGuidance).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
 
-    typeIntoTextarea(textarea, "立刻引导");
+    // Modifier keys no longer flip the delivery (user decision): Ctrl+Enter
+    // steers exactly like bare Enter.
+    typeIntoTextarea(textarea, "再引导一条");
     await act(async () => {
       pressEnter(textarea, { ctrl: true });
     });
-    expect(onSafeGuidance).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSafeGuidance).toHaveBeenCalledTimes(2);
+    expect(onSubmit).not.toHaveBeenCalled();
 
-    typeIntoTextarea(textarea, "再来一条");
+    typeIntoTextarea(textarea, "第三条");
     await act(async () => {
       pressEnter(textarea, { meta: true });
     });
-    expect(onSafeGuidance).toHaveBeenCalledTimes(2);
+    expect(onSafeGuidance).toHaveBeenCalledTimes(3);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("keeps idle behavior: bare Enter sends, Ctrl/⌘+Enter does nothing", async () => {
+  it("keeps idle behavior: Enter sends, modifiers included", async () => {
     const onSubmit = vi.fn();
     const onSafeGuidance = vi.fn();
     const textarea = await renderEnterDeliveryComposer({
@@ -153,15 +156,15 @@ describe("composer Enter delivery (ZCode opposite follow-up delivery)", () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSafeGuidance).not.toHaveBeenCalled();
 
-    typeIntoTextarea(textarea, "修饰键不发送");
+    typeIntoTextarea(textarea, "修饰键同样发送");
     await act(async () => {
       pressEnter(textarea, { ctrl: true });
     });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledTimes(2);
     expect(onSafeGuidance).not.toHaveBeenCalled();
   });
 
-  it("falls the Ctrl+Enter flip back to queueing when the draft rides attachments or references", async () => {
+  it("queues on Enter when the draft rides attachments or references", async () => {
     const onSubmit = vi.fn();
     const onSafeGuidance = vi.fn();
     const queryClient = new QueryClient({
@@ -221,9 +224,9 @@ describe("composer Enter delivery (ZCode opposite follow-up delivery)", () => {
 
     typeIntoTextarea(textarea, "带引用的引导");
     await act(async () => {
-      pressEnter(textarea, { ctrl: true });
+      pressEnter(textarea);
     });
-    // Guidance cannot carry references, so the flip queues instead.
+    // Guidance cannot carry references, so Enter queues instead of steering.
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSafeGuidance).not.toHaveBeenCalled();
   });
@@ -239,7 +242,8 @@ describe("composer Enter delivery (ZCode opposite follow-up delivery)", () => {
       .find((title) => title.includes("Enter"));
     expect(idleHint).toBe(dictionary.zh.composerSendEnterHint);
 
-    // Re-render in stop mode: with a draft the queue primary names both deliveries.
+    // Re-render in stop mode: with a draft the queue primary points at
+    // immediate Enter delivery and names itself as the queue entry.
     const stopGuidance = vi.fn();
     const stopSubmit = vi.fn();
     const busyTextarea = await renderEnterDeliveryComposer({
@@ -253,7 +257,7 @@ describe("composer Enter delivery (ZCode opposite follow-up delivery)", () => {
     });
     const busyHint = Array.from(container?.querySelectorAll<HTMLButtonElement>("button[title]") ?? [])
       .map((button) => button.getAttribute("title") ?? "")
-      .find((title) => title.includes("Enter") && title.includes("立刻引导"));
+      .find((title) => title.includes("Enter") && title.includes("此按钮加入队列"));
     expect(busyHint).toBe(dictionary.zh.composerQueueSteerEnterHint);
   });
 });

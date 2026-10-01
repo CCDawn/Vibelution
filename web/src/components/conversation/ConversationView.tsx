@@ -1560,8 +1560,9 @@ export const ConversationView = React.memo(function ConversationView({
   const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
     ? resolvedImmediateSteerLabel
     : resolvedQueueFollowupLabel;
-  // Tooltip carries the keyboard contract (ZCode opposite-delivery): bare Enter
-  // keeps the primary delivery, Ctrl/⌘+Enter flips queue ↔ immediate steer.
+  // Tooltip carries the keyboard contract: running Enter delivers immediately
+  // (or queues the draft when guidance cannot carry it); the button itself
+  // stays the explicit queue entry.
   const resolvedBusyPrimaryHint = queuePrimaryIsImmediate
     ? t("composerSteerEnterHint")
     : t("composerQueueSteerEnterHint");
@@ -7424,11 +7425,12 @@ export const ConversationView = React.memo(function ConversationView({
                 event.preventDefault();
                 onStop?.();
               }
-              // ZCode opposite-followup-delivery: idle bare Enter sends; running
-              // bare Enter queues, and Ctrl/⌘+Enter flips to immediate delivery
-              // (steer via the existing safe-guidance channel). The flip falls
+              // Enter delivery: while a turn runs, Enter immediately steers
+              // the draft via the existing safe-guidance channel, falling
               // back to queueing when the payload cannot ride guidance
               // (attachments/references) or no guidance handler exists.
+              // Idle Enter sends. Modifier keys never change the delivery
+              // (user decision removed the Ctrl/⌘+Enter flip).
               const composerEnterDelivery = resolveComposerEnterDelivery({
                 key: event.key,
                 shiftKey: event.shiftKey,

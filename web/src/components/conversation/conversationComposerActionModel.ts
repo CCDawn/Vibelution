@@ -75,14 +75,15 @@ export function resolveComposerPrimaryActionFlags(input: {
 export type ComposerEnterDelivery = "none" | "send" | "queue" | "steer";
 
 /**
- * ZCode followupModeSettings.resolveOppositeFollowupDelivery parity (claim:
- * composer action state). While a turn runs, bare Enter queues the draft and
- * Ctrl/⌘+Enter flips the delivery to immediate (steer the draft into the
- * running turn via the existing safe-guidance channel). When the immediate
- * channel cannot carry the payload (no handler, or attachments/references
- * riding the draft) the flip falls back to queueing instead of dropping the
- * message. Idle behavior is unchanged: bare Enter sends, modifier Enter stays
- * unbound. Pure: no React / DOM.
+ * Composer Enter delivery (claim: composer action state). User decision
+ * (2026-10): the previous Ctrl/⌘+Enter opposite-delivery flip is gone —
+ * modifier keys never participate in the delivery choice. While a turn runs,
+ * Enter immediately steers the draft into the running turn via the existing
+ * safe-guidance channel; when that channel cannot carry the payload (no
+ * handler, or attachments/references riding the draft) Enter queues instead
+ * of dropping the message. Idle Enter sends. Shift (newline), alt, and IME
+ * composition stay guarded. The ctrl/meta fields are kept for call-site
+ * compatibility but intentionally ignored. Pure: no React / DOM.
  */
 export function resolveComposerEnterDelivery(input: {
   key: string;
@@ -97,14 +98,10 @@ export function resolveComposerEnterDelivery(input: {
   if (input.isComposing || input.key !== "Enter" || input.shiftKey || input.altKey) {
     return "none";
   }
-  const modifierFlip = input.ctrlKey || input.metaKey;
   if (input.actionMode === "stop") {
-    if (!modifierFlip) {
-      return "queue";
-    }
     return input.canDeliverImmediately ? "steer" : "queue";
   }
-  return modifierFlip ? "none" : "send";
+  return "send";
 }
 
 /**
