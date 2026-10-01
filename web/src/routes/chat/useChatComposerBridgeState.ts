@@ -228,6 +228,8 @@ export function useChatComposerBridgeState({
         loadingSession: t("loadingSession"),
         messageInputPlaceholder: t("messageInputPlaceholder"),
         saveAndRerunMessage: t("saveAndRerunMessage"),
+        sessionBusyQueuePlaceholder: t("sessionBusyQueuePlaceholder"),
+        sessionBusyQueuedPlaceholder: t("sessionBusyQueuedPlaceholder"),
       },
       references: activeReferenceAttachments,
       safeGuidancePending: composerSafeGuidancePending,

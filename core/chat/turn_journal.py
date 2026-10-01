@@ -1619,6 +1619,61 @@ def append_canonical_turn_outcome(
     return committed
 
 
+def _event_timestamp_ms(value: str) -> int | None:
+    """Parse a journal timestamp into epoch milliseconds; None when unparseable.
+
+    Journal writers emit UTC ISO-8601 (``_now_timestamp``); naive legacy stamps
+    are read as UTC so differences inside one turn stay on a single clock.
+    """
+
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    try:
+        text = normalized[:-1] + "+00:00" if normalized.endswith(("Z", "z")) else normalized
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def _tool_error_facts_from_payload(tool_call: dict[str, Any]) -> dict[str, str]:
+    """Structured tool_call error wire facts from the result payload.
+
+    ``code`` maps failureClass/timedOut/httpStatus onto a stable fault
+    vocabulary (ZCode protocol style); ``message`` reuses the already-safe
+    user-visible error/summary preview instead of raw provider payloads.
+    """
+
+    failure_class = str(tool_call.get("failureClass") or tool_call.get("failure_class") or "").strip().lower()
+    timed_out_raw = tool_call.get("timedOut", tool_call.get("timed_out"))
+    timed_out = timed_out_raw is True or str(timed_out_raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+    try:
+        http_status = int(float(tool_call.get("httpStatus") or tool_call.get("http_status") or 0))
+    except (TypeError, ValueError):
+        http_status = 0
+    if timed_out or failure_class in {"timeout", "timed_out", "tool_timeout"}:
+        code = "fault.tool.timeout"
+    elif http_status > 0:
+        code = f"fault.tool.http_{http_status}"
+    elif failure_class:
+        code = "fault.tool." + re.sub(r"[^a-z0-9_]+", "_", failure_class).strip("_")
+    else:
+        code = "fault.tool.failed"
+    message = str(
+        tool_call.get("error")
+        or tool_call.get("summary")
+        or tool_call.get("resultPreview")
+        or tool_call.get("result_preview")
+        or ""
+    ).strip()
+    if len(message) > 240:
+        message = message[:239].rstrip() + "…"
+    return {"code": code, "message": message or "Tool call failed."}
+
+
 def session_turn_items_from_events(
     events: Iterable["TurnJournalEvent"],
     *,
@@ -1629,6 +1684,15 @@ def session_turn_items_from_events(
     Tool items are first committed as ``status=ready`` (pre-execution identity).
     Later ``tool_result`` / CLI result events must upgrade those rows so the live
     transcript does not freeze every tool as ready/pending and flash the UI.
+
+    Journal event timestamps are the only durable instants a settled turn has,
+    so they are projected onto the items: every item carries ``createdAt``
+    (its commit instant); tool items additionally carry ``updatedAt`` (the
+    result instant), ``durationMs`` (started→result) and a structured
+    ``error`` for failed calls.  Tools still open when the turn reached a
+    terminal event are closed as failed with the synthetic
+    ``fault.runtime.toolLifecycleIncomplete`` error (ZCode-aligned lifecycle
+    guard), so settled transcripts never freeze a running row.
     """
 
     normalized_turn_id = str(turn_id or "").strip()
@@ -1639,10 +1703,23 @@ def session_turn_items_from_events(
     tool_semantic_statuses: dict[str, str] = {}
     tool_summaries: dict[str, str] = {}
     tool_inputs: dict[str, str] = {}
+    tool_started_at: dict[str, str] = {}
+    tool_result_at: dict[str, str] = {}
+    tool_error_facts: dict[str, dict[str, str]] = {}
+    terminal_at = ""
     for event in event_list:
-        if event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
-            continue
         if normalized_turn_id and event.turn_id != normalized_turn_id:
+            continue
+        if event.event_type in TERMINAL_EVENTS:
+            terminal_at = str(event.timestamp or "").strip() or terminal_at
+            continue
+        if event.event_type == EVENT_TOOL_CALL_STARTED:
+            started_call_id = _event_tool_call_id(event)
+            started_at = str(event.timestamp or "").strip()
+            if started_call_id and started_at:
+                tool_started_at.setdefault(started_call_id, started_at)
+            continue
+        if event.event_type not in {EVENT_TOOL_RESULT, EVENT_CLI_TASK_RESULT}:
             continue
         call_id = _event_tool_call_id(event)
         if not call_id:
@@ -1672,6 +1749,11 @@ def session_turn_items_from_events(
             arguments = tool_call.get("arguments")
             if isinstance(arguments, dict) and arguments:
                 tool_inputs[call_id] = _bounded_tool_input_text(arguments)
+        result_at = str(event.timestamp or "").strip()
+        if result_at:
+            tool_result_at[call_id] = result_at
+        if outcome == "failed":
+            tool_error_facts[call_id] = _tool_error_facts_from_payload(tool_call)
 
     items: list[dict[str, Any]] = []
     for event in event_list:
@@ -1683,12 +1765,18 @@ def session_turn_items_from_events(
         kind = str(payload.get("kind") or "assistant_message")
         status = str(payload.get("status") or event.status or "").strip().lower()
         call_id = str(payload.get("callId") or "").strip()
+        event_at = str(event.timestamp or "").strip()
         if kind == "tool_call" or call_id:
             if call_id and call_id in tool_outcomes:
                 status = tool_outcomes[call_id]
             elif status in {"", "ready", "queued"}:
                 # Still open: never leave bare "ready" for the renderer (maps poorly).
                 status = "pending"
+            if terminal_at and status in {"pending", "running"}:
+                # The turn settled while this tool never saw a terminal event
+                # (executor early-exit / missing result).  Close it as failed
+                # instead of freezing a running row in a settled transcript.
+                status = "failed"
         item = {
             "version": 2,
             "id": f"{payload.get('itemId') or event.event_id}:{int(payload.get('revision') or 0)}",
@@ -1709,8 +1797,29 @@ def session_turn_items_from_events(
             "terminal": bool(payload.get("terminal")),
             "text": str(payload.get("text") or ""),
         }
+        if event_at:
+            item["createdAt"] = event_at
+            item["updatedAt"] = event_at
         if call_id:
             item["callId"] = call_id
+        if kind == "tool_call":
+            result_at = tool_result_at.get(call_id, "")
+            if result_at:
+                item["updatedAt"] = result_at
+                started_ms = _event_timestamp_ms(tool_started_at.get(call_id) or event_at)
+                result_ms = _event_timestamp_ms(result_at)
+                if started_ms is not None and result_ms is not None and result_ms >= started_ms:
+                    item["durationMs"] = result_ms - started_ms
+            elif terminal_at:
+                item["updatedAt"] = terminal_at
+            if status == "failed":
+                if call_id in tool_error_facts:
+                    item["error"] = dict(tool_error_facts[call_id])
+                elif terminal_at:
+                    item["error"] = {
+                        "code": "fault.runtime.toolLifecycleIncomplete",
+                        "message": "Tool call ended without a terminal event.",
+                    }
         if call_id and tool_semantic_statuses.get(call_id):
             item["semanticStatus"] = tool_semantic_statuses[call_id]
         if str(payload.get("toolName") or ""):

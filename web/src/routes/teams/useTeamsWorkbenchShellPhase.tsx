@@ -241,6 +241,10 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     startNodeDrag,
     moveNodeDrag,
     finishNodeDrag,
+    connectNodes,
+    deleteSelectedEdge,
+    relabelSelectedEdge,
+    relabelSelectedNode,
     nodeTone,
     roleBadgeTone,
     TEAMS_BOARD_INSPECTOR_PANE,
@@ -373,6 +377,107 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   );
   const [boardInspectorOverlayOpen, setBoardInspectorOverlayOpen] = useState(false);
   const toggleBoardInspectorOverlay = () => setBoardInspectorOverlayOpen((current) => !current);
+
+  // Organization canvas authoring UI state (connect mode / edge + node label editing).
+  const [canvasSelectedEdgeId, setCanvasSelectedEdgeId] = useState("");
+  const [canvasConnectSourceNodeId, setCanvasConnectSourceNodeId] = useState("");
+  const [canvasRenamingNodeId, setCanvasRenamingNodeId] = useState("");
+  const [canvasEdgeLabelDraft, setCanvasEdgeLabelDraft] = useState("");
+  const [canvasNodeRenameDraft, setCanvasNodeRenameDraft] = useState("");
+
+  useEffect(() => {
+    setCanvasSelectedEdgeId("");
+    setCanvasEdgeLabelDraft("");
+    setCanvasConnectSourceNodeId("");
+    setCanvasRenamingNodeId("");
+    setCanvasNodeRenameDraft("");
+  }, [effectiveTeamId]);
+
+  useEffect(() => {
+    if (!canvasConnectSourceNodeId && !canvasRenamingNodeId && !canvasSelectedEdgeId) {
+      return;
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      if (canvasConnectSourceNodeId) {
+        setCanvasConnectSourceNodeId("");
+        return;
+      }
+      if (canvasRenamingNodeId) {
+        setCanvasRenamingNodeId("");
+        return;
+      }
+      setCanvasSelectedEdgeId("");
+      setCanvasEdgeLabelDraft("");
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [canvasConnectSourceNodeId, canvasRenamingNodeId, canvasSelectedEdgeId]);
+
+  const canvasAuthoring = {
+    selectedEdgeId: canvasSelectedEdgeId,
+    connectSourceNodeId: canvasConnectSourceNodeId,
+    renamingNodeId: canvasRenamingNodeId,
+    edgeLabelDraft: canvasEdgeLabelDraft,
+    nodeRenameDraft: canvasNodeRenameDraft,
+    onSelectEdge: (edgeId: string) => {
+      const next = canvasSelectedEdgeId === edgeId ? "" : edgeId;
+      setCanvasSelectedEdgeId(next);
+      setCanvasEdgeLabelDraft(
+        next ? (visibleEdges.find((edge: { id: string; label: string }) => edge.id === next)?.label ?? "") : "",
+      );
+    },
+    onBeginConnect: () => {
+      if (!selectedNodeId || !hasWritableCanvas) {
+        return;
+      }
+      setCanvasSelectedEdgeId("");
+      setCanvasEdgeLabelDraft("");
+      setCanvasRenamingNodeId("");
+      setCanvasConnectSourceNodeId(selectedNodeId);
+    },
+    onCancelConnect: () => setCanvasConnectSourceNodeId(""),
+    onConnectNodes: (sourceNodeId: string, targetNodeId: string) => {
+      connectNodes(sourceNodeId, targetNodeId);
+      setCanvasConnectSourceNodeId("");
+      // New edges default to communication type; keep them visible after a connect.
+      setShowCommunicationEdges(true);
+    },
+    onDeleteEdge: (edgeId: string) => {
+      deleteSelectedEdge(edgeId);
+      setCanvasSelectedEdgeId("");
+      setCanvasEdgeLabelDraft("");
+    },
+    onEdgeLabelDraftChange: (value: string) => setCanvasEdgeLabelDraft(value),
+    onCommitEdgeLabel: () => {
+      if (canvasSelectedEdgeId) {
+        relabelSelectedEdge(canvasSelectedEdgeId, canvasEdgeLabelDraft);
+      }
+    },
+    onBeginNodeRename: () => {
+      if (canvasRenamingNodeId) {
+        setCanvasRenamingNodeId("");
+        return;
+      }
+      const node = displayCanvasNodes.find((item: { id: string; label: string }) => item.id === selectedNodeId);
+      if (!node || !hasWritableCanvas) {
+        return;
+      }
+      setCanvasSelectedEdgeId("");
+      setCanvasEdgeLabelDraft("");
+      setCanvasRenamingNodeId(node.id);
+      setCanvasNodeRenameDraft(node.label);
+    },
+    onNodeRenameDraftChange: (value: string) => setCanvasNodeRenameDraft(value),
+    onCommitNodeRename: () => {
+      if (canvasRenamingNodeId) {
+        relabelSelectedNode(canvasRenamingNodeId, canvasNodeRenameDraft);
+      }
+      setCanvasRenamingNodeId("");
+    },
+  };
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") {
@@ -722,7 +827,11 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       nodeToneClass: nodeTone,
       roleBadgeToneClass: roleBadgeTone,
       completionFlowSlot: renderKnowledgeCollectionCompletionFlowPanel(),
-      onSelectNode: setSelectedNodeId,
+      onSelectNode: (nodeId: string) => {
+        setSelectedNodeId(nodeId);
+        setCanvasSelectedEdgeId("");
+        setCanvasEdgeLabelDraft("");
+      },
       onLayoutModeChange: setResearchCanvasLayoutMode,
       onToggleCommunicationEdges: () => setShowCommunicationEdges((current: boolean) => !current),
       onAddNode: addNode,
@@ -732,6 +841,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       onNodePointerMove: moveNodeDrag,
       onNodePointerUp: finishNodeDrag,
       onNodePointerCancel: finishNodeDrag,
+      canvasAuthoring,
     });
   }
 

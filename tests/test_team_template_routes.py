@@ -188,3 +188,117 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
     assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
     assert all(agent.get("metadata", {}).get("heletechMaternalDigitalHealthDemo") is True for agent in demo_agents)
     assert all("medicalTriageDemo" not in agent.get("metadata", {}) for agent in demo_agents)
+
+
+def test_team_template_routes_list_includes_dev_team_template(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    dev_template = _team_template_detail(client, "dev-team")
+
+    response = client.get("/api/team-templates")
+
+    assert response.status_code == 200, response.text
+    templates = response.json()["templates"]
+    dev_team = next(item for item in templates if item["templateId"] == "dev-team")
+    assert dev_team["defaultTeamName"] == "开发团队"
+    assert dev_team["roleCount"] == 4
+    assert dev_team["roleCount"] == len(dev_template["roles"])
+    assert dev_team["chatRoom"]["mode"] == "planned"
+    assert dev_team["chatRoom"]["purpose"] == "meeting"
+    assert dev_team["chatRoom"]["config"]["managerTeamRole"] == "规划师"
+
+
+def test_team_template_instantiate_creates_dev_team(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+    client = _client()
+    template = _team_template_detail(client, "dev-team")
+    expected_count = len(template["roles"])
+    expected_edge_count = len(template.get("canvas", {}).get("edges") or [])
+    assert expected_count == 4
+
+    response = client.post(
+        "/api/team-templates/dev-team/instantiate",
+        json={"name": "开发团队试运行"},
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    team = payload["team"]
+    assert team["name"] == "开发团队试运行"
+    assert team["teamKind"] == "template_demo"
+    assert team["teamCategory"] == "演示业务团队"
+    assert team["teamSource"] == "team_template"
+    assert team["teamTemplateId"] == "dev-team"
+    assert team["memberCount"] == 4
+    assert len(payload["createdAgents"]) == 4
+    assert team["linkedChatRoom"]["mode"] == "planned"
+    assert team["linkedChatRoom"]["purpose"] == "meeting"
+    assert {member["role"] for member in team["members"]} == {
+        "规划师",
+        "开发工程师 A",
+        "开发工程师 B",
+        "评审员",
+    }
+
+    room = client.get(f"/api/chat-rooms/{team['linkedChatRoomId']}").json()
+    assert room["mode"] == "planned"
+    assert room["purpose"] == "meeting"
+    assert room["config"]["teamKind"] == "template_demo"
+    assert room["config"]["teamTemplateId"] == "dev-team"
+    assert room["config"]["devTeamTemplate"] is True
+    assert room["config"]["managerTeamRole"] == "规划师"
+    assert len(room["participants"]) == expected_count
+    assert {
+        "规划师",
+        "开发工程师 A",
+        "开发工程师 B",
+        "评审员",
+    }.issubset({participant["teamRole"] for participant in room["participants"]})
+
+    canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
+    assert len(canvas["nodes"]) == expected_count
+    assert len(canvas["edges"]) == expected_edge_count
+    assert canvas["validation"]["valid"] is True
+    assert [node["id"] for node in canvas["nodes"]] == [
+        "dev-team-node-1",
+        "dev-team-node-2",
+        "dev-team-node-3",
+        "dev-team-node-4",
+    ]
+    assert {node["purpose"] for node in canvas["nodes"]} == {
+        "需求规划",
+        "编码实现",
+        "并行实现",
+        "独立评审",
+    }
+
+    agents = client.get("/api/agents").json()
+    demo_agents = [
+        agent for agent in agents
+        if agent.get("metadata", {}).get("teamTemplateId") == "dev-team"
+    ]
+    assert len(demo_agents) == expected_count
+    assert {agent.get("metadata", {}).get("teamTemplateRole") for agent in demo_agents} == {
+        "dev_team_planner",
+        "dev_team_developer_a",
+        "dev_team_developer_b",
+        "dev_team_reviewer",
+    }
+    assert all("agent_message_tool" in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
+    assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
+    assert all(agent.get("metadata", {}).get("devTeamTemplate") is True for agent in demo_agents)
+    assert all("heletechMaternalDigitalHealthDemo" not in agent.get("metadata", {}) for agent in demo_agents)
+
+    policy_by_role = {
+        agent.get("metadata", {}).get("teamTemplateRole"): agent["toolPolicy"]
+        for agent in demo_agents
+    }
+    assert policy_by_role["dev_team_planner"]["writeScopes"] == []
+    assert "apply_diff_edit_tool" not in policy_by_role["dev_team_planner"]["allowedTools"]
+    assert policy_by_role["dev_team_reviewer"]["writeScopes"] == []
+    assert "apply_diff_edit_tool" not in policy_by_role["dev_team_reviewer"]["allowedTools"]
+    assert policy_by_role["dev_team_developer_a"]["writeScopes"] == ["private"]
+    assert "apply_diff_edit_tool" in policy_by_role["dev_team_developer_a"]["allowedTools"]
+    assert policy_by_role["dev_team_developer_b"]["writeScopes"] == ["private"]
+    assert "apply_diff_edit_tool" in policy_by_role["dev_team_developer_b"]["allowedTools"]

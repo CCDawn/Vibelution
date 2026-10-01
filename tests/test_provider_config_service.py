@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from config.model_catalog import load_model_catalog_state, save_model_catalog_state
 from config.public_config import public_config_hash
 from core.web.services import config_service, provider_config_service
 from core.web.services.model_reference_service import ModelReferenceConflictError
@@ -406,7 +407,11 @@ def test_provider_draft_rejects_conflicting_pending_field(monkeypatch) -> None:
 
 def test_provider_draft_repeated_pins_keep_original_baseline_and_apply_three_way_merge(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
+    # apply_config_workspace now sweeps the derived model-catalog state file;
+    # pin the state path into tmp so the suite never touches operator data.
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
     base = config_service._with_config_workspace_defaults(_v2_with_provider())
     base["language"] = "zh"
     latest = copy.deepcopy(base)
@@ -1177,3 +1182,215 @@ def test_apply_reports_full_observed_pin_count_with_bounded_refs(monkeypatch) ->
     )
     assert applied["observedPinCount"] == 55
     assert len(applied["observedPinnedModelRefs"]) == 50
+
+
+def _v2_two_provider_config_for_delete() -> dict:
+    config = _v2_config()
+    config["llm"]["providers"]["relay_keep"] = _provider(
+        "env:VIBELUTION_LLM_PROVIDER_RELAY_KEEP_API_KEY"
+    )
+    config["llm"]["providers"]["relay_keep"]["models"]["base-model"] = {
+        "upstream_id": "base-model",
+        "label": "Base Model",
+        "enabled": True,
+    }
+    config["llm"]["providers"]["relay_dead"] = _provider(
+        "env:VIBELUTION_LLM_PROVIDER_RELAY_DEAD_API_KEY"
+    )
+    config["llm"]["profiles"]["primary"] = {
+        "model_ref": "relay_keep/base-model",
+        "overrides": {},
+    }
+    return config
+
+
+def _catalog_state_with_dead_entries() -> dict:
+    def _provider_entry(fingerprint: str) -> dict:
+        return {
+            "providerFingerprint": fingerprint,
+            "status": "reachable",
+            "catalogStale": False,
+            "lastAttemptAt": "2026-07-11T00:00:00+00:00",
+            "lastSuccessAt": "2026-07-11T00:00:00+00:00",
+            "lastErrorType": "",
+            "models": {
+                "observed-model": {
+                    "upstreamId": "observed-model",
+                    "label": "Observed Model",
+                    "availability": "observed",
+                }
+            },
+            "warnings": [],
+        }
+
+    return {
+        "schemaVersion": 2,
+        "providers": {
+            "relay_keep": _provider_entry("fp-keep"),
+            "relay_dead": _provider_entry("fp-dead"),
+            "relay_legacy": _provider_entry("fp-legacy"),
+        },
+        "metadata": {"legacyCapabilityImportCompleted": False},
+    }
+
+
+def _noop_model_reference_scan(model_ref: str, **_kwargs) -> dict:
+    return {
+        "modelId": model_ref,
+        "liveReferences": [],
+        "historicalReferences": [],
+        "liveReferenceCount": 0,
+        "historicalReferenceCount": 0,
+        "blocking": False,
+    }
+
+
+def test_apply_after_provider_delete_prunes_model_catalog_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    state = _catalog_state_with_dead_entries()
+    save_model_catalog_state(state)
+
+    saved = _v2_two_provider_config_for_delete()
+    base_hash = public_config_hash(saved)
+    _patch_saved(monkeypatch, saved)
+    monkeypatch.setattr(provider_config_service, "_record_provider_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(provider_config_service, "scan_model_references", _noop_model_reference_scan)
+
+    draft = provider_config_service.draft_delete_provider(
+        saved,
+        draft_meta={},
+        base_hash=base_hash,
+        base_config=saved,
+        provider_id="relay_dead",
+    )
+
+    persisted = {"value": copy.deepcopy(saved)}
+    events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(persisted["value"]))
+    monkeypatch.setattr(
+        config_service,
+        "save_public_config",
+        lambda value: persisted.update(value=copy.deepcopy(value)),
+    )
+    monkeypatch.setattr(config_service, "reload_config", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "_read_raw_public_config", lambda: "")
+    monkeypatch.setattr(config_service, "_set_user_env_var", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(config_service, "_delete_user_env_var", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+
+    config_service.apply_config_workspace(
+        draft["publicConfig"],
+        base_config=saved,
+        draft_meta=draft["draftMeta"],
+        base_hash=base_hash,
+    )
+
+    assert set(persisted["value"]["llm"]["providers"]) == {"relay_keep"}
+    applied = next(
+        kwargs["fields"]
+        for args, kwargs in events
+        if args[1] == "config.workspace.applied"
+    )
+    assert applied["prunedCatalogProviderIds"] == ["relay_dead", "relay_legacy"]
+
+    after = load_model_catalog_state()
+    assert set(after["providers"]) == {"relay_keep"}
+    assert after["providers"]["relay_keep"] == state["providers"]["relay_keep"]
+    assert after["schemaVersion"] == state["schemaVersion"]
+    assert after["metadata"] == state["metadata"]
+
+
+def _v2_single_provider_config() -> dict:
+    config = _v2_config()
+    config["llm"]["providers"]["relay_keep"] = _provider(
+        "env:VIBELUTION_LLM_PROVIDER_RELAY_KEEP_API_KEY"
+    )
+    config["llm"]["providers"]["relay_keep"]["models"]["base-model"] = {
+        "upstream_id": "base-model",
+        "label": "Base Model",
+        "enabled": True,
+    }
+    config["llm"]["profiles"]["primary"] = {
+        "model_ref": "relay_keep/base-model",
+        "overrides": {},
+    }
+    return config
+
+
+def test_config_workspace_read_sweeps_stale_catalog_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    state = _catalog_state_with_dead_entries()
+    save_model_catalog_state(state)
+
+    config = _v2_single_provider_config()
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(config))
+
+    workspace = config_service.get_config_workspace()
+
+    after = load_model_catalog_state()
+    assert set(after["providers"]) == {"relay_keep"}
+    assert after["providers"]["relay_keep"] == state["providers"]["relay_keep"]
+    model_catalog = workspace["modelCatalog"]["providers"]
+    assert "relay_keep" in model_catalog
+    assert "relay_dead" not in model_catalog
+    assert "relay_legacy" not in model_catalog
+
+    # Idempotent: a second read with nothing left to prune never rewrites the file.
+    state_path = tmp_path / "model-catalog-state.json"
+    before_bytes = state_path.read_bytes()
+    config_service.get_config_workspace()
+    assert state_path.read_bytes() == before_bytes
+
+
+def test_draft_delete_without_apply_keeps_catalog_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    state = _catalog_state_with_dead_entries()
+    save_model_catalog_state(state)
+
+    saved = _v2_two_provider_config_for_delete()
+    _patch_saved(monkeypatch, saved)
+    monkeypatch.setattr(provider_config_service, "_record_provider_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(provider_config_service, "scan_model_references", _noop_model_reference_scan)
+
+    provider_config_service.draft_delete_provider(
+        saved,
+        draft_meta={},
+        base_hash=public_config_hash(saved),
+        base_config=saved,
+        provider_id="relay_dead",
+    )
+
+    # Draft-only deletion must not prune: discarding the draft keeps history.
+    after = load_model_catalog_state()
+    assert set(after["providers"]) == {"relay_keep", "relay_dead", "relay_legacy"}
+
+
+def test_model_catalog_sweep_skips_schema_v1_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    state = _catalog_state_with_dead_entries()
+    save_model_catalog_state(state)
+
+    config = _v1_artifact_config()
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(config))
+
+    config_service.get_config_workspace()
+
+    # Schema v1 legacy capability records share state["providers"]; never swept.
+    after = load_model_catalog_state()
+    assert set(after["providers"]) == {"relay_keep", "relay_dead", "relay_legacy"}

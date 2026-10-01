@@ -108,6 +108,10 @@ const AgentContextSectionsView = React.lazy(() =>
 import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
+  navigatePromptHistory,
+  readPromptHistory,
+} from "./conversationPromptHistory";
+import {
   MAX_COMPOSER_STARTERS,
   resolveComposerPlaceholder,
   shouldAcceptComposerGhost,
@@ -122,8 +126,10 @@ import {
 } from "./ConversationSlashCommandChip";
 import {
   insertSlashCommandSuggestion,
+  groupSlashCommandSuggestionsBySection,
   mergeSlashCommandSuggestions,
   moveSlashCommandActiveIndex,
+  shouldShowSlashCommandSuggestions,
   type BuiltinSlashCommand,
   type BuiltinSlashCommandId,
   type SlashCommandSuggestion,
@@ -161,6 +167,7 @@ import {
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
 import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
+import { ConversationRunningTasks } from "./ConversationRunningTasks";
 import {
   formatConversationTurnWorkBreakdown,
   formatConversationTurnWorkedFor,
@@ -402,6 +409,7 @@ import {
   resolveComposerActionLabels,
   resolveComposerActionMode,
   resolveComposerEditMode,
+  resolveComposerEnterDelivery,
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
   shouldStopComposerOnEscape,
@@ -1130,6 +1138,7 @@ export const ConversationView = React.memo(function ConversationView({
   composerAttachments = [],
   composerReferences = [],
   slashCommandSuggestions = [],
+  slashSkillsCatalogState = "ready",
   composerReferenceOptions = [],
   composerAttachmentInputDisabled,
   composerLeadingControl,
@@ -1228,6 +1237,25 @@ export const ConversationView = React.memo(function ConversationView({
   const toolApprovalConsumedRef = useRef(false);
   toolApprovalConsumedRef.current = false;
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Composer auto-height (ZCode parity): the codex composer grows with the
+  // draft and only scrolls internally once the CSS max-height clamp is hit —
+  // same auto→scrollHeight trick as the inline edit editor. min/max stay in
+  // the inputCodex style (48px/240px), the inline height never exceeds them.
+  useLayoutEffect(() => {
+    if (composerVariant !== "codex") {
+      return;
+    }
+    const el = composerInputRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [composerVariant, composerValue, composerDisabled]);
+  // Prompt history browse state (ArrowUp/Down on an empty draft). Refs instead
+  // of state so the keydown closure never reads a stale index or stash.
+  const promptHistoryIndexRef = useRef<number | null>(null);
+  const promptHistoryDraftRef = useRef<string | null>(null);
   const inlineEditInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
@@ -1532,6 +1560,12 @@ export const ConversationView = React.memo(function ConversationView({
   const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
     ? resolvedImmediateSteerLabel
     : resolvedQueueFollowupLabel;
+  // Tooltip carries the keyboard contract: running Enter delivers immediately
+  // (or queues the draft when guidance cannot carry it); the button itself
+  // stays the explicit queue entry.
+  const resolvedBusyPrimaryHint = queuePrimaryIsImmediate
+    ? t("composerSteerEnterHint")
+    : t("composerQueueSteerEnterHint");
   const baseComposerPlaceholder = composerPlaceholder.trim()
     ? composerPlaceholder
     : resolvedActionMode === "stop"
@@ -1594,7 +1628,10 @@ export const ConversationView = React.memo(function ConversationView({
   }, [composerValue]);
   const showSlashSuggestions = !composerDisabled
     && slashDismissedAtValue !== composerValue
-    && slashSuggestions.length > 0;
+    && (slashSuggestions.length > 0
+      // ZCode panel parity: a still-loading or failed skill catalog must not
+      // read as silence — the panel opens to say so instead of staying shut.
+      || (shouldShowSlashCommandSuggestions(composerValue) && slashSkillsCatalogState !== "ready"));
   const activeSlashIndex = showSlashSuggestions
     ? (slashActiveIndex >= 0 && slashActiveIndex < slashSuggestions.length ? slashActiveIndex : 0)
     : -1;
@@ -3425,7 +3462,61 @@ export const ConversationView = React.memo(function ConversationView({
     });
   }
 
+  function exitComposerPromptHistoryBrowse() {
+    promptHistoryIndexRef.current = null;
+    promptHistoryDraftRef.current = null;
+  }
+
+  /**
+   * ZCode parity: ArrowUp/ArrowDown on an empty draft (or while already
+   * browsing) recall recently sent prompts. Runs after find-bar/slash/ghost/
+   * typeahead/IME claims, so it never steals their arrow navigation, and it
+   * leaves multi-line caret movement alone for a non-empty draft.
+   */
+  function handleComposerPromptHistoryNavigation(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ): boolean {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      return false;
+    }
+    if (event.nativeEvent.isComposing || composerComposing) {
+      return false;
+    }
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+      return false;
+    }
+    // History navigation only takes over from an empty draft or while
+    // already browsing; a non-empty draft keeps native caret movement.
+    if (promptHistoryIndexRef.current === null && composerValue.length > 0) {
+      return false;
+    }
+    const result = navigatePromptHistory(
+      readPromptHistory(),
+      promptHistoryIndexRef.current,
+      event.key === "ArrowUp" ? "up" : "down",
+    );
+    if (!result.shouldHandle) {
+      return false;
+    }
+    event.preventDefault();
+    if (result.nextIndex === null) {
+      // Past the newest entry: hand the composer back to the stashed draft.
+      const stashedDraft = promptHistoryDraftRef.current ?? "";
+      exitComposerPromptHistoryBrowse();
+      onComposerChange(stashedDraft);
+      return true;
+    }
+    if (promptHistoryIndexRef.current === null) {
+      // Entering browse mode: stash the (empty) draft for later restore.
+      promptHistoryDraftRef.current = composerValue;
+    }
+    promptHistoryIndexRef.current = result.nextIndex;
+    onComposerChange(result.nextValue);
+    return true;
+  }
+
   function handleSendAndFollowLatest() {
+    exitComposerPromptHistoryBrowse();
     pinFollowLatestForSubmit();
     onSubmit();
   }
@@ -6502,10 +6593,12 @@ export const ConversationView = React.memo(function ConversationView({
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
                 ? resolvedSafeGuidancePendingLabel
-                : resolvedBusyPrimaryLabel
+                : resolvedBusyPrimaryHint
               : composerPending
                 ? resolvedPendingLabel
-                : resolvedActionLabel
+                : primaryActionIsEditSubmit
+                  ? resolvedActionLabel
+                  : t("composerSendEnterHint")
           }
           aria-label={
             runningGuidanceActionsEnabled
@@ -6683,6 +6776,7 @@ export const ConversationView = React.memo(function ConversationView({
             {timelineRowPlan
               .filter((row) => row.virtualStartPx === null)
               .map((rowPlan) => renderTimelineRow(rowPlan))}
+            <ConversationRunningTasks sessionId={sessionId} />
             {companionTypingMessage ? (
               <div
                 className={styles.companionTypingTurn}
@@ -7032,49 +7126,92 @@ export const ConversationView = React.memo(function ConversationView({
               aria-label={lang === "zh" ? "斜杠指令" : "Slash commands"}
               className={styles.slashCommandSuggestions}
             >
-              {slashSuggestions.map((suggestion, index) => (
-                <div
-                  id={`${slashSuggestionListId}-option-${index}`}
-                  key={suggestion.key}
-                  role="option"
-                  aria-selected={index === activeSlashIndex}
-                  aria-label={suggestion.command}
-                  className={styles.slashCommandSuggestionOption}
-                  data-active={index === activeSlashIndex ? "true" : "false"}
-                >
-                  <VButton
-                    type="button"
-                    className={
-                      index === activeSlashIndex
-                        ? `${styles.slashCommandSuggestionButton} ${styles.slashCommandSuggestionButtonActive}`
-                        : styles.slashCommandSuggestionButton
-                    }
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => handleSlashCommandSuggestion(suggestion)}
-                  >
-                    {suggestion.builtin ? (
-                      <span className={styles.slashCommandSuggestionIcon} aria-hidden="true">
-                        {suggestion.builtinId === "new_session" ? (
-                          <CirclePlus size={13} />
-                        ) : suggestion.builtinId === "model" ? (
-                          <Cpu size={13} />
-                        ) : (
-                          <Gauge size={13} />
-                        )}
-                      </span>
+              {/* ZCode panel sections: two labeled groups (builtins vs skills);
+                  ArrowUp/Down and the active index stay flat over the merged
+                  ranked list, so option ids keep their flat positions. */}
+              {(() => {
+                let flatIndex = -1;
+                const sections = groupSlashCommandSuggestionsBySection(slashSuggestions);
+                return (
+                  <>
+                    {sections.map((section) => (
+                      <div
+                        key={section.id}
+                        role="group"
+                        aria-label={section.id === "commands" ? t("slashPanelCommandsSection") : t("slashPanelSkillsSection")}
+                        className={styles.slashCommandSection}
+                        data-slash-section={section.id}
+                      >
+                        <div className={styles.slashCommandSectionHeader} aria-hidden="true">
+                          {section.id === "commands" ? t("slashPanelCommandsSection") : t("slashPanelSkillsSection")}
+                        </div>
+                        {section.suggestions.map((suggestion) => {
+                          flatIndex += 1;
+                          const index = flatIndex;
+                          return (
+                            <div
+                              id={`${slashSuggestionListId}-option-${index}`}
+                              key={suggestion.key}
+                              role="option"
+                              aria-selected={index === activeSlashIndex}
+                              aria-label={suggestion.command}
+                              className={styles.slashCommandSuggestionOption}
+                              data-active={index === activeSlashIndex ? "true" : "false"}
+                            >
+                              <VButton
+                                type="button"
+                                className={
+                                  index === activeSlashIndex
+                                    ? `${styles.slashCommandSuggestionButton} ${styles.slashCommandSuggestionButtonActive}`
+                                    : styles.slashCommandSuggestionButton
+                                }
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => handleSlashCommandSuggestion(suggestion)}
+                              >
+                                {suggestion.builtin ? (
+                                  <span className={styles.slashCommandSuggestionIcon} aria-hidden="true">
+                                    {suggestion.builtinId === "new_session" ? (
+                                      <CirclePlus size={13} />
+                                    ) : suggestion.builtinId === "model" ? (
+                                      <Cpu size={13} />
+                                    ) : (
+                                      <Gauge size={13} />
+                                    )}
+                                  </span>
+                                ) : null}
+                                <code className={styles.slashCommandSuggestionCode}>
+                                  {suggestion.command}
+                                </code>
+                                <span className={styles.slashCommandSuggestionDescription}>{suggestion.description}</span>
+                                {suggestion.builtin ? (
+                                  <span className={styles.slashCommandBuiltinBadge} data-vui="slash-builtin-badge">
+                                    {t("slashBuiltinBadge")}
+                                  </span>
+                                ) : null}
+                              </VButton>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                    {/* Skills catalog health: a failed or still-loading library
+                        must not read as "no skills" — the section says so. */}
+                    {slashSkillsCatalogState === "loading" ? (
+                      <div className={styles.slashCommandCatalogNotice} data-slash-catalog-state="loading">
+                        {t("slashSkillsCatalogLoading")}
+                      </div>
+                    ) : slashSkillsCatalogState === "error" ? (
+                      <div className={styles.slashCommandCatalogNotice} data-slash-catalog-state="error" role="status">
+                        {t("slashSkillsCatalogError")}
+                      </div>
+                    ) : slashCommandSuggestions.length === 0 ? (
+                      <div className={styles.slashCommandCatalogNotice} data-slash-catalog-state="empty">
+                        {t("slashSkillsCatalogEmpty")}
+                      </div>
                     ) : null}
-                    <code className={styles.slashCommandSuggestionCode}>
-                      {suggestion.command}
-                    </code>
-                    <span className={styles.slashCommandSuggestionDescription}>{suggestion.description}</span>
-                    {suggestion.builtin ? (
-                      <span className={styles.slashCommandBuiltinBadge} data-vui="slash-builtin-badge">
-                        {t("slashBuiltinBadge")}
-                      </span>
-                    ) : null}
-                  </VButton>
-                </div>
-              ))}
+                  </>
+                );
+              })()}
             </div>
           ) : null}
           {showReferenceSuggestions ? (
@@ -7152,6 +7289,9 @@ export const ConversationView = React.memo(function ConversationView({
                   : undefined
             }
             onChange={(event) => {
+              // Any manual edit (typing, IME, cut) leaves the history browse
+              // mode; programmatic history fills do not go through onChange.
+              exitComposerPromptHistoryBrowse();
               onComposerChange(event.target.value);
               syncComposerReferenceCaret(event.currentTarget);
             }}
@@ -7259,6 +7399,13 @@ export const ConversationView = React.memo(function ConversationView({
                   return;
                 }
               }
+              // Prompt history recall: claims bare ArrowUp/Down only when the
+              // draft is empty (or browsing is already active); everything
+              // above (find bar, ghost, slash, typeahead) already had its
+              // chance, and IME composition is excluded inside.
+              if (handleComposerPromptHistoryNavigation(event)) {
+                return;
+              }
               // Yield-aware Esc→stop: ghost/slash/typeahead branches above
               // return when they consume Escape; this fallback only fires when
               // the key is still unclaimed and a turn is running. Repeats are
@@ -7278,23 +7425,36 @@ export const ConversationView = React.memo(function ConversationView({
                 event.preventDefault();
                 onStop?.();
               }
-              if (
-                shouldSubmitComposerOnKeydown({
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  ctrlKey: event.ctrlKey,
-                  metaKey: event.metaKey,
-                  altKey: event.altKey,
-                  isComposing: event.nativeEvent.isComposing,
-                })
-              ) {
+              // Enter delivery: while a turn runs, Enter immediately steers
+              // the draft via the existing safe-guidance channel, falling
+              // back to queueing when the payload cannot ride guidance
+              // (attachments/references) or no guidance handler exists.
+              // Idle Enter sends. Modifier keys never change the delivery
+              // (user decision removed the Ctrl/⌘+Enter flip).
+              const composerEnterDelivery = resolveComposerEnterDelivery({
+                key: event.key,
+                shiftKey: event.shiftKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                altKey: event.altKey,
+                isComposing: event.nativeEvent.isComposing,
+                actionMode: resolvedActionMode,
+                canDeliverImmediately: Boolean(onSafeGuidance)
+                  && !hasComposerAttachments
+                  && !hasComposerReferences,
+              });
+              if (composerEnterDelivery !== "none") {
                 event.preventDefault();
                 if (
-                  resolvedActionMode === "send"
+                  composerEnterDelivery === "send"
                   && !resolvedActionDisabled
                   && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
                 ) {
                   handleSendAndFollowLatest();
+                } else if (composerEnterDelivery === "steer" && composerValue.trim() && onSafeGuidance) {
+                  if (!guidanceActionDisabled) {
+                    onSafeGuidance();
+                  }
                 } else if (
                   (queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
                   && !guidanceActionDisabled

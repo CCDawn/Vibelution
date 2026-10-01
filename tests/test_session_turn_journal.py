@@ -128,6 +128,9 @@ def test_canonical_outcomes_commit_items_before_tools_and_project_safe_v2(tmp_pa
     ] == ["最终答案"]
 
     items = session_turn_items_from_events(events, turn_id="turn-1")
+    # Batch A: settled items carry journal event timestamps.
+    assert items[-1]["createdAt"] == events[-2].timestamp
+    assert items[-1]["updatedAt"] == events[-2].timestamp
     assert items[-1] == {
         "version": 2,
         "id": "answer-1:0",
@@ -147,6 +150,8 @@ def test_canonical_outcomes_commit_items_before_tools_and_project_safe_v2(tmp_pa
         "provisional": False,
         "terminal": True,
         "text": "最终答案",
+        "createdAt": events[-2].timestamp,
+        "updatedAt": events[-2].timestamp,
     }
     assert "replay" not in str(items).lower()
     assert "opaque" not in str(items).lower()

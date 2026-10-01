@@ -103,6 +103,16 @@ export function updateBannerRestartLabel(lang: string): string {
   return lang === "en" ? "Restart now" : "立即重启";
 }
 
+/**
+ * An accepted update-banner restart publishes the current frontend release
+ * and replaces the backend, but the open window stays on the old document
+ * until something reloads it. `restart_queued` only schedules that restart,
+ * so this page must stay where it is.
+ */
+export function updateBannerRestartReloadsDocument(code: string | null | undefined): boolean {
+  return String(code ?? "").trim() !== "restart_queued";
+}
+
 export function updateBannerDismissLabel(lang: string): string {
   return lang === "en" ? "Dismiss until the next commit" : "下一个提交前不再提醒";
 }

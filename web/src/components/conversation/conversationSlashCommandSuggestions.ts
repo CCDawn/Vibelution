@@ -167,6 +167,33 @@ export function moveSlashCommandActiveIndex(index: number, delta: number, length
   return (base + delta + length) % length;
 }
 
+export type SlashCommandSuggestionSectionId = "commands" | "skills";
+
+export type SlashCommandSuggestionSection = {
+  id: SlashCommandSuggestionSectionId;
+  suggestions: SlashCommandSuggestion[];
+};
+
+/**
+ * ZCode slashCommandPanelSections parity: the panel reads as two labeled
+ * groups (client builtins vs skill-library entries) while keyboard navigation
+ * stays flat — callers keep their single active index over the merged list.
+ */
+export function groupSlashCommandSuggestionsBySection(
+  suggestions: readonly SlashCommandSuggestion[],
+): SlashCommandSuggestionSection[] {
+  const sections: SlashCommandSuggestionSection[] = [];
+  const commands = suggestions.filter((suggestion) => suggestion.builtin);
+  const skills = suggestions.filter((suggestion) => !suggestion.builtin);
+  if (commands.length) {
+    sections.push({ id: "commands", suggestions: commands });
+  }
+  if (skills.length) {
+    sections.push({ id: "skills", suggestions: skills });
+  }
+  return sections;
+}
+
 export function insertSlashCommandSuggestion(value: string, command: string): string {
   if (!shouldShowSlashCommandSuggestions(value)) {
     return value;

@@ -43,6 +43,7 @@ from config.model_catalog import (
     CAPABILITY_SOURCE_PRIORITY,
     CAPABILITY_VALUES,
     load_model_catalog_state,
+    prune_absent_provider_entries,
     provider_catalog_refresh_due,
     record_model_reasoning_contract,
     record_model_verification,
@@ -1756,6 +1757,48 @@ def _project_catalog_reasoning_contract(
     }
 
 
+def _sweep_absent_model_catalog_providers(public_config: dict[str, Any]) -> list[str]:
+    """Prune catalog entries whose provider no longer exists in the saved config.
+
+    Runs only on saved-config readers (workspace GET and config apply). Draft
+    views must never sweep: a draft that deletes a provider has not removed it
+    from the persisted config yet, and discarding that draft must keep the
+    discovery history intact. Schema-v1 configs are skipped as well — legacy
+    capability records live under the same ``state["providers"]`` keys and are
+    not provider-registry entries. Persistence is opportunistic: the state file
+    is written only when something was actually pruned, so steady-state reads
+    never write.
+
+    Selection rationale: apply_config_workspace is the single persistence gate
+    for provider deletions (draft flows only mutate the in-memory draft and land
+    here on apply), so sweeping there covers future removals synchronously;
+    sweeping the saved-config workspace read additionally catches legacy stock
+    and removals that bypass the apply path (e.g. duplicate-provider merge
+    writes config directly via provider_merge_migration).
+    """
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    if not isinstance(llm, dict) or int(llm.get("schema_version") or 2) != 2:
+        return []
+    providers = llm.get("providers", {})
+    if not isinstance(providers, dict):
+        return []
+    try:
+        state = load_model_catalog_state()
+    except ValueError:
+        return []
+    pruned_state, pruned_ids = prune_absent_provider_entries(
+        state,
+        configured_provider_ids=frozenset(providers),
+    )
+    if not pruned_ids:
+        return []
+    try:
+        save_model_catalog_state(pruned_state)
+    except (OSError, ValueError):
+        return pruned_ids
+    return pruned_ids
+
+
 def summarize_model_catalog(
     state: dict[str, Any],
     *,
@@ -1766,9 +1809,23 @@ def summarize_model_catalog(
     catalog_providers = state.get("providers", {}) if isinstance(state, dict) else {}
     now = datetime.now(timezone.utc).isoformat()
     providers: dict[str, Any] = {}
+    # Schema v2: the provider registry is authoritative — catalog entries whose
+    # provider left the config are dead discovery history and must not surface
+    # in the projected catalog (the physical sweep above removes them from the
+    # state file; this keeps stale entries out of every projection view, even
+    # draft views built before the sweep persisted). Schema v1 keeps the union:
+    # its legacy-imported capability records are not registry entries.
+    try:
+        schema_v2 = int(llm.get("schema_version") or 2) == 2
+    except (TypeError, ValueError):
+        schema_v2 = True
     raw_provider_ids = sorted(
         set(configured_providers if isinstance(configured_providers, dict) else {})
-        | set(catalog_providers if isinstance(catalog_providers, dict) else {})
+        | (
+            set()
+            if schema_v2
+            else set(catalog_providers if isinstance(catalog_providers, dict) else {})
+        )
     )
     provider_ids: list[str] = []
     for raw_provider_id in raw_provider_ids:
@@ -2301,6 +2358,11 @@ def get_config_workspace() -> dict[str, Any]:
     """Return the full config workspace payload for the Config route."""
 
     public_config = _with_config_workspace_defaults(load_public_config())
+    # Saved-config reader: opportunistically sweep derived catalog entries whose
+    # provider no longer exists (legacy stock and removals that bypass the apply
+    # path). Persist happens only when something was pruned; see
+    # _sweep_absent_model_catalog_providers for why draft views must not sweep.
+    _sweep_absent_model_catalog_providers(public_config)
     return _build_workspace(public_config)
 
 
@@ -3631,6 +3693,10 @@ def apply_config_workspace(
 
     persisted = _with_config_workspace_defaults(load_public_config())
     reload_config(str(CONFIG_PATH))
+    # Provider removal just landed in the persisted config: synchronously prune
+    # its derived model-catalog entry (and any historical dead entries) so the
+    # state file never keeps serving a deleted provider's discovery history.
+    pruned_catalog_provider_ids = _sweep_absent_model_catalog_providers(persisted)
     llm_config = persisted.get("llm", {}) if isinstance(persisted.get("llm", {}), dict) else {}
     model_library = llm_config.get("model_library", {}) if isinstance(llm_config, dict) else {}
     model_options = list_llm_model_options(persisted)
@@ -3667,6 +3733,8 @@ def apply_config_workspace(
             "changedModelIds": _changed_model_ids_from_paths(changed_paths, base_for_summary, submitted),
             "observedPinCount": len(observed_pins),
             "observedPinnedModelRefs": observed_pins[:50],
+            "prunedCatalogProviderCount": len(pruned_catalog_provider_ids),
+            "prunedCatalogProviderIds": pruned_catalog_provider_ids[:50],
             "runtimeConfigReloaded": True,
             "primaryProviderKind": primary_provider.kind,
             "primaryModel": primary_profile.model,

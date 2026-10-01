@@ -291,8 +291,11 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("t(\"agentBroadcastLabel\")");
     expect(shellSource).toContain("queryKeys.projectAgentBusLatestEvent()");
     expect(shellSource).toContain("listProjectAgentBusTimeline(1, { signal })");
-    expect(shellSource).toContain("markAgentBroadcastSeen()");
-    expect(shellSource).toContain("hasUnseenAgentBroadcast(agentBroadcastLatestEventMs, agentBroadcastReadAtMs)");
+    // Every left click (modifier or not) counts as having looked at the bell.
+    expect(shellSource).toContain("if (event.button === 0) {\n            markAgentBroadcastSeen();\n          }");
+    // First visit silently adopts the baseline instead of flagging all history.
+    expect(shellSource).toContain("resolveAgentBroadcastBadgeState(agentBroadcastLatestEventMs, agentBroadcastReadAtMs)");
+    expect(shellSource).toContain("agentBroadcastBadgeState.adoptedBaseline");
     // Gentle foreground-only poll; no background churn for a badge.
     expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 60_000)");
     expect(styles.settingsTriggerIconSlot).toContain("relative");
@@ -304,6 +307,29 @@ describe("AppShell layout contract", () => {
     expect(shellDictionary.zh.agentBroadcastUnread).toBe("有新广播");
     expect(shellDictionary.en.agentBroadcastLabel).toBe("Agent broadcast");
     expect(shellDictionary.en.agentBroadcastUnread).toBe("new broadcasts");
+  });
+
+  it("exposes the aux task center from the title bar with a running-count badge", () => {
+    // The entry sits in the settings trigger family next to the git shortcut.
+    expect(shellSource).toContain('to="/aux"');
+    expect(shellSource).toContain("<ListTree size={17} />");
+    expect(shellSource).toContain("const auxCenterLabel = lang === \"en\" ? \"Background tasks\" : \"后台任务\";");
+    expect(shellSource).toContain('aria-label={auxCenterLabel}');
+    // Global active-only badge poll: revision-aware payload, gentle foreground
+    // beat, no background churn, cache entry distinct from /aux and strips.
+    expect(shellSource).toContain('queryKeys.runtimeTasks("", "shell")');
+    expect(shellSource).toContain('listRuntimeTasksRevisionAware(\n        { status: "active" }');
+    expect(shellSource).toContain("refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000)");
+    expect(shellSource).toContain("refetchIntervalInBackground: false");
+    // Badge reads running.length: digit when busy, hidden at zero, 9+ clamp.
+    expect(shellSource).toContain('shellAuxRunningCount > 9 ? "9+" : String(shellAuxRunningCount)');
+    expect(shellSource).toContain("{shellAuxRunningBadge ? (");
+    expect(shellSource).toContain("styles.settingsTriggerCountBadge");
+    expect(styles.settingsTriggerCountBadge).toContain("absolute");
+    expect(styles.settingsTriggerCountBadge).toContain("bg-[var(--accent-cool)]");
+    expect(styles.settingsTriggerCountBadge).toContain("rounded-full");
+    // /aux stops falling back to the app title in the return-navigation label.
+    expect(shellSource).toContain('if (pathname.startsWith("/aux")) return auxCenterLabel;');
   });
 
   it("exposes a shell-level semantic return action without visible helper copy", () => {
@@ -643,6 +669,14 @@ describe("AppShell layout contract", () => {
     // The update banner restart rides the same dormant shell lifecycle path
     // (beginRestart -> requestLifecycle) — never a direct restart API call.
     expect(shellSource).toContain("onPress={beginRestart}");
+    const restartRegion = shellSource.slice(
+      shellSource.indexOf("const beginRestart"),
+      shellSource.indexOf("const cancelLifecycleWait"),
+    );
+    expect(restartRegion).toContain("restartWaitsForDocumentReloadRef.current = true");
+    expect(restartRegion).toContain("updateBannerRestartReloadsDocument(payload.code)");
+    expect(restartRegion).toContain("window.location.reload()");
+    expect(shellSource).toContain("ready && restartWaitsForDocumentReloadRef.current");
   });
 
   it("surfaces a dismissible update banner only when the backend is behind disk HEAD", () => {

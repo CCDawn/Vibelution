@@ -21,7 +21,7 @@ _DIRECTORY_SESSION_COLUMNS = (
     "title, status, recency_at_ms, updated_at_ms, created_at_ms, archived_at_ms, "
     "session_kind, session_role, conversation_index_kind, "
     "conversation_index_visibility, hidden_from_index, team_id, "
-    "last_preview, last_preview_at_ms"
+    "last_preview, last_preview_at_ms, pinned_at_ms"
 )
 _CHAT_STATE_ROOT_KEYS = {
     "version",
@@ -510,6 +510,25 @@ class SessionDao:
         )
         return {"sessionId": session_id, "action": "archived", "archivedAtMs": now_ms}
 
+    def set_pinned(self, session_id: str, *, pinned: bool) -> dict[str, Any] | None:
+        """Pin or unpin one directory session for pinned-first list ordering."""
+
+        normalized = str(session_id or "").strip()
+        existing = self.get(normalized)
+        if existing is None:
+            return None
+        now_ms = _now_ms()
+        pinned_at = now_ms if pinned else None
+        self._connection.execute(
+            "UPDATE sessions SET pinned_at_ms=? WHERE session_id=?",
+            (pinned_at, normalized),
+        )
+        return {
+            "sessionId": normalized,
+            "action": "pinned" if pinned else "unpinned",
+            "pinnedAtMs": pinned_at,
+        }
+
     def mark_legacy_sessions_discarded(self) -> int:
         return _mark_legacy_sessions_discarded(self._connection)
 
@@ -556,7 +575,7 @@ class SessionDao:
         matching_agent_ids: Sequence[str] = (),
         agent_ids: Sequence[str] = (),
         limit: int = 50,
-        before: tuple[int, str] | None = None,
+        before: tuple[int, str] | tuple[int, str, int | None] | None = None,
     ) -> dict[str, Any]:
         bounded_limit = min(200, max(1, int(limit)))
         where = ["archived_at_ms IS NULL"]
@@ -605,11 +624,36 @@ class SessionDao:
             where.append("(" + " OR ".join(query_clauses) + ")")
         filter_sql = " AND ".join(where)
         filter_parameters = list(parameters)
+        # Keyset pagination over (pinned, recency, session_id). A pinned cursor
+        # entry keeps streaming the remaining pinned rows before unpinned rows;
+        # an unpinned cursor entry means every pinned row was already emitted,
+        # so later pages must exclude pinned rows to avoid duplicates.
         if before is not None:
-            where.append(
-                "(recency_at_ms < ? OR (recency_at_ms = ? AND session_id < ?))"
-            )
-            parameters.extend((int(before[0]), int(before[0]), str(before[1])))
+            before_recency = int(before[0])
+            before_session_id = str(before[1])
+            before_pinned_at_ms = int(before[2]) if len(before) > 2 and before[2] is not None else None
+            if before_pinned_at_ms is None:
+                where.append(
+                    "(pinned_at_ms IS NULL AND "
+                    "(recency_at_ms < ? OR (recency_at_ms = ? AND session_id < ?)))"
+                )
+                parameters.extend((before_recency, before_recency, before_session_id))
+            else:
+                where.append(
+                    "((pinned_at_ms IS NOT NULL AND "
+                    "(pinned_at_ms < ? OR (pinned_at_ms = ? AND "
+                    "(recency_at_ms < ? OR (recency_at_ms = ? AND session_id < ?))))) "
+                    "OR pinned_at_ms IS NULL)"
+                )
+                parameters.extend(
+                    (
+                        before_pinned_at_ms,
+                        before_pinned_at_ms,
+                        before_recency,
+                        before_recency,
+                        before_session_id,
+                    )
+                )
         where_sql = " AND ".join(where)
         total = int(
             self._connection.execute(
@@ -623,7 +667,8 @@ class SessionDao:
             SELECT {_DIRECTORY_SESSION_COLUMNS}
             FROM sessions
             WHERE {where_sql}
-            ORDER BY recency_at_ms DESC, session_id DESC
+            ORDER BY (pinned_at_ms IS NULL) ASC, pinned_at_ms DESC,
+                     recency_at_ms DESC, session_id DESC
             LIMIT ?
             """,
             page_parameters,
@@ -638,7 +683,7 @@ class SessionDao:
         next_cursor = ""
         if mapped and len(mapped) == bounded_limit:
             last = mapped[-1]
-            next_cursor = f"{last['recencyAtMs']}:{last['sessionId']}"
+            next_cursor = directory_cursor_for_row(last)
         return {"rows": mapped, "nextCursor": next_cursor, "total": total}
 
 
@@ -1525,6 +1570,18 @@ class ConversationRepository:
             force_flush=True,
         )
 
+    def set_session_pinned(
+        self,
+        session_id: str,
+        *,
+        pinned: bool,
+    ) -> Future[dict[str, Any] | None]:
+        normalized = str(session_id or "").strip()
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.sessions.set_pinned(normalized, pinned=pinned),
+            force_flush=True,
+        )
+
     def legacy_sessions_discarded_at_ms(self) -> int | None:
         with self._database.reader() as connection:
             return _legacy_sessions_discarded_at_ms(connection)
@@ -1782,6 +1839,55 @@ def parse_directory_cursor(cursor: str) -> tuple[int, str] | None:
     return recency_ms, normalized_session_id
 
 
+def parse_directory_cursor_entry(
+    cursor: str,
+) -> tuple[int, str, int | None] | None:
+    """Parse a directory cursor into ``(recency_at_ms, session_id, pinned_at_ms)``.
+
+    Accepts both cursor shapes: ``"<recency>:<session_id>"`` for unpinned rows
+    (``pinned_at_ms`` is ``None``) and ``"p<pinned_at_ms>:<recency>:<session_id>"``
+    for rows that were pinned when the page was cut.
+    """
+
+    raw = str(cursor or "").strip()
+    pinned_at_ms: int | None = None
+    if raw.startswith("p") and not raw.startswith("p "):
+        first_colon = raw.find(":")
+        if first_colon <= 1:
+            return None
+        try:
+            pinned_at_ms = int(raw[1:first_colon])
+        except ValueError:
+            return None
+        if pinned_at_ms < 0:
+            return None
+        raw = raw[first_colon + 1 :]
+    parsed = parse_directory_cursor(raw)
+    if parsed is None:
+        return None
+    recency_ms, session_id = parsed
+    return recency_ms, session_id, pinned_at_ms
+
+
+def directory_cursor_for_row(row: Mapping[str, Any]) -> str:
+    recency = row.get("recencyAtMs")
+    session_id = str(row.get("sessionId") or "").strip()
+    if recency in (None, "") or not session_id:
+        return ""
+    try:
+        recency_ms = int(recency)
+    except (TypeError, ValueError):
+        return ""
+    pinned_at = row.get("pinnedAtMs")
+    if pinned_at is None:
+        return f"{recency_ms}:{session_id}"
+    try:
+        pinned_at_ms = int(pinned_at)
+    except (TypeError, ValueError):
+        return f"{recency_ms}:{session_id}"
+    return f"p{pinned_at_ms}:{recency_ms}:{session_id}"
+
+
 def _like_contains(value: str) -> str:
     escaped = (
         str(value or "")
@@ -1801,6 +1907,7 @@ def _bounded_preview(value: str) -> str:
 
 def _session_row(row: Any) -> dict[str, Any]:
     preview_at = row["last_preview_at_ms"]
+    pinned_at = row["pinned_at_ms"]
     return {
         "sessionId": str(row["session_id"]),
         "agentId": str(row["agent_id"]),
@@ -1819,6 +1926,7 @@ def _session_row(row: Any) -> dict[str, Any]:
         "teamId": str(row["team_id"] or ""),
         "lastPreview": str(row["last_preview"] or ""),
         "lastPreviewAtMs": int(preview_at) if preview_at is not None else None,
+        "pinnedAtMs": int(pinned_at) if pinned_at is not None else None,
         "childSessionIds": [],
     }
 

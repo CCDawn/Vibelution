@@ -121,11 +121,14 @@ const graphPayload: MemoryKnowledgeGraphPayload = {
 };
 
 type HarnessOptions = {
-  payloadMode?: "default" | "empty" | "none";
+  payloadMode?: "default" | "structure" | "empty" | "none";
   graphLoading?: boolean;
   graphError?: string;
   initialQuery?: string;
   onRetry?: () => void;
+  withTeam?: boolean;
+  onActorChange?: (agentId: string) => void;
+  onTeamChange?: (teamId: string) => void;
 };
 
 function Harness({
@@ -134,11 +137,22 @@ function Harness({
   graphError = "",
   initialQuery = "",
   onRetry = () => undefined,
+  withTeam = false,
+  onActorChange = () => undefined,
+  onTeamChange = () => undefined,
 }: HarnessOptions) {
   const [query, setQuery] = React.useState(initialQuery);
   const [nodeType, setNodeType] = React.useState("");
   const [selectedId, setSelectedId] = React.useState("");
-  const payload = payloadMode === "none" ? undefined : payloadMode === "empty" ? { ...graphPayload, nodes: [], edges: [], summary: { ...graphPayload.summary, nodeCount: 0, edgeCount: 0 } } : graphPayload;
+  const [actorId, setActorId] = React.useState("actor-a");
+  const [teamId, setTeamId] = React.useState("");
+  const team = { ...node("team:research-team", "研究团队"), type: "team", metadata: { teamId: "research-team" } };
+  const payloadNodes = payloadMode === "empty" ? [] : payloadMode === "structure" ? [
+    { ...node("project", "项目"), type: "project" }, { ...node("agent", "Agent"), type: "agent" },
+  ] : withTeam ? [...nodes, team] : nodes;
+  const payload = payloadMode === "none" ? undefined : { ...graphPayload, nodes: payloadNodes,
+    edges: payloadMode === "empty" || payloadMode === "structure" ? [] : edges,
+    summary: { ...graphPayload.summary, nodeCount: payloadNodes.length } };
   const selectedNode = payload?.nodes.find(candidate => candidate.id === selectedId) ?? null;
 
   return (
@@ -149,6 +163,11 @@ function Harness({
         isGraphLoading={graphLoading}
         graphError={graphError}
         onRetryGraph={onRetry}
+        graphActorAgentId={actorId}
+        graphActorChoices={[{ agentId: "actor-a", displayName: "Agent A" }, { agentId: "actor-b", displayName: "Agent B" }]}
+        graphTeamId={teamId}
+        onGraphActorChange={id => { setActorId(id); setTeamId(""); onActorChange(id); }}
+        onGraphTeamChange={id => { setTeamId(id); onTeamChange(id); }}
         graphSearchText={query}
         activeGraphNodeType={nodeType}
         graphTypeEntries={payload ? Object.entries(payload.summary.nodeTypeCounts) : []}
@@ -198,6 +217,15 @@ async function enterSearch(value: string) {
   });
 }
 
+async function chooseScope(label: string, value: string) {
+  const select = host?.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`);
+  if (!select) throw new Error("Expected graph scope selector");
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
 beforeEach(() => {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
 });
@@ -210,6 +238,34 @@ afterEach(async () => {
 });
 
 describe("MemoryGraphViewPanel", () => {
+  it("changes explicit actor and authorized team scope while clearing filters and private reading", async () => {
+    const actorChanged = vi.fn();
+    const teamChanged = vi.fn();
+    const view = await renderPanel({ withTeam: true, onActorChange: actorChanged, onTeamChange: teamChanged });
+    const teamSelect = view.querySelector<HTMLSelectElement>('select[aria-label="团队范围"]');
+    expect(Array.from(teamSelect?.options ?? []).map(option => option.value)).toEqual(["", "research-team"]);
+    await click(view.querySelector('[data-testid="canvas-node-alpha"]'));
+    expect(view.textContent).toContain("完整正文仅在选中后读取");
+    await chooseScope("团队范围", "research-team");
+    expect(teamChanged).toHaveBeenCalledWith("research-team");
+    expect(view.querySelector('[data-vui-region="memory-graph-inspector"]')).toBeNull();
+    await enterSearch("Alpha");
+    await click(view.querySelector('[data-testid="canvas-node-alpha"]'));
+    await chooseScope("读取身份", "actor-b");
+    expect(actorChanged).toHaveBeenCalledWith("actor-b");
+    expect(teamSelect?.value).toBe("");
+    expect(view.querySelector<HTMLInputElement>('input[aria-label="搜索记忆或来源"]')?.value).toBe("");
+    expect(view.textContent).not.toContain("完整正文仅在选中后读取");
+    expect(view.querySelector('[data-vui-region="memory-graph-inspector"]')).toBeNull();
+  });
+
+  it("explains a structure-only actor scope without pretending that the whole knowledge library is empty", async () => {
+    const view = await renderPanel({ payloadMode: "structure" });
+    expect(view.querySelector('[role="status"]')?.textContent).toContain("当前读取身份没有可见知识或私有记忆");
+    expect(view.querySelector<HTMLElement>('[data-testid="mock-graph-canvas"]')?.dataset.nodeIds).toBe("project,agent");
+    expect(view.textContent).not.toContain("当前范围还没有可显示的图谱");
+  });
+
   it("starts without an inspector and opens, closes, and reopens selected-node reading", async () => {
     const view = await renderPanel();
     expect(view.querySelector('[data-vui-region="memory-graph-inspector"]')).toBeNull();

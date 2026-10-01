@@ -4,21 +4,33 @@ import type { AssistantConversationTurn, SessionTurnItem } from "../../api/types
  * Settled-turn work header data. Pure derivation only.
  *
  * 口径（honest, derivable facts only — no invented fields):
+ * - `turn_header`（authoritative）: the backend projects the turn-level work
+ *   header (`turnState`/`turnStartedAt`/`turnEndedAt`/`turnActiveMs`) from the
+ *   durable journal + work-run snapshots. `turnActiveMs` is the authoritative
+ *   worked time; `turnEndedAt - turnStartedAt` is the honest span fallback
+ *   when active time is not (yet) derivable. Live turns (`turnState:
+ *   "running"`) have no settled span, so the header still degrades below.
  * - `turn_span`: from the turn's start instant to the last derivable activity
  *   instant. Start = the assistant message `timestamp` (turn creation, always
  *   present). End = the freshest of: any item `updatedAt`/`createdAt`, or a
- *   completed tool's `executionStartedAtEpochMs + durationMs`. Canonical journal
- *   items carry no timestamps today, so a turn whose only timed facts are tool
- *   facts measures up to the last tool completion — the trailing answer
- *   generation is not inventable from the data, and the header says "已工作"
- *   with that span rather than fabricating an end.
+ *   completed tool's `executionStartedAtEpochMs + durationMs`. Turns whose
+ *   items carry no timestamps still measure up to the last tool completion —
+ *   the trailing answer generation is not inventable from the data.
  * - `tool_durations`: fallback when no span can be formed — the plain sum of
  *   completed tool durations. The header then labels it 「工具耗时」 so the
  *   number is never presented as total turn time.
  */
 export const MIN_TURN_WORK_HEADER_DURATION_MS = 5_000;
 
-export type ConversationTurnWorkBasis = "turn_span" | "tool_durations";
+export type ConversationTurnWorkBasis = "turn_header" | "turn_span" | "tool_durations";
+
+/** Turn-level work header projected by the backend (additive wire fields). */
+type TurnWorkHeader = {
+  turnState?: string;
+  turnStartedAt?: string;
+  turnEndedAt?: string;
+  turnActiveMs?: number;
+};
 
 export type ConversationTurnWorkSummary = {
   durationMs: number;
@@ -41,6 +53,21 @@ function parseEpochMs(value: unknown): number | null {
   return null;
 }
 
+function turnWorkHeader(message: AssistantConversationTurn): TurnWorkHeader {
+  // Additive backend fields ride next to the canonical envelope; structural
+  // keeps this module decoupled from the shared type file's revision cadence.
+  const candidate = message as AssistantConversationTurn & TurnWorkHeader;
+  return {
+    turnState: typeof candidate.turnState === "string" ? candidate.turnState : undefined,
+    turnStartedAt: typeof candidate.turnStartedAt === "string" ? candidate.turnStartedAt : undefined,
+    turnEndedAt: typeof candidate.turnEndedAt === "string" ? candidate.turnEndedAt : undefined,
+    turnActiveMs:
+      typeof candidate.turnActiveMs === "number" && Number.isFinite(candidate.turnActiveMs)
+        ? candidate.turnActiveMs
+        : undefined,
+  };
+}
+
 function itemMetadata(item: SessionTurnItem): Record<string, unknown> {
   return item.metadata && typeof item.metadata === "object" ? item.metadata : {};
 }
@@ -49,18 +76,27 @@ function toolStartEpochMs(item: SessionTurnItem): number | null {
   return parseEpochMs(itemMetadata(item).executionStartedAtEpochMs);
 }
 
-function toolDurationMsValue(item: SessionTurnItem): number | null {
-  const raw = itemMetadata(item).durationMs;
-  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
-    return raw;
+function coerceDurationMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
   }
-  if (typeof raw === "string" && raw.trim()) {
-    const parsed = Number(raw);
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
     if (Number.isFinite(parsed) && parsed >= 0) {
       return parsed;
     }
   }
   return null;
+}
+
+function toolDurationMsValue(item: SessionTurnItem): number | null {
+  // First-class `durationMs` is the v3 wire fact; metadata carries the legacy
+  // live-merge location. Both are capture/journal-measured numbers.
+  const wireDuration = coerceDurationMs((item as SessionTurnItem & { durationMs?: unknown }).durationMs);
+  if (wireDuration !== null) {
+    return wireDuration;
+  }
+  return coerceDurationMs(itemMetadata(item).durationMs);
 }
 
 function itemStampMs(item: SessionTurnItem): number | null {
@@ -87,6 +123,40 @@ export function resolveConversationTurnWorkSummary(
       toolDurationSumMs += durationMs;
       hasToolDuration = true;
     }
+  }
+
+  const header = turnWorkHeader(message);
+  const headerActiveMs = header.turnActiveMs ?? null;
+  const headerStartMs = parseEpochMs(header.turnStartedAt);
+  const headerEndMs = parseEpochMs(header.turnEndedAt);
+  // Authoritative header: the backend measured this turn's worked time (or at
+  // least its real start/end instants). Never below the noise floor either —
+  // a sub-threshold header is still a header, but keep the threshold semantics.
+  if (headerActiveMs !== null && headerActiveMs > 0 && header.turnState !== "running") {
+    if (headerActiveMs >= MIN_TURN_WORK_HEADER_DURATION_MS) {
+      return {
+        durationMs: headerActiveMs,
+        basis: "turn_header",
+        toolCallCount,
+        toolDurationMs: hasToolDuration ? toolDurationSumMs : null,
+      };
+    }
+    return null;
+  }
+  if (
+    header.turnState
+    && header.turnState !== "running"
+    && headerStartMs !== null
+    && headerEndMs !== null
+    && headerEndMs >= headerStartMs
+    && headerEndMs - headerStartMs >= MIN_TURN_WORK_HEADER_DURATION_MS
+  ) {
+    return {
+      durationMs: headerEndMs - headerStartMs,
+      basis: "turn_header",
+      toolCallCount,
+      toolDurationMs: hasToolDuration ? toolDurationSumMs : null,
+    };
   }
 
   const endCandidates: number[] = [];

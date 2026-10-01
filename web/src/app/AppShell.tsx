@@ -7,6 +7,7 @@ import {
   GitBranch,
   ChevronDown,
   ChevronRight,
+  ListTree,
   LoaderCircle,
   Menu,
   Settings,
@@ -24,10 +25,11 @@ import {
 import { fetchPublicConfig } from "../api/config";
 import { fetchGitStatus } from "../api/git";
 import { listProjectAgentBusTimeline } from "../api/projectAgentBus";
+import { listRuntimeTasksRevisionAware, type RuntimeTaskListPayload } from "../api/runtimeTasks";
 import {
   agentBroadcastEventTimeMs,
-  hasUnseenAgentBroadcast,
   readStoredAgentBroadcastReadAtMs,
+  resolveAgentBroadcastBadgeState,
   storeAgentBroadcastReadAtMs,
 } from "./agentBroadcastBadge";
 import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
@@ -53,6 +55,7 @@ import {
   updateBannerCopy,
   updateBannerDismissLabel,
   updateBannerRestartLabel,
+  updateBannerRestartReloadsDocument,
 } from "./updateBanner";
 import { useShellI18n } from "../i18n/useShellI18n";
 import {
@@ -736,6 +739,10 @@ export function AppShell() {
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
   const restartCompletionDismissTimerRef = useRef<number | null>(null);
+  // True from "立即重启" until this document reloads. The workbench snapshot
+  // stays "open and healthy" for the whole request, so it must not count as
+  // a finished restart.
+  const restartWaitsForDocumentReloadRef = useRef(false);
   const lifecycleRequestSeqRef = useRef(0);
   const lifecycleOverlayDismissedRef = useRef(false);
 
@@ -816,6 +823,10 @@ export function AppShell() {
     refetchIntervalInBackground: shellStartupWarmupActive,
     // Heartbeat-only field churn must not re-render the whole shell + route tree.
     structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
+    // One retry absorbs transient blips, but a hung backend flips isError (the
+    // half-dead warning) fast instead of eating the default retry+backoff wait;
+    // health polls with retry:false every few seconds remain the recovery path.
+    retry: 1,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
   // Running-code freshness: compare the commit this backend was started from
@@ -853,7 +864,26 @@ export function AppShell() {
     staleTime: 30_000,
     notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
-  const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState(() => readStoredAgentBroadcastReadAtMs());
+  // Aux-center running badge: a global active-only runtime-task list (the
+  // title-bar icon only reads running.length). The key reuses the existing
+  // runtimeTasks shape with a shell scope marker so this payload never shares
+  // a cache entry with the /aux all-status list (["runtime-tasks", kind, ""])
+  // or per-session strips (["runtime-tasks", "", sessionId]).
+  const shellAuxTasksQuery = useQuery({
+    queryKey: queryKeys.runtimeTasks("", "shell"),
+    queryFn: ({ signal }) =>
+      listRuntimeTasksRevisionAware(
+        { status: "active" },
+        queryClient.getQueryData<RuntimeTaskListPayload>(queryKeys.runtimeTasks("", "shell")),
+        signal,
+      ),
+    enabled: shellStartupDataReady,
+    refetchInterval: resolvePollingInterval(shellPollingVisible, 15_000),
+    refetchIntervalInBackground: false,
+    staleTime: 30_000,
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
+  });
+  const [agentBroadcastReadAtMs, setAgentBroadcastReadAtMs] = useState<number | null>(() => readStoredAgentBroadcastReadAtMs());
   const agentBroadcastLatestEvent = useMemo(() => {
     const events = agentBroadcastLatestQuery.data?.events;
     return events && events.length ? events[events.length - 1] : undefined;
@@ -862,7 +892,20 @@ export function AppShell() {
     () => agentBroadcastEventTimeMs(agentBroadcastLatestEvent),
     [agentBroadcastLatestEvent],
   );
-  const agentBroadcastHasUnread = hasUnseenAgentBroadcast(agentBroadcastLatestEventMs, agentBroadcastReadAtMs);
+  const agentBroadcastBadgeState = useMemo(
+    () => resolveAgentBroadcastBadgeState(agentBroadcastLatestEventMs, agentBroadcastReadAtMs),
+    [agentBroadcastLatestEventMs, agentBroadcastReadAtMs],
+  );
+  // First visit (no stored cursor): silently adopt the observed latest event
+  // as the read baseline instead of flagging the whole broadcast history
+  // unread — only events landing after the baseline light the bell.
+  useEffect(() => {
+    if (agentBroadcastBadgeState.adoptedBaseline) {
+      storeAgentBroadcastReadAtMs(agentBroadcastBadgeState.cursorMs);
+      setAgentBroadcastReadAtMs(agentBroadcastBadgeState.cursorMs);
+    }
+  }, [agentBroadcastBadgeState]);
+  const agentBroadcastHasUnread = agentBroadcastBadgeState.unread;
   const agentBroadcastLabel = t("agentBroadcastLabel");
   const agentBroadcastTriggerLabel = agentBroadcastHasUnread
     ? `${agentBroadcastLabel}，${t("agentBroadcastUnread")}`
@@ -882,6 +925,12 @@ export function AppShell() {
   const shellGitTriggerTitle = shellGitStatus?.available && shellGitStatus.summary
     ? `${t("navGit")}：${shellGitStatus.summary}`
     : t("navGit");
+  // Aux-center entry + running badge (text count, ZCode badge shape; >9 clamps).
+  const shellAuxRunningCount = shellAuxTasksQuery.data?.running.length ?? 0;
+  const shellAuxRunningBadge = shellAuxRunningCount > 0
+    ? (shellAuxRunningCount > 9 ? "9+" : String(shellAuxRunningCount))
+    : "";
+  const auxCenterLabel = lang === "en" ? "Background tasks" : "后台任务";
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
 
@@ -960,8 +1009,9 @@ export function AppShell() {
     if (pathname.startsWith("/usage")) return t("navUsage");
     if (pathname.startsWith("/logs")) return t("navLogs");
     if (pathname.startsWith("/git")) return t("navGit");
+    if (pathname.startsWith("/aux")) return auxCenterLabel;
     return t("appTitle");
-  }, [location.pathname, t]);
+  }, [auxCenterLabel, location.pathname, t]);
   const handleReturnNavigation = useCallback(() => {
     if (!returnNavigationTarget) {
       return;
@@ -1495,6 +1545,7 @@ export function AppShell() {
     const task = (async () => {
       clearRestartCompletionDismissTimer();
       lifecycleOverlayDismissedRef.current = false;
+      restartWaitsForDocumentReloadRef.current = true;
       setRestartRequested(true);
       setShutdownRequested(false);
       setShutdownSettled(false);
@@ -1508,20 +1559,37 @@ export function AppShell() {
 
       const payload = await requestLifecycle("restart");
       if (requestSeq !== lifecycleRequestSeqRef.current) {
+        restartWaitsForDocumentReloadRef.current = false;
         if (payload.commandId) {
           cancelSupersededLifecycleCommand(payload.commandId, "restart");
         }
         return;
       }
-      markControlledProjectLifecycleOperation("restart");
       emitBrowserTelemetry(buildLifecycleControlResponseTelemetry("restart", payload), { preferBeacon: true });
+      if (!updateBannerRestartReloadsDocument(payload.code)) {
+        restartWaitsForDocumentReloadRef.current = false;
+        setRestartRequested(false);
+        setShutdownRequested(false);
+        setShutdownOpen(true);
+        setShutdownSettled(false);
+        setLifecycleAction("restart");
+        setLifecycleCommandId(payload.commandId ?? "");
+        setLifecycleCancelPending(false);
+        setShutdownTitle(restartHeading);
+        setShutdownDetail(payload.message || restartBody);
+        return;
+      }
+      markControlledProjectLifecycleOperation("restart");
       if (payload.commandId) {
         setLifecycleCommandId(payload.commandId);
       }
-      if (payload.message) {
-        setShutdownDetail(payload.message);
-      }
+      // The launcher restart already published the current frontend release
+      // and replaced the backend. Reload this document onto it. The overlay
+      // stays on "正在重启" until the navigation clears this page.
+      allowNextWorkbenchWindowUnload();
+      window.location.reload();
     })().catch((error) => {
+      restartWaitsForDocumentReloadRef.current = false;
       if (requestSeq !== lifecycleRequestSeqRef.current) {
         return;
       }
@@ -1555,7 +1623,7 @@ export function AppShell() {
         return;
       }
       const errorMessage = error instanceof Error ? error.message : String(error || "");
-      setRestartRequested(true);
+      setRestartRequested(false);
       setShutdownRequested(false);
       setShutdownOpen(true);
       setShutdownSettled(false);
@@ -1606,6 +1674,7 @@ export function AppShell() {
     );
 
     const resetOverlay = () => {
+      restartWaitsForDocumentReloadRef.current = false;
       lifecycleOverlayDismissedRef.current = true;
       shutdownPromiseRef.current = null;
       restartPromiseRef.current = null;
@@ -2204,6 +2273,17 @@ export function AppShell() {
       && workbench.backendHealthy
       && workbench.browserWindowAlive;
 
+    if (failed && restartWaitsForDocumentReloadRef.current) {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
+      setShutdownOpen(true);
+      setShutdownSettled(false);
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(workbench.statusLine || restartBody);
+      return;
+    }
+
     if (failed) {
       if (lifecycleOverlayDismissedRef.current) {
         return;
@@ -2213,6 +2293,17 @@ export function AppShell() {
       setShutdownSettled(true);
       setShutdownTitle(restartHeading);
       setShutdownDetail(workbench.failureMessage || restartErrorBody);
+      return;
+    }
+
+    if (ready && restartWaitsForDocumentReloadRef.current) {
+      if (lifecycleOverlayDismissedRef.current) {
+        return;
+      }
+      setShutdownOpen(true);
+      setShutdownSettled(false);
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(workbench.statusLine || restartBody);
       return;
     }
 
@@ -2665,10 +2756,23 @@ export function AppShell() {
             {shellGitNeedsAttention ? <span className={styles.settingsTriggerAlertDot} aria-hidden="true" /> : null}
           </span>
         </VRouteLinkButton>
+        <VRouteLinkButton to="/aux" variant="ghost" className={styles.settingsTrigger} aria-label={auxCenterLabel} title={auxCenterLabel}>
+          <span className={styles.settingsTriggerIconSlot}>
+            <ListTree size={17} />
+            {shellAuxRunningBadge ? (
+              <span className={styles.settingsTriggerCountBadge} aria-hidden="true">{shellAuxRunningBadge}</span>
+            ) : null}
+          </span>
+        </VRouteLinkButton>
         <VRouteLinkButton to={{ pathname: "/chat", search: serializeChatRouteSelection("", { kind: "project_bus" }) }} variant="ghost" className={styles.settingsTrigger} aria-label={agentBroadcastTriggerLabel} title={agentBroadcastTriggerLabel} onClick={(event) => {
+          // Any left click counts as "went to look" — modifier clicks hand the
+          // navigation to the browser's new-tab behaviour, which still shows
+          // the broadcast surface. Right click (context menu) does not.
+          if (event.button === 0) {
+            markAgentBroadcastSeen();
+          }
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
-          markAgentBroadcastSeen();
           chatRoute.openProjectBus({ telemetrySource: "shell_settings" });
           closeUtilityMenu();
         }}>

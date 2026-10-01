@@ -72,6 +72,38 @@ export function resolveComposerPrimaryActionFlags(input: {
   };
 }
 
+export type ComposerEnterDelivery = "none" | "send" | "queue" | "steer";
+
+/**
+ * Composer Enter delivery (claim: composer action state). User decision
+ * (2026-10): the previous Ctrl/⌘+Enter opposite-delivery flip is gone —
+ * modifier keys never participate in the delivery choice. While a turn runs,
+ * Enter immediately steers the draft into the running turn via the existing
+ * safe-guidance channel; when that channel cannot carry the payload (no
+ * handler, or attachments/references riding the draft) Enter queues instead
+ * of dropping the message. Idle Enter sends. Shift (newline), alt, and IME
+ * composition stay guarded. The ctrl/meta fields are kept for call-site
+ * compatibility but intentionally ignored. Pure: no React / DOM.
+ */
+export function resolveComposerEnterDelivery(input: {
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  isComposing: boolean;
+  actionMode: ComposerActionMode;
+  canDeliverImmediately: boolean;
+}): ComposerEnterDelivery {
+  if (input.isComposing || input.key !== "Enter" || input.shiftKey || input.altKey) {
+    return "none";
+  }
+  if (input.actionMode === "stop") {
+    return input.canDeliverImmediately ? "steer" : "queue";
+  }
+  return "send";
+}
+
 /**
  * Fallback Esc→stop yield decision (claim: composer action state). The composer
  * keydown handler consumes Escape for ghost dismiss, slash suggestions, and

@@ -20,6 +20,7 @@ from core.web.routes.session_catalog_models import (
     SessionBulkDeleteResponse,
     SessionCatalogItem,
     SessionDeleteResponse,
+    SessionPinResponse,
     SessionQueryResponse,
 )
 from core.web.routes.session_detail_models import SessionDetailResponse
@@ -43,6 +44,7 @@ from core.web.routes.session_turn_models import (
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services import session_service
+from core.web.services.session.session_pin_ops import set_chat_session_pinned
 from core.web.services.session import document_attachments as session_document_attachments
 from core.web.services.session.image_attachments import (
     LocalAttachmentReadError,
@@ -618,6 +620,34 @@ def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEf
 
 
 @router.post(
+    "/sessions/{session_id}/pin",
+    response_model=SessionPinResponse,
+    response_model_exclude_unset=True,
+)
+def session_pin(session_id: str) -> dict:
+    try:
+        return set_chat_session_pinned(session_id, pinned=True)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/unpin",
+    response_model=SessionPinResponse,
+    response_model_exclude_unset=True,
+)
+def session_unpin(session_id: str) -> dict:
+    try:
+        return set_chat_session_pinned(session_id, pinned=False)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
     "/sessions/{session_id}/select",
     response_model=SessionCatalogItem,
     response_model_exclude_unset=True,
@@ -726,7 +756,16 @@ def sessions_bulk_delete(payload: SessionBulkDeletePayload) -> dict:
 
 
 @router.get("/sessions/{session_id}/events", response_class=StreamingResponse)
-async def session_events(session_id: str, initial: str = Query("light")) -> StreamingResponse:
+async def session_events(
+    session_id: str,
+    initial: str = Query("light"),
+    request: Request = None,
+) -> StreamingResponse:
+    raw_last_event_id = request.headers.get("last-event-id") if request is not None else None
+    try:
+        last_event_id = session_service.parse_session_stream_last_event_id(raw_last_event_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         initial_mode, detail, initial_state = await asyncio.get_running_loop().run_in_executor(
             _SESSION_STREAM_EXECUTOR,
@@ -742,6 +781,7 @@ async def session_events(session_id: str, initial: str = Query("light")) -> Stre
             initial_detail=detail,
             initial=initial_mode,
             initial_state=initial_state,
+            last_event_id=last_event_id,
         ),
         media_type="text/event-stream",
         headers={

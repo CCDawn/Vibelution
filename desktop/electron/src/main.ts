@@ -180,6 +180,7 @@ import {
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
 import { listActiveWorkRuns } from "./process/activeWorkGuard.js";
+import { executeLauncherUpdate, projectLauncherUpdateFreshness } from "./process/launcherUpdate.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
@@ -188,6 +189,7 @@ import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
   fetchLauncherActiveWorkStatus,
+  activeWorkStatusFromLauncherStatus,
   resolveQuitActiveWorkStatus,
   type ActiveWorkProbeState,
   type ActiveWorkStatus,
@@ -2516,29 +2518,61 @@ async function restartLauncherToLatestBuild(): Promise<OrchestratedLifecycleResu
   }
   shellRefreshInFlight = true;
   try {
-    try {
-      await bestEffortStopIsolatedInstancesForShutdown("stop isolated instances before latest launcher restart");
-    } catch (error: unknown) {
-      console.warn(error instanceof Error ? error.message : String(error));
-    }
-    await scheduleCurrentDesktopShellRefresh("open", {
-      force: true,
-      shellKind: app.isPackaged ? "packaged" : "unpackaged"
+    const result = await executeLauncherUpdate({
+      activeWork: () => resolveLauncherUpdateActiveWork(true),
+      prepare: () => ensureLatestLauncher({
+        workspaceRoot: createDesktopPathsForApp().workspaceRoot,
+        pythonPath: desktopPythonPath()
+      }),
+      stopWorkspaces: async () => {
+        // These normal lifecycle paths retain their own final admission guards.
+        // A refused stop aborts replacement; never degrade to best-effort/force.
+        await stopMainRuntimeForApprovedShutdown();
+        await stopIsolatedInstancesForApprovedShutdown();
+      },
+      scheduleReplacement: () => scheduleCurrentDesktopShellRefresh("open", {
+        force: true,
+        shellKind: app.isPackaged ? "packaged" : "unpackaged"
+      })
     });
+    if (!result.accepted) {
+      shellRefreshInFlight = false;
+      return result;
+    }
+    shutdownApproved = true;
+    setTimeout(() => app.exit(0), 250);
+    return result;
   } catch (error: unknown) {
     shellRefreshInFlight = false;
     throw error;
   }
-  shutdownApproved = true;
-  setTimeout(() => {
-    app.exit(0);
-  }, 250);
-  return {
-    schemaVersion: 1,
-    accepted: true,
-    operation: "restart-latest-shell",
-    message: "正在退出并启动最新 Launcher。"
-  };
+}
+
+async function resolveLauncherUpdateActiveWork(refreshBranches = false): Promise<ActiveWorkStatus> {
+  try {
+    if (refreshBranches) await launcherStateStore.refresh("launcher_update_guard");
+    const payload = await orchestrateLauncherApi("status", { schemaVersion: 1, path: "status" });
+    const main = activeWorkStatusFromLauncherStatus(
+      typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {}
+    );
+    if (main.state === "unknown") return main;
+    const slots = parseBranchInstanceRecords(launcherStateStore.projectBranchInstances())
+      .filter((item) => !item.current && item.path && item.alive);
+    const isolated = slots.flatMap((slot) => listActiveWorkRuns(slot.path));
+    const count = (main.count ?? 0) + isolated.length;
+    return { state: count ? "active" : "idle", message: "", count, items: [...(main.items ?? []), ...isolated].slice(0, 8) };
+  } catch {
+    return { state: "unknown", message: "Launcher task status is unavailable." };
+  }
+}
+
+async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>> {
+  const [raw, shell, activeWork] = await Promise.all([
+    orchestrateLauncherApi("freshness", { schemaVersion: 1, path: "freshness" }),
+    app.isPackaged ? inspectCurrentDesktopShell().catch(() => undefined) : Promise.resolve(undefined),
+    resolveLauncherUpdateActiveWork()
+  ]);
+  return projectLauncherUpdateFreshness({ raw, shell, activeWork, packaged: app.isPackaged, updating: shellRefreshInFlight });
 }
 
 async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
@@ -4521,7 +4555,7 @@ function resolveLauncherIpcHost() {
     },
     restartLatestShell: () => restartLauncherToLatestBuild(),
     orchestrateLauncherApi: async (path, payload) => {
-      const result = await orchestrateLauncherApi(path, payload);
+      const result = path === "freshness" ? await currentLauncherUpdateFreshness() : await orchestrateLauncherApi(path, payload);
       if (String(payload.init?.method ?? "GET").toUpperCase() !== "GET") {
         scheduleLauncherStatusCliRefresh();
       }

@@ -93,6 +93,7 @@ import {
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
 import { removeStoredSessionDraft, scheduleSessionDraftSave } from "./chatDraftPersistence";
 import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
+import { appendStoredPromptHistoryEntry } from "../../components/conversation/conversationPromptHistory";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
 import { isEditAcknowledged, rollbackEditResubmit } from "./chatEditResubmitState";
@@ -507,6 +508,8 @@ export function useChatComposerTurnMutations({
       }));
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
+      // Backend accepted the turn: the sent prompt becomes ArrowUp-recallable.
+      appendStoredPromptHistoryEntry(variables.content);
       const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
       // A queued acceptance must be projected as "queued", never as
       // "sent/running": the turn did not start, it joined the session queue.

@@ -16,7 +16,7 @@
   ],
   "extraResources": [
     {
-      "from": "../../web/dist",
+      "from": "node_modules/.cache/vibelution-package-web-dist",
       "to": "web-dist"
     }
   ],

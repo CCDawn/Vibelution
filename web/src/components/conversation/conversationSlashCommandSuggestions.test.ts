@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { SkillLibraryItem } from "../../api/types";
+import {
+  groupSlashCommandSuggestionsBySection,
+} from "./conversationSlashCommandSuggestions";
 import chatRouteSource from "../../routes/chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatCatalogQueriesSource from "../../routes/chat/useChatWorkbenchCatalogQueries.ts?raw";
 import chatConversationComposerBridgeSource from "../../routes/chat/ChatConversationComposerBridge.tsx?raw";
@@ -226,5 +229,40 @@ describe("conversation slash command suggestions", () => {
     expect(conversationViewSource).toContain('role="option"');
     expect(conversationViewSource).toContain("executeBuiltinSlashCommand(suggestion.builtinId)");
     expect(conversationViewSource).toContain('data-vui="slash-builtin-badge"');
+    expect(conversationViewSource).toContain("groupSlashCommandSuggestionsBySection(slashSuggestions)");
+  });
+});
+
+describe("groupSlashCommandSuggestionsBySection", () => {
+  const builtinSuggestion = {
+    key: "builtin:model",
+    command: "/model",
+    description: "切换模型",
+    builtin: true,
+    builtinId: "model" as const,
+  };
+  const skillSuggestion = {
+    key: "skill:/brt",
+    command: "/brt",
+    description: "Intent routing",
+    builtin: false,
+  };
+
+  it("splits the merged ranked list into Commands/Skills groups, preserving order", () => {
+    const sections = groupSlashCommandSuggestionsBySection([
+      skillSuggestion,
+      builtinSuggestion,
+      { ...skillSuggestion, key: "skill:/zoo", command: "/zoo" },
+    ]);
+    expect(sections.map((section) => section.id)).toEqual(["commands", "skills"]);
+    expect(sections[0].suggestions).toEqual([builtinSuggestion]);
+    expect(sections[1].suggestions.map((suggestion) => suggestion.key)).toEqual(["skill:/brt", "skill:/zoo"]);
+  });
+
+  it("omits empty sections entirely", () => {
+    expect(groupSlashCommandSuggestionsBySection([builtinSuggestion])).toEqual([
+      { id: "commands", suggestions: [builtinSuggestion] },
+    ]);
+    expect(groupSlashCommandSuggestionsBySection([])).toEqual([]);
   });
 });

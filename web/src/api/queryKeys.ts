@@ -47,7 +47,8 @@ export const queryKeys = {
   // broad invalidations still reach this key).
   conversationsCatalogQuery: (limit = 100) => ["conversations", "query", limit] as const,
   sessions: () => ["sessions"] as const,
-  sessionQuery: (q = "", limit = 50, cursor = "") => ["sessions", "query", q, limit, cursor] as const,
+  sessionQuery: (q = "", limit = 50, cursor = "", sort = "") =>
+    ["sessions", "query", q, limit, cursor, sort] as const,
   // Archived-session listing; the "sessions" prefix keeps broad invalidations
   // (["sessions"]) reaching it after archive/unarchive mutations.
   sessionArchive: () => ["sessions", "archived"] as const,
@@ -74,6 +75,7 @@ export const queryKeys = {
   projectAgentBus: () => ["project-agent-bus"] as const,
   projectAgentBusLatestEvent: () => ["project-agent-bus", "latest-event"] as const,
   teams: () => ["teams"] as const,
+  teamTemplates: () => ["teams", "templates"] as const,
   teamDetails: (id: string) => ["teams", id, "detail"] as const,
   team: (id: string, detail = "full") => ["teams", id, "detail", detail] as const,
   teamCanvas: (id: string) => ["teams", id, "canvas"] as const,
@@ -159,6 +161,8 @@ export const queryKeys = {
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
+  memoryAgentInventory: () => ["memory", "agents", "inventory"] as const,
+  memoryAgentDetail: (agentId: string, revision: string) => ["memory", "agents", agentId, "detail", revision] as const,
   memoryCleanupPreview: () => ["memory", "cleanup", "preview"] as const,
   userMarkdownSpaces: (userId: string) => ["user-content", "markdown-spaces", userId] as const,
   userMarkdownSpacePages: (userId: string, spaceId: string, query = "", tag = "") =>

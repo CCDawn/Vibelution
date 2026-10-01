@@ -79,9 +79,10 @@ def _no_stream_subscriber_leftover():
 class _HttpSseReader:
     """后台线程用真 httpx 流消费一条 SSE，帧进共享 deque。"""
 
-    def __init__(self, base_url: str, headers: dict):
+    def __init__(self, base_url: str, headers: dict, *, params: dict | None = None):
         self.base_url = base_url
         self.headers = headers
+        self.params = params or {"initial": "full"}
         self.frames: deque[dict] = deque()
         self.first_frame = threading.Event()
         self.error: BaseException | None = None
@@ -97,13 +98,14 @@ class _HttpSseReader:
 
     def _run(self) -> None:
         event_name = ""
+        event_id = ""
         data_lines: list[str] = []
         try:
             self._client = httpx.Client(timeout=httpx.Timeout(30.0, read=None))
             with self._client.stream(
                 "GET",
                 f"{self.base_url}/api/sessions/session-live/events",
-                params={"initial": "full"},
+                params=self.params,
                 headers=self.headers,
             ) as response:
                 self._response = response
@@ -113,6 +115,9 @@ class _HttpSseReader:
                     if self._stop.is_set():
                         break
                     if line.startswith(":"):
+                        continue
+                    if line.startswith("id:"):
+                        event_id = line.split(":", 1)[1].strip()
                         continue
                     if line.startswith("event:"):
                         event_name = line.split(":", 1)[1].strip()
@@ -126,10 +131,14 @@ class _HttpSseReader:
                         import json
 
                         self.frames.append(
-                            {"event": event_name, "data": json.loads("\n".join(data_lines))}
+                            {
+                                "id": event_id,
+                                "event": event_name,
+                                "data": json.loads("\n".join(data_lines)),
+                            }
                         )
                         self.first_frame.set()
-                    event_name, data_lines = "", []
+                    event_name, event_id, data_lines = "", "", []
         except BaseException as exc:  # noqa: BLE001 - 线程异常带回主线程
             self.error = exc
         finally:
@@ -246,3 +255,104 @@ def test_http_two_streams_both_receive_turn_frames(live_server, auth_headers, tm
         first.abort()
         second.abort()
         _wait_subscribers_drained()
+
+
+def test_http_stream_frames_carry_sse_id_lines(live_server, auth_headers, tmp_path, monkeypatch):
+    agent = _E2EChatAgent(
+        result=_completed_turn_result(text="带 id 行的流。", reasoning="每帧都要有 seq。"),
+    )
+    _seed_streamed_session(tmp_path, monkeypatch, agent)
+
+    reader = _HttpSseReader(live_server, auth_headers).start()
+    try:
+        response = httpx.post(
+            f"{live_server}/api/sessions/session-live/messages",
+            headers=auth_headers,
+            json={"clientSubmissionId": "submission-http-e2e-id", "content": "给我 id 行"},
+        )
+        assert response.status_code == 202
+        done = reader.wait_frames(lambda p: p.get("type") == "assistant_delta" and p.get("done"))
+        assert done.get("ledgerSeq", 0) > 0
+        deltas = [f for f in reader.frames if f["event"] == "assistant_delta"]
+        assert deltas
+        # Every delta frame carries an id: line fed by the journal watermark.
+        assert all(str(f["id"]).isdigit() and int(f["id"]) > 0 for f in deltas)
+        ids = [int(f["id"]) for f in deltas]
+        assert ids == sorted(ids), "同连接内 id 必须非递减"
+    finally:
+        reader.abort()
+        _wait_subscribers_drained()
+
+
+def test_http_stream_resume_replays_missed_journal_events(live_server, auth_headers, tmp_path, monkeypatch):
+    agent = _E2EChatAgent(
+        result=_completed_turn_result(text="断线补偿的第一轮。", reasoning="先留下一段可重放的账本。"),
+    )
+    _seed_streamed_session(tmp_path, monkeypatch, agent)
+
+    # Turn 1: consume frames live, remember an early id, then drop the client.
+    first = _HttpSseReader(live_server, auth_headers).start()
+    try:
+        assert first.first_frame.wait(10.0)
+        response = httpx.post(
+            f"{live_server}/api/sessions/session-live/messages",
+            headers=auth_headers,
+            json={"clientSubmissionId": "submission-http-e2e-resume-1", "content": "第一轮"},
+        )
+        assert response.status_code == 202
+        first.wait_frames(lambda p: p.get("type") == "assistant_delta" and p.get("done"))
+    finally:
+        first.abort()
+    _wait_subscribers_drained()
+
+    received_ids = [int(f["id"]) for f in first.frames if str(f["id"]).isdigit()]
+    assert received_ids
+    resume_from = min(received_ids)
+
+    # Reconnect with Last-Event-ID: missed journal events replay in order and a
+    # stream_resume marker closes the window before the live loop resumes.
+    second = _HttpSseReader(
+        live_server,
+        {**auth_headers, "Last-Event-ID": str(resume_from)},
+        params={"initial": "none"},
+    ).start()
+    try:
+        marker = second.wait_frames(lambda p: p.get("type") == "stream_resume")
+        assert marker["resume"] == "replayed"
+        assert marker["fromSeq"] == resume_from
+        assert marker["toSeq"] >= resume_from
+
+        replayed = [
+            f
+            for f in second.frames
+            if f["event"] == "session_journal_event"
+        ]
+        assert replayed, "重放窗口内必须补偿错过的持久事件"
+        replayed_seqs = [f["data"]["seq"] for f in replayed]
+        assert replayed_seqs == sorted(replayed_seqs)
+        assert all(marker["fromSeq"] < seq <= marker["toSeq"] for seq in replayed_seqs)
+
+        # Live handover: the next turn's frames never fall below the watermark.
+        response = httpx.post(
+            f"{live_server}/api/sessions/session-live/messages",
+            headers=auth_headers,
+            json={"clientSubmissionId": "submission-http-e2e-resume-2", "content": "第二轮"},
+        )
+        assert response.status_code == 202
+        done = second.wait_frames(lambda p: p.get("type") == "assistant_delta" and p.get("done"))
+        assert done.get("ledgerSeq", 0) >= marker["toSeq"]
+    finally:
+        second.abort()
+        _wait_subscribers_drained()
+
+
+def test_http_stream_resume_rejects_malformed_last_event_id(live_server, auth_headers, tmp_path, monkeypatch):
+    agent = _E2EChatAgent(result=_completed_turn_result(text="无关正文。", reasoning="头部校验先于流。"))
+    _seed_streamed_session(tmp_path, monkeypatch, agent)
+
+    response = httpx.get(
+        f"{live_server}/api/sessions/session-live/events",
+        params={"initial": "none"},
+        headers={**auth_headers, "Last-Event-ID": "not-a-sequence"},
+    )
+    assert response.status_code == 422

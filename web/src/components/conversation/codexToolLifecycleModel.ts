@@ -1,6 +1,6 @@
 import type { AgentMessageOperation } from "./agentMessageOperations";
 
-export type CodexToolLifecycleStatus = "pending" | "running" | "completed" | "failed" | "degraded";
+export type CodexToolLifecycleStatus = "pending" | "running" | "completed" | "failed" | "degraded" | "cancelled";
 
 export type CodexToolRuntimeKind = "terminal" | "tool";
 
@@ -105,9 +105,19 @@ export function buildCodexToolLifecycleModel(
   return model;
 }
 
+/**
+ * Tool terminal states come in three families (ZCode tool-call-summary parity):
+ * success stays green, failure paints red, and user/permission-interrupted
+ * runs (cancelled/stopped/denied) are a neutral terminal state — never red
+ * (the user chose to stop) and never green (nothing was accomplished).
+ * Unknown statuses fall to failure: 宁红不绿, a silent green hides breakage.
+ */
 export function normalizeCodexToolLifecycleStatus(status: string | undefined): CodexToolLifecycleStatus {
   const normalized = String(status ?? "").trim().toLowerCase();
-  if (["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(normalized)) {
+  if (["cancelled", "canceled", "stopped", "denied", "aborted"].includes(normalized)) {
+    return "cancelled";
+  }
+  if (["failed", "error", "failure", "timeout", "timed_out"].includes(normalized)) {
     return "failed";
   }
   if (["degraded", "fallback", "partial", "recovered", "unavailable"].includes(normalized)) {
@@ -119,7 +129,10 @@ export function normalizeCodexToolLifecycleStatus(status: string | undefined): C
   if (["running", "thinking", "tooling", "answering", "streaming"].includes(normalized)) {
     return "running";
   }
-  return "completed";
+  if (["completed", "complete", "done", "success", "succeeded", "ok", "finished", "ready"].includes(normalized)) {
+    return "completed";
+  }
+  return "failed";
 }
 
 export function codexToolRuntimeKind(operation: AgentMessageOperation): CodexToolRuntimeKind {
@@ -249,6 +262,9 @@ function mergeTerminalSessionStatus(
   }
   if (current === "failed" || next === "failed") {
     return "failed";
+  }
+  if (current === "cancelled" || next === "cancelled") {
+    return "cancelled";
   }
   if (current === "degraded" || next === "degraded") {
     return "degraded";

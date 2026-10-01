@@ -371,6 +371,14 @@ describe("normalizeToolActivityStatus / extractToolDisplayCommand", () => {
     expect(normalizeToolActivityStatus("fallback")).toBe("degraded");
   });
 
+  it("maps cancelled/stopped onto the neutral terminal family and unknown onto failure", () => {
+    expect(normalizeToolActivityStatus("cancelled")).toBe("cancelled");
+    expect(normalizeToolActivityStatus("stopped")).toBe("cancelled");
+    expect(normalizeToolActivityStatus("denied")).toBe("cancelled");
+    // 宁红不绿: unknown vocabulary never silently resolves completed.
+    expect(normalizeToolActivityStatus("mystery_status")).toBe("failed");
+  });
+
   it("extracts display commands from argument bags", () => {
     expect(extractToolDisplayCommand({ displayCommand: "pnpm test" })).toBe("pnpm test");
     expect(extractToolDisplayCommand({ command: ["git", "status"] })).toBe("git status");
@@ -406,6 +414,37 @@ describe("buildCodexToolActivityPills", () => {
       statusKind: "running",
       subject: "type README.md",
       durationLabel: "",
+    });
+  });
+
+  it("renders cancelled/stopped as a grey neutral chip instead of red or green", () => {
+    expect(buildCodexToolActivityPills({
+      toolName: "cli_tool",
+      status: "cancelled",
+      language: "zh",
+      displayCommand: "pnpm test",
+    })).toMatchObject({
+      statusLabel: "已取消",
+      statusKind: "cancelled",
+    });
+    expect(buildCodexToolActivityPills({
+      toolName: "cli_tool",
+      status: "stopped",
+      language: "en",
+    })).toMatchObject({
+      statusLabel: "Stopped",
+      statusKind: "cancelled",
+    });
+  });
+
+  it("renders unknown statuses as failure pills (宁红不绿)", () => {
+    expect(buildCodexToolActivityPills({
+      toolName: "code_symbol_tool",
+      status: "mystery_status",
+      language: "zh",
+    })).toMatchObject({
+      statusLabel: "执行失败",
+      statusKind: "failed",
     });
   });
 

@@ -631,6 +631,7 @@ export type CodexToolActivityPillStatusKind =
   | "failed"
   | "timeout"
   | "attention"
+  | "cancelled"
   | "idle";
 
 export type CodexToolActivityPills = {
@@ -649,7 +650,7 @@ export type CodexToolActivityPills = {
  */
 export function normalizeToolActivityStatus(status: string | undefined | null) {
   const normalized = String(status || "").trim().toLowerCase();
-  if (["done", "success", "completed", "succeeded", "ok"].includes(normalized)) {
+  if (["done", "success", "completed", "succeeded", "ok", "finished"].includes(normalized)) {
     return "completed";
   }
   if (["running", "in_progress", "active", "working"].includes(normalized)) {
@@ -658,13 +659,19 @@ export function normalizeToolActivityStatus(status: string | undefined | null) {
   if (["pending", "queued", "waiting"].includes(normalized)) {
     return "pending";
   }
-  if (["failed", "error", "cancelled", "canceled"].includes(normalized)) {
+  // Cancelled/stopped/denied are a neutral terminal family, not a failure
+  // (ZCode tool-call-summary stopped/output-denied parity).
+  if (["cancelled", "canceled", "stopped", "denied", "aborted"].includes(normalized)) {
+    return "cancelled";
+  }
+  if (["failed", "error", "failure", "timeout", "timed_out"].includes(normalized)) {
     return "failed";
   }
   if (["degraded", "fallback", "partial", "unavailable", "recovered"].includes(normalized)) {
     return "degraded";
   }
-  return normalized;
+  // Unknown status: 宁红不绿 — never silently green.
+  return "failed";
 }
 
 /** Pull a human command string from tool argument bags used by legacy ops. */
@@ -906,6 +913,20 @@ function buildToolActivityPillsForStatus(options: {
       actionLabel,
       statusLabel: language === "zh" ? "运行中" : "Running",
       statusKind: "running",
+      subject,
+      durationLabel,
+    };
+  }
+
+  // Neutral terminal state: cancelled/stopped/denied show a grey chip, not a
+  // red failure and not a green completion.
+  if (status === "cancelled") {
+    return {
+      actionLabel,
+      statusLabel: ["stopped", "denied"].includes(rawStatus)
+        ? (language === "zh" ? "已停止" : "Stopped")
+        : (language === "zh" ? "已取消" : "Cancelled"),
+      statusKind: "cancelled",
       subject,
       durationLabel,
     };

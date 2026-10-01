@@ -37,6 +37,14 @@ class SessionActiveResponse(BaseModel):
     activeSessionId: str = ""
 
 
+class SessionPinResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    pinned: bool = False
+    pinnedAtMs: int | None = None
+
+
 class SessionQueryFilters(BaseModel):
     model_config = ConfigDict(extra="allow")
 

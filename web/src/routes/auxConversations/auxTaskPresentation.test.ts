@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  Ban,
+  CheckCircle2,
+  CircleAlert,
+  CircleDashed,
+  Clock,
+  LoaderCircle,
+  PauseCircle,
+} from "lucide-react";
+
+import {
   AUX_TASK_KINDS,
   auxTaskKindLabel,
+  auxTaskStatusIcon,
   auxTaskStatusLabel,
   auxTaskStatusTone,
   formatRelativeTime,
@@ -45,6 +56,22 @@ describe("auxTaskPresentation", () => {
     expect(isTerminalRuntimeTask({ endedAt: "" })).toBe(false);
     expect(isTerminalRuntimeTask({ endedAt: null })).toBe(false);
     expect(isTerminalRuntimeTask({})).toBe(false);
+  });
+
+  it("maps every status word to a neutral directory glyph and only running spins", () => {
+    expect(auxTaskStatusIcon("running")).toEqual({ Icon: LoaderCircle, spin: true });
+    expect(auxTaskStatusIcon("stopping")).toEqual({ Icon: LoaderCircle, spin: false });
+    expect(auxTaskStatusIcon("queued").Icon).toBe(Clock);
+    expect(auxTaskStatusIcon("waiting").Icon).toBe(PauseCircle);
+    expect(auxTaskStatusIcon("succeeded").Icon).toBe(CheckCircle2);
+    expect(auxTaskStatusIcon("completed").Icon).toBe(CheckCircle2);
+    expect(auxTaskStatusIcon("failed").Icon).toBe(CircleAlert);
+    expect(auxTaskStatusIcon("timed_out").Icon).toBe(CircleAlert);
+    expect(auxTaskStatusIcon("cancelled").Icon).toBe(Ban);
+    expect(auxTaskStatusIcon("stopped").Icon).toBe(Ban);
+    expect(auxTaskStatusIcon("weird").Icon).toBe(CircleDashed);
+    expect(auxTaskStatusIcon("").Icon).toBe(CircleDashed);
+    expect(auxTaskStatusIcon("Running").spin).toBe(true);
   });
 
   it("formats compact relative time buckets", () => {

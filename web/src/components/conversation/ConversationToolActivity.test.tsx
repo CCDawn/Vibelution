@@ -647,6 +647,43 @@ describe("ConversationToolActivity", () => {
     expect(activityCss).toContain("color-mix(in srgb, var(--subagent-accent, var(--fg-tertiary)) 14%, transparent)");
   });
 
+  it("tags agent spawn rows with the neutral 子代理 source badge without touching the name bucket", () => {
+    const cell = namedToolCell("spawn-badge-1", "spawn_agent_tool", "");
+    cell.toolArguments = { task_type: "research" };
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+
+    expect(html).toContain('data-codex-tool-agent-badge="true"');
+    expect(html).toContain(">子代理</span>");
+    // The badge is a quiet grey tag: it must not absorb the name's accent variable.
+    expect(styles.agentSourceBadge).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.agentSourceBadge).not.toContain("--subagent-accent");
+
+    const enHtml = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="en"
+        renderToolDetails={() => null}
+      />,
+    );
+    expect(enHtml).toContain(">Agent</span>");
+
+    // Non-agent rows stay badge-free.
+    const plainHtml = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([namedToolCell("read-badge-1", "read_file_tool")])}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+    expect(plainHtml).not.toContain('data-codex-tool-agent-badge="true"');
+  });
+
   it("keeps category group chrome on the shared quiet-row contract", () => {
     expect(styles.categoryGroupSummary).toContain("list-none");
     expect(styles.categoryGroupSummary).toContain("[&::marker]:content-none");

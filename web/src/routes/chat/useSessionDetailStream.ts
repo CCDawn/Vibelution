@@ -12,8 +12,10 @@ import {
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
 import {
+  createSessionStreamAppendReassembler,
   routeSessionStreamEvent,
   sessionStreamProtocolTelemetryFields,
+  type SessionStreamAppendGap,
   type SessionStreamProtocolTrace,
 } from "../chatSessionStreamProtocol";
 import {
@@ -68,7 +70,7 @@ export function shouldDropSupersededEditDelta(
 }
 
 /** Why a guarded stream was hard-closed by its owner (telemetry evidence). */
-export type SessionStreamCloseReason = "grace_timeout" | "manual_reconnect";
+export type SessionStreamCloseReason = "grace_timeout" | "manual_reconnect" | "append_gap";
 
 export type UseSessionDetailStreamOptions = {
   activeSessionId: string | null | undefined;
@@ -223,6 +225,9 @@ export function useSessionDetailStream({
     let lastAppliedAt = 0;
     let committedAssistantDeltaLayer: ActiveTurnLayerState | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
     let observedEditSubmissionId = "";
+    let appendGapLogged = false;
+    let journalReplayLogged = false;
+    const sessionStreamAppendReassembler = createSessionStreamAppendReassembler();
     const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({
       nowMs: chatStreamPerformanceNowMs,
     });
@@ -813,18 +818,114 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
+      // Append-only fragments splice onto this connection's cached item text;
+      // a broken chain means the cached baseline diverged from the server
+      // cursor, so nothing partial is applied: refresh the body and reconnect
+      // (a fresh stream restarts with full item snapshots).
+      const expansion = sessionStreamAppendReassembler.expand(routed.payload);
+      if (expansion.gaps.length) {
+        logAppendGaps(expansion.gaps, routed.trace);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+        forceCloseStream("append_gap");
+        return;
+      }
       const editGuard = queryClient.getQueryData<SessionDetail>(queryKeys.session(streamSessionId))?.editResubmitProtection;
-      if (shouldDropSupersededEditDelta(editGuard, routed.payload.turnId, routed.payload.ledgerSeq)) return;
-      desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
+      if (shouldDropSupersededEditDelta(editGuard, expansion.payload.turnId, expansion.payload.ledgerSeq)) return;
+      desktopConversationNotifierRef.current.handleAssistantDelta(expansion.payload, {
         sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
         viewedSessionId: viewedSessionIdRef.current,
       });
-      queueAssistantDelta(routed.payload, routed.trace);
+      queueAssistantDelta(expansion.payload, routed.trace);
+    }
+
+    function logAppendGaps(gaps: SessionStreamAppendGap[], trace: SessionStreamProtocolTrace) {
+      if (appendGapLogged) {
+        return;
+      }
+      appendGapLogged = true;
+      postBrowserTelemetry({
+        phase: "session_stream",
+        eventCode: "browser.session_stream.append_gap",
+        message: "Session assistant delta append chain broke; snapshot resync was requested.",
+        level: "warning",
+        fields: {
+          sessionId: streamSessionId,
+          gapItemIds: gaps.slice(0, 5).map((gap) => gap.itemId).join(","),
+          gapReasons: gaps.slice(0, 5).map((gap) => gap.reason).join(","),
+          ...sessionStreamProtocolTelemetryFields(trace),
+        },
+      });
+    }
+
+    function handleStreamResume(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
+      const routed = routeSessionStreamEvent({
+        activeSessionId: streamSessionId,
+        expectedType: "stream_resume",
+        rawData: event.data,
+      });
+      if (!routed.accepted) {
+        return;
+      }
+      markStreamConnected();
+      if (routed.payload.resume === "partial") {
+        // The gap exceeded the server's bounded replay window and was honestly
+        // skipped; the authoritative refetch restores the missed body.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
+      }
+      postBrowserTelemetry({
+        phase: "session_stream",
+        eventCode: "browser.session_stream.resumed",
+        message: "Session stream resumed from the Last-Event-ID journal window.",
+        level: "info",
+        fields: {
+          sessionId: streamSessionId,
+          resume: routed.payload.resume,
+          fromSeq: routed.payload.fromSeq,
+          toSeq: routed.payload.toSeq,
+          replayedCount: routed.payload.replayedCount ?? 0,
+        },
+      });
+    }
+
+    function handleSessionJournalEvent(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
+      const routed = routeSessionStreamEvent({
+        activeSessionId: streamSessionId,
+        expectedType: "session_journal_event",
+        rawData: event.data,
+      });
+      if (!routed.accepted) {
+        return;
+      }
+      markStreamConnected();
+      if (journalReplayLogged) {
+        return;
+      }
+      journalReplayLogged = true;
+      postBrowserTelemetry({
+        phase: "session_stream",
+        eventCode: "browser.session_stream.journal_replay_frame",
+        message: "Session stream replayed a missed journal event after reconnect.",
+        level: "info",
+        fields: {
+          sessionId: streamSessionId,
+          replayedSeq: routed.payload.seq,
+          eventType: routed.payload.eventType,
+          payloadTruncated: Boolean(routed.payload.payloadTruncated),
+        },
+      });
     }
 
     stream.addEventListener("session_detail", handleSessionDetail as EventListener);
     stream.addEventListener("session_initial", handleSessionInitial as EventListener);
     stream.addEventListener("assistant_delta", handleAssistantDelta as EventListener);
+    stream.addEventListener("stream_resume", handleStreamResume as EventListener);
+    stream.addEventListener("session_journal_event", handleSessionJournalEvent as EventListener);
 
     return () => {
       // Route/session switch or unmount: detach this effect's projection state
@@ -861,6 +962,8 @@ export function useSessionDetailStream({
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.removeEventListener("session_initial", handleSessionInitial as EventListener);
       stream.removeEventListener("assistant_delta", handleAssistantDelta as EventListener);
+      stream.removeEventListener("stream_resume", handleStreamResume as EventListener);
+      stream.removeEventListener("session_journal_event", handleSessionJournalEvent as EventListener);
       releaseSessionStream(streamSessionId, stream);
       if (!closeTelemetryFired) {
         postBrowserTelemetry({

@@ -8,6 +8,7 @@ the current checkout's shell is relaunched.
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import shutil
@@ -23,6 +24,7 @@ from uuid import uuid4
 
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.no_console_git import run_git
+from core.launcher.frontend_build import inspect_frontend_build, resolve_active_frontend_dist
 from core.runtime_manager.constants import PROJECT_ROOT
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
@@ -31,6 +33,7 @@ PROVENANCE_RELATIVE = (
     Path("dist") / "desktop" / "win-unpacked" / "resources" / "app.asar.unpacked" / "package-provenance.json"
 )
 ASAR_RELATIVE = Path("dist") / "desktop" / "win-unpacked" / "resources" / "app.asar"
+PACKAGED_FRONTEND_RELATIVE = Path("dist") / "desktop" / "win-unpacked" / "resources" / "web-dist"
 ELECTRON_SRC_RELATIVE = Path("desktop") / "electron" / "src"
 ELECTRON_PACKAGE_DIR = Path("desktop") / "electron"
 UNPACKAGED_MAIN_RELATIVE = Path("desktop") / "electron" / "dist" / "main.js"
@@ -67,6 +70,10 @@ def packaged_provenance_path(project_root: Path | str = PROJECT_ROOT) -> Path:
 
 def packaged_asar_path(project_root: Path | str = PROJECT_ROOT) -> Path:
     return Path(project_root) / ASAR_RELATIVE
+
+
+def packaged_frontend_dist(project_root: Path | str = PROJECT_ROOT) -> Path:
+    return Path(project_root) / PACKAGED_FRONTEND_RELATIVE
 
 
 def unpackaged_electron_executable(project_root: Path | str = PROJECT_ROOT) -> Path | None:
@@ -370,26 +377,86 @@ def _release_desktop_shell_refresh_lock(project_root: Path | str) -> None:
 
 
 def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
-    """Return whether the live packaged Electron shell matches current desktop/electron."""
+    """Return whether the packaged Electron shell and Launcher frontend are current."""
 
     root = Path(project_root)
     current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+    current_commit = _git_tree_hash(root, "HEAD")
     provenance = _read_json(packaged_provenance_path(root))
     packaged_tree = str(provenance.get("electronTreeHash") or "").strip()
     exe_path = packaged_desktop_exe(root)
     asar_path = packaged_asar_path(root)
     source_newer = _electron_sources_newer_than_asar(root)
+    packaged_frontend_path = packaged_frontend_dist(root)
+    packaged_frontend_hash = _frontend_directory_content_sha256(packaged_frontend_path)
+    expected_frontend_hash = str(provenance.get("frontendContentSha256") or "").strip().lower()
+    packaged_frontend_tree = str(provenance.get("frontendTreeHash") or "").strip()
+    packaged_source_commit = str(provenance.get("sourceCommit") or "").strip()
+    packaged_frontend_build_key = str(provenance.get("frontendBuildKey") or "").strip()
+    current_frontend_hash = ""
+    current_frontend_tree = ""
+    current_frontend_source_commit = ""
+    current_frontend_build_key = ""
+    current_frontend_dist = ""
+    frontend_build_current: bool | None = None
+    if exe_path.is_file() and asar_path.is_file():
+        try:
+            frontend_status = inspect_frontend_build(root)
+            frontend_build_current = bool(frontend_status.get("current"))
+            current_frontend_dist = str(frontend_status.get("dist") or resolve_active_frontend_dist(root))
+            frontend_provenance = frontend_status.get("provenance")
+            if not isinstance(frontend_provenance, dict):
+                frontend_provenance = {}
+            frontend_inputs = frontend_status.get("buildInputs")
+            if not isinstance(frontend_inputs, dict):
+                frontend_inputs = {}
+            current_frontend_tree = str(
+                frontend_inputs.get("frontendTree")
+                or frontend_provenance.get("frontendTree")
+                or ""
+            ).strip()
+            current_frontend_source_commit = str(
+                frontend_inputs.get("sourceCommit")
+                or frontend_provenance.get("sourceCommit")
+                or ""
+            ).strip()
+            current_frontend_build_key = str(frontend_status.get("buildKey") or "").strip()
+            current_frontend_hash = _frontend_directory_content_sha256(Path(current_frontend_dist))
+        except Exception:
+            # A failure to inspect current source cannot establish package freshness.
+            frontend_build_current = None
     if not exe_path.is_file() or not asar_path.is_file():
         reason = "missing_package"
         stale = True
     elif not packaged_tree:
         reason = "missing_provenance"
         stale = True
-    elif current_tree and packaged_tree != current_tree:
+    elif not current_tree:
+        reason = "current_electron_tree_unavailable"
+        stale = True
+    elif packaged_tree != current_tree:
         reason = "provenance_mismatch"
         stale = True
     elif source_newer:
         reason = "source_newer_than_asar"
+        stale = True
+    elif not packaged_frontend_path.is_dir() or not expected_frontend_hash or not packaged_frontend_tree:
+        reason = "missing_frontend_provenance"
+        stale = True
+    elif not packaged_frontend_hash or packaged_frontend_hash != expected_frontend_hash:
+        reason = "frontend_package_content_mismatch"
+        stale = True
+    elif frontend_build_current is not True:
+        reason = "frontend_source_stale" if frontend_build_current is False else "frontend_inspection_failed"
+        stale = True
+    elif not current_frontend_tree:
+        reason = "current_frontend_tree_unavailable"
+        stale = True
+    elif not current_frontend_hash or current_frontend_hash != packaged_frontend_hash:
+        reason = "frontend_release_mismatch"
+        stale = True
+    elif current_frontend_tree and packaged_frontend_tree != current_frontend_tree:
+        reason = "frontend_source_mismatch"
         stale = True
     else:
         reason = "current"
@@ -401,6 +468,20 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         "reason": reason,
         "packagedElectronTree": packaged_tree,
         "currentElectronTree": current_tree,
+        "packagedSourceCommit": packaged_source_commit,
+        "currentCommit": current_commit,
+        "packagedFrontendTree": packaged_frontend_tree,
+        "currentFrontendTree": current_frontend_tree,
+        "packagedFrontendContentSha256": packaged_frontend_hash,
+        "expectedFrontendContentSha256": expected_frontend_hash,
+        "currentFrontendContentSha256": current_frontend_hash,
+        "packagedFrontendBuildKey": packaged_frontend_build_key,
+        "currentFrontendBuildKey": current_frontend_build_key,
+        "packagedFrontendSourceCommit": str(provenance.get("frontendSourceCommit") or "").strip(),
+        "currentFrontendSourceCommit": current_frontend_source_commit,
+        "currentFrontendDist": current_frontend_dist,
+        "frontendBuildCurrent": frontend_build_current,
+        "packagedFrontendDist": str(packaged_frontend_path),
         "packagedExe": str(exe_path),
         "sourceNewerThanAsar": source_newer,
         "refreshBlocked": refresh_block is not None,
@@ -937,6 +1018,31 @@ def _git_tree_hash(project_root: Path, spec: str) -> str:
     if int(result.returncode or 0) != 0:
         return ""
     return str(result.stdout or "").strip()
+
+
+def _frontend_directory_content_sha256(path: Path) -> str:
+    """Hash every packaged frontend path and its bytes in deterministic order."""
+
+    if not path.is_dir() or path.is_symlink():
+        return ""
+    try:
+        files = sorted(
+            (entry for entry in path.rglob("*") if entry.is_file() and not entry.is_symlink()),
+            key=lambda entry: entry.relative_to(path).as_posix().encode("utf-8"),
+        )
+        if any(entry.is_symlink() for entry in path.rglob("*")):
+            return ""
+        digest = hashlib.sha256()
+        for entry in files:
+            relative_path = entry.relative_to(path).as_posix().encode("utf-8")
+            content = entry.read_bytes()
+            digest.update(len(relative_path).to_bytes(4, "big"))
+            digest.update(relative_path)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+        return digest.hexdigest()
+    except OSError:
+        return ""
 
 
 def _electron_sources_newer_than_asar(project_root: Path) -> bool:

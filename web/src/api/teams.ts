@@ -5,6 +5,8 @@ import type {
   Team,
   TeamListPayload,
   TeamOrganizationCanvas,
+  TeamTemplateInstantiatePayload,
+  TeamTemplateListPayload,
 } from "./types";
 
 function writeJson<T>(url: string, method: string, body?: unknown): Promise<T> {
@@ -76,6 +78,25 @@ export function createTeam(body: {
   members?: unknown[];
 }): Promise<Team> {
   return writeJson<Team>("/api/teams", "POST", body);
+}
+
+export function listTeamTemplates(options?: {
+  signal?: AbortSignal;
+}): Promise<TeamTemplateListPayload> {
+  return fetchJson<TeamTemplateListPayload>("/api/team-templates", {
+    signal: options?.signal,
+  });
+}
+
+export function instantiateTeamTemplate(
+  templateId: string,
+  name: string,
+): Promise<TeamTemplateInstantiatePayload> {
+  return writeJson<TeamTemplateInstantiatePayload>(
+    `/api/team-templates/${encodeURIComponent(templateId)}/instantiate`,
+    "POST",
+    { name },
+  );
 }
 
 export function updateTeam(

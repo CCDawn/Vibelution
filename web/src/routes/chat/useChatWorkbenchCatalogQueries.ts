@@ -55,6 +55,8 @@ export type ChatWorkbenchCatalogQueriesInput = {
   chatSecondaryPollPolicy: ChatSecondaryPollPolicy;
   chatLiveQueryPolicy: ChatLiveQueryPolicy;
   sessionQueryText: string;
+  /** Session index sort (backend whitelist value); empty keeps the default. */
+  sessionListSort?: string;
   activeSessionId: string;
   activeGroupRoomId: string;
   expandedGroupAgentSessionIds: string[];
@@ -78,6 +80,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     chatSecondaryPollPolicy,
     chatLiveQueryPolicy,
     sessionQueryText,
+    sessionListSort = "",
     activeSessionId,
     activeGroupRoomId,
     expandedGroupAgentSessionIds,
@@ -180,6 +183,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     enabled: sessionIndexQueryEnabled,
     refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+    sort: sessionListSort,
   });
   const visibleSessionsData = useMemo(
     () => rawSessionsQuery.data?.filter((session) => isVisibleDirectSession(session)),
@@ -274,6 +278,16 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     staleTime: 60_000,
   });
   const slashCommandSuggestions = skillsQuery.data?.skills ?? [];
+  /**
+   * Slash panel catalog state (ZCode slashCommandPanelSections parity): the
+   * panel renders loading/error placeholders for the skills section instead of
+   * silently showing an empty list when the skill library query fails.
+   */
+  const slashSkillsCatalogState: "ready" | "loading" | "error" = skillsQuery.isError
+    ? "error"
+    : skillsQuery.isPending
+      ? "loading"
+      : "ready";
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
     queryFn: () => listChatRoomModes(),
@@ -339,6 +353,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     agentsQuery,
     skillsQuery,
     slashCommandSuggestions,
+    slashSkillsCatalogState,
     chatRoomModesQuery,
     chatRoomPurposesQuery,
     activeGroupRoomQuery,

@@ -15,6 +15,8 @@ const labels: ChatConversationComposerBridgeLabels = {
   loadingSession: "loading",
   messageInputPlaceholder: "message",
   saveAndRerunMessage: "save and rerun",
+  sessionBusyQueuePlaceholder: "input queues and sends after this turn",
+  sessionBusyQueuedPlaceholder: "append; empty Enter steers now",
 };
 
 describe("ChatConversationComposerBridge", () => {
@@ -69,7 +71,27 @@ describe("ChatConversationComposerBridge", () => {
     expect(state.actionMode).toBe("stop");
     expect(state.pending).toBe(true);
     expect(state.actionDisabled).toBe(true);
-    expect(state.placeholder).toBe("");
+    // ZCode followUpQueue placeholder: a running turn never blanks the composer.
+    expect(state.placeholder).toBe(labels.sessionBusyQueuePlaceholder);
+  });
+
+  it("flips the busy placeholder to the append hint once queue items exist", () => {
+    const state = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      sessionBusy: true,
+      followupQueue: [{ id: "queue-1", text: "queued" }],
+      value: "",
+    });
+    expect(state.placeholder).toBe(labels.sessionBusyQueuedPlaceholder);
+
+    const stoppingState = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      sessionBusy: true,
+      sessionStopping: true,
+      followupQueue: [{ id: "queue-1", text: "queued" }],
+      value: "",
+    });
+    expect(stoppingState.placeholder).toBe("message");
   });
 
   it("disables image input in edit mode or when the active model cannot read images", () => {
@@ -116,6 +138,8 @@ describe("ChatConversationComposerBridge", () => {
     expect(dictionary.en.messageInputPlaceholder).toBe("Describe the next step...");
     expect(dictionary.zh.sessionBusyPlaceholder).toBe("输入后排队，当前轮结束后自动发出");
     expect(dictionary.en.sessionBusyPlaceholder).toBe("Type to queue; it sends after this turn");
+    expect(dictionary.zh.sessionBusyQueuePlaceholder).toBe("输入将排队，本轮结束后自动发送");
+    expect(dictionary.en.sessionBusyQueuePlaceholder).toBe("Input queues and sends automatically when the turn ends");
     expect(dictionary.zh.messageInputPlaceholder).not.toContain("当前会话");
     expect(dictionary.en.messageInputPlaceholder).not.toContain("current session");
   });

@@ -68,10 +68,23 @@ describe("memory workbench queries contract", () => {
     );
 
     const detailQuery = extractQueryBlock("agentMemoryDetailQuery");
-    expect(detailQuery).toContain('queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"]');
+    expect(detailQuery).toContain("queryKey: queryKeys.memoryAgentDetail(selectedAgentMemoryAgentId, selectedAgentMemoryRevision)");
     expect(detailQuery).toContain("fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId");
     expect(detailQuery).toContain("includeContent: true");
     expect(detailQuery).toContain("enabled: isPersonalMemoryView(forcedView) && Boolean(selectedAgentMemoryAgentId)");
+  });
+
+  it("requests formal knowledge and private metadata with actor-scoped graph and detail caches", () => {
+    expect(queriesSource).toContain('const MEMORY_GRAPH_INCLUDE = "knowledge,privateMemory,officialResearchGraph"');
+    const graph = extractQueryBlock("memoryKnowledgeGraphQuery");
+    expect(graph).toContain("queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, MEMORY_GRAPH_INCLUDE, requestedTeamId)");
+    expect(graph).toContain("include: MEMORY_GRAPH_INCLUDE");
+    expect(graph).toContain("teamId: requestedTeamId || undefined");
+    const detail = extractQueryBlock("memoryKnowledgeGraphNodeDetailQuery");
+    expect(detail).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
+    expect(routeSource).toContain('if (forcedView === "graph") return;');
+    expect(routeSource).toContain("graphActorAgentId={fallbackKnowledgeActorAgentId}");
+    expect(routeSource).toContain("graphTeamId={requestedTeamId}");
   });
 
   it("keeps polled queries cache-first with staleTime >= refetchInterval", () => {

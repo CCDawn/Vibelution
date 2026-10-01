@@ -21,7 +21,10 @@ import type {
   ConversationQueryResponse,
   ConversationSummary,
   SessionDetail,
+  SessionSummary,
 } from "../../api/types";
+import { isSessionCreatePreserved, resetSessionCreatePreservesForTests } from "../sessionCreatePreserve";
+import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { chatRouteSelectionsEqual, type ChatRouteSelection } from "./chatSelectionProjection";
 import {
@@ -88,6 +91,7 @@ function buildOptions(route: ReturnType<typeof buildRouteStub>) {
       queryClient,
       chatWorkspaceCache: {
         afterChatRoomChanged: vi.fn(),
+        afterSessionDeleted: vi.fn(),
       },
       lang: "zh" as const,
       t: (key: TranslationKey) => key,
@@ -599,5 +603,63 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     await createChatSession({ agentId: "agent-a" });
     const legacyInit = fetchJsonMock.mock.calls[0]?.[1] as RequestInit;
     expect(legacyInit.headers).not.toHaveProperty("Idempotency-Key");
+  });
+
+  it("does not put the real session back when the temp tab was deleted first", async () => {
+    resetSessionCreatePreservesForTests();
+    resetSessionDeleteTombstonesForTests();
+    const deferred = createDeferred<SessionDetail>();
+    fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const path = String(input || "");
+      const method = String(init?.method || "GET").toUpperCase();
+      if (path === "/api/sessions" && method === "POST") {
+        return deferred.promise;
+      }
+      if (method === "DELETE" && path.startsWith("/api/sessions/")) {
+        return Promise.resolve({
+          deleted: true,
+          deletedSessionId: decodeURIComponent(path.slice("/api/sessions/".length)),
+          nextActiveSessionId: "",
+        });
+      }
+      return Promise.resolve({});
+    });
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempSessionId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    expect(tempSessionId.startsWith("temp-session-")).toBe(true);
+
+    act(() => {
+      resultRef!.deleteSessionMutation.mutate({ sessionId: tempSessionId });
+    });
+    await flushMutationQueue();
+    expect(isSessionDeleteTombstoned(tempSessionId)).toBe(true);
+    expect(isSessionCreatePreserved(tempSessionId)).toBe(false);
+
+    deferred.resolve(serverSessionFor("session-real", "agent-a"));
+    await flushMutationQueue();
+    await flushMutationQueue();
+
+    const sessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
+    expect(sessions.map((item) => item.id)).not.toContain("session-real");
+    expect(sessions.map((item) => item.id)).not.toContain(tempSessionId);
+    expect(isSessionCreatePreserved("session-real")).toBe(false);
+    expect(isSessionDeleteTombstoned("session-real")).toBe(true);
+    expect(queryClient.getQueryData(queryKeys.session("session-real"))).toBeUndefined();
+    const deleteCalls = fetchJsonMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input) === "/api/sessions/session-real"
+        && String((init as RequestInit | undefined)?.method || "").toUpperCase() === "DELETE",
+    );
+    expect(deleteCalls.length).toBeGreaterThan(0);
+    expect(hookOptions.route.ref.current).not.toEqual({ kind: "session", sessionId: "session-real" });
+
+    resetSessionCreatePreservesForTests();
+    resetSessionDeleteTombstonesForTests();
   });
 });

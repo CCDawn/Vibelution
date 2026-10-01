@@ -12,6 +12,10 @@ describe("team canvas node editing extraction", () => {
     expect(routeSource).toContain("createTeamCanvasNodeEditing");
     expect(routeSource).toContain("addNode,");
     expect(routeSource).toContain("finishNodeDrag,");
+    expect(routeSource).toContain("connectNodes,");
+    expect(routeSource).toContain("deleteSelectedEdge,");
+    expect(routeSource).toContain("relabelSelectedEdge,");
+    expect(routeSource).toContain("relabelSelectedNode,");
     expect(routeSource).not.toContain("function addNode()");
     expect(routeSource).not.toContain("function finishNodeDrag(");
     expect(routeSource).not.toContain("function applyNodeDraft()");
@@ -21,7 +25,24 @@ describe("team canvas node editing extraction", () => {
     expect(editingSource).toContain("export function createTeamCanvasNodeEditing");
     expect(editingSource).toContain("buildCanvasWithNewNode");
     expect(editingSource).toContain("buildCanvasWithDraggedNode");
+    expect(editingSource).toContain("buildCanvasWithEdge");
+    expect(editingSource).toContain("buildCanvasWithoutEdge");
+    expect(editingSource).toContain("buildCanvasWithRelabeledEdge");
+    expect(editingSource).toContain("buildCanvasWithRelabeledNode");
     expect(modelSource).toContain("export function applyNodeDragDeltas");
     expect(modelSource).toContain("export function buildCanvasWithLeadConnection");
+    expect(modelSource).toContain("export function buildCanvasWithEdge");
+    expect(modelSource).toContain("export function buildCanvasWithoutEdge");
+    expect(modelSource).toContain("export function buildCanvasWithRelabeledEdge");
+    expect(modelSource).toContain("export function buildCanvasWithRelabeledNode");
+  });
+
+  it("edge and node relabel handlers stay behind the read-only gate", () => {
+    for (const handler of ["connectNodes(", "deleteSelectedEdge(", "relabelSelectedEdge(", "relabelSelectedNode("]) {
+      const index = editingSource.indexOf(`function ${handler}`);
+      expect(index).toBeGreaterThan(0);
+      const body = editingSource.slice(index, editingSource.indexOf("}", index));
+      expect(body).toContain("researchCanvasReadOnly");
+    }
   });
 });

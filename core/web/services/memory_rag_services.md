@@ -62,9 +62,25 @@
 
 改 Agent Prompt 注入 memory 时，先查 tool/route 是否经 `unified_knowledge_search_service` 或 `rag_retrieval_service`，不要在 chat route 平行拼检索。
 
+个人记忆列表的文件 metadata 包含可选 `revision`（文件 `mtime_ns:size`）；它复用已有 stat，
+不读取正文，也不是内容哈希。旧 `updatedAt` 仍保持秒级显示格式。前端详情 cache key 使用
+选中 Agent 的文件 revision、路径和知识摘要；列表轮询发现变化后更新正文，未变时不增加
+正文请求。改写并保留原始 mtime 和 size 的外部工具不在该 metadata 标识的检测能力内。
+详情接口每次只读取一次 inventory；不匹配的 actor 只读取 metadata，保持 unknown Agent
+先返回 404、已知 Agent 的无效 actor 返回 422 的现有顺序。
+
 ---
 
 ## 主测（可复制）
+
+知识图谱新增显式 include：`knowledge` 展开当前 actor 有权读取的 Agent / Team 正式知识条目，
+`privateMemory` 展开当前 actor 的私有文件 metadata，`officialResearchGraph` 保留科研追踪引用。
+默认请求与旧 `all` 不增加这两类展开。图谱节点不含私有正文；点击私有文件详情时先校验 owner
+等于 actor，再调用现有 memory inventory 读取。可见队友的私有文件不会随团队结构一起展开。
+
+`GET /api/memory/agents` 的 `Server-Timing` 响应头仅含毫秒耗时：`memory-directory` 为 Agent 目录读取（含修复、等待与摘要投影），`memory-paths` 为共享路径上下文解析，`memory-scan` 为逐 Agent 文件扫描与正式知识统计，`memory-total` 为完整 service 计算。JSON 内容与权限契约保持原样；这些计时不含 HTTP 调度、响应模型序列化和传输，不能直接当成浏览器总等待时间，也不会触发额外日志写入。
+
+单次 inventory 调用复用按项目分区的正式工作区根解析；调用结束即释放，下次调用重新解析存储位置。沙箱选择与补种仍逐路径执行，路径包含性检查仍使用实际解析结果；该快照不用于跨请求缓存文件或知识内容。
 
 ```powershell
 # 矩阵 memory-cleanup 行

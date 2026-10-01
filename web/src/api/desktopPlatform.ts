@@ -38,7 +38,7 @@ function isExternalHttpMailtoUrl(rawUrl: string): boolean {
 }
 
 /** Windows drive, Windows UNC, or POSIX absolute — anything else is rejected. */
-function isAbsoluteFileSystemPath(rawPath: string): boolean {
+export function isAbsoluteFileSystemPath(rawPath: string): boolean {
   const trimmed = rawPath.trim();
   if (trimmed.length === 0) {
     return false;

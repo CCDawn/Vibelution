@@ -12,10 +12,14 @@ from datetime import datetime
 import logging
 from typing import Any
 
-from core.chat.conversation_store import parse_directory_cursor
+from core.chat.conversation_store import (
+    directory_cursor_for_row,
+    parse_directory_cursor_entry,
+)
 from core.web.services.agent_config_authority import canonical_agent_config_payload
 
 from . import directory_runtime
+from . import session_body_search
 from .read_health import note_session_read_degraded
 
 
@@ -24,6 +28,9 @@ logger = logging.getLogger(__name__)
 _DIRECTORY_LIST_PAGE = 200
 _SYNC_TIMEOUT_SECONDS = 5.0
 _QUERY_VISIBLE_PAGE_ATTEMPTS = 8
+# Body-enabled search gathers before paginating; the cap bounds the gather on
+# very large installs while staying far above any realistic interactive list.
+_BODY_SEARCH_ROW_CAP = 600
 
 
 def _service():
@@ -88,10 +95,27 @@ def query_session_summaries(
             ).lower()
         )
     include_hidden = bool(normalized_agent_id)
-    before = parse_directory_cursor(cursor)
+    before = parse_directory_cursor_entry(cursor)
     started_at_head = before is None
     runtime_statuses = _session_runtime_status_snapshot()
     _, experiment_bindings = _chat_state_directory_overlay()
+    if normalized_query:
+        return _query_session_summaries_with_body_search(
+            store=store,
+            limit=normalized_limit,
+            query=normalized_query,
+            agent_id=normalized_agent_id,
+            session_kind=normalized_session_kind,
+            state=normalized_state,
+            sort=normalized_sort,
+            include_hidden=include_hidden,
+            matching_agent_ids=matching_agent_ids,
+            agent_ids=agent_ids,
+            agent_by_id=agent_by_id,
+            experiment_bindings=experiment_bindings,
+            runtime_statuses=runtime_statuses,
+            cursor=cursor,
+        )
     if normalized_sort != "updatedAt_desc":
         page = store.repository.list_directory_page(
             agent_id=normalized_agent_id,
@@ -178,7 +202,7 @@ def query_session_summaries(
         next_cursor = str(page.get("nextCursor") or "")
         if not next_cursor:
             break
-        before = parse_directory_cursor(next_cursor)
+        before = parse_directory_cursor_entry(next_cursor)
         if before is None:
             next_cursor = ""
             break
@@ -196,6 +220,148 @@ def query_session_summaries(
         "items": items,
         "nextCursor": next_cursor if len(items) >= normalized_limit else "",
         "totalEstimate": int(page.get("total") or 0) if items or next_cursor else 0,
+    }
+
+
+def _query_session_summaries_with_body_search(
+    *,
+    store: Any,
+    limit: int,
+    query: str,
+    agent_id: str,
+    session_kind: str,
+    state: str,
+    sort: str,
+    include_hidden: bool,
+    matching_agent_ids: tuple[str, ...],
+    agent_ids: Sequence[str],
+    agent_by_id: Mapping[str, Mapping[str, Any]],
+    experiment_bindings: Mapping[str, Mapping[str, Any]],
+    runtime_statuses: Mapping[str, str] | None,
+    cursor: str,
+) -> dict[str, Any]:
+    """Search path that also matches session journal bodies and returns snippets.
+
+    Title/preview/session-id matches come from the store LIKE query; sessions
+    whose journals contain the query text are appended with match-centered
+    ``searchSnippets``.  Results are pinned-first, then the requested sort,
+    paginated with an offset cursor (the gather must complete before paging).
+    """
+
+    s = _service()
+    sql_rows: list[dict[str, Any]] = []
+    before: tuple[int, str, int | None] | None = None
+    while len(sql_rows) < _BODY_SEARCH_ROW_CAP:
+        page = store.repository.list_directory_page(
+            agent_id=agent_id,
+            session_kind=session_kind,
+            status=state,
+            query=query,
+            include_hidden=include_hidden,
+            matching_agent_ids=matching_agent_ids,
+            agent_ids=agent_ids,
+            limit=_DIRECTORY_LIST_PAGE,
+            before=before,
+        )
+        batch = list(page.get("rows") or [])
+        sql_rows.extend(batch)
+        next_cursor = str(page.get("nextCursor") or "")
+        if not batch or not next_cursor:
+            break
+        before = parse_directory_cursor_entry(next_cursor)
+        if before is None:
+            break
+    sql_matched_ids = {
+        str(row.get("sessionId") or "").strip()
+        for row in sql_rows
+    }
+    candidate_rows: list[dict[str, Any]] = []
+    if len(sql_rows) < _BODY_SEARCH_ROW_CAP:
+        before = None
+        while len(candidate_rows) < session_body_search.MAX_BODY_SEARCH_SESSIONS:
+            page = store.repository.list_directory_page(
+                agent_id=agent_id,
+                session_kind=session_kind,
+                status=state,
+                query="",
+                include_hidden=include_hidden,
+                matching_agent_ids=(),
+                agent_ids=agent_ids,
+                limit=_DIRECTORY_LIST_PAGE,
+                before=before,
+            )
+            batch = list(page.get("rows") or [])
+            for row in batch:
+                session_id = str(row.get("sessionId") or "").strip()
+                if session_id and session_id not in sql_matched_ids:
+                    candidate_rows.append(row)
+            next_cursor = str(page.get("nextCursor") or "")
+            if not batch or not next_cursor:
+                break
+            before = parse_directory_cursor_entry(next_cursor)
+            if before is None:
+                break
+    try:
+        body_matches = session_body_search.search_session_bodies(
+            query=query,
+            session_ids=[
+                str(row.get("sessionId") or "").strip()
+                for row in candidate_rows
+            ],
+            workspace_resolver=s._session_workspace_dir_if_present,
+        )
+    except Exception as exc:
+        # Body search is an enhancement over title/preview matching; a scan
+        # failure must not take the whole query down.
+        note_session_read_degraded(
+            source="session body search",
+            error_type=type(exc).__name__,
+        )
+        body_matches = {}
+    # SQL matches first, then body-only matches with their full directory rows
+    # so summaries keep every store field.
+    matched_rows = [
+        *sql_rows,
+        *(row for row in candidate_rows if str(row.get("sessionId") or "").strip() in body_matches),
+    ]
+    summaries = [
+        _summary_from_directory_row(
+            row,
+            agent_by_id=agent_by_id,
+            experiment_binding=experiment_bindings.get(
+                str(row.get("sessionId") or "").strip()
+            ),
+            runtime_statuses=runtime_statuses,
+            search_snippets=body_matches.get(str(row.get("sessionId") or "").strip()),
+        )
+        for row in matched_rows
+    ]
+    summaries = _filter_user_directory_summaries(
+        summaries,
+        include_hidden=include_hidden,
+    )
+    summaries = _merge_agent_directory_stub_summaries(
+        summaries,
+        agent_by_id=agent_by_id,
+        include_hidden=include_hidden,
+        agent_id=agent_id,
+        query=query,
+        matching_agent_ids=matching_agent_ids,
+        runtime_statuses=runtime_statuses,
+    )
+    # Stable two-pass sort: requested order first, then pinned-first tiers.
+    summaries.sort(
+        key=s._session_query_sort_key(sort),
+        reverse=str(sort).endswith("_desc"),
+    )
+    summaries.sort(key=lambda item: 0 if item.get("pinnedAtMs") else 1)
+    offset_cursor = s._coerce_nonnegative_int(cursor)
+    start = min(offset_cursor, len(summaries))
+    end = min(start + limit, len(summaries))
+    return {
+        "items": summaries[start:end],
+        "nextCursor": str(end) if end < len(summaries) else "",
+        "totalEstimate": len(summaries),
     }
 
 
@@ -223,7 +389,7 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         next_cursor = str(page.get("nextCursor") or "")
         if not batch or not next_cursor:
             break
-        before = parse_directory_cursor(next_cursor)
+        before = parse_directory_cursor_entry(next_cursor)
         if before is None:
             break
     _, experiment_bindings = _chat_state_directory_overlay()
@@ -671,14 +837,7 @@ def _filter_user_directory_summaries(
 
 
 def _directory_cursor_from_row(row: Mapping[str, Any]) -> str:
-    recency = row.get("recencyAtMs")
-    session_id = str(row.get("sessionId") or "").strip()
-    if recency in (None, "") or not session_id:
-        return ""
-    try:
-        return f"{int(recency)}:{session_id}"
-    except (TypeError, ValueError):
-        return ""
+    return directory_cursor_for_row(row)
 
 
 def _conversation_title(conversation: Mapping[str, Any]) -> str:
@@ -708,6 +867,7 @@ def _summary_from_directory_row(
     agent_by_id: Mapping[str, Mapping[str, Any]],
     experiment_binding: Mapping[str, Any] | None = None,
     runtime_statuses: Mapping[str, str] | None = None,
+    search_snippets: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     session_id = str(row.get("sessionId") or "").strip()
@@ -746,7 +906,7 @@ def _summary_from_directory_row(
         agent_lookup_checked=True,
         persisted_status_code="",
     )
-    return {
+    summary: dict[str, Any] = {
         "id": session_id,
         "title": display_title or raw_title,
         "agentId": agent_id,
@@ -780,6 +940,11 @@ def _summary_from_directory_row(
         "currentPhase": status,
         "sessionKind": session_kind,
         "hiddenFromIndex": bool(row.get("hiddenFromIndex")),
+        "pinnedAtMs": (
+            int(row["pinnedAtMs"])
+            if row.get("pinnedAtMs") is not None
+            else None
+        ),
         "readOnly": False,
         "archiveState": {},
         "conversationIndexVisibility": str(row.get("conversationIndexVisibility") or "").strip(),
@@ -798,3 +963,6 @@ def _summary_from_directory_row(
         "projectionEdit": s._projection_edit_contract("session", session_id),
         "agentSourceRef": s._source_authority_ref("agent", agent_id) if agent_id else None,
     }
+    if search_snippets:
+        summary["searchSnippets"] = [str(item) for item in search_snippets][:4]
+    return summary

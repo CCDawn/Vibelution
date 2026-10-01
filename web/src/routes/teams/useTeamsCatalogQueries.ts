@@ -9,14 +9,14 @@ import { useMemo } from "react";
 import { listAgentSummaries } from "../../api/agents";
 import { queryKeys } from "../../api/queryKeys";
 import { listTeams } from "../../api/teams";
-import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
+import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
 import {
   RESEARCH_TEAM_ID,
   TEAM_PICKER_TEAM_IDS,
   resolveKnownRouteTeamId,
 } from "../TeamsRoute.canvasData";
-import { isEvolutionSystemTeam } from "./teamKindModel";
+import { selectVisibleTeams } from "./teamCreateLogic";
 import {
   TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS,
   TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS,
@@ -61,14 +61,13 @@ export function useTeamsCatalogQueries({
     [activeAgents],
   );
   const teams = teamsQuery.data?.teams ?? [];
-  const visibleTeams = useMemo(() => {
-    const teamsById = new Map(
-      teams.filter((team) => !isEvolutionSystemTeam(team)).map((team) => [team.teamId, team]),
-    );
-    return TEAM_PICKER_TEAM_IDS.map((teamId) => teamsById.get(teamId)).filter(
-      (team): team is Team => Boolean(team),
-    );
-  }, [teams]);
+  // Picker visibility: fixed board teams ∪ user-created teams (blank manual
+  // and template-instantiated); evolution system teams stay hidden
+  // (teamCreateLogic.selectVisibleTeams).
+  const visibleTeams = useMemo(
+    () => selectVisibleTeams(teams, TEAM_PICKER_TEAM_IDS),
+    [teams],
+  );
   const visibleTeamIds = useMemo(
     () => new Set(visibleTeams.map((team) => team.teamId)),
     [visibleTeams],

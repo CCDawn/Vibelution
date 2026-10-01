@@ -10,7 +10,7 @@ from typing import Any
 from core.infrastructure import developer_sandbox
 from vibelution_storage import resolve_project_logs_home
 
-from . import agent_directory_service, team_knowledge_service, team_service
+from . import agent_directory_service, memory_service, team_knowledge_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -44,6 +44,9 @@ def get_memory_knowledge_graph(
     normalized_team_id = str(team_id or "").strip()
     filter_owner_type, filter_owner_id, normalized_base_id = _parse_owner_scoped_node_value(knowledge_base_id)
     include_set = _include_set(include)
+    include_knowledge = "knowledge" in include_set
+    include_private_memory = "privatememory" in include_set or "private_memory" in include_set
+    include_research_refs = "officialresearchgraph" in include_set or "official_research_graph" in include_set or "all" in include_set
     node_limit = max(1, min(int(limit or DEFAULT_LIMIT), MAX_LIMIT))
     graph = _GraphBuilder(node_limit)
     detail_cache: dict[str, list[dict[str, Any]]] = {}
@@ -123,6 +126,21 @@ def get_memory_knowledge_graph(
             content_items=agent_detail,
         )
         graph.add_edge(project_node_id, _node_id("agent", agent_id_value), "project_has_agent")
+        owner = team_knowledge_service._owner_context("agent", agent_id_value, agent=agent)
+        if include_knowledge:
+            _add_owner_knowledge_graph_nodes(
+                graph, _node_id("agent", agent_id_value), owner,
+                actor_agent_id=normalized_agent_id,
+                knowledge_base_owner_type=filter_owner_type,
+                knowledge_base_owner_id=filter_owner_id,
+                knowledge_base_id=normalized_base_id,
+                include_all_items=True,
+                include_research_refs=include_research_refs,
+            )
+        # File-backed memories have no Team ACL grants. Only their owner may
+        # discover or read them, even when teammates are visible in the graph.
+        if include_private_memory and agent_id_value == normalized_agent_id and not normalized_base_id:
+            _add_agent_private_memory_nodes(graph, agent_id_value)
 
     for team in teams:
         team_id_value = str(team.get("teamId") or "").strip()
@@ -172,8 +190,8 @@ def get_memory_knowledge_graph(
                 label=str(member.get("role") or "member"),
                 metadata={"role": str(member.get("role") or "member"), "agentStatus": str(member.get("agentStatus") or "")},
             )
-        if "officialresearchgraph" in include_set or "official_research_graph" in include_set or "all" in include_set:
-            _add_official_research_graph_nodes(
+        if include_knowledge or include_research_refs:
+            _add_owner_knowledge_graph_nodes(
                 graph,
                 team_node_id,
                 team_knowledge_service._owner_context("team", team_id_value, team=team),
@@ -181,6 +199,8 @@ def get_memory_knowledge_graph(
                 knowledge_base_owner_type=filter_owner_type,
                 knowledge_base_owner_id=filter_owner_id,
                 knowledge_base_id=normalized_base_id,
+                include_all_items=include_knowledge,
+                include_research_refs=include_research_refs,
             )
 
     if "runtime" in include_set or "all" in include_set or not include_set:
@@ -452,16 +472,19 @@ def _resolve_file_backed_domain_path(root: Path, path: str) -> Path:
     return root / normalized
 
 
-def _add_official_research_graph_nodes(
+def _add_owner_knowledge_graph_nodes(
     graph: _GraphBuilder,
-    team_node_id: str,
+    parent_node_id: str,
     owner: dict[str, Any],
     *,
     actor_agent_id: str,
     knowledge_base_owner_type: str,
     knowledge_base_owner_id: str,
     knowledge_base_id: str,
+    include_all_items: bool = False,
+    include_research_refs: bool = True,
 ) -> None:
+    all_items: list[dict[str, Any]] | None = None
     for base in team_knowledge_service._knowledge_bases_for_owner(owner):
         base_id = str(base.get("knowledgeBaseId") or "").strip()
         if not _knowledge_base_matches_filter(owner, base, knowledge_base_owner_type, knowledge_base_owner_id, knowledge_base_id):
@@ -486,13 +509,16 @@ def _add_official_research_graph_nodes(
             responsibility_question=_responsibility_question("knowledge_base", base),
             visual={"size": "container"},
         )
-        graph.add_edge(team_node_id, base_node_id, "team_has_knowledge_base")
-        for item in team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner)):
+        graph.add_edge(parent_node_id, base_node_id, f"{owner.get('ownerType')}_has_knowledge_base")
+        if all_items is None:
+            all_items = team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+        for item in all_items:
             if str(item.get("knowledgeBaseId") or "") != base_id:
                 continue
             metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
             official_graph = metadata.get("officialResearchGraph") if isinstance(metadata.get("officialResearchGraph"), dict) else {}
-            if str(official_graph.get("status") or "") != "synced":
+            synced = str(official_graph.get("status") or "") == "synced"
+            if not include_all_items and not synced:
                 continue
             item_id = str(item.get("knowledgeItemId") or "").strip()
             if not item_id:
@@ -511,7 +537,7 @@ def _add_official_research_graph_nodes(
                     "knowledgeBaseId": base_id,
                     "ownerType": owner.get("ownerType"),
                     "ownerId": owner.get("ownerId"),
-                    "graphKind": str(official_graph.get("graphKind") or "formal_research_trace"),
+                    "graphKind": str(official_graph.get("graphKind") or "formal_research_trace") if synced else "formal_knowledge",
                     "edgeCount": int((official_graph.get("summary") or {}).get("edgeCount") or 0)
                     if isinstance(official_graph.get("summary"), dict)
                     else 0,
@@ -522,7 +548,7 @@ def _add_official_research_graph_nodes(
                 content_items=[],
             )
             graph.add_edge(base_node_id, item_node_id, "knowledge_base_has_item")
-            for edge in official_graph.get("edges") or []:
+            for edge in (official_graph.get("edges") or []) if synced and include_research_refs else []:
                 if not isinstance(edge, dict):
                     continue
                 source_id = str(edge.get("sourceId") or "").strip()
@@ -559,6 +585,30 @@ def _add_official_research_graph_nodes(
                 )
 
 
+def _add_agent_private_memory_nodes(graph: _GraphBuilder, agent_id: str) -> None:
+    inventory = memory_service.get_agent_memory_inventory(agent_id=agent_id, include_content=False)
+    agent = inventory.get("selectedAgent") or {}
+    owner = {"ownerType": "agent", "ownerId": agent_id}
+    for item in agent.get("items") or []:
+        item_id = str(item.get("id") or "").strip()
+        if not item_id:
+            continue
+        node_id = _owner_scoped_node_id("agent_private_memory", owner, item_id)
+        graph.add_node(
+            node_id, "agent_private_memory", str(item.get("title") or item.get("name") or item_id),
+            summary=str(item.get("summary") or ""),
+            status=str(item.get("status") or "available"),
+            updated_at=str(item.get("updatedAt") or ""),
+            metadata={
+                "ownerType": "agent", "ownerId": agent_id, "memoryItemId": item_id,
+                "relativePath": str(item.get("relativePath") or ""),
+                "revision": str(item.get("revision") or ""),
+                "sizeBytes": int(item.get("sizeBytes") or 0), "fullContentIncluded": False,
+            },
+        )
+        graph.add_edge(_node_id("agent", agent_id), node_id, "agent_has_private_memory")
+
+
 def _sync_roots() -> None:
     if agent_directory_service.PROJECT_ROOT != PROJECT_ROOT:
         agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
@@ -566,6 +616,8 @@ def _sync_roots() -> None:
         team_service.PROJECT_ROOT = PROJECT_ROOT
     if team_knowledge_service.PROJECT_ROOT != PROJECT_ROOT:
         team_knowledge_service.PROJECT_ROOT = PROJECT_ROOT
+    if memory_service.PROJECT_ROOT != PROJECT_ROOT:
+        memory_service.PROJECT_ROOT = PROJECT_ROOT
 
 
 def _record_graph_event(payload: dict[str, Any], agent_id: str) -> None:
@@ -783,6 +835,30 @@ def _resolve_node_detail(node_id: str, actor_agent_id: str, *, limit: int) -> di
             "label": str(item.get("title") or raw_value),
             "summary": str(item.get("summary") or ""),
             "contentItems": [_full_knowledge_item_detail(item, base=base, owner=owner)],
+        }
+    if node_type == "agent_private_memory":
+        owner_type, owner_id, item_id = _parse_owner_scoped_node_value(raw_value)
+        if owner_type != "agent" or not owner_id or owner_id != actor_agent_id or not item_id:
+            return None
+        inventory = memory_service.get_agent_memory_inventory(agent_id=owner_id, include_content=True)
+        agent = inventory.get("selectedAgent") or {}
+        item = next((value for value in agent.get("items") or [] if _node_fragment_matches(value.get("id"), item_id)), None)
+        if item is None:
+            return None
+        content = str(item.get("content") or "")
+        trimmed_content = _trim(content, NODE_DETAIL_CONTENT_LIMIT)
+        return {
+            "nodeType": "agent_private_memory", "label": str(item.get("title") or item_id),
+            "summary": str(item.get("summary") or ""),
+            "contentItems": [{
+                "id": str(item.get("id") or ""), "type": "agent_private_memory",
+                "title": str(item.get("title") or item_id), "summary": str(item.get("summary") or ""),
+                "ownerType": "agent", "ownerId": owner_id,
+                "updatedAt": str(item.get("updatedAt") or ""),
+                "content": trimmed_content,
+                "contentTruncated": bool(item.get("contentTruncated")) or len(content) > len(trimmed_content),
+                "fullContentIncluded": True,
+            }],
         }
     return {"nodeType": node_type, "label": node_id, "summary": "", "contentItems": []}
 

@@ -65,6 +65,7 @@ TEAM_ID_TO_KIND = {
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
     "medical-demo": "medical-consultation-demo",
     "heletech-demo": "heletech-maternal-digital-health-demo",
+    "dev-team": "dev-team",
 }
 
 

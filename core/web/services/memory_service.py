@@ -219,18 +219,32 @@ def get_memory_overview(*, include_content: bool = True) -> dict[str, Any]:
     return overview
 
 
-def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = False) -> dict[str, Any]:
-    """Return Agent-private workspace memory files and formal private knowledge counts."""
+@developer_sandbox.snapshot_formal_workspace_paths()
+def get_agent_memory_inventory(
+    *,
+    agent_id: str = "",
+    include_content: bool = False,
+    phase_timings: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Return private memory inventory, optionally measuring service phases in milliseconds."""
 
+    started_at = time.perf_counter()
     from core.web.services import agent_directory_service, team_knowledge_service
 
+    if phase_timings is not None:
+        phase_timings.update(directory=0.0, paths=0.0, scan=0.0, total=0.0)
     root = PROJECT_ROOT.resolve()
     normalized_agent_id = str(agent_id or "").strip()
     warnings: list[str] = []
+    phase_started_at = time.perf_counter()
     agents = agent_directory_service.list_agents(include_archived=True, detail="summary")
+    if phase_timings is not None:
+        phase_timings["directory"] = (time.perf_counter() - phase_started_at) * 1000
     if normalized_agent_id:
         agents = [agent for agent in agents if str(agent.get("agentId") or "").strip() == normalized_agent_id]
         if not agents:
+            if phase_timings is not None:
+                phase_timings["total"] = (time.perf_counter() - started_at) * 1000
             return {
                 "schemaVersion": 1,
                 "generatedAt": _now_iso(),
@@ -249,8 +263,12 @@ def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = Fa
                 "agents": [],
             }
 
+    phase_started_at = time.perf_counter()
     path_context = _agent_memory_path_context(root) if agents else None
+    if phase_timings is not None:
+        phase_timings["paths"] = (time.perf_counter() - phase_started_at) * 1000
     agent_entries: list[dict[str, Any]] = []
+    phase_started_at = time.perf_counter()
     for agent in agents:
         entry = _agent_memory_inventory_entry(
             root,
@@ -261,6 +279,8 @@ def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = Fa
             path_context=path_context,
         )
         agent_entries.append(entry)
+    if phase_timings is not None:
+        phase_timings["scan"] = (time.perf_counter() - phase_started_at) * 1000
 
     agent_entries.sort(
         key=lambda item: (
@@ -280,7 +300,7 @@ def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = Fa
         int(((agent.get("knowledgeSummary") or {}).get("itemCount")) or 0)
         for agent in agent_entries
     )
-    return {
+    payload = {
         "schemaVersion": 1,
         "generatedAt": _now_iso(),
         "projectRoot": str(root),
@@ -297,6 +317,9 @@ def get_agent_memory_inventory(*, agent_id: str = "", include_content: bool = Fa
         },
         "agents": agent_entries,
     }
+    if phase_timings is not None:
+        phase_timings["total"] = (time.perf_counter() - started_at) * 1000
+    return payload
 
 
 def prewarm_memory_overview_cache(*, reason: str = "startup") -> dict[str, Any]:
@@ -2253,8 +2276,10 @@ def _agent_private_memory_item(
     try:
         stat = path.stat()
         size_bytes = int(stat.st_size)
+        revision = f"{stat.st_mtime_ns}:{size_bytes}"
     except OSError:
         size_bytes = 0
+        revision = ""
     content_type = _content_type(path)
     if include_content:
         read = _read_text(path)
@@ -2291,6 +2316,7 @@ def _agent_private_memory_item(
             "relativePath": relative_path,
             "privateMemoryRoot": _rel(root, memory_root, path_context=path_context),
             "sizeBytes": size_bytes,
+            "revision": revision,
             "contentDeferred": content_deferred,
             "contentLength": len(content) if include_content else size_bytes,
         }

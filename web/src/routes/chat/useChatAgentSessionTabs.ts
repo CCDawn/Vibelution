@@ -5,6 +5,7 @@ import { querySessions } from "../../api/chat";
 import type { AgentInstance, SessionQueryResponse, SessionSummary } from "../../api/types";
 import { isRepresentedInAgentSessionTabs } from "../conversationIndexModel";
 import { mergePreservedCreatedSessions } from "../sessionCreatePreserve";
+import { filterOutTombstonedSessions } from "../sessionDeleteTombstone";
 import { markSessionActivitySnapshotsSeen } from "../sessionActivityIndicator";
 import { buildAgentSessionTabs } from "./chatSessionSurfaceModel";
 
@@ -79,7 +80,10 @@ export function useChatAgentSessionTabs({
 
   const agentSessionTabs = useMemo(
     () => buildAgentSessionTabs({
-      sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions],
+      sessions: filterOutTombstonedSessions([
+        ...(selectedAgentSessionsQuery.data?.items ?? []),
+        ...selectedAgentVisibleSessions,
+      ]) ?? [],
       selectedChatAgentDirectSessionId: agentsById.get(selectedChatAgentId)?.directSessionId,
     }),
     [agentsById, selectedAgentSessionsQuery.data?.items, selectedAgentVisibleSessions, selectedChatAgentId],

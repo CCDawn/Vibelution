@@ -15,7 +15,13 @@ export type CodexTranscriptCellKind =
   | "error_notice"
   | "stream_tail";
 
-export type CodexTranscriptCellStatus = "pending" | "running" | "completed" | "failed" | "degraded";
+export type CodexTranscriptCellStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "degraded"
+  | "cancelled";
 
 export type CodexTranscriptCellTone = "neutral" | "running" | "warning" | "error";
 
@@ -852,7 +858,12 @@ function isAssistantAnswerTextPart(part: AgentMessagePart): part is AgentTextPar
 
 function normalizeCellStatus(status: string | undefined): CodexTranscriptCellStatus {
   const normalized = String(status ?? "").trim().toLowerCase();
-  if (["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(normalized)) {
+  // Cancelled/stopped/denied are a neutral terminal state (ZCode stopped parity):
+  // the user or a permission gate ended the run — never red, never green.
+  if (["cancelled", "canceled", "stopped", "denied", "aborted"].includes(normalized)) {
+    return "cancelled";
+  }
+  if (["failed", "error", "failure", "timeout", "timed_out"].includes(normalized)) {
     return "failed";
   }
   if (["degraded", "fallback", "partial", "recovered", "unavailable"].includes(normalized)) {
@@ -870,7 +881,12 @@ function normalizeCellStatus(status: string | undefined): CodexTranscriptCellSta
   if (["running", "thinking", "tooling", "answering", "streaming"].includes(normalized)) {
     return "running";
   }
-  return "completed";
+  if (["completed", "complete", "done", "success", "succeeded", "ok", "finished"].includes(normalized)) {
+    return "completed";
+  }
+  // Unknown statuses must not silently paint green (宁红不绿): surface them as
+  // failures so a protocol drift is visible instead of a fake "done" row.
+  return "failed";
 }
 
 function isCommentaryTranscriptCell(cell: CodexTranscriptCell) {
@@ -999,8 +1015,8 @@ export function dedupeToolTranscriptCells(
       text: previous.summary || previous.text,
     } as CodexTranscriptCell);
     // Prefer completed over pending for the same identity when ranks tie on liveBoost.
-    const previousDone = previous.status === "completed" || previous.status === "failed" || previous.status === "degraded";
-    const currentDone = cell.status === "completed" || cell.status === "failed" || cell.status === "degraded";
+    const previousDone = isTerminalCellStatus(previous.status);
+    const currentDone = isTerminalCellStatus(cell.status);
     if (keepCurrent || (currentDone && !previousDone)) {
       drop.add(existing);
       bestByIdentity.set(identity, index);
@@ -1134,6 +1150,11 @@ export function settleCodexTranscriptActiveStatuses(
   return changed ? next : cells;
 }
 
+/** Terminal cell states: dedupe may collapse an earlier non-terminal twin into them. */
+function isTerminalCellStatus(status: CodexTranscriptCellStatus): boolean {
+  return status === "completed" || status === "failed" || status === "degraded" || status === "cancelled";
+}
+
 function cellTone(status: CodexTranscriptCellStatus): CodexTranscriptCellTone {
   if (status === "failed") {
     return "error";
@@ -1144,6 +1165,7 @@ function cellTone(status: CodexTranscriptCellStatus): CodexTranscriptCellTone {
   if (status === "running" || status === "pending") {
     return "running";
   }
+  // Cancelled rows stay visually neutral: an intentional stop is not a warning.
   return "neutral";
 }
 

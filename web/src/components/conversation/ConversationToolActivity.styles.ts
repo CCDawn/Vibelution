@@ -112,6 +112,13 @@ const styles = {
   statusLabel_failed: cx("statusLabel_failed", "text-[var(--state-error)]"),
   statusLabel_timeout: cx("statusLabel_timeout", "text-[var(--state-warning)]"),
   statusLabel_attention: cx("statusLabel_attention", "text-[var(--state-warning)]"),
+  // Neutral terminal state (cancelled/stopped/denied): grey word, self-contained
+  // (no dashed failure underline) — an intentional stop is not an error and has
+  // no error tooltip. The pill renderer swaps this in place of the base class.
+  statusLabel_cancelled: cx(
+    "statusLabel_cancelled",
+    "shrink-0 font-normal text-[var(--fg-tertiary)]",
+  ),
   // Keep old keys so existing style-map tests fail clearly if reintroduced as chips.
   statusPill: cx("statusPill", "shrink-0 font-normal text-[var(--fg-tertiary)]"),
   statusPill_running: cx("statusPill_running", "text-[var(--accent-cool)]"),
@@ -133,6 +140,12 @@ const styles = {
   agentNameChip: cx(
     "agentNameChip",
     "inline-flex max-w-full min-w-0 shrink items-center overflow-hidden whitespace-nowrap align-baseline",
+  ),
+  // Neutral origin tag (「子代理」on agent-spawn rows): quiet grey tag next to
+  // the colored name; it must not take over the name's color bucket.
+  agentSourceBadge: cx(
+    "agentSourceBadge",
+    "ml-1 inline-flex shrink-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1 py-px text-[10px] font-medium leading-[1.4] text-[var(--fg-tertiary)] whitespace-nowrap align-baseline",
   ),
   itemDuration: cx(
     "itemDuration",

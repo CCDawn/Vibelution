@@ -10,11 +10,13 @@ import styles from "./ConversationToolActivity.styles";
 /**
  * Status kinds that need an explicit trailing label. Running/completed rely on
  * the leading icon only — matching Codex's quiet tool rail (no dual chips).
+ * Cancelled joins them: an intentional stop needs its grey word, not silence.
  */
 const SHOW_STATUS_LABEL: ReadonlySet<CodexToolActivityPillStatusKind> = new Set([
   "failed",
   "timeout",
   "attention",
+  "cancelled",
 ]);
 
 export function toolActivityAriaTitle(pills: CodexToolActivityPills) {
@@ -46,6 +48,7 @@ export function ConversationToolActivityPills({
   className = "",
   statusTooltip,
   agentAccentStyle = null,
+  sourceBadge = "",
 }: {
   pills: CodexToolActivityPills;
   leadingIcon?: ReactNode;
@@ -59,10 +62,20 @@ export function ConversationToolActivityPills({
    * token-derived tinted chip. Absent → unchanged muted subject.
    */
   agentAccentStyle?: Record<string, string> | null;
+  /**
+   * Neutral origin tag rendered after the subject (e.g. the「子代理」badge on
+   * agent-spawn rows). Layout only: it never touches the subject's color
+   * bucket. Absent/empty → no badge.
+   */
+  sourceBadge?: string;
 }) {
   const showStatusLabel = SHOW_STATUS_LABEL.has(pills.statusKind) && Boolean(pills.statusLabel);
   const running = pills.statusKind === "running";
   const coloredAgentName = Boolean(agentAccentStyle && pills.subject);
+  // Cancelled is self-contained: no dashed failure underline on the grey word.
+  const statusLabelClassName = pills.statusKind === "cancelled"
+    ? styles.statusLabel_cancelled
+    : `${styles.statusLabel} ${styles[`statusLabel_${pills.statusKind}` as keyof typeof styles] || ""}`;
 
   return (
     <>
@@ -83,7 +96,7 @@ export function ConversationToolActivityPills({
           statusTooltip ? (
             <VTooltip width="compact" content={statusTooltip}>
               <span
-                className={`${styles.statusLabel} ${styles[`statusLabel_${pills.statusKind}` as keyof typeof styles] || ""}`}
+                className={statusLabelClassName}
                 data-codex-tool-status-pill="true"
                 data-codex-tool-status-kind={pills.statusKind}
               >
@@ -92,7 +105,7 @@ export function ConversationToolActivityPills({
             </VTooltip>
           ) : (
             <span
-              className={`${styles.statusLabel} ${styles[`statusLabel_${pills.statusKind}` as keyof typeof styles] || ""}`}
+              className={statusLabelClassName}
               data-codex-tool-status-pill="true"
               data-codex-tool-status-kind={pills.statusKind}
             >
@@ -113,6 +126,15 @@ export function ConversationToolActivityPills({
             ) : (
               pills.subject
             )}
+            {sourceBadge ? (
+              <span
+                className={styles.agentSourceBadge}
+                data-codex-tool-agent-badge="true"
+                aria-label={sourceBadge}
+              >
+                {sourceBadge}
+              </span>
+            ) : null}
           </span>
         ) : null}
         {pills.diffStatLabel ? (

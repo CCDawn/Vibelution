@@ -396,7 +396,8 @@ def test_memory_item_detail_loads_only_requested_base_section(tmp_path, monkeypa
     assert calls == ["prompt-memory"]
 
 
-def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("include", "base_count", "knowledge_count"), [("", 0, 0), ("all", 1, 0), ("knowledge", 1, 1)])
+def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp_path, monkeypatch, include, base_count, knowledge_count):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
@@ -431,7 +432,7 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
         reviewed_by_agent_id=reviewer["agentId"],
     )
 
-    response = client.get("/api/memory/knowledge-graph", params={"agentId": agent["agentId"]})
+    response = client.get("/api/memory/knowledge-graph", params={"agentId": agent["agentId"], "include": include})
     payload = response.json()
 
     assert response.status_code == 200
@@ -439,8 +440,8 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert payload["operatingBoundary"]["layoutWorker"] is True
     assert payload["operatingBoundary"]["fullContentIncluded"] is False
     assert payload["summary"]["nodeTypeCounts"]["agent"] >= 1
-    assert payload["summary"]["nodeTypeCounts"].get("knowledge_base", 0) == 0
-    assert payload["summary"]["nodeTypeCounts"].get("knowledge_item", 0) == 0
+    assert payload["summary"]["nodeTypeCounts"].get("knowledge_base", 0) == base_count
+    assert payload["summary"]["nodeTypeCounts"].get("knowledge_item", 0) == knowledge_count
     team_node = next(node for node in payload["nodes"] if node["type"] == "team")
     agent_node = next(node for node in payload["nodes"] if node["type"] == "agent" and node["metadata"]["agentId"] == agent["agentId"])
     reviewer_node = next(node for node in payload["nodes"] if node["type"] == "agent" and node["metadata"]["agentId"] == reviewer["agentId"])
@@ -450,6 +451,57 @@ def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp
     assert team_node["contentItems"][0]["title"] == "Graph API proposal"
     assert agent_node["contentItems"] == []
     assert "GRAPH API BODY MUST STAY OUT" not in str(payload)
+
+
+def test_memory_graph_private_knowledge_and_files_are_owner_scoped_and_deferred(tmp_path, monkeypatch):
+    for service in (agent_directory_service, memory_graph_service, memory_service, team_service, team_knowledge_service):
+        monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    owner = agent_directory_service.create_agent_instance(display_name="Private graph owner")
+    peer = agent_directory_service.create_agent_instance(display_name="Visible teammate")
+    team_service.create_team(name="Private graph team", members=[{"agentId": owner["agentId"]}, {"agentId": peer["agentId"]}])
+    base = team_knowledge_service.create_agent_knowledge_base(owner["agentId"], name="Private graph KB", actor_agent_id=owner["agentId"])
+    context = team_knowledge_service._owner_context("agent", owner["agentId"], agent=owner)
+    items_path = team_knowledge_service._items_path_for_owner(context)
+    items_path.parent.mkdir(parents=True, exist_ok=True)
+    items_path.write_text(json.dumps({
+        "knowledgeItemId": "private-graph-item", "knowledgeBaseId": base["knowledgeBaseId"],
+        "ownerType": "agent", "ownerId": owner["agentId"], "title": "Private formal lesson",
+        "content": "PRIVATE FORMAL BODY", "metadata": {},
+    }) + "\n", encoding="utf-8")
+    calls = []
+
+    def inventory(*, agent_id, include_content):
+        calls.append((agent_id, include_content))
+        return {"selectedAgent": {"agentId": agent_id, "items": [{
+            "id": "private-file-id", "title": "lesson.md", "revision": "123:12",
+            "relativePath": "lesson.md", "sizeBytes": 12,
+            "content": "PRIVATE FILE BODY" if include_content else "",
+        }]}}
+
+    monkeypatch.setattr(memory_service, "get_agent_memory_inventory", inventory)
+    params = {"agentId": owner["agentId"], "include": "knowledge,privateMemory,officialResearchGraph"}
+    graph = client.get("/api/memory/knowledge-graph", params=params).json()
+    private_file = next(node for node in graph["nodes"] if node["type"] == "agent_private_memory")
+    private_item = next(node for node in graph["nodes"] if node["type"] == "knowledge_item")
+    assert graph["summary"]["nodeTypeCounts"]["knowledge_item"] == 1
+    assert private_item["id"].startswith(f"knowledge_item:agent:{owner['agentId']}:")
+    assert calls == [(owner["agentId"], False)]
+    assert "PRIVATE FORMAL BODY" not in str(graph)
+    assert "PRIVATE FILE BODY" not in str(graph)
+
+    owner_detail = client.get("/api/memory/knowledge-graph/node-detail", params={"agentId": owner["agentId"], "nodeId": private_file["id"]})
+    assert owner_detail.status_code == 200
+    assert owner_detail.json()["contentItems"][0]["content"] == "PRIVATE FILE BODY"
+    assert calls[-1] == (owner["agentId"], True)
+    calls.clear()
+    for node_id in (private_file["id"], private_item["id"]):
+        denied = client.get("/api/memory/knowledge-graph/node-detail", params={"agentId": peer["agentId"], "nodeId": node_id})
+        assert denied.status_code == 404
+    assert calls == []
+    peer_graph = client.get("/api/memory/knowledge-graph", params={**params, "agentId": peer["agentId"]}).json()
+    assert private_file["id"] not in {node["id"] for node in peer_graph["nodes"]}
+    assert private_item["id"] not in {node["id"] for node in peer_graph["nodes"]}
+    assert calls == [(peer["agentId"], False)]
 
 
 def test_memory_knowledge_graph_uses_developer_sandbox_evolution_domain_paths(tmp_path, monkeypatch):
@@ -979,6 +1031,30 @@ def test_agent_memory_inventory_reuses_agent_summary_for_formal_knowledge(tmp_pa
     assert get_agent_calls == []
 
 
+def test_agent_memory_inventory_reports_only_duration_headers_without_changing_body(monkeypatch):
+    payload = {"schemaVersion": 1, "agents": [], "summary": {"agentCount": 0}}
+    calls = []
+
+    def inventory(*, agent_id, include_content, phase_timings):
+        calls.append((agent_id, include_content))
+        phase_timings.update(directory=10.0, paths=1.0, scan=2.0, total=14.0)
+        phase_timings["private-owner"] = 123.0
+        return payload
+
+    monkeypatch.setattr(memory_routes, "get_agent_memory_inventory", inventory)
+    response = client.get("/api/memory/agents?agentId=selected-agent&includeContent=false")
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert response.headers["Server-Timing"] == (
+        "memory-directory;dur=10.0, memory-paths;dur=1.0, memory-scan;dur=2.0, memory-total;dur=14.0"
+    )
+    assert calls == [("selected-agent", False)]
+    operation = client.app.openapi()["paths"]["/api/memory/agents"]["get"]
+    assert {parameter["name"] for parameter in operation["parameters"]} == {"agentId", "includeContent"}
+    assert "Server-Timing" in operation["responses"]["200"]["headers"]
+
+
 def test_agent_memory_inventory_unknown_agent_returns_404(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
@@ -987,6 +1063,39 @@ def test_agent_memory_inventory_unknown_agent_returns_404(tmp_path, monkeypatch)
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Agent memory not found."
+
+
+@pytest.mark.parametrize(
+    ("agent_id", "actor_id", "include_content", "expected_status", "reads_content"),
+    [
+        ("known", "known", True, 200, True),
+        ("known", "", True, 422, False),
+        ("known", "outsider", True, 422, False),
+        ("known", "", False, 200, False),
+        ("missing", "", True, 404, False),
+        ("missing", "missing", True, 404, True),
+    ],
+)
+def test_agent_memory_detail_reads_inventory_once_without_exposing_content(
+    monkeypatch, agent_id, actor_id, include_content, expected_status, reads_content
+):
+    calls = []
+
+    def inventory(*, agent_id, include_content):
+        calls.append((agent_id, include_content))
+        return {
+            "selectedAgent": {"agentId": agent_id} if agent_id == "known" else None,
+            "agents": [],
+        }
+
+    monkeypatch.setattr(memory_routes, "get_agent_memory_inventory", inventory)
+    response = client.get(
+        f"/api/memory/agents/{agent_id}",
+        params={"actorAgentId": actor_id, "includeContent": str(include_content).lower()},
+    )
+
+    assert response.status_code == expected_status
+    assert calls == [(agent_id, reads_content)]
 
 
 def test_memory_global_overviews_do_not_expose_formal_knowledge_bodies(tmp_path, monkeypatch):

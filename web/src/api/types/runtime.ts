@@ -1212,6 +1212,8 @@ export type LauncherControlResponse = RuntimeControlResponse & {
   controlPort?: number;
   url?: string;
   shellStale?: boolean;
+  /** Electron lifecycle outcome such as `restart_queued`. Absent on a settled restart. */
+  code?: string;
 };
 
 export type LauncherFreshness = {
@@ -1222,6 +1224,10 @@ export type LauncherFreshness = {
   shellStale?: boolean;
   shellReason?: string;
   updateAvailable?: boolean;
+  activeWorkState?: "idle" | "active" | "unknown";
+  activeWorkCount?: number;
+  updateInProgress?: boolean;
+  refreshError?: string;
 };
 
 export type WorkbenchWindowModeUpdateResponse = {

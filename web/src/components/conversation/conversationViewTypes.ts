@@ -146,6 +146,12 @@ export type ConversationViewProps = {
   composerReferences?: SessionReferenceAttachment[];
   slashCommandSuggestions?: SkillLibraryItem[];
   /**
+   * Skill-library catalog health for the slash panel (ZCode panel sections
+   * parity): the skills section renders loading/error placeholders instead of
+   * silently reading as "no skills".
+   */
+  slashSkillsCatalogState?: "ready" | "loading" | "error";
+  /**
    * Candidate rows for the composer "@" reference type-ahead (knowledge bases,
    * knowledge items, session files — same source as the plus-menu picker).
    */

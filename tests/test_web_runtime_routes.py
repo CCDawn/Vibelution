@@ -456,6 +456,66 @@ def test_runtime_summary_keeps_fresh_cli_usage_fallback(monkeypatch):
     assert payload["contextCompression"]["currentTokens"] == 7000
 
 
+def test_runtime_summary_refuses_stale_runtime_state_session_updated_at(monkeypatch):
+    stale_ts = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "IDLE",
+            "updated_at": stale_ts,
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionUpdatedAt"] == ""
+
+
+def test_runtime_summary_keeps_fresh_runtime_state_session_updated_at(monkeypatch):
+    fresh_ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda **_: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "IDLE",
+            "updated_at": fresh_ts,
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionUpdatedAt"] == fresh_ts
+
+
+def test_runtime_summary_session_updated_at_prefers_pointer_session_without_fallback(
+    monkeypatch,
+):
+    stale_ts = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda **_: {
+            "id": "sess-pointer",
+            "updatedAt": "2026-05-18T20:00:00",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "IDLE",
+            "updated_at": stale_ts,
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["sessionUpdatedAt"] == "2026-05-18T20:00:00"
+
+
 def test_runtime_last_cache_composition_hides_legacy_zero_cache_calibration():
     composition = runtime_service._runtime_last_cache_composition(
         {

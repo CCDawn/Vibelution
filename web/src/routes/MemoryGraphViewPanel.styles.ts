@@ -9,6 +9,10 @@ const styles = {
   canvasTitle: "mt-2 text-vui-title leading-[1.4] font-medium",
   canvasHint: "mt-2 text-vui-2xs leading-4 text-[var(--fg-secondary)]",
   viewModes: "flex items-center gap-1",
+  scopeControls: "flex min-w-0 max-w-full flex-wrap items-center gap-2",
+  scopeField: "flex min-w-0 max-w-full items-center gap-2 text-vui-2xs leading-4 text-[var(--fg-secondary)]",
+  scopeSelect: "!w-auto min-w-0 max-w-48",
+  scopeHint: "shrink-0 px-6 pb-3 text-vui-2xs leading-4 text-[var(--fg-secondary)]",
   selectedTitle: "max-w-48 truncate",
   refreshError: "px-6 text-vui-2xs leading-4 text-[var(--fg-secondary)]",
 

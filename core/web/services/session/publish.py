@@ -1,7 +1,8 @@
 """Session SSE transport and stream publish helpers.
 
 Claim scope: EventSource stream_session_events, stream initial payload helpers,
-session_detail / assistant_delta publish, subscriber queue coalescing.
+Last-Event-ID resume replay over the session journal, session_detail /
+assistant_delta publish, subscriber queue coalescing.
 
 DTO projection lives in ``projection.py``. Capture batching stays in
 ``stream_capture.py``. Late-bound facade keeps monkeypatches stable.
@@ -17,6 +18,14 @@ from typing import Any
 from uuid import uuid4
 
 from .stream_transport_delta import SessionStreamItemDelta
+
+# Last-Event-ID resume replay window (aligns with ZCode eventRetentionPerSession:
+# a bounded, order-preserving replay range; older gaps honestly degrade to a
+# full initial + client refetch instead of pretending the gap is covered).
+SESSION_STREAM_RESUME_MAX_EVENTS = 2000
+# Per-replayed-journal-event payload bound: resume replay exists to prove what
+# was missed and mark the handover watermark, not to re-ship whole bodies.
+SESSION_STREAM_RESUME_MAX_PAYLOAD_CHARS = 8192
 
 
 def _service():
@@ -165,12 +174,45 @@ def _initial_session_stream_event(
     return None
 
 
+def _session_stream_resume_prelude(
+    conversation_id: str,
+    last_event_id: int,
+) -> list[str]:
+    """SSE frames that compensate a reconnecting consumer before the live loop.
+
+    ``last_event_id`` is the last journal sequence the consumer received. With
+    a replayable gap this replays journal events in ``(last_event_id, toSeq]``
+    and closes with a ``stream_resume`` marker; an over-window gap degrades to
+    a light initial marked ``resume="partial"`` plus the same marker, so the
+    consumer refetches the authoritative body instead of trusting the window.
+    """
+
+    if last_event_id <= 0:
+        return []
+    plan = build_session_stream_resume(conversation_id, last_event_id)
+    frames = _session_stream_resume_frames(plan)
+    if str(plan.get("resume") or "") != "partial":
+        return frames
+    s = _service()
+    state = s.get_session_stream_initial_state(conversation_id)
+    frames = [frames[-1]]
+    if isinstance(state, dict):
+        marked_state = dict(state)
+        marked_state["resume"] = "partial"
+        initial_frame = s._encode_sse_event("session_initial", marked_state)
+        # The partial marker must carry the watermark so consumers can still
+        # verify the live handover even though the replay itself was skipped.
+        frames = [initial_frame, *frames]
+    return frames
+
+
 def stream_session_events(
     session_id: str,
     initial_detail: dict[str, Any] | None = None,
     *,
     initial: str = "full",
     initial_state: dict[str, Any] | None = None,
+    last_event_id: int = 0,
 ):
     """Yield SSE events for one persisted chat session."""
     s = _service()
@@ -203,6 +245,9 @@ def stream_session_events(
         if initial_event is not None:
             event_count += 1
             yield initial_event
+        for resume_frame in _session_stream_resume_prelude(conversation_id, last_event_id):
+            event_count += 1
+            yield resume_frame
         item_delta = SessionStreamItemDelta()
         while True:
             try:
@@ -212,7 +257,11 @@ def stream_session_events(
                 yield ": keep-alive\n\n"
                 continue
             event_count += 1
-            yield s._encode_sse_event(str(event.get("type") or "message"), item_delta.compact(event))
+            yield s._encode_sse_event(
+                str(event.get("type") or "message"),
+                item_delta.compact(event),
+                event_seq=int(event.get("ledgerSeq") or 0),
+            )
     except Exception as exc:
         if opened:
             failed = True
@@ -252,6 +301,7 @@ async def stream_session_events_async(
     *,
     initial: str = "full",
     initial_state: dict[str, Any] | None = None,
+    last_event_id: int = 0,
 ):
     """Yield SSE events without occupying a worker while the stream is idle."""
     s = _service()
@@ -287,6 +337,9 @@ async def stream_session_events_async(
         if initial_event is not None:
             event_count += 1
             yield initial_event
+        for resume_frame in _session_stream_resume_prelude(conversation_id, last_event_id):
+            event_count += 1
+            yield resume_frame
         item_delta = SessionStreamItemDelta()
         while True:
             try:
@@ -296,7 +349,11 @@ async def stream_session_events_async(
                 yield ": keep-alive\n\n"
                 continue
             event_count += 1
-            yield s._encode_sse_event(str(event.get("type") or "message"), item_delta.compact(event))
+            yield s._encode_sse_event(
+                str(event.get("type") or "message"),
+                item_delta.compact(event),
+                event_seq=int(event.get("ledgerSeq") or 0),
+            )
     except Exception as exc:
         if opened:
             failed = True
@@ -879,9 +936,163 @@ def _unregister_session_stream_subscriber(session_id: str, subscriber: queue.Que
             s._SESSION_STREAM_SUBSCRIBERS.pop(session_id, None)
 
 
-def _encode_sse_event(event_name: str, payload: dict[str, Any]) -> str:
+def _encode_sse_event(event_name: str, payload: dict[str, Any], *, event_seq: int = 0) -> str:
     body = json.dumps(payload, ensure_ascii=False)
+    seq = max(0, int(event_seq or 0))
+    if not seq:
+        # Payloads carry their own ledger watermark on the session stream.
+        seq = max(0, int(payload.get("ledgerSeq") or payload.get("seq") or 0))
+    if seq > 0:
+        return f"id: {seq}\nevent: {event_name}\ndata: {body}\n\n"
     return f"event: {event_name}\ndata: {body}\n\n"
+
+
+def parse_session_stream_last_event_id(value: str | None) -> int:
+    """Parse an SSE ``Last-Event-ID`` header into a journal sequence."""
+
+    if value is None or not value.strip():
+        return 0
+    try:
+        parsed = int(value.strip())
+    except ValueError as exc:
+        raise ValueError("Last-Event-ID must be a non-negative journal sequence") from exc
+    if parsed < 0:
+        raise ValueError("Last-Event-ID must be a non-negative journal sequence")
+    return parsed
+
+
+def _session_stream_journal_event_attributes(event: Any) -> dict[str, Any]:
+    sequence = max(0, int(getattr(event, "sequence", 0) or 0))
+    payload = getattr(event, "payload", None)
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "seq": sequence,
+        "eventId": str(getattr(event, "event_id", "") or "").strip(),
+        "turnId": str(getattr(event, "turn_id", "") or "").strip(),
+        "eventType": str(getattr(event, "event_type", "") or "").strip(),
+        "status": str(getattr(event, "status", "") or "").strip(),
+        "timestamp": str(getattr(event, "timestamp", "") or "").strip(),
+        "payload": payload,
+    }
+
+
+def build_session_stream_resume(
+    session_id: str,
+    last_event_id: int,
+) -> dict[str, Any]:
+    """Build a bounded Last-Event-ID resume plan over the session journal.
+
+    The plan covers journal events in ``(last_event_id, watermark]``. When the
+    gap exceeds the bounded retention window the mode degrades to ``partial``:
+    the caller falls back to a full initial payload and the client refetches
+    instead of receiving a replay that silently under-covers the gap.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    from_seq = max(0, int(last_event_id or 0))
+    watermark = s._session_ledger_sequence(normalized_session_id)
+    plan: dict[str, Any] = {
+        "sessionId": normalized_session_id,
+        "resume": "replayed",
+        "fromSeq": from_seq,
+        "toSeq": max(0, int(watermark or 0)),
+        "replayedCount": 0,
+        "events": [],
+    }
+    if not normalized_session_id or watermark <= from_seq:
+        return plan
+    try:
+        events = list(s._load_session_conversation_events_cached(normalized_session_id) or [])
+    except Exception:
+        events = []
+    if not events and watermark > 0:
+        # The journal is unreadable while the watermark advanced: replaying an
+        # empty window must not masquerade as covered — degrade honestly.
+        plan["resume"] = "partial"
+        return plan
+    missed = sorted(
+        (
+            _session_stream_journal_event_attributes(event)
+            for event in events
+            if from_seq < int(getattr(event, "sequence", 0) or 0) <= watermark
+        ),
+        key=lambda item: item["seq"],
+    )
+    if len(missed) > SESSION_STREAM_RESUME_MAX_EVENTS:
+        # Honest degradation: replay only the newest bounded window and mark
+        # the resume partial so the client refetches the authoritative body.
+        missed = missed[-SESSION_STREAM_RESUME_MAX_EVENTS:]
+        plan["resume"] = "partial"
+    plan["events"] = missed
+    plan["replayedCount"] = len(missed) if plan["resume"] == "replayed" else 0
+    return plan
+
+
+def _session_stream_resume_journal_payload(
+    session_id: str,
+    missed_event: dict[str, Any],
+) -> dict[str, Any]:
+    payload = missed_event.get("payload")
+    frame_payload: dict[str, Any] = {
+        "type": "session_journal_event",
+        "sessionId": str(session_id or "").strip(),
+        "seq": max(0, int(missed_event.get("seq") or 0)),
+        "eventId": str(missed_event.get("eventId") or ""),
+        "turnId": str(missed_event.get("turnId") or ""),
+        "eventType": str(missed_event.get("eventType") or ""),
+        "status": str(missed_event.get("status") or ""),
+        "timestamp": str(missed_event.get("timestamp") or ""),
+    }
+    encoded_length = len(json.dumps(payload or {}, ensure_ascii=False, default=str))
+    if encoded_length <= SESSION_STREAM_RESUME_MAX_PAYLOAD_CHARS:
+        frame_payload["payload"] = payload or {}
+    else:
+        frame_payload["payloadTruncated"] = True
+    return frame_payload
+
+
+def _session_stream_resume_event_payload(plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "stream_resume",
+        "sessionId": str(plan.get("sessionId") or ""),
+        "resume": str(plan.get("resume") or "replayed"),
+        "fromSeq": max(0, int(plan.get("fromSeq") or 0)),
+        "toSeq": max(0, int(plan.get("toSeq") or 0)),
+        "replayedCount": max(0, int(plan.get("replayedCount") or 0)),
+    }
+
+
+def _session_stream_resume_frames(plan: dict[str, Any]) -> list[str]:
+    """Encode one SSE frame per missed journal event plus the resume marker.
+
+    The marker's ``toSeq`` is the journal watermark at plan time; live frames
+    that follow carry ``ledgerSeq >= toSeq``, so a consumer can verify the
+    replay→live handover has no gap and no overlap.
+    """
+
+    s = _service()
+    session_id = str(plan.get("sessionId") or "")
+    frames: list[str] = []
+    for missed_event in plan.get("events") or []:
+        payload = _session_stream_resume_journal_payload(session_id, missed_event)
+        frames.append(
+            s._encode_sse_event(
+                "session_journal_event",
+                payload,
+                event_seq=max(0, int(missed_event.get("seq") or 0)),
+            )
+        )
+    resume_payload = _session_stream_resume_event_payload(plan)
+    frames.append(
+        s._encode_sse_event(
+            "stream_resume",
+            resume_payload,
+            event_seq=max(0, int(resume_payload.get("toSeq") or 0)),
+        )
+    )
+    return frames
 
 
 def _record_session_assistant_delta_published_event(

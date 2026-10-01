@@ -3,6 +3,7 @@ import {
   ChevronRight,
   Check,
   CircleAlert,
+  CircleSlash,
   Copy,
   FileSearch,
   LoaderCircle,
@@ -31,6 +32,7 @@ import {
 import {
   conversationAgentDisplayName,
   conversationToolCategoryForCell,
+  conversationToolCategoryLabel,
   type ConversationToolCategory,
 } from "./conversationToolCategory";
 import {
@@ -400,6 +402,11 @@ function ToolStatusIcon({
   if (cell.status === "degraded") {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />;
   }
+  // Neutral terminal state: cancelled/stopped/denied get the quiet slash glyph,
+  // never the red failure alert and never a green check.
+  if (cell.status === "cancelled") {
+    return <CircleSlash className={styles.itemIcon} size={15} />;
+  }
   const Icon = descriptor.icon;
   return <Icon className={styles.itemIcon} size={15} />;
 }
@@ -474,12 +481,18 @@ function ToolActivityItem({
   const label = language === "zh"
     ? `展开或收起工具结果：${title}`
     : `Expand or collapse tool results: ${title}`;
+  // ZCode subagent rows carry a neutral origin badge next to the colored name.
+  // Drilling into the child session is not wired yet: the spawn result only
+  // carries a subRunId (a JSONL run log), not a chat session id, so there is
+  // no href to open — the badge is presentational until that id exists.
+  const agentSourceBadge = agentName ? conversationToolCategoryLabel("agent", language) : "";
   const content = (
     <ConversationToolActivityPills
       pills={pills}
       leadingIcon={<ToolStatusIcon cell={cell} language={language} />}
       statusTooltip={failureDetail}
       agentAccentStyle={agentAccentStyle}
+      sourceBadge={agentSourceBadge}
     />
   );
   const emptyDetail = language === "zh" ? "无更多详情" : "No further details";

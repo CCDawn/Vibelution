@@ -25,6 +25,13 @@ class FetchSessionEventStream implements SessionEventStream {
   private controller: AbortController | null = null;
   private reconnectTimer: number | null = null;
   private closed = false;
+  /**
+   * Last journal sequence seen on an `id:` line. Native EventSource replays it
+   * as the Last-Event-ID header on auto-reconnect; this fetch stream mirrors
+   * that browser behavior manually so the server can resume the journal
+   * window instead of forcing a full resync.
+   */
+  private lastEventId = "";
 
   constructor(private readonly url: string) {
     queueMicrotask(() => void this.connect());
@@ -59,6 +66,7 @@ class FetchSessionEventStream implements SessionEventStream {
       await consumeGuardedEventStream({
         url: this.url,
         signal: controller.signal,
+        headers: this.lastEventId ? { "Last-Event-ID": this.lastEventId } : undefined,
         onOpen: () => {
           if (this.closed || controller.signal.aborted) return;
           this.readyState = 1;
@@ -66,7 +74,11 @@ class FetchSessionEventStream implements SessionEventStream {
         },
         onFrame: (frame) => {
           if (this.closed || controller.signal.aborted) return;
-          const event = new MessageEvent<string>(frame.event, { data: frame.data });
+          if (frame.id) this.lastEventId = frame.id;
+          const event = new MessageEvent<string>(frame.event, {
+            data: frame.data,
+            lastEventId: frame.id ?? "",
+          });
           for (const listener of this.listeners.get(frame.event) ?? []) listener(event);
         },
       });

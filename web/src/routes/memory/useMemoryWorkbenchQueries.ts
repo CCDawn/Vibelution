@@ -3,6 +3,7 @@
  * Mutations stay in useMemoryItemMutations / useMemoryKnowledgeMutations.
  */
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 import { listAgentProjectMemoryUpdates, listAgentSummaries } from "../../api/agents";
 import {
@@ -57,9 +58,11 @@ import type {
   AgentMemoryInventoryPayload,
 } from "./agentMemoryView";
 
-import { resolveDefaultAgentMemoryId } from "./agentMemoryView";
+import { agentMemoryDetailRevision, resolveDefaultAgentMemoryId } from "./agentMemoryView";
 
 export type { AgentMemoryInventoryAgent, AgentMemoryInventoryPayload } from "./agentMemoryView";
+
+const MEMORY_GRAPH_INCLUDE = "knowledge,privateMemory,officialResearchGraph";
 
 export type MemoryRouteView =
   | "personal"
@@ -171,7 +174,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     staleTime: 60_000,
   });
   const agentMemoryInventoryQuery = useQuery({
-    queryKey: ["memory", "agents", "inventory"],
+    queryKey: queryKeys.memoryAgentInventory(),
     queryFn: ({ signal }) => fetchMemoryAgents<AgentMemoryInventoryPayload>({ signal }),
     enabled: isPersonalMemoryView(forcedView),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
@@ -182,13 +185,18 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   const knowledgeActorAgents = agentsQuery.data ?? [];
   const agentMemoryInventoryAgents = agentMemoryInventoryQuery.data?.agents ?? [];
   const selectedAgentMemoryAgentId = resolveDefaultAgentMemoryId(agentMemoryInventoryAgents, requestedKnowledgeActorAgentId);
+  const selectedAgentMemoryInventory = agentMemoryInventoryAgents.find((agent) => agent.agentId === selectedAgentMemoryAgentId);
+  const selectedAgentMemoryRevision = useMemo(
+    () => agentMemoryDetailRevision(selectedAgentMemoryInventory),
+    [selectedAgentMemoryInventory],
+  );
   const fallbackKnowledgeActorAgentId =
     requestedKnowledgeActorAgentId
     || knowledgeActorAgents.find((agent) => agent.status !== "archived")?.agentId
     || "";
 
   const agentMemoryDetailQuery = useQuery({
-    queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"],
+    queryKey: queryKeys.memoryAgentDetail(selectedAgentMemoryAgentId, selectedAgentMemoryRevision),
     queryFn: ({ signal }) =>
       fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId, {
         actorAgentId: selectedAgentMemoryAgentId,
@@ -197,6 +205,9 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
       }),
     enabled: isPersonalMemoryView(forcedView) && Boolean(selectedAgentMemoryAgentId),
     refetchInterval: false,
+    // Keep an open Agent's content while its new revision loads; never reuse a
+    // different Agent's private body as a placeholder during selection changes.
+    placeholderData: (previous) => previous?.selectedAgent?.agentId === selectedAgentMemoryAgentId ? previous : undefined,
     // Heavy includeContent payload with no polling: serve cache instantly on
     // remount and keep it parked for 15min instead of the 5min default GC.
     staleTime: 60_000,
@@ -220,11 +231,11 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     enabled: (isTeamMemoryView(forcedView) || isManageMemoryView(forcedView)) && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryKnowledgeGraphQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId),
+    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, MEMORY_GRAPH_INCLUDE, requestedTeamId),
     queryFn: ({ signal }) =>
       fetchMemoryKnowledgeGraph<MemoryKnowledgeGraphPayload>({
         agentId: fallbackKnowledgeActorAgentId,
-        include: "officialResearchGraph",
+        include: MEMORY_GRAPH_INCLUDE,
         teamId: requestedTeamId || undefined,
         signal,
       }),

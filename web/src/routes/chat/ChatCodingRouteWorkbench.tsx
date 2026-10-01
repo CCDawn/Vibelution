@@ -18,6 +18,7 @@ import {
   Check,
   ChevronRight,
   HeartHandshake,
+  ListTree,
   MessageCircleHeart,
   RotateCcw,
   PanelLeftOpen,
@@ -36,7 +37,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
+import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals, pinChatSession, unpinChatSession } from "../../api/chat";
 import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchive";
 import { archiveAgent, updateAgent } from "../../api/agents";
 import {
@@ -78,7 +79,7 @@ import {
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import type { ConversationForkScope } from "../../components/conversation/conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
+import { VButton, VIconButton, VContextualHint, VInput, VNativeInput, VStateSurface, VStringSelect, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { startUserAction } from "../../app/userActionTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
@@ -96,9 +97,26 @@ import {
   mergeSessionDetailIntoSummaries,
 } from "../chatSessionState";
 import {
+  captureAgentSessionCacheSnapshots,
+  captureSessionIndexCacheSnapshots,
   reconcileAgentSessionDetailCache,
+  restoreAgentSessionCacheSnapshots,
+  restoreSessionIndexCacheSnapshots,
+  updateAgentSessionSummaryCaches,
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
+import {
+  loadSessionListPreferences,
+  normalizeSessionListSortBy,
+  saveSessionListPreferences,
+  sessionListSortQueryValue,
+  type SessionListPreferences,
+} from "./sessionListPreferences";
+import {
+  groupSessionsByTimeline,
+  splitPinnedSessions,
+  type SessionListDateBucket,
+} from "./sessionListGrouping";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import {
   ACTIVE_INDEX_POLL_MS,
@@ -126,6 +144,8 @@ import {
 } from "../AgentConversationDirectory";
 import { directoryTeamBlockIds } from "../agentConversationDirectoryModel";
 import { ConversationIndexTree } from "../ConversationIndexTree";
+import { ConversationIndexSection } from "../ConversationIndexSection";
+import { DirectSessionIndexList } from "../DirectSessionIndexList";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   hasInvalidChildSessionLink,
@@ -292,7 +312,11 @@ import {
   cliAgentRunTabId,
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
-import { readStoredSessionDrafts, removeStoredSessionDraft } from "./chatDraftPersistence";
+import {
+  readStoredSessionDraftState,
+  removeStoredSessionDraft,
+  scheduleSessionDraftMetaSave,
+} from "./chatDraftPersistence";
 import {
   buildFileReferencePayload,
   buildKnowledgeBaseReferencePayload,
@@ -584,8 +608,19 @@ export function ChatCodingRouteWorkbench() {
   const retiredDirectSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
+  const [sessionListPrefs, setSessionListPrefs] = useState<SessionListPreferences>(
+    () => loadSessionListPreferences(),
+  );
+  useEffect(() => {
+    saveSessionListPreferences(sessionListPrefs);
+  }, [sessionListPrefs]);
+  const sessionListSort = sessionListSortQueryValue(sessionListPrefs.sortBy);
+  const [railSectionCollapsed, setRailSectionCollapsed] = useState<Record<string, boolean>>({});
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
-  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(() => readStoredSessionDrafts());
+  // One storage read hydrates text + rich draft fields (per-turn model
+  // selection and reference chips) for every remembered session.
+  const [storedDraftState] = useState(() => readStoredSessionDraftState());
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(storedDraftState.drafts);
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const composerFocusSequenceRef = useRef(0);
   const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
@@ -608,7 +643,7 @@ export function ChatCodingRouteWorkbench() {
     ));
   }, []);
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({});
-  const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({});
+  const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>(storedDraftState.referenceAttachments);
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -651,7 +686,21 @@ export function ChatCodingRouteWorkbench() {
   // Sticky per-turn model override (ZCode modelSelection semantics): follows
   // the session default until the user pins a model, then stays pinned across
   // sends until changed or restored. Keyed per session.
-  const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>({});
+  const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>(storedDraftState.turnModelSelections);
+  // Rich draft persistence: per-turn model selection and reference chips ride
+  // the same debounced store as the draft text (ZCode draft parity). The
+  // composer-change text save stays in useChatComposerSubmit; only this effect
+  // reports meta. Images/files never enter the store (text metadata only).
+  useEffect(() => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    scheduleSessionDraftMetaSave(sessionId, {
+      turnModelSelection: turnModelSelections[sessionId] ?? null,
+      referenceAttachments: sessionReferenceAttachments[sessionId] ?? [],
+    });
+  }, [activeSessionId, turnModelSelections, sessionReferenceAttachments]);
   const [groupManageDialogOpen, setGroupManageDialogOpen] = useState(false);
   const {
     groupComposerOpen,
@@ -1104,6 +1153,7 @@ export function ChatCodingRouteWorkbench() {
     agentsQuery,
     skillsQuery,
     slashCommandSuggestions,
+    slashSkillsCatalogState,
     chatRoomModesQuery,
     chatRoomPurposesQuery,
     activeGroupRoomQuery,
@@ -1115,6 +1165,7 @@ export function ChatCodingRouteWorkbench() {
     chatSecondaryPollPolicy,
     chatLiveQueryPolicy,
     sessionQueryText,
+    sessionListSort,
     activeSessionId: activeSessionId || "",
     activeGroupRoomId,
     expandedGroupAgentSessionIds,
@@ -1180,6 +1231,55 @@ export function ChatCodingRouteWorkbench() {
           variables.archive
             ? lang === "zh" ? "归档会话失败" : "Failed to archive session"
             : lang === "zh" ? "取消归档失败" : "Failed to unarchive session",
+        ),
+      }));
+    },
+  });
+  const pinSessionMutation = useMutation({
+    mutationFn: async (payload: { sessionId: string; pinned: boolean }) => (
+      payload.pinned
+        ? pinChatSession(payload.sessionId)
+        : unpinChatSession(payload.sessionId)
+    ),
+    onMutate: async (variables) => {
+      const telemetry = startUserAction(
+        variables.pinned ? "session_pin" : "session_unpin",
+        { sessionId: variables.sessionId },
+      );
+      void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
+      // Snapshot for rollback; the optimistic patch flips pinnedAtMs so the
+      // pinned rail section reacts on the next render.
+      const indexSnapshots = captureSessionIndexCacheSnapshots(queryClient);
+      const agentSnapshots = captureAgentSessionCacheSnapshots(queryClient);
+      const pinnedAtMs = variables.pinned ? Date.now() : null;
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        sessions?.map((session) => session.id === variables.sessionId
+          ? { ...session, pinnedAtMs }
+          : session),
+      );
+      updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+        sessions?.map((session) => session.id === variables.sessionId
+          ? { ...session, pinnedAtMs }
+          : session),
+      );
+      return { telemetry, indexSnapshots, agentSnapshots };
+    },
+    onSuccess: (_result, variables, context) => {
+      context?.telemetry?.succeeded({ sessionId: variables.sessionId });
+      // Authoritative pinned_at_ms and ordering come from the next refetch.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    },
+    onError: (error, variables, context) => {
+      restoreSessionIndexCacheSnapshots(queryClient, context?.indexSnapshots);
+      restoreAgentSessionCacheSnapshots(queryClient, context?.agentSnapshots);
+      context?.telemetry?.failed(error, { sessionId: variables.sessionId });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(
+          error,
+          variables.pinned
+            ? lang === "zh" ? "置顶会话失败" : "Failed to pin session"
+            : lang === "zh" ? "取消置顶失败" : "Failed to unpin session",
         ),
       }));
     },
@@ -3019,6 +3119,14 @@ export function ChatCodingRouteWorkbench() {
     });
   }, [sessionArchiveMutation, setSessionContextMenu]);
 
+  const handleTogglePinSession = useCallback((session: SessionSummary) => {
+    setSessionContextMenu(null);
+    pinSessionMutation.mutate({
+      sessionId: session.id,
+      pinned: !(Number(session.pinnedAtMs ?? 0) > 0),
+    });
+  }, [pinSessionMutation, setSessionContextMenu]);
+
   const {
     handleCreateAgent,
     openAgentContextMenu,
@@ -3082,7 +3190,120 @@ export function ChatCodingRouteWorkbench() {
     agentsIsLoading: agentsQuery.isLoading,
     visibleSessionCount: allVisibleSessions.length,
   });
+  const toggleRailSection = useCallback((key: string) => {
+    setRailSectionCollapsed((current) => ({ ...current, [key]: !current[key] }));
+  }, []);
+  const timelineBucketLabel = useCallback((bucket: SessionListDateBucket) => {
+    switch (bucket) {
+      case "today":
+        return t("sessionListTimelineToday");
+      case "yesterday":
+        return t("sessionListTimelineYesterday");
+      case "thisWeek":
+        return t("sessionListTimelineThisWeek");
+      default:
+        return t("sessionListTimelineEarlier");
+    }
+  }, [t]);
+  // Pinned-first split plus optional day buckets over the loaded page; the
+  // backend already orders pinned first, the split only isolates the section.
+  const sessionListRailGroups = (() => {
+    const { pinned, unpinned } = splitPinnedSessions(allVisibleSessions);
+    const timelineGroups = sessionListPrefs.timelineGrouping
+      ? groupSessionsByTimeline(unpinned, Date.now())
+      : [];
+    if (!pinned.length && !timelineGroups.length) {
+      return null;
+    }
+    const renderSessionList = (sessions: SessionSummary[]) => (
+      <DirectSessionIndexList
+        activeSessionId={activeSessionId}
+        addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
+        agentsById={agentsById}
+        avatarImageUrlFrom={avatarImageUrlFrom}
+        avatarInitials={avatarInitials}
+        buildSessionReferencePayload={buildSessionReferencePayload}
+        contextMenuSessionId={contextMenuSessionId}
+        conversations={sessions.map(sessionToConversationSummary)}
+        deleteBusyLabel={t("deleteSessionBusy")}
+        editingSessionId={editingSessionId}
+        editingSessionTitle={editingSessionTitle}
+        formatTime={formatConversationIndexTime}
+        groupPanelActive={groupPanelActive}
+        isBusyPhase={isBusyPhase}
+        lang={lang}
+        renamePending={renameSessionMutation.isPending}
+        renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+        resolveModelLabel={resolveModelLabel}
+        runtimeRunningSessionIds={runtimeRunningSessionIds}
+        sessionComposerErrors={sessionComposerErrors}
+        sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+        sessionsById={sessionsById}
+        statusLabel={statusLabel}
+        t={t}
+        onCancelRename={cancelRenameSession}
+        onContextMenu={openSessionContextMenu}
+        onDragReference={startSessionReferenceDrag}
+        onOpen={handleOpenDirectSession}
+        onPrefetch={handlePrefetchDirectSession}
+        onRenameTitleChange={setEditingSessionTitle}
+        onSubmitRename={submitRenameSession}
+      />
+    );
+    return (
+      <>
+        {pinned.length ? (
+          <ConversationIndexSection
+            count={pinned.length}
+            expanded={!railSectionCollapsed.sessionListPinned}
+            label={t("sessionListPinnedSection")}
+            onToggle={() => toggleRailSection("sessionListPinned")}
+          >
+            {renderSessionList(pinned)}
+          </ConversationIndexSection>
+        ) : null}
+        {timelineGroups.map((group) => (
+          <ConversationIndexSection
+            key={group.bucket}
+            count={group.sessions.length}
+            expanded={!railSectionCollapsed[`sessionListTimeline:${group.bucket}`]}
+            label={timelineBucketLabel(group.bucket)}
+            onToggle={() => toggleRailSection(`sessionListTimeline:${group.bucket}`)}
+          >
+            {renderSessionList(group.sessions)}
+          </ConversationIndexSection>
+        ))}
+      </>
+    );
+  })();
   const conversationIndexPanel = (
+    <>
+    <div className={styles.sessionListControlsRow} data-vui="chat-session-list-controls">
+      <VStringSelect
+        ariaLabel={t("sessionListSortAria")}
+        className={styles.sessionListSortSelect}
+        value={sessionListPrefs.sortBy}
+        onValueChange={(value) => setSessionListPrefs((current) => ({
+          ...current,
+          sortBy: normalizeSessionListSortBy(value),
+        }))}
+        options={[
+          { value: "updatedAt", label: t("sessionListSortByUpdated") },
+          { value: "createdAt", label: t("sessionListSortByCreated") },
+        ]}
+      />
+      <VIconButton
+        type="button"
+        label={t("sessionListTimelineToggle")}
+        tooltip={t("sessionListTimelineToggle")}
+        aria-pressed={sessionListPrefs.timelineGrouping}
+        onClick={() => setSessionListPrefs((current) => ({
+          ...current,
+          timelineGrouping: !current.timelineGrouping,
+        }))}
+        icon={<ListTree size={16} aria-hidden="true" />}
+      />
+    </div>
     <ChatConversationIndexPanelContent
       styles={styles}
       loadingLabel={t("loadingSession")}
@@ -3100,6 +3321,7 @@ export function ChatCodingRouteWorkbench() {
         && allVisibleSessions.length === 0
       }
     >
+          {sessionListRailGroups}
           <AgentConversationDirectory
             activeAgentId={selectedChatAgentId}
             activeSessionId={activeSessionId}
@@ -3218,6 +3440,11 @@ export function ChatCodingRouteWorkbench() {
               <SessionContextMenu
                 addToReviewDisabled={contextMenuAddToReviewDisabled}
                 addToReviewPending={contextMenuAddToReviewPending}
+                pinDisabled={pinSessionMutation.isPending}
+                pinPending={
+                  pinSessionMutation.isPending
+                  && pinSessionMutation.variables?.sessionId === contextMenuSession.id
+                }
                 clearHistoryDisabled={contextMenuClearHistoryDisabled}
                 clearHistoryPending={contextMenuClearHistoryPending}
                 clearHistoryVisible={contextMenuClearHistoryVisible}
@@ -3233,6 +3460,7 @@ export function ChatCodingRouteWorkbench() {
                 }
                 onAddToReview={handleAddSessionToReview}
                 onArchive={handleArchiveSession}
+                onTogglePin={handleTogglePinSession}
                 onClearHistory={handleClearSessionHistory}
                 onDelete={handleDeleteSession}
                 onOpenAgentConfig={openSessionAgentConfig}
@@ -3242,6 +3470,7 @@ export function ChatCodingRouteWorkbench() {
             </Suspense>
           ) : null}
     </ChatConversationIndexPanelContent>
+    </>
   );
 
   // Conversation surface model, memoized so unrelated workbench renders (rails,
@@ -3364,6 +3593,7 @@ export function ChatCodingRouteWorkbench() {
       onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
       onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
       slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
+      slashSkillsCatalogState: verifiedCompanionMode ? "ready" : slashSkillsCatalogState,
       composerReferenceOptions: verifiedCompanionMode ? [] : composerKnowledgeReferenceOptions,
       cancelComposerModeLabel: t("cancelEditMessage"),
       turnError: detail.lastTurnError,
@@ -3482,6 +3712,7 @@ export function ChatCodingRouteWorkbench() {
       setGroupManageDialogOpen,
       settleSessionComposerFocusRequest,
       slashCommandSuggestions,
+      slashSkillsCatalogState,
       standardGroupRoomActive,
       switchHeadMutation,
       t,
