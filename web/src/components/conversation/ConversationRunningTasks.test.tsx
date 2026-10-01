@@ -52,11 +52,11 @@ function task(overrides: Partial<RuntimeTaskCard> & { taskId: string }): Runtime
   };
 }
 
-function listPayload(running: RuntimeTaskCard[]): RuntimeTaskListPayload {
+function listPayload(running: RuntimeTaskCard[], endedTotal = 0): RuntimeTaskListPayload {
   return {
     revision: "rev-1",
     running,
-    ended: { items: [], total: 0, nextCursor: "" },
+    ended: { items: [], total: endedTotal, nextCursor: "" },
   };
 }
 
@@ -68,14 +68,22 @@ describe("ConversationRunningTasks", () => {
    * Seeds the list cache before mount so the first render already shows the
    * rows: DOM assertions stay deterministic instead of racing act flushes.
    * The polled refetch resolves the same payload, so later poll beats cannot
-   * wipe the seeded rows out from under the assertions.
+   * wipe the seeded rows out from under the assertions. The shared fetch mock
+   * routes by status: the active strip and the ended-count probe each get
+   * their own payload.
    */
-  async function mountStrip(seed: RuntimeTaskListPayload) {
+  async function mountStrip(
+    active: RuntimeTaskListPayload,
+    ended: RuntimeTaskListPayload = listPayload([]),
+  ) {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    runtimeApi.listRuntimeTasksRevisionAware.mockResolvedValue(seed);
-    queryClient.setQueryData(queryKeys.runtimeTasks("", SESSION_ID), seed);
+    runtimeApi.listRuntimeTasksRevisionAware.mockImplementation(
+      (options: { status?: string }) =>
+        Promise.resolve(options.status === "ended" ? ended : active),
+    );
+    queryClient.setQueryData(queryKeys.runtimeTasks("", SESSION_ID), active);
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
@@ -136,6 +144,13 @@ describe("ConversationRunningTasks", () => {
       expect.anything(),
       expect.anything(),
     );
+    // The ended directory probe is session-scoped too and only reads the count
+    // (its cache entry starts unseeded, so the previous-payload arg is undefined).
+    expect(runtimeApi.listRuntimeTasksRevisionAware).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "ended", parentSessionId: SESSION_ID, limit: 1 }),
+      undefined,
+      expect.anything(),
+    );
     expect(host?.querySelector('[data-conversation-running-tasks="true"]')).toBeNull();
     expect(host?.textContent).toBe("");
   });
@@ -176,6 +191,34 @@ describe("ConversationRunningTasks", () => {
     );
     // Kinds without a child session jump to the aux task center.
     expect(cliLink?.getAttribute("href")).toBe("/aux");
+
+    // With an ended count of zero the directory footer stays hidden.
+    expect(host?.querySelector('[data-testid="conversation-running-tasks-ended-row"]')).toBeNull();
+  });
+
+  it("renders the ended directory footer linking to /aux when only ended tasks remain", async () => {
+    await mountStrip(listPayload([]), listPayload([], 3));
+    await flushUntil(() => Boolean(host?.querySelector('[data-testid="conversation-running-tasks-ended-row"]')));
+
+    const footer = host!.querySelector<HTMLAnchorElement>('[data-testid="conversation-running-tasks-ended-row"]');
+    expect(footer, "ended directory footer should exist").toBeTruthy();
+    expect(footer!.getAttribute("href")).toBe("/aux");
+    expect(footer!.textContent).toContain("已结束 · 3");
+    // Ended-only state: no running rows, no stop buttons, no timers needed.
+    expect(host!.querySelector('[data-testid^="conversation-running-task-"]')).toBeNull();
+  });
+
+  it("keeps the ended footer visible next to live running rows", async () => {
+    await mountStrip(
+      listPayload([task({ taskId: "task-1", title: "子任务：调研资料" })]),
+      listPayload([task({ taskId: "task-1" })], 2),
+    );
+    await flushUntil(() => Boolean(host?.querySelector('[data-testid="conversation-running-tasks-ended-row"]')));
+
+    expect(host!.querySelector('[data-testid="conversation-running-task-task-1"]')).toBeTruthy();
+    const footer = host!.querySelector<HTMLAnchorElement>('[data-testid="conversation-running-tasks-ended-row"]');
+    expect(footer!.getAttribute("href")).toBe("/aux");
+    expect(footer!.textContent).toContain("已结束 · 2");
   });
 
   it("stops a running task through the confirm dialog and keeps 停止中 until the row leaves the running bucket", async () => {

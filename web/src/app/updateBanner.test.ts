@@ -8,6 +8,7 @@ import {
   storeUpdateBannerDismissedHead,
   updateBannerCopy,
   updateBannerHeadToken,
+  updateBannerRestartReloadsDocument,
 } from "./updateBanner";
 
 describe("updateBanner verdict gate", () => {
@@ -120,6 +121,19 @@ describe("updateBannerCopy", () => {
       .toBe("运行中的代码基于较早的工作区状态，重启后会按当前代码运行。 重启会同时加载新的前端构建。");
     expect(updateBannerCopy("en", "e91a851dfabc", true, null).detail)
       .toBe("The running code was loaded from an earlier working-tree state; restart to serve the current changes. The restart also loads the new frontend build.");
+  });
+});
+
+describe("updateBannerRestartReloadsDocument", () => {
+  it("reloads the open document after an accepted restart so the new frontend build loads", () => {
+    expect(updateBannerRestartReloadsDocument(undefined)).toBe(true);
+    expect(updateBannerRestartReloadsDocument("")).toBe(true);
+    expect(updateBannerRestartReloadsDocument("restart_accepted")).toBe(true);
+  });
+
+  it("leaves the current document in place when the restart was only queued", () => {
+    expect(updateBannerRestartReloadsDocument("restart_queued")).toBe(false);
+    expect(updateBannerRestartReloadsDocument(" restart_queued ")).toBe(false);
   });
 });
 
