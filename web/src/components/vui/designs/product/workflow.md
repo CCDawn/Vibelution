@@ -119,6 +119,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - `@xyflow/react` 仅允许在 `renderers/shadcn/workflow/**`（入口 `ShadcnWorkflowCanvas.tsx`）
 - 业务路由禁止 import renderer 或 xyflow
 - `stage-columns` 默认不可拖；`serpentine` 允许任务节点做浏览器本地展示调整，仍不可改运行图拓扑。解锁时可把箭头改挂到同一张卡片的磁铁，不可接到另一张卡片。
+- React Flow `onNodesChange` 只收下尺寸、选中，以及手动布局未锁定时的位置。新增、删除和替换直接丢掉，库不能改运行图拓扑。拖动中的吸附和松手写入仍走现有手动布局；边继续用 BaseEdge 与 ELK/L-Z，不接 `onConnect`。
 - MiniMap 默认关闭；长流程由生产工作台显式 `showMiniMap` 开启
 - 单击节点 → 选中；点空白 → 取消；键盘可聚焦节点（aria-label 含名称/类型/状态）
 - 选中卡片时点亮其入边和出边：描边加粗/提亮（idle 主路径改用 `--accent-cool`），箭头颜色跟描边；不抬 `zIndex`，也不因此展开标签

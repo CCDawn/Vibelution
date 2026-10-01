@@ -30,16 +30,25 @@ export type ShutdownInstanceSnapshot = {
 };
 
 export function registryEntriesToShutdownInstanceSnapshots(
-  instances: Record<string, RegistryEntry>
+  instances: Record<string, RegistryEntry>,
+  pidAlive?: (pid: number) => boolean
 ): ShutdownInstanceSnapshot[] {
-  return Object.entries(instances).map(([id, entry]) => ({
-    id,
-    observedState: [String(entry.status || ""), String(entry.desiredState || "")].filter(Boolean).join(" "),
-    phase: String(entry.phase || ""),
-    pid: Number(entry.spawnPid || 0),
-    port: Number(entry.port || 0),
-    window: { open: Number(entry.windowPid || 0) > 0 }
-  }));
+  return Object.entries(instances).map(([id, entry]) => {
+    const spawnPid = Number(entry.spawnPid || 0);
+    const windowPid = Number(entry.windowPid || 0);
+    // Registry rows can outlive their processes by months; a dead pid is not
+    // stop evidence, so clear pids the caller reports as no longer alive.
+    const spawnConsideredAlive = spawnPid <= 0 || !pidAlive || pidAlive(spawnPid);
+    const windowConsideredAlive = windowPid <= 0 || !pidAlive || pidAlive(windowPid);
+    return {
+      id,
+      observedState: [String(entry.status || ""), String(entry.desiredState || "")].filter(Boolean).join(" "),
+      phase: String(entry.phase || ""),
+      pid: spawnConsideredAlive ? spawnPid : 0,
+      port: Number(entry.port || 0),
+      window: { open: windowConsideredAlive ? windowPid > 0 : false }
+    };
+  });
 }
 
 export function trayRestartAllPendingPath(workspaceRoot: string): string {

@@ -9,6 +9,7 @@ import { AgentFocusedOverviewPanel } from "./AgentFocusedOverviewPanel";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentSelectedDetailContentPanel.styles";
+import { FinancialAssistantStatusNote } from "./finance/FinancialAssistantStatusNote";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 export type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
@@ -46,6 +47,7 @@ type AgentSelectedDetailHeaderProps = Omit<
 
 export type AgentSelectedDetailContentPanelProps = {
   activePane: AgentSelectedDetailPaneId;
+  agentId: string;
   header: AgentSelectedDetailHeaderProps;
   brief: ComponentProps<typeof AgentManagementBriefPanel>;
   overview: ComponentProps<typeof AgentFocusedOverviewPanel> | null;
@@ -97,6 +99,7 @@ function PaneSuspense({ children, lang }: { children: ReactNode; lang: "zh" | "e
 
 export function AgentSelectedDetailContentPanel({
   activePane,
+  agentId,
   header,
   overview,
   configChanges,
@@ -137,6 +140,7 @@ export function AgentSelectedDetailContentPanel({
       {activePane === "config" ? (
         <PaneSuspense lang={header.lang}>
           <div className={styles.paneContent}>
+            <FinancialAssistantStatusNote agentId={agentId} lang={header.lang} />
             <nav className={styles.configSectionNav} aria-label={labels.navLabel}>
               {(
                 [

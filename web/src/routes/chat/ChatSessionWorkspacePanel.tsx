@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, type ComponentProps } from "react";
+import { lazy, Suspense, useMemo, type ComponentProps, type ReactNode } from "react";
 
 import type {
   FileContent,
@@ -51,6 +51,8 @@ type ChatSessionWorkspacePanelProps = {
   invalidChildSessionLinkMessage: string;
   lang: "zh" | "en";
   loadingSessionLabel: string;
+  /** Fixed note at the start of one specialist chat. Ordinary sessions pass nothing. */
+  preface?: ReactNode;
   noSessionsLabel: string;
   notices: SessionRuntimeNotice[];
   onApproveToolApproval: () => void;
@@ -88,6 +90,7 @@ export function ChatSessionWorkspacePanel({
   invalidChildSessionLinkMessage,
   lang,
   loadingSessionLabel,
+  preface = null,
   noSessionsLabel,
   notices,
   onApproveToolApproval,
@@ -168,6 +171,7 @@ export function ChatSessionWorkspacePanel({
     return (
       <div className={conversationFocused ? `${styles.conversationShell} ${styles.conversationFrameFocus}` : styles.conversationShell}>
         <div className={styles.conversationFrame}>
+          {preface}
           {hasTransientError ? (
             <div className={styles.inlineNotice} role="status">
               {transientErrorMessage}

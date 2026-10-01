@@ -17,10 +17,11 @@ import {
   useReactFlow,
   type Connection,
   type Edge,
+  type EdgeTypes,
   type Node,
+  type NodeChange,
   type NodeProps,
   type NodeTypes,
-  type EdgeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -53,6 +54,10 @@ import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
 import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
+import {
+  resolveWorkflowNodeChangeOutcome,
+  type WorkflowMeasuredSize,
+} from "./workflowNodeChanges";
 import { resolveRelatedEdgeStroke } from "./workflowCanvasState";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 import { shouldRefitOnContainerResize } from "./workflowFitOnResize";
@@ -330,6 +335,7 @@ function WorkflowCanvasInner({
   const [manualHistory, setManualHistory] = useState<WorkflowManualLayoutSnapshot[]>([]);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [helperLines, setHelperLines] = useState<WorkflowHelperLines | null>(null);
+  const [measuredVersion, setMeasuredVersion] = useState(0);
   const [reconnectSession, setReconnectSession] = useState<{
     edgeId: string;
     handleType: "source" | "target";
@@ -348,6 +354,9 @@ function WorkflowCanvasInner({
   const stageAnchorByIdRef = useRef<Record<string, { x: number; y: number }>>({});
   const layoutNodesRef = useRef(layout.nodes);
   const manualLockedRef = useRef(false);
+  const selectedNodeIdRef = useRef(selectedNodeId);
+  const measuredByIdRef = useRef<Record<string, WorkflowMeasuredSize>>({});
+  selectedNodeIdRef.current = selectedNodeId;
   const manualHistoryRef = useRef<WorkflowManualLayoutSnapshot[]>([]);
   const manualDragFrameRef = useRef<number | null>(null);
   const helperLinesRef = useRef<WorkflowHelperLines | null>(null);
@@ -723,6 +732,7 @@ function WorkflowCanvasInner({
             // relying on style alone (style is not part of nodeHasDimensions).
             width: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_WIDTH : node.width,
             height: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_HEIGHT : node.height,
+            measured: measuredByIdRef.current[node.id],
             style: {
               width: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_WIDTH : node.width,
               height: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_HEIGHT : node.height,
@@ -777,6 +787,7 @@ function WorkflowCanvasInner({
           // the first render, including after a refresh or narrow resize.
           width: node.width,
           height: node.height,
+          measured: measuredByIdRef.current[node.id],
           style: { width: node.width, height: node.height },
           selectable: true,
           draggable: manualLayoutEnabled && !manualLayoutLocked,
@@ -800,12 +811,41 @@ function WorkflowCanvasInner({
       edgeAnchors,
       reconnectSession,
       layout.edges,
+      measuredVersion,
     ],
   );
 
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   const focusableNodeCount = nodes.length;
+
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    const outcome = resolveWorkflowNodeChangeOutcome(
+      changes,
+      nodesRef.current,
+      manualLayoutEnabled && !manualLockedRef.current,
+    );
+    if (!outcome) return;
+    let measuredChanged = false;
+    for (const [id, size] of Object.entries(outcome.measured)) {
+      const previous = measuredByIdRef.current[id];
+      if (previous && previous.width === size.width && previous.height === size.height) continue;
+      measuredByIdRef.current[id] = size;
+      measuredChanged = true;
+    }
+    if (measuredChanged && !outcome.dragging) {
+      setMeasuredVersion((version) => version + 1);
+    }
+    if (outcome.selectedId !== undefined && outcome.selectedId !== selectedNodeIdRef.current) {
+      selectFromCanvas(outcome.selectedId);
+    }
+    if (Object.keys(outcome.positions).length === 0) return;
+    manualPositionsRef.current = {
+      ...manualPositionsRef.current,
+      ...outcome.positions,
+    };
+    setManualPositions(cloneWorkflowManualPositions(manualPositionsRef.current));
+  }, [manualLayoutEnabled, selectFromCanvas]);
 
   const obstacleRects = useMemo(() => {
     if (!manualLayoutEnabled) return [] as OrthogonalObstacle[];
@@ -986,6 +1026,7 @@ function WorkflowCanvasInner({
           <ReactFlow
           nodes={nodes}
           edges={edges}
+          onNodesChange={onNodesChange}
           nodeTypes={measuredNodeTypes}
           edgeTypes={edgeTypes}
           minZoom={layoutMode === "serpentine" ? 0.1 : 0.35}

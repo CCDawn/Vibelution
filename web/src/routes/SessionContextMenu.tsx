@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, BookPlus, Eraser, Pencil, Pin, PinOff, Settings2, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, BookPlus, Eraser, Library, Pencil, Pin, PinOff, Settings2, Trash2 } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import type { SessionSummary } from "../api/types";
@@ -7,7 +7,7 @@ import type { TranslationKey } from "../i18n/dictionary";
 import styles from "./SessionContextMenu.styles";
 
 const MENU_WIDTH = 188;
-const MENU_HEIGHT = 232;
+const MENU_HEIGHT = 260;
 const MENU_MARGIN = 12;
 
 export type SessionContextMenuPosition = {
@@ -51,6 +51,7 @@ type SessionContextMenuProps = {
   onClearHistory: (session: SessionSummary) => void;
   onDelete: (session: SessionSummary) => void;
   onOpenAgentConfig?: (session: SessionSummary) => void;
+  onOpenReportLibrary?: (session: SessionSummary) => void;
   onRename: (session: SessionSummary) => void;
   onTogglePin?: (session: SessionSummary) => void;
   onDismiss?: () => void;
@@ -76,6 +77,7 @@ export function SessionContextMenu({
   onClearHistory,
   onDelete,
   onOpenAgentConfig,
+  onOpenReportLibrary,
   onRename,
   onTogglePin,
   onDismiss,
@@ -153,6 +155,15 @@ export function SessionContextMenu({
               title: lang === "zh" ? "打开当前 Agent 配置" : "Open current Agent configuration",
               label: lang === "zh" ? "打开 Agent 配置" : "Open Agent config",
               onSelect: () => onOpenAgentConfig(session),
+            }]
+          : []),
+        ...(session.agentId && onOpenReportLibrary
+          ? [{
+              id: "open-report-library",
+              icon: <Library size={14} />,
+              title: lang === "zh" ? "打开财报知识库" : "Open the report library",
+              label: lang === "zh" ? "财报知识库" : "Report library",
+              onSelect: () => onOpenReportLibrary(session),
             }]
           : []),
         ...(clearHistoryVisible

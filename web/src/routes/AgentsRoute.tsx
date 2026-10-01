@@ -2300,6 +2300,7 @@ export function AgentsRoute() {
 
   const selectedAgentDetailContent = useMemo<AgentSelectedDetailContentPanelProps | null>(() => selectedAgent ? {
     activePane,
+    agentId: selectedAgent.agentId,
     preferOpsSection: (selectedAgent.health?.length ?? 0) > 0,
     header: {
       copy,

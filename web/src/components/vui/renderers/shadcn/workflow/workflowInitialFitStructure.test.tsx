@@ -25,7 +25,10 @@ const fakeInstance = vi.hoisted(() => ({
   getNode: vi.fn(() => null),
 }));
 
-vi.mock("@xyflow/react", () => ({
+vi.mock("@xyflow/react", async () => {
+  const actual = await vi.importActual<typeof import("@xyflow/react")>("@xyflow/react");
+  return {
+  applyNodeChanges: actual.applyNodeChanges,
   ReactFlowProvider: ({ children }: { children: unknown }) => children,
   useReactFlow: () => fakeInstance,
   useNodesInitialized: () => true,
@@ -39,7 +42,8 @@ vi.mock("@xyflow/react", () => ({
     rfCalls.push(props);
     return null;
   },
-}));
+};
+});
 
 import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/workflow/workflowCanvasTypes";
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
@@ -356,6 +360,73 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       root.unmount();
       container.remove();
     });
+  });
+
+  it("accepts dimensions, selection, and unlocked position without editing topology", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const onSelectNode = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas graph={sampleGraph()} layoutMode="serpentine" onSelectNode={onSelectNode} />,
+      );
+    });
+
+    const latest = () => rfCalls.at(-1)!;
+    expect(latest().onConnect).toBeUndefined();
+    expect(latest().onEdgesChange).toBeUndefined();
+    const nodesOf = () => latest().nodes as Array<{
+      id: string;
+      width?: number;
+      measured?: { width: number; height: number };
+      position: { x: number; y: number };
+    }>;
+    const apply = (changes: unknown[]) => {
+      (latest().onNodesChange as (next: unknown[]) => void)(changes);
+    };
+
+    await act(async () => {
+      apply([
+        { type: "add", item: { id: "extra", position: { x: 0, y: 0 }, data: {} } },
+        { type: "remove", id: "protocol_design" },
+      ]);
+    });
+    expect(nodesOf().map((node) => node.id)).toEqual(["protocol_design"]);
+
+    await act(async () => {
+      apply([{
+        type: "dimensions",
+        id: "protocol_design",
+        dimensions: { width: 10, height: 12 },
+        setAttributes: true,
+      }]);
+    });
+    const measured = nodesOf().find((node) => node.id === "protocol_design");
+    expect(measured?.measured).toEqual({ width: 10, height: 12 });
+    expect(measured?.width).toBe(300);
+
+    await act(async () => {
+      apply([{ type: "select", id: "protocol_design", selected: true }]);
+    });
+    expect(onSelectNode).toHaveBeenCalledWith("protocol_design");
+
+    await act(async () => {
+      apply([{ type: "position", id: "protocol_design", position: { x: 120, y: 200 }, dragging: false }]);
+    });
+    expect(nodesOf().find((node) => node.id === "protocol_design")?.position).toEqual({ x: 120, y: 200 });
+
+    rfCalls.length = 0;
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} onSelectNode={onSelectNode} />);
+    });
+    await act(async () => {
+      apply([{ type: "position", id: "protocol_design", position: { x: 8, y: 8 }, dragging: false }]);
+    });
+    expect(nodesOf().find((node) => node.id === "protocol_design")?.position).toEqual({ x: 40, y: 80 });
+
+    await act(async () => { root.unmount(); container.remove(); });
   });
 
   it("does not paint serpentine stage labels as React Flow nodes", async () => {

@@ -13,6 +13,7 @@ import {
 import { createExperimentController } from "./createExperimentController";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
+import { TeamCreateToolbarActions } from "./TeamCreateToolbarActions";
 import { TeamShellToolbar } from "./TeamShellToolbar";
 
 /**
@@ -265,6 +266,7 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
                 }
               }}
               switchClassName="min-w-0 w-full"
+              actions={<TeamCreateToolbarActions lang={lang} onTeamCreated={selectTeamRecord} />}
             />
           )}
         />
