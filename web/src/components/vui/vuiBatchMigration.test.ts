@@ -236,7 +236,8 @@ const routeShellTargets = [
   },
   {
     path: "routes/LauncherStartupSettingsPanel.tsx",
-    expected: ["VTabs", "windowModeTabs"],
+    // Approved row-based settings use the form recipe and VUI selects, not mode tabs.
+    expected: ["VSettingsFormPage", "VSettingsGroupCard", "VSettingsRow", "VStringSelect"],
     forbidden: ["segmentedControl", "data-active={draft.workbench.windowMode"],
   },
   {
