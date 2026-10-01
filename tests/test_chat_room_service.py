@@ -1395,6 +1395,100 @@ def test_group_round_sync_materializes_agent_directory_only_sessions(tmp_path, m
     assert messages[-1]["metadata"]["sourceRoundId"] == "round-alpha"
 
 
+def test_meeting_round_keeps_transcript_on_the_room(tmp_path, monkeypatch):
+    monkeypatch.delenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", raising=False)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="Alpha Agent")
+    room = {
+        "roomId": "room-meeting",
+        "title": "候选评审",
+        "participants": [
+            {
+                "participantId": "session-alpha",
+                "agentId": detail["agentId"],
+                "sessionId": detail["id"],
+                "directSessionId": detail["id"],
+                "title": "Alpha Agent",
+                "enabled": True,
+            }
+        ],
+    }
+    round_payload = {
+        "roundId": "round-meeting",
+        "roomId": "room-meeting",
+        "topic": "候选评审",
+        "summary": "纪要留在会议记录。",
+        "finishedAt": "2026-05-29T08:30:00+00:00",
+        "config": {
+            "meetingRoundId": "meeting-round-1",
+            "meetingType": "hypothesis_review",
+        },
+        "messages": [
+            {
+                "participantId": "session-alpha",
+                "speakerTitle": "Alpha Agent",
+                "status": "completed",
+                "content": "这一轮只留在会议室。",
+            }
+        ],
+    }
+
+    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+
+    messages = _session_ledger_messages(tmp_path, detail["id"])
+    assert all(
+        item.get("metadata", {}).get("kind") != "group_room_transcript"
+        for item in messages
+    )
+
+
+def test_meeting_round_copies_transcript_when_room_view_is_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", "0")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="Alpha Agent")
+    room = {
+        "roomId": "room-meeting",
+        "title": "候选评审",
+        "participants": [
+            {
+                "participantId": "session-alpha",
+                "agentId": detail["agentId"],
+                "sessionId": detail["id"],
+                "directSessionId": detail["id"],
+                "title": "Alpha Agent",
+                "enabled": True,
+            }
+        ],
+    }
+    round_payload = {
+        "roundId": "round-meeting",
+        "roomId": "room-meeting",
+        "topic": "候选评审",
+        "summary": "旧路径仍抄回会话。",
+        "finishedAt": "2026-05-29T08:30:00+00:00",
+        "config": {
+            "meetingRoundId": "meeting-round-1",
+            "meetingType": "hypothesis_review",
+        },
+        "messages": [
+            {
+                "participantId": "session-alpha",
+                "speakerTitle": "Alpha Agent",
+                "status": "completed",
+                "content": "关掉会议室投影后仍写回会话。",
+            }
+        ],
+    }
+
+    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+
+    messages = _session_ledger_messages(tmp_path, detail["id"])
+    assert messages[-1]["metadata"]["kind"] == "group_room_transcript"
+    assert messages[-1]["metadata"]["sourceRoundId"] == "round-meeting"
+
+
 def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
