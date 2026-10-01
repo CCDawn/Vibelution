@@ -3622,7 +3622,7 @@ def test_config_workspace_apply_rejects_stale_base_hash(monkeypatch):
     original.setdefault("ui", {})["language"] = "zh"
     stale_hash = public_config_hash(original)
     external = copy.deepcopy(original)
-    external.setdefault("ui", {})["language"] = "en"
+    external["ui"]["language"] = "en"
     public_config = external
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -3638,6 +3638,42 @@ def test_config_workspace_apply_rejects_stale_base_hash(monkeypatch):
 
     assert response.status_code == 409
     assert "重新加载" in response.json()["detail"]
+
+
+def test_config_workspace_apply_rejects_externally_rewritten_disk_config(monkeypatch, tmp_path):
+    """Real-filesystem check: an external rewrite of the operator config
+    (fresh mtime/size signature) must be caught by the real disk reload in
+    the apply staleness gate, not only by a patched load_public_config symbol.
+    """
+
+    config_path = tmp_path / "config.toml"
+    original = copy.deepcopy(load_public_config())
+    original.setdefault("ui", {})["language"] = "zh"
+    public_config_module.ensure_global_config_initialized(config_path)
+    public_config_module.save_public_config(original, config_path)
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_path)
+    public_config_module._reset_public_config_cache()
+    try:
+        stale_hash = public_config_hash(original)
+
+        # Simulate another process rewriting the file on the real filesystem.
+        external = copy.deepcopy(original)
+        external["ui"]["language"] = "en"
+        public_config_module.save_public_config(external, config_path)
+
+        response = client.put(
+            "/api/config/apply",
+            json={
+                "publicConfig": original,
+                "draftMeta": {},
+                "baseHash": stale_hash,
+            },
+        )
+
+        assert response.status_code == 409
+        assert "重新加载" in response.json()["detail"]
+    finally:
+        public_config_module._reset_public_config_cache()
 
 
 def test_llm_v2_migration_preview_route_projects_allowlisted_fields(monkeypatch):
