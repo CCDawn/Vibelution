@@ -21,18 +21,28 @@ from contextlib import nullcontext
 from dataclasses import replace
 from typing import Any
 
+from core.research.workflow.challenge_cup_runtime import (
+    resolve_definition_for_version,
+    successor_map,
+)
 from core.research.workflow.contracts import (
     ExecutionReceipt,
     PendingAction,
 )
-from core.research.workflow.challenge_cup_runtime import successor_map
-from core.research.workflow.ledger import WorkflowLedgerStore
-from core.research.workflow.ledger import outbox as outbox_api
+from core.research.workflow.definition_registry import WorkflowDefinitionRegistryError
 from core.research.workflow.knowledge_sideflow_definition import (
     KNOWLEDGE_SIDEFLOW_WORKFLOW_ID,
 )
-from core.research.workflow.models import ActorKind
-from core.research.workflow.transitions import NodeAttemptStatus
+from core.research.workflow.ledger import WorkflowLedgerStore
+from core.research.workflow.ledger import outbox as outbox_api
+from core.research.workflow.models import ActorKind, NodeRouteMode
+from core.research.workflow.node_route import (
+    AGENT_NEXT_FIELD,
+    allowed_targets,
+    decision_from_attempts,
+    successors_for_decision,
+)
+from core.research.workflow.transitions import NodeAttemptStatus, RunStatus
 
 from .action_registry import ActionRegistry, VerifiedDomainResult
 from .block_projection import (
@@ -766,18 +776,35 @@ class AdapterDispatchWorker:
                 self._commit_hook()
             if self._after_commit_hook is not None:
                 uow.after_commit(self._after_commit_hook)
-            acked = uow.repository.ack_outbox(outbox.action_id, self._owner, now_ms)
-            if not acked:
-                return False
             run = uow.repository.get_run(action.run_id)
             if run is None:
                 return False
+            route_decision = _agent_route_decision(uow, run, action, anchor_payload)
+            if route_decision is not None and route_decision.status == "retry":
+                return _requeue_agent_route(
+                    self,
+                    uow,
+                    outbox,
+                    action,
+                    run,
+                    route_decision,
+                    anchor_payload,
+                    now_ms,
+                )
+            acked = uow.repository.ack_outbox(outbox.action_id, self._owner, now_ms)
+            if not acked:
+                return False
+            route_steps = (
+                1
+                if route_decision is not None and route_decision.status == "wait_human"
+                else event_count
+            )
             last_sequence = uow.repository.advance_last_sequence(
-                action.run_id, event_count, now_ms
+                action.run_id, route_steps, now_ms
             )
             if last_sequence is None:
                 return False
-            base_sequence = last_sequence - event_count
+            base_sequence = last_sequence - route_steps
             bound_anchor_id = anchor_id
 
             if anchor_id and anchor_payload:
@@ -874,6 +901,17 @@ class AdapterDispatchWorker:
                     now_ms=now_ms,
                 )
 
+            if route_decision is not None and route_decision.status == "wait_human":
+                return _park_agent_route_for_human(
+                    uow,
+                    action,
+                    run,
+                    route_decision,
+                    anchor_payload,
+                    base_sequence,
+                    now_ms,
+                )
+
             uow.repository.update_attempt_status(
                 action.node_run_id,
                 NodeAttemptStatus.SUCCEEDED.value,
@@ -911,6 +949,13 @@ class AdapterDispatchWorker:
                         now_ms=now_ms,
                     )
                 successors = ()
+            follow = (
+                route_decision
+                if route_decision is not None and route_decision.status == "follow"
+                else None
+            )
+            applied = successors_for_decision(tuple(successors), follow)
+            successors = () if applied is None else applied
             if successors:
                 uow.repository.insert_handoff(
                     handoff_id=handoff_id,
@@ -957,6 +1002,8 @@ class AdapterDispatchWorker:
             )
             if successors or action.node_id == "result_package" or operator_baseline_terminal or operator_round_terminal:
                 state_update = {"branch_decision": branch} if branch else {}
+                if follow is not None and follow.next_node_id:
+                    state_update["agent_next_node_id"] = follow.next_node_id
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
                         run=run,
@@ -1961,6 +2008,152 @@ def _heal_pending_action_identity(outbox: Any, action: PendingAction) -> Pending
     if run_id == payload_run_id and node_run_id == payload_node_run_id:
         return action
     return replace(action, run_id=run_id, node_run_id=node_run_id)
+
+
+def _agent_route_decision(
+    uow: Any,
+    run: Any,
+    action: PendingAction,
+    anchor_payload: dict[str, Any] | None,
+):
+    """None keeps the designed successor. Agent mode returns a decision."""
+
+    version_id = str(getattr(run, "workflow_version_id", "") or "").strip()
+    if not version_id:
+        return None
+    try:
+        definition = resolve_definition_for_version(version_id)
+    except WorkflowDefinitionRegistryError:
+        return None
+    node = next(
+        (item for item in definition.nodes if item.nodeId == action.node_id),
+        None,
+    )
+    if node is None or node.routeMode is not NodeRouteMode.AGENT:
+        return None
+    chosen = ""
+    if isinstance(anchor_payload, dict):
+        chosen = str(anchor_payload.get(AGENT_NEXT_FIELD) or "").strip()
+    return decision_from_attempts(
+        allowed=allowed_targets(definition, action.node_id),
+        chosen=chosen,
+        attempts=uow.repository.list_attempts(action.run_id),
+        node_id=action.node_id,
+        node_run_id=action.node_run_id,
+    )
+
+
+def _agent_route_problem(
+    decision: Any,
+    anchor_payload: dict[str, Any] | None,
+) -> dict[str, str]:
+    chosen = ""
+    if isinstance(anchor_payload, dict):
+        chosen = str(anchor_payload.get(AGENT_NEXT_FIELD) or "").strip()
+    return {
+        "code": str(decision.code or ""),
+        "detail": str(decision.detail or ""),
+        "nextNodeId": chosen,
+    }
+
+
+def _requeue_agent_route(
+    worker: Any,
+    uow: Any,
+    outbox: Any,
+    action: PendingAction,
+    run: Any,
+    decision: Any,
+    anchor_payload: dict[str, Any] | None,
+    now_ms: int,
+) -> bool:
+    """Ask the same agent once more. The leased outbox stays the retry."""
+
+    problem = _agent_route_problem(decision, anchor_payload)
+    problem_json = json.dumps(problem, ensure_ascii=False)
+    requeued = uow.repository.requeue_outbox(
+        outbox.action_id,
+        worker._owner,
+        now_ms,
+        retry_at_ms=now_ms,
+        problem_json=problem_json,
+    )
+    if not requeued:
+        return False
+    uow.repository.update_attempt_status(
+        action.node_run_id,
+        NodeAttemptStatus.RUNNING.value,
+        now_ms,
+        problem_json=problem_json,
+    )
+    last_sequence = uow.repository.advance_last_sequence(action.run_id, 1, now_ms)
+    if last_sequence is None:
+        raise RuntimeError("agent route retry could not record its event")
+    uow.repository.insert_event(
+        _event(
+            run_id=action.run_id,
+            sequence=last_sequence,
+            run_version=int(run.run_version),
+            event_id=new_id("evt"),
+            event_type="agent_next_rejected",
+            correlation_id=action.action_id,
+            payload=problem,
+            now_ms=now_ms,
+        )
+    )
+    return True
+
+
+def _park_agent_route_for_human(
+    uow: Any,
+    action: PendingAction,
+    run: Any,
+    decision: Any,
+    anchor_payload: dict[str, Any] | None,
+    base_sequence: int,
+    now_ms: int,
+) -> bool:
+    """Stop for a person after the agent repeats an illegal next station."""
+
+    problem = _agent_route_problem(decision, anchor_payload)
+    problem_json = json.dumps(problem, ensure_ascii=False)
+    uow.repository.update_attempt_status(
+        action.node_run_id,
+        NodeAttemptStatus.WAITING_HUMAN.value,
+        now_ms,
+        problem_json=problem_json,
+        finished_at_ms=now_ms,
+    )
+    uow.repository.update_run_status(
+        action.run_id,
+        run.team_id,
+        RunStatus.WAITING_HUMAN.value,
+        now_ms,
+        active_node_id=action.node_id,
+        blocked_problem_json=problem_json,
+    )
+    uow.repository.insert_human_task(
+        task_id=new_id("ht"),
+        run_id=action.run_id,
+        node_run_id=action.node_run_id,
+        handoff_id=None,
+        task_kind=f"agent_route:{action.node_id}",
+        prompt_json=problem_json,
+        created_at_ms=now_ms,
+    )
+    uow.repository.insert_event(
+        _event(
+            run_id=action.run_id,
+            sequence=base_sequence + 1,
+            run_version=int(run.run_version),
+            event_id=new_id("evt"),
+            event_type="agent_next_waiting_human",
+            correlation_id=action.action_id,
+            payload=problem,
+            now_ms=now_ms,
+        )
+    )
+    return True
 
 
 def _event(*, run_id: str, sequence: int, run_version: int, event_id: str, event_type: str, correlation_id: str, payload: dict, now_ms: int):

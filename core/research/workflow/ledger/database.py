@@ -117,7 +117,8 @@ class WorkflowLedgerDatabase:
             connection.close()
         except Exception:
             return
-        self._reader_slots.release()
+        # This connection was opened after the pool was full, so it never
+        # took a slot. Releasing one here overflows the semaphore.
 
     def close_all_readers(self) -> None:
         """Close every pooled reader connection (fixes WinError 32 on close)."""
