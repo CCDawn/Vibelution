@@ -19,6 +19,9 @@ export function chatRoomModeLabel(mode: ChatRoomMode, lang: "zh" | "en") {
   if (mode.id === "medical_consultation_panel") {
     return lang === "zh" ? "协同问诊会诊" : "Medical consultation";
   }
+  if (mode.id === "planned") {
+    return lang === "zh" ? "计划分派" : "Planned dispatch";
+  }
   return mode.label || mode.id;
 }
 

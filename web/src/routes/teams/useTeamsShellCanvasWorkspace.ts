@@ -7,7 +7,7 @@
  * Mutations / drag commit / save remain in TeamsRoute and use setters/refs from here.
  */
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import { queryKeys } from "../../api/queryKeys";
 import { fetchTeamCanvas } from "../../api/teams";
@@ -30,11 +30,20 @@ import {
 } from "./canvasGeometry";
 import { resolveTeamCanvasQueryEnabled } from "./teamDetailLoadPolicy";
 import type { ResearchWorkspaceView } from "./researchWorkspaceModel";
+import { isResearchWorkflowTeam } from "./teamKindModel";
 import {
   parseTeamShellMode,
   teamShellModeFromResearchView,
   type TeamShellMode,
 } from "./teamShellModel";
+
+/**
+ * Shell-mode ownership of a team id, resolved against the visible team catalog.
+ * - "research": research-workspace team (board shell derivation applies)
+ * - "user": user-owned team (organization canvas home; never forced to board)
+ * - "unknown": team not (yet) resolvable — keep the legacy research bootstrap.
+ */
+export type ShellTeamKind = "research" | "user" | "unknown";
 
 export type NodeDraft = {
   label: string;
@@ -62,6 +71,8 @@ export type UseTeamsShellCanvasWorkspaceInput = {
   requestedVisibleTeamId: string;
   requestedVisibleAgentTeamId: string;
   visibleTeamIds: Set<string>;
+  /** Visible team catalog; used to tell research-workspace teams from user teams. */
+  visibleTeams: Team[];
   fallbackVisibleTeamId: string;
 };
 
@@ -75,10 +86,29 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
     requestedVisibleTeamId,
     requestedVisibleAgentTeamId,
     visibleTeamIds,
+    visibleTeams,
     fallbackVisibleTeamId,
   } = input;
 
   const [selectedTeamId, setSelectedTeamId] = useState("");
+  const visibleTeamsById = useMemo(
+    () => new Map(visibleTeams.map((team) => [team.teamId, team] as const)),
+    [visibleTeams],
+  );
+  const shellTeamKindFor = useCallback(
+    (teamId: string): ShellTeamKind => {
+      if (!teamId) {
+        return "unknown";
+      }
+      const team = visibleTeamsById.get(teamId);
+      if (!team) {
+        return "unknown";
+      }
+      return isResearchWorkflowTeam(team) ? "research" : "user";
+    },
+    [visibleTeamsById],
+  );
+  const requestedShellTeamKind = shellTeamKindFor(requestedVisibleTeamId);
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [nodeDraft, setNodeDraft] = useState<NodeDraft>(EMPTY_NODE_DRAFT);
   const [teamMessage, setTeamMessage] = useState("");
@@ -88,11 +118,18 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   const [researchCanvasLayoutMode, setResearchCanvasLayoutMode] = useState<ResearchCanvasLayoutMode>("auto");
   const [researchWorkspaceView, setResearchWorkspaceView] = useState<ResearchWorkspaceView>(
     // ADR 0006: process workflow is the default research home (not overview/org canvas).
-    forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "workflow",
+    // Non-research teams do not participate in the research workspace view system:
+    // their researchView URL param is ignored at seed time.
+    () =>
+      forcedResearchWorkspaceView
+      ?? (requestedShellTeamKind === "user" ? null : requestedResearchWorkspaceView)
+      ?? "workflow",
   );
   const [teamShellMode, setTeamShellMode] = useState<TeamShellMode>(
     () =>
       requestedTeamShellMode
+      // User teams land on the organization canvas, not the research board.
+      ?? (requestedShellTeamKind === "user" ? "canvas" as const : null)
       ?? teamShellModeFromResearchView(forcedResearchWorkspaceView ?? requestedResearchWorkspaceView)
       // End-user research home is board shell hosting the process workspace.
       ?? "board",
@@ -108,9 +145,20 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   const dragStateRef = useRef<NodeDragState | null>(null);
   const dragFrameRef = useRef(0);
 
+  const selectedShellTeamKind = shellTeamKindFor(selectedTeamId);
+  // Before the selection effect resolves selectedTeamId (first render), the URL's
+  // requested team is the authoritative kind for shell gating.
+  const shellTeamKind =
+    selectedShellTeamKind !== "unknown" ? selectedShellTeamKind : requestedShellTeamKind;
+
   useEffect(() => {
     if (forcedResearchWorkspaceView) {
       setResearchWorkspaceView(forcedResearchWorkspaceView);
+      return;
+    }
+    if (shellTeamKind === "user") {
+      // Non-research teams do not participate in the research workspace view
+      // system: a stale researchView URL param must not drive their state.
       return;
     }
     if (requestedResearchWorkspaceView) {
@@ -129,17 +177,33 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
       }
       setResearchWorkspaceView(requestedResearchWorkspaceView);
     }
-  }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView]);
+  }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView, shellTeamKind]);
 
   // Process workflow home uses board shell (primary column = ResearchProcessWorkspace).
+  // Only research-workspace teams (or the not-yet-resolved bootstrap team) force the
+  // board shell; user teams keep the organization canvas and are never forced back.
   useEffect(() => {
     if (
       (researchWorkspaceView === "workflow" || researchWorkspaceView === "overview")
       && teamShellMode !== "board"
+      && shellTeamKind !== "user"
     ) {
       setTeamShellMode("board");
     }
-  }, [researchWorkspaceView, teamShellMode]);
+  }, [researchWorkspaceView, shellTeamKind, teamShellMode]);
+
+  // A resolved non-research team must not stay stranded on the board shell when
+  // the URL carried no explicit teamMode (covers the async team-resolution timing
+  // right after team creation, before the catalog entry lands).
+  useEffect(() => {
+    if (
+      requestedTeamShellMode === null
+      && shellTeamKind === "user"
+      && teamShellMode === "board"
+    ) {
+      setTeamShellMode("canvas");
+    }
+  }, [requestedTeamShellMode, shellTeamKind, teamShellMode]);
 
   useEffect(() => {
     if (requestedVisibleTeamId) {

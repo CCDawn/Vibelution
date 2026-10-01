@@ -18,6 +18,11 @@ describe("chatRoutePresentation", () => {
     expect(chatRoomModeLabel({ id: "custom", label: "X" }, "en")).toBe("X");
   });
 
+  it("labels the planned dispatch mode in zh/en", () => {
+    expect(chatRoomModeLabel({ id: "planned", label: "" }, "zh")).toBe("计划分派");
+    expect(chatRoomModeLabel({ id: "planned", label: "" }, "en")).toBe("Planned dispatch");
+  });
+
   it("formats agent identity labels without role suffix", () => {
     expect(formatAgentIdentityLabel("Alpha")).toBe("Alpha");
     expect(formatAgentIdentityLabel("", "p1")).toBe("p1");

@@ -223,6 +223,7 @@ export function useTeamsWorkbenchFoundation({
     requestedVisibleTeamId,
     requestedVisibleAgentTeamId,
     visibleTeamIds,
+    visibleTeams,
     fallbackVisibleTeamId,
   });
   const {

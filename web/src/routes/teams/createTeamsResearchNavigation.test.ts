@@ -32,6 +32,25 @@ function researchTeam(teamId: string): Team {
   };
 }
 
+function userTeam(teamId: string): Team {
+  return {
+    teamId,
+    name: teamId,
+    description: "",
+    purpose: "",
+    status: "active",
+    teamKind: "custom",
+    teamCategory: "general",
+    teamSource: "manual",
+    members: [],
+    memberCount: 0,
+    canvasPath: "",
+    createdAt: "",
+    updatedAt: "",
+    canvas: { path: "", nodeCount: 0, edgeCount: 0 },
+  };
+}
+
 function navigationFor(search: string) {
   const setSearchParamsSpy = vi.fn();
   const setTeamShellModeSpy = vi.fn();
@@ -115,6 +134,21 @@ describe("createTeamsResearchNavigation", () => {
     expect(conflictingParams.has("node")).toBe(false);
     expect(conflictingParams.has("panel")).toBe(false);
     expect(conflictingAliases.setSearchParamsSpy.mock.calls[0]?.[1]).toEqual({ replace: false });
+  });
+
+  it("sends non-research teams to teamId + teamMode=canvas without research workspace params", () => {
+    const state = navigationFor("teamId=research-team-a&researchView=workflow&workflowId=challenge-cup-research");
+    state.navigation.selectTeamRecord(userTeam("custom-team-1"));
+
+    const params = state.setSearchParamsSpy.mock.calls[0]?.[0] as URLSearchParams;
+    expect(params.get("teamId")).toBe("custom-team-1");
+    expect(params.get("teamMode")).toBe("canvas");
+    expect(params.has("researchView")).toBe(false);
+    expect(params.has("workflowId")).toBe(false);
+    expect(params.has("node")).toBe(false);
+    expect(params.has("panel")).toBe(false);
+    // Legacy links dropped every other param; the canvas home URL stays equally minimal.
+    expect(Array.from(params.keys()).sort()).toEqual(["teamId", "teamMode"]);
   });
 
   it.each([

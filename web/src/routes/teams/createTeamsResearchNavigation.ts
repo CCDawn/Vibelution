@@ -95,8 +95,13 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
     }
     setResearchWorkspaceView("overview");
     setTeamShellMode("canvas");
-    const query = teamWorkspaceRoute(team.teamId).split("?")[1] || "";
-    setSearchParams(new URLSearchParams(query));
+    // Non-research teams own the org-canvas home: teamId + teamMode only. Carrying
+    // researchView/workflowId would re-enter the challenge-cup canonicalization and
+    // remount the whole workspace around the wrong team.
+    const params = new URLSearchParams();
+    params.set("teamId", team.teamId);
+    params.set("teamMode", "canvas");
+    setSearchParams(params);
   }
 
   function selectTeamShellMode(mode: TeamShellMode) {
