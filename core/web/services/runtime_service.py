@@ -296,10 +296,15 @@ def get_runtime_summary() -> dict:
             "needs_response": False,
             "tool_name": "",
         }
+    # The runtime_state timestamp fallback must pass the same age gate as the
+    # usage projections: ui_runtime_state.json is written by the legacy CLI
+    # shell only, so a weeks-old leftover must not surface as sessionUpdatedAt
+    # (stale or unparsable state yields an empty string). The pointer session's
+    # own updatedAt/lastActive are session-storage facts and stay ungated.
     session_updated_at = str(
         active_session.get("updatedAt")
         or active_session.get("lastActive")
-        or runtime_state.get("updated_at")
+        or usage_state.get("updated_at")
         or ""
     ).strip()
 
