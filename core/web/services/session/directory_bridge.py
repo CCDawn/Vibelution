@@ -14,7 +14,6 @@ from typing import Any
 
 from core.chat.conversation_store import (
     directory_cursor_for_row,
-    parse_directory_cursor,
     parse_directory_cursor_entry,
 )
 from core.web.services.agent_config_authority import canonical_agent_config_payload

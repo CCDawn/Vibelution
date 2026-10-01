@@ -14,10 +14,10 @@ snippets per session.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
-import json
 
 MAX_SEARCH_SNIPPETS = 4
 _SNIPPET_PREFIX_RADIUS = 48
@@ -119,9 +119,7 @@ def _scan_journal_file(path: Path, query: str) -> list[str]:
             if file_size > MAX_SCAN_BYTES_PER_FILE:
                 handle.seek(file_size - MAX_SCAN_BYTES_PER_FILE)
             raw = handle.read(MAX_SCAN_BYTES_PER_FILE)
-        text = raw.decode("utf-8", errors="replace")
-        if text.startswith("\ufeff"):
-            text = text[1:]
+        text = raw.decode("utf-8", errors="replace").removeprefix("\ufeff")
         lines = text.splitlines()
         if file_size > MAX_SCAN_BYTES_PER_FILE and lines:
             # Drop the partial first line left by the tail window seek.

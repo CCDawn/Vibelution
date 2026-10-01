@@ -59,8 +59,11 @@ def set_chat_session_pinned(session_id: str, *, pinned: bool) -> dict:
             },
             lifecycle=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        s._debug_logger.warning(
+            f"session pin scene log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
     return {
         "id": conversation_id,
         "pinned": bool(pinned),
