@@ -86,6 +86,25 @@ describe("workbench job registry", () => {
     }
   );
 
+  it("retains the captured job when native termination is not confirmed", async () => {
+    const terminate = vi.fn(() => false);
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate, activeCount: () => 0, close
+    });
+    const old = spawnTrackedWorkbenchProcess("C:/unconfirmed-retirement", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    const retire = captureTrackedWorkbenchJobRetirement("C:/unconfirmed-retirement", old.pid)!;
+    await expect(terminateTrackedWorkbenchJob("C:/unconfirmed-retirement", old.pid)).resolves.toBe(false);
+    await expect(retire()).resolves.toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    expect(hasTrackedWorkbenchJob("C:/unconfirmed-retirement")).toBe(true);
+    terminate.mockReturnValue(true);
+    await expect(retire()).resolves.toBe(true);
+    expect(hasTrackedWorkbenchJob("C:/unconfirmed-retirement")).toBe(false);
+  });
+
   it("terminates the tracked group before a later tree walk would be needed", async () => {
     const jobs: WorkbenchJobHandle[] = [];
     let active = 2;

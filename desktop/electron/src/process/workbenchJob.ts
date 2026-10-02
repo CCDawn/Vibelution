@@ -189,7 +189,7 @@ async function retireJob(current: TrackedJob): Promise<boolean> {
   if (current.retiring) return await current.retiring;
   const retirement = (async (): Promise<boolean> => {
     try {
-      current.native.terminate(current.job);
+      if (!current.native.terminate(current.job)) return false;
       if (!(await waitUntilIdle(current.job, current.native))) return false;
       // A replacement may already have closed this handle. Its registration
       // belongs to a different spawn and must survive this late completion.
