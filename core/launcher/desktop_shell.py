@@ -896,44 +896,54 @@ def _stage_desktop_shell(root: Path) -> dict[str, Any]:
 def _try_promote_staged_desktop_shell(root: Path) -> bool:
     """Swap a valid staged build into the live ``win-unpacked`` via rename.
 
-    Only the Electron tree hash gates the swap; the caller still runs the full
+    Serialized on the prebuild lock: a running prebuild helper is mid-write on
+    the staging tree (electron-builder's copy order is unspecified, so a
+    half-written package can already expose exe and provenance), and renaming
+    it in would ship a broken shell. Lock contention therefore yields to the
+    helper and the caller falls back to the real rebuild. Only the Electron
+    tree hash gates the swap; the caller still runs the full
     ``inspect_desktop_shell`` afterwards and falls back to the real npm rebuild
     when the promoted package does not pass. Any rename failure restores the
     previous layout and returns False so the slow path stays safe.
     """
 
-    staging_unpacked = root / STAGING_WIN_UNPACKED_RELATIVE
-    if not (staging_unpacked / "Vibelution.exe").is_file():
+    if not _acquire_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE):
         return False
-    staged_tree = str(_read_json(root / STAGING_PROVENANCE_RELATIVE).get("electronTreeHash") or "").strip()
-    if not staged_tree:
-        return False
-    current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
-    if not current_tree or staged_tree != current_tree:
-        # Leave the staging in place; the next successful prebuild replaces it.
-        return False
-    live = root / "dist" / "desktop" / "win-unpacked"
-    previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
-    moved_previous = False
     try:
-        if previous.exists():
-            shutil.rmtree(previous, ignore_errors=True)
-        if live.exists():
-            _rename_dir(live, previous)
-            moved_previous = True
-        _rename_dir(staging_unpacked, live)
-    except OSError:
-        # A sharing violation here means something still holds the live tree
-        # open; put the old package back and let the caller rebuild instead.
-        if moved_previous and not live.exists():
-            try:
-                _rename_dir(previous, live)
-            except OSError:
-                pass
-        return False
-    shutil.rmtree(previous, ignore_errors=True)
-    shutil.rmtree(root / STAGING_OUTPUT_DIR_RELATIVE, ignore_errors=True)
-    return True
+        staging_unpacked = root / STAGING_WIN_UNPACKED_RELATIVE
+        if not (staging_unpacked / "Vibelution.exe").is_file():
+            return False
+        staged_tree = str(_read_json(root / STAGING_PROVENANCE_RELATIVE).get("electronTreeHash") or "").strip()
+        if not staged_tree:
+            return False
+        current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+        if not current_tree or staged_tree != current_tree:
+            # Leave the staging in place; the next successful prebuild replaces it.
+            return False
+        live = root / "dist" / "desktop" / "win-unpacked"
+        previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
+        moved_previous = False
+        try:
+            if previous.exists():
+                shutil.rmtree(previous, ignore_errors=True)
+            if live.exists():
+                _rename_dir(live, previous)
+                moved_previous = True
+            _rename_dir(staging_unpacked, live)
+        except OSError:
+            # A sharing violation here means something still holds the live tree
+            # open; put the old package back and let the caller rebuild instead.
+            if moved_previous and not live.exists():
+                try:
+                    _rename_dir(previous, live)
+                except OSError:
+                    pass
+            return False
+        shutil.rmtree(previous, ignore_errors=True)
+        shutil.rmtree(root / STAGING_OUTPUT_DIR_RELATIVE, ignore_errors=True)
+        return True
+    finally:
+        _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
 
 
 def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:

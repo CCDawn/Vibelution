@@ -1318,6 +1318,78 @@ def test_try_promote_staged_desktop_shell_rejects_mismatched_and_incomplete_stag
     assert (live / "main.js").read_text(encoding="utf-8") == "old"
 
 
+def test_try_promote_staged_desktop_shell_yields_to_running_prebuild(tmp_path, monkeypatch):
+    """A live prebuild helper owns the staging tree; promotion must not race it.
+
+    electron-builder's copy order is unspecified, so exe and provenance can be
+    visible while the rest of the package is still being written. With the
+    helper holding the prebuild lock, promotion must yield (False) and leave
+    both the live tree and the staging untouched.
+    """
+
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    staged = _write_staged_shell(tmp_path, tree_hash=tree)
+    _write_prebuild_lock(tmp_path, pid=99150)
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    # The holder predates the lock, so it is the real helper, not a recycled PID.
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: 0.0)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is False
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+    assert (staged / "main.js").read_text(encoding="utf-8") == "new"
+    assert desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+    assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()
+
+
+def test_rebuild_desktop_shell_yields_to_running_prebuild_and_falls_back_to_npm(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_live_win_unpacked(tmp_path)
+    _write_staged_shell(tmp_path, tree_hash=tree)
+    _write_prebuild_lock(tmp_path, pid=99151)
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: 0.0)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": False, "reason": "current", "currentElectronTree": tree},
+    )
+    _stub_npm_toolchain(monkeypatch)
+    ran: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        ran["command"] = command
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", fake_run)
+    result = desktop_shell.rebuild_desktop_shell(tmp_path)
+    assert ran["command"][-2:] == ["run", "package:dir"]
+    assert result["rebuilt"] is True
+    assert "promotedFromStaging" not in result
+
+
+def test_try_promote_staged_desktop_shell_releases_prebuild_lock_on_every_exit(tmp_path, monkeypatch):
+    tree = "a" * 40
+    lock_path = desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE)
+    live = _write_live_win_unpacked(tmp_path)
+    # Failure path (staging provenance does not match HEAD).
+    _write_staged_shell(tmp_path, tree_hash="b" * 40)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is False
+    assert not lock_path.is_file()
+
+    # Success path (matching staging swaps in).
+    shutil.rmtree(tmp_path / desktop_shell.STAGING_OUTPUT_DIR_RELATIVE)
+    _write_staged_shell(tmp_path, tree_hash=tree)
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is True
+    assert (live / "main.js").read_text(encoding="utf-8") == "new"
+    assert not lock_path.is_file()
+    assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()
+
+
 def test_rebuild_desktop_shell_promotes_valid_staging_without_npm(tmp_path, monkeypatch):
     tree = "a" * 40
     _write_live_win_unpacked(tmp_path)
@@ -1407,3 +1479,5 @@ def test_rebuild_desktop_shell_promote_sharing_violation_falls_back_to_npm(tmp_p
     assert (live / "main.js").read_text(encoding="utf-8") == "old"
     assert (staged / "main.js").read_text(encoding="utf-8") == "new"
     assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()
+    # The promotion lock must not outlive the failed promote either.
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
