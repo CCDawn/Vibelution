@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createInstanceRegistryReconciler,
+  observeBranchInstanceRuntimes,
   RECONCILE_ATTEMPT_COOLDOWN_MS,
   type ReconcilerDependencies
 } from "../src/lifecycle/instanceRegistryReconciler.js";
@@ -33,6 +34,23 @@ function writeRegistry(path: string, payload: RegistryPayload): void {
 
 function readRegistryFile(path: string): RegistryPayload {
   return JSON.parse(readFileSync(path, "utf8")) as RegistryPayload;
+}
+
+/**
+ * The real state-refresh payload ships branchInstances as the bridge source
+ * envelope; the store only unwraps it after the reconciler hook runs. Tests
+ * must feed this exact shape or the production defect this guards against
+ * (items silently empty -> adopt never fires) cannot regress.
+ */
+function envelope(items: unknown[]): Record<string, unknown> {
+  return {
+    ok: true,
+    value: { schemaVersion: 1, currentId: "main", items }
+  };
+}
+
+function bareItems(items: unknown[]): Record<string, unknown> {
+  return { schemaVersion: 1, currentId: "main", items };
 }
 
 function liveItem(input: {
@@ -128,11 +146,9 @@ describe("instanceRegistryReconciler", () => {
     const reconciler = createInstanceRegistryReconciler({
       dependencies: buildDeps({ captureIdentityCalls: identityCalls })
     });
-    const branchInstances = {
-      schemaVersion: 1,
-      currentId: "main",
-      items: [liveItem({ id: "worktree:orphan", path: workspace.root, pid: 4242, port: 8001, controlPort: 8767 })]
-    };
+    const branchInstances = envelope([
+      liveItem({ id: "worktree:orphan", path: workspace.root, pid: 4242, port: 8001, controlPort: 8767 })
+    ]);
 
     const first = await reconciler.reconcile({
       branchInstances,
@@ -224,11 +240,7 @@ describe("instanceRegistryReconciler", () => {
         pathExists: () => true
       })
     });
-    const branchInstances = {
-      schemaVersion: 1,
-      currentId: "main",
-      items: [deadItem("worktree:ghost", workspace.root, 8002)]
-    };
+    const branchInstances = envelope([deadItem("worktree:ghost", workspace.root, 8002)]);
 
     const first = await reconciler.reconcile({ branchInstances, registryPath, nowMs: t0 });
     expect(first.closed).toEqual([]);
@@ -312,11 +324,9 @@ describe("instanceRegistryReconciler", () => {
         pidAlive: () => true
       })
     });
-    const branchInstances = {
-      schemaVersion: 1,
-      currentId: "main",
-      items: [liveItem({ id: "worktree:busy", path: workspace.root, pid: 4242, port: 8006 })]
-    };
+    const branchInstances = envelope([
+      liveItem({ id: "worktree:busy", path: workspace.root, pid: 4242, port: 8006 })
+    ]);
 
     await reconciler.reconcile({
       branchInstances,
@@ -360,11 +370,11 @@ describe("instanceRegistryReconciler", () => {
     const reconciler = createInstanceRegistryReconciler({
       dependencies: buildDeps()
     });
-    const branchInstances = {
-      schemaVersion: 1,
-      currentId: "main",
-      items: [liveItem({ id: "worktree:orphan", path: workspace.root, pid: 4242, port: 8001 })]
-    };
+    // Bare items shape (post-unwrap store projection) must keep working too;
+    // the other tests feed the raw bridge envelope.
+    const branchInstances = bareItems([
+      liveItem({ id: "worktree:orphan", path: workspace.root, pid: 4242, port: 8001 })
+    ]);
     const [first, second] = await Promise.all([
       reconciler.reconcile({ branchInstances, registryPath, nowMs: t0 }),
       reconciler.reconcile({ branchInstances, registryPath, nowMs: t0 })
@@ -393,27 +403,62 @@ describe("instanceRegistryReconciler", () => {
         pathExists: (path) => path === workspace.root
       })
     });
-    await reconciler.reconcile({ branchInstances: { items: [] }, registryPath, nowMs: t0 });
+    await reconciler.reconcile({ branchInstances: envelope([]), registryPath, nowMs: t0 });
     await reconciler.reconcile({
-      branchInstances: {
-        items: [
-          {
-            id: "worktree:window",
-            kind: "worktree",
-            path: workspace.missingRoot,
-            branch: "codex/branch",
-            port: 8007,
-            controlPort: 0,
-            runtime: {
-              backend: { alive: false, healthy: false, listening: false, portConflict: false, pid: 0, port: 8007 },
-              window: { open: true, pid: 555 }
-            }
+      branchInstances: envelope([
+        {
+          id: "worktree:window",
+          kind: "worktree",
+          path: workspace.missingRoot,
+          branch: "codex/branch",
+          port: 8007,
+          controlPort: 0,
+          runtime: {
+            backend: { alive: false, healthy: false, listening: false, portConflict: false, pid: 0, port: 8007 },
+            window: { open: true, pid: 555 }
           }
-        ]
-      },
+        }
+      ]),
       registryPath,
       nowMs: t0 + 10_001
     });
     expect(readRegistryFile(registryPath).instances["worktree:window"]).toBeDefined();
+  });
+});
+
+describe("observeBranchInstanceRuntimes payload shapes", () => {
+  const item = liveItem({ id: "worktree:shape", path: "C:/w", pid: 43128, port: 8010, controlPort: 8770 });
+
+  it("yields identical liveBackends for the bridge envelope and the bare items array", () => {
+    for (const shape of [envelope([item]), bareItems([item])]) {
+      const observed = observeBranchInstanceRuntimes(shape);
+      const live = observed.liveBackends.get("worktree:shape");
+      expect(live).toBeDefined();
+      expect(live).toMatchObject({ pid: 43128, port: 8010, controlPort: 8770, projectRoot: "C:/w" });
+      expect(observed.openWindowIds.has("worktree:shape")).toBe(false);
+    }
+  });
+
+  it("ignores failed source envelopes, the current item, and non-item garbage", () => {
+    const failed = observeBranchInstanceRuntimes({ ok: false, errorType: "BridgeError", message: "source down" });
+    expect(failed.liveBackends.size).toBe(0);
+    expect(failed.openWindowIds.size).toBe(0);
+
+    const currentItem = { ...liveItem({ id: "worktree:cur", path: "C:/w", pid: 1, port: 8000 }), current: true };
+    const mixed = observeBranchInstanceRuntimes(envelope([currentItem, item, "garbage", null]));
+    expect(mixed.liveBackends.size).toBe(1);
+    expect(mixed.liveBackends.has("worktree:shape")).toBe(true);
+  });
+
+  it("registers open windows even when the backend is dead", () => {
+    const observed = observeBranchInstanceRuntimes(envelope([
+      {
+        id: "worktree:win",
+        path: "C:/w2",
+        runtime: { backend: { alive: false, listening: false, pid: 0, port: 8009 }, window: { open: true, pid: 42 } }
+      }
+    ]));
+    expect(observed.liveBackends.size).toBe(0);
+    expect(observed.openWindowIds.has("worktree:win")).toBe(true);
   });
 });
