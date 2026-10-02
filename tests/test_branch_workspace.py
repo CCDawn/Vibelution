@@ -185,6 +185,33 @@ def test_list_branch_instances_covers_worktrees_and_local_refs(tmp_path):
     assert len(payload["items"]) == len({item["id"] for item in payload["items"]})
 
 
+def test_pool_external_nested_worktrees_get_distinct_ids(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    one = tmp_path / "codex-wt" / "chat-preview" / "Vibelution"
+    two = tmp_path / "codex-wt" / "nav-preview" / "Vibelution"
+    one.parent.parent.mkdir(parents=True, exist_ok=True)
+    two.parent.parent.mkdir(parents=True, exist_ok=True)
+    _git(project, "worktree", "add", "-b", "codex/chat-preview", str(one))
+    _git(project, "worktree", "add", "-b", "codex/nav-preview", str(two))
+
+    payload = list_branch_instances(project)
+    by_branch = {item["branch"]: item for item in payload["items"] if item.get("branch")}
+
+    chat = by_branch["codex/chat-preview"]
+    nav = by_branch["codex/nav-preview"]
+    # Nested sibling checkouts share the leaf dir name; ids must still be
+    # distinct (path-derived fallback), or registry overlays merge unrelated
+    # branches into one key and the launcher renders duplicate rows.
+    assert chat["id"] != nav["id"]
+    assert chat["id"].startswith("worktree:")
+    assert "chat-preview" in chat["id"].lower()
+    assert "nav-preview" in nav["id"].lower()
+    assert len(payload["items"]) == len({item["id"] for item in payload["items"]})
+    # Display names stay branch-driven regardless of the path-derived id.
+    assert chat["shortName"] == "branch+codex/chat-preview"
+    assert nav["shortName"] == "branch+codex/nav-preview"
+
+
 def test_pool_reparse_entry_is_removed_without_touching_external_target(tmp_path):
     project = _init_repo(tmp_path / "OtherApp")
     pool_entry = project / ".worktrees" / "external-link"
