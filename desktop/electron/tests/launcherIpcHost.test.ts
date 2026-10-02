@@ -277,6 +277,37 @@ describe("createLauncherIpcHost", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("stamps in-flight lifecycle state onto locally served branch instances without fetching", async () => {
+    const fetchImpl = vi.fn();
+    const resolveLifecycleInFlight = vi.fn((instanceId: string) =>
+      instanceId === "worktree:task" ? { operation: "start", phase: "intent" } : null);
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: null, instances: [] }),
+      resolveLocalBranchInstances: () => ({
+        items: [
+          {
+            id: "worktree:task",
+            current: false,
+            alive: false,
+            startable: true,
+            runtime: { lifecycleState: "closed", window: { open: false, pid: 0 } },
+          },
+        ],
+      }),
+      resolveLifecycleInFlight,
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "branch-instances" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const item = ((result.payload as Record<string, unknown>).items as Record<string, unknown>[])[0];
+      expect((item.runtime as Record<string, unknown>).lifecycleState).toBe("starting");
+    }
+    expect(resolveLifecycleInFlight).toHaveBeenCalledWith("worktree:task");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("loads cleanup metadata through one python api orchestrator instead of the memory snapshot", async () => {
     const fetchImpl = vi.fn();
     const resolveLocalBranchInstances = vi.fn().mockReturnValue({ items: [] });

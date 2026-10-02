@@ -150,9 +150,51 @@ function overlayStatusWindowTruth(
   return payload;
 }
 
+/**
+ * In-flight lifecycle evidence straight from the Electron main supervisor:
+ * `{ operation, phase }` for the instance's current lease, or null when no
+ * slot exists. Phase follows LauncherLifecyclePhase ("intent" | "observing" |
+ * "ready" | "uncertain"); only in-flight phases may stamp presentation.
+ */
+export type LauncherLifecycleInFlight = {
+  operation: string;
+  phase: string;
+};
+
+export type ResolveLauncherLifecycleInFlight = (
+  instanceId: string
+) => LauncherLifecycleInFlight | null;
+
+const LIFECYCLE_IN_FLIGHT_PHASES = new Set(["intent", "observing"]);
+
+/**
+ * Maps an in-flight supervisor lease to the lifecycleState the row must keep
+ * showing. Only start-like operations stamp: stop/shutdown truth is carried by
+ * the payload itself. "ready" means the command already finished its ready
+ * confirmation and "uncertain" means the outcome is unknown — neither may
+ * claim in-flight presentation, and an unmapped operation keeps cached truth
+ * instead of guessing.
+ */
+function lifecycleStampFor(inFlight: LauncherLifecycleInFlight): string | null {
+  if (!LIFECYCLE_IN_FLIGHT_PHASES.has(String(inFlight.phase || "").toLowerCase())) {
+    return null;
+  }
+  const operation = String(inFlight.operation || "").toLowerCase();
+  if (operation === "start" || operation === "open") {
+    return "starting";
+  }
+  if (operation === "restart" || operation === "rebuild-and-start") {
+    return "restarting";
+  }
+  return null;
+}
+
+const LIFECYCLE_STAMP_PROTECTED_STATES = new Set(["building", "running", "partial"]);
+
 function overlayBranchInstancesWindowTruth(
   payload: Record<string, unknown>,
-  truth: LauncherWindowTruth
+  truth: LauncherWindowTruth,
+  resolveLifecycleInFlight?: ResolveLauncherLifecycleInFlight
 ): Record<string, unknown> {
   const items = payload.items;
   if (!Array.isArray(items)) {
@@ -228,6 +270,25 @@ function overlayBranchInstancesWindowTruth(
       item.runtime.lifecycleState = "building";
       item.startable = false;
     }
+    // An admitted start/restart keeps the row away from a stale closed (or
+    // leftover error) snapshot while the supervisor still runs the command:
+    // between the build gate clearing and the store refresh landing, the
+    // cached row would otherwise flash 已停止 while the product is starting.
+    // Priority with the build gate: a row the gate already marked building
+    // keeps the more specific building marker; the lifecycle stamp only fills
+    // non-building rows. A row that already reached a live terminal state
+    // (running/partial) is never downgraded either — a lingering observing
+    // slot (e.g. a failed window-open after a healthy start) must not pin a
+    // healthy instance at starting/restarting.
+    const inFlight = resolveLifecycleInFlight?.(String(item.id || "")) ?? null;
+    const lifecycleStamp = inFlight === null ? null : lifecycleStampFor(inFlight);
+    if (
+      lifecycleStamp !== null
+      && isRecord(item.runtime)
+      && !LIFECYCLE_STAMP_PROTECTED_STATES.has(String(item.runtime.lifecycleState || ""))
+    ) {
+      item.runtime.lifecycleState = lifecycleStamp;
+    }
     applyAdmissionOverlay(item, String(item.id || ""));
     return item;
   });
@@ -237,7 +298,8 @@ function overlayBranchInstancesWindowTruth(
 export function overlayLauncherWindowTruth(
   path: string,
   payload: unknown,
-  truth: LauncherWindowTruth
+  truth: LauncherWindowTruth,
+  resolveLifecycleInFlight?: ResolveLauncherLifecycleInFlight
 ): unknown {
   if (!isRecord(payload)) {
     return payload;
@@ -249,7 +311,7 @@ export function overlayLauncherWindowTruth(
     return overlayRetiredControlPort(payload);
   }
   if (path === "branch-instances") {
-    return overlayBranchInstancesWindowTruth(payload, truth);
+    return overlayBranchInstancesWindowTruth(payload, truth, resolveLifecycleInFlight);
   }
   return payload;
 }

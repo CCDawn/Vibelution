@@ -292,21 +292,45 @@ function pendingAppliesTo(item: LauncherBranchInstance, pending?: InstancePendin
   return pending.instanceId === item.id;
 }
 
+/**
+ * Terminal payload states that prove a start/restart command has landed.
+ * building/starting/stopping/restarting are intermediates: the cached
+ * branch-instances snapshot re-reports them transiently — and can flash a
+ * stale closed row right after the Electron build gate clears — while the
+ * command is still in flight, so they must never settle the optimistic
+ * intent. ("error" is the payload term for the UI's failed state.)
+ */
+const LIFECYCLE_TERMINAL_EVIDENCE_STATES: ReadonlySet<LauncherBranchInstance["runtime"]["lifecycleState"]> = new Set([
+  "running",
+  "partial",
+  "error",
+]);
+
 export function pendingLifecycleReflected(
   item: LauncherBranchInstance,
   pending: InstancePendingOperation,
 ): boolean {
   const state = item.runtime.lifecycleState;
-  if (pending.operation === "start") {
-    // Start is done once the instance is no longer closed. Do not require a
-    // baseline change: opening a window from partial recycles start but stays
-    // partial until the window appears, which used to freeze the row on 正在启动.
-    return state !== "closed";
-  }
-  if (pending.baselineLifecycleState) {
-    return state !== pending.baselineLifecycleState;
+  if (pending.operation === "start" || pending.operation === "restart") {
+    // Settle a start/restart intent on terminal evidence only. The old
+    // "state !== closed" rule dropped the optimistic intent on the first
+    // transient building/starting payload — or on a stale closed snapshot
+    // between the Electron build gate clearing and the store refresh
+    // landing — so the row flashed 已停止 while the command was still in
+    // flight. A start may additionally settle on live backend/window
+    // signals; for a restart those are intermediate (the previous runtime
+    // is still up during the stop half), so only payload states settle it.
+    if (LIFECYCLE_TERMINAL_EVIDENCE_STATES.has(state)) {
+      return true;
+    }
+    return pending.operation === "start" && instanceHasLiveRuntime(item);
   }
   if (pending.operation === "stop") {
+    // Stop keeps its existing reflected semantics: any state change away
+    // from a recorded baseline, or an observed closed/stopping/error row.
+    if (pending.baselineLifecycleState) {
+      return state !== pending.baselineLifecycleState;
+    }
     return state === "closed" || state === "stopping" || state === "error";
   }
   return state === "restarting" || state === "starting" || state === "error";

@@ -4700,7 +4700,13 @@ function resolveLauncherIpcHost() {
       return result;
     },
     resolveLocalStatus: () => launcherStateStore.projectStatus(),
-    resolveLocalBranchInstances: () => launcherStateStore.projectBranchInstances()
+    resolveLocalBranchInstances: () => launcherStateStore.projectBranchInstances(),
+    resolveLifecycleInFlight: (instanceId) => {
+      const snapshot = launcherLifecycleSupervisor.snapshot(instanceId);
+      return snapshot === null
+        ? null
+        : { operation: snapshot.operation, phase: snapshot.phase };
+    }
   });
   return launcherIpcHost;
 }

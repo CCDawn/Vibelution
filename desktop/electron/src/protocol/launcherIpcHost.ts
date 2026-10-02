@@ -9,7 +9,11 @@ import {
   admitLifecycleCommand,
   ensureAdmissionLoaded
 } from "../lifecycle/instanceAdmissionStore.js";
-import { overlayLauncherWindowTruth, type LauncherWindowTruth } from "../windows/launcherWindowTruthOverlay.js";
+import {
+  overlayLauncherWindowTruth,
+  type LauncherWindowTruth,
+  type ResolveLauncherLifecycleInFlight,
+} from "../windows/launcherWindowTruthOverlay.js";
 
 export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
 export const LAUNCHER_IPC_UNSUPPORTED_PATH = "LAUNCHER_IPC_UNSUPPORTED_PATH";
@@ -227,6 +231,7 @@ export function createLauncherIpcHost(input: {
   restartLatestShell?: () => Promise<OrchestratedLifecycleResult>;
   resolveLocalStatus?: () => unknown;
   resolveLocalBranchInstances?: () => unknown;
+  resolveLifecycleInFlight?: ResolveLauncherLifecycleInFlight;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
   admissionStorePath?: string;
@@ -298,7 +303,15 @@ export function createLauncherIpcHost(input: {
         await ensureAdmissionLoaded(admissionStorePath);
         return {
           ok: true,
-          payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalBranchInstances(), resolveWindowTruth())
+          // Only the local branch-instances path stamps in-flight lifecycle
+          // state: the HTTP fallback and the orchestrator-backed cleanup
+          // path keep their raw payloads untouched.
+          payload: overlayLauncherWindowTruth(
+            apiRoute,
+            input.resolveLocalBranchInstances(),
+            resolveWindowTruth(),
+            input.resolveLifecycleInFlight
+          )
         };
       }
       if (BRANCH_INSTANCE_PATHS.has(apiRoute) && input.orchestrateBranchInstance) {

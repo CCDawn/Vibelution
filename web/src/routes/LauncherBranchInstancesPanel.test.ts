@@ -26,6 +26,7 @@ import {
   isCleanupEligible,
   overlayCleanupMetadata,
   paginateItems,
+  pendingIntentToOperation,
   resolveActivePendingOperation,
   acceptLifecycleIntent,
   hasActiveLifecyclePending,
@@ -341,27 +342,157 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(formatAttentionReason(failed, true)).toBe("上次启动失败");
   });
 
-  it("keeps an accepted start pending until the instance leaves closed", () => {
+  it("keeps a start intent alive through stale closed and transient payloads until terminal evidence", () => {
     const startable = instance({ id: "main", kind: "main", branch: "main", current: true });
-    const pending = {
+    const accepted = acceptLifecycleIntent({}, {
       instanceId: startable.id,
-      operation: "start" as const,
-      baselineLifecycleState: "closed" as const,
-    };
-
-    expect(resolveActivePendingOperation(pending, [startable])).toEqual(pending);
-    expect(instanceRuntimeState(startable, pending)).toBe("starting");
-    expect(canRequestOpenInstance(startable, pending)).toBe(false);
-    expect(resolveActivePendingOperation(pending, [{
-      ...startable,
+      operation: "start",
+      requestId: "req-start",
+      baselineLifecycleState: "closed",
+    });
+    const table = accepted.table;
+    const intent = pendingIntentToOperation(table[startable.id]);
+    expect(canRequestOpenInstance(startable, table)).toBe(false);
+    // Between the Electron build gate clearing and the store refresh landing,
+    // the cached row still reports closed; transient building/starting
+    // snapshots are equally non-terminal. None of them may settle the intent:
+    // dropping it on the first non-closed payload used to flash 已停止 while
+    // the command was still in flight.
+    const staleClosed = instance({ id: startable.id });
+    expect(resolveActivePendingOperation(intent, [staleClosed])).toEqual(intent);
+    expect(instanceRuntimeState(staleClosed, table)).toBe("starting");
+    const building = instance({
+      id: startable.id,
+      startable: false,
+      runtime: { ...startable.runtime, lifecycleState: "building" },
+    });
+    expect(resolveActivePendingOperation(intent, [building])).toEqual(intent);
+    expect(instanceRuntimeState(building, table)).toBe("building");
+    const starting = instance({
+      id: startable.id,
+      startable: false,
       runtime: { ...startable.runtime, lifecycleState: "starting" },
-    }])).toBeUndefined();
-    expect(resolveActivePendingOperation(pending, [{
-      ...startable,
-      runtime: { ...startable.runtime, lifecycleState: "running" },
-    }])).toBeUndefined();
-    expect(canStopInstance(startable, pending)).toBe(true);
-    expect(canStartInstance(startable, pending)).toBe(false);
+    });
+    expect(resolveActivePendingOperation(intent, [starting])).toEqual(intent);
+    expect(instanceRuntimeState(starting, table)).toBe("starting");
+    // Terminal payload evidence settles the intent and hands the row back to
+    // the payload truth.
+    for (const lifecycleState of ["running", "partial"] as const) {
+      const payload = instance({
+        id: startable.id,
+        startable: false,
+        runtime: { ...startable.runtime, lifecycleState },
+      });
+      expect(resolveActivePendingOperation(intent, [payload])).toBeUndefined();
+      const settledTable = settleLifecycleIntentTable(table, [payload]);
+      expect(settledTable).toEqual({});
+      expect(instanceRuntimeState(payload, settledTable)).toBe(lifecycleState);
+    }
+    const failed = instance({
+      id: startable.id,
+      runtime: {
+        ...startable.runtime,
+        lifecycleState: "error",
+        error: { code: "runtime_error", message: "启动失败" },
+      },
+    });
+    expect(resolveActivePendingOperation(intent, [failed])).toBeUndefined();
+    const settledAfterFailure = settleLifecycleIntentTable(table, [failed]);
+    expect(settledAfterFailure).toEqual({});
+    expect(instanceRuntimeState(failed, settledAfterFailure)).toBe("failed");
+  });
+
+  it("settles a start intent on live runtime signals even while the payload lags", () => {
+    const startable = instance({ id: "worktree:live" });
+    const accepted = acceptLifecycleIntent({}, {
+      instanceId: startable.id,
+      operation: "start",
+      requestId: "req-start-live",
+      baselineLifecycleState: "closed",
+    });
+    const intent = pendingIntentToOperation(accepted.table[startable.id]);
+    const liveWindow = instance({
+      id: startable.id,
+      startable: false,
+      runtime: {
+        ...startable.runtime,
+        lifecycleState: "starting",
+        backend: { ...startable.runtime.backend, alive: true },
+        window: { ...startable.runtime.window, open: true, pid: 4242 },
+      },
+    });
+    expect(resolveActivePendingOperation(intent, [liveWindow])).toBeUndefined();
+  });
+
+  it("keeps a restart intent through stopping, starting, and building until terminal evidence", () => {
+    const restarting = instance({
+      id: "worktree:restart",
+      startable: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: { ...instance().runtime.backend, alive: true, healthy: true, listening: true, port: 8002, pid: 1200 },
+        window: { ...instance().runtime.window, open: true, pid: 1300 },
+      },
+    });
+    const accepted = acceptLifecycleIntent({}, {
+      instanceId: restarting.id,
+      operation: "restart",
+      requestId: "req-restart",
+      baselineLifecycleState: "running",
+    });
+    const table = accepted.table;
+    const intent = pendingIntentToOperation(table[restarting.id]);
+    // Restart intermediates never settle the intent — including payloads that
+    // still carry live runtime from the stop half of the restart.
+    for (const lifecycleState of ["stopping", "starting", "building"] as const) {
+      const payload = instance({
+        id: restarting.id,
+        runtime: { ...restarting.runtime, lifecycleState },
+      });
+      expect(resolveActivePendingOperation(intent, [payload])).toEqual(intent);
+      // building wins over any intent; the other intermediates keep the
+      // optimistic restarting label.
+      expect(instanceRuntimeState(payload, table)).toBe(
+        lifecycleState === "building" ? "building" : "restarting"
+      );
+    }
+    expect(resolveActivePendingOperation(intent, [
+      instance({ id: restarting.id, runtime: { ...restarting.runtime, lifecycleState: "running" } }),
+    ])).toBeUndefined();
+    expect(resolveActivePendingOperation(intent, [
+      instance({
+        id: restarting.id,
+        runtime: { ...restarting.runtime, lifecycleState: "error", error: { code: "runtime_error", message: "重启失败" } },
+      }),
+    ])).toBeUndefined();
+  });
+
+  it("keeps stop reflected semantics: closed, stopping, or error settle it", () => {
+    const running = instance({
+      id: "worktree:stop-target",
+      startable: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: { ...instance().runtime.backend, alive: true, healthy: true, listening: true, port: 8003, pid: 1400 },
+        window: { ...instance().runtime.window, open: true, pid: 1500 },
+      },
+    });
+    const accepted = acceptLifecycleIntent({}, {
+      instanceId: running.id,
+      operation: "stop",
+      requestId: "req-stop",
+    });
+    const intent = pendingIntentToOperation(accepted.table[running.id]);
+    expect(resolveActivePendingOperation(intent, [running])).toEqual(intent);
+    for (const lifecycleState of ["stopping", "closed", "error"] as const) {
+      const payload = instance({
+        id: running.id,
+        runtime: { ...running.runtime, lifecycleState },
+      });
+      expect(resolveActivePendingOperation(intent, [payload])).toBeUndefined();
+    }
   });
 
   it("does not freeze start pending on 正在启动 when the instance is already partial", () => {

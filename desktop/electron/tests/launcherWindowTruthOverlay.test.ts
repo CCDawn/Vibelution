@@ -422,6 +422,133 @@ describe("launcher branch-instances window truth overlay", () => {
   });
 });
 
+describe("in-flight lifecycle stamp overlay", () => {
+  const closedRow = (): Record<string, unknown> => ({
+    items: [
+      {
+        id: "worktree:task",
+        current: false,
+        alive: false,
+        startable: true,
+        runtime: {
+          lifecycleState: "closed",
+          phase: "steady",
+          observedState: "closed",
+          desiredState: "closed",
+          registryStatus: "closed",
+          backend: { alive: false, healthy: false, listening: false, portConflict: false },
+          frontend: { ready: true },
+          window: { open: false, pid: 0 },
+        },
+      },
+    ],
+  });
+  const rowState = (overlaid: unknown): unknown => {
+    const item = ((overlaid as Record<string, unknown>).items as Record<string, unknown>[])[0];
+    return (item.runtime as Record<string, unknown>).lifecycleState;
+  };
+
+  it("stamps an in-flight start as starting on a stale closed row", () => {
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      closedRow(),
+      truth(),
+      () => ({ operation: "start", phase: "intent" })
+    );
+    expect(rowState(overlaid)).toBe("starting");
+  });
+
+  it("stamps an observing restart as restarting", () => {
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      closedRow(),
+      truth(),
+      () => ({ operation: "rebuild-and-start", phase: "observing" })
+    );
+    expect(rowState(overlaid)).toBe("restarting");
+  });
+
+  it("keeps the build-gate building marker over an in-flight start", () => {
+    // Build-gate semantics stay untouched: building is the more specific
+    // marker and the lifecycle stamp only fills non-building rows.
+    beginFrontendBuild("worktree:task", "start");
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      closedRow(),
+      truth(),
+      () => ({ operation: "start", phase: "intent" })
+    );
+    expect(rowState(overlaid)).toBe("building");
+  });
+
+  it("does not stamp uncertain, ready, unknown, or slot-less commands", () => {
+    for (const inFlight of [
+      { operation: "start", phase: "uncertain" },
+      { operation: "start", phase: "ready" },
+    ]) {
+      const overlaid = overlayLauncherWindowTruth("branch-instances", closedRow(), truth(), () => inFlight);
+      expect(rowState(overlaid)).toBe("closed");
+    }
+    expect(rowState(overlayLauncherWindowTruth("branch-instances", closedRow(), truth(), () => null))).toBe("closed");
+    expect(rowState(overlayLauncherWindowTruth("branch-instances", closedRow(), truth()))).toBe("closed");
+  });
+
+  it("does not stamp stop-like operations", () => {
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      closedRow(),
+      truth(),
+      () => ({ operation: "stop", phase: "intent" })
+    );
+    expect(rowState(overlaid)).toBe("closed");
+  });
+
+  it("does not downgrade a row that already reached a live terminal state", () => {
+    // A lingering observing slot (e.g. a failed window-open after a healthy
+    // start) must not pin a healthy instance at starting/restarting.
+    const liveRow = (lifecycleState: string): Record<string, unknown> => ({
+      items: [
+        {
+          id: "worktree:task",
+          current: false,
+          alive: true,
+          startable: false,
+          runtime: {
+            lifecycleState,
+            backend: { alive: true, healthy: true, listening: true, portConflict: false },
+            frontend: { ready: true },
+            window: { open: true, pid: 4242 },
+          },
+        },
+      ],
+    });
+    expect(rowState(overlayLauncherWindowTruth(
+      "branch-instances",
+      liveRow("running"),
+      truth(),
+      () => ({ operation: "start", phase: "observing" })
+    ))).toBe("running");
+    expect(rowState(overlayLauncherWindowTruth(
+      "branch-instances",
+      liveRow("partial"),
+      truth(),
+      () => ({ operation: "restart", phase: "intent" })
+    ))).toBe("partial");
+  });
+
+  it("stamps over a leftover error row while a start is still in flight", () => {
+    const payload = closedRow();
+    ((payload.items as Record<string, unknown>[])[0].runtime as Record<string, unknown>).lifecycleState = "error";
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth(),
+      () => ({ operation: "start", phase: "observing" })
+    );
+    expect(rowState(overlaid)).toBe("starting");
+  });
+});
+
 describe("frontend build gate overlay", () => {
   it("reports the main bundle as building during ensureFrontendRelease and falls back afterwards", () => {
     const payload = {
