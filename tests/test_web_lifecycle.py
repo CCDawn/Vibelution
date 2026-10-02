@@ -4,6 +4,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 
@@ -15,6 +16,36 @@ from core.web.router_registry import (
 )
 from core.web.services import cli_agent_terminal_service, session_service
 from core.web.services import virtual_human_life_service
+
+
+def test_begin_owned_lifecycle_reopens_loaded_owners_without_cold_imports(monkeypatch):
+    called = []
+    monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(modules={}))
+    lifecycle._begin_owned_runtime_lifecycle()
+    assert called == []
+    lifecycle.sys.modules.update({
+        "core.infrastructure.background_tasks": SimpleNamespace(
+            begin_background_task_lifecycle=lambda: called.append("background")),
+        "core.web.services.cli_agent_terminal_service": SimpleNamespace(
+            begin_cli_agent_terminal_lifecycle=lambda: called.append("terminal")),
+    })
+    lifecycle._begin_owned_runtime_lifecycle()
+    assert called == ["background", "terminal"]
+
+
+def test_owned_runtime_shutdown_runs_both_owners_even_if_one_fails(monkeypatch):
+    from core.infrastructure import background_tasks
+    called = []
+
+    def background_shutdown():
+        called.append("background")
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(background_tasks, "shutdown_background_tasks", background_shutdown)
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions",
+                        lambda: called.append("terminal"))
+    asyncio.run(lifecycle._shutdown_owned_runtime_resources())
+    assert sorted(called) == ["background", "terminal"]
 
 
 def test_web_app_import_keeps_runtime_scene_service_off_health_path():

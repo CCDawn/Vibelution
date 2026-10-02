@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -7,17 +7,14 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   writeFileSync
 } from "node:fs";
-import { basename, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 
 const FRONTEND_RELEASES_RELATIVE = ["web", ".vibelution-builds"] as const;
 const FRONTEND_ACTIVE_POINTER = "active.json";
 const FRONTEND_BUILD_METADATA = ".vibelution-build.json";
-const FRONTEND_PACKAGE_INPUT_RELATIVE = ["node_modules", ".cache", "vibelution-package-web-dist"] as const;
-const FRONTEND_PACKAGE_OWNER_SUFFIX = ".owner.json";
 const GIT_OBJECT_HASH = /^[0-9a-f]{40,64}$/i;
 
 export type EnsureFrontendBuildResult = {
@@ -46,20 +43,14 @@ type FrontendBuildMetadata = {
   sourceCommit?: unknown;
 };
 
-type PackageInputOwner = {
-  schemaVersion?: unknown;
-  workspaceRoot?: unknown;
-  buildKey?: unknown;
-  contentSha256?: unknown;
-};
-
 export function preparePackagedFrontend(input: {
   workspaceRoot: string;
-  electronRoot: string;
+  packageInputRoot: string;
   ensureBuild?: (workspaceRoot: string) => EnsureFrontendBuildResult;
 }): PackagedFrontendEvidence {
   const workspaceRoot = resolve(input.workspaceRoot);
-  const electronRoot = resolve(input.electronRoot);
+  const packageInputRoot = resolve(input.packageInputRoot);
+  assertIsolatedPackageInput(workspaceRoot, packageInputRoot);
   const build = (input.ensureBuild ?? ensureCurrentFrontendBuild)(workspaceRoot);
   if (!build.ok || !build.buildKey.trim()) {
     throw new Error("Frontend build did not return verified active-release metadata.");
@@ -94,55 +85,14 @@ export function preparePackagedFrontend(input: {
   }
 
   const frontendContentSha256 = sha256DirectoryTree(activeRelease);
-  const packageInputRoot = resolve(electronRoot, ...FRONTEND_PACKAGE_INPUT_RELATIVE);
-  const cacheRoot = resolve(electronRoot, "node_modules", ".cache");
-  assertContainedPath(cacheRoot, packageInputRoot, "package frontend input");
-  const ownerPath = `${packageInputRoot}${FRONTEND_PACKAGE_OWNER_SUFFIX}`;
-  const existingOwner = existsSync(ownerPath) ? readJsonFile<PackageInputOwner>(ownerPath) : null;
-
   if (existsSync(packageInputRoot)) {
-    if (
-      existingOwner?.schemaVersion !== 1
-      || !sameResolvedPath(String(existingOwner.workspaceRoot ?? ""), workspaceRoot)
-    ) {
-      throw new Error("Refusing to replace an unowned desktop package frontend cache.");
-    }
-    if (
-      existingOwner.buildKey === frontendBuildKey
-      && existingOwner.contentSha256 === frontendContentSha256
-      && sha256DirectoryTree(packageInputRoot) === frontendContentSha256
-    ) {
-      assertFrontendReleaseStillCurrent({
-        workspaceRoot,
-        releasesRoot,
-        activeRelease,
-        buildKey: frontendBuildKey,
-        ensureBuild: input.ensureBuild ?? ensureCurrentFrontendBuild
-      });
-      return {
-        path: packageInputRoot,
-        frontendTreeHash,
-        frontendContentSha256,
-        frontendBuildKey,
-        frontendSourceCommit
-      };
-    }
-  } else if (existsSync(ownerPath)) {
-    if (
-      existingOwner?.schemaVersion !== 1
-      || !sameResolvedPath(String(existingOwner.workspaceRoot ?? ""), workspaceRoot)
-    ) {
-      throw new Error("Refusing to replace a desktop package frontend cache owned by another workspace.");
-    }
-    rmSync(ownerPath, { force: true });
+    throw new Error("Desktop package frontend input must use a fresh, isolated build path.");
   }
 
-  mkdirSync(cacheRoot, { recursive: true });
-  const stagingRoot = `${packageInputRoot}.staging-${randomUUID()}`;
-  let promoted = false;
+  mkdirSync(packageInputRoot, { recursive: true });
   try {
-    cpSync(activeRelease, stagingRoot, { recursive: true, errorOnExist: true, force: false });
-    if (sha256DirectoryTree(stagingRoot) !== frontendContentSha256) {
+    cpSync(activeRelease, packageInputRoot, { recursive: true, errorOnExist: true, force: false });
+    if (sha256DirectoryTree(packageInputRoot) !== frontendContentSha256) {
       throw new Error("Copied frontend package input does not match the verified active release.");
     }
     assertFrontendReleaseStillCurrent({
@@ -152,27 +102,8 @@ export function preparePackagedFrontend(input: {
       buildKey: frontendBuildKey,
       ensureBuild: input.ensureBuild ?? ensureCurrentFrontendBuild
     });
-    if (existsSync(packageInputRoot)) {
-      rmSync(packageInputRoot, { recursive: true, force: true });
-    }
-    renameSync(stagingRoot, packageInputRoot);
-    promoted = true;
-    writeFileSync(
-      ownerPath,
-      `${JSON.stringify({
-        schemaVersion: 1,
-        workspaceRoot,
-        buildKey: frontendBuildKey,
-        contentSha256: frontendContentSha256
-      }, null, 2)}\n`,
-      "utf8"
-    );
   } catch (error: unknown) {
-    rmSync(stagingRoot, { recursive: true, force: true });
-    if (promoted) {
-      rmSync(packageInputRoot, { recursive: true, force: true });
-      rmSync(ownerPath, { force: true });
-    }
+    rmSync(packageInputRoot, { recursive: true, force: true });
     throw error;
   }
 
@@ -183,6 +114,14 @@ export function preparePackagedFrontend(input: {
     frontendBuildKey,
     frontendSourceCommit
   };
+}
+
+function assertIsolatedPackageInput(workspaceRoot: string, packageInputRoot: string): void {
+  const sharedNodeModules = resolve(workspaceRoot, "desktop", "electron", "node_modules");
+  const relativePath = relative(sharedNodeModules, packageInputRoot);
+  if (!relativePath || (!relativePath.startsWith("..") && !isAbsolute(relativePath))) {
+    throw new Error("Desktop package frontend input cannot be written below shared electron/node_modules.");
+  }
 }
 
 function assertFrontendReleaseStillCurrent(input: {
@@ -315,7 +254,13 @@ function assertContainedPath(parent: string, candidate: string, label: string): 
   const absoluteParent = resolve(parent);
   const absoluteCandidate = resolve(candidate);
   const relativePath = relative(absoluteParent, absoluteCandidate);
-  if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${sep}`) || !sameResolvedPath(resolve(absoluteParent, relativePath), absoluteCandidate)) {
+  if (
+    !relativePath
+    || relativePath === ".."
+    || relativePath.startsWith(`..${sep}`)
+    || isAbsolute(relativePath)
+    || !sameResolvedPath(resolve(absoluteParent, relativePath), absoluteCandidate)
+  ) {
     throw new Error(`${label} must resolve below its owning directory.`);
   }
 }
