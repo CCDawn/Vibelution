@@ -373,6 +373,24 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
+  it("staggers chrome-only boot polls behind the startup request volley", () => {
+    // The boot volley races the backend's lifespan warmup tasks; badge-only
+    // polls (code freshness, git status, agent broadcast bell) latch behind
+    // useBootStaggeredPollReady instead of firing the instant data is ready.
+    expect(shellSource).toContain("useBootStaggeredPollReady(shellStartupDataReady)");
+    expect(shellSource).toMatch(
+      /queryKey: queryKeys\.codeFreshness\(\),[\s\S]*?enabled: shellDeferredPollReady,/,
+    );
+    expect(shellSource).toMatch(/queryKey: queryKeys\.gitStatus\(\),[\s\S]*?enabled: shellDeferredPollReady,/);
+    expect(shellSource).toMatch(
+      /queryKey: queryKeys\.projectAgentBusLatestEvent\(\),[\s\S]*?enabled: shellDeferredPollReady,/,
+    );
+    // Startup-critical polls stay on the immediate ready flag: runtime summary
+    // drives the status chip, aux tasks drive the running badge.
+    expect(shellSource).toMatch(/queryKey: queryKeys\.runtimeSummary\(\),[\s\S]*?enabled: shellStartupDataReady,/);
+    expect(shellSource).toMatch(/queryKeys\.runtimeTasks\("", "shell"\),[\s\S]*?enabled: shellStartupDataReady,/);
+  });
+
   it("keeps the top bar free of brand text so every control shares one row", () => {
     expect(shellSource).not.toContain("brandCopy");
     expect(shellSource).not.toContain("versionPill");
