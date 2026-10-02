@@ -399,6 +399,15 @@ def test_config_cache_signature_change_invalidates(monkeypatch, tmp_path):
     save_model_catalog_state(empty_model_catalog_state())
     counters: dict = {}
     _count_builder(monkeypatch, "_build_workspace", counters)
+    # 诊断里的 llm_facing_tool_count 来自进程级实时工具探测，注册表在进程
+    # 启动数秒后会沉降（实测首探测 112 → 稳态 111，main 上同样发生）。它
+    # 不是 config.toml 驱动的内容，跨构建比较会撞上这个时间性全局态；
+    # 钉成固定值让「重算结果一致」只断言本测试声明的 config 驱动内容。
+    import config.models as config_models
+
+    monkeypatch.setattr(
+        config_models, "_discover_llm_facing_tool_names", lambda: (["cli_tool"], "")
+    )
 
     first = config_service.get_config_workspace()
     assert counters == {"_build_workspace": 1}
