@@ -9,11 +9,35 @@ from .types import LLMError, LLMOutputTruncatedError
 
 __all__ = [
     "CHINESE_RATE_LIMIT_PHRASES",
+    "CLASSIFIER_CATEGORIES",
     "GATEWAY_TRANSIENT_400_PHRASES",
     "LLMError",
     "LLMOutputTruncatedError",
     "classify_exception",
 ]
+
+# classify_exception 自己能构造的全部 category 值域（LLMError 实例按原样透传，
+# 其类别可以是任意值，见 core/llm/types.py 的 LLMError 子类）。这是单一事实
+# 源：core/llm/recovery.py 在 import 时机器校验恢复动作表覆盖本集合，防止
+# 「分类器产出 X、恢复表只认 Y」的键名漂移再次发生——2026-10-02 事件里，
+# 协议类错误因恢复表键名漂移整轮 fail-fast、走不到任何恢复动作，只能靠
+# 同类问题的事后修复兜底。
+CLASSIFIER_CATEGORIES: Tuple[str, ...] = (
+    "payload_protocol_error",
+    "user_interrupt",
+    "server_error",
+    "rate_limit",
+    "context_length_error",
+    "quota_error",
+    "tool_protocol_error",
+    "empty_content_error",
+    "network_error",
+    "provider_protocol_error",
+    "auth_error",
+    "timeout",
+    "capability_error",
+    "configuration_error",
+)
 
 # one-api/new-api 系聚合网关把上游路由失败包成 HTTP 400（"Error code: 400 -
 # 当前分组 default 下对于模型 xxx 无可用渠道"）：渠道耗尽、分组负载是网关侧
