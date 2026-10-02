@@ -242,6 +242,9 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         "evidence_refs": evidence_paths[:5],
         "work_run_focus": s._runtime_scene_agent_work_run_focus(work_run_summary),
         "do_not_do": do_not_do,
+        "user_summary": str(diagnosis.get("userSummary") or "").strip()[:600],
+        "repeat_count": _runtime_scene_primary_repeat_count(issue_state),
+        "primary_reason": _runtime_scene_primary_reason(issue_state, first_signal),
     }
     from core.diagnostics.agent_log_context import build_agent_first_read
 
@@ -249,6 +252,31 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
     brief["next_minimal_action"] = first_read["nextStep"]
     brief["first_read"] = first_read
     return brief
+
+
+def _runtime_scene_primary_repeat_count(issue_state: dict[str, Any]) -> int:
+    s = _service()
+    cluster = s._runtime_scene_primary_issue_cluster(issue_state)
+    if not isinstance(cluster, dict):
+        return 0
+    try:
+        count = int(cluster.get("repeatCount") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, count)
+
+
+def _runtime_scene_primary_reason(
+    issue_state: dict[str, Any],
+    first_signal: dict[str, Any],
+) -> str:
+    from core.diagnostics.agent_log_context import primary_reason_from_cluster
+
+    s = _service()
+    return primary_reason_from_cluster(
+        s._runtime_scene_primary_issue_cluster(issue_state),
+        first_signal if isinstance(first_signal, dict) else None,
+    )
 
 
 def _runtime_scene_primary_issue_from_cluster(issue_state: dict[str, Any]) -> str:
@@ -634,8 +662,8 @@ def _runtime_scene_diagnosis_next_step(
     scene_status: str = "",
 ) -> str:
     s = _service()
-    first_path = recommended_order[0] if recommended_order else key_entries[0]["path"] if key_entries else s.SUMMARY_PATH
-    package_anchor = str(scene_dir_name or scene_id).strip() or scene_id
+    # Callers still pass the package location. The step no longer prints a checkout path.
+    _ = (scene_dir_name, scene_id, recommended_order, key_entries)
     historical_errors = int(issue_state.get("historicalErrorCount") or 0)
     historical_warnings = int(issue_state.get("historicalWarningCount") or 0)
     active_cluster_count = int(issue_state.get("activeClusterCount") or 0)
@@ -646,7 +674,8 @@ def _runtime_scene_diagnosis_next_step(
     if policy_signal_count and not active_cluster_count and first_signal:
         cluster = s._runtime_scene_issue_cluster_display(issue_state.get("firstPolicyCluster"))
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.policyClusterCount；"
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            f"确认 issueState.policyClusterCount；"
             f"再定位主控制/策略簇 {cluster}，优先检查 testPolicy、mode、source 或 guard 语义，不要按业务故障继续追恢复链。"
         )
     if severity == "error" and active_cluster_count and first_signal:
@@ -654,8 +683,9 @@ def _runtime_scene_diagnosis_next_step(
         hint = s._runtime_scene_issue_cluster_hint(issue_state.get("firstActiveCluster"))
         hint_sentence = f" 诊断提示：{hint}" if hint else ""
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
-            f"再定位主问题簇 {cluster}，优先打开 summary/package_index 里的 evidence_paths 对应文件，"
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            f"确认 issueState.activeClusterCount；"
+            f"再定位主问题簇 {cluster}，只打开 firstRead.evidencePaths 里点名的文件，"
             f"并沿同一 component/runId/pageInstanceId 向后找恢复或重复崩溃。{hint_sentence}"
         )
     if severity == "warning" and active_cluster_count and first_signal:
@@ -663,30 +693,35 @@ def _runtime_scene_diagnosis_next_step(
         hint = s._runtime_scene_issue_cluster_hint(issue_state.get("firstActiveCluster"))
         hint_sentence = f" 诊断提示：{hint}" if hint else ""
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
-            f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时打开 evidence_paths 对应文件。{hint_sentence}"
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            f"确认 issueState.activeClusterCount；"
+            f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时只打开 firstRead.evidencePaths 里点名的文件。{hint_sentence}"
         )
     if policy_signal_count and first_signal:
         cluster = s._runtime_scene_issue_cluster_display(issue_state.get("firstPolicyCluster"))
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.policyClusterCount；"
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            f"确认 issueState.policyClusterCount；"
             f"再定位主控制/策略簇 {cluster}，优先检查 testPolicy、mode、source 或 guard 语义，不要按业务故障继续追恢复链。"
         )
     if historical_cluster_count or historical_errors or historical_warnings:
         cluster = s._runtime_scene_issue_cluster_display(issue_state.get("firstHistoricalCluster"))
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState 中历史/已恢复簇计数；"
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            "确认 issueState 中历史/已恢复簇计数；"
             f"再对照主历史簇 {cluster} 与后续恢复事件，避免把已恢复错误当成当前阻塞。"
         )
     missing = startup_trace.get("missingStepIds", []) if isinstance(startup_trace, dict) else []
     if missing and (severity in {"error", "warning"} or scene_status != "running"):
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再对照 startupTrace.missingStepIds "
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            "再对照 startupTrace.missingStepIds "
             "确认启动链路缺口是否属于日志系统问题。"
         )
     if control_count:
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认控制类信号只代表用户意图或编辑行为；"
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            "确认控制类信号只代表用户意图或编辑行为；"
             "再按推荐阅读顺序抽查 timeline、conversation 和 agent 子日志。"
         )
     if active_cluster_count:
@@ -694,11 +729,13 @@ def _runtime_scene_diagnosis_next_step(
         hint = s._runtime_scene_issue_cluster_hint(issue_state.get("firstActiveCluster"))
         hint_sentence = f" 诊断提示：{hint}" if hint else ""
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
+            "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+            f"确认 issueState.activeClusterCount；"
             f"再追踪主问题簇 {cluster}，把它和首个信号、证据路径、timeline 顺序对齐。{hint_sentence}"
         )
     return (
-        f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再按推荐阅读顺序对照 timeline、lifecycle 和子日志确认周期完整性。"
+        "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。"
+        "再按推荐阅读顺序对照 timeline、lifecycle 和子日志确认周期完整性。"
     )
 
 
