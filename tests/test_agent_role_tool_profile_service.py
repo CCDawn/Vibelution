@@ -186,6 +186,25 @@ def test_knowledge_steward_profile_owns_formal_knowledge_tools():
     assert policy["roleToolProfileId"] == "knowledge_steward"
 
 
+def test_knowledge_steward_can_stage_session_attachments_without_expanding_other_roles():
+    steward_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key="knowledge_steward",
+        primary_mode="general",
+        metadata={"systemRole": "knowledge_steward"},
+        policy_id="tool-knowledge-steward-attachments",
+    )
+    ingestor_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key="source_ingestor",
+        primary_mode="research",
+        policy_id="tool-source-ingestor-attachments",
+    )
+
+    assert steward_policy is not None
+    assert ingestor_policy is not None
+    assert "knowledge_stage_session_attachment_tool" in steward_policy["allowedTools"]
+    assert "knowledge_stage_session_attachment_tool" not in ingestor_policy["allowedTools"]
+
+
 def test_research_profiles_prefer_unified_memory_search_before_legacy_query_tools():
     profile_ids = {
         "ai_search_scope_lead",
