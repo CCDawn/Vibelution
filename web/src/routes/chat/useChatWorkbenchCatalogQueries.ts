@@ -103,7 +103,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const configSummaryQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchPublicConfig(),
+    queryFn: ({ signal }) => fetchPublicConfig({ signal }),
     staleTime: 30_000,
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -301,7 +301,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const activeGroupRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(activeGroupRoomId || "none"),
-    queryFn: () => fetchChatRoomDetail(activeGroupRoomId),
+    queryFn: ({ signal }) => fetchChatRoomDetail(activeGroupRoomId, { signal }),
     enabled: standardGroupRoomActive,
     refetchInterval: standardGroupRoomActive
       ? resolvePollingInterval(
@@ -322,7 +322,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const expandedGroupAgentDetailQueries = useQueries({
     queries: expandedGroupAgentSessionIds.map((sessionId) => ({
       queryKey: queryKeys.groupExpandedSession(sessionId || "none"),
-      queryFn: () => fetchSessionDetailWindow(sessionId, { messageLimit: 20 }),
+      queryFn: ({ signal }: { signal: AbortSignal }) => fetchSessionDetailWindow(sessionId, { messageLimit: 20, signal }),
       enabled: standardGroupRoomActive && Boolean(sessionId),
       // Match group room detail: only poll while SSE is not open (F2).
       refetchInterval: standardGroupRoomActive && sessionId

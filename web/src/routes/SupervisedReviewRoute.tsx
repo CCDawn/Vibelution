@@ -39,6 +39,7 @@ import {
   type VStatusTone,
 } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
+import type { Language } from "../i18n/dictionaryTypes";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedWorktreeReviewPanel } from "./SupervisedWorktreeReviewPanel";
@@ -59,6 +60,61 @@ const REVIEW_QUEUE_SIDEBAR = {
   minWidth: 320,
   maxWidth: 560,
 } as const;
+
+type SupervisedReviewTranscriptProps = {
+  lang: Language;
+  candidate: Pick<EvolutionChatReviewCandidate, "candidateId" | "conversationTurns" | "sourceLogPath">;
+  positiveDatasetPath?: string;
+  negativeDatasetPath?: string;
+};
+
+export function SupervisedReviewTranscript({
+  lang,
+  candidate,
+  positiveDatasetPath,
+  negativeDatasetPath,
+}: SupervisedReviewTranscriptProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <details
+      className={styles.transcriptSection}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>{lang === "zh" ? "完整对话与来源" : "Full transcript and provenance"}</summary>
+      {expanded ? (
+        <>
+          <div className={styles.transcriptMeta}>
+            <article className={styles.metaRow}>
+              <strong>{lang === "zh" ? "来源日志" : "Source log"}</strong>
+              <span>{candidate.sourceLogPath || "--"}</span>
+            </article>
+            <article className={styles.metaRow}>
+              <strong>{lang === "zh" ? "正例数据集" : "Positive dataset"}</strong>
+              <span>{positiveDatasetPath || "--"}</span>
+            </article>
+            <article className={styles.metaRow}>
+              <strong>{lang === "zh" ? "负例数据集" : "Negative dataset"}</strong>
+              <span>{negativeDatasetPath || "--"}</span>
+            </article>
+          </div>
+          <div className={styles.transcriptList}>
+            {candidate.conversationTurns.map((turn) => (
+              <article key={`${candidate.candidateId}-transcript-${turn.turnNumber}`} className={styles.transcriptCard}>
+                <div className={styles.evidenceTop}>
+                  <strong>{`Turn ${turn.turnNumber}`}</strong>
+                  <span>{turn.toolCalls.join(", ") || "--"}</span>
+                </div>
+                <p>{lang === "zh" ? `用户：${turn.userMessage}` : `User: ${turn.userMessage}`}</p>
+                <p>{lang === "zh" ? `助手：${turn.assistantMessage}` : `Assistant: ${turn.assistantMessage}`}</p>
+              </article>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </details>
+  );
+}
 
 
 export function SupervisedReviewRoute() {
@@ -898,35 +954,13 @@ export function SupervisedReviewRoute() {
                 {decisionError ? <p className={styles.errorText}>{decisionError}</p> : null}
               </section>
 
-              <details className={styles.transcriptSection}>
-                <summary>{lang === "zh" ? "完整对话与来源" : "Full transcript and provenance"}</summary>
-                <div className={styles.transcriptMeta}>
-                  <article className={styles.metaRow}>
-                    <strong>{lang === "zh" ? "来源日志" : "Source log"}</strong>
-                    <span>{detailCandidate.sourceLogPath || "--"}</span>
-                  </article>
-                  <article className={styles.metaRow}>
-                    <strong>{lang === "zh" ? "正例数据集" : "Positive dataset"}</strong>
-                    <span>{reviewData?.positiveDatasetPath || "--"}</span>
-                  </article>
-                  <article className={styles.metaRow}>
-                    <strong>{lang === "zh" ? "负例数据集" : "Negative dataset"}</strong>
-                    <span>{reviewData?.negativeDatasetPath || "--"}</span>
-                  </article>
-                </div>
-                <div className={styles.transcriptList}>
-                  {detailCandidate.conversationTurns.map((turn) => (
-                    <article key={`${detailCandidate.candidateId}-transcript-${turn.turnNumber}`} className={styles.transcriptCard}>
-                      <div className={styles.evidenceTop}>
-                        <strong>{`Turn ${turn.turnNumber}`}</strong>
-                        <span>{turn.toolCalls.join(", ") || "--"}</span>
-                      </div>
-                      <p>{lang === "zh" ? `用户：${turn.userMessage}` : `User: ${turn.userMessage}`}</p>
-                      <p>{lang === "zh" ? `助手：${turn.assistantMessage}` : `Assistant: ${turn.assistantMessage}`}</p>
-                    </article>
-                  ))}
-                </div>
-              </details>
+              <SupervisedReviewTranscript
+                key={detailCandidate.candidateId}
+                lang={lang}
+                candidate={detailCandidate}
+                positiveDatasetPath={reviewData?.positiveDatasetPath}
+                negativeDatasetPath={reviewData?.negativeDatasetPath}
+              />
             </>
           ) : (
             <div className={styles.emptyState}>

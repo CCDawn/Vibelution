@@ -673,7 +673,6 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
         )
     normalized_project_id = str(active_project.get("projectId") or "").strip()
     run_ids = _project_source_collection_run_ids(normalized_team_id, normalized_project_id)
-    stage_status = workflow.get_research_stage_round_status(normalized_team_id)
     # Prefer full store rounds for counts (activeRounds alone undercounts).
     with workflow._WORKFLOW_LOCK:
         stage_store = workflow._load_stage_round_store(normalized_team_id)
@@ -747,7 +746,7 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
         "phases": phases,
         "canResetSourceOnly": len(run_ids) > 0 and stage_round_counts["experiment"] == 0 and stage_round_counts["iteration"] == 0 and downstream_candidate_count == 0,
         "canResetProgress": len(run_ids) > 0 or sum(stage_round_counts.values()) > 0 or len(project_candidates) > 0 or len(project_plans) > 0,
-        "updatedAt": str(stage_status.get("updatedAt") or active_project.get("updatedAt") or _utc_now()),
+        "updatedAt": str(stage_store.get("updatedAt") or active_project.get("updatedAt") or _utc_now()),
     }
 
 
