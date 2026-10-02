@@ -75,6 +75,7 @@ describe("Chat route write boundary (single authority)", () => {
     expect(source).toContain("activeGroupRoomIdFromRouteSelection(chatRouteSelection)");
     expect(source).toContain("useChatRouteSelection()");
     expect(source).toContain("canonicalizeBareRoute(bareRouteBootstrapTarget)");
+    expect(source).toContain("indexRailEnabled: !financeSurface");
     // No direct Chat selection navigation remains in the workbench shell.
     for (const line of source.split("\n")) {
       if (line.includes("navigate(`/chat")) {

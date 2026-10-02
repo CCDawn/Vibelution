@@ -117,7 +117,8 @@ import {
   readLauncherStateFile,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
-import { terminateTrackedWorkbenchJob } from "./process/workbenchJob.js";
+import { captureTrackedWorkbenchJobRetirement } from "./process/workbenchJob.js";
+import { waitForPortRelease } from "./process/workbenchBackendRetire.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import {
   inspectWorkbenchServingVersion,
@@ -182,7 +183,7 @@ import { executeLauncherUpdate, projectLauncherUpdateFreshness } from "./process
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
 import { isExternalOpenableUrl, normalizeAbsoluteOpenPath } from "./security/externalOpenPolicy.js";
 import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
-import { executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
+import { createDesktopShellExitDeadline, executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout, type DesktopShellExitDeadline } from "./shutdown/desktopShellExit.js";
 import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
@@ -377,6 +378,8 @@ let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
 let pendingProjectRoot = desktopCliArgs.projectRoot;
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
 let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
+let workbenchCloseBackendStopInFlight: Promise<void> | null = null;
+let mainRuntimeShutdownInFlight: Promise<void> | null = null;
 let electronStartupStage = "electron_process_ready";
 let electronStartupSummaryRecorded = false;
 let workbenchOpenRequestedAtMs: number | null = null;
@@ -1405,24 +1408,38 @@ async function requestTransactionalWorkbenchClose(
         mode: transaction.mode
       }
     });
-    await stopWorkbenchBackend(paths, bootstrap, transaction);
-    const backendStopped = await waitForWorkbenchBackendSettledForWindowClose({
-      readStatus: async () => {
-        try {
-          return await fetchLauncherStatusSummary(context);
-        } catch {
-          return readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot);
-        }
-      },
-      timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS
+    const backendStopFlight = (async (): Promise<boolean> => {
+      await stopWorkbenchBackend(paths, bootstrap, transaction);
+      return await waitForWorkbenchBackendSettledForWindowClose({
+        readStatus: async () => {
+          try {
+            return await fetchLauncherStatusSummary(context);
+          } catch {
+            return readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot);
+          }
+        },
+        timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS
+      });
+    })();
+    workbenchCloseBackendStopInFlight = backendStopFlight.then((settled) => {
+      if (!settled) {
+        throw new Error("Workbench backend did not settle closed before window authorization.");
+      }
     });
-    if (!backendStopped) {
+    const ownedBackendStop = workbenchCloseBackendStopInFlight;
+    try {
+      await ownedBackendStop;
+    } catch (error: unknown) {
       mainWorkbenchCloseStore.fail(
         transaction.closeId,
         "backend_stop_timeout",
-        "Workbench backend did not settle closed before window authorization."
+        error instanceof Error ? error.message : String(error)
       );
-      throw new Error("Workbench backend did not settle closed before window authorization.");
+      throw error;
+    } finally {
+      if (workbenchCloseBackendStopInFlight === ownedBackendStop) {
+        workbenchCloseBackendStopInFlight = null;
+      }
     }
     transaction = mainWorkbenchCloseStore.backendStopped(transaction.closeId);
     await recordElectronSupervisorEvent(bootstrap, {
@@ -1837,7 +1854,7 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   }
 }
 
-async function stopOwnedPythonLauncherService(): Promise<LauncherServiceStopResult> {
+async function stopOwnedPythonLauncherService(signal?: AbortSignal): Promise<LauncherServiceStopResult> {
   const desktopEnv = desktopEnvironment();
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
@@ -1851,48 +1868,72 @@ async function stopOwnedPythonLauncherService(): Promise<LauncherServiceStopResu
     workspaceRoot,
     pythonPath,
     operatorConfigPath,
-    launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0
+    launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0,
+    signal
   });
 }
 
-async function stopManagedRuntime(): Promise<void> {
-  const desktopEnv = desktopEnvironment();
-  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
-  if (!pythonPath) {
-    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop managed project processes");
+function runJoinedMainRuntimeShutdown(operation: () => Promise<void>): Promise<void> {
+  if (mainRuntimeShutdownInFlight !== null) {
+    return mainRuntimeShutdownInFlight;
   }
-  const paths = createDesktopPathsForApp();
-  const lease = launcherLifecycleSupervisor.beginIntent({
-    instanceId: "main",
-    operation: "shutdown",
-    desiredState: "closed"
-  });
-  const mutation = await launcherLifecycleSupervisor.executeMutation({
-    lease,
-    mutate: async () => await runWorkbenchLifecycle({
-      workspaceRoot: paths.workspaceRoot,
-      pythonPath,
-      operatorConfigPath:
-        launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+  const flight = Promise.resolve().then(operation);
+  mainRuntimeShutdownInFlight = flight;
+  void flight.then(
+    () => {
+      if (mainRuntimeShutdownInFlight === flight) mainRuntimeShutdownInFlight = null;
+    },
+    () => {
+      if (mainRuntimeShutdownInFlight === flight) mainRuntimeShutdownInFlight = null;
+    }
+  );
+  return flight;
+}
+
+async function stopManagedRuntime(signal?: AbortSignal): Promise<void> {
+  return await runJoinedMainRuntimeShutdown(async () => {
+    signal?.throwIfAborted();
+    const desktopEnv = desktopEnvironment();
+    const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+    if (!pythonPath) {
+      throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop managed project processes");
+    }
+    const paths = createDesktopPathsForApp();
+    const lease = launcherLifecycleSupervisor.beginIntent({
+      instanceId: "main",
       operation: "shutdown",
-      signal: lease.signal
-    }),
-    reconcile: async () => {
-      scheduleLauncherStatusCliRefresh();
+      desiredState: "closed"
+    });
+    const lifecycleSignal = signal
+      ? AbortSignal.any([signal, lease.signal])
+      : lease.signal;
+    const mutation = await launcherLifecycleSupervisor.executeMutation({
+      lease,
+      mutate: async () => await runWorkbenchLifecycle({
+        workspaceRoot: paths.workspaceRoot,
+        pythonPath,
+        operatorConfigPath:
+          launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+        operation: "shutdown",
+        signal: lifecycleSignal
+      }),
+      reconcile: async () => {
+        scheduleLauncherStatusCliRefresh();
+      }
+    });
+    if (mutation.outcome === "failed") {
+      throw mutation.error;
+    }
+    if (mutation.outcome === "uncertain") {
+      throw new Error("Managed runtime shutdown outcome is uncertain; reconciliation started.");
+    }
+    if (mutation.outcome === "ignored" || mutation.outcome === "superseded") {
+      throw new Error("Managed runtime shutdown was superseded before closure could be verified.");
+    }
+    if (!mutation.value.accepted) {
+      throw new Error(mutation.value.message || mutation.value.code || "Managed runtime shutdown was not accepted.");
     }
   });
-  if (mutation.outcome === "failed") {
-    throw mutation.error;
-  }
-  if (mutation.outcome === "uncertain") {
-    throw new Error("Managed runtime shutdown outcome is uncertain; reconciliation started.");
-  }
-  if (mutation.outcome === "ignored" || mutation.outcome === "superseded") {
-    return;
-  }
-  if (!mutation.value.accepted) {
-    throw new Error(mutation.value.message || mutation.value.code || "Managed runtime shutdown was not accepted.");
-  }
 }
 
 function desktopPythonPath(): string {
@@ -2130,42 +2171,51 @@ function trustedIpcOrigins(): string[] {
   );
 }
 
-async function stopMainRuntimeForApprovedShutdown(interruptActiveWork = false): Promise<void> {
-  const result = await orchestrateLauncherLifecycle("shutdown", {
-    schemaVersion: 1,
-    path: "desktop-shell-shutdown",
-    init: {
-      method: "POST",
-      body: { operatorIntent: "desktop_shell_shutdown" }
+async function stopMainRuntimeForApprovedShutdown(
+  interruptActiveWork = false,
+  signal?: AbortSignal
+): Promise<void> {
+  return await runJoinedMainRuntimeShutdown(async () => {
+    const result = await orchestrateLauncherLifecycle("shutdown", {
+      schemaVersion: 1,
+      path: "desktop-shell-shutdown",
+      init: {
+        method: "POST",
+        body: { operatorIntent: "desktop_shell_shutdown" }
+      }
+    }, interruptActiveWork ? "operator-restart" : "operator", signal);
+    if (!result.accepted) {
+      throw new Error(result.message || result.code || "Launcher shutdown was not accepted.");
     }
-  }, interruptActiveWork ? "operator-restart" : "operator");
-  if (!result.accepted) {
-    throw new Error(result.message || result.code || "Launcher shutdown was not accepted.");
-  }
+  });
 }
 
-async function captureShutdownIsolatedInstanceIds(): Promise<string[]> {
+async function captureShutdownIsolatedInstanceIds(deadline: DesktopShellExitDeadline): Promise<string[]> {
   if (launcherBootstrap === null) {
     return [];
   }
   const fallbackSnapshot = launcherStateStore.snapshot();
   const [snapshotResult, listedResult, registryResult] = await Promise.allSettled([
     withDesktopShellExitTimeout(
-      launcherStateStore.refresh("desktop_shell_exit"),
-      DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
+      () => launcherStateStore.refresh("desktop_shell_exit"),
+      deadline,
       "refresh isolated instances for desktop shell exit"
     ),
     withDesktopShellExitTimeout(
-      (async () => await fetchLauncherBranchInstances({
-        ...(await resolveTrayControlContextOrLoopback()),
-        requestTimeoutMs: Math.min(8_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS)
-      }))(),
-      DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
+      async (signal) => {
+        const context = await resolveTrayControlContextOrLoopback();
+        signal.throwIfAborted();
+        return await fetchLauncherBranchInstances({
+          ...context,
+          requestTimeoutMs: Math.max(1, Math.min(8_000, deadline.remainingMs()))
+        });
+      },
+      deadline,
       "fetch isolated instances for desktop shell exit"
     ),
     withDesktopShellExitTimeout(
-      readRegistry(instancesRegistryPath()),
-      DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
+      () => readRegistry(instancesRegistryPath()),
+      deadline,
       "read isolated instance registry for desktop shell exit"
     )
   ]);
@@ -2190,10 +2240,48 @@ async function captureShutdownIsolatedInstanceIds(): Promise<string[]> {
   return Array.from(new Set([...stateIds, ...listedIds, ...registryIds]));
 }
 
-async function stopIsolatedInstancesForApprovedShutdown(interruptActiveWork = false): Promise<void> {
+async function recordDesktopExitEvent(
+  deadline: DesktopShellExitDeadline,
+  event: RuntimeSceneElectronEvent
+): Promise<void> {
+  await withDesktopShellExitTimeout(
+    () => recordElectronSupervisorEvent(launcherBootstrap, event),
+    deadline,
+    event.eventCode
+  ).catch(() => undefined);
+}
+
+async function joinWorkbenchCloseBackendStop(deadline: DesktopShellExitDeadline): Promise<boolean> {
+  const stop = workbenchCloseBackendStopInFlight;
+  if (stop === null) return false;
+  await withDesktopShellExitTimeout(
+    () => stop,
+    deadline,
+    "join workbench close backend stop"
+  );
+  return true;
+}
+
+async function stopIsolatedInstancesForApprovedShutdown(
+  interruptActiveWork = false,
+  sharedDeadline?: DesktopShellExitDeadline
+): Promise<void> {
+  const ownsDeadline = sharedDeadline === undefined;
+  const deadline = sharedDeadline ?? createDesktopShellExitDeadline();
+  try {
+    await stopIsolatedInstancesWithDeadline(interruptActiveWork, deadline);
+  } finally {
+    if (ownsDeadline) deadline.dispose();
+  }
+}
+
+async function stopIsolatedInstancesWithDeadline(
+  interruptActiveWork: boolean,
+  deadline: DesktopShellExitDeadline
+): Promise<void> {
   let instanceIds: string[] = [];
   try {
-    instanceIds = await captureShutdownIsolatedInstanceIds();
+    instanceIds = await captureShutdownIsolatedInstanceIds(deadline);
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     console.warn(`Unable to enumerate isolated instances for desktop shell exit: ${detail}`);
@@ -2203,23 +2291,23 @@ async function stopIsolatedInstancesForApprovedShutdown(interruptActiveWork = fa
     return;
   }
 
-  await recordElectronSupervisorEvent(launcherBootstrap, {
+  await recordDesktopExitEvent(deadline, {
     eventCode: "electron.isolated_instances.stop_all_requested",
     message: "All live isolated instances were enumerated for desktop shell exit.",
     fields: { instanceCount: instanceIds.length, instanceIds: instanceIds.join(",").slice(0, 500) }
-  }).catch(() => undefined);
+  });
 
   const outcomes = await Promise.allSettled(instanceIds.map(async (instanceId) => {
     const result = await withDesktopShellExitTimeout(
-      orchestrateBranchInstanceLifecycle("stop", {
+      (signal) => orchestrateBranchInstanceLifecycle("stop", {
         schemaVersion: 1,
         path: "desktop-shell-shutdown/branch-instances/stop",
         init: {
           method: "POST",
           body: { instanceId }
         }
-      }, interruptActiveWork ? "operator-restart" : "operator"),
-      interruptActiveWork ? 40_000 : DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
+      }, interruptActiveWork ? "operator-restart" : "operator", signal),
+      deadline,
       `stop isolated instance ${instanceId}`
     );
     if (!result.accepted || result.code) {
@@ -2232,19 +2320,19 @@ async function stopIsolatedInstancesForApprovedShutdown(interruptActiveWork = fa
     const instanceId = instanceIds[index];
     const outcome = outcomes[index];
     if (outcome.status === "fulfilled") {
-      await recordElectronSupervisorEvent(launcherBootstrap, {
+      await recordDesktopExitEvent(deadline, {
         eventCode: "electron.isolated_instance.stopped",
         message: "Isolated instance stop completed during desktop shell exit.",
         fields: { instanceId }
-      }).catch(() => undefined);
+      });
       continue;
     }
     const detail = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
-    await recordElectronSupervisorEvent(launcherBootstrap, {
+    await recordDesktopExitEvent(deadline, {
       eventCode: "electron.isolated_instance.stop_failed",
       message: "Isolated instance stop failed during desktop shell exit.",
       fields: { instanceId, error: detail.slice(0, 500) }
-    }).catch(() => undefined);
+    });
   }
   const failedInstanceIds = outcomes.flatMap((outcome, index) =>
     outcome.status === "rejected" ? [instanceIds[index]] : []
@@ -2256,21 +2344,25 @@ async function stopIsolatedInstancesForApprovedShutdown(interruptActiveWork = fa
 
 async function bestEffortStopIsolatedInstancesForShutdown(
   label: string,
-  timeoutMs = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
+  sharedDeadline?: DesktopShellExitDeadline
 ): Promise<void> {
+  const ownsDeadline = sharedDeadline === undefined;
+  const deadline = sharedDeadline ?? createDesktopShellExitDeadline();
   try {
     await withDesktopShellExitTimeout(
-      stopIsolatedInstancesForApprovedShutdown(),
-      timeoutMs,
+      () => stopIsolatedInstancesForApprovedShutdown(false, deadline),
+      deadline,
       label
     );
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    await recordElectronSupervisorEvent(launcherBootstrap, {
+    await recordDesktopExitEvent(deadline, {
       eventCode: "electron.isolated_instances.stop_all_failed",
       message: "Isolated instance stop did not finish before the desktop shell exit step deadline.",
       fields: { error: detail.slice(0, 500), label: label.slice(0, 160) }
-    }).catch(() => undefined);
+    });
+  } finally {
+    if (ownsDeadline) deadline.dispose();
   }
 }
 
@@ -2334,16 +2426,18 @@ async function requestDesktopShellExit(
       },
       runApproved: async (decision) => {
         pendingWorkbenchCloseAck = null;
-        await withDesktopShellExitTimeout(
-          (async () => {
-            await withDesktopShellExitTimeout(
-              stopIsolatedInstancesForApprovedShutdown(),
-              DESKTOP_SHELL_EXIT_BUDGET_MS,
-              "stop isolated instances before desktop shell exit"
-            );
+        const deadline = createDesktopShellExitDeadline();
+        try {
+          await withDesktopShellExitTimeout(async (signal) => {
+            signal.throwIfAborted();
+            const mainRuntimeAlreadyStopped = await joinWorkbenchCloseBackendStop(deadline);
+            await stopIsolatedInstancesForApprovedShutdown(false, deadline);
             const shutdownResult = await executeApprovedDesktopShellShutdown({
               decision,
-              closeDesktopSession: closeDesktopSessionIfRegistered,
+              closeDesktopSession: async (signal) => {
+                signal.throwIfAborted();
+                await closeDesktopSessionIfRegistered();
+              },
               recordEvent: async (event) => {
                 await recordElectronSupervisorEvent(launcherBootstrap, {
                   ...event,
@@ -2354,16 +2448,18 @@ async function requestDesktopShellExit(
                   }
                 });
               },
-              stopManagedRuntime: stopMainRuntimeForApprovedShutdown,
+              stopManagedRuntime: mainRuntimeAlreadyStopped
+                ? async () => undefined
+                : (signal) => stopMainRuntimeForApprovedShutdown(false, signal),
               stopPythonLauncher: stopOwnedPythonLauncherService,
               approveShutdown: () => {
                 shutdownApproved = true;
               },
               stopDesktopActionLoop,
+              deadline,
               quitApp: () => {
                 app.quit();
-              },
-              stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
+              }
             });
             if (shutdownResult?.managedRuntimeError || shutdownResult?.stopError) {
               notifyDesktopTray(
@@ -2372,10 +2468,10 @@ async function requestDesktopShellExit(
                 "warning"
               );
             }
-          })(),
-          DESKTOP_SHELL_EXIT_BUDGET_MS,
-          "desktop shell exit"
-        );
+          }, deadline, "desktop shell exit");
+        } finally {
+          deadline.dispose();
+        }
       },
       onApprovedFailure: async (_decision, error) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -2842,12 +2938,26 @@ async function requestForcedDesktopShellExit(
           interruptedActiveWorkItems: JSON.stringify(interruptedActiveWork.items)
         });
       }
+      const deadline = createDesktopShellExitDeadline();
+      let mainRuntimeAlreadyStopped = false;
       try {
-        await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        mainRuntimeAlreadyStopped = await joinWorkbenchCloseBackendStop(deadline);
+        if (!mainRuntimeAlreadyStopped) {
+          await withDesktopShellExitTimeout(
+            (signal) => orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" }, "operator", signal),
+            deadline,
+            "force stop main runtime"
+          );
+          await withDesktopShellExitTimeout(
+            (signal) => delayWithAbortSignal(1_500, signal),
+            deadline,
+            "wait for forced runtime stop"
+          );
+        }
       } catch (error: unknown) {
         if (isForceLifecycleAuthorizationDenied(error)) {
           notifyDesktopTray("Vibelution", "已取消退出，当前窗口、运行时和任务均保留。", "info");
+          deadline.dispose();
           return;
         }
         if (shouldNotifyForceStopControlFailure(error)) {
@@ -2856,15 +2966,19 @@ async function requestForcedDesktopShellExit(
         }
       }
       pendingWorkbenchCloseAck = null;
-      await withDesktopShellExitTimeout(
-        (async () => {
+      try {
+        await withDesktopShellExitTimeout(async (signal) => {
+          signal.throwIfAborted();
           await bestEffortStopIsolatedInstancesForShutdown(
             "stop isolated instances before forced desktop shell exit",
-            DESKTOP_SHELL_EXIT_BUDGET_MS
+            deadline
           );
           await executeApprovedDesktopShellShutdown({
             decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: true },
-            closeDesktopSession: closeDesktopSessionIfRegistered,
+            closeDesktopSession: async (signal) => {
+              signal.throwIfAborted();
+              await closeDesktopSessionIfRegistered();
+            },
             recordEvent: async (event) => {
               await recordElectronSupervisorEvent(launcherBootstrap, {
                 ...event,
@@ -2877,22 +2991,22 @@ async function requestForcedDesktopShellExit(
                 }
               });
             },
-            stopManagedRuntime,
+            stopManagedRuntime: mainRuntimeAlreadyStopped ? async () => undefined : stopManagedRuntime,
             stopPythonLauncher: stopOwnedPythonLauncherService,
             approveShutdown: () => {
               shutdownApproved = true;
             },
             stopDesktopActionLoop,
+            deadline,
             quitApp: () => {
               app.quit();
             },
-            stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
             forceExitOnStopFailure: true
           });
-        })(),
-        DESKTOP_SHELL_EXIT_BUDGET_MS,
-        "forced desktop shell exit"
-      );
+        }, deadline, "forced desktop shell exit");
+      } finally {
+        deadline.dispose();
+      }
     });
   } finally {
     trayQuitAllInFlight = false;
@@ -3165,7 +3279,8 @@ function launcherIpcTrustedOrigins(): string[] {
 async function orchestrateLauncherLifecycle(
   operation: string,
   payload: LauncherIpcInvokePayload,
-  provenance: LauncherLifecycleProvenance = "operator"
+  provenance: LauncherLifecycleProvenance = "operator",
+  signal?: AbortSignal
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -3176,6 +3291,7 @@ async function orchestrateLauncherLifecycle(
     payload,
     operatorIntent: payload.path || operation
   });
+  signal?.throwIfAborted();
   const desktopEnv = desktopEnvironment();
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
@@ -3202,7 +3318,8 @@ async function orchestrateLauncherLifecycle(
       { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
       () => ensureFrontendRelease({
         workspaceRoot: paths.workspaceRoot,
-        pythonPath
+        pythonPath,
+        signal
       })
     );
     frontendReleaseChanged = !frontend.skipped;
@@ -3225,8 +3342,9 @@ async function orchestrateLauncherLifecycle(
     // A window-level stop must not abort an in-flight restart or
     // rebuild-and-start; wait for the mutation to settle first, then stop the
     // (restarted) backend.
-    await waitForInFlightRestartSettlement("main", WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS);
+    await waitForInFlightRestartSettlement("main", WORKBENCH_CLOSE_RESTART_JOIN_WAIT_MS, signal);
   }
+  signal?.throwIfAborted();
   const begunIntent = launcherLifecycleSupervisor.beginIntentWithOptions(
     {
       instanceId: "main",
@@ -3249,6 +3367,9 @@ async function orchestrateLauncherLifecycle(
     };
   }
   const intentLease = begunIntent.lease;
+  const lifecycleSignal = signal
+    ? AbortSignal.any([signal, intentLease.signal])
+    : intentLease.signal;
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
     const servingVersion = !frontendReleaseChanged && !packagedShellStale
@@ -3340,7 +3461,7 @@ async function orchestrateLauncherLifecycle(
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       operation: lifecycleOperation,
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
-      signal: intentLease.signal
+      signal: lifecycleSignal
     }),
     reconcile: async () => {
       scheduleLauncherStatusCliRefresh();
@@ -3544,18 +3665,42 @@ function inFlightRestartLeaseSettled(instanceId: string): boolean {
     || snapshot.phase !== "intent";
 }
 
-async function waitForInFlightRestartSettlement(instanceId: string, timeoutMs: number): Promise<void> {
+function delayWithAbortSignal(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, timeoutMs);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      const reason = signal?.reason;
+      reject(reason instanceof Error ? reason : new Error("lifecycle wait aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+  });
+}
+
+async function waitForInFlightRestartSettlement(
+  instanceId: string,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<void> {
   const deadlineMs = Date.now() + timeoutMs;
   while (!inFlightRestartLeaseSettled(instanceId)) {
+    signal?.throwIfAborted();
     if (Date.now() >= deadlineMs) {
       throw new Error(
         `In-flight Launcher restart/rebuild-and-start did not settle within ${Math.round(timeoutMs / 1000)}s; `
         + "the window close stop was not accepted because it must not abort a running mutation."
       );
     }
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, RESTART_SETTLEMENT_POLL_INTERVAL_MS);
-    });
+    await delayWithAbortSignal(
+      Math.min(RESTART_SETTLEMENT_POLL_INTERVAL_MS, Math.max(1, deadlineMs - Date.now())),
+      signal
+    );
   }
 }
 
@@ -3890,32 +4035,19 @@ async function runIsolatedRegistryMutation(input: {
       });
       const spawnPid = Number(spawned.child.pid || 0);
       const generation = Number(claimed.entry.generation || 0);
-      const spawnIdentity = spawnPid > 0
-        ? await capturePythonProcessIdentity({
-            pythonPath: spawned.pythonPath,
-            workspaceRoot: target.projectRoot,
-            pid: spawnPid
-          })
+      // Capture the process owner synchronously after spawn. The workspace key
+      // can already point at a newer job by the time identity/readiness awaits
+      // settle, so cleanup must retain this exact generation's retirement.
+      const retireOwnedJob = spawnPid > 0
+        ? captureTrackedWorkbenchJobRetirement(target.projectRoot, spawnPid)
         : null;
-      if (spawnPid > 0 && !spawnIdentity) {
-        const retained = generation > 0
-          ? await recordSpawnPid(instancesRegistryPath(), {
-              instanceId: input.instanceId,
-              spawnPid,
-              expectedGeneration: generation
-            })
-          : { applied: false };
-        if (!retained.applied) {
-          throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}; lifecycle claim could not retain its handle`);
-        }
-        throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}; registered handle retained`);
-      }
-      const retireSpawnedTree = async (): Promise<void> => {
+      let spawnIdentity: Awaited<ReturnType<typeof capturePythonProcessIdentity>> = null;
+      const retireSpawnedTree = async (): Promise<boolean> => {
         if (spawnPid <= 0) {
-          return;
+          return false;
         }
-        if (await terminateTrackedWorkbenchJob(target.projectRoot)) {
-          return;
+        if (retireOwnedJob && await retireOwnedJob()) {
+          return true;
         }
         if (!spawnIdentity) {
           throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}`);
@@ -3929,39 +4061,44 @@ async function runIsolatedRegistryMutation(input: {
         if (!(await terminateProcessTree(spawnPid, spawnIdentity))) {
           throw new Error(`isolated workbench backend process-tree retirement was not verified for pid ${spawnPid}`);
         }
+        return true;
       };
-      if (spawnPid > 0 && generation > 0) {
-        const recorded = await recordSpawnPid(instancesRegistryPath(), {
-          instanceId: input.instanceId,
-          spawnPid,
-          expectedGeneration: generation,
-          ...(spawnIdentity
-            ? {
-                spawnCreateTime: spawnIdentity.createTime,
-                spawnExecutable: spawnIdentity.executable
-              }
-            : {})
-        });
-        if (!recorded.applied) {
-          try {
-            await retireSpawnedTree();
-          } catch (retirementError: unknown) {
-            throw new Error(
-              `isolated workbench backend spawn pid CAS missed and its process tree remains unverified: ${retirementError instanceof Error ? retirementError.message : String(retirementError)}`
-            );
-          }
-          return {
-            schemaVersion: 1,
-            accepted: false,
-            operation: input.operation,
-            instanceId: input.instanceId,
-            generation,
-            code: "spawn_pid_cas_miss",
-            message: "spawn pid CAS missed"
-          };
-        }
-      }
       try {
+        if (spawnPid > 0 && generation > 0) {
+          // Persist the PID before asynchronous identity capture. If capture or
+          // later startup fails, the registry still retains a retirement-pending
+          // handle unless this exact generation is superseded.
+          const recorded = await recordSpawnPid(instancesRegistryPath(), {
+            instanceId: input.instanceId,
+            spawnPid,
+            expectedGeneration: generation
+          });
+          if (!recorded.applied) {
+            throw new Error(`isolated workbench backend spawn pid CAS missed for pid ${spawnPid}`);
+          }
+        }
+        if (spawnPid > 0) {
+          spawnIdentity = await capturePythonProcessIdentity({
+            pythonPath: spawned.pythonPath,
+            workspaceRoot: target.projectRoot,
+            pid: spawnPid
+          });
+          if (!spawnIdentity) {
+            throw new Error(`isolated workbench backend process identity could not be captured for pid ${spawnPid}`);
+          }
+        }
+        if (spawnPid > 0 && generation > 0 && spawnIdentity) {
+          const recorded = await recordSpawnPid(instancesRegistryPath(), {
+            instanceId: input.instanceId,
+            spawnPid,
+            expectedGeneration: generation,
+            spawnCreateTime: spawnIdentity.createTime,
+            spawnExecutable: spawnIdentity.executable
+          });
+          if (!recorded.applied) {
+            throw new Error(`isolated workbench backend spawn identity CAS missed for pid ${spawnPid}`);
+          }
+        }
         await waitForBackendHealthy({
           port,
           signal: input.signal,
@@ -3976,14 +4113,27 @@ async function runIsolatedRegistryMutation(input: {
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         try {
+          const retirementProven = await retireSpawnedTree();
+          const released = await waitForPortRelease({ port, host: "127.0.0.1" });
+          if (!released) {
+            throw new Error(`isolated workbench backend port ${port} remains occupied after spawn cleanup`);
+          }
+          if (retirementProven && spawnPid > 0 && generation > 0) {
+            // A verified retirement of this captured owner is sufficient to
+            // clear its handle, even when identity capture itself failed. CAS
+            // prevents this compensation from clearing a replacement generation.
+            await upsert(instancesRegistryPath(), input.instanceId, {
+              spawnPid: 0,
+              spawnCreateTime: 0,
+              spawnExecutable: ""
+            }, generation);
+          }
           await retireIsolatedBackendAfterStartFailure({
             instanceId: input.instanceId,
             workspaceRoot: target.projectRoot,
             generation,
             commandId: String(claimed.entry.commandId || ""),
             message,
-            isCurrent: input.isCurrent,
-            signal: input.signal,
             pythonPath: input.pythonPath,
           });
         } catch (compensationError: unknown) {
@@ -4069,7 +4219,8 @@ async function runIsolatedRegistryMutation(input: {
 async function orchestrateBranchInstanceLifecycle(
   operation: string,
   payload: LauncherIpcInvokePayload,
-  provenance: LauncherLifecycleProvenance = "operator"
+  provenance: LauncherLifecycleProvenance = "operator",
+  signal?: AbortSignal
 ): Promise<OrchestratedBranchInstanceResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
@@ -4090,7 +4241,7 @@ async function orchestrateBranchInstanceLifecycle(
     throw new Error("branch instance id is required");
   }
   if (isCurrentCheckoutInstance(instanceId)) {
-    const mainResult = await orchestrateLauncherLifecycle(operation, payload, provenance);
+    const mainResult = await orchestrateLauncherLifecycle(operation, payload, provenance, signal);
     return { ...mainResult, instanceId };
   }
   const forceAuthorization = await authorizeLauncherForceLifecycle({
@@ -4099,6 +4250,7 @@ async function orchestrateBranchInstanceLifecycle(
     payload,
     operatorIntent: payload.path || operation
   });
+  signal?.throwIfAborted();
   const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
   const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
   const intentLease = launcherLifecycleSupervisor.beginIntent({
@@ -4106,6 +4258,9 @@ async function orchestrateBranchInstanceLifecycle(
     operation: supervisedOperation,
     desiredState
   });
+  const lifecycleSignal = signal
+    ? AbortSignal.any([signal, intentLease.signal])
+    : intentLease.signal;
   const paths = createDesktopPathsForApp();
   const mutation = await launcherLifecycleSupervisor.executeMutation({
     lease: intentLease,
@@ -4116,7 +4271,7 @@ async function orchestrateBranchInstanceLifecycle(
       pythonPath,
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-      signal: intentLease.signal,
+      signal: lifecycleSignal,
       isCurrent: () => launcherLifecycleSupervisor.isCurrent(intentLease),
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")
     }),

@@ -713,7 +713,8 @@ def test_apply_requires_matching_base_hash(tmp_path, monkeypatch):
     stale_hash = public_config_hash(public_config)
     external = load_public_config(config_path)
     external["ui"]["language"] = "en"
-    save_public_config(external, config_path)
+    # 模拟外部显式改语言：保留语义下需 override 才能改写磁盘存量语言。
+    save_public_config(external, config_path, ui_language_override="en")
     payload = load_public_config(config_path)
     payload["ui"]["language"] = "zh"
     server, thread, base_url = _start_test_config_panel(monkeypatch, config_path)

@@ -129,9 +129,12 @@ class TestGitMemoryService:
         service = GitMemoryService()
         calls = []
 
+        # Polling scans default to --no-optional-locks (see scan_working_tree).
+        polled_status = ["--no-optional-locks", "status", "--porcelain=1"]
+
         def fake_run_git(args):
             calls.append(args)
-            if args == ["status", "--porcelain=1"]:
+            if args == polled_status:
                 return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
             if args == ["rev-parse", "HEAD"]:
                 return subprocess.CompletedProcess(args=args, returncode=0, stdout="abcdef\n", stderr="")
@@ -143,7 +146,111 @@ class TestGitMemoryService:
 
         assert snapshot.available is True
         assert snapshot.base_rev == "abcdef"
-        assert calls == [["status", "--porcelain=1"], ["rev-parse", "HEAD"]]
+        assert calls == [polled_status, ["rev-parse", "HEAD"]]
+
+    def test_scan_working_tree_force_keeps_ordinary_lock_mode(self, tmp_path, monkeypatch):
+        """Prewarm/explicit refresh (force=True) keeps ordinary mode so the index can flush."""
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        assert service.scan_working_tree(store=False, no_optional_locks=False).available is True
+
+    def test_polling_refresh_scan_uses_no_optional_locks_but_prewarm_does_not(self, tmp_path, monkeypatch):
+        """force=False (polling) argv carries --no-optional-locks; force=True (prewarm) does not."""
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        git_calls: list[list[str]] = []
+        original_run_git = git_process.run_git
+
+        def tracked_run_git(args, **kwargs):
+            git_calls.append([str(part) for part in args])
+            return original_run_git(args, **kwargs)
+
+        monkeypatch.setattr(git_process, "run_git", tracked_run_git)
+
+        state = service.refresh_git_memory(force=False)
+        assert state.available is True
+        assert ["--no-optional-locks", "status", "--porcelain=1"] in git_calls
+
+        git_calls.clear()
+        state = service.refresh_git_memory(force=True)
+        assert state.available is True
+        assert ["status", "--porcelain=1"] in git_calls
+        assert not any(args[:1] == ["--no-optional-locks"] for args in git_calls)
+
+    def test_concurrent_refresh_shares_single_scan(self, tmp_path, monkeypatch):
+        """Concurrent refresh calls merge into one in-flight scan (no double status)."""
+        import threading
+        import time as time_module
+
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        scans = []
+        original_scan = service.scan_working_tree
+        scan_started = threading.Event()
+
+        def slow_scan(*args, **kwargs):
+            scans.append((args, kwargs))
+            scan_started.set()
+            time_module.sleep(0.5)
+            return original_scan(*args, **kwargs)
+
+        monkeypatch.setattr(service, "scan_working_tree", slow_scan)
+
+        results: list = []
+
+        def worker():
+            results.append(service.refresh_git_memory(force=False))
+
+        first = threading.Thread(target=worker)
+        first.start()
+        assert scan_started.wait(timeout=5)
+        second_thread = threading.Thread(target=worker)
+        second_thread.start()
+        first.join(timeout=10)
+        second_thread.join(timeout=10)
+
+        assert len(results) == 2
+        assert all(state.available for state in results)
+        assert len(scans) == 1
 
     def test_run_git_timeout_degrades_without_raising(self, tmp_path, monkeypatch):
         """Git hangs must not raise TimeoutExpired into agent main-loop refresh."""

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const JOB_TERMINATE_WAIT_MS = 8_000;
 const JOB_TERMINATE_POLL_MS = 100;
+const JOB_REAP_INTERVAL_MS = 1_000;
 
 export type WorkbenchJobHandle = object;
 
@@ -26,12 +27,56 @@ export type WorkbenchJobNative = {
 
 type TrackedJob = {
   key: string;
+  pid: number;
   job: WorkbenchJobHandle;
+  native: WorkbenchJobNative;
+  retiring?: Promise<boolean>;
+  released?: boolean;
 };
 
 const tracked = new Map<string, TrackedJob>();
 let nativeOverride: WorkbenchJobNative | null | undefined;
 let nativeModule: WorkbenchJobNative | null = null;
+let reapTimer: ReturnType<typeof setInterval> | null = null;
+
+function forgetJob(current: TrackedJob): void {
+  current.released = true;
+  if (tracked.get(current.key) === current) {
+    tracked.delete(current.key);
+  }
+  if (tracked.size === 0 && reapTimer !== null) {
+    clearInterval(reapTimer);
+    reapTimer = null;
+  }
+}
+
+function ensureReaper(): void {
+  if (reapTimer !== null) return;
+  reapTimer = setInterval(() => {
+    for (const current of tracked.values()) {
+      if (current.retiring) continue;
+      try {
+        if (current.native.activeCount(current.job) === 0) {
+          current.native.close(current.job);
+          forgetJob(current);
+          continue;
+        }
+        try {
+          process.kill(current.pid, 0);
+        } catch (error: unknown) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+            // The owned root exited but left children in its Job. Reclaim the
+            // same group; never infer ownership from a later process-tree walk.
+            void terminateTrackedWorkbenchJob(current.key, current.pid);
+          }
+        }
+      } catch {
+        // Keep ownership for a later reconciliation if native inspection fails.
+      }
+    }
+  }, JOB_REAP_INTERVAL_MS);
+  reapTimer.unref?.();
+}
 
 const requireNative = createRequire(import.meta.url);
 
@@ -68,6 +113,11 @@ export function loadWorkbenchJobNative(): WorkbenchJobNative {
 }
 
 export function __setWorkbenchJobNativeForTests(native: WorkbenchJobNative | null | undefined): void {
+  for (const current of tracked.values()) {
+    try { current.native.close(current.job); } catch { /* Test teardown. */ }
+  }
+  if (reapTimer !== null) clearInterval(reapTimer);
+  reapTimer = null;
   nativeOverride = native;
   nativeModule = null;
   tracked.clear();
@@ -87,25 +137,33 @@ export function spawnTrackedWorkbenchProcess(
   const key = jobKey(workspaceRoot);
   const previous = tracked.get(key);
   if (previous) {
-    try {
-      native.terminate(previous.job);
-    } catch {
-      // The previous group is replaced by the new job either way.
+    if (!previous.native.terminate(previous.job)) {
+      throw new Error("previous workbench job termination was not confirmed");
     }
-    try {
-      native.close(previous.job);
-    } catch {
-      // Closing a finished job is cleanup.
-    }
-    tracked.delete(key);
+    // Keep the old registration if either operation fails. Closing the owned
+    // KILL_ON_JOB_CLOSE handle is what makes replacement safe for its children.
+    previous.native.close(previous.job);
+    forgetJob(previous);
   }
   const spawned = native.spawn(input);
-  tracked.set(key, { key, job: spawned.job });
+  tracked.set(key, { key, pid: spawned.pid, job: spawned.job, native });
+  ensureReaper();
   return { pid: spawned.pid };
 }
 
 export function hasTrackedWorkbenchJob(workspaceRoot: string): boolean {
   return tracked.has(jobKey(workspaceRoot));
+}
+
+/** Capture ownership before any asynchronous identity/readiness work. */
+export function captureTrackedWorkbenchJobRetirement(workspaceRoot: string, pid: number): (() => Promise<boolean>) | null {
+  const current = tracked.get(jobKey(workspaceRoot));
+  if (!current || current.pid !== pid) return null;
+  return async () => {
+    if (current.released) return true;
+    if (tracked.get(current.key) !== current) return false;
+    return await retireJob(current);
+  };
 }
 
 async function waitUntilIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative): Promise<boolean> {
@@ -119,31 +177,34 @@ async function waitUntilIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative
   return native.activeCount(job) === 0;
 }
 
-export async function terminateTrackedWorkbenchJob(workspaceRoot: string): Promise<boolean> {
+export async function terminateTrackedWorkbenchJob(workspaceRoot: string, expectedPid?: number): Promise<boolean> {
   const current = tracked.get(jobKey(workspaceRoot));
-  if (!current) {
+  if (!current || (expectedPid !== undefined && current.pid !== expectedPid)) {
     return false;
   }
-  const native = nativeOverride === undefined ? loadWorkbenchJobNative() : nativeOverride;
-  if (native === null) {
-    return false;
+  return await retireJob(current);
+}
+
+async function retireJob(current: TrackedJob): Promise<boolean> {
+  if (current.retiring) return await current.retiring;
+  const retirement = (async (): Promise<boolean> => {
+    try {
+      if (!current.native.terminate(current.job)) return false;
+      if (!(await waitUntilIdle(current.job, current.native))) return false;
+      // A replacement may already have closed this handle. Its registration
+      // belongs to a different spawn and must survive this late completion.
+      if (tracked.get(current.key) !== current) return true;
+      current.native.close(current.job);
+      forgetJob(current);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  current.retiring = retirement;
+  try { return await retirement; } finally {
+    if (current.retiring === retirement) current.retiring = undefined;
   }
-  try {
-    native.terminate(current.job);
-  } catch {
-    return false;
-  }
-  const idle = await waitUntilIdle(current.job, native);
-  if (!idle) {
-    return false;
-  }
-  try {
-    native.close(current.job);
-  } catch {
-    // The group is already idle; dropping the handle is best-effort.
-  }
-  tracked.delete(current.key);
-  return true;
 }
 
 export async function closeTrackedWorkbenchJob(workspaceRoot: string): Promise<boolean> {
@@ -151,15 +212,11 @@ export async function closeTrackedWorkbenchJob(workspaceRoot: string): Promise<b
   if (!current) {
     return false;
   }
-  const native = nativeOverride === undefined ? loadWorkbenchJobNative() : nativeOverride;
-  if (native === null) {
-    return false;
-  }
   try {
-    native.close(current.job);
+    current.native.close(current.job);
   } catch {
     return false;
   }
-  tracked.delete(current.key);
+  forgetJob(current);
   return true;
 }

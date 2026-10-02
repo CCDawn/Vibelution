@@ -2456,15 +2456,26 @@ def _store_config_result_cache(key: str, signature: tuple[Any, ...], payload: di
     )
 
 
-def _save_public_config_and_invalidate(public_config: dict[str, Any]) -> None:
+def _save_public_config_and_invalidate(
+    public_config: dict[str, Any],
+    *,
+    ui_language_override: str | None = None,
+) -> None:
     """Persist config.toml and drop the result-level cache.
 
     Every config_service write path must go through this wrapper (or
     _save_model_catalog_state_and_invalidate) so a save never leaves a stale
     cached workspace/summary behind. Writers outside this module are covered by
-    the mtime+size signature instead.
+    the mtime+size signature instead. Only explicit ui.language writers
+    (update_language) pass ui_language_override; every other path keeps the
+    on-disk language via save_public_config's preserve mode.
     """
-    save_public_config(public_config)
+    if ui_language_override is None:
+        # 不带关键字调用：现有测试与外部 monkeypatch 的单参 save_public_config
+        # 替身继续可用；保留语义由落盘层默认执行。
+        save_public_config(public_config)
+    else:
+        save_public_config(public_config, ui_language_override=ui_language_override)
     _invalidate_config_result_cache()
 
 
@@ -2629,8 +2640,10 @@ def update_language(language: str) -> dict[str, Any]:
 
     public_config = _with_config_workspace_defaults(load_public_config())
     ui_cfg = public_config.setdefault("ui", {})
-    ui_cfg["language"] = "en" if str(language or "").strip().lower() == "en" else "zh"
-    _save_public_config_and_invalidate(public_config)
+    new_language = "en" if str(language or "").strip().lower() == "en" else "zh"
+    ui_cfg["language"] = new_language
+    # 显式声明语言写入：绕过落盘层的保留语义，否则磁盘旧值会把改动回填掉。
+    _save_public_config_and_invalidate(public_config, ui_language_override=new_language)
     summary = get_config_summary()
     _record_config_scene_event(
         "persist",
@@ -3858,6 +3871,11 @@ def _preserve_stored_ui_language_on_apply(merged: dict[str, Any], stored_languag
     to it (fail-open: the apply itself never fails on this) and record a scene
     event whenever a submitted value was suppressed, closing the forensics gap.
     A stored config without ui.language passes the submitted value through.
+
+    Double insurance: the persistence layer now applies the same preserve
+    policy inside save_public_config for every whole-config writer; this
+    apply-layer guard stays for its drift event/forensics, and its backfill is
+    idempotent with the save-layer backstop.
     """
 
     if not stored_language:

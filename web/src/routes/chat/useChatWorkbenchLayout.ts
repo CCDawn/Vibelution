@@ -40,6 +40,11 @@ export type UseChatWorkbenchLayoutOptions = {
    * conversation and no right resize/collapse affordance is exposed.
    */
   statusRailEnabled: boolean;
+  /**
+   * Whether the shared conversation index occupies a column. The stock
+   * assistant page turns this off so its conversation uses the full width.
+   */
+  indexRailEnabled?: boolean;
 };
 
 export type UseChatWorkbenchLayoutResult = {
@@ -81,6 +86,7 @@ export const CHAT_WORKBENCH_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.chat;
 export function useChatWorkbenchLayout({
   standardGroupRoomActive,
   statusRailEnabled,
+  indexRailEnabled = true,
 }: UseChatWorkbenchLayoutOptions): UseChatWorkbenchLayoutResult {
   const chatPanelWidths = useShellStore((state) => state.chatPanelWidths);
   const setChatPanelWidths = useShellStore((state) => state.setChatPanelWidths);
@@ -279,10 +285,10 @@ export function useChatWorkbenchLayout({
   const layoutStyle = useMemo(
     () =>
       ({
-        "--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`,
+        "--chat-left-pane-width": !indexRailEnabled || conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`,
         "--chat-right-pane-width": statusRailDocked ? `${rightPanelWidth}px` : "0px",
       }) as CSSProperties,
-    [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailDocked],
+    [conversationIndexCollapsed, indexRailEnabled, leftPanelWidth, rightPanelWidth, statusRailDocked],
   );
 
   const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
@@ -300,6 +306,7 @@ export function useChatWorkbenchLayout({
   const chatLayoutClassName = [
     layoutModeClassName,
     reclaimStatusRailTrack ? styles.layoutStatusRailCollapsed : "",
+    indexRailEnabled ? "" : styles.layoutConversationOnly,
   ].filter(Boolean).join(" ");
   const centerPaneClassName = responsiveLayout.mode === "overlay" || responsiveLayout.mode === "mobile"
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`

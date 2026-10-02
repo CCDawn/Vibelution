@@ -693,6 +693,43 @@ export function canForceStopInstance(item: LauncherBranchInstance): boolean {
   return item.runtime.lifecycleState === "error";
 }
 
+export type ForceStopTier = "danger" | "secondary" | "menu";
+
+const FORCE_STOP_LIVE_STATES: ReadonlySet<LauncherBranchInstance["runtime"]["lifecycleState"]> = new Set([
+  "running",
+  "partial",
+  "stopping",
+  "starting",
+  "restarting",
+  "building",
+]);
+
+/**
+ * Presentation tier for the force-stop affordance. Reachability (confirm
+ * dialog + dispatch) stays with canForceStopInstance; the tier only decides
+ * where and how loudly the row presents the action:
+ * - danger: the row still carries live runtime signals (live backend/window,
+ *   an in-flight lifecycle state, or a verified match) — keep the red button;
+ * - secondary: no live signal and the spawn identity was never verified or is
+ *   untrusted (missing/unknown/mismatch) — the recorded state may be stale,
+ *   so soften the button but keep it on the row;
+ * - menu: the backend verified the spawn process is dead — no inline button,
+ *   the recovery action lives in the overflow menu.
+ */
+export function forceStopTier(item: LauncherBranchInstance): ForceStopTier {
+  if (
+    instanceHasLiveRuntime(item)
+    || FORCE_STOP_LIVE_STATES.has(item.runtime.lifecycleState)
+    || item.runtime.spawnIdentityStatus === "match"
+  ) {
+    return "danger";
+  }
+  if (item.runtime.spawnIdentityStatus === "dead") {
+    return "menu";
+  }
+  return "secondary";
+}
+
 export function paginateItems<T>(items: readonly T[], page: number, pageSize = BRANCH_INSTANCE_PAGE_SIZE) {
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(Math.max(1, page), pageCount);

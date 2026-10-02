@@ -379,7 +379,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
   const workspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionWorkspaceSnapshot(),
-    queryFn: () => fetchEvolutionWorkspaceSnapshot<EvolutionWorkspaceSnapshot>(),
+    queryFn: ({ signal }) => fetchEvolutionWorkspaceSnapshot<EvolutionWorkspaceSnapshot>({ signal }),
     // R3: idle workspace — slower poll; fast only when an active run is present (see below after data).
     refetchInterval: (query) => {
       const snapshot = query.state.data as EvolutionWorkspaceSnapshot | undefined;
@@ -394,7 +394,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const workbenchCatalogQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
-    queryFn: () => fetchEvolutionWorkbench<EvolutionWorkbench>(),
+    queryFn: ({ signal }) => fetchEvolutionWorkbench<EvolutionWorkbench>({ signal }),
     // workbench 全量载荷（含 dataset catalog）低频刷新；高频运行态来自 workspace-snapshot
     // 内嵌的无 catalog workbench 投影，run 启动等变更仍会即时失效本查询。
     refetchInterval: resolvePollingInterval(pageVisible, EVOLUTION_WORKBENCH_POLL_INTERVAL_MS),
@@ -403,7 +403,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const selfWorkspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionSelfWorkspaceSnapshot(),
-    queryFn: () => fetchSelfEvolutionWorkspaceSnapshot<SelfEvolutionWorkspaceSnapshot>(),
+    queryFn: ({ signal }) => fetchSelfEvolutionWorkspaceSnapshot<SelfEvolutionWorkspaceSnapshot>({ signal }),
     refetchInterval: (query) => {
       const snapshot = query.state.data as SelfEvolutionWorkspaceSnapshot | undefined;
       const hasActiveRun = Boolean(

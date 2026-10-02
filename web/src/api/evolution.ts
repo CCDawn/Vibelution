@@ -31,8 +31,8 @@ export function fetchEvolutionOverview<T = EvolutionOverview>(): Promise<T> {
   return fetchJson<T>("/api/evolution/overview");
 }
 
-export function fetchEvolutionWorkspaceSnapshot<T = EvolutionWorkspaceSnapshot>(): Promise<T> {
-  return fetchJson<T>("/api/evolution/workspace-snapshot");
+export function fetchEvolutionWorkspaceSnapshot<T = EvolutionWorkspaceSnapshot>(init?: { signal?: AbortSignal }): Promise<T> {
+  return fetchJson<T>("/api/evolution/workspace-snapshot", { signal: init?.signal });
 }
 
 // workbench 全量载荷（含 dataset catalog）只在低频轮询中刷新；高频运行态数据
@@ -40,12 +40,12 @@ export function fetchEvolutionWorkspaceSnapshot<T = EvolutionWorkspaceSnapshot>(
 // SupervisedReviewRoute 两个挂载点每 8-15s 各拉一次全量 catalog（触发后端全语料计数 IO）。
 export const EVOLUTION_WORKBENCH_POLL_INTERVAL_MS = 60_000;
 
-export function fetchEvolutionWorkbench<T = EvolutionWorkbench>(): Promise<T> {
-  return fetchJson<T>("/api/evolution/workbench");
+export function fetchEvolutionWorkbench<T = EvolutionWorkbench>(init?: { signal?: AbortSignal }): Promise<T> {
+  return fetchJson<T>("/api/evolution/workbench", { signal: init?.signal });
 }
 
-export function fetchSelfEvolutionWorkspaceSnapshot<T = SelfEvolutionWorkspaceSnapshot>(): Promise<T> {
-  return fetchJson<T>("/api/evolution/self/workspace-snapshot");
+export function fetchSelfEvolutionWorkspaceSnapshot<T = SelfEvolutionWorkspaceSnapshot>(init?: { signal?: AbortSignal }): Promise<T> {
+  return fetchJson<T>("/api/evolution/self/workspace-snapshot", { signal: init?.signal });
 }
 
 export function fetchSelfObservationRun<T = SelfObservationRun>(runId: string): Promise<T> {

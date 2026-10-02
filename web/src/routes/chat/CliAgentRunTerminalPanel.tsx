@@ -62,6 +62,7 @@ export function CliAgentRunTerminalPanel({
   const [terminalError, setTerminalError] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [terminalHasOutput, setTerminalHasOutput] = useState(false);
+  const [terminalStreamGeneration, setTerminalStreamGeneration] = useState(0);
   const terminalElementRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -344,6 +345,11 @@ export function CliAgentRunTerminalPanel({
     }, { signal })
       .then((session) => {
         setTerminalSession(session);
+        if (intent !== "view") {
+          // An explicit resume/start may reuse the same server terminal id;
+          // reopen its stream only after that ensure request succeeds.
+          setTerminalStreamGeneration((generation) => generation + 1);
+        }
         if (intent === "view" || !canInputTerminal(session)) {
           replayTerminalSnapshot(session);
         } else {
@@ -421,6 +427,16 @@ export function CliAgentRunTerminalPanel({
         }
         if (payload.session) {
           setTerminalSession(payload.session);
+          const eventType = String(payload.type || event.type || "");
+          if (
+            payload.session.alive === false
+            && (eventType === "terminal_snapshot" || eventType === "terminal_status")
+          ) {
+            // These server messages are authoritative for process lifetime.
+            // Closing here prevents EventSource from reconnecting to a run
+            // that has already exited; transport errors remain reconnectable.
+            stream.close();
+          }
           if (payload.type === "terminal_snapshot" && !canInputTerminal(payload.session)) {
             replayTerminalSnapshot(payload.session);
           }
@@ -433,6 +449,8 @@ export function CliAgentRunTerminalPanel({
     stream.addEventListener("terminal_output", handleEvent as EventListener);
     stream.addEventListener("terminal_status", handleEvent as EventListener);
     stream.onerror = () => {
+      // EventSource retries transport failures itself. Keep this separate from
+      // the server-confirmed terminal_snapshot / terminal_status close path.
       setTerminalSession((current) => current ? { ...current, alive: false, canInput: false } : current);
     };
     return () => {
@@ -441,7 +459,7 @@ export function CliAgentRunTerminalPanel({
       stream.removeEventListener("terminal_status", handleEvent as EventListener);
       stream.close();
     };
-  }, [replayTerminalSnapshot, terminalSessionId, writeTerminalChunk]);
+  }, [replayTerminalSnapshot, terminalSessionId, terminalStreamGeneration, writeTerminalChunk]);
 
   return (
     <section

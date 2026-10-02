@@ -942,7 +942,11 @@ export function ChatCodingRouteWorkbench() {
     setLeftRailCollapsed,
     setRightPaneCollapsed,
     setResponsiveOverlayPane,
-  } = useChatWorkbenchLayout({ standardGroupRoomActive, statusRailEnabled: verifiedCompanionMode });
+  } = useChatWorkbenchLayout({
+    standardGroupRoomActive,
+    statusRailEnabled: verifiedCompanionMode,
+    indexRailEnabled: !financeSurface,
+  });
   const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive;
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);

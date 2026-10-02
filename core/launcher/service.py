@@ -17,6 +17,7 @@ from config.paths import resolve_config_backup_dir
 from config.public_config import (
     CONFIG_PATH,
     HEADER_LINES,
+    _apply_ui_language_persistence_policy,
     _canonicalize_public_config,
     _config_edit_lock,
     _legacy_v1_public_payload,
@@ -105,8 +106,16 @@ def _launcher_elapsed_ms(started_at: float) -> float:
     return round(max(0.0, (time.monotonic() - started_at) * 1000.0), 1)
 
 
-def _save_public_config_under_edit_lock(public_config: dict[str, Any], config_path: Path) -> None:
-    """Persist config while the caller holds the cross-process edit lock."""
+def _save_public_config_under_edit_lock(
+    public_config: dict[str, Any],
+    config_path: Path,
+    ui_language_override: str | None = None,
+) -> None:
+    """Persist config while the caller holds the cross-process edit lock.
+
+    Mirrors save_public_config's ui.language policy: preserve mode keeps the
+    on-disk language; only explicit language writers pass ui_language_override.
+    """
 
     payload = public_config
     if _legacy_v1_public_payload(public_config):
@@ -115,6 +124,10 @@ def _save_public_config_under_edit_lock(public_config: dict[str, Any], config_pa
         payload = convert_legacy_llm_config(public_config, allow_missing_credentials=True)
     cleaned_public_config = strip_runtime_model_capability_fields(
         _canonicalize_public_config(payload)
+    )
+    # 与 save_public_config 同一道兜底：整份写保留磁盘存量 [ui] language。
+    _apply_ui_language_persistence_policy(
+        cleaned_public_config, config_path, ui_language_override
     )
     backup_dir = resolve_config_backup_dir(config_path)
     backup_dir.mkdir(parents=True, exist_ok=True)
@@ -792,10 +805,13 @@ def _update_launcher_startup_settings_locked(payload: dict[str, Any]) -> dict[st
         workbench["window_size"] = _parse_workbench_window_size(workbench_payload.get("windowSize"))
     if "windowPosition" in workbench_payload:
         workbench["window_position"] = _parse_workbench_window_position(workbench_payload.get("windowPosition"))
+    ui_language_override: str | None = None
     if "language" in interface_payload:
-        ui["language"] = _parse_ui_language(interface_payload.get("language"))
+        ui_language_override = _parse_ui_language(interface_payload.get("language"))
+        ui["language"] = ui_language_override
 
-    _save_public_config_under_edit_lock(public_config, CONFIG_PATH)
+    # 界面语言是 Launcher 设置页的合法语言写入：显式 override 绕过落盘层保留语义。
+    _save_public_config_under_edit_lock(public_config, CONFIG_PATH, ui_language_override)
     setting = get_launcher_startup_settings()
     _record_launcher_event(
         "launcher.settings.startup.updated",

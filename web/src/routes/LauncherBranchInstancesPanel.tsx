@@ -11,6 +11,7 @@ import {
   canRequestOpenInstance,
   canForceStopInstance,
   canStopInstance,
+  forceStopTier,
   cleanupRiskLabels,
   filterBranchInstances,
   formatAdmissionReason,
@@ -140,6 +141,7 @@ export function LauncherBranchInstancesPanel({
         stop: "停止",
         forceStop: "强制停止",
         forceStopHint: "普通停止无法收口时使用",
+        forceStopStaleHint: "状态可能过期，将按真实进程核对处理",
         close: "关闭",
         stopAll: "停止全部",
         closeAll: "全部关闭",
@@ -203,6 +205,7 @@ export function LauncherBranchInstancesPanel({
         stop: "Stop",
         forceStop: "Force stop",
         forceStopHint: "Use when normal Stop cannot settle",
+        forceStopStaleHint: "State may be stale; verified against the real process",
         close: "Close",
         stopAll: "Stop all",
         closeAll: "Close all",
@@ -372,7 +375,13 @@ export function LauncherBranchInstancesPanel({
     // progress instead of a frozen button.
     const showOpen = canRequestOpenInstance(item, pendingOperation) || startBusy || stopBusy;
     const showStop = canStopInstance(item, pendingOperation) || stopBusy;
-    const showForceStop = canForceStopInstance(item);
+    // Reachability (confirm dialog + dispatch) stays with canForceStopInstance;
+    // the verified liveness tier only decides where and how loudly the row
+    // presents the action. A backend-verified dead spawn leaves the row and
+    // lives only in the overflow menu.
+    const forceStopTierValue = forceStopTier(item);
+    const forceStopMenuOnly = canForceStopInstance(item) && forceStopTierValue === "menu";
+    const showForceStop = canForceStopInstance(item) && !forceStopMenuOnly;
     const requestOpen = () => {
       if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id)) {
         return;
@@ -436,9 +445,9 @@ export function LauncherBranchInstancesPanel({
         {showForceStop ? (
           <VButton
             type="button"
-            variant="danger"
+            variant={forceStopTierValue === "danger" ? "danger" : "secondary"}
             density="compact"
-            title={labels.forceStopHint}
+            title={forceStopTierValue === "danger" ? labels.forceStopHint : labels.forceStopStaleHint}
             isDisabled={lifecyclePending}
             onPress={() => setForceStopId(item.id)}
           >
@@ -450,6 +459,7 @@ export function LauncherBranchInstancesPanel({
           items={[
             { id: "details", label: zh ? "查看详情" : "View details", onSelect: () => { onSelect(item.id); setDetailId(item.id); } },
             ...(isCleanupEligible(item) ? [{ id: "cleanup", label: labels.cleanup, danger: true, disabled: cleanupMutation.isPending || building || startingOrRestarting || stopBusy, onSelect: () => askCleanup([item.id]) }] : []),
+            ...(forceStopMenuOnly ? [{ id: "force-stop", label: labels.forceStop, danger: true, disabled: lifecyclePending, onSelect: () => setForceStopId(item.id) }] : []),
           ]} />
       </VActionGroup>
       {feedback ? (
