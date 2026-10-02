@@ -479,13 +479,13 @@ export function AgentsRoute() {
   const fullWorkspaceNeeded = Boolean(selectedAgentId || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false }),
+    queryFn: ({ signal }) => fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false, signal }),
     enabled: fullWorkspaceNeeded,
     staleTime: 10_000,
   });
   const agentSummaryQuery = useQuery({
     queryKey: queryKeys.agentSummary(true),
-    queryFn: () => listAgentSummaries<AgentConfigWorkspaceAgent>({ includeArchived: true }),
+    queryFn: ({ signal }) => listAgentSummaries<AgentConfigWorkspaceAgent>({ includeArchived: true, signal }),
     staleTime: 10_000,
   });
 
