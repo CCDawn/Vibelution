@@ -5,14 +5,17 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  applyAdoptLiveInstance,
   applyClaimStart,
   applyClaimStop,
   applyClaimStopIfGeneration,
+  applyCloseConfirmedDeadInstance,
   applyCompleteStop,
   applyObserve,
   applyRecordSpawnPid,
   applyReclaimStaleInFlightStart,
   applyRenewOwnerLease,
+  applySweepTerminatedRows,
   applyUpsert,
   claimStart,
   claimStop,
@@ -21,7 +24,9 @@ import {
   reclaimStaleInFlightStops,
   readRegistry,
   recordSpawnPid,
-  type RegistryPayload
+  REGISTRY_OBSERVATION_GRACE_MS,
+  type RegistryPayload,
+  type SweepGraceTracker
 } from "../src/lifecycle/instanceRegistryStore.js";
 
 type CaseInput = {
@@ -698,5 +703,362 @@ describe("instanceRegistryStore shared fixture", () => {
       ownerPid: 1234,
     })).rejects.toThrow("instances registry is corrupt");
     expect(readFileSync(registryPath, "utf8")).toBe(contents);
+  });
+});
+
+describe("applyAdoptLiveInstance", () => {
+  const baseInput = {
+    instanceId: "worktree:adopt",
+    projectRoot: "C:/worktree/adopt",
+    branch: "codex/adopt",
+    observedPid: 4242,
+    observedPort: 8001,
+    observedControlPort: 8767,
+    nowMs: Date.parse("2026-10-02T10:00:00Z")
+  };
+
+  it("adopts a terminal closed row onto the observed live backend", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:adopt": {
+          port: 8001,
+          controlPort: 8767,
+          projectRoot: "C:/worktree/adopt",
+          status: "closed",
+          generation: 4,
+          failureMessage: "",
+          portLeaseStatus: "reclaimable",
+          portLease: { status: "reclaimable", reason: "legacy_unknown_idle" },
+          cleanupObservation: { kind: "orphan", firstObservedAt: "2026-08-19T16:28:53Z" }
+        }
+      }
+    };
+    const result = applyAdoptLiveInstance(payload, {
+      ...baseInput,
+      identity: { createTime: 133000000000000000, executable: "pythonw.exe" },
+      commandId: "adopt:abc"
+    });
+    expect(result.applied).toBe(true);
+    const entry = payload.instances["worktree:adopt"];
+    expect(entry).toMatchObject({
+      status: "steady",
+      phase: "steady",
+      desiredState: "open",
+      spawnPid: 4242,
+      spawnCreateTime: 133000000000000000,
+      spawnExecutable: "pythonw.exe",
+      port: 8001,
+      controlPort: 8767,
+      portLeaseStatus: "held",
+      generation: 5,
+      commandId: "adopt:abc",
+      failureMessage: "",
+      url: "http://127.0.0.1:8001"
+    });
+    expect(entry.portLease).toBeUndefined();
+    expect(entry.cleanupObservation).toBeUndefined();
+    expect(entry.deadlineAt).toBeUndefined();
+    expect(entry.inFlightDeadlineAt).toBeUndefined();
+    expect(entry.ownerLease).toBeUndefined();
+  });
+
+  it("creates a row when the registry has none", () => {
+    const payload: RegistryPayload = { schemaVersion: 3, instances: {} };
+    const result = applyAdoptLiveInstance(payload, baseInput);
+    expect(result.applied).toBe(true);
+    expect(payload.instances["worktree:adopt"]).toMatchObject({
+      status: "steady",
+      spawnPid: 4242,
+      port: 8001,
+      controlPort: 8767,
+      portLeaseStatus: "held",
+      generation: 1
+    });
+  });
+
+  it("is idempotent when the row already matches the observation", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:adopt": {
+          port: 8001,
+          controlPort: 8767,
+          projectRoot: "C:/worktree/adopt",
+          status: "steady",
+          phase: "steady",
+          desiredState: "open",
+          spawnPid: 4242,
+          portLeaseStatus: "held",
+          generation: 7
+        }
+      }
+    };
+    const result = applyAdoptLiveInstance(payload, baseInput);
+    expect(result.applied).toBe(false);
+    expect(payload.instances["worktree:adopt"].generation).toBe(7);
+  });
+
+  it("never adopts an in-flight row owned by a live supervisor", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:adopt": {
+          port: 8001,
+          status: "starting",
+          desiredState: "open",
+          generation: 9,
+          spawnPid: 0,
+          portLeaseStatus: "held"
+        }
+      }
+    };
+    const result = applyAdoptLiveInstance(payload, baseInput);
+    expect(result.applied).toBe(false);
+    expect(payload.instances["worktree:adopt"].status).toBe("starting");
+    expect(payload.instances["worktree:adopt"].generation).toBe(9);
+  });
+
+  it("refuses to clobber a different live registered spawn pid", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:adopt": {
+          port: 8001,
+          status: "steady",
+          desiredState: "open",
+          spawnPid: 111,
+          portLeaseStatus: "held",
+          generation: 3
+        }
+      }
+    };
+    const result = applyAdoptLiveInstance(payload, { ...baseInput, registeredSpawnPidAlive: true });
+    expect(result.applied).toBe(false);
+    expect(payload.instances["worktree:adopt"].spawnPid).toBe(111);
+  });
+
+  it("drops a stale identity triple when the observation has none", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:adopt": {
+          port: 8001,
+          status: "failed",
+          spawnPid: 0,
+          spawnCreateTime: 1,
+          spawnExecutable: "stale.exe",
+          generation: 2
+        }
+      }
+    };
+    const result = applyAdoptLiveInstance(payload, baseInput);
+    expect(result.applied).toBe(true);
+    const entry = payload.instances["worktree:adopt"];
+    expect(entry.spawnCreateTime).toBeUndefined();
+    expect(entry.spawnExecutable).toBeUndefined();
+    expect(entry.status).toBe("steady");
+  });
+
+  it("rejects observations without a live pid or port", () => {
+    const payload: RegistryPayload = { schemaVersion: 3, instances: {} };
+    expect(() => applyAdoptLiveInstance(payload, { ...baseInput, observedPid: 0 })).toThrow();
+    expect(() => applyAdoptLiveInstance(payload, { ...baseInput, observedPort: 0 })).toThrow();
+  });
+});
+
+describe("applyCloseConfirmedDeadInstance", () => {
+  const t0 = Date.parse("2026-10-02T10:00:00Z");
+
+  it("settles a dead steady row to closed and reclaims the lease", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:dead": {
+          port: 8002,
+          status: "steady",
+          desiredState: "open",
+          spawnPid: 999,
+          spawnCreateTime: 5,
+          spawnExecutable: "pythonw.exe",
+          portLeaseStatus: "held",
+          generation: 7
+        }
+      }
+    };
+    const result = applyCloseConfirmedDeadInstance(payload, {
+      instanceId: "worktree:dead",
+      expectedGeneration: 7,
+      outcome: "closed",
+      nowMs: t0
+    });
+    expect(result.applied).toBe(true);
+    expect(payload.instances["worktree:dead"]).toMatchObject({
+      status: "closed",
+      phase: "steady",
+      desiredState: "closed",
+      spawnPid: 0,
+      portLeaseStatus: "reclaimable",
+      generation: 7
+    });
+    expect(payload.instances["worktree:dead"].spawnExecutable).toBeUndefined();
+    expect(payload.instances["worktree:dead"].ownerLease).toBeUndefined();
+  });
+
+  it("settles a stale in-flight start to failed with the supervisor-lost message", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:stale": {
+          port: 8003,
+          status: "starting",
+          desiredState: "open",
+          spawnPid: 555,
+          portLeaseStatus: "held",
+          generation: 2,
+          deadlineAt: "2026-10-02T09:00:00Z",
+          inFlightDeadlineAt: "2026-10-02T09:00:00Z"
+        }
+      }
+    };
+    const result = applyCloseConfirmedDeadInstance(payload, {
+      instanceId: "worktree:stale",
+      expectedGeneration: 2,
+      outcome: "failed",
+      failureMessage: "启动监督进程已退出且超过启动期限，启动未完成。",
+      nowMs: t0
+    });
+    expect(result.applied).toBe(true);
+    expect(payload.instances["worktree:stale"]).toMatchObject({
+      status: "failed",
+      phase: "failed",
+      desiredState: "open",
+      spawnPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
+  });
+
+  it("honors the generation CAS and refuses mismatched outcomes", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:a": { status: "steady", spawnPid: 10, generation: 5 },
+        "worktree:b": { status: "closed", spawnPid: 0, generation: 5 }
+      }
+    };
+    expect(applyCloseConfirmedDeadInstance(payload, {
+      instanceId: "worktree:a",
+      expectedGeneration: 6,
+      outcome: "closed"
+    }).applied).toBe(false);
+    expect(applyCloseConfirmedDeadInstance(payload, {
+      instanceId: "worktree:b",
+      outcome: "closed"
+    }).applied).toBe(false);
+    expect(payload.instances["worktree:a"].spawnPid).toBe(10);
+  });
+});
+
+describe("applySweepTerminatedRows", () => {
+  const t0 = Date.parse("2026-10-02T10:00:00Z");
+  const existingRoot = "C:/worktree/alive";
+
+  function sweep(
+    payload: RegistryPayload,
+    input: Partial<Parameters<typeof applySweepTerminatedRows>[1]> = {}
+  ) {
+    return applySweepTerminatedRows(payload, {
+      nowMs: t0,
+      pidAlive: () => false,
+      pathExists: (path) => path === existingRoot,
+      ...input
+    });
+  }
+
+  it("removes a dead key after the grace elapses", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:gone": {
+          port: 8004,
+          status: "closed",
+          projectRoot: "C:/worktree/gone",
+          generation: 2
+        }
+      }
+    };
+    const tracker: SweepGraceTracker = new Map();
+    expect(sweep(payload, { graceTracker: tracker }).removedInstanceIds).toEqual([]);
+    expect(payload.instances["worktree:gone"]).toBeDefined();
+    expect(sweep(payload, {
+      graceTracker: tracker,
+      nowMs: t0 + REGISTRY_OBSERVATION_GRACE_MS + 1
+    }).removedInstanceIds).toEqual(["worktree:gone"]);
+    expect(payload.instances["worktree:gone"]).toBeUndefined();
+  });
+
+  it("keeps rows whose worktree still exists or whose identity may live", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:exists": { status: "closed", projectRoot: existingRoot },
+        "worktree:livepid": { status: "closed", projectRoot: "C:/worktree/gone", spawnPid: 42 },
+        "worktree:livewin": { status: "closed", projectRoot: "C:/worktree/gone", windowPid: 43 },
+        "worktree:inflight": { status: "stopping", projectRoot: "C:/worktree/gone" },
+        "worktree:protected": { status: "failed", projectRoot: "C:/worktree/gone" }
+      }
+    };
+    const result = sweep(payload, {
+      nowMs: t0 + REGISTRY_OBSERVATION_GRACE_MS * 10,
+      pidAlive: (pid) => pid === 42 || pid === 43,
+      protectedInstanceIds: ["worktree:protected"],
+      graceTracker: new Map([
+        ["worktree:exists", { since: t0, fingerprint: `${existingRoot}|0|0` }],
+        ["worktree:livepid", { since: t0, fingerprint: "C:/worktree/gone|0|0" }],
+        ["worktree:livewin", { since: t0, fingerprint: "C:/worktree/gone|0|0" }],
+        ["worktree:inflight", { since: t0, fingerprint: "C:/worktree/gone|0|0" }],
+        ["worktree:protected", { since: t0, fingerprint: "C:/worktree/gone|0|0" }]
+      ])
+    });
+    expect(result.removedInstanceIds).toEqual([]);
+    expect(Object.keys(payload.instances)).toHaveLength(5);
+  });
+
+  it("resets the grace when the row fingerprint changes", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:churn": { status: "failed", projectRoot: "C:/worktree/gone", generation: 1 }
+      }
+    };
+    const tracker: SweepGraceTracker = new Map([
+      ["worktree:churn", { since: t0 - REGISTRY_OBSERVATION_GRACE_MS - 1, fingerprint: "C:/worktree/gone|0|0" }]
+    ]);
+    const result = sweep(payload, {
+      graceTracker: tracker,
+      nowMs: t0 + REGISTRY_OBSERVATION_GRACE_MS + 1
+    });
+    expect(result.removedInstanceIds).toEqual([]);
+    expect(result.eligibleInstanceIds).toEqual(["worktree:churn"]);
+    expect(tracker.get("worktree:churn")?.fingerprint).toBe("C:/worktree/gone|1|0");
+  });
+
+  it("keeps rows with an unexpired owner lease", () => {
+    const payload: RegistryPayload = {
+      schemaVersion: 3,
+      instances: {
+        "worktree:leased": {
+          status: "closed",
+          projectRoot: "C:/worktree/gone",
+          ownerLease: { ownerId: "pid:1", expiresAt: new Date(t0 + 60_000).toISOString() }
+        }
+      }
+    };
+    const result = sweep(payload, {
+      nowMs: t0 + REGISTRY_OBSERVATION_GRACE_MS * 10,
+      graceTracker: new Map()
+    });
+    expect(result.removedInstanceIds).toEqual([]);
+    expect(payload.instances["worktree:leased"]).toBeDefined();
   });
 });

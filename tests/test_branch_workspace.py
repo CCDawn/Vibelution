@@ -212,6 +212,30 @@ def test_pool_external_nested_worktrees_get_distinct_ids(tmp_path):
     assert nav["shortName"] == "branch+codex/nav-preview"
 
 
+def test_pool_external_detached_checkout_short_name_stays_leaf(tmp_path):
+    project = _init_repo(tmp_path / "OtherApp")
+    external = tmp_path / "codex-wt" / "spike-detached" / "Vibelution"
+    external.parent.parent.mkdir(parents=True, exist_ok=True)
+    _git(project, "worktree", "add", "--detach", str(external))
+
+    payload = list_branch_instances(project)
+    detached = next(
+        item for item in payload["items"] if item.get("branch") == "detached"
+    )
+
+    # The id fallback is a normalized absolute path; the display name must be
+    # built from the checkout's leaf directory name instead of the id.
+    assert detached["id"].startswith("worktree:")
+    assert "codex-wt" in detached["id"].lower()
+    short_name = detached["shortName"]
+    assert short_name == "branch+Vibelution"
+    assert "/" not in short_name
+    assert ":" not in short_name
+    assert "\\" not in short_name
+    assert detached["workbenchTitle"] == "branch+Vibelution 台"
+    assert detached["launcherTitle"] == "branch+Vibelution 控"
+
+
 def test_pool_reparse_entry_is_removed_without_touching_external_target(tmp_path):
     project = _init_repo(tmp_path / "OtherApp")
     pool_entry = project / ".worktrees" / "external-link"

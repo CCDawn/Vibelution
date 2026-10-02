@@ -135,6 +135,7 @@ import {
   upsert
 } from "./lifecycle/instanceRegistryStore.js";
 import { reconcileOrphanedInstanceRegistry } from "./lifecycle/instanceRegistryRecovery.js";
+import { reconcileRegistryWithObservation } from "./lifecycle/instanceRegistryReconciler.js";
 import { knownPidIsAlive } from "./lifecycle/mainLine/observation.js";
 import {
   superviseIsolatedInstanceStart
@@ -331,6 +332,10 @@ const launcherStateStore = new LauncherStateStore(
     if (!("status" in state) || !("branchInstances" in state)) {
       throw new Error("launcher state refresh omitted required state sources");
     }
+    // Successful observation is the trigger for registry SSOT repair: adopt
+    // live backends onto terminal/missing rows, settle rows whose registered
+    // identity died, and sweep dead keys after their grace.
+    scheduleRegistryReconciliation(state.branchInstances);
     return {
       status: state.status,
       branchInstances: state.branchInstances,
@@ -1939,6 +1944,26 @@ async function stopManagedRuntime(signal?: AbortSignal): Promise<void> {
 function desktopPythonPath(): string {
   const desktopEnv = desktopEnvironment();
   return String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+}
+
+/**
+ * State-refresh driven registry SSOT repair: adopt live backends sitting on
+ * missing/terminal registry rows, settle rows whose registered identity is
+ * confirmed dead, and sweep dead keys whose worktree is gone. Fire-and-forget:
+ * the reconciler is mutex-guarded and cooldown-limited, and a failure must
+ * never fail the refresh (or the start short-circuit) that triggered it.
+ * Skipped once shutdown is approved so it cannot fight the shutdown harvest.
+ */
+function scheduleRegistryReconciliation(branchInstances: unknown): void {
+  if (shutdownApproved) {
+    return;
+  }
+  void reconcileRegistryWithObservation({
+    branchInstances,
+    pythonPath: desktopPythonPath() || undefined
+  }).catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
 }
 
 async function inspectCurrentDesktopShell(): Promise<DesktopShellStatus> {
@@ -3984,6 +4009,11 @@ async function runIsolatedRegistryMutation(input: {
 
   if (input.operation === "start" || input.operation === "restart") {
     if (input.operation === "start" && target?.alive) {
+      // The cached projection says the backend is alive, but the registry row
+      // may still be terminal or missing (spawn outside a registered
+      // generation). Trigger the adopt pass asynchronously; the response stays
+      // non-blocking either way.
+      scheduleRegistryReconciliation(payload);
       return {
         schemaVersion: 1,
         accepted: true,

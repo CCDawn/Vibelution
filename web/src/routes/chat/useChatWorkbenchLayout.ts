@@ -308,9 +308,14 @@ export function useChatWorkbenchLayout({
     reclaimStatusRailTrack ? styles.layoutStatusRailCollapsed : "",
     indexRailEnabled ? "" : styles.layoutConversationOnly,
   ].filter(Boolean).join(" ");
-  const centerPaneClassName = responsiveLayout.mode === "overlay" || responsiveLayout.mode === "mobile"
+  // A one-column template (finance, overlay, mobile) must not also place this
+  // pane on column 3. That placement creates an empty leading track.
+  const centerOnFirstColumn = responsiveLayout.mode === "overlay"
+    || responsiveLayout.mode === "mobile"
+    || !indexRailEnabled;
+  const centerPaneClassName = centerOnFirstColumn
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`
-    : styles.centerPane;
+    : `${styles.centerPane} ${styles.centerPaneDocked}`;
   // Critical: when docked status rail is collapsed, do NOT attach leftRail
   // (grid-column:5). A non-display:none item on column 5 creates implicit
   // grid tracks and a blank right strip after route remounts.

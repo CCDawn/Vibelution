@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
-import type { ConfigWorkspace } from "../../api/types";
+import type { ConfigSummary } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread";
 import { queryKeys } from "../../api/queryKeys";
 import { dictionary } from "../../i18n/dictionary";
@@ -142,8 +142,8 @@ function renderConversation(
       aliases?: string[];
     }>;
     slashSkillsCatalogState?: "ready" | "loading" | "error";
-    configWorkspace?: {
-      modelOptions: Array<{ model_id: string; label: string }>;
+    configSummary?: {
+      modelLabels: Record<string, string>;
     };
   } = {},
 ) {
@@ -155,10 +155,10 @@ function renderConversation(
     },
   });
   queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
-  if (options.configWorkspace) {
-    queryClient.setQueryData(queryKeys.configWorkspace(), {
-      modelOptions: options.configWorkspace.modelOptions,
-    } as unknown as ConfigWorkspace);
+  if (options.configSummary) {
+    queryClient.setQueryData(queryKeys.configPublic(), {
+      modelLabels: options.configSummary.modelLabels,
+    } as unknown as ConfigSummary);
   }
   const processDisplayProps = options.useDefaultProcessDisplayMode
     ? {}
@@ -2740,11 +2740,11 @@ describe("conversation turn envelope dividers", () => {
       envelopeUserMessage("message-user-3", "第三轮同模型", "2026-09-20T02:00:00Z"),
       envelopeSettledAssistant("message-assistant-3", "turn-3", "第三轮回答。", "2026-09-20T02:01:00Z", "claude-y"),
     ], {
-      configWorkspace: {
-        modelOptions: [
-          { model_id: "gpt-x", label: "GPT-X 满血版" },
-          { model_id: "claude-y", label: "Claude-Y" },
-        ],
+      configSummary: {
+        modelLabels: {
+          "gpt-x": "GPT-X 满血版",
+          "claude-y": "Claude-Y",
+        },
       },
     });
 

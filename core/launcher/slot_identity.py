@@ -17,11 +17,10 @@ from vibelution_storage import (
     ProjectIdentityError,
     instance_id_for_project,
     resolve_active_project_storage_paths,
+    slot_id_for_key,
 )
 
 WORKSPACE_ROOT_ENV = "VIBELUTION_WORKSPACE_ROOT"
-_FNV32_OFFSET = 2166136261
-_FNV32_PRIME = 16777619
 
 
 def normalize_slot_key(project_root: str | os.PathLike[str]) -> str:
@@ -29,14 +28,6 @@ def normalize_slot_key(project_root: str | os.PathLike[str]) -> str:
     if not raw:
         raise ValueError("project_root must not be empty")
     return os.path.normcase(str(Path(raw).expanduser().resolve()))
-
-
-def slot_id_for_key(slot_key: str) -> str:
-    digest = _FNV32_OFFSET
-    for byte in str(slot_key or "").encode("utf-8"):
-        digest ^= byte
-        digest = (digest * _FNV32_PRIME) & 0xFFFFFFFF
-    return f"{digest:08x}"
 
 
 def slot_id_for_project(project_root: str | os.PathLike[str]) -> str:

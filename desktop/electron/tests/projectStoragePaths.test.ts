@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   resolveCanonicalRuntimeHome,
   instanceIdForProject,
+  normalizeInstanceKey,
   resolveLauncherRuntimeDir,
   resolveRuntimeManagerDir,
 } from "../src/lifecycle/projectStoragePaths.js";
@@ -101,5 +102,41 @@ describe("project storage runtime paths", () => {
 
     expect(() => resolveLauncherRuntimeDir(projectRoot)).toThrow("storage_migration_marker_invalid");
     expect(() => resolveRuntimeManagerDir(projectRoot)).toThrow("storage_migration_marker_invalid");
+  });
+});
+
+describe("slot hash cross-language vectors", () => {
+  // Cross-language expected-vector lock, kept literally identical to
+  // CROSS_LANGUAGE_SLOT_HASH_VECTORS in tests/test_slot_identity.py. All inputs
+  // are lexically stable, non-existent Windows paths, so neither implementation
+  // can drift on symlink or 8.3-name resolution. Never change an expected hash:
+  // on-disk slot directories are addressed by these values, and both tables
+  // must be edited together.
+  const crossLanguageSlotHashVectors: ReadonlyArray<readonly [string, string]> = [
+    ["C:\\Users\\dev\\projects\\vibelution", "cfeef128"],
+    ["C:\\Users\\dev\\projects\\vibelution\\", "cfeef128"],
+    ["C:/Users/dev/projects/vibelution", "cfeef128"],
+    ["c:\\Users\\dev\\projects\\VIBELUTION", "cfeef128"],
+    ["C:\\Users\\dev\\projects\\.\\vibelution", "cfeef128"],
+    ["C:\\Users\\dev\\My Projects\\Vibelution App", "0a6c8387"],
+    ["  C:\\Users\\dev\\projects\\vibelution  ", "cfeef128"],
+    ["C:\\Users\\dev\\项目\\维博路申", "7caa26ae"],
+  ];
+
+  it("pins FNV-1a32 slot hashes shared with the Python implementation", () => {
+    for (const [projectRoot, expected] of crossLanguageSlotHashVectors) {
+      expect(instanceIdForProject(projectRoot)).toBe(expected);
+    }
+  });
+
+  it("documents a known divergence: no expanduser step for ~ inputs", () => {
+    // Python normalization (normalize_slot_key / normalize_instance_key) runs
+    // expanduser(), so a "~" input reaches the real home directory; this side
+    // has no expanduser step and keeps "~" as a literal path segment. Electron
+    // callers only pass absolute paths, so this normalization-scope difference
+    // cannot split an existing dataHome; pin it so the divergence stays
+    // explicit. TypeScript-side twin of
+    // test_known_divergence_python_expands_tilde_before_hashing.
+    expect(normalizeInstanceKey("~/projects/vibelution")).toContain("~");
   });
 });

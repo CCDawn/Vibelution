@@ -1011,6 +1011,296 @@ export async function recordSpawnPid(
   return mutateRegistry(registryPath, (payload) => applyRecordSpawnPid(payload, input), options);
 }
 
+// ============================================================================
+// State-refresh driven SSOT repair: adopt / close-dead / sweep.
+//
+// The registry is the single source of truth for instance state, and Electron
+// is its only product writer. Terminal rows (closed/failed, spawnPid=0,
+// reclaimable lease) previously had no mechanism to re-bind a live backend
+// that re-appeared on the same instance, and dead keys whose worktree is gone
+// were never removed. The mutations below close that gap; they are driven by
+// instanceRegistryReconciler.ts on every successful state refresh.
+// ============================================================================
+
+/** Registry statuses that describe a finished lifecycle ("error" is legacy). */
+export const TERMINAL_REGISTRY_STATUSES = new Set(["closed", "failed", "error"]);
+/** Mirrors the Python orphan grace (_CLEANUP_OBSERVATION_GRACE_SECONDS = 10s). */
+export const REGISTRY_OBSERVATION_GRACE_MS = 10_000;
+
+export type AdoptedProcessIdentity = {
+  createTime: number;
+  executable: string;
+};
+
+export type AdoptLiveInstanceInput = {
+  instanceId: string;
+  projectRoot: string;
+  branch?: string;
+  observedPid: number;
+  observedPort: number;
+  observedControlPort?: number;
+  identity?: AdoptedProcessIdentity;
+  commandId?: string;
+  host?: string;
+  nowMs?: number;
+  /** Evidence that a differing registered spawn pid is still alive. */
+  registeredSpawnPidAlive?: boolean;
+};
+
+/**
+ * Re-bind a live backend onto the instance row it belongs to.
+ *
+ * Adopt applies when the row is missing, terminal, handle-free (spawnPid=0),
+ * or carries a reclaimable/quarantined lease while the observation proves a
+ * live backend for the same instance. In-flight rows (starting/restarting/
+ * stopping) always belong to a live supervisor and are never adopted; a row
+ * whose differing registered spawn pid is verified alive is left to the
+ * retirement path. Applying the adopt is idempotent: a row that already
+ * matches the observation is returned untouched.
+ */
+export function applyAdoptLiveInstance(
+  payload: RegistryPayload,
+  input: AdoptLiveInstanceInput
+): ObserveResult {
+  const instanceId = String(input.instanceId || "").trim();
+  if (!instanceId) {
+    throw new Error("instance_id must not be empty");
+  }
+  const observedPid = positiveInt(input.observedPid);
+  const observedPort = positiveInt(input.observedPort);
+  if (observedPid <= 0 || observedPort <= 0) {
+    throw new Error("adopt requires an observed live pid and backend port");
+  }
+  const entry = payload.instances[instanceId];
+  if (entry) {
+    if (Boolean(entry.cleanupInProgress)) {
+      return { applied: false, entry: { ...entry } };
+    }
+    const status = statusOf(entry);
+    if (IN_FLIGHT_STATUSES.has(status)) {
+      return { applied: false, entry: { ...entry } };
+    }
+    const registeredPid = positiveInt(entry.spawnPid);
+    if (registeredPid > 0 && registeredPid !== observedPid && input.registeredSpawnPidAlive === true) {
+      // A different, still-live registered handle belongs to the health-identity
+      // retirement path; overwriting it could orphan that process.
+      return { applied: false, entry: { ...entry } };
+    }
+    if (
+      status === "steady"
+      && String(entry.desiredState || "").trim().toLowerCase() === "open"
+      && registeredPid === observedPid
+      && positiveInt(entry.port) === observedPort
+      && holdsPortLease(entry)
+    ) {
+      return { applied: false, entry: { ...entry } };
+    }
+  }
+  const target = ensureEntry(payload, instanceId);
+  const nowMs = input.nowMs ?? Date.now();
+  const createTime = Number(input.identity?.createTime || 0);
+  const executable = String(input.identity?.executable || "").trim();
+  const identity = createTime > 0 && executable ? { createTime, executable } : null;
+  const controlPort = positiveInt(target.controlPort) || positiveInt(input.observedControlPort);
+  Object.assign(target, {
+    ...(String(input.projectRoot || "").trim() ? { projectRoot: String(input.projectRoot).trim() } : {}),
+    ...(String(input.branch || "").trim() ? { branch: String(input.branch).trim() } : {}),
+    port: observedPort,
+    host: String(target.host || input.host || "127.0.0.1").trim() || "127.0.0.1",
+    url: loopbackUrl(observedPort),
+    status: "steady",
+    phase: "steady",
+    desiredState: "open",
+    generation: positiveInt(target.generation) + 1,
+    failureMessage: "",
+    spawnPid: observedPid,
+    portLeaseStatus: "held",
+    startedAt: String(target.startedAt || "").trim() || toIsoUtc(nowMs)
+  });
+  if (controlPort > 0) {
+    target.controlPort = controlPort;
+  }
+  if (String(input.commandId || "").trim()) {
+    target.commandId = String(input.commandId).trim();
+  }
+  if (identity) {
+    target.spawnCreateTime = identity.createTime;
+    target.spawnExecutable = identity.executable;
+  } else {
+    delete target.spawnCreateTime;
+    delete target.spawnExecutable;
+  }
+  // Stale in-flight bookkeeping from a dead generation must not survive.
+  delete target.deadlineAt;
+  delete target.inFlightDeadlineAt;
+  delete target.ownerLease;
+  delete target.portLease;
+  delete target.cleanupObservation;
+  return { applied: true, entry: { ...target } };
+}
+
+export type CloseConfirmedDeadInstanceInput = {
+  instanceId: string;
+  expectedGeneration?: number;
+  /** "failed" settles a stale in-flight start; "closed" settles a dead steady row. */
+  outcome: "closed" | "failed";
+  failureMessage?: string;
+  nowMs?: number;
+};
+
+/**
+ * Symmetric half of adopt: the row claims a live runtime (steady, or a stale
+ * in-flight start) with a registered spawn pid, but observation proved that
+ * identity dead. Clears the handles and reclaims the port lease. The caller
+ * must have verified the registered pid is dead and waited out the
+ * observation grace; the generation CAS fences concurrent lifecycle owners.
+ */
+export function applyCloseConfirmedDeadInstance(
+  payload: RegistryPayload,
+  input: CloseConfirmedDeadInstanceInput
+): ObserveResult {
+  const instanceId = String(input.instanceId || "").trim();
+  if (!instanceId) {
+    throw new Error("instance_id must not be empty");
+  }
+  const entry = payload.instances[instanceId];
+  if (!entry) {
+    return { applied: false, entry: {} };
+  }
+  const expected = positiveInt(input.expectedGeneration);
+  if (expected > 0 && positiveInt(entry.generation) !== expected) {
+    return { applied: false, entry: { ...entry } };
+  }
+  if (positiveInt(entry.spawnPid) <= 0) {
+    return { applied: false, entry: { ...entry } };
+  }
+  const status = statusOf(entry);
+  if (input.outcome === "failed") {
+    if (status !== "starting" && status !== "restarting") {
+      return { applied: false, entry: { ...entry } };
+    }
+  } else if (status !== "steady") {
+    return { applied: false, entry: { ...entry } };
+  }
+  const outcome = input.outcome === "failed" ? "failed" : "closed";
+  entry.status = outcome;
+  entry.phase = outcome === "failed" ? "failed" : "steady";
+  entry.desiredState = outcome === "failed" ? "open" : "closed";
+  entry.failureMessage = String(input.failureMessage || "");
+  entry.spawnPid = 0;
+  delete entry.spawnCreateTime;
+  delete entry.spawnExecutable;
+  entry.portLeaseStatus = "reclaimable";
+  delete entry.ownerLease;
+  return { applied: true, entry: { ...entry } };
+}
+
+/** Grace tracker shared across passes; keyed by instance id. */
+export type SweepGraceTracker = Map<string, { since: number; fingerprint: string }>;
+
+export type SweepTerminatedRowsInput = {
+  nowMs?: number;
+  graceMs?: number;
+  pidAlive: (pid: number) => boolean;
+  pathExists: (path: string) => boolean;
+  /** Instance ids whose scan observation shows a live backend or open window. */
+  protectedInstanceIds?: Iterable<string>;
+  graceTracker?: SweepGraceTracker;
+};
+
+export type SweepTerminatedRowsResult = {
+  applied: boolean;
+  removedInstanceIds: string[];
+  eligibleInstanceIds: string[];
+};
+
+/**
+ * Delete dead keys: terminal rows with no live registered identity whose
+ * worktree path no longer exists. The 10s grace (tracked via the injected
+ * tracker, mirroring the Python orphan grace) keeps a single jittery
+ * observation from deleting a key; a fingerprint change resets the grace.
+ */
+export function applySweepTerminatedRows(
+  payload: RegistryPayload,
+  input: SweepTerminatedRowsInput
+): SweepTerminatedRowsResult {
+  const nowMs = input.nowMs ?? Date.now();
+  const graceMs = Math.max(0, Math.trunc(input.graceMs ?? REGISTRY_OBSERVATION_GRACE_MS));
+  const tracker = input.graceTracker;
+  const protectedIds = new Set(
+    Array.from(input.protectedInstanceIds || [], (id) => String(id))
+  );
+  const removed: string[] = [];
+  const eligible: string[] = [];
+  for (const [instanceId, entry] of Object.entries(payload.instances)) {
+    if (!TERMINAL_REGISTRY_STATUSES.has(statusOf(entry))) {
+      continue;
+    }
+    if (Boolean(entry.cleanupInProgress)) {
+      continue;
+    }
+    if (!ownerLeaseExpired(entry, nowMs)) {
+      continue;
+    }
+    if (protectedIds.has(instanceId)) {
+      continue;
+    }
+    const spawnPid = positiveInt(entry.spawnPid);
+    if (spawnPid > 0 && input.pidAlive(spawnPid)) {
+      continue;
+    }
+    const windowPid = positiveInt(entry.windowPid);
+    if (windowPid > 0 && input.pidAlive(windowPid)) {
+      continue;
+    }
+    const projectRoot = String(entry.projectRoot || "").trim();
+    if (!projectRoot || input.pathExists(projectRoot)) {
+      continue;
+    }
+    const fingerprint = `${projectRoot}|${positiveInt(entry.generation)}|${positiveInt(entry.port)}`;
+    if (tracker) {
+      const prev = tracker.get(instanceId);
+      if (!prev || prev.fingerprint !== fingerprint) {
+        tracker.set(instanceId, { since: nowMs, fingerprint });
+        eligible.push(instanceId);
+        continue;
+      }
+      if (nowMs - prev.since < graceMs) {
+        eligible.push(instanceId);
+        continue;
+      }
+      tracker.delete(instanceId);
+    }
+    delete payload.instances[instanceId];
+    removed.push(instanceId);
+  }
+  return { applied: removed.length > 0, removedInstanceIds: removed, eligibleInstanceIds: eligible };
+}
+
+export async function adoptLiveInstance(
+  registryPath: string,
+  input: AdoptLiveInstanceInput,
+  options: RegistryStoreOptions = {}
+): Promise<ObserveResult> {
+  return mutateRegistry(registryPath, (payload) => applyAdoptLiveInstance(payload, input), options);
+}
+
+export async function closeConfirmedDeadInstance(
+  registryPath: string,
+  input: CloseConfirmedDeadInstanceInput,
+  options: RegistryStoreOptions = {}
+): Promise<ObserveResult> {
+  return mutateRegistry(registryPath, (payload) => applyCloseConfirmedDeadInstance(payload, input), options);
+}
+
+export async function sweepTerminatedRows(
+  registryPath: string,
+  input: SweepTerminatedRowsInput,
+  options: RegistryStoreOptions = {}
+): Promise<SweepTerminatedRowsResult> {
+  return mutateRegistry(registryPath, (payload) => applySweepTerminatedRows(payload, input), options);
+}
+
 export function throwIfBusy(result: ClaimStartResult): RegistryEntry {
   if (!result.ok) {
     throw new InstanceBusyError(result.instanceId, result.status, result.generation);
