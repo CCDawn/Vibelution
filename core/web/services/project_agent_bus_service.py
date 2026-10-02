@@ -47,10 +47,9 @@ def list_project_agent_bus_events(*, limit: int = 80) -> dict[str, Any]:
         capped_limit = 80
     return {
         "events": events[-capped_limit:],
-        "activeAgentCount": len([
-            agent for agent in agent_directory_service.list_agents(include_archived=False, detail="summary")
-            if str(agent.get("status") or "active").strip().lower() != "archived"
-        ]),
+        # 徽标轮询只需要数量：count_active_agents 锁内取已修复共享 state 计数，
+        # 不再经 list_agents(detail="summary") 的全量投影路径。
+        "activeAgentCount": agent_directory_service.count_active_agents(include_archived=False),
         "updatedAt": utc_now_iso(),
     }
 

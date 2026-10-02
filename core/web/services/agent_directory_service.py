@@ -148,6 +148,8 @@ from .agent_directory.projections import (
     _agent_to_api,
     _build_agent_api_hydration_context,
     list_agents,
+    count_active_agents,
+    prewarm_registry_caches,
     _agent_to_api_summary,
     _build_agent_api_config_hydration_context,
     agent_conversation_index_classification,
