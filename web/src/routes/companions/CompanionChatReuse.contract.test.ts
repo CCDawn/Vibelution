@@ -63,14 +63,17 @@ describe("virtual-human native Chat reuse", () => {
     expect(lobbySource).not.toContain("EventSource");
     expect(lifeRailSource).not.toContain("EventSource");
     expect(personRailSource).not.toContain("EventSource");
-    expect(chatSource).toContain("showSessionTabs={!verifiedCompanionMode");
-    expect(chatSource).toContain("showAgentFallbackTab={!verifiedCompanionMode}");
+    expect(chatSource).toContain("showSessionTabs={!financeSurface && !verifiedCompanionMode");
+    expect(chatSource).toContain("showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}");
   });
 
   it("opens life management as an exact hidden native Session", () => {
-    expect(chatSource).toContain("onOpenLifeSteward");
-    expect(chatSource).toContain('telemetrySource: "virtual_human_life_steward"');
-    expect(chatSource).not.toContain("/chat?session=${");
+    const lifeStart = chatSource.indexOf("onOpenLifeSteward={(stewardSessionId) => {");
+    const lifeSteward = chatSource.slice(lifeStart, chatSource.indexOf("/>", lifeStart));
+    expect(lifeStart).toBeGreaterThanOrEqual(0);
+    expect(lifeSteward).toContain("openSession(stewardSessionId,");
+    expect(lifeSteward).toContain('telemetrySource: "virtual_human_life_steward"');
+    expect(lifeSteward).not.toContain("/chat?session=");
   });
 
   it("removes technical composer chrome only from the verified companion presentation", () => {
@@ -82,7 +85,7 @@ describe("virtual-human native Chat reuse", () => {
     expect(chatSource).toContain("composerContextRing: verifiedCompanionMode ? null : composerContextRing");
     expect(chatSource).toContain("slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions");
     expect(chatSource).toContain("statusRail={verifiedCompanionMode ? (");
-    expect(chatSource).toContain("conversationIndex={verifiedCompanionMode ? (");
+    expect(chatSource).toContain("conversationIndex={financeSurface ? null : verifiedCompanionMode ? (");
   });
 
   it("keeps route-layer JSON transport in web/src/api", () => {
