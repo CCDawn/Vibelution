@@ -3,16 +3,23 @@
 Covers the backend cold-start window fixes:
 - ``count_active_agents``: bus-style counters must read the repaired shared
   state without the summary projection path or repair recompute.
-- ``prewarm_registry_caches``: the first registry reader must not pay repair
-  (p90≈2.6s) and summary rebuild (p50≈1.0s) inside the first user request.
+- ``prewarm_registry_caches`` + lifecycle scheduling: the first registry reader
+  must not pay repair (p90≈2.6s) and summary rebuild (p50≈1.0s) inside the
+  first user request.
 - ``_ensure_config_agent_instances`` signature gate: hot GET /api/agents must
   skip the presence ``load_state`` path until a relevant file changes.
 """
 
 from __future__ import annotations
 
+import asyncio
+import threading
+
+from core.web import lifecycle
 from core.web.routes import agents as agents_route
 from core.web.services import agent_directory_service
+from core.web.services.session import directory_runtime
+from core.web.services import runtime_scene_service
 from tests.helpers.system_agent_state import _mark_config_agent_instances_present
 from tests.test_agent_config_workspace_service import _use_tmp_project_root
 
@@ -86,6 +93,87 @@ def test_prewarm_registry_caches_fills_summary_projection_cache(tmp_path, monkey
 
     assert agents
     assert projection_calls == []
+
+
+def test_prewarm_agent_registry_waits_for_directory_startup_then_warms(monkeypatch):
+    order: list[str] = []
+    monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: False)
+
+    def fake_wait(*, timeout=None):
+        order.append("wait")
+        return "ready"
+
+    monkeypatch.setattr(directory_runtime, "wait_for_directory_startup", fake_wait)
+
+    def fake_prewarm():
+        order.append("warm")
+        return {"repairCacheHit": True, "repairMs": 0.0, "summaryPrewarmMs": 0.0}
+
+    monkeypatch.setattr(agent_directory_service, "prewarm_registry_caches", fake_prewarm)
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
+
+    result = lifecycle._prewarm_agent_registry_on_startup()
+
+    assert order == ["wait", "warm"]
+    assert result["totalMs"] >= 0
+
+
+def test_prewarm_agent_registry_skips_under_pytest(monkeypatch):
+    monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: True)
+
+    def fail_wait(*, timeout=None):
+        raise AssertionError("pytest skip must not wait on the directory startup")
+
+    monkeypatch.setattr(directory_runtime, "wait_for_directory_startup", fail_wait)
+    result = lifecycle._prewarm_agent_registry_on_startup()
+    assert result == {"skipped": "pytest"}
+
+
+def test_web_lifespan_schedules_agent_registry_prewarm(monkeypatch):
+    entered = threading.Event()
+    prewarm_started = threading.Event()
+    observed: dict = {}
+
+    def record_ready_event(**fields) -> None:
+        observed.update(fields)
+
+    def prewarm() -> dict:
+        prewarm_started.set()
+        return {}
+
+    monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", record_ready_event)
+    monkeypatch.setattr(lifecycle, "_prewarm_agent_registry_on_startup", prewarm)
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda: None)
+    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    from core.web.services import cli_agent_terminal_service, session_service
+
+    monkeypatch.setattr(
+        cli_agent_terminal_service,
+        "reconcile_cli_agent_terminal_states_on_startup",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
+    monkeypatch.setattr(
+        session_service,
+        "recover_wakeable_agent_inbox_messages_on_startup",
+        dict,
+        raising=False,
+    )
+
+    async def exercise() -> None:
+        async with lifecycle.web_workbench_lifespan(None):
+            entered.set()
+            assert await asyncio.to_thread(prewarm_started.wait, 1)
+
+    asyncio.run(exercise())
+
+    assert entered.is_set()
+    assert "agent_registry_prewarm" in observed["background_tasks"]
 
 
 def test_ensure_config_agent_instances_gate_skips_load_state_until_signature_changes(
