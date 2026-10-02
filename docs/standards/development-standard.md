@@ -144,21 +144,22 @@ Validation anchor: user-visible or debugging-critical fallback behavior needs te
 
 ## 4. Log-First Diagnosis
 
-For bugs, regressions, stalls, runtime mismatches, failed commands, unexpected behavior, bad delegation, repeated tool loops, or broken convergence, start from the newest relevant lifecycle log package under:
+For bugs, regressions, stalls, runtime mismatches, failed commands, unexpected behavior, bad delegation, repeated tool loops, or broken convergence, start from the shared log entry:
 
-`<active-logs>/runtime_scenes/` (resolve `activePaths.logs` with the storage inventory command)
+```powershell
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>"
+```
 
-Use the newest package matching the affected run or workbench lifecycle as the primary evidence unit. Start from its manifest or package index, then inspect:
+The workbench tool `conversation_log_inspect_tool` with no `log_path` returns the same JSON. Read `firstRead` and then stop:
 
-- `timeline.jsonl`;
-- `lifecycle.jsonl`;
-- child logs under `raw/`, `conversations/`, `agent/`, and `artifacts/`;
-- fallback evidence under `<active-logs>/`;
-- `log_info/conversation_*.jsonl`;
-- matching `log_info/debug_*.log`;
-- adjacent validation outputs.
+- `conclusion` says whether to act. When the scene has them, it also includes the existing scene summary, repeat count, and primary reason. `summary`, `repeatCount`, and `primaryReason` hold those three values.
+- `evidencePaths` lists only the files that may be opened. Use `absolutePath`. A `warning` means do not read the whole file.
+- `nextStep` is the only next action.
+- `doNotDo` is the stop boundary.
 
-Use older packages only as explicitly labeled historical comparison.
+Resolve locations from `activePaths`. Do not look in the git checkout `logs/` directory, `log_info/`, or retired `debug_*.log` files. Do not start from `summary.json`, `timeline.jsonl`, `lifecycle.jsonl`, or a raw child log unless `nextStep` names that path.
+
+Use an older scene only when `firstRead` or an explicit `--scene-id` says it is historical comparison.
 
 If no suitable package exists, treat missing runtime evidence as part of the bug. Add logging at the actual error site, branch, state transition, or failure path so the next failing run is diagnosable.
 

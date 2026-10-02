@@ -17,18 +17,20 @@
 
 ## 2. 只读 firstRead
 
-返回 JSON 里先看 `firstRead`。它有且只有四段：
+返回 JSON 里先看 `firstRead`，读完就停。阅读顺序只有这四段：
 
 | 段 | 字段 | 怎么用 |
 | --- | --- | --- |
-| 结论 | `conclusion` | 一句话：要不要动手，主问题是什么 |
-| 证据路径 | `evidencePaths` | 先看 `ref`。入口会补上 `absolutePath` 和 `exists`。有 `warning` 就不要整篇读 |
+| 结论 | `conclusion` | 要不要动手。有现场时会接上摘要、重复次数和首要原因 |
+| 证据路径 | `evidencePaths` | 先看 `ref`。入口补上 `absolutePath` 和 `exists`。有 `warning` 就不要整篇读 |
 | 下一步 | `nextStep` | 唯一允许的下一步 |
 | 不要做 | `doNotDo` | 停在这些动作之外 |
 
+同对象还有三份原值，不必再打开 `summary.json` 找它们：`summary`、`repeatCount`、`primaryReason`。入口不再返回 `resolvedEvidenceRefs`。
+
 `nextStep` 说停止，或结论是没有进行中的问题：不要打开原始日志。
 
-`diagnostic_entrypoint.first_read` 仍是场景包里的文件名（通常是 `summary.json`），不是这四段。不要从它开始读。
+`diagnostic_entrypoint.first_read` 仍是场景包里的文件名（通常是 `summary.json`），不是这四段。不要从它开始读。不要到仓库 `logs/` 或 `log_info/` 里找。
 
 要看某一轮会话时才加 `--session-id`。之后只读 `session.diagnosis.nextMinimalAction`，不要展开 journal。
 

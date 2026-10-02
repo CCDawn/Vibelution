@@ -107,9 +107,10 @@ def test_runtime_scene_detail_exposes_package_diagnosis_first_signal(tmp_path, m
     assert diagnosis["keyEntries"][1]["path"] == "package_index.json"
     assert diagnosis["keyEntries"][2]["path"] == "raw/desktop-entry-vbs.log"
     assert any(item["path"] == "raw/backend.stderr.log" for item in diagnosis["keyEntries"])
-    assert "logs/runtime_scenes/20260518T120000Z__scene-diagnosis-error/summary.json" in diagnosis["agentNextStep"]
+    assert "先看 firstRead，不要到仓库 logs/ 或 log_info/ 里找。" in diagnosis["agentNextStep"]
+    assert "logs/runtime_scenes/" not in diagnosis["agentNextStep"]
     assert "issueState.activeClusterCount" in diagnosis["agentNextStep"]
-    assert "evidence_paths" in diagnosis["agentNextStep"]
+    assert "evidencePaths" in diagnosis["agentNextStep"]
     assert "rawRefs" not in diagnosis["agentNextStep"]
 
 
@@ -1326,6 +1327,9 @@ def test_runtime_scene_agent_brief_names_the_primary_cluster_not_the_first_signa
     assert brief["active_cluster_count"] == issue_state["activeClusterCount"]
     assert brief["severity_cluster_count"] == 2
     assert "browser.page.error" in brief["first_read"]["conclusion"]
+    assert "重复 3 次" in brief["first_read"]["conclusion"]
+    assert brief["first_read"]["repeatCount"] == 3
+    assert "本周期状态为" in brief["first_read"]["summary"]
     assert brief["next_minimal_action"] == brief["first_read"]["nextStep"]
     assert "先读 logs/runtime_scenes" not in brief["next_minimal_action"]
     evidence_refs = {item["ref"] for item in brief["first_read"]["evidencePaths"]}

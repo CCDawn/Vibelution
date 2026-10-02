@@ -28,10 +28,21 @@ SCENE_RAW_TO_LAUNCHER = {
 }
 
 USAGE_GUIDANCE = [
-    "只读 firstRead 的四段：conclusion、evidencePaths、nextStep、doNotDo。然后停止。",
+    "只读 firstRead：conclusion、evidencePaths、nextStep、doNotDo。然后停止。",
+    "conclusion 已带现场摘要、重复次数和首要原因；同对象的 summary、repeatCount、primaryReason 是这三样的原值。",
     "只有 nextStep 点名的 evidencePaths.absolutePath 才可以打开；带 warning 的文件不要整篇读。",
-    "路径以 activePaths 为准。深读才传 log_path，而且文件必须已出现在 evidencePaths。",
+    "路径以 activePaths 为准。不要到仓库 logs/ 或 log_info/ 里找。深读才传 log_path。",
 ]
+_SUMMARY_LIMIT = 600
+_REASON_LIMIT = 180
+_REASON_KEYS = (
+    "diagnosisHint",
+    "diagnosisReason",
+    "reason",
+    "errorType",
+    "errorCategory",
+    "reasonCode",
+)
 _MAX_FIRST_READ_EVIDENCE = 5
 _PACKAGE_FILE_NAMES = frozenset(
     {
@@ -66,10 +77,11 @@ def build_agent_log_context(
         active_reference=active_reference,
     )
     summary_payload = _load_json_object(scene_dir / SUMMARY_FILE_NAME) if scene_dir else {}
-    agent_brief = (
+    agent_brief = enrich_agent_brief_for_first_read(
         summary_payload.get("agent_brief")
         if isinstance(summary_payload.get("agent_brief"), dict)
-        else {}
+        else {},
+        summary_payload,
     )
     diagnostic_entrypoint = (
         summary_payload.get("diagnostic_entrypoint")
@@ -119,7 +131,6 @@ def build_agent_log_context(
         ),
         "agentBrief": agent_brief,
         "diagnosticEntrypoint": diagnostic_entrypoint,
-        "resolvedEvidenceRefs": resolved_evidence_refs,
         "recentScenes": recent_scenes,
         "launcherRuntime": _launcher_runtime_hints(launcher_dir),
         "session": session_payload,
@@ -149,8 +160,19 @@ def build_agent_first_read(
         evidence_refs,
         session_requested=session_requested,
     )
+    repeat_count = _coerce_repeat_count(brief.get("repeat_count"))
+    summary = _bounded_text(brief.get("user_summary"), limit=_SUMMARY_LIMIT)
+    primary_reason = _bounded_text(brief.get("primary_reason"), limit=_REASON_LIMIT)
     return {
-        "conclusion": _first_read_conclusion(brief),
+        "conclusion": _first_read_conclusion(
+            brief,
+            repeat_count=repeat_count,
+            summary=summary,
+            primary_reason=primary_reason,
+        ),
+        "summary": summary,
+        "repeatCount": repeat_count,
+        "primaryReason": primary_reason,
         "evidencePaths": [
             _first_read_evidence_path(ref, resolved_by_ref.get(ref))
             for ref in evidence_refs
@@ -160,7 +182,113 @@ def build_agent_first_read(
     }
 
 
-def _first_read_conclusion(agent_brief: dict[str, Any]) -> str:
+def enrich_agent_brief_for_first_read(
+    agent_brief: dict[str, Any] | None,
+    summary_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Copy the scene summary, repeat count, and reason onto the brief.
+
+    Older scene packages stored these only on ``diagnosis``. The entry still
+    projects them so an agent does not have to open ``summary.json``.
+    """
+
+    brief = dict(agent_brief) if isinstance(agent_brief, dict) else {}
+    payload = summary_payload if isinstance(summary_payload, dict) else {}
+    diagnosis = payload.get("diagnosis") if isinstance(payload.get("diagnosis"), dict) else {}
+    if not _bounded_text(brief.get("user_summary"), limit=_SUMMARY_LIMIT):
+        summary = _bounded_text(diagnosis.get("userSummary"), limit=_SUMMARY_LIMIT)
+        if summary:
+            brief["user_summary"] = summary
+    if brief.get("repeat_count") in (None, ""):
+        cluster = _primary_cluster(diagnosis.get("issueState"))
+        if isinstance(cluster, dict) and cluster.get("repeatCount") not in (None, ""):
+            brief["repeat_count"] = _coerce_repeat_count(cluster.get("repeatCount"))
+    if not _bounded_text(brief.get("primary_reason"), limit=_REASON_LIMIT):
+        reason = primary_reason_from_cluster(
+            _primary_cluster(diagnosis.get("issueState")),
+            diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else None,
+        )
+        if reason:
+            brief["primary_reason"] = reason
+    return brief
+
+
+def primary_reason_from_cluster(
+    cluster: dict[str, Any] | None,
+    first_signal: dict[str, Any] | None = None,
+) -> str:
+    """Return the shortest existing reason already stored on the primary cluster."""
+
+    sources: list[dict[str, Any]] = []
+    if isinstance(cluster, dict):
+        sources.append(cluster)
+        representative = cluster.get("representativeSignal")
+        if isinstance(representative, dict):
+            sources.append(representative)
+            fields = representative.get("fields")
+            if isinstance(fields, dict):
+                sources.append(fields)
+    if isinstance(first_signal, dict):
+        sources.append(first_signal)
+        fields = first_signal.get("fields")
+        if isinstance(fields, dict):
+            sources.append(fields)
+    for key in _REASON_KEYS:
+        for source in sources:
+            text = _bounded_text(source.get(key), limit=_REASON_LIMIT)
+            if text:
+                return text
+    return ""
+
+
+def _primary_cluster(issue_state: Any) -> dict[str, Any] | None:
+    if not isinstance(issue_state, dict):
+        return None
+    for key in ("firstActiveCluster", "firstPolicyCluster", "firstHistoricalCluster"):
+        value = issue_state.get(key)
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _coerce_repeat_count(value: Any) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, count)
+
+
+def _bounded_text(value: Any, *, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _first_read_conclusion(
+    agent_brief: dict[str, Any],
+    *,
+    repeat_count: int = 0,
+    summary: str = "",
+    primary_reason: str = "",
+) -> str:
+    lead = _first_read_lead(agent_brief)
+    parts = [lead]
+    if repeat_count > 0:
+        parts.append(f"重复 {repeat_count} 次。")
+    reason = str(primary_reason or "").strip()
+    if reason:
+        parts.append(f"原因：{reason}。")
+    scene_summary = str(summary or "").strip()
+    if scene_summary:
+        if not scene_summary.endswith("。"):
+            scene_summary += "。"
+        parts.append(scene_summary)
+    return "".join(parts)
+
+
+def _first_read_lead(agent_brief: dict[str, Any]) -> str:
     if not agent_brief:
         return "没有当前运行现场。不要猜日志路径。"
     status = str(agent_brief.get("diagnosis_status") or "").strip()
@@ -258,6 +386,9 @@ def _first_read_evidence_path(ref: str, resolved: dict[str, Any] | None) -> dict
         entry["absolutePath"] = absolute_path
     if "exists" in resolved:
         entry["exists"] = bool(resolved.get("exists"))
+    source = str(resolved.get("source") or "").strip()
+    if source:
+        entry["source"] = source
     warning = str(resolved.get("warning") or "").strip()
     if warning:
         entry["warning"] = warning
