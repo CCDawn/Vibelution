@@ -150,6 +150,13 @@ class GitMemoryService:
         self._project_root = self._workspace.project_root
         self._bus = get_event_bus()
         self._lock = threading.Lock()
+        # Single-flight merge for refresh: concurrent callers wait for the
+        # in-flight refresh and share its result instead of each running a full
+        # scan serially behind ``self._lock`` (startup prewarm + first polling
+        # callers no longer double-scan).
+        self._refresh_gate: threading.Condition = threading.Condition()
+        self._refresh_inflight = False
+        self._refresh_done_generation = 0
         self._last_snapshot: Optional[WorkingTreeSnapshot] = None
         self._worktree_snapshot_retention_limit = _normalize_worktree_snapshot_retention_limit(
             worktree_snapshot_retention_limit
@@ -530,8 +537,17 @@ class GitMemoryService:
             indexed.append(commit_sha)
         return {"available": True, "indexed_commits": indexed, "error": None}
 
-    def scan_working_tree(self, store: bool = True) -> WorkingTreeSnapshot:
-        result = self._run_git(["status", "--porcelain=1"])
+    def scan_working_tree(self, store: bool = True, *, no_optional_locks: bool = True) -> WorkingTreeSnapshot:
+        # Polling scans default to --no-optional-locks so repeated status reads
+        # never block user git operations on index.lock.  status is the only
+        # command here that may refresh/write the index; rev-parse below cannot
+        # take index locks at all, so it stays unflagged.  Startup prewarm and
+        # explicit tool refreshes pass no_optional_locks=False (force=True) to
+        # keep the ordinary mode and give the index a chance to flush.
+        status_args = ["status", "--porcelain=1"]
+        if no_optional_locks:
+            status_args = ["--no-optional-locks", *status_args]
+        result = self._run_git(status_args)
         if result.returncode != 0:
             return WorkingTreeSnapshot(
                 snapshot_id="unavailable",
@@ -753,9 +769,44 @@ class GitMemoryService:
         *,
         index_recent_changes: bool = True,
     ) -> GitMemoryState:
+        """Refresh cached git state; concurrent callers share one in-flight scan.
+
+        ``force=True`` is the startup-prewarm / explicit-tool contract: it keeps
+        ordinary git mode so the index gets a chance to flush.  Polling callers
+        (force=False) scan with --no-optional-locks instead.
+        """
+        with self._refresh_gate:
+            arrival_generation = self._refresh_done_generation
+            if self._refresh_inflight:
+                # Wait for the in-flight refresh; share its result when it
+                # completes.  If it fails (generation unchanged), fall through
+                # and run this caller's own refresh.
+                while self._refresh_inflight:
+                    self._refresh_gate.wait()
+                if self._refresh_done_generation != arrival_generation:
+                    return self._last_state
+            self._refresh_inflight = True
+        succeeded = False
+        try:
+            state = self._refresh_locked(force=force, index_recent_changes=index_recent_changes)
+            succeeded = True
+            return state
+        finally:
+            with self._refresh_gate:
+                self._refresh_inflight = False
+                if succeeded:
+                    self._refresh_done_generation += 1
+                self._refresh_gate.notify_all()
+
+    def _refresh_locked(
+        self,
+        *,
+        force: bool,
+        index_recent_changes: bool,
+    ) -> GitMemoryState:
         with self._lock:
             now = _utcnow_iso()
-            snapshot = self.scan_working_tree(store=False)
+            snapshot = self.scan_working_tree(store=False, no_optional_locks=not force)
             if not snapshot.available:
                 self._last_state = GitMemoryState(
                     available=False,

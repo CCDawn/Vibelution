@@ -78,6 +78,8 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute layoutCompactDesktop w-full grid min-w-0 grid-cols-[minmax(220px,var(--chat-left-pane-width,248px))_var(--chat-pane-gutter)_minmax(0,1fr)] overflow-hidden",
   layoutStatusRailCollapsed:
     "vui-routes-chatcodingroute layoutStatusRailCollapsed w-full grid !grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)]",
+  layoutConversationOnly:
+    "vui-routes-chatcodingroute layoutConversationOnly w-full grid !grid-cols-[minmax(0,1fr)]",
   layoutOverlay:
     "vui-routes-chatcodingroute layoutOverlay relative w-full grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden",
   // Rail sections separate by whitespace rhythm (p-2 vertical), not hairline rules;
