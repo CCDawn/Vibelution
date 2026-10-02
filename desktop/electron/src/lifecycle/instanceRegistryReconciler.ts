@@ -7,11 +7,13 @@ import {
   REGISTRY_OBSERVATION_GRACE_MS,
   START_SUPERVISOR_LOST_MESSAGE,
   adoptLiveInstance,
+  applySyncWindowPids,
   closeConfirmedDeadInstance,
   isStaleInFlightStart,
   instancesRegistryPath,
   readRegistry,
   sweepTerminatedRows,
+  syncWindowPids,
   type RegistryEntry,
   type RegistryStoreOptions,
   type SweepGraceTracker
@@ -32,7 +34,12 @@ import { capturePythonProcessIdentity } from "../process/pythonJsonBridge.js";
  *   is confirmed dead settles to closed (steady) or failed (stale in-flight
  *   start);
  * - sweep: terminal rows with no live identity whose worktree path is gone are
- *   deleted after the 10s observation grace.
+ *   deleted after the 10s observation grace;
+ * - window-pid write-back: the Electron window truth (open windows with their
+ *   renderer pids) is authoritative and is written back into the registry's
+ *   windowPid so Electron-external consumers (Python overlay, tray, cleanup)
+ *   stop reading stale window-open facts. The scan's window.open is only a
+ *   protection set for adopt/sweep/clear decisions.
  *
  * Electron is the only product writer of the registry, so this pass is the
  * single place where observation truth flows back into the SSOT without a
@@ -54,8 +61,26 @@ type ObservationSummary = {
   openWindowIds: Set<string>;
 };
 
+/**
+ * Electron window truth for one instance, structurally the entry of
+ * LauncherWindowTruth.instances (main.ts currentLauncherWindowTruth). Declared
+ * locally so the lifecycle layer stays free of a windows/ import.
+ */
+export type InstanceWindowState = {
+  instanceId: string;
+  open: boolean;
+  rendererProcessId: number;
+};
+
 export type ReconcileRegistryWithObservationInput = {
   branchInstances: unknown;
+  /**
+   * Authoritative Electron window states. Absent means the truth source is
+   * unavailable (no window provider yet) and the window-pid write-back is
+   * skipped for that pass; an empty array means "no windows open" and clears
+   * stale pids.
+   */
+  instanceWindowStates?: InstanceWindowState[];
   registryPath?: string;
   nowMs?: number;
   pythonPath?: string;
@@ -67,6 +92,7 @@ export type ReconcileWithObservationResult = {
   closed: string[];
   failed: string[];
   swept: string[];
+  windowPidsSynced: string[];
 };
 
 export type ReconcilerDependencies = {
@@ -74,6 +100,7 @@ export type ReconcilerDependencies = {
   adoptLiveInstance: typeof adoptLiveInstance;
   closeConfirmedDeadInstance: typeof closeConfirmedDeadInstance;
   sweepTerminatedRows: typeof sweepTerminatedRows;
+  syncWindowPids: typeof syncWindowPids;
   captureIdentity: typeof capturePythonProcessIdentity;
   pidAlive: (pid: number) => boolean;
   pathExists: (path: string) => boolean;
@@ -168,6 +195,20 @@ function needsAdopt(entry: RegistryEntry | undefined, live: LiveBackendObservati
   );
 }
 
+/** Electron truth open windows, parsed defensively into instanceId -> renderer pid. */
+function openWindowPidsOf(windowStates: InstanceWindowState[]): Map<string, number> {
+  const openWindowPids = new Map<string, number>();
+  for (const entry of windowStates) {
+    const record: Record<string, unknown> = isRecord(entry) ? entry : {};
+    const instanceId = text(record.instanceId);
+    const pid = record.open === true ? positiveInt(record.rendererProcessId) : 0;
+    if (instanceId && pid > 0) {
+      openWindowPids.set(instanceId, pid);
+    }
+  }
+  return openWindowPids;
+}
+
 export type InstanceRegistryReconciler = {
   reconcile: (
     input: ReconcileRegistryWithObservationInput
@@ -185,6 +226,7 @@ export function createInstanceRegistryReconciler(overrides: {
     closeConfirmedDeadInstance: (registryPath, input, options) =>
       closeConfirmedDeadInstance(registryPath, input, options),
     sweepTerminatedRows: (registryPath, input, options) => sweepTerminatedRows(registryPath, input, options),
+    syncWindowPids: (registryPath, input, options) => syncWindowPids(registryPath, input, options),
     captureIdentity: capturePythonProcessIdentity,
     pidAlive: knownPidIsAlive,
     pathExists: (path: string) => {
@@ -213,7 +255,13 @@ export function createInstanceRegistryReconciler(overrides: {
     const nowMs = input.nowMs ?? Date.now();
     const observation = observeBranchInstanceRuntimes(input.branchInstances);
     const registry = await dependencies.readRegistry(registryPath);
-    const result: ReconcileWithObservationResult = { adopted: [], closed: [], failed: [], swept: [] };
+    const result: ReconcileWithObservationResult = {
+      adopted: [],
+      closed: [],
+      failed: [],
+      swept: [],
+      windowPidsSynced: []
+    };
 
     for (const [instanceId, live] of observation.liveBackends) {
       if (cooledDown(instanceId, nowMs) || !needsAdopt(registry.instances[instanceId], live)) {
@@ -327,6 +375,24 @@ export function createInstanceRegistryReconciler(overrides: {
     for (const instanceId of swept.removedInstanceIds) {
       lastAttemptAt.delete(instanceId);
       deadGrace.delete(instanceId);
+    }
+
+    // Window-pid write-back: Electron truth is authoritative, the scan's
+    // window.open is only a protection set. Dry-run on the already-read
+    // snapshot first so a pass with nothing to sync skips the registry lock
+    // entirely; the real mutation re-checks every row under the lock.
+    if (Array.isArray(input.instanceWindowStates)) {
+      const syncInput = {
+        openWindowPids: openWindowPidsOf(input.instanceWindowStates),
+        protectedInstanceIds: observation.openWindowIds
+      };
+      const preview = applySyncWindowPids(registry, syncInput);
+      if (preview.applied) {
+        const synced = await dependencies.syncWindowPids(registryPath, syncInput, input.storeOptions);
+        if (synced.applied) {
+          result.windowPidsSynced = synced.updatedInstanceIds;
+        }
+      }
     }
     return result;
   }

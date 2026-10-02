@@ -1301,6 +1301,72 @@ export async function sweepTerminatedRows(
   return mutateRegistry(registryPath, (payload) => applySweepTerminatedRows(payload, input), options);
 }
 
+export type SyncWindowPidsInput = {
+  /** Electron window truth: instanceId -> renderer process id of each open window. */
+  openWindowPids: Map<string, number>;
+  /** Instance ids whose scan observation shows an open window; their pid is never cleared. */
+  protectedInstanceIds?: Iterable<string>;
+};
+
+export type SyncWindowPidsResult = {
+  applied: boolean;
+  updatedInstanceIds: string[];
+};
+
+const RETAINED_WINDOW_WARNING_PREFIX = "unverified browser/window handle retained:";
+
+/**
+ * Write Electron window truth back into the registry's windowPid (SSOT repair).
+ *
+ * The Electron window provider is the only authority on instance window
+ * open/close; the registry previously learned windowPid only as a side effect
+ * of lifecycle actions, so Electron-side window closes left stale pids that
+ * Python consumers (overlay_instance_window_pid, tray, cleanup) read as an
+ * open window. This pass is diff-gated and idempotent: only rows whose
+ * windowPid differs from truth are rewritten (open -> renderer pid, closed ->
+ * 0). In-flight rows belong to a live supervisor whose claim/complete path
+ * owns windowPid and are never touched; a row the scan saw with an open
+ * window but the truth has not listed yet (mid-open race) is conservatively
+ * skipped instead of cleared.
+ */
+export function applySyncWindowPids(
+  payload: RegistryPayload,
+  input: SyncWindowPidsInput
+): SyncWindowPidsResult {
+  const updated: string[] = [];
+  const protectedIds = new Set(
+    Array.from(input.protectedInstanceIds || [], (id) => String(id))
+  );
+  for (const [instanceId, entry] of Object.entries(payload.instances)) {
+    if (IN_FLIGHT_STATUSES.has(statusOf(entry)) || Boolean(entry.cleanupInProgress)) {
+      continue;
+    }
+    const truthPid = positiveInt(input.openWindowPids.get(instanceId));
+    if (truthPid <= 0 && protectedIds.has(instanceId)) {
+      continue;
+    }
+    if (positiveInt(entry.windowPid) === truthPid) {
+      continue;
+    }
+    entry.windowPid = truthPid;
+    if (String(entry.lifecycleWarning || "").startsWith(RETAINED_WINDOW_WARNING_PREFIX)) {
+      // The retained-handle warning described exactly this unverified pid;
+      // unrelated warnings are preserved.
+      delete entry.lifecycleWarning;
+    }
+    updated.push(instanceId);
+  }
+  return { applied: updated.length > 0, updatedInstanceIds: updated };
+}
+
+export async function syncWindowPids(
+  registryPath: string,
+  input: SyncWindowPidsInput,
+  options: RegistryStoreOptions = {}
+): Promise<SyncWindowPidsResult> {
+  return mutateRegistry(registryPath, (payload) => applySyncWindowPids(payload, input), options);
+}
+
 export function throwIfBusy(result: ClaimStartResult): RegistryEntry {
   if (!result.ok) {
     throw new InstanceBusyError(result.instanceId, result.status, result.generation);

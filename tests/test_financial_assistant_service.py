@@ -119,13 +119,25 @@ def test_archived_identity_is_not_restored_or_recreated(entry_env):
     assert len(service.list_financial_assistants()) == 1
 
 
-def test_foreign_session_binding_never_opens(entry_env, monkeypatch):
-    service.create_financial_assistant()
-    monkeypatch.setattr(
-        session_service,
-        "get_session_detail",
-        lambda *a, **kw: {"agentId": entry_env["other"]},
+def test_foreign_session_binding_never_opens(entry_env):
+    row = service.create_financial_assistant()["assistant"]
+    foreign = session_service.create_chat_session(
+        title="外部会话", lightweight=True
     )
+    # create_chat_session 会把新会话绑到某个活动 Agent 的 directSessionId；
+    # 借这个真实存在、归属他人的运行时行，把助手的绑定污染成它（直接改
+    # state 绕过 update API 的占用保护——这里模拟的正是被污染的绑定）。
+    state = directory.load_state()
+    holder = next(
+        str(a.get("agentId") or "")
+        for a in state["agents"]
+        if str(a.get("directSessionId") or "").strip() == foreign["id"]
+    )
+    assert holder and holder != row["agentId"]
+    for agent in state["agents"]:
+        if str(agent.get("agentId") or "") == row["agentId"]:
+            agent["directSessionId"] = foreign["id"]
+    directory.save_state(state)
     assert service.list_financial_assistants()[0]["directSessionId"] == ""
 
 
@@ -284,16 +296,55 @@ def _rewind_stage_one(agent_id: str, *, max_calls: int = 8) -> None:
             **agent["personaProfile"],
             "expertise": ["A股财报证据", "个人投资目标澄清", "风险分析"],
         },
+        # 模拟前 marker 时代的 stage-1 存量助手：清掉「迁移已完成」标记，
+        # 让写路径迁移重新可用（metadata 合并语义只能覆盖，不能删除）。
+        metadata={"financialAssistantNewsReferenceGranted": False},
     )
 
 
-def test_listing_upgrades_untouched_stage_one_assistant_once(entry_env):
+def test_listing_is_pure_read_and_reads_the_directory_once(entry_env, monkeypatch):
+    """GET 变纯读：一次目录读取、零 registry 写，迁移只在写路径发生。"""
+    row = service.create_financial_assistant()["assistant"]
+    _rewind_stage_one(row["agentId"])
+
+    list_calls: list[int] = []
+    real_list_agents = directory.list_agents
+
+    def counting_list_agents(*args, **kwargs):
+        list_calls.append(1)
+        return real_list_agents(*args, **kwargs)
+
+    monkeypatch.setattr(directory, "list_agents", counting_list_agents)
+    writes: list = []
+    monkeypatch.setattr(
+        directory, "update_agent_instance", lambda *a, **kw: writes.append(kw)
+    )
+
+    listed = service.list_financial_assistants()
+
+    assert len(listed) == 1
+    assert len(list_calls) == 1
+    assert writes == []
+
+
+def test_stage_one_migration_happens_on_write_path_not_listing(entry_env):
     row = service.create_financial_assistant()["assistant"]
     _rewind_stage_one(row["agentId"], max_calls=3)
     before = directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"]
+
+    # GET 纯读：stage-1 存量不再在 listing 里迁移。
     listed = service.list_financial_assistants()
-    agent = directory.get_agent(row["agentId"])
+    unchanged = directory.get_agent(row["agentId"])
     assert listed[0]["newsDelegationStatus"] == "disabled"
+    assert set(unchanged["toolPolicy"]["allowedTools"]) == set(
+        service._PREVIOUS_READ_TOOLS
+    )
+    assert unchanged["toolPolicy"]["policyVersion"] == before
+
+    # create（写路径）完成迁移，语义与旧 list 迁移一致。
+    again = service.create_financial_assistant("新名字不会覆盖")
+    assert again["created"] is False
+    agent = directory.get_agent(row["agentId"])
     assert agent["metadata"]["delegationPolicy"]["allowSubagents"] is False
     assert set(agent["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
     assert set(agent["toolPolicy"]["preferredTools"]) == set(service.READ_TOOLS)
@@ -302,6 +353,9 @@ def test_listing_upgrades_untouched_stage_one_assistant_once(entry_env):
     assert agent["taskProfile"]["constraints"] == service.TASK["constraints"]
     assert agent["taskProfile"]["avoidTasks"] == service.TASK["avoidTasks"]
     assert "公开新闻真伪判断" in agent["personaProfile"]["expertise"]
+
+    # 持久标记已落：后续写路径与读取都不再改写（只跑一次）。
+    service.create_financial_assistant("名字不影响迁移")
     service.list_financial_assistants()
     assert directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before + 1
 
@@ -349,5 +403,9 @@ def test_cleared_or_custom_policies_do_not_gain_news_search(entry_env):
     )
     service.list_financial_assistants()
     refreshed = directory.get_agent(custom["agentId"])
+    # GET 是纯读：即使内容长得像 stage-1，只要迁移标记已落，
+    # listing 也不改写用户留下的策略与文本（迁移只发生在写路径）。
     assert refreshed["toolPolicy"]["allowedTools"] == ["financial_report_query_tool"]
-    assert refreshed["taskProfile"]["constraints"] == service.TASK["constraints"]
+    assert (
+        refreshed["taskProfile"]["constraints"] == _STAGE_ONE_TASK["constraints"]
+    )

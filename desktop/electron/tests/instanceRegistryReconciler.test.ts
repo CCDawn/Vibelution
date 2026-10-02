@@ -7,6 +7,7 @@ import {
   createInstanceRegistryReconciler,
   observeBranchInstanceRuntimes,
   RECONCILE_ATTEMPT_COOLDOWN_MS,
+  type InstanceWindowState,
   type ReconcilerDependencies
 } from "../src/lifecycle/instanceRegistryReconciler.js";
 import type { RegistryPayload } from "../src/lifecycle/instanceRegistryStore.js";
@@ -112,6 +113,10 @@ function buildDeps(overrides: DepsOverrides = {}): ReconcilerDependencies {
     sweepTerminatedRows: (registryPath, input, options) =>
       import("../src/lifecycle/instanceRegistryStore.js").then((store) =>
         store.sweepTerminatedRows(registryPath, input, options)
+      ),
+    syncWindowPids: (registryPath, input, options) =>
+      import("../src/lifecycle/instanceRegistryStore.js").then((store) =>
+        store.syncWindowPids(registryPath, input, options)
       ),
     captureIdentity: async (input) => {
       overrides.captureIdentityCalls?.push(input.pid);
@@ -423,6 +428,165 @@ describe("instanceRegistryReconciler", () => {
       nowMs: t0 + 10_001
     });
     expect(readRegistryFile(registryPath).instances["worktree:window"]).toBeDefined();
+  });
+});
+
+describe("instanceRegistryReconciler window-pid write-back", () => {
+  const t0 = Date.parse("2026-10-02T10:00:00Z");
+
+  function steadyRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      port: 8001,
+      status: "steady",
+      desiredState: "open",
+      spawnPid: 4242,
+      portLeaseStatus: "held",
+      projectRoot: "C:/w",
+      generation: 3,
+      ...overrides
+    };
+  }
+
+  function truth(entries: Array<{ id: string; pid: number } | null>): InstanceWindowState[] {
+    return entries.filter((entry): entry is { id: string; pid: number } => entry !== null)
+      .map((entry) => ({ instanceId: entry.id, open: true, rendererProcessId: entry.pid }));
+  }
+
+  it("writes Electron truth pids over stale registry window pids", async () => {
+    const workspace = makeWorkspace();
+    const registryPath = join(workspace.root, "instances.json");
+    writeRegistry(registryPath, {
+      schemaVersion: 3,
+      instances: {
+        "worktree:live": steadyRow({ windowPid: 555 }),
+        "worktree:fresh": steadyRow({ windowPid: 777, spawnPid: 4243 })
+      }
+    });
+    const reconciler = createInstanceRegistryReconciler({ dependencies: buildDeps() });
+    const result = await reconciler.reconcile({
+      branchInstances: { items: [] },
+      registryPath,
+      nowMs: t0,
+      instanceWindowStates: truth([
+        { id: "worktree:live", pid: 777 },
+        { id: "worktree:fresh", pid: 777 }
+      ])
+    });
+    expect(result.windowPidsSynced).toEqual(["worktree:live"]);
+    const instances = readRegistryFile(registryPath).instances;
+    expect(instances["worktree:live"].windowPid).toBe(777);
+    expect(instances["worktree:fresh"].windowPid).toBe(777);
+  });
+
+  it("clears a stale retained window pid once Electron truth says the window is gone", async () => {
+    const workspace = makeWorkspace();
+    const registryPath = join(workspace.root, "instances.json");
+    writeRegistry(registryPath, {
+      schemaVersion: 3,
+      instances: {
+        "worktree:ghost-window": steadyRow({
+          status: "closed",
+          desiredState: "closed",
+          spawnPid: 0,
+          windowPid: 555,
+          lifecycleWarning: "unverified browser/window handle retained: 555"
+        }),
+        "worktree:other-warning": steadyRow({
+          status: "closed",
+          desiredState: "closed",
+          spawnPid: 0,
+          windowPid: 0,
+          lifecycleWarning: "unrelated warning"
+        })
+      }
+    });
+    const reconciler = createInstanceRegistryReconciler({ dependencies: buildDeps() });
+    const result = await reconciler.reconcile({
+      branchInstances: { items: [] },
+      registryPath,
+      nowMs: t0,
+      instanceWindowStates: []
+    });
+    expect(result.windowPidsSynced).toEqual(["worktree:ghost-window"]);
+    const instances = readRegistryFile(registryPath).instances;
+    expect(instances["worktree:ghost-window"].windowPid).toBe(0);
+    expect(instances["worktree:ghost-window"].lifecycleWarning).toBeUndefined();
+    expect(instances["worktree:other-warning"].lifecycleWarning).toBe("unrelated warning");
+  });
+
+  it("never clears a row whose scan saw an open window the truth has not listed yet", async () => {
+    const workspace = makeWorkspace();
+    const registryPath = join(workspace.root, "instances.json");
+    writeRegistry(registryPath, {
+      schemaVersion: 3,
+      instances: { "worktree:opening": steadyRow({ windowPid: 555 }) }
+    });
+    const reconciler = createInstanceRegistryReconciler({ dependencies: buildDeps() });
+    const result = await reconciler.reconcile({
+      branchInstances: envelope([
+        {
+          id: "worktree:opening",
+          kind: "worktree",
+          path: workspace.root,
+          branch: "codex/branch",
+          port: 8001,
+          controlPort: 0,
+          runtime: {
+            backend: { alive: true, healthy: true, listening: true, portConflict: false, pid: 4242, port: 8001 },
+            window: { open: true, pid: 0 }
+          }
+        }
+      ]),
+      registryPath,
+      nowMs: t0,
+      instanceWindowStates: []
+    });
+    expect(result.windowPidsSynced).toEqual([]);
+    expect(readRegistryFile(registryPath).instances["worktree:opening"].windowPid).toBe(555);
+  });
+
+  it("leaves in-flight rows and passes without window truth untouched", async () => {
+    const workspace = makeWorkspace();
+    const registryPath = join(workspace.root, "instances.json");
+    writeRegistry(registryPath, {
+      schemaVersion: 3,
+      instances: {
+        "worktree:starting": steadyRow({
+          status: "starting",
+          spawnPid: 777,
+          windowPid: 555,
+          deadlineAt: new Date(t0 + 120_000).toISOString(),
+          inFlightDeadlineAt: new Date(t0 + 120_000).toISOString()
+        }),
+        "worktree:steady": steadyRow({ windowPid: 555, spawnPid: 4244 })
+      }
+    });
+    const reconciler = createInstanceRegistryReconciler({ dependencies: buildDeps() });
+
+    // With truth attached (empty = no windows open) only the in-flight row is
+    // protected; the steady row's stale pid is cleared.
+    const withTruth = await reconciler.reconcile({
+      branchInstances: { items: [] },
+      registryPath,
+      nowMs: t0,
+      instanceWindowStates: []
+    });
+    expect(withTruth.windowPidsSynced).toEqual(["worktree:steady"]);
+    expect(readRegistryFile(registryPath).instances["worktree:starting"].windowPid).toBe(555);
+    expect(readRegistryFile(registryPath).instances["worktree:steady"].windowPid).toBe(0);
+
+    // No truth attached (window provider unavailable): no write-back at all.
+    writeRegistry(registryPath, {
+      schemaVersion: 3,
+      instances: { "worktree:steady": steadyRow({ windowPid: 555, spawnPid: 4244 }) }
+    });
+    const withoutTruth = await reconciler.reconcile({
+      branchInstances: { items: [] },
+      registryPath,
+      nowMs: t0 + 1000
+    });
+    expect(withoutTruth.windowPidsSynced).toEqual([]);
+    expect(readRegistryFile(registryPath).instances["worktree:steady"].windowPid).toBe(555);
   });
 });
 

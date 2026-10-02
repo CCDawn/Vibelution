@@ -314,6 +314,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_registry_prewarm_task = asyncio.create_task(
         asyncio.to_thread(_prewarm_agent_registry_on_startup)
     )
+    # Config workspace prewarm trails the directory startup task for the same
+    # reason (the alias scan reads sessions under the serving root).
+    startup_config_workspace_prewarm_task = asyncio.create_task(
+        asyncio.to_thread(_prewarm_config_workspace_on_startup)
+    )
     startup_agent_inbox_recovery_task = asyncio.create_task(
         asyncio.to_thread(_recover_wakeable_agent_inbox_messages_on_startup)
     )
@@ -391,6 +396,11 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Agent registry prewarm failed during startup."
         )
     )
+    startup_config_workspace_prewarm_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="Config workspace prewarm failed during startup."
+        )
+    )
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
@@ -463,6 +473,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                         "session_directory",
                         "session_catalog",
                         "agent_registry_prewarm",
+                        "config_workspace_prewarm",
                         "agent_inbox_recovery",
                         "meeting_driver_recovery",
                         "chat_room_round_recovery",
@@ -491,6 +502,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
                 startup_directory_task,
                 startup_catalog_task,
                 startup_agent_registry_prewarm_task,
+                startup_config_workspace_prewarm_task,
                 startup_agent_inbox_recovery_task,
                 startup_meeting_driver_recovery_task,
                 startup_chat_room_round_recovery_task,
@@ -580,7 +592,61 @@ def _prewarm_git_memory_on_startup() -> tuple[Any, int]:
 
     started = time.perf_counter()
     state = git_memory.refresh_git_memory(force=True)
+    # Warm the code-freshness verdict cache too (45s fast-path TTL): the
+    # frontend polls freshness a few seconds after boot, and a prewarmed cache
+    # turns that first poll into a cache hit instead of a full git-backed
+    # resolution. Best effort — a freshness failure never fails git prewarm.
+    try:
+        from .routes.runtime import PROJECT_ROOT
+        from .services.code_freshness import resolve_code_freshness
+
+        resolve_code_freshness(project_root=PROJECT_ROOT)
+    except Exception:  # noqa: BLE001 - freshness prewarm is best effort
+        pass
     return state, max(0, int((time.perf_counter() - started) * 1000))
+
+
+def _prewarm_config_workspace_on_startup() -> dict[str, Any]:
+    """Warm the config workspace payload cache before the first request.
+
+    ``GET /api/config/workspace`` pays a multi-second full rebuild on a cold
+    cache (the model-alias usage scan walks six sources per alias, including
+    two full rglob traversals). config_service's per-key single-flight shares
+    one build across this prewarm thread and any early request volley, so
+    boot-time requests wait for this build instead of each paying the slow
+    path. The session directory startup task aligns the serving root the
+    alias scan reads, so wait for it (bounded) first — same reason as the
+    registry prewarm. Pytest skips like the directory runtime itself.
+    """
+
+    from .services.session.directory_runtime import (
+        should_skip_directory_runtime_for_pytest,
+        wait_for_directory_startup,
+    )
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    wait_for_directory_startup()
+    from .services import config_service
+
+    started = time.perf_counter()
+    config_service.prewarm_config_workspace()
+    timings = {"totalMs": max(0, int((time.perf_counter() - started) * 1000))}
+    try:
+        from .services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "config",
+            "startup_prewarm",
+            "config.workspace_prewarmed",
+            message="Config workspace payload cache was prewarmed at startup.",
+            outcome="completed",
+            fields=dict(timings),
+            lifecycle=True,
+        )
+    except Exception:  # noqa: BLE001 - prewarm diagnostics are best effort
+        pass
+    return timings
 
 
 def _prewarm_agent_registry_on_startup() -> dict[str, Any]:
