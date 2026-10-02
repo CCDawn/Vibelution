@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "source": "SSOT review: launcher instance cross-port contract (web convergence batch 2). Vocabulary-level pinning; behavior cases live in the sibling *Projection/*.cases.json fixtures.",
+  "lifecycleStates": {
+    "payload": [
+      "closed",
+      "building",
+      "starting",
+      "running",
+      "stopping",
+      "restarting",
+      "partial",
+      "error"
+    ],
+    "terminal": ["closed", "error"],
+    "inFlight": ["building", "starting", "stopping", "restarting"],
+    "live": ["running", "partial", "building", "starting", "stopping", "restarting"],
+    "webRuntimeStates": [
+      "building",
+      "starting",
+      "running",
+      "partial",
+      "stopping",
+      "restarting",
+      "failed",
+      "stopped"
+    ],
+    "webStateMapping": {
+      "closed": "stopped",
+      "building": "building",
+      "starting": "starting",
+      "running": "running",
+      "stopping": "stopping",
+      "restarting": "restarting",
+      "partial": "partial",
+      "error": "failed"
+    }
+  },
+  "liveRuntimeSignals": {
+    "python": [
+      "item.alive",
+      "runtime.backend.alive",
+      "runtime.backend.listening",
+      "runtime.window.open",
+      "isolated_backend_alive"
+    ],
+    "typescript": [
+      "runtime.backend.alive",
+      "runtime.backend.listening",
+      "runtime.window.open"
+    ],
+    "note": "Known cross-port difference, pinned on purpose: core/launcher/branch_instance_lifecycle.py _item_has_live_runtime adds the flat item.alive flag and the isolated-backend probe (5 signals); web LauncherBranchInstancesPanel.model.ts instanceHasLiveRuntime and Electron instanceLifecycleProjection hasLiveRuntimeSignal share the 3 runtime-section signals. A row carrying only item.alive=true counts as live for Python but not for TS. Reconciliation is out of scope for this fixture."
+  },
+  "admissionBlockReasons": {
+    "electron": ["rate_limited", "crash_loop_backoff"],
+    "web": ["rate_limited", "crash_loop_backoff"],
+    "note": "Produced only by Electron instanceAdmissionControl (RATE_LIMITED_CODE / CRASH_LOOP_BACKOFF_CODE). web LauncherBranchInstancesPanel.model.ts ADMISSION_BLOCK_REASONS must equal the web list and stay within the Electron list."
+  },
+  "clientOnlyCodes": {
+    "startBlockReasons": [
+      {
+        "code": "launcher_refresh_required",
+        "producer": "web/src/api/launcher.ts CLIENT_START_BLOCK_REFRESH_REQUIRED",
+        "note": "Client-synthesized for legacy payloads without the runtime envelope; not part of the backend/Electron start-block vocabulary (branch_instance_lifecycle.py, instanceAdmissionControl.ts never emit it)."
+      }
+    ]
+  }
+}
