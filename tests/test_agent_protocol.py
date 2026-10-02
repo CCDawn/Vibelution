@@ -5354,11 +5354,13 @@ class TestLocalProviderBootstrap:
             "summary-model-id": {
                 "provider_id": provider_id,
                 "model": "summary-model",
+                "contract": "basic_chat",
                 "tool_calling_mode": "disabled",
             },
             "mental-model-id": {
                 "provider_id": provider_id,
                 "model": "mental-model",
+                "contract": "basic_chat",
                 "tool_calling_mode": "disabled",
             },
         }
@@ -6012,6 +6014,7 @@ class TestLocalProviderBootstrap:
             "subagent-execution-model-id": {
                 "provider_id": provider_id,
                 "model": "subagent-execution-model",
+                "contract": "basic_chat",
                 "tool_calling_mode": "disabled",
             },
         }
