@@ -1212,11 +1212,14 @@ def test_read_knowledge_item_tool_honors_current_agent_acl_and_memory_policy(tmp
 
 def test_read_knowledge_item_tool_is_exposed_only_by_knowledge_steward_profile():
     steward = agent_role_tool_profile_service.get_role_tool_profile("knowledge_steward")
-    ordinary = agent_role_tool_profile_service.get_role_tool_profile("ai_search_scope_lead")
 
     assert "read_knowledge_item_tool" in steward["allowedTools"]
     assert "read_knowledge_item_tool" in steward["preferredTools"]
-    assert "read_knowledge_item_tool" not in ordinary["allowedTools"]
+    assert [
+        profile_id
+        for profile_id, profile in agent_role_tool_profile_service.ROLE_TOOL_PROFILES.items()
+        if "read_knowledge_item_tool" in profile["allowedTools"]
+    ] == ["knowledge_steward"]
 
 
 def test_unified_memory_search_tool_rag_mode_honors_memory_policy_base_ids(tmp_path, monkeypatch):

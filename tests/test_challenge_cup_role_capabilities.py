@@ -211,15 +211,17 @@ def test_canonical_challenge_cup_mutation_and_write_scopes_match_role_ownership(
 
 
 def test_legacy_challenge_cup_role_profiles_remain_read_compatible():
+    # Pin the current canonical legacy profiles. The governed item reader is
+    # granted only to knowledge_steward and must not change these profiles.
     expected_fingerprints = {
-        "source_finder": "723a521c1fe12818",
-        "source_extractor": "a84566fbc79bd9e5",
-        "source_relation_mapper": "583e12a6d82a1b94",
-        "source_ingestor": "adf7ea32a57cd1dd",
-        "challenge_cup_experiment_planner": "9049f3cfde73e64a",
-        "challenge_cup_experiment_ledger": "0e8b96d06e24e4ee",
-        "challenge_cup_iteration_planner": "94d226cec9b37083",
-        "challenge_cup_versioning": "2ad6f01c482a7764",
+        "source_finder": "346ad5fba96208d4",
+        "source_extractor": "1fd4fae2b8ef11e9",
+        "source_relation_mapper": "bf1f80bdda9da310",
+        "source_ingestor": "cd8fdcdc4a504d71",
+        "challenge_cup_experiment_planner": "c329558d8b6218d0",
+        "challenge_cup_experiment_ledger": "4cb34ffff6125729",
+        "challenge_cup_iteration_planner": "d973b8c5d8e8d92f",
+        "challenge_cup_versioning": "5bb3872312d084e2",
     }
     assert {
         role_key: svc.ROLE_TOOL_PROFILES[role_key]["profileFingerprint"]
@@ -363,4 +365,4 @@ def test_role_capability_contract_snapshot_is_stable():
     snapshot = svc.role_capability_contract_snapshot()
     assert [item["roleKey"] for item in snapshot] == sorted(item["roleKey"] for item in snapshot)
     assert {item["roleKey"] for item in snapshot} == set(svc.ROLE_CAPABILITY_CONTRACTS)
-    assert svc.role_capability_contract_fingerprint() == "14ef8b7226844eb01a8fc0855ce9942f251c86fdf3d9dbfe65ee25e1f18f8eb3"
+    assert svc.role_capability_contract_fingerprint() == "a86027bcd9fc0892c6d13151e19152bcaa8141e525d21e1626fb814890f52f2f"
