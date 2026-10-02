@@ -2558,17 +2558,17 @@ async function currentLauncherUpdateFreshness(): Promise<Record<string, unknown>
 
 async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
   const forceRefresh = options.forceShellRefresh === true;
-  let stale = false;
+  let launchBlocking = false;
   if (app.isPackaged) {
     try {
-      stale = (await inspectCurrentDesktopShell()).stale;
+      launchBlocking = (await inspectCurrentDesktopShell()).launchBlocking;
     } catch {
-      stale = false;
+      launchBlocking = false;
     }
   }
   const decision = decideLauncherShellRestart({
     isPackaged: app.isPackaged,
-    stale,
+    launchBlocking,
     forceRefresh
   });
   if (decision === "rebuild-and-exit") {
@@ -3305,7 +3305,7 @@ async function orchestrateLauncherLifecycle(
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
         return supersededLifecycleResult(operation);
       }
-      refreshBeforeLifecycle = shouldRefreshBeforeLifecycle(lifecycleOperation, { isPackaged: true, stale: status.stale });
+      refreshBeforeLifecycle = shouldRefreshBeforeLifecycle(lifecycleOperation, { isPackaged: true, launchBlocking: status.launchBlocking });
     } catch (error: unknown) {
       console.warn(error instanceof Error ? error.message : String(error));
     }

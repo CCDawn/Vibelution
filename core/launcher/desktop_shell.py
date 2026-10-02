@@ -24,7 +24,11 @@ from uuid import uuid4
 
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.no_console_git import run_git
-from core.launcher.frontend_build import inspect_frontend_build, resolve_active_frontend_dist
+from core.launcher.frontend_build import (
+    frontend_releases_dir,
+    inspect_frontend_build,
+    resolve_active_frontend_dist,
+)
 from core.runtime_manager.constants import PROJECT_ROOT
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
@@ -376,6 +380,41 @@ def _release_desktop_shell_refresh_lock(project_root: Path | str) -> None:
             return
 
 
+FRONTEND_ONLY_STALE_REASONS = {
+    "missing_frontend_provenance",
+    "frontend_package_content_mismatch",
+    "frontend_source_stale",
+    "frontend_inspection_failed",
+    "current_frontend_tree_unavailable",
+    "frontend_release_mismatch",
+    "frontend_source_mismatch",
+}
+
+
+def _usable_active_frontend_release(root: Path) -> bool:
+    """Whether the workspace active frontend release can serve the launcher.
+
+    Aligned with the Electron fallback chain in
+    ``desktop/electron/src/protocol/launcherAppProtocol.ts``
+    ``resolveWorkspaceActiveRelease``: the active release is usable only when
+    the ``active.json`` pointer resolves to a real release under the releases
+    directory (a valid, complete release) and its ``index.html`` is readable.
+    A legacy ``web/dist`` fallback does not count: with no active release the
+    packaged launcher window would serve the packaged snapshot, so frontend
+    staleness must block again.
+    """
+
+    try:
+        dist = resolve_active_frontend_dist(root)
+        if dist.parent != frontend_releases_dir(root):
+            return False
+        index = dist / "index.html"
+        return index.is_file() and bool(index.read_text(encoding="utf-8", errors="replace").strip())
+    except Exception:
+        # Freshness inspection must never raise over release resolution.
+        return False
+
+
 def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Return whether the packaged Electron shell and Launcher frontend are current."""
 
@@ -462,10 +501,23 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         reason = "current"
         stale = False
     refresh_block = recent_desktop_shell_refresh_failure(root)
+    active_release_usable = _usable_active_frontend_release(root)
+    # launchBlocking answers one question: can the packaged exe safely serve
+    # the current checkout's first window? Electron-tree/package reasons always
+    # block. Frontend-only staleness is advisory while a usable workspace
+    # active release exists, because both shell forms' launcher windows prefer
+    # that release (launcherAppProtocol.ts resolveLauncherDistRoot) and the
+    # workbench window is served by the backend regardless of shell form; with
+    # no usable active release the packaged snapshot is what would be served,
+    # so frontend staleness blocks again. Full `stale`/`reason` stay
+    # authoritative for status display and background snapshot convergence.
+    launch_blocking = bool(stale and not (reason in FRONTEND_ONLY_STALE_REASONS and active_release_usable))
     payload: dict[str, Any] = {
         "schemaVersion": 1,
         "stale": stale,
         "reason": reason,
+        "activeFrontendReleaseUsable": active_release_usable,
+        "launchBlocking": launch_blocking,
         "packagedElectronTree": packaged_tree,
         "currentElectronTree": current_tree,
         "packagedSourceCommit": packaged_source_commit,
@@ -895,7 +947,10 @@ def resolve_desktop_shell_launch(
                     lifecycle=lifecycle, hidden_presentation=hidden_presentation),
             }
     packaged_status = inspect_desktop_shell(shell_root)
-    if not packaged_status.get("stale") and packaged_status.get("reason") == "current":
+    # launchBlocking, not stale: advisory frontend staleness still launches the
+    # packaged exe because the launcher window follows the workspace active
+    # release, and reporting the real reason keeps downstream status honest.
+    if not packaged_status.get("launchBlocking"):
         args = _desktop_shell_electron_args(
             str(packaged_desktop_exe(shell_root)),
             [],
@@ -910,7 +965,7 @@ def resolve_desktop_shell_launch(
             "kind": "packaged",
             "args": args,
             "cwd": str(shell_root),
-            "reason": "current",
+            "reason": str(packaged_status.get("reason") or "current"),
             "currentElectronTree": str(packaged_status.get("currentElectronTree") or ""),
         }
     unpackaged = ensure_unpackaged_electron(shell_root)
