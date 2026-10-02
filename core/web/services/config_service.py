@@ -2389,11 +2389,14 @@ def _resolve_apply_base_config(
 # and external hand-edits are caught by the mtime+size signature immediately,
 # so the TTL never delays visibility of an actual config change.
 #
-# Concurrency: these getters run on the sync threadpool. We use lock-free
-# compute-then-swap — each thread may compute a full payload and the dict
-# store is atomic under the GIL, so worst case two threads compute the same
-# entry concurrently and the last store wins (idempotent). Readers always get
-# a deep copy, so a stored payload is never handed out mutably.
+# Concurrency: these getters run on the sync threadpool. Compute-then-swap
+# stays the store contract (the dict store is atomic under the GIL, last store
+# wins idempotently, and readers always get deep copies), but a per-key
+# single-flight gate (see _CONFIG_RESULT_FLIGHTS below) ensures only one
+# thread pays the full slow path per key at a time — the boot volley of
+# concurrent first hits waits and shares instead of each thread rescanning
+# every model alias. Invalidation remains lock-free: writers never touch the
+# flight gate, so a cache write/clear is never blocked by waiting readers.
 # ---------------------------------------------------------------------------
 
 _CONFIG_RESULT_CACHE_TTL_SECONDS = 90.0
@@ -2454,6 +2457,77 @@ def _store_config_result_cache(key: str, signature: tuple[Any, ...], payload: di
         expires_at=time.monotonic() + _CONFIG_RESULT_CACHE_TTL_SECONDS,
         payload=payload,
     )
+
+
+# Per-key single-flight gate: same-key concurrent misses share one compute.
+# Modeled on GitMemoryService.refresh_git_memory (Condition + generation:
+# waiters share a successful compute, a failed compute is never shared and
+# every waiter falls through to its own compute). The gate guards only the
+# flight bookkeeping below — never the result cache itself — so config writers
+# keep their existing lock-free invalidate/swap semantics.
+#
+# Waiters are bounded: if the in-flight compute takes longer than the timeout
+# (or its notification was lost), the waiter stops waiting and computes its own
+# payload. Worst case that briefly means two concurrent computes for one key,
+# which the store contract already treats as idempotent.
+_CONFIG_RESULT_FLIGHT_WAIT_TIMEOUT_SECONDS = 30.0
+_CONFIG_RESULT_FLIGHTS: dict[str, dict[str, Any]] = {}
+_CONFIG_RESULT_FLIGHT_LOCK = threading.Condition()
+
+
+def _config_result_cache_single_flight(
+    key: str,
+    compute: Any,
+) -> dict[str, Any]:
+    """Return the cached payload for ``key``, computing it at most once per volley.
+
+    ``compute`` receives the freshly taken cache signature and returns
+    ``(payload, post_signature)``. Concurrent same-key callers: the first miss
+    becomes the flight leader; the others wait (bounded), then share the
+    leader's stored payload when it succeeded. A leader failure is not shared —
+    waiters recompute their own, and the leader's exception propagates to the
+    leader only.
+    """
+
+    signature = _config_result_cache_signature()
+    cached = _config_result_cache_hit(key, signature)
+    if cached is not None:
+        return cached
+    with _CONFIG_RESULT_FLIGHT_LOCK:
+        flight = _CONFIG_RESULT_FLIGHTS.setdefault(
+            key, {"inflight": False, "generation": 0}
+        )
+        arrival_generation = flight["generation"]
+        if flight["inflight"]:
+            deadline = time.monotonic() + _CONFIG_RESULT_FLIGHT_WAIT_TIMEOUT_SECONDS
+            while flight["inflight"]:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                _CONFIG_RESULT_FLIGHT_LOCK.wait(remaining)
+            if flight["generation"] != arrival_generation:
+                # The leader finished successfully and stored a payload; hand
+                # it out through the normal hit path so signature/TTL rules
+                # still apply (a writer that invalidated mid-flight makes this
+                # miss, and this caller then computes its own fresh payload).
+                shared = _config_result_cache_hit(key, _config_result_cache_signature())
+                if shared is not None:
+                    return shared
+            # Leader failed, hit its own timeout window, or its payload was
+            # invalidated before we could share: fall through and compute.
+        flight["inflight"] = True
+    succeeded = False
+    try:
+        payload, signature = compute(_config_result_cache_signature())
+        _store_config_result_cache(key, signature, payload)
+        succeeded = True
+        return copy.deepcopy(payload)
+    finally:
+        with _CONFIG_RESULT_FLIGHT_LOCK:
+            flight["inflight"] = False
+            if succeeded:
+                flight["generation"] += 1
+            _CONFIG_RESULT_FLIGHT_LOCK.notify_all()
 
 
 def _save_public_config_and_invalidate(
@@ -2535,17 +2609,12 @@ def _compute_config_summary_payload(pre_signature: tuple[Any, ...]) -> tuple[dic
 def get_config_summary() -> dict[str, Any]:
     """Return a condensed config summary for shell-wide consumers.
 
-    Result-level cached (see the cache section above); callers must treat the
-    returned dict as read-only — the cache always hands out deep copies.
+    Result-level cached (see the cache section above) with a per-key
+    single-flight gate; callers must treat the returned dict as read-only —
+    the cache always hands out deep copies.
     """
 
-    signature = _config_result_cache_signature()
-    cached = _config_result_cache_hit("summary", signature)
-    if cached is not None:
-        return cached
-    payload, signature = _compute_config_summary_payload(signature)
-    _store_config_result_cache("summary", signature, payload)
-    return copy.deepcopy(payload)
+    return _config_result_cache_single_flight("summary", _compute_config_summary_payload)
 
 
 def _compute_config_workspace_payload(pre_signature: tuple[Any, ...]) -> tuple[dict[str, Any], tuple[Any, ...]]:
@@ -2574,17 +2643,25 @@ def _compute_config_workspace_payload(pre_signature: tuple[Any, ...]) -> tuple[d
 def get_config_workspace() -> dict[str, Any]:
     """Return the full config workspace payload for the Config route.
 
-    Result-level cached (see the cache section above); callers must treat the
-    returned dict as read-only — the cache always hands out deep copies.
+    Result-level cached (see the cache section above) with a per-key
+    single-flight gate; callers must treat the returned dict as read-only —
+    the cache always hands out deep copies.
     """
 
-    signature = _config_result_cache_signature()
-    cached = _config_result_cache_hit("workspace", signature)
-    if cached is not None:
-        return cached
-    payload, signature = _compute_config_workspace_payload(signature)
-    _store_config_result_cache("workspace", signature, payload)
-    return copy.deepcopy(payload)
+    return _config_result_cache_single_flight("workspace", _compute_config_workspace_payload)
+
+
+def prewarm_config_workspace() -> dict[str, Any]:
+    """Startup prewarm hook: build the workspace payload once, off the request path.
+
+    Called from the web lifespan prewarm thread so the first user hit on
+    ``GET /api/config/workspace`` is a cache hit instead of the multi-second
+    slow path. Safe to call concurrently with early requests:
+    get_config_workspace single-flights per key, so requests arriving during
+    the prewarm build wait and share that result rather than recomputing.
+    """
+
+    return get_config_workspace()
 
 
 def get_agent_model_options_workspace() -> dict[str, Any]:

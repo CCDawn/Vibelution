@@ -10,6 +10,8 @@ import copy
 import json
 import os
 import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -413,3 +415,164 @@ def test_config_cache_signature_change_invalidates(monkeypatch, tmp_path):
     assert counters == {"_build_workspace": 3}
     # 内容未变，重算结果与首次构建一致。
     assert third == first
+
+
+# ---------------------------------------------------------------------------
+# Per-key single-flight（冷启动并发首击只付一次全价）。
+# ---------------------------------------------------------------------------
+
+
+def _slow_counting_builder(monkeypatch, *, build_seconds: float):
+    """Replace _build_workspace with a slow counting stand-in.
+
+    Returns (build_calls, build_entered). build_entered is set when the first
+    build starts so tests can pin a leader as in-flight before adding waiters.
+    """
+
+    real_build = config_service._build_workspace
+    build_calls: list[int] = []
+    build_entered = threading.Event()
+
+    def slow_counting(*args, **kwargs):
+        build_calls.append(1)
+        build_entered.set()
+        time.sleep(build_seconds)
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(config_service, "_build_workspace", slow_counting)
+    return build_calls, build_entered
+
+
+def _run_concurrent_hits(worker_count: int, target=None):
+    """Start worker_count threads hitting the same getter behind a barrier."""
+
+    if target is None:
+        target = config_service.get_config_workspace
+    barrier = threading.Barrier(worker_count)
+    results: list = []
+    errors: list = []
+
+    def hit():
+        barrier.wait()
+        try:
+            results.append(target())
+        except Exception as exc:  # noqa: BLE001 - the test asserts on outcomes
+            errors.append(exc)
+
+    threads = [threading.Thread(target=hit) for _ in range(worker_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    return results, errors
+
+
+def test_config_workspace_concurrent_first_hits_compute_once(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    _warm_config_init()
+    build_calls, _ = _slow_counting_builder(monkeypatch, build_seconds=0.15)
+
+    results, errors = _run_concurrent_hits(6)
+
+    assert errors == []
+    assert len(results) == 6
+    # 同 key 并发首击：底层构建只发生一次，等待者共享同一份结果。
+    assert len(build_calls) == 1
+    assert all(result == results[0] for result in results)
+    assert all(result is not results[0] for result in results[1:])
+
+    # 热态再读：走缓存，不再构建。
+    config_service.get_config_workspace()
+    assert len(build_calls) == 1
+
+
+def test_config_summary_concurrent_first_hits_compute_once(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    _warm_config_init()
+    real_build = config_service._build_config_summary
+    build_calls: list[int] = []
+
+    def slow_counting(*args, **kwargs):
+        build_calls.append(1)
+        time.sleep(0.15)
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(config_service, "_build_config_summary", slow_counting)
+
+    results, errors = _run_concurrent_hits(5, target=config_service.get_config_summary)
+
+    assert errors == []
+    assert len(results) == 5
+    assert len(build_calls) == 1
+    assert all(result == results[0] for result in results)
+
+
+def test_config_single_flight_failure_is_not_shared(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    _warm_config_init()
+    real_build = config_service._build_workspace
+    build_calls: list[int] = []
+
+    def flaky_build(*args, **kwargs):
+        build_calls.append(1)
+        if len(build_calls) == 1:
+            raise RuntimeError("injected first-build failure")
+        time.sleep(0.1)
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(config_service, "_build_workspace", flaky_build)
+
+    results, errors = _run_concurrent_hits(4)
+
+    # 成功共享、失败不共享：首击者拿到注入异常，等待者各自重算并成功。
+    assert len(errors) == 1 and isinstance(errors[0], RuntimeError)
+    assert len(results) == 3
+    assert all(result == results[0] for result in results)
+    assert len(build_calls) >= 2
+
+    # 失败后缓存不落毒：成功者的构建已把缓存填好，顺序读取命中、不再构建。
+    payload = config_service.get_config_workspace()
+    assert len(build_calls) == 2
+    assert payload == results[0]
+
+
+def test_config_single_flight_waiter_timeout_computes_own(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    _warm_config_init()
+    monkeypatch.setattr(
+        config_service, "_CONFIG_RESULT_FLIGHT_WAIT_TIMEOUT_SECONDS", 0.05
+    )
+    build_calls, build_entered = _slow_counting_builder(
+        monkeypatch, build_seconds=0.5
+    )
+
+    leader = threading.Thread(target=config_service.get_config_workspace)
+    leader.start()
+    assert build_entered.wait(timeout=5), "leader never entered the build"
+
+    waiter_payload = config_service.get_config_workspace()
+    leader.join(timeout=30)
+    leader_payload = config_service.get_config_workspace()
+
+    # 等待者超过兜底窗口后自行计算（不永等）：总构建 2 次（领导一次、
+    # 超时等待者一次），而非等待者无限挂起或共享领导的单次构建。
+    assert len(build_calls) == 2
+    assert waiter_payload == leader_payload
+
+
+def test_config_single_flight_rearms_after_invalidation(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    _warm_config_init()
+    build_calls, _ = _slow_counting_builder(monkeypatch, build_seconds=0.15)
+
+    results, errors = _run_concurrent_hits(4)
+    assert errors == []
+    assert len(build_calls) == 1
+
+    # 失效（writer 无锁换出）后新一轮并发首击重新 single-flight。
+    config_service._invalidate_config_result_cache()
+    results2, errors2 = _run_concurrent_hits(4)
+    assert errors2 == []
+    assert len(build_calls) == 2
+    assert all(result == results2[0] for result in results2)
+    assert results2[0] == results[0]
