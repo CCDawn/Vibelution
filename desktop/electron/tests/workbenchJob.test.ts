@@ -65,6 +65,27 @@ describe("workbench job registry", () => {
     expect(terminate.mock.calls.length).toBe(calls);
     expect(replacement.pid).not.toBe(old.pid);
   });
+
+  it.each(["terminate throws", "terminate rejects", "close throws"])(
+    "retains ownership and blocks replacement when %s",
+    async (failure) => {
+      const spawn = vi.fn(() => ({ pid: process.pid, job: {} }));
+      const terminate = vi.fn(() => true);
+      const close = vi.fn();
+      __setWorkbenchJobNativeForTests({ spawn, terminate, activeCount: () => 0, close });
+      const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
+      const old = spawnTrackedWorkbenchProcess("C:/failed-replacement", input);
+      if (failure === "terminate throws") terminate.mockImplementationOnce(() => { throw new Error("terminate failed"); });
+      if (failure === "terminate rejects") terminate.mockReturnValueOnce(false);
+      if (failure === "close throws") close.mockImplementationOnce(() => { throw new Error("close failed"); });
+      expect(() => spawnTrackedWorkbenchProcess("C:/failed-replacement", input)).toThrow();
+      expect(spawn).toHaveBeenCalledOnce();
+      expect(hasTrackedWorkbenchJob("C:/failed-replacement")).toBe(true);
+      await expect(terminateTrackedWorkbenchJob("C:/failed-replacement", old.pid)).resolves.toBe(true);
+      expect(hasTrackedWorkbenchJob("C:/failed-replacement")).toBe(false);
+    }
+  );
+
   it("terminates the tracked group before a later tree walk would be needed", async () => {
     const jobs: WorkbenchJobHandle[] = [];
     let active = 2;

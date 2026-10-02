@@ -137,16 +137,12 @@ export function spawnTrackedWorkbenchProcess(
   const key = jobKey(workspaceRoot);
   const previous = tracked.get(key);
   if (previous) {
-    try {
-      previous.native.terminate(previous.job);
-    } catch {
-      // The previous group is replaced by the new job either way.
+    if (!previous.native.terminate(previous.job)) {
+      throw new Error("previous workbench job termination was not confirmed");
     }
-    try {
-      previous.native.close(previous.job);
-    } catch {
-      // Closing a finished job is cleanup.
-    }
+    // Keep the old registration if either operation fails. Closing the owned
+    // KILL_ON_JOB_CLOSE handle is what makes replacement safe for its children.
+    previous.native.close(previous.job);
     forgetJob(previous);
   }
   const spawned = native.spawn(input);

@@ -552,7 +552,9 @@ static napi_value close_job(napi_env env, napi_callback_info info) {
   if (box == NULL) {
     return NULL;
   }
-  CloseHandle(box->job);
+  if (!CloseHandle(box->job)) {
+    return throw_win(env, "CloseHandle(job)");
+  }
   box->job = NULL;
   napi_get_undefined(env, &result);
   return result;
