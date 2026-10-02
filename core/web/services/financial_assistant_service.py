@@ -76,13 +76,21 @@ def _project(agent: dict) -> dict:
     session_id = str(agent.get("directSessionId") or "")
     verified_session = False
     if active and session_id and valid_profile:
-        detail = session_service.get_session_detail(
-            session_id,
-            message_limit=0,
-            transcript_scope="none",
-            include_secondary=False,
+        # Existence-only check (same fast path as the message-curation read):
+        # one session runtime row from the chat-state store instead of the full
+        # get_session_detail pipeline (double JSON read + ledger reconcile +
+        # session-row persist). Listing must stay a pure read, so this drops
+        # detail's repair/stub side effects — a direct session is provisioned
+        # by our own write path, so its runtime row is the existence authority.
+        session_row = session_service.load_session_chat_state(
+            session_service.PROJECT_ROOT, session_id
         )
-        verified_session = bool(detail and detail.get("agentId") == agent_id)
+        row_agent_id = str(
+            (session_row or {}).get("agentId")
+            or (session_row or {}).get("agent_id")
+            or ""
+        ).strip()
+        verified_session = bool(session_row) and row_agent_id == agent_id
     base = None
     if active and valid_profile:
         try:
@@ -126,13 +134,26 @@ def _names(policy: dict, key: str) -> set[str]:
     return {str(item) for item in raw if str(item or "").strip()}
 
 
+_NEWS_REFERENCE_MARKER = "financialAssistantNewsReferenceGranted"
+
+
 def _grant_news_reference(agent: dict) -> bool:
-    """Grant same-session news search only when stage-1 defaults are still untouched."""
+    """Grant same-session news search only when stage-1 defaults are still untouched.
+
+    Write-path migration: called from provisioning/update flows only — listing
+    is a pure read and never calls this. Idempotent via the
+    ``financialAssistantNewsReferenceGranted`` metadata marker, so the check
+    (and any registry write) runs at most once per assistant. Returns True
+    when a migration write happened.
+    """
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if metadata.get(_NEWS_REFERENCE_MARKER):
+        return False
     if agent.get("status") != "active":
         return False
     if agent.get("roleKey") != ROLE or agent.get("primaryMode") != "general":
         return False
-    if (agent.get("metadata") or {}).get("financialAssistantSetup") != "ready":
+    if metadata.get("financialAssistantSetup") != "ready":
         return False
     policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
     updates: dict = {}
@@ -176,21 +197,26 @@ def _grant_news_reference(agent: dict) -> bool:
             "expertise": list(PERSONA["expertise"]),
         }
     if not updates:
+        # Nothing left to migrate (user customized): still mark the check as
+        # done so later write paths stop re-evaluating. One write, once.
+        directory.update_agent_instance(
+            agent["agentId"], metadata={_NEWS_REFERENCE_MARKER: True}
+        )
         return False
+    updates["metadata"] = {_NEWS_REFERENCE_MARKER: True}
     directory.update_agent_instance(agent["agentId"], **updates)
     return True
 
 
 def list_financial_assistants() -> list[dict]:
-    """Project assistants. Never create or restore Agents, sessions, or bases.
+    """Project assistants. Pure read: never create, restore, migrate, or write.
 
-    An untouched stage-1 tool list gains same-session news search. Cleared or
-    customized policies stay as the user left them.
+    An untouched stage-1 tool list gains same-session news search on the next
+    provisioning/update write (create_financial_assistant), not here.
     """
     with _LOCK:
-        for agent in _agents():
-            _grant_news_reference(agent)
-        return [_project(agent) for agent in _agents()]
+        agents = _agents()
+        return [_project(agent) for agent in agents]
 
 
 def create_financial_assistant(display_name: str = "炒股智能体") -> dict:
@@ -262,7 +288,13 @@ def create_financial_assistant(display_name: str = "炒股智能体") -> dict:
                 agent_id=agent["agentId"], title=name, created_by="financial_assistant"
             )
             directory.update_agent_instance(
-                agent["agentId"], metadata={"financialAssistantSetup": "ready"}
+                agent["agentId"],
+                metadata={
+                    "financialAssistantSetup": "ready",
+                    # Provisioning writes the current defaults (news reference
+                    # included); record the migration as done for this assistant.
+                    _NEWS_REFERENCE_MARKER: True,
+                },
             )
         else:
             _grant_news_reference(agent)
