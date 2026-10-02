@@ -858,6 +858,19 @@ def run_desktop_shell_prebuild(project_root: Path | str = PROJECT_ROOT) -> dict[
         _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
 
 
+def _npm_failure_detail(result: subprocess.CompletedProcess) -> str:
+    """Combine both captured npm output streams for a failure detail line.
+
+    npm script chains interleave stdout and stderr (esbuild prints its summary
+    to stderr while the actually failing step usually reports on stdout), so a
+    single-stream tail can hide the real error behind benign output.
+    """
+
+    stderr_tail = str(result.stderr or "").strip().replace("\r", "")[-400:]
+    stdout_tail = str(result.stdout or "").strip().replace("\r", "")[-400:]
+    return "\n--\n".join(part for part in (stderr_tail, stdout_tail) if part)
+
+
 def _stage_desktop_shell(root: Path) -> dict[str, Any]:
     """Build into desktop-staging and verify the staged provenance tree hash."""
 
@@ -879,7 +892,7 @@ def _stage_desktop_shell(root: Path) -> dict[str, Any]:
         **no_window_subprocess_kwargs(),
     )
     if int(result.returncode or 0) != 0:
-        detail = (result.stderr or result.stdout or "").strip().replace("\r", "")[-800:]
+        detail = _npm_failure_detail(result)
         _append_refresh_log(root, "prebuild.failed", exit_code=int(result.returncode or 0), detail=detail)
         raise RuntimeError(f"desktop shell package:staging failed with exit code {result.returncode}: {detail}")
     staged_tree = str(_read_json(root / STAGING_PROVENANCE_RELATIVE).get("electronTreeHash") or "").strip()
@@ -980,7 +993,7 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         **no_window_subprocess_kwargs(),
     )
     if int(result.returncode or 0) != 0:
-        detail = (result.stderr or result.stdout or "").strip().replace("\r", "")[-800:]
+        detail = _npm_failure_detail(result)
         _append_refresh_log(root, "rebuild.failed", exit_code=int(result.returncode or 0), detail=detail)
         raise RuntimeError(f"desktop shell package:dir failed with exit code {result.returncode}: {detail}")
     status = inspect_desktop_shell(root)
@@ -1473,7 +1486,7 @@ def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
                 **no_window_subprocess_kwargs(),
             )
             if int(result.returncode or 0) != 0:
-                detail = (result.stderr or result.stdout or "").strip().replace("\r", "")[-800:]
+                detail = _npm_failure_detail(result)
                 _append_refresh_log(
                     project_root,
                     "unpackaged.build.failed",

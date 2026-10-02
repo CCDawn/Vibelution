@@ -1282,6 +1282,31 @@ def test_run_desktop_shell_prebuild_failure_records_cooldown_and_releases_lock(t
     assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
 
 
+def test_npm_failure_detail_combines_both_streams():
+    result = types.SimpleNamespace(
+        returncode=1,
+        stdout="step output\nnpm ERR! real failure",
+        stderr="dist\\preload.cjs 1.7kb\n\nDone in 6ms",
+    )
+    detail = desktop_shell._npm_failure_detail(result)
+    assert "npm ERR! real failure" in detail
+    assert "Done in 6ms" in detail
+
+
+def test_stage_desktop_shell_failure_detail_carries_stdout_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        desktop_shell.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            returncode=1, stdout="npm ERR! write:provenance refused", stderr="Done in 6ms"
+        ),
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        desktop_shell._stage_desktop_shell(tmp_path)
+    assert "write:provenance refused" in str(excinfo.value)
+    assert "Done in 6ms" in str(excinfo.value)
+
+
 def test_run_desktop_shell_prebuild_releases_lock_when_build_explodes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         desktop_shell,
