@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI
 
@@ -185,6 +186,53 @@ async def reconcile_external_agent_tasks_forever(*, interval_seconds: float = 5.
         await asyncio.sleep(interval)
 
 
+def _enforce_runtime_scene_retention_after_routes_ready(
+    *, should_stop: Callable[[], bool] | None = None
+) -> dict[str, Any]:
+    """Run the existing guarded retention sweep after route readiness."""
+
+    try:
+        # Keep the scene/query import graph off the startup path until routes
+        # have mounted and health can be served.
+        from .services.runtime_scene.query import _enforce_runtime_scene_retention
+
+        if should_stop is None:
+            return dict(_enforce_runtime_scene_retention() or {})
+        return dict(_enforce_runtime_scene_retention(should_stop=should_stop) or {})
+    except Exception as exc:  # noqa: BLE001 - cleanup must not affect readiness
+        logger.warning("Runtime scene retention failed after startup (%s).", type(exc).__name__)
+        return {}
+
+
+async def _run_runtime_scene_retention_after_routes_ready(app: FastAPI) -> None:
+    """Wait for successful route registration, then run one tracked cleanup."""
+
+    ready_event = getattr(app.state, "web_routes_ready_event", None)
+    if ready_event is None:
+        return
+    await ready_event.wait()
+    if not bool(getattr(app.state, "web_routes_registered", False)):
+        return
+
+    stop_requested = threading.Event()
+    # Shield the worker so cancellation reaches this owner first; it can then
+    # stop the next scan/delete and join any filesystem operation in progress.
+    retention_worker = asyncio.create_task(
+        asyncio.to_thread(
+            _enforce_runtime_scene_retention_after_routes_ready,
+            should_stop=stop_requested.is_set,
+        ),
+        name="runtime-scene-retention-worker",
+    )
+    try:
+        await asyncio.shield(retention_worker)
+    except asyncio.CancelledError:
+        stop_requested.set()
+        with suppress(Exception):
+            await asyncio.shield(retention_worker)
+        raise
+
+
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
     if os.name != "nt":
         return False
@@ -219,12 +267,18 @@ async def web_workbench_lifespan(app: FastAPI | None):
     from .route_bootstrap import warm_web_routes_in_background
 
     startup_routes_task: asyncio.Task[Any] | None = None
+    startup_scene_retention_task: asyncio.Task[Any] | None = None
     if app is not None:
         # Enable async waiters for non-health requests while routes mount in background.
         app.state.web_routes_ready_event = asyncio.Event()
         # Route import/mount is the cold-start bulk cost — do not await before yield so
         # /api/health can pass and Launcher can open the window early.
         startup_routes_task = asyncio.create_task(warm_web_routes_in_background(app))
+        if os.environ.get("VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION") == "1":
+            startup_scene_retention_task = asyncio.create_task(
+                _run_runtime_scene_retention_after_routes_ready(app),
+                name="runtime-scene-retention",
+            )
     # Snapshot the git commit this backend was started from (best effort, never
     # blocks health). The UI compares it with disk HEAD to flag stale instances.
     startup_code_fingerprint_task = asyncio.create_task(
@@ -302,6 +356,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
     if startup_routes_task is not None:
         startup_routes_task.add_done_callback(
             lambda task: consume_startup_task_result(task, message="Web route bootstrap failed during startup.")
+        )
+    if startup_scene_retention_task is not None:
+        startup_scene_retention_task.add_done_callback(
+            lambda task: consume_startup_task_result(
+                task, message="Runtime scene retention task failed during startup."
+            )
         )
     startup_cli_reconcile_task.add_done_callback(
         lambda task: consume_startup_task_result(
@@ -411,6 +471,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         stop_virtual_human_life_runtime()
         for startup_task in (
             startup_routes_task,
+            startup_scene_retention_task,
             startup_cli_reconcile_task,
             startup_cache_prewarm_task,
             startup_directory_task,

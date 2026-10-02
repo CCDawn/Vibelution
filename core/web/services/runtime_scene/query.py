@@ -14,7 +14,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
-from typing import Any
+from typing import Any, Callable
 
 from core.logging import debug as _debug_logger
 
@@ -69,15 +69,23 @@ def _closed_reconciliation_fields(fields: dict[str, Any]) -> bool:
     return observed_state == "closed" and desired_state == "closed" and not manager_running and backend_pid == 0 and browser_pid == 0
 
 
-def _enforce_runtime_scene_retention(max_packages: int = RUNTIME_SCENE_RETENTION_LIMIT) -> dict[str, Any]:
+def _enforce_runtime_scene_retention(
+    max_packages: int = RUNTIME_SCENE_RETENTION_LIMIT,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     """Keep runtime scene packages bounded while preserving active evidence."""
     s = _service()
+    if should_stop is not None and should_stop():
+        return {"stopped": True}
 
     try:
         retention_limit = max(1, int(max_packages or s.RUNTIME_SCENE_RETENTION_LIMIT))
     except (TypeError, ValueError):
         retention_limit = s.RUNTIME_SCENE_RETENTION_LIMIT
     scene_dirs = s._scene_dirs()
+    if should_stop is not None and should_stop():
+        return {"stopped": True}
     if len(scene_dirs) <= retention_limit:
         return {
             "retentionLimit": retention_limit,
@@ -90,6 +98,8 @@ def _enforce_runtime_scene_retention(max_packages: int = RUNTIME_SCENE_RETENTION
     current_scene_dir = s._safe_current_runtime_scene_dir_for_retention()
     items: list[dict[str, Any]] = []
     for scene_dir in scene_dirs:
+        if should_stop is not None and should_stop():
+            return {"stopped": True}
         manifest = s._load_scene_manifest(scene_dir)
         items.append(
             {
@@ -100,17 +110,25 @@ def _enforce_runtime_scene_retention(max_packages: int = RUNTIME_SCENE_RETENTION
                 "protected": s._is_runtime_scene_retention_protected(scene_dir, current_scene_dir),
             }
         )
+    if should_stop is not None and should_stop():
+        return {"stopped": True}
 
     items.sort(key=lambda item: item["sortKey"], reverse=True)
     protected_items = [item for item in items if item["protected"]]
     ordinary_items = [item for item in items if not item["protected"]]
+    if should_stop is not None and should_stop():
+        return {"stopped": True}
     keep_paths: set[Path] = {item["path"].resolve() for item in protected_items}
     ordinary_slots = max(0, retention_limit - len(keep_paths))
     keep_paths.update(item["path"].resolve() for item in ordinary_items[:ordinary_slots])
     delete_items = [item for item in ordinary_items if item["path"].resolve() not in keep_paths]
 
     deleted_scene_ids: list[str] = []
+    stopped = False
     for item in delete_items:
+        if should_stop is not None and should_stop():
+            stopped = True
+            break
         scene_dir = item["path"]
         if not s._can_delete_runtime_scene_for_retention(scene_dir):
             continue
@@ -125,13 +143,16 @@ def _enforce_runtime_scene_retention(max_packages: int = RUNTIME_SCENE_RETENTION
             deleted_scene_ids=deleted_scene_ids,
         )
 
-    return {
+    result = {
         "retentionLimit": retention_limit,
         "deletedCount": len(deleted_scene_ids),
         "keptCount": len(items) - len(deleted_scene_ids),
         "protectedCount": len(protected_items),
         "deletedSceneIds": deleted_scene_ids,
     }
+    if stopped:
+        result["stopped"] = True
+    return result
 
 
 def _get_runtime_scene_prompt_index_cache(
