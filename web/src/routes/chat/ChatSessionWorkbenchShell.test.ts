@@ -38,5 +38,14 @@ describe("ChatSessionWorkbenchShell geometry host", () => {
 
     expect(layout).toContain("CHAT_WORKBENCH_LAYOUT_ID");
     expect(layout).toContain("setChatPanelWidths");
+    expect(layout).toContain("|| !indexRailEnabled");
+    expect(layout).toContain("styles.centerPaneDocked");
+    expect(layout).toContain("styles.centerPaneOverlay");
+
+    const styles = readFileSync(resolve(chatDir, "../ChatCodingRoute.styles.ts"), "utf8");
+    const centerPaneBlock = styles.slice(styles.indexOf("centerPane:"), styles.indexOf("centerPaneDocked:"));
+    expect(centerPaneBlock).not.toContain("[grid-column:3]");
+    expect(styles).toContain("centerPaneDocked [grid-column:3] [grid-row:1]");
+    expect(styles).toContain("centerPaneOverlay [grid-column:1] [grid-row:1]");
   });
 });
