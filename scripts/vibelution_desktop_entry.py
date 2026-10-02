@@ -2084,6 +2084,19 @@ def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]
     return payload
 
 
+def _prebuild_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import run_desktop_shell_prebuild
+
+    payload = run_desktop_shell_prebuild(_workspace_root(args))
+    _append_log(
+        "desktop_entry_python.desktop_shell.prebuilt",
+        ok=bool(payload.get("ok")),
+        skipped=str(payload.get("skipped") or ""),
+        reason=str(payload.get("reason") or ""),
+    )
+    return payload
+
+
 def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
     from core.launcher.desktop_shell import launch_desktop_shell
 
@@ -2288,6 +2301,7 @@ def main(argv: list[str] | None = None) -> int:
         "unpackaged-shell-status",
         "schedule-desktop-shell-refresh",
         "refresh-desktop-shell",
+        "prebuild-desktop-shell",
         "launch-desktop-shell",
         "ensure-latest-launcher",
         "ensure-frontend-build",
@@ -2379,6 +2393,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print("Desktop shell refreshed")
+        elif action == "prebuild-desktop-shell":
+            payload = _prebuild_desktop_shell_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(
+                    f"Desktop shell prebuild ok={payload.get('ok')} "
+                    f"skipped={payload.get('skipped') or ''} reason={payload.get('reason') or ''}"
+                )
         elif action == "launch-desktop-shell":
             payload = _launch_desktop_shell_bridge(args)
             settlement = payload.get("lifecycleSettlement") or {}
