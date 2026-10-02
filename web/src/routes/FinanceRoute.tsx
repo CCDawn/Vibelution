@@ -1,68 +1,84 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 
+import { createFinancialAssistant, listFinancialAssistants } from "../api/financialAssistant";
 import { VButton, VDenseOpsPage, VStateSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
+import { ChatCodingRoute } from "./ChatCodingRoute";
+import { planFinancialAssistantEntry } from "./finance/financialAssistantEntry";
 import styles from "./FinanceRoute.styles";
-import { useOpenFinancialAssistantChat } from "./finance/useOpenFinancialAssistantChat";
-
-function entryErrorFromState(state: unknown) {
-  if (!state || typeof state !== "object") {
-    return "";
-  }
-  const message = (state as { financialEntryError?: unknown }).financialEntryError;
-  return typeof message === "string" ? message : "";
-}
 
 export function FinanceRoute() {
-  const { lang } = useShellI18n();
   const location = useLocation();
-  const presetError = entryErrorFromState(location.state);
-  const { open, cancel } = useOpenFinancialAssistantChat();
-  const [failure, setFailure] = useState(presetError);
+  const sessionFromUrl = new URLSearchParams(location.search).get("session") || "";
+  if (sessionFromUrl) {
+    return <ChatCodingRoute />;
+  }
+  return <FinanceEntryGate />;
+}
+
+function FinanceEntryGate() {
+  const { lang } = useShellI18n();
   const zh = lang === "zh";
+  const [sessionId, setSessionId] = useState("");
+  const [failure, setFailure] = useState("");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (presetError) {
-      return undefined;
-    }
     let active = true;
-    void open({ replace: true }).then((result) => {
-      if (active && !result.ok && "message" in result) {
-        setFailure(result.message);
+    void (async () => {
+      try {
+        const rows = await listFinancialAssistants();
+        if (!active) {
+          return;
+        }
+        const plan = planFinancialAssistantEntry(rows, lang);
+        if (plan.kind === "blocked") {
+          setFailure(plan.message);
+          return;
+        }
+        const nextId = plan.kind === "open"
+          ? plan.sessionId
+          : (await createFinancialAssistant()).assistant.directSessionId;
+        if (!active) {
+          return;
+        }
+        if (!nextId) {
+          setFailure(zh ? "会话还没准备好，请到 Agent 管理里查看。" : "The chat is not ready. Check Agent management.");
+          return;
+        }
+        setSessionId(nextId);
+      } catch (error) {
+        if (active) {
+          setFailure(error instanceof Error ? error.message : (zh ? "打开失败，请重试。" : "Could not open the chat. Retry."));
+        }
       }
-    });
+    })();
     return () => {
       active = false;
-      cancel();
     };
-  }, [cancel, open, presetError]);
-  const retry = () => {
-    setFailure("");
-    void open({ replace: true }).then((result) => {
-      if (!result.ok && "message" in result) {
-        setFailure(result.message);
-      }
-    });
-  };
+  }, [attempt, lang, zh]);
 
+  if (sessionId) {
+    return <Navigate to={`/finance?session=${encodeURIComponent(sessionId)}`} replace />;
+  }
   return (
     <VDenseOpsPage
       ariaLabel={zh ? "炒股智能体" : "Investment assistant"}
       title={zh ? "炒股智能体" : "Investment assistant"}
-      meta={zh ? "正在打开对话" : "Opening chat"}
+      meta={failure ? (zh ? "还没打开" : "Not opened") : (zh ? "正在打开这个助手" : "Opening this assistant")}
       bodyClassName={styles.body}
     >
-      <div className={styles.sections} data-vui-domain-recipe="financial-assistant-entry">
+      <div data-vui-domain-recipe="financial-assistant-entry">
         {failure ? (
           <VStateSurface
-            title={zh ? "还没打开对话" : "Chat did not open"}
+            title={zh ? "还没打开这个助手" : "This assistant did not open"}
             tone="error"
-            actions={<VButton onPress={retry}>{zh ? "重试" : "Retry"}</VButton>}
+            actions={<VButton onPress={() => { setFailure(""); setAttempt((current) => current + 1); }}>{zh ? "重试" : "Retry"}</VButton>}
           >
             {failure}
           </VStateSurface>
         ) : (
-          <VStateSurface title={zh ? "正在打开对话" : "Opening chat"} tone="loading" busy />
+          <VStateSurface title={zh ? "正在打开这个助手" : "Opening this assistant"} tone="loading" busy />
         )}
       </div>
     </VDenseOpsPage>

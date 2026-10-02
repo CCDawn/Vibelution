@@ -145,7 +145,6 @@ import { serializeChatRouteSelection } from "../routes/chat/chatSelectionProject
 import { useChatRouteSelection } from "../routes/chat/useChatRouteSelection";
 import { CompanionDesktopAttention } from "../routes/companions/CompanionDesktopAttention";
 import { SpecialistAgentMenu } from "./SpecialistAgentMenu";
-import { useOpenFinancialAssistantChat } from "../routes/finance/useOpenFinancialAssistantChat";
 
 const LazyAppShellSettingsMenu = lazy(() =>
   import("./AppShellSettingsMenu")
@@ -1041,15 +1040,6 @@ export function AppShell() {
   const location = useLocation();
   const chatRoute = useChatRouteSelection();
   const navigate = useNavigate();
-  const { open: openFinancialAssistantChat } = useOpenFinancialAssistantChat();
-  const openFinancialAssistantFromMenu = useCallback(() => {
-    void openFinancialAssistantChat({ replace: false }).then((result) => {
-      if (result.ok || !("message" in result)) {
-        return;
-      }
-      navigate("/finance", { state: { financialEntryError: result.message } });
-    });
-  }, [navigate, openFinancialAssistantChat]);
   const navigationType = useNavigationType();
   const { request: requestLifecycle } = useWorkbenchLifecycleActions("app_shell");
   const [shutdownOpen, setShutdownOpen] = useState(false);
@@ -1609,6 +1599,13 @@ export function AppShell() {
       navigate(to);
     }
   }, [emitBrowserTelemetry, navigate]);
+
+  const openFinancialAssistantFromMenu = useCallback(() => {
+    if (routerLocationRef.current.pathname === "/finance") {
+      return;
+    }
+    navigatePrimaryNav("/finance");
+  }, [navigatePrimaryNav]);
 
   const handlePrimaryNavClick = useCallback(
     (event: ReactMouseEvent<HTMLAnchorElement>, to: string) => {

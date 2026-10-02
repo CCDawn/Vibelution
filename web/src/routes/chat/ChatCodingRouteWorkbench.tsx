@@ -895,6 +895,7 @@ export function ChatCodingRouteWorkbench() {
     )) ?? null;
   }, [companionMode, companionsQuery.data, requestedCompanionId, requestedSessionId]);
   const verifiedCompanionMode = Boolean(activeCompanion);
+  const financeSurface = location.pathname === "/finance";
   const companionTransportAgentId = activeCompanion?.agentId;
   const companionRailState: CompanionRailState = companionsQuery.isPending && !companionsQuery.data
     ? "loading"
@@ -3780,7 +3781,7 @@ export function ChatCodingRouteWorkbench() {
       />
       ) : null}
       leftResizeHandle={
-      responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
+      financeSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
         side="left"
         collapsed={conversationIndexCollapsed}
         separatorLabel={t("resizeLeftPanel")}
@@ -3818,12 +3819,12 @@ export function ChatCodingRouteWorkbench() {
             chatReturnLabel={chatReturnLabel}
             groupPanelActive={groupPanelActive}
             projectBusActive={projectBusActive}
-            showSessionTabs={!verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
-            showAgentFallbackTab={!verifiedCompanionMode}
+            showSessionTabs={!financeSurface && !verifiedCompanionMode && Boolean(selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0)}
+            showAgentFallbackTab={!financeSurface && !verifiedCompanionMode}
             companionHeader={verifiedCompanionMode && activeCompanion ? (
               <CompanionConversationHeader companion={activeCompanion} lang={lang} />
             ) : null}
-            conversationIndexControl={!verifiedCompanionMode && responsiveLayout.leftVisible && conversationIndexCollapsed ? (
+            conversationIndexControl={!financeSurface && !verifiedCompanionMode && responsiveLayout.leftVisible && conversationIndexCollapsed ? (
               <VIconButton
                 tooltip=""
                 id="chat-conversation-index-toggle"
@@ -4068,7 +4069,7 @@ export function ChatCodingRouteWorkbench() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       /> : null
       }
-      conversationIndex={verifiedCompanionMode ? (
+      conversationIndex={financeSurface ? null : verifiedCompanionMode ? (
       <CompanionPersonRail
         className={conversationIndexPaneClassName}
         collapsed={conversationIndexCollapsed}

@@ -2,14 +2,13 @@
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFinancialAssistant, listFinancialAssistants, type FinancialAssistant } from "../api/financialAssistant";
 import { FinanceRoute } from "./FinanceRoute";
 
 vi.mock("../api/financialAssistant", () => ({ createFinancialAssistant: vi.fn(), listFinancialAssistants: vi.fn() }));
-const { openSession } = vi.hoisted(() => ({ openSession: vi.fn() }));
-vi.mock("./chat/useChatRouteSelection", () => ({ useChatRouteSelection: () => ({ openSession }) }));
+vi.mock("./ChatCodingRoute", () => ({ ChatCodingRoute: () => <div>finance-workspace</div> }));
 vi.mock("../i18n/useShellI18n", () => ({ useShellI18n: () => ({ lang: "zh" }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement; let root: Root; let client: QueryClient;
@@ -20,6 +19,10 @@ const row: FinancialAssistant = {
   newsDelegationStatus: "disabled", marketDataStatus: "not_connected", privateLedgerStatus: "not_implemented",
   tradingEnabled: false,
 };
+function LocationEcho() {
+  const location = useLocation();
+  return <output>{location.pathname}{location.search}</output>;
+}
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -27,42 +30,52 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); vi.clearAllMocks(); });
-async function render(state?: unknown) {
+async function render(path = "/finance") {
   await act(async () => root.render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[{ pathname: "/finance", state }]}><FinanceRoute /></MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>
+        <LocationEcho />
+        <Routes><Route path="/finance" element={<FinanceRoute />} /></Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   ));
   await settle();
 }
-async function settle() { await act(async () => new Promise((resolve) => setTimeout(resolve, 15))); }
+async function settle() { await act(async () => new Promise((resolve) => setTimeout(resolve, 20))); }
 function button(label: string) { return [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label)); }
 
-describe("financial assistant entry", () => {
-  it("opens a ready chat without creating another assistant", async () => {
+describe("financial assistant page", () => {
+  it("opens the assistant workspace on its own page", async () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([row]);
     await render();
     expect(createFinancialAssistant).not.toHaveBeenCalled();
-    expect(openSession).toHaveBeenCalledWith("native-session", expect.objectContaining({ replace: true, telemetrySource: "financial_assistant_entry" }));
-    expect(container.textContent).not.toContain("当前能力");
+    expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
+    expect(container.textContent).toContain("finance-workspace");
+    expect(container.textContent).not.toContain("Conversation Agents");
   });
 
-  it("creates the assistant on first open and then enters its chat", async () => {
+  it("creates the assistant once, then stays on this page", async () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([]);
     vi.mocked(createFinancialAssistant).mockResolvedValue({ created: true, assistant: row });
     await render();
     expect(createFinancialAssistant).toHaveBeenCalledTimes(1);
-    expect(openSession).toHaveBeenCalledWith("native-session", expect.objectContaining({ replace: true }));
+    expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
+    expect(container.textContent).toContain("finance-workspace");
   });
 
-  it("does not open a chat after the page has gone", async () => {
+  it("uses the session already on this page without creating another assistant", async () => {
+    await render("/finance?session=native-session");
+    expect(listFinancialAssistants).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("finance-workspace");
+  });
+
+  it("does not leave this page after it unmounts", async () => {
     let resolve!: (value: FinancialAssistant[]) => void;
     vi.mocked(listFinancialAssistants).mockReturnValue(new Promise((done) => { resolve = done; }));
     await render();
     await act(async () => root.render(<div>another route</div>));
     await act(async () => resolve([row]));
     await settle();
-    expect(openSession).not.toHaveBeenCalled();
     expect(container.textContent).toBe("another route");
   });
 
@@ -70,17 +83,16 @@ describe("financial assistant entry", () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, status: "archived", directSessionId: "", setupStatus: "ready" }]);
     await render();
     expect(createFinancialAssistant).not.toHaveBeenCalled();
-    expect(openSession).not.toHaveBeenCalled();
     expect(container.textContent).toContain("已归档");
+    expect(container.textContent).not.toContain("finance-workspace");
   });
 
-  it("shows a menu failure and retries into the chat", async () => {
-    vi.mocked(listFinancialAssistants).mockResolvedValue([row]);
-    await render({ financialEntryError: "打开失败" });
-    expect(listFinancialAssistants).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("打开失败");
+  it("retries a failed open into the workspace", async () => {
+    vi.mocked(listFinancialAssistants).mockRejectedValueOnce(new Error("offline")).mockResolvedValue([row]);
+    await render();
+    expect(container.textContent).toContain("offline");
     await act(async () => button("重试")!.click());
     await settle();
-    expect(openSession).toHaveBeenCalledWith("native-session", expect.objectContaining({ replace: true }));
+    expect(container.textContent).toContain("finance-workspace");
   });
 });

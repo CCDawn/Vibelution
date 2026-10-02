@@ -10,6 +10,11 @@ import {
   type ChatRouteSelection,
 } from "./chatSelectionProjection";
 
+/** The stock assistant keeps its own page. Ordinary chat stays on /chat. */
+export function chatSelectionPathname(pathname: string) {
+  return pathname === "/finance" ? "/finance" : "/chat";
+}
+
 export type ChatRouteNavigateOptions = {
   /** Replace the current history entry instead of pushing a new one. */
   replace?: boolean;
@@ -86,9 +91,9 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       }
       const encoded = params.toString();
       const search = encoded ? `?${encoded}` : "";
-      navigate({ pathname: "/chat", search }, { replace: options?.replace ?? false });
+      navigate({ pathname: chatSelectionPathname(location.pathname), search }, { replace: options?.replace ?? false });
     },
-    [location.search, navigate],
+    [location.pathname, location.search, navigate],
   );
 
   const openSession = useCallback(
@@ -267,10 +272,10 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
         });
       }
       const search = serializeChatRouteSelection(location.search, next);
-      navigate({ pathname: "/chat", search }, { replace: true });
+      navigate({ pathname: chatSelectionPathname(location.pathname), search }, { replace: true });
       return true;
     },
-    [location.search, navigate],
+    [location.pathname, location.search, navigate],
   );
 
   return {

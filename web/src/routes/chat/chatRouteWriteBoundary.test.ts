@@ -29,7 +29,7 @@ function navigatesToChatSelection(source: string): string[] {
 describe("Chat route write boundary (single authority)", () => {
   it("useChatRouteSelection is the only module allowed to build session/room route targets", () => {
     const writerSource = readSource(useChatRouteSelectionSourcePath);
-    expect(writerSource).toContain('pathname: "/chat"');
+    expect(writerSource).toContain('pathname === "/finance" ? "/finance" : "/chat"');
     expect(writerSource).toContain("serializeChatRouteSelection");
 
     for (const [path, source] of [
