@@ -195,12 +195,26 @@ def normalize_instance_key(project_root: str | os.PathLike[str]) -> str:
     return os.path.normcase(str(_resolve_project_root(project_root)))
 
 
-def instance_id_for_project(project_root: str | os.PathLike[str]) -> str:
+def slot_id_for_key(slot_key: str) -> str:
+    """FNV-1a32 over the already-normalized slot key.
+
+    Single cross-language reference implementation: TypeScript's twin lives in
+    ``desktop/electron/src/lifecycle/projectStoragePaths.ts`` (instanceIdForProject)
+    and is pinned to this output by the shared expected-vector tables in
+    ``tests/test_slot_identity.py`` and
+    ``desktop/electron/tests/projectStoragePaths.test.ts``. Never change the
+    output for existing keys: on-disk slot directories are addressed by it.
+    """
+
     digest = _FNV32_OFFSET
-    for byte in normalize_instance_key(project_root).encode("utf-8"):
+    for byte in str(slot_key or "").encode("utf-8"):
         digest ^= byte
         digest = (digest * _FNV32_PRIME) & 0xFFFFFFFF
     return f"{digest:08x}"
+
+
+def instance_id_for_project(project_root: str | os.PathLike[str]) -> str:
+    return slot_id_for_key(normalize_instance_key(project_root))
 
 
 def resolve_project_storage_paths(
@@ -735,6 +749,7 @@ __all__ = [
     "ensure_project_storage",
     "instance_id_for_project",
     "load_project_identity",
+    "slot_id_for_key",
     "legacy_project_state_present",
     "legacy_project_storage_paths",
     "normalize_instance_key",
