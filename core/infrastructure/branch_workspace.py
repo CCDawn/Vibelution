@@ -259,7 +259,11 @@ def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
             checked_out_branches.add(branch)
         head = _short_sha(str(entry.get("HEAD") or ""))
         kind = _instance_kind(role)
-        instance_id = _instance_id(kind, slug=slug or path.name, branch=branch)
+        # Pool-external checkouts (e.g. nested `<slug>/<repo>` worktrees under
+        # .codex) share leaf dir names across siblings, so the id fallback must
+        # be the normalized path — a bare path.name collides and merges
+        # unrelated branches into one registry key.
+        instance_id = _instance_id(kind, slug=slug or _norm(path), branch=branch)
         dirty = dirty_by_path.get(_norm(path), False)
         observation = _runtime_observation(path)
         item = _instance_payload(
