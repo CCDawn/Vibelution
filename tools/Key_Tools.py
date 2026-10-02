@@ -1157,11 +1157,12 @@ def _build_key_tools() -> List[BaseTool]:
         """
         【日志第一眼】不传 log_path 时，返回与 scripts/agent_log_context.py 相同的 JSON。
 
-        先读 firstRead 的四段：conclusion、evidencePaths、nextStep、doNotDo，然后停止。
+        先读 firstRead 的 conclusion、evidencePaths、nextStep、doNotDo，然后停止。
+        conclusion 里已有现场摘要、重复次数和首要原因；summary、repeatCount、primaryReason 是这三样原值。
         只有 nextStep 点名的 evidencePaths.absolutePath 才可以再查。带 warning 的文件不要整篇读。
         要看某一轮会话时传 session_id / turn_id，之后只读 session.diagnosis.nextMinimalAction。
         传 log_path 才是深读；可深读的文件是 firstRead.evidencePaths 里已经点名的路径。
-        本工具不执行 shell，不写文件，不返回整段日志正文。
+        本工具不执行 shell，不写文件，不返回整段日志正文，也不返回整份证据清单。
 
         Args:
             query: 深读时的可选关键词；不传 log_path 时忽略

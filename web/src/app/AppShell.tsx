@@ -87,7 +87,7 @@ import {
   type SystemStatusTone,
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
-import { resolvePollingInterval, useStartupWarmup } from "./pollingPolicy";
+import { resolvePollingInterval, useBootStaggeredPollReady, useStartupWarmup } from "./pollingPolicy";
 import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
 import {
   isModifiedPrimaryNavClick,
@@ -1111,6 +1111,8 @@ export function AppShell() {
   );
   const shellStartupWarmupActive = useStartupWarmup(shellStartupDataReady);
   const shellPollingVisible = frontendVisible || shellStartupWarmupActive;
+  // Chrome-only polls wait out the boot volley (see useBootStaggeredPollReady).
+  const shellDeferredPollReady = useBootStaggeredPollReady(shellStartupDataReady);
   const lifecycleControlActive = shutdownOpen || shutdownRequested || restartRequested;
   const runtimeRefetchInterval = resolvePollingInterval(
     shellPollingVisible,
@@ -1176,7 +1178,7 @@ export function AppShell() {
   const codeFreshnessQuery = useQuery<CodeFreshness>({
     queryKey: queryKeys.codeFreshness(),
     queryFn: ({ signal }) => fetchJson<CodeFreshness>("/api/runtime/code-freshness", { signal }),
-    enabled: shellStartupDataReady,
+    enabled: shellDeferredPollReady,
     refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
     refetchIntervalInBackground: false,
     staleTime: 30_000,
@@ -1187,10 +1189,12 @@ export function AppShell() {
   // Both share existing endpoints with their owning pages and poll gently —
   // the git status cache is shared with /git, the bus badge reads a single
   // latest event against a localStorage cursor (see agentBroadcastBadge).
+  // Staggered behind shellDeferredPollReady: these badges ride out the boot
+  // request volley instead of racing the backend's startup warmup tasks.
   const shellGitStatusQuery = useQuery({
     queryKey: queryKeys.gitStatus(),
     queryFn: ({ signal }) => fetchGitStatus({ limit: 500, signal }),
-    enabled: shellStartupDataReady,
+    enabled: shellDeferredPollReady,
     refetchInterval: resolvePollingInterval(shellPollingVisible, 120_000),
     refetchIntervalInBackground: false,
     staleTime: 30_000,
@@ -1199,7 +1203,7 @@ export function AppShell() {
   const agentBroadcastLatestQuery = useQuery({
     queryKey: queryKeys.projectAgentBusLatestEvent(),
     queryFn: ({ signal }) => listProjectAgentBusTimeline(1, { signal }),
-    enabled: shellStartupDataReady,
+    enabled: shellDeferredPollReady,
     refetchInterval: resolvePollingInterval(shellPollingVisible, 60_000),
     refetchIntervalInBackground: false,
     staleTime: 30_000,

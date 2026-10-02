@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  SHELL_DEFERRED_POLL_BOOT_DELAY_MS,
   STARTUP_BACKGROUND_WARMUP_MS,
+  isBootStaggeredPollReady,
   isDocumentVisible,
   isStartupWarmupActive,
   resolveLauncherStatusPollingInterval,
@@ -38,6 +40,20 @@ describe("pollingPolicy", () => {
     expect(isStartupWarmupActive(false, STARTUP_BACKGROUND_WARMUP_MS)).toBe(false);
     expect(isStartupWarmupActive(true, 0)).toBe(false);
     expect(isStartupWarmupActive(false, 60_000, 0)).toBe(true);
+  });
+
+  it("holds boot-staggered polls back until the shell has been ready for the delay", () => {
+    expect(isBootStaggeredPollReady(false, 0)).toBe(false);
+    expect(isBootStaggeredPollReady(false, 60_000)).toBe(false);
+    expect(isBootStaggeredPollReady(true, 0)).toBe(false);
+    expect(isBootStaggeredPollReady(true, SHELL_DEFERRED_POLL_BOOT_DELAY_MS - 1)).toBe(false);
+    expect(isBootStaggeredPollReady(true, SHELL_DEFERRED_POLL_BOOT_DELAY_MS)).toBe(true);
+    expect(isBootStaggeredPollReady(true, 60_000)).toBe(true);
+  });
+
+  it("lets a zero boot-stagger delay disable the latch entirely", () => {
+    expect(isBootStaggeredPollReady(true, 0, 0)).toBe(true);
+    expect(isBootStaggeredPollReady(false, 0, 0)).toBe(false);
   });
 
   it("backs off Launcher status polling after the control plane settles", () => {
