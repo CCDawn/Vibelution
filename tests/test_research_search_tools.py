@@ -282,6 +282,36 @@ def test_cjk_news_search_keeps_chinese_sources(monkeypatch):
     assert "reuters.com" not in captured["allowed_domains"]
 
 
+def test_google_news_rss_follows_redirect_and_keeps_chinese_items(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_http_get_text(url, *, params=None, headers=None, follow_redirects=False):
+        seen["url"] = url
+        seen["follow_redirects"] = follow_redirects
+        return """<?xml version="1.0" encoding="UTF-8"?>
+<rss><channel>
+<item>
+<title>贵州茅台，午后翻红！ - 证券时报网</title>
+<link>https://news.google.com/rss/articles/example</link>
+<description>贵州茅台午后股价翻红。</description>
+<pubDate>Fri, 03 Oct 2026 00:00:00 GMT</pubDate>
+</item>
+</channel></rss>"""
+
+    monkeypatch.setattr(research_search_backends, "_http_get_text", fake_http_get_text)
+    results, event = research_search_backends.google_news_rss_search(
+        "贵州茅台 2026",
+        max_results=2,
+        locale="zh-CN",
+    )
+    assert seen["follow_redirects"] is True
+    assert "hl=zh-CN" in str(seen["url"])
+    assert "ceid=CN%3Azh-Hans" in str(seen["url"]) or "ceid=CN:zh-Hans" in str(seen["url"])
+    assert event["status"] == "ok"
+    assert results[0]["title"].startswith("贵州茅台")
+    assert results[0]["url"].startswith("https://news.google.com/")
+
+
 def test_paper_search_accepts_integer_year_hint(monkeypatch):
     # 真实故障：模型传 year_hint=1984（int）被签名校验拒绝后弃用整条论文检索路径；
     # 实现入口必须先把 int 归一成字符串再拼查询。
