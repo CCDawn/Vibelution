@@ -226,7 +226,8 @@ def test_update_language_remains_the_legitimate_ui_language_writer(monkeypatch):
     monkeypatch.setattr(
         config_service,
         "save_public_config",
-        lambda value: persisted.update(value=copy.deepcopy(value)),
+        # update_language 经 ui_language_override 显式声明语言写入。
+        lambda value, **_kwargs: persisted.update(value=copy.deepcopy(value)),
     )
     monkeypatch.setattr(config_service, "_record_config_scene_event", lambda *_args, **_kwargs: None)
 

@@ -291,6 +291,39 @@ def test_stop_does_not_kill_unverified_spawn_pid(registry_path, tmp_path, monkey
     assert reaped == []
 
 
+def test_stop_skips_kill_for_dead_spawn_pid_and_closes_registry(registry_path, tmp_path, monkeypatch):
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance(
+        "worktree:task",
+        port=8004,
+        controlPort=8769,
+        projectRoot=str(worktree),
+        status="starting",
+        generation=2,
+        spawnPid=424242,
+    )
+    reaped: list[int] = []
+    monkeypatch.setattr(lifecycle.registry, "inspect_process_identity", lambda _expected: {"status": "dead"})
+
+    def fake_spawn(root, action, backend_port, control_port, **kwargs):
+        return {"returncode": 0}
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree), port=8004, controlPort=8769),
+        "stop",
+        runner=fake_spawn,
+        terminate_pid=lambda pid: reaped.append(pid) or {"supported": True, "rootPid": pid},
+    )
+
+    # A verified-dead spawn must never be "killed"; the stop stays accepted and
+    # only settles the registry record (fail-safe idempotent close).
+    assert response["accepted"] is True
+    assert reaped == []
+    assert registry.get_instance("worktree:task")["status"] == "closed"
+    assert registry.get_instance("worktree:task")["spawnPid"] == 0
+
+
 def test_launcher_script_resolves_workspace_env_before_sys_path():
     text = Path(__file__).resolve().parents[1].joinpath("scripts", "vibelution_launcher.py").read_text(encoding="utf-8")
     assert text.index("VIBELUTION_WORKSPACE_ROOT") < text.index("sys.path.insert")

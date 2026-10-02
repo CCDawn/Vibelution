@@ -535,8 +535,8 @@ describe("AgentsRoute layout contract", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
   it("loads the read-only Agent config workspace endpoint", () => {
-    expect(routeSource).toContain("fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false })");
-    expect(routeSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ includeArchived: true })");
+    expect(routeSource).toContain("fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false, signal })");
+    expect(routeSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ includeArchived: true, signal })");
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
     expect(routeSource).toContain("const workspace = resolveAgentWorkspaceSource({");

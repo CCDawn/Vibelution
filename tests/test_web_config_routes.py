@@ -4457,7 +4457,8 @@ def test_updating_language_refreshes_config_summary(monkeypatch):
     def fake_load_public_config():
         return copy.deepcopy(public_config)
 
-    def fake_save_public_config(updated_public_config):
+    def fake_save_public_config(updated_public_config, **_kwargs):
+        # update_language 走显式 override 落盘，替身需接受 ui_language_override。
         public_config.clear()
         public_config.update(copy.deepcopy(updated_public_config))
 

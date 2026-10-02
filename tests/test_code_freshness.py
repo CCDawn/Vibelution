@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -618,3 +619,225 @@ def test_runtime_route_passes_pinned_serving_metadata_fallback(tmp_path: Path, m
     assert fallback["runningHead"] == "oldhead00000"
     assert fallback["dirtyTreeDigest"] == pinned["backend"]["dirtyTreeDigest"]
     assert captured["project_root"] == str(runtime_routes.PROJECT_ROOT)
+
+
+# --- hot-path verdict cache (HEAD-file observation, no git process) ---
+
+def _write_git_dir(tmp_path: Path, *, head: str, symref: str = "refs/heads/main") -> Path:
+    """Fabricate a readable .git layout without spawning git (pure files)."""
+    git_dir = tmp_path / ".git"
+    ref_path = git_dir / symref
+    ref_path.parent.mkdir(parents=True, exist_ok=True)
+    (git_dir / "HEAD").write_text(f"ref: {symref}\n", encoding="utf-8")
+    ref_path.write_text(f"{head}\n", encoding="utf-8")
+    return git_dir
+
+
+def _freshness_git_fake(holder: dict, calls: list):
+    def fake_git(root, args):
+        calls.append(list(args))
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return holder["head"]
+        if args[:2] == ["branch", "--show-current"]:
+            return "main"
+        if args[:3] == ["rev-list", "--count", f"{holder.get('running', '')}..{holder['head']}"]:
+            return str(holder.get("behindCount", ""))
+        return ""
+
+    return fake_git
+
+
+def _current_frontend_mock(built_from: str):
+    return lambda root: {
+        "current": True,
+        "reason": "frontend build is current",
+        "provenance": {
+            "builtFromCommit": built_from,
+            "frontendTree": f"{built_from}-tree",
+            "buildKey": "key",
+        },
+    }
+
+
+def test_resolve_code_freshness_fast_path_replays_cache_without_git(tmp_path: Path, monkeypatch) -> None:
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="head00000000")
+    _write_git_dir(tmp_path, head="head00000000")
+    holder = {"head": "head00000000"}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(code_freshness, "_capture_git_text", _freshness_git_fake(holder, calls))
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("head00000000"))
+
+    first = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert first["verdict"] == "current"
+    assert calls, "first call must take the full path"
+    calls_after_first = len(calls)
+
+    second = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert len(calls) == calls_after_first, "unchanged HEAD+fingerprint must replay the cache with zero git calls"
+    assert second == first
+
+    # schema must stay identically shaped on the replayed payload
+    assert set(second) == {"schemaVersion", "verdict", "backend", "frontend"}
+    assert set(second["backend"]) == {"available", "behind", "behindCount", "reason", "source", "running", "disk"}
+    assert set(second["backend"]["running"]) == {
+        "head",
+        "branch",
+        "startedAt",
+        "dirty",
+        "dirtyTreeDigest",
+        "pid",
+        "createTime",
+        "executable",
+    }
+    assert set(second["frontend"]) == {
+        "available",
+        "stale",
+        "reason",
+        "builtFromCommit",
+        "frontendTree",
+        "buildKey",
+        "servingBuildKey",
+        "servingRelease",
+        "activeRelease",
+    }
+
+    # deep-copy isolation: a caller mutating the returned payload must not
+    # corrupt the shared cache for the next poll
+    second["verdict"] = "tampered"
+    second["backend"]["disk"]["head"] = "tampered"
+    third = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert third == first
+
+
+def test_resolve_code_freshness_head_change_reruns_full_path_and_refreshes_cache(tmp_path: Path, monkeypatch) -> None:
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="oldhead00000")
+    git_dir = _write_git_dir(tmp_path, head="oldhead00000")
+    holder = {"head": "oldhead00000", "running": "oldhead00000", "behindCount": 2}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(code_freshness, "_capture_git_text", _freshness_git_fake(holder, calls))
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("oldhead00000"))
+
+    first = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert first["verdict"] == "current"
+    calls_after_first = len(calls)
+
+    # HEAD moves on disk: the file observation must notice without any help.
+    holder["head"] = "newhead00000"
+    (git_dir / "refs" / "heads" / "main").write_text("newhead00000\n", encoding="utf-8")
+    second = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert len(calls) > calls_after_first
+    assert second["verdict"] == "backend_behind"
+    assert second["backend"]["behindCount"] == 2
+    assert second["backend"]["disk"]["head"] == "newhead00000"
+
+    # The refreshed behind verdict itself is cached: further polls stay free.
+    calls_after_second = len(calls)
+    third = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert len(calls) == calls_after_second
+    assert third == second
+
+
+def test_resolve_code_freshness_fingerprint_change_reruns_full_path(tmp_path: Path, monkeypatch) -> None:
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="head00000000")
+    _write_git_dir(tmp_path, head="head00000000")
+    holder = {"head": "head00000000"}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(code_freshness, "_capture_git_text", _freshness_git_fake(holder, calls))
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("head00000000"))
+
+    first = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert first["verdict"] == "current"
+    calls_after_first = len(calls)
+
+    # A rewritten snapshot (new running branch + new file stamps) must
+    # invalidate the cache even though disk HEAD did not move.
+    _write_snapshot(tmp_path, head="head00000000", branch="feature", started_at="2026-10-02T00:00:00+00:00")
+    second = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert len(calls) > calls_after_first
+    assert second["backend"]["running"]["branch"] == "feature"
+
+
+def test_resolve_code_freshness_ttl_expiry_rereads_head_file(tmp_path: Path, monkeypatch) -> None:
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="head00000000")
+    _write_git_dir(tmp_path, head="head00000000")
+    holder = {"head": "head00000000"}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(code_freshness, "_capture_git_text", _freshness_git_fake(holder, calls))
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("head00000000"))
+
+    code_freshness.resolve_code_freshness(project_root=tmp_path)
+    calls_after_first = len(calls)
+
+    real_monotonic = code_freshness._monotonic
+    shift = {"delta": 0.0}
+
+    def shifted_monotonic() -> float:
+        return real_monotonic() + shift["delta"]
+
+    monkeypatch.setattr(code_freshness, "_monotonic", shifted_monotonic)
+    shift["delta"] = code_freshness.FRESHNESS_FAST_PATH_TTL_SECONDS + 1.0
+
+    second = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert len(calls) > calls_after_first, "TTL expiry must leave the fast path and re-read inputs"
+    assert any(args[:2] == ["rev-parse", "HEAD"] for args in calls[calls_after_first:])
+    assert second["verdict"] == "current"
+
+
+def test_backend_freshness_polling_git_calls_carry_no_optional_locks(tmp_path: Path, monkeypatch) -> None:
+    _write_snapshot(tmp_path, head="head00000000")
+    captured: list[list[str]] = []
+
+    def fake_run_git(args, *, cwd, timeout=15.0, env=None):
+        captured.append([str(part) for part in args])
+        stdout = ""
+        if args[-2:] == ["rev-parse", "HEAD"]:
+            stdout = "head00000000"
+        elif args[-2:] == ["branch", "--show-current"]:
+            stdout = "main"
+        return subprocess.CompletedProcess(args=list(args), returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(code_freshness, "run_git", fake_run_git)
+
+    result = code_freshness.resolve_backend_freshness(project_root=tmp_path)
+
+    assert result["available"] is True
+    assert captured
+    assert all(args[0] == "--no-optional-locks" for args in captured), captured
+
+
+def test_dirty_summary_keeps_last_known_value_within_throttle(tmp_path: Path, monkeypatch) -> None:
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="same-head")
+    _write_git_dir(tmp_path, head="same-head")
+    holder = {"head": "same-head"}
+    status_calls: list[list[str]] = []
+
+    def fake_git(root, args):
+        # _capture_git_text sees the raw subcommand argv (the --no-optional-locks
+        # prefix is added inside the real helper when spawning).
+        if args[:1] == ["status"]:
+            status_calls.append(list(args))
+            return " M core/web/app.py"
+        if args[:2] == ["rev-parse", "HEAD"]:
+            return holder["head"]
+        if args[:2] == ["branch", "--show-current"]:
+            return "main"
+        return ""
+
+    monkeypatch.setattr(code_freshness, "_capture_git_text", fake_git)
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("same-head"))
+
+    first = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert first["backend"]["behind"] is True  # dirty digest differs from the clean snapshot
+    assert len(status_calls) == 1
+    calls_after_first = len(status_calls)
+
+    # Same HEAD + fingerprint: the dirty walk stays throttled out of the hot
+    # path and the last known dirty value is replayed from cache.
+    second = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert len(status_calls) == calls_after_first
+    assert second == first

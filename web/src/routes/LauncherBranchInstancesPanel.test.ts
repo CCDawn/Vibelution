@@ -8,6 +8,7 @@ import {
   canStartInstance,
   canForceStopInstance,
   canStopInstance,
+  forceStopTier,
   formatAdmissionReason,
   isAdmissionBlocked,
   cleanupRiskLabels,
@@ -102,11 +103,19 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     // an endless loading state on the confirm dialog.
     expect(panelSource).toContain("cleanupConfirmMetadataFailed");
     expect(panelSource).toContain("cleanupMetadataQuery.refetch()");
-    // Stop and force-stop are row-level controls, not overflow items.
+    // Stop stays a row-level control, never an overflow item.
     expect(panelSource).toMatch(/\{showStop \? \(\s*<VButton[\s\S]{0,400}?askBatchStop\(\[item\.id\], "stop"\)/);
-    expect(panelSource).toMatch(/\{showForceStop \? \(\s*<VButton[\s\S]{0,400}?variant="danger"[\s\S]{0,400}?setForceStopId\(item\.id\)/);
+    // Force-stop is tiered by verified process liveness: the inline button
+    // renders for the danger/secondary tiers with the variant (and tooltip)
+    // keyed off the tier, while a backend-verified dead spawn leaves the row
+    // and enters the overflow menu.
+    expect(panelSource).toMatch(/\{showForceStop \? \(\s*<VButton[\s\S]{0,400}?variant=\{forceStopTierValue === "danger" \? "danger" : "secondary"\}[\s\S]{0,400}?setForceStopId\(item\.id\)/);
+    expect(panelSource).toContain('title={forceStopTierValue === "danger" ? labels.forceStopHint : labels.forceStopStaleHint}');
     expect(panelSource).not.toContain('{ id: "stop"');
-    expect(panelSource).not.toContain('{ id: "force-stop"');
+    expect(panelSource).toContain('{ id: "force-stop"');
+    // The menu route exists only for the verified-dead tier; danger/secondary
+    // rows keep their inline button and never grow an overflow entry.
+    expect(panelSource).toMatch(/forceStopMenuOnly \? \[\{ id: "force-stop"[\s\S]{0,200}?setForceStopId\(item\.id\)/);
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
@@ -424,7 +433,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStopInstance(unknownStarting, { instanceId: unknownStarting.id, operation: "start" })).toBe(true);
   });
 
-  it("keeps force-stop available for every non-current row, including stale stopping rows", () => {
+  it("tiers force-stop presentation by verified process liveness", () => {
     const stale = instance({
       alive: false,
       runtime: {
@@ -438,10 +447,39 @@ describe("LauncherBranchInstancesPanel contracts", () => {
         },
       },
     });
+    const stoppedUnverified = instance({
+      alive: false,
+      runtime: { ...instance().runtime, lifecycleState: "closed" },
+    });
+    const verifiedDead = instance({
+      alive: false,
+      runtime: { ...instance().runtime, lifecycleState: "closed", spawnIdentityStatus: "dead" },
+    });
+    const verifiedMatch = instance({
+      alive: false,
+      runtime: { ...instance().runtime, lifecycleState: "closed", spawnIdentityStatus: "match" },
+    });
+    const suspiciousMismatch = instance({
+      alive: false,
+      runtime: { ...instance().runtime, lifecycleState: "closed", spawnIdentityStatus: "mismatch" },
+    });
     const current = instance({ current: true, id: "main", kind: "main", branch: "main" });
 
+    // Reachability is unchanged: any non-current row can still reach the
+    // force-stop confirm dialog, whatever its tier.
     expect(canForceStopInstance(stale)).toBe(true);
+    expect(canForceStopInstance(stoppedUnverified)).toBe(true);
+    expect(canForceStopInstance(verifiedDead)).toBe(true);
     expect(canForceStopInstance(current)).toBe(false);
+    // Presentation tiers: live signals (runtime or a verified match) keep the
+    // red row button; a stopped row without a verified identity softens to
+    // secondary because the recorded state may be stale; a backend-verified
+    // dead spawn collapses into the overflow menu.
+    expect(forceStopTier(stale)).toBe("danger");
+    expect(forceStopTier(verifiedMatch)).toBe("danger");
+    expect(forceStopTier(stoppedUnverified)).toBe("secondary");
+    expect(forceStopTier(suspiciousMismatch)).toBe("secondary");
+    expect(forceStopTier(verifiedDead)).toBe("menu");
   });
 
   it("keeps a force-stop exit for the current/main row while its lifecycle is stuck in error", () => {

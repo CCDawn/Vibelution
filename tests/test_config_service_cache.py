@@ -150,7 +150,17 @@ def test_config_summary_result_cache_hits_within_ttl(monkeypatch, tmp_path):
 
 
 def test_update_language_invalidates_result_cache(monkeypatch, tmp_path):
-    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    # 隔离必须 patch public_config 的 CONFIG_PATH 模块属性：setenv 对
+    # public_config 的无参读写无效（CONFIG_PATH 是 import 期常量），会把
+    # update_language 的落盘打到真实 operator config——正是 ui.language
+    # 漂移事故的根因机制。保留 setenv 仅供 _warm_config_init 里动态解析
+    # env 的 ensure_global_config_initialized 建出同一个 tmp 文件。
+    from config import public_config as public_config_module
+
+    config_path = tmp_path / "config.toml"
+    public_config_module._reset_public_config_cache()
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_path)
     _warm_config_init()
     counters: dict = {}
     _count_builder(monkeypatch, "_build_workspace", counters)
@@ -162,6 +172,8 @@ def test_update_language_invalidates_result_cache(monkeypatch, tmp_path):
 
     summary = config_service.update_language("en")
     assert summary["language"] == "en"
+    # 落盘目标必须是 tmp 隔离文件：磁盘断言钉住写入路径，防止打到真实配置。
+    assert public_config_module.load_public_config(config_path)["ui"]["language"] == "en"
     # update_language 写后失效并内部重算 summary；workspace 条目也被清掉。
     assert counters == {"_build_workspace": 1, "_build_config_summary": 2}
 
@@ -170,6 +182,37 @@ def test_update_language_invalidates_result_cache(monkeypatch, tmp_path):
     fresh_summary = config_service.get_config_summary()
     assert fresh_summary["language"] == "en"
     assert counters == {"_build_workspace": 2, "_build_config_summary": 2}
+
+
+def test_update_language_override_writes_language_over_stored_value(monkeypatch, tmp_path):
+    """update_language 是合法语言写入方：显式 override 绕过落盘层保留语义。
+
+    磁盘存量 zh 时整份写会被回填回 zh（save_public_config 保留模式），
+    只有 override 声明才能把语言真正改成 en，再改回 zh 同理。
+
+    隔离用 monkeypatch CONFIG_PATH 模块属性（test_public_config_model_refs
+    同款）：setenv("VIBELUTION_CONFIG_PATH") 对 public_config 的无参读写
+    无效——默认路径是 import 期常量，env 后设不生效，会把保存打到真实
+    operator config。
+    """
+
+    from config import public_config as public_config_module
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[ui]\nlanguage = "zh"\n', encoding="utf-8")
+    public_config_module._reset_public_config_cache()
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", config_path)
+    config_service._invalidate_config_result_cache()
+
+    summary = config_service.update_language("en")
+
+    assert summary["language"] == "en"
+    assert public_config_module.load_public_config(config_path)["ui"]["language"] == "en"
+
+    summary = config_service.update_language("zh")
+
+    assert summary["language"] == "zh"
+    assert public_config_module.load_public_config(config_path)["ui"]["language"] == "zh"
 
 
 def test_catalog_sweep_write_invalidates_result_cache(monkeypatch, tmp_path):
