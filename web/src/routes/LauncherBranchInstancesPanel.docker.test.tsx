@@ -30,6 +30,7 @@ function instance(overrides: {
   state?: LauncherBranchInstance["runtime"]["lifecycleState"];
   alive?: boolean;
   windowOpen?: boolean;
+  spawnIdentityStatus?: "match" | "dead" | "mismatch" | "unknown";
 } = {}): LauncherBranchInstance {
   const id = overrides.id ?? "worktree:task";
   const branch = overrides.branch ?? "codex/task";
@@ -70,6 +71,7 @@ function instance(overrides: {
       },
       frontend: { mode: "bundled_static_dist", ready: state !== "building" },
       window: { open: windowOpen, pid: 0, title: `${branch} 台`, titleObserved: false },
+      ...(overrides.spawnIdentityStatus ? { spawnIdentityStatus: overrides.spawnIdentityStatus } : {}),
     },
     startable: true,
     startBlockReason: "",
@@ -249,14 +251,51 @@ describe("Launcher branch workspace interactions", () => {
   });
 
   it("confirms Force stop before dispatching the recovery operation", async () => {
-    const stoppedWorktree = instance({ id: "worktree:stale", branch: "codex/stale", state: "stopping", alive: false });
+    // A stopped row without a verified spawn identity is the secondary tier:
+    // the action stays on the row, softened from danger-red, with a stale-
+    // state tooltip, and still flows through the same confirm dialog.
+    const stoppedWorktree = instance({ id: "worktree:stale", branch: "codex/stale", state: "closed", alive: false });
     await renderPanel([stoppedWorktree]);
 
-    await click(button("强制停止"));
+    const forceStopAction = button("强制停止");
+    expect(forceStopAction.getAttribute("data-variant")).toBe("secondary");
+    expect(forceStopAction.getAttribute("title")).toContain("状态可能过期");
+    await click(forceStopAction);
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("普通停止无法收口时使用");
     await click(button("强制停止", document.querySelector('[role="dialog"]')!));
 
     expect(onLifecycle).toHaveBeenCalledWith(stoppedWorktree.id, "force-stop");
+    expect(onStopMany).not.toHaveBeenCalled();
+  });
+
+  it("moves a backend-verified dead row's force-stop into the overflow menu", async () => {
+    const deadWorktree = instance({
+      id: "worktree:dead",
+      branch: "codex/dead",
+      state: "closed",
+      alive: false,
+      spawnIdentityStatus: "dead",
+    });
+    await renderPanel([deadWorktree]);
+
+    // Verified dead: no inline force-stop button on the row at all.
+    expect([...host.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "强制停止")).toBe(false);
+
+    const menuTrigger = [...host.querySelectorAll("button")].find(
+      (candidate) => (candidate.getAttribute("aria-label") || "").includes("更多操作"),
+    );
+    if (!menuTrigger) throw new Error("row menu button not found");
+    await click(menuTrigger);
+    const menuItem = [...document.querySelectorAll('[role="menuitem"]')].find(
+      (item) => item.textContent?.trim() === "强制停止",
+    );
+    if (!menuItem) throw new Error("force-stop menu item not found");
+    await click(menuItem);
+
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("普通停止无法收口时使用");
+    await click(button("强制停止", document.querySelector('[role="dialog"]')!));
+
+    expect(onLifecycle).toHaveBeenCalledWith(deadWorktree.id, "force-stop");
     expect(onStopMany).not.toHaveBeenCalled();
   });
 

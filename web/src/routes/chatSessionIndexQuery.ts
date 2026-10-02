@@ -282,13 +282,15 @@ export function useSessionIndexQuery({
     queryKey: queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE, "", normalizedSort),
     initialPageParam: "",
     enabled,
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam, signal }) => {
       const payload = await querySessions({
         limit: SESSION_INDEX_PAGE_SIZE,
         cursor: String(pageParam || ""),
         q: normalizedQueryText,
         sort: normalizedSort || undefined,
-      });
+      }, { signal });
+      // A cancelled route read must not seed list caches after navigation.
+      signal.throwIfAborted();
       const existing = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
       const previousPages = queryClient.getQueryData<SessionQueryInfiniteData>(
         queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE, "", normalizedSort),

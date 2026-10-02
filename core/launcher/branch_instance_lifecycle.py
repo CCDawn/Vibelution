@@ -334,6 +334,9 @@ def _instance_runtime_projection(
     classification = str(observation.get("classification") or "").strip()
     if classification:
         runtime["registryClassification"] = classification
+    spawn_identity_status = str(registered_backend.get("spawnIdentityStatus") or "").strip().lower()
+    if spawn_identity_status:
+        runtime["spawnIdentityStatus"] = spawn_identity_status
     next_reconcile_at = str(observation.get("nextReconcileAt") or "").strip()
     if next_reconcile_at:
         runtime["nextReconcileAt"] = next_reconcile_at
@@ -955,14 +958,20 @@ def _registered_isolated_backend_observation(
             "executable": entry.get("spawnExecutable"),
         }
     )
-    if str(identity.get("status") or "").strip().lower() != "match":
-        return {}
-    observation = _loopback_workspace_health(
-        _positive_int(entry.get("port")) or _positive_int(item.get("port")),
-        project_root,
-    )
-    if observation and _positive_int(observation.get("pid")) <= 0:
-        observation["pid"] = spawn_pid
+    identity_status = str(identity.get("status") or "").strip().lower()
+    observation: dict[str, Any] = {}
+    if identity_status == "match":
+        observation = _loopback_workspace_health(
+            _positive_int(entry.get("port")) or _positive_int(item.get("port")),
+            project_root,
+        )
+        if observation and _positive_int(observation.get("pid")) <= 0:
+            observation["pid"] = spawn_pid
+    if identity_status:
+        # Surface the verified spawn identity (match/dead/mismatch/unknown) so
+        # consumers can tier recovery affordances by process liveness instead
+        # of guessing from a possibly stale registry row.
+        observation["spawnIdentityStatus"] = identity_status
     return observation
 
 

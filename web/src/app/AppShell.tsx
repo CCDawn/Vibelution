@@ -32,6 +32,7 @@ import {
   resolveAgentBroadcastBadgeState,
   storeAgentBroadcastReadAtMs,
 } from "./agentBroadcastBadge";
+import { loadPrimaryRouteChunk } from "./primaryRouteChunkLoader";
 import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { queryKeys } from "../api/queryKeys";
@@ -379,7 +380,7 @@ function startPrimaryRoutePreloadImport(key: PrimaryRoutePreloadKey, trigger: Pr
     return;
   }
   const startedAt = browserNowMs();
-  primaryRoutePreloadPromises[key] = primaryRoutePreloadLoaders[key]()
+  primaryRoutePreloadPromises[key] = loadPrimaryRouteChunk(primaryRoutePreloadLoaders[key])
     .then(() => {
       postBrowserTelemetry({
         phase: "navigation",
