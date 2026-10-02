@@ -246,6 +246,42 @@ def test_paper_project_and_news_search_build_no_quota_queries(monkeypatch):
     assert "reuters.com" in calls[2]["allowed_domains"]
 
 
+def test_cjk_news_search_keeps_chinese_sources(monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake_rss(query, *, max_results, locale="en-US"):
+        captured["locale"] = locale
+        captured["rss_query"] = query
+        return [], {"provider": "google_news_rss", "status": "failed"}
+
+    monkeypatch.setattr(research_search_backends, "google_news_rss_search", fake_rss)
+    monkeypatch.setattr(
+        research_search_backends,
+        "searxng_search",
+        lambda *args, **kwargs: ([], {"provider": "searxng", "status": "failed"}),
+    )
+    monkeypatch.setattr(
+        research_search_backends,
+        "ddgs_search",
+        lambda *args, **kwargs: ([], {"provider": "ddgs", "status": "failed"}),
+    )
+
+    def fake_public_web_search(query, max_results=10, allowed_domains="", blocked_domains=""):
+        captured["query"] = query
+        captured["allowed_domains"] = allowed_domains
+        return "ok"
+
+    monkeypatch.setattr(research_search_tools, "public_web_search", fake_public_web_search)
+
+    assert research_search_tools.news_search("贵州茅台", date_hint="2026") == "ok"
+    assert captured["locale"] == "zh-CN"
+    assert "贵州茅台" in captured["rss_query"]
+    assert "news latest analysis" not in captured["query"]
+    assert "eastmoney.com" in captured["allowed_domains"]
+    assert "cninfo.com.cn" in captured["allowed_domains"]
+    assert "reuters.com" not in captured["allowed_domains"]
+
+
 def test_paper_search_accepts_integer_year_hint(monkeypatch):
     # 真实故障：模型传 year_hint=1984（int）被签名校验拒绝后弃用整条论文检索路径；
     # 实现入口必须先把 int 归一成字符串再拼查询。

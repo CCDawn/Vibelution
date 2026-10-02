@@ -82,7 +82,7 @@ describe("memory workbench queries contract", () => {
     expect(graph).toContain("teamId: requestedTeamId || undefined");
     const detail = extractQueryBlock("memoryKnowledgeGraphNodeDetailQuery");
     expect(detail).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
-    expect(routeSource).toContain('if (forcedView === "graph") return;');
+    expect(routeSource).toContain('if (forcedView === "graph" || forcedView === "knowledge") return;');
     expect(routeSource).toContain("graphActorAgentId={fallbackKnowledgeActorAgentId}");
     expect(routeSource).toContain("graphTeamId={requestedTeamId}");
   });

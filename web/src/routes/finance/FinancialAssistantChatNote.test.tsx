@@ -38,9 +38,10 @@ describe("financial assistant chat note", () => {
     await settle();
     expect(container.textContent).toContain("自己判断真假");
     expect(container.textContent).toContain("不会自动下单");
-    const hrefs = [...container.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href"));
-    expect(hrefs.some((href) => href?.includes("/agents?") && href.includes("finance-a"))).toBe(true);
-    expect(hrefs.some((href) => href?.includes("reports"))).toBe(true);
+    const hrefs = [...container.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href") || "");
+    const decoded = hrefs.map((href) => decodeURIComponent(href));
+    expect(decoded.some((href) => href.includes("/agents?") && href.includes("finance-a") && href.includes("/finance?session=native-session"))).toBe(true);
+    expect(decoded.some((href) => href.includes("/memory/knowledge") && href.includes("view=knowledge") && href.includes("reports") && href.includes("/finance?session=native-session"))).toBe(true);
   });
 
   it("stays quiet in an ordinary chat", async () => {

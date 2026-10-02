@@ -39,6 +39,20 @@ _NEWS_DOMAINS = (
     "theverge.com",
     "technologyreview.com",
 )
+# Public Chinese finance pages for CJK topics. The English list above drops
+# A-share hits before the quality gate can keep them.
+_CN_NEWS_DOMAINS = (
+    "eastmoney.com",
+    "finance.sina.com.cn",
+    "sina.com.cn",
+    "stcn.com",
+    "cs.com.cn",
+    "cninfo.com.cn",
+    "sse.com.cn",
+    "szse.cn",
+    "10jqka.com.cn",
+)
+_CJK_TOPIC_RE = re.compile(r"[\u3400-\u9fff]")
 
 
 def _clamp_int(value: int, *, default: int, minimum: int, maximum: int) -> int:
@@ -386,10 +400,13 @@ def news_search(topic: str, max_results: int = 8, date_hint: str = "") -> str:
         return "[错误] 新闻搜索主题不能为空"
     date_part = f" {str(date_hint).strip()}" if str(date_hint or "").strip() else " 2026"
     provider_query = f"{topic_text}{date_part}".strip()
+    chinese = bool(_CJK_TOPIC_RE.search(topic_text))
+    locale = "zh-CN" if chinese else "en-US"
+    domains = _CN_NEWS_DOMAINS if chinese else _NEWS_DOMAINS
     provider_payload = research_search_backends.collect_provider_results(
         provider_query,
         [
-            ("google_news_rss", lambda: research_search_backends.google_news_rss_search(provider_query, max_results=max_results)),
+            ("google_news_rss", lambda: research_search_backends.google_news_rss_search(provider_query, max_results=max_results, locale=locale)),
             ("searxng", lambda: research_search_backends.searxng_search(provider_query, max_results=max_results, category="news")),
             ("ddgs", lambda: research_search_backends.ddgs_search(provider_query, max_results=max_results, kind="news")),
         ],
@@ -397,8 +414,11 @@ def news_search(topic: str, max_results: int = 8, date_hint: str = "") -> str:
     )
     if provider_payload.get("results"):
         return _render_provider_payload("新闻公开搜索", provider_payload)
-    query = f'{topic_text} news latest analysis{date_part}{_domain_query(_NEWS_DOMAINS)}'
-    return public_web_search(query=query, max_results=max_results, allowed_domains=",".join(_NEWS_DOMAINS))
+    if chinese:
+        query = f"{topic_text}{date_part}{_domain_query(domains)}"
+    else:
+        query = f"{topic_text} news latest analysis{date_part}{_domain_query(domains)}"
+    return public_web_search(query=query, max_results=max_results, allowed_domains=",".join(domains))
 
 
 def search_summarize_sources(search_outputs: str, max_sources: int = 20) -> str:

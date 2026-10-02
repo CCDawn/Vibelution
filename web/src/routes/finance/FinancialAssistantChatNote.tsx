@@ -17,7 +17,7 @@ export function FinancialAssistantChatNote({
     return null;
   }
   const [capability, boundary] = financialAssistantBoundary(lang);
-  const returnTo = `/chat?session=${encodeURIComponent(sessionId)}`;
+  const returnTo = `/finance?session=${encodeURIComponent(sessionId)}`;
   const zh = lang === "zh";
   return (
     <VStateSurface
@@ -38,6 +38,7 @@ export function FinancialAssistantChatNote({
             <VRouteLinkButton to={agentCenterMemoryRoute({
               agentId: row.agentId,
               knowledgeBaseId: row.knowledgeBaseId,
+              view: "knowledge",
               returnTo,
               returnLabel: zh ? "炒股智能体" : "Investment assistant",
             })}>

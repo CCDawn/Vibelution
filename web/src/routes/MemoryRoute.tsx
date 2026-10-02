@@ -2913,9 +2913,9 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   }, [searchParamText]);
 
   useEffect(() => {
-    // Graph scope is URL-owned; the generic memory-list normalizer would
-    // otherwise strip teamId / knowledgeBaseId / nodeId from graph links.
-    if (forcedView === "graph") return;
+    // Graph and knowledge scope are URL-owned; the generic memory-list
+    // normalizer would strip knowledgeBaseId / returnTo from those links.
+    if (forcedView === "graph" || forcedView === "knowledge") return;
     const next = buildMemorySearchParams(
       activeSectionId,
       activeItemId,
