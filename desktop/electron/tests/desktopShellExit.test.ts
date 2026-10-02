@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createDesktopShellExitDeadline,
   DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
   executeApprovedDesktopShellShutdown,
   reapManagedRuntimeOnDesktopStart,
@@ -119,18 +120,22 @@ describe("executeApprovedDesktopShellShutdown", () => {
     });
   });
 
-  it("fail-opens past a hung desktop session close so quit still runs", async () => {
+  it("shares one absolute budget across a close step slower than the old per-step timeout", async () => {
     vi.useFakeTimers();
     const calls: string[] = [];
+    const signals: AbortSignal[] = [];
+    const deadline = createDesktopShellExitDeadline(10_000);
     const pending = executeApprovedDesktopShellShutdown({
       decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: false },
-      closeDesktopSession: async () => {
-        await new Promise(() => undefined);
+      closeDesktopSession: async (signal) => {
+        signals.push(signal);
+        await new Promise((resolve) => setTimeout(resolve, 8_500));
       },
       recordEvent: async (event) => {
         calls.push(`event:${event.eventCode}`);
       },
-      stopManagedRuntime: async () => {
+      stopManagedRuntime: async (signal) => {
+        signals.push(signal);
         calls.push("stop-managed-runtime");
       },
       stopPythonLauncher: async () => {
@@ -145,20 +150,49 @@ describe("executeApprovedDesktopShellShutdown", () => {
       quitApp: () => {
         calls.push("quit-app");
       },
-      stepTimeoutMs: 25
+      deadline
     });
 
-    await vi.advanceTimersByTimeAsync(30);
+    await vi.advanceTimersByTimeAsync(8_500);
     const result = await pending;
-    expect(calls).toEqual([
-      "event:electron.runtime.stop_requested",
-      "stop-managed-runtime",
-      "event:electron.launcher_service.exited",
-      "approve-shutdown",
-      "stop-action-loop",
-      "quit-app"
-    ]);
+    expect(calls).toContain("stop-managed-runtime");
+    expect(calls).toContain("quit-app");
+    expect(new Set(signals).size).toBe(1);
     expect(result?.stopStatus).toBe("not_requested");
+    deadline.dispose();
+    vi.useRealTimers();
+  });
+
+  it("returns at the shared deadline without awaiting an unfinished managed stop", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const deadline = createDesktopShellExitDeadline(40);
+    let managedSignal: AbortSignal | null = null;
+    const pending = executeApprovedDesktopShellShutdown({
+      decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: false },
+      closeDesktopSession: async () => calls.push("close-session"),
+      recordEvent: async (event) => calls.push(`event:${event.eventCode}`),
+      stopManagedRuntime: async (signal) => {
+        calls.push("stop-managed-runtime");
+        managedSignal = signal;
+        await new Promise(() => undefined);
+      },
+      stopPythonLauncher: async () => {
+        throw new Error("should not stop");
+      },
+      approveShutdown: () => calls.push("approve-shutdown"),
+      stopDesktopActionLoop: () => calls.push("stop-action-loop"),
+      quitApp: () => calls.push("quit-app"),
+      deadline
+    });
+    await vi.advanceTimersByTimeAsync(40);
+    const result = await pending;
+    expect(managedSignal?.aborted).toBe(true);
+    expect(result?.managedRuntimeError).toBe("stop managed runtime timed out after 40ms");
+    expect(calls).toContain("stop-managed-runtime");
+    expect(calls).not.toContain("approve-shutdown");
+    expect(calls).not.toContain("quit-app");
+    deadline.dispose();
     vi.useRealTimers();
   });
 
