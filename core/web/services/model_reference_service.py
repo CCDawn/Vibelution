@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -341,6 +342,250 @@ def _scan_agent_registry_refs(refs: list[dict[str, Any]], model_id: str, project
         )
 
 
+def _iter_agent_store_bindings(project_root: Path) -> list[tuple[str, str, str, dict[str, Any]]]:
+    """Read per-agent dialogue bindings from the SQLite conversation store.
+
+    The agent registry moved from agent_directory/agents/agents.json into
+    conversations.sqlite3 (``agents`` + ``agent_config_revisions``), so the
+    deletion guards must consult the store or every live session binding
+    turns invisible. Each agent contributes its latest revision's compiled
+    config (max created_at_ms, revision_id as tie-breaker). Read-only and
+    best effort: a missing/corrupt database, absent tables or unparsable
+    config payloads yield nothing instead of breaking the guard.
+    """
+    from core.web.services.session.directory_runtime import conversation_store_path
+
+    try:
+        path = conversation_store_path(project_root)
+    except (ImportError, OSError, ValueError):
+        return []
+    source_path = _display_path(path, project_root)
+    bindings: list[tuple[str, str, str, dict[str, Any]]] = []
+    try:
+        connection = sqlite3.connect(f"file:{path.resolve().as_posix()}?mode=ro", uri=True, timeout=0.5)
+        try:
+            rows = connection.execute(
+                """
+                SELECT a.agent_id AS agent_id, a.display_name AS display_name, r.config_json AS config_json
+                FROM agents AS a
+                JOIN agent_config_revisions AS r ON r.agent_id = a.agent_id
+                WHERE r.revision_id = (
+                    SELECT r2.revision_id FROM agent_config_revisions AS r2
+                    WHERE r2.agent_id = a.agent_id
+                    ORDER BY r2.created_at_ms DESC, r2.revision_id DESC
+                    LIMIT 1
+                )
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error):
+        return bindings
+    for agent_id, display_name, config_json in rows:
+        try:
+            payload = json.loads(config_json) if config_json else None
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        bindings.append((str(agent_id or "").strip(), str(display_name or "").strip(), source_path, payload))
+    return bindings
+
+
+def _scan_agent_store_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
+    for agent_id, label, source_path, payload in _iter_agent_store_bindings(project_root):
+        _scan_agent_binding_payload(
+            refs,
+            model_id,
+            payload,
+            source="agent_store",
+            source_path=source_path,
+            base_path=f"agents[{agent_id}]",
+            owner_type="agent",
+            owner_id=agent_id,
+            label=label,
+        )
+
+
+def _binding_model_id_values(payload: Any) -> list[tuple[str, str, Any]]:
+    """Collect (path suffix, field, raw value) for model-id fields on a binding payload."""
+    if not isinstance(payload, dict):
+        return []
+    values: list[tuple[str, str, Any]] = []
+    for field in ("modelId", "dialogueModelId"):
+        values.append((field, field, payload.get(field)))
+    bindings = payload.get("llmBindings")
+    if isinstance(bindings, dict):
+        for slot, binding in sorted(bindings.items(), key=lambda item: str(item[0])):
+            if not isinstance(binding, dict):
+                continue
+            slot_key = str(slot or "").strip()
+            values.append((f"llmBindings.{slot_key}.modelId", f"llmBindings.{slot_key}.modelId", binding.get("modelId")))
+    return values
+
+
+def scan_provider_live_references(
+    provider_id: str,
+    *,
+    project_root: Path | str | None = None,
+) -> dict[str, Any]:
+    """Return live binding references pointing under ``<provider_id>/``.
+
+    Companion to :func:`scan_model_references` for provider-level guards: a
+    model-catalog prune must keep a provider entry while any dialogue binding
+    still resolves through it, even when the exact model key is unknown.
+    Scans the SQLite agent store plus the legacy workspace registries;
+    public-config profile refs stay out — they are owned by the per-model
+    delete guard, not the catalog prune.
+    """
+    normalized_provider = _normalized_model_id(provider_id)
+    if not normalized_provider:
+        return {
+            "providerId": "",
+            "liveReferences": [],
+            "liveReferenceCount": 0,
+            "blocking": False,
+        }
+    root = Path(project_root) if project_root is not None else PROJECT_ROOT
+    prefix = f"{normalized_provider}/"
+    refs: list[dict[str, Any]] = []
+
+    def _collect(
+        values: list[tuple[str, str, Any]],
+        *,
+        source: str,
+        source_path: str,
+        base_path: str,
+        owner_type: str,
+        owner_id: str = "",
+        label: str = "",
+    ) -> None:
+        for path_suffix, field, value in values:
+            raw = _normalized_model_id(value)
+            if not raw.startswith(prefix):
+                continue
+            refs.append(
+                _reference(
+                    source=source,
+                    source_path=source_path,
+                    path=f"{base_path}.{path_suffix}",
+                    field=field,
+                    owner_type=owner_type,
+                    owner_id=owner_id,
+                    label=label,
+                )
+            )
+
+    registry_path = _workspace_path(root, "agent_directory", "agents", "agents.json")
+    registry = _load_json(registry_path)
+    agents = registry.get("agents") if isinstance(registry, dict) else None
+    if isinstance(agents, list):
+        registry_source = _display_path(registry_path, root)
+        for index, agent in enumerate(agents):
+            if not isinstance(agent, dict):
+                continue
+            _collect(
+                _binding_model_id_values(agent),
+                source="agent_registry",
+                source_path=registry_source,
+                base_path=f"agents[{index}]",
+                owner_type="agent",
+                owner_id=_normalized_model_id(agent.get("agentId") or agent.get("id")) or str(index),
+                label=str(agent.get("displayName") or agent.get("name") or "").strip(),
+            )
+
+    for agent_id, label, store_source, payload in _iter_agent_store_bindings(root):
+        _collect(
+            _binding_model_id_values(payload),
+            source="agent_store",
+            source_path=store_source,
+            base_path=f"agents[{agent_id}]",
+            owner_type="agent",
+            owner_id=agent_id,
+            label=label,
+        )
+
+    rooms_path = _workspace_path(root, "chat_room", "chat_rooms", "chat_rooms.json")
+    rooms_payload = _load_json(rooms_path)
+    rooms = rooms_payload.get("rooms") if isinstance(rooms_payload, dict) else None
+    if isinstance(rooms, list):
+        rooms_source = _display_path(rooms_path, root)
+        for room_index, room in enumerate(rooms):
+            participants = room.get("participants") if isinstance(room, dict) else None
+            if not isinstance(participants, list):
+                continue
+            room_id = _normalized_model_id(room.get("roomId") or room.get("id")) or str(room_index)
+            for participant_index, participant in enumerate(participants):
+                if not isinstance(participant, dict):
+                    continue
+                participant_id = (
+                    _normalized_model_id(
+                        participant.get("participantId") or participant.get("agentId") or participant.get("sessionId")
+                    )
+                    or str(participant_index)
+                )
+                _collect(
+                    _binding_model_id_values(participant),
+                    source="chat_room_registry",
+                    source_path=rooms_source,
+                    base_path=f"rooms[{room_index}].participants[{participant_index}]",
+                    owner_type="chat_room_participant",
+                    owner_id=f"{room_id}:{participant_id}",
+                    label=str(participant.get("title") or participant.get("agentCode") or "").strip(),
+                )
+
+    supervised_path = _active_supervised_snapshot_path(root)
+    if supervised_path is not None:
+        snapshot = _load_json(supervised_path)
+        status = str(snapshot.get("status") or "").strip().lower() if snapshot else ""
+        if status in _ACTIVE_RUN_STATUSES:
+            run_id = _normalized_model_id(snapshot.get("runId") or supervised_path.stem)
+            run_source = _display_path(supervised_path, root)
+            _collect(
+                _binding_model_id_values(snapshot.get("currentAgentBinding")),
+                source="active_supervised_run",
+                source_path=run_source,
+                base_path="currentAgentBinding",
+                owner_type="supervised_run",
+                owner_id=run_id,
+                label="currentAgentBinding",
+            )
+            role_bindings = snapshot.get("agentBindings")
+            if isinstance(role_bindings, dict):
+                for role, binding in sorted(role_bindings.items(), key=lambda item: str(item[0])):
+                    role_key = str(role or "").strip()
+                    _collect(
+                        _binding_model_id_values(binding),
+                        source="active_supervised_run",
+                        source_path=run_source,
+                        base_path=f"agentBindings.{role_key}",
+                        owner_type="supervised_run_role",
+                        owner_id=f"{run_id}:{role_key}",
+                        label=role_key,
+                    )
+
+    for policy_path in _team_live_policy_paths(root):
+        payload = _load_json(policy_path)
+        policy = payload.get("promptCachePolicy") if isinstance(payload, dict) else None
+        if not isinstance(policy, dict):
+            continue
+        _collect(
+            [("modelId", "modelId", policy.get("modelId"))],
+            source="team_live_prompt_cache_policy",
+            source_path=_display_path(policy_path, root),
+            base_path="promptCachePolicy",
+            owner_type="team_prompt_cache_policy",
+            owner_id=policy_path.parent.name,
+        )
+
+    return {
+        "providerId": normalized_provider,
+        "liveReferences": refs,
+        "liveReferenceCount": len(refs),
+        "blocking": bool(refs),
+    }
+
+
 def _scan_chat_room_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
     path = _workspace_path(project_root, "chat_room", "chat_rooms", "chat_rooms.json")
     source_path = _display_path(path, project_root)
@@ -592,6 +837,7 @@ def scan_model_references(
     if include_public_config and isinstance(public_config, dict):
         _scan_public_config_refs(live_refs, normalized_model_id, public_config)
     _scan_agent_registry_refs(live_refs, normalized_model_id, root)
+    _scan_agent_store_refs(live_refs, normalized_model_id, root)
     _scan_chat_room_refs(live_refs, normalized_model_id, root)
     _scan_active_supervised_run_refs(live_refs, normalized_model_id, root)
     _scan_team_live_prompt_cache_refs(live_refs, normalized_model_id, root)
@@ -1171,4 +1417,5 @@ __all__ = [
     "rewrite_model_reference_payload",
     "scan_model_alias_usage",
     "scan_model_references",
+    "scan_provider_live_references",
 ]

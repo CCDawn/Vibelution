@@ -94,6 +94,7 @@ from .model_reference_service import (
     ModelReferenceConflictError,
     assert_model_delete_safe,
     scan_model_alias_usage,
+    scan_provider_live_references,
 )
 from .runtime_scene_service import record_runtime_scene_event_quietly as record_runtime_scene_event
 from .theme_background_service import DEFAULT_THEME_BACKGROUND_PATH, theme_background_image_url
@@ -1778,6 +1779,11 @@ def _sweep_absent_model_catalog_providers(public_config: dict[str, Any]) -> list
     sweeping the saved-config workspace read additionally catches legacy stock
     and removals that bypass the apply path (e.g. duplicate-provider merge
     writes config directly via provider_merge_migration).
+
+    Live-reference guard: a provider whose catalogue is still referenced by a
+    dialogue binding (model id under ``<provider_id>/``, including bindings
+    stored in the SQLite agent store) keeps its catalog entry — pruning it
+    would orphan the bound sessions with no way to resolve their model.
     """
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
     if not isinstance(llm, dict) or int(llm.get("schema_version") or 2) != 2:
@@ -1795,11 +1801,46 @@ def _sweep_absent_model_catalog_providers(public_config: dict[str, Any]) -> list
     )
     if not pruned_ids:
         return []
+    blocked = _provider_ids_with_live_references(pruned_ids)
+    if blocked:
+        for provider_id, reference_count in sorted(blocked.items()):
+            _record_config_scene_event(
+                "model_catalog",
+                "config.model_catalog.prune_skipped_live_refs",
+                message="Model catalog prune skipped: live dialogue bindings still reference the provider.",
+                level="warning",
+                outcome="blocked",
+                fields={"providerId": provider_id, "liveReferenceCount": reference_count},
+            )
+        pruned_state, pruned_ids = prune_absent_provider_entries(
+            state,
+            configured_provider_ids=frozenset(providers) | frozenset(blocked),
+        )
+        if not pruned_ids:
+            return []
     try:
         _save_model_catalog_state_and_invalidate(pruned_state)
     except (OSError, ValueError):
         return pruned_ids
     return pruned_ids
+
+
+def _provider_ids_with_live_references(provider_ids: list[str]) -> dict[str, int]:
+    """Return live binding reference counts for providers slated for prune.
+
+    Best effort by design: a scan failure must never block the prune pipeline,
+    it just means this guard stays silent for that provider.
+    """
+    blocked: dict[str, int] = {}
+    for provider_id in provider_ids:
+        try:
+            impact = scan_provider_live_references(provider_id)
+        except Exception:  # noqa: BLE001 - guard must stay exception-free
+            continue
+        count = int(impact.get("liveReferenceCount") or 0)
+        if count:
+            blocked[provider_id] = count
+    return blocked
 
 
 def summarize_model_catalog(

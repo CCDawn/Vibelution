@@ -92,6 +92,9 @@ export type ChatSubmitErrorKind =
   | "network"
   | "request_rejected";
 
+/** Upper bound for the server detail appended to rejection copy. */
+const CHAT_SUBMIT_SERVER_DETAIL_MAX_LENGTH = 200;
+
 /** Chat dictionary keys for each submit failure category. */
 export const CHAT_SUBMIT_ERROR_KIND_KEYS: Record<ChatSubmitErrorKind, TranslationKey> = {
   turn_in_progress: "composerErrorTurnInProgress",
@@ -136,10 +139,37 @@ export function classifyChatSubmitErrorKind(error: unknown): ChatSubmitErrorKind
 }
 
 /**
+ * Server-provided human detail (FastAPI ``{detail: ...}`` body, already
+ * parsed into ``FetchJsonHttpError.details`` by the transport) for a 4xx
+ * submit rejection. Cleaned and truncated so a broken backend payload can
+ * never flood the composer.
+ */
+function serverSubmitErrorDetail(error: unknown): string {
+  if (!isFetchJsonHttpError(error)) {
+    return "";
+  }
+  const payload = error.details;
+  const detail = payload && typeof payload === "object" ? (payload as { detail?: unknown }).detail : undefined;
+  if (typeof detail !== "string") {
+    return "";
+  }
+  const cleaned = detail.replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return "";
+  }
+  return cleaned.length > CHAT_SUBMIT_SERVER_DETAIL_MAX_LENGTH
+    ? `${cleaned.slice(0, CHAT_SUBMIT_SERVER_DETAIL_MAX_LENGTH)}…`
+    : cleaned;
+}
+
+/**
  * Human composer text for a submit failure: classified category copy when
- * the error is recognizable, otherwise the caller's localized fallback. The
- * raw error is never concatenated — it is already reported to telemetry and
- * runtime logs by the submit mutation's error path.
+ * the error is recognizable, otherwise the caller's localized fallback. For
+ * 4xx rejections the server ``detail`` (backend-localized, e.g. "当前 Agent
+ * 绑定的模型不在模型库中") is appended so the composer names the real cause
+ * instead of a generic rejection line. The raw error is never concatenated —
+ * it is already reported to telemetry and runtime logs by the submit
+ * mutation's error path.
  */
 export function describeChatSubmitError(
   error: unknown,
@@ -147,7 +177,17 @@ export function describeChatSubmitError(
   fallback: string,
 ) {
   const kind = classifyChatSubmitErrorKind(error);
-  return kind ? t(CHAT_SUBMIT_ERROR_KIND_KEYS[kind]) : fallback;
+  if (!kind) {
+    return fallback;
+  }
+  const copy = t(CHAT_SUBMIT_ERROR_KIND_KEYS[kind]);
+  if (kind === "request_rejected") {
+    const detail = serverSubmitErrorDetail(error);
+    if (detail) {
+      return `${copy}：${detail}`;
+    }
+  }
+  return copy;
 }
 
 function comparableErrorText(value: unknown) {
