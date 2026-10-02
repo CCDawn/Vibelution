@@ -99,22 +99,27 @@ describe("launcher app protocol file serving", () => {
   });
 
   it("resolves the dist root to packaged resources or the workspace dev build", () => {
-    expect(
-      resolveLauncherDistRoot({
-        resourcesRoot: "C:/app/resources",
-        workspaceRoot: "C:/repo",
-        packaged: true,
-        env: {},
-      })
-    ).toBe(resolve("C:/app/resources/web-dist"));
-    expect(
-      resolveLauncherDistRoot({
-        resourcesRoot: "C:/app/resources",
-        workspaceRoot: "C:/repo",
-        packaged: false,
-        env: {},
-      })
-    ).toBe(resolve("C:/repo/web/dist"));
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-dist-root-"));
+    try {
+      expect(
+        resolveLauncherDistRoot({
+          resourcesRoot: "C:/app/resources",
+          workspaceRoot,
+          packaged: true,
+          env: {},
+        })
+      ).toBe(resolve("C:/app/resources/web-dist"));
+      expect(
+        resolveLauncherDistRoot({
+          resourcesRoot: "C:/app/resources",
+          workspaceRoot,
+          packaged: false,
+          env: {},
+        })
+      ).toBe(resolve(workspaceRoot, "web", "dist"));
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it("resolves an unpackaged workspace through its atomically active release", () => {
@@ -134,6 +139,99 @@ describe("launcher app protocol file serving", () => {
           env: {},
         })
       ).toBe(resolve(releasesRoot, release));
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves a packaged launcher to the workspace active release so web changes skip a rebuild", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-packaged-release-"));
+    const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
+    const release = "release-live";
+    try {
+      mkdirSync(join(releasesRoot, release), { recursive: true });
+      writeFileSync(join(releasesRoot, release, "index.html"), "<!doctype html>", "utf8");
+      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release }), "utf8");
+
+      expect(
+        resolveLauncherDistRoot({
+          resourcesRoot: "C:/app/resources",
+          workspaceRoot,
+          packaged: true,
+          env: {},
+        })
+      ).toBe(resolve(releasesRoot, release));
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the packaged snapshot when the workspace has no active release", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-packaged-empty-"));
+    try {
+      expect(
+        resolveLauncherDistRoot({
+          resourcesRoot: "C:/app/resources",
+          workspaceRoot,
+          packaged: true,
+          env: {},
+        })
+      ).toBe(resolve("C:/app/resources/web-dist"));
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the packaged snapshot when the active release is invalid", () => {
+    const expectPackagedFallback = (release: unknown, setup: (releasesRoot: string) => void): void => {
+      const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-packaged-invalid-"));
+      const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
+      try {
+        mkdirSync(releasesRoot, { recursive: true });
+        setup(releasesRoot);
+        writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release }), "utf8");
+
+        expect(
+          resolveLauncherDistRoot({
+            resourcesRoot: "C:/app/resources",
+            workspaceRoot,
+            packaged: true,
+            env: {},
+          })
+        ).toBe(resolve("C:/app/resources/web-dist"));
+      } finally {
+        rmSync(workspaceRoot, { recursive: true, force: true });
+      }
+    };
+    // Path escape attempt.
+    expectPackagedFallback("../evil", () => undefined);
+    // Baseline name mismatch inside the releases root.
+    expectPackagedFallback("release-evil/inner", (releasesRoot) => {
+      mkdirSync(join(releasesRoot, "release-evil", "inner"), { recursive: true });
+      writeFileSync(join(releasesRoot, "release-evil", "inner", "index.html"), "<!doctype html>", "utf8");
+    });
+    // Release directory without an index.html entrypoint.
+    expectPackagedFallback("release-blank", (releasesRoot) => {
+      mkdirSync(join(releasesRoot, "release-blank"), { recursive: true });
+    });
+  });
+
+  it("keeps the explicit dist root override above the workspace active release", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-packaged-override-"));
+    const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
+    try {
+      mkdirSync(join(releasesRoot, "release-live"), { recursive: true });
+      writeFileSync(join(releasesRoot, "release-live", "index.html"), "<!doctype html>", "utf8");
+      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release: "release-live" }), "utf8");
+
+      expect(
+        resolveLauncherDistRoot({
+          resourcesRoot: "C:/app/resources",
+          workspaceRoot,
+          packaged: true,
+          env: { VIBELUTION_LAUNCHER_DIST_ROOT: "C:/override/dist" },
+        })
+      ).toBe(resolve("C:/override/dist"));
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }
