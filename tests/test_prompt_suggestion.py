@@ -420,6 +420,19 @@ def test_composer_example_route_uses_current_project_root(tmp_path, monkeypatch)
     assert exc_info.value.status_code == 404
 
 
+def test_composer_example_route_is_bound_to_the_session_handler():
+    from core.web.routes import sessions as session_routes
+
+    matches = [
+        route
+        for route in session_routes.router.routes
+        if getattr(route, "path", "") == "/sessions/{session_id}/composer-example"
+        and "GET" in getattr(route, "methods", set())
+    ]
+    assert len(matches) == 1
+    assert matches[0].endpoint is session_routes.session_composer_example
+
+
 def test_composer_example_route_uses_financial_research_starters(monkeypatch):
     from core.web.routes import sessions as session_routes
 
