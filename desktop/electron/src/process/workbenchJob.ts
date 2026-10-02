@@ -88,7 +88,7 @@ function addonCandidates(): string[] {
   const here = dirname(fileURLToPath(import.meta.url));
   return [
     join(here, "../native/workbench_job.node"),
-    join(here, "../../native/workbench-job/build/Release/workbench_job.node")
+    join(here, "../../dist/native/workbench_job.node")
   ];
 }
 

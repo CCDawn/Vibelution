@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const packageJsonPath = fileURLToPath(new URL("../package.json", import.meta.url));
 const electronBuilderConfigPath = fileURLToPath(new URL("../electron-builder.json", import.meta.url));
+const builderSource = readFileSync(fileURLToPath(new URL("../scripts/buildDesktopPackage.js", import.meta.url)), "utf8");
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
   main?: string;
@@ -24,12 +25,11 @@ describe("linux arm64 packaging", () => {
     const script = packageJson.scripts?.["package:linux-arm64:dir"];
 
     expect(script).toBeDefined();
-    expect(script).toContain("electron-builder");
-    expect(script).toContain("--config electron-builder.json");
-    expect(script).toMatch(/--linux dir/);
-    expect(script).toMatch(/--arm64/);
+    expect(script).toContain("runDesktopPackage.js --mode linux-arm64");
+    expect(builderSource).toContain('builderArgs.push("--linux", "dir", "--arm64")');
+    expect(builderSource).toContain('"--config", generatedConfigPath');
     expect(script).not.toMatch(/--x64|--ia32/);
-    expect(script).toMatch(/^npm run build && /);
+    expect(script).not.toContain("npm run build &&");
   });
 
   it("configures electron-builder for a Linux dir target", () => {
@@ -41,8 +41,9 @@ describe("linux arm64 packaging", () => {
   it("preserves the Electron main/preload output contract for the Linux bundle", () => {
     // Runtime entry points: tsc emits dist/main.js, the preload build emits dist/preload.cjs.
     expect(packageJson.main).toBe("dist/main.js");
-    expect(packageJson.scripts?.["build:preload"]).toContain("--outfile=dist/preload.cjs");
-    expect(packageJson.scripts?.["build:preload"]).toContain("--external:electron");
+    expect(packageJson.scripts?.["build:preload"]).toContain("runDesktopPackage.js --mode unpackaged");
+    expect(builderSource).toContain('`--outfile=${join(distRoot, "preload.cjs")}`');
+    expect(builderSource).toContain('"--external:electron"');
 
     // The shared top-level files list must still ship both outputs; the Linux
     // block must not override it with a narrower set.

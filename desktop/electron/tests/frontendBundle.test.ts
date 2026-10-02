@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -32,7 +32,13 @@ function createFixture() {
     JSON.stringify({ release: "release-abcdef0123456789", buildKey }),
     "utf8"
   );
-  return { workspaceRoot, electronRoot, release, buildKey };
+  return {
+    workspaceRoot,
+    electronRoot,
+    release,
+    buildKey,
+    packageInputRoot: resolve(root, "build/session-1/package-web-dist")
+  };
 }
 
 afterEach(() => {
@@ -68,9 +74,12 @@ describe("packaged frontend input", () => {
 
     const repeated = preparePackagedFrontend({
       ...fixture,
+      packageInputRoot: resolve(fixture.workspaceRoot, "build/session-2/package-web-dist"),
       ensureBuild: () => ({ ok: true, release: fixture.release, buildKey: fixture.buildKey })
     });
-    expect(repeated).toEqual(result);
+    expect(repeated.path).not.toBe(result.path);
+    expect(sha256DirectoryTree(repeated.path)).toBe(result.frontendContentSha256);
+    expect(existsSync(resolve(fixture.electronRoot, "node_modules/.cache/vibelution-package-web-dist"))).toBe(false);
   });
 
   it("refuses a release that changed after the frontend freshness check", () => {
@@ -81,17 +90,16 @@ describe("packaged frontend input", () => {
     })).toThrow("Frontend active release changed while preparing the desktop package.");
   });
 
-  it("does not overwrite a package cache without this workspace's ownership marker", () => {
+  it("refuses a package input path under shared electron node_modules", () => {
     const fixture = createFixture();
     const target = resolve(fixture.electronRoot, "node_modules/.cache/vibelution-package-web-dist");
-    mkdirSync(target, { recursive: true });
-    writeFileSync(join(target, "user-data.txt"), "keep", "utf8");
 
     expect(() => preparePackagedFrontend({
       ...fixture,
+      packageInputRoot: target,
       ensureBuild: () => ({ ok: true, release: fixture.release, buildKey: fixture.buildKey })
-    })).toThrow("Refusing to replace an unowned desktop package frontend cache.");
-    expect(readFileSync(join(target, "user-data.txt"), "utf8")).toBe("keep");
+    })).toThrow("Desktop package frontend input cannot be written below shared electron/node_modules.");
+    expect(existsSync(target)).toBe(false);
   });
 
   it("binds the digest to relative paths as well as file contents", () => {

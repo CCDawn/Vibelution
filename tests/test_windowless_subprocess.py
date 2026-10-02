@@ -49,4 +49,9 @@ def test_windowless_policy_is_used_by_high_risk_process_owners() -> None:
 
     for relative_path in owners:
         source = (project_root / relative_path).read_text(encoding="utf-8")
-        assert "no_window_subprocess_kwargs" in source, relative_path
+        if relative_path == "core/infrastructure/background_tasks.py":
+            assert "OwnedProcess.spawn" in source
+            owner = (project_root / "core/infrastructure/owned_process.py").read_text(encoding="utf-8")
+            assert "no_window_subprocess_kwargs" in owner
+        else:
+            assert "no_window_subprocess_kwargs" in source, relative_path

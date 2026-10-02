@@ -1,4 +1,4 @@
-import type { LauncherBranchInstance } from "../api/launcher";
+import { CLIENT_START_BLOCK_REFRESH_REQUIRED, type LauncherBranchInstance } from "../api/launcher";
 
 export const BRANCH_INSTANCE_PAGE_SIZE = 8;
 
@@ -47,6 +47,33 @@ export function cleanupRiskLabels(item: LauncherBranchInstance, isZh: boolean): 
 }
 
 export type InstanceRuntimeState = "building" | "starting" | "running" | "partial" | "stopping" | "restarting" | "failed" | "stopped";
+
+/**
+ * Lifecycle states where a build/start/stop/restart command is still in
+ * flight. The spellings are shared by the payload lifecycleState enum
+ * (closed/building/…/error) and the UI InstanceRuntimeState enum
+ * (…/failed/stopped), so one set serves both. Every "is this row mid-flight?"
+ * check must read this set — do not re-list states at the call site.
+ * Pinned by LauncherBranchInstanceContract.test.ts against the cross-port
+ * fixture launcherInstanceContract.cases.json.
+ */
+export const IN_FLIGHT_LIFECYCLE_STATES: ReadonlySet<string> = new Set([
+  "building",
+  "starting",
+  "stopping",
+  "restarting",
+]);
+
+/**
+ * Payload lifecycle states that still carry (or are transitioning) live
+ * runtime — the full payload enum minus the two terminals closed/error.
+ * Feeds force-stop tiering.
+ */
+export const LIVE_LIFECYCLE_STATES: ReadonlySet<string> = new Set([
+  "running",
+  "partial",
+  ...IN_FLIGHT_LIFECYCLE_STATES,
+]);
 
 export type InstancePendingOperation = {
   instanceId: string;
@@ -105,7 +132,7 @@ export function hasActiveLifecyclePending(pending?: LifecyclePendingInput): bool
 
 /** Double-click guard may stay only while this row is actually in a lifecycle transition. */
 export function shouldHoldOpenClickGuard(state: InstanceRuntimeState): boolean {
-  return state === "building" || state === "starting" || state === "restarting" || state === "stopping";
+  return IN_FLIGHT_LIFECYCLE_STATES.has(state);
 }
 
 export function lifecycleIntentRejectMessage(
@@ -429,7 +456,7 @@ export function isStartableInstance(item: LauncherBranchInstance, pending?: Life
 
 export function isAttentionInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   const state = instanceRuntimeState(item, pending);
-  if (["building", "starting", "stopping", "restarting"].includes(state)) {
+  if (IN_FLIGHT_LIFECYCLE_STATES.has(state)) {
     return false;
   }
   if (state === "failed") {
@@ -643,10 +670,10 @@ export function formatAdmissionReason(item: LauncherBranchInstance, isZh: boolea
 }
 
 export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
-  if (!isOperableInstance(item) || item.startBlockReason === "launcher_refresh_required") {
+  if (!isOperableInstance(item) || item.startBlockReason === CLIENT_START_BLOCK_REFRESH_REQUIRED) {
     return false;
   }
-  return !["building", "starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending));
+  return !IN_FLIGHT_LIFECYCLE_STATES.has(instanceRuntimeState(item, pending));
 }
 
 export function canStartInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
@@ -691,7 +718,9 @@ export function canStopInstance(item: LauncherBranchInstance, pending?: Lifecycl
     return false;
   }
   // Frontend build is part of an admitted start, even before backend/window PIDs exist.
-  const startingOrRestarting = state === "building" || state === "starting" || state === "restarting";
+  // "stopping" already returned above, so membership in the in-flight set here
+  // means exactly building/starting/restarting.
+  const startingOrRestarting = IN_FLIGHT_LIFECYCLE_STATES.has(state);
   if (isUnknownRegistryInstance(item) && !instanceHasLiveRuntime(item) && !startingOrRestarting) {
     const dismissableMissingWorktree = state === "failed" && instanceErrorMessage(item) === "worktree_path_missing";
     if (!dismissableMissingWorktree) {
@@ -700,7 +729,7 @@ export function canStopInstance(item: LauncherBranchInstance, pending?: Lifecycl
   }
   const failedLeftover = (state === "failed" || state === "partial") && !instanceHasLiveRuntime(item);
   return (isOperableInstance(item) || failedLeftover)
-    && item.startBlockReason !== "launcher_refresh_required"
+    && item.startBlockReason !== CLIENT_START_BLOCK_REFRESH_REQUIRED
     && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial" || startingOrRestarting);
 }
 
@@ -719,15 +748,6 @@ export function canForceStopInstance(item: LauncherBranchInstance): boolean {
 
 export type ForceStopTier = "danger" | "secondary" | "menu";
 
-const FORCE_STOP_LIVE_STATES: ReadonlySet<LauncherBranchInstance["runtime"]["lifecycleState"]> = new Set([
-  "running",
-  "partial",
-  "stopping",
-  "starting",
-  "restarting",
-  "building",
-]);
-
 /**
  * Presentation tier for the force-stop affordance. Reachability (confirm
  * dialog + dispatch) stays with canForceStopInstance; the tier only decides
@@ -743,7 +763,7 @@ const FORCE_STOP_LIVE_STATES: ReadonlySet<LauncherBranchInstance["runtime"]["lif
 export function forceStopTier(item: LauncherBranchInstance): ForceStopTier {
   if (
     instanceHasLiveRuntime(item)
-    || FORCE_STOP_LIVE_STATES.has(item.runtime.lifecycleState)
+    || LIVE_LIFECYCLE_STATES.has(item.runtime.lifecycleState)
     || item.runtime.spawnIdentityStatus === "match"
   ) {
     return "danger";

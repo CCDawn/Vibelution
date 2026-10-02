@@ -14,9 +14,11 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,7 @@ from uuid import uuid4
 
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.no_console_git import run_git
+from core.infrastructure.owned_process import OwnedProcess
 from core.launcher.frontend_build import (
     frontend_releases_dir,
     inspect_frontend_build,
@@ -55,6 +58,45 @@ REFRESH_COOLDOWN_SECONDS = 900.0
 PREBUILD_COOLDOWN_SECONDS = 1800.0
 PREBUILD_FAILURE_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-prebuild-failure.json"
 PREBUILD_LOCK_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-prebuild.lock"
+DESKTOP_SHELL_BUILD_DEADLINE_SECONDS = 15 * 60
+DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS = 5.0
+DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS = 0.1
+DESKTOP_SHELL_BUILD_CLOSE_RETRIES = 3
+
+
+class BuildProcessRetirementError(RuntimeError):
+    """A build process tree could not be confirmed closed; keep its lock and files."""
+
+    def __init__(self, message: str, owner: OwnedProcess) -> None:
+        super().__init__(message)
+        self.owner = owner
+
+
+@dataclass
+class _PendingBuildRetirement:
+    owner: OwnedProcess
+    project_root: Path
+    cleanup_paths: tuple[Path, ...]
+    lock_relative: Path
+    lock_snapshot: tuple[int, int, int, bytes] | None
+
+
+_PENDING_BUILD_RETIREMENTS: list[_PendingBuildRetirement] = []
+
+
+def _pending_build_retirement_for(
+    project_root: Path,
+    *,
+    cleanup_path: Path | None = None,
+) -> bool:
+    root = project_root.resolve()
+    target = cleanup_path.resolve() if cleanup_path is not None else None
+    return any(
+        item.project_root == root and (target is None or target in item.cleanup_paths)
+        for item in _PENDING_BUILD_RETIREMENTS
+    )
+
+
 # The prebuild target: electron-builder writes win-unpacked below this output
 # dir, exactly like the live package below dist/desktop. Promotion renames it
 # over the live tree, so the layout must match.
@@ -423,6 +465,86 @@ def _release_desktop_shell_refresh_lock(
             path.unlink()
         except OSError:
             return
+
+
+def _desktop_shell_lock_owned_by_current_process(
+    project_root: Path,
+    *,
+    lock_relative: Path = PREBUILD_LOCK_RELATIVE,
+) -> bool:
+    path = _refresh_lock_path(project_root, lock_relative)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return isinstance(payload, dict) and int(payload.get("pid") or 0) == os.getpid()
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return False
+
+
+def _ensure_desktop_shell_build_lock(root: Path, *, deadline: float) -> None:
+    _retry_pending_build_retirements(root, deadline=deadline)
+    if _desktop_shell_lock_owned_by_current_process(root, lock_relative=PREBUILD_LOCK_RELATIVE):
+        return
+    _wait_for_desktop_shell_build_lock(root, deadline=deadline)
+
+
+def _register_pending_build_retirement(
+    project_root: Path,
+    owner: OwnedProcess,
+    *,
+    cleanup_paths: tuple[Path, ...],
+    lock_relative: Path = PREBUILD_LOCK_RELATIVE,
+) -> None:
+    """Retain build artifacts and the exact lock until an owner can be closed."""
+
+    if any(item.owner is owner for item in _PENDING_BUILD_RETIREMENTS):
+        return
+    root = project_root.resolve()
+    lock_path = _refresh_lock_path(root, lock_relative)
+    _PENDING_BUILD_RETIREMENTS.append(
+        _PendingBuildRetirement(
+            owner=owner,
+            project_root=root,
+            cleanup_paths=tuple(path.resolve() for path in cleanup_paths),
+            lock_relative=lock_relative,
+            lock_snapshot=_refresh_lock_snapshot(lock_path),
+        )
+    )
+
+
+def _release_pending_build_lock(item: _PendingBuildRetirement) -> bool:
+    """Release only the lock snapshot captured for this unretired owner."""
+
+    if item.lock_snapshot is None:
+        return True
+    lock_path = _refresh_lock_path(item.project_root, item.lock_relative)
+    with _refresh_lock_breaker(lock_path) as acquired:
+        if not acquired:
+            return False
+        current = _refresh_lock_snapshot(lock_path)
+        if current is None or current != item.lock_snapshot:
+            return True
+        try:
+            lock_path.unlink()
+        except OSError:
+            return False
+        return True
+
+
+def _retry_pending_build_retirements(project_root: Path, *, deadline: float) -> None:
+    """Retire a previously unconfirmed build tree before allowing new work."""
+
+    root = project_root.resolve()
+    for item in tuple(_PENDING_BUILD_RETIREMENTS):
+        if item.project_root != root:
+            continue
+        _close_owned_process(item.owner, deadline=deadline)
+        for path in item.cleanup_paths:
+            shutil.rmtree(path, ignore_errors=True)
+            if path.exists():
+                raise RuntimeError(f"desktop build stage cleanup could not be confirmed: {path}")
+        if not _release_pending_build_lock(item):
+            raise RuntimeError("desktop build lock cleanup could not be confirmed")
+        _PENDING_BUILD_RETIREMENTS.remove(item)
 
 
 FRONTEND_ONLY_STALE_REASONS = {
@@ -828,15 +950,17 @@ def run_desktop_shell_prebuild(project_root: Path | str = PROJECT_ROOT) -> dict[
     """Stage the current checkout's packaged shell into ``dist/desktop-staging``."""
 
     root = Path(project_root)
+    deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
     try:
         if _refresh_lock_path(root).is_file():
             # Refresh owns the final package; a staging build would only race it.
             return {"schemaVersion": 1, "ok": True, "skipped": "refresh_in_progress"}
+        _ensure_desktop_shell_build_lock(root, deadline=deadline)
         status = inspect_desktop_shell(root)
         if not status["stale"]:
             return {"schemaVersion": 1, "ok": True, "skipped": "current"}
         try:
-            staged = _stage_desktop_shell(root)
+            staged = _stage_desktop_shell(root, deadline=deadline)
         except Exception as exc:
             detail = str(exc)
             _record_shell_failure_marker(
@@ -855,7 +979,8 @@ def run_desktop_shell_prebuild(project_root: Path | str = PROJECT_ROOT) -> dict[
         _append_refresh_log(root, "prebuild.finished", electronTreeHash=str(staged.get("electronTreeHash") or ""))
         return {"schemaVersion": 1, "ok": True, "staged": True, **staged}
     finally:
-        _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
+        if not _pending_build_retirement_for(root):
+            _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
 
 
 def _npm_failure_detail(result: subprocess.CompletedProcess) -> str:
@@ -871,39 +996,208 @@ def _npm_failure_detail(result: subprocess.CompletedProcess) -> str:
     return "\n--\n".join(part for part in (stderr_tail, stdout_tail) if part)
 
 
-def _stage_desktop_shell(root: Path) -> dict[str, Any]:
-    """Build into desktop-staging and verify the staged provenance tree hash."""
+def _read_log_tail(handle: Any, *, limit: int = 1200) -> str:
+    handle.flush()
+    handle.seek(0, os.SEEK_END)
+    size = handle.tell()
+    handle.seek(max(0, size - limit * 4), os.SEEK_SET)
+    raw = handle.read()
+    return raw.decode("utf-8", errors="replace")[-limit:].strip().replace("\r", "")
 
-    staging_root = root / STAGING_OUTPUT_DIR_RELATIVE
-    shutil.rmtree(staging_root, ignore_errors=True)
+
+def _close_owned_process(owner: OwnedProcess, *, deadline: float) -> None:
+    last_error: BaseException | None = None
+    for attempt in range(DESKTOP_SHELL_BUILD_CLOSE_RETRIES):
+        try:
+            owner.close(timeout=max(0.0, deadline - time.monotonic()))
+            return
+        except BaseException as exc:
+            last_error = exc
+            if attempt + 1 < DESKTOP_SHELL_BUILD_CLOSE_RETRIES:
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(0.05, remaining))
+    raise BuildProcessRetirementError(
+        "desktop build process retirement could not be confirmed; keeping its lock and stage for recovery",
+        owner,
+    ) from last_error
+
+
+def _run_owned_process(
+    command: list[str],
+    *,
+    cwd: Path,
+    deadline: float,
+    label: str,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a bounded, console-free process tree with disk-backed output tails."""
+
+    remaining = max(0.0, deadline - time.monotonic())
+    if remaining <= DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS:
+        raise TimeoutError(f"{label} could not start within the desktop build deadline")
+    owner: OwnedProcess | None = None
+    with tempfile.TemporaryFile(mode="w+b") as stdout_log, tempfile.TemporaryFile(mode="w+b") as stderr_log:
+        try:
+            owner = OwnedProcess.spawn(
+                command,
+                cwd=str(cwd),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_log,
+                stderr=stderr_log,
+                close_fds=True,
+                **no_window_subprocess_kwargs(),
+            )
+            wait_timeout = max(
+                0.0,
+                deadline - time.monotonic() - DESKTOP_SHELL_BUILD_CLEANUP_RESERVE_SECONDS,
+            )
+            try:
+                owner.process.wait(timeout=wait_timeout)
+            except subprocess.TimeoutExpired as exc:
+                remaining = max(0.0, deadline - time.monotonic())
+                if not owner.terminate(timeout=remaining):
+                    raise RuntimeError(f"{label} timed out and its process tree could not be retired") from exc
+                owner.process.wait(timeout=max(0.0, deadline - time.monotonic()))
+                detail = _npm_failure_detail(
+                    subprocess.CompletedProcess(
+                        command,
+                        returncode=int(owner.process.returncode or 0),
+                        stdout=_read_log_tail(stdout_log),
+                        stderr=_read_log_tail(stderr_log),
+                    )
+                )
+                raise TimeoutError(f"{label} exceeded the desktop build deadline: {detail}") from exc
+
+            result = subprocess.CompletedProcess(
+                command,
+                returncode=int(owner.process.returncode or 0),
+                stdout=_read_log_tail(stdout_log),
+                stderr=_read_log_tail(stderr_log),
+            )
+            if result.returncode != 0:
+                detail = _npm_failure_detail(result)
+                raise RuntimeError(f"{label} failed with exit code {result.returncode}: {detail}")
+            return result
+        finally:
+            if owner is not None:
+                _close_owned_process(owner, deadline=deadline)
+
+
+def _wait_for_desktop_shell_build_lock(root: Path, *, deadline: float) -> None:
+    _retry_pending_build_retirements(root, deadline=deadline)
+    while True:
+        if _acquire_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE):
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("desktop shell build lock was not available before the build deadline")
+        time.sleep(min(DESKTOP_SHELL_BUILD_LOCK_POLL_SECONDS, remaining))
+
+
+def _run_desktop_shell_package_build(root: Path, *, mode: str, deadline: float) -> Path:
+    session = root / "dist" / f".desktop-shell-build-{uuid4().hex}"
     electron_dir = root / ELECTRON_PACKAGE_DIR
     node_command = _node_command()
-    npm_cli = _npm_cli_script_for_node(node_command)
-    command = [node_command, npm_cli, "run", "package:staging"]
-    result = subprocess.run(
-        command,
-        cwd=str(electron_dir),
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-        **no_window_subprocess_kwargs(),
-    )
-    if int(result.returncode or 0) != 0:
-        detail = _npm_failure_detail(result)
-        _append_refresh_log(root, "prebuild.failed", exit_code=int(result.returncode or 0), detail=detail)
-        raise RuntimeError(f"desktop shell package:staging failed with exit code {result.returncode}: {detail}")
-    staged_tree = str(_read_json(root / STAGING_PROVENANCE_RELATIVE).get("electronTreeHash") or "").strip()
-    current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
-    if not staged_tree or not current_tree or staged_tree != current_tree:
-        shutil.rmtree(staging_root, ignore_errors=True)
-        raise RuntimeError(
-            "staged desktop shell provenance does not match HEAD:desktop/electron "
-            f"(staged={staged_tree!r} current={current_tree!r})"
+    command = [node_command, str(electron_dir / "scripts" / "buildDesktopPackage.js"), "--mode", mode]
+    env = os.environ.copy()
+    env["VIBELUTION_DESKTOP_BUILD_ROOT"] = str(session)
+    env["VIBELUTION_DESKTOP_BUILD_MANAGED"] = "1"
+    try:
+        _run_owned_process(
+            command,
+            cwd=electron_dir,
+            deadline=deadline,
+            label=f"desktop shell package:{mode}",
+            env=env,
         )
-    return {"electronTreeHash": staged_tree}
+        return session
+    except BuildProcessRetirementError as exc:
+        _register_pending_build_retirement(
+            root,
+            exc.owner,
+            cleanup_paths=(session,),
+            lock_relative=PREBUILD_LOCK_RELATIVE,
+        )
+        raise
+    except Exception:
+        shutil.rmtree(session, ignore_errors=True)
+        raise
+
+
+def build_desktop_shell_package(
+    project_root: Path | str = PROJECT_ROOT,
+    *,
+    mode: str = "dir",
+) -> dict[str, Any]:
+    """Build and publish a package through the shared project build owner."""
+
+    if mode not in {"dir", "staging", "linux-arm64"}:
+        raise ValueError(f"unsupported desktop package mode: {mode}")
+    root = Path(project_root).resolve()
+    deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
+    _wait_for_desktop_shell_build_lock(root, deadline=deadline)
+    session: Path | None = None
+    try:
+        session = _run_desktop_shell_package_build(root, mode=mode, deadline=deadline)
+        output = session / "builder-output"
+        if mode == "linux-arm64":
+            published_output = root / "dist" / "desktop-linux-arm64"
+            _publish_built_shell_tree(
+                output,
+                published_output,
+                previous=root / "dist" / ".desktop-linux-arm64-previous",
+            )
+        else:
+            built = output / "win-unpacked"
+            built_provenance = built / "resources" / "app.asar.unpacked" / "package-provenance.json"
+            packaged_tree = str(_read_json(built_provenance).get("electronTreeHash") or "").strip()
+            current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+            if not packaged_tree or not current_tree or packaged_tree != current_tree:
+                raise RuntimeError(
+                    "desktop package provenance does not match HEAD:desktop/electron "
+                    f"(packaged={packaged_tree!r} current={current_tree!r})"
+                )
+            published_output = (
+                root / STAGING_WIN_UNPACKED_RELATIVE
+                if mode == "staging"
+                else root / PACKAGED_EXE_RELATIVE.parent
+            )
+            previous = root / STAGING_OUTPUT_DIR_RELATIVE / ".win-unpacked-previous" if mode == "staging" else root / PREVIOUS_WIN_UNPACKED_RELATIVE
+            _publish_built_shell_tree(built, published_output, previous=previous)
+        return {"built": True, "mode": mode, "output": str(published_output)}
+    finally:
+        if session is not None and not _pending_build_retirement_for(root, cleanup_path=session):
+            shutil.rmtree(session, ignore_errors=True)
+        if not _pending_build_retirement_for(root):
+            _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
+
+
+def _stage_desktop_shell(root: Path, *, deadline: float | None = None) -> dict[str, Any]:
+    """Build to a unique app/output tree, then publish verified staging bytes."""
+
+    deadline = deadline or (time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS)
+    session = _run_desktop_shell_package_build(root, mode="staging", deadline=deadline)
+    built = session / "builder-output" / "win-unpacked"
+    built_provenance = built / "resources" / "app.asar.unpacked" / "package-provenance.json"
+    try:
+        staged_tree = str(_read_json(built_provenance).get("electronTreeHash") or "").strip()
+        current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+        if not staged_tree or not current_tree or staged_tree != current_tree:
+            raise RuntimeError(
+                "staged desktop shell provenance does not match HEAD:desktop/electron "
+                f"(staged={staged_tree!r} current={current_tree!r})"
+            )
+        _publish_built_shell_tree(
+            built,
+            root / STAGING_WIN_UNPACKED_RELATIVE,
+            previous=root / STAGING_OUTPUT_DIR_RELATIVE / ".win-unpacked-previous",
+        )
+        return {"electronTreeHash": staged_tree}
+    finally:
+        if not _pending_build_retirement_for(root, cleanup_path=session):
+            shutil.rmtree(session, ignore_errors=True)
 
 
 def _try_promote_staged_desktop_shell(root: Path) -> bool:
@@ -923,87 +1217,104 @@ def _try_promote_staged_desktop_shell(root: Path) -> bool:
     if not _acquire_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE):
         return False
     try:
-        staging_unpacked = root / STAGING_WIN_UNPACKED_RELATIVE
-        if not (staging_unpacked / "Vibelution.exe").is_file():
-            return False
-        staged_tree = str(_read_json(root / STAGING_PROVENANCE_RELATIVE).get("electronTreeHash") or "").strip()
-        if not staged_tree:
-            return False
-        current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
-        if not current_tree or staged_tree != current_tree:
-            # Leave the staging in place; the next successful prebuild replaces it.
-            return False
-        live = root / "dist" / "desktop" / "win-unpacked"
-        previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
-        moved_previous = False
-        try:
-            if previous.exists():
-                shutil.rmtree(previous, ignore_errors=True)
-            if live.exists():
-                _rename_dir(live, previous)
-                moved_previous = True
-            _rename_dir(staging_unpacked, live)
-        except OSError:
-            # A sharing violation here means something still holds the live tree
-            # open; put the old package back and let the caller rebuild instead.
-            if moved_previous and not live.exists():
-                try:
-                    _rename_dir(previous, live)
-                except OSError:
-                    pass
-            return False
-        shutil.rmtree(previous, ignore_errors=True)
-        shutil.rmtree(root / STAGING_OUTPUT_DIR_RELATIVE, ignore_errors=True)
-        return True
+        return _try_promote_staged_desktop_shell_locked(root)
     finally:
         _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
+
+
+def _try_promote_staged_desktop_shell_locked(root: Path) -> bool:
+    staging_unpacked = root / STAGING_WIN_UNPACKED_RELATIVE
+    if not (staging_unpacked / "Vibelution.exe").is_file():
+        return False
+    staged_tree = str(_read_json(staging_unpacked / "resources" / "app.asar.unpacked" / "package-provenance.json").get("electronTreeHash") or "").strip()
+    if not staged_tree:
+        return False
+    current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+    if not current_tree or staged_tree != current_tree:
+        # Leave the staging in place; the next successful prebuild replaces it.
+        return False
+    live = root / "dist" / "desktop" / "win-unpacked"
+    previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
+    try:
+        _publish_built_shell_tree(staging_unpacked, live, previous=previous)
+    except OSError:
+        # A sharing violation here means something still holds the live tree
+        # open; leave staging and the old package untouched for a later retry.
+        return False
+    shutil.rmtree(root / STAGING_OUTPUT_DIR_RELATIVE, ignore_errors=True)
+    return True
+
+
+def _publish_built_shell_tree(source: Path, destination: Path, *, previous: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    previous.parent.mkdir(parents=True, exist_ok=True)
+    moved_previous = False
+    try:
+        if previous.exists():
+            shutil.rmtree(previous, ignore_errors=True)
+        if destination.exists():
+            _rename_dir(destination, previous)
+            moved_previous = True
+        _rename_dir(source, destination)
+    except OSError:
+        if moved_previous and not destination.exists():
+            try:
+                _rename_dir(previous, destination)
+            except OSError:
+                pass
+        raise
+    if moved_previous:
+        shutil.rmtree(previous, ignore_errors=True)
 
 
 def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Rebuild ``win-unpacked`` from the current ``desktop/electron`` checkout."""
 
     root = Path(project_root)
-    if _try_promote_staged_desktop_shell(root):
+    deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
+    _wait_for_desktop_shell_build_lock(root, deadline=deadline)
+    try:
+        if _try_promote_staged_desktop_shell_locked(root):
+            status = inspect_desktop_shell(root)
+            if not status["stale"]:
+                _append_refresh_log(root, "rebuild.promoted_from_staging", reason=status["reason"])
+                return {
+                    "rebuilt": True,
+                    "promotedFromStaging": True,
+                    "reason": status["reason"],
+                    "currentElectronTree": status["currentElectronTree"],
+                }
+            # The staged tree hash matched but the full freshness inspection does
+            # not. Keep the old package until the independent build is complete.
+            _append_refresh_log(root, "rebuild.promote_rejected", reason=status["reason"])
+
+        session = _run_desktop_shell_package_build(root, mode="dir", deadline=deadline)
+        try:
+            built = session / "builder-output" / "win-unpacked"
+            _publish_built_shell_tree(
+                built,
+                root / PACKAGED_EXE_RELATIVE.parent,
+                previous=root / PREVIOUS_WIN_UNPACKED_RELATIVE,
+            )
+        finally:
+            if not _pending_build_retirement_for(root, cleanup_path=session):
+                shutil.rmtree(session, ignore_errors=True)
+
         status = inspect_desktop_shell(root)
-        if not status["stale"]:
-            _append_refresh_log(root, "rebuild.promoted_from_staging", reason=status["reason"])
-            return {
-                "rebuilt": True,
-                "promotedFromStaging": True,
-                "reason": status["reason"],
-                "currentElectronTree": status["currentElectronTree"],
-            }
-        # The staged tree hash matched but the full freshness inspection does
-        # not (frontend drift, mtime regression). Never deliver that package:
-        # fall through to the real rebuild.
-        _append_refresh_log(root, "rebuild.promote_rejected", reason=status["reason"])
-    electron_dir = root / ELECTRON_PACKAGE_DIR
-    node_command = _node_command()
-    npm_cli = _npm_cli_script_for_node(node_command)
-    command = [node_command, npm_cli, "run", "package:dir"]
-    result = subprocess.run(
-        command,
-        cwd=str(electron_dir),
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-        **no_window_subprocess_kwargs(),
-    )
-    if int(result.returncode or 0) != 0:
-        detail = _npm_failure_detail(result)
-        _append_refresh_log(root, "rebuild.failed", exit_code=int(result.returncode or 0), detail=detail)
-        raise RuntimeError(f"desktop shell package:dir failed with exit code {result.returncode}: {detail}")
-    status = inspect_desktop_shell(root)
-    if status["stale"]:
-        raise RuntimeError(f"desktop shell is still stale after rebuild: {status['reason']}")
-    return {
-        "rebuilt": True,
-        "reason": status["reason"],
-        "currentElectronTree": status["currentElectronTree"],
-    }
+        if status["stale"]:
+            raise RuntimeError(f"desktop shell is still stale after rebuild: {status['reason']}")
+        return {
+            "rebuilt": True,
+            "reason": status["reason"],
+            "currentElectronTree": status["currentElectronTree"],
+        }
+    except Exception as exc:
+        detail = str(exc)
+        _append_refresh_log(root, "rebuild.failed", detail=detail)
+        raise
+    finally:
+        if not _pending_build_retirement_for(root):
+            _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
 
 
 def inspect_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
@@ -1061,7 +1372,6 @@ def ensure_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[
         )
     rebuilt = _rebuild_unpackaged_electron(root)
     current_tree = str(rebuilt.get("currentElectronTree") or _git_tree_hash(root, "HEAD:desktop/electron"))
-    _write_unpackaged_provenance(root, current_tree)
     status = inspect_unpackaged_electron(root)
     if status["stale"]:
         raise RuntimeError(f"checkout Electron main is still stale after build: {status['reason']}")
@@ -1439,71 +1749,79 @@ def _publish_staged_electron_dist(stage: Path, dist: Path) -> None:
             shutil.rmtree(previous, ignore_errors=True)
 
 
+def build_unpackaged_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Compile and publish checkout dist through the shared build owner."""
+    return _rebuild_unpackaged_electron(Path(project_root).resolve())
+
+
 def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
     """Build Electron main beside dist, then publish only after the stage is complete."""
 
     electron_dir = project_root / ELECTRON_PACKAGE_DIR
-    stage = electron_dir / ".build-stage"
-    if stage.exists():
-        shutil.rmtree(stage)
-    stage.mkdir(parents=True)
-    node_command = _node_command()
-    env = os.environ.copy()
-    env["VIBELUTION_ELECTRON_DIST"] = str(stage)
-    commands = [
-        [
-            node_command,
-            str(electron_dir / "node_modules" / "typescript" / "lib" / "tsc.js"),
-            "-p",
-            "tsconfig.json",
-            "--outDir",
-            str(stage),
-        ],
-        [
-            node_command,
-            str(electron_dir / "node_modules" / "esbuild" / "bin" / "esbuild"),
-            "src/preload.ts",
-            "--bundle",
-            "--platform=node",
-            "--format=cjs",
-            f"--outfile={stage / 'preload.cjs'}",
-            "--external:electron",
-        ],
-        [node_command, str(electron_dir / "scripts" / "buildWorkbenchJob.js")],
-    ]
+    deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
+    _wait_for_desktop_shell_build_lock(project_root, deadline=deadline)
+    stage = electron_dir / f".build-stage-{uuid4().hex}"
     try:
+        stage.mkdir(parents=True)
+        node_command = _node_command()
+        env = os.environ.copy()
+        env["VIBELUTION_DESKTOP_BUILD_MANAGED"] = "1"
+        env["VIBELUTION_DESKTOP_BUILD_ROOT"] = str(stage)
+        env["VIBELUTION_ELECTRON_DIST"] = str(stage)
+        env["VIBELUTION_WORKBENCH_JOB_BUILD_ROOT"] = str(stage / ".workbench-job-build")
+        commands = [
+            [
+                node_command,
+                str(electron_dir / "node_modules" / "typescript" / "lib" / "tsc.js"),
+                "-p",
+                "tsconfig.json",
+                "--outDir",
+                str(stage),
+            ],
+            [
+                node_command,
+                str(electron_dir / "node_modules" / "esbuild" / "bin" / "esbuild"),
+                "src/preload.ts",
+                "--bundle",
+                "--platform=node",
+                "--format=cjs",
+                f"--outfile={stage / 'preload.cjs'}",
+                "--external:electron",
+            ],
+            [node_command, str(electron_dir / "scripts" / "buildWorkbenchJob.js")],
+        ]
         for command in commands:
-            result = subprocess.run(
-                command,
-                cwd=str(electron_dir),
-                env=env,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-                **no_window_subprocess_kwargs(),
-            )
-            if int(result.returncode or 0) != 0:
-                detail = _npm_failure_detail(result)
-                _append_refresh_log(
-                    project_root,
-                    "unpackaged.build.failed",
-                    exit_code=int(result.returncode or 0),
-                    detail=detail,
+            try:
+                _run_owned_process(
+                    command,
+                    cwd=electron_dir,
+                    env=env,
+                    deadline=deadline,
+                    label="checkout Electron main build",
                 )
-                raise RuntimeError(f"checkout Electron main build failed with exit code {result.returncode}: {detail}")
+            except BuildProcessRetirementError as exc:
+                _register_pending_build_retirement(
+                    project_root,
+                    exc.owner,
+                    cleanup_paths=(stage,),
+                    lock_relative=PREBUILD_LOCK_RELATIVE,
+                )
+                raise
         _publish_staged_electron_dist(stage, electron_dir / "dist")
+        current_tree = _git_tree_hash(project_root, "HEAD:desktop/electron")
+        _write_unpackaged_provenance(project_root, current_tree)
+    except Exception as exc:
+        _append_refresh_log(project_root, "unpackaged.build.failed", detail=str(exc)[-800:])
+        raise
     finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        if not _pending_build_retirement_for(project_root, cleanup_path=stage):
+            shutil.rmtree(stage, ignore_errors=True)
+        if not _pending_build_retirement_for(project_root):
+            _release_desktop_shell_refresh_lock(project_root, lock_relative=PREBUILD_LOCK_RELATIVE)
     main_js = unpackaged_main_js(project_root)
     if not main_js.is_file():
         raise RuntimeError(f"checkout Electron main was not produced: {main_js}")
-    return {
-        "rebuilt": True,
-        "currentElectronTree": _git_tree_hash(project_root, "HEAD:desktop/electron"),
-    }
+    return {"rebuilt": True, "currentElectronTree": current_tree}
 
 
 def _write_unpackaged_provenance(project_root: Path, tree_hash: str) -> None:

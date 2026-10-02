@@ -29,6 +29,7 @@ def _configure_roots(monkeypatch, tmp_path):
     monkeypatch.setattr(terminal_service, "TRANSCRIPT_DIR", project_root / ".runtime" / "cli_agents" / "transcripts")
     terminal_service.shutdown_cli_agent_terminal_sessions()
     terminal_service._RUNTIMES.clear()
+    terminal_service.begin_cli_agent_terminal_lifecycle()
     monkeypatch.setattr(service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": False})
     return project_root
 

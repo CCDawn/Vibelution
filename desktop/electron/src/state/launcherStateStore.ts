@@ -156,7 +156,7 @@ export function boundedStaleReason(value: unknown): string {
   return text;
 }
 
-function unwrapSource(value: unknown): LauncherStateRefreshSource<unknown> | { ok: true; value: unknown; legacy: true } {
+export function unwrapSource(value: unknown): LauncherStateRefreshSource<unknown> | { ok: true; value: unknown; legacy: true } {
   if (typeof value === "object" && value !== null && "ok" in value) {
     const payload = value as Record<string, unknown>;
     if (payload.ok === true) {

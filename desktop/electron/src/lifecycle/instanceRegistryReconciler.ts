@@ -17,6 +17,7 @@ import {
   type SweepGraceTracker
 } from "./instanceRegistryStore.js";
 import { knownPidIsAlive } from "./mainLine/observation.js";
+import { unwrapSource } from "../state/launcherStateStore.js";
 import { capturePythonProcessIdentity } from "../process/pythonJsonBridge.js";
 
 /**
@@ -99,10 +100,20 @@ function holdsLease(entry: RegistryEntry): boolean {
   return !PORT_LEASE_RECLAIMABLE.has(String(entry.portLeaseStatus || "").trim().toLowerCase());
 }
 
-/** Raw runtime signals from the state-refresh payload (never UI terminal states). */
+/**
+ * Raw runtime signals from the state-refresh payload (never UI terminal states).
+ *
+ * Accepts both payload shapes: the raw state-refresh envelope
+ * `{ok: true, value: {items: [...]}}` (what the state-refresh bridge returns,
+ * unwrapped by the store loader only after this hook runs) and the bare
+ * `{items: [...]}` projection the store keeps after unwrapping. Envelope
+ * unwrapping reuses the store's own unwrapSource so the two stay one semantic.
+ */
 export function observeBranchInstanceRuntimes(branchInstances: unknown): ObservationSummary {
-  const items = isRecord(branchInstances) && Array.isArray(branchInstances.items)
-    ? branchInstances.items.filter(isRecord)
+  const unwrapped = unwrapSource(branchInstances);
+  const source = unwrapped.ok ? unwrapped.value : branchInstances;
+  const items = isRecord(source) && Array.isArray(source.items)
+    ? source.items.filter(isRecord)
     : [];
   const liveBackends = new Map<string, LiveBackendObservation>();
   const openWindowIds = new Set<string>();

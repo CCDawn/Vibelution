@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
 import hashlib
 import json
 import os
@@ -15,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure.owned_process import OwnedProcess
+from core.infrastructure.windows_process_job import WindowsProcessJob
 from . import cli_agent_service
 from . import cli_agent_task_kernel
 from .terminal_screen_buffer import TerminalScreenBuffer, TerminalScreenSnapshot
@@ -38,6 +42,10 @@ MAX_TRANSCRIPT_BYTES = 1_500_000
 TRANSCRIPT_TRIM_TARGET_BYTES = 900_000
 STREAM_HEARTBEAT_SECONDS = 15
 STREAM_QUEUE_SIZE = 200
+TERMINAL_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+_PROCESS_SET_QUOTA = 0x0100
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 DEFAULT_DISCOVERY_POLL_ATTEMPTS = 8
 DEFAULT_DISCOVERY_POLL_INTERVAL_SECONDS = 0.75
 DEFAULT_DISCOVERY_CREATED_GRACE_MS = 5000
@@ -63,6 +71,381 @@ class CliAgentTerminalError(Exception):
         self.details = dict(details or {})
 
 
+def _close_pywinpty_transport(process: Any, deadline: float) -> bool:
+    """Close pywinpty 3.0.5's socket pair and release its native PTY object."""
+
+    pty = getattr(process, "pty", None)
+    cancel_io = getattr(pty, "cancel_io", None)
+    if callable(cancel_io):
+        try:
+            cancel_io()
+        except Exception:
+            # pywinpty can report that there is no pending I/O after the Job
+            # has already terminated the root. Closing both endpoints and
+            # joining the pump below provide the actual retirement evidence.
+            pass
+    for name in ("fileobj", "_server"):
+        endpoint = getattr(process, name, None)
+        if endpoint is not None:
+            try:
+                close = getattr(endpoint, "close", None)
+                if not callable(close):
+                    return False
+                close()
+            except Exception:
+                return False
+    reader = getattr(process, "_thread", None)
+    if reader is not None and reader.is_alive():
+        reader.join(timeout=max(0.0, deadline - time.monotonic()))
+    if reader is not None and reader.is_alive():
+        return False
+    process.fd = -1
+    process.closed = True
+    if pty is not None:
+        try:
+            process.pty = None
+        except Exception:
+            try:
+                del process.pty
+            except Exception:
+                return False
+    return True
+
+
+class _ConptyProcessOwner:
+    """Best-effort Job ownership for pywinpty's post-spawn process handle.
+
+    pywinpty does not expose a suspended-spawn hook, so descendants already
+    created before the first Job assignment must be adopted explicitly.
+    """
+
+    def __init__(self, process: Any, job: WindowsProcessJob) -> None:
+        self.process = process
+        self.pid = int(process.pid)
+        self.job = job
+        self._identities: dict[int, float] = {}
+        # Keep identities for every observed process, including ones that could
+        # not yet be assigned to the Job. If adoption fails, a retry can still
+        # verify and reap those exact processes after the PTY root exits.
+        self._known_identities: dict[int, float] = {}
+        self._lock = threading.RLock()
+        self._closed = False
+        self._adoption_failed = False
+        self._known_tree_complete = False
+        try:
+            self.initial_adoption_complete = self._adopt_descendants()
+        except Exception:  # noqa: BLE001 - keep a retryable owner after partial adoption
+            self.initial_adoption_complete = False
+        self._adoption_failed = not self.initial_adoption_complete
+
+    def _process_creation_time(self, handle: int) -> float:
+        creation = ctypes.wintypes.FILETIME()
+        exit_time = ctypes.wintypes.FILETIME()
+        kernel_time = ctypes.wintypes.FILETIME()
+        user_time = ctypes.wintypes.FILETIME()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetProcessTimes.argtypes = [
+            ctypes.wintypes.HANDLE,
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+            ctypes.POINTER(ctypes.wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = ctypes.wintypes.BOOL
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        ticks = (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+        return (ticks - 116444736000000000) / 10_000_000
+
+    def _assign_process(self, process: Any) -> bool:
+        pid = int(process.pid)
+        expected_creation_time = float(process.create_time())
+        if self._known_identities.get(pid) != expected_creation_time:
+            return False
+        if self._identities.get(pid) == expected_creation_time:
+            return True
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [
+            ctypes.wintypes.DWORD,
+            ctypes.wintypes.BOOL,
+            ctypes.wintypes.DWORD,
+        ]
+        kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+        kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+        handle = kernel32.OpenProcess(
+            _PROCESS_SET_QUOTA | _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION,
+            False,
+            pid,
+        )
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            actual_creation_time = self._process_creation_time(handle)
+            if abs(actual_creation_time - expected_creation_time) > 0.01:
+                return False
+
+            in_job = ctypes.wintypes.BOOL()
+            kernel32.IsProcessInJob.argtypes = [
+                ctypes.wintypes.HANDLE,
+                ctypes.wintypes.HANDLE,
+                ctypes.POINTER(ctypes.wintypes.BOOL),
+            ]
+            kernel32.IsProcessInJob.restype = ctypes.wintypes.BOOL
+            if not kernel32.IsProcessInJob(handle, self.job._handle, ctypes.byref(in_job)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not in_job.value:
+                self.job.assign_handle(handle)
+            self._identities[pid] = expected_creation_time
+            return True
+        finally:
+            kernel32.CloseHandle(handle)
+
+    def _snapshot_process_tree(self) -> bool:
+        """Record a validated PID/creation-time set before stopping the root."""
+
+        try:
+            import psutil
+
+            if self.pid not in self._known_identities:
+                # pywinpty exposes no suspended-create handle. If the native
+                # root is already gone, its PID may belong to an unrelated
+                # replacement; never establish ownership from that PID.
+                try:
+                    if not self.process.isalive():
+                        return False
+                except Exception:
+                    return False
+            root = psutil.Process(self.pid)
+            root_creation_time = float(root.create_time())
+            expected_root_time = self._known_identities.get(self.pid)
+            if expected_root_time is not None and abs(root_creation_time - expected_root_time) > 0.01:
+                # The original root exited and its PID was reused. Do not adopt
+                # the replacement; rely only on identities saved earlier.
+                return self._known_tree_complete
+            self._known_identities[self.pid] = root_creation_time
+
+            complete = True
+            try:
+                descendants = root.children(recursive=True)
+            except psutil.NoSuchProcess:
+                return self._known_tree_complete
+            except Exception:
+                descendants = []
+                complete = False
+            for child in descendants:
+                try:
+                    pid = int(child.pid)
+                    creation_time = float(child.create_time())
+                except psutil.NoSuchProcess:
+                    continue
+                except Exception:
+                    complete = False
+                    continue
+                previous = self._known_identities.get(pid)
+                if previous is not None and abs(previous - creation_time) > 0.01:
+                    # A descendant PID was reused. Keep the old identity and
+                    # never let a new process inherit this owner's authority.
+                    continue
+                self._known_identities[pid] = creation_time
+
+            if complete:
+                self._known_tree_complete = True
+            return complete or self._known_tree_complete
+        except Exception as exc:  # noqa: BLE001 - retain any earlier identity snapshot
+            try:
+                import psutil
+
+                if isinstance(exc, psutil.NoSuchProcess):
+                    return self._known_tree_complete
+            except Exception:
+                pass
+            return self._known_tree_complete
+
+    def _adopt_descendants(self) -> bool:
+        try:
+            import psutil
+
+            if not self._snapshot_process_tree():
+                return False
+            for _ in range(8):
+                previous = dict(self._identities)
+                for pid, creation_time in list(self._known_identities.items()):
+                    try:
+                        child = psutil.Process(pid)
+                        if abs(float(child.create_time()) - creation_time) > 0.01:
+                            continue
+                    except psutil.NoSuchProcess:
+                        continue
+                    if not self._assign_process(child):
+                        return False
+                if not self._snapshot_process_tree():
+                    return False
+                if self._identities == previous:
+                    return True
+            return False
+        except Exception as exc:  # noqa: BLE001 - do not scan outside the owned tree
+            try:
+                import psutil
+
+                if isinstance(exc, psutil.NoSuchProcess) and self.pid in self._identities:
+                    return True
+            except Exception:
+                pass
+            return False
+
+    def _root_is_alive(self) -> bool:
+        if getattr(self.process, "pty", None) is None:
+            return False
+        return bool(self.process.isalive())
+
+    def _terminate_known_processes(self) -> bool:
+        """Terminate only saved PIDs whose current creation time still matches."""
+
+        for pid, expected_creation_time in sorted(
+            self._known_identities.items(), key=lambda item: item[0] == self.pid
+        ):
+            if os.name == "nt":
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.OpenProcess.argtypes = [
+                    ctypes.wintypes.DWORD,
+                    ctypes.wintypes.BOOL,
+                    ctypes.wintypes.DWORD,
+                ]
+                kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+                kernel32.TerminateProcess.argtypes = [ctypes.wintypes.HANDLE, ctypes.wintypes.UINT]
+                kernel32.TerminateProcess.restype = ctypes.wintypes.BOOL
+                kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+                kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+                handle = kernel32.OpenProcess(
+                    _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION,
+                    False,
+                    pid,
+                )
+                if not handle:
+                    if ctypes.get_last_error() == 87:  # ERROR_INVALID_PARAMETER: process exited
+                        continue
+                    return False
+                try:
+                    actual_creation_time = self._process_creation_time(handle)
+                    if abs(actual_creation_time - expected_creation_time) > 0.01:
+                        continue
+                    if not kernel32.TerminateProcess(handle, 1):
+                        error = ctypes.get_last_error()
+                        if error not in {5, 87}:  # access denied or already exited
+                            return False
+                finally:
+                    kernel32.CloseHandle(handle)
+                continue
+
+            try:
+                import psutil
+
+                process = psutil.Process(pid)
+                if abs(float(process.create_time()) - expected_creation_time) > 0.01:
+                    continue
+                process.terminate()
+            except psutil.NoSuchProcess:
+                continue
+            except Exception:
+                return False
+        return True
+
+    def _known_processes_stopped(self) -> bool:
+        if not self._known_tree_complete:
+            return False
+        try:
+            import psutil
+
+            for pid, expected_creation_time in self._known_identities.items():
+                try:
+                    process = psutil.Process(pid)
+                    if (
+                        abs(float(process.create_time()) - expected_creation_time) <= 0.01
+                        and process.is_running()
+                        and process.status() != psutil.STATUS_ZOMBIE
+                    ):
+                        return False
+                except psutil.NoSuchProcess:
+                    continue
+            return True
+        except Exception:
+            return False
+
+    def request_stop(self) -> bool:
+        with self._lock:
+            if self._closed:
+                return True
+            snapshot_complete = self._snapshot_process_tree()
+            adopted = self._adopt_descendants()
+            if not adopted:
+                self._adoption_failed = True
+                if not snapshot_complete and not self._known_tree_complete:
+                    return False
+                # First preserve and reap the known descendants, then terminate
+                # the root. If the snapshot was incomplete, keep the owner and
+                # root alive for a later adoption attempt instead.
+                if not self._known_tree_complete or not self._terminate_known_processes():
+                    return False
+            try:
+                if self.job.active_count() != 0:
+                    self.job.terminate()
+            except Exception:
+                return False
+            # This is the low-level cancellation call used by pywinpty 3.0.5's own
+            # PtyProcess.terminate implementation. It cancels the PTY read pump.
+            pty = getattr(self.process, "pty", None)
+            cancel_io = getattr(pty, "cancel_io", None)
+            if callable(cancel_io):
+                try:
+                    cancel_io()
+                except Exception:
+                    return False
+            return adopted or self._known_tree_complete
+
+    def wait_until_stopped(self, deadline: float) -> bool:
+        while True:
+            try:
+                job_empty = self.job.active_count() == 0
+            except Exception:
+                job_empty = False
+            if job_empty and not self._root_is_alive() and self._known_processes_stopped():
+                self._adoption_failed = False
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(0.02, remaining))
+
+    def close(self, deadline: float) -> bool:
+        with self._lock:
+            if self._closed:
+                return True
+            try:
+                job_empty = self.job.active_count() == 0
+            except Exception:
+                return False
+            if not job_empty or self._root_is_alive() or not self._known_processes_stopped():
+                return False
+            # pywinpty 3.0.5's isalive() sets process.closed=True as soon as the
+            # PTY root exits. Its close() then skips closing both sockets, so
+            # retire those transports explicitly after the runtime reader stops.
+            if not _close_pywinpty_transport(self.process, deadline):
+                return False
+            if self.job.active_count() != 0:
+                return False
+            self.job.close()
+            self._closed = True
+            return True
+
+
 class _TerminalRuntime:
     def __init__(
         self,
@@ -76,6 +459,8 @@ class _TerminalRuntime:
         self.state = state
         self.process = process
         self.transport = transport
+        self.process_owner = getattr(process, "_vibelution_terminal_process_owner", None)
+        self._process_retired = False
         self.transcript_path = transcript_path
         self.session_id_regex = session_id_regex
         self.screen = TerminalScreenBuffer(
@@ -91,9 +476,15 @@ class _TerminalRuntime:
             name=f"cli-agent-terminal-{state.get('terminalSessionId')}",
             daemon=True,
         )
+        self.lifecycle_thread = threading.Thread(
+            target=self._watch_root_process,
+            name=f"cli-agent-terminal-watch-{state.get('terminalSessionId')}",
+            daemon=True,
+        )
 
     def start(self) -> None:
         self.reader_thread.start()
+        self.lifecycle_thread.start()
 
     def subscribe(self) -> queue.Queue[dict[str, Any]]:
         subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=STREAM_QUEUE_SIZE)
@@ -133,8 +524,21 @@ class _TerminalRuntime:
             except Exception:
                 return
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         self.stop_requested.set()
+        owner = self.process_owner
+        if owner is not None:
+            try:
+                if isinstance(owner, OwnedProcess):
+                    return owner.terminate(timeout=0.0)
+                else:
+                    return bool(owner.request_stop())
+            except Exception as exc:  # noqa: BLE001 - retain the owner for retry
+                _debug_logger.warning(
+                    f"Failed to request terminal process-tree stop (transport={self.transport}): {exc}",
+                    tag="cli_terminal_process_stop",
+                )
+                return False
         try:
             if self.transport == "conpty":
                 try:
@@ -143,11 +547,110 @@ class _TerminalRuntime:
                     self.process.terminate()
             else:
                 self.process.terminate()
+            return True
         except Exception as exc:
             _debug_logger.warning(
                 f"Failed to terminate terminal process (transport={self.transport}): {exc}",
                 tag="cli_terminal_process_stop",
             )
+            return False
+
+    def wait_stopped(self, deadline: float) -> bool:
+        owner = self.process_owner
+        if isinstance(owner, OwnedProcess):
+            if not owner.terminate(timeout=max(0.0, deadline - time.monotonic())):
+                return False
+        elif owner is not None:
+            try:
+                if not owner.wait_until_stopped(deadline):
+                    return False
+            except Exception as exc:  # noqa: BLE001 - retain the owner for retry
+                _debug_logger.warning(
+                    f"Failed while waiting for terminal process tree (transport={self.transport}): {exc}",
+                    tag="cli_terminal_process_stop",
+                )
+                return False
+        else:
+            wait = getattr(self.process, "wait", None)
+            if callable(wait):
+                try:
+                    wait(timeout=max(0.0, deadline - time.monotonic()))
+                except TypeError:
+                    while self.is_alive() and time.monotonic() < deadline:
+                        time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+                    if self.is_alive():
+                        return False
+                except subprocess.TimeoutExpired:
+                    return False
+            elif self.is_alive():
+                while self.is_alive() and time.monotonic() < deadline:
+                    time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+                if self.is_alive():
+                    return False
+
+        if self.reader_thread.is_alive():
+            self.reader_thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        if self.reader_thread.is_alive():
+            return False
+        if self.lifecycle_thread.is_alive() and threading.current_thread() is not self.lifecycle_thread:
+            self.lifecycle_thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        if self.lifecycle_thread.is_alive():
+            return False
+
+        for stream in (
+            getattr(self.process, "stdin", None),
+            getattr(self.process, "stdout", None),
+            getattr(self.process, "stderr", None),
+        ):
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
+        if isinstance(owner, OwnedProcess):
+            try:
+                owner.close(timeout=max(0.0, deadline - time.monotonic()))
+            except Exception:
+                return False
+        elif owner is not None:
+            try:
+                if not owner.close(deadline):
+                    return False
+            except Exception:
+                return False
+        self._process_retired = True
+        try:
+            self._persist_retired_state()
+        except Exception as exc:  # noqa: BLE001 - keep the retired runtime available for state retry
+            self._process_retired = False
+            _debug_logger.warning(
+                f"Failed to persist retired terminal state: {exc}",
+                tag="cli_terminal_process_retire",
+            )
+            return False
+        self._remove_from_runtime_map()
+        return True
+
+    def _persist_retired_state(self) -> None:
+        with self.lock:
+            stopped_by_request = self.stop_requested.is_set()
+            requested_closed = bool(self.state.get("userClosed"))
+            self.state["status"] = "closed" if requested_closed else ("stopped" if stopped_by_request else "exited")
+            self.state["alive"] = False
+            self.state["updatedAt"] = _now_iso()
+            if requested_closed and not self.state.get("closedAt"):
+                self.state["closedAt"] = self.state["updatedAt"]
+            _write_state(self.state)
+            final_state = _public_state(dict(self.state))
+        self._publish({"type": "terminal_status", "session": final_state})
+        cli_agent_task_kernel.mark_terminal_closed(final_state, status=str(final_state.get("status") or "exited"))
+
+    def _remove_from_runtime_map(self) -> None:
+        terminal_session_id = str(self.state.get("terminalSessionId") or "")
+        with _RUNTIMES_LOCK:
+            if _RUNTIMES.get(terminal_session_id) is self:
+                _RUNTIMES.pop(terminal_session_id, None)
 
     def is_alive(self) -> bool:
         try:
@@ -186,23 +689,88 @@ class _TerminalRuntime:
                     continue
                 self._record_output(chunk)
         finally:
-            with self.lock:
-                self.state["status"] = "stopped" if self.stop_requested.is_set() else "exited"
-                self.state["alive"] = False
-                self.state["updatedAt"] = _now_iso()
-                _write_state(self.state)
-                final_state = _public_state(dict(self.state))
-            self._publish({"type": "terminal_status", "session": final_state})
-            cli_agent_service._record_event(
-                "cli_agent.terminal.exited",
-                outcome="stopped" if self.stop_requested.is_set() else "completed",
-                fields={
-                    "terminalSessionId": str(self.state.get("terminalSessionId") or ""),
-                    "adapterId": str(self.state.get("adapterId") or ""),
-                    "transport": self.transport,
-                },
+            try:
+                if not self.stop_requested.is_set():
+                    self._retire_after_natural_exit()
+                with self.lock:
+                    stopped_by_request = self.stop_requested.is_set()
+                    requested_closed = bool(self.state.get("userClosed"))
+                    self.state["status"] = (
+                        "closed" if requested_closed else ("stopped" if stopped_by_request else "exited")
+                    ) if self._process_retired else "stopping"
+                    self.state["alive"] = not self._process_retired
+                    self.state["updatedAt"] = _now_iso()
+                    if requested_closed and self._process_retired and not self.state.get("closedAt"):
+                        self.state["closedAt"] = self.state["updatedAt"]
+                    _write_state(self.state)
+                    final_state = _public_state(dict(self.state))
+                self._publish({"type": "terminal_status", "session": final_state})
+                cli_agent_service._record_event(
+                    "cli_agent.terminal.exited",
+                    outcome="stopped" if stopped_by_request else "completed",
+                    fields={
+                        "terminalSessionId": str(self.state.get("terminalSessionId") or ""),
+                        "adapterId": str(self.state.get("adapterId") or ""),
+                        "transport": self.transport,
+                    },
+                )
+                if self._process_retired:
+                    cli_agent_task_kernel.mark_terminal_closed(final_state, status=str(final_state.get("status") or "exited"))
+            finally:
+                if self._process_retired and not self.stop_requested.is_set():
+                    self._remove_from_runtime_map()
+
+    def _watch_root_process(self) -> None:
+        """Retire owned descendants when the terminal root exits before EOF."""
+
+        while not self.stop_requested.is_set():
+            if not self.is_alive():
+                owner = self.process_owner
+                try:
+                    if isinstance(owner, OwnedProcess):
+                        owner.terminate(timeout=0.0)
+                    elif owner is not None:
+                        owner.request_stop()
+                    return
+                except Exception as exc:  # noqa: BLE001 - final shutdown can retry the owner
+                    _debug_logger.warning(
+                        f"Failed to retire terminal descendants after root exit: {exc}",
+                        tag="cli_terminal_process_retire",
+                    )
+                    return
+            self.stop_requested.wait(0.05)
+
+    def _retire_after_natural_exit(self) -> None:
+        """Release a naturally exited runtime without waiting for a later stop call."""
+
+        owner = self.process_owner
+        deadline = time.monotonic() + TERMINAL_SHUTDOWN_TIMEOUT_SECONDS
+        try:
+            if isinstance(owner, OwnedProcess):
+                if not owner.terminate(timeout=max(0.0, deadline - time.monotonic())):
+                    return
+                owner.close(timeout=max(0.0, deadline - time.monotonic()))
+            elif owner is not None:
+                owner.request_stop()
+                if not owner.wait_until_stopped(deadline) or not owner.close(deadline):
+                    return
+            for stream in (
+                getattr(self.process, "stdin", None),
+                getattr(self.process, "stdout", None),
+                getattr(self.process, "stderr", None),
+            ):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+        except Exception as exc:  # noqa: BLE001 - preserve a retryable runtime owner
+            _debug_logger.warning(
+                f"Failed to retire naturally exited terminal runtime (transport={self.transport}): {exc}",
+                tag="cli_terminal_process_retire",
             )
-            cli_agent_task_kernel.mark_terminal_closed(final_state, status=str(final_state.get("status") or "exited"))
+            return
+        self._process_retired = True
 
     def _read_chunk(self) -> str:
         try:
@@ -252,7 +820,26 @@ class _TerminalRuntime:
 
 
 _RUNTIMES: dict[str, _TerminalRuntime] = {}
+# Failed ConPTY adoption has no user terminal state yet, but the process and
+# Job still need a strong owner until shutdown can retry cleanup.
+_PENDING_CONPTY_OWNERS: dict[str, _ConptyProcessOwner] = {}
 _RUNTIMES_LOCK = threading.RLock()
+_TERMINAL_SHUTDOWN_EVENT = threading.Event()
+
+
+def begin_cli_agent_terminal_lifecycle() -> None:
+    """Reopen terminal creation for a new backend lifespan."""
+
+    if not _RUNTIMES_LOCK.acquire(timeout=TERMINAL_SHUTDOWN_TIMEOUT_SECONDS):
+        raise RuntimeError("Previous CLI terminal runtimes are still registering or retiring")
+    try:
+        if _TERMINAL_SHUTDOWN_EVENT.is_set() and (_RUNTIMES or _PENDING_CONPTY_OWNERS):
+            raise RuntimeError("Previous CLI terminal runtimes are still retiring")
+        if _PENDING_CONPTY_OWNERS:
+            raise RuntimeError("A failed ConPTY spawn is still owned for cleanup")
+        _TERMINAL_SHUTDOWN_EVENT.clear()
+    finally:
+        _RUNTIMES_LOCK.release()
 
 
 def ensure_cli_agent_terminal_session(
@@ -312,6 +899,16 @@ def ensure_cli_agent_terminal_session(
     )
 
     with _RUNTIMES_LOCK:
+        if _TERMINAL_SHUTDOWN_EVENT.is_set():
+            raise CliAgentTerminalError(
+                "TERMINAL_SESSION_NOT_RUNNING",
+                "CLI Agent terminal service is shutting down.",
+            )
+        if _PENDING_CONPTY_OWNERS:
+            raise CliAgentTerminalError(
+                "TERMINAL_SESSION_NOT_RUNNING",
+                "A previous CLI Agent terminal spawn is still being cleaned up.",
+            )
         runtime = _RUNTIMES.get(terminal_session_id)
         if runtime and runtime.is_alive():
             _link_runtime_source(
@@ -323,6 +920,14 @@ def ensure_cli_agent_terminal_session(
             snapshot = runtime.snapshot()
             snapshot["reusedActiveLock"] = True
             return snapshot
+        if runtime is not None:
+            runtime.stop()
+            if not runtime.wait_stopped(time.monotonic() + 0.1):
+                raise CliAgentTerminalError(
+                    "TERMINAL_SESSION_NOT_RUNNING",
+                    "Previous CLI Agent terminal runtime is still being cleaned up.",
+                    details={"terminalSessionId": terminal_session_id, "status": "stopping"},
+                )
 
         existing_state = _read_state(terminal_session_id)
         if not existing_state:
@@ -503,8 +1108,6 @@ def ensure_cli_agent_terminal_session(
         state["status"] = "running"
         transcript_path = _transcript_path(terminal_session_id)
         state["transcriptPath"] = _relative_to_project(transcript_path)
-        _write_state(state)
-        _supersede_related_terminal_states(state, keep_terminal_session_id=terminal_session_id)
         runtime = _TerminalRuntime(
             state=state,
             process=process,
@@ -512,6 +1115,16 @@ def ensure_cli_agent_terminal_session(
             transcript_path=transcript_path,
             session_id_regex=str(command.get("sessionIdRegex") or ""),
         )
+        if _TERMINAL_SHUTDOWN_EVENT.is_set():
+            runtime.stop()
+            if not runtime.wait_stopped(time.monotonic() + TERMINAL_SHUTDOWN_TIMEOUT_SECONDS):
+                _RUNTIMES[terminal_session_id] = runtime
+            raise CliAgentTerminalError(
+                "TERMINAL_SESSION_NOT_RUNNING",
+                "CLI Agent terminal service is shutting down.",
+            )
+        _write_state(state)
+        _supersede_related_terminal_states(state, keep_terminal_session_id=terminal_session_id)
         _RUNTIMES[terminal_session_id] = runtime
         runtime.start()
         if send_initial_task:
@@ -670,21 +1283,47 @@ def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     closed_ids: list[str] = []
     now = _now_iso()
     with _RUNTIMES_LOCK:
-        for related_id in related_ids:
-            related_runtime = _RUNTIMES.get(related_id)
-            if related_runtime is not None and related_runtime.is_alive():
-                related_runtime.stop()
-            related_state = dict(related_runtime.state) if related_runtime is not None else _read_state(related_id)
-            if not related_state:
-                continue
+        related_runtimes = {related_id: _RUNTIMES.get(related_id) for related_id in related_ids}
+    for related_runtime in related_runtimes.values():
+        if related_runtime is not None:
+            related_runtime.stop()
+
+    deadline = time.monotonic() + TERMINAL_SHUTDOWN_TIMEOUT_SECONDS
+    for related_id in related_ids:
+        related_runtime = related_runtimes.get(related_id)
+        completed = related_runtime is None
+        if related_runtime is not None:
+            runtime_deadline = deadline
+            if related_runtime.process_owner is None:
+                runtime_deadline = min(runtime_deadline, time.monotonic() + 0.1)
+            completed = related_runtime.wait_stopped(runtime_deadline)
+            if completed:
+                with _RUNTIMES_LOCK:
+                    if _RUNTIMES.get(related_id) is related_runtime:
+                        _RUNTIMES.pop(related_id, None)
+
+        if related_runtime is not None:
+            with related_runtime.lock:
+                related_state = dict(related_runtime.state)
+        else:
+            related_state = _read_state(related_id)
+        if not related_state:
+            continue
+        if completed:
             _mark_terminal_state_closed(related_state, closed_at=now, closed_ids=related_ids)
-            if related_runtime is not None:
-                with related_runtime.lock:
-                    related_runtime.state.update(related_state)
-                    _write_state(related_runtime.state)
-            else:
-                _write_state(related_state)
             closed_ids.append(related_id)
+        else:
+            related_state["status"] = "stopping"
+            related_state["alive"] = True
+            related_state["userClosed"] = True
+            related_state.setdefault("closeRequestedAt", now)
+            related_state["updatedAt"] = now
+        if related_runtime is not None:
+            with related_runtime.lock:
+                related_runtime.state.update(related_state)
+                _write_state(related_runtime.state)
+        else:
+            _write_state(related_state)
     final_state = _read_state(session_id) or state
     final_state["closedTerminalSessionIds"] = closed_ids
     return _public_state(
@@ -695,12 +1334,60 @@ def stop_cli_agent_terminal_session(terminal_session_id: str) -> dict[str, Any]:
     )
 
 
-def shutdown_cli_agent_terminal_sessions() -> None:
-    with _RUNTIMES_LOCK:
-        runtimes = list(_RUNTIMES.values())
-        _RUNTIMES.clear()
-    for runtime in runtimes:
+def shutdown_cli_agent_terminal_sessions() -> dict[str, Any]:
+    _TERMINAL_SHUTDOWN_EVENT.set()
+    deadline = time.monotonic() + TERMINAL_SHUTDOWN_TIMEOUT_SECONDS
+    if not _RUNTIMES_LOCK.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        _debug_logger.error(
+            "CLI terminal shutdown could not snapshot runtimes before its deadline.",
+            tag="cli_terminal_shutdown",
+        )
+        return {"closed": False, "remaining": [], "reason": "runtime_registry_busy"}
+    try:
+        runtimes = list(_RUNTIMES.items())
+        pending_owners = list(_PENDING_CONPTY_OWNERS.items())
+    finally:
+        _RUNTIMES_LOCK.release()
+
+    for _, runtime in runtimes:
         runtime.stop()
+    for owner_key, owner in pending_owners:
+        try:
+            owner.request_stop()
+        except Exception as exc:  # noqa: BLE001 - continue broadcasting to other owners
+            _debug_logger.warning(
+                f"Failed to request pending ConPTY cleanup ({owner_key}): {exc}",
+                tag="cli_terminal_shutdown",
+            )
+
+    remaining: list[str] = []
+    for terminal_session_id, runtime in runtimes:
+        runtime_deadline = deadline
+        if runtime.process_owner is None:
+            runtime_deadline = min(runtime_deadline, time.monotonic() + 0.1)
+        if not runtime.wait_stopped(runtime_deadline):
+            remaining.append(terminal_session_id)
+            continue
+        with _RUNTIMES_LOCK:
+            if _RUNTIMES.get(terminal_session_id) is runtime:
+                _RUNTIMES.pop(terminal_session_id, None)
+    for owner_key, owner in pending_owners:
+        try:
+            completed = owner.wait_until_stopped(deadline) and owner.close(deadline)
+        except Exception:
+            completed = False
+        if not completed:
+            remaining.append(f"failed-conpty-spawn:{owner_key}")
+            continue
+        with _RUNTIMES_LOCK:
+            if _PENDING_CONPTY_OWNERS.get(owner_key) is owner:
+                _PENDING_CONPTY_OWNERS.pop(owner_key, None)
+    if remaining:
+        _debug_logger.error(
+            f"CLI terminal shutdown left {len(remaining)} runtime(s) under retryable ownership.",
+            tag="cli_terminal_shutdown",
+        )
+    return {"closed": not remaining, "remaining": remaining}
 
 
 def reconcile_cli_agent_terminal_states_on_startup(*, reason: str = "backend_startup") -> dict[str, Any]:
@@ -895,8 +1582,42 @@ def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) 
     rows = _clamp_int(rows, DEFAULT_ROWS, 4, 120)
     cols = _clamp_int(cols, DEFAULT_COLS, 20, 240)
     if _is_windows_platform() and PtyProcess is not None:
-        return PtyProcess.spawn(args, cwd=cwd, env=env, dimensions=(rows, cols)), "conpty"
-    process = subprocess.Popen(
+        job = WindowsProcessJob()
+        try:
+            process = PtyProcess.spawn(args, cwd=cwd, env=env, dimensions=(rows, cols))
+        except Exception:
+            try:
+                job.close()
+            except Exception:
+                pass
+            raise
+        owner = _ConptyProcessOwner(process, job)
+        process._vibelution_terminal_process_owner = owner
+        if not owner.initial_adoption_complete:
+            owner_key = f"{owner.pid}:{id(owner):x}"
+            with _RUNTIMES_LOCK:
+                _PENDING_CONPTY_OWNERS[owner_key] = owner
+            cleanup_deadline = time.monotonic() + TERMINAL_SHUTDOWN_TIMEOUT_SECONDS
+            try:
+                owner.request_stop()
+                cleaned = owner.wait_until_stopped(cleanup_deadline) and owner.close(cleanup_deadline)
+            except Exception:
+                cleaned = False
+            if cleaned:
+                with _RUNTIMES_LOCK:
+                    if _PENDING_CONPTY_OWNERS.get(owner_key) is owner:
+                        _PENDING_CONPTY_OWNERS.pop(owner_key, None)
+            raise CliAgentTerminalError(
+                "TERMINAL_PROCESS_OWNERSHIP_FAILED",
+                (
+                    "CLI Agent terminal process ownership could not be confirmed; its process tree was retired."
+                    if cleaned
+                    else "CLI Agent terminal process ownership could not be confirmed; cleanup remains pending."
+                ),
+                details={"processId": owner.pid, "cleanupPending": not cleaned},
+            )
+        return process, "conpty"
+    owner = OwnedProcess.spawn(
         args,
         cwd=cwd,
         stdin=subprocess.PIPE,
@@ -909,6 +1630,8 @@ def _spawn_terminal_process(args: list[str], *, cwd: str, rows: int, cols: int) 
         env=env,
         **cli_agent_service._subprocess_no_window_kwargs(),
     )
+    process = owner.process
+    process._vibelution_terminal_process_owner = owner
     return process, "pipe"
 
 

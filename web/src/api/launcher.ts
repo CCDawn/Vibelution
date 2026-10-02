@@ -29,6 +29,15 @@ import type {
 export const LAUNCHER_ENDPOINT = "/api/launcher";
 export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
 
+/**
+ * Client-synthesized start-block code, stamped onto legacy branch-instance
+ * payloads that lack the runtime envelope: the row cannot be operated until
+ * the Launcher webview refreshes to the control plane that speaks the runtime
+ * contract. Not part of the backend/Electron start-block vocabulary
+ * (branch_instance_lifecycle.py / instanceAdmissionControl.ts never emit it).
+ */
+export const CLIENT_START_BLOCK_REFRESH_REQUIRED = "launcher_refresh_required";
+
 export class LauncherControlPlaneNotReadyError extends Error {
   readonly code = LAUNCHER_IPC_HOST_NOT_READY;
 
@@ -454,7 +463,7 @@ function normalizeLauncherBranchInstances(payload: LauncherBranchInstancesPayloa
         ...item,
         runtime: legacyBranchInstanceRuntime(item),
         startable: false,
-        startBlockReason: "launcher_refresh_required",
+        startBlockReason: CLIENT_START_BLOCK_REFRESH_REQUIRED,
       };
     }),
   };
