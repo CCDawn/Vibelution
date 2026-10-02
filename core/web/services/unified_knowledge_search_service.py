@@ -408,10 +408,13 @@ def _payload(
 
 def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str) -> dict[str, Any]:
     knowledge_item_id = str(item.get("knowledgeItemId") or "").strip()
-    excerpt = _excerpt(_knowledge_text(item), max_chars=900)
-    return {
+    scoped_knowledge_base_id = _scoped_knowledge_base_id(item)
+    matched_excerpt = str(item.get("matchedExcerpt") or "").strip()
+    excerpt = _excerpt(matched_excerpt or _knowledge_text(item), max_chars=1200 if matched_excerpt else 900)
+    result_id = _result_id("knowledge_item", knowledge_item_id, rank)
+    result = {
         **({"financialEvidence": item["financialEvidence"]} if item.get("financialEvidence") else {}),
-        "resultId": _result_id("knowledge_item", knowledge_item_id, rank),
+        "resultId": result_id,
         "resultType": "knowledge_item",
         "title": str(item.get("title") or "").strip(),
         "excerpt": excerpt,
@@ -424,6 +427,7 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
         "agentId": str(item.get("agentId") or "").strip(),
         "agentName": str(item.get("agentName") or "").strip(),
         "knowledgeBaseId": str(item.get("knowledgeBaseId") or "").strip(),
+        "scopedKnowledgeBaseId": scoped_knowledge_base_id,
         "knowledgeBaseName": str(item.get("knowledgeBaseName") or "").strip(),
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()],
@@ -446,12 +450,15 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
             "updatedAt": str(item.get("updatedAt") or item.get("createdAt") or "").strip(),
         },
     }
+    result["citation"] = _citation_from_knowledge_item(result, rank=rank)
+    return result
 
 
 def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str, Any]:
     source = context.get("source") if isinstance(context.get("source"), dict) else {}
     metadata = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
     knowledge_item_id = str(source.get("knowledgeItemId") or "").strip()
+    scoped_knowledge_base_id = _scoped_knowledge_base_id(source)
     return {
         **({"financialEvidence": source["financialEvidence"]} if source.get("financialEvidence") else {}),
         "resultId": str(context.get("contextId") or _result_id("rag_context", knowledge_item_id, rank)).strip(),
@@ -467,6 +474,7 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
         "agentId": str(source.get("agentId") or "").strip(),
         "agentName": str(source.get("agentName") or "").strip(),
         "knowledgeBaseId": str(source.get("knowledgeBaseId") or "").strip(),
+        "scopedKnowledgeBaseId": scoped_knowledge_base_id,
         "knowledgeBaseName": str(source.get("knowledgeBaseName") or "").strip(),
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(source.get("sourceArtifactIds") or []) if str(value or "").strip()],
@@ -556,6 +564,13 @@ def _rerank_result(item: dict[str, Any], *, rank: int) -> dict[str, Any]:
     next_item["rank"] = rank
     if str(next_item.get("resultType") or "") == "knowledge_item":
         next_item["resultId"] = _result_id("knowledge_item", str(next_item.get("knowledgeItemId") or "").strip(), rank)
+        citation = next_item.get("citation") if isinstance(next_item.get("citation"), dict) else None
+        if citation is not None:
+            next_item["citation"] = {
+                **citation,
+                "contextId": next_item["resultId"],
+                "rank": rank,
+            }
     return next_item
 
 
@@ -583,6 +598,30 @@ def _citations_for_results(results: list[dict[str, Any]]) -> list[dict[str, Any]
     return citations
 
 
+def _citation_from_knowledge_item(result: dict[str, Any], *, rank: int) -> dict[str, Any]:
+    """Cite the formal item and its recorded sources without inventing a locator."""
+
+    return {
+        **({"financialEvidence": result["financialEvidence"]} if result.get("financialEvidence") else {}),
+        "contextId": str(result.get("resultId") or "").strip(),
+        "rank": rank,
+        "title": str(result.get("title") or "").strip(),
+        "ownerType": str(result.get("ownerType") or "team").strip(),
+        "ownerId": str(result.get("ownerId") or "").strip(),
+        "teamId": str(result.get("teamId") or "").strip(),
+        "teamName": str(result.get("teamName") or "").strip(),
+        "agentId": str(result.get("agentId") or "").strip(),
+        "agentName": str(result.get("agentName") or "").strip(),
+        "knowledgeBaseId": str(result.get("knowledgeBaseId") or "").strip(),
+        "scopedKnowledgeBaseId": str(result.get("scopedKnowledgeBaseId") or "").strip(),
+        "knowledgeBaseName": str(result.get("knowledgeBaseName") or "").strip(),
+        "knowledgeItemId": str(result.get("knowledgeItemId") or "").strip(),
+        "sourceArtifactIds": list(result.get("sourceArtifactIds") or []),
+        "centralSourceIds": list(result.get("centralSourceIds") or []),
+        "sourceSummaries": _source_trust_summaries(result.get("sourceSummaries")),
+    }
+
+
 def _citation_from_rag_result(result: dict[str, Any], *, rank: int) -> dict[str, Any]:
     metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
     return {
@@ -597,6 +636,7 @@ def _citation_from_rag_result(result: dict[str, Any], *, rank: int) -> dict[str,
         "agentId": str(result.get("agentId") or "").strip(),
         "agentName": str(result.get("agentName") or "").strip(),
         "knowledgeBaseId": str(result.get("knowledgeBaseId") or "").strip(),
+        "scopedKnowledgeBaseId": str(result.get("scopedKnowledgeBaseId") or "").strip(),
         "knowledgeBaseName": str(result.get("knowledgeBaseName") or "").strip(),
         "knowledgeItemId": str(result.get("knowledgeItemId") or "").strip(),
         "sourceArtifactIds": list(result.get("sourceArtifactIds") or []),
@@ -611,6 +651,20 @@ def _citation_from_rag_result(result: dict[str, Any], *, rank: int) -> dict[str,
         "provider": str(metadata.get("provider") or "").strip(),
         "retrievalMode": str(metadata.get("retrievalMode") or "").strip(),
     }
+
+
+def _scoped_knowledge_base_id(record: dict[str, Any]) -> str:
+    """Build the canonical owner-qualified KB reference for a result/citation."""
+
+    knowledge_base_id = str(record.get("knowledgeBaseId") or "").strip()
+    owner_type = str(record.get("ownerType") or "").strip()
+    owner_id = str(record.get("ownerId") or record.get("teamId") or record.get("agentId") or "").strip()
+    if knowledge_base_id and owner_type in team_knowledge_service.KNOWLEDGE_OWNER_TYPES and owner_id:
+        return team_knowledge_service._owner_scoped_knowledge_base_id(
+            {"ownerType": owner_type, "ownerId": owner_id},
+            knowledge_base_id,
+        )
+    return str(record.get("scopedKnowledgeBaseId") or "").strip()
 
 
 def _result_score(item: dict[str, Any]) -> float:

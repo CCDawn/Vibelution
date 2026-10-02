@@ -12,10 +12,34 @@ import json
 import os
 import tempfile
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+
+
+_READ_DIAGNOSTICS: ContextVar[dict[str, dict[str, int]] | None] = ContextVar(
+    "knowledge_jsonl_read_diagnostics", default=None
+)
+
+
+@contextmanager
+def capture_jsonl_read_diagnostics():
+    """Collect read counts within this context without retaining knowledge content."""
+    diagnostics: dict[str, dict[str, int]] = {}
+    token = _READ_DIAGNOSTICS.set(diagnostics)
+    try:
+        yield diagnostics
+    finally:
+        _READ_DIAGNOSTICS.reset(token)
+
+
+def _record_read_diagnostics(path: Path, *, corrupt_lines: int = 0, read_errors: int = 0) -> None:
+    diagnostics = _READ_DIAGNOSTICS.get()
+    if diagnostics is not None:
+        diagnostics[str(path)] = {"corruptLineCount": corrupt_lines, "readErrorCount": read_errors}
 
 
 def _service():
@@ -297,16 +321,22 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
+        _record_read_diagnostics(path, read_errors=1)
         return items
+    corrupt_lines = 0
     for line in text.splitlines():
         if not line.strip():
             continue
         try:
             payload = json.loads(line)
         except (json.JSONDecodeError, RecursionError, ValueError):
+            corrupt_lines += 1
             continue
         if isinstance(payload, dict):
             items.append(payload)
+        else:
+            corrupt_lines += 1
+    _record_read_diagnostics(path, corrupt_lines=corrupt_lines)
     return items
 
 

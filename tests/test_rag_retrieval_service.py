@@ -216,9 +216,13 @@ def test_local_rag_retrieval_returns_contexts_with_citations(rag_knowledge_env):
     assert context["rank"] == 1
     assert context["source"]["teamId"] == rag_knowledge_env["team"]["teamId"]
     assert context["source"]["knowledgeBaseId"] == rag_knowledge_env["readableBase"]["knowledgeBaseId"]
+    assert context["source"]["scopedKnowledgeBaseId"] == (
+        f"team:{rag_knowledge_env['team']['teamId']}:{rag_knowledge_env['readableBase']['knowledgeBaseId']}"
+    )
     assert context["source"]["knowledgeItemId"] in {item["knowledgeItemId"] for item in rag_knowledge_env["items"]}
     assert citation["contextId"] == context["contextId"]
     assert citation["knowledgeItemId"] == context["source"]["knowledgeItemId"]
+    assert citation["scopedKnowledgeBaseId"] == context["source"]["scopedKnowledgeBaseId"]
     assert citation["sourceArtifactIds"] == context["source"]["sourceArtifactIds"]
 
 
@@ -463,6 +467,8 @@ def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     assert providers["local"]["status"] == "ready"
     assert providers["local"]["vectorEnabled"] is False
     assert providers["local"]["bm25Enabled"] is True
+    assert providers["local"]["semanticBackend"] == "local_token_overlap"
+    assert providers["local"]["embeddingEnabled"] is False
     assert providers["vector"]["status"] == "unavailable"
     assert providers["vector"]["vectorEnabled"] is False
     assert providers["vector"]["indexedItemCount"] == 0
@@ -472,8 +478,56 @@ def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     assert payload["retrievalPolicy"]["honorsMemoryPolicy"] is True
     assert payload["retrievalPolicy"]["mutatesFormalKnowledge"] is False
     assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
+    assert payload["retrievalPolicy"]["semanticBackend"] == "local_token_overlap"
+    assert payload["retrievalPolicy"]["embeddingEnabled"] is False
     assert "bm25" in payload["retrievalPolicy"]["supportedRetrievalModes"]
     assert payload["updatedAt"]
+
+
+@pytest.mark.parametrize("mode", ["exact", "bm25", "semantic", "hybrid"])
+def test_rag_returns_matching_tail_passage_with_citation(rag_knowledge_env, mode):
+    from core.web.services import rag_retrieval_service
+
+    env = rag_knowledge_env
+    base_id = env["readableBase"]["knowledgeBaseId"]
+    body = "\n".join([f"General introductory paragraph {index}." for index in range(55)])
+    body += "\nThe proposalPayload field retains the governed provenance of this memory."
+    source = _source_artifact(
+        base_id,
+        owner_type="team",
+        owner_id=env["team"]["teamId"],
+        actor_agent_id=env["member"]["agentId"],
+        reviewer_agent_id=env["lead"]["agentId"],
+        title="Long provenance report",
+        original_content=body,
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        base_id,
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=env["member"]["agentId"],
+        title="Long provenance report",
+        content=body,
+    )
+    item = team_knowledge_service.review_refinement_proposal(
+        base_id,
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=env["lead"]["agentId"],
+    )["item"]
+    payload = rag_retrieval_service.retrieve_rag_contexts(
+        agent_id=env["member"]["agentId"],
+        knowledge_base_id=base_id,
+        query="proposalPayload",
+        retrieval_mode=mode,
+        top_k=1,
+        max_context_chars=500,
+    )
+    assert payload["summary"]["contextCount"] == 1
+    context = payload["contexts"][0]
+    assert context["source"]["knowledgeItemId"] == item["knowledgeItemId"]
+    assert "proposalPayload" in context["text"]
+    assert len(context["text"]) <= 500
+    assert payload["citations"][0]["sourceArtifactIds"] == [source["sourceArtifactId"]]
 
 
 def test_rag_retrieval_honors_knowledge_acl(rag_knowledge_env):

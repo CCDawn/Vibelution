@@ -1097,6 +1097,36 @@ def list_knowledge_items(knowledge_base_id: str, *, agent_id: str = "") -> dict[
     }
 
 
+def get_readable_knowledge_item(
+    knowledge_base_id: str,
+    knowledge_item_id: str,
+    *,
+    agent_id: str,
+) -> dict[str, Any]:
+    """Read one formal item under the same ACL and eligibility as retrieval."""
+
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, agent_id, "read")
+    if owner["ownerType"] == "agent" and owner["ownerId"] != str(agent_id or "").strip():
+        raise TeamKnowledgePermissionError("Agent private knowledge is only readable by its owner through this tool.")
+    if str(base.get("status") or "active") != "active":
+        raise TeamKnowledgeNotFoundError("Knowledge item not found.")
+    stored_items = _read_jsonl(_items_path_for_owner(owner))
+    item = _find_by_id(stored_items, "knowledgeItemId", str(knowledge_item_id or "").strip())
+    if not item or str(item.get("knowledgeBaseId") or "") != base["knowledgeBaseId"]:
+        raise TeamKnowledgeNotFoundError("Knowledge item not found.")
+    artifacts_by_id = {
+        str(source.get("sourceArtifactId") or ""): source
+        for source in _source_artifacts_for_base(owner, base["knowledgeBaseId"])
+    }
+    eligible = _tk_financial.eligible_financial_items(owner, base, stored_items, artifacts_by_id)
+    if eligible is not None:
+        if item["knowledgeItemId"] not in eligible:
+            raise TeamKnowledgeNotFoundError("Knowledge item not found.")
+        item = _tk_financial.financial_item_projection(item, eligible[item["knowledgeItemId"]])
+    return {**item, "ownerType": owner["ownerType"], "ownerId": owner["ownerId"]}
+
+
 def update_knowledge_item_metadata(
     knowledge_base_id: str,
     knowledge_item_id: str,
@@ -1957,18 +1987,25 @@ def search_knowledge_items(
             continue
         if normalized_team_id and not (current_owner_type == "team" and current_owner_id == normalized_team_id):
             continue
-        for base in _knowledge_bases_for_owner(owner):
+        readable_bases = [
+            base
+            for base in _knowledge_bases_for_owner(owner)
+            if (not normalized_base_id or str(base.get("knowledgeBaseId") or "") == normalized_base_id)
+            and _can_access(owner, base, agent_id, "read")
+        ]
+        if not readable_bases:
+            continue
+        owner_artifacts = _read_jsonl(_source_artifacts_path_for_owner(owner))
+        stored_items = _read_jsonl(_items_path_for_owner(owner))
+        for base in readable_bases:
             base_id = str(base.get("knowledgeBaseId") or "")
-            if normalized_base_id and base_id != normalized_base_id:
-                continue
-            if not _can_access(owner, base, agent_id, "read"):
-                continue
             scanned_bases += 1
             artifacts_by_id = {
-                str(item.get("sourceArtifactId") or ""): item
-                for item in _source_artifacts_for_base(owner, base_id)
+                str(artifact.get("sourceArtifactId") or ""): _public_source_artifact(artifact)
+                for artifact in owner_artifacts
+                if str(artifact.get("knowledgeBaseId") or "") == base_id
+                and str(artifact.get("sourceArtifactId") or "")
             }
-            stored_items = _read_jsonl(_items_path_for_owner(owner))
             financial_items = _tk_financial.eligible_financial_items(owner, base, stored_items, artifacts_by_id)
             for item in stored_items:
                 if financial_items is not None and item.get("knowledgeItemId") not in financial_items:
@@ -1977,6 +2014,12 @@ def search_knowledge_items(
                     item = _tk_financial.financial_item_projection(item, financial_items[item["knowledgeItemId"]])
                 if str(item.get("knowledgeBaseId") or "") != base_id:
                     continue
+                linked_artifacts = {
+                    source_id: artifacts_by_id[source_id]
+                    for source_id in [str(value or "") for value in list(item.get("sourceArtifactIds") or [])]
+                    if source_id in artifacts_by_id
+                }
+                search_document = _knowledge_item_search_document(item, linked_artifacts)
                 if not _item_matches_filters(
                     item,
                     query="" if score_after_scan else normalized_query,
@@ -1987,14 +2030,23 @@ def search_knowledge_items(
                     stability=normalized_stability,
                     created_from=created_from,
                     created_to=created_to,
-                    artifacts_by_id=artifacts_by_id,
+                    artifacts_by_id=linked_artifacts,
                     search_mode=normalized_search_mode,
                     research_project_id=normalized_research_project_id,
                     question_id=normalized_question_id,
                     source_collection_run_id=normalized_source_collection_run_id,
+                    search_document=search_document,
                 ):
                     continue
-                view = _search_item_view(item, base, owner, artifacts_by_id)
+                view = _search_item_view(
+                    item,
+                    base,
+                    owner,
+                    linked_artifacts,
+                    query=normalized_query,
+                    search_document=search_document,
+                )
+                view["_searchDocument"] = search_document
                 if financial_items is not None:
                     view["financialEvidence"] = financial_items[item["knowledgeItemId"]]
                 if score_after_scan:
@@ -2002,29 +2054,13 @@ def search_knowledge_items(
                     view["searchMode"] = normalized_search_mode
                     view["matchReason"] = "no_query" if not normalized_query else "metadata_filter"
                 else:
-                    score = _semantic_match_score(view, normalized_query) if normalized_query else 1.0
+                    score = _semantic_match_score(search_document, normalized_query) if normalized_query else 1.0
                     if normalized_query and normalized_search_mode == "semantic" and score <= 0:
                         continue
-                    if normalized_query and normalized_search_mode == "hybrid" and score <= 0:
-                        haystack = " ".join(
-                            [
-                                str(view.get("title") or ""),
-                                str(view.get("summary") or ""),
-                                str(view.get("content") or ""),
-                            ]
-                        ).lower()
-                        if normalized_query not in haystack:
-                            continue
                     view["semanticScore"] = score
                     view["searchMode"] = normalized_search_mode
-                    view["matchReason"] = _search_match_reason(view, normalized_query, score)
+                    view["matchReason"] = _search_match_reason(search_document, normalized_query, score)
                 results.append(view)
-                if len(results) >= bounded_limit and not score_after_scan:
-                    break
-            if len(results) >= bounded_limit and not score_after_scan:
-                break
-        if len(results) >= bounded_limit and not score_after_scan:
-            break
     if score_after_scan:
         results = _rank_bm25_search_results(results, normalized_query)
         if normalized_query:
@@ -2032,6 +2068,9 @@ def search_knowledge_items(
         results = results[:bounded_limit]
     else:
         results.sort(key=lambda item: (float(item.get("semanticScore") or 0.0), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
+        results = results[:bounded_limit]
+    for result in results:
+        result.pop("_searchDocument", None)
     _record_event(
         "knowledge.search.executed",
         normalized_team_id,
@@ -2076,12 +2115,38 @@ def get_knowledge_operations_health(*, agent_id: str = "", internal: bool = Fals
         "",
         "",
         actor_agent_id=str(payload.get("agentId") or ""),
-        fields={"knowledgeBaseCount": payload["summary"]["knowledgeBaseCount"], "findingCount": payload["summary"]["findingCount"]},
+        fields={
+            "knowledgeBaseCount": payload["summary"]["knowledgeBaseCount"],
+            "findingCount": payload["summary"]["findingCount"],
+            "corruptJsonlLineCount": payload["summary"]["corruptJsonlLineCount"],
+            "storageReadErrorCount": payload["summary"]["storageReadErrorCount"],
+        },
     )
     return payload
 
 
 def _build_knowledge_operations_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
+    with _tk_store.capture_jsonl_read_diagnostics() as diagnostics:
+        payload = _compute_knowledge_operations_health(agent_id=agent_id, internal=internal)
+    corrupt_lines = sum(row["corruptLineCount"] for row in diagnostics.values())
+    read_errors = sum(row["readErrorCount"] for row in diagnostics.values())
+    payload["summary"]["corruptJsonlLineCount"] = corrupt_lines
+    payload["summary"]["storageReadErrorCount"] = read_errors
+    payload["storageHealth"] = {
+        "status": "degraded" if corrupt_lines or read_errors else "ok",
+        "corruptJsonlLineCount": corrupt_lines,
+        "readErrorCount": read_errors,
+    }
+    if corrupt_lines or read_errors:
+        payload.setdefault("findings", []).append(_knowledge_health_finding(
+            "storage_read_degraded", "warning", {}, corrupt_lines + read_errors,
+            "Knowledge storage reads skipped invalid records or failed; review storage diagnostics.",
+        ))
+        payload["summary"]["findingCount"] = len(payload["findings"])
+    return payload
+
+
+def _compute_knowledge_operations_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     _sync_roots()
     normalized_agent_id = str(agent_id or "").strip()
     rows: list[dict[str, Any]] = []
@@ -2877,6 +2942,8 @@ _bm25_text_for_result = _tk_search_ranking._bm25_text_for_result
 _semantic_match_score = _tk_search_ranking._semantic_match_score
 _search_match_reason = _tk_search_ranking._search_match_reason
 _item_matches_filters = _tk_search_ranking._item_matches_filters
+_knowledge_item_search_document = _tk_search_ranking._knowledge_item_search_document
+_matched_excerpt = _tk_search_ranking._matched_excerpt
 
 _iter_existing_knowledge_roots = _tk_store._iter_existing_knowledge_roots
 _load_knowledge_bases_state_from_path = _tk_store._load_knowledge_bases_state_from_path
@@ -3081,6 +3148,9 @@ def _search_item_view(
     base: dict[str, Any],
     owner_value: dict[str, Any],
     artifacts_by_id: dict[str, dict[str, Any]],
+    *,
+    query: str = "",
+    search_document: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     owner = _coerce_owner_context(owner_value)
     team = owner.get("team") if isinstance(owner.get("team"), dict) else {}
@@ -3091,7 +3161,7 @@ def _search_item_view(
         if source_id in artifacts_by_id
     ]
     local_copies = _local_copies_from_source_artifacts(source_artifacts)
-    return {
+    view = {
         "knowledgeItemId": str(item.get("knowledgeItemId") or ""),
         "knowledgeBaseId": str(base.get("knowledgeBaseId") or ""),
         "knowledgeBaseName": str(base.get("name") or ""),
@@ -3128,6 +3198,11 @@ def _search_item_view(
         "appliedAt": str(item.get("appliedAt") or ""),
         "updatedAt": str(item.get("updatedAt") or ""),
     }
+    if query:
+        excerpt = _matched_excerpt(search_document or _knowledge_item_search_document(item, artifacts_by_id), query)
+        if excerpt:
+            view["matchedExcerpt"] = excerpt
+    return view
 
 
 def _search_source_summary(source: dict[str, Any]) -> dict[str, Any]:

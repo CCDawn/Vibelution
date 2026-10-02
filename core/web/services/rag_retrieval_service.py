@@ -40,6 +40,8 @@ def get_rag_retrieval_health(*, agent_id: str = "", internal: bool = False) -> d
                 "status": "ready",
                 "vectorEnabled": False,
                 "bm25Enabled": True,
+                "semanticBackend": "local_token_overlap",
+                "embeddingEnabled": False,
                 "indexedItemCount": 0,
                 "staleItemCount": 0,
             },
@@ -122,6 +124,7 @@ def retrieve_rag_contexts(
             retrieval_mode=normalized_mode,
             provider=normalized_provider,
             max_context_chars=normalized_max_chars,
+            query=normalized_query,
         )
         for index, result in enumerate(list(search_payload.get("results") or [])[:normalized_top_k])
     ]
@@ -167,6 +170,7 @@ def _context_from_search_result(
     retrieval_mode: str,
     provider: str,
     max_context_chars: int,
+    query: str = "",
 ) -> dict[str, Any]:
     source_artifact_ids = [str(item or "").strip() for item in list(result.get("sourceArtifactIds") or []) if str(item or "").strip()]
     central_source_ids = [str(item or "").strip() for item in list(result.get("centralSourceIds") or []) if str(item or "").strip()]
@@ -178,6 +182,7 @@ def _context_from_search_result(
         "agentId": str(result.get("agentId") or "").strip(),
         "agentName": str(result.get("agentName") or "").strip(),
         "knowledgeBaseId": str(result.get("knowledgeBaseId") or "").strip(),
+        "scopedKnowledgeBaseId": _scoped_knowledge_base_id(result),
         "knowledgeBaseName": str(result.get("knowledgeBaseName") or "").strip(),
         "knowledgeItemId": str(result.get("knowledgeItemId") or "").strip(),
         **({"financialEvidence": result["financialEvidence"]} if result.get("financialEvidence") else {}),
@@ -194,7 +199,7 @@ def _context_from_search_result(
     context_id = _context_id(context_source["knowledgeItemId"], rank)
     return {
         "contextId": context_id,
-        "text": _trim_context_text(_context_text(result), max_context_chars),
+        "text": _trim_context_text(_context_text(result), max_context_chars, query=query),
         "title": str(result.get("title") or "").strip(),
         "score": float(result.get("semanticScore") or 0.0),
         "rank": rank,
@@ -225,6 +230,7 @@ def _citation_from_context(context: dict[str, Any]) -> dict[str, Any]:
         "agentId": str(source.get("agentId") or "").strip(),
         "agentName": str(source.get("agentName") or "").strip(),
         "knowledgeBaseId": str(source.get("knowledgeBaseId") or "").strip(),
+        "scopedKnowledgeBaseId": _scoped_knowledge_base_id(source),
         "knowledgeBaseName": str(source.get("knowledgeBaseName") or "").strip(),
         "knowledgeItemId": str(source.get("knowledgeItemId") or "").strip(),
         **({"financialEvidence": source["financialEvidence"]} if source.get("financialEvidence") else {}),
@@ -261,6 +267,10 @@ def _source_trust_summaries(value: Any) -> list[dict[str, str]]:
 
 
 def _context_text(result: dict[str, Any]) -> str:
+    matched_excerpt = str(result.get("matchedExcerpt") or "").strip()
+    if matched_excerpt:
+        title = trim_lines(str(result.get("title") or ""), max_lines=1).strip()
+        return "\n".join(part for part in [title, matched_excerpt] if part)
     parts = [
         trim_lines(str(result.get("title") or ""), max_lines=1).strip(),
         trim_lines(str(result.get("summary") or ""), max_lines=3).strip(),
@@ -269,18 +279,37 @@ def _context_text(result: dict[str, Any]) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def _trim_context_text(text: str, max_chars: int) -> str:
+def _trim_context_text(text: str, max_chars: int, *, query: str = "") -> str:
     normalized = str(text or "").strip()
     if len(normalized) <= max_chars:
         return normalized
     if max_chars <= 3:
         return "." * max_chars
+    match_position = normalized.lower().find(str(query or "").strip().lower()) if query else -1
+    if match_position >= max_chars - 3:
+        # Keep the matched evidence when the caller asks for a shorter context.
+        start = max(0, match_position - (max_chars - 6) // 3)
+        return "..." + normalized[start : start + max_chars - 6].strip() + "..."
     return normalized[: max_chars - 3].rstrip() + "..."
 
 
 def _context_id(knowledge_item_id: str, rank: int) -> str:
     digest = hashlib.sha1(f"{knowledge_item_id}:{rank}".encode("utf-8")).hexdigest()[:12]
     return f"ctx-{digest}"
+
+
+def _scoped_knowledge_base_id(record: dict[str, Any]) -> str:
+    """Build the canonical owner-qualified KB reference for a context/citation."""
+
+    knowledge_base_id = str(record.get("knowledgeBaseId") or "").strip()
+    owner_type = str(record.get("ownerType") or "").strip()
+    owner_id = str(record.get("ownerId") or record.get("teamId") or record.get("agentId") or "").strip()
+    if knowledge_base_id and owner_type in team_knowledge_service.KNOWLEDGE_OWNER_TYPES and owner_id:
+        return team_knowledge_service._owner_scoped_knowledge_base_id(
+            {"ownerType": owner_type, "ownerId": owner_id},
+            knowledge_base_id,
+        )
+    return str(record.get("scopedKnowledgeBaseId") or "").strip()
 
 
 def _retrieval_policy(provider: str) -> dict[str, Any]:
@@ -291,6 +320,8 @@ def _retrieval_policy(provider: str) -> dict[str, Any]:
         "mutatesFormalKnowledge": False,
         "injectsPromptByDefault": False,
         "supportedRetrievalModes": sorted(SUPPORTED_RETRIEVAL_MODES),
+        "semanticBackend": "local_token_overlap",
+        "embeddingEnabled": False,
     }
 
 

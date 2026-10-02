@@ -707,6 +707,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["agent_private_memory_access", "prompt_context_candidate"],
         "permissionTier": LOW_PERMISSION_TIER,
     },
+    "read_knowledge_item_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "agent_private_memory", "item_read", "bounded_read", "citations", "read_only"],
+        "riskTags": ["team_knowledge_access", "agent_private_memory_access", "prompt_context_candidate"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "knowledge_stage_session_attachment_tool": {
         "category": "memory_context",
         "capabilityTags": ["team_knowledge_write", "session_attachment", "untrusted_source"],

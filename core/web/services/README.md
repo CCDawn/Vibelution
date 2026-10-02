@@ -28,9 +28,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**81**
+- Facade `*_service.py`：**82**
 - 有 pack README：**6**
-- 仅单文件 facade：**75**
+- 仅单文件 facade：**76**
 
 ## Domain 速查
 
@@ -41,7 +41,7 @@
 | Team registry / canvas (`team`) | 3 |
 | Agent directory / config (`agent`) | 18 |
 | Chat room / conversation index (`chat`) | 3 |
-| Knowledge / RAG (`knowledge`) | 4 |
+| Knowledge / RAG (`knowledge`) | 5 |
 | Memory (`memory`) | 4 |
 | Research / Challenge Cup (`research`) | 5 |
 | Self / Supervised evolution (`evolution`) | 12 |
@@ -117,6 +117,7 @@
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `rag_retrieval_service.py` | Governed RAG retrieval helpers for Team Knowledge. | — | `knowledge.py` | `test_rag_retrieval_service.py`, `test_session_document_attachments.py` |
+| `knowledge_read_service.py` | Bounded Agent-facing pages and linked source citations; ACL and eligibility remain on Team Knowledge. | — | Agent tool only | `test_knowledge_read_service.py`, `test_team_knowledge_tools.py` |
 | `rag_vector_index_service.py` | File-backed metadata for optional RAG vector indexing. | — | — | `test_challenge_cup_knowledge_migration.py`, `test_developer_sandbox_path_routing.py`, `test_memory_cleanup_service.py` |
 | `team_knowledge_service.py` | Team-scoped knowledge base storage and governance service. | `team_knowledge/` | `knowledge.py` | `test_context_prefix_freeze.py`, `test_candidate_session_read_gate.py`, `test_workflow_binding_evidence_ssot.py` |
 | `unified_knowledge_search_service.py` | Unified read-only search boundary for governed memory and formal knowledge. | — | — | `test_unified_knowledge_search_github_projects.py`, `test_unified_knowledge_search_user_content.py` |

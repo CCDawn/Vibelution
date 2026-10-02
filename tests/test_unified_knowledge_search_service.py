@@ -45,7 +45,13 @@ def test_unified_search_preserves_source_trust_for_formal_and_rag_results(monkey
             }
         },
     )
-    knowledge_item.update({"semanticScore": 0.9, "matchReason": "bm25"})
+    knowledge_item.update(
+        {
+            "semanticScore": 0.9,
+            "matchReason": "bm25",
+            "matchedExcerpt": "A matched passage from the complete formal item.",
+        }
+    )
 
     monkeypatch.setattr(
         team_knowledge_service,
@@ -78,9 +84,33 @@ def test_unified_search_preserves_source_trust_for_formal_and_rag_results(monkey
     )
 
     assert formal_payload["results"][0]["resultType"] == "knowledge_item"
+    assert formal_payload["results"][0]["excerpt"] == "A matched passage from the complete formal item."
+    assert formal_payload["results"][0]["scopedKnowledgeBaseId"] == "agent:agent-1:base-1"
     assert formal_payload["results"][0]["sourceSummaries"] == expected_trust
+    assert formal_payload["citations"] == [
+        {
+            "contextId": formal_payload["results"][0]["resultId"],
+            "rank": 1,
+            "title": "Memory ingestion review",
+            "ownerType": "agent",
+            "ownerId": "agent-1",
+            "teamId": "",
+            "teamName": "",
+            "agentId": "agent-1",
+            "agentName": "Knowledge Agent",
+            "knowledgeBaseId": "base-1",
+            "scopedKnowledgeBaseId": "agent:agent-1:base-1",
+            "knowledgeBaseName": "Private Memory",
+            "knowledgeItemId": "item-1",
+            "sourceArtifactIds": ["artifact-1"],
+            "centralSourceIds": [],
+            "sourceSummaries": expected_trust,
+        }
+    ]
     assert rag_payload["results"][0]["resultType"] == "rag_context"
+    assert rag_payload["results"][0]["scopedKnowledgeBaseId"] == "agent:agent-1:base-1"
     assert rag_payload["results"][0]["sourceSummaries"] == expected_trust
+    assert rag_payload["citations"][0]["scopedKnowledgeBaseId"] == "agent:agent-1:base-1"
     assert rag_payload["citations"][0]["sourceSummaries"] == expected_trust
 
 

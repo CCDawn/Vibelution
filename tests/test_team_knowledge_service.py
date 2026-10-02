@@ -2410,6 +2410,218 @@ def test_semantic_search_matches_token_overlap_without_exact_substring(knowledge
     assert semantic["results"][0]["matchReason"] == "token_overlap"
 
 
+def _approve_search_test_item(
+    knowledge_base_id: str,
+    *,
+    source_artifact_ids: list[str],
+    proposer_agent_id: str,
+    reviewer_agent_id: str,
+    title: str,
+    content: str,
+) -> dict:
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_base_id,
+        source_artifact_ids=source_artifact_ids,
+        proposed_by_agent_id=proposer_agent_id,
+        title=title,
+        content=content,
+    )
+    return team_knowledge_service.review_refinement_proposal(
+        knowledge_base_id,
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=reviewer_agent_id,
+    )["item"]
+
+
+def test_exact_search_does_not_match_unlinked_source_artifact(knowledge_env):
+    base_id = knowledge_env["base"]["knowledgeBaseId"]
+    member_id = knowledge_env["member"]["agentId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    linked_source = _source_ids_for_env(knowledge_env, title="Relevant linked source")
+    _approve_search_test_item(
+        base_id,
+        source_artifact_ids=linked_source,
+        proposer_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Unrelated formal knowledge",
+        content="This approved entry only discusses routine index maintenance.",
+    )
+    _create_central_source_artifact(
+        base_id,
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Unlinked Oracle Neptune Phrase",
+    )
+
+    result = team_knowledge_service.search_knowledge_items(
+        agent_id=member_id,
+        knowledge_base_id=base_id,
+        query="Unlinked Oracle Neptune Phrase",
+        search_mode="exact",
+    )
+
+    assert result["summary"]["resultCount"] == 0
+
+
+@pytest.mark.parametrize("search_mode", ["exact", "bm25", "semantic", "hybrid"])
+def test_linked_source_metadata_is_matched_and_ranked_consistently(knowledge_env, search_mode):
+    base_id = knowledge_env["base"]["knowledgeBaseId"]
+    member_id = knowledge_env["member"]["agentId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    needle = "Linked Athena Source Marker"
+    source = _create_central_source_artifact(
+        base_id,
+        owner_type="team",
+        owner_id=knowledge_env["team"]["teamId"],
+        actor_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title=needle,
+    )
+    item = _approve_search_test_item(
+        base_id,
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposer_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Unrelated formal knowledge",
+        content="The curated item does not repeat its source title.",
+    )
+
+    result = team_knowledge_service.search_knowledge_items(
+        agent_id=member_id,
+        knowledge_base_id=base_id,
+        query=needle,
+        search_mode=search_mode,
+    )
+
+    assert result["summary"]["resultCount"] == 1
+    assert result["results"][0]["knowledgeItemId"] == item["knowledgeItemId"]
+    assert needle in result["results"][0]["matchedExcerpt"]
+
+
+@pytest.mark.parametrize("search_mode", ["exact", "bm25", "semantic", "hybrid"])
+def test_search_modes_match_full_knowledge_body_and_return_bounded_match_excerpt(knowledge_env, search_mode):
+    base_id = knowledge_env["base"]["knowledgeBaseId"]
+    member_id = knowledge_env["member"]["agentId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    needle = "TailOnlyProposalPayloadNeedle"
+    source_ids = _source_ids_for_env(knowledge_env, title="Tail passage source")
+    content = "\n".join([f"Routine context line {index}." for index in range(20)] + [f"Reviewed tail evidence: {needle}."])
+    item = _approve_search_test_item(
+        base_id,
+        source_artifact_ids=source_ids,
+        proposer_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Long knowledge entry",
+        content=content,
+    )
+
+    result = team_knowledge_service.search_knowledge_items(
+        agent_id=member_id,
+        knowledge_base_id=base_id,
+        query=needle,
+        search_mode=search_mode,
+        limit=5,
+    )
+
+    assert result["summary"]["resultCount"] == 1
+    assert result["results"][0]["knowledgeItemId"] == item["knowledgeItemId"]
+    assert needle not in result["results"][0]["content"]
+    assert needle in result["results"][0]["matchedExcerpt"]
+    assert len(result["results"][0]["matchedExcerpt"]) <= 1200
+
+
+def test_semantic_search_ranks_all_readable_bases_before_applying_limit(knowledge_env):
+    team_id = knowledge_env["team"]["teamId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+    first_base_id = knowledge_env["base"]["knowledgeBaseId"]
+    second_base = team_knowledge_service.create_knowledge_base(
+        team_id,
+        name="Second Search Library",
+        actor_agent_id=lead_id,
+    )
+    first_source = _source_ids_for_env(knowledge_env, title="First ranking source")
+    _approve_search_test_item(
+        first_base_id,
+        source_artifact_ids=first_source,
+        proposer_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Partial token entry",
+        content="alpha appears alone in this entry.",
+    )
+    second_source = _create_central_source_artifact(
+        second_base["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=team_id,
+        actor_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Second ranking source",
+    )
+    strongest = _approve_search_test_item(
+        second_base["knowledgeBaseId"],
+        source_artifact_ids=[second_source["sourceArtifactId"]],
+        proposer_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Complete token entry",
+        content="alpha appears first; beta is elsewhere; gamma is at the end.",
+    )
+
+    result = team_knowledge_service.search_knowledge_items(
+        agent_id=member_id,
+        query="alpha beta gamma",
+        search_mode="semantic",
+        limit=1,
+    )
+
+    assert result["summary"]["resultCount"] == 1
+    assert result["results"][0]["knowledgeItemId"] == strongest["knowledgeItemId"]
+
+
+def test_search_reads_owner_items_and_source_artifacts_once_across_bases(knowledge_env, monkeypatch):
+    team_id = knowledge_env["team"]["teamId"]
+    lead_id = knowledge_env["lead"]["agentId"]
+    member_id = knowledge_env["member"]["agentId"]
+    second_base = team_knowledge_service.create_knowledge_base(
+        team_id,
+        name="Second Search Library",
+        actor_agent_id=lead_id,
+    )
+    _create_central_source_artifact(
+        second_base["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=team_id,
+        actor_agent_id=member_id,
+        reviewer_agent_id=lead_id,
+        title="Second base source",
+    )
+    owner = team_knowledge_service._require_base_with_owner(knowledge_env["base"]["knowledgeBaseId"])[0]
+    target_paths = {
+        str(team_knowledge_service._items_path_for_owner(owner).resolve()),
+        str(team_knowledge_service._source_artifacts_path_for_owner(owner).resolve()),
+    }
+    read_counts: dict[str, int] = {}
+    original_read_jsonl = team_knowledge_service._read_jsonl
+
+    def count_owner_jsonl_reads(path):
+        path_key = str(path.resolve())
+        if path_key in target_paths:
+            read_counts[path_key] = read_counts.get(path_key, 0) + 1
+        return original_read_jsonl(path)
+
+    monkeypatch.setattr(team_knowledge_service, "_read_jsonl", count_owner_jsonl_reads)
+
+    team_knowledge_service.search_knowledge_items(
+        agent_id=member_id,
+        query="search query",
+        search_mode="exact",
+    )
+
+    assert read_counts == {path: 1 for path in target_paths}
+
+
 def test_operations_health_reports_orphan_pending_and_unrated_items(knowledge_env):
     source = _create_central_source_artifact(
         knowledge_env["base"]["knowledgeBaseId"],

@@ -782,6 +782,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "skill_library_search_tool",
             "github_project_library_search_tool",
             "unified_memory_search_tool",
+            "read_knowledge_item_tool",
             *KNOWLEDGE_STEWARD_TOOLS,
         ),
         preferred_tools=(
@@ -795,6 +796,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "skill_library_search_tool",
             "github_project_library_search_tool",
             "unified_memory_search_tool",
+            "read_knowledge_item_tool",
             "knowledge_rating_suggestion_tool",
         ),
         forbidden_tools=SEARCH_DISABLED_TOOLS,

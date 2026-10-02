@@ -19,6 +19,7 @@
 | RAG **检索**（governed contexts） | `rag_retrieval_service.py` → `team_knowledge_service` | 第二套 retrieval 绕过 reviewed formal knowledge |
 | RAG **向量索引元数据**（可选 local vector） | `rag_vector_index_service.py` | 索引层当 KB SSOT；cleanup 不走 preview grant |
 | **统一只读搜索**（Agent/Team memory + 可选 user content） | `unified_knowledge_search_service.py` | unified search 写删除/索引；把 tool 授权塞进来 |
+| **正式知识全文分页回读**（Agent 工具） | `knowledge_read_service.py` → `team_knowledge_service.get_readable_knowledge_item` | 任意来源路径读取、绕过 ACL/MemoryPolicy、读取其他 Agent 私有正文 |
 | 用户 Markdown 空间（import/index/delete 语义） | `user_content_markdown_service.py`（route：`user_content.py`） | 与 formal knowledge JSONL 混写同一 owner 路径 |
 | 外部 Skill Library 索引/搜索 | `skill_library_service.py` | 与 team_knowledge 双写同一路径 |
 | 开源 GitHub 项目索引（默认主干浅克隆 + 生成 INDEX） | `github_project_library_service.py` | 把整仓正文写入 KnowledgeItem / RAG；未落盘就把网页当结论 |
@@ -61,6 +62,21 @@
 ```
 
 改 Agent Prompt 注入 memory 时，先查 tool/route 是否经 `unified_knowledge_search_service` 或 `rag_retrieval_service`，不要在 chat route 平行拼检索。
+
+检索的匹配与排序使用完整正式正文及该条目关联来源的标题/摘要，跨可读库排序后取 Top K；
+响应保留旧 `content` 摘录并新增有界 `matchedExcerpt`，统一搜索和 RAG 优先使用命中段落。
+`semantic` 当前是 `local_token_overlap`，RAG health/policy 明示 `embeddingEnabled=false`，
+不把本地关键词服务就绪解释为向量语义能力就绪。
+
+正式条目的 `content` 当前可能包含知识管家保存的 JSON 审计包；本轮检索和回读保持其
+原始含义，不解包、不改写存量数据。审计字段或候选文献清单仍可能命中，不能把每一次
+匹配都解释为已核实的知识结论；知识正文与治理元数据的读取投影需要独立确定契约。
+
+`read_knowledge_item_tool` 绑定当前 Agent 和 MemoryPolicy，按字符分页正式条目正文；
+返回 `hasMore/nextOffset`、来源引用和不可信材料标记，不沿 `centralPath/localCopies` 打开文件。
+原始来源正文未读时明确返回 `sourceBodyStatus=source_body_unavailable`；财务证据资格由
+正式知识 facade 校验，失效或已归档内容不通过该工具回读。运营健康检查通过请求内读取计数
+报告 JSONL 坏行和 I/O 失败，不输出原始行、正文或存储路径。
 
 个人记忆列表的文件 metadata 包含可选 `revision`（文件 `mtime_ns:size`）；它复用已有 stat，
 不读取正文，也不是内容哈希。旧 `updatedAt` 仍保持秒级显示格式。前端详情 cache key 使用

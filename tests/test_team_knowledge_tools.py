@@ -2,7 +2,13 @@ import json
 
 import pytest
 
-from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
+from core.web.services import (
+    agent_directory_service,
+    agent_role_tool_profile_service,
+    chat_room_service,
+    team_knowledge_service,
+    team_service,
+)
 from tools import team_knowledge_tools
 from tools.Key_Tools import create_llm_facing_tools
 
@@ -142,6 +148,7 @@ def _create_approved_owner_knowledge_item(
 
 _LLM_FACING_KNOWLEDGE_TOOL_NAMES = {
     "unified_memory_search_tool",
+    "read_knowledge_item_tool",
     "knowledge_proposal_tool",
     "knowledge_proposal_review_tool",
     "knowledge_rating_suggestion_tool",
@@ -1096,6 +1103,122 @@ def test_unified_memory_search_tool_returns_rag_results_with_citations(tmp_path,
     assert result["retrievalPolicy"]["injectsPromptByDefault"] is False
 
 
+def test_read_knowledge_item_tool_reads_bounded_pages_and_only_linked_sources(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    agent_id = env["member"]["agentId"]
+    base_id = _kb_ref(env)
+    content = "0123456789" * 530
+    item = _create_approved_owner_knowledge_item(
+        owner_type="team",
+        owner_id=env["team"]["teamId"],
+        knowledge_base_id=base_id,
+        actor_agent_id=agent_id,
+        reviewer_agent_id=env["lead"]["agentId"],
+        title="Paged knowledge item",
+        content=content,
+    )
+    unrelated_source = _source_artifact(env, title="Unrelated source")
+    agent_directory_service.update_agent_instance(
+        agent_id,
+        tool_policy={"allowedTools": ["read_knowledge_item_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [base_id]},
+    )
+
+    with agent_directory_service.active_agent_runtime(agent_id, session_id="session-knowledge-read"):
+        first = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=base_id,
+                knowledge_item_id=item["knowledgeItemId"],
+                offset=0,
+                max_chars=1300,
+            )
+        )
+        second = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=base_id,
+                knowledge_item_id=item["knowledgeItemId"],
+                offset=first["nextOffset"],
+                max_chars=1300,
+            )
+        )
+        unrelated = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=base_id,
+                knowledge_item_id=item["knowledgeItemId"],
+                source_artifact_id=unrelated_source["sourceArtifactId"],
+            )
+        )
+
+    assert first["ok"] is True
+    assert first["content"] == content[:1300]
+    assert first["contentLength"] == len(content)
+    assert first["hasMore"] is True
+    assert first["nextOffset"] == 1300
+    assert first["untrusted"] is True
+    assert first["embeddedInstructionsAreData"] is True
+    assert [citation["sourceArtifactId"] for citation in first["citations"]] == item["sourceArtifactIds"]
+    assert all("centralPath" not in citation for citation in first["citations"])
+    assert second["content"] == content[1300:2600]
+    assert second["offset"] == 1300
+    assert unrelated["ok"] is False
+    assert unrelated["error"] == "source_not_related_to_item"
+
+
+def test_read_knowledge_item_tool_honors_current_agent_acl_and_memory_policy(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    base_id = _kb_ref(env)
+    item = _create_approved_owner_knowledge_item(
+        owner_type="team",
+        owner_id=env["team"]["teamId"],
+        knowledge_base_id=base_id,
+        actor_agent_id=env["member"]["agentId"],
+        reviewer_agent_id=env["lead"]["agentId"],
+        title="Restricted knowledge item",
+        content="This item is readable only through the current Agent's ACL and MemoryPolicy.",
+    )
+    outsider = agent_directory_service.create_agent_instance(display_name="Knowledge Reader Outsider")
+    agent_directory_service.update_agent_instance(
+        outsider["agentId"],
+        tool_policy={"allowedTools": ["read_knowledge_item_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [base_id]},
+    )
+    agent_directory_service.update_agent_instance(
+        env["member"]["agentId"],
+        tool_policy={"allowedTools": ["read_knowledge_item_tool"]},
+        memory_policy={"readKnowledgeBaseIds": ["team:another-team:another-kb"]},
+    )
+
+    with agent_directory_service.active_agent_runtime(outsider["agentId"], session_id="session-outsider-read"):
+        acl_denied = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=base_id,
+                knowledge_item_id=item["knowledgeItemId"],
+            )
+        )
+    with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-policy-read"):
+        policy_denied = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=base_id,
+                knowledge_item_id=item["knowledgeItemId"],
+            )
+        )
+
+    assert acl_denied["ok"] is False
+    assert acl_denied["status"] == "blocked"
+    assert acl_denied["error"] == "knowledge_access_denied"
+    assert policy_denied["ok"] is False
+    assert policy_denied["error"] == "knowledge_base_not_in_memory_policy"
+
+
+def test_read_knowledge_item_tool_is_exposed_only_by_knowledge_steward_profile():
+    steward = agent_role_tool_profile_service.get_role_tool_profile("knowledge_steward")
+    ordinary = agent_role_tool_profile_service.get_role_tool_profile("ai_search_scope_lead")
+
+    assert "read_knowledge_item_tool" in steward["allowedTools"]
+    assert "read_knowledge_item_tool" in steward["preferredTools"]
+    assert "read_knowledge_item_tool" not in ordinary["allowedTools"]
+
+
 def test_unified_memory_search_tool_rag_mode_honors_memory_policy_base_ids(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     agent_directory_service.update_agent_instance(
@@ -1208,3 +1331,160 @@ def test_knowledge_rating_suggestion_tool_submits_pending_suggestion_only(tmp_pa
     assert result["ok"] is True
     assert result["suggestion"]["status"] == "pending"
     assert item["importanceLevel"] == "medium"
+
+
+def test_scoped_memory_policy_search_result_can_be_read_back(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    agent_id = env["member"]["agentId"]
+    scoped_base_id = _kb_ref(env)
+    query = "scoped-memory-readback-amber"
+    item = _create_approved_owner_knowledge_item(
+        owner_type="team",
+        owner_id=env["team"]["teamId"],
+        knowledge_base_id=scoped_base_id,
+        actor_agent_id=agent_id,
+        reviewer_agent_id=env["lead"]["agentId"],
+        title="Scoped readback proof",
+        content=f"{query}: this exact approved text must be readable after search.",
+    )
+    agent_directory_service.update_agent_instance(
+        agent_id,
+        tool_policy={"allowedTools": ["unified_memory_search_tool", "read_knowledge_item_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [scoped_base_id]},
+    )
+
+    with agent_directory_service.active_agent_runtime(agent_id, session_id="session-scoped-search-read"):
+        search = json.loads(
+            team_knowledge_tools.unified_memory_search_tool(
+                query=query,
+                query_mode="bm25",
+                knowledge_base_id=scoped_base_id,
+                limit=3,
+            )
+        )
+        result = next(row for row in search["results"] if row["knowledgeItemId"] == item["knowledgeItemId"])
+        readback = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=result["scopedKnowledgeBaseId"],
+                knowledge_item_id=result["knowledgeItemId"],
+                max_chars=4000,
+            )
+        )
+
+    assert search["ok"] is True
+    assert result["scopedKnowledgeBaseId"] == scoped_base_id
+    assert search["citations"][0]["scopedKnowledgeBaseId"] == scoped_base_id
+    assert readback["ok"] is True
+    assert readback["scopedKnowledgeBaseId"] == result["scopedKnowledgeBaseId"]
+    assert readback["knowledgeItemId"] == item["knowledgeItemId"]
+    assert readback["content"] == item["content"]
+
+
+def test_global_knowledge_steward_cannot_read_another_agents_private_item(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    other = agent_directory_service.create_agent_instance(display_name="Private Knowledge Owner")
+    private_base = team_knowledge_service.create_agent_knowledge_base(
+        other["agentId"],
+        name="Private Read Isolation",
+        actor_agent_id=other["agentId"],
+    )
+    item = _create_approved_owner_knowledge_item(
+        owner_type="agent",
+        owner_id=other["agentId"],
+        knowledge_base_id=private_base["knowledgeBaseId"],
+        actor_agent_id=other["agentId"],
+        reviewer_agent_id=other["agentId"],
+        title="Another Agent private item",
+        content="This private body must never be returned to a global steward through item readback.",
+    )
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {
+            "agentId": steward_id,
+            "memoryPolicy": {
+                "enabled": True,
+                "readKnowledgeBaseIds": [private_base["scopedKnowledgeBaseId"]],
+            },
+        },
+    )
+    monkeypatch.setattr(team_knowledge_tools, "_record_event", lambda *args, **kwargs: None)
+
+    payload = json.loads(
+        team_knowledge_tools.read_knowledge_item_tool(
+            knowledge_base_id=private_base["scopedKnowledgeBaseId"],
+            knowledge_item_id=item["knowledgeItemId"],
+        )
+    )
+
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["error"] == "knowledge_access_denied"
+    assert item["content"] not in json.dumps(payload)
+
+
+def test_agent_can_read_own_private_search_result_but_disabled_memory_blocks_readback(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    agent_id = env["member"]["agentId"]
+    private_base = team_knowledge_service.create_agent_knowledge_base(
+        agent_id,
+        name="Current Agent Readback",
+        actor_agent_id=agent_id,
+    )
+    query = "own-private-roundtrip-celadon"
+    item = _create_approved_owner_knowledge_item(
+        owner_type="agent",
+        owner_id=agent_id,
+        knowledge_base_id=private_base["knowledgeBaseId"],
+        actor_agent_id=agent_id,
+        reviewer_agent_id=agent_id,
+        title="Own private readback",
+        content=f"{query}: this private item belongs to the current Agent.",
+    )
+    scoped_base_id = private_base["scopedKnowledgeBaseId"]
+    agent_directory_service.update_agent_instance(
+        agent_id,
+        tool_policy={"allowedTools": ["search_agent_private_memory_tool", "read_knowledge_item_tool"]},
+        memory_policy={"enabled": True, "readKnowledgeBaseIds": [scoped_base_id]},
+    )
+
+    with agent_directory_service.active_agent_runtime(agent_id, session_id="session-own-private-read"):
+        search = json.loads(
+            team_knowledge_tools.search_agent_private_memory_tool(
+                query=query,
+                query_mode="bm25",
+                limit=3,
+            )
+        )
+        result = next(row for row in search["results"] if row["knowledgeItemId"] == item["knowledgeItemId"])
+        readback = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=result["scopedKnowledgeBaseId"],
+                knowledge_item_id=result["knowledgeItemId"],
+            )
+        )
+
+    assert search["ok"] is True
+    assert result["scopedKnowledgeBaseId"] == scoped_base_id
+    assert readback["ok"] is True
+    assert readback["ownerType"] == "agent"
+    assert readback["ownerId"] == agent_id
+    assert readback["content"] == item["content"]
+
+    agent_directory_service.update_agent_instance(
+        agent_id,
+        memory_policy={"enabled": False, "readKnowledgeBaseIds": [scoped_base_id]},
+    )
+    with agent_directory_service.active_agent_runtime(agent_id, session_id="session-disabled-private-read"):
+        disabled_read = json.loads(
+            team_knowledge_tools.read_knowledge_item_tool(
+                knowledge_base_id=scoped_base_id,
+                knowledge_item_id=item["knowledgeItemId"],
+            )
+        )
+
+    assert disabled_read["ok"] is False
+    assert disabled_read["status"] == "blocked"
+    assert disabled_read["error"] == "personal_memory_disabled"
+    assert item["content"] not in json.dumps(disabled_read)
