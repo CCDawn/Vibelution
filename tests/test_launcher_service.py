@@ -106,9 +106,9 @@ def test_launcher_settings_cas_holds_config_lock_through_save(tmp_path, monkeypa
         finally:
             lock_events.append("exit")
 
-    def save_under_lock(public_config, path):
+    def save_under_lock(public_config, path, *args, **kwargs):
         assert lock_events[-1] == "enter"
-        return original_save(public_config, path)
+        return original_save(public_config, path, *args, **kwargs)
 
     monkeypatch.setattr(launcher_service, "_config_edit_lock", tracking_lock)
     monkeypatch.setattr(launcher_service, "_save_public_config_under_edit_lock", save_under_lock)
@@ -137,9 +137,9 @@ def test_launcher_startup_settings_cas_holds_config_lock_through_save(tmp_path, 
         finally:
             lock_events.append("exit")
 
-    def save_under_lock(public_config, path):
+    def save_under_lock(public_config, path, *args, **kwargs):
         assert lock_events[-1] == "enter"
-        return original_save(public_config, path)
+        return original_save(public_config, path, *args, **kwargs)
 
     monkeypatch.setattr(launcher_service, "_config_edit_lock", tracking_lock)
     monkeypatch.setattr(launcher_service, "_save_public_config_under_edit_lock", save_under_lock)
@@ -150,6 +150,33 @@ def test_launcher_startup_settings_cas_holds_config_lock_through_save(tmp_path, 
 
     assert response["ok"] is True
     assert lock_events == ["enter", "exit"]
+
+
+def test_launcher_startup_settings_interface_language_write_succeeds(tmp_path, monkeypatch):
+    """Launcher 设置页的 interface.language 是合法语言写入方。
+
+    落盘层保留语义会把整份写的语言回填为磁盘存量值；只有显式 override
+    才能把界面语言真正改掉（zh → en），且不触碰窗口等其他设置。
+    """
+
+    from config.public_config import load_public_config
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[ui]\nlanguage = "zh"\n[workbench]\nwindow_size = "auto"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    base_hash = launcher_service.get_launcher_startup_settings()["configHash"]
+
+    response = launcher_service.update_launcher_startup_settings(
+        {"baseHash": base_hash, "interface": {"language": "en"}}
+    )
+
+    assert response["ok"] is True
+    persisted = load_public_config(config_path)
+    assert persisted["ui"]["language"] == "en"
+    assert persisted["workbench"]["window_size"] == "auto"
 
 
 def test_workbench_close_transaction_is_durable_idempotent_and_requires_confirmed_force(tmp_path, monkeypatch):

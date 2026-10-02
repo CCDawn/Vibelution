@@ -537,7 +537,8 @@ def test_get_web_language_refreshes_after_save_public_config(tmp_path, monkeypat
 
     updated = public_config_module.load_public_config()
     updated["ui"]["language"] = "zh"
-    public_config_module.save_public_config(updated, config_file)
+    # 落盘层保留语义下，改语言必须走显式 override（update_language 同款路径）。
+    public_config_module.save_public_config(updated, config_file, ui_language_override="zh")
 
     # 写时刷新：保存后快照立即读到新语言（UI 可感知行为）。
     assert get_web_language() == "zh"
