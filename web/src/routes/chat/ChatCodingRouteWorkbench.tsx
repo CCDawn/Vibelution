@@ -585,7 +585,6 @@ export function ChatCodingRouteWorkbench() {
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
-  const financialAssistants = useFinancialAssistants();
   const location = useLocation();
   // Committed React Router URL is the single authority for the current Chat selection.
   const {
@@ -661,6 +660,13 @@ export function ChatCodingRouteWorkbench() {
     agentContextMenu,
     setAgentContextMenu,
   } = useChatWorkbenchContextMenus();
+  // Lazy boot-volley guard: the only consumer in this shell is the session
+  // context-menu "report library" entry below, which already degrades to a
+  // hidden item while the data is absent. Unconditionally fetching here put
+  // GET /api/financial-assistants into every app-open boot volley (cold hits
+  // measured at multiple seconds), so the query only enables while a session
+  // context menu is open; the hook cache still serves repeat opens.
+  const financialAssistants = useFinancialAssistants(Boolean(sessionContextMenu));
   // Active-turn layers live in an external store instead of component state:
   // assistant delta frames commit multiple times per second, and only the
   // ConversationView bridge subscribes per frame (see activeTurnLayersStore).

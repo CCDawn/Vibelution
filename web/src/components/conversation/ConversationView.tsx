@@ -49,7 +49,7 @@ import type {
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
-import { fetchConfigWorkspace } from "../../api/config";
+import { fetchPublicConfig } from "../../api/config";
 import { fetchSessionMessageCuration, isFetchJsonHttpError, setSessionMessageCuration } from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import { VStateSurface } from "../../components/vui";
@@ -1200,24 +1200,21 @@ export const ConversationView = React.memo(function ConversationView({
   void onInterruptGuidance;
   void onSafeGuidance;
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
-  // Model labels for the turn-envelope switch dividers. Shared cache key with
-  // the config routes; absence of data degrades to the raw model id.
-  const configWorkspaceQuery = useQuery({
-    queryKey: queryKeys.configWorkspace(),
-    queryFn: ({ signal }) => fetchConfigWorkspace({ signal }),
+  // Model labels for the turn-envelope switch dividers. Uses the lightweight
+  // /api/config/public summary (modelLabels id→label map) instead of the full
+  // /api/config/workspace payload: this mount only needs labels, and the heavy
+  // workspace endpoint landed in every boot volley. Shares the configPublic
+  // cache key with the shell-wide summary consumers; absence of data degrades
+  // to the raw model id.
+  const configSummaryQuery = useQuery({
+    queryKey: queryKeys.configPublic(),
+    queryFn: ({ signal }) => fetchPublicConfig({ signal }),
     staleTime: 30_000,
   });
-  const modelLabelByModelId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const option of configWorkspaceQuery.data?.modelOptions ?? []) {
-      const modelId = String(option.model_id ?? "").trim();
-      const label = String(option.label ?? "").trim();
-      if (modelId && label && !map.has(modelId)) {
-        map.set(modelId, label);
-      }
-    }
-    return map;
-  }, [configWorkspaceQuery.data]);
+  const modelLabelByModelId = useMemo(
+    () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
+    [configSummaryQuery.data?.modelLabels],
+  );
   const conversationModelLabel = useCallback(
     (modelId: string) => modelLabelByModelId.get(modelId) ?? modelId,
     [modelLabelByModelId],
