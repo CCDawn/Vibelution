@@ -9,6 +9,8 @@ const workbenchCloseCanaryScriptPath = fileURLToPath(
   new URL("../../../scripts/verify_desktop_workbench_close.ps1", import.meta.url)
 );
 const electronBuilderConfigPath = fileURLToPath(new URL("../electron-builder.json", import.meta.url));
+const packageBuilderPath = fileURLToPath(new URL("../scripts/buildDesktopPackage.js", import.meta.url));
+const packageOwnerPath = fileURLToPath(new URL("../scripts/runDesktopPackage.js", import.meta.url));
 const provenanceWriterPath = fileURLToPath(new URL("../src/scripts/writePackageProvenance.ts", import.meta.url));
 const frontendBundlePath = fileURLToPath(new URL("../src/packaging/frontendBundle.ts", import.meta.url));
 
@@ -50,13 +52,22 @@ describe("desktop package script", () => {
     expect(config.asarUnpack).toContain("package-provenance.json");
   });
 
-  it("generates a source-bound provenance manifest before packaging", () => {
+  it("routes package entrypoints through the bounded Python build owner", () => {
     const packageJson = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")) as {
       scripts?: Record<string, string>;
     };
+    const owner = readFileSync(packageOwnerPath, "utf8");
+    const builder = readFileSync(packageBuilderPath, "utf8");
 
-    expect(packageJson.scripts?.["write:provenance"]).toContain("writePackageProvenance.js");
-    expect(packageJson.scripts?.["package:dir"]).toContain("npm run write:provenance");
+    expect(packageJson.scripts?.["package:dir"]).toContain("runDesktopPackage.js --mode dir");
+    expect(packageJson.scripts?.["package:staging"]).toContain("runDesktopPackage.js --mode staging");
+    expect(packageJson.scripts?.["package:linux-arm64:dir"]).toContain("runDesktopPackage.js --mode linux-arm64");
+    for (const entry of ["build", "build:preload", "build:job"]) {
+      expect(packageJson.scripts?.[entry]).toContain("runDesktopPackage.js --mode unpackaged");
+    }
+    expect(owner).toContain("build_desktop_shell_package.py");
+    expect(builder).toContain("VIBELUTION_DESKTOP_BUILD_MANAGED");
+    expect(builder).toContain("Invoke desktop packaging through the Python build owner.");
   });
 
   it("packages the verified active frontend release and binds its copied bytes", () => {
@@ -69,15 +80,14 @@ describe("desktop package script", () => {
       scripts?: Record<string, string>;
     };
 
-    expect(config.extraResources).toContainEqual({
-      from: "node_modules/.cache/vibelution-package-web-dist",
-      to: "web-dist"
-    });
-    expect(config.extraResources?.some((entry) => entry.from === "../../web/dist")).toBe(false);
+    expect(JSON.stringify(config)).not.toContain("node_modules/.cache/vibelution-package-web-dist");
+    expect((config.extraResources ?? []).some((entry) => entry.from === "../../web/dist")).toBe(false);
     expect(writer).toContain("preparePackagedFrontend");
     expect(frontendBundle).toContain("ensure-frontend-build");
     expect(frontendBundle).toContain("frontendContentSha256");
-    expect(packageJson.scripts?.["package:linux-arm64:dir"]).toContain("npm run write:provenance");
+    expect(readFileSync(packageBuilderPath, "utf8")).toContain("frontendRoot");
+    expect(readFileSync(packageBuilderPath, "utf8")).toContain("extraResources = [{ from: resolve(input.frontendRoot), to: \"web-dist\" }]");
+    expect(packageJson.scripts?.["package:linux-arm64:dir"]).toContain("runDesktopPackage.js --mode linux-arm64");
   });
 
   it("provides a reusable package verification entrypoint", () => {

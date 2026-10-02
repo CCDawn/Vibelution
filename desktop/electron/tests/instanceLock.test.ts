@@ -1,7 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -18,16 +18,38 @@ import {
   withInstanceLock
 } from "../src/lifecycle/instanceLock.js";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const protocolPath = join(repoRoot, "tests", "fixtures", "launcher", "instance_lock_protocol.json");
+const gitCommonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+  cwd: repoRoot,
+  encoding: "utf8",
+  windowsHide: true
+}).trim();
+const mainCheckoutRoot = dirname(resolve(repoRoot, gitCommonDir));
+const checkoutPython = join(
+  mainCheckoutRoot,
+  ".venv",
+  process.platform === "win32" ? "Scripts/python.exe" : "bin/python"
+);
 const pythonExe = [
-  join(repoRoot, ".venv", "Scripts", "python.exe"),
-  join(repoRoot, ".venv", "bin", "python"),
-  join(repoRoot, "..", "..", ".venv", "Scripts", "python.exe"),
-  join(repoRoot, "..", "..", ".venv", "bin", "python")
-].find((candidate) => existsSync(candidate));
+  process.env.VIBELUTION_TEST_PYTHON,
+  process.env.VIBELUTION_PYTHON_PATH,
+  process.env.PYTHON,
+  checkoutPython
+].filter((candidate): candidate is string => Boolean(candidate?.trim())).find((candidate) => {
+  try {
+    execFileSync(candidate, ["-c", "import core.runtime_manager.instance_lock"], {
+      cwd: repoRoot,
+      stdio: "ignore",
+      windowsHide: true
+    });
+    return true;
+  } catch {
+    return false;
+  }
+});
 if (!pythonExe) {
-  throw new Error("python not found beside the worktree or the main checkout .venv");
+  throw new Error("Python is unavailable; set VIBELUTION_TEST_PYTHON or provide the main checkout .venv.");
 }
 const tempDirs: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];

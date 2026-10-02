@@ -14,12 +14,6 @@
     "package-provenance.json",
     "dist/native/workbench_job.node"
   ],
-  "extraResources": [
-    {
-      "from": "node_modules/.cache/vibelution-package-web-dist",
-      "to": "web-dist"
-    }
-  ],
   "win": {
     "icon": "../../assets/icons/vibelution.ico",
     "target": [

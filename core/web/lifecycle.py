@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
@@ -263,6 +264,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
             return
         current_loop.default_exception_handler(context)
 
+    _begin_owned_runtime_lifecycle()
     loop.set_exception_handler(handle_loop_exception)
     from .route_bootstrap import warm_web_routes_in_background
 
@@ -476,43 +478,73 @@ async def web_workbench_lifespan(app: FastAPI | None):
             logger.debug("Backend ready runtime-scene task scheduling failed: %s", type(exc).__name__)
         yield
     finally:
-        shutdown_session_catalog_on_shutdown()
-        from .services.virtual_human_life_service import stop_virtual_human_life_runtime
+        try:
+            shutdown_session_catalog_on_shutdown()
+            from .services.virtual_human_life_service import stop_virtual_human_life_runtime
 
-        stop_virtual_human_life_runtime()
-        for startup_task in (
-            startup_routes_task,
-            startup_scene_retention_task,
-            startup_cli_reconcile_task,
-            startup_cache_prewarm_task,
-            startup_directory_task,
-            startup_catalog_task,
-            startup_agent_registry_prewarm_task,
-            startup_agent_inbox_recovery_task,
-            startup_meeting_driver_recovery_task,
-            startup_chat_room_round_recovery_task,
-            startup_command_attempt_recovery_task,
-            startup_session_recovery_task,
-            startup_challenge_fence_validation_task,
-            startup_external_agent_reconcile_task,
-            startup_code_fingerprint_task,
-            startup_workflow_runtime_task,
-            startup_virtual_human_life_task,
-            startup_scene_event_task,
-        ):
-            if startup_task is None:
-                continue
-            if not startup_task.done():
-                startup_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await startup_task
-        from .services.cli_agent_terminal_service import (
-            shutdown_cli_agent_terminal_sessions,
-        )
+            stop_virtual_human_life_runtime()
+            for startup_task in (
+                startup_routes_task,
+                startup_scene_retention_task,
+                startup_cli_reconcile_task,
+                startup_cache_prewarm_task,
+                startup_directory_task,
+                startup_catalog_task,
+                startup_agent_registry_prewarm_task,
+                startup_agent_inbox_recovery_task,
+                startup_meeting_driver_recovery_task,
+                startup_chat_room_round_recovery_task,
+                startup_command_attempt_recovery_task,
+                startup_session_recovery_task,
+                startup_challenge_fence_validation_task,
+                startup_external_agent_reconcile_task,
+                startup_code_fingerprint_task,
+                startup_workflow_runtime_task,
+                startup_virtual_human_life_task,
+                startup_scene_event_task,
+            ):
+                if startup_task is None:
+                    continue
+                if not startup_task.done():
+                    startup_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await startup_task
+        finally:
+            try:
+                await _shutdown_owned_runtime_resources()
+                await asyncio.to_thread(_stop_research_workflow_runtime)
+            finally:
+                loop.set_exception_handler(previous_handler)
 
-        await asyncio.to_thread(shutdown_cli_agent_terminal_sessions)
-        await asyncio.to_thread(_stop_research_workflow_runtime)
-        loop.set_exception_handler(previous_handler)
+
+def _begin_owned_runtime_lifecycle() -> None:
+    # Fresh processes already have open admission gates. Only reopen owners
+    # from a previous lifespan; importing them here would delay cold health.
+    for module_name, begin_name in (
+        ("core.infrastructure.background_tasks", "begin_background_task_lifecycle"),
+        ("core.web.services.cli_agent_terminal_service", "begin_cli_agent_terminal_lifecycle"),
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None:
+            getattr(module, begin_name)()
+
+
+async def _shutdown_owned_runtime_resources() -> None:
+    from core.infrastructure.background_tasks import shutdown_background_tasks
+    from .services.cli_agent_terminal_service import shutdown_cli_agent_terminal_sessions
+
+    # Each owner broadcasts before waiting and enforces its own shared deadline.
+    results = await asyncio.gather(
+        asyncio.to_thread(shutdown_background_tasks),
+        asyncio.to_thread(shutdown_cli_agent_terminal_sessions),
+        return_exceptions=True,
+    )
+    for name, result in zip(("background_tasks", "cli_terminals"), results):
+        if isinstance(result, BaseException):
+            logger.error("Owned runtime shutdown failed: %s (%s)", name, type(result).__name__)
+        elif isinstance(result, dict) and result.get("closed") is False:
+            logger.error("Owned runtime shutdown incomplete: %s", name)
+
 
 
 def _start_research_workflow_runtime() -> str:
