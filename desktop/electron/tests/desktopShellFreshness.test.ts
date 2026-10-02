@@ -101,18 +101,49 @@ describe("desktop shell freshness", () => {
     ).toBe("refresh");
   });
 
-  it("rebuilds a stale packaged launcher instead of relaunching the same asar", () => {
-    expect(decideLauncherShellRestart({ isPackaged: true, stale: true })).toBe("rebuild-and-exit");
-    expect(decideLauncherShellRestart({ isPackaged: true, stale: false })).toBe("relaunch");
-    expect(decideLauncherShellRestart({ isPackaged: false, stale: true })).toBe("relaunch");
-    expect(decideLauncherShellRestart({ isPackaged: true, stale: false, forceRefresh: true })).toBe("rebuild-and-exit");
-    expect(decideLauncherShellRestart({ isPackaged: false, stale: false, forceRefresh: true })).toBe("ensure-and-relaunch");
+  it("rebuilds only a launch-blocking packaged shell; advisory frontend staleness relaunches", () => {
+    expect(decideLauncherShellRestart({ isPackaged: true, launchBlocking: true })).toBe("rebuild-and-exit");
+    expect(decideLauncherShellRestart({ isPackaged: true, launchBlocking: false })).toBe("relaunch");
+    expect(decideLauncherShellRestart({ isPackaged: false, launchBlocking: true })).toBe("relaunch");
+    expect(decideLauncherShellRestart({ isPackaged: true, launchBlocking: false, forceRefresh: true })).toBe(
+      "rebuild-and-exit"
+    );
+    expect(decideLauncherShellRestart({ isPackaged: false, launchBlocking: false, forceRefresh: true })).toBe(
+      "ensure-and-relaunch"
+    );
   });
 
-  it("keeps start/restart/rebuild-and-start on a stale packaged shell", () => {
-    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: true, stale: true })).toBe(true);
-    expect(shouldRefreshBeforeLifecycle("stop", { isPackaged: true, stale: true })).toBe(false);
-    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: false, stale: true })).toBe(false);
+  it("keeps start/restart/rebuild-and-start on a launch-blocking packaged shell", () => {
+    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: true, launchBlocking: true })).toBe(true);
+    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: true, launchBlocking: false })).toBe(false);
+    expect(shouldRefreshBeforeLifecycle("stop", { isPackaged: true, launchBlocking: true })).toBe(false);
+    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: false, launchBlocking: true })).toBe(false);
+  });
+
+  it("keeps periodic refresh observing full stale so frontend-only staleness still converges", () => {
+    // Advisory frontend staleness (launchBlocking false) must still schedule a
+    // background package rebuild until the snapshot returns to "current".
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: true,
+        refreshInFlight: false,
+        shutdownApproved: false
+      })
+    ).toBe("refresh");
+  });
+
+  it("falls back to stale semantics when the payload predates launchBlocking", () => {
+    const legacy = parseDesktopShellStatus(
+      JSON.stringify({ schemaVersion: 1, stale: true, reason: "frontend_source_stale" })
+    );
+    expect(legacy.launchBlocking).toBe(true);
+    const current = parseDesktopShellStatus(
+      JSON.stringify({ schemaVersion: 1, stale: true, reason: "frontend_source_stale", launchBlocking: false })
+    );
+    expect(current.launchBlocking).toBe(false);
+    expect(current.stale).toBe(true);
   });
 
   it("maps first-instance CLI into a post-refresh lifecycle token", () => {

@@ -96,6 +96,8 @@ def test_inspect_desktop_shell_missing_package_is_stale(tmp_path, monkeypatch):
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is True
     assert status["reason"] == "missing_package"
+    assert status["activeFrontendReleaseUsable"] is False
+    assert status["launchBlocking"] is True
 
 
 def test_frontend_directory_digest_uses_shared_path_and_byte_sha256_format(tmp_path):
@@ -115,6 +117,7 @@ def test_inspect_desktop_shell_provenance_mismatch_is_stale(tmp_path, monkeypatc
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is True
     assert status["reason"] == "provenance_mismatch"
+    assert status["launchBlocking"] is True
 
 
 def test_inspect_desktop_shell_missing_current_electron_tree_is_not_current(tmp_path, monkeypatch):
@@ -130,6 +133,7 @@ def test_inspect_desktop_shell_missing_current_electron_tree_is_not_current(tmp_
 
     assert status["stale"] is True
     assert status["reason"] == "current_electron_tree_unavailable"
+    assert status["launchBlocking"] is True
 
 
 def test_inspect_desktop_shell_current_when_hashes_match(tmp_path, monkeypatch):
@@ -140,6 +144,8 @@ def test_inspect_desktop_shell_current_when_hashes_match(tmp_path, monkeypatch):
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is False
     assert status["reason"] == "current"
+    assert status["activeFrontendReleaseUsable"] is True
+    assert status["launchBlocking"] is False
     assert status["packagedSourceCommit"] == "a" * 40
     assert status["currentCommit"] == tree
     assert status["packagedFrontendContentSha256"] == status["expectedFrontendContentSha256"]
@@ -155,6 +161,7 @@ def test_inspect_desktop_shell_source_newer_than_asar(tmp_path, monkeypatch):
     status = desktop_shell.inspect_desktop_shell(tmp_path)
     assert status["stale"] is True
     assert status["reason"] == "source_newer_than_asar"
+    assert status["launchBlocking"] is True
 
 
 def test_inspect_desktop_shell_package_frontend_bytes_must_match_provenance(tmp_path, monkeypatch):
@@ -231,6 +238,76 @@ def test_inspect_desktop_shell_requires_packaged_frontend_content_proof(tmp_path
 
     assert status["stale"] is True
     assert status["reason"] == "missing_frontend_provenance"
+
+
+def _build_shell_with_frontend_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str) -> None:
+    """Construct a packaged shell whose inspect waterfall lands on ``reason``."""
+
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    release = tmp_path / "web" / ".vibelution-builds" / "release-current"
+    if reason == "missing_frontend_provenance":
+        _mock_frontend_inspection(monkeypatch, tmp_path)
+        provenance_path = desktop_shell.packaged_provenance_path(tmp_path)
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance.pop("frontendContentSha256")
+        provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+    elif reason == "frontend_package_content_mismatch":
+        _mock_frontend_inspection(monkeypatch, tmp_path)
+        (desktop_shell.packaged_frontend_dist(tmp_path) / "index.html").write_text(
+            "<main>tampered</main>\n", encoding="utf-8"
+        )
+    elif reason == "frontend_source_stale":
+        _mock_frontend_inspection(monkeypatch, tmp_path, current=False)
+    elif reason == "frontend_inspection_failed":
+        def _raise(project_root):
+            raise RuntimeError("frontend inspection exploded")
+
+        monkeypatch.setattr(desktop_shell, "inspect_frontend_build", _raise)
+    elif reason == "current_frontend_tree_unavailable":
+        monkeypatch.setattr(
+            desktop_shell,
+            "inspect_frontend_build",
+            lambda project_root: {
+                "current": True,
+                "dist": str(release),
+                "provenance": {},
+                "buildInputs": {},
+            },
+        )
+    elif reason == "frontend_release_mismatch":
+        _mock_frontend_inspection(monkeypatch, tmp_path)
+        (release / "index.html").write_bytes(b"<main>new active frontend</main>\n")
+    elif reason == "frontend_source_mismatch":
+        _mock_frontend_inspection(monkeypatch, tmp_path)
+        provenance_path = desktop_shell.packaged_provenance_path(tmp_path)
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance["frontendTreeHash"] = "e" * 40
+        provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+    else:
+        raise AssertionError(f"unsupported frontend reason: {reason}")
+
+
+@pytest.mark.parametrize("reason", sorted(desktop_shell.FRONTEND_ONLY_STALE_REASONS))
+def test_inspect_desktop_shell_frontend_reasons_follow_active_release_availability(tmp_path, monkeypatch, reason):
+    _build_shell_with_frontend_reason(tmp_path, monkeypatch, reason)
+
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+
+    assert status["stale"] is True
+    assert status["reason"] == reason
+    assert status["activeFrontendReleaseUsable"] is True
+    assert status["launchBlocking"] is False
+
+    # Without a usable workspace active release the packaged launcher window
+    # would serve the stale packaged snapshot, so the same reason blocks again.
+    (tmp_path / "web" / ".vibelution-builds" / "active.json").unlink()
+    blocked = desktop_shell.inspect_desktop_shell(tmp_path)
+    assert blocked["stale"] is True
+    assert blocked["reason"] == reason
+    assert blocked["activeFrontendReleaseUsable"] is False
+    assert blocked["launchBlocking"] is True
 
 
 def test_refresh_lock_reclaims_dead_holder_without_unlink_race(tmp_path, monkeypatch):
@@ -634,6 +711,36 @@ def test_resolve_desktop_shell_launch_uses_unpackaged_when_packaged_missing(tmp_
     assert spec["args"][spec["args"].index("--workspace") + 1] == str(tmp_path)
     assert "--project" not in spec["args"]
     assert "--open-workbench" in spec["args"]
+
+
+def test_resolve_desktop_shell_launch_launches_packaged_with_advisory_frontend_stale(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash=tree, asar_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    release = tmp_path / "web" / ".vibelution-builds" / "release-current"
+    (release / "index.html").write_bytes(b"<main>new active frontend</main>\n")
+
+    spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
+
+    assert spec["kind"] == "packaged"
+    # Advisory frontend staleness keeps the packaged exe but must not be
+    # reported as "current"; downstream status shows the real reason.
+    assert spec["reason"] == "frontend_release_mismatch"
+    assert spec["args"][0] == str(desktop_shell.packaged_desktop_exe(tmp_path))
+
+
+def test_resolve_desktop_shell_launch_falls_back_when_launch_blocking(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_packaged_shell(tmp_path, tree_hash="b" * 40, asar_mtime=2_000_000_000)
+    electron_exe = _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=2_000_000_000)
+    _mock_frontend_inspection(monkeypatch, tmp_path)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+
+    spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, open_workbench=True)
+
+    assert spec["kind"] == "unpackaged"
+    assert spec["args"][:2] == [str(electron_exe), str(desktop_shell.unpackaged_main_js(tmp_path))]
 
 
 def test_live_shell_owns_rebuild_decision_before_relaunch(tmp_path, monkeypatch):

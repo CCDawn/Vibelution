@@ -36,7 +36,7 @@ import {
   type WorkbenchPortOwnerResolution
 } from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
-import { closeTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
+import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
   defaultFetchWorkbenchHealth,
@@ -1308,6 +1308,7 @@ export function spawnWorkbenchBackend(input: {
       stdoutPath: join(runtimeDir, "backend.stdout.log"),
       stderrPath: join(runtimeDir, "backend.stderr.log")
     });
+    const retireOwnedJob = captureTrackedWorkbenchJobRetirement(input.workspaceRoot, managed.pid);
     let killed = false;
     const child: WorkbenchBackendSpawnChild = {
       pid: managed.pid,
@@ -1322,7 +1323,7 @@ export function spawnWorkbenchBackend(input: {
       },
       kill() {
         killed = true;
-        void terminateTrackedWorkbenchJob(input.workspaceRoot);
+        void retireOwnedJob?.();
         return true;
       },
       once() {
@@ -1896,6 +1897,7 @@ export async function executeMainLineWorkbench(
     fileExists
   });
   const spawnPid = Number(spawned.child.pid || 0);
+  const retireOwnedJob = captureTrackedWorkbenchJobRetirement(input.workspaceRoot, spawnPid);
   let backendIdentity: PythonProcessIdentity | null = null;
   const persistUnretiredStart = (message: string): void => {
     writeState({
@@ -1926,23 +1928,11 @@ export async function executeMainLineWorkbench(
       updatedAt: isoNow(input.now)
     });
   };
-  if (spawnPid > 0 && captureIdentity) {
-    backendIdentity = await captureIdentity({
-      pythonPath: spawned.pythonPath,
-      workspaceRoot: input.workspaceRoot,
-      pid: spawnPid
-    });
-    if (!backendIdentity) {
-      const message = `workbench backend process identity could not be captured for pid ${spawnPid}; registered handle retained`;
-      persistUnretiredStart(message);
-      throw new Error(message);
-    }
-  }
   const retireSpawnedTree = async (): Promise<void> => {
     if (spawnPid <= 0) {
       return;
     }
-    if (await terminateTrackedWorkbenchJob(input.workspaceRoot)) {
+    if (retireOwnedJob && await retireOwnedJob()) {
       return;
     }
     if (terminateProcessTree) {
@@ -1961,6 +1951,17 @@ export async function executeMainLineWorkbench(
     throw new Error(`workbench backend process-tree terminator was not configured for pid ${spawnPid}`);
   };
   try {
+    if (spawnPid > 0 && captureIdentity) {
+      backendIdentity = await captureIdentity({
+        pythonPath: spawned.pythonPath,
+        workspaceRoot: input.workspaceRoot,
+        pid: spawnPid
+      });
+      if (!backendIdentity) {
+        throw new Error(`workbench backend process identity could not be captured for pid ${spawnPid}`);
+      }
+    }
+    input.signal?.throwIfAborted();
     await waitForBackendHealthy({
       port: resolved.port,
       host,
@@ -1978,11 +1979,26 @@ export async function executeMainLineWorkbench(
   } catch (error: unknown) {
     try {
       await retireSpawnedTree();
+      // Cleanup must finish even when the startup waiter has been cancelled.
+      const released = await waitForPortRelease({ port: resolved.port, host, connect: input.connect });
+      if (!released) throw new Error(`workbench backend port ${resolved.port} remains occupied`);
     } catch (retirementError: unknown) {
       const message = `workbench backend startup failed and its process tree remains registered: ${retirementError instanceof Error ? retirementError.message : String(retirementError)}`;
       persistUnretiredStart(message);
       throw new Error(`${error instanceof Error ? error.message : String(error)}; ${message}`);
     }
+    writeState({
+      ...stateWithoutReconciledBackendHandles(previous, reconciledDeadPids),
+      desiredState: "closed", observedState: "failed", phase: "failed",
+      backendPid: 0, backendLaunchPid: 0, spawnPid: 0,
+      backendCreateTime: 0, backendExecutable: "",
+      backendLaunchCreateTime: 0, backendLaunchExecutable: "",
+      spawnCreateTime: 0, spawnExecutable: "",
+      host, backendPort: resolved.port, port: resolved.port,
+      failureMessage: error instanceof Error ? error.message : String(error),
+      lifecycleWarning: "", lastReason: "electron_main_start_failed_retired",
+      lastSource: "electron_main", updatedAt: isoNow(input.now)
+    });
     throw error;
   }
   writeState({

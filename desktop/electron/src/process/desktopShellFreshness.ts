@@ -16,6 +16,7 @@ const FIRST_INSTANCE_LIFECYCLE = new Set(["start", "stop", "force-stop", "restar
 export type DesktopShellStatus = {
   schemaVersion: 1;
   stale: boolean;
+  launchBlocking: boolean;
   reason: string;
   packagedElectronTree?: string;
   currentElectronTree?: string;
@@ -77,6 +78,10 @@ export function formatTrayLauncherFreshness(
   };
 }
 
+// These decisions drive background snapshot convergence: they rebuild the
+// package so the full `stale` state returns to "current". They intentionally
+// observe `stale` rather than `launchBlocking`, so frontend-only staleness
+// still converges the packaged snapshot without blocking any launch.
 export function decidePackagedDesktopShellRefresh(input: {
   isPackaged: boolean;
   smoke: boolean;
@@ -113,10 +118,10 @@ export function decidePeriodicDesktopShellRefresh(input: {
 
 export function decideLauncherShellRestart(input: {
   isPackaged: boolean;
-  stale: boolean;
+  launchBlocking: boolean;
   forceRefresh?: boolean;
 }): "relaunch" | "rebuild-and-exit" | "ensure-and-relaunch" {
-  if (input.isPackaged && (input.stale || input.forceRefresh)) {
+  if (input.isPackaged && (input.launchBlocking || input.forceRefresh)) {
     return "rebuild-and-exit";
   }
   if (!input.isPackaged && input.forceRefresh) {
@@ -145,9 +150,13 @@ export function shouldDeferWorkbenchOpenUntilLifecycleStart(lifecycleCommand: st
 
 export function shouldRefreshBeforeLifecycle(
   operation: string,
-  input: { isPackaged: boolean; stale: boolean }
+  input: { isPackaged: boolean; launchBlocking: boolean }
 ): boolean {
-  return Boolean(input.isPackaged && input.stale && REFRESH_BEFORE_LIFECYCLE.has(String(operation || "").trim().toLowerCase()));
+  return Boolean(
+    input.isPackaged
+      && input.launchBlocking
+      && REFRESH_BEFORE_LIFECYCLE.has(String(operation || "").trim().toLowerCase())
+  );
 }
 
 export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
@@ -158,6 +167,9 @@ export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
   return {
     schemaVersion: 1,
     stale: Boolean(parsed.stale),
+    // Older Python payloads predate launchBlocking; fall back to the old
+    // "stale blocks the packaged launch" semantics instead of widening the gate.
+    launchBlocking: typeof parsed.launchBlocking === "boolean" ? parsed.launchBlocking : Boolean(parsed.stale),
     reason: String(parsed.reason || ""),
     ...(typeof parsed.packagedElectronTree === "string" ? { packagedElectronTree: parsed.packagedElectronTree } : {}),
     ...(typeof parsed.currentElectronTree === "string" ? { currentElectronTree: parsed.currentElectronTree } : {}),

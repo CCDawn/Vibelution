@@ -18,7 +18,7 @@ import {
   retireClaimedIsolatedRuntime,
   retireIsolatedRuntimeBeforeStart
 } from "../src/lifecycle/isolatedInstanceRegistryHost.js";
-import { claimStopIfGeneration, readRegistry } from "../src/lifecycle/instanceRegistryStore.js";
+import { claimStopIfGeneration, readRegistry, upsert } from "../src/lifecycle/instanceRegistryStore.js";
 import {
   instanceIdForProject,
   normalizeInstanceKey,
@@ -1008,5 +1008,107 @@ describe("isolatedInstanceRegistryHost", () => {
       storeOptions: { portIsFree: async () => true }
     });
     expect(retried.ok).toBe(true);
+  });
+
+  it("keeps an identity-less dead spawn pending until its captured owner is CAS-cleared", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-owner-retirement-proof-"));
+    const registryPath = join(dir, "instances.json");
+    await writeFile(registryPath, JSON.stringify({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          projectRoot: "C:/wt/task",
+          host: "127.0.0.1",
+          port: 8003,
+          controlPort: 8768,
+          status: "starting",
+          desiredState: "open",
+          generation: 4,
+          commandId: "start-command",
+          spawnPid: 4242,
+          portLeaseStatus: "held"
+        }
+      }
+    }), "utf8");
+
+    const firstClaim = await claimStopIfGeneration(registryPath, {
+      instanceId: "worktree:task",
+      expectedGeneration: 4,
+      expectedCommandId: "start-command",
+      commandId: "retire-without-identity"
+    });
+    expect(firstClaim.applied).toBe(true);
+    let receivedPids: number[] = [];
+    const retained = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      entry: firstClaim.entry,
+      registryPath,
+      desiredStateOnFailure: "open",
+      dependencies: {
+        readDaemonPid: () => 0,
+        readDaemonIdentity: () => null,
+        connect: async () => false,
+        pidAlive: () => false,
+        reclaimBackend: async (input) => {
+          receivedPids = [...(input.registeredPids ?? [])];
+          return receivedPids.includes(4242)
+            ? { reclaimed: false, reason: "identity-less registered process remains pending" }
+            : { reclaimed: true, reason: "port released after captured owner retirement" };
+        }
+      }
+    });
+    expect(receivedPids).toEqual([4242]);
+    expect(retained.ok).toBe(false);
+    const afterPending = await readRegistry(registryPath);
+    expect(afterPending.instances["worktree:task"]).toMatchObject({
+      status: "failed",
+      spawnPid: 4242,
+      generation: firstClaim.entry.generation
+    });
+
+    // This is the main-process compensation's proof boundary: only the same
+    // registry generation can clear the handle after the captured Job owner
+    // reports retirement and the port probe reports free.
+    const cleared = await upsert(registryPath, "worktree:task", {
+      spawnPid: 0,
+      spawnCreateTime: 0,
+      spawnExecutable: ""
+    }, Number(firstClaim.entry.generation));
+    expect(cleared.applied).toBe(true);
+    const retryClaim = await claimStopIfGeneration(registryPath, {
+      instanceId: "worktree:task",
+      expectedGeneration: Number(firstClaim.entry.generation),
+      expectedCommandId: "retire-without-identity",
+      commandId: "settle-captured-retirement"
+    });
+    expect(retryClaim.applied).toBe(true);
+    const settled = await retireClaimedIsolatedRuntime({
+      instanceId: "worktree:task",
+      workspaceRoot: "C:/wt/task",
+      pythonPath: "python",
+      entry: retryClaim.entry,
+      registryPath,
+      desiredStateOnFailure: "open",
+      successFailureMessage: "isolated backend startup failed",
+      dependencies: {
+        readDaemonPid: () => 0,
+        readDaemonIdentity: () => null,
+        connect: async () => false,
+        pidAlive: () => false,
+        reclaimBackend: async (input) => {
+          expect(input.registeredPids).toEqual([]);
+          return { reclaimed: true, reason: "port released after captured owner retirement" };
+        },
+        clearRuntimeState: () => ({ cleared: true, removedCount: 0, failedCount: 0 })
+      }
+    });
+    expect(settled).toEqual({ ok: true });
+    expect((await readRegistry(registryPath)).instances["worktree:task"]).toMatchObject({
+      status: "failed",
+      spawnPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
   });
 });

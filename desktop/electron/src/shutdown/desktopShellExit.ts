@@ -5,16 +5,44 @@ import type { ShutdownDecision } from "./shutdownCoordinator.js";
 export const DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS = 8_000;
 export const DESKTOP_SHELL_EXIT_BUDGET_MS = 15_000;
 
+export type DesktopShellExitDeadline = {
+  budgetMs: number;
+  expiresAt: number;
+  signal: AbortSignal;
+  remainingMs: () => number;
+  dispose: () => void;
+};
+
+export function createDesktopShellExitDeadline(
+  timeoutMs = DESKTOP_SHELL_EXIT_BUDGET_MS,
+  now: () => number = Date.now
+): DesktopShellExitDeadline {
+  const budgetMs = Math.max(1, Math.round(timeoutMs));
+  const expiresAt = now() + budgetMs;
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`desktop shell exit timed out after ${budgetMs}ms`));
+  }, budgetMs);
+  timer.unref?.();
+  return {
+    budgetMs,
+    expiresAt,
+    signal: controller.signal,
+    remainingMs: () => Math.max(0, expiresAt - now()),
+    dispose: () => clearTimeout(timer)
+  };
+}
+
 export type ApprovedDesktopShellShutdownInput = {
   decision: ShutdownDecision;
-  closeDesktopSession: () => Promise<void>;
+  closeDesktopSession: (signal: AbortSignal) => Promise<void>;
   recordEvent: (event: RuntimeSceneElectronEvent) => Promise<void>;
-  stopManagedRuntime: () => Promise<void>;
-  stopPythonLauncher: () => Promise<LauncherServiceStopResult>;
+  stopManagedRuntime: (signal: AbortSignal) => Promise<void>;
+  stopPythonLauncher: (signal: AbortSignal) => Promise<LauncherServiceStopResult>;
   approveShutdown: () => void;
   stopDesktopActionLoop: () => void;
   quitApp: () => void;
-  stepTimeoutMs?: number;
+  deadline?: DesktopShellExitDeadline;
   forceExitOnStopFailure?: boolean;
 };
 
@@ -28,23 +56,37 @@ export type ApprovedDesktopShellShutdownResult = {
 };
 
 export async function withDesktopShellExitTimeout<T>(
-  operation: Promise<T>,
-  timeoutMs: number,
+  operation: Promise<T> | ((signal: AbortSignal) => Promise<T>),
+  timeout: number | DesktopShellExitDeadline,
   label: string
 ): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  const ownsDeadline = typeof timeout === "number";
+  const deadline = ownsDeadline ? createDesktopShellExitDeadline(timeout) : timeout;
+  const timeoutError = (): Error => new Error(`${label} timed out after ${deadline.budgetMs}ms`);
+  let onAbort: (() => void) | null = null;
   try {
+    if (deadline.signal.aborted || deadline.remainingMs() <= 0) {
+      throw timeoutError();
+    }
+    const pending = Promise.resolve().then(() =>
+      typeof operation === "function" ? operation(deadline.signal) : operation
+    );
     return await Promise.race([
-      operation,
+      pending,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-        }, Math.max(1, Math.round(timeoutMs)));
+        onAbort = () => reject(timeoutError());
+        deadline.signal.addEventListener("abort", onAbort, { once: true });
+        if (deadline.signal.aborted) {
+          onAbort();
+        }
       })
     ]);
   } finally {
-    if (timer !== null) {
-      clearTimeout(timer);
+    if (onAbort !== null) {
+      deadline.signal.removeEventListener("abort", onAbort);
+    }
+    if (ownsDeadline) {
+      deadline.dispose();
     }
   }
 }
@@ -131,88 +173,94 @@ export async function executeApprovedDesktopShellShutdown(
     return null;
   }
 
-  const stepTimeoutMs = input.stepTimeoutMs ?? DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
-  try {
-    await withDesktopShellExitTimeout(input.closeDesktopSession(), stepTimeoutMs, "close desktop session");
-  } catch {
-    // Fail-open: session close must not block Electron from quitting.
-  }
-
-  let stopResult: LauncherServiceStopResult | null = null;
-  let stopError = "";
-  let managedRuntimeError = "";
-  await input.recordEvent({
-    eventCode: "electron.runtime.stop_requested",
-    message: "Managed project process tree stop requested before desktop shell quit.",
-    fields: {}
-  }).catch(() => undefined);
-  try {
-    await withDesktopShellExitTimeout(input.stopManagedRuntime(), stepTimeoutMs, "stop managed runtime");
-  } catch (error: unknown) {
-    managedRuntimeError = error instanceof Error ? error.message : String(error);
-    await input.recordEvent({
-      eventCode: "electron.runtime.stop_failed",
-      message: "Managed project process tree stop failed before shell quit.",
-      fields: { error: managedRuntimeError.slice(0, 500) }
-    }).catch(() => undefined);
-  }
-  if (input.decision.stopPythonLauncher) {
-    await input.recordEvent({
-      eventCode: "electron.launcher_service.stop_requested",
-      message: "Owned Python launcher service stop requested.",
-      fields: {}
-    }).catch(() => undefined);
-    try {
-      stopResult = await withDesktopShellExitTimeout(
-        input.stopPythonLauncher(),
-        stepTimeoutMs,
-        "stop python launcher"
-      );
-    } catch (error: unknown) {
-      stopError = error instanceof Error ? error.message : String(error);
-      await input.recordEvent({
-        eventCode: "electron.launcher_service.stop_failed",
-        message: "Owned Python launcher service stop failed before shell quit.",
-        fields: { error: stopError.slice(0, 500) }
-      }).catch(() => undefined);
-    }
-  }
-
-  const result: ApprovedDesktopShellShutdownResult = {
-    stopManagedRuntime: !managedRuntimeError,
-    managedRuntimeError,
-    stopPythonLauncher: input.decision.stopPythonLauncher,
-    stopStatus: stopResult?.status ?? (stopError ? "failed" : "not_requested"),
-    stoppedPidCount: stopResult?.terminatedPids.length ?? 0,
-    stopError
+  const ownsDeadline = input.deadline === undefined;
+  const deadline = input.deadline ?? createDesktopShellExitDeadline();
+  const record = async (event: RuntimeSceneElectronEvent): Promise<void> => {
+    await withDesktopShellExitTimeout(() => input.recordEvent(event), deadline, event.eventCode).catch(() => undefined);
   };
-
-  if ((managedRuntimeError || stopError) && !input.forceExitOnStopFailure) {
-    await input.recordEvent({
-      eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
-      message: "Desktop shell exit was cancelled because managed processes did not stop cleanly.",
-      fields: {
-        managedRuntimeError: managedRuntimeError.slice(0, 500),
-        launcherStopError: stopError.slice(0, 500)
-      }
-    }).catch(() => undefined);
-    return result;
-  }
-
-  await input.recordEvent({
-    eventCode: "electron.launcher_service.exited",
-    message: "Electron desktop shell exit approved.",
-    fields: {
-      stopManagedRuntime: result.stopManagedRuntime,
-      managedRuntimeError: result.managedRuntimeError.slice(0, 500),
-      stopPythonLauncher: result.stopPythonLauncher,
-      stopStatus: result.stopStatus,
-      stoppedPidCount: result.stoppedPidCount
+  try {
+    try {
+      await withDesktopShellExitTimeout(input.closeDesktopSession, deadline, "close desktop session");
+    } catch {
+      // Fail-open: session close must not block Electron from quitting.
     }
-  }).catch(() => undefined);
 
-  input.approveShutdown();
-  input.stopDesktopActionLoop();
-  input.quitApp();
-  return result;
+    let stopResult: LauncherServiceStopResult | null = null;
+    let stopError = "";
+    let managedRuntimeError = "";
+    await record({
+      eventCode: "electron.runtime.stop_requested",
+      message: "Managed project process tree stop requested before desktop shell quit.",
+      fields: {}
+    });
+    try {
+      await withDesktopShellExitTimeout(input.stopManagedRuntime, deadline, "stop managed runtime");
+    } catch (error: unknown) {
+      managedRuntimeError = error instanceof Error ? error.message : String(error);
+      await record({
+        eventCode: "electron.runtime.stop_failed",
+        message: "Managed project process tree stop failed before shell quit.",
+        fields: { error: managedRuntimeError.slice(0, 500) }
+      });
+    }
+    if (input.decision.stopPythonLauncher) {
+      await record({
+        eventCode: "electron.launcher_service.stop_requested",
+        message: "Owned Python launcher service stop requested.",
+        fields: {}
+      });
+      try {
+        stopResult = await withDesktopShellExitTimeout(input.stopPythonLauncher, deadline, "stop python launcher");
+      } catch (error: unknown) {
+        stopError = error instanceof Error ? error.message : String(error);
+        await record({
+          eventCode: "electron.launcher_service.stop_failed",
+          message: "Owned Python launcher service stop failed before shell quit.",
+          fields: { error: stopError.slice(0, 500) }
+        });
+      }
+    }
+
+    const result: ApprovedDesktopShellShutdownResult = {
+      stopManagedRuntime: !managedRuntimeError,
+      managedRuntimeError,
+      stopPythonLauncher: input.decision.stopPythonLauncher,
+      stopStatus: stopResult?.status ?? (stopError ? "failed" : "not_requested"),
+      stoppedPidCount: stopResult?.terminatedPids.length ?? 0,
+      stopError
+    };
+
+    if ((managedRuntimeError || stopError) && !input.forceExitOnStopFailure) {
+      await record({
+        eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
+        message: "Desktop shell exit was cancelled because managed processes did not stop cleanly.",
+        fields: {
+          managedRuntimeError: managedRuntimeError.slice(0, 500),
+          launcherStopError: stopError.slice(0, 500)
+        }
+      });
+      return result;
+    }
+
+    await record({
+      eventCode: "electron.launcher_service.exited",
+      message: "Electron desktop shell exit approved.",
+      fields: {
+        stopManagedRuntime: result.stopManagedRuntime,
+        managedRuntimeError: result.managedRuntimeError.slice(0, 500),
+        stopPythonLauncher: result.stopPythonLauncher,
+        stopStatus: result.stopStatus,
+        stoppedPidCount: result.stoppedPidCount
+      }
+    });
+
+    input.approveShutdown();
+    input.stopDesktopActionLoop();
+    input.quitApp();
+    return result;
+  } finally {
+    if (ownsDeadline) {
+      deadline.dispose();
+    }
+  }
 }

@@ -1490,7 +1490,11 @@ def _packaged_electron_desktop_executable() -> Path | None:
 
 
 def _packaged_electron_is_current_checkout() -> bool:
-    """True when the real packaged exe matches current desktop/electron, or a test fake."""
+    """True when the packaged exe fits driving this checkout's first window, or a test fake.
+
+    Consumes ``launchBlocking`` rather than ``stale``: advisory frontend
+    staleness (usable workspace active release) must not demote the shell.
+    """
 
     packaged = _packaged_electron_desktop_executable()
     if packaged is None:
@@ -1508,7 +1512,7 @@ def _packaged_electron_is_current_checkout() -> bool:
         status = inspect_desktop_shell(PROJECT_ROOT)
     except (OSError, TypeError, ValueError):
         return True
-    return not bool(status.get("stale"))
+    return not bool(status.get("launchBlocking"))
 
 
 def _checkout_electron_launch_command(*, open_workbench: bool = True) -> list[str] | None:

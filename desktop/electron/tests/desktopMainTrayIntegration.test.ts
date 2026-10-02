@@ -151,34 +151,32 @@ describe("Electron main tray integration", () => {
     const quitFailureStart = quitSource.indexOf("onApprovedFailure:", quitApprovedStart);
     const quitApprovedSource = quitSource.slice(quitApprovedStart, quitFailureStart);
     const quitTimeoutStart = quitApprovedSource.indexOf("await withDesktopShellExitTimeout(");
-    const quitBudgetIndex = quitApprovedSource.lastIndexOf("DESKTOP_SHELL_EXIT_BUDGET_MS");
-    const quitExitSource = quitApprovedSource.slice(quitTimeoutStart, quitBudgetIndex);
+    const quitExitSource = quitApprovedSource.slice(quitTimeoutStart);
     expect(quitApprovedStart).toBeGreaterThan(-1);
     expect(quitFailureStart).toBeGreaterThan(quitApprovedStart);
     expect(quitTimeoutStart).toBeGreaterThan(-1);
-    expect(quitBudgetIndex).toBeGreaterThan(quitTimeoutStart);
-    expect(quitExitSource).toContain("stopIsolatedInstancesForApprovedShutdown()");
+    expect(quitExitSource).toContain("stopIsolatedInstancesForApprovedShutdown(false, deadline)");
     expect(quitExitSource).toContain("await executeApprovedDesktopShellShutdown");
-    expect(quitExitSource.indexOf("stopIsolatedInstancesForApprovedShutdown()")).toBeLessThan(
+    expect(quitExitSource.indexOf("stopIsolatedInstancesForApprovedShutdown(false, deadline)")).toBeLessThan(
       quitExitSource.indexOf("await executeApprovedDesktopShellShutdown")
     );
-    expect(quitApprovedSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
+    expect(quitApprovedSource).toContain("createDesktopShellExitDeadline()");
+    expect(quitApprovedSource).toContain("deadline,");
     const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
     const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);
     const forcedSource = mainSource.slice(forcedStart, forcedEnd);
     const forcedTimeoutStart = forcedSource.indexOf("await withDesktopShellExitTimeout(");
-    const forcedBudgetIndex = forcedSource.lastIndexOf("DESKTOP_SHELL_EXIT_BUDGET_MS");
-    const forcedExitSource = forcedSource.slice(forcedTimeoutStart, forcedBudgetIndex);
+    const forcedExitSource = forcedSource.slice(forcedTimeoutStart);
     expect(forcedStart).toBeGreaterThan(-1);
     expect(forcedEnd).toBeGreaterThan(forcedStart);
     expect(forcedTimeoutStart).toBeGreaterThan(-1);
-    expect(forcedBudgetIndex).toBeGreaterThan(forcedTimeoutStart);
     expect(forcedExitSource).toContain("await bestEffortStopIsolatedInstancesForShutdown");
     expect(forcedExitSource).toContain("await executeApprovedDesktopShellShutdown");
     expect(forcedExitSource.indexOf("await bestEffortStopIsolatedInstancesForShutdown")).toBeLessThan(
       forcedExitSource.indexOf("await executeApprovedDesktopShellShutdown")
     );
-    expect(forcedSource).toContain("DESKTOP_SHELL_EXIT_BUDGET_MS");
+    expect(forcedSource).toContain("createDesktopShellExitDeadline()");
+    expect(forcedSource).toContain("deadline,");
     expect(forcedSource).toContain("forceExitOnStopFailure: true");
     const failureStart = quitSource.indexOf("onApprovedFailure:", quitApprovedStart);
     const failureSource = quitSource.slice(failureStart);

@@ -111,7 +111,7 @@ describe("Electron main Launcher IPC facade", () => {
     const branchBody = mainSource.slice(branchStart, mainSource.indexOf("async function orchestrateLauncherApi"));
     expect(branchBody).toContain('operation === "start" || operation === "restart"');
     expect(branchBody).toContain("isCurrentCheckoutInstance(instanceId)");
-    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload, provenance)");
+    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload, provenance, signal)");
     expect(branchBody).toContain("superviseIsolatedInstanceStart");
     expect(branchBody).toContain("deadlineAt: result.deadlineAt");
     expect(branchBody).toContain("renewIsolatedOwnerLease");
@@ -139,7 +139,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(lifecycleBody).toContain("launcherLifecycleSupervisor.executeMutation");
     expect(lifecycleBody).toContain("launcherLifecycleSupervisor.bindCommand");
     expect(lifecycleBody).toContain("scheduleLauncherStatusCliRefresh");
-    expect(lifecycleBody).toContain("signal: intentLease.signal");
+    expect(lifecycleBody).toContain("AbortSignal.any([signal, intentLease.signal])");
+    expect(lifecycleBody).toContain("signal: lifecycleSignal");
 
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
     // Window covers the post-start serving verification plus the ready gates.
@@ -162,7 +163,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("isCurrent:");
     expect(branchBody).toContain("claimReady:");
     expect(branchBody).toContain("completeReady:");
-    expect(branchBody).toContain("signal: intentLease.signal");
+    expect(branchBody).toContain("AbortSignal.any([signal, intentLease.signal])");
+    expect(branchBody).toContain("signal: lifecycleSignal");
   });
 
   it("waits for the Electron control plane before dispatching startup and second-instance lifecycle commands", () => {
@@ -242,8 +244,13 @@ describe("Electron main Launcher IPC facade", () => {
     const shutdownStart = mainSource.indexOf("async function stopMainRuntimeForApprovedShutdown");
     const shutdownBody = mainSource.slice(shutdownStart, mainSource.indexOf("async function requestDesktopShellExit", shutdownStart));
     expect(shutdownBody).toContain('orchestrateLauncherLifecycle("shutdown"');
-    expect(mainSource).toContain("stopManagedRuntime: stopMainRuntimeForApprovedShutdown");
-    const managedStart = mainSource.indexOf("async function stopManagedRuntime()");
+    const exitStart = mainSource.indexOf("async function requestDesktopShellExit");
+    const exitBody = mainSource.slice(exitStart, mainSource.indexOf("async function requestForcedDesktopShellExit", exitStart));
+    expect(exitBody).toMatch(
+      /stopManagedRuntime:\s*mainRuntimeAlreadyStopped\s*\? async \(\) => undefined\s*:\s*\(signal\) => stopMainRuntimeForApprovedShutdown\(false, signal\)/
+    );
+    const managedStart = mainSource.indexOf("async function stopManagedRuntime(");
+    expect(managedStart).toBeGreaterThan(0);
     const managedBody = mainSource.slice(managedStart, mainSource.indexOf("\nfunction desktopPythonPath", managedStart));
     expect(managedBody).toContain("launcherLifecycleSupervisor.executeMutation");
     expect(managedBody).toContain('operation: "shutdown"');
@@ -313,7 +320,7 @@ describe("Electron main Launcher IPC facade", () => {
     const branchEnd = mainSource.indexOf("async function", branchStart + 1);
     const branchBody = mainSource.slice(branchStart, branchEnd);
     expect(branchBody).toContain('provenance: LauncherLifecycleProvenance = "operator"');
-    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload, provenance)");
+    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload, provenance, signal)");
     expect(branchBody).toContain(
       'interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator")'
     );

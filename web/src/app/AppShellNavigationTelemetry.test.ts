@@ -227,6 +227,10 @@ describe("AppShell navigation telemetry", () => {
     // the exact chunks the lazy route graph consumes.
     expect(appShellSource).toContain('import("./router")');
     expect(appShellSource).toContain("loadTeamsRouteChunk");
+    // The resolver yields a loader function; the shared helper must invoke it
+    // so this path warms the chunk rather than only loading the router module.
+    expect(appShellSource).toContain('import { loadPrimaryRouteChunk } from "./primaryRouteChunkLoader"');
+    expect(appShellSource).toContain("loadPrimaryRouteChunk(primaryRoutePreloadLoaders[key])");
     // Event codes follow the browser.chat_route.preload_* pattern per route key.
     expect(appShellSource).toContain('`browser.${key}_route.preload_${kind}`');
     expect(appShellSource).toContain('"teams" | "companions" | "evolution" | "memory" | "agents"');

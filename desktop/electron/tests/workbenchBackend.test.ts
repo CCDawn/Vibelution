@@ -39,6 +39,7 @@ import { ACTIVE_WORK_BLOCK_MESSAGE_STOP, blockLifecycleIfActiveWork } from "../s
 import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
 import { runWorkbenchLifecycle, parseWorkbenchLifecycleResult } from "../src/process/workbenchLifecycle.js";
+import { __setWorkbenchJobNativeForTests, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess } from "../src/process/workbenchJob.js";
 
 function fakeBackendChild(pid = 4242) {
   return {
@@ -1357,6 +1358,51 @@ describe("runWorkbenchLifecycle", () => {
       }
     };
   }
+
+  it.each(["missing", "rejected", "cancelled"])("retires the owned spawn when identity capture is %s", async (failure) => {
+    const { input, written } = harness();
+    let active = 1;
+    let listening = false;
+    const terminate = vi.fn(() => { active = 0; listening = false; return true; });
+    const controller = new AbortController();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: 4242, job: {} }), terminate,
+      activeCount: () => active, close: () => undefined
+    });
+    try {
+      await expect(runWorkbenchLifecycle({
+        ...input, operation: "start", signal: controller.signal,
+        spawnImpl: () => {
+          spawnTrackedWorkbenchProcess("C:/repo", {
+            executable: "pythonw.exe", arguments: [], cwd: "C:/repo", env: {}, stdoutPath: "out", stderrPath: "err"
+          });
+          listening = true;
+          return fakeBackendChild();
+        },
+        connect: async () => listening,
+        captureProcessIdentity: async () => {
+          if (failure === "rejected") throw new Error("identity probe failed");
+          if (failure === "cancelled") controller.abort(new Error("start cancelled"));
+          return null;
+        }
+      })).rejects.toThrow(failure === "rejected" ? "identity probe failed" : "identity could not be captured");
+      expect(terminate).toHaveBeenCalledOnce();
+      expect(hasTrackedWorkbenchJob("C:/repo")).toBe(false);
+      expect(written.at(-1)).toMatchObject({ backendPid: 0, spawnPid: 0, lastReason: "electron_main_start_failed_retired" });
+    } finally {
+      __setWorkbenchJobNativeForTests(undefined);
+    }
+  });
+
+  it("retains a failed startup registration when cleanup cannot be verified", async () => {
+    const { input, written } = harness();
+    const killPid = vi.fn(() => { throw new Error("owned cleanup failed"); });
+    await expect(runWorkbenchLifecycle({
+      ...input, operation: "start", captureProcessIdentity: async () => null, killPid
+    })).rejects.toThrow("process tree remains registered");
+    expect(killPid).toHaveBeenCalledWith(4242);
+    expect(written.at(-1)).toMatchObject({ backendPid: 4242, lastReason: "electron_main_start_retirement_pending" });
+  });
 
   it("spawns pythonw web_workbench.py instead of the lifecycle CLI", async () => {
     const { spawnImpl, input, written } = harness();

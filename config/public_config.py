@@ -2632,7 +2632,84 @@ def preserve_secret_blanks(new_public: dict, old_public: dict) -> dict:
     return result
 
 
-def save_public_config(public_config: dict, config_path: Path | None = None) -> None:
+_UI_LANGUAGE_VALUES = frozenset({"zh", "en"})
+
+
+def _stored_ui_language_from_disk(config_path: Path) -> str | None:
+    """Read the operator's persisted [ui] language straight from the target file.
+
+    Never trusts an in-memory payload: whole-config saves are exactly the paths
+    whose ui.language can be stale. Fail-open — a missing or unreadable file
+    yields None ("no stored language"), which keeps first-initialization saves
+    untouched and never blocks an unrelated save on a corrupt config.
+    """
+
+    try:
+        if not config_path.exists():
+            return None
+        stored = load_public_config(config_path)
+    except Exception:
+        return None
+    ui = stored.get("ui") if isinstance(stored, dict) else None
+    if not isinstance(ui, dict):
+        return None
+    value = str(ui.get("language") or "").strip()
+    return value or None
+
+
+def _apply_ui_language_persistence_policy(
+    cleaned_public_config: dict,
+    config_path: Path,
+    ui_language_override: str | None = None,
+) -> None:
+    """Keep [ui] language stable across whole-config saves; mutate in place.
+
+    Preserve mode (ui_language_override None or blank): the language already on
+    disk wins. Every whole-config writer (config workspace apply, git status
+    service, tool registry, developer sandbox, external scripts importing this
+    package) persists a payload whose ui.language may be stale or absent, so
+    before the file is replaced a stored zh/en value that differs from the
+    payload's is written back into the payload. No stored value means no
+    injection. Silent by design: this layer is a backstop; the apply-layer
+    guard owns the drift event.
+
+    Override mode (non-blank ui_language_override): reserved for ui.language's
+    only legitimate writers — update_language and the Launcher interface
+    language setting — which pass the parsed new value. A non-blank override
+    outside {zh, en} raises ValueError so an explicit language change never
+    silently keeps the old value.
+    """
+
+    normalized_override = str(ui_language_override or "").strip().lower()
+    if normalized_override:
+        if normalized_override not in _UI_LANGUAGE_VALUES:
+            allowed = ", ".join(sorted(_UI_LANGUAGE_VALUES))
+            raise ValueError(
+                f"Unsupported ui language override '{ui_language_override}'. Allowed values: {allowed}."
+            )
+        ui_cfg = cleaned_public_config.get("ui")
+        if not isinstance(ui_cfg, dict):
+            ui_cfg = {}
+            cleaned_public_config["ui"] = ui_cfg
+        ui_cfg["language"] = normalized_override
+        return
+    stored_language = _stored_ui_language_from_disk(config_path)
+    if stored_language not in _UI_LANGUAGE_VALUES:
+        return
+    ui_cfg = cleaned_public_config.get("ui")
+    if not isinstance(ui_cfg, dict):
+        ui_cfg = {}
+        cleaned_public_config["ui"] = ui_cfg
+    submitted_language = str(ui_cfg.get("language") or "").strip()
+    if submitted_language != stored_language:
+        ui_cfg["language"] = stored_language
+
+
+def save_public_config(
+    public_config: dict,
+    config_path: Path | None = None,
+    ui_language_override: str | None = None,
+) -> None:
     resolved_config_path = _resolve_public_config_path(config_path)
     payload = public_config
     if _legacy_v1_public_payload(public_config):
@@ -2643,6 +2720,11 @@ def save_public_config(public_config: dict, config_path: Path | None = None) -> 
         _canonicalize_public_config(payload)
     )
     with _config_edit_lock(resolved_config_path):
+        # 整份写统一兜底：保留磁盘存量 [ui] language，漂移在落盘前被回填。
+        # 显式改语言的调用方（update_language / Launcher 界面语言）传 override。
+        _apply_ui_language_persistence_policy(
+            cleaned_public_config, resolved_config_path, ui_language_override
+        )
         backup_dir = resolve_config_backup_dir(resolved_config_path)
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup_path = backup_dir / f"{resolved_config_path.name}.bak"

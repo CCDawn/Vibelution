@@ -25,6 +25,7 @@ _LEGACY_DISCARD_IN_PROGRESS = threading.Event()
 _STORE: ConversationStore | None = None
 _PROJECT_ROOT: Path | None = None
 _STATUS: SessionDirectoryRuntimeStatus | None = None
+_GENERATION = 0
 STARTING_WAIT_SECONDS = 30.0
 # List/query must not block HTTP on startup; an empty page is preferable to a
 # 30s hang, and callers must not fall back to discarded JSON.
@@ -95,15 +96,33 @@ def should_skip_directory_runtime_for_pytest() -> bool:
     return bool(os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules)
 
 
-def begin_directory_startup() -> None:
+def begin_directory_startup() -> int:
     """Mark the directory as starting so list/query wait instead of reading JSON."""
 
-    global _STATUS
+    global _GENERATION, _STATUS
     with _RUNTIME_LOCK:
-        if _STATUS is not None and _STATUS.status == "starting":
-            return
+        _GENERATION += 1
+        generation = _GENERATION
         _STATUS = SessionDirectoryRuntimeStatus(status="starting")
         _READY.clear()
+        return generation
+
+
+def _generation_is_current(generation: int) -> bool:
+    with _RUNTIME_LOCK:
+        return generation == _GENERATION
+
+
+def _discard_published_store(store: ConversationStore, *, timeout: float) -> None:
+    """Detach and close this store only if it is still the published instance."""
+
+    global _STORE, _PROJECT_ROOT
+    with _RUNTIME_LOCK:
+        if _STORE is not store:
+            return
+        _STORE = None
+        _PROJECT_ROOT = None
+    store.close(timeout=timeout)
 
 
 def wait_for_directory_startup(*, timeout: float | None = None) -> str:
@@ -129,6 +148,7 @@ def initialize_session_directory_runtime(
     *,
     project_root: Path,
     migrate_legacy_chat_state: bool = True,
+    generation: int | None = None,
 ) -> SessionDirectoryRuntimeStatus:
     """Open the production directory store for one project root.
 
@@ -146,8 +166,19 @@ def initialize_session_directory_runtime(
     from core.chat.conversation_store import ConversationStore
 
     root = Path(project_root).resolve()
-    begin_directory_startup()
-    shutdown_session_directory_runtime(mark_stopped=False)
+    if generation is None:
+        generation = begin_directory_startup()
+    with _RUNTIME_LOCK:
+        if generation != _GENERATION:
+            return SessionDirectoryRuntimeStatus(status="superseded")
+        previous_store = _STORE
+        _STORE = None
+        _PROJECT_ROOT = None
+    if previous_store is not None:
+        previous_store.close(timeout=5)
+
+    if not _generation_is_current(generation):
+        return SessionDirectoryRuntimeStatus(status="superseded")
     store = ConversationStore(
         conversation_store_path(root),
         busy_timeout_ms=DIRECTORY_BUSY_TIMEOUT_MS,
@@ -171,17 +202,28 @@ def initialize_session_directory_runtime(
             fields={"errorType": type(exc).__name__},
         )
         with _RUNTIME_LOCK:
-            _STORE = None
-            _PROJECT_ROOT = None
-            _STATUS = status
-            _READY.set()
-        return status
+            if generation == _GENERATION:
+                _STORE = None
+                _PROJECT_ROOT = None
+                _STATUS = status
+                _READY.set()
+                current = True
+            else:
+                current = False
+        return status if current else SessionDirectoryRuntimeStatus(status="superseded")
 
     # Publish the usable store before best-effort bootstrap steps so list and
     # query reads never queue behind agent import or legacy migration.
     with _RUNTIME_LOCK:
-        _STORE = store
-        _PROJECT_ROOT = root
+        if generation == _GENERATION:
+            _STORE = store
+            _PROJECT_ROOT = root
+            published = True
+        else:
+            published = False
+    if not published:
+        store.close(timeout=5)
+        return SessionDirectoryRuntimeStatus(status="superseded")
 
     imported_agent_count = 0
     migrated_legacy = False
@@ -189,6 +231,9 @@ def initialize_session_directory_runtime(
     migration_backup_created = False
     degraded_reasons: list[str] = []
     try:
+        if not _generation_is_current(generation):
+            _discard_published_store(store, timeout=5)
+            return SessionDirectoryRuntimeStatus(status="superseded")
         imported_agent_count = _import_agent_snapshots(store, root)
     except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
         degraded_reasons.append(f"agent_import:{type(exc).__name__}")
@@ -198,6 +243,9 @@ def initialize_session_directory_runtime(
         )
     if migrate_legacy_chat_state:
         try:
+            if not _generation_is_current(generation):
+                _discard_published_store(store, timeout=5)
+                return SessionDirectoryRuntimeStatus(status="superseded")
             (
                 migrated_legacy,
                 migrated_session_count,
@@ -210,6 +258,9 @@ def initialize_session_directory_runtime(
                 type(exc).__name__,
             )
     try:
+        if not _generation_is_current(generation):
+            _discard_published_store(store, timeout=5)
+            return SessionDirectoryRuntimeStatus(status="superseded")
         _restore_missing_personal_direct_sessions(root)
     except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
         degraded_reasons.append(f"direct_restore:{type(exc).__name__}")
@@ -253,16 +304,22 @@ def initialize_session_directory_runtime(
             },
         )
     with _RUNTIME_LOCK:
-        _STORE = store
-        _PROJECT_ROOT = root
-        _STATUS = status
-        _READY.set()
+        if generation != _GENERATION or _STORE is not store:
+            published = False
+        else:
+            _STATUS = status
+            _READY.set()
+            published = True
+    if not published:
+        _discard_published_store(store, timeout=5)
+        return SessionDirectoryRuntimeStatus(status="superseded")
     return status
 
 
 def shutdown_session_directory_runtime(*, timeout: float = 5, mark_stopped: bool = True) -> None:
-    global _STORE, _PROJECT_ROOT, _STATUS
+    global _GENERATION, _STORE, _PROJECT_ROOT, _STATUS
     with _RUNTIME_LOCK:
+        _GENERATION += 1
         store = _STORE
         _STORE = None
         _PROJECT_ROOT = None

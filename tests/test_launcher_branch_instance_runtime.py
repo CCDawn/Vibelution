@@ -1064,3 +1064,41 @@ def test_overlay_exposes_quarantine_lease_fields_from_registry(tmp_path, monkeyp
     assert runtime["registryClassification"] == "unknown"
     assert runtime["nextReconcileAt"] == "2026-08-19T06:00:10Z"
     assert runtime["firstObservedAt"] == "2026-08-19T06:00:00Z"
+
+
+@pytest.mark.parametrize("identity_status", ["match", "dead"])
+def test_overlay_exposes_spawn_identity_status_from_registry(tmp_path, monkeypatch, identity_status):
+    path = tmp_path / "feature"
+    path.mkdir()
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "inspect_process_identity",
+        lambda _expected: {"status": identity_status},
+    )
+    monkeypatch.setattr(lifecycle, "_loopback_workspace_health", lambda _port, _root, **_: {})
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [
+            {
+                "instanceId": "worktree:feature",
+                "projectRoot": str(path),
+                "port": 8765,
+                "controlPort": 9001,
+                "spawnPid": 424242,
+                "spawnCreateTime": 123.5,
+                "spawnExecutable": "C:/Python/pythonw.exe",
+            }
+        ],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    # The verified spawn identity must survive the projection: match and dead
+    # (plus mismatch/unknown) are what the frontend tiers force-stop on.
+    assert runtime["spawnIdentityStatus"] == identity_status

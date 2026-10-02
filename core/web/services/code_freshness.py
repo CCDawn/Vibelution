@@ -11,14 +11,22 @@ a restart is needed.  Reads fall back to the legacy checkout-relative
 Git calls go through ``core.infrastructure.no_console_git`` (CREATE_NO_WINDOW +
 GIT_OPTIONAL_LOCKS=0), matching the Windows no-console red line and the
 GitHub-Desktop convention of not competing with user git operations.
+
+The combined resolver keeps a short-TTL verdict cache guarded by pure file
+observation (``.git/HEAD`` text + fingerprint file stamps), so the 120s UI
+polling loop usually spawns no git process at all; dirty-tree walks run on an
+independent, longer throttle.  See ``resolve_code_freshness``.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
 import subprocess
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,6 +47,38 @@ FINGERPRINT_NAME = "running-code-fingerprint.json"
 # which raises NotImplementedError before any test setup can run.
 LEGACY_FINGERPRINT_RELATIVE = f".runtime/{FINGERPRINT_NAME}"
 GIT_TIMEOUT_SECONDS = 10
+# Polling reads never compete with user git operations for the index lock:
+# ``--no-optional-locks`` is the argv form of the GIT_OPTIONAL_LOCKS=0 env that
+# no_console_git already sets, kept explicit so the polling contract is visible
+# in spawn logs and test assertions.
+POLL_GIT_GLOBAL_ARGS = ["--no-optional-locks"]
+# Fast-path TTL for the combined verdict.  The UI polls every 120s while this
+# only bounds staleness of inputs the HEAD/fingerprint observation cannot see
+# (frontend provenance files), so 45s (matching git_status_service's snapshot
+# TTL) keeps the hot path at zero git processes between unrelated changes.
+FRESHNESS_FAST_PATH_TTL_SECONDS = 45.0
+# Dirty-tree recheck throttle.  ``status --untracked-files=all`` walks the whole
+# tree and dominates the request cost, but the restart banner only needs a
+# eventually-consistent dirty flag, so it is refreshed at most every 5 minutes
+# and immediately whenever HEAD or the fingerprint file changes.
+DIRTY_RECHECK_INTERVAL_SECONDS = 300.0
+
+_freshness_cache_lock = threading.Lock()
+# key -> {"at": monotonic, "observation": tuple, "response": dict}
+_freshness_cache: dict[str, dict[str, Any]] = {}
+# key -> {"at": monotonic, "head_text": str, "fingerprint": str, "dirty": dict}
+_dirty_summary_cache: dict[str, dict[str, Any]] = {}
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def reset_freshness_caches_for_tests() -> None:
+    """Drop the module-level freshness caches (test isolation helper)."""
+    with _freshness_cache_lock:
+        _freshness_cache.clear()
+        _dirty_summary_cache.clear()
 
 
 def _now_iso() -> str:
@@ -47,7 +87,7 @@ def _now_iso() -> str:
 
 def _capture_git_text(project_root: Path | str, args: list[str]) -> str:
     try:
-        result = run_git(args, cwd=str(project_root), timeout=GIT_TIMEOUT_SECONDS)
+        result = run_git([*POLL_GIT_GLOBAL_ARGS, *args], cwd=str(project_root), timeout=GIT_TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError):
         return ""
     if int(result.returncode or 0) != 0:
@@ -67,6 +107,82 @@ def _dirty_tree_summary(project_root: Path | str) -> dict[str, Any]:
 def _short_sha(value: str) -> str:
     text = str(value or "").strip()
     return text[:12] if text else ""
+
+
+def _read_git_head_text(project_root: Path | str) -> str:
+    """Read the current HEAD text with pure file I/O, spawning no git process.
+
+    Adapted from ``core.external_agent.backend_client._checkout_revision``:
+    handles the ``.git`` gitdir pointer file, detached HEAD, and linked
+    worktrees (refs resolved against ``commondir`` when the per-worktree path
+    misses).  Returns "" on any failure so callers fall back to the full git
+    path instead of trusting a partially read state.
+    """
+    root = Path(project_root)
+    git_entry = root / ".git"
+    git_dir = git_entry
+    try:
+        if git_entry.is_file():
+            text = git_entry.read_text(encoding="utf-8", errors="replace").strip()
+            if not text.lower().startswith("gitdir:"):
+                return ""
+            git_dir = Path(text.split(":", 1)[1].strip())
+            if not git_dir.is_absolute():
+                git_dir = (root / git_dir).resolve()
+        head_path = git_dir / "HEAD"
+        if not head_path.is_file():
+            return ""
+        head = head_path.read_text(encoding="utf-8", errors="replace").strip()
+        if not head.startswith("ref:"):
+            return head
+        ref = head.split(":", 1)[1].strip()
+        candidates = [git_dir / ref]
+        common_dir_path = git_dir / "commondir"
+        if common_dir_path.is_file():
+            common_dir = Path(common_dir_path.read_text(encoding="utf-8").strip())
+            if not common_dir.is_absolute():
+                common_dir = (git_dir / common_dir).resolve()
+            candidates.append(common_dir / ref)
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate.read_text(encoding="utf-8", errors="replace").strip()
+        return ""
+    except OSError:
+        return ""
+
+
+def _fingerprint_stamps(project_root: Path | str) -> tuple[tuple[str, int, int], ...]:
+    """Cheap (path, mtime_ns, size) stamps for the snapshot read candidates."""
+    stamps: list[tuple[str, int, int]] = []
+    for path in running_code_fingerprint_read_paths(project_root):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        stamps.append((str(path), stat.st_mtime_ns, stat.st_size))
+    return tuple(stamps)
+
+
+def _observe_freshness_inputs(project_root: Path | str) -> tuple[str, tuple[tuple[str, int, int], ...]]:
+    """Zero-process change observation for the freshness fast path."""
+    return _read_git_head_text(project_root), _fingerprint_stamps(project_root)
+
+
+def _freshness_cache_key(project_root: Path | str, fallback_snapshot: dict[str, Any] | None) -> str:
+    try:
+        root = os.path.normcase(str(Path(project_root).resolve()))
+    except OSError:
+        root = os.path.normcase(str(project_root))
+    if isinstance(fallback_snapshot, dict) and fallback_snapshot:
+        signature = "|".join(
+            [
+                str(fallback_snapshot.get("runningHead") or ""),
+                str(fallback_snapshot.get("dirtyTreeDigest") or ""),
+            ]
+        )
+    else:
+        signature = "none"
+    return f"{root}|{signature}"
 
 
 def running_code_fingerprint_path(project_root: Path | str) -> Path:
@@ -288,17 +404,55 @@ def fallback_snapshot_from_serving_metadata(serving_metadata: Any) -> dict[str, 
     }
 
 
+def _throttled_dirty_summary(
+    project_root: Path | str,
+    *,
+    head_text: str,
+    fingerprint_stamp: str,
+) -> dict[str, Any]:
+    """Reuse the last known dirty summary unless HEAD/fingerprint changed.
+
+    ``status --untracked-files=all`` walks the whole worktree and dominates the
+    freshness cost, but the restart banner does not need a per-poll dirty flag.
+    The digest therefore keeps its last known value and is recomputed only when
+    HEAD moved, the fingerprint file changed, or the 5-minute throttle elapsed.
+    """
+    key = _freshness_cache_key(project_root, None)
+    now = _monotonic()
+    with _freshness_cache_lock:
+        cached = _dirty_summary_cache.get(key)
+        if (
+            cached
+            and now - float(cached["at"]) <= DIRTY_RECHECK_INTERVAL_SECONDS
+            and cached["head_text"] == head_text
+            and cached["fingerprint"] == fingerprint_stamp
+        ):
+            return dict(cached["dirty"])
+    dirty = _dirty_tree_summary(project_root)
+    with _freshness_cache_lock:
+        _dirty_summary_cache[key] = {
+            "at": now,
+            "head_text": head_text,
+            "fingerprint": fingerprint_stamp,
+            "dirty": dict(dirty),
+        }
+    return dirty
+
+
 def resolve_backend_freshness(
     *,
     project_root: Path | str,
     fallback_snapshot: dict[str, Any] | None = None,
+    dirty_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare the running snapshot with the current disk HEAD.
 
     Pure decision inputs keep this function unit-testable; git reads are the
-    only side effect and they never lock (GIT_OPTIONAL_LOCKS=0).
+    only side effect and they never lock (--no-optional-locks).
     ``fallback_snapshot`` (from the startup-pinned serving metadata) keeps the
     verdict decidable when the on-disk fingerprint file is missing or unreadable.
+    ``dirty_summary`` lets the combined resolver inject the throttled dirty
+    summary instead of paying for a fresh ``status`` walk on every call.
     """
     root = Path(project_root)
     running = read_running_code_fingerprint(root)
@@ -308,7 +462,10 @@ def resolve_backend_freshness(
         snapshot_source = str(fallback_snapshot.get("source") or "serving_metadata_fallback")
     disk_head = _capture_git_text(root, ["rev-parse", "HEAD"])
     disk_branch = _capture_git_text(root, ["branch", "--show-current"])
-    disk_dirty = _dirty_tree_summary(root)
+    if isinstance(dirty_summary, dict) and dirty_summary:
+        disk_dirty = dict(dirty_summary)
+    else:
+        disk_dirty = _dirty_tree_summary(root)
 
     running_head = str((running or {}).get("runningHead") or "").strip()
     if not running_head:
@@ -449,10 +606,36 @@ def resolve_code_freshness(
     verdict to ``unknown`` even when the frontend panel independently proved
     the serving build was behind, and the UI rendered ``unknown`` as a neutral
     chip with no stale warning at all.
+
+    Hot path (zero git processes): the cached verdict is replayed whenever the
+    HEAD text read straight from ``.git/HEAD`` (the VS Code DotGitWatcher
+    approach of watching the HEAD file instead of spawning git) and the
+    fingerprint file stamps are unchanged and the TTL has not elapsed.  Any
+    HEAD/fingerprint/TTL change falls back to the full git-backed verdict and
+    refreshes the cache.  Cached responses are deep-copied on the way in and
+    out so callers cannot mutate the shared cache.
     """
+    cache_key = _freshness_cache_key(project_root, fallback_snapshot)
+    observation = _observe_freshness_inputs(project_root)
+    now = _monotonic()
+    with _freshness_cache_lock:
+        cached = _freshness_cache.get(cache_key)
+        if (
+            cached
+            and now - float(cached["at"]) <= FRESHNESS_FAST_PATH_TTL_SECONDS
+            and cached["observation"] == observation
+        ):
+            return copy.deepcopy(cached["response"])
+
+    dirty = _throttled_dirty_summary(
+        project_root,
+        head_text=observation[0],
+        fingerprint_stamp=repr(observation[1]),
+    )
     backend = resolve_backend_freshness(
         project_root=project_root,
         fallback_snapshot=fallback_snapshot,
+        dirty_summary=dirty,
     )
     frontend = resolve_frontend_freshness(project_root=project_root)
 
@@ -477,7 +660,7 @@ def resolve_code_freshness(
     else:
         verdict = "unknown"
 
-    return {
+    response = {
         "schemaVersion": FINGERPRINT_SCHEMA_VERSION,
         "verdict": verdict,
         "backend": {
@@ -501,3 +684,16 @@ def resolve_code_freshness(
             "activeRelease": str(frontend.get("activeRelease") or ""),
         },
     }
+    # Only cache when the file-read HEAD agrees with rev-parse: a mismatch means
+    # the cheap observation cannot be trusted to guard this verdict (odd refs
+    # layouts, packed-refs-only states), so keep paying the full path.
+    observed_head = observation[0]
+    disk_head = str((backend.get("disk") or {}).get("head") or "")
+    if observed_head and observed_head == disk_head:
+        with _freshness_cache_lock:
+            _freshness_cache[cache_key] = {
+                "at": now,
+                "observation": observation,
+                "response": copy.deepcopy(response),
+            }
+    return response
