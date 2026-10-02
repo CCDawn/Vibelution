@@ -3304,25 +3304,27 @@ async function orchestrateLauncherLifecycle(
     || supervisedOperation === "restart"
     || supervisedOperation === "rebuild-and-start";
   let frontendReleaseChanged = false;
+  let frontendCheckedForReuse = false;
   let shellStale = false;
 
   if (startsWorkbench) {
-    // Opening a workbench prepares that checkout's frontend. Rebuilding the
-    // desktop shell here used to overwrite workbench_job.node while this
-    // process still had it loaded, and the start died before the backend.
-    // The build gate runs before the supervisor claims the intent, so the
-    // in-process marker (published ahead of the await) is what lets the
-    // Launcher UI report "building" instead of a frozen start button.
-    const frontend = await runWithFrontendBuildGate(
-      "main",
-      { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
-      () => ensureFrontendRelease({
-        workspaceRoot: paths.workspaceRoot,
-        pythonPath,
-        signal
-      })
-    );
-    frontendReleaseChanged = !frontend.skipped;
+    // A live backend can bypass the mutation, so verify its release here.
+    // Cold starts and restarts verify inside the queued mutation instead,
+    // keeping one full fingerprint scan at the actual startup boundary.
+    if (supervisedOperation === "start" && windowProvider !== null
+      && await mainLineBackendIsReachable(paths.workspaceRoot)) {
+      const frontend = await runWithFrontendBuildGate(
+        "main",
+        { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
+        () => ensureFrontendRelease({
+          workspaceRoot: paths.workspaceRoot,
+          pythonPath,
+          signal
+        })
+      );
+      frontendReleaseChanged = !frontend.skipped;
+      frontendCheckedForReuse = true;
+    }
     if (!app.isPackaged) {
       try {
         const shell = await inspectUnpackagedShell({
@@ -3372,14 +3374,15 @@ async function orchestrateLauncherLifecycle(
     : intentLease.signal;
   if (supervisedOperation === "start" && windowProvider !== null) {
     const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
-    const servingVersion = !frontendReleaseChanged && !packagedShellStale
+    const servingVersion = frontendCheckedForReuse && !frontendReleaseChanged && !packagedShellStale
       ? await inspectWorkbenchServingVersion({ workspaceRoot: paths.workspaceRoot })
       : { ok: false, reason: "release_or_shell_changed" };
     if (!servingVersion.ok && servingVersion.reason !== "release_or_shell_changed") {
       console.warn(`main-line backend reuse rejected: ${servingVersion.reason}`);
     }
     if (
-      !frontendReleaseChanged
+      frontendCheckedForReuse
+      && !frontendReleaseChanged
       && !packagedShellStale
       && servingVersion.ok
       && await mainLineBackendIsReusable(paths.workspaceRoot)
@@ -3461,6 +3464,15 @@ async function orchestrateLauncherLifecycle(
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
       operation: lifecycleOperation,
       interruptActiveWork: provenance === "operator-restart" || (operation === "restart" && provenance === "operator"),
+      // Never cache the earlier reuse probe: queueing can overlap source
+      // changes, and a rejected reuse must revalidate before spawning.
+      ensureFrontend: async ({ signal: buildSignal }) => {
+        await runWithFrontendBuildGate(
+          "main",
+          { operation: supervisedOperation, notify: () => updateLauncherWindowTruth() },
+          () => ensureFrontendRelease({ workspaceRoot: paths.workspaceRoot, pythonPath, signal: buildSignal })
+        );
+      },
       signal: lifecycleSignal
     }),
     reconcile: async () => {
