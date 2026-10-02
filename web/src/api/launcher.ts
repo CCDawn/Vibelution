@@ -289,6 +289,7 @@ export type LauncherBranchInstanceRuntime = {
     message: string;
   };
   registryClassification?: "healthy" | "stale" | "orphan" | "conflict" | "unknown";
+  spawnIdentityStatus?: "match" | "dead" | "mismatch" | "unknown";
   portLeaseStatus?: string;
   firstObservedAt?: string;
   nextReconcileAt?: string;
