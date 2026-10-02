@@ -19,7 +19,6 @@ def test_worktree_keeps_full_branch_name():
         instance_short_name_base(
             kind="worktree",
             branch="codex/slot-supervisor-registry",
-            slug="slot-supervisor-registry",
         )
         == "branch+codex/slot-supervisor-registry"
     )
@@ -27,25 +26,44 @@ def test_worktree_keeps_full_branch_name():
 
 def test_feat_task_keeps_codex_prefix():
     assert (
-        instance_short_name_base(kind="worktree", branch="codex/feat-task", slug="feat-task")
+        instance_short_name_base(kind="worktree", branch="codex/feat-task")
         == "branch+codex/feat-task"
     )
 
 
 def test_retired_uses_retired_prefix():
-    assert instance_short_name_base(kind="retired", slug="shell-only", path_name="shell-only") == "retired+shell-only"
+    assert instance_short_name_base(kind="retired", path_name="shell-only") == "retired+shell-only"
 
 
-def test_detached_worktree_falls_back_to_slug():
+def test_detached_worktree_falls_back_to_path_name():
     assert (
         instance_short_name_base(
             kind="worktree",
             branch="detached",
-            slug="fix-composer-dialog-chrome",
             path_name="fix-composer-dialog-chrome",
         )
         == "branch+fix-composer-dialog-chrome"
     )
+
+
+def test_pool_external_id_stays_out_of_short_name():
+    items = [
+        {
+            "id": "worktree:c:/users/dev/codex-wt/nav-preview/vibelution",
+            "kind": "worktree",
+            "branch": "detached",
+            "path": "C:/Users/dev/codex-wt/nav-preview/Vibelution",
+            "current": False,
+        }
+    ]
+
+    assign_instance_display_names(items)
+
+    short_name = items[0]["shortName"]
+    assert short_name == "branch+Vibelution"
+    assert "/" not in short_name
+    assert ":" not in short_name
+    assert "\\" not in short_name
 
 
 def test_assign_names_disambiguates_collisions_and_marks_current():
