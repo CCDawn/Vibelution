@@ -5,16 +5,23 @@ from core.web.services import agent_directory_service, project_agent_bus_service
 
 def test_bus_timeline_counts_agents_without_full_activity_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    calls = []
+    list_agents_calls: list[tuple] = []
+    count_calls: list[bool] = []
 
-    def list_agents(*, include_archived=False, detail="full"):
-        calls.append((include_archived, detail))
-        return [{"agentId": "active", "status": "active"}, {"agentId": "archived", "status": "archived"}]
+    def list_agents(*args, **kwargs):
+        list_agents_calls.append((args, kwargs))
+        return []
+
+    def count_active_agents(*, include_archived=False, project_root=None):
+        count_calls.append(include_archived)
+        return 3
 
     monkeypatch.setattr(agent_directory_service, "list_agents", list_agents)
+    monkeypatch.setattr(agent_directory_service, "count_active_agents", count_active_agents)
     result = project_agent_bus_service.list_project_agent_bus_events()
-    assert result["activeAgentCount"] == 1
-    assert calls == [(False, "summary")]
+    assert result["activeAgentCount"] == 3
+    assert count_calls == [False]
+    assert list_agents_calls == []
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):

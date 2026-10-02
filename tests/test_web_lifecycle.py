@@ -14,6 +14,7 @@ from core.web.router_registry import (
     register_web_routers,
 )
 from core.web.services import cli_agent_terminal_service, session_service
+from core.web.services import virtual_human_life_service
 
 
 def test_web_app_import_keeps_runtime_scene_service_off_health_path():
@@ -218,6 +219,103 @@ def test_web_lifespan_does_not_await_cli_reconcile_before_yield(monkeypatch):
             entered.set()
             await asyncio.sleep(0)
             assert reconcile_released.wait(timeout=2)
+
+    asyncio.run(exercise())
+
+
+def test_runtime_scene_retention_waits_for_routes_and_is_reaped_on_shutdown(monkeypatch):
+    route_release = asyncio.Event()
+    route_started = asyncio.Event()
+    retention_started = threading.Event()
+    retention_release = threading.Event()
+    retention_operation_finished = threading.Event()
+    retention_calls = []
+    later_history = []
+    app = FastAPI()
+
+    async def warm_routes(target_app):
+        route_started.set()
+        await route_release.wait()
+        target_app.state.web_routes_registered = True
+        target_app.state.web_routes_ready_event.set()
+
+    def slow_retention(*, should_stop):
+        retention_calls.append("started")
+        retention_started.set()
+        assert retention_release.wait(timeout=3)
+        retention_operation_finished.set()
+        for scene_index in range(10):
+            if should_stop():
+                retention_calls.append("stopped")
+                return {"stopped": True}
+            later_history.append(scene_index)
+        retention_calls.append("finished")
+        return {"deletedCount": 1}
+
+    monkeypatch.setenv("VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION", "1")
+    monkeypatch.setattr("core.web.route_bootstrap.warm_web_routes_in_background", warm_routes)
+    monkeypatch.setattr(lifecycle, "_enforce_runtime_scene_retention_after_routes_ready", slow_retention)
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda: None)
+    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", lambda **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_challenge_meeting_drivers_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_orphaned_chat_room_rounds_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_hypothesis_command_attempts_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_interrupted_session_turns_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_validate_challenge_fence_config_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "reconcile_external_agent_tasks_forever", lambda: asyncio.sleep(3600))
+    monkeypatch.setattr(virtual_human_life_service, "run_virtual_human_life_runtime", lambda: asyncio.sleep(3600))
+    monkeypatch.setattr(virtual_human_life_service, "stop_virtual_human_life_runtime", lambda: None)
+    from core.web.services.session import directory_runtime
+
+    monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: True)
+    monkeypatch.setattr(
+        cli_agent_terminal_service,
+        "reconcile_cli_agent_terminal_states_on_startup",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
+    monkeypatch.setattr(
+        session_service,
+        "recover_wakeable_agent_inbox_messages_on_startup",
+        dict,
+        raising=False,
+    )
+
+    async def exercise() -> None:
+        async with lifecycle.web_workbench_lifespan(app):
+            # Health/lifespan readiness has been yielded while route mounting is
+            # still held and no scene-history scan has started.
+            assert not retention_started.is_set()
+            assert await asyncio.wait_for(route_started.wait(), timeout=1)
+            assert not retention_started.is_set()
+
+            route_release.set()
+            assert await asyncio.to_thread(retention_started.wait, 1)
+            assert app.state.web_routes_registered is True
+            # The deliberately slow sweep must not hold the serving context.
+            assert "runtime-scene-retention" in {
+                task.get_name() for task in asyncio.all_tasks()
+            }
+
+            # Lifespan shutdown cancels the owner, waits for its executor work,
+            # and leaves no named retention task behind.
+            asyncio.get_running_loop().call_later(0.02, retention_release.set)
+
+        assert retention_calls == ["started", "stopped"]
+        assert retention_operation_finished.is_set()
+        assert later_history == []
+        await asyncio.sleep(0)
+        assert not any(
+            task.get_name() in {"runtime-scene-retention", "runtime-scene-retention-worker"}
+            and not task.done()
+            for task in asyncio.all_tasks()
+        )
 
     asyncio.run(exercise())
 

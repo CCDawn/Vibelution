@@ -92,6 +92,7 @@ from core.web.services.agent_bulk_edit_service import bulk_update_agent_config, 
 from core.web.services.agent_mode_binding_service import (
     AgentModeBindingError,
     get_mode_bindings_payload,
+    mode_binding_path,
     remove_agent_from_mode_bindings,
     restore_removed_agents_to_mode_bindings,
     update_agent_mode_membership,
@@ -437,11 +438,48 @@ class AgentChatRoomMembershipUpdatePayload(BaseModel):
     roomIds: list[str] = Field(default_factory=list)
 
 
+# 冷启动/热态请求的固定成本闸门：存在性由注册表内容与 mode_bindings
+# （excludedSlots 记在这份文件里，测试隔离助手 _mark_config_agent_instances_present
+# 也只写它）共同决定，任一文件 stat 变化都必须重跑存在性检查；两个签名都
+# 未变时跳过 load_state + mode bindings repair 的整段 _STATE_LOCK 路径。
+_CONFIG_PRESENCE_GATE_SIGNATURE: tuple[Any, ...] | None = None
+
+
+def _config_presence_gate_signature() -> tuple[Any, ...] | None:
+    """Return the composite change key, or ``None`` when stats are unavailable."""
+
+    try:
+        registry_signature = agent_directory_service._registry_state_signature()
+    except Exception:  # noqa: BLE001 - gate is an optimization; fail open to re-check
+        return None
+    try:
+        binding_file = mode_binding_path()
+    except Exception:  # noqa: BLE001 - same fail-open contract as the registry stat
+        return None
+    try:
+        binding_stat = binding_file.stat()
+        binding_signature = (str(binding_file), True, int(binding_stat.st_mtime_ns), int(binding_stat.st_size))
+    except OSError:
+        binding_signature = (str(binding_file), False, 0, 0)
+    return (registry_signature, binding_signature)
+
+
 def _ensure_config_agent_instances() -> None:
+    global _CONFIG_PRESENCE_GATE_SIGNATURE
+    signature = _config_presence_gate_signature()
+    if signature is not None and signature == _CONFIG_PRESENCE_GATE_SIGNATURE:
+        return
     if _config_agent_instances_present():
+        # 在存在性评估之后取签名：首次评估可能完成 mode_bindings 落盘，
+        # 评估后再 stat 才是"已验证 present 状态"的准确键。
+        _CONFIG_PRESENCE_GATE_SIGNATURE = _config_presence_gate_signature()
         return
     ensure_supervised_agent_instances()
     ensure_self_evolution_agent_instances()
+    # 只在 ensure 达到 present 稳态后记忆签名；创建失败的 ensure 必须保持
+    # 逐请求重试的既有语义，不得被门控跳过。
+    if _config_agent_instances_present():
+        _CONFIG_PRESENCE_GATE_SIGNATURE = _config_presence_gate_signature()
 
 
 def _config_agent_instances_present() -> bool:

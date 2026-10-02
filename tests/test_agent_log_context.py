@@ -28,6 +28,16 @@ def test_build_agent_log_context_reads_active_scene_and_summary(tmp_path, monkey
         "diagnostic_entrypoint": {
             "recommended_order": ["summary.json", "raw/launcher-control.log"],
         },
+        "diagnosis": {
+            "userSummary": "本周期状态为 running；当前仍有 1 个活跃问题簇。",
+            "issueState": {
+                "firstActiveCluster": {
+                    "eventCode": "launcher.startup.failed",
+                    "repeatCount": 2,
+                    "representativeSignal": {"fields": {"reason": "port_in_use"}},
+                }
+            },
+        },
     }
     (scene_dir / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
     (scene_dir / "raw").mkdir(parents=True)
@@ -50,21 +60,25 @@ def test_build_agent_log_context_reads_active_scene_and_summary(tmp_path, monkey
     assert payload["selectionStatus"] == "active_scene"
     assert payload["currentScene"]["present"] is True
     assert payload["agentBrief"]["primary_issue"] == "launcher.startup.failed"
-    assert payload["firstRead"]["conclusion"] == "要处理。主问题是 launcher.startup.failed。"
+    assert payload["firstRead"]["conclusion"] == (
+        "要处理。主问题是 launcher.startup.failed。"
+        "重复 2 次。原因：port_in_use。"
+        "本周期状态为 running；当前仍有 1 个活跃问题簇。"
+    )
+    assert payload["firstRead"]["repeatCount"] == 2
+    assert payload["firstRead"]["primaryReason"] == "port_in_use"
+    assert payload["firstRead"]["summary"].startswith("本周期状态为 running")
+    assert "resolvedEvidenceRefs" not in payload
     assert [item["ref"] for item in payload["firstRead"]["evidencePaths"]] == ["raw/launcher-control.log"]
     assert payload["firstRead"]["evidencePaths"][0]["exists"] is True
     assert payload["firstRead"]["evidencePaths"][0]["absolutePath"]
     assert payload["firstRead"]["nextStep"] == "只打开 evidencePaths 里的 raw/launcher-control.log。文件带 warning 时不要整篇读。"
     assert "不要在读完 firstRead 之前搜索仓库或整篇打开 stdout。" in payload["firstRead"]["doNotDo"]
     assert payload["diagnosticEntrypoint"]["recommended_order"][1] == "raw/launcher-control.log"
-    launcher_ref = next(
-        item for item in payload["resolvedEvidenceRefs"] if item["ref"] == "raw/launcher-control.log"
-    )
-    assert launcher_ref["exists"] is True
+    launcher_ref = payload["firstRead"]["evidencePaths"][0]
     assert launcher_ref["absolutePath"].endswith("raw\\launcher-control.log") or launcher_ref[
         "absolutePath"
     ].endswith("raw/launcher-control.log")
-    assert "launcher-control.log" in launcher_ref["displayPath"]
 
 
 def test_build_agent_log_context_resolved_evidence_warns_on_large_logs(tmp_path, monkeypatch):
@@ -90,11 +104,11 @@ def test_build_agent_log_context_resolved_evidence_warns_on_large_logs(tmp_path,
     )
 
     payload = build_agent_log_context(tmp_path)
-    large_ref = payload["resolvedEvidenceRefs"][0]
+    large_ref = payload["firstRead"]["evidencePaths"][0]
 
+    assert "resolvedEvidenceRefs" not in payload
     assert large_ref["exists"] is True
     assert large_ref["warning"] == "do_not_read_full_file_use_scene_raw_or_tail"
-    assert payload["firstRead"]["evidencePaths"][0]["warning"] == large_ref["warning"]
     assert payload["firstRead"]["nextStep"] == "停止。不要打开原始日志。"
 
 
@@ -175,8 +189,9 @@ def test_build_agent_log_context_uses_migrated_active_paths(tmp_path, monkeypatc
     )
 
     payload = build_agent_log_context(tmp_path)
-    stdout_ref = payload["resolvedEvidenceRefs"][0]
+    stdout_ref = payload["firstRead"]["evidencePaths"][0]
 
+    assert "resolvedEvidenceRefs" not in payload
     assert payload["activePaths"]["migrated"] == "true"
     assert stdout_ref["exists"] is True
     assert stdout_ref["source"] == "runtime_scene_raw"
@@ -204,8 +219,9 @@ def test_build_agent_log_context_falls_back_to_launcher_runtime_log(tmp_path, mo
     )
 
     payload = build_agent_log_context(tmp_path)
-    stdout_ref = payload["resolvedEvidenceRefs"][0]
+    stdout_ref = payload["firstRead"]["evidencePaths"][0]
 
+    assert "resolvedEvidenceRefs" not in payload
     assert stdout_ref["exists"] is True
     assert stdout_ref["source"] == "launcher_runtime"
     assert stdout_ref["absolutePath"].endswith("backend.stdout.log")

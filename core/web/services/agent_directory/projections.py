@@ -665,6 +665,59 @@ def _list_agents(*, include_archived: bool, detail: str) -> list[dict[str, Any]]
     return agents
 
 
+def count_active_agents(
+    *,
+    include_archived: bool = False,
+    project_root: Path | None = None,
+) -> int:
+    """Count non-archived Agent records straight from the repaired registry.
+
+    轮询类调用方（project-agent-bus 未读徽标）只需要数量：锁内取
+    ``_load_repaired_state_for_read`` 的已修复共享引用后计数，不做
+    ``_agent_to_api_summary`` 投影、不深拷贝整份 state。repair 缓存命中时
+    这是一次 stat + O(n) 计数；过滤语义与 ``_list_agents`` 逐字一致
+    （``status == "archived"``，``include_archived=True`` 时不过滤）。
+    """
+
+    s = _service()
+    with s.scoped_project_root(project_root):
+        with s._STATE_LOCK:
+            state, _repair_cache_hit = s._load_repaired_state_for_read()
+        agents = state.get("agents") or []
+        return sum(
+            1
+            for item in agents
+            if isinstance(item, dict)
+            and (include_archived or str(item.get("status") or "active") != "archived")
+        )
+
+
+def prewarm_registry_caches() -> dict[str, Any]:
+    """Warm the repaired-state read cache and the summary projection cache.
+
+    冷启动窗口内首个注册表读者会全程持 ``_STATE_LOCK`` 跑 repair
+    （实测 p90≈2.6s），随后的 summary 投影重建也要秒级（to_api p50≈1.0s）。
+    启动后台先暖 repair 层，再跑一次 ``list_agents(detail="summary")`` 把
+    GET /api/agents?detail=summary 导航热点路径也变成缓存命中——此时 repair
+    已命中，投影阶段不再持 ``_STATE_LOCK``，只是把一份必然发生的 CPU 成本
+    挪到路由挂载等待期。返回计时供启动诊断记录。
+    """
+
+    s = _service()
+    started = time.perf_counter()
+    with s._STATE_LOCK:
+        _state, repair_cache_hit = s._load_repaired_state_for_read()
+    repair_ms = round((time.perf_counter() - started) * 1000, 1)
+    summary_started = time.perf_counter()
+    list_agents(detail="summary")
+    summary_ms = round((time.perf_counter() - summary_started) * 1000, 1)
+    return {
+        "repairCacheHit": repair_cache_hit,
+        "repairMs": repair_ms,
+        "summaryPrewarmMs": summary_ms,
+    }
+
+
 def _agent_to_api_summary(
     agent: dict[str, Any],
     *,

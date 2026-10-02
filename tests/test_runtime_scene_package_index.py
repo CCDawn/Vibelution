@@ -226,7 +226,8 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 2
     assert summary["diagnosis"]["evidencePaths"][0] == "events/llm.jsonl"
     assert "rawRefs" not in summary["diagnosis"]["agentNextStep"]
-    assert "evidence_paths" in summary["diagnosis"]["agentNextStep"]
+    assert "evidencePaths" in summary["diagnosis"]["agentNextStep"]
+    assert "logs/runtime_scenes/" not in summary["diagnosis"]["agentNextStep"]
     assert "llm-llm-invoke-failed" in package_index["search_text"]
     assert "diagnosis-active-issue" in package_index["tags"]
     assert summary["diagnosis"]["agentNextStep"]

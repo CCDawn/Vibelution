@@ -25,6 +25,7 @@ from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port  # 
 
 
 USER_ENV_FALLBACK_ENV = "VIBELUTION_ENABLE_USER_ENV_FALLBACK"
+DEFER_RUNTIME_SCENE_RETENTION_ENV = "VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION"
 
 # Runtime scene opened by this backend process (see bootstrap below); the exit
 # seal only touches the pointer while it still references this scene.
@@ -121,28 +122,22 @@ def install_access_log_filters() -> None:
 
 
 def open_runtime_scene_for_startup() -> dict[str, object]:
-    """Open a fresh runtime scene for this backend start, then prune overflow.
+    """Open a fresh runtime scene for this backend start.
 
     Ported from the retired Python launcher path: every backend start seals the
     previous scene as ``orphan_reconciled`` and repoints
     ``active-runtime-scene.json`` at a new timestamped scene, which is what
     makes query-side retention (keep newest 30, protect the current scene)
-    effective again. Kept as a pure function so tests can run it against an
+    effective again. Retention runs after route readiness so it cannot delay
+    health startup. Kept as a pure function so tests can run it against an
     isolated service root without starting uvicorn.
     """
     from core.web.services.runtime_scene.lifecycle import (
         BACKEND_STARTUP_TRIGGER,
         start_runtime_scene,
     )
-    from core.web.services.runtime_scene.query import _enforce_runtime_scene_retention
-
     reference = start_runtime_scene(BACKEND_STARTUP_TRIGGER)
-    retention: dict[str, object] = {}
-    try:
-        retention = dict(_enforce_runtime_scene_retention() or {})
-    except Exception as exc:  # retention must never block backend startup
-        retention = {"error": type(exc).__name__}
-    return {"runtimeScene": reference, "retention": retention}
+    return {"runtimeScene": reference}
 
 
 def seal_runtime_scene_on_exit() -> None:
@@ -177,13 +172,14 @@ def seal_runtime_scene_on_exit() -> None:
         pass
 
 
-def bootstrap_runtime_scene_for_workbench() -> None:
-    """Startup wiring: open scene + retention + graceful-exit seal (best-effort).
+def bootstrap_runtime_scene_for_workbench() -> bool:
+    """Startup wiring: open scene + graceful-exit seal (best-effort).
 
     Deliberately NOT wired into the FastAPI lifespan: TestClient triggers the
     lifespan, which would create runtime scenes in every service test. Only
     the real entrypoint (``main``) calls this. Any failure here degrades to no
-    scene rotation; backend startup must proceed.
+    scene rotation; backend startup must proceed. Return whether the entrypoint
+    should enable the lifespan-owned post-routes retention task.
     """
     global _startup_runtime_scene_reference
     try:
@@ -197,6 +193,7 @@ def bootstrap_runtime_scene_for_workbench() -> None:
         atexit.register(seal_runtime_scene_on_exit)
     except Exception:
         pass
+    return _startup_runtime_scene_reference is not None
 
 
 def main() -> None:
@@ -206,8 +203,16 @@ def main() -> None:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     enable_user_env_fallback_for_workbench()
     install_access_log_filters()
-    bootstrap_runtime_scene_for_workbench()
-    uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=args.reload)
+    scene_opened = bootstrap_runtime_scene_for_workbench()
+    previous_retention_flag = os.environ.get(DEFER_RUNTIME_SCENE_RETENTION_ENV)
+    os.environ[DEFER_RUNTIME_SCENE_RETENTION_ENV] = "1" if scene_opened else "0"
+    try:
+        uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=args.reload)
+    finally:
+        if previous_retention_flag is None:
+            os.environ.pop(DEFER_RUNTIME_SCENE_RETENTION_ENV, None)
+        else:
+            os.environ[DEFER_RUNTIME_SCENE_RETENTION_ENV] = previous_retention_flag
 
 
 if __name__ == "__main__":
