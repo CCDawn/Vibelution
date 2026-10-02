@@ -290,10 +290,19 @@ def github_project_search(query: str, *, max_results: int, language: str = "") -
     return results, _provider_event("github_public_rest", "ok", result_count=len(results))
 
 
-def google_news_rss_search(query: str, *, max_results: int) -> tuple[list[dict[str, str]], dict[str, Any]]:
+def google_news_rss_search(
+    query: str,
+    *,
+    max_results: int,
+    locale: str = "en-US",
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if str(locale or "").lower().startswith("zh"):
+        edition = {"hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
+    else:
+        edition = {"hl": "en-US", "gl": "US", "ceid": "US:en"}
     try:
         text = _http_get_text(
-            f"{_GOOGLE_NEWS_RSS_URL}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
+            f"{_GOOGLE_NEWS_RSS_URL}?{urlencode({'q': query, **edition})}"
         )
     except Exception as exc:
         return [], _provider_event("google_news_rss", "failed", error=f"{type(exc).__name__}: {exc}")

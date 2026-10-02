@@ -211,7 +211,10 @@ export function agentCenterMemoryRoute({
   }
 
   const query = params.toString();
-  return query ? `/memory/agents?${query}` : "/memory/agents";
+  const memoryPath = normalizedView === "knowledge" || normalizedView === "graph"
+    ? `/memory/${encodeURIComponent(normalizedView)}`
+    : "/memory/agents";
+  return query ? `${memoryPath}?${query}` : memoryPath;
 }
 
 export function teamMemoryRoute({

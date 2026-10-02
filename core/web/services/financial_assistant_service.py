@@ -56,6 +56,40 @@ TASK = {
     "deliverables": "有来源和风险说明的研究答复。",
     "taskTypes": ["financial_research", "risk_review"],
 }
+# Empty-composer cards for this profile only. Ordinary chats keep the shared
+# code starters from composer_example_commands.
+COMPOSER_STARTERS: tuple[dict[str, str], ...] = (
+    {
+        "heading": "新闻参考",
+        "command": "帮我查一家公司最近的公开新闻，并说明哪些能当参考、哪些不能引用。",
+    },
+    {
+        "heading": "财报证据",
+        "command": "围绕一家公司和报告期查找财报证据。库里没有就直接说明证据不足，不要编造数字。",
+    },
+    {
+        "heading": "风险边界",
+        "command": "先问清我的期限和能接受的亏损，再列出研究时必须核对的风险。不要建议下单。",
+    },
+)
+
+
+def composer_starters_for_agent(agent_id: str) -> list[dict[str, str]] | None:
+    """Research cards for a financial assistant. None keeps the shared code cards."""
+
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return None
+    try:
+        agent = directory.get_agent(normalized)
+    except Exception:
+        return None
+    if not isinstance(agent, dict):
+        return None
+    profile = (agent.get("metadata") or {}).get("financialAssistantProfile")
+    if profile != PROFILE:
+        return None
+    return [dict(item) for item in COMPOSER_STARTERS]
 
 
 def _agents() -> list[dict]:
