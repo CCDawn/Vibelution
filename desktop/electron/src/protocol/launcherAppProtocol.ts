@@ -43,20 +43,8 @@ export function resolveLauncherAppUrl(): string {
   return `${LAUNCHER_APP_ORIGIN}/launcher`;
 }
 
-export function resolveLauncherDistRoot(input: {
-  resourcesRoot: string;
-  workspaceRoot: string;
-  packaged: boolean;
-  env: NodeJS.ProcessEnv;
-}): string {
-  const explicit = String(input.env.VIBELUTION_LAUNCHER_DIST_ROOT || "").trim();
-  if (explicit) {
-    return resolve(explicit);
-  }
-  if (input.packaged) {
-    return resolve(input.resourcesRoot, "web-dist");
-  }
-  const releasesRoot = resolve(input.workspaceRoot, "web", ".vibelution-builds");
+function resolveWorkspaceActiveRelease(workspaceRoot: string): string | null {
+  const releasesRoot = resolve(workspaceRoot, "web", ".vibelution-builds");
   try {
     const active = JSON.parse(readFileSync(resolve(releasesRoot, "active.json"), "utf8")) as { release?: unknown };
     const release = String(active.release || "").trim();
@@ -71,7 +59,30 @@ export function resolveLauncherDistRoot(input: {
       }
     }
   } catch {
-    // Old workspaces and interrupted builds retain the web/dist compatibility fallback.
+    // Old workspaces and interrupted builds leave no usable active release.
+  }
+  return null;
+}
+
+export function resolveLauncherDistRoot(input: {
+  resourcesRoot: string;
+  workspaceRoot: string;
+  packaged: boolean;
+  env: NodeJS.ProcessEnv;
+}): string {
+  const explicit = String(input.env.VIBELUTION_LAUNCHER_DIST_ROOT || "").trim();
+  if (explicit) {
+    return resolve(explicit);
+  }
+  // The packaged launcher window must observe the workspace active release so
+  // web changes reach the shell without a full package rebuild; the packaged
+  // snapshot stays as the fallback when no workspace release exists.
+  const activeRelease = resolveWorkspaceActiveRelease(input.workspaceRoot);
+  if (activeRelease) {
+    return activeRelease;
+  }
+  if (input.packaged) {
+    return resolve(input.resourcesRoot, "web-dist");
   }
   return resolve(input.workspaceRoot, "web", "dist");
 }
