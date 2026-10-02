@@ -466,6 +466,18 @@ def test_session_turn_response_models_keep_unknown_fields(monkeypatch):
     assert options_response.json() == expected_options
 
 
+def test_session_llm_options_maps_dangling_model_binding_to_422(monkeypatch):
+    detail = "当前 Agent 绑定的模型不在模型库中：opencode_go/deepseek-v4.1-flash"
+
+    def _raise_validation_error(*_args, **_kwargs):
+        raise session_service.SessionValidationError(detail)
+
+    monkeypatch.setattr(session_routes, "get_session_llm_options", _raise_validation_error)
+    response = client.get("/api/sessions/session-active/llm-options")
+    assert response.status_code == 422
+    assert response.json()["detail"] == detail
+
+
 def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monkeypatch):
     agents = [{"agentId": "agent-a", "displayName": "Agent A"}]
     captured: dict[str, object] = {}

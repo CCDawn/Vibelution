@@ -128,4 +128,37 @@ describe("chat coding route view model", () => {
       expect(dictionaryChat.en[key], `en missing for ${key}`).toBeTruthy();
     }
   });
+
+  it("appends the server detail to 4xx rejection copy", () => {
+    const t = (key: Parameters<typeof describeChatSubmitError>[1] extends (k: infer K) => string ? K : never) =>
+      (dictionaryChat.zh as Record<string, string>)[key] ?? `#${key}`;
+    const detail = "当前 Agent 绑定的模型不在模型库中：opencode_go/deepseek-v4.1-flash";
+    const rejectionCopy = describeChatSubmitError(
+      new FetchJsonHttpError(detail, { status: 422, details: { detail } }),
+      t,
+      t("submitFailed"),
+    );
+    expect(rejectionCopy).toBe(`${dictionaryChat.zh.composerErrorRequestRejected}：${detail}`);
+    expect(rejectionCopy).toContain("opencode_go/deepseek-v4.1-flash");
+
+    // No parseable detail body: keep the plain category copy.
+    const plainCopy = describeChatSubmitError(
+      new FetchJsonHttpError("raw transport text", { status: 422 }),
+      t,
+      t("submitFailed"),
+    );
+    expect(plainCopy).toBe(dictionaryChat.zh.composerErrorRequestRejected);
+
+    // Overlong details are truncated, not dropped.
+    const longDetail = "x".repeat(260);
+    const truncatedCopy = describeChatSubmitError(
+      new FetchJsonHttpError(longDetail, { status: 400, details: { detail: longDetail } }),
+      t,
+      t("submitFailed"),
+    );
+    expect(truncatedCopy.startsWith(`${dictionaryChat.zh.composerErrorRequestRejected}：`)).toBe(true);
+    expect(truncatedCopy.length).toBeLessThanOrEqual(
+      dictionaryChat.zh.composerErrorRequestRejected.length + 1 + 200 + 1,
+    );
+  });
 });

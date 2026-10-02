@@ -598,6 +598,8 @@ def session_llm_options(session_id: str) -> dict:
         return get_session_llm_options(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.patch(

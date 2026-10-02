@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,9 @@ from core.web.services.model_reference_service import (
     rewrite_model_reference_payload,
     scan_model_alias_usage,
     scan_model_references,
+    scan_provider_live_references,
 )
+from core.web.services.session.directory_runtime import conversation_store_path
 
 @pytest.fixture(autouse=True)
 def _isolate_data_home(tmp_path, monkeypatch):
@@ -196,6 +199,64 @@ def _seed_agent_registry(root, model_id: str, other_model_id: str = "model-b") -
             ],
         },
     )
+
+
+def _seed_agent_store(project_root, *, dialogue_model_id: str, stale_dialogue_model_id: str) -> Path:
+    """Create a conversations.sqlite3 whose agent carries two config revisions."""
+    db_path = conversation_store_path(Path(project_root))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE agents (
+              agent_id TEXT PRIMARY KEY,
+              display_name TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active',
+              current_config_revision_id TEXT,
+              created_at_ms INTEGER NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              archived_at_ms INTEGER
+            );
+            CREATE TABLE agent_config_revisions (
+              revision_id TEXT PRIMARY KEY,
+              agent_id TEXT NOT NULL,
+              config_hash TEXT NOT NULL,
+              config_json TEXT NOT NULL,
+              source TEXT NOT NULL,
+              created_at_ms INTEGER NOT NULL
+            );
+            """
+        )
+        now_ms = 1_700_000_000_000
+        connection.execute(
+            "INSERT INTO agents (agent_id, display_name, kind, status, created_at_ms, updated_at_ms)"
+            " VALUES ('agent-store', 'Store Agent', 'chat', 'active', ?, ?)",
+            (now_ms, now_ms),
+        )
+        latest_config = {
+            "dialogueModelId": dialogue_model_id,
+            "llmBindings": {"dialogue": {"modelId": dialogue_model_id}},
+        }
+        stale_config = {
+            "dialogueModelId": stale_dialogue_model_id,
+            "llmBindings": {"dialogue": {"modelId": stale_dialogue_model_id}},
+        }
+        for revision_id, config_json, created_at_ms in (
+            ("agent-store:stale", stale_config, now_ms),
+            ("agent-store:latest", latest_config, now_ms + 1),
+        ):
+            connection.execute(
+                "INSERT INTO agent_config_revisions"
+                " (revision_id, agent_id, config_hash, config_json, source, created_at_ms)"
+                " VALUES (?, 'agent-store', 'hash', ?, 'test', ?)",
+                (revision_id, json.dumps(config_json), created_at_ms),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+    return db_path
 
 
 def _seed_chat_rooms(root, model_id: str) -> None:
@@ -440,3 +501,48 @@ def test_config_route_maps_model_reference_conflict_to_conflict_response():
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == impact
+
+
+def test_scan_model_references_reads_sqlite_agent_store_bindings(tmp_path):
+    _seed_agent_store(tmp_path, dialogue_model_id="model-store", stale_dialogue_model_id="model-stale")
+
+    impact = scan_model_references("model-store", project_root=tmp_path)
+
+    assert impact["blocking"] is True
+    store_refs = [item for item in impact["liveReferences"] if item["source"] == "agent_store"]
+    assert {item["field"] for item in store_refs} == {"dialogueModelId", "llmBindings.dialogue.modelId"}
+    assert all(item["ownerType"] == "agent" for item in store_refs)
+    assert all(item["ownerId"] == "agent-store" for item in store_refs)
+    assert all(item["label"] == "Store Agent" for item in store_refs)
+
+    # Only the latest revision (max created_at_ms) counts as live: the stale
+    # revision's binding must not block deleting model-stale.
+    stale_impact = scan_model_references("model-stale", project_root=tmp_path)
+    assert stale_impact["liveReferences"] == []
+
+
+def test_scan_model_references_survives_missing_agent_store(tmp_path):
+    impact = scan_model_references("model-store", project_root=tmp_path)
+    assert impact["blocking"] is False
+    assert impact["liveReferences"] == []
+
+
+def test_scan_provider_live_references_matches_provider_prefix_across_agent_store(tmp_path):
+    _seed_agent_store(
+        tmp_path,
+        dialogue_model_id="opencode_go/deepseek-v4.1-flash",
+        stale_dialogue_model_id="relay_dead/legacy-model",
+    )
+
+    impact = scan_provider_live_references("opencode_go", project_root=tmp_path)
+
+    assert impact["blocking"] is True
+    assert impact["liveReferenceCount"] == 2
+    assert {item["field"] for item in impact["liveReferences"]} == {
+        "dialogueModelId",
+        "llmBindings.dialogue.modelId",
+    }
+
+    other = scan_provider_live_references("other_provider", project_root=tmp_path)
+    assert other["blocking"] is False
+    assert other["liveReferences"] == []

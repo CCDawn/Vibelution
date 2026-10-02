@@ -7,7 +7,9 @@ config_service write path, TTL expiry, and signature-change invalidation.
 """
 
 import copy
+import json
 import os
+import sqlite3
 
 import pytest
 
@@ -17,6 +19,8 @@ from config.model_catalog import (
     save_model_catalog_state,
 )
 from core.web.services import config_service
+from core.web.services import model_reference_service
+from core.web.services.session.directory_runtime import conversation_store_path
 
 pytestmark = pytest.mark.serial
 
@@ -212,6 +216,90 @@ def test_catalog_sweep_write_invalidates_result_cache(monkeypatch, tmp_path):
     # catalog state 落盘后 summary 缓存已失效，必须重算。
     config_service.get_config_summary()
     assert counters == {"_build_config_summary": 2}
+
+
+def _seed_agent_store_binding(project_root, dialogue_model_id: str) -> None:
+    """Create a minimal conversations.sqlite3 with one bound agent config."""
+    db_path = conversation_store_path(project_root)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE agents (
+              agent_id TEXT PRIMARY KEY,
+              display_name TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'active',
+              current_config_revision_id TEXT,
+              created_at_ms INTEGER NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              archived_at_ms INTEGER
+            );
+            CREATE TABLE agent_config_revisions (
+              revision_id TEXT PRIMARY KEY,
+              agent_id TEXT NOT NULL,
+              config_hash TEXT NOT NULL,
+              config_json TEXT NOT NULL,
+              source TEXT NOT NULL,
+              created_at_ms INTEGER NOT NULL
+            );
+            """
+        )
+        now_ms = 1_700_000_000_000
+        connection.execute(
+            "INSERT INTO agents (agent_id, display_name, kind, status, created_at_ms, updated_at_ms)"
+            " VALUES ('agent-live', 'Live Agent', 'chat', 'active', ?, ?)",
+            (now_ms, now_ms),
+        )
+        connection.execute(
+            "INSERT INTO agent_config_revisions"
+            " (revision_id, agent_id, config_hash, config_json, source, created_at_ms)"
+            " VALUES ('agent-live:r1', 'agent-live', 'hash', ?, 'test', ?)",
+            (json.dumps({"dialogueModelId": dialogue_model_id}), now_ms),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_catalog_sweep_skips_provider_with_live_dialogue_binding(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "config.toml"))
+    _warm_config_init()
+    # 活引用扫描只看本测试的临时 agent 存储，不读真实 workspace。
+    monkeypatch.setattr(model_reference_service, "PROJECT_ROOT", tmp_path)
+    scene_events: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(
+        config_service,
+        "_record_config_scene_event",
+        lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+    )
+
+    state = empty_model_catalog_state()
+    for provider_id, fingerprint in (
+        ("relay_keep", "fp-keep"),
+        ("relay_live", "fp-live"),
+        ("relay_dead", "fp-dead"),
+    ):
+        state["providers"][provider_id] = {
+            "providerFingerprint": fingerprint,
+            "status": "reachable",
+            "catalogStale": False,
+            "lastAttemptAt": "2026-07-11T00:00:00+00:00",
+            "lastSuccessAt": "2026-07-11T00:00:00+00:00",
+            "lastErrorType": "",
+            "models": {},
+        }
+    save_model_catalog_state(state)
+    _seed_agent_store_binding(tmp_path, "relay_live/bound-model")
+
+    pruned = config_service._sweep_absent_model_catalog_providers(_v2_single_provider_config())
+
+    # 仍被活会话对话绑定引用的 provider 目录保留，无引用的照常 prune。
+    assert pruned == ["relay_dead"]
+    assert set(load_model_catalog_state()["providers"]) == {"relay_keep", "relay_live"}
+    assert [event[1] for event in scene_events] == ["config.model_catalog.prune_skipped_live_refs"]
+    assert scene_events[0][2]["fields"] == {"providerId": "relay_live", "liveReferenceCount": 1}
 
 
 def test_saved_model_verification_write_invalidates_result_cache(monkeypatch, tmp_path):
