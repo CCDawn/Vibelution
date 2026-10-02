@@ -56,6 +56,21 @@
     "web": ["rate_limited", "crash_loop_backoff"],
     "note": "Produced only by Electron instanceAdmissionControl (RATE_LIMITED_CODE / CRASH_LOOP_BACKOFF_CODE). web LauncherBranchInstancesPanel.model.ts ADMISSION_BLOCK_REASONS must equal the web list and stay within the Electron list."
   },
+  "dismissableFailedLeftover": {
+    "payloadFailureStates": ["error"],
+    "webRuntimeFailureStates": ["failed"],
+    "webStateMappingForFailureStates": { "error": "failed" },
+    "defensivePartialState": "partial",
+    "python": {
+      "judgmentStates": ["error", "partial"],
+      "gate": "core/launcher/branch_instance_lifecycle.py _is_dismissable_failed_leftover"
+    },
+    "web": {
+      "judgmentStates": ["failed", "partial"],
+      "gate": "web/src/routes/LauncherBranchInstancesPanel.model.ts canStopInstance failedLeftover"
+    },
+    "note": "Pins the dismissable failed-leftover stop judgment (stop/force-stop may retire a dead failed row). The payload lexicon spells failure 'error' (locked 8-state enum; the registry terminal vocabulary is closed/failed and never reaches this payload field); the web panel judges after applying webStateMapping, so its failure word is 'failed'. Same semantic set: payloadFailureStates + defensivePartialState for Python equals webRuntimeFailureStates + defensivePartialState for web under the pinned mapping. 'partial' is defensive on both sides (a partial projection implies a live runtime signal, and the live-runtime guard wins first). Any change here must move both judgmentStates lists together."
+  },
   "clientOnlyCodes": {
     "startBlockReasons": [
       {

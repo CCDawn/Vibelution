@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { CLIENT_START_BLOCK_REFRESH_REQUIRED, type LauncherBranchInstance } from "../api/launcher";
 import {
   ADMISSION_BLOCK_REASONS,
+  DISMISSABLE_FAILED_LEFTOVER_STATES,
   IN_FLIGHT_LIFECYCLE_STATES,
   instanceHasLiveRuntime,
   instanceRuntimeState,
@@ -30,6 +31,15 @@ type ContractFixture = {
   admissionBlockReasons: {
     electron: string[];
     web: string[];
+  };
+  dismissableFailedLeftover: {
+    payloadFailureStates: string[];
+    webRuntimeFailureStates: string[];
+    webStateMappingForFailureStates: Record<string, string>;
+    defensivePartialState: string;
+    python: { judgmentStates: string[]; gate: string };
+    web: { judgmentStates: string[]; gate: string };
+    note: string;
   };
   clientOnlyCodes: {
     startBlockReasons: { code: string; producer: string; note: string }[];
@@ -161,5 +171,48 @@ describe("launcher instance cross-port contract", () => {
     expect(clientOnly[0].code).toBe(CLIENT_START_BLOCK_REFRESH_REQUIRED);
     expect(fixture.admissionBlockReasons.electron).not.toContain(CLIENT_START_BLOCK_REFRESH_REQUIRED);
     expect(fixture.lifecycleStates.payload).not.toContain(CLIENT_START_BLOCK_REFRESH_REQUIRED);
+  });
+
+  it("pins the dismissable failed-leftover stop judgment to the error-to-failed mapping", () => {
+    const leftover = fixture.dismissableFailedLeftover;
+    // The web judgment lexicon equals the fixture's declared web list.
+    expect([...DISMISSABLE_FAILED_LEFTOVER_STATES].sort()).toEqual([...leftover.web.judgmentStates].sort());
+    // Failure words correspond 1:1 through the pinned mapping, and the partial
+    // fallback is shared and stays itself under the mapping.
+    expect(Object.keys(leftover.webStateMappingForFailureStates).sort()).toEqual(
+      [...leftover.payloadFailureStates].sort()
+    );
+    for (const [payloadState, webState] of Object.entries(leftover.webStateMappingForFailureStates)) {
+      expect(fixture.lifecycleStates.webStateMapping[payloadState]).toBe(webState);
+      expect(instanceRuntimeState(instanceWithRuntime({ lifecycleState: payloadState }))).toBe(webState);
+    }
+    expect(
+      instanceRuntimeState(instanceWithRuntime({ lifecycleState: leftover.defensivePartialState }))
+    ).toBe(leftover.defensivePartialState);
+    // Both sides judge the same semantic set: their failure words plus the
+    // shared defensive partial state.
+    expect(leftover.python.judgmentStates).toEqual([
+      ...leftover.payloadFailureStates,
+      leftover.defensivePartialState,
+    ]);
+    expect(leftover.web.judgmentStates).toEqual([
+      ...leftover.webRuntimeFailureStates,
+      leftover.defensivePartialState,
+    ]);
+    for (const state of [...leftover.web.judgmentStates, ...leftover.webRuntimeFailureStates]) {
+      expect(fixture.lifecycleStates.webRuntimeStates).toContain(state);
+    }
+    // Behavioral: the payload failure word maps into the judgment lexicon; the
+    // shared defensive partial state maps to itself.
+    for (const payloadState of leftover.payloadFailureStates) {
+      expect(DISMISSABLE_FAILED_LEFTOVER_STATES.has(
+        instanceRuntimeState(instanceWithRuntime({ lifecycleState: payloadState }))
+      )).toBe(true);
+    }
+    expect(
+      DISMISSABLE_FAILED_LEFTOVER_STATES.has(
+        instanceRuntimeState(instanceWithRuntime({ lifecycleState: leftover.defensivePartialState }))
+      )
+    ).toBe(true);
   });
 });

@@ -75,6 +75,20 @@ export const LIVE_LIFECYCLE_STATES: ReadonlySet<string> = new Set([
   ...IN_FLIGHT_LIFECYCLE_STATES,
 ]);
 
+/**
+ * Web runtime states whose dead rows are dismissable failed leftovers: stop/
+ * force-stop may retire them without the usual operability gate (the dead
+ * failed row must stay stoppable to clear its registry entry). Spelled in the
+ * web runtime lexicon — the payload's failure word "error" is mapped to
+ * "failed" by instanceRuntimeState before this set is consulted. Pinned
+ * against desktop/electron/src/lifecycle/__fixtures__/
+ * launcherInstanceContract.cases.json (dismissableFailedLeftover.web).
+ */
+export const DISMISSABLE_FAILED_LEFTOVER_STATES: ReadonlySet<string> = new Set([
+  "failed",
+  "partial",
+]);
+
 export type InstancePendingOperation = {
   instanceId: string;
   instanceIds?: string[];
@@ -727,10 +741,11 @@ export function canStopInstance(item: LauncherBranchInstance, pending?: Lifecycl
       return false;
     }
   }
-  const failedLeftover = (state === "failed" || state === "partial") && !instanceHasLiveRuntime(item);
+  const failedLeftover =
+    DISMISSABLE_FAILED_LEFTOVER_STATES.has(state) && !instanceHasLiveRuntime(item);
   return (isOperableInstance(item) || failedLeftover)
     && item.startBlockReason !== CLIENT_START_BLOCK_REFRESH_REQUIRED
-    && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial" || startingOrRestarting);
+    && (instanceHasLiveRuntime(item) || DISMISSABLE_FAILED_LEFTOVER_STATES.has(state) || startingOrRestarting);
 }
 
 /**

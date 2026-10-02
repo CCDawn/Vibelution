@@ -1949,9 +1949,10 @@ function desktopPythonPath(): string {
 /**
  * State-refresh driven registry SSOT repair: adopt live backends sitting on
  * missing/terminal registry rows, settle rows whose registered identity is
- * confirmed dead, and sweep dead keys whose worktree is gone. Fire-and-forget:
- * the reconciler is mutex-guarded and cooldown-limited, and a failure must
- * never fail the refresh (or the start short-circuit) that triggered it.
+ * confirmed dead, sweep dead keys whose worktree is gone, and write Electron
+ * window truth back into the registry's windowPid. Fire-and-forget: the
+ * reconciler is mutex-guarded and cooldown-limited, and a failure must never
+ * fail the refresh (or the start short-circuit) that triggered it.
  * Skipped once shutdown is approved so it cannot fight the shutdown harvest.
  */
 function scheduleRegistryReconciliation(branchInstances: unknown): void {
@@ -1960,7 +1961,11 @@ function scheduleRegistryReconciliation(branchInstances: unknown): void {
   }
   void reconcileRegistryWithObservation({
     branchInstances,
-    pythonPath: desktopPythonPath() || undefined
+    pythonPath: desktopPythonPath() || undefined,
+    // Electron window truth is authoritative for instance window pids. Attach
+    // it only while a window provider exists: before that, an empty truth
+    // would be misread as "every window closed" and clear live pids.
+    ...(windowProvider ? { instanceWindowStates: currentLauncherWindowTruth().instances } : {})
   }).catch((error: unknown) => {
     console.warn(error instanceof Error ? error.message : String(error));
   });

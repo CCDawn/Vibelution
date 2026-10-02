@@ -328,3 +328,68 @@ def test_launcher_script_resolves_workspace_env_before_sys_path():
     text = Path(__file__).resolve().parents[1].joinpath("scripts", "vibelution_launcher.py").read_text(encoding="utf-8")
     assert text.index("VIBELUTION_WORKSPACE_ROOT") < text.index("sys.path.insert")
     assert "SUPERVISOR_ROOT" in text
+
+
+def _launcher_instance_contract_fixture() -> dict:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "desktop" / "electron" / "src" / "lifecycle" / "__fixtures__"
+        / "launcherInstanceContract.cases.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_dismissable_failed_leftover_matches_cross_port_contract():
+    fixture = _launcher_instance_contract_fixture()["dismissableFailedLeftover"]
+
+    # The Python judgment lexicon is exactly the payload failure words plus the
+    # shared defensive partial state; the web side judges the same semantic set
+    # after its error->failed runtime mapping.
+    assert fixture["python"]["judgmentStates"] == [
+        *fixture["payloadFailureStates"],
+        fixture["defensivePartialState"],
+    ]
+    assert fixture["web"]["judgmentStates"] == [
+        *fixture["webRuntimeFailureStates"],
+        fixture["defensivePartialState"],
+    ]
+    for payload_state in fixture["payloadFailureStates"]:
+        assert fixture["webStateMappingForFailureStates"][payload_state] in (
+            fixture["webRuntimeFailureStates"]
+        )
+
+    dead_item = _item(
+        runtime={
+            "lifecycleState": "error",
+            "backend": {"alive": False, "healthy": False, "listening": False},
+            "window": {"open": False},
+        }
+    )
+    for state in fixture["python"]["judgmentStates"]:
+        item = dict(dead_item)
+        item["runtime"] = dict(dead_item["runtime"], lifecycleState=state)
+        assert lifecycle._is_dismissable_failed_leftover(item) is True, state
+
+    # Non-judgment payload states are never dismissable leftovers.
+    judgment_states = set(fixture["python"]["judgmentStates"])
+    for state in _launcher_instance_contract_fixture()["lifecycleStates"]["payload"]:
+        if state in judgment_states:
+            continue
+        item = dict(dead_item)
+        item["runtime"] = dict(dead_item["runtime"], lifecycleState=state)
+        assert lifecycle._is_dismissable_failed_leftover(item) is False, state
+
+
+def test_dismissable_failed_leftover_never_dismisses_live_runtime():
+    fixture = _launcher_instance_contract_fixture()["dismissableFailedLeftover"]
+    for state in fixture["python"]["judgmentStates"]:
+        live_item = _item(
+            alive=True,
+            port=8004,
+            runtime={
+                "lifecycleState": state,
+                "backend": {"alive": True, "healthy": True, "listening": True},
+                "window": {"open": True},
+            },
+        )
+        assert lifecycle._is_dismissable_failed_leftover(live_item) is False, state
