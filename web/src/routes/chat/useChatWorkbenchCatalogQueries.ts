@@ -95,7 +95,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: () => fetchRuntimeSummary(),
+    queryFn: ({ signal }) => fetchRuntimeSummary({ signal }),
     enabled: secondaryChatDataEnabled,
     refetchInterval: chatSecondaryPollPolicy.runtimeRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
@@ -111,6 +111,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     queryKey: ["sessions", "active-bootstrap"],
     queryFn: async ({ signal }) => {
       const payload = await fetchChatWorkbenchBootstrap({ signal });
+      signal.throwIfAborted();
       queryClient.setQueryData(queryKeys.agents(), payload.agents);
       // Seed the group-room catalog with the bootstrap projection so the rail
       // paints before the paginated catalog query resolves; the catalog query
@@ -209,12 +210,12 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     staleTime: 5_000,
     refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground,
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam, signal }) => {
       const payload = await queryConversations({
         limit: CONVERSATIONS_CATALOG_PAGE_SIZE,
         cursor: String(pageParam || ""),
         type: "group_room",
-      });
+      }, { signal });
       return {
         ...payload,
         items: filterOutTombstonedConversations(payload.items) ?? [],
@@ -255,7 +256,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   }, [conversationsQueryRaw]);
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
-    queryFn: () => listTeams(),
+    queryFn: ({ signal }) => listTeams({ signal }),
     // Must load whenever the left-rail agent directory is active — not only when the
     // group-room picker is open. With teams=[], research/evolution members all dump into
     // 「特殊 Agent」and team rooms fall into 未归属.
@@ -265,7 +266,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => listAgentSummaries(),
+    queryFn: ({ signal }) => listAgentSummaries({ signal }),
     enabled:
       bootstrapSettled &&
       (secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive),

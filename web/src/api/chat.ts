@@ -117,7 +117,10 @@ export function listSessionChildSessions(sessionId: string): Promise<SessionSumm
   );
 }
 
-export function querySessions(params: SessionQueryParams = {}): Promise<SessionQueryResponse> {
+export function querySessions(
+  params: SessionQueryParams = {},
+  init?: { signal?: AbortSignal },
+): Promise<SessionQueryResponse> {
   const search = new URLSearchParams();
   if (params.limit != null) {
     search.set("limit", String(params.limit));
@@ -146,6 +149,7 @@ export function querySessions(params: SessionQueryParams = {}): Promise<SessionQ
   const suffix = search.toString();
   return fetchJson<SessionQueryResponse>(
     suffix ? `/api/sessions/query?${suffix}` : "/api/sessions/query",
+    { signal: init?.signal },
   );
 }
 
@@ -161,6 +165,7 @@ export type ConversationQueryParams = {
 
 export function queryConversations(
   params: ConversationQueryParams = {},
+  init?: { signal?: AbortSignal },
 ): Promise<ConversationQueryResponse> {
   const search = new URLSearchParams();
   if (params.limit != null) {
@@ -184,6 +189,7 @@ export function queryConversations(
   const suffix = search.toString();
   return fetchJson<ConversationQueryResponse>(
     suffix ? `/api/conversations?${suffix}` : "/api/conversations",
+    { signal: init?.signal },
   );
 }
 
