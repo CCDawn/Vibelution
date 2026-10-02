@@ -2,15 +2,32 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-10-03
+
 ### Breaking
 
-- LLM operator config schema v1 and `role_bindings` are no longer runtime-readable. Persisted v1 files are upgraded in place by a one-shot atomic upgrader; inputs that cannot be upgraded fail closed and do not overwrite the original file. In-memory drafts may still be materialized to schema v2. This is a public compatibility break and is recorded as a **major** version impact; no release is executed in this change.
+- Persisted LLM operator config must be schema v2. Recognizable schema v1 files, including `role_bindings`, are upgraded in place by a one-shot upgrader. Inputs that cannot be upgraded leave the original file unchanged and are not read at runtime.
+
+### Added
+
+- 炒股智能体 opens from the specialist menu or `/finance` into its own chat. The first visit creates a general agent, an empty report library, and a session without calling a model. Public news in that chat is reference only and is not filed. The assistant does not collect accounts, holdings, or amounts, and it cannot place orders.
+- An agent can bind the virtual-human life plugin. Only an explicitly enabled binding keeps a schedule, mood, memory, and proactive messages. Other agents stay unchanged.
 
 ### Changed
 
-- Chat workbench widths now persist only through `paneLayouts.chat` (`WORKBENCH_LAYOUT_IDS.chat` + `vibelution.pane-layouts.v1`). Leftover `shell.chatPanelWidths` is migrated once when canonical is missing, then dropped. Server `paneLayouts` remains a durable mirror. Version impact: **patch**; no release is executed.
-- Frontend compatibility redirects for `/chat-rooms`, `/agents/teams`, `/agents/memory/*`, and `/evolution` are removed. Canonical routes (`/chat`, `/teams`, `/memory/*`, `/supervised-evolution` / `/self-evolution`) are the only workbench entries; unknown leftover URLs follow the product's unmatched-route behavior. Version impact: **patch**; no release is executed.
-- Compat SSOT closeout is archived. Permanent retirement rules live in `docs/standards/development-standard.md` §25 (no waiting stability gates; one-shot upgraders; fail-closed reads; no new long-lived fallback). Version impact: **patch**; docs only; no release is executed.
+- Chat panel widths are stored only in `paneLayouts.chat`. A leftover `shell.chatPanelWidths` value is copied once when the canonical value is missing, then dropped.
+- Agent log diagnosis now leads with the scene summary, how many times it repeated, and the primary reason. The default result names the evidence files to open.
+
+### Removed
+
+- The workbench no longer redirects `/chat-rooms`, `/agents/teams`, `/agents/memory/*`, or `/evolution`. Use `/chat`, `/teams`, `/memory/*`, `/supervised-evolution`, or `/self-evolution`.
+
+### Notes
+
+- Old compatibility paths now follow `docs/standards/development-standard.md` §25.
+- This product version is 2.0.0. The desktop shell package version remains 1.0.16.
+- These notes cover the user-visible changes recorded since 1.1.2. They do not list internal launcher, startup, and test fixes.
+- Restoring the 1.1.2 label does not rewrite an operator config that has already been upgraded to schema v2.
 
 ## 1.1.2 - 2026-08-06
 
