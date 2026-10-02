@@ -436,6 +436,19 @@ def isolate_source_collection_dashscope_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolate_closeout_post_merge_prebuild(monkeypatch):
+    """Closeout must never spawn a real desktop-shell prebuild helper in tests.
+
+    The post-merge hook fires on every successful closeout; without this pin a
+    test that reaches ``merged_clean`` would schedule a detached staging build
+    against the developer's real checkout.  Tests that exercise the hook inject
+    a fake ``schedule_desktop_shell_prebuild`` and remove the pin via
+    ``monkeypatch.delenv``.
+    """
+    monkeypatch.setenv("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD", "1")
+
+
+@pytest.fixture(autouse=True)
 def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
     path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")

@@ -1033,3 +1033,377 @@ def test_resolve_desktop_shell_launch_forwards_worktree_as_project_slot(tmp_path
     assert args[args.index("--project") + 1] == str(worktree)
     assert "--open-workbench" in args
     assert args[-1] == "start"
+
+
+def _write_prebuild_lock(tmp_path: Path, *, pid: int) -> Path:
+    lock = desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(json.dumps({"pid": pid, "startedAt": "2026-10-01T00:00:00Z"}), encoding="utf-8")
+    return lock
+
+
+def _write_refresh_lock(tmp_path: Path, *, pid: int) -> Path:
+    lock = desktop_shell._refresh_lock_path(tmp_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(json.dumps({"pid": pid, "startedAt": "2026-10-01T00:00:00Z"}), encoding="utf-8")
+    return lock
+
+
+def _write_staged_shell(root: Path, *, tree_hash: str) -> Path:
+    staging_unpacked = root / desktop_shell.STAGING_WIN_UNPACKED_RELATIVE
+    provenance_dir = staging_unpacked / "resources" / "app.asar.unpacked"
+    provenance_dir.mkdir(parents=True)
+    (staging_unpacked / "Vibelution.exe").write_bytes(b"mz")
+    (staging_unpacked / "main.js").write_text("new", encoding="utf-8")
+    (provenance_dir / "package-provenance.json").write_text(
+        json.dumps({"electronTreeHash": tree_hash}), encoding="utf-8"
+    )
+    return staging_unpacked
+
+
+def _write_live_win_unpacked(root: Path) -> Path:
+    live = root / "dist" / "desktop" / "win-unpacked"
+    live.mkdir(parents=True, exist_ok=True)
+    (live / "Vibelution.exe").write_bytes(b"mz")
+    (live / "main.js").write_text("old", encoding="utf-8")
+    return live
+
+
+def _stub_npm_toolchain(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(desktop_shell, "_node_command", lambda: r"C:\nodejs\node.exe")
+    monkeypatch.setattr(desktop_shell, "_npm_cli_script_for_node", lambda command: r"C:\nodejs\npm-cli.js")
+
+
+def test_prebuild_lock_is_independent_of_refresh_lock(tmp_path):
+    assert desktop_shell._acquire_desktop_shell_refresh_lock(
+        tmp_path, lock_relative=desktop_shell.PREBUILD_LOCK_RELATIVE
+    ) is True
+    assert desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+    assert not desktop_shell._refresh_lock_path(tmp_path).is_file()
+    assert desktop_shell._acquire_desktop_shell_refresh_lock(tmp_path) is True
+
+    desktop_shell._release_desktop_shell_refresh_lock(tmp_path)
+    assert not desktop_shell._refresh_lock_path(tmp_path).is_file()
+    assert desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+    desktop_shell._release_desktop_shell_refresh_lock(
+        tmp_path, lock_relative=desktop_shell.PREBUILD_LOCK_RELATIVE
+    )
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="pythonw resolution and Windows spawn flags",
+)
+def test_schedule_desktop_shell_prebuild_spawns_pythonw_helper_and_transfers_lock(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            self.pid = 4321
+
+    python = tmp_path / "python.exe"
+    python.write_text("", encoding="utf-8")
+    pythonw = tmp_path / "pythonw.exe"
+    pythonw.write_text("", encoding="utf-8")
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+
+    result = desktop_shell.schedule_desktop_shell_prebuild(tmp_path, python_executable=str(python))
+
+    args = captured["args"]
+    assert args[0] == str(pythonw)
+    assert args[args.index("--action") + 1] == "prebuild-desktop-shell"
+    assert args[args.index("--workspace") + 1] == str(tmp_path)
+    assert captured["kwargs"]["stdin"] is desktop_shell.subprocess.DEVNULL
+    flags = int(captured["kwargs"].get("creationflags") or 0)
+    assert flags & int(getattr(desktop_shell.subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    assert flags & desktop_shell.CREATE_NEW_PROCESS_GROUP
+    assert flags & desktop_shell.CREATE_BREAKAWAY_FROM_JOB
+    assert result["scheduled"] is True
+    assert result["helperPid"] == 4321
+    lock_payload = json.loads(
+        desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).read_text(encoding="utf-8")
+    )
+    assert lock_payload["pid"] == 4321
+    desktop_shell._release_desktop_shell_refresh_lock(
+        tmp_path, lock_relative=desktop_shell.PREBUILD_LOCK_RELATIVE
+    )
+
+
+def test_schedule_desktop_shell_prebuild_skips_while_refresh_lock_held(tmp_path, monkeypatch):
+    _write_refresh_lock(tmp_path, pid=99140)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("prebuild helper must not spawn while refresh holds its lock")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", fail_if_called)
+    result = desktop_shell.schedule_desktop_shell_prebuild(tmp_path)
+    assert result["scheduled"] is False
+    assert result["reason"] == "refresh_in_progress"
+
+
+def test_schedule_desktop_shell_prebuild_skips_when_prebuild_lock_held(tmp_path, monkeypatch):
+    _write_prebuild_lock(tmp_path, pid=99141)
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+    # The holder process predates the lock, so it is the real holder.
+    monkeypatch.setattr(desktop_shell, "_process_create_time", lambda pid: 0.0)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("prebuild helper must not spawn while another prebuild runs")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", fail_if_called)
+    result = desktop_shell.schedule_desktop_shell_prebuild(tmp_path)
+    assert result["scheduled"] is False
+    assert result["reason"] == "prebuild_in_progress"
+
+
+def test_schedule_desktop_shell_prebuild_skips_during_cooldown(tmp_path, monkeypatch):
+    desktop_shell._record_shell_failure_marker(
+        desktop_shell._prebuild_failure_path(tmp_path),
+        reason="prebuild_failed",
+        detail="boom",
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("prebuild helper must not spawn during cooldown")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", fail_if_called)
+    result = desktop_shell.schedule_desktop_shell_prebuild(tmp_path)
+    assert result["scheduled"] is False
+    assert result["reason"] == "prebuild_cooldown"
+
+
+def test_run_desktop_shell_prebuild_skips_when_shell_current(tmp_path, monkeypatch):
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", lambda root: {"stale": False, "reason": "current"})
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("current shell must not trigger a staging build")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", fail_run)
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is True
+    assert result["skipped"] == "current"
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_run_desktop_shell_prebuild_skips_while_refresh_lock_held(tmp_path, monkeypatch):
+    _write_refresh_lock(tmp_path, pid=99142)
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: (_ for _ in ()).throw(AssertionError("refresh takes precedence over prebuild")),
+    )
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is True
+    assert result["skipped"] == "refresh_in_progress"
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_run_desktop_shell_prebuild_stages_valid_build(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": True, "reason": "provenance_mismatch"},
+    )
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: "a" * 40)
+    _stub_npm_toolchain(monkeypatch)
+    ran: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        ran["command"] = command
+        _write_staged_shell(tmp_path, tree_hash="a" * 40)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", fake_run)
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert ran["command"][-2:] == ["run", "package:staging"]
+    assert result["ok"] is True
+    assert result["staged"] is True
+    assert (tmp_path / desktop_shell.STAGING_WIN_UNPACKED_RELATIVE / "Vibelution.exe").is_file()
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+    assert (
+        desktop_shell._recent_shell_failure_marker(
+            desktop_shell._prebuild_failure_path(tmp_path),
+            cooldown_seconds=desktop_shell.PREBUILD_COOLDOWN_SECONDS,
+        )
+        is None
+    )
+
+
+def test_run_desktop_shell_prebuild_discards_staging_on_provenance_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": True, "reason": "provenance_mismatch"},
+    )
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: "a" * 40)
+    _stub_npm_toolchain(monkeypatch)
+
+    def fake_run(command, **kwargs):
+        _write_staged_shell(tmp_path, tree_hash="b" * 40)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", fake_run)
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is False
+    assert not (tmp_path / desktop_shell.STAGING_OUTPUT_DIR_RELATIVE).exists()
+    marker = desktop_shell._recent_shell_failure_marker(
+        desktop_shell._prebuild_failure_path(tmp_path),
+        cooldown_seconds=desktop_shell.PREBUILD_COOLDOWN_SECONDS,
+    )
+    assert marker is not None
+    assert marker["reason"] == "prebuild_failed"
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_run_desktop_shell_prebuild_failure_records_cooldown_and_releases_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": True, "reason": "provenance_mismatch"},
+    )
+    _stub_npm_toolchain(monkeypatch)
+    monkeypatch.setattr(
+        desktop_shell.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=1, stdout="boom", stderr="boom"),
+    )
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is False
+    marker = desktop_shell._recent_shell_failure_marker(
+        desktop_shell._prebuild_failure_path(tmp_path),
+        cooldown_seconds=desktop_shell.PREBUILD_COOLDOWN_SECONDS,
+    )
+    assert marker is not None
+    assert marker["reason"] == "prebuild_failed"
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_run_desktop_shell_prebuild_releases_lock_when_build_explodes(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": True, "reason": "provenance_mismatch"},
+    )
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("npm vanished")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", explode)
+    result = desktop_shell.run_desktop_shell_prebuild(tmp_path)
+    assert result["ok"] is False
+    assert "npm vanished" in result["message"]
+    marker = desktop_shell._recent_shell_failure_marker(
+        desktop_shell._prebuild_failure_path(tmp_path),
+        cooldown_seconds=desktop_shell.PREBUILD_COOLDOWN_SECONDS,
+    )
+    assert marker is not None
+    assert not desktop_shell._refresh_lock_path(tmp_path, desktop_shell.PREBUILD_LOCK_RELATIVE).is_file()
+
+
+def test_try_promote_staged_desktop_shell_rejects_mismatched_and_incomplete_staging(tmp_path, monkeypatch):
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    _write_staged_shell(tmp_path, tree_hash="b" * 40)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is False
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+
+    shutil.rmtree(tmp_path / desktop_shell.STAGING_OUTPUT_DIR_RELATIVE)
+    assert desktop_shell._try_promote_staged_desktop_shell(tmp_path) is False
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+
+
+def test_rebuild_desktop_shell_promotes_valid_staging_without_npm(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_live_win_unpacked(tmp_path)
+    _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": False, "reason": "current", "currentElectronTree": tree},
+    )
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("valid staging must be promoted without an npm rebuild")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", fail_run)
+    result = desktop_shell.rebuild_desktop_shell(tmp_path)
+    assert result["rebuilt"] is True
+    assert result["promotedFromStaging"] is True
+    live = tmp_path / "dist" / "desktop" / "win-unpacked"
+    assert (live / "main.js").read_text(encoding="utf-8") == "new"
+    assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()
+    assert not (tmp_path / desktop_shell.STAGING_OUTPUT_DIR_RELATIVE).exists()
+
+
+def test_rebuild_desktop_shell_falls_back_to_npm_when_promoted_still_stale(tmp_path, monkeypatch):
+    tree = "a" * 40
+    _write_live_win_unpacked(tmp_path)
+    _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    inspections = {"count": 0}
+
+    def fake_inspect(root):
+        inspections["count"] += 1
+        if inspections["count"] == 1:
+            return {"stale": True, "reason": "frontend_release_mismatch", "currentElectronTree": tree}
+        return {"stale": False, "reason": "current", "currentElectronTree": tree}
+
+    monkeypatch.setattr(desktop_shell, "inspect_desktop_shell", fake_inspect)
+    _stub_npm_toolchain(monkeypatch)
+    ran: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        ran["command"] = command
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", fake_run)
+    result = desktop_shell.rebuild_desktop_shell(tmp_path)
+    assert ran["command"][-2:] == ["run", "package:dir"]
+    assert result["rebuilt"] is True
+    assert "promotedFromStaging" not in result
+    assert inspections["count"] == 2
+
+
+def test_rebuild_desktop_shell_promote_sharing_violation_falls_back_to_npm(tmp_path, monkeypatch):
+    tree = "a" * 40
+    live = _write_live_win_unpacked(tmp_path)
+    staged = _write_staged_shell(tmp_path, tree_hash=tree)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(
+        desktop_shell,
+        "inspect_desktop_shell",
+        lambda root: {"stale": False, "reason": "current", "currentElectronTree": tree},
+    )
+    real_rename = os.rename
+
+    def locked_rename(src, dest):
+        if Path(src) == staged:
+            error = PermissionError(13, "in use", str(src))
+            error.winerror = 32
+            raise error
+        real_rename(src, dest)
+
+    monkeypatch.setattr(desktop_shell, "_rename_dir", locked_rename)
+    _stub_npm_toolchain(monkeypatch)
+    ran: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        ran["command"] = command
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "run", fake_run)
+    result = desktop_shell.rebuild_desktop_shell(tmp_path)
+    assert ran["command"][-2:] == ["run", "package:dir"]
+    assert result["rebuilt"] is True
+    # The live tree was restored after the sharing violation; the staging
+    # survived untouched for a later promotion attempt.
+    assert (live / "main.js").read_text(encoding="utf-8") == "old"
+    assert (staged / "main.js").read_text(encoding="utf-8") == "new"
+    assert not (tmp_path / desktop_shell.PREVIOUS_WIN_UNPACKED_RELATIVE).exists()

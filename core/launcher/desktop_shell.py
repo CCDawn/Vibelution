@@ -49,6 +49,21 @@ UNPACKAGED_ELECTRON_BIN_RELATIVE = Path("desktop") / "electron" / "node_modules"
 REFRESH_FAILURE_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh-failure.json"
 REFRESH_LOCK_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh.lock"
 REFRESH_COOLDOWN_SECONDS = 900.0
+# Post-merge staging builds run in the background where nobody is waiting, so a
+# longer cooldown than refresh is fine: half an hour keeps a persistently
+# failing prebuild from spinning while a healthy closeout still retries it.
+PREBUILD_COOLDOWN_SECONDS = 1800.0
+PREBUILD_FAILURE_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-prebuild-failure.json"
+PREBUILD_LOCK_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-prebuild.lock"
+# The prebuild target: electron-builder writes win-unpacked below this output
+# dir, exactly like the live package below dist/desktop. Promotion renames it
+# over the live tree, so the layout must match.
+STAGING_OUTPUT_DIR_RELATIVE = Path("dist") / "desktop-staging"
+STAGING_WIN_UNPACKED_RELATIVE = STAGING_OUTPUT_DIR_RELATIVE / "win-unpacked"
+STAGING_PROVENANCE_RELATIVE = (
+    STAGING_WIN_UNPACKED_RELATIVE / "resources" / "app.asar.unpacked" / "package-provenance.json"
+)
+PREVIOUS_WIN_UNPACKED_RELATIVE = Path("dist") / "desktop" / ".win-unpacked-previous"
 # A lock without a trustworthy live holder must not block refresh forever after
 # a helper crash. Live holders remain authoritative even when a rebuild is
 # longer than this grace period.
@@ -101,29 +116,26 @@ def _refresh_failure_path(project_root: Path | str) -> Path:
     return Path(project_root) / REFRESH_FAILURE_RELATIVE
 
 
-def _refresh_lock_path(project_root: Path | str) -> Path:
-    return Path(project_root) / REFRESH_LOCK_RELATIVE
+def _refresh_lock_path(project_root: Path | str, lock_relative: Path = REFRESH_LOCK_RELATIVE) -> Path:
+    return Path(project_root) / lock_relative
 
 
-def record_desktop_shell_refresh_failure(
-    project_root: Path | str,
-    *,
-    reason: str,
-    detail: str,
-) -> None:
-    path = _refresh_failure_path(project_root)
+def _prebuild_failure_path(project_root: Path | str) -> Path:
+    return Path(project_root) / PREBUILD_FAILURE_RELATIVE
+
+
+def _record_shell_failure_marker(path: Path, *, reason: str, detail: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schemaVersion": 1,
         "failedAt": datetime.now(timezone.utc).isoformat(),
-        "reason": str(reason or "refresh_failed"),
+        "reason": str(reason or "failed"),
         "detail": str(detail or "")[:800],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def clear_desktop_shell_refresh_failure(project_root: Path | str) -> None:
-    path = _refresh_failure_path(project_root)
+def _clear_shell_failure_marker(path: Path) -> None:
     if not path.is_file():
         return
     try:
@@ -132,12 +144,7 @@ def clear_desktop_shell_refresh_failure(project_root: Path | str) -> None:
         return
 
 
-def recent_desktop_shell_refresh_failure(
-    project_root: Path | str,
-    *,
-    cooldown_seconds: float = REFRESH_COOLDOWN_SECONDS,
-) -> dict[str, Any] | None:
-    path = _refresh_failure_path(project_root)
+def _recent_shell_failure_marker(path: Path, *, cooldown_seconds: float) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:
@@ -159,8 +166,39 @@ def recent_desktop_shell_refresh_failure(
     return payload
 
 
-def _acquire_desktop_shell_refresh_lock(project_root: Path | str) -> bool:
-    path = _refresh_lock_path(project_root)
+def record_desktop_shell_refresh_failure(
+    project_root: Path | str,
+    *,
+    reason: str,
+    detail: str,
+) -> None:
+    _record_shell_failure_marker(
+        _refresh_failure_path(project_root),
+        reason=str(reason or "refresh_failed"),
+        detail=detail,
+    )
+
+
+def clear_desktop_shell_refresh_failure(project_root: Path | str) -> None:
+    _clear_shell_failure_marker(_refresh_failure_path(project_root))
+
+
+def recent_desktop_shell_refresh_failure(
+    project_root: Path | str,
+    *,
+    cooldown_seconds: float = REFRESH_COOLDOWN_SECONDS,
+) -> dict[str, Any] | None:
+    return _recent_shell_failure_marker(
+        _refresh_failure_path(project_root),
+        cooldown_seconds=cooldown_seconds,
+    )
+
+
+def _acquire_desktop_shell_refresh_lock(
+    project_root: Path | str,
+    lock_relative: Path = REFRESH_LOCK_RELATIVE,
+) -> bool:
+    path = _refresh_lock_path(project_root, lock_relative)
     path.parent.mkdir(parents=True, exist_ok=True)
     for _attempt in range(3):
         with _refresh_lock_breaker(path) as acquired:
@@ -182,10 +220,14 @@ def _acquire_desktop_shell_refresh_lock(project_root: Path | str) -> bool:
     return False
 
 
-def _assign_desktop_shell_refresh_helper(project_root: Path | str, helper_pid: int) -> None:
+def _assign_desktop_shell_refresh_helper(
+    project_root: Path | str,
+    helper_pid: int,
+    lock_relative: Path = REFRESH_LOCK_RELATIVE,
+) -> None:
     """Transfer refresh-lock ownership from the scheduler to its helper."""
 
-    path = _refresh_lock_path(project_root)
+    path = _refresh_lock_path(project_root, lock_relative)
     with _refresh_lock_breaker(path) as acquired:
         if not acquired:
             raise OSError(f"desktop shell refresh lock is busy: {path}")
@@ -359,8 +401,11 @@ def _quarantine_stale_refresh_lock(path: Path) -> bool:
         return _quarantine_stale_refresh_lock_locked(path)
 
 
-def _release_desktop_shell_refresh_lock(project_root: Path | str) -> None:
-    path = _refresh_lock_path(project_root)
+def _release_desktop_shell_refresh_lock(
+    project_root: Path | str,
+    lock_relative: Path = REFRESH_LOCK_RELATIVE,
+) -> None:
+    path = _refresh_lock_path(project_root, lock_relative)
     with _refresh_lock_breaker(path) as acquired:
         if not acquired or not path.is_file():
             return
@@ -714,10 +759,201 @@ def run_desktop_shell_refresh(
         _release_desktop_shell_refresh_lock(root)
 
 
+def schedule_desktop_shell_prebuild(
+    project_root: Path | str = PROJECT_ROOT,
+    *,
+    python_executable: str | None = None,
+) -> dict[str, Any]:
+    """Start a detached helper that stages the next packaged shell build.
+
+    The staged build lands in ``dist/desktop-staging`` and never touches the
+    live ``win-unpacked``; the next ``rebuild_desktop_shell`` promotes it via
+    rename instead of running the minute-long npm build.
+    """
+
+    root = Path(project_root)
+    if (
+        _recent_shell_failure_marker(_prebuild_failure_path(root), cooldown_seconds=PREBUILD_COOLDOWN_SECONDS)
+        is not None
+    ):
+        return {"schemaVersion": 1, "scheduled": False, "helperPid": 0, "reason": "prebuild_cooldown"}
+    if _refresh_lock_path(root).is_file():
+        # A scheduled-or-running refresh rebuilds the final package anyway, so
+        # a staging build started now would race the very rebuild it exists
+        # to speed up.
+        return {"schemaVersion": 1, "scheduled": False, "helperPid": 0, "reason": "refresh_in_progress"}
+    if not _acquire_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE):
+        return {"schemaVersion": 1, "scheduled": False, "helperPid": 0, "reason": "prebuild_in_progress"}
+    helper_python = _pythonw(python_executable or sys.executable)
+    entry = root / "scripts" / "vibelution_desktop_entry.py"
+    args = [
+        helper_python,
+        str(entry),
+        "--action",
+        "prebuild-desktop-shell",
+        "--output",
+        "json",
+        "--workspace",
+        str(root),
+    ]
+    # The prebuild helper must outlive the closeout that scheduled it, without
+    # any visible console. Workbench jobs allow explicit breakaway and nothing
+    # else, so this flag set is the only exit.
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+    kwargs = no_window_subprocess_kwargs(creationflags=flags)
+    try:
+        process = subprocess.Popen(
+            args,
+            cwd=str(root),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            **kwargs,
+        )
+    except OSError as exc:
+        _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
+        raise RuntimeError(f"desktop shell prebuild helper did not start: {exc}") from exc
+    helper_pid = int(getattr(process, "pid", 0) or 0)
+    if helper_pid > 0:
+        try:
+            _assign_desktop_shell_refresh_helper(root, helper_pid, lock_relative=PREBUILD_LOCK_RELATIVE)
+        except OSError as exc:
+            _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
+            raise RuntimeError(f"desktop shell prebuild lock could not be transferred: {exc}") from exc
+    return {"schemaVersion": 1, "scheduled": True, "helperPid": helper_pid}
+
+
+def run_desktop_shell_prebuild(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Stage the current checkout's packaged shell into ``dist/desktop-staging``."""
+
+    root = Path(project_root)
+    try:
+        if _refresh_lock_path(root).is_file():
+            # Refresh owns the final package; a staging build would only race it.
+            return {"schemaVersion": 1, "ok": True, "skipped": "refresh_in_progress"}
+        status = inspect_desktop_shell(root)
+        if not status["stale"]:
+            return {"schemaVersion": 1, "ok": True, "skipped": "current"}
+        try:
+            staged = _stage_desktop_shell(root)
+        except Exception as exc:
+            detail = str(exc)
+            _record_shell_failure_marker(
+                _prebuild_failure_path(root),
+                reason="prebuild_failed",
+                detail=detail,
+            )
+            _append_refresh_log(root, "prebuild.aborted", detail=detail[-800:])
+            return {
+                "schemaVersion": 1,
+                "ok": False,
+                "reason": "prebuild_failed",
+                "message": detail[-800:],
+            }
+        _clear_shell_failure_marker(_prebuild_failure_path(root))
+        _append_refresh_log(root, "prebuild.finished", electronTreeHash=str(staged.get("electronTreeHash") or ""))
+        return {"schemaVersion": 1, "ok": True, "staged": True, **staged}
+    finally:
+        _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
+
+
+def _stage_desktop_shell(root: Path) -> dict[str, Any]:
+    """Build into desktop-staging and verify the staged provenance tree hash."""
+
+    staging_root = root / STAGING_OUTPUT_DIR_RELATIVE
+    shutil.rmtree(staging_root, ignore_errors=True)
+    electron_dir = root / ELECTRON_PACKAGE_DIR
+    node_command = _node_command()
+    npm_cli = _npm_cli_script_for_node(node_command)
+    command = [node_command, npm_cli, "run", "package:staging"]
+    result = subprocess.run(
+        command,
+        cwd=str(electron_dir),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        **no_window_subprocess_kwargs(),
+    )
+    if int(result.returncode or 0) != 0:
+        detail = (result.stderr or result.stdout or "").strip().replace("\r", "")[-800:]
+        _append_refresh_log(root, "prebuild.failed", exit_code=int(result.returncode or 0), detail=detail)
+        raise RuntimeError(f"desktop shell package:staging failed with exit code {result.returncode}: {detail}")
+    staged_tree = str(_read_json(root / STAGING_PROVENANCE_RELATIVE).get("electronTreeHash") or "").strip()
+    current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+    if not staged_tree or not current_tree or staged_tree != current_tree:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise RuntimeError(
+            "staged desktop shell provenance does not match HEAD:desktop/electron "
+            f"(staged={staged_tree!r} current={current_tree!r})"
+        )
+    return {"electronTreeHash": staged_tree}
+
+
+def _try_promote_staged_desktop_shell(root: Path) -> bool:
+    """Swap a valid staged build into the live ``win-unpacked`` via rename.
+
+    Only the Electron tree hash gates the swap; the caller still runs the full
+    ``inspect_desktop_shell`` afterwards and falls back to the real npm rebuild
+    when the promoted package does not pass. Any rename failure restores the
+    previous layout and returns False so the slow path stays safe.
+    """
+
+    staging_unpacked = root / STAGING_WIN_UNPACKED_RELATIVE
+    if not (staging_unpacked / "Vibelution.exe").is_file():
+        return False
+    staged_tree = str(_read_json(root / STAGING_PROVENANCE_RELATIVE).get("electronTreeHash") or "").strip()
+    if not staged_tree:
+        return False
+    current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+    if not current_tree or staged_tree != current_tree:
+        # Leave the staging in place; the next successful prebuild replaces it.
+        return False
+    live = root / "dist" / "desktop" / "win-unpacked"
+    previous = root / PREVIOUS_WIN_UNPACKED_RELATIVE
+    moved_previous = False
+    try:
+        if previous.exists():
+            shutil.rmtree(previous, ignore_errors=True)
+        if live.exists():
+            _rename_dir(live, previous)
+            moved_previous = True
+        _rename_dir(staging_unpacked, live)
+    except OSError:
+        # A sharing violation here means something still holds the live tree
+        # open; put the old package back and let the caller rebuild instead.
+        if moved_previous and not live.exists():
+            try:
+                _rename_dir(previous, live)
+            except OSError:
+                pass
+        return False
+    shutil.rmtree(previous, ignore_errors=True)
+    shutil.rmtree(root / STAGING_OUTPUT_DIR_RELATIVE, ignore_errors=True)
+    return True
+
+
 def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
     """Rebuild ``win-unpacked`` from the current ``desktop/electron`` checkout."""
 
     root = Path(project_root)
+    if _try_promote_staged_desktop_shell(root):
+        status = inspect_desktop_shell(root)
+        if not status["stale"]:
+            _append_refresh_log(root, "rebuild.promoted_from_staging", reason=status["reason"])
+            return {
+                "rebuilt": True,
+                "promotedFromStaging": True,
+                "reason": status["reason"],
+                "currentElectronTree": status["currentElectronTree"],
+            }
+        # The staged tree hash matched but the full freshness inspection does
+        # not (frontend drift, mtime regression). Never deliver that package:
+        # fall through to the real rebuild.
+        _append_refresh_log(root, "rebuild.promote_rejected", reason=status["reason"])
     electron_dir = root / ELECTRON_PACKAGE_DIR
     node_command = _node_command()
     npm_cli = _npm_cli_script_for_node(node_command)
@@ -1330,7 +1566,10 @@ def _append_refresh_log(project_root: Path, event: str, **fields: Any) -> None:
         payload = {"event": event, **fields}
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except OSError:
+    except Exception:
+        # Structured logging is strictly best-effort: a missing project
+        # identity or an unwritable runtime tree must never break the refresh
+        # or prebuild flows it observes.
         return
 
 

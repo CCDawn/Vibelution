@@ -1423,3 +1423,177 @@ def test_cleanup_only_dirty_main_reports_attribution(
     assert result.errors[0] == "dirty_main"
     assert any("stray.txt" in line for line in result.errors[1:])
     assert result.next_action == error.next_action
+
+
+def _stub_merged_closeout_flow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[str],
+    *,
+    merge_sha: str = "new-sha",
+) -> None:
+    """Everything around a successful closeout merge, with events recorded."""
+
+    manifest = tmp_path / "manifest.json"
+    monkeypatch.setattr(closeout, "resolve_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(
+        closeout,
+        "acquire_integration_claim",
+        lambda *_args, **_kwargs: events.append("acquire") or "claim-int",
+    )
+    monkeypatch.setattr(
+        gate,
+        "run_closeout",
+        lambda *_args, **_kwargs: events.append("closeout")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(
+        gate,
+        "verify_manifest",
+        lambda *_args, **_kwargs: events.append("verify")
+        or gate.GateResult(outcome="passed", exit_code=0, manifest_path=manifest),
+    )
+    monkeypatch.setattr(closeout, "merge_ff_only", lambda *_args, **_kwargs: merge_sha)
+    monkeypatch.setattr(
+        closeout,
+        "release_claim",
+        lambda _ctx, claim_id, *, status, reason: events.append(f"release:{claim_id}:{status}"),
+    )
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: events.append("cleanup"))
+    monkeypatch.setattr(closeout, "complete_agent", lambda *_args, **_kwargs: events.append("complete"))
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: events.append("prune"))
+
+
+def test_post_merge_prebuild_scheduled_once_with_main_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.launcher import desktop_shell
+
+    events: list[str] = []
+    _stub_merged_closeout_flow(tmp_path, monkeypatch, events)
+    monkeypatch.setattr(gate, "rev_parse", lambda root, spec: "old-sha")
+    monkeypatch.delenv("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD", raising=False)
+    scheduled: list[Path] = []
+    monkeypatch.setattr(
+        desktop_shell,
+        "schedule_desktop_shell_prebuild",
+        lambda root: scheduled.append(Path(root)) or {"scheduled": True, "helperPid": 7},
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.exit_code == 0
+    assert scheduled == [tmp_path / "main"]
+
+
+def test_post_merge_prebuild_failure_keeps_merged_clean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.launcher import desktop_shell
+
+    events: list[str] = []
+    _stub_merged_closeout_flow(tmp_path, monkeypatch, events)
+    monkeypatch.setattr(gate, "rev_parse", lambda root, spec: "old-sha")
+    monkeypatch.delenv("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD", raising=False)
+
+    def explode(root):
+        raise RuntimeError("helper spawn refused")
+
+    monkeypatch.setattr(desktop_shell, "schedule_desktop_shell_prebuild", explode)
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.exit_code == 0
+    assert result.merged is True
+
+
+def test_cleanup_only_never_schedules_post_merge_prebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.launcher import desktop_shell
+
+    monkeypatch.setattr(closeout, "resolve_cleanup_context", lambda *_args, **_kwargs: context(tmp_path))
+    monkeypatch.setattr(closeout, "cleanup_task_resources", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(closeout, "prune_coordination", lambda *_args, **_kwargs: None)
+    monkeypatch.delenv("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD", raising=False)
+    monkeypatch.setattr(
+        desktop_shell,
+        "schedule_desktop_shell_prebuild",
+        lambda root: pytest.fail("cleanup-only must not schedule a desktop shell prebuild"),
+    )
+
+    result = closeout.run_cleanup_only(
+        tmp_path / "task",
+        branch="codex/test-task",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.exit_code == 0
+
+
+def test_post_merge_prebuild_env_switch_disables_hook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.launcher import desktop_shell
+
+    events: list[str] = []
+    _stub_merged_closeout_flow(tmp_path, monkeypatch, events)
+    monkeypatch.setattr(gate, "rev_parse", lambda root, spec: "old-sha")
+    # The conftest autouse fixture pins the disable switch; keep it and prove
+    # the scheduler is never even imported on the merge success path.
+    assert os.environ.get("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD") == "1"
+    monkeypatch.setattr(
+        desktop_shell,
+        "schedule_desktop_shell_prebuild",
+        lambda root: pytest.fail("disable switch must gate the hook"),
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.exit_code == 0
+
+
+def test_post_merge_prebuild_skipped_when_merge_does_not_advance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.launcher import desktop_shell
+
+    events: list[str] = []
+    _stub_merged_closeout_flow(tmp_path, monkeypatch, events, merge_sha="old-sha")
+    monkeypatch.setattr(gate, "rev_parse", lambda root, spec: "old-sha")
+    monkeypatch.delenv("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD", raising=False)
+    monkeypatch.setattr(
+        desktop_shell,
+        "schedule_desktop_shell_prebuild",
+        lambda root: pytest.fail("a no-advance merge must not schedule a prebuild"),
+    )
+
+    result = closeout.run_managed_closeout(
+        tmp_path / "task",
+        claim_id="claim-dev",
+        agent_id="agent-test",
+    )
+
+    assert result.status == "merged_clean"
+    assert result.exit_code == 0

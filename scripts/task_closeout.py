@@ -623,6 +623,46 @@ def merge_ff_only(context: CloseoutContext, *, integration_claim_id: str, target
     return target_sha
 
 
+def _safe_main_head_sha(context: CloseoutContext) -> str:
+    """Best-effort pre-merge HEAD of main; empty when Git cannot answer."""
+
+    try:
+        return gate.rev_parse(context.main_root, "HEAD")
+    except Exception:  # noqa: BLE001 - the prebuild hook must never fail closeout
+        return ""
+
+
+def _schedule_post_merge_desktop_shell_prebuild(
+    context: CloseoutContext,
+    *,
+    merge_sha: str,
+    old_sha: str,
+) -> None:
+    """After a real merge advance, stage the next packaged shell in the background.
+
+    Best-effort by contract: any failure costs one bounded stderr line and can
+    never change the closeout result, and ``--cleanup-only`` (no merge) never
+    reaches here. ``VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD=1`` disables
+    the hook entirely (test isolation).
+    """
+
+    if os.environ.get("VIBELUTION_CLOSEOUT_DISABLE_POST_MERGE_PREBUILD", "").strip() == "1":
+        return
+    if not merge_sha or not old_sha or merge_sha == old_sha:
+        return
+    try:
+        from core.launcher.desktop_shell import schedule_desktop_shell_prebuild
+
+        payload = schedule_desktop_shell_prebuild(context.main_root)
+        if not payload.get("scheduled"):
+            print(
+                f"post-merge desktop shell prebuild not scheduled: {payload.get('reason') or 'unknown'}",
+                file=sys.stderr,
+            )
+    except Exception as error:  # noqa: BLE001 - prebuild must never fail closeout
+        print(f"post-merge desktop shell prebuild failed: {str(error)[:200]}", file=sys.stderr)
+
+
 def resolve_claim_identity(
     context: CloseoutContext,
     *,
@@ -1218,6 +1258,7 @@ def run_managed_closeout(
                 errors=[str(verified.outcome)],
             )
         else:
+            pre_merge_sha = _safe_main_head_sha(context)
             merge_sha = merge_ff_only(
                 context,
                 integration_claim_id=integration_claim_id,
@@ -1235,6 +1276,11 @@ def run_managed_closeout(
                 reason=f"ff-only merge completed at {merge_sha}",
             )
             integration_released = True
+            _schedule_post_merge_desktop_shell_prebuild(
+                context,
+                merge_sha=merge_sha,
+                old_sha=pre_merge_sha,
+            )
             cleanup_errors: list[str] = []
             if not retain_worktree:
                 try:
