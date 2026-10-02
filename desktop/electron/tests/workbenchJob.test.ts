@@ -1,10 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   __setWorkbenchJobNativeForTests,
+  captureTrackedWorkbenchJobRetirement,
   hasTrackedWorkbenchJob,
   spawnTrackedWorkbenchProcess,
   terminateTrackedWorkbenchJob,
@@ -13,6 +14,57 @@ import {
 } from "../src/process/workbenchJob.js";
 
 describe("workbench job registry", () => {
+  afterEach(() => {
+    __setWorkbenchJobNativeForTests(undefined);
+    vi.useRealTimers();
+  });
+
+  it("releases an idle job after natural exit without another lifecycle command", async () => {
+    vi.useFakeTimers();
+    let active = 1;
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+      activeCount: () => active, close
+    });
+    spawnTrackedWorkbenchProcess("C:/natural-exit", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    active = 0;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(close).toHaveBeenCalledOnce();
+    expect(hasTrackedWorkbenchJob("C:/natural-exit")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not let an old retirement delete or terminate a replacement job", async () => {
+    vi.useFakeTimers();
+    let generation = 0;
+    const counts = new Map<object, number>();
+    const close = vi.fn((job) => counts.set(job, 0));
+    const terminate = vi.fn(() => true);
+    __setWorkbenchJobNativeForTests({
+      spawn: () => {
+        const job = {};
+        counts.set(job, 1);
+        return { pid: process.pid + (++generation), job };
+      }, terminate, activeCount: (job) => counts.get(job) ?? 0, close
+    });
+    const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
+    const old = spawnTrackedWorkbenchProcess("C:/replacement", input);
+    const retireOld = captureTrackedWorkbenchJobRetirement("C:/replacement", old.pid)!;
+    const retirement = terminateTrackedWorkbenchJob("C:/replacement", old.pid);
+    const replacement = spawnTrackedWorkbenchProcess("C:/replacement", input);
+    await vi.advanceTimersByTimeAsync(100);
+    await retirement;
+    expect(hasTrackedWorkbenchJob("C:/replacement")).toBe(true);
+    const calls = terminate.mock.calls.length;
+    await expect(terminateTrackedWorkbenchJob("C:/replacement", old.pid)).resolves.toBe(false);
+    expect(terminate.mock.calls.length).toBe(calls);
+    await expect(retireOld()).resolves.toBe(true);
+    expect(terminate.mock.calls.length).toBe(calls);
+    expect(replacement.pid).not.toBe(old.pid);
+  });
   it("terminates the tracked group before a later tree walk would be needed", async () => {
     const jobs: WorkbenchJobHandle[] = [];
     let active = 2;
@@ -51,6 +103,56 @@ const nativeAddon = process.platform === "win32"
   : describe.skip;
 
 nativeAddon("windows workbench job", () => {
+  it("reclaims surviving children when their owned root exits naturally", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-orphan-job-"));
+    const childPidPath = join(directory, "child-pid.txt");
+    const script = [
+      "const {spawn}=require('node:child_process');const fs=require('node:fs');",
+      "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true});",
+      `fs.writeFileSync(${JSON.stringify(childPidPath)},String(child.pid));`,
+      "setTimeout(()=>process.exit(0),100);"
+    ].join("");
+    const spawned = spawnTrackedWorkbenchProcess(directory, {
+      executable: process.execPath, arguments: ["-e", script], cwd: directory, env: { ...process.env },
+      stdoutPath: join(directory, "stdout.log"), stderrPath: join(directory, "stderr.log")
+    });
+    try {
+      const deadline = Date.now() + 8_000;
+      while (hasTrackedWorkbenchJob(directory) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const childPid = Number(readFileSync(childPidPath, "utf8"));
+      expect(childPid).toBeGreaterThan(0);
+      expect(pidAlive(spawned.pid)).toBe(false);
+      expect(pidAlive(childPid)).toBe(false);
+      expect(hasTrackedWorkbenchJob(directory)).toBe(false);
+    } finally {
+      await terminateTrackedWorkbenchJob(directory);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 12_000);
+
+  it("reaps the native handle after a process exits by itself", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-natural-job-"));
+    const spawned = spawnTrackedWorkbenchProcess(directory, {
+      executable: process.execPath, arguments: ["-e", "setTimeout(()=>{},100)"],
+      cwd: directory, env: { ...process.env },
+      stdoutPath: join(directory, "stdout.log"), stderrPath: join(directory, "stderr.log")
+    });
+    try {
+      const deadline = Date.now() + 5_000;
+      while (hasTrackedWorkbenchJob(directory) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(pidAlive(spawned.pid)).toBe(false);
+      expect(hasTrackedWorkbenchJob(directory)).toBe(false);
+    } finally {
+      await terminateTrackedWorkbenchJob(directory);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 10_000);
   it("kills the spawned process and the child it starts", async () => {
     const { loadWorkbenchJobNative } = await import("../src/process/workbenchJob.js");
     const native = loadWorkbenchJobNative();

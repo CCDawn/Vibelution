@@ -56,7 +56,7 @@ def initialize_session_catalog_on_startup() -> object:
     )
 
 
-def initialize_session_directory_on_startup() -> object:
+def initialize_session_directory_on_startup(generation: int | None = None) -> object:
     """Open the live session directory store and discard unmigrated JSON sessions."""
 
     from .services.session.directory_runtime import (
@@ -69,6 +69,7 @@ def initialize_session_directory_on_startup() -> object:
         return SessionDirectoryRuntimeStatus(status="skipped_pytest")
     return initialize_session_directory_runtime(
         project_root=Path(__file__).resolve().parents[2],
+        generation=generation,
     )
 
 
@@ -240,11 +241,15 @@ async def web_workbench_lifespan(app: FastAPI | None):
         should_skip_directory_runtime_for_pytest,
     )
 
-    if not should_skip_directory_runtime_for_pytest():
-        begin_directory_startup()
-    startup_directory_task = asyncio.create_task(
-        asyncio.to_thread(initialize_session_directory_on_startup)
-    )
+    if should_skip_directory_runtime_for_pytest():
+        startup_directory_task = asyncio.create_task(
+            asyncio.to_thread(initialize_session_directory_on_startup)
+        )
+    else:
+        directory_generation = begin_directory_startup()
+        startup_directory_task = asyncio.create_task(
+            asyncio.to_thread(initialize_session_directory_on_startup, directory_generation)
+        )
     startup_catalog_task = asyncio.create_task(
         asyncio.to_thread(initialize_session_catalog_on_startup)
     )

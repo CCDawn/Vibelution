@@ -68,6 +68,22 @@ def test_directory_runtime_import_keeps_heavy_dependencies_lazy():
     )
 
 
+def test_directory_startup_forwards_lifespan_generation(monkeypatch):
+    from core.web.services.session import directory_runtime
+
+    observed = {}
+    monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: False)
+    monkeypatch.setattr(
+        directory_runtime,
+        "initialize_session_directory_runtime",
+        lambda **kwargs: observed.update(kwargs) or object(),
+    )
+
+    lifecycle.initialize_session_directory_on_startup(generation=23)
+
+    assert observed["generation"] == 23
+
+
 def test_web_lifespan_records_ready_scene_event_after_entering_context(monkeypatch):
     entered = threading.Event()
     recorded = threading.Event()

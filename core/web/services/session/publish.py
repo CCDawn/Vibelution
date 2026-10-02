@@ -588,15 +588,16 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
     if detail is None and s._is_session_running(session_id):
         interval_seconds = s._SESSION_STREAM_MIN_BUSY_SNAPSHOT_INTERVAL_SECONDS
         now = s._perf_counter()
-        with s._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
-            last_snapshot_at = s._SESSION_STREAM_LAST_SNAPSHOT_AT.get(session_id, 0.0)
-            if last_snapshot_at and now - last_snapshot_at < interval_seconds:
-                pre_throttled_count = s._SESSION_STREAM_THROTTLED_COUNTS.get(session_id, 0) + 1
-                s._SESSION_STREAM_THROTTLED_COUNTS[session_id] = pre_throttled_count
-            else:
-                pre_throttled_count = s._SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, 0)
-                s._SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = now
-                pre_reserved_busy_snapshot = True
+        claim = _claim_session_detail_snapshot_slot(
+            s,
+            session_id,
+            subscribers,
+            now=now,
+            interval_seconds=interval_seconds,
+        )
+        if claim is None:
+            return
+        pre_reserved_busy_snapshot, pre_throttled_count = claim
         if not pre_reserved_busy_snapshot:
             if pre_throttled_count % 10 == 1:
                 s._record_session_detail_snapshot_throttled_event(
@@ -631,16 +632,17 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
                 interval_ms=int(round(interval_seconds * 1000)),
             )
     elif is_busy_snapshot:
-        with s._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
-            last_snapshot_at = s._SESSION_STREAM_LAST_SNAPSHOT_AT.get(session_id, 0.0)
-            if last_snapshot_at and now - last_snapshot_at < interval_seconds:
-                should_throttle = True
-                skipped_count = s._SESSION_STREAM_THROTTLED_COUNTS.get(session_id, 0) + 1
-                s._SESSION_STREAM_THROTTLED_COUNTS[session_id] = skipped_count
-                s._SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = last_snapshot_at
-            else:
-                skipped_count = s._SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, 0)
-                s._SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = now
+        claim = _claim_session_detail_snapshot_slot(
+            s,
+            session_id,
+            subscribers,
+            now=now,
+            interval_seconds=interval_seconds,
+        )
+        if claim is None:
+            return
+        reserved, skipped_count = claim
+        should_throttle = not reserved
         if should_throttle:
             if skipped_count % 10 == 1:
                 s._record_session_detail_snapshot_throttled_event(
@@ -660,9 +662,9 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
                 interval_ms=int(round(interval_seconds * 1000)),
             )
     else:
-        with s._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
-            s._SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = now
-            skipped_count = s._SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, 0)
+        skipped_count = _clear_session_detail_snapshot_slot(s, session_id, subscribers, now=now)
+        if skipped_count is None:
+            return
         if skipped_count:
             s._record_session_detail_snapshot_throttled_event(
                 session_id=session_id,
@@ -671,6 +673,9 @@ def _publish_session_detail_snapshot(session_id: str, *, detail: dict[str, Any] 
                 current_phase=current_phase,
                 interval_ms=int(round(interval_seconds * 1000)),
             )
+    subscribers = _current_session_stream_subscribers(s, session_id, subscribers)
+    if not subscribers:
+        return
     event = {
         "type": "session_detail",
         "sessionId": session_id,
@@ -934,6 +939,70 @@ def _unregister_session_stream_subscriber(session_id: str, subscriber: queue.Que
         bucket.discard(subscriber)
         if not bucket:
             s._SESSION_STREAM_SUBSCRIBERS.pop(session_id, None)
+            # Lock order is always subscribers -> snapshot state. A publisher
+            # that already copied the old bucket must revalidate before it can
+            # repopulate these per-session throttle maps.
+            with s._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
+                s._SESSION_STREAM_LAST_SNAPSHOT_AT.pop(session_id, None)
+                s._SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, None)
+
+
+def _has_current_session_stream_subscriber_locked(
+    s: Any,
+    session_id: str,
+    candidates: list[Any],
+) -> bool:
+    bucket = s._SESSION_STREAM_SUBSCRIBERS.get(session_id) or set()
+    return any(candidate in bucket for candidate in candidates)
+
+
+def _current_session_stream_subscribers(
+    s: Any,
+    session_id: str,
+    candidates: list[Any],
+) -> list[Any]:
+    with s._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        bucket = s._SESSION_STREAM_SUBSCRIBERS.get(session_id) or set()
+        return [candidate for candidate in candidates if candidate in bucket]
+
+
+def _claim_session_detail_snapshot_slot(
+    s: Any,
+    session_id: str,
+    candidates: list[Any],
+    *,
+    now: float,
+    interval_seconds: float,
+) -> tuple[bool, int] | None:
+    """Reserve one snapshot interval only for a subscriber still in this bucket."""
+
+    with s._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        if not _has_current_session_stream_subscriber_locked(s, session_id, candidates):
+            return None
+        with s._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
+            last_snapshot_at = s._SESSION_STREAM_LAST_SNAPSHOT_AT.get(session_id, 0.0)
+            if last_snapshot_at and now - last_snapshot_at < interval_seconds:
+                skipped_count = s._SESSION_STREAM_THROTTLED_COUNTS.get(session_id, 0) + 1
+                s._SESSION_STREAM_THROTTLED_COUNTS[session_id] = skipped_count
+                return False, skipped_count
+            skipped_count = s._SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, 0)
+            s._SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = now
+            return True, skipped_count
+
+
+def _clear_session_detail_snapshot_slot(
+    s: Any,
+    session_id: str,
+    candidates: list[Any],
+    *,
+    now: float,
+) -> int | None:
+    with s._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        if not _has_current_session_stream_subscriber_locked(s, session_id, candidates):
+            return None
+        with s._SESSION_STREAM_LAST_SNAPSHOT_LOCK:
+            s._SESSION_STREAM_LAST_SNAPSHOT_AT[session_id] = now
+            return s._SESSION_STREAM_THROTTLED_COUNTS.pop(session_id, 0)
 
 
 def _encode_sse_event(event_name: str, payload: dict[str, Any], *, event_seq: int = 0) -> str:
