@@ -71,7 +71,7 @@ ROOT_GUIDES = {
     },
     "launcher_runtime": {
         "userGuide": "Launcher 进程 stdout/stderr、启动控制与前端构建日志。",
-        "agentGuide": "排查启动、关闭、端口和后台服务时优先读 backend.stdout.log / backend.stderr.log / launcher-control.log；大文件先看 agent_log_context.resolvedEvidenceRefs 或 runtime scene raw 尾段。",
+        "agentGuide": "排查启动、关闭、端口和后台服务时，只打开 firstRead.evidencePaths 里点名的 backend.stdout.log / backend.stderr.log / launcher-control.log；带 warning 的文件不要整篇读。",
     },
     "runtime_logs": {
         "userGuide": "项目 logs/ 根下的普通运行日志（不含 runtime_scenes 包与 conversations）。",
