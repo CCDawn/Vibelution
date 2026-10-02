@@ -28,7 +28,6 @@ def instance_short_name_base(
     *,
     kind: str = "",
     branch: str = "",
-    slug: str = "",
     path_name: str = "",
 ) -> str:
     normalized_kind = str(kind or "").strip().lower()
@@ -36,7 +35,9 @@ def instance_short_name_base(
         return MAIN_SHORT_NAME
     label = _branch_label(branch)
     if not label or label.lower() == "detached":
-        label = _branch_label(slug) or _branch_label(path_name) or "detached"
+        # Pool-external ids carry a normalized path fallback; never decode the
+        # id for display. Fall back to the checkout's leaf directory name.
+        label = _branch_label(path_name) or "detached"
     if normalized_kind == "retired":
         return f"{RETIRED_NAME_PREFIX}{label}"
     return f"{BRANCH_NAME_PREFIX}{label}"
@@ -52,7 +53,6 @@ def assign_instance_display_names(items: Iterable[dict[str, Any]]) -> None:
         base = instance_short_name_base(
             kind=str(item.get("kind") or ""),
             branch=str(item.get("branch") or ""),
-            slug=_slug_from_id(str(item.get("id") or "")),
             path_name=path_name,
         )
         name = base
@@ -86,12 +86,6 @@ def _branch_label(value: str) -> str:
     if text.startswith("refs/heads/"):
         text = text.removeprefix("refs/heads/")
     return text.strip("/")
-
-
-def _slug_from_id(instance_id: str) -> str:
-    if ":" not in instance_id:
-        return instance_id
-    return instance_id.split(":", 1)[1]
 
 
 def _clean_short_name(value: str) -> str:

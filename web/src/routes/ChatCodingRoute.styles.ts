@@ -42,7 +42,11 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
   // Wave 6H dialog policy: viewport clamp only — not workbench pane-heights.,
   centerPane:
-    `vui-routes-chatcodingroute centerPane min-w-0 w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden ${vuiChatFillClass} [grid-column:3] [grid-row:1]`,
+    `vui-routes-chatcodingroute centerPane min-w-0 w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden ${vuiChatFillClass}`,
+  // Column placement is separate from the pane. The built stylesheet emits
+  // grid-column:3 after grid-column:1, so both utilities on one node keep column 3.
+  centerPaneDocked:
+    "vui-routes-chatcodingroute centerPaneDocked [grid-column:3] [grid-row:1]",
   centerPaneOverlay:
     "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
