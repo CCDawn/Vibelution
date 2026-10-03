@@ -167,6 +167,35 @@ describe("ShadcnTooltip React 19 update depth", () => {
     expect(document.activeElement).toBe(container.querySelector("input"));
   });
 
+  it("keeps the idle host through a pointer click before arming the overlay", () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    mount(
+      <VuiProvider>
+        <VTooltip content="click-tip" delay={320}>
+          <button type="button" onClick={onClick}>host</button>
+        </VTooltip>
+      </VuiProvider>,
+    );
+    const host = container.querySelector("button");
+    act(() => {
+      host?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      host?.focus();
+      vi.advanceTimersByTime(500);
+    });
+    expect(container.querySelector("button")).toBe(host);
+    expect(document.querySelector("[data-vui='tooltip-content']")).toBeNull();
+    act(() => {
+      host?.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      host?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(container.querySelector("button")).toBe(host);
+    act(() => vi.advanceTimersByTime(320));
+    expect(document.activeElement).toBe(container.querySelector("button"));
+    expect(document.querySelector("[data-vui='tooltip-content']")?.textContent).toContain("click-tip");
+  });
+
   it("does not restore a trigger after focus has moved elsewhere", () => {
     mount(
       <VuiProvider>

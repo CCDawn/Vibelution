@@ -58,6 +58,7 @@ const triggerSlotProps = {
 type IntentTriggerProps = {
   onPointerEnter?: (event: PointerEvent<HTMLElement>) => void;
   onPointerLeave?: (event: PointerEvent<HTMLElement>) => void;
+  onPointerDown?: (event: PointerEvent<HTMLElement>) => void;
   onFocus?: (event: FocusEvent<HTMLElement>) => void;
   onBlur?: (event: FocusEvent<HTMLElement>) => void;
 };
@@ -65,6 +66,7 @@ type IntentTriggerProps = {
 type IdleIntentHandlers = {
   onPointerEnter: () => void;
   onPointerLeave: () => void;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
   onFocus: (event: FocusEvent<HTMLElement>) => void;
   onBlur: (event: FocusEvent<HTMLElement>) => void;
 };
@@ -97,6 +99,10 @@ function withIdleIntent(trigger: ReactElement, handlers: IdleIntentHandlers): Re
     onPointerLeave: (event: PointerEvent<HTMLElement>) => {
       prev.onPointerLeave?.(event);
       handlers.onPointerLeave();
+    },
+    onPointerDown: (event: PointerEvent<HTMLElement>) => {
+      prev.onPointerDown?.(event);
+      handlers.onPointerDown(event);
     },
     onFocus: (event: FocusEvent<HTMLElement>) => {
       prev.onFocus?.(event);
@@ -148,6 +154,8 @@ export function ShadcnTooltip({
   const [overlayMounted, setOverlayMounted] = useState(eager);
   const intentRef = useRef({ pointer: false, focus: false });
   const openTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const pointerPressedRef = useRef(false);
+  const pointerReleaseCleanupRef = useRef<(() => void) | null>(null);
   const armedTriggerRef = useRef<HTMLButtonElement | null>(null);
   const pendingFocusPathRef = useRef<number[] | null>(null);
   const trigger = resolveTrigger(children, renderTrigger);
@@ -180,6 +188,7 @@ export function ShadcnTooltip({
         window.clearTimeout(openTimerRef.current);
         openTimerRef.current = null;
       }
+      pointerReleaseCleanupRef.current?.();
     };
   }, []);
 
@@ -198,7 +207,7 @@ export function ShadcnTooltip({
       }
       openTimerRef.current = window.setTimeout(() => {
         openTimerRef.current = null;
-        if (intentRef.current.pointer || intentRef.current.focus) {
+        if (!pointerPressedRef.current && (intentRef.current.pointer || intentRef.current.focus)) {
           setOverlayMounted(true);
         }
       }, wait);
@@ -208,6 +217,27 @@ export function ShadcnTooltip({
       onPointerLeave: () => {
         intentRef.current.pointer = false;
         if (!intentRef.current.focus) clearOpenTimer();
+      },
+      onPointerDown: (event) => {
+        // Keep the native host through mouseup/click, including label default
+        // actions. Arming during pointer focus would swallow the first click.
+        clearOpenTimer();
+        pointerPressedRef.current = true;
+        pointerReleaseCleanupRef.current?.();
+        const owner = event.currentTarget.ownerDocument;
+        const cleanup = () => {
+          owner.removeEventListener("pointerup", release);
+          owner.removeEventListener("pointercancel", release);
+        };
+        const release = () => {
+          cleanup();
+          pointerReleaseCleanupRef.current = null;
+          pointerPressedRef.current = false;
+          if (intentRef.current.pointer || intentRef.current.focus) armPointer();
+        };
+        pointerReleaseCleanupRef.current = cleanup;
+        owner.addEventListener("pointerup", release);
+        owner.addEventListener("pointercancel", release);
       },
       onFocus: (event) => {
         const path: number[] = [];
@@ -220,7 +250,7 @@ export function ShadcnTooltip({
         }
         pendingFocusPathRef.current = path;
         intentRef.current.focus = true;
-        showNow();
+        if (!pointerPressedRef.current) showNow();
       },
       onBlur: (event) => {
         if (event.currentTarget.isConnected) pendingFocusPathRef.current = null;
