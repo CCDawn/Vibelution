@@ -180,6 +180,9 @@ def build_chat_workbench_bootstrap(
         "activeSessionId": str(active_session_id or "").strip(),
         "sessionPage": session_page,
         "agents": agents,
+        # First-paint gate: lets the web client hold the session index until the
+        # directory store can answer instead of flashing the startup empty page.
+        "directoryReady": directory_runtime.is_directory_ready(),
         # Direct conversations are already represented by sessionPage. The
         # unified index needs only group rooms as its additional first-paint input.
         "conversations": list_group_conversations(list(session_page.get("items") or [])),

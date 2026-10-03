@@ -73,6 +73,10 @@ class ChatWorkbenchBootstrapResponse(BaseModel):
     sessionPage: SessionQueryResponse
     agents: list[dict[str, Any]] = Field(default_factory=list)
     conversations: list[dict[str, Any]] = Field(default_factory=list)
+    # False only while the session directory store is mid-startup; the web
+    # client holds the session index on this bit until it flips or a bounded
+    # fallback expires. Default True keeps unknown payloads ungated.
+    directoryReady: bool = True
 
 
 class SessionDeleteResponse(BaseModel):

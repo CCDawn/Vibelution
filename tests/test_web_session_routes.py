@@ -513,6 +513,9 @@ def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monk
         "sessionPage": {"items": [{"id": "session-a"}], "nextCursor": ""},
         "agents": agents,
         "conversations": [{"conversationId": "room-for-session-a"}],
+        # Pytest skips the directory runtime, so the readiness bit must read
+        # ready (unknown/open) instead of wedging the web client's first paint.
+        "directoryReady": True,
     }
 
 

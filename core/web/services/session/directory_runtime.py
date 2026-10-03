@@ -27,9 +27,14 @@ _PROJECT_ROOT: Path | None = None
 _STATUS: SessionDirectoryRuntimeStatus | None = None
 _GENERATION = 0
 STARTING_WAIT_SECONDS = 30.0
-# List/query must not block HTTP on startup; an empty page is preferable to a
-# 30s hang, and callers must not fall back to discarded JSON.
-LIST_QUERY_STARTUP_WAIT_SECONDS = 0.0
+# List/query may briefly hold a first request so one that races the store
+# publish returns real data instead of an artificial empty page. The store is
+# measured to publish ~8s after lifespan, so no sub-8s wait converts the very
+# first boot-racing request; this bound only wins for requests arriving near
+# readiness while staying far below the 30s STARTING_WAIT_SECONDS hang. The
+# bootstrap payload's ``directoryReady`` bit is the primary gate; this is the
+# backstop for callers that bypass it.
+LIST_QUERY_STARTUP_WAIT_SECONDS = 1.5
 # Boot-time store bootstrap runs alongside route-module imports; the previous
 # 5s writer/import timeouts turned that contention into a dead directory store
 # (observed as ``Session directory store failed to start (TimeoutError)``).
@@ -66,6 +71,20 @@ def conversation_store_path(project_root: Path) -> Path:
 def is_directory_store_open() -> bool:
     with _RUNTIME_LOCK:
         return bool(_STORE is not None and getattr(_STORE, "_open", False))
+
+
+def is_directory_ready() -> bool:
+    """True unless the runtime is mid-startup; unknown or idle counts as ready.
+
+    First-paint consumers read this from the bootstrap payload to hold the
+    session index until the store can answer with real data instead of the
+    startup empty page. Every terminal phase (ready/degraded/failed/stopped)
+    opens the gate so a broken startup can never wedge the frontend forever.
+    """
+
+    with _RUNTIME_LOCK:
+        status = _STATUS
+    return status is None or status.status != "starting"
 
 
 def is_legacy_discard_in_progress() -> bool:

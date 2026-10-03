@@ -1156,6 +1156,7 @@ export function ChatCodingRouteWorkbench() {
     setSelectedAgentId,
     activeSessionBootstrapQuery,
     sessionIndexQueryEnabled,
+    directoryGatePending,
     modelLabelsById,
     modelImageInputSupportById,
     resolveModelLabel,
@@ -3203,6 +3204,7 @@ export function ChatCodingRouteWorkbench() {
     agentsHasData: Boolean(agentsQuery.data),
     agentsIsLoading: agentsQuery.isLoading,
     visibleSessionCount: allVisibleSessions.length,
+    directoryGatePending,
   });
   const toggleRailSection = useCallback((key: string) => {
     setRailSectionCollapsed((current) => ({ ...current, [key]: !current[key] }));

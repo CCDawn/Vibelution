@@ -254,6 +254,8 @@ export type ChatWorkbenchBootstrap = {
   sessionPage: SessionQueryResponse;
   agents: AgentInstance[];
   conversations: ConversationSummary[];
+  /** False only while the backend session directory store is mid-startup. */
+  directoryReady?: boolean;
 };
 
 export type SessionChildHandoffContext = {
