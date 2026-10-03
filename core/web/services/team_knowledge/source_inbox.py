@@ -557,7 +557,7 @@ def collect_session_attachment_to_inbox(
             )
         except ValueError as exc:
             raise s.TeamKnowledgeError(str(exc)) from exc
-        extracted_text = str(extracted_text or "")
+        extracted_text = str(extracted_text or "").replace("\r\n", "\n").replace("\r", "\n")
         max_text_chars = 200_000
         truncated_chars = max(0, len(extracted_text) - max_text_chars)
         safe_content = extracted_text[:max_text_chars]
@@ -571,6 +571,7 @@ def collect_session_attachment_to_inbox(
             "attachmentKind": attachment_kind,
             "contentTrust": "untrusted_source_material",
             "documentHash": file_hash,
+            "extractedTextSha256": "sha256:" + hashlib.sha256(safe_content.encode("utf-8")).hexdigest(),
             "textTruncated": bool(truncated_chars),
             "truncatedCharacters": truncated_chars,
         }
@@ -707,6 +708,52 @@ def list_owner_source_inbox(
     }
 
 
+def _read_staged_document_content(owner: dict[str, Any], source: dict[str, Any]) -> str:
+    """Read only a verified session-document snapshot inside this owner Inbox."""
+    s = _service()
+    source_ref = source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}
+    if (
+        not source.get("_sessionAttachmentCollectorAgentId")
+        or source_ref.get("sourceKind") != "session_attachment"
+        or source_ref.get("attachmentKind") != "user_document"
+        or source_ref.get("textTruncated") is not False
+    ):
+        raise s.TeamKnowledgeError("source_document requires a complete staged session document.")
+    expected_hash = str(source_ref.get("extractedTextSha256") or "")
+    if not expected_hash.startswith("sha256:") or len(expected_hash) != 71:
+        raise s.TeamKnowledgeError("Document snapshot has no text checksum; stage the attachment again.")
+    filename = str(source.get("originalFilename") or "")
+    if not filename or s._safe_source_filename(filename, default="source.txt") != filename:
+        raise s.TeamKnowledgeError("Invalid document snapshot filename.")
+    source_dir = s._owner_inbox_source_dir(owner, str(source.get("inboxSourceId") or ""))
+    # Resolve from the trusted owner directory, never from a caller-provided path.
+    # Keep the owner path lexical: resolving its parents would trust a
+    # symlink/junction that redirects the owner's sources into another folder.
+    expected_dir = source_dir.absolute()
+    expected_path = expected_dir / filename
+    try:
+        stored_path = s._project_path_from_relative(str(source.get("originalPath") or ""))
+        resolved_path = stored_path.resolve(strict=True)
+        if resolved_path != expected_path or stored_path.is_symlink():
+            raise s.TeamKnowledgeError("Document snapshot path is outside its owner Inbox.")
+        max_chars = s.MAX_FORMAL_KNOWLEDGE_CONTENT_CHARS
+        if resolved_path.stat().st_size > max_chars * 4:
+            raise s.TeamKnowledgeError(f"Knowledge content must not exceed {max_chars} characters.")
+        with s._extended_fs_path(resolved_path).open(encoding="utf-8") as handle:
+            content = handle.read(max_chars + 1)
+    except s.TeamKnowledgeError:
+        raise
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise s.TeamKnowledgeError("Document snapshot could not be read safely.") from exc
+    normalized_content = s._normalize_formal_knowledge_content(content)
+    if not normalized_content:
+        raise s.TeamKnowledgeError("Document snapshot contains no knowledge text.")
+    actual_hash = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+    if actual_hash != expected_hash:
+        raise s.TeamKnowledgeError("Document snapshot checksum mismatch; stage the attachment again.")
+    return normalized_content
+
+
 def review_owner_inbox_source(
     owner_type: str,
     owner_id: str,
@@ -721,6 +768,7 @@ def review_owner_inbox_source(
     knowledge_title: str = "",
     knowledge_summary: str = "",
     knowledge_content: str = "",
+    knowledge_content_mode: str = "authored",
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """Resolve one owner inbox source and optionally direct-ingest it as formal knowledge."""
@@ -731,11 +779,17 @@ def review_owner_inbox_source(
     if not s._can_review_owner_source(owner, reviewer_id):
         raise s.TeamKnowledgePermissionError("Agent is not allowed to review this owner source inbox.")
     normalized_decision = s._normalize_source_review_decision(decision)
+    normalized_content_mode = str(knowledge_content_mode or "authored").strip().lower()
+    if normalized_content_mode not in {"authored", "source_document"}:
+        raise s.TeamKnowledgeError("Unsupported knowledge content mode.")
+    if normalized_content_mode == "source_document" and str(knowledge_content or ""):
+        raise s.TeamKnowledgeError("source_document cannot include caller-written knowledgeContent.")
     wants_direct_ingest = bool(
         ingest_on_accept
         or str(knowledge_base_id or "").strip()
         or str(knowledge_content or "").strip()
         or str(knowledge_title or "").strip()
+        or normalized_content_mode == "source_document"
     )
     if wants_direct_ingest and normalized_decision != "accepted":
         raise s.TeamKnowledgeError("Direct ingestion is only supported for accepted source reviews.")
@@ -776,7 +830,14 @@ def review_owner_inbox_source(
                 )
             if not s._is_global_knowledge_steward(reviewer_id):
                 s._require_permission(target_owner, target_base, reviewer_id, "review")
-            normalized_knowledge_content = s._normalize_formal_knowledge_content(knowledge_content)
+            # Creating the downstream source artifact also requires propose.
+            # Reject before central promotion rather than leaving a partial review.
+            s._require_permission(target_owner, target_base, reviewer_id, "propose")
+            normalized_knowledge_content = (
+                _read_staged_document_content(owner, source)
+                if normalized_content_mode == "source_document"
+                else s._normalize_formal_knowledge_content(knowledge_content)
+            )
             if not normalized_knowledge_content:
                 raise s.TeamKnowledgeError("Direct ingestion requires knowledgeContent.")
             s._tk_financial.validate_financial_source(

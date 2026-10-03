@@ -3079,6 +3079,7 @@ def _build_key_tools() -> List[BaseTool]:
         owner_id: str = "",
         review_decision: str = "accepted",
         resolution_note: str = "",
+        content_mode: str = "authored",
     ) -> str:
         """
         【团队知识摄取】基于已筛选来源直接入库，或基于中央来源提交待审摄取包。
@@ -3108,6 +3109,7 @@ def _build_key_tools() -> List[BaseTool]:
             owner_id: inbox source 所属 owner ID
             review_decision: inbox source 审核结论，默认 accepted
             resolution_note: 审核说明
+            content_mode: 默认 authored 为自写摘要/提案；完整保留已暂存的会话文档用 source_document，省略 proposal_content 和 excerpt，由服务校验并复制正文
 
         Returns:
             JSON 格式结果；直接入库路径包含 directIngestion，旧路径包含 SourceArtifact 和 pending RefinementProposal
@@ -3129,6 +3131,7 @@ def _build_key_tools() -> List[BaseTool]:
             inbox_source_id=inbox_source_id,
             owner_type=owner_type,
             owner_id=owner_id,
+            content_mode=content_mode,
             review_decision=review_decision,
             resolution_note=resolution_note,
         )

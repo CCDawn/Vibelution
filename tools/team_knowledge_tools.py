@@ -636,6 +636,7 @@ def knowledge_ingestion_tool(
     owner_id: str = "",
     review_decision: str = "accepted",
     resolution_note: str = "",
+    content_mode: str = "authored",
 ) -> str:
     """
     Submit a knowledge ingestion package, or direct-ingest a screened inbox source.
@@ -644,6 +645,9 @@ def knowledge_ingestion_tool(
     that owner inbox source and direct-ingests accepted content as a formal
     KnowledgeItem. Without inbox_source_id, it keeps the older central-source
     package behavior and creates SourceArtifact + pending RefinementProposal.
+    For a complete staged session document, use content_mode="source_document"
+    and omit proposal_content and excerpt: the service copies its verified text.
+    The default "authored" mode keeps caller-written summaries/proposals.
     """
 
     runtime = _current_runtime()
@@ -666,6 +670,14 @@ def knowledge_ingestion_tool(
     try:
         from core.web.services import team_knowledge_service
 
+        normalized_content_mode = str(content_mode or "authored").strip().lower()
+        if normalized_content_mode not in {"authored", "source_document"}:
+            raise team_knowledge_service.TeamKnowledgeError("Unsupported content_mode.")
+        if normalized_content_mode == "source_document":
+            if not normalized_inbox_source_id:
+                raise team_knowledge_service.TeamKnowledgeError("source_document requires a staged inbox source.")
+            if proposal_content or excerpt:
+                raise team_knowledge_service.TeamKnowledgeError("source_document requires omitting proposal_content and excerpt.")
         if normalized_inbox_source_id:
             review = team_knowledge_service.review_owner_inbox_source(
                 owner_type,
@@ -679,6 +691,7 @@ def knowledge_ingestion_tool(
                 knowledge_title=proposal_title or source_title,
                 knowledge_summary=proposal_summary or source_summary,
                 knowledge_content=proposal_content or excerpt,
+                knowledge_content_mode=normalized_content_mode,
                 tags=_split_tags(tags),
             )
             direct_ingestion = review.get("directIngestion") if isinstance(review.get("directIngestion"), dict) else {}

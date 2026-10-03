@@ -52,15 +52,15 @@ def test_knowledge_steward_workflow_upgrades_old_template_and_invalidates_snapsh
     for item in payload["templates"]:
         if item["templateId"] == "prompt-knowledge-steward":
             item["content"] = "OLD_STEWARD_TEMPLATE"
-            item["metadata"]["builtinContentVersion"] = 17
+            item["metadata"]["builtinContentVersion"] = 18
     prompt_template_service.prompt_template_path().write_text(json.dumps(payload), encoding="utf-8")
 
     versions = prompt_template_service.get_agent_prompt_snapshot_versions("prompt-knowledge-steward")
-    assert versions["builtinContentVersion"] > 17
+    assert versions["builtinContentVersion"] > 18
     old_snapshot = {
         "agentId": "agent-knowledge-steward",
         "promptTemplateId": "prompt-knowledge-steward",
-        "builtinContentVersion": 17,
+        "builtinContentVersion": 18,
     }
     assert not _agent_prompt_snapshot_matches_agent(
         old_snapshot, agent_id="agent-knowledge-steward", prompt_template_id="prompt-knowledge-steward",
@@ -74,6 +74,7 @@ def test_knowledge_steward_workflow_upgrades_old_template_and_invalidates_snapsh
     assert "read_knowledge_item_tool" in snapshot["content"]
     assert "scopedKnowledgeBaseId" in snapshot["content"]
     assert "knowledge_stage_session_attachment_tool" in snapshot["content"]
+    assert "content_mode=source_document" in snapshot["content"]
     assert _agent_prompt_snapshot_matches_agent(
         snapshot, agent_id="agent-knowledge-steward", prompt_template_id="prompt-knowledge-steward",
         builtin_content_version=versions["builtinContentVersion"],

@@ -63,6 +63,8 @@
 
 改 Agent Prompt 注入 memory 时，先查 tool/route 是否经 `unified_knowledge_search_service` 或 `rag_retrieval_service`，不要在 chat route 平行拼检索。
 
+完整保留会话文档时，原生 `knowledge_ingestion_tool` 可选 `content_mode=source_document`，只接受已受控暂存的完整 document Inbox source；服务在审核权限、Owner/知识库一致性与 Team 禁止自审校验后，从该 Owner 的 Inbox 快照读取正文并验证 `extractedTextSha256`，在晋升前拒绝越界路径、缺失/改写/截断快照与超限正文。模型不再重传 `proposal_content` / `excerpt`。默认 `authored` 保持原提案与摘要行为，REST DTO 不变；旧暂存来源没有正文校验值时须重新暂存。保真对象是抽取后统一换行并经既有首尾空白规范化的文本，附件原始字节仍由 `documentHash` 与附件副本追溯。
+
 检索的匹配与排序使用完整正式正文及该条目关联来源的标题/摘要，跨可读库排序后取 Top K；
 响应保留旧 `content` 摘录并新增有界 `matchedExcerpt`，统一搜索和 RAG 优先使用命中段落。
 `semantic` 当前是 `local_token_overlap`，RAG health/policy 明示 `embeddingEnabled=false`，
