@@ -18,6 +18,7 @@ import shutil
 import stat
 import threading
 import hashlib
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -1149,6 +1150,10 @@ _SESSION_CYCLE_PROJECTION_EXECUTOR = ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix="web-chat-cycle-projection",
 )
+_SESSION_EXECUTOR_LIFECYCLE_LOCK = threading.RLock()
+_SESSION_EXECUTORS_CLOSED = False
+_SESSION_EXECUTOR_DRAIN_THREADS: list[threading.Thread] = []
+_SESSION_EXECUTOR_DRAIN_ERRORS: set[str] = set()
 _SESSION_AGENT_MAX_ACTIVE_TURNS = 8
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
 INTERNAL_AUTO_CONTINUE_MAX_TURNS = 3
@@ -1205,6 +1210,116 @@ _SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SESSION_IMAGE_ARTIFACT_SAFE_CHARS = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
 _SESSION_INDEX_EVENT_DEDUPE_LOCK = threading.Lock()
+
+
+def begin_session_service_lifecycle() -> dict[str, Any]:
+    """Recreate the session executors after a completed lifespan shutdown."""
+
+    global _SESSION_EXECUTOR, _SESSION_CYCLE_PROJECTION_EXECUTOR, _SESSION_EXECUTORS_CLOSED
+    with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
+        if not _SESSION_EXECUTORS_CLOSED:
+            return {"opened": True, "recreated": False}
+        pending = [thread.name for thread in _SESSION_EXECUTOR_DRAIN_THREADS if thread.is_alive()]
+        failed = sorted(_SESSION_EXECUTOR_DRAIN_ERRORS)
+        if pending or failed:
+            logging.getLogger(__name__).error(
+                "Session executors did not close cleanly across lifespan restart (pending=%s failed=%s).",
+                pending,
+                failed,
+            )
+            return {
+                "opened": False,
+                "recreated": False,
+                "pendingExecutors": pending,
+                "failedExecutors": failed,
+            }
+        _SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="web-chat-turn")
+        _SESSION_CYCLE_PROJECTION_EXECUTOR = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="web-chat-cycle-projection",
+        )
+        _SESSION_EXECUTOR_DRAIN_THREADS.clear()
+        _SESSION_EXECUTOR_DRAIN_ERRORS.clear()
+        _SESSION_EXECUTORS_CLOSED = False
+        return {"opened": True, "recreated": True}
+
+
+def stop_session_service_admission() -> None:
+    """Close new executor submissions while Uvicorn retires the workbench."""
+
+    global _SESSION_EXECUTORS_CLOSED
+    with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
+        if _SESSION_EXECUTORS_CLOSED:
+            return
+        _SESSION_EXECUTORS_CLOSED = True
+        executors = (
+            ("session-turns", _SESSION_EXECUTOR),
+            ("session-cycle-projection", _SESSION_CYCLE_PROJECTION_EXECUTOR),
+        )
+        for name, executor in executors:
+            if not isinstance(executor, ThreadPoolExecutor):
+                _SESSION_EXECUTOR_DRAIN_ERRORS.add(name)
+                continue
+            try:
+                executor.shutdown(wait=False, cancel_futures=False)
+            except Exception as exc:  # noqa: BLE001 - keep closing the other executor
+                _SESSION_EXECUTOR_DRAIN_ERRORS.add(name)
+                logging.getLogger(__name__).warning(
+                    "Session executor admission close failed for %s (%s).", name, type(exc).__name__
+                )
+                continue
+
+            def _drain(target: ThreadPoolExecutor = executor, owner: str = name) -> None:
+                try:
+                    target.shutdown(wait=True, cancel_futures=False)
+                except BaseException as exc:  # noqa: BLE001 - communicate drain failure to owner
+                    with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
+                        _SESSION_EXECUTOR_DRAIN_ERRORS.add(owner)
+                    logging.getLogger(__name__).warning(
+                        "Session executor drain failed for %s (%s).", owner, type(exc).__name__
+                    )
+
+            joiner = threading.Thread(
+                target=_drain,
+                name=f"{executor._thread_name_prefix}-shutdown",
+                daemon=True,
+            )
+            try:
+                joiner.start()
+            except Exception as exc:  # noqa: BLE001 - a missing joiner is an unverified drain
+                _SESSION_EXECUTOR_DRAIN_ERRORS.add(name)
+                logging.getLogger(__name__).warning(
+                    "Session executor drain worker could not start for %s (%s).",
+                    name,
+                    type(exc).__name__,
+                )
+                continue
+            _SESSION_EXECUTOR_DRAIN_THREADS.append(joiner)
+
+
+def shutdown_session_service(*, deadline: float) -> dict[str, Any]:
+    """Drain accepted session/projection work using the lifespan deadline."""
+
+    stop_session_service_admission()
+    with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
+        joiners = tuple(_SESSION_EXECUTOR_DRAIN_THREADS)
+    for joiner in joiners:
+        try:
+            joiner.join(timeout=max(0.0, float(deadline) - time.monotonic()))
+        except Exception as exc:  # noqa: BLE001 - isolate each executor owner
+            with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
+                _SESSION_EXECUTOR_DRAIN_ERRORS.add(joiner.name)
+            logging.getLogger(__name__).warning(
+                "Session executor join failed for %s (%s).", joiner.name, type(exc).__name__
+            )
+    pending = sorted(joiner.name for joiner in joiners if joiner.is_alive())
+    with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
+        failed = sorted(_SESSION_EXECUTOR_DRAIN_ERRORS)
+    return {
+        "closed": not pending and not failed,
+        "pendingExecutors": pending,
+        "failedExecutors": failed,
+    }
 
 
 def _claim_index_event_key_once(collection: set, key: tuple, *, cap: int = 4096) -> bool:

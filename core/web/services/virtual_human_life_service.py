@@ -8,7 +8,7 @@ import logging
 import threading
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from core.agent_plugins.virtual_human_life.delivery_runtime import (
     is_companion_continuation_delivery_kind,
@@ -1639,19 +1639,32 @@ def _reconcile_enabled_companion_directory_visibility(
     return updated
 
 
-async def run_virtual_human_life_runtime(*, interval_seconds: float = 60.0) -> None:
+async def run_virtual_human_life_runtime(
+    *,
+    interval_seconds: float = 60.0,
+    run_sync: Callable[..., Awaitable[Any]] | None = None,
+) -> None:
     """Run the in-process deterministic heartbeat supervisor."""
 
     interval = max(1.0, float(interval_seconds))
     _RUNTIME_STARTED.set()
     _RUNTIME_ACCEPTING.set()
+
+    async def heartbeat(name: str, *, coalesced: bool) -> None:
+        if run_sync is None:
+            await asyncio.to_thread(heartbeat_all_virtual_humans, coalesced=coalesced)
+            return
+        await run_sync(name, heartbeat_all_virtual_humans, coalesced=coalesced)
+
     try:
-        await asyncio.to_thread(heartbeat_all_virtual_humans, coalesced=True)
+        await heartbeat("virtual-human-initial-heartbeat", coalesced=True)
+        iteration = 0
         while _RUNTIME_ACCEPTING.is_set():
             await asyncio.sleep(interval)
             if not _RUNTIME_ACCEPTING.is_set():
                 break
-            await asyncio.to_thread(heartbeat_all_virtual_humans, coalesced=False)
+            iteration += 1
+            await heartbeat(f"virtual-human-heartbeat-{iteration}", coalesced=False)
     finally:
         stop_virtual_human_life_runtime()
 

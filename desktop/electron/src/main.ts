@@ -273,7 +273,8 @@ const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
 const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
-const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = 20_000;
+const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
+const DESKTOP_QUIT_TOTAL_BUDGET_MS = 30_000;
 const PERIODIC_SHELL_FRESHNESS_MS = 5 * 60_000;
 const ACTIVE_WORK_POLICY_FORCE_INTERRUPT = true;
 const ELECTRON_PROCESS_STARTED_AT_MS = performance.now();
@@ -1203,7 +1204,7 @@ function stopDesktopSessionHeartbeat(): void {
 
 async function resolveDesktopActionLoopContext(
   bootstrap: LauncherBootstrapResult,
-  options: { forceControlTokenRefresh?: boolean } = {}
+  options: { forceControlTokenRefresh?: boolean; signal?: AbortSignal } = {}
 ): Promise<DesktopActionLoopContext> {
   if (!options.forceControlTokenRefresh && desktopActionContext !== null) {
     return desktopActionContext;
@@ -1212,8 +1213,9 @@ async function resolveDesktopActionLoopContext(
   const launcherOrigin = resolveWorkbenchUrl(desktopEnv, bootstrap.workbenchUrl);
   const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
   const controlToken = options.forceControlTokenRefresh
-    ? await fetchLauncherControlToken({ launcherOrigin })
-    : envToken || (await fetchLauncherControlToken({ launcherOrigin }));
+    ? await fetchLauncherControlToken({ launcherOrigin, signal: options.signal })
+    : envToken || (await fetchLauncherControlToken({ launcherOrigin, signal: options.signal }));
+  options.signal?.throwIfAborted();
   desktopActionContext = {
     launcherOrigin,
     controlToken,
@@ -1361,7 +1363,7 @@ async function requestTransactionalWorkbenchClose(
     let activeWorkState: ActiveWorkProbeState = "unknown";
     try {
       const status = await withDesktopShellExitTimeout(
-        fetchLauncherActiveWorkStatus(context),
+        (signal) => fetchLauncherActiveWorkStatus({ ...context, signal }),
         ACTIVE_WORK_STATUS_TIMEOUT_MS,
         "resolve launcher active work status for workbench close"
       );
@@ -1401,31 +1403,35 @@ async function requestTransactionalWorkbenchClose(
       closeId: transaction.closeId,
       desktopSessionId: context.desktopSessionId
     };
-    await recordElectronSupervisorEvent(bootstrap, {
-      eventCode: "electron.workbench_close.backend_stopping",
-      message: "Electron is stopping the workbench backend.",
-      fields: {
-        closeId: transaction.closeId,
-        requestId: transaction.requestId ?? "",
-        desktopSessionId: context.desktopSessionId,
-        operatorIntent: transaction.mode === "force" ? "force_close" : "close",
-        activeWorkState: transaction.activeWorkState,
-        mode: transaction.mode
-      }
-    });
-    const backendStopFlight = (async (): Promise<boolean> => {
-      await stopWorkbenchBackend(paths, bootstrap, transaction);
+    const closeDeadline = createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS);
+    const backendStopFlight = withDesktopShellExitTimeout(async (signal): Promise<boolean> => {
+      await recordElectronSupervisorEvent(bootstrap, {
+        eventCode: "electron.workbench_close.backend_stopping",
+        message: "Electron is stopping the workbench backend.",
+        fields: {
+          closeId: transaction.closeId,
+          requestId: transaction.requestId ?? "",
+          desktopSessionId: context.desktopSessionId,
+          operatorIntent: transaction.mode === "force" ? "force_close" : "close",
+          activeWorkState: transaction.activeWorkState,
+          mode: transaction.mode
+        }
+      });
+      signal.throwIfAborted();
+      await stopWorkbenchBackend(paths, bootstrap, transaction, signal);
       return await waitForWorkbenchBackendSettledForWindowClose({
         readStatus: async () => {
           try {
-            return await fetchLauncherStatusSummary(context);
+            return await fetchLauncherStatusSummary({ ...context, signal });
           } catch {
+            signal.throwIfAborted();
             return readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot);
           }
         },
-        timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS
+        timeoutMs: closeDeadline.remainingMs(),
+        signal
       });
-    })();
+    }, closeDeadline, "workbench close");
     workbenchCloseBackendStopInFlight = backendStopFlight.then((settled) => {
       if (!settled) {
         throw new Error("Workbench backend did not settle closed before window authorization.");
@@ -1442,12 +1448,13 @@ async function requestTransactionalWorkbenchClose(
       );
       throw error;
     } finally {
+      closeDeadline.dispose();
       if (workbenchCloseBackendStopInFlight === ownedBackendStop) {
         workbenchCloseBackendStopInFlight = null;
       }
     }
     transaction = mainWorkbenchCloseStore.backendStopped(transaction.closeId);
-    await recordElectronSupervisorEvent(bootstrap, {
+    recordSupervisorEventFallbackLocally({
       eventCode: "electron.workbench_close.window_authorized",
       message: "Workbench backend closed; Electron is requesting the final window close.",
       fields: {
@@ -1463,7 +1470,8 @@ async function requestTransactionalWorkbenchClose(
 async function stopWorkbenchBackend(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
-  transaction: MainWorkbenchCloseTransaction
+  transaction: MainWorkbenchCloseTransaction,
+  signal?: AbortSignal
 ): Promise<void> {
   void paths;
   void bootstrap;
@@ -1485,7 +1493,7 @@ async function stopWorkbenchBackend(
     // A force close is an explicitly confirmed destructive operator intent and
     // keeps the original supersede semantics; a normal window close must not
     // abort an in-flight restart.
-  }, transaction.mode === "force" ? "operator" : "window-close");
+  }, transaction.mode === "force" ? "operator" : "window-close", signal);
   if (!result.accepted) {
     throw new Error(result.message || result.code || `Workbench ${operation} was not accepted.`);
   }
@@ -1786,7 +1794,7 @@ async function authorizeLauncherForceLifecycle(input: {
       }
       const context = await resolveDesktopActionLoopContext(launcherBootstrap);
       return await withDesktopShellExitTimeout(
-        fetchLauncherActiveWorkStatus(context),
+        (signal) => fetchLauncherActiveWorkStatus({ ...context, signal }),
         ACTIVE_WORK_STATUS_TIMEOUT_MS,
         "resolve launcher active work for force authorization"
       );
@@ -2421,43 +2429,49 @@ async function requestDesktopShellExit(
 ): Promise<ShutdownDecision> {
   return desktopLifecycleCoordinator.request(closeReason, async () => {
     const ownershipMode = launcherBootstrap?.mode ?? "attached";
-    return await executeShutdownAuthorizationBoundary({
-      authorize: async () =>
-        await decideShutdown({
-        ownershipMode,
-        activeWorkStatus: async () => {
-          const bootstrap = launcherBootstrap;
-          if (bootstrap === null) {
-            return { state: "unknown", message: "Launcher bootstrap is not available." };
-          }
-          const probeQuitActiveWork = async (forceControlTokenRefresh: boolean) => {
-            const context = await resolveDesktopActionLoopContext(bootstrap, {
-              forceControlTokenRefresh
-            });
-            return await withDesktopShellExitTimeout(
-              fetchLauncherActiveWorkStatus(context),
-              QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS,
-              "resolve launcher active work status for quit"
-            );
-          };
-          return await resolveQuitActiveWorkStatus({
-            probe: () => probeQuitActiveWork(false),
-            recoverAndRetry: () => probeQuitActiveWork(true)
-          });
+    // Authorization, retry, stop and close all spend the same finite budget.
+    const deadline = createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS);
+    try {
+      return await executeShutdownAuthorizationBoundary({
+        authorize: async () =>
+          await decideShutdown({
+            ownershipMode,
+            activeWorkStatus: async () => {
+              const bootstrap = launcherBootstrap;
+              if (bootstrap === null) {
+                return { state: "unknown", message: "Launcher bootstrap is not available." };
+              }
+              const probeQuitActiveWork = async (forceControlTokenRefresh: boolean) => {
+                const context = await withDesktopShellExitTimeout(
+                  (signal) => resolveDesktopActionLoopContext(bootstrap, { forceControlTokenRefresh, signal }),
+                  deadline,
+                  "resolve quit control context"
+                );
+                return await withDesktopShellExitTimeout(
+                  (signal) => fetchLauncherActiveWorkStatus({
+                    ...context,
+                    signal: AbortSignal.any([signal, deadline.signal])
+                  }),
+                  Math.max(1, Math.min(QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS, deadline.remainingMs())),
+                  "resolve launcher active work status for quit"
+                );
+              };
+              return await resolveQuitActiveWorkStatus({
+                probe: () => probeQuitActiveWork(false),
+                recoverAndRetry: () => probeQuitActiveWork(true)
+              });
+          },
+          // The launcher probe rides on the workbench backend. When that backend
+          // is dead or wedged the probe times out and quit used to fail with
+          // "无法确认是否有进行中的任务" forever; the same file-based scan the
+          // main-line stop command trusts keeps quit possible instead.
+          localActiveWorkStatus: () => localQuitActiveWorkStatus()
+        }),
+        onDenied: (decision) => {
+          notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“退出壳并停止全部任务”。", "warning");
         },
-        // The launcher probe rides on the workbench backend. When that backend
-        // is dead or wedged the probe times out and quit used to fail with
-        // "无法确认是否有进行中的任务" forever; the same file-based scan the
-        // main-line stop command trusts keeps quit possible instead.
-        localActiveWorkStatus: () => localQuitActiveWorkStatus()
-      }),
-      onDenied: (decision) => {
-        notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“退出壳并停止全部任务”。", "warning");
-      },
-      runApproved: async (decision) => {
-        pendingWorkbenchCloseAck = null;
-        const deadline = createDesktopShellExitDeadline();
-        try {
+        runApproved: async (decision) => {
+          pendingWorkbenchCloseAck = null;
           await withDesktopShellExitTimeout(async (signal) => {
             signal.throwIfAborted();
             const mainRuntimeAlreadyStopped = await joinWorkbenchCloseBackendStop(deadline);
@@ -2499,31 +2513,31 @@ async function requestDesktopShellExit(
               );
             }
           }, deadline, "desktop shell exit");
-        } finally {
-          deadline.dispose();
+        },
+        onApprovedFailure: async (_decision, error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(message);
+          recordSupervisorEventFallbackLocally({
+            eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
+            message: "Desktop shell exit was cancelled because managed processes did not stop within budget.",
+            fields: { closeReason, error: message.slice(0, 500), failOpen: false }
+          });
+          recordSupervisorEventFallbackLocally({
+            eventCode: "electron.isolated_instances.stop_all_failed",
+            message: "Isolated instance stop did not finish before the desktop shell exit budget.",
+            fields: { closeReason, error: message.slice(0, 500), failOpen: false, retrySuppressed: true }
+          });
+          pendingWorkbenchCloseAck = null;
+          notifyDesktopTray(
+            "Vibelution",
+            "运行时或隔离实例未能完整停止，已取消退出。可检查状态后重试，或明确选择“退出壳并停止全部任务”。",
+            "warning"
+          );
         }
-      },
-      onApprovedFailure: async (_decision, error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(message);
-        await recordElectronSupervisorEvent(launcherBootstrap, {
-          eventCode: "electron.desktop_shell.exit_blocked_stop_failed",
-          message: "Desktop shell exit was cancelled because managed processes did not stop within budget.",
-          fields: { closeReason, error: message.slice(0, 500), failOpen: false }
-        }).catch(() => undefined);
-        await recordElectronSupervisorEvent(launcherBootstrap, {
-          eventCode: "electron.isolated_instances.stop_all_failed",
-          message: "Isolated instance stop did not finish before the desktop shell exit budget.",
-          fields: { closeReason, error: message.slice(0, 500), failOpen: false, retrySuppressed: true }
-        }).catch(() => undefined);
-        pendingWorkbenchCloseAck = null;
-        notifyDesktopTray(
-          "Vibelution",
-          "运行时或隔离实例未能完整停止，已取消退出。可检查状态后重试，或明确选择“退出壳并停止全部任务”。",
-          "warning"
-        );
-      }
-    });
+      });
+    } finally {
+      deadline.dispose();
+    }
   });
 }
 
@@ -2574,7 +2588,7 @@ async function resolveInterruptedActiveWork(): Promise<{ count: number; items: R
   try {
     const context = await resolveDesktopActionLoopContext(launcherBootstrap);
     const status = await withDesktopShellExitTimeout(
-      fetchLauncherActiveWorkStatus(context),
+      (signal) => fetchLauncherActiveWorkStatus({ ...context, signal }),
       ACTIVE_WORK_STATUS_TIMEOUT_MS,
       "resolve launcher active work for tray force action"
     );

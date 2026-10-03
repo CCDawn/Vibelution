@@ -61,7 +61,9 @@ describe("Electron main tray integration", () => {
     expect(quitSource).toContain("forceControlTokenRefresh");
     expect(quitSource).toContain("QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS");
     expect(quitSource).toContain("退出壳并停止全部任务");
-    expect(mainSource).toContain("const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = 20_000");
+    expect(quitSource).toContain("createDesktopShellExitDeadline(DESKTOP_QUIT_TOTAL_BUDGET_MS)");
+    expect(quitSource).toContain("deadline.remainingMs()");
+    expect(quitSource).toContain("AbortSignal.any([signal, deadline.signal])");
   });
 
   it("destroys the tray only after shutdown is approved", () => {
@@ -160,7 +162,7 @@ describe("Electron main tray integration", () => {
     expect(quitExitSource.indexOf("stopIsolatedInstancesForApprovedShutdown(false, deadline)")).toBeLessThan(
       quitExitSource.indexOf("await executeApprovedDesktopShellShutdown")
     );
-    expect(quitApprovedSource).toContain("createDesktopShellExitDeadline()");
+    expect(quitApprovedSource).not.toContain("createDesktopShellExitDeadline(");
     expect(quitApprovedSource).toContain("deadline,");
     const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
     const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);

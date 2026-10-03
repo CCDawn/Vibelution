@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -167,7 +167,12 @@ def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) 
             raise
 
 
-async def warm_web_routes_in_background(app: FastAPI, *, web_dist: Path | None = None) -> dict[str, Any]:
+async def warm_web_routes_in_background(
+    app: FastAPI,
+    *,
+    web_dist: Path | None = None,
+    run_sync: Callable[..., Awaitable[Any]] | None = None,
+) -> dict[str, Any]:
     """Import route modules off-thread, mount on the event-loop thread."""
 
     if bool(getattr(app.state, "web_routes_registered", False)):
@@ -180,7 +185,17 @@ async def warm_web_routes_in_background(app: FastAPI, *, web_dist: Path | None =
     started = time.perf_counter()
     module_imports, on_module_imported = _new_module_timing_sink()
     try:
-        modules = await asyncio.to_thread(import_web_route_modules, on_module_imported=on_module_imported)
+        if run_sync is None:
+            modules = await asyncio.to_thread(
+                import_web_route_modules,
+                on_module_imported=on_module_imported,
+            )
+        else:
+            modules = await run_sync(
+                "web-route-import",
+                import_web_route_modules,
+                on_module_imported=on_module_imported,
+            )
         import_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
         # include_router must stay on the main thread / event loop.
         with _REGISTER_LOCK:

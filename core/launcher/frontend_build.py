@@ -8,6 +8,7 @@ This keeps a running backend from observing a half-written Vite output.
 
 from __future__ import annotations
 
+import contextvars
 import errno
 import hashlib
 import json
@@ -20,10 +21,10 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from typing import Any
 
-from core.infrastructure.codex_sandbox.process import terminate_process_tree
+from core.infrastructure.owned_process import OwnedProcess
 from core.infrastructure.process_liveness import is_pid_alive
 from core.runtime_manager.process_identity import inspect_process_identity
 from vibelution_storage import (
@@ -63,9 +64,18 @@ SERVING_FRONTEND_LEASE_SCHEMA_VERSION = 1
 FRONTEND_PUBLISH_RETRY_TIMEOUT_SECONDS = 5.0
 _FRONTEND_PUBLISH_RETRY_INITIAL_DELAY_SECONDS = 0.05
 _FRONTEND_PUBLISH_RETRY_MAX_DELAY_SECONDS = 0.25
+FRONTEND_BUILD_TIMEOUT_SECONDS = 540.0
+FRONTEND_BUILD_CLEANUP_TIMEOUT_SECONDS = 15.0
+FRONTEND_BUILD_OUTPUT_TAIL_BYTES = 256 * 1024
+FRONTEND_BUILD_OUTPUT_JOIN_TIMEOUT_SECONDS = 2.0
 _FRONTEND_TREE_CACHE_LIMIT = 64
 _FRONTEND_TREE_CACHE_LOCK = Lock()
 _FRONTEND_TREE_CACHE: dict[tuple[str, str], str] = {}
+_PENDING_BUILD_CLEANUPS_LOCK = Lock()
+_PENDING_BUILD_CLEANUPS: dict[str, dict[str, Any]] = {}
+_FRONTEND_BUILD_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "frontend_build_deadline", default=None
+)
 
 
 def frontend_releases_dir(project_root: Path | str) -> Path:
@@ -395,11 +405,28 @@ def _pid_is_alive(pid: int) -> bool:
     return is_pid_alive(pid)
 
 
+def _release_build_lock(path: Path, token: str) -> bool:
+    if not path.exists():
+        return True
+    try:
+        holder = json.loads((path / "holder.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return False
+    if not isinstance(holder, dict) or holder.get("token") != token:
+        # The path no longer belongs to this build; never delete a replacement owner.
+        return True
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        return False
+    return not path.exists()
+
+
 @contextmanager
 def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 180.0) -> Iterator[dict[str, Any]]:
     path = frontend_build_lock_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + max(1.0, timeout_seconds)
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
     waited = False
 
     def claim_holder() -> dict[str, Any] | None:
@@ -465,7 +492,8 @@ def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 18
                 shutil.rmtree(path)
             except OSError:
                 pass
-            continue
+            else:
+                continue
         if holder_pid <= 0:
             try:
                 lock_age = max(0.0, time.time() - path.stat().st_mtime)
@@ -476,20 +504,26 @@ def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 18
                     shutil.rmtree(path)
                 except OSError:
                     pass
-                continue
+                else:
+                    continue
 
         if time.monotonic() >= deadline:
             raise TimeoutError("Timed out waiting for the frontend build lock.")
         time.sleep(0.1)
+    lock_state = {"waited": waited, "path": str(path), "token": owned_holder["token"]}
     try:
-        yield {"waited": waited, "path": str(path), "token": owned_holder["token"]}
+        yield lock_state
     finally:
-        current = read_holder()
-        if owned_holder is not None and current and current.get("token") == owned_holder.get("token"):
-            try:
-                shutil.rmtree(path)
-            except OSError:
-                pass
+        if not lock_state.get("_retain"):
+            if not _release_build_lock(path, str(owned_holder["token"])):
+                # Publication/reuse has already completed. Keep its result intact
+                # and retry only this token-owned cleanup before the next build.
+                _retain_pending_build_cleanup(
+                    Path(project_root).resolve(),
+                    lock_state,
+                    stage=None,
+                    owner=None,
+                )
 
 
 def create_staging_release(project_root: Path | str) -> Path:
@@ -848,62 +882,230 @@ def _npm_cli(node_command: str) -> str:
     raise RuntimeError("npm-cli.js was not found next to Node.js/npm.")
 
 
-def _run_checked(command: list[str], *, cwd: Path, label: str) -> str:
-    process: subprocess.Popen[str] | None = None
+class _BuildOutputTail:
+    """Drain a build pipe continuously while retaining only its bounded tail."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = max(1, int(limit))
+        self.data = bytearray()
+        self.error: str | None = None
+        self._lock = Lock()
+
+    def drain(self, pipe: Any) -> None:
+        try:
+            while chunk := pipe.read(8192):
+                with self._lock:
+                    self.data.extend(chunk)
+                    if len(self.data) > self.limit:
+                        del self.data[:-self.limit]
+        except (OSError, ValueError) as exc:
+            self.error = type(exc).__name__
+        finally:
+            try:
+                pipe.close()
+            except (OSError, ValueError) as exc:
+                self.error = type(exc).__name__
+
+    def snapshot(self) -> str:
+        with self._lock:
+            return bytes(self.data).decode("utf-8", errors="replace")
+
+
+class _PendingBuildCleanupError(RuntimeError):
+    def __init__(self, message: str, *, owner: OwnedProcess, readers: list[Thread]) -> None:
+        super().__init__(message)
+        self.owner = owner
+        self.readers = readers
+
+
+def _retire_build_process(owner: OwnedProcess | None, readers: list[Thread], *, timeout: float) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout)
     try:
-        process = subprocess.Popen(
+        if owner is not None:
+            # Leave a small bounded window for pipe readers after the process
+            # tree is gone. The Job owns descendants even if the root exited.
+            terminate_budget = max(0.0, timeout - FRONTEND_BUILD_OUTPUT_JOIN_TIMEOUT_SECONDS)
+            if not owner.terminate(timeout=min(terminate_budget, max(0.0, deadline - time.monotonic()))):
+                return False
+        for reader in readers:
+            if reader.ident is not None:
+                reader.join(
+                    timeout=min(
+                        FRONTEND_BUILD_OUTPUT_JOIN_TIMEOUT_SECONDS,
+                        max(0.0, deadline - time.monotonic()),
+                    )
+                )
+        if any(reader.is_alive() for reader in readers):
+            return False
+        if owner is not None:
+            for pipe in (owner.process.stdout, owner.process.stderr):
+                if pipe is not None:
+                    pipe.close()
+            owner.close(timeout=max(0.0, deadline - time.monotonic()))
+            if owner.process.stdin is not None:
+                owner.process.stdin.close()
+        return True
+    except Exception:
+        return False
+
+
+def _pending_build_cleanup_key(project_root: Path | str) -> str:
+    return os.path.normcase(str(Path(project_root).resolve()))
+
+
+def _retain_pending_build_cleanup(
+    project_root: Path,
+    lock_state: dict[str, Any],
+    *,
+    stage: Path | None,
+    owner: OwnedProcess | None,
+    readers: list[Thread] | None = None,
+) -> None:
+    lock_state["_retain"] = True
+    key = _pending_build_cleanup_key(project_root)
+    entry = {
+        "root": str(project_root),
+        "stage": stage,
+        "owner": owner,
+        "readers": list(readers or []),
+        "lockPath": Path(str(lock_state["path"])),
+        "lockToken": str(lock_state["token"]),
+        "retryLock": Lock(),
+        "retired": owner is None,
+    }
+    with _PENDING_BUILD_CLEANUPS_LOCK:
+        _PENDING_BUILD_CLEANUPS[key] = entry
+
+
+def _retry_pending_build_cleanup(project_root: Path, *, timeout_seconds: float) -> None:
+    key = _pending_build_cleanup_key(project_root)
+    with _PENDING_BUILD_CLEANUPS_LOCK:
+        entry = _PENDING_BUILD_CLEANUPS.get(key)
+    if entry is None:
+        return
+    retry_lock = entry["retryLock"]
+    if not retry_lock.acquire(blocking=False):
+        raise RuntimeError("A previous frontend build cleanup is still in progress.")
+    try:
+        owner = entry.get("owner")
+        readers = list(entry.get("readers") or [])
+        if not entry.get("retired"):
+            if not _retire_build_process(owner, readers, timeout=max(0.0, timeout_seconds)):
+                raise RuntimeError("A previous frontend build process tree is still awaiting cleanup.")
+            entry["retired"] = True
+        stage = entry.get("stage")
+        if isinstance(stage, Path) and stage.exists():
+            try:
+                shutil.rmtree(stage)
+            except OSError as exc:
+                raise RuntimeError("A previous frontend build staging directory is still awaiting cleanup.") from exc
+            if stage.exists():
+                raise RuntimeError("A previous frontend build staging directory is still awaiting cleanup.")
+            entry["stage"] = None
+        if not _release_build_lock(entry["lockPath"], str(entry["lockToken"])):
+            raise RuntimeError("A previous frontend build lock is still awaiting cleanup.")
+        with _PENDING_BUILD_CLEANUPS_LOCK:
+            if _PENDING_BUILD_CLEANUPS.get(key) is entry:
+                del _PENDING_BUILD_CLEANUPS[key]
+    finally:
+        retry_lock.release()
+
+
+def _run_checked(command: list[str], *, cwd: Path, label: str) -> str:
+    deadline = _FRONTEND_BUILD_DEADLINE.get()
+    if deadline is None:
+        deadline = time.monotonic() + FRONTEND_BUILD_TIMEOUT_SECONDS
+    remaining = max(0.0, deadline - time.monotonic())
+    if remaining <= 0:
+        raise RuntimeError(f"{label} failed: TimeoutExpired: frontend build deadline expired")
+
+    try:
+        owner = OwnedProcess.spawn(
             command,
             cwd=str(cwd),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             **_hidden_subprocess_kwargs(),
         )
-        stdout, stderr = process.communicate(timeout=900)
-    except subprocess.TimeoutExpired as exc:
-        # `subprocess.run(..., timeout=...)` only owns the direct process.
-        # This builder owns a live Popen handle, so reuse the project helper
-        # to terminate descendants before the root and keep Windows hidden.
-        if process is not None:
-            try:
-                terminate_process_tree(process)
-            except (OSError, RuntimeError, subprocess.SubprocessError) as terminate_error:
-                raise RuntimeError(
-                    f"{label} timed out and its process tree could not be retired: "
-                    f"{type(terminate_error).__name__}: {terminate_error}"
-                ) from exc
-        raise RuntimeError(f"{label} failed: {type(exc).__name__}: {exc}") from exc
     except OSError as exc:
         raise RuntimeError(f"{label} failed: {type(exc).__name__}: {exc}") from exc
-    if int(process.returncode or 0) != 0:
+
+    tails = [_BuildOutputTail(FRONTEND_BUILD_OUTPUT_TAIL_BYTES) for _ in range(2)]
+    readers = [
+        Thread(target=tail.drain, args=(pipe,), name=f"frontend-build-output-{index}", daemon=True)
+        for index, (tail, pipe) in enumerate(zip(tails, (owner.process.stdout, owner.process.stderr)))
+        if pipe is not None
+    ]
+    timed_out = False
+    reader_error = False
+    try:
+        for reader in readers:
+            reader.start()
+        try:
+            owner.process.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        for reader in readers:
+            if reader.ident is not None:
+                reader.join(timeout=max(0.0, deadline - time.monotonic()))
+        if any(reader.is_alive() for reader in readers):
+            # A child can outlive an already-exited root while keeping a pipe
+            # open. Include pipe EOF in command completion, not just root exit.
+            timed_out = True
+        reader_error = any(tail.error for tail in tails)
+    except Exception:
+        reader_error = True
+
+    stdout, stderr = (tail.snapshot() for tail in tails)
+    return_code = owner.process.poll()
+    if timed_out:
+        failure = f"{label} failed: TimeoutExpired: frontend build exceeded {FRONTEND_BUILD_TIMEOUT_SECONDS:g} seconds"
+    elif reader_error:
+        failure = f"{label} failed: build output could not be read"
+    elif int(return_code or 0) != 0:
         detail = str(stderr or stdout or "").strip()[-1200:]
-        raise RuntimeError(f"{label} failed with exit code {process.returncode}: {detail}")
-    return str(stdout or "")
+        failure = f"{label} failed with exit code {return_code}: {detail}"
+    else:
+        failure = ""
+
+    if failure:
+        if not _retire_build_process(owner, readers, timeout=FRONTEND_BUILD_CLEANUP_TIMEOUT_SECONDS):
+            raise _PendingBuildCleanupError(
+                f"{failure}; process-tree cleanup is pending",
+                owner=owner,
+                readers=readers,
+            )
+        raise RuntimeError(failure)
+
+    remaining = max(0.0, deadline - time.monotonic())
+    if not _retire_build_process(owner, readers, timeout=remaining):
+        if not _retire_build_process(owner, readers, timeout=FRONTEND_BUILD_CLEANUP_TIMEOUT_SECONDS):
+            raise _PendingBuildCleanupError(
+                f"{label} completed but process-tree cleanup is pending",
+                owner=owner,
+                readers=readers,
+            )
+    return stdout
 
 
-def ensure_frontend_build(
-    project_root: Path | str,
+def _require_frontend_build_time(deadline: float, phase: str) -> None:
+    if time.monotonic() >= deadline:
+        raise RuntimeError(f"Frontend build deadline expired during {phase}.")
+
+
+def _build_frontend_release(
+    root: Path,
+    web_dir: Path,
+    manager: str,
+    lock: dict[str, Any],
+    inspection: dict[str, Any],
     *,
-    package_manager: str | None = None,
-    lock_timeout_seconds: float = 180.0,
+    deadline: float,
 ) -> dict[str, Any]:
-    """Build a verified release only when its complete BuildKey is not active.
-
-    The old active pointer is deliberately left intact until both TypeScript and
-    Vite complete and the staging output passes validation.
-    """
-
-    root = Path(project_root).resolve()
-    web_dir = root / "web"
-    manager = frontend_package_manager(package_manager)
-    with frontend_build_lock(root, timeout_seconds=lock_timeout_seconds) as lock:
-        inspection = inspect_frontend_build(root, package_manager=manager)
-        if bool(inspection["current"]):
-            return {"rebuilt": False, "skipped": True, "lock": lock, **inspection}
-
+    stage: Path | None = None
+    try:
+        _require_frontend_build_time(deadline, "build setup")
         if manager == "bun":
             bun = shutil.which("bun") or "bun"
             if (
@@ -912,6 +1114,7 @@ def ensure_frontend_build(
                 or not (web_dir / "node_modules" / ".bin" / "vite").exists()
             ):
                 _run_checked([bun, "install"], cwd=web_dir, label="bun install")
+            _require_frontend_build_time(deadline, "dependency installation")
             stage = create_staging_release(root)
             commands = [
                 ("tsc -b", [bun, "x", "tsc", "-b"]),
@@ -925,34 +1128,103 @@ def ensure_frontend_build(
                 or not (web_dir / "node_modules" / "vite" / "bin" / "vite.js").is_file()
             ):
                 _run_checked([node, _npm_cli(node), "ci"], cwd=web_dir, label="node npm-cli.js ci")
+            _require_frontend_build_time(deadline, "dependency installation")
             stage = create_staging_release(root)
             commands = [
                 ("tsc -b", [node, str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"]),
                 ("vite build", [node, str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build", "--config", "vite.config.ts", "--outDir", str(stage)]),
             ]
-        try:
-            outputs = {label: _run_checked(command, cwd=web_dir, label=label) for label, command in commands}
-            # Recompute after build: toolchain/source drift must not be stamped as current.
-            final = inspect_frontend_build(root, package_manager=manager)
-            if (
-                str(final["buildKey"]) != str(inspection["buildKey"])
-                or str(final["buildInputs"].get("productionInputStateDigest") or "")
-                != str(inspection["buildInputs"].get("productionInputStateDigest") or "")
-            ):
-                raise RuntimeError("Frontend inputs changed while building; refusing to publish a mixed release.")
-            published = publish_staging_release(root, stage, build_key=str(final["buildKey"]), build_inputs_value=dict(final["buildInputs"]))
-        except Exception:
+        outputs: dict[str, str] = {}
+        for label, command in commands:
+            _require_frontend_build_time(deadline, label)
+            outputs[label] = _run_checked(command, cwd=web_dir, label=label)
+            _require_frontend_build_time(deadline, label)
+
+        # Recompute after build: toolchain/source drift must not be stamped as current.
+        _require_frontend_build_time(deadline, "final build inspection")
+        final = inspect_frontend_build(root, package_manager=manager)
+        _require_frontend_build_time(deadline, "final build inspection")
+        if (
+            str(final["buildKey"]) != str(inspection["buildKey"])
+            or str(final["buildInputs"].get("productionInputStateDigest") or "")
+            != str(inspection["buildInputs"].get("productionInputStateDigest") or "")
+        ):
+            raise RuntimeError("Frontend inputs changed while building; refusing to publish a mixed release.")
+        _require_frontend_build_time(deadline, "publication")
+        assert stage is not None
+        published = publish_staging_release(
+            root,
+            stage,
+            build_key=str(final["buildKey"]),
+            build_inputs_value=dict(final["buildInputs"]),
+        )
+    except _PendingBuildCleanupError as exc:
+        _retain_pending_build_cleanup(
+            root,
+            lock,
+            stage=stage,
+            owner=exc.owner,
+            readers=exc.readers,
+        )
+        raise
+    except Exception as exc:
+        if stage is not None and stage.exists():
+            try:
+                shutil.rmtree(stage)
+            except OSError as cleanup_error:
+                _retain_pending_build_cleanup(root, lock, stage=stage, owner=None)
+                raise RuntimeError("Frontend build failed and staging cleanup is pending.") from cleanup_error
             if stage.exists():
-                shutil.rmtree(stage, ignore_errors=True)
-            raise
-        return {
-            "rebuilt": True,
-            "skipped": False,
-            "lock": lock,
-            "buildKey": final["buildKey"],
-            "buildInputs": final["buildInputs"],
-            "dist": published["release"],
-            "provenance": published["provenance"],
-            "gc": published.get("gc") or {},
-            "outputs": outputs,
-        }
+                _retain_pending_build_cleanup(root, lock, stage=stage, owner=None)
+                raise RuntimeError("Frontend build failed and staging cleanup is pending.") from exc
+        raise
+    return {
+        "rebuilt": True,
+        "skipped": False,
+        "lock": lock,
+        "buildKey": final["buildKey"],
+        "buildInputs": final["buildInputs"],
+        "dist": published["release"],
+        "provenance": published["provenance"],
+        "gc": published.get("gc") or {},
+        "outputs": outputs,
+    }
+
+
+def ensure_frontend_build(
+    project_root: Path | str,
+    *,
+    package_manager: str | None = None,
+    lock_timeout_seconds: float = 180.0,
+) -> dict[str, Any]:
+    """Build a verified release only when its complete BuildKey is not active.
+
+    The old active pointer is deliberately left intact until both TypeScript and
+    Vite complete and the staging output passes validation. One deadline covers
+    cleanup retry, lock acquisition, dependency installation, and both builds.
+    """
+
+    deadline = time.monotonic() + FRONTEND_BUILD_TIMEOUT_SECONDS
+    deadline_token = _FRONTEND_BUILD_DEADLINE.set(deadline)
+    try:
+        root = Path(project_root).resolve()
+        web_dir = root / "web"
+        manager = frontend_package_manager(package_manager)
+        _retry_pending_build_cleanup(
+            root,
+            timeout_seconds=min(FRONTEND_BUILD_CLEANUP_TIMEOUT_SECONDS, max(0.0, deadline - time.monotonic())),
+        )
+        remaining = max(0.0, deadline - time.monotonic())
+        _require_frontend_build_time(deadline, "lock acquisition")
+        with frontend_build_lock(
+            root,
+            timeout_seconds=min(max(0.0, float(lock_timeout_seconds)), remaining),
+        ) as lock:
+            _require_frontend_build_time(deadline, "initial build inspection")
+            inspection = inspect_frontend_build(root, package_manager=manager)
+            _require_frontend_build_time(deadline, "initial build inspection")
+            if bool(inspection["current"]):
+                return {"rebuilt": False, "skipped": True, "lock": lock, **inspection}
+            return _build_frontend_release(root, web_dir, manager, lock, inspection, deadline=deadline)
+    finally:
+        _FRONTEND_BUILD_DEADLINE.reset(deadline_token)
