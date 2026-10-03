@@ -2627,7 +2627,8 @@ async function stopAllManagedRuntimeTrees(): Promise<void> {
 
 async function restartLauncherToLatestBuild(
   interruptActiveWork = true,
-  operationToRestore = "open"
+  operationToRestore = "open",
+  options: { shellKind?: "packaged" | "unpackaged" } = {}
 ): Promise<OrchestratedLifecycleResult> {
   if (shellRefreshInFlight) {
     return {
@@ -2653,7 +2654,9 @@ async function restartLauncherToLatestBuild(
       },
       scheduleReplacement: () => scheduleCurrentDesktopShellRefresh(operationToRestore, {
         force: true,
-        shellKind: app.isPackaged ? "packaged" : "unpackaged"
+        // Callers that need a real promotion (rebuild-and-start) force the
+        // packaged helper path; everyone else keeps the current shell kind.
+        shellKind: options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged")
       })
     });
     if (!result.accepted) {
@@ -3466,8 +3469,14 @@ async function orchestrateLauncherLifecycle(
       lifecycleOperation = "restart";
     }
   }
+  // The refresh gate is no longer packaged-only: rebuild-and-start keeps its
+  // promotion promise on an unpackaged running shell too, while packaged
+  // start/restart/rebuild-and-start still require a launch-blocking shell.
+  let refreshBeforeLifecycle = shouldRefreshBeforeLifecycle(lifecycleOperation, {
+    isPackaged: app.isPackaged,
+    launchBlocking: false
+  });
   if (app.isPackaged) {
-    let refreshBeforeLifecycle = false;
     try {
       const status = await inspectCurrentDesktopShell();
       if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
@@ -3477,16 +3486,19 @@ async function orchestrateLauncherLifecycle(
     } catch (error: unknown) {
       console.warn(error instanceof Error ? error.message : String(error));
     }
-    if (refreshBeforeLifecycle) {
-      notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在更新后再执行…");
-      try {
-        return await restartLauncherToLatestBuild(
-          operation === "restart" && provenance === "operator",
-          lifecycleOperation
-        );
-      } finally {
-        launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
-      }
+  }
+  if (refreshBeforeLifecycle) {
+    notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在更新后再执行…");
+    try {
+      return await restartLauncherToLatestBuild(
+        operation === "restart" && provenance === "operator",
+        lifecycleOperation,
+        // The helper must promote and relaunch the packaged shell even when
+        // the current running shell is unpackaged.
+        { shellKind: "packaged" }
+      );
+    } finally {
+      launcherLifecycleSupervisor.clearSlotIfCurrent(intentLease);
     }
   }
   // Snapshot the pre-mutation backend identity so the post-start verification

@@ -9,6 +9,8 @@ from core.llm.errors import classify_exception
 from core.llm.recovery import plan_recovery
 from core.ui.chat_state import CHAT_STATE_VERSION, save_chat_state
 from core.web.services import agent_directory_service, session_service
+import pytest
+
 from tests.helpers.isolated_config import isolated_settings_config
 
 
@@ -17,6 +19,17 @@ def _use_tmp_session_root(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
+
+
+@pytest.fixture(autouse=True)
+def _stamp_session_context_window(monkeypatch):
+    # These tests check provider-failure sanitization, not model discovery;
+    # the isolated config names openai/gpt-5.5 without a context_window entry.
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda conversation, _limit=128000: {"limit": _limit},
+    )
 
 
 def _make_config(**kwargs):
