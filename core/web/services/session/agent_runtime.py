@@ -8,6 +8,8 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import contextvars
+
 import copy
 
 import hashlib
@@ -166,9 +168,87 @@ def _session_llm_model_choices() -> list[dict[str, Any]]:
     return choices
 
 
+_LLM_OPTIONS_CHAIN_MEMO: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar(
+    "session_llm_options_chain_memo",
+    default=None,
+)
+_LLM_OPTIONS_CHAIN_UNSET = object()
+
+
+def _llm_options_chain_slot(session_id: str) -> dict[str, Any] | None:
+    """Return the per-session memo slot active inside one get_session_llm_options call.
+
+    A single GET fans out into repeated ensure + chat-state reads (top-level
+    guard, reasoning-effort snapshot, fixed-model choice). The chain memo
+    collapses them to one real ensure and one real chat-state read per session
+    without changing any collaborator signature, so late-bound collaborators
+    (and their monkeypatched test fakes) keep working unchanged.
+    """
+    chain = _LLM_OPTIONS_CHAIN_MEMO.get()
+    if not isinstance(chain, dict):
+        return None
+    normalized_session_id = str(session_id or "").strip()
+    slot = chain.get(normalized_session_id)
+    if not isinstance(slot, dict):
+        slot = {
+            "ensure": _LLM_OPTIONS_CHAIN_UNSET,
+            "agent_id": _LLM_OPTIONS_CHAIN_UNSET,
+        }
+        chain[normalized_session_id] = slot
+    return slot
+
+
+def _llm_options_chain_ensure(session_id: str, *, source: str) -> bool:
+    """Run ``_ensure_session_conversation_record`` once per GET chain.
+
+    Read paths never block on the directory SQLite upsert: inside the chain the
+    ensure is recorded with ``sync_wait=False`` and the result is memoized.
+    """
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    slot = _llm_options_chain_slot(normalized_session_id)
+    if slot is None:
+        return bool(
+            s._ensure_session_conversation_record(
+                normalized_session_id,
+                source=source,
+            )
+        )
+    if slot["ensure"] is _LLM_OPTIONS_CHAIN_UNSET:
+        slot["ensure"] = bool(
+            s._ensure_session_conversation_record(
+                normalized_session_id,
+                source=source,
+                sync_wait=False,
+            )
+        )
+    return bool(slot["ensure"])
+
+
 def _session_agent_id_snapshot(session_id: str) -> str:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
+    slot = _llm_options_chain_slot(normalized_session_id)
+    if slot is not None:
+        if slot["agent_id"] is not _LLM_OPTIONS_CHAIN_UNSET:
+            cached_agent_id = slot["agent_id"]
+            if cached_agent_id is None:
+                raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
+            return str(cached_agent_id)
+        if not _llm_options_chain_ensure(
+            normalized_session_id,
+            source="session.agent_id.snapshot",
+        ):
+            slot["agent_id"] = None
+            raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        with s._CHAT_STATE_LOCK:
+            conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+            if conversation is None:
+                slot["agent_id"] = None
+                raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
+            agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        slot["agent_id"] = agent_id
+        return agent_id
     if not s._ensure_session_conversation_record(
         normalized_session_id,
         source="session.agent_id.snapshot",
@@ -183,22 +263,27 @@ def _session_agent_id_snapshot(session_id: str) -> str:
 
 def get_session_llm_options(session_id: str) -> dict[str, Any]:
     s = _service()
-    if not s._ensure_session_conversation_record(
-        str(session_id or "").strip(),
-        source="session.llm_options",
-    ):
-        raise s.SessionNotFoundError(f"Session not found: {str(session_id or '').strip()}")
-    current_reasoning_effort = s._session_reasoning_effort_snapshot(session_id)
-    model = s._session_fixed_model_choice(session_id)
-    return {
-        "sessionId": str(session_id or "").strip(),
-        "currentModelId": str(model.get("modelRef") or model.get("modelId") or "").strip(),
-        "currentReasoningEffort": s.normalize_reasoning_effort(current_reasoning_effort),
-        "model": model,
-        # Full selectable list for per-turn overrides (composer "send once with
-        # model" menu). Same candidate projection as the session default.
-        "choices": s._session_llm_model_choices(),
-    }
+    normalized_session_id = str(session_id or "").strip()
+    chain_token = _LLM_OPTIONS_CHAIN_MEMO.set({})
+    try:
+        if not _llm_options_chain_ensure(
+            normalized_session_id,
+            source="session.llm_options",
+        ):
+            raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        current_reasoning_effort = s._session_reasoning_effort_snapshot(normalized_session_id)
+        model = s._session_fixed_model_choice(normalized_session_id)
+        return {
+            "sessionId": normalized_session_id,
+            "currentModelId": str(model.get("modelRef") or model.get("modelId") or "").strip(),
+            "currentReasoningEffort": s.normalize_reasoning_effort(current_reasoning_effort),
+            "model": model,
+            # Full selectable list for per-turn overrides (composer "send once with
+            # model" menu). Same candidate projection as the session default.
+            "choices": s._session_llm_model_choices(),
+        }
+    finally:
+        _LLM_OPTIONS_CHAIN_MEMO.reset(chain_token)
 
 
 def _normalize_session_agent_profile_id(value: Any) -> str:

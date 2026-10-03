@@ -1115,6 +1115,41 @@ def test_recover_missing_conversation_writes_only_target_session_row(tmp_path, m
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
 
 
+def test_ensure_session_conversation_record_sync_wait_reaches_directory_bridge(tmp_path, monkeypatch):
+    """Read paths pass sync_wait=False so the directory upsert never blocks the response."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.services.session.directory_runtime.is_legacy_discard_in_progress",
+        lambda: False,
+    )
+    save_session_chat_state(tmp_path, "session-a", {"conversation_id": "session-a", "title": "A"})
+    sync_waits: list[bool] = []
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.sync_conversation_record",
+        lambda conversation, **kwargs: sync_waits.append(bool(kwargs.get("wait", True))),
+    )
+
+    assert (
+        session_service._ensure_session_conversation_record(
+            "session-a",
+            source="test_chat_state_persistence",
+            sync_wait=False,
+        )
+        is True
+    )
+    assert sync_waits == [False]
+
+    assert (
+        session_service._ensure_session_conversation_record(
+            "session-a",
+            source="test_chat_state_persistence",
+        )
+        is True
+    )
+    assert sync_waits == [False, True]
+
+
 def test_initialized_session_reasoning_effort_loads_one_row(tmp_path, monkeypatch):
     """Reasoning snapshot must read the target runtime row, not the compatibility document."""
 

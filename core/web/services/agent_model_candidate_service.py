@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import copy
 import re
+import threading
+import time
+from pathlib import Path
 from typing import Any
 
+from config import public_config as public_config_module
 from config.llm_credentials import resolve_credential_ref
 from config.llm_identity import make_model_ref, provider_discovery_fingerprint
 from config.model_catalog import load_model_catalog_state, resolve_model_capabilities
+from config.paths import resolve_model_catalog_state_path
 from config.public_config import (
     curated_catalog_capabilities,
     load_public_config,
@@ -529,9 +535,44 @@ def _legacy_model_options(candidates: list[dict[str, Any]]) -> list[dict[str, An
     return options
 
 
-def list_agent_model_candidates() -> dict[str, Any]:
-    """Load each canonical source once and project one consistent workspace payload."""
+_AGENT_MODEL_CANDIDATES_CACHE_TTL_SECONDS = 90.0
+_AGENT_MODEL_CANDIDATES_CACHE_LOCK = threading.Lock()
+_AGENT_MODEL_CANDIDATES_CACHE: tuple[tuple[Any, ...], float, dict[str, Any]] | None = None
 
+
+def _agent_model_candidates_file_signature(path: Path) -> tuple[str, int, int] | None:
+    """Same (path, mtime_ns, size) stat signature as the public_config cache."""
+
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _agent_model_candidates_cache_signature() -> tuple[Any, ...]:
+    """Signature of everything the candidate payload is derived from.
+
+    Mirrors config_service._config_result_cache_signature: the bound loader
+    callables are part of the key so rebinding them (tests, alternative config
+    paths) always misses, and the file stats catch operator edits to
+    config.toml / model-catalog-state.json without needing a write hook. Path
+    strings are part of each stat signature so pytest tmp dirs never share an
+    entry, and the config path is read through the public_config module
+    attribute at call time so monkeypatched CONFIG_PATH is honored.
+    """
+    return (
+        load_public_config,
+        load_model_catalog_state,
+        public_config_hash,
+        _agent_model_candidates_file_signature(
+            Path(str(public_config_module.CONFIG_PATH)).expanduser().resolve()
+        ),
+        _agent_model_candidates_file_signature(resolve_model_catalog_state_path()),
+    )
+
+
+def _build_agent_model_candidates_payload() -> dict[str, Any]:
     public_config = load_public_config()
     catalog_state = load_model_catalog_state()
     candidates = project_agent_model_candidates(public_config, catalog_state)
@@ -540,6 +581,33 @@ def list_agent_model_candidates() -> dict[str, Any]:
         "candidates": candidates,
         "modelOptions": _legacy_model_options(candidates),
     }
+
+
+def list_agent_model_candidates() -> dict[str, Any]:
+    """Load each canonical source once and project one consistent workspace payload.
+
+    The projected payload is cached at process level keyed on
+    ``_agent_model_candidates_cache_signature``; the signature check is two
+    stats, so operator edits invalidate without any write hook. Callers always
+    receive a private deep copy (cache hit and rebuild alike) and may mutate
+    the payload without affecting other callers.
+    """
+
+    signature = _agent_model_candidates_cache_signature()
+    now = time.monotonic()
+    global _AGENT_MODEL_CANDIDATES_CACHE
+    with _AGENT_MODEL_CANDIDATES_CACHE_LOCK:
+        cached = _AGENT_MODEL_CANDIDATES_CACHE
+        if cached is not None and cached[0] == signature and now < cached[1]:
+            return copy.deepcopy(cached[2])
+    payload = _build_agent_model_candidates_payload()
+    with _AGENT_MODEL_CANDIDATES_CACHE_LOCK:
+        _AGENT_MODEL_CANDIDATES_CACHE = (
+            signature,
+            time.monotonic() + _AGENT_MODEL_CANDIDATES_CACHE_TTL_SECONDS,
+            copy.deepcopy(payload),
+        )
+    return payload
 
 
 __all__ = [

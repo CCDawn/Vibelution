@@ -2484,6 +2484,7 @@ def _ensure_agent_directory_conversation_materialized(
     *,
     source: str,
     activate: bool = False,
+    sync_wait: bool = True,
 ) -> bool:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
@@ -2517,7 +2518,7 @@ def _ensure_agent_directory_conversation_materialized(
     if snapshot is not None:
         from . import directory_bridge
 
-        directory_bridge.sync_conversation_record(snapshot)
+        directory_bridge.sync_conversation_record(snapshot, wait=sync_wait)
         s._invalidate_session_list_cache()
     return changed
 
@@ -2526,12 +2527,17 @@ def _ensure_session_conversation_record(
     session_id: str,
     *,
     source: str,
+    sync_wait: bool = True,
 ) -> bool:
     """Ensure chat_state has a conversation row for this session.
 
     Used by mutations (e.g. reasoning effort) that only write chat_state, while
     list/detail can surface agent-directory or workspace-backed sessions that
     were never (or no longer) indexed in chat_state.
+
+    ``sync_wait=False`` keeps read-path callers (GET llm-options) from blocking
+    on the directory SQLite upsert: the write is still enqueued (eventually
+    consistent) instead of joining the writer queue before the response.
     """
     s = _service()
     normalized_session_id = str(session_id or "").strip()
@@ -2550,6 +2556,7 @@ def _ensure_session_conversation_record(
     s._ensure_agent_directory_conversation_materialized(
         normalized_session_id,
         source=source,
+        sync_wait=sync_wait,
     )
     with s._CHAT_STATE_LOCK:
         entry = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
@@ -2569,7 +2576,7 @@ def _ensure_session_conversation_record(
     if snapshot is not None:
         from . import directory_bridge
 
-        directory_bridge.sync_conversation_record(snapshot)
+        directory_bridge.sync_conversation_record(snapshot, wait=sync_wait)
     return snapshot is not None
 
 

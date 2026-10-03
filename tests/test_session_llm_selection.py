@@ -160,6 +160,76 @@ def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest
     assert "models" not in payload
 
 
+def test_session_llm_options_chain_ensures_and_loads_chat_state_once(monkeypatch: pytest.MonkeyPatch):
+    """One GET must ensure once, read chat state once, and never block on the directory write."""
+    ensure_calls: list[dict] = []
+    chat_state_loads: list[str] = []
+
+    def _fake_ensure(session_id, *, source, sync_wait=True, **_kwargs):
+        ensure_calls.append({"session": session_id, "source": source, "sync_wait": sync_wait})
+        return True
+
+    def _fake_load_chat_state(project_root, session_id, *args, **kwargs):
+        chat_state_loads.append(str(session_id))
+        return {"agent_id": "agent-live"}
+
+    monkeypatch.setattr(session_service, "_ensure_session_conversation_record", _fake_ensure)
+    monkeypatch.setattr(session_service, "load_session_chat_state", _fake_load_chat_state)
+    monkeypatch.setattr(
+        session_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: {
+            "agentId": agent_id,
+            "llmBindings": {"dialogue": {"modelId": "ai-pixel/gpt-5.6-luna"}},
+        },
+    )
+    monkeypatch.setattr(session_service, "_session_llm_model_choices", _model_choices)
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *_args, **_kwargs: pytest.fail("LLM options must not hydrate full session detail"),
+    )
+
+    payload = session_service.get_session_llm_options("session-live")
+
+    assert len(ensure_calls) == 1
+    assert ensure_calls[0]["session"] == "session-live"
+    assert ensure_calls[0]["sync_wait"] is False
+    assert chat_state_loads == ["session-live"]
+    assert set(payload) == {"sessionId", "currentModelId", "currentReasoningEffort", "model", "choices"}
+    assert payload["currentModelId"] == "ai-pixel/gpt-5.6-luna"
+    assert payload["currentReasoningEffort"] == ""
+    assert payload["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
+
+    # The chain memo is scoped to a single GET: the next GET re-runs the chain.
+    session_service.get_session_llm_options("session-live")
+    assert len(ensure_calls) == 2
+    assert len(chat_state_loads) == 2
+
+
+def test_session_agent_id_snapshot_outside_llm_options_keeps_ensure_and_load(monkeypatch: pytest.MonkeyPatch):
+    """Collaborators outside the GET chain keep their own ensure + chat-state read."""
+    ensure_calls: list[str] = []
+    chat_state_loads: list[str] = []
+
+    monkeypatch.setattr(
+        session_service,
+        "_ensure_session_conversation_record",
+        lambda session_id, *, source, **_kwargs: ensure_calls.append(source) or True,
+    )
+
+    def _fake_load_chat_state(project_root, session_id, *args, **kwargs):
+        chat_state_loads.append(str(session_id))
+        return {"agent_id": "agent-live"}
+
+    monkeypatch.setattr(session_service, "load_session_chat_state", _fake_load_chat_state)
+
+    assert session_service._session_agent_id_snapshot("session-live") == "agent-live"
+    assert session_service._session_agent_id_snapshot("session-live") == "agent-live"
+    assert len(ensure_calls) == 2
+    assert chat_state_loads == ["session-live", "session-live"]
+
+
 def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Workspace-backed sessions may rematerialize identity, but config stays on Agent."""
     state = {"conversations": [], "version": 1}

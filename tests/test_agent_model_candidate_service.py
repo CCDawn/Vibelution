@@ -431,3 +431,84 @@ def test_list_candidates_reads_each_snapshot_once_and_never_exposes_secret(monke
     assert secret not in repr(payload)
     assert {item["apiKeyEnv"] for item in payload["candidates"]} == {"AI_PIXEL_API_KEY"}
     assert all(item["apiKeyConfigured"] is True for item in payload["candidates"])
+
+
+def _install_counting_candidate_loaders(monkeypatch, catalog_state):
+    """Bind per-test loaders so the cache signature is unique to this test."""
+    calls = {"config": 0, "catalog": 0, "hash": 0}
+    original_hash = agent_model_candidate_service.public_config_hash
+
+    def load_config():
+        calls["config"] += 1
+        return _public_config()
+
+    def load_catalog():
+        calls["catalog"] += 1
+        return copy.deepcopy(catalog_state)
+
+    def hash_snapshot(snapshot):
+        calls["hash"] += 1
+        return original_hash(snapshot)
+
+    monkeypatch.setattr(agent_model_candidate_service, "load_public_config", load_config)
+    monkeypatch.setattr(agent_model_candidate_service, "load_model_catalog_state", load_catalog)
+    monkeypatch.setattr(agent_model_candidate_service, "public_config_hash", hash_snapshot)
+    return calls
+
+
+def test_list_candidates_cache_hit_skips_rebuild_and_isolates_mutation(monkeypatch):
+    calls = _install_counting_candidate_loaders(monkeypatch, _catalog_state())
+
+    first = agent_model_candidate_service.list_agent_model_candidates()
+    assert calls == {"config": 1, "catalog": 1, "hash": 1}
+    assert first["candidates"]
+
+    pristine = copy.deepcopy(first)
+    first["candidates"].clear()
+    first["modelOptions"].clear()
+    first["operatorConfigHash"] = "mutated-by-caller"
+
+    second = agent_model_candidate_service.list_agent_model_candidates()
+    assert calls == {"config": 1, "catalog": 1, "hash": 1}
+    assert second == pristine
+    assert second["operatorConfigHash"] != "mutated-by-caller"
+
+    second["candidates"].pop()
+    third = agent_model_candidate_service.list_agent_model_candidates()
+    assert calls == {"config": 1, "catalog": 1, "hash": 1}
+    assert third == pristine
+
+
+def test_list_candidates_cache_invalidates_when_catalog_signature_changes(monkeypatch):
+    catalog_a = _catalog_state()
+    calls = _install_counting_candidate_loaders(monkeypatch, catalog_a)
+
+    first = agent_model_candidate_service.list_agent_model_candidates()
+    assert calls == {"config": 1, "catalog": 1, "hash": 1}
+    assert "ai-pixel/gpt-5.6-sol" in {item["modelRef"] for item in first["candidates"]}
+
+    catalog_b = _catalog_state()
+    del catalog_b["providers"]["ai-pixel"]["models"]["gpt-5.6-sol"]
+    # Rebind the catalog loader: the bound callable is part of the cache signature,
+    # so the next read must rebuild from the new snapshot.
+    monkeypatch.setattr(
+        agent_model_candidate_service,
+        "load_model_catalog_state",
+        lambda: copy.deepcopy(catalog_b),
+    )
+
+    second = agent_model_candidate_service.list_agent_model_candidates()
+    assert calls["config"] == 2
+    model_refs = {item["modelRef"] for item in second["candidates"]}
+    assert "ai-pixel/gpt-5.6-sol" not in model_refs
+    assert "ai-pixel/gpt-5.6-luna" in model_refs
+
+
+def test_candidates_cache_signature_tracks_config_path(monkeypatch, tmp_path):
+    from config import public_config as public_config_module
+
+    before = agent_model_candidate_service._agent_model_candidates_cache_signature()
+    monkeypatch.setattr(public_config_module, "CONFIG_PATH", str(tmp_path / "config.toml"))
+    after = agent_model_candidate_service._agent_model_candidates_cache_signature()
+
+    assert before != after
