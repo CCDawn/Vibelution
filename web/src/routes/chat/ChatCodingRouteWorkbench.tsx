@@ -1477,12 +1477,13 @@ export function ChatCodingRouteWorkbench() {
   useEffect(() => {
     const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
     const groupReady = !standardGroupRoomActive || Boolean(activeGroupRoomQuery.data);
-    if (sessionsQuery.data && directReady && groupReady) {
+    if ((financeSurface || sessionsQuery.data) && directReady && groupReady) {
       setChatStartupDataReady(true);
     }
   }, [
     activeGroupRoomQuery.data,
     activeSessionId,
+    financeSurface,
     standardGroupRoomActive,
     sessionDetailQuery.data,
     sessionsQuery.data,

@@ -1,3 +1,5 @@
+import { useLocation } from "react-router-dom";
+
 import { VRouteLinkButton, VStateSurface } from "../../components/vui";
 import { agentCenterConfigRoute, agentCenterMemoryRoute } from "../agentCenterRoutes";
 import { financialAssistantBoundary } from "./financialAssistantEntry";
@@ -54,4 +56,3 @@ export function FinancialAssistantChatNote({
     </VStateSurface>
   );
 }
-import { useLocation } from "react-router-dom";
