@@ -2,12 +2,13 @@
 """Task kickoff brief: one command that aggregates what a development agent
 would otherwise re-derive by hand at the start of every task.
 
-聚合四段::
+聚合五段::
 
     1. 域定位与测试建议   --files 匹配 tests/test_matrix.yaml 的 rules.paths
     2. claim 冲突预检     活跃 claims 的 scopes vs 目标文件/域
     3. 修复历史           fix_ledger 按任务关键词与文件检索
     4. 文档指引           命中面 → ownership/README 链接
+    5. 本地开源参考       任务与 owning surface → 固定版本项目卡片
 
 用法::
 
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import fix_ledger  # noqa: E402
 from agent_session_status import active_claims, claims_touching, read_coordination_status, scope_covers  # noqa: E402
@@ -109,6 +111,47 @@ def guide_for(surface: str) -> str | None:
     return None
 
 
+def github_projects_for_task(main_root: Path, task: str, files: Sequence[str]) -> dict[str, Any]:
+    """Discover bounded local pointers; never clone, execute or write sources."""
+    queries = [str(task).strip()[:240]]
+    paths = [str(path).replace("\\", "/").lower() for path in files]
+    if any(path.startswith("web/") for path in paths):
+        queries.append("前端治理")
+    if any(path.startswith(("core/", "tools/")) or path == "agent.py" for path in paths):
+        queries.append("后端治理")
+    queries = list(dict.fromkeys(query for query in queries if query))
+    cards: dict[str, dict[str, Any]] = {}
+    ranked_queries: list[list[dict[str, Any]]] = []
+    error = ""
+    try:
+        from core.web.services.github_project_library_service import search_github_project_cards
+
+        for query in queries:
+            ranked = search_github_project_cards(query=query, limit=5, project_root=main_root)
+            ranked_queries.append(ranked)
+            for card in ranked:
+                identity = str((card.get("metadata") or {}).get("fullName") or card.get("resultId") or "")
+                if identity not in cards or float(card.get("score") or 0) > float(cards[identity].get("score") or 0):
+                    cards[identity] = card
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        error = type(exc).__name__
+    # Keep both owning surfaces visible when a task spans frontend and backend.
+    ordered: dict[str, dict[str, Any]] = {}
+    for rank in range(5):
+        for ranked in ranked_queries:
+            if rank >= len(ranked):
+                continue
+            card = ranked[rank]
+            identity = str((card.get("metadata") or {}).get("fullName") or card.get("resultId") or "")
+            if identity not in ordered and len(ordered) < 5:
+                ordered[identity] = cards[identity]
+    return {
+        "githubProjects": list(ordered.values()),
+        "githubProjectQueries": queries,
+        "githubProjectsError": error,
+    }
+
+
 def build_brief(
     main_root: Path,
     *,
@@ -167,6 +210,7 @@ def build_brief(
         "fixHistory": ledger_entries,
         "fixHistoryError": ledger_error,
         "docGuides": guides,
+        **github_projects_for_task(main_root, task, files),
     }
 
 
@@ -207,6 +251,23 @@ def render_text(brief: dict[str, Any]) -> str:
         lines.append("  (见 docs/guides/route.md 全量路由)")
     for doc in guides:
         lines.append(f"  → {doc}")
+    lines.append("")
+    lines.append("-- 本地开源参考 --")
+    if brief.get("githubProjectsError"):
+        lines.append(f"  (本地索引不可用: {brief['githubProjectsError']})")
+    elif not brief.get("githubProjects"):
+        lines.append("  (无匹配项目；索引空或查询未命中不表示没有成熟方案)")
+    for card in brief.get("githubProjects") or []:
+        metadata = card.get("metadata") or {}
+        review = metadata.get("governanceReview") or {}
+        lines.append(f"  → {metadata.get('fullName')}: {review.get('status') or '未审查'} · {metadata.get('localPath')}")
+        if review.get("borrowedSlice"):
+            lines.append(f"    借鉴点: {review['borrowedSlice']}")
+        if review.get("reuseBoundary"):
+            lines.append(f"    边界: {review['reuseBoundary']}")
+        for ref in review.get("evidenceRefs") or []:
+            lines.append(f"    证据: {ref.get('absolutePath')}:{ref.get('line')}")
+    lines.append("  卡片只用于发现候选；先读固定 HEAD 的具体源码。静态审查不代表运行验证或代码复用许可。")
     return "\n".join(lines)
 
 
@@ -215,11 +276,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--project-root", default=str(PROJECT_ROOT))
     parser.add_argument("--task", required=True, help="One-line task description.")
     parser.add_argument("--files", nargs="*", default=[], help="Target files (git-relative).")
+    parser.add_argument("--json", action="store_true", help="Print the bounded kickoff brief as JSON.")
     arguments = parser.parse_args(argv)
 
     main_root = Path(arguments.project_root).resolve()
     brief = build_brief(main_root, task=arguments.task, files=arguments.files)
-    if "--json" in (argv or []):
+    if arguments.json:
         print(json.dumps({"ok": True, **brief}, ensure_ascii=False, indent=2))
     else:
         print(render_text(brief))

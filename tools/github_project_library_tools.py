@@ -48,7 +48,9 @@ def github_project_library_search_tool(query: str = "", limit: int = 12) -> str:
                 "indexPath": payload.get("indexPath") or "",
                 "hint": (
                     "按 searchScore 和 matchedTerms 选择最贴合的候选，再读取 localPath/absolutePath "
-                    "下固定 HEAD 的具体文件；不要把项目卡、README token 或网页摘要当实现结论。"
+                    "下固定 HEAD 的具体文件；治理查询可用前端治理、后端治理、工具权限审批、工作流检查点恢复。"
+                    "governanceReview 含证据位置与复用边界，static_reviewed 仅为静态审查，"
+                    "review_required 需要复审；不要把项目卡、README token 或网页摘要当实现结论。"
                 ),
             }
         )

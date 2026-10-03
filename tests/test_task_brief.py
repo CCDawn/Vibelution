@@ -131,3 +131,57 @@ def test_render_text_contains_sections(repo: Path) -> None:
     assert "claim 冲突预检" in text
     assert "相关修复历史" in text
     assert "pytest tests/test_llm_client.py -q" in text
+
+
+def test_brief_discovers_bounded_local_references_for_owning_surface(repo, monkeypatch):
+    from core.web.services import github_project_library_service as library
+
+    queries = []
+
+    def search(*, query, limit, project_root):
+        queries.append(query)
+        assert project_root == repo and limit == 5
+        return [
+            {"title": str(i), "score": 0.9 - i * 0.01, "metadata": {"fullName": f"acme/{i}", "localPath": f"repos/acme__{i}"}}
+            for i in range(8)
+        ]
+
+    monkeypatch.setattr(library, "search_github_project_cards", search)
+    brief = task_brief.build_brief(repo, task="调整请求状态", files=["web/src/api/chat.ts"])
+    assert queries == ["调整请求状态", "前端治理"]
+    assert len(brief["githubProjects"]) == 5
+    assert "本地开源参考" in task_brief.render_text(brief)
+    assert "acme/0" in task_brief.render_text(brief)
+
+
+def test_brief_reports_index_failure_without_losing_other_sections(repo, monkeypatch):
+    from core.web.services import github_project_library_service as library
+
+    def unavailable(**_):
+        raise OSError("index unavailable")
+
+    monkeypatch.setattr(library, "search_github_project_cards", unavailable)
+    brief = task_brief.build_brief(repo, task="后端治理", files=["core/llm/client.py"])
+    assert brief["githubProjects"] == []
+    assert brief["githubProjectsError"] == "OSError"
+    assert brief["matchedRules"]
+
+
+def test_brief_keeps_both_frontend_and_backend_candidates(repo, monkeypatch):
+    from core.web.services import github_project_library_service as library
+
+    def search(*, query, **_):
+        area = "backend" if query == "后端治理" else "frontend"
+        return [{"score": 0.9, "metadata": {"fullName": f"{area}/{i}"}} for i in range(5)]
+
+    monkeypatch.setattr(library, "search_github_project_cards", search)
+    brief = task_brief.build_brief(repo, task="治理项目", files=["web/src/api/chat.ts", "core/web/services"])
+    names = [card["metadata"]["fullName"] for card in brief["githubProjects"]]
+    assert "frontend/0" in names and "backend/0" in names
+    assert len(names) == len(set(names)) == 5
+
+
+def test_cli_json_uses_the_same_bounded_brief(repo, capsys):
+    assert task_brief.main(["--project-root", str(repo), "--task", "前端治理", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True and payload["githubProjectQueries"] == ["前端治理"]

@@ -831,11 +831,6 @@ def session_prompt_suggestion(
     return {"sessionId": session_id, **result}
 
 
-@router.get(
-    "/sessions/{session_id}/composer-example",
-    response_model=SessionComposerExampleResponse,
-    response_model_exclude_unset=True,
-)
 def _composer_starters_for_detail(detail: dict | None) -> list[dict[str, str]]:
     agent_id = ""
     if isinstance(detail, dict):
@@ -854,11 +849,18 @@ def _composer_starters_for_detail(detail: dict | None) -> list[dict[str, str]]:
     return get_composer_starter_commands(session_service.PROJECT_ROOT)
 
 
+@router.get(
+    "/sessions/{session_id}/composer-example",
+    response_model=SessionComposerExampleResponse,
+    response_model_exclude_unset=True,
+)
 def session_composer_example(session_id: str) -> dict:
     try:
         detail = get_session_detail(session_id, message_limit=0, transcript_scope="none")
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     starters = _composer_starters_for_detail(detail)
     return {
         "command": starters[0]["command"] if starters else None,
