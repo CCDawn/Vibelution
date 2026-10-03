@@ -166,6 +166,13 @@ export type ConfigCatalogModel = {
   reasoningAdapter?: string;
   reasoningCapabilitySource?: string;
   reasoningCheckedAt?: string;
+  /**
+   * Raw draft entry (`llm.providers.<id>.models.<key>`) merged into this row,
+   * present only when the model is pinned in the current draft. The model
+   * entry editor reads whitelist values and protocol-layer facts from here;
+   * see routes/config/modelEditableFields.ts.
+   */
+  draftEntry?: Record<string, unknown>;
 };
 
 export type ConfigCatalogWarning = {

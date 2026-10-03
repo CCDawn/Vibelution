@@ -328,7 +328,9 @@ export function buildProviderSetupChecklist(
 
 /**
  * Merge discovery catalog rows with draft pins so the table does not keep showing
- * "observed" after models are already pinned in publicConfig.
+ * "observed" after models are already pinned in publicConfig. Pinned rows carry
+ * the raw draft entry (`draftEntry`) so the model entry editor can read
+ * whitelist values and protocol-layer facts.
  */
 export function projectProviderModelsForUi(
   providerId: string,
@@ -346,6 +348,7 @@ export function projectProviderModelsForUi(
         availability: model.availability === "missing_remote" ? "missing_remote" : "pinned",
         label: String(draft.label || model.label || model.modelKey),
         upstreamId: String(draft.upstream_id || model.upstreamId || model.modelKey),
+        draftEntry: draft,
       });
     } else {
       byKey.set(model.modelKey, model);
@@ -363,6 +366,7 @@ export function projectProviderModelsForUi(
       availability: "pinned",
       status: "pinned",
       capabilities: {},
+      draftEntry: draft,
     });
   }
   return Array.from(byKey.values()).sort((left, right) => left.modelRef.localeCompare(right.modelRef));

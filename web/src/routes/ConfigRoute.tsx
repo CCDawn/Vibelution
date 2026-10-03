@@ -942,6 +942,7 @@ export function ConfigRoute() {
     handleConfirmDeleteProvider,
     handleCancelDeleteProvider,
     handleUpdateProviderCredential: updateProviderCredential,
+    handleUpdatePinnedModel,
     handleUpdateProviderContextWindow: updateProviderContextWindow,
     handleToggleProviderEnabled,
     handleBeginProviderRouteEdit,
@@ -1978,6 +1979,12 @@ export function ConfigRoute() {
                     // Wave 2: draft-only toggle; the save prompt persists it.
                     void handleToggleProviderEnabled(providerId, enabled);
                   }}
+                  onUpdateModel={(providerId, modelKey, edits) => {
+                    // Wave 3 governance path B: whitelist-gated entry edit,
+                    // draft-only until「保存到外部配置」.
+                    void handleUpdatePinnedModel(`${providerId}/${modelKey}`, edits);
+                  }}
+                  modelUpdateBusy={busyAction === copy.actionModelUpdateBusy}
                 />
                   </>
                 ) : null}

@@ -17,6 +17,7 @@ import {
   VSplitWorkspace,
   VStateSurface,
   VStatusChip,
+  VStringSelect,
   VSurface,
   VSwitch,
   VTooltip,
@@ -29,6 +30,13 @@ import type {
   ConfigProviderMergeResult,
 } from "../api/types";
 import { type ConfigCopy, formatConfigCopy } from "./config/configCopy";
+import {
+  buildModelFieldValues,
+  EDITABLE_MODEL_FIELDS,
+  extractProtocolFacts,
+  type ModelFieldEdits,
+  type ModelFieldValues,
+} from "./config/modelEditableFields";
 import {
   buildProviderSetupChecklist,
   canTestProviderModel,
@@ -51,7 +59,7 @@ import styles from "./ConfigProviderRegistryPanel.styles";
 
 export type ConfigProviderRegistryTab = "connection" | "models" | "protocols" | "diagnostics";
 
-export type ProviderActionKind = "discover" | "credential" | "route" | "pin";
+export type ProviderActionKind = "discover" | "credential" | "route" | "pin" | "model";
 
 export type ProviderActionFeedback = {
   kind: ProviderActionKind;
@@ -101,6 +109,14 @@ export type ConfigProviderRegistryPanelProps = {
    * Selection-surface semantics only: no running call is cut off.
    */
   onToggleEnabled?: (providerId: string, enabled: boolean) => void;
+  /**
+   * Wave 3 governance path B: whitelist-governed pinned-model entry edit.
+   * `edits` only ever carries EDITABLE_MODEL_FIELDS keys; the draft action
+   * applies them through applyModelEntryEdits. Draft-only: persisted by the
+   *「保存到外部配置」prompt like every other provider mutation.
+   */
+  onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
+  modelUpdateBusy?: boolean;
 };
 
 const TABS: Array<{ id: ConfigProviderRegistryTab; copyKey: "registryTabConnection" | "registryTabModels" | "registryTabProtocols" | "registryTabDiagnostics" }> = [
@@ -529,6 +545,9 @@ export type ProviderModelsTabProps = {
     message: string;
   }>;
   onProbeReasoning?: (modelRef: string) => void;
+  /** Whitelist-governed pinned-model edit (wave 3 governance path B). */
+  onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
+  modelUpdateBusy?: boolean;
 };
 
 /** P1 model row dot: availability-only tone; the status word lives in the title. */
@@ -623,6 +642,185 @@ function ModelListRowItem({
 }
 
 /**
+ * Wave 3 governance path B: whitelist-governed editor for one pinned model
+ * entry. Whitelist fields (EDITABLE_MODEL_FIELDS) render editable controls;
+ * protocol-layer fields render read-only with the「由协议规则供给」note —
+ * visible but not editable, so users cannot break protocol combinations.
+ * Saving only sends changed whitelist fields; the draft write action applies
+ * them through applyModelEntryEdits (the same single source).
+ */
+function ModelEntryEditor({
+  model,
+  disabled,
+  busy,
+  copy,
+  onSave,
+}: {
+  model: ConfigCatalogModel;
+  disabled: boolean;
+  busy: boolean;
+  copy: ConfigCopy;
+  onSave: (modelKey: string, edits: ModelFieldEdits) => void;
+}) {
+  const baseline = useMemo(
+    () => buildModelFieldValues(model.draftEntry, { label: model.label, upstreamId: model.upstreamId }),
+    // Rebuild only when the underlying entry changes identity, not on every render.
+    [model.draftEntry, model.label, model.upstreamId],
+  );
+  const baselineKey = JSON.stringify(baseline);
+  const [draft, setDraft] = useState<ModelFieldValues>(baseline);
+  // Follow externally applied entry changes (save/discovery refresh); explicit
+  // keying on the serialized baseline keeps the form mirroring the draft.
+  useEffect(() => {
+    setDraft(JSON.parse(baselineKey) as ModelFieldValues);
+  }, [baselineKey]);
+
+  const edits: ModelFieldEdits = {};
+  for (const field of EDITABLE_MODEL_FIELDS) {
+    if (draft[field] !== baseline[field]) {
+      edits[field] = draft[field];
+    }
+  }
+  const dirty = Object.keys(edits).length > 0;
+  const reasoningOptions = model.reasoningEffortValues ?? [];
+
+  return (
+    <div className={styles.modelEditForm} data-model-edit-form={model.modelRef}>
+      <p className={styles.modelEditHint}>{copy.modelEditSectionHint}</p>
+      <div className={styles.modelEditGrid} aria-label={copy.modelEditFieldsAria}>
+        <label className={styles.modelEditField} data-model-edit-field="label">
+          <span>{copy.modelEditFieldLabel}</span>
+          <VInput
+            value={draft.label}
+            disabled={disabled || busy}
+            onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
+          />
+        </label>
+        <label className={styles.modelEditField} data-model-edit-field="model">
+          <span>{copy.modelEditFieldModel}</span>
+          <VInput
+            value={draft.model}
+            disabled={disabled || busy}
+            title={copy.modelEditModelHint}
+            onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
+          />
+        </label>
+        <label className={styles.modelEditField} data-model-edit-field="context_window">
+          <span>{copy.modelEditFieldContextWindow}</span>
+          <VInput
+            type="number"
+            min={1}
+            step={1}
+            value={draft.context_window}
+            disabled={disabled || busy}
+            placeholder={copy.useModelDeclared}
+            onChange={(event) => setDraft((current) => ({ ...current, context_window: event.target.value }))}
+          />
+        </label>
+        <label className={styles.modelEditField} data-model-edit-field="temperature">
+          <span>{copy.modelEditFieldTemperature}</span>
+          <VInput
+            type="number"
+            step="any"
+            value={draft.temperature}
+            disabled={disabled || busy}
+            onChange={(event) => setDraft((current) => ({ ...current, temperature: event.target.value }))}
+          />
+        </label>
+        <label className={styles.modelEditField} data-model-edit-field="max_output_tokens">
+          <span>{copy.modelEditFieldMaxOutputTokens}</span>
+          <VInput
+            type="number"
+            min={1}
+            step={1}
+            value={draft.max_output_tokens}
+            disabled={disabled || busy}
+            onChange={(event) => setDraft((current) => ({ ...current, max_output_tokens: event.target.value }))}
+          />
+        </label>
+        <label className={styles.modelEditField} data-model-edit-field="timeout">
+          <span>{copy.modelEditFieldTimeout}</span>
+          <VInput
+            type="number"
+            min={1}
+            step={1}
+            value={draft.timeout}
+            disabled={disabled || busy}
+            onChange={(event) => setDraft((current) => ({ ...current, timeout: event.target.value }))}
+          />
+        </label>
+        <div className={styles.modelEditField} data-model-edit-field="enabled">
+          <span>{copy.modelEditFieldEnabled}</span>
+          <VSwitch
+            isSelected={draft.enabled === true}
+            isDisabled={disabled || busy}
+            aria-label={copy.modelEditFieldEnabled}
+            onChange={(next) => setDraft((current) => ({ ...current, enabled: next }))}
+          />
+        </div>
+        <div className={styles.modelEditField} data-model-edit-field="streaming">
+          <span>{copy.modelEditFieldStreaming}</span>
+          <VSwitch
+            isSelected={draft.streaming === true}
+            isDisabled={disabled || busy}
+            aria-label={copy.modelEditFieldStreaming}
+            onChange={(next) => setDraft((current) => ({ ...current, streaming: next }))}
+          />
+        </div>
+        {reasoningOptions.length > 0 ? (
+          <label className={styles.modelEditField} data-model-edit-field="default_reasoning_effort">
+            <span>{copy.modelEditFieldReasoningEffort}</span>
+            <VStringSelect
+              ariaLabel={copy.modelEditFieldReasoningEffort}
+              value={draft.default_reasoning_effort}
+              isDisabled={disabled || busy}
+              options={[
+                { value: "", label: copy.modelEditReasoningFollowRules },
+                ...reasoningOptions.map((value) => ({ value, label: value })),
+              ]}
+              onValueChange={(value) => setDraft((current) => ({ ...current, default_reasoning_effort: value }))}
+            />
+          </label>
+        ) : null}
+      </div>
+      {(() => {
+        const protocolFacts = extractProtocolFacts(model.draftEntry);
+        if (!protocolFacts.length) return null;
+        return (
+          <div className={styles.modelEditProtocol} data-model-protocol-facts="true">
+            <span className={styles.modelEditProtocolHeading}>{copy.modelEditProtocolHeading}</span>
+            {protocolFacts.map((fact) => (
+              <span key={fact.field} className={styles.modelEditProtocolFact} data-model-protocol-field={fact.field}>
+                <code>{fact.field}</code>
+                <span className={styles.modelEditProtocolValue}>{fact.value}</span>
+                <VStatusChip tone="neutral">{copy.modelEditProtocolNote}</VStatusChip>
+              </span>
+            ))}
+          </div>
+        );
+      })()}
+      <VActionGroup ariaLabel={`${model.modelRef}${copy.modelActionsAriaSuffix}`}>
+        <VButton
+          variant="primary"
+          data-model-action="save-edit"
+          isDisabled={disabled || busy || !dirty}
+          onPress={() => onSave(model.modelKey, edits)}
+        >
+          {busy ? copy.actionModelUpdateBusy : copy.modelEditSaveAction}
+        </VButton>
+        <VButton
+          data-model-action="cancel-edit"
+          isDisabled={disabled || busy || !dirty}
+          onPress={() => setDraft(baseline)}
+        >
+          {copy.modelEditCancelAction}
+        </VButton>
+      </VActionGroup>
+    </div>
+  );
+}
+
+/**
  * P1 detail pane: carries everything the old inline table squeezed into rows —
  * identity, verification, capabilities, and all actions with converged weight
  * (primary=添加一个 / secondary=测试与探测 / danger=移除).
@@ -636,11 +834,13 @@ function ModelDetailBody({
   imageCapabilityBusy,
   liveReferenceCount,
   reasoningFeedback,
+  modelUpdateBusy,
   onPin,
   onUnpin,
   onTestModel,
   onProbeImageInput,
   onProbeReasoning,
+  onUpdateModel,
 }: {
   provider: ProviderRegistryRow;
   model: ConfigCatalogModel;
@@ -654,11 +854,13 @@ function ModelDetailBody({
     values: string[];
     message: string;
   };
+  modelUpdateBusy?: boolean;
   onPin: (providerId: string, models: ConfigCatalogModel[]) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
   onProbeImageInput?: (modelRef: string) => void;
   onProbeReasoning?: (modelRef: string) => void;
+  onUpdateModel?: (providerId: string, modelKey: string, edits: ModelFieldEdits) => void;
 }) {
   const action = deriveProviderModelActionState(provider, model, liveReferenceCount, disabled, copy);
   const testAvailable = canTestProviderModel(model);
@@ -718,6 +920,25 @@ function ModelDetailBody({
         </div>
         <CapabilityList model={model} copy={copy} termReasoningHelp={copy.termReasoningHelp} termReasoningLabel={copy.reasoningTermLabel} termHelpAriaSuffix={copy.termHelpAriaSuffix} />
       </section>
+      {onUpdateModel && ["pinned", "missing_remote"].includes(model.availability) ? (
+        <section className={styles.modelDetailSection} data-model-section="edit">
+          <div className={styles.modelDetailSectionHead}>
+            <h3>{copy.modelEditSectionTitle}</h3>
+            <TermHelp
+              ariaLabel={`${copy.modelEditSectionTitle}${copy.termHelpAriaSuffix}`}
+              help={copy.modelEditSectionHint}
+            />
+          </div>
+          <ModelEntryEditor
+            key={model.modelRef}
+            model={model}
+            disabled={disabled}
+            busy={Boolean(modelUpdateBusy)}
+            copy={copy}
+            onSave={(modelKey, edits) => onUpdateModel(provider.providerId, modelKey, edits)}
+          />
+        </section>
+      ) : null}
       <section className={styles.modelDetailSection} data-model-section="actions">
         <div className={styles.modelDetailSectionHead}>
           <h3>{copy.columnActions}</h3>
@@ -826,6 +1047,8 @@ export function ProviderModelsTab({
   onProbeImageInput,
   reasoningFeedbackByModelRef = {},
   onProbeReasoning,
+  onUpdateModel,
+  modelUpdateBusy = false,
 }: ProviderModelsTabProps) {
   const summary = useMemo(() => summarizeProviderModels(provider.models), [provider.models]);
   const pinnableModels = useMemo(
@@ -943,11 +1166,13 @@ export function ProviderModelsTab({
               imageCapabilityBusy={imageCapabilityBusy}
               liveReferenceCount={liveReferenceCountByModelRef[detailModel.modelRef] ?? 0}
               reasoningFeedback={reasoningFeedbackByModelRef[detailModel.modelRef]}
+              modelUpdateBusy={modelUpdateBusy}
               onPin={onPin}
               onUnpin={onUnpin}
               onTestModel={onTestModel}
               onProbeImageInput={onProbeImageInput}
               onProbeReasoning={onProbeReasoning}
+              onUpdateModel={onUpdateModel}
             />
           ) : (
             <VStateSurface tone="empty" title={copy.modelDetailEmptyTitle}>{copy.modelDetailEmptyBody}</VStateSurface>
@@ -1055,6 +1280,8 @@ export function ConfigProviderRegistryPanel({
   onDeleteProvider,
   onAddConnection,
   onToggleEnabled,
+  onUpdateModel,
+  modelUpdateBusy = false,
 }: ConfigProviderRegistryPanelProps) {
   const orderedRows = useMemo(() => sortProviderRegistryRows(rows), [rows]);
   // P0 single list: every provider shows once; dot carries availability, in-use sorts first.
@@ -1417,6 +1644,8 @@ export function ConfigProviderRegistryPanel({
                 onProbeImageInput={onProbeImageInput}
                 reasoningFeedbackByModelRef={reasoningFeedbackByModelRef}
                 onProbeReasoning={(modelRef) => void probeReasoning(modelRef)}
+                onUpdateModel={onUpdateModel}
+                modelUpdateBusy={modelUpdateBusy}
               />
             </div>
           </div>
