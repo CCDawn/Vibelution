@@ -43,6 +43,7 @@ def _config_with_agent_models():
         "dialogue-model": {
             "provider_id": "default",
             "model": "dialogue-base",
+            "contract": "basic_chat",
             "streaming": False,
             "tool_calling_mode": "disabled",
             "supports_image_input": False,
@@ -50,6 +51,7 @@ def _config_with_agent_models():
         "summary-model": {
             "provider_id": "default",
             "model": "summary-fast",
+            "contract": "basic_chat",
             "streaming": True,
             "tool_calling_mode": "disabled",
             "prompt_cache": {"mode": "automatic", "key": "summary-agent-cache", "retention": "24h"},
@@ -374,6 +376,7 @@ def test_resolve_agent_llm_applies_reasoning_effort_for_supported_gpt_slot():
         "model": "gpt-5.5",
         "transport": "responses",
         "contract": "tool_chat",
+        "tool_calling_mode": "auto",
         "reasoning_effort_values": ["low", "high"],
         "default_reasoning_effort": "low",
         "reasoning_effort_adapter": "reasoning_object",

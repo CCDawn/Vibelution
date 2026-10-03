@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from config import LLMProfile, ProviderConfig
 
+from .protocol_constants import REASONING_EFFORT_ADAPTER_NONE, THINKING_FIELD
 from .reasoning_effort import (
     ReasoningEffortResolution,
     normalize_reasoning_effort,
@@ -161,8 +162,10 @@ class ProviderAdapter:
             for value in list(getattr(self.profile, "reasoning_effort_values", None) or [])
             if normalize_reasoning_effort(value)
         ]
-        contract_adapter = str(getattr(self.profile, "reasoning_effort_adapter", "") or "none").strip().lower()
-        supports_reasoning_effort = bool(contract_values) and contract_adapter not in {"", "none"}
+        contract_adapter = str(
+            getattr(self.profile, "reasoning_effort_adapter", "") or REASONING_EFFORT_ADAPTER_NONE
+        ).strip().lower()
+        supports_reasoning_effort = bool(contract_values) and contract_adapter not in {"", REASONING_EFFORT_ADAPTER_NONE}
         image_input_support = getattr(self.profile, "supports_image_input", None)
         return replace(
             base,
@@ -296,7 +299,7 @@ class AnthropicAdapter(ProviderAdapter):
         thinking_display = str(getattr(self.profile, "thinking_display", "") or "").strip().lower()
         if thinking_type != "disabled" and thinking_display:
             thinking["display"] = thinking_display
-        return {"thinking": thinking}
+        return {THINKING_FIELD: thinking}
 
 
 class DeepSeekAdapter(ProviderAdapter):
