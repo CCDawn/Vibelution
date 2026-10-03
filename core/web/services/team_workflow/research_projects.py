@@ -664,7 +664,10 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
     )
 
     normalized_team_id = str(team_id or "").strip()
-    team_service.get_team(normalized_team_id)
+    # This endpoint only needs to validate the team identity. ``get_team`` also
+    # repairs stale Team projections and can persist those repairs, which would
+    # make opening the progress view a write operation.
+    team_service.assert_team_exists(normalized_team_id)
     active_project = get_active_research_project(normalized_team_id)
     requested_project_id = str(project_id or "").strip()
     if requested_project_id and requested_project_id != str(active_project.get("projectId") or ""):
@@ -675,11 +678,63 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
     run_ids = _project_source_collection_run_ids(normalized_team_id, normalized_project_id)
     # Prefer full store rounds for counts (activeRounds alone undercounts).
     with workflow._WORKFLOW_LOCK:
-        stage_store = workflow._load_stage_round_store(normalized_team_id)
+        # These owner loaders create absent defaults and can repair persisted
+        # records on the way in. Progress is a read projection, so read each
+        # owner path directly and build defaults in memory only.
+        stage_path = workflow._stage_round_store_path(
+            normalized_team_id,
+            normalized_project_id,
+        )
+        stage_store = workflow._read_json(stage_path) if stage_path.exists() else {}
+        if not isinstance(stage_store.get("rounds"), list):
+            stage_store = {"rounds": [], "updatedAt": str(active_project.get("updatedAt") or "")}
         all_rounds = workflow._stage_rounds(stage_store)
-        candidate_store = workflow._load_candidate_store(normalized_team_id)
-        plan_store = workflow._load_experiment_plan_store(normalized_team_id)
-        workflow_record = workflow._load_or_create_workflow(normalized_team_id)
+
+        candidate_path = workflow._candidate_store_path(
+            normalized_team_id,
+            research_project_id=normalized_project_id,
+        )
+        candidate_store = workflow._read_json(candidate_path) if candidate_path.exists() else {}
+        if not isinstance(candidate_store.get("candidates"), list):
+            candidate_store = {"candidates": []}
+
+        plan_path = workflow._experiment_plan_store_path(
+            normalized_team_id,
+            normalized_project_id,
+        )
+        plan_payload = workflow._read_json(plan_path) if plan_path.exists() else {}
+        if (
+            plan_payload.get("storeKind") == workflow.EXPERIMENT_PLAN_STORE_KIND
+            and isinstance(plan_payload.get("plans"), list)
+        ):
+            plan_store = workflow.experiment_contract.project_plan_store_contracts(plan_payload)
+            from core.web.services.team_workflow.experiment_kernel import (
+                _sanitize_projected_experiment_plan,
+            )
+
+            for plan in list(plan_store.get("plans") or []):
+                if isinstance(plan, dict):
+                    _sanitize_projected_experiment_plan(plan)
+                    workflow._refresh_experiment_bounded_smoke_readiness(plan)
+                    workflow._refresh_hypothesis_progress(plan)
+        else:
+            plan_store = {"plans": []}
+
+        workflow_path = workflow._workflow_path(
+            normalized_team_id,
+            normalized_project_id,
+        )
+        if workflow_path.exists():
+            workflow_record = workflow._repair_workflow(
+                workflow._read_json(workflow_path),
+                normalized_team_id,
+            )
+        else:
+            workflow_record = workflow._default_workflow(
+                normalized_team_id,
+                workflow_kind=workflow.WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH,
+                owner_agent_id=workflow.DEFAULT_OWNER_AGENT_ID,
+            )
     project_rounds = [
         item
         for item in all_rounds
@@ -720,16 +775,36 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
     # mixes every project's rounds, which would leak other projects' active
     # rounds and readiness into this project's phase view.
     team_snapshot = workflow._source_collection_team_identity_snapshot(normalized_team_id)
-    phases = [
-        workflow._stage_phase_status(
-            normalized_team_id,
-            stage_type,
-            project_rounds,
-            workflow=workflow_record,
-            team=team_snapshot,
+    phases = []
+    for stage_type in workflow.RESEARCH_STAGE_TYPES:
+        phase_options: dict[str, Any] = {}
+        if stage_type == "iteration":
+            experiment_rounds = [
+                item
+                for item in project_rounds
+                if str(item.get("stageType") or "") == "experiment"
+            ]
+            if workflow._latest_stage_round(experiment_rounds) is not None:
+                from core.web.services.team_workflow.research_project_agent_tasks import (
+                    _research_project_iteration_readiness_from_plans,
+                )
+
+                phase_options["readiness_override"] = (
+                    _research_project_iteration_readiness_from_plans(
+                        normalized_project_id,
+                        plans,
+                    )
+                )
+        phases.append(
+            workflow._stage_phase_status(
+                normalized_team_id,
+                stage_type,
+                project_rounds,
+                workflow=workflow_record,
+                team=team_snapshot,
+                **phase_options,
+            )
         )
-        for stage_type in workflow.RESEARCH_STAGE_TYPES
-    ]
     current_stage = workflow._current_research_stage(phases, workflow_record)
     return {
         "schemaVersion": SCHEMA_VERSION,
