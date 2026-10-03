@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 import pytest
 
-from core.web import lifecycle
+from core.web import lifecycle, startup_jobs
 from core.web.router_registry import (
     _ROUTE_MODULE_NAMES,
     import_web_route_modules,
@@ -215,6 +215,43 @@ def test_startup_job_group_retires_completed_workers_and_counts_failures():
         result = await jobs.shutdown(deadline=time.monotonic() + 1)
         assert result["closed"] is False
         assert result["failedOwnerCount"] == 1
+        assert not jobs._workers
+        assert not jobs._tasks
+
+    asyncio.run(exercise())
+
+
+def test_startup_job_group_waits_for_real_thread_exit_before_returning(monkeypatch):
+    exiting = threading.Event()
+    release = threading.Event()
+
+    class HeldExitThread(threading.Thread):
+        def run(self):
+            super().run()
+            exiting.set()
+            release.wait(timeout=3)
+
+    monkeypatch.setattr(
+        startup_jobs, "threading", SimpleNamespace(Thread=HeldExitThread, Event=threading.Event),
+    )
+
+    async def exercise():
+        jobs = StartupJobGroup()
+        task = asyncio.create_task(jobs.run_sync("thread-exit-owner", lambda: 42))
+        try:
+            deadline = time.monotonic() + 1
+            while not exiting.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            assert exiting.is_set()
+            await asyncio.sleep(0.03)
+            assert not task.done()
+            assert any(worker.thread.is_alive() for worker in jobs._workers)
+            release.set()
+            assert await task == 42
+        finally:
+            release.set()
+            result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
         assert not jobs._workers
         assert not jobs._tasks
 

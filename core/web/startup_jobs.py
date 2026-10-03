@@ -120,12 +120,15 @@ class StartupJobGroup:
                     worker.finished.set()
                     raise asyncio.CancelledError
                 worker.thread.start()
-                while not worker.finished.is_set():
+                # The callback signals its result before the Python thread
+                # actually exits. Keep the awaitable owned until both finish,
+                # so sequential jobs cannot accumulate completed live threads.
+                while not worker.finished.is_set() or worker.thread.is_alive():
                     await asyncio.sleep(0.02)
             except asyncio.CancelledError:
                 self._stop_requested.set()
                 while (
-                    not worker.finished.is_set()
+                    (not worker.finished.is_set() or worker.thread.is_alive())
                     and self._shutdown_deadline is not None
                     and remaining_seconds(self._shutdown_deadline) > 0
                 ):
