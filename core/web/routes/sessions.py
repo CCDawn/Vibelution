@@ -859,6 +859,8 @@ def session_composer_example(session_id: str) -> dict:
         detail = get_session_detail(session_id, message_limit=0, transcript_scope="none")
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     starters = _composer_starters_for_detail(detail)
     return {
         "command": starters[0]["command"] if starters else None,
