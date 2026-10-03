@@ -42,7 +42,7 @@ export async function waitForWorkbenchHttp(input: {
     try {
       const response = await fetchImpl(url);
       input.signal?.throwIfAborted();
-      if (response.status > 0 && response.status < 500) {
+      if (response.status >= 200 && response.status < 400) {
         return;
       }
       lastError = `HTTP ${response.status}`;

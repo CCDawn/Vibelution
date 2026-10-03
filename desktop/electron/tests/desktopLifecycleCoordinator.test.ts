@@ -7,6 +7,18 @@ import {
 } from "../src/lifecycle/desktopLifecycleCoordinator.js";
 
 describe("DesktopLifecycleCoordinator", () => {
+  it("observes a rejected close, clears its owner and allows retry", async () => {
+    const coordinator = new DesktopLifecycleCoordinator();
+    const failure = new Error("isolated close failure");
+    await expect(coordinator.request("workbench_window_close", async () => {
+      throw failure;
+    })).rejects.toBe(failure);
+    // Vitest also fails this test if cleanup creates an unhandled rejection.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(coordinator.pendingReason()).toBeNull();
+    await expect(coordinator.request("workbench_window_close", async () => "retried")).resolves.toBe("retried");
+  });
+
   it("shares one pending close operation across duplicate workbench close requests", async () => {
     let resolveClose: ((value: DesktopCloseReason) => void) | null = null;
     let calls = 0;

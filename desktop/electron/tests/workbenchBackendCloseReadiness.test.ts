@@ -81,6 +81,27 @@ describe("isWorkbenchBackendSettledForWindowClose", () => {
 });
 
 describe("waitForWorkbenchBackendSettledForWindowClose", () => {
+  it("cancels its delay without leaving an observer after close timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const readStatus = vi.fn(async () => summary());
+      const pending = waitForWorkbenchBackendSettledForWindowClose({
+        readStatus,
+        timeoutMs: 30_000,
+        pollIntervalMs: 1_000,
+        signal: controller.signal
+      });
+      const rejected = expect(pending).rejects.toThrow("close budget expired");
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort(new Error("close budget expired"));
+      await rejected;
+      expect(vi.getTimerCount()).toBe(0);
+      expect(readStatus).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("polls until the Electron handoff state appears", async () => {
     vi.useFakeTimers();
     const readStatus = vi

@@ -159,13 +159,22 @@ nativeAddon("windows workbench job", () => {
     });
     try {
       const deadline = Date.now() + 8_000;
-      while (hasTrackedWorkbenchJob(directory) && Date.now() < deadline) {
+      let childPid = 0;
+      while (Date.now() < deadline) {
+        try {
+          childPid = Number(readFileSync(childPidPath, "utf8"));
+        } catch {
+          // The child publishes its identity after the owned root starts.
+        }
+        // Windows Job accounting and process-exit visibility can settle on
+        // different ticks. Require both within the original cleanup budget.
+        if (childPid > 0 && !hasTrackedWorkbenchJob(directory)
+          && !pidAlive(spawned.pid) && !pidAlive(childPid)) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      const childPid = Number(readFileSync(childPidPath, "utf8"));
       expect(childPid).toBeGreaterThan(0);
-      expect(pidAlive(spawned.pid)).toBe(false);
-      expect(pidAlive(childPid)).toBe(false);
+      expect(pidAlive(spawned.pid), `owned root ${spawned.pid} still alive`).toBe(false);
+      expect(pidAlive(childPid), `owned child ${childPid} still alive`).toBe(false);
       expect(hasTrackedWorkbenchJob(directory)).toBe(false);
     } finally {
       await terminateTrackedWorkbenchJob(directory);

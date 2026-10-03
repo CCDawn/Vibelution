@@ -1,14 +1,17 @@
 import asyncio
+import gc
 import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import FastAPI
+import pytest
 
-from core.web import lifecycle
+from core.web import lifecycle, startup_jobs
 from core.web.router_registry import (
     _ROUTE_MODULE_NAMES,
     import_web_route_modules,
@@ -16,6 +19,88 @@ from core.web.router_registry import (
 )
 from core.web.services import cli_agent_terminal_service, session_service
 from core.web.services import virtual_human_life_service
+from core.web.startup_jobs import StartupJobGroup
+
+
+def test_shutdown_step_preserves_deferred_owner_cleanup_result():
+    called = []
+
+    async def exercise():
+        deadline = time.monotonic() + 1
+        return await lifecycle._run_shutdown_step(
+            "deferred-store",
+            lambda: lifecycle.run_sync_bounded(
+                lambda: called.append("closed") or {"closed": True},
+                deadline_at=deadline,
+                name="deferred-store-worker",
+            ),
+            deadline=deadline,
+        )
+
+    result = asyncio.run(exercise())
+    assert called == ["closed"]
+    assert result == (True, {"closed": True})
+
+
+def test_shutdown_step_bounds_deferred_owner_before_awaiting_it():
+    async def exercise():
+        finalized = asyncio.Event()
+
+        async def slow_owner():
+            try:
+                await asyncio.sleep(0.25)
+            finally:
+                finalized.set()
+
+        started = time.monotonic()
+        result = await lifecycle._run_shutdown_step(
+            "slow-deferred-owner", slow_owner, deadline=started + 0.02
+        )
+        elapsed = time.monotonic() - started
+        await asyncio.sleep(0)
+        assert result is None
+        assert elapsed < 0.2
+        assert finalized.is_set()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("stores_closed", [True, False])
+def test_lifespan_marks_server_clean_only_after_owned_cleanup(monkeypatch, stores_closed):
+    called = []
+    clean = []
+
+    class IdleStartupJobs(StartupJobGroup):
+        def start_thread(self, name, _callback, *_args, **_kwargs):
+            return super().start_async(name, asyncio.sleep(0))
+
+        def start_async(self, name, awaitable):
+            awaitable.close()
+            return super().start_async(name, asyncio.sleep(0))
+
+    async def close_runtime(**_kwargs):
+        called.append("runtime")
+        return {"closed": True}
+
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", IdleStartupJobs)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: called.append("companion"))
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: called.append("workflow"))
+    monkeypatch.setattr(lifecycle, "_shutdown_owned_runtime_resources", close_runtime)
+    monkeypatch.setattr(
+        lifecycle,
+        "shutdown_session_catalog_on_shutdown",
+        lambda **_kwargs: called.append("stores") or {"closed": stores_closed},
+    )
+    monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: clean.append(tuple(called)))
+
+    async def exercise():
+        async with lifecycle.web_workbench_lifespan(None):
+            await asyncio.sleep(0)
+
+    asyncio.run(exercise())
+    assert called == ["companion", "workflow", "runtime", "stores"]
+    assert clean == ([tuple(called)] if stores_closed else [])
 
 
 def test_begin_owned_lifecycle_reopens_loaded_owners_without_cold_imports(monkeypatch):
@@ -33,19 +118,329 @@ def test_begin_owned_lifecycle_reopens_loaded_owners_without_cold_imports(monkey
     assert called == ["background", "terminal"]
 
 
-def test_owned_runtime_shutdown_runs_both_owners_even_if_one_fails(monkeypatch):
+def test_gated_prewarm_stops_before_route_readiness_without_starting_worker(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0")
+    called = []
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_routes_ready_event = asyncio.Event()
+        jobs = StartupJobGroup()
+        task = jobs.start_async(
+            "gated-prewarm",
+            lifecycle._run_prewarm_heavy_after_routes_ready(
+                app,
+                lambda _timings: called.append("started"),
+                worker_name="owned-gated-prewarm",
+                startup_jobs=jobs,
+            ),
+        )
+        await asyncio.sleep(0)
+        result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+        assert task.cancelled()
+
+    asyncio.run(exercise())
+    assert called == []
+
+
+def test_gated_prewarm_retains_real_worker_until_it_exits(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0")
+    started = threading.Event()
+    release = threading.Event()
+
+    def heavy(_timings):
+        started.set()
+        assert release.wait(2)
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_routes_ready_event = asyncio.Event()
+        app.state.web_routes_ready_event.set()
+        jobs = StartupJobGroup()
+        jobs.start_async(
+            "gated-prewarm",
+            lifecycle._run_prewarm_heavy_after_routes_ready(
+                app, heavy, worker_name="owned-gated-prewarm", startup_jobs=jobs,
+            ),
+        )
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            result = await jobs.shutdown(deadline=time.monotonic() + 0.03)
+            assert result["closed"] is False
+            assert result["pendingWorkers"] == ["owned-gated-prewarm"]
+        finally:
+            release.set()
+            result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+        assert result["pendingWorkers"] == []
+
+    asyncio.run(exercise())
+
+
+def test_begin_owned_lifecycle_rejects_unjoined_session_executor(monkeypatch):
+    monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(modules={
+        "core.web.services.session_service": session_service,
+    }))
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTORS_CLOSED", True)
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR_DRAIN_THREADS",
+        [SimpleNamespace(is_alive=lambda: True, name="stuck-session-executor")],
+    )
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR_DRAIN_ERRORS", set())
+
+    with pytest.raises(RuntimeError, match="could not reopen"):
+        lifecycle._begin_owned_runtime_lifecycle()
+
+
+def test_startup_job_group_retires_completed_workers_and_counts_failures():
+    async def exercise() -> None:
+        jobs = StartupJobGroup()
+        results = []
+        for value in range(32):
+            results.append(await jobs.run_sync("short-startup-worker", lambda value=value: value))
+            await asyncio.sleep(0)
+            assert len(jobs._workers) <= 1
+            assert len(jobs._tasks) <= 1
+
+        assert results == list(range(32))
+
+        async def failed_startup_owner() -> None:
+            raise RuntimeError("synthetic startup failure")
+
+        jobs.start_async("failed-startup-owner", failed_startup_owner())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is False
+        assert result["failedOwnerCount"] == 1
+        assert not jobs._workers
+        assert not jobs._tasks
+
+    asyncio.run(exercise())
+
+
+def test_startup_job_group_waits_for_real_thread_exit_before_returning(monkeypatch):
+    exiting = threading.Event()
+    release = threading.Event()
+
+    class HeldExitThread(threading.Thread):
+        def run(self):
+            super().run()
+            exiting.set()
+            release.wait(timeout=3)
+
+    monkeypatch.setattr(
+        startup_jobs, "threading", SimpleNamespace(Thread=HeldExitThread, Event=threading.Event),
+    )
+
+    async def exercise():
+        jobs = StartupJobGroup()
+        task = asyncio.create_task(jobs.run_sync("thread-exit-owner", lambda: 42))
+        try:
+            deadline = time.monotonic() + 1
+            while not exiting.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            assert exiting.is_set()
+            await asyncio.sleep(0.03)
+            assert not task.done()
+            assert any(worker.thread.is_alive() for worker in jobs._workers)
+            release.set()
+            assert await task == 42
+        finally:
+            release.set()
+            result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+        assert not jobs._workers
+        assert not jobs._tasks
+
+    asyncio.run(exercise())
+
+
+def test_startup_job_group_defers_thread_start_until_event_loop_runs():
+    async def exercise() -> None:
+        jobs = StartupJobGroup()
+        started = threading.Event()
+        task = jobs.start_thread("deferred-startup-worker", started.set)
+
+        assert not started.is_set()
+        await asyncio.sleep(0)
+        assert await asyncio.to_thread(started.wait, 1)
+        assert await task is None
+        result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+
+    asyncio.run(exercise())
+
+
+def test_startup_job_group_cancellation_before_worker_start_does_not_leak_owner():
+    async def exercise() -> None:
+        jobs = StartupJobGroup()
+        called = []
+        task = jobs.start_thread("cancelled-before-start", lambda: called.append("started"))
+        task.cancel()
+
+        result = await jobs.shutdown(deadline=time.monotonic() + 1)
+
+        assert result["closed"] is True
+        assert called == []
+        assert not jobs._workers
+        assert not jobs._tasks
+
+    asyncio.run(exercise())
+
+
+def test_startup_job_group_stop_before_worker_start_skips_callback():
+    async def exercise() -> None:
+        jobs = StartupJobGroup()
+        called = []
+        task = jobs.start_thread("stopped-before-start", lambda: called.append("started"))
+        jobs.request_stop()
+        await asyncio.sleep(0)
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+        assert called == []
+        assert not jobs._workers
+        assert not jobs._tasks
+
+    asyncio.run(exercise())
+
+
+def test_unawaited_startup_worker_failure_is_consumed_by_owner():
+    async def exercise() -> None:
+        loop = asyncio.get_running_loop()
+        exception_contexts = []
+        previous_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: exception_contexts.append(context))
+        jobs = StartupJobGroup()
+        worker_started = threading.Event()
+
+        def fail_worker() -> None:
+            worker_started.set()
+            raise RuntimeError("synthetic unobserved startup worker failure")
+
+        try:
+            task = jobs.start_thread("unobserved-failing-worker", fail_worker)
+            assert await asyncio.to_thread(worker_started.wait, 1)
+            # Let the Task deliver the worker error before shutdown can cancel
+            # it. Reading done() leaves that exception unobserved.
+            async with asyncio.timeout(1):
+                while not task.done():
+                    await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
+            del task
+
+            result = await jobs.shutdown(deadline=time.monotonic() + 1)
+            await asyncio.sleep(0)
+            gc.collect()
+            await asyncio.sleep(0)
+
+            assert result["closed"] is False
+            assert result["failedOwnerCount"] == 1
+            assert not any(
+                context.get("message") == "Task exception was never retrieved"
+                for context in exception_contexts
+            )
+        finally:
+            loop.set_exception_handler(previous_handler)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("failure_type", [RuntimeError, asyncio.CancelledError])
+def test_owned_runtime_shutdown_runs_all_owners_when_one_fails_or_cancels(
+    monkeypatch, failure_type
+):
     from core.infrastructure import background_tasks
+
     called = []
 
     def background_shutdown():
         called.append("background")
-        raise RuntimeError("synthetic failure")
+        raise failure_type("synthetic failure")
 
     monkeypatch.setattr(background_tasks, "shutdown_background_tasks", background_shutdown)
     monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions",
                         lambda: called.append("terminal"))
-    asyncio.run(lifecycle._shutdown_owned_runtime_resources())
-    assert sorted(called) == ["background", "terminal"]
+    monkeypatch.setattr(
+        session_service,
+        "shutdown_session_service",
+        lambda **_kwargs: called.append("session-executors") or {"closed": True},
+    )
+
+    result = asyncio.run(
+        lifecycle._shutdown_owned_runtime_resources(deadline=time.monotonic() + 1)
+    )
+    assert sorted(called) == ["background", "session-executors", "terminal"]
+    assert result["closed"] is False
+
+
+def test_session_executor_shutdown_reopens_both_pools_across_lifecycles(monkeypatch):
+    monkeypatch.setattr(
+        lifecycle,
+        "sys",
+        SimpleNamespace(modules={"core.web.services.session_service": session_service}),
+    )
+    assert session_service.begin_session_service_lifecycle()["opened"] is True
+    previous_turn_executor = session_service._SESSION_EXECUTOR
+    previous_projection_executor = session_service._SESSION_CYCLE_PROJECTION_EXECUTOR
+
+    for _ in range(2):
+        session_service.stop_session_service_admission()
+        result = session_service.shutdown_session_service(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+
+        lifecycle._begin_owned_runtime_lifecycle()
+
+        assert session_service._SESSION_EXECUTOR is not previous_turn_executor
+        assert session_service._SESSION_CYCLE_PROJECTION_EXECUTOR is not previous_projection_executor
+        assert session_service._SESSION_EXECUTORS_CLOSED is False
+        previous_turn_executor = session_service._SESSION_EXECUTOR
+        previous_projection_executor = session_service._SESSION_CYCLE_PROJECTION_EXECUTOR
+
+
+def test_session_executor_shutdown_reports_joiner_failure(monkeypatch):
+    class FailingJoiner:
+        name = "synthetic-session-executor-joiner"
+
+        def join(self, timeout=None):
+            raise RuntimeError("synthetic join failure")
+
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(session_service, "stop_session_service_admission", lambda: None)
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR_DRAIN_THREADS", [FailingJoiner()])
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR_DRAIN_ERRORS", set())
+
+    result = session_service.shutdown_session_service(deadline=time.monotonic() + 1)
+
+    assert result["closed"] is False
+    assert result["failedExecutors"] == ["synthetic-session-executor-joiner"]
+
+
+def test_session_executor_shutdown_reports_executor_close_failure(monkeypatch):
+    class FailingExecutor:
+        _thread_name_prefix = "synthetic-session-executor"
+
+        def shutdown(self, *, wait, cancel_futures):
+            raise RuntimeError("synthetic close failure")
+
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTORS_CLOSED", False)
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR_DRAIN_THREADS", [])
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR_DRAIN_ERRORS", set())
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", FailingExecutor())
+    monkeypatch.setattr(session_service, "_SESSION_CYCLE_PROJECTION_EXECUTOR", FailingExecutor())
+
+    result = session_service.shutdown_session_service(deadline=time.monotonic() + 1)
+
+    assert result["closed"] is False
+    assert result["failedExecutors"] == ["session-cycle-projection", "session-turns"]
 
 
 def test_web_app_import_keeps_runtime_scene_service_off_health_path():
@@ -127,11 +522,11 @@ def test_web_lifespan_records_ready_scene_event_after_entering_context(monkeypat
         recorded.set()
 
     monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", record_ready_event)
-    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda **_kwargs: asyncio.sleep(0))
     monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
-    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda: None)
-    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
     monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
     monkeypatch.setattr(
@@ -178,7 +573,7 @@ def test_web_lifespan_schedules_agent_inbox_recovery_without_blocking_startup(mo
         allow_reconcile_to_finish.wait(timeout=2)
         return {"staleCount": 0}
 
-    async def prewarm() -> None:
+    async def prewarm(**_kwargs) -> None:
         return None
 
     monkeypatch.setattr(
@@ -202,7 +597,7 @@ def test_web_lifespan_schedules_agent_inbox_recovery_without_blocking_startup(mo
     monkeypatch.setattr(
         lifecycle,
         "shutdown_session_catalog_on_shutdown",
-        lambda: catalog_shutdown.set(),
+        lambda **_kwargs: catalog_shutdown.set(),
     )
 
     async def exercise() -> None:
@@ -235,9 +630,9 @@ def test_web_lifespan_does_not_await_cli_reconcile_before_yield(monkeypatch):
         reconcile,
     )
     monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
-    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda **_kwargs: asyncio.sleep(0))
     monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
-    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
     monkeypatch.setattr(
         session_service,
         "recover_wakeable_agent_inbox_messages_on_startup",
@@ -264,7 +659,7 @@ def test_runtime_scene_retention_waits_for_routes_and_is_reaped_on_shutdown(monk
     later_history = []
     app = FastAPI()
 
-    async def warm_routes(target_app):
+    async def warm_routes(target_app, *, run_sync=None):
         route_started.set()
         await route_release.wait()
         target_app.state.web_routes_registered = True
@@ -286,21 +681,33 @@ def test_runtime_scene_retention_waits_for_routes_and_is_reaped_on_shutdown(monk
     monkeypatch.setenv("VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION", "1")
     monkeypatch.setattr("core.web.route_bootstrap.warm_web_routes_in_background", warm_routes)
     monkeypatch.setattr(lifecycle, "_enforce_runtime_scene_retention_after_routes_ready", slow_retention)
-    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda **_kwargs: asyncio.sleep(0))
     monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
-    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda: None)
-    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", lambda **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
     monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
     monkeypatch.setattr(lifecycle, "_recover_challenge_meeting_drivers_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "_recover_orphaned_chat_room_rounds_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "_recover_hypothesis_command_attempts_on_startup", lambda: None)
-    monkeypatch.setattr(lifecycle, "_recover_interrupted_session_turns_on_startup", lambda: None)
+    monkeypatch.setattr(
+        lifecycle,
+        "_recover_interrupted_session_turns_on_startup",
+        lambda *, should_stop=None: None,
+    )
     monkeypatch.setattr(lifecycle, "_validate_challenge_fence_config_on_startup", lambda: None)
-    monkeypatch.setattr(lifecycle, "reconcile_external_agent_tasks_forever", lambda: asyncio.sleep(3600))
-    monkeypatch.setattr(virtual_human_life_service, "run_virtual_human_life_runtime", lambda: asyncio.sleep(3600))
+    monkeypatch.setattr(
+        lifecycle,
+        "reconcile_external_agent_tasks_forever",
+        lambda **_kwargs: asyncio.sleep(3600),
+    )
+    monkeypatch.setattr(
+        virtual_human_life_service,
+        "run_virtual_human_life_runtime",
+        lambda **_kwargs: asyncio.sleep(3600),
+    )
     monkeypatch.setattr(virtual_human_life_service, "stop_virtual_human_life_runtime", lambda: None)
     from core.web.services.session import directory_runtime
 

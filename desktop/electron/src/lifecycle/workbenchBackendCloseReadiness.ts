@@ -26,23 +26,37 @@ export async function waitForWorkbenchBackendSettledForWindowClose(input: {
   readStatus: () => Promise<LauncherStatusSummary>;
   timeoutMs: number;
   pollIntervalMs?: number;
+  signal?: AbortSignal;
 }): Promise<boolean> {
   const startedAt = Date.now();
   const pollIntervalMs = Math.max(0, input.pollIntervalMs ?? 1000);
   do {
+    input.signal?.throwIfAborted();
     try {
       const status = await input.readStatus();
+      input.signal?.throwIfAborted();
       if (isWorkbenchBackendSettledForWindowClose(status)) {
         return true;
       }
     } catch {
+      input.signal?.throwIfAborted();
       // Treat control-plane read failures as not-yet-closed; the next poll retries.
     }
     if (Date.now() - startedAt >= input.timeoutMs) {
       break;
     }
     if (pollIntervalMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => input.signal?.removeEventListener("abort", onAbort);
+        const timer = setTimeout(() => { cleanup(); resolve(); }, pollIntervalMs);
+        const onAbort = () => {
+          clearTimeout(timer);
+          cleanup();
+          reject(input.signal?.reason ?? new Error("workbench close observer aborted"));
+        };
+        input.signal?.addEventListener("abort", onAbort, { once: true });
+        if (input.signal?.aborted) onAbort();
+      });
     }
   } while (Date.now() - startedAt < input.timeoutMs);
   return false;

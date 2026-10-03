@@ -159,6 +159,7 @@ export async function postLauncherControl(input: {
 export async function fetchLauncherStatusSummary(input: {
   launcherOrigin: string;
   controlToken: string;
+  signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }): Promise<LauncherStatusSummary> {
@@ -168,6 +169,7 @@ export async function fetchLauncherStatusSummary(input: {
     operation: "launcher status",
     requestTimeoutMs: input.requestTimeoutMs,
     init: {
+      signal: input.signal,
       method: "GET",
       headers: {
         "X-Vibelution-Control-Token": input.controlToken

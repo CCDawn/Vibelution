@@ -15,6 +15,7 @@ These tests lock the sweep contract:
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +206,58 @@ def _recovery_events(tmp_path, session_id: str = SESSION_ID) -> list[Any]:
         for event in load_turn_events(Path(tmp_path), session_id)
         if event.event_type == EVENT_SESSION_RECOVERY_RESUMED
     ]
+
+
+def test_shutdown_stop_fence_prevents_recovery_scan(recovery_env, monkeypatch, submit_calls):
+    monkeypatch.setattr(
+        session_service,
+        "list_session_runtime_ids",
+        lambda *_args, **_kwargs: pytest.fail("stopped sweep must not scan sessions"),
+    )
+
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup(
+        should_stop=lambda: True
+    )
+
+    assert summary["stopped"] is True
+    assert summary["scannedSessionCount"] == 0
+    assert submit_calls == []
+
+
+def test_shutdown_stop_fence_releases_recovery_claim_before_submit(
+    recovery_env, tmp_path, submit_calls, monkeypatch
+):
+    _seed_conversation(tmp_path)
+    _seed_interrupted_turn(tmp_path)
+    _seed_active_work_run(recovery_env)
+
+    stop_requested = threading.Event()
+    original_lock = startup_recovery._RESUMED_TURN_KEYS_LOCK
+
+    class StopAfterClaimLock:
+        triggered = False
+
+        def __enter__(self):
+            original_lock.acquire()
+            return self
+
+        def __exit__(self, *_exc_info):
+            original_lock.release()
+            if not self.triggered:
+                self.triggered = True
+                stop_requested.set()
+
+    monkeypatch.setattr(
+        startup_recovery, "_RESUMED_TURN_KEYS_LOCK", StopAfterClaimLock()
+    )
+    summary = startup_recovery.recover_interrupted_session_turns_on_startup(
+        should_stop=stop_requested.is_set
+    )
+
+    assert summary["resumedCount"] == 0
+    assert submit_calls == []
+    assert f"{SESSION_ID}:{ORIGINAL_TURN_ID}" not in startup_recovery._RESUMED_TURN_KEYS
+    assert _recovery_events(tmp_path) == []
 
 
 def test_interrupted_turn_is_resubmitted_with_status_line(

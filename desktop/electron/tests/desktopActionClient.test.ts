@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { createDesktopShellExitDeadline, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
 import {
   desktopWindowOperationForAction,
   fetchLauncherControlToken,
@@ -35,6 +38,53 @@ describe("desktopWindowOperationForAction", () => {
 });
 
 describe("fetchLauncherControlToken", () => {
+  it("bounds an unfinished response body without a caller exit deadline", async () => {
+    let requestClosed = false;
+    const server = createServer((request, response) => {
+      request.socket.once("close", () => { requestClosed = true; });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"controlToken":');
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = (server.address() as { port: number }).port;
+    try {
+      await expect(fetchLauncherControlToken({
+        launcherOrigin: `http://127.0.0.1:${port}`,
+        requestTimeoutMs: 200
+      })).rejects.toThrow();
+      await vi.waitFor(() => expect(requestClosed).toBe(true));
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+  it("cancels a real response body after headers when the caller exit budget expires", async () => {
+    let requestSeen = false;
+    let requestClosed = false;
+    const server = createServer((request, response) => {
+      requestSeen = true;
+      request.socket.once("close", () => { requestClosed = true; });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"controlToken":');
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = (server.address() as { port: number }).port;
+    const deadline = createDesktopShellExitDeadline(200);
+    try {
+      await expect(withDesktopShellExitTimeout((signal) => fetchLauncherControlToken({
+        launcherOrigin: `http://127.0.0.1:${port}`,
+        signal
+      }), deadline, "real token body probe")).rejects.toThrow("timed out");
+      expect(requestSeen).toBe(true);
+      await vi.waitFor(() => expect(requestClosed).toBe(true));
+    } finally {
+      deadline.dispose();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
   it("bounds a stalled control request so the desktop action loop can retry", async () => {
     await expect(
       fetchLauncherControlToken({

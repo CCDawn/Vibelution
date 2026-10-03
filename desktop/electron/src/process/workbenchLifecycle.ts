@@ -75,6 +75,8 @@ export type RunWorkbenchLifecycleInput = {
 
 /** Slowest bounded step (frontend build bridge) is 600s; 15min covers the sum. */
 export const MAIN_LINE_COMMAND_DEADLINE_MS = 900_000;
+/** Stop operations never build; they must not inherit a build-sized timeout. */
+export const MAIN_LINE_STOP_DEADLINE_MS = 30_000;
 
 /**
  * Best-effort trace for close re-requests absorbed by the close-domain retry
@@ -116,7 +118,11 @@ export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): 
   });
   const deadlineMs = Math.max(
     1_000,
-    Math.round(input.commandDeadlineMs ?? MAIN_LINE_COMMAND_DEADLINE_MS)
+    Math.round(input.commandDeadlineMs ?? (
+      ["stop", "force-stop", "shutdown"].includes(input.operation)
+        ? MAIN_LINE_STOP_DEADLINE_MS
+        : MAIN_LINE_COMMAND_DEADLINE_MS
+    ))
   );
   return queue.submit({
     operation: input.operation,

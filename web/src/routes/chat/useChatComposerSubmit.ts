@@ -1209,6 +1209,19 @@ export function useChatComposerSubmitActions({
   // in flight must not re-send the DELETE, while different rows stay free to
   // race in parallel.
   const pendingQueueWithdrawalIdsRef = useRef<Set<string>>(new Set());
+  // This hook owns every composer object URL, including URLs for attachments
+  // that are rejected after classification. Files remain in the session tray
+  // when its preview URLs are released, so returning to a session can restore
+  // its previews without keeping Blob URLs alive in the background.
+  const composerPreviewUrlsBySessionRef = useRef<Map<string, Map<string, {
+    file: File;
+    previewUrl: string | null;
+  }>>>(new Map());
+  const pendingPreviewReleaseTokenBySessionRef = useRef(new Map<string, number>());
+  const composerLifecycleTokenRef = useRef(0);
+  const isMountedRef = useRef(false);
+  const clearedSubmitMutationVariablesRef = useRef<unknown>(null);
+  const clearedEditMutationVariablesRef = useRef<unknown>(null);
   // Defect-① observability: a queued turn whose drain never fires (ghost
   // running marker) would sit silently forever. Surface one composer hint per
   // row once its wait exceeds the threshold; forget a row when it leaves the
@@ -1285,6 +1298,199 @@ export function useChatComposerSubmitActions({
     attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: activeImageAttachments };
   }
 
+  const rememberComposerAttachmentUrls = useCallback((sessionId: string, attachments: ComposerImageAttachment[]) => {
+    if (!sessionId || !attachments.length) {
+      return;
+    }
+    let owners = composerPreviewUrlsBySessionRef.current.get(sessionId);
+    if (!owners) {
+      owners = new Map();
+      composerPreviewUrlsBySessionRef.current.set(sessionId, owners);
+    }
+    for (const attachment of attachments) {
+      if (!owners.has(attachment.id)) {
+        owners.set(attachment.id, { file: attachment.file, previewUrl: attachment.previewUrl });
+      }
+    }
+  }, []);
+
+  const restoreComposerAttachmentUrls = useCallback((sessionId: string, attachments: ComposerImageAttachment[]) => {
+    if (!sessionId || !attachments.length) {
+      return attachments;
+    }
+    let owners = composerPreviewUrlsBySessionRef.current.get(sessionId);
+    if (!owners) {
+      owners = new Map();
+      composerPreviewUrlsBySessionRef.current.set(sessionId, owners);
+    }
+    let changed = false;
+    const restored = attachments.map((attachment) => {
+      let owned = owners!.get(attachment.id);
+      if (!owned) {
+        owned = { file: attachment.file, previewUrl: attachment.previewUrl };
+        owners!.set(attachment.id, owned);
+      }
+      if (!owned.previewUrl) {
+        owned.previewUrl = URL.createObjectURL(owned.file);
+      }
+      if (owned.previewUrl === attachment.previewUrl) {
+        return attachment;
+      }
+      changed = true;
+      return { ...attachment, previewUrl: owned.previewUrl };
+    });
+    return changed ? restored : attachments;
+  }, []);
+
+  const releaseComposerSessionPreviewUrls = useCallback((sessionId: string, forgetFiles: boolean) => {
+    const owners = composerPreviewUrlsBySessionRef.current.get(sessionId);
+    if (!owners) {
+      return;
+    }
+    for (const [attachmentId, owned] of owners) {
+      if (owned.previewUrl) {
+        URL.revokeObjectURL(owned.previewUrl);
+      }
+      if (forgetFiles) {
+        owners.delete(attachmentId);
+      } else {
+        owned.previewUrl = null;
+      }
+    }
+    if (forgetFiles || owners.size === 0) {
+      composerPreviewUrlsBySessionRef.current.delete(sessionId);
+    }
+  }, []);
+
+  const forgetComposerAttachmentUrl = useCallback((
+    sessionId: string,
+    attachment: Pick<ComposerImageAttachment, "id" | "previewUrl">,
+  ) => {
+    const owners = composerPreviewUrlsBySessionRef.current.get(sessionId);
+    const owned = owners?.get(attachment.id);
+    const previewUrl = owned ? owned.previewUrl : attachment.previewUrl;
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    owners?.delete(attachment.id);
+    if (owners?.size === 0) {
+      composerPreviewUrlsBySessionRef.current.delete(sessionId);
+    }
+  }, []);
+
+  const isComposerAttachmentOwned = useCallback((sessionId: string, attachmentId: string) => (
+    composerPreviewUrlsBySessionRef.current.get(sessionId)?.has(attachmentId) ?? false
+  ), []);
+
+  const retainOwnedComposerUploadOutcomes = useCallback((
+    sessionId: string,
+    attachments: ComposerImageAttachment[],
+    outcomes: ComposerAttachmentUploadOutcome[],
+  ) => {
+    const ownedIds = new Set(
+      attachments
+        .filter((attachment) => isComposerAttachmentOwned(sessionId, attachment.id))
+        .map((attachment) => attachment.id),
+    );
+    return outcomes.filter((outcome) => ownedIds.has(outcome.id));
+  }, [isComposerAttachmentOwned]);
+
+  const cancelScheduledComposerPreviewRelease = useCallback((sessionId: string) => {
+    const token = pendingPreviewReleaseTokenBySessionRef.current.get(sessionId) ?? 0;
+    pendingPreviewReleaseTokenBySessionRef.current.set(sessionId, token + 1);
+  }, []);
+
+  const scheduleComposerPreviewRelease = useCallback((sessionId: string) => {
+    const token = (pendingPreviewReleaseTokenBySessionRef.current.get(sessionId) ?? 0) + 1;
+    pendingPreviewReleaseTokenBySessionRef.current.set(sessionId, token);
+    void Promise.resolve().then(() => {
+      if (pendingPreviewReleaseTokenBySessionRef.current.get(sessionId) !== token) {
+        return;
+      }
+      pendingPreviewReleaseTokenBySessionRef.current.delete(sessionId);
+      releaseComposerSessionPreviewUrls(sessionId, false);
+    });
+  }, [releaseComposerSessionPreviewUrls]);
+
+  const releaseAllComposerPreviewUrls = useCallback(() => {
+    for (const sessionId of [...composerPreviewUrlsBySessionRef.current.keys()]) {
+      releaseComposerSessionPreviewUrls(sessionId, true);
+    }
+  }, [releaseComposerSessionPreviewUrls]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    composerLifecycleTokenRef.current += 1;
+    return () => {
+      isMountedRef.current = false;
+      const token = ++composerLifecycleTokenRef.current;
+      void Promise.resolve().then(() => {
+        if (composerLifecycleTokenRef.current === token && !isMountedRef.current) {
+          releaseAllComposerPreviewUrls();
+        }
+      });
+    };
+  }, [releaseAllComposerPreviewUrls]);
+
+  useEffect(() => {
+    const sessionId = activeSessionId;
+    if (!sessionId) {
+      return;
+    }
+    cancelScheduledComposerPreviewRelease(sessionId);
+    const snapshot = attachmentSnapshotRef.current.sessionId === sessionId
+      ? attachmentSnapshotRef.current.attachments
+      : [];
+    const restored = restoreComposerAttachmentUrls(sessionId, snapshot);
+    if (restored !== snapshot) {
+      setSessionImageAttachments((current) => {
+        const latest = current[sessionId] ?? snapshot;
+        const owners = composerPreviewUrlsBySessionRef.current.get(sessionId);
+        let changed = false;
+        const next = latest.map((attachment) => {
+          const previewUrl = owners?.get(attachment.id)?.previewUrl;
+          if (!previewUrl || previewUrl === attachment.previewUrl) {
+            return attachment;
+          }
+          changed = true;
+          return { ...attachment, previewUrl };
+        });
+        return changed ? { ...current, [sessionId]: next } : current;
+      });
+    }
+    return () => scheduleComposerPreviewRelease(sessionId);
+  }, [
+    activeSessionId,
+    cancelScheduledComposerPreviewRelease,
+    restoreComposerAttachmentUrls,
+    scheduleComposerPreviewRelease,
+    setSessionImageAttachments,
+  ]);
+
+  useEffect(() => {
+    const variables = submitTurnMutation.variables;
+    if (submitTurnMutation.isSuccess && variables?.sessionId && variables !== clearedSubmitMutationVariablesRef.current) {
+      clearedSubmitMutationVariablesRef.current = variables;
+      releaseComposerSessionPreviewUrls(variables.sessionId, true);
+    }
+  }, [
+    releaseComposerSessionPreviewUrls,
+    submitTurnMutation.isSuccess,
+    submitTurnMutation.variables,
+  ]);
+
+  useEffect(() => {
+    const variables = editResubmitMutation.variables;
+    if (editResubmitMutation.isSuccess && variables?.sessionId && variables !== clearedEditMutationVariablesRef.current) {
+      clearedEditMutationVariablesRef.current = variables;
+      releaseComposerSessionPreviewUrls(variables.sessionId, true);
+    }
+  }, [
+    editResubmitMutation.isSuccess,
+    editResubmitMutation.variables,
+    releaseComposerSessionPreviewUrls,
+  ]);
+
   const handleComposerChange = useCallback((value: string) => {
     if (!activeSessionId) {
       return;
@@ -1324,6 +1530,9 @@ export function useChatComposerSubmitActions({
     if (!classifiedAccepted.length && !rejected.length) {
       return;
     }
+    // Own every URL returned by classification before applying model and
+    // capacity filters, so rejected previews are covered by the same cleanup.
+    rememberComposerAttachmentUrls(activeSessionId, classifiedAccepted);
     // Document attachments do not depend on the model's image input support;
     // only image attachments are dropped when the dialogue model lacks vision.
     const accepted = activeAgentImageInputUnsupported
@@ -1335,7 +1544,7 @@ export function useChatComposerSubmitActions({
     if (activeAgentImageInputUnsupported) {
       classifiedAccepted
         .filter((attachment) => attachment.kind === "image")
-        .forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+        .forEach((attachment) => forgetComposerAttachmentUrl(activeSessionId, attachment));
     }
     let capacityRejected: ComposerImageAttachment[] = [];
     if (accepted.length) {
@@ -1348,7 +1557,7 @@ export function useChatComposerSubmitActions({
         maxDocuments: MAX_COMPOSER_DOCUMENT_ATTACHMENTS,
       });
       capacityRejected = mergePreview.rejected;
-      capacityRejected.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+      capacityRejected.forEach((attachment) => forgetComposerAttachmentUrl(activeSessionId, attachment));
       attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: mergePreview.attachments };
       setSessionImageAttachments((current) => {
         return {
@@ -1380,7 +1589,9 @@ export function useChatComposerSubmitActions({
     activeAgentImageInputUnsupported,
     activeImageAttachments,
     activeSessionId,
+    forgetComposerAttachmentUrl,
     lang,
+    rememberComposerAttachmentUrls,
     sessionBusy,
     setSessionComposerErrors,
     setSessionImageAttachments,
@@ -1393,26 +1604,31 @@ export function useChatComposerSubmitActions({
     const attachmentSnapshot = attachmentSnapshotRef.current.sessionId === activeSessionId
       ? attachmentSnapshotRef.current.attachments
       : activeImageAttachments;
+    rememberComposerAttachmentUrls(activeSessionId, attachmentSnapshot);
     const nextAttachments = attachmentSnapshot.filter((attachment) => attachment.id !== attachmentId);
     if (nextAttachments.length === attachmentSnapshot.length) {
       return;
     }
     const removed = attachmentSnapshot.find((attachment) => attachment.id === attachmentId);
-    if (removed) {
-      URL.revokeObjectURL(removed.previewUrl);
-    }
+    if (removed) forgetComposerAttachmentUrl(activeSessionId, removed);
     attachmentSnapshotRef.current = { sessionId: activeSessionId, attachments: nextAttachments };
     setSessionImageAttachments((current) => ({
       ...current,
       [activeSessionId]: nextAttachments,
     }));
-  }, [activeImageAttachments, activeSessionId, setSessionImageAttachments]);
+  }, [
+    activeImageAttachments,
+    activeSessionId,
+    forgetComposerAttachmentUrl,
+    rememberComposerAttachmentUrls,
+    setSessionImageAttachments,
+  ]);
 
   // Upload-repair entry for failed attachment chips: re-uploads only the
   // failed subset (or one chip), respects the same per-session in-flight guard
   // as submit, and never auto-sends — the restored draft waits for the user.
   const retryComposerAttachmentUploads = useCallback(async (sessionId: string, onlyAttachmentId?: string) => {
-    if (!sessionId || imageUploadInFlightRef.current[sessionId]) {
+    if (!isMountedRef.current || !sessionId || imageUploadInFlightRef.current[sessionId]) {
       return;
     }
     const tray = activeImageAttachments;
@@ -1422,6 +1638,7 @@ export function useChatComposerSubmitActions({
     if (!targets.length) {
       return;
     }
+    rememberComposerAttachmentUrls(sessionId, targets);
     imageUploadInFlightRef.current[sessionId] = true;
     setSessionImageUploadPending((current) => ({
       ...current,
@@ -1441,14 +1658,20 @@ export function useChatComposerSubmitActions({
       { attachmentCount: targets.length },
     );
     try {
-      const outcomes = await uploadComposerAttachmentsSettled(sessionId, targets);
+      const settledOutcomes = await uploadComposerAttachmentsSettled(sessionId, targets);
+      if (!isMountedRef.current) {
+        return;
+      }
+      const outcomes = retainOwnedComposerUploadOutcomes(sessionId, targets, settledOutcomes);
       setSessionImageAttachments((current) => ({
         ...current,
         [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
       }));
       const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
       const remainingFailedChips = failedComposerAttachmentUploads(
-        applyComposerAttachmentUploadOutcomes(tray, outcomes),
+        applyComposerAttachmentUploadOutcomes(tray.filter((attachment) => (
+          isComposerAttachmentOwned(sessionId, attachment.id)
+        )), outcomes),
       ).length;
       if (failedOutcomes.length) {
         postSubmitTelemetry(
@@ -1490,16 +1713,21 @@ export function useChatComposerSubmitActions({
       }
     } finally {
       imageUploadInFlightRef.current[sessionId] = false;
-      setSessionImageUploadPending((current) => ({
-        ...current,
-        [sessionId]: false,
-      }));
+      if (isMountedRef.current) {
+        setSessionImageUploadPending((current) => ({
+          ...current,
+          [sessionId]: false,
+        }));
+      }
     }
   }, [
     activeImageAttachments,
     describeError,
     imageUploadInFlightRef,
+    isComposerAttachmentOwned,
     lang,
+    rememberComposerAttachmentUrls,
+    retainOwnedComposerUploadOutcomes,
     setSessionComposerErrors,
     setSessionImageAttachments,
     setSessionImageUploadPending,
@@ -1595,6 +1823,9 @@ export function useChatComposerSubmitActions({
     queuedBehindActiveTurn = false,
     modelSelection: SessionModelSelection | null = null,
   ) => {
+    if (!isMountedRef.current) {
+      return;
+    }
     if (imageUploadInFlightRef.current[sessionId]) {
       postSubmitTelemetry(
         "browser.chat_submit.blocked",
@@ -1612,6 +1843,7 @@ export function useChatComposerSubmitActions({
       );
       return;
     }
+    rememberComposerAttachmentUrls(sessionId, attachments);
     imageUploadInFlightRef.current[sessionId] = true;
     pendingUploadSubmissionRef.current.set(sessionId, clientSubmissionId);
     setSessionImageUploadPending((current) => ({
@@ -1655,11 +1887,18 @@ export function useChatComposerSubmitActions({
           ...current,
           [sessionId]: markComposerAttachmentsUploading(current[sessionId] ?? []),
         }));
-        outcomes = await uploadComposerAttachmentsSettled(sessionId, needUpload);
+        const settledOutcomes = await uploadComposerAttachmentsSettled(sessionId, needUpload);
+        if (!isMountedRef.current) {
+          return;
+        }
+        outcomes = retainOwnedComposerUploadOutcomes(sessionId, needUpload, settledOutcomes);
         setSessionImageAttachments((current) => ({
           ...current,
           [sessionId]: applyComposerAttachmentUploadOutcomes(current[sessionId] ?? [], outcomes),
         }));
+      }
+      if (!isMountedRef.current) {
+        return;
       }
       const failedOutcomes = outcomes.filter(isFailedUploadOutcome);
       if (failedOutcomes.length) {
@@ -1705,8 +1944,11 @@ export function useChatComposerSubmitActions({
           },
         );
       }
+      const stillOwnedAttachments = attachments.filter((attachment) => (
+        isComposerAttachmentOwned(sessionId, attachment.id)
+      ));
       const uploadedAttachmentIds = composerUploadedArtifactIds(
-        applyComposerAttachmentUploadOutcomes(attachments, outcomes),
+        applyComposerAttachmentUploadOutcomes(stillOwnedAttachments, outcomes),
       );
       postSubmitTelemetry(
         "browser.chat_submit.submit_mutate_requested",
@@ -1735,6 +1977,9 @@ export function useChatComposerSubmitActions({
         modelSelection,
       });
     } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
       // Defense net only: attachment uploads settle per attachment above, so
       // this keeps any unexpected throw on the same failure semantics.
       postSubmitTelemetry(
@@ -1765,16 +2010,21 @@ export function useChatComposerSubmitActions({
         pendingUploadSubmissionRef.current.delete(sessionId);
       }
       imageUploadInFlightRef.current[sessionId] = false;
-      setSessionImageUploadPending((current) => ({
-        ...current,
-        [sessionId]: false,
-      }));
+      if (isMountedRef.current) {
+        setSessionImageUploadPending((current) => ({
+          ...current,
+          [sessionId]: false,
+        }));
+      }
     }
   }, [
     describeError,
     imageUploadInFlightRef,
+    isComposerAttachmentOwned,
+    retainOwnedComposerUploadOutcomes,
     lang,
     queryClient,
+    rememberComposerAttachmentUrls,
     restorePendingStopAfterUploadFailure,
     setSessionComposerErrors,
     setSessionDrafts,
@@ -2243,11 +2493,15 @@ export function useChatComposerSubmitActions({
       );
       const continueEdit = () => {
         void (async () => {
+          if (!isMountedRef.current) {
+            return;
+          }
           if (editAttachments.length && imageUploadInFlightRef.current[activeSessionId]) {
             return;
           }
           let uploadedAttachmentIds: string[] = [];
           if (editAttachments.length) {
+            rememberComposerAttachmentUrls(activeSessionId, editAttachments);
             imageUploadInFlightRef.current[activeSessionId] = true;
             pendingUploadSubmissionRef.current.set(activeSessionId, clientSubmissionId);
             setSessionImageUploadPending((current) => ({
@@ -2265,7 +2519,11 @@ export function useChatComposerSubmitActions({
                   ...current,
                   [activeSessionId]: markComposerAttachmentsUploading(current[activeSessionId] ?? []),
                 }));
-                outcomes = await uploadComposerAttachmentsSettled(activeSessionId, needUpload);
+                const settledOutcomes = await uploadComposerAttachmentsSettled(activeSessionId, needUpload);
+                if (!isMountedRef.current) {
+                  return;
+                }
+                outcomes = retainOwnedComposerUploadOutcomes(activeSessionId, needUpload, settledOutcomes);
                 setSessionImageAttachments((current) => ({
                   ...current,
                   [activeSessionId]: applyComposerAttachmentUploadOutcomes(current[activeSessionId] ?? [], outcomes),
@@ -2283,10 +2541,16 @@ export function useChatComposerSubmitActions({
                 restorePendingStopAfterUploadFailure(activeSessionId);
                 return;
               }
+              const stillOwnedAttachments = editAttachments.filter((attachment) => (
+                isComposerAttachmentOwned(activeSessionId, attachment.id)
+              ));
               uploadedAttachmentIds = composerUploadedArtifactIds(
-                applyComposerAttachmentUploadOutcomes(editAttachments, outcomes),
+                applyComposerAttachmentUploadOutcomes(stillOwnedAttachments, outcomes),
               );
             } catch (error) {
+              if (!isMountedRef.current) {
+                return;
+              }
               setSessionComposerErrors((current) => ({
                 ...current,
                 [activeSessionId]: describeError(error, lang === "zh" ? "图片上传失败" : "Image upload failed"),
@@ -2298,11 +2562,16 @@ export function useChatComposerSubmitActions({
                 pendingUploadSubmissionRef.current.delete(activeSessionId);
               }
               imageUploadInFlightRef.current[activeSessionId] = false;
-              setSessionImageUploadPending((current) => ({
-                ...current,
-                [activeSessionId]: false,
-              }));
+              if (isMountedRef.current) {
+                setSessionImageUploadPending((current) => ({
+                  ...current,
+                  [activeSessionId]: false,
+                }));
+              }
             }
+          }
+          if (!isMountedRef.current) {
+            return;
           }
           editResubmitMutation.mutate({
             sessionId: activeSessionId,
@@ -2346,6 +2615,7 @@ export function useChatComposerSubmitActions({
     editResubmitMutation,
     imageUploadInFlightRef,
     interceptRerun,
+    isComposerAttachmentOwned,
     lang,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
@@ -2359,6 +2629,8 @@ export function useChatComposerSubmitActions({
     setSessionComposerErrors,
     setSessionDrafts,
     setSessionImageUploadPending,
+    rememberComposerAttachmentUrls,
+    retainOwnedComposerUploadOutcomes,
     handleFollowupQueueSteer,
     submitTurnWithAttachments,
   ]);
@@ -2378,6 +2650,7 @@ export function useChatComposerSubmitActions({
         original: message.content,
       },
     }));
+    releaseComposerSessionPreviewUrls(activeSessionId, true);
     setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
     setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
     setSessionDrafts((current) => ({
@@ -2396,6 +2669,7 @@ export function useChatComposerSubmitActions({
     setSessionEditTargets,
     setSessionImageAttachments,
     setSessionReferenceAttachments,
+    releaseComposerSessionPreviewUrls,
   ]);
 
   useEffect(() => {
@@ -2430,6 +2704,7 @@ export function useChatComposerSubmitActions({
       ...current,
       [activeSessionId]: "",
     }));
+    releaseComposerSessionPreviewUrls(activeSessionId, true);
     setSessionImageAttachments((current) => clearSessionImageAttachments(current, activeSessionId));
     setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, activeSessionId));
   }, [
@@ -2438,6 +2713,7 @@ export function useChatComposerSubmitActions({
     setSessionEditTargets,
     setSessionImageAttachments,
     setSessionReferenceAttachments,
+    releaseComposerSessionPreviewUrls,
   ]);
 
   const handleRegenerateAssistantMessage = useCallback((message: ConversationMessage) => {

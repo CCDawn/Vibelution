@@ -29,7 +29,7 @@ describe("waitForWorkbenchHttp", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("treats a non-server-error status as ready", async () => {
+  it("accepts redirects to a serving workbench page", async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce({ status: 307 });
     await waitForWorkbenchHttp({
       url: "http://127.0.0.1:8002/",
@@ -38,6 +38,18 @@ describe("waitForWorkbenchHttp", () => {
       fetchImpl
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([401, 403, 404])("rejects HTTP %s as workbench readiness", async (status) => {
+    let nowMs = 0;
+    await expect(waitForWorkbenchHttp({
+      url: "http://127.0.0.1:8002/",
+      timeoutMs: 5,
+      pollIntervalMs: 1,
+      now: () => nowMs,
+      delay: async (ms) => { nowMs += ms; },
+      fetchImpl: async () => ({ status })
+    })).rejects.toThrow(`HTTP ${status}`);
   });
 
   it("keeps polling through 5xx until the origin recovers", async () => {

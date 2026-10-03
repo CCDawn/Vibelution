@@ -1,3 +1,5 @@
+import { boundedDesktopControlFetch } from "../protocol/boundedFetch.js";
+
 export type RuntimeSceneElectronEvent = {
   eventCode: string;
   message: string;
@@ -111,15 +113,22 @@ export class RuntimeSceneBridge {
   }
 
   private async post(event: RuntimeSceneElectronEvent): Promise<void> {
-    const fetcher = this.options.fetchImpl ?? fetch;
-    const response = await fetcher(`${new URL(this.options.launcherOrigin).origin}/api/launcher/runtime-scene/events`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "X-Vibelution-Control-Token": this.options.controlToken
-      },
-      body: JSON.stringify(electronEventPayload(event))
+    const response = await boundedDesktopControlFetch({
+      fetchImpl: this.options.fetchImpl,
+      resource: `${new URL(this.options.launcherOrigin).origin}/api/launcher/runtime-scene/events`,
+      operation: "runtime scene event",
+      init: {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Vibelution-Control-Token": this.options.controlToken
+        },
+        body: JSON.stringify(electronEventPayload(event))
+      }
     });
+    // The status is the complete acknowledgement. Release an unread body so
+    // even a server that never finishes its response cannot retain a socket.
+    void response.body?.cancel().catch(() => undefined);
     if (!response.ok) {
       throw new Error(`runtime scene event rejected: ${response.status}`);
     }

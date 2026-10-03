@@ -14,7 +14,11 @@ from typing import Any, Callable
 
 from fastapi import FastAPI
 
+from .server_shutdown import mark_server_shutdown_clean
+from .startup_jobs import StartupJobGroup, remaining_seconds, run_sync_bounded
+
 logger = logging.getLogger(__name__)
+LIFESPAN_SHUTDOWN_TIMEOUT_SECONDS = 25.0
 
 
 def _record_backend_ready_scene_event(
@@ -120,7 +124,9 @@ def _recover_hypothesis_command_attempts_on_startup() -> object:
     return recover_interrupted_command_attempts()
 
 
-def _recover_interrupted_session_turns_on_startup() -> object:
+def _recover_interrupted_session_turns_on_startup(
+    *, should_stop: Callable[[], bool] | None = None
+) -> object:
     """Resume interrupted session turns and queue drains after a restart.
 
     Operator-gated by ``session_recovery``; best-effort (never blocks
@@ -131,7 +137,7 @@ def _recover_interrupted_session_turns_on_startup() -> object:
         recover_interrupted_session_turns_on_startup,
     )
 
-    return recover_interrupted_session_turns_on_startup()
+    return recover_interrupted_session_turns_on_startup(should_stop=should_stop)
 
 
 def _validate_challenge_fence_config_on_startup() -> int | None:
@@ -151,14 +157,29 @@ def _validate_challenge_fence_config_on_startup() -> int | None:
     return validate_live_operator_per_call_config()
 
 
-def shutdown_session_catalog_on_shutdown() -> None:
-    """Cancel opt-in catalog-only work before web shutdown completes."""
+def shutdown_session_catalog_on_shutdown(*, deadline: float | None = None) -> dict[str, Any]:
+    """Flush the directory writer and close catalog work under one deadline."""
 
-    from .services.session.catalog_runtime import shutdown_session_catalog_runtime
-    from .services.session.directory_runtime import shutdown_session_directory_runtime
+    if deadline is None:
+        deadline = time.monotonic() + LIFESPAN_SHUTDOWN_TIMEOUT_SECONDS
+    failed_owners: list[str] = []
+    try:
+        from .services.session.directory_runtime import shutdown_session_directory_runtime
 
-    shutdown_session_directory_runtime()
-    shutdown_session_catalog_runtime()
+        shutdown_session_directory_runtime(
+            timeout=remaining_seconds(deadline),
+        )
+    except Exception as exc:  # noqa: BLE001 - catalog teardown still has to run
+        failed_owners.append("session_directory")
+        logger.error("Session directory writer shutdown failed (%s).", type(exc).__name__)
+    try:
+        from .services.session.catalog_runtime import shutdown_session_catalog_runtime
+
+        shutdown_session_catalog_runtime()
+    except Exception as exc:  # noqa: BLE001 - isolate the catalog owner
+        failed_owners.append("session_catalog")
+        logger.error("Session catalog shutdown failed (%s).", type(exc).__name__)
+    return {"closed": not failed_owners, "failedOwners": failed_owners}
 
 
 def reconcile_external_agent_tasks_once() -> list[dict[str, Any]]:
@@ -170,13 +191,23 @@ def reconcile_external_agent_tasks_once() -> list[dict[str, Any]]:
     return list(get_default_service(project_root).reconcile())
 
 
-async def reconcile_external_agent_tasks_forever(*, interval_seconds: float = 5.0) -> None:
+async def reconcile_external_agent_tasks_forever(
+    *, interval_seconds: float = 5.0, startup_jobs: StartupJobGroup | None = None
+) -> None:
     """Keep lease expiry and stop acknowledgement live without a child process."""
 
     interval = max(0.01, float(interval_seconds))
+    iteration = 0
     while True:
         try:
-            await asyncio.to_thread(reconcile_external_agent_tasks_once)
+            if startup_jobs is None:
+                await asyncio.to_thread(reconcile_external_agent_tasks_once)
+            else:
+                iteration += 1
+                await startup_jobs.run_sync(
+                    f"external-agent-reconcile-{iteration}",
+                    reconcile_external_agent_tasks_once,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - one bad pass must not disable leases
@@ -205,7 +236,11 @@ def _enforce_runtime_scene_retention_after_routes_ready(
         return {}
 
 
-async def _run_runtime_scene_retention_after_routes_ready(app: FastAPI) -> None:
+async def _run_runtime_scene_retention_after_routes_ready(
+    app: FastAPI,
+    *,
+    startup_jobs: StartupJobGroup | None = None,
+) -> None:
     """Wait for successful route registration, then run one tracked cleanup."""
 
     ready_event = getattr(app.state, "web_routes_ready_event", None)
@@ -216,6 +251,13 @@ async def _run_runtime_scene_retention_after_routes_ready(app: FastAPI) -> None:
         return
 
     stop_requested = threading.Event()
+    if startup_jobs is not None:
+        await startup_jobs.run_sync(
+            "runtime-scene-retention-worker",
+            _enforce_runtime_scene_retention_after_routes_ready,
+            stop_keyword="should_stop",
+        )
+        return
     # Shield the worker so cancellation reaches this owner first; it can then
     # stop the next scan/delete and join any filesystem operation in progress.
     retention_worker = asyncio.create_task(
@@ -313,6 +355,7 @@ async def _run_prewarm_heavy_after_routes_ready(
     heavy: Callable[[dict[str, Any]], Any],
     *,
     worker_name: str,
+    startup_jobs: StartupJobGroup | None = None,
 ) -> Any:
     """Shared ready→settle→to_thread gate for the CPU-heavy startup prewarms."""
 
@@ -324,6 +367,8 @@ async def _run_prewarm_heavy_after_routes_ready(
         "waitedForRoutesMs": waited_ms,
         "staggerMs": max(0, int(round(stagger_seconds * 1000))),
     }
+    if startup_jobs is not None:
+        return await startup_jobs.run_sync(worker_name, heavy, gate_timings)
     worker = asyncio.create_task(asyncio.to_thread(heavy, gate_timings), name=worker_name)
     try:
         # Shield the scan so cancellation reaches this owner first; shutdown
@@ -335,7 +380,9 @@ async def _run_prewarm_heavy_after_routes_ready(
         raise
 
 
-async def _run_config_workspace_prewarm_after_routes_ready(app: FastAPI | None) -> dict[str, Any]:
+async def _run_config_workspace_prewarm_after_routes_ready(
+    app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
+) -> dict[str, Any]:
     from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
 
     if should_skip_directory_runtime_for_pytest():
@@ -344,10 +391,13 @@ async def _run_config_workspace_prewarm_after_routes_ready(app: FastAPI | None) 
         app,
         _prewarm_config_workspace_on_startup,
         worker_name="config-workspace-prewarm-worker",
+        startup_jobs=startup_jobs,
     )
 
 
-async def _run_agent_registry_prewarm_after_routes_ready(app: FastAPI | None) -> dict[str, Any]:
+async def _run_agent_registry_prewarm_after_routes_ready(
+    app: FastAPI | None, *, startup_jobs: StartupJobGroup | None = None
+) -> dict[str, Any]:
     from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
 
     if should_skip_directory_runtime_for_pytest():
@@ -356,6 +406,7 @@ async def _run_agent_registry_prewarm_after_routes_ready(app: FastAPI | None) ->
         app,
         _prewarm_agent_registry_on_startup,
         worker_name="agent-registry-prewarm-worker",
+        startup_jobs=startup_jobs,
     )
 
 
@@ -391,6 +442,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
 
     _begin_owned_runtime_lifecycle()
     loop.set_exception_handler(handle_loop_exception)
+    startup_jobs = StartupJobGroup()
     from .route_bootstrap import warm_web_routes_in_background
 
     startup_routes_task: asyncio.Task[Any] | None = None
@@ -400,39 +452,44 @@ async def web_workbench_lifespan(app: FastAPI | None):
         app.state.web_routes_ready_event = asyncio.Event()
         # Route import/mount is the cold-start bulk cost — do not await before yield so
         # /api/health can pass and Launcher can open the window early.
-        startup_routes_task = asyncio.create_task(warm_web_routes_in_background(app))
+        startup_routes_task = startup_jobs.start_async(
+            "web-routes-bootstrap",
+            warm_web_routes_in_background(app, run_sync=startup_jobs.run_sync),
+        )
         if os.environ.get("VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION") == "1":
-            startup_scene_retention_task = asyncio.create_task(
-                _run_runtime_scene_retention_after_routes_ready(app),
-                name="runtime-scene-retention",
+            startup_scene_retention_task = startup_jobs.start_async(
+                "runtime-scene-retention",
+                _run_runtime_scene_retention_after_routes_ready(app, startup_jobs=startup_jobs),
             )
     # Snapshot the git commit this backend was started from (best effort, never
     # blocks health). The UI compares it with disk HEAD to flag stale instances.
-    startup_code_fingerprint_task = asyncio.create_task(
-        asyncio.to_thread(_write_running_code_fingerprint_on_startup, app)
+    startup_code_fingerprint_task = startup_jobs.start_thread(
+        "startup-code-fingerprint", _write_running_code_fingerprint_on_startup, app
     )
     # Do not await terminal reconcile before yield — it blocked /api/health readiness
     # and stretched launcher open_launcher_action by the full reconcile cost.
-    startup_cli_reconcile_task = asyncio.create_task(
-        asyncio.to_thread(_reconcile_cli_agent_terminal_states_on_startup)
+    startup_cli_reconcile_task = startup_jobs.start_thread(
+        "startup-cli-terminal-reconcile", _reconcile_cli_agent_terminal_states_on_startup
     )
-    startup_cache_prewarm_task = asyncio.create_task(prewarm_ui_caches_on_startup())
+    startup_cache_prewarm_task = startup_jobs.start_async(
+        "startup-ui-cache-prewarm", prewarm_ui_caches_on_startup(startup_jobs=startup_jobs)
+    )
     from .services.session.directory_runtime import (
         begin_directory_startup,
         should_skip_directory_runtime_for_pytest,
     )
 
     if should_skip_directory_runtime_for_pytest():
-        startup_directory_task = asyncio.create_task(
-            asyncio.to_thread(initialize_session_directory_on_startup)
+        startup_directory_task = startup_jobs.start_thread(
+            "startup-session-directory", initialize_session_directory_on_startup
         )
     else:
         directory_generation = begin_directory_startup()
-        startup_directory_task = asyncio.create_task(
-            asyncio.to_thread(initialize_session_directory_on_startup, directory_generation)
+        startup_directory_task = startup_jobs.start_thread(
+            "startup-session-directory", initialize_session_directory_on_startup, directory_generation
         )
-    startup_catalog_task = asyncio.create_task(
-        asyncio.to_thread(initialize_session_catalog_on_startup)
+    startup_catalog_task = startup_jobs.start_thread(
+        "startup-session-catalog", initialize_session_catalog_on_startup
     )
     # The alias scans are multi-second pure-Python CPU and would hold the GIL
     # against the route mount and the frontend's first request volley; defer
@@ -442,54 +499,58 @@ async def web_workbench_lifespan(app: FastAPI | None):
         # Registry prewarm must trail the directory startup task (see the
         # worker): the wait itself happens inside the thread, never blocking
         # startup.
-        startup_agent_registry_prewarm_task = asyncio.create_task(
-            _run_agent_registry_prewarm_after_routes_ready(app),
-            name="agent-registry-prewarm",
+        startup_agent_registry_prewarm_task = startup_jobs.start_async(
+            "startup-agent-registry-prewarm",
+            _run_agent_registry_prewarm_after_routes_ready(app, startup_jobs=startup_jobs),
         )
         # Config workspace prewarm trails the directory startup task for the
         # same reason (the alias scan reads sessions under the serving root).
-        startup_config_workspace_prewarm_task = asyncio.create_task(
-            _run_config_workspace_prewarm_after_routes_ready(app),
-            name="config-workspace-prewarm",
+        startup_config_workspace_prewarm_task = startup_jobs.start_async(
+            "startup-config-workspace-prewarm",
+            _run_config_workspace_prewarm_after_routes_ready(app, startup_jobs=startup_jobs),
         )
     else:
-        startup_agent_registry_prewarm_task = asyncio.create_task(
-            asyncio.to_thread(_prewarm_agent_registry_on_startup)
+        startup_agent_registry_prewarm_task = startup_jobs.start_thread(
+            "startup-agent-registry-prewarm", _prewarm_agent_registry_on_startup
         )
-        startup_config_workspace_prewarm_task = asyncio.create_task(
-            asyncio.to_thread(_prewarm_config_workspace_on_startup)
+        startup_config_workspace_prewarm_task = startup_jobs.start_thread(
+            "startup-config-workspace-prewarm", _prewarm_config_workspace_on_startup
         )
-    startup_agent_inbox_recovery_task = asyncio.create_task(
-        asyncio.to_thread(_recover_wakeable_agent_inbox_messages_on_startup)
+    startup_agent_inbox_recovery_task = startup_jobs.start_thread(
+        "startup-agent-inbox-recovery", _recover_wakeable_agent_inbox_messages_on_startup
     )
-    startup_meeting_driver_recovery_task = asyncio.create_task(
-        asyncio.to_thread(_recover_challenge_meeting_drivers_on_startup)
+    startup_meeting_driver_recovery_task = startup_jobs.start_thread(
+        "startup-meeting-driver-recovery", _recover_challenge_meeting_drivers_on_startup
     )
-    startup_chat_room_round_recovery_task = asyncio.create_task(
-        asyncio.to_thread(_recover_orphaned_chat_room_rounds_on_startup)
+    startup_chat_room_round_recovery_task = startup_jobs.start_thread(
+        "startup-chat-room-round-recovery", _recover_orphaned_chat_room_rounds_on_startup
     )
-    startup_command_attempt_recovery_task = asyncio.create_task(
-        asyncio.to_thread(_recover_hypothesis_command_attempts_on_startup)
+    startup_command_attempt_recovery_task = startup_jobs.start_thread(
+        "startup-command-attempt-recovery", _recover_hypothesis_command_attempts_on_startup
     )
     # Session startup recovery sweep (interrupted turns + queue drain). Kept
     # adjacent to the other *_recovery_* hooks; later recovery hooks append
     # below this block.
-    startup_session_recovery_task = asyncio.create_task(
-        asyncio.to_thread(_recover_interrupted_session_turns_on_startup)
+    startup_session_recovery_task = startup_jobs.start_thread(
+        "startup-session-recovery",
+        _recover_interrupted_session_turns_on_startup,
+        stop_keyword="should_stop",
     )
-    startup_challenge_fence_validation_task = asyncio.create_task(
-        asyncio.to_thread(_validate_challenge_fence_config_on_startup)
+    startup_challenge_fence_validation_task = startup_jobs.start_thread(
+        "startup-challenge-fence-validation", _validate_challenge_fence_config_on_startup
     )
-    startup_external_agent_reconcile_task = asyncio.create_task(
-        reconcile_external_agent_tasks_forever()
+    startup_external_agent_reconcile_task = startup_jobs.start_async(
+        "startup-external-agent-reconcile",
+        reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
     )
-    startup_workflow_runtime_task = asyncio.create_task(
-        asyncio.to_thread(_start_research_workflow_runtime)
+    startup_workflow_runtime_task = startup_jobs.start_thread(
+        "startup-workflow-runtime", _start_research_workflow_runtime
     )
     from .services.virtual_human_life_service import run_virtual_human_life_runtime
 
-    startup_virtual_human_life_task = asyncio.create_task(
-        run_virtual_human_life_runtime()
+    startup_virtual_human_life_task = startup_jobs.start_async(
+        "startup-virtual-human-life",
+        run_virtual_human_life_runtime(run_sync=startup_jobs.run_sync),
     )
 
     def consume_startup_task_result(task: asyncio.Task[Any], *, message: str) -> None:
@@ -599,103 +660,226 @@ async def web_workbench_lifespan(app: FastAPI | None):
         # Schedule the informational event immediately before yield, but do not
         # import the runtime-scene/LLM graph until health is already available.
         try:
-            startup_scene_event_task = asyncio.create_task(
-                asyncio.to_thread(
-                    _record_backend_ready_scene_event,
-                    pre_yield_ms=max(0, int((time.perf_counter() - lifespan_started) * 1000)),
-                    routes_ready=bool(
-                        app is not None and getattr(app.state, "web_routes_registered", False)
-                    ),
-                    background_tasks=[
-                        *(["web_routes_bootstrap"] if startup_routes_task is not None else []),
-                        "cli_terminal_reconcile",
-                        "ui_cache_prewarm",
-                        "session_directory",
-                        "session_catalog",
-                        "agent_registry_prewarm",
-                        "config_workspace_prewarm",
-                        "agent_inbox_recovery",
-                        "meeting_driver_recovery",
-                        "chat_room_round_recovery",
-                        "command_attempt_recovery",
-                        "session_recovery_sweep",
-                        "challenge_fence_config_validation",
-                        "external_agent_task_reconcile",
-                        "virtual_human_life",
-                    ],
-                )
+            startup_scene_event_task = startup_jobs.start_thread(
+                "startup-ready-scene-event",
+                _record_backend_ready_scene_event,
+                pre_yield_ms=max(0, int((time.perf_counter() - lifespan_started) * 1000)),
+                routes_ready=bool(
+                    app is not None and getattr(app.state, "web_routes_registered", False)
+                ),
+                background_tasks=[
+                    *(["web_routes_bootstrap"] if startup_routes_task is not None else []),
+                    "cli_terminal_reconcile",
+                    "ui_cache_prewarm",
+                    "session_directory",
+                    "session_catalog",
+                    "agent_registry_prewarm",
+                    "config_workspace_prewarm",
+                    "agent_inbox_recovery",
+                    "meeting_driver_recovery",
+                    "chat_room_round_recovery",
+                    "command_attempt_recovery",
+                    "session_recovery_sweep",
+                    "challenge_fence_config_validation",
+                    "external_agent_task_reconcile",
+                    "virtual_human_life",
+                ],
             )
         except Exception as exc:  # noqa: BLE001 - health must not depend on diagnostics
             logger.debug("Backend ready runtime-scene task scheduling failed: %s", type(exc).__name__)
         yield
     finally:
-        try:
-            shutdown_session_catalog_on_shutdown()
-            from .services.virtual_human_life_service import stop_virtual_human_life_runtime
+        deadline = time.monotonic() + LIFESPAN_SHUTDOWN_TIMEOUT_SECONDS
+        shutdown_clean = True
+        startup_jobs.request_stop()
 
-            stop_virtual_human_life_runtime()
-            for startup_task in (
-                startup_routes_task,
-                startup_scene_retention_task,
-                startup_cli_reconcile_task,
-                startup_cache_prewarm_task,
-                startup_directory_task,
-                startup_catalog_task,
-                startup_agent_registry_prewarm_task,
-                startup_config_workspace_prewarm_task,
-                startup_agent_inbox_recovery_task,
-                startup_meeting_driver_recovery_task,
-                startup_chat_room_round_recovery_task,
-                startup_command_attempt_recovery_task,
-                startup_session_recovery_task,
-                startup_challenge_fence_validation_task,
-                startup_external_agent_reconcile_task,
-                startup_code_fingerprint_task,
-                startup_workflow_runtime_task,
-                startup_virtual_human_life_task,
-                startup_scene_event_task,
-            ):
-                if startup_task is None:
-                    continue
-                if not startup_task.done():
-                    startup_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await startup_task
-        finally:
-            try:
-                await _shutdown_owned_runtime_resources()
-                await asyncio.to_thread(_stop_research_workflow_runtime)
-            finally:
-                loop.set_exception_handler(previous_handler)
+        human_stop_ok = await _run_shutdown_step(
+            "virtual-human-stop",
+            lambda: run_sync_bounded(
+                _stop_virtual_human_life_runtime,
+                deadline_at=deadline,
+                name="shutdown-virtual-human",
+            ),
+            deadline=deadline,
+        )
+        shutdown_clean &= _sync_owner_result_is_clean(human_stop_ok)
+
+        startup_result = await _run_shutdown_step(
+            "startup-jobs",
+            startup_jobs.shutdown(deadline=deadline),
+            deadline=deadline,
+        )
+        shutdown_clean &= bool(
+            isinstance(startup_result, dict) and startup_result.get("closed") is True
+        )
+
+        workflow_stop_ok = await _run_shutdown_step(
+            "research-workflow-stop",
+            lambda: run_sync_bounded(
+                _stop_research_workflow_runtime,
+                deadline_at=deadline,
+                name="shutdown-research-workflow",
+            ),
+            deadline=deadline,
+        )
+        shutdown_clean &= _sync_owner_result_is_clean(workflow_stop_ok)
+
+        owned_result = await _run_shutdown_step(
+            "owned-runtime-resources",
+            _shutdown_owned_runtime_resources(deadline=deadline),
+            deadline=deadline,
+        )
+        shutdown_clean &= bool(
+            isinstance(owned_result, dict) and owned_result.get("closed") is True
+        )
+
+        stores_ok = await _run_shutdown_step(
+            "session-stores",
+            lambda: run_sync_bounded(
+                shutdown_session_catalog_on_shutdown,
+                deadline_at=deadline,
+                name="shutdown-session-stores",
+                deadline=deadline,
+            ),
+            deadline=deadline,
+        )
+        shutdown_clean &= _sync_owner_result_is_clean(stores_ok)
+        if shutdown_clean:
+            mark_server_shutdown_clean()
+        else:
+            logger.error("Workbench shutdown left one or more owned resources unverified.")
+        loop.set_exception_handler(previous_handler)
+
+
+def _stop_virtual_human_life_runtime() -> None:
+    from .services.virtual_human_life_service import stop_virtual_human_life_runtime
+
+    stop_virtual_human_life_runtime()
+
+
+def _sync_owner_result_is_clean(result: Any) -> bool:
+    return bool(
+        isinstance(result, tuple)
+        and len(result) == 2
+        and result[0] is True
+        and not (isinstance(result[1], dict) and result[1].get("closed") is False)
+    )
+
+
+async def _run_shutdown_step(name: str, awaitable: Any, *, deadline: float) -> Any:
+    """Isolate one owner failure/cancellation and still run later cleanup."""
+
+    try:
+        if callable(awaitable):
+            awaitable = awaitable()
+        task = asyncio.create_task(awaitable, name=f"shutdown-{name}")
+    except asyncio.CancelledError:
+        logger.error("Workbench shutdown step could not start because it was cancelled: %s", name)
+        return None
+    except Exception as exc:  # noqa: BLE001 - setup/import failure must not skip later owners
+        logger.error("Workbench shutdown step could not start: %s (%s)", name, type(exc).__name__)
+        return None
+    while not task.done():
+        remaining = remaining_seconds(deadline)
+        if remaining <= 0:
+            task.cancel()
+            logger.error("Workbench shutdown step exceeded the shared deadline: %s", name)
+            return None
+        try:
+            await asyncio.wait({task}, timeout=min(0.05, remaining))
+        except asyncio.CancelledError:
+            logger.warning("Workbench shutdown step was cancelled; continuing cleanup: %s", name)
+    if task.cancelled():
+        logger.error("Workbench shutdown step ended cancelled: %s", name)
+        return None
+    try:
+        return task.result()
+    except asyncio.CancelledError:
+        logger.error("Workbench shutdown owner raised CancelledError: %s", name)
+    except Exception as exc:  # noqa: BLE001 - one owner must not skip later cleanup
+        logger.error("Workbench shutdown owner failed: %s (%s)", name, type(exc).__name__)
+    return None
 
 
 def _begin_owned_runtime_lifecycle() -> None:
     # Fresh processes already have open admission gates. Only reopen owners
     # from a previous lifespan; importing them here would delay cold health.
+    failures: list[str] = []
     for module_name, begin_name in (
         ("core.infrastructure.background_tasks", "begin_background_task_lifecycle"),
         ("core.web.services.cli_agent_terminal_service", "begin_cli_agent_terminal_lifecycle"),
+        ("core.web.services.session_service", "begin_session_service_lifecycle"),
     ):
         module = sys.modules.get(module_name)
         if module is not None:
-            getattr(module, begin_name)()
+            try:
+                result = getattr(module, begin_name)()
+                if isinstance(result, dict) and result.get("opened") is False:
+                    failures.append(module_name)
+                    logger.error("Owned runtime lifecycle could not reopen: %s", module_name)
+            except Exception as exc:  # noqa: BLE001 - assess every loaded owner
+                failures.append(module_name)
+                logger.error(
+                    "Owned runtime lifecycle reopen failed: %s (%s)",
+                    module_name,
+                    type(exc).__name__,
+                )
+    if failures:
+        raise RuntimeError("Owned runtime lifecycle could not reopen: " + ", ".join(failures))
 
 
-async def _shutdown_owned_runtime_resources() -> None:
-    from core.infrastructure.background_tasks import shutdown_background_tasks
-    from .services.cli_agent_terminal_service import shutdown_cli_agent_terminal_sessions
+async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) -> dict[str, Any]:
+    if deadline is None:
+        deadline = time.monotonic() + LIFESPAN_SHUTDOWN_TIMEOUT_SECONDS
 
-    # Each owner broadcasts before waiting and enforces its own shared deadline.
+    def _stop_background_tasks() -> Any:
+        from core.infrastructure.background_tasks import shutdown_background_tasks
+
+        return shutdown_background_tasks()
+
+    def _stop_cli_terminals() -> Any:
+        from .services.cli_agent_terminal_service import shutdown_cli_agent_terminal_sessions
+
+        return shutdown_cli_agent_terminal_sessions()
+
+    def _stop_session_executors() -> Any:
+        from .services.session_service import shutdown_session_service
+
+        return shutdown_session_service(deadline=deadline)
+
+    owners = (
+        ("background-tasks", _stop_background_tasks, {}),
+        ("cli-terminals", _stop_cli_terminals, {}),
+        ("session-executors", _stop_session_executors, {}),
+    )
+
+    async def _shutdown_owner(name: str, callback: Callable[..., Any], kwargs: dict[str, Any]) -> bool:
+        try:
+            completed, result = await run_sync_bounded(
+                callback,
+                deadline_at=deadline,
+                name=f"shutdown-{name}",
+                **kwargs,
+            )
+        except asyncio.CancelledError:
+            logger.error("Owned runtime shutdown cancelled: %s", name)
+            return False
+        except Exception as exc:  # noqa: BLE001 - isolate each runtime owner
+            logger.error("Owned runtime shutdown failed: %s (%s)", name, type(exc).__name__)
+            return False
+        if not completed or (isinstance(result, dict) and result.get("closed") is False):
+            logger.error("Owned runtime shutdown incomplete: %s", name)
+            return False
+        return True
+
     results = await asyncio.gather(
-        asyncio.to_thread(shutdown_background_tasks),
-        asyncio.to_thread(shutdown_cli_agent_terminal_sessions),
+        *(_shutdown_owner(name, callback, kwargs) for name, callback, kwargs in owners),
         return_exceptions=True,
     )
-    for name, result in zip(("background_tasks", "cli_terminals"), results):
-        if isinstance(result, BaseException):
-            logger.error("Owned runtime shutdown failed: %s (%s)", name, type(result).__name__)
-        elif isinstance(result, dict) and result.get("closed") is False:
-            logger.error("Owned runtime shutdown incomplete: %s", name)
+    return {
+        "closed": all(result is True for result in results),
+        "owners": [name for name, _, _ in owners],
+    }
 
 
 
@@ -843,15 +1027,29 @@ def _prewarm_agent_registry_on_startup(gate_timings: dict[str, Any] | None = Non
     return timings
 
 
-async def prewarm_ui_caches_on_startup() -> None:
+async def prewarm_ui_caches_on_startup(
+    *, startup_jobs: StartupJobGroup | None = None
+) -> None:
     from tools import Key_Tools, web_search_tool
 
     started = time.perf_counter()
-    results = await asyncio.gather(
-        asyncio.to_thread(Key_Tools.prewarm_key_tool_definitions),
-        asyncio.to_thread(web_search_tool.autoglm_search_tool_availability, force=True),
-        asyncio.to_thread(_prewarm_git_memory_on_startup),
-    )
+    if startup_jobs is None:
+        jobs = (
+            asyncio.to_thread(Key_Tools.prewarm_key_tool_definitions),
+            asyncio.to_thread(web_search_tool.autoglm_search_tool_availability, force=True),
+            asyncio.to_thread(_prewarm_git_memory_on_startup),
+        )
+    else:
+        jobs = (
+            startup_jobs.run_sync("startup-key-tools-prewarm", Key_Tools.prewarm_key_tool_definitions),
+            startup_jobs.run_sync(
+                "startup-web-search-prewarm",
+                web_search_tool.autoglm_search_tool_availability,
+                force=True,
+            ),
+            startup_jobs.run_sync("startup-git-memory-prewarm", _prewarm_git_memory_on_startup),
+        )
+    results = await asyncio.gather(*jobs)
     git_state, git_duration_ms = results[2]
     from .services.runtime_scene_service import record_runtime_scene_event
 
