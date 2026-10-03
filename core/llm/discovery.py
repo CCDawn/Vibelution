@@ -11,6 +11,7 @@ from typing import Any
 from config import AppConfig
 from config.model_catalog import load_model_catalog_state, resolve_model_capabilities
 from config.models import LLMProfile, PromptCacheConfig
+from config.protocol_families import apply_model_entry_family_defaults
 
 from .adapters import capabilities_for_adapter
 from .types import DiagnosticReport, LLMCapabilities, ResolvedModelSpec
@@ -524,7 +525,12 @@ def build_llm_profile_from_model_entry(
 
     从 agent_runtime.config_for_agent_llm_model 原地抽出，键拷贝语义保持不变；
     供换模型运行时收口点与 doctor_model_library 共用，避免两处漂移。
+
+    合成顺序（稀疏 overlay）：基准 profile 载荷 < 协议族默认值（config/
+    protocol_families.py，只填条目为空/缺失的字段）< 条目显式字段。条目显式
+    声明永远赢；未知协议族不改写。
     """
+    effective_entry = apply_model_entry_family_defaults(entry)
     selected_payload = dict(base_payload)
     for key in (
         "transport",
@@ -550,16 +556,18 @@ def build_llm_profile_from_model_entry(
         "reasoning_effort_map",
         "supports_image_input",
     ):
-        if key in entry:
-            selected_payload[key] = copy.deepcopy(entry[key])
+        if key in effective_entry:
+            selected_payload[key] = copy.deepcopy(effective_entry[key])
     selected_payload.update(
         {
             "profile_id": profile_id,
             "provider_id": provider_id,
             "model_ref": model_ref,
             "model": model_name,
-            "api_key_env": str(entry.get("api_key_env") or "").strip(),
-            "prompt_cache": entry.get("prompt_cache") if "prompt_cache" in entry else PromptCacheConfig(),
+            "api_key_env": str(effective_entry.get("api_key_env") or "").strip(),
+            "prompt_cache": (
+                effective_entry.get("prompt_cache") if "prompt_cache" in effective_entry else PromptCacheConfig()
+            ),
         }
     )
     return LLMProfile(**selected_payload)
