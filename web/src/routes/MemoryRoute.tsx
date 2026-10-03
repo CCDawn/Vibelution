@@ -2483,6 +2483,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     sourceInboxStatus: sourceInboxStatus as any,
   });
   const knowledgeItems = ((knowledgeItemsQuery.data as any)?.items ?? []) as any[];
+  const knowledgeItemsPending = Boolean(activeKnowledgeBaseForItems && activeKnowledgeActorAgentId) && knowledgeItemsQuery.isPending;
   const cleanupTargetOptions = useMemo<CleanupTargetOption[]>(() => {
     const options: CleanupTargetOption[] = [
       {
@@ -2913,9 +2914,9 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   }, [searchParamText]);
 
   useEffect(() => {
-    // Graph scope is URL-owned; the generic memory-list normalizer would
-    // otherwise strip teamId / knowledgeBaseId / nodeId from graph links.
-    if (forcedView === "graph") return;
+    // Graph and knowledge scope are URL-owned; the generic memory-list
+    // normalizer would strip knowledgeBaseId / returnTo from those links.
+    if (forcedView === "graph" || forcedView === "knowledge") return;
     const next = buildMemorySearchParams(
       activeSectionId,
       activeItemId,
@@ -4035,7 +4036,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             reason: tool.reason,
           }))}
           activeBaseRequestId={activeKnowledgeBaseForItems}
-          isLoading={knowledgeDashboardSnapshotQuery.isPending}
+          isLoading={knowledgeDashboardSnapshotQuery.isLoading}
           onSelectBase={setActiveKnowledgeBaseId}
         />
         )}
@@ -4169,7 +4170,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
           traceTargetId={traceTargetId}
           trace={knowledgeTraceQuery.data}
           knowledgeItems={knowledgeItems}
-          knowledgeItemsPending={knowledgeItemsQuery.isPending}
+          knowledgeItemsPending={knowledgeItemsPending}
           knowledgeItemsErrorText={knowledgeItemsErrorText}
           ratingDraft={ratingDraft}
           knowledgeBusy={knowledgeBusy}

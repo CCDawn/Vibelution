@@ -77,6 +77,9 @@ Inside its own worktree, an Agent should:
 - merge its own task branch into local `main` when the local merge gates pass, then immediately close its claim and clean only its task-owned resources without waiting for post-merge validation; waiting for the user to request merge is not done;
 - invoke `scripts/task_closeout.py` from root local `main` as the single final entry. If a valid manifest exists or integration contention returns one, pass `--manifest`; never rerun selector tests for the same binding.
 - hand off to the main integration session only for large conflicts, cross-lane conflicts, hot-file/active-claim conflicts, release-sensitive work, unclear semantic conflicts, or explicit user-designated integration;
+- never force, release, complete, take over, or rewrite a claim this session does not own without explicit per-claim authorization from the main integration session; already-merged task cleanup in [Main Integration Responsibilities](#main-integration-responsibilities) is the standing exception; record the per-claim evidence and the authorization source in the report;
+- never treat such an operation as pre-authorized: "it should be approved" or "a similar case was approved before" is not authorization; without an explicit grant, only report the situation and wait;
+- accept such an authorization only when it is grounded on at least one of: zero overlap between the other task's actual dirty files and this task's file surface, or the claim's worktree and branch no longer exist with their content already merged into local `main`;
 - never push to GitHub unless the user explicitly authorizes remote sync or publication;
 - report the worktree path, branch, local commit SHA, changed files, pre-merge validation result, Launcher refresh need, project-memory update proposal, whether it self-merged, and the resulting cleanup or exact `cleanup pending` residue.
 
@@ -136,7 +139,7 @@ python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.
 ```
 
 - `STANDARD_TASK` 及以上必须有 Reviewer `APPROVE` 证据才允许 closeout 合入；`FAST_PATCH` 维持 Worker 自审，不强制独立 Reviewer。
-- Reviewer 只裁决，不做生命周期操作：不执行 merge 与 cleanup，不释放他人 claim。
+- Reviewer 只裁决，不做生命周期操作：不执行 merge 与 cleanup，不释放他人 claim；这是全角色 claim 授权规则的特例（见 [Agent Responsibilities](#agent-responsibilities)）。
 
 ### 合入与串行
 

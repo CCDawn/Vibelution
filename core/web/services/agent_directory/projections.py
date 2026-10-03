@@ -240,6 +240,44 @@ def _team_knowledge_access_lines(agent_id: str, memory_policy: dict[str, Any]) -
     return lines
 
 
+# Tools the lint/test/git reserve lines tell the model to spend calls on.
+# A non-empty allow-list that cannot call any of these skips that reserve.
+# An empty allow-list stays full access and keeps the coding budget.
+_CODING_BUDGET_TOOLS = frozenset({
+    "code_symbol_tool",
+    "grep_search_tool",
+    "glob_tool",
+    "read_file_tool",
+    "python_lint_tool",
+    "run_test_for_tool",
+    "cli_tool",
+    "get_git_status_summary_tool",
+    "apply_patch_tool",
+    "apply_diff_edit_tool",
+    "write_file_tool",
+})
+
+
+def _runtime_tool_budget_lines(max_calls: int, allowed_tools: list[str] | None) -> list[str]:
+    if max_calls <= 0:
+        return []
+    names = [str(item or "").strip() for item in (allowed_tools or []) if str(item or "").strip()]
+    suppress_coding = bool(names) and set(names).isdisjoint(_CODING_BUDGET_TOOLS)
+    if suppress_coding:
+        return [
+            f"ToolCallBudget: maxCallsPerTurn={max_calls}",
+            f"- Explore/search budget soft cap: <= {max_calls}",
+        ]
+    reserve = max(2, min(3, max_calls // 8 or 2))
+    explore_cap = max(1, max_calls - reserve)
+    return [
+        f"ToolCallBudget: maxCallsPerTurn={max_calls}",
+        f"- Explore/search budget soft cap: <= {explore_cap}",
+        f"- Reserve at least {reserve} calls for lint/test/git verification",
+        "- After one shell failure of the same intent, switch to code_symbol_tool/grep_search_tool",
+    ]
+
+
 def build_agent_runtime_context_block(
     agent_id: str,
     *,
@@ -291,21 +329,16 @@ def build_agent_runtime_context_block(
         else s.resolve_tool_policy_for_agent(str(agent.get("agentId") or "").strip())
     )
     max_calls = 0
+    allowed_tools: list[str] = []
     if isinstance(tool_policy, dict):
         try:
             max_calls = int(tool_policy.get("maxCallsPerTurn") or 0)
         except (TypeError, ValueError):
             max_calls = 0
-    budget_lines: list[str] = []
-    if max_calls > 0:
-        reserve = max(2, min(3, max_calls // 8 or 2))
-        explore_cap = max(1, max_calls - reserve)
-        budget_lines = [
-            f"ToolCallBudget: maxCallsPerTurn={max_calls}",
-            f"- Explore/search budget soft cap: <= {explore_cap}",
-            f"- Reserve at least {reserve} calls for lint/test/git verification",
-            "- After one shell failure of the same intent, switch to code_symbol_tool/grep_search_tool",
-        ]
+        raw_allowed = tool_policy.get("allowedTools")
+        if isinstance(raw_allowed, list):
+            allowed_tools = [str(item or "") for item in raw_allowed]
+    budget_lines = _runtime_tool_budget_lines(max_calls, allowed_tools)
     lines = [
         "## Agent Runtime Context",
         f"AgentId: {agent.get('agentId') or ''}",

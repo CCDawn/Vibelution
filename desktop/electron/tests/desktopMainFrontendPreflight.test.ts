@@ -9,6 +9,7 @@ import {
   resetFrontendBuildStateForTests,
   runWithFrontendBuildGate
 } from "../src/lifecycle/frontendBuildState.js";
+import { shouldRefreshBeforeLifecycle } from "../src/process/desktopShellFreshness.js";
 import type { RunWorkbenchLifecycleInput } from "../src/process/workbenchLifecycle.js";
 
 function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
@@ -24,6 +25,13 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
   const reusable = vi.fn(async () => true);
   const opened = vi.fn(async () => undefined);
   const notify = vi.fn();
+  const trayNotify = vi.fn();
+  const promote = vi.fn(async () => ({
+    schemaVersion: 1,
+    accepted: true,
+    operation: "restart-latest-shell",
+    message: "promoted"
+  }));
   const lifecycle = vi.fn(async (input: RunWorkbenchLifecycleInput) => {
     // The backend invokes this callback at its startup boundary, with its
     // execution signal. Preserve that contract in this process-free harness.
@@ -47,6 +55,11 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
     runWithFrontendBuildGate,
     updateLauncherWindowTruth: notify,
     inspectUnpackagedShell: async () => ({ stale: false }),
+    // Real routing decision so the unpackaged rebuild-and-start promotion lane
+    // is exercised end to end without Electron.
+    shouldRefreshBeforeLifecycle,
+    notifyDesktopTray: trayNotify,
+    restartLauncherToLatestBuild: promote,
     joinDecisionForLauncherLifecycleStop: () => ({ waitForInFlightRestart: false, joinInFlightRestart: false }),
     launcherLifecycleSupervisor: supervisor,
     readLauncherStateFile: () => ({}),
@@ -68,7 +81,7 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
     { compilerOptions: { target: ScriptTarget.ES2022 } }
   ).outputText, sandbox);
   return {
-    ensure, reachable, reusable, opened, notify, lifecycle, supervisor,
+    ensure, reachable, reusable, opened, notify, trayNotify, promote, lifecycle, supervisor,
     run: sandbox.orchestrateUnderTest as (
       operation: string, payload: object, provenance?: string, signal?: AbortSignal
     ) => Promise<{ accepted: boolean; code?: string }>
@@ -78,13 +91,26 @@ function harness(options: { live?: boolean; releaseChanged?: boolean } = {}) {
 afterEach(resetFrontendBuildStateForTests);
 
 describe("main-line frontend startup preflight", () => {
-  it.each(["start", "restart", "rebuild-and-start"])("verifies once at the startup boundary for %s", async (operation) => {
+  it.each(["start", "restart"])("verifies once at the startup boundary for %s", async (operation) => {
     const h = harness();
     await expect(h.run(operation, {})).resolves.toMatchObject({ accepted: true });
     expect(h.ensure).toHaveBeenCalledTimes(1);
     expect(h.lifecycle).toHaveBeenCalledTimes(1);
     expect(h.notify).toHaveBeenCalledTimes(2);
     expect(peekFrontendBuild("main")).toBe(false);
+  });
+
+  it("routes an unpackaged rebuild-and-start into the shell promotion lane instead of the workbench preflight", async () => {
+    const h = harness();
+    await expect(h.run("rebuild-and-start", {})).resolves.toMatchObject({
+      accepted: true,
+      operation: "restart-latest-shell"
+    });
+    // The helper must promote to a packaged shell, never relaunch unpackaged.
+    expect(h.promote).toHaveBeenCalledWith(false, "rebuild-and-start", { shellKind: "packaged" });
+    expect(h.lifecycle).not.toHaveBeenCalled();
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.trayNotify).toHaveBeenCalledTimes(1);
   });
 
   it("still verifies before reusing a live backend", async () => {

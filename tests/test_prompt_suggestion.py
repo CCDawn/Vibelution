@@ -420,6 +420,60 @@ def test_composer_example_route_uses_current_project_root(tmp_path, monkeypatch)
     assert exc_info.value.status_code == 404
 
 
+def test_composer_example_route_uses_financial_research_starters(monkeypatch):
+    from core.web.routes import sessions as session_routes
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_session_detail",
+        lambda *args, **kwargs: {"agentId": "agent-finance"},
+    )
+    research = [{"heading": "新闻参考", "command": "查一家公司的公开新闻"}]
+
+    def fake_specialized(agent_id):
+        assert agent_id == "agent-finance"
+        return research
+
+    monkeypatch.setattr(
+        "core.web.services.financial_assistant_service.composer_starters_for_agent",
+        fake_specialized,
+    )
+    seen: list = []
+    monkeypatch.setattr(
+        session_routes,
+        "get_composer_starter_commands",
+        lambda root: seen.append(root) or [{"heading": "修复问题", "command": "修复 lint 报错"}],
+    )
+
+    assert session_routes.session_composer_example("session-1") == {
+        "command": "查一家公司的公开新闻",
+        "starters": research,
+    }
+    assert seen == []
+
+
+def test_composer_example_route_falls_back_when_financial_lookup_fails(monkeypatch):
+    from core.web.routes import sessions as session_routes
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_session_detail",
+        lambda *args, **kwargs: {"agentId": "agent-finance"},
+    )
+
+    def broken(agent_id):
+        raise RuntimeError("lookup failed")
+
+    monkeypatch.setattr(
+        "core.web.services.financial_assistant_service.composer_starters_for_agent",
+        broken,
+    )
+    starters = [{"heading": "修复问题", "command": "修复 lint 报错"}]
+    monkeypatch.setattr(session_routes, "get_composer_starter_commands", lambda root: starters)
+
+    assert session_routes.session_composer_example("session-1")["starters"] == starters
+
+
 def test_build_example_starters_are_distinct_and_capped():
     files = ["agent.py", "chat.py", "workbench.tsx"]
     for _ in range(20):

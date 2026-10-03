@@ -120,6 +120,35 @@ def test_historical_alias_usage_is_reported_but_does_not_block_exit(tmp_path) ->
     assert usage["canRemoveAliases"] is True
 
 
+def test_scan_model_alias_usage_yields_gil_between_chunks(tmp_path, monkeypatch) -> None:
+    alias_ids = ["legacy-a", "legacy-b"]
+    decisions_root = tmp_path / "workspace" / "supervised_evolution" / "decisions"
+    for index in range(30):
+        _write_json(
+            decisions_root / f"decision-{index:02d}.json",
+            {"modelId": alias_ids[index % 2]},
+        )
+    alias_config = {"llm": {"model_aliases": {alias: "relay/gpt-a" for alias in alias_ids}}}
+
+    baseline = scan_model_alias_usage(alias_config, project_root=tmp_path)
+    assert baseline["totalHistoricalReferenceCount"] == 30
+    assert [item["historicalReferenceCount"] for item in baseline["aliases"]] == [15, 15]
+
+    real_sleep = model_reference_service.time.sleep
+    sleep_calls: list[float] = []
+
+    def _counting_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+        real_sleep(seconds)
+
+    monkeypatch.setattr(model_reference_service.time, "sleep", _counting_sleep)
+    yielded = scan_model_alias_usage(alias_config, project_root=tmp_path)
+
+    assert len(sleep_calls) >= 1
+    assert all(seconds == 0 for seconds in sleep_calls)
+    assert yielded == baseline
+
+
 @pytest.mark.parametrize(
     "status",
     ["", "queued", "stopping", "started", "in_progress", "unknown", "completed", "failed", "cancelled"],

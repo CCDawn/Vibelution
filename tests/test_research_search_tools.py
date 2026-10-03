@@ -246,6 +246,72 @@ def test_paper_project_and_news_search_build_no_quota_queries(monkeypatch):
     assert "reuters.com" in calls[2]["allowed_domains"]
 
 
+def test_cjk_news_search_keeps_chinese_sources(monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake_rss(query, *, max_results, locale="en-US"):
+        captured["locale"] = locale
+        captured["rss_query"] = query
+        return [], {"provider": "google_news_rss", "status": "failed"}
+
+    monkeypatch.setattr(research_search_backends, "google_news_rss_search", fake_rss)
+    monkeypatch.setattr(
+        research_search_backends,
+        "searxng_search",
+        lambda *args, **kwargs: ([], {"provider": "searxng", "status": "failed"}),
+    )
+    monkeypatch.setattr(
+        research_search_backends,
+        "ddgs_search",
+        lambda *args, **kwargs: ([], {"provider": "ddgs", "status": "failed"}),
+    )
+
+    def fake_public_web_search(query, max_results=10, allowed_domains="", blocked_domains=""):
+        captured["query"] = query
+        captured["allowed_domains"] = allowed_domains
+        return "ok"
+
+    monkeypatch.setattr(research_search_tools, "public_web_search", fake_public_web_search)
+
+    assert research_search_tools.news_search("贵州茅台", date_hint="2026") == "ok"
+    assert captured["locale"] == "zh-CN"
+    assert "贵州茅台" in captured["rss_query"]
+    assert "news latest analysis" not in captured["query"]
+    assert "eastmoney.com" in captured["allowed_domains"]
+    assert "cninfo.com.cn" in captured["allowed_domains"]
+    assert "reuters.com" not in captured["allowed_domains"]
+
+
+def test_google_news_rss_follows_redirect_and_keeps_chinese_items(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_http_get_text(url, *, params=None, headers=None, follow_redirects=False):
+        seen["url"] = url
+        seen["follow_redirects"] = follow_redirects
+        return """<?xml version="1.0" encoding="UTF-8"?>
+<rss><channel>
+<item>
+<title>贵州茅台，午后翻红！ - 证券时报网</title>
+<link>https://news.google.com/rss/articles/example</link>
+<description>贵州茅台午后股价翻红。</description>
+<pubDate>Fri, 03 Oct 2026 00:00:00 GMT</pubDate>
+</item>
+</channel></rss>"""
+
+    monkeypatch.setattr(research_search_backends, "_http_get_text", fake_http_get_text)
+    results, event = research_search_backends.google_news_rss_search(
+        "贵州茅台 2026",
+        max_results=2,
+        locale="zh-CN",
+    )
+    assert seen["follow_redirects"] is True
+    assert "hl=zh-CN" in str(seen["url"])
+    assert "ceid=CN%3Azh-Hans" in str(seen["url"]) or "ceid=CN:zh-Hans" in str(seen["url"])
+    assert event["status"] == "ok"
+    assert results[0]["title"].startswith("贵州茅台")
+    assert results[0]["url"].startswith("https://news.google.com/")
+
+
 def test_paper_search_accepts_integer_year_hint(monkeypatch):
     # 真实故障：模型传 year_hint=1984（int）被签名校验拒绝后弃用整条论文检索路径；
     # 实现入口必须先把 int 归一成字符串再拼查询。

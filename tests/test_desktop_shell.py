@@ -572,6 +572,122 @@ def test_schedule_desktop_shell_refresh_force_bypasses_recent_failure(tmp_path, 
     assert desktop_shell.recent_desktop_shell_refresh_failure(tmp_path) is None
 
 
+def test_run_desktop_shell_refresh_packaged_kind_promotes_even_from_unpackaged_shell(tmp_path, monkeypatch):
+    """shell_kind=packaged must walk rebuild/promote, never the unpackaged path.
+
+    The unpackaged rebuild-and-start defect: a running unpackaged shell
+    scheduled its replacement with shell_kind=unpackaged, so the helper
+    re-ensured the unpackaged bundle and the freshly built packaged shell was
+    never promoted. The Electron side now forces "packaged" for that intent.
+    """
+    calls: list[str] = []
+
+    def fail_unpackaged(*_args, **_kwargs):
+        raise AssertionError("shell_kind=packaged must not take the unpackaged ensure/launch path")
+
+    def fake_rebuild(*_args, **_kwargs):
+        calls.append("rebuild")
+        return {"rebuilt": True}
+
+    def fake_launch_packaged(*, project_root, then_lifecycle=""):
+        calls.append(f"launch_packaged:{then_lifecycle}")
+        return {"launched": True, "pid": 11}
+
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", fail_unpackaged)
+    monkeypatch.setattr(desktop_shell, "launch_desktop_shell", fail_unpackaged)
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fake_rebuild)
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fake_launch_packaged)
+
+    result = desktop_shell.run_desktop_shell_refresh(
+        wait_pid=0,
+        then_lifecycle="rebuild-and-start",
+        project_root=tmp_path,
+        shell_kind="packaged",
+    )
+    assert result["refreshed"] is True
+    assert calls == ["rebuild", "launch_packaged:rebuild-and-start"]
+
+
+def test_run_desktop_shell_refresh_default_kind_keeps_packaged_promotion(tmp_path, monkeypatch):
+    """Empty shell_kind (tray restart-all) keeps the packaged promotion path."""
+    calls: list[str] = []
+
+    def fake_rebuild(*_args, **_kwargs):
+        calls.append("rebuild")
+        return {"rebuilt": True}
+
+    def fake_launch_packaged(*, project_root, then_lifecycle=""):
+        calls.append(f"launch_packaged:{then_lifecycle}")
+        return {"launched": True, "pid": 12}
+
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fake_rebuild)
+    monkeypatch.setattr(desktop_shell, "launch_packaged_desktop_shell", fake_launch_packaged)
+
+    result = desktop_shell.run_desktop_shell_refresh(wait_pid=0, project_root=tmp_path)
+    assert result["refreshed"] is True
+    assert calls == ["rebuild", "launch_packaged:"]
+
+
+def test_run_desktop_shell_refresh_unpackaged_kind_keeps_unpackaged_relaunch(tmp_path, monkeypatch):
+    """Plain unpackaged relaunch semantics stay pinned (restart keeps its kind)."""
+    calls: list[str] = []
+
+    def fake_ensure(*_args, **_kwargs):
+        calls.append("ensure_unpackaged")
+        return {"rebuilt": False}
+
+    def fake_launch(*_args, prefer="", then_lifecycle="", **_kwargs):
+        calls.append(f"launch:{prefer}:{then_lifecycle}")
+        return {"launched": True, "pid": 13}
+
+    def fail_rebuild(*_args, **_kwargs):
+        raise AssertionError("shell_kind=unpackaged must not rebuild the packaged shell")
+
+    monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", fake_ensure)
+    monkeypatch.setattr(desktop_shell, "launch_desktop_shell", fake_launch)
+    monkeypatch.setattr(desktop_shell, "rebuild_desktop_shell", fail_rebuild)
+
+    result = desktop_shell.run_desktop_shell_refresh(
+        wait_pid=0,
+        then_lifecycle="restart",
+        project_root=tmp_path,
+        shell_kind="unpackaged",
+    )
+    assert result["refreshed"] is True
+    assert result["kind"] == "unpackaged"
+    assert calls == ["ensure_unpackaged", "launch:unpackaged:restart"]
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="no_window_subprocess_kwargs intentionally drops creationflags on "
+    "POSIX, where the console-free spawn policy does not apply",
+)
+def test_schedule_desktop_shell_refresh_forwards_shell_kind(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            captured["args"] = args
+            self.pid = 322
+
+    python = tmp_path / "python.exe"
+    python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    result = desktop_shell.schedule_desktop_shell_refresh(
+        wait_pid=44,
+        then_lifecycle="rebuild-and-start",
+        project_root=tmp_path,
+        python_executable=str(python),
+        shell_kind="packaged",
+    )
+    args = captured["args"]
+    assert args[args.index("--shell-kind") + 1] == "packaged"
+    assert args[args.index("--then-lifecycle") + 1] == "rebuild-and-start"
+    assert result["scheduled"] is True
+    assert result["helperPid"] == 322
+
+
 def test_recent_desktop_shell_refresh_failure_blocks_inspect(tmp_path):
     desktop_shell.record_desktop_shell_refresh_failure(
         tmp_path,

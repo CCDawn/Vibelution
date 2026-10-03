@@ -1,20 +1,20 @@
 {
   "comment": "Baseline for visualTokenEscalationContract.test.ts. Ratchet: counts may only shrink. Regenerate with: npm run tokens:baseline-update (web/).",
-  "updatedAt": "2026-10-01",
-  "scannedFileCount": 1430,
+  "updatedAt": "2026-10-02",
+  "scannedFileCount": 1438,
   "exemptFiles": [
     "routes/chat/CliAgentRunTerminalPanel.tsx",
     "routes/teams/challenge-cup/questionArchiveExport.ts"
   ],
   "categories": {
     "builtinFontSize": {
-      "total": 25,
+      "total": 21,
       "files": {
         "routes/LauncherBranchDetailPanel.styles.ts": 1,
         "routes/LauncherBranchInstancesPanel.styles.ts": 1,
         "routes/LauncherRoute.styles.ts": 1,
         "routes/LauncherToolsRoute.styles.ts": 1,
-        "routes/MemoryAgentMemoryPanel.styles.ts": 21
+        "routes/MemoryAgentMemoryPanel.styles.ts": 17
       }
     },
     "arbitraryTextSize": {

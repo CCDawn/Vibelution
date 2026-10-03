@@ -52,9 +52,8 @@ def _guard_initial_url(url: str) -> None:
     """出站前置校验：初始 URL 必须过 url_guard，否则拒绝发请求。
 
     固定端点已由 import 期常量断言兜底；这里覆盖运行时拼装/环境变量入口
-    （SearxNG）以及未来新增的调用点。httpx 默认自动跟随重定向，重定向目标
-    不经过本校验——检索后端均为固定可信宿主，重定向跟随维持现状；环境变量
-    入口在 searxng_search 层单独拒绝内网目标。
+    （SearxNG）以及未来新增的调用点。httpx 默认不跟随重定向；需要跟随的
+    固定可信宿主由调用方显式打开。环境变量入口在 searxng_search 层单独拒绝内网目标。
     """
     error = validate_public_http_url(url)
     if error:
@@ -70,10 +69,20 @@ def _http_get_json(url: str, *, params: dict[str, Any] | None = None, headers: d
         return payload if isinstance(payload, dict) else {}
 
 
-def _http_get_text(url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> str:
+def _http_get_text(
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    follow_redirects: bool = False,
+) -> str:
     _guard_initial_url(url)
-    with httpx.Client(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-        response = client.get(url, params=params or {}, headers=headers or {"User-Agent": _USER_AGENT})
+    # An empty params mapping replaces a query string already present on the URL.
+    request: dict[str, Any] = {"headers": headers or {"User-Agent": _USER_AGENT}}
+    if params:
+        request["params"] = params
+    with httpx.Client(timeout=_HTTP_TIMEOUT_SECONDS, follow_redirects=follow_redirects) as client:
+        response = client.get(url, **request)
         response.raise_for_status()
         return response.text
 
@@ -290,10 +299,23 @@ def github_project_search(query: str, *, max_results: int, language: str = "") -
     return results, _provider_event("github_public_rest", "ok", result_count=len(results))
 
 
-def google_news_rss_search(query: str, *, max_results: int) -> tuple[list[dict[str, str]], dict[str, Any]]:
+def google_news_rss_search(
+    query: str,
+    *,
+    max_results: int,
+    locale: str = "en-US",
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if str(locale or "").lower().startswith("zh"):
+        edition = {"hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans"}
+    else:
+        edition = {"hl": "en-US", "gl": "US", "ceid": "US:en"}
     try:
+        # Google News answers the first request with a 302. Without following
+        # it, every news search misses the feed and falls through to the
+        # domain-filtered public page.
         text = _http_get_text(
-            f"{_GOOGLE_NEWS_RSS_URL}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
+            f"{_GOOGLE_NEWS_RSS_URL}?{urlencode({'q': query, **edition})}",
+            follow_redirects=True,
         )
     except Exception as exc:
         return [], _provider_event("google_news_rss", "failed", error=f"{type(exc).__name__}: {exc}")

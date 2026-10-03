@@ -776,11 +776,14 @@ def review_owner_inbox_source(
                 )
             if not s._is_global_knowledge_steward(reviewer_id):
                 s._require_permission(target_owner, target_base, reviewer_id, "review")
+            normalized_knowledge_content = s._normalize_formal_knowledge_content(knowledge_content)
+            if not normalized_knowledge_content:
+                raise s.TeamKnowledgeError("Direct ingestion requires knowledgeContent.")
             s._tk_financial.validate_financial_source(
                 target_base,
                 str(source.get("sourceType") or ""),
                 source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {},
-                content=trim_lines(knowledge_content or "", max_lines=120).strip(),
+                content=normalized_knowledge_content,
             )
         central_source: dict[str, Any] | None = None
         promotion: dict[str, Any] | None = None
@@ -804,7 +807,7 @@ def review_owner_inbox_source(
                     knowledge_base_id=knowledge_base_id,
                     knowledge_title=knowledge_title,
                     knowledge_summary=knowledge_summary,
-                    knowledge_content=knowledge_content,
+                    knowledge_content=normalized_knowledge_content,
                     tags=tags,
                     now=now,
                 )
@@ -981,7 +984,7 @@ def _direct_ingest_accepted_source_locked(
         knowledge_summary or source.get("summary") or central_source.get("summary") or "",
         max_lines=6,
     ).strip()
-    normalized_content = trim_lines(knowledge_content or "", max_lines=120).strip()
+    normalized_content = s._normalize_formal_knowledge_content(knowledge_content)
     if not normalized_title:
         raise s.TeamKnowledgeError("Direct ingestion requires knowledgeTitle or source title.")
     if not normalized_content:
