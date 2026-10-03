@@ -3,6 +3,7 @@ import {
   cloneElement,
   isValidElement,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FocusEvent,
@@ -64,8 +65,8 @@ type IntentTriggerProps = {
 type IdleIntentHandlers = {
   onPointerEnter: () => void;
   onPointerLeave: () => void;
-  onFocus: () => void;
-  onBlur: () => void;
+  onFocus: (event: FocusEvent<HTMLElement>) => void;
+  onBlur: (event: FocusEvent<HTMLElement>) => void;
 };
 
 function resolveTrigger(
@@ -99,11 +100,11 @@ function withIdleIntent(trigger: ReactElement, handlers: IdleIntentHandlers): Re
     },
     onFocus: (event: FocusEvent<HTMLElement>) => {
       prev.onFocus?.(event);
-      handlers.onFocus();
+      handlers.onFocus(event);
     },
     onBlur: (event: FocusEvent<HTMLElement>) => {
       prev.onBlur?.(event);
-      handlers.onBlur();
+      handlers.onBlur(event);
     },
   } as Partial<typeof trigger.props>);
 }
@@ -147,7 +148,24 @@ export function ShadcnTooltip({
   const [overlayMounted, setOverlayMounted] = useState(eager);
   const intentRef = useRef({ pointer: false, focus: false });
   const openTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const armedTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pendingFocusPathRef = useRef<number[] | null>(null);
   const trigger = resolveTrigger(children, renderTrigger);
+
+  useLayoutEffect(() => {
+    const path = pendingFocusPathRef.current;
+    if (!overlayMounted || path === null) return;
+    pendingFocusPathRef.current = null;
+    const host = armedTriggerRef.current;
+    if (!host) return;
+    const active = host.ownerDocument.activeElement;
+    if (active && active !== host.ownerDocument.body) return;
+    // Arming replaces the idle host. Restore its focused descendant without
+    // stealing focus from another control or moving a virtualized viewport.
+    let target: Element | undefined = host;
+    for (const index of path) target = target?.children[index];
+    if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+  }, [overlayMounted]);
 
   const clearOpenTimer = () => {
     if (openTimerRef.current !== null) {
@@ -191,11 +209,21 @@ export function ShadcnTooltip({
         intentRef.current.pointer = false;
         if (!intentRef.current.focus) clearOpenTimer();
       },
-      onFocus: () => {
+      onFocus: (event) => {
+        const path: number[] = [];
+        let target: Element | null = event.target as Element;
+        while (target && target !== event.currentTarget) {
+          const parent: HTMLElement | null = target.parentElement;
+          if (!parent) return;
+          path.unshift(Array.from(parent.children).indexOf(target));
+          target = parent;
+        }
+        pendingFocusPathRef.current = path;
         intentRef.current.focus = true;
         showNow();
       },
-      onBlur: () => {
+      onBlur: (event) => {
+        if (event.currentTarget.isConnected) pendingFocusPathRef.current = null;
         intentRef.current.focus = false;
         if (!intentRef.current.pointer) clearOpenTimer();
       },
@@ -210,7 +238,7 @@ export function ShadcnTooltip({
         defaultOpen={eager ? defaultOpen : true}
         onOpenChange={onOpenChange}
       >
-        <TooltipPrimitive.Trigger asChild {...triggerSlotProps}>
+        <TooltipPrimitive.Trigger ref={armedTriggerRef} asChild {...triggerSlotProps}>
           {trigger}
         </TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>

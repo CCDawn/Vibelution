@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ToolRegistryItem } from "../api/types";
+import { VButton } from "../components/vui";
 import { ToolPermissionGroupDisclosure, ToolRegistryVirtualList, type ToolRegistryVirtualRow } from "./ToolsRoute";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -122,7 +123,7 @@ function renderLargeRegistry() {
         className="tool-list"
         ariaLabel="Tool registry"
         onActivateTool={onActivateTool}
-        renderRow={(row) => row.kind === "tool" ? <button type="button">{row.tool.name}</button> : <h2>{row.group.label}</h2>}
+        renderRow={(row) => row.kind === "tool" ? <VButton tooltip="Tool details">{row.tool.name}</VButton> : <h2>{row.group.label}</h2>}
       />,
     );
   });

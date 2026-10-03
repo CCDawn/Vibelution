@@ -152,5 +152,32 @@ describe("ShadcnTooltip React 19 update depth", () => {
       host?.focus();
     });
     expect(document.querySelector("[data-vui='tooltip-content']")?.textContent ?? "").toContain("hello-tip");
+    expect(document.activeElement).toBe(container.querySelector("button"));
+  });
+
+  it("retains a focused input inside a lazily armed label", () => {
+    mount(
+      <VuiProvider>
+        <VTooltip content="input-tip">
+          <label><span>Pick</span><input type="checkbox" /></label>
+        </VTooltip>
+      </VuiProvider>,
+    );
+    act(() => container.querySelector("input")?.focus());
+    expect(document.activeElement).toBe(container.querySelector("input"));
+  });
+
+  it("does not restore a trigger after focus has moved elsewhere", () => {
+    mount(
+      <VuiProvider>
+        <VTooltip content="hello-tip"><button type="button">host</button></VTooltip>
+        <button type="button" data-testid="next">next</button>
+      </VuiProvider>,
+    );
+    act(() => {
+      container.querySelector("button")?.focus();
+      container.querySelector<HTMLButtonElement>("[data-testid=next]")?.focus();
+    });
+    expect(document.activeElement).toBe(container.querySelector("[data-testid=next]"));
   });
 });
