@@ -813,12 +813,12 @@ def test_unified_memory_search_tool_returns_standard_results(tmp_path, monkeypat
         )
 
     assert result["ok"] is True
-    assert result["request"]["effectiveQueryMode"] == "hybrid"
-    assert result["request"]["backend"] == "local_hybrid"
+    assert result["request"]["effectiveQueryMode"] == "bm25"
+    assert result["request"]["backend"] == "local_bm25"
     assert result["summary"]["resultCount"] == 1
     assert result["results"][0]["resultType"] == "knowledge_item"
     assert result["results"][0]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
-    assert result["results"][0]["searchBackend"] == "local_hybrid"
+    assert result["results"][0]["searchBackend"] == "local_bm25"
     assert result["retrievalPolicy"]["mutatesFormalKnowledge"] is False
 
 
@@ -1448,7 +1448,7 @@ def test_agent_can_read_own_private_search_result_but_disabled_memory_blocks_rea
     scoped_base_id = private_base["scopedKnowledgeBaseId"]
     agent_directory_service.update_agent_instance(
         agent_id,
-        tool_policy={"allowedTools": ["search_agent_private_memory_tool", "read_knowledge_item_tool"]},
+        tool_policy={"allowedTools": ["search_agent_private_memory_tool", "read_knowledge_item_tool", "unified_memory_search_tool"]},
         memory_policy={"enabled": True, "readKnowledgeBaseIds": [scoped_base_id]},
     )
 
@@ -1486,6 +1486,12 @@ def test_agent_can_read_own_private_search_result_but_disabled_memory_blocks_rea
                 knowledge_item_id=item["knowledgeItemId"],
             )
         )
+        for mode in ("exact", "bm25", "semantic", "hybrid", "regex", "rag"):
+            disabled_search = json.loads(team_knowledge_tools.unified_memory_search_tool(query=query, query_mode=mode))
+            assert disabled_search["ok"] is True
+            assert disabled_search["privateMemoryEnabled"] is False
+            assert not disabled_search["results"]
+            assert item["content"] not in json.dumps(disabled_search)
 
     assert disabled_read["ok"] is False
     assert disabled_read["status"] == "blocked"

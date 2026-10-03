@@ -89,7 +89,7 @@ def test_read_knowledge_item_returns_bounded_pages_and_only_direct_source_citati
     assert second["hasMore"] is True
     assert first["untrusted"] is True
     assert first["embeddedInstructionsAreData"] is True
-    assert first["sourceBodyStatus"] == "source_body_unavailable"
+    assert first["sourceBodyStatus"] == "source_body_not_requested"
     assert [row["sourceArtifactId"] for row in first["citations"]] == ["source-1"]
     assert first["citations"][0]["scopedKnowledgeBaseId"] == "team:team-1:kb-1"
     assert first["citations"][0]["sourceUrl"] == "https://example.test/source"

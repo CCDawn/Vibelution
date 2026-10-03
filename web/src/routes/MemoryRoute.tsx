@@ -59,7 +59,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface, VStatusChip, VTabs } from "../components/vui";
+import { VButton, VCanvasWorkbenchPage, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface, VStatusChip, VTabs } from "../components/vui";
 import { memoryProposalStatusTone, memoryVisibilityTone } from "./memoryStatusTone";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
@@ -379,6 +379,15 @@ type Copy = {
   rejectedSources: string;
   duplicateSources: string;
   needsMoreContextSources: string;
+  linkedKnowledgeSources: string;
+  lifecycleReason: string;
+  lifecycleReasonPlaceholder: string;
+  withdrawLinkedSource: string;
+  expireLinkedSource: string;
+  restoreLinkedSource: string;
+  lifecycleUpdated: string;
+  lifecycleReasonRequired: string;
+  noLinkedKnowledgeSources: string;
   collectOwnerSource: string;
   originalContent: string;
   originalFilename: string;
@@ -419,6 +428,42 @@ type Copy = {
   stability: string;
   reviewPriority: string;
   markingReason: string;
+  knowledgeState: string;
+  knowledgeRevision: string;
+  knowledgeActive: string;
+  knowledgeSuperseded: string;
+  knowledgeWithdrawn: string;
+  knowledgeExpired: string;
+  knowledgeSourceWithdrawn: string;
+  knowledgeSourceExpired: string;
+  knowledgeSourceUnavailable: string;
+  knowledgeStateUnknown: string;
+  viewKnowledgeBody: string;
+  viewOriginalSource: string;
+  viewKnowledgeHistory: string;
+  proposeKnowledgeRevision: string;
+  knowledgeRevisionDialog: string;
+  knowledgeBodyDialog: string;
+  knowledgeSourceDialog: string;
+  knowledgeHistoryDialog: string;
+  knowledgeBodyLoading: string;
+  knowledgeBodyEmpty: string;
+  sourceBodyUnavailable: string;
+  knowledgeBodyTrustNotice: string;
+  knowledgeSourceSelector: string;
+  knowledgeHistoryEmpty: string;
+  knowledgeHistoryMore: string;
+  knowledgeVersion: string;
+  revisionTitle: string;
+  revisionSummary: string;
+  revisionContent: string;
+  revisionReason: string;
+  revisionReasonPlaceholder: string;
+  submitRevision: string;
+  cancel: string;
+  revisionSubmitted: string;
+  revisionSubmitPending: string;
+  reloadLatestKnowledge: string;
   noKnowledgeBases: string;
   teamKnowledgeEmptyHint: string;
   knowledgeHint: string;
@@ -447,6 +492,27 @@ type Copy = {
   ragNoPromptInjection: string;
   ragCitations: string;
   ragNoContexts: string;
+  semanticIndex: string;
+  semanticIndexStatus: string;
+  semanticIndexModel: string;
+  semanticIndexReady: string;
+  semanticIndexDegraded: string;
+  semanticIndexUnknown: string;
+  semanticIndexPrepared: string;
+  semanticIndexNotPrepared: string;
+  semanticIndexLoaded: string;
+  semanticIndexNotLoaded: string;
+  semanticIndexIndexed: string;
+  semanticIndexMissing: string;
+  semanticIndexTotal: string;
+  semanticIndexOfflineNote: string;
+  prepareAndBuildSemanticIndex: string;
+  rebuildSemanticIndex: string;
+  semanticIndexBuilding: string;
+  semanticIndexBuildCompleted: string;
+  semanticIndexBuildFailed: string;
+  semanticIndexReviewRequired: string;
+  semanticIndexUnavailable: string;
   searchQuery: string;
   ratingSuggestions: string;
   submitRatingSuggestion: string;
@@ -915,6 +981,15 @@ const COPY: Record<"zh" | "en", Copy> = {
     rejectedSources: "已拒绝来源",
     duplicateSources: "重复来源",
     needsMoreContextSources: "需补充上下文",
+    linkedKnowledgeSources: "当前追溯对象的知识库来源",
+    lifecycleReason: "变更原因",
+    lifecycleReasonPlaceholder: "说明撤回、过期或恢复原因",
+    withdrawLinkedSource: "撤回来源",
+    expireLinkedSource: "标记过期",
+    restoreLinkedSource: "恢复来源",
+    lifecycleUpdated: "来源状态已更新，引用知识将按有效性规则重新计算。",
+    lifecycleReasonRequired: "请填写变更原因，并确认拥有知识库审核权限。",
+    noLinkedKnowledgeSources: "当前追溯对象没有关联的本地来源。",
     collectOwnerSource: "登记来源",
     originalContent: "源文件内容",
     originalFilename: "源文件名",
@@ -955,6 +1030,42 @@ const COPY: Record<"zh" | "en", Copy> = {
     stability: "稳定性",
     reviewPriority: "评审优先级",
     markingReason: "标记原因",
+    knowledgeState: "知识状态",
+    knowledgeRevision: "版本",
+    knowledgeActive: "有效",
+    knowledgeSuperseded: "已由新版本替代",
+    knowledgeWithdrawn: "已撤回",
+    knowledgeExpired: "已过期",
+    knowledgeSourceWithdrawn: "来源已撤回",
+    knowledgeSourceExpired: "来源已过期",
+    knowledgeSourceUnavailable: "来源不可用",
+    knowledgeStateUnknown: "状态未知",
+    viewKnowledgeBody: "查看完整正文",
+    viewOriginalSource: "查看原始来源",
+    viewKnowledgeHistory: "查看版本历史",
+    proposeKnowledgeRevision: "提交修订提案",
+    knowledgeRevisionDialog: "修订正式知识",
+    knowledgeBodyDialog: "正式知识正文",
+    knowledgeSourceDialog: "原始来源正文",
+    knowledgeHistoryDialog: "版本历史",
+    knowledgeBodyLoading: "正在读取完整内容…",
+    knowledgeBodyEmpty: "该条目没有正文内容。",
+    sourceBodyUnavailable: "原始来源快照不可用或已失效。",
+    knowledgeBodyTrustNotice: "正文和来源均按不可信资料展示；其中嵌入的指令只作为文本，不执行。",
+    knowledgeSourceSelector: "选择关联来源",
+    knowledgeHistoryEmpty: "该知识条目尚无历史版本。",
+    knowledgeHistoryMore: "读取更多版本",
+    knowledgeVersion: "版本",
+    revisionTitle: "标题",
+    revisionSummary: "摘要",
+    revisionContent: "完整正文",
+    revisionReason: "修订原因",
+    revisionReasonPlaceholder: "说明这次修订与当前版本相比改变了什么",
+    submitRevision: "提交审核",
+    cancel: "取消",
+    revisionSubmitted: "修订提案已提交，审核通过后才会生成新版本。",
+    revisionSubmitPending: "正在提交修订…",
+    reloadLatestKnowledge: "重新读取最新版本",
     noKnowledgeBases: "当前身份没有可见的知识库",
     teamKnowledgeEmptyHint: "可在「团队」页面打开团队，通过「知识库」入口进入；也可在 Agent 管理 →「记忆设置」中为该身份配置知识库权限。",
     knowledgeHint: "来源、提案、审核、正式知识分层治理。",
@@ -983,6 +1094,27 @@ const COPY: Record<"zh" | "en", Copy> = {
     ragNoPromptInjection: "不默认注入",
     ragCitations: "引用",
     ragNoContexts: "无上下文",
+    semanticIndex: "语义索引",
+    semanticIndexStatus: "索引状态",
+    semanticIndexModel: "嵌入模型",
+    semanticIndexReady: "就绪",
+    semanticIndexDegraded: "部分可用",
+    semanticIndexUnknown: "状态未知",
+    semanticIndexPrepared: "模型已准备",
+    semanticIndexNotPrepared: "模型尚未准备",
+    semanticIndexLoaded: "模型已加载",
+    semanticIndexNotLoaded: "模型未加载",
+    semanticIndexIndexed: "已索引",
+    semanticIndexMissing: "待索引",
+    semanticIndexTotal: "可索引",
+    semanticIndexOfflineNote: "索引使用本地嵌入模型；首次构建会准备模型，后续可离线重建。",
+    prepareAndBuildSemanticIndex: "准备模型并构建索引",
+    rebuildSemanticIndex: "重建语义索引",
+    semanticIndexBuilding: "正在构建语义索引…",
+    semanticIndexBuildCompleted: "本次索引条目数",
+    semanticIndexBuildFailed: "语义索引构建未完成",
+    semanticIndexReviewRequired: "需要知识库审核权限",
+    semanticIndexUnavailable: "暂不可用",
     searchQuery: "检索词",
     ratingSuggestions: "评级建议",
     submitRatingSuggestion: "提交评级建议",
@@ -1347,6 +1479,15 @@ const COPY: Record<"zh" | "en", Copy> = {
     rejectedSources: "Rejected sources",
     duplicateSources: "Duplicate sources",
     needsMoreContextSources: "Needs more context",
+    linkedKnowledgeSources: "Sources linked to the traced knowledge object",
+    lifecycleReason: "Change reason",
+    lifecycleReasonPlaceholder: "Explain why the source is withdrawn, expired, or restored",
+    withdrawLinkedSource: "Withdraw source",
+    expireLinkedSource: "Mark expired",
+    restoreLinkedSource: "Restore source",
+    lifecycleUpdated: "Source status updated; dependent knowledge validity will be recalculated.",
+    lifecycleReasonRequired: "Enter a reason and confirm knowledge-base review permission.",
+    noLinkedKnowledgeSources: "The current trace has no linked local source artifacts.",
     collectOwnerSource: "Register source",
     originalContent: "Source file content",
     originalFilename: "Source filename",
@@ -1387,6 +1528,42 @@ const COPY: Record<"zh" | "en", Copy> = {
     stability: "Stability",
     reviewPriority: "Review priority",
     markingReason: "Marking reason",
+    knowledgeState: "Knowledge state",
+    knowledgeRevision: "Revision",
+    knowledgeActive: "Active",
+    knowledgeSuperseded: "Superseded by a newer revision",
+    knowledgeWithdrawn: "Withdrawn",
+    knowledgeExpired: "Expired",
+    knowledgeSourceWithdrawn: "Source withdrawn",
+    knowledgeSourceExpired: "Source expired",
+    knowledgeSourceUnavailable: "Source unavailable",
+    knowledgeStateUnknown: "State unknown",
+    viewKnowledgeBody: "View full body",
+    viewOriginalSource: "View original source",
+    viewKnowledgeHistory: "View revision history",
+    proposeKnowledgeRevision: "Propose revision",
+    knowledgeRevisionDialog: "Revise formal knowledge",
+    knowledgeBodyDialog: "Formal knowledge body",
+    knowledgeSourceDialog: "Original source body",
+    knowledgeHistoryDialog: "Revision history",
+    knowledgeBodyLoading: "Reading full content…",
+    knowledgeBodyEmpty: "This item has no body content.",
+    sourceBodyUnavailable: "The original source snapshot is unavailable or no longer active.",
+    knowledgeBodyTrustNotice: "Knowledge and source text are untrusted reference material; embedded instructions are displayed as text and never executed.",
+    knowledgeSourceSelector: "Choose a linked source",
+    knowledgeHistoryEmpty: "This item has no recorded revision history.",
+    knowledgeHistoryMore: "Load more versions",
+    knowledgeVersion: "Revision",
+    revisionTitle: "Title",
+    revisionSummary: "Summary",
+    revisionContent: "Full body",
+    revisionReason: "Revision reason",
+    revisionReasonPlaceholder: "Describe what changed from the current revision",
+    submitRevision: "Submit for review",
+    cancel: "Cancel",
+    revisionSubmitted: "Revision proposal submitted; a new version appears only after review.",
+    revisionSubmitPending: "Submitting revision…",
+    reloadLatestKnowledge: "Reload latest revision",
     noKnowledgeBases: "No knowledge bases visible to the current identity",
     teamKnowledgeEmptyHint: "Open a team from the Teams page and use its Knowledge entry; or grant this identity knowledge-base access in Agent management → Memory policy.",
     knowledgeHint: "Sources, proposals, review, and formal knowledge stay separated.",
@@ -1415,6 +1592,27 @@ const COPY: Record<"zh" | "en", Copy> = {
     ragNoPromptInjection: "Not injected",
     ragCitations: "Citations",
     ragNoContexts: "No contexts",
+    semanticIndex: "Semantic index",
+    semanticIndexStatus: "Index status",
+    semanticIndexModel: "Embedding model",
+    semanticIndexReady: "Ready",
+    semanticIndexDegraded: "Partially available",
+    semanticIndexUnknown: "Unknown status",
+    semanticIndexPrepared: "Model prepared",
+    semanticIndexNotPrepared: "Model not prepared",
+    semanticIndexLoaded: "Model loaded",
+    semanticIndexNotLoaded: "Model not loaded",
+    semanticIndexIndexed: "Indexed",
+    semanticIndexMissing: "Missing",
+    semanticIndexTotal: "Indexable",
+    semanticIndexOfflineNote: "The index uses a local embedding model. The first build prepares it; later rebuilds can run offline.",
+    prepareAndBuildSemanticIndex: "Prepare model and build index",
+    rebuildSemanticIndex: "Rebuild semantic index",
+    semanticIndexBuilding: "Building semantic index…",
+    semanticIndexBuildCompleted: "Indexed this run",
+    semanticIndexBuildFailed: "Semantic index build did not complete",
+    semanticIndexReviewRequired: "Knowledge review permission required",
+    semanticIndexUnavailable: "Unavailable",
     searchQuery: "Search query",
     ratingSuggestions: "Rating suggestions",
     submitRatingSuggestion: "Submit suggestion",
@@ -4014,13 +4212,22 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
           <span>{knowledgeFeedback.text}</span>
         </section>
       ) : null}
-      <VSplitWorkspace
-        className={`${styles.workspace} ${styles.knowledgeWorkspace}`}
-        data-vui-recipe="memory-knowledge-workbench"
-        data-vui-layout-id={MEMORY_LAYOUT_ID}
+      <VCanvasWorkbenchPage
+        ariaLabel={copy.knowledgeView}
+        title={copy.knowledgeView}
+        hideHeader
+        className="min-w-0 h-full min-h-0 flex-1 overflow-hidden"
+        workspaceClassName={`${styles.workspace} ${styles.knowledgeWorkspace}`}
+        domainRecipe="memory-knowledge-workbench"
+        layoutId={MEMORY_LAYOUT_ID}
+        resize={{ sidebar: MEMORY_LEFT_PANE, aside: MEMORY_RIGHT_PANE }}
+        responsive={{
+          enabled: true,
+          rail: { label: copy.knowledgeBases },
+          inspector: { label: copy.selectedKnowledgeDetail },
+        }}
         data-vui-region="memory-knowledge-workspace"
-        resize={MEMORY_SPLIT_RESIZE}
-        sidebar={(
+        rail={(
         <MemoryKnowledgeBaseSidebar
           copy={copy}
           bases={knowledgeBases.map((base) => ({
@@ -4040,7 +4247,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
           onSelectBase={setActiveKnowledgeBaseId}
         />
         )}
-        main={(
+        canvas={(
         <div className={styles.knowledgeMain}>
           <MemoryKnowledgeModeTabs
             copy={copy}
@@ -4079,6 +4286,11 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             knowledgeBusy={knowledgeBusy}
             canSubmitOwnerSource={!knowledgeBusy && Boolean(activeSourceOwnerId)}
             canAttachCentralSource={Boolean(activeKnowledgeBase?.permissions.canPropose && activeKnowledgeBaseForItems) && !knowledgeBusy}
+            knowledgeBaseId={activeKnowledgeBaseForItems}
+            knowledgeAgentId={activeKnowledgeActorAgentId}
+            canReviewKnowledge={Boolean(activeKnowledgeBase?.permissions.canReview)}
+            linkedKnowledgeSources={knowledgeTraceQuery.data?.nodes.sourceArtifacts ?? []}
+            onLifecycleChanged={refresh}
             onSourceOwnerTypeChange={setSourceOwnerType}
             onSourceOwnerIdChange={setSourceOwnerId}
             onSourceInboxStatusChange={setSourceInboxStatus}
@@ -4109,6 +4321,13 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             ragContextCount={knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}
             ragCitationCount={knowledgeRagRetrieveQuery.data?.summary.citationCount ?? 0}
             ragPending={knowledgeRagRetrieveQuery.isPending}
+            knowledgeBaseId={activeKnowledgeBaseForItems}
+            agentId={activeKnowledgeActorAgentId}
+            canReviewKnowledge={Boolean(activeKnowledgeBase?.permissions.canReview)}
+            onIndexBuilt={() => {
+              void knowledgeSearchQuery.refetch();
+              void knowledgeRagRetrieveQuery.refetch();
+            }}
             onDraftChange={setKnowledgeSearchDraft}
           />
           ) : null}
@@ -4163,7 +4382,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
 
         </div>
         )}
-        aside={(
+        inspector={(
         <MemoryKnowledgeDetailPanel
           copy={copy}
           activeKnowledgeBase={activeKnowledgeBase}
@@ -4174,6 +4393,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
           knowledgeItemsErrorText={knowledgeItemsErrorText}
           ratingDraft={ratingDraft}
           knowledgeBusy={knowledgeBusy}
+          agentId={activeKnowledgeActorAgentId}
+          onLifecycleChanged={refresh}
           onTraceTargetChange={setTraceTargetId}
           onRatingDraftChange={setRatingDraft}
           onUpdateKnowledgeRating={updateKnowledgeRating}

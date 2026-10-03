@@ -37,6 +37,7 @@ pypdf>=5.0.0              # 本地 PDF 文本抽取（Challenge Cup source-extra
 pywinpty>=3.0.5; platform_system == "Windows"  # Windows ConPTY backend for embedded CLI Agent terminals
 ddgs>=9.0.0               # No-key public metasearch fallback for research search tools
 trafilatura>=2.0.0        # Web article extraction for web_fetch_tool
+fastembed==0.8.1         # Local ONNX Chinese semantic retrieval; weights prepared explicitly
 pyrate-limiter>=4.0.0     # global per-provider rate limiting for source collection
 
 # 可选依赖（根据需要安装）

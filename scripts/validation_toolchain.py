@@ -5,7 +5,9 @@ Phase 1 deliberately does not create or mutate virtual environments.  A task
 worktree may reuse the integration worktree's ``.venv`` when that environment can
 actually run the checkout: either both ``requirements.txt`` files are
 byte-identical, or every requirement the checkout declares is already satisfied
-there.
+there. When a dependency change needs a separate environment, an existing
+physical task-local venv can be used after its requirements and pip health are
+verified. This resolver never creates an environment or installs packages.
 
 Comparing bytes alone refused safe reuse.  A comment edit, a reordered block, or a
 bound the shared environment already meets all failed the gate even though the
@@ -344,6 +346,15 @@ def resolve_validation_toolchain(checkout: Path | str) -> ValidationToolchain:
     # symlink to the base interpreter, and resolving it would spawn the base
     # interpreter without the venv's site-packages (no ruff/pytest).
     python_executable = venv_python(integration_root / ".venv")
+    source: ToolchainSource = "checkout_venv" if checkout_root == integration_root else "integration_venv"
+    task_venv = checkout_root / ".venv"
+    if (checkout_root != integration_root and checkout_sha256 != integration_sha256
+            and task_venv.resolve() == task_venv.absolute()
+            and (task_venv / "pyvenv.cfg").is_file()
+            and venv_python(task_venv).is_file()):
+        # A junction into the live shared environment is not isolation.
+        python_executable = venv_python(task_venv)
+        source = "checkout_venv"
     if not python_executable.is_file():
         raise ValidationToolchainError(
             "validation_toolchain_missing",
@@ -365,11 +376,6 @@ def resolve_validation_toolchain(checkout: Path | str) -> ValidationToolchain:
             f"{python_executable}: {error}",
         ) from error
 
-    source: ToolchainSource = (
-        "checkout_venv"
-        if checkout_root == integration_root
-        else "integration_venv"
-    )
     return ValidationToolchain(
         checkout_root=checkout_root,
         integration_root=integration_root,

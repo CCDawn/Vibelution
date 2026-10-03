@@ -467,7 +467,9 @@ def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     assert providers["local"]["status"] == "ready"
     assert providers["local"]["vectorEnabled"] is False
     assert providers["local"]["bm25Enabled"] is True
-    assert providers["local"]["semanticBackend"] == "local_token_overlap"
+    assert providers["local"]["semanticBackend"] == "fastembed"
+    assert providers["local"]["semanticStatus"] == "unavailable"
+    assert providers["local"]["modelPrepared"] is False
     assert providers["local"]["embeddingEnabled"] is False
     assert providers["vector"]["status"] == "unavailable"
     assert providers["vector"]["vectorEnabled"] is False
@@ -478,15 +480,39 @@ def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     assert payload["retrievalPolicy"]["honorsMemoryPolicy"] is True
     assert payload["retrievalPolicy"]["mutatesFormalKnowledge"] is False
     assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
-    assert payload["retrievalPolicy"]["semanticBackend"] == "local_token_overlap"
+    assert payload["retrievalPolicy"]["semanticBackend"] == "fastembed"
     assert payload["retrievalPolicy"]["embeddingEnabled"] is False
     assert "bm25" in payload["retrievalPolicy"]["supportedRetrievalModes"]
     assert payload["updatedAt"]
 
 
-@pytest.mark.parametrize("mode", ["exact", "bm25", "semantic", "hybrid"])
-def test_rag_returns_matching_tail_passage_with_citation(rag_knowledge_env, mode):
+def test_rag_policy_reports_actual_embedding_readiness(monkeypatch):
     from core.web.services import rag_retrieval_service
+    from core.web.services.team_knowledge import semantic as knowledge_semantic_service
+
+    monkeypatch.setattr(rag_retrieval_service.rag_vector_index_service, "get_vector_index_health", lambda **_: {})
+    monkeypatch.setattr(knowledge_semantic_service, "get_semantic_index_health", lambda **_: {
+        "status": "ready", "vectorEnabled": True, "modelPrepared": True, "indexedItemCount": 1,
+        "embeddingModel": "prepared-model",
+    })
+    health = rag_retrieval_service.get_rag_retrieval_health(agent_id="owner")
+    assert health["providers"][0]["embeddingEnabled"] is True
+    assert health["retrievalPolicy"]["embeddingEnabled"] is True
+
+    monkeypatch.setattr(team_knowledge_service, "search_knowledge_items", lambda **_: {
+        "results": [], "semanticRetrieval": {"status": "ready", "indexedCandidateCount": 1, "effectiveMode": "hybrid"},
+    })
+    assert rag_retrieval_service.retrieve_rag_contexts(agent_id="owner", query="query")["retrievalPolicy"]["embeddingEnabled"] is True
+    monkeypatch.setattr(team_knowledge_service, "search_knowledge_items", lambda **_: {
+        "results": [], "semanticRetrieval": {"status": "unavailable", "effectiveMode": "bm25"},
+    })
+    assert rag_retrieval_service.retrieve_rag_contexts(agent_id="owner", query="query")["retrievalPolicy"]["embeddingEnabled"] is False
+
+
+@pytest.mark.parametrize("mode", ["exact", "bm25", "semantic", "hybrid"])
+def test_rag_returns_matching_tail_passage_with_citation(rag_knowledge_env, mode, monkeypatch):
+    from core.web.services import rag_retrieval_service
+    from core.web.services.team_knowledge import semantic
 
     env = rag_knowledge_env
     base_id = env["readableBase"]["knowledgeBaseId"]
@@ -514,6 +540,15 @@ def test_rag_returns_matching_tail_passage_with_citation(rag_knowledge_env, mode
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
     )["item"]
+    if mode == "semantic":
+        # Semantic retrieval requires vectors; this test controls the tail
+        # match and citation, while real Chinese model behavior is tested live.
+        monkeypatch.setattr(semantic.embeddings, "readiness", lambda **_: {"status": "ready", "dimension": 2})
+        monkeypatch.setattr(semantic.embeddings, "encode", lambda texts, *, purpose="passage", **_: [
+            [1.0, 0.0] if purpose == "query" or "proposalPayload" in text else [0.0, 1.0] for text in texts
+        ])
+        built = semantic.build_knowledge_index(base_id, agent_id=env["lead"]["agentId"])
+        assert built["status"] == "ready"
     payload = rag_retrieval_service.retrieve_rag_contexts(
         agent_id=env["member"]["agentId"],
         knowledge_base_id=base_id,
@@ -528,6 +563,8 @@ def test_rag_returns_matching_tail_passage_with_citation(rag_knowledge_env, mode
     assert "proposalPayload" in context["text"]
     assert len(context["text"]) <= 500
     assert payload["citations"][0]["sourceArtifactIds"] == [source["sourceArtifactId"]]
+    if mode == "semantic":
+        assert payload["semanticRetrieval"]["status"] == "ready"
 
 
 def test_rag_retrieval_honors_knowledge_acl(rag_knowledge_env):
@@ -590,14 +627,14 @@ def test_rag_retrieval_includes_own_agent_formal_knowledge_by_default(tmp_path, 
     owner_payload = rag_retrieval_service.retrieve_rag_contexts(
         agent_id=owner["agentId"],
         query="owner scoped citation",
-        retrieval_mode="semantic",
+        retrieval_mode="hybrid",
         provider="local",
         top_k=5,
     )
     other_payload = rag_retrieval_service.retrieve_rag_contexts(
         agent_id=other["agentId"],
         query="owner scoped citation",
-        retrieval_mode="semantic",
+        retrieval_mode="hybrid",
         provider="local",
         top_k=5,
     )
@@ -621,7 +658,7 @@ def test_rag_context_budget_trims_text_but_keeps_source(rag_knowledge_env):
         agent_id=rag_knowledge_env["member"]["agentId"],
         query="retrieval",
         knowledge_base_id=rag_knowledge_env["readableBase"]["knowledgeBaseId"],
-        retrieval_mode="semantic",
+        retrieval_mode="hybrid",
         provider="local",
         top_k=1,
         max_context_chars=80,

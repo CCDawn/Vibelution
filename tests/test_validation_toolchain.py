@@ -94,6 +94,38 @@ def _write_task_requirements(task: Path, body: str) -> None:
     (task / "requirements.txt").write_text(body, encoding="utf-8")
 
 
+def test_dependency_change_uses_validated_physical_task_venv(linked_worktrees, monkeypatch):
+    main, task = linked_worktrees
+    _write_task_requirements(task, "pytest>=7\nruff>=0.6\nbranch-only-package>=1.0\n")
+    task_venv = task / ".venv"
+    task_python = validation_toolchain.venv_python(task_venv)
+    task_python.parent.mkdir(parents=True)
+    task_python.touch()
+    (task_venv / "pyvenv.cfg").write_text("home = isolated-test-runtime\n", encoding="utf-8")
+    monkeypatch.setattr(validation_toolchain, "_probe_python", lambda _: _identity())
+    monkeypatch.setattr(validation_toolchain, "_probe_distributions", lambda python: {
+        **_INSTALLED, **({"branch-only-package": "1.0"} if python == task_python else {}),
+    })
+
+    resolved = validation_toolchain.resolve_validation_toolchain(task)
+    assert resolved.python_executable == task_python
+    assert resolved.source == "checkout_venv"
+
+
+def test_task_venv_still_requires_declared_dependencies(linked_worktrees, monkeypatch):
+    _, task = linked_worktrees
+    _write_task_requirements(task, "branch-only-package>=1.0\n")
+    task_venv = task / ".venv"
+    task_python = validation_toolchain.venv_python(task_venv)
+    task_python.parent.mkdir(parents=True)
+    task_python.touch()
+    (task_venv / "pyvenv.cfg").write_text("home = isolated-test-runtime\n", encoding="utf-8")
+    monkeypatch.setattr(validation_toolchain, "_probe_python", lambda _: _identity())
+
+    with pytest.raises(validation_toolchain.ValidationToolchainError, match="branch-only-package"):
+        validation_toolchain.resolve_validation_toolchain(task)
+
+
 def test_task_requirement_the_environment_already_satisfies_still_reuses(
     linked_worktrees: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,

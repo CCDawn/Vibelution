@@ -1125,6 +1125,7 @@ def submit_session_message(
                 knowledge_file_reference_rows,
                 agent_id=agent_id,
                 query=message,
+                memory_policy=agent.get("memoryPolicy") or {},
                 lang=lang,
             )
             all_references = [
@@ -1233,16 +1234,28 @@ def submit_session_message(
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         submit_timing_fields["setSessionRunningMs"] = s._elapsed_ms(set_running_started_at)
         work_run_persist_started_at = s._perf_counter()
-        s._persist_chat_turn_work_run(
-            session_id=conversation_id,
-            turn_id=turn_control.turn_id,
-            status="running",
-            agent_id=agent_id,
-            leases=requested_leases,
-            user_message=message,
-            started_at=user_entry["timestamp"],
-            updated_at=user_entry["timestamp"],
-        )
+        acceptance_stage = "work_run_running"
+        try:
+            s._persist_chat_turn_work_run(
+                session_id=conversation_id,
+                turn_id=turn_control.turn_id,
+                status="running",
+                agent_id=agent_id,
+                leases=requested_leases,
+                user_message=message,
+                started_at=user_entry["timestamp"],
+                updated_at=user_entry["timestamp"],
+            )
+        except Exception as exc:
+            _settle_session_submit_admission_failure(
+                session_id=conversation_id,
+                turn_id=turn_control.turn_id,
+                leases=requested_leases,
+                user_message=message,
+                exc=exc,
+                stage=acceptance_stage,
+            )
+            raise
         submit_timing_fields["workRunPersistMs"] = s._elapsed_ms(work_run_persist_started_at)
         submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(persist_started_at)
     finally:

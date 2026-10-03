@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import threading
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ from . import team_knowledge_service
 
 
 SCHEMA_VERSION = 1
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _LOCK = threading.RLock()
 
@@ -53,6 +54,13 @@ def list_indexable_knowledge_items(*, agent_id: str = "", internal: bool = False
             continue
         team_id = str(payload.get("teamId") or base.get("teamId") or "").strip()
         knowledge_base = payload.get("knowledgeBase") if isinstance(payload.get("knowledgeBase"), dict) else {}
+        if str(knowledge_base.get("status") or "active") != "active":
+            continue
+        from .team_knowledge import lifecycle
+
+        owner, stored_base = team_knowledge_service._require_base_with_owner(base_id)
+        artifacts = {a["sourceArtifactId"]: a for a in team_knowledge_service._source_artifacts_for_base(owner, stored_base["knowledgeBaseId"])}
+        lifecycle_states = lifecycle.lifecycle_states_for_base(owner, stored_base, list(payload.get("items") or []), artifacts)
         financial_items = None
         if knowledge_base.get("profile") == "financial_reports_v1":
             owner, stored_base = team_knowledge_service._require_base_with_owner(base_id)
@@ -62,6 +70,8 @@ def list_indexable_knowledge_items(*, agent_id: str = "", internal: bool = False
             if not isinstance(item, dict):
                 continue
             knowledge_item_id = str(item.get("knowledgeItemId") or "").strip()
+            if lifecycle_states.get(knowledge_item_id) != "active":
+                continue
             if financial_items is not None and knowledge_item_id not in financial_items:
                 continue
             if financial_items is not None:
@@ -112,6 +122,7 @@ def write_index_record(
     embedding_model: str = "",
     status: str = "indexed",
     error_type: str = "",
+    chunks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Persist vector index metadata for one formal knowledge item."""
 
@@ -151,22 +162,49 @@ def write_index_record(
         "errorType": str(error_type or "").strip(),
         "updatedAt": now,
     }
+    if chunks is not None:
+        record["chunks"] = _validated_chunks(chunks)
+        record["embeddingDimensions"] = len(record["chunks"][0]["vector"]) if record["chunks"] else 0
     with _LOCK:
         _write_json(_item_record_path(record_id), record)
         _write_index_summary(_load_all_index_records())
     return record
 
 
+def _validated_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Bound and normalize derived vectors; never persist another body copy."""
+    if not isinstance(chunks, list) or len(chunks) > 1024:
+        raise ValueError("Vector records require at most 1024 chunks.")
+    rows = []
+    dimensions = 0
+    for chunk in chunks:
+        start, end = int(chunk["start"]), int(chunk["end"])
+        vector = [float(value) for value in chunk["vector"]]
+        if start < 0 or end <= start or not vector or len(vector) > 2048:
+            raise ValueError("Invalid vector chunk bounds or dimensions.")
+        if any(not math.isfinite(value) for value in vector):
+            raise ValueError("Embedding vectors must contain finite values.")
+        if dimensions and dimensions != len(vector):
+            raise ValueError("Embedding vectors must have consistent dimensions.")
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm <= 0 or not math.isfinite(norm):
+            raise ValueError("Embedding vectors require a finite nonzero norm.")
+        dimensions = len(vector)
+        rows.append({"start": start, "end": end, "vector": [value / norm for value in vector]})
+    return rows
+
+
 def get_vector_index_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
     """Return vector index readiness without exposing knowledge bodies."""
 
     indexable_items = list_indexable_knowledge_items(agent_id=agent_id, internal=internal)
-    records = {_record_id_for_record(record): record for record in _load_all_index_records()}
+    records = {_record_id_for_item(item): _read_json(_item_record_path(_record_id_for_item(item))) for item in indexable_items}
     item_rows: list[dict[str, Any]] = []
     indexed_count = 0
     stale_count = 0
     missing_count = 0
     failed_count = 0
+    vector_count = 0
     provider = ""
     model = ""
     last_indexed_at = ""
@@ -195,6 +233,11 @@ def get_vector_index_health(*, agent_id: str = "", internal: bool = False) -> di
             last_indexed_at = max(last_indexed_at, indexed_at)
         if status == "indexed":
             indexed_count += 1
+            try:
+                if _validated_chunks(record.get("chunks") or []):
+                    vector_count += 1
+            except (ValueError, TypeError, KeyError, OverflowError):
+                pass
         elif status == "stale":
             stale_count += 1
         elif status == "failed":
@@ -220,15 +263,17 @@ def get_vector_index_health(*, agent_id: str = "", internal: bool = False) -> di
         )
 
     status = "ready"
-    if indexed_count <= 0:
+    if vector_count <= 0:
         status = "unavailable"
-    if stale_count or failed_count:
+    elif stale_count or failed_count or missing_count or vector_count < indexed_count:
         status = "degraded"
     return {
         "schemaVersion": SCHEMA_VERSION,
         "provider": "vector",
         "status": status,
-        "vectorEnabled": indexed_count > 0 or stale_count > 0 or failed_count > 0,
+        "vectorEnabled": vector_count > 0,
+        "vectorItemCount": vector_count,
+        "metadataOnlyItemCount": indexed_count - vector_count,
         "indexedItemCount": indexed_count,
         "staleItemCount": stale_count,
         "missingItemCount": missing_count,

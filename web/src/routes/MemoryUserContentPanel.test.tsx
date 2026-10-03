@@ -1,7 +1,6 @@
 /** @vitest-environment happy-dom */
 import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -78,19 +77,73 @@ afterEach(async () => {
 });
 
 describe("MemoryUserContentPanel page detail state", () => {
-  it("shows the empty state while the page query is disabled", () => {
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
+  it("defers page lists, page bodies, and search until the collapsed workspace is opened", async () => {
+    contentApiMocks.listUserMarkdownSpacePages.mockResolvedValue({
+      ok: true,
+      space,
+      summary: { pageCount: 1 },
+      pages: [page],
     });
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryUserContentPanel />
-      </QueryClientProvider>,
+    contentApiMocks.fetchUserMarkdownSpacePage.mockImplementation(
+      () => new Promise(() => {}),
     );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    queryClient.setQueryData(queryKeys.userMarkdownSpaces("default"), {
+      ok: true,
+      summary: { spaceCount: 1 },
+      spaces: [space],
+    });
 
-    expect(markup).toContain("未选择页面");
-    expect(markup).not.toContain("正在读取页面");
-    expect(markup).not.toContain('aria-busy="true"');
+    const container = renderPanel(queryClient);
+    await flushEffects();
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="memory-user-content-toggle"]');
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle?.parentElement?.textContent).toContain("1");
+    expect(contentApiMocks.listUserMarkdownSpacePages).not.toHaveBeenCalled();
+    expect(contentApiMocks.fetchUserMarkdownSpacePage).not.toHaveBeenCalled();
+    expect(contentApiMocks.searchUserMarkdownSpaces).not.toHaveBeenCalled();
+
+    await act(async () => toggle?.click());
+    await flushEffects();
+    await flushEffects();
+
+    expect(contentApiMocks.listUserMarkdownSpacePages).toHaveBeenCalledTimes(1);
+    expect(contentApiMocks.fetchUserMarkdownSpacePage).toHaveBeenCalledWith("space-1", "page-1", { userId: "default" });
+  });
+
+  it("keeps User Markdown collapsed by default and preserves access to its full workspace", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    queryClient.setQueryData(queryKeys.userMarkdownSpaces("default"), {
+      ok: true,
+      summary: { spaceCount: 0 },
+      spaces: [],
+    });
+    const container = renderPanel(queryClient);
+    await flushEffects();
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="memory-user-content-toggle"]');
+    const content = toggle?.getAttribute("aria-controls");
+    const panel = content
+      ? [...container.querySelectorAll<HTMLElement>("[id]")].find((element) => element.id === content) ?? null
+      : null;
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(panel?.hidden).toBe(true);
+    expect(panel?.textContent).toContain("未选择页面");
+    expect(container.textContent).toContain("用户内容");
+
+    await act(async () => toggle?.click());
+
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(panel?.hidden).toBe(false);
+    expect(container.textContent).toContain("未选择页面");
+    expect(container.textContent).not.toContain("正在读取页面");
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
   });
 
   it("shows loading while the selected page request is actually fetching", async () => {
@@ -113,6 +166,8 @@ describe("MemoryUserContentPanel page detail state", () => {
     });
 
     const container = renderPanel(queryClient);
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="memory-user-content-toggle"]');
+    await act(async () => toggle?.click());
     await flushEffects();
     await flushEffects();
 

@@ -40,6 +40,7 @@ def search_unified_memory(
     user_id: str = "default",
     limit: int = 8,
     max_context_chars: int = 1200,
+    private_memory_enabled: bool = True,
 ) -> dict[str, Any]:
     """Search formal Agent/Team memory through one stable Agent-facing result contract."""
 
@@ -64,6 +65,7 @@ def search_unified_memory(
             query=normalized_query,
             requested_mode=requested_mode,
             effective_mode=effective_mode,
+            private_memory_enabled=private_memory_enabled,
             owner_type=owner_type,
             owner_id=owner_id,
             knowledge_base_id=normalized_base_id,
@@ -85,6 +87,7 @@ def search_unified_memory(
             query=normalized_query,
             requested_mode=requested_mode,
             effective_mode=effective_mode,
+            private_memory_enabled=private_memory_enabled,
             owner_type=owner_type,
             owner_id=owner_id,
             knowledge_base_id=normalized_base_id,
@@ -121,12 +124,23 @@ def search_unified_memory(
         search_mode=search_mode,
         limit=bounded_limit,
         allowed_knowledge_base_ids=normalized_allowed_base_ids,
+        private_memory_enabled=private_memory_enabled,
     )
     matched_items = [
         item
         for payload in payloads
         for item in list(payload.get("results") or [])
     ]
+    semantic_reports = [payload["semanticRetrieval"] for payload in payloads if "semanticRetrieval" in payload]
+    semantic_retrieval = None
+    if semantic_reports:
+        status = "ready" if all(row["status"] == "ready" for row in semantic_reports) else "degraded" if any(row["status"] in {"ready", "degraded"} for row in semantic_reports) else "unavailable"
+        semantic_retrieval = {"status": status,
+                              "indexedCandidateCount": sum(row.get("indexedCandidateCount", 0) for row in semantic_reports),
+                              "missingCandidateCount": sum(row.get("missingCandidateCount", 0) for row in semantic_reports),
+                              "embeddingModel": semantic_reports[0].get("embeddingModel", "")}
+        if effective_mode == "hybrid" and all(row.get("effectiveMode") == "bm25" for row in semantic_reports):
+            effective_mode = "bm25"
     matched_items.sort(
         key=lambda item: (float(item.get("semanticScore") or 0.0), str(item.get("updatedAt") or item.get("createdAt") or "")),
         reverse=True,
@@ -184,6 +198,7 @@ def search_unified_memory(
             results=results,
         ),
         citations=_citations_for_results(results),
+        semantic_retrieval=semantic_retrieval,
     )
 
 
@@ -206,6 +221,7 @@ def _rag_search(
     user_id: str,
     limit: int,
     max_context_chars: int,
+    private_memory_enabled: bool = True,
 ) -> dict[str, Any]:
     payloads = _rag_payloads(
         agent_id=agent_id,
@@ -220,6 +236,7 @@ def _rag_search(
         limit=limit,
         max_context_chars=max_context_chars,
         allowed_knowledge_base_ids=allowed_knowledge_base_ids,
+        private_memory_enabled=private_memory_enabled,
     )
     contexts = [
         context
@@ -288,6 +305,7 @@ def _regex_search(
     allowed_user_content_space_ids: list[str],
     user_id: str,
     limit: int,
+    private_memory_enabled: bool = True,
 ) -> dict[str, Any]:
     if not query:
         raise UnifiedMemorySearchError("Regex unified memory search requires query.")
@@ -308,6 +326,7 @@ def _regex_search(
         search_mode="exact",
         limit=REGEX_SCAN_LIMIT,
         allowed_knowledge_base_ids=allowed_knowledge_base_ids,
+        private_memory_enabled=private_memory_enabled,
     )
     matched = []
     for payload in payloads:
@@ -379,6 +398,7 @@ def _payload(
     summary: dict[str, Any],
     citations: list[dict[str, Any]] | None = None,
     retrieval_policy: dict[str, Any] | None = None,
+    semantic_retrieval: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -401,6 +421,7 @@ def _payload(
         "summary": summary,
         "results": results,
         "citations": citations or [],
+        **({"semanticRetrieval": semantic_retrieval} if semantic_retrieval is not None else {}),
         "retrievalPolicy": retrieval_policy or _read_only_policy(backend),
         "updatedAt": utc_now_iso(),
     }
@@ -439,7 +460,8 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
         "sourceCandidateId": str(item.get("sourceCandidateId") or "").strip(),
         "sourceIdentityHash": str(item.get("sourceIdentityHash") or "").strip(),
         "evidenceLevel": str(item.get("evidenceLevel") or "").strip(),
-        "localCopies": [copy for copy in list(item.get("localCopies") or []) if isinstance(copy, dict)][:16],
+        "localCopies": [{key: value for key, value in copy.items() if key in {"filename", "sha256", "sizeBytes", "pageCount", "contentType"}}
+                        for copy in list(item.get("localCopies") or []) if isinstance(copy, dict)][:16],
         "searchBackend": backend,
         "matchReason": str(item.get("matchReason") or "").strip(),
         "metadata": {
@@ -761,6 +783,7 @@ def _knowledge_search_payloads(
     search_mode: str,
     limit: int,
     allowed_knowledge_base_ids: list[str],
+    private_memory_enabled: bool = True,
 ) -> list[dict[str, Any]]:
     payloads = []
     for base_id in _effective_knowledge_base_ids(knowledge_base_id, allowed_knowledge_base_ids):
@@ -777,6 +800,7 @@ def _knowledge_search_payloads(
                 tags=tags,
                 search_mode=search_mode,
                 limit=limit,
+                **({"private_memory_enabled": False} if not private_memory_enabled else {}),
             )
         )
     return payloads
@@ -796,6 +820,7 @@ def _rag_payloads(
     limit: int,
     max_context_chars: int,
     allowed_knowledge_base_ids: list[str],
+    private_memory_enabled: bool = True,
 ) -> list[dict[str, Any]]:
     payloads = []
     for base_id in _effective_knowledge_base_ids(knowledge_base_id, allowed_knowledge_base_ids):
@@ -814,6 +839,7 @@ def _rag_payloads(
                 provider="local",
                 top_k=limit,
                 max_context_chars=max_context_chars,
+                private_memory_enabled=private_memory_enabled,
             )
         )
     return payloads
@@ -856,8 +882,8 @@ def _backend_for_mode(mode: str) -> str:
     return {
         "literal": "local_exact",
         "exact": "local_exact",
-        "semantic": "local_token_overlap",
-        "hybrid": "local_hybrid",
+        "semantic": "fastembed",
+        "hybrid": "fastembed_rrf",
         "bm25": "local_bm25",
         "metadata": "local_metadata",
     }.get(mode, "local_hybrid")

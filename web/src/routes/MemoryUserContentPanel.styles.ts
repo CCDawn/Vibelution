@@ -27,8 +27,18 @@ const styles = {
     "emptyState min-w-0 grid min-h-[96px] content-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   header:
     "header min-w-0 flex flex-wrap items-center justify-between gap-2",
+  headerActions:
+    "headerActions min-w-0 inline-flex shrink-0 items-center gap-1.5",
   panelEyebrow:
     "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+  content:
+    "content min-w-0 grid gap-2",
+  contentToggle:
+    "contentToggle min-h-[26px] cursor-pointer border-0 bg-transparent px-1.5 py-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] hover:bg-[var(--vui-surface-row-hover)] hover:text-[var(--fg-secondary)]",
+  contentToggleIcon:
+    "contentToggleIcon transition-transform duration-150 motion-reduce:transition-none",
+  contentToggleIconExpanded:
+    "contentToggleIconExpanded rotate-180 transition-transform duration-150 motion-reduce:transition-none",
   body:
     "body min-w-0 grid gap-2 xl:grid-cols-[minmax(17rem,0.82fr)_minmax(17rem,0.82fr)_minmax(0,1.36fr)]",
   panel: `panel min-w-0 grid min-h-[14rem] content-start gap-1.5 ${vuiOpaqueRowClass} p-2`,

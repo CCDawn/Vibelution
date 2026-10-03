@@ -8,9 +8,13 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
+  cardStatus:
+    "cardStatus min-w-0 flex shrink-0 flex-wrap items-center gap-1.5",
   detailActionButton:
     `detailActionButton min-w-0 ${vuiControlQuietClass}`,
   knowledgeItemCard: `knowledgeItemCard min-w-0 ${vuiOpaqueRowClass} p-2`,
+  lifecycleActions:
+    "lifecycleActions min-w-0 flex flex-wrap items-center gap-1.5",
   metaGrid:
     "metaGrid min-w-0 flex flex-wrap items-center gap-1.5 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   panelHeader:

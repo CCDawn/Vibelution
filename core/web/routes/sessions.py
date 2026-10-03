@@ -969,12 +969,78 @@ class SessionQueuedTurnUpdatePayload(BaseModel):
     status: Literal["paused", "queued"] | None = None
 
 
-@router.get("/sessions/{session_id}/queued-turns")
+class SessionQueuedTurnAttachmentResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    artifactId: str
+    filename: str | None = None
+    contentType: str | None = None
+    imageUrl: str | None = None
+    sizeBytes: int | None = None
+
+
+class SessionQueuedTurnReferenceResponse(BaseModel):
+    """Open reference object; reference kinds add their own fields over time."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class SessionQueuedTurnModelSelectionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    modelId: str
+    reasoningEffort: str | None = None
+
+
+class SessionQueuedTurnResponse(BaseModel):
+    """One public queue row, preserving extra runtime-notice fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    position: int
+    kind: str = "user"
+    status: str = "queued"
+    content: str = ""
+    sendNow: bool | None = None
+    attachments: list[SessionQueuedTurnAttachmentResponse] = Field(default_factory=list)
+    references: list[SessionQueuedTurnReferenceResponse] = Field(default_factory=list)
+    lastError: str | None = None
+    clientSubmissionId: str | None = None
+    mentalModelEnabled: bool | None = None
+    runtimeStatusEnabled: bool | None = None
+    turnMode: str | None = None
+    writeIntent: bool | None = None
+    modelSelection: SessionQueuedTurnModelSelectionResponse | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+    branchGeneration: int | None = None
+
+
+class SessionQueuedTurnsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    queuedTurns: list[SessionQueuedTurnResponse]
+
+
+class SessionQueuedTurnSendNowResponse(SessionQueuedTurnsResponse):
+    stopRequested: bool
+
+
+@router.get(
+    "/sessions/{session_id}/queued-turns",
+    response_model=SessionQueuedTurnsResponse,
+    response_model_exclude_unset=True,
+)
 def session_list_queued_turns(session_id: str) -> dict:
     return {"queuedTurns": list_session_queued_turns(session_id)}
 
 
-@router.patch("/sessions/{session_id}/queued-turns/{queued_turn_id}")
+@router.patch(
+    "/sessions/{session_id}/queued-turns/{queued_turn_id}",
+    response_model=SessionQueuedTurnsResponse,
+    response_model_exclude_unset=True,
+)
 def session_update_queued_turn(
     session_id: str,
     queued_turn_id: str,
@@ -995,7 +1061,11 @@ def session_update_queued_turn(
     return {"queuedTurns": rows}
 
 
-@router.delete("/sessions/{session_id}/queued-turns/{queued_turn_id}")
+@router.delete(
+    "/sessions/{session_id}/queued-turns/{queued_turn_id}",
+    response_model=SessionQueuedTurnsResponse,
+    response_model_exclude_unset=True,
+)
 def session_remove_queued_turn(session_id: str, queued_turn_id: str) -> dict:
     try:
         rows = remove_session_queued_turn(session_id, queued_turn_id)
@@ -1018,6 +1088,8 @@ class SessionQueuedTurnSendNowPayload(BaseModel):
 @router.post(
     "/sessions/{session_id}/queued-turns/{queued_turn_id}/send-now",
     status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionQueuedTurnSendNowResponse,
+    response_model_exclude_unset=True,
 )
 def session_send_now_queued_turn(
     session_id: str,

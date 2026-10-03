@@ -806,7 +806,7 @@ def test_agent_knowledge_routes_create_private_formal_base_and_rag(tmp_path, mon
             "query": "private formal retrievable",
             "ownerType": "agent",
             "ownerId": member["agentId"],
-            "retrievalMode": "semantic",
+            "retrievalMode": "bm25",
         },
     )
     blocked_response = client.get(
@@ -816,7 +816,7 @@ def test_agent_knowledge_routes_create_private_formal_base_and_rag(tmp_path, mon
             "query": "private formal retrievable",
             "ownerType": "agent",
             "ownerId": member["agentId"],
-            "retrievalMode": "semantic",
+            "retrievalMode": "bm25",
         },
     )
 
@@ -855,11 +855,11 @@ def test_knowledge_search_permission_audit_and_rating_suggestion_routes(tmp_path
 
     search_response = client.get(
         "/api/knowledge/search",
-        params={"agentId": member["agentId"], "query": "rating governance missing", "tags": "governance", "searchMode": "semantic"},
+        params={"agentId": member["agentId"], "query": "rating governance missing", "tags": "governance", "searchMode": "bm25"},
     )
     assert search_response.status_code == 200
     assert search_response.json()["summary"]["resultCount"] == 1
-    assert search_response.json()["filters"]["searchMode"] == "semantic"
+    assert search_response.json()["filters"]["searchMode"] == "bm25"
     assert search_response.json()["results"][0]["semanticScore"] > 0
 
     suggestion_response = client.post(

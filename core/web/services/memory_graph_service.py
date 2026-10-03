@@ -512,6 +512,9 @@ def _add_owner_knowledge_graph_nodes(
         graph.add_edge(parent_node_id, base_node_id, f"{owner.get('ownerType')}_has_knowledge_base")
         if all_items is None:
             all_items = team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+        from .team_knowledge import lifecycle
+        artifacts = {row["sourceArtifactId"]: row for row in team_knowledge_service._source_artifacts_for_base(owner, base_id)}
+        states = lifecycle.lifecycle_states_for_base(owner, base, all_items, artifacts)
         for item in all_items:
             if str(item.get("knowledgeBaseId") or "") != base_id:
                 continue
@@ -534,6 +537,8 @@ def _add_owner_knowledge_graph_nodes(
                 updated_at=str(item.get("updatedAt") or item.get("appliedAt") or ""),
                 metadata={
                     "knowledgeItemId": item_id,
+                    "knowledgeState": states.get(item_id, "unavailable"),
+                    "revision": int(item.get("revision") or 1),
                     "knowledgeBaseId": base_id,
                     "ownerType": owner.get("ownerType"),
                     "ownerId": owner.get("ownerId"),
@@ -889,9 +894,19 @@ def _items_for_base_full_detail(
     all_items: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     base_id = str(base.get("knowledgeBaseId") or "").strip()
+    if str(base.get("status") or "active") != "active":
+        return []
+    from .team_knowledge import lifecycle
+    artifacts = {row["sourceArtifactId"]: row for row in team_knowledge_service._source_artifacts_for_base(owner, base_id)}
+    states = lifecycle.lifecycle_states_for_base(owner, base, all_items, artifacts)
+    financial = team_knowledge_service.eligible_financial_items(owner, base, all_items, artifacts)
     items: list[dict[str, Any]] = []
     for item in all_items:
         if str(item.get("knowledgeBaseId") or "") != base_id:
+            continue
+        if states.get(str(item.get("knowledgeItemId") or "")) != "active":
+            continue
+        if financial is not None and item.get("knowledgeItemId") not in financial:
             continue
         items.append(_full_knowledge_item_detail(item, base=base, owner=owner))
     return items
@@ -939,6 +954,13 @@ def _find_accessible_knowledge_item(knowledge_item_id: str, actor_agent_id: str)
                     return None
                 continue
             if not team_knowledge_service._can_access(owner, base, actor_agent_id, "read"):
+                if has_owner_scope:
+                    return None
+                continue
+            scoped_base_id = team_knowledge_service._owner_scoped_knowledge_base_id(owner, base["knowledgeBaseId"])
+            try:
+                item = team_knowledge_service.get_readable_knowledge_item(scoped_base_id, item["knowledgeItemId"], agent_id=actor_agent_id)
+            except team_knowledge_service.TeamKnowledgeError:
                 if has_owner_scope:
                     return None
                 continue

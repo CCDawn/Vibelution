@@ -381,6 +381,34 @@ def test_partition_without_metadata_defaults_to_image_pipeline() -> None:
 # knowledge / file conversation references
 
 
+def _allow_knowledge_reference_base(
+    monkeypatch,
+    *,
+    owner_type: str = "team",
+    owner_id: str = "team-1",
+    base_id: str = "kb1",
+) -> list[tuple[str, str, str]]:
+    from core.web.services import team_knowledge_service
+
+    permission_checks: list[tuple[str, str, str]] = []
+    owner = {"ownerType": owner_type, "ownerId": owner_id}
+    base = {"knowledgeBaseId": base_id, "status": "active"}
+    monkeypatch.setattr(team_knowledge_service, "_require_base_with_owner", lambda _base_id: (owner, base))
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "_owner_scoped_knowledge_base_id",
+        lambda current_owner, current_base_id: (
+            f"{current_owner['ownerType']}:{current_owner['ownerId']}:{current_base_id}"
+        ),
+    )
+
+    def require_permission(_owner, _base, agent_id: str, action: str) -> None:
+        permission_checks.append((owner_type, str(agent_id), action))
+
+    monkeypatch.setattr(team_knowledge_service, "_require_permission", require_permission)
+    return permission_checks
+
+
 def test_partition_conversation_references_splits_kinds() -> None:
     session_rows, knowledge_rows = conversation_references.partition_conversation_references(
         [
@@ -419,6 +447,7 @@ def test_normalize_knowledge_file_references_dedupes_and_requires_keys() -> None
 
 def test_resolve_knowledge_base_reference_uses_governed_retrieval(monkeypatch) -> None:
     captured: dict = {}
+    _allow_knowledge_reference_base(monkeypatch)
 
     def fake_retrieve(**kwargs):
         captured.update(kwargs)
@@ -438,10 +467,12 @@ def test_resolve_knowledge_base_reference_uses_governed_retrieval(monkeypatch) -
         [{"kind": "knowledge_base", "knowledgeBaseId": "kb1", "title": "Lab KB"}],
         agent_id="agent-1",
         query="what does alpha mean",
+        memory_policy={"enabled": True, "readKnowledgeBaseIds": []},
         lang="en",
     )
     assert captured["knowledge_base_id"] == "kb1"
     assert captured["agent_id"] == "agent-1"
+    assert captured["private_memory_enabled"] is True
     assert len(resolved) == 1
     assert resolved[0]["contentChars"] > 0
     assert "alpha content" in resolved[0]["content"]
@@ -453,24 +484,23 @@ def test_resolve_knowledge_base_reference_uses_governed_retrieval(monkeypatch) -
 def test_resolve_knowledge_item_reference_reads_reviewed_content(monkeypatch) -> None:
     from core.web.services import team_knowledge_service
 
+    _allow_knowledge_reference_base(monkeypatch)
     monkeypatch.setattr(
         team_knowledge_service,
-        "list_knowledge_items",
-        lambda knowledge_base_id, agent_id="": {
-            "items": [
-                {
-                    "knowledgeItemId": "ki1",
-                    "title": "Protocol",
-                    "content": "step one\nstep two",
-                    "evidenceLevel": "reviewed",
-                }
-            ]
+        "get_readable_knowledge_item",
+        lambda knowledge_base_id, knowledge_item_id, *, agent_id: {
+            "knowledgeBaseId": knowledge_base_id,
+            "knowledgeItemId": knowledge_item_id,
+            "title": "Protocol",
+            "content": "step one\nstep two",
+            "evidenceLevel": "reviewed",
         },
     )
     resolved = conversation_references.resolve_knowledge_file_references(
         "session-live",
         [{"kind": "knowledge_item", "knowledgeItemId": "ki1", "knowledgeBaseId": "kb1"}],
         agent_id="agent-1",
+        memory_policy={"enabled": True, "readKnowledgeBaseIds": ["team:team-1:kb1"]},
         lang="en",
     )
     assert resolved[0]["title"] == "Protocol"
@@ -480,10 +510,13 @@ def test_resolve_knowledge_item_reference_reads_reviewed_content(monkeypatch) ->
 def test_resolve_knowledge_item_reference_missing_item_raises(monkeypatch) -> None:
     from core.web.services import team_knowledge_service
 
+    _allow_knowledge_reference_base(monkeypatch)
     monkeypatch.setattr(
         team_knowledge_service,
-        "list_knowledge_items",
-        lambda knowledge_base_id, agent_id="": {"items": []},
+        "get_readable_knowledge_item",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            team_knowledge_service.TeamKnowledgeNotFoundError("Knowledge item not found.")
+        ),
     )
     with pytest.raises(session_service.SessionValidationError, match="Invalid reference"):
         conversation_references.resolve_knowledge_file_references(
@@ -492,6 +525,123 @@ def test_resolve_knowledge_item_reference_missing_item_raises(monkeypatch) -> No
             agent_id="agent-1",
             lang="en",
         )
+
+
+def test_knowledge_base_reference_enforces_read_allowlist_before_retrieval(monkeypatch) -> None:
+    from core.web.services import rag_retrieval_service
+
+    _allow_knowledge_reference_base(monkeypatch)
+    retrieval_calls: list[dict] = []
+    monkeypatch.setattr(rag_retrieval_service, "retrieve_rag_contexts", lambda **kwargs: retrieval_calls.append(kwargs))
+
+    with pytest.raises(session_service.SessionValidationError, match="Invalid reference"):
+        conversation_references.resolve_knowledge_file_references(
+            "session-live",
+            [{"kind": "knowledge_base", "knowledgeBaseId": "kb1"}],
+            agent_id="agent-1",
+            query="q",
+            memory_policy={"enabled": True, "readKnowledgeBaseIds": ["team:team-1:another-kb"]},
+            lang="en",
+        )
+
+    assert retrieval_calls == []
+
+
+def test_private_knowledge_reference_is_rejected_when_private_memory_is_disabled(monkeypatch) -> None:
+    from core.web.services import rag_retrieval_service
+
+    _allow_knowledge_reference_base(monkeypatch, owner_type="agent", owner_id="agent-1")
+    retrieval_calls: list[dict] = []
+    monkeypatch.setattr(rag_retrieval_service, "retrieve_rag_contexts", lambda **kwargs: retrieval_calls.append(kwargs))
+
+    with pytest.raises(session_service.SessionValidationError, match="Invalid reference"):
+        conversation_references.resolve_knowledge_file_references(
+            "session-live",
+            [{"kind": "knowledge_base", "knowledgeBaseId": "kb1"}],
+            agent_id="agent-1",
+            query="q",
+            memory_policy={"enabled": False, "readKnowledgeBaseIds": []},
+            lang="en",
+        )
+
+    assert retrieval_calls == []
+
+
+def test_team_knowledge_reference_remains_readable_when_private_memory_is_disabled(monkeypatch) -> None:
+    from core.web.services import rag_retrieval_service
+
+    permission_checks = _allow_knowledge_reference_base(monkeypatch)
+    captured: dict = {}
+
+    def fake_retrieve(**kwargs):
+        captured.update(kwargs)
+        return {"request": {"retrievalMode": "hybrid"}, "contexts": [{"title": "Team note", "text": "shared content"}]}
+
+    monkeypatch.setattr(rag_retrieval_service, "retrieve_rag_contexts", fake_retrieve)
+    resolved = conversation_references.resolve_knowledge_file_references(
+        "session-live",
+        [{"kind": "knowledge_base", "knowledgeBaseId": "kb1"}],
+        agent_id="agent-1",
+        query="q",
+        memory_policy={"enabled": False, "readKnowledgeBaseIds": []},
+        lang="en",
+    )
+
+    assert "shared content" in resolved[0]["content"]
+    assert captured["private_memory_enabled"] is False
+    assert permission_checks == [("team", "agent-1", "read")]
+
+
+def test_superseded_knowledge_item_is_not_injected_from_list_projection(monkeypatch) -> None:
+    from core.web.services import team_knowledge_service
+
+    _allow_knowledge_reference_base(monkeypatch)
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "list_knowledge_items",
+        lambda *_args, **_kwargs: {
+            "items": [{"knowledgeItemId": "ki1", "title": "Old", "content": "superseded content", "knowledgeState": "superseded"}]
+        },
+    )
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "get_readable_knowledge_item",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            team_knowledge_service.TeamKnowledgeNotFoundError("Knowledge item is no longer active.")
+        ),
+    )
+
+    with pytest.raises(session_service.SessionValidationError, match="Invalid reference"):
+        conversation_references.resolve_knowledge_file_references(
+            "session-live",
+            [{"kind": "knowledge_item", "knowledgeItemId": "ki1", "knowledgeBaseId": "kb1"}],
+            agent_id="agent-1",
+            memory_policy={"enabled": True, "readKnowledgeBaseIds": []},
+            lang="en",
+        )
+
+
+def test_private_knowledge_item_is_rejected_when_private_memory_is_disabled(monkeypatch) -> None:
+    from core.web.services import team_knowledge_service
+
+    _allow_knowledge_reference_base(monkeypatch, owner_type="agent", owner_id="agent-1")
+    readable_item_calls: list[dict] = []
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "get_readable_knowledge_item",
+        lambda *args, **kwargs: readable_item_calls.append({"args": args, "kwargs": kwargs}),
+    )
+
+    with pytest.raises(session_service.SessionValidationError, match="Invalid reference"):
+        conversation_references.resolve_knowledge_file_references(
+            "session-live",
+            [{"kind": "knowledge_item", "knowledgeItemId": "ki1", "knowledgeBaseId": "kb1"}],
+            agent_id="agent-1",
+            memory_policy={"enabled": False, "readKnowledgeBaseIds": []},
+            lang="en",
+        )
+
+    assert readable_item_calls == []
 
 
 def test_resolve_file_reference_reads_session_artifact(seeded_document_session: str) -> None:
@@ -524,6 +674,7 @@ def test_resolve_file_reference_rejects_arbitrary_artifact(seeded_document_sessi
 def test_knowledge_reference_prompt_block_fences_content(monkeypatch) -> None:
     from core.web.services import rag_retrieval_service
 
+    _allow_knowledge_reference_base(monkeypatch)
     monkeypatch.setattr(
         rag_retrieval_service,
         "retrieve_rag_contexts",
@@ -551,6 +702,7 @@ def test_knowledge_reference_prompt_block_fences_content(monkeypatch) -> None:
 def test_knowledge_reference_budget_truncates(monkeypatch) -> None:
     from core.web.services import rag_retrieval_service
 
+    _allow_knowledge_reference_base(monkeypatch)
     monkeypatch.setattr(
         rag_retrieval_service,
         "retrieve_rag_contexts",
@@ -856,6 +1008,7 @@ def test_submit_injects_knowledge_reference_block_into_turn_prompt(
         ],
     )
     _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    _allow_knowledge_reference_base(monkeypatch)
     monkeypatch.setattr(session_service, "_record_session_attachment_event", lambda *a, **k: None)
     monkeypatch.setattr(session_service, "_remember_session_uploaded_attachment", lambda *a, **k: None)
 

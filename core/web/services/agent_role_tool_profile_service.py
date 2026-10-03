@@ -8,11 +8,13 @@ import re
 from typing import Any
 
 
-ROLE_TOOL_PROFILE_VERSION = 1
+ROLE_TOOL_PROFILE_VERSION = 2
 
 FORMAL_KNOWLEDGE_WRITE_TOOLS = (
     "knowledge_proposal_tool",
     "knowledge_proposal_review_tool",
+    "knowledge_source_lifecycle_tool",
+    "knowledge_index_build_tool",
     "knowledge_ingestion_tool",
 )
 KNOWLEDGE_GOVERNANCE_TOOLS = (

@@ -1,8 +1,12 @@
 import sqlite3
+import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+
+from core.web.services.team_knowledge import semantic as knowledge_semantic_service
 
 from core.web.services import (
     agent_directory_service,
@@ -78,6 +82,45 @@ def _promote_source_to_item(env: dict) -> dict:
         proposal["proposalId"],
         status="approved",
         reviewed_by_agent_id=env["lead"]["agentId"],
+    )["item"]
+
+
+def _promote_agent_source_to_item(agent_id: str, knowledge_base_id: str) -> dict:
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "agent",
+        agent_id,
+        source_type="agent_authored",
+        source_ref={"note": "private cleanup race test"},
+        original_content="Private Agent knowledge must not retain an orphan vector after cleanup.",
+        original_filename="private-cleanup-source.txt",
+        title="Private cleanup source",
+        actor_agent_id=agent_id,
+    )
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "agent",
+        agent_id,
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=agent_id,
+    )
+    source_artifact = team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_base_id,
+        reviewed["centralSource"]["centralSourceId"],
+        actor_agent_id=agent_id,
+        title="Private cleanup source",
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_base_id,
+        source_artifact_ids=[source_artifact["sourceArtifactId"]],
+        proposed_by_agent_id=agent_id,
+        title="Private cleanup race item",
+        content="Private Agent knowledge must not retain an orphan vector after cleanup.",
+    )
+    return team_knowledge_service.review_refinement_proposal(
+        knowledge_base_id,
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=agent_id,
     )["item"]
 
 
@@ -211,15 +254,26 @@ def test_memory_cleanup_maintenance_artifacts_delete_noise_without_touching_prot
     assert current_team_run.exists()
 
 
-def test_memory_cleanup_knowledge_base_removes_owner_records_and_vector_metadata(cleanup_project: Path):
+def test_memory_cleanup_knowledge_base_removes_only_selected_base_records_and_vectors(cleanup_project: Path):
     env = _knowledge_env()
     reviewed_item = _promote_source_to_item(env)
-    indexable_item = next(
-        item
-        for item in rag_vector_index_service.list_indexable_knowledge_items(internal=True)
-        if item["knowledgeItemId"] == reviewed_item["knowledgeItemId"]
+    preserved_base = team_knowledge_service.create_knowledge_base(
+        env["team"]["teamId"],
+        name="Preserved Base",
+        actor_agent_id=env["lead"]["agentId"],
     )
-    rag_vector_index_service.write_index_record(indexable_item, embedding_provider="test", embedding_model="cleanup-v1")
+    preserved_item = _promote_source_to_item({**env, "base": preserved_base})
+    indexable_items = {
+        item["knowledgeItemId"]: item
+        for item in rag_vector_index_service.list_indexable_knowledge_items(internal=True)
+    }
+    for item_id in (reviewed_item["knowledgeItemId"], preserved_item["knowledgeItemId"]):
+        rag_vector_index_service.write_index_record(
+            indexable_items[item_id],
+            embedding_provider="test",
+            embedding_model="cleanup-v1",
+            chunks=[{"start": 0, "end": 1, "vector": [1.0, 0.0]}],
+        )
     scoped_id = env["base"]["scopedKnowledgeBaseId"]
     central_registry = cleanup_project / "workspace" / "knowledge" / "sources" / "registry" / "source_registry.jsonl"
 
@@ -241,10 +295,213 @@ def test_memory_cleanup_knowledge_base_removes_owner_records_and_vector_metadata
     assert result["totals"]["vectorRecordCount"] == 1
     assert central_registry.exists()
     owner = {"ownerType": "team", "ownerId": env["team"]["teamId"]}
+    remaining_bases = team_knowledge_service._load_bases_state_for_owner(owner)["knowledgeBases"]
+    remaining_items = team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner))
+    assert [base["knowledgeBaseId"] for base in remaining_bases] == [preserved_base["knowledgeBaseId"]]
+    assert [item["knowledgeItemId"] for item in remaining_items] == [preserved_item["knowledgeItemId"]]
+    assert [record["knowledgeItemId"] for record in rag_vector_index_service._load_all_index_records()] == [
+        preserved_item["knowledgeItemId"]
+    ]
+
+
+def test_memory_cleanup_private_knowledge_base_still_hard_deletes_only_its_owner_rows(cleanup_project: Path):
+    agent = agent_directory_service.create_agent_instance(display_name="Private Knowledge Owner")
+    base = team_knowledge_service.create_agent_knowledge_base(
+        agent["agentId"],
+        name="Private Base",
+        actor_agent_id=agent["agentId"],
+    )
+    target = {
+        "targetType": "knowledge_base",
+        "ownerType": "agent",
+        "ownerId": agent["agentId"],
+        "knowledgeBaseId": base["knowledgeBaseId"],
+    }
+
+    preview = memory_cleanup_service.preview_memory_cleanup([target])
+    result = memory_cleanup_service.execute_memory_cleanup(
+        [target],
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
+    )
+
+    assert result["outcome"] == "succeeded"
+    owner = {"ownerType": "agent", "ownerId": agent["agentId"]}
     assert team_knowledge_service._load_bases_state_for_owner(owner)["knowledgeBases"] == []
     assert team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner)) == []
-    assert team_knowledge_service._read_jsonl(team_knowledge_service._source_artifacts_path_for_owner(owner)) == []
     assert rag_vector_index_service._load_all_index_records() == []
+
+
+@pytest.mark.parametrize("target_type", ["knowledge_base", "agent_formal_knowledge", "team_knowledge"])
+def test_memory_cleanup_waits_for_inflight_semantic_publish_then_removes_its_vector(
+    cleanup_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target_type: str,
+):
+    sync_reviewed_item = knowledge_semantic_service.sync_reviewed_item
+    monkeypatch.setattr(knowledge_semantic_service, "sync_reviewed_item", lambda *args, **kwargs: {"status": "unavailable"})
+    if target_type == "agent_formal_knowledge":
+        publisher_agent = agent_directory_service.create_agent_instance(display_name="Private Cleanup Publisher")
+        base = team_knowledge_service.create_agent_knowledge_base(
+            publisher_agent["agentId"],
+            name="Private Cleanup Base",
+            actor_agent_id=publisher_agent["agentId"],
+        )
+        reviewed_item = _promote_agent_source_to_item(publisher_agent["agentId"], base["knowledgeBaseId"])
+        owner = {"ownerType": "agent", "ownerId": publisher_agent["agentId"]}
+        target = {"targetType": target_type, "agentId": publisher_agent["agentId"]}
+    else:
+        env = _knowledge_env()
+        base = env["base"]
+        publisher_agent = env["lead"]
+        reviewed_item = _promote_source_to_item(env)
+        owner = {"ownerType": "team", "ownerId": env["team"]["teamId"]}
+        if target_type == "team_knowledge":
+            target = {"targetType": target_type, "teamId": env["team"]["teamId"]}
+        else:
+            target = {
+                "targetType": target_type,
+                "knowledgeBaseId": base.get("scopedKnowledgeBaseId") or base["knowledgeBaseId"],
+            }
+    monkeypatch.setattr(knowledge_semantic_service, "sync_reviewed_item", sync_reviewed_item)
+    indexable_item = next(
+        item
+        for item in rag_vector_index_service.list_indexable_knowledge_items(internal=True)
+        if item["knowledgeItemId"] == reviewed_item["knowledgeItemId"]
+    )
+    rag_vector_index_service.write_index_record(
+        indexable_item,
+        embedding_provider="test",
+        embedding_model="cleanup-v1",
+        chunks=[{"start": 0, "end": 1, "vector": [1.0, 0.0]}],
+    )
+    preview = memory_cleanup_service.preview_memory_cleanup([target])
+    assert preview["totals"]["vectorRecordCount"] == 1
+
+    monkeypatch.setattr(knowledge_semantic_service, "DEFAULT_EMBEDDING_DIMENSION", 2)
+    monkeypatch.setattr(
+        knowledge_semantic_service.embeddings,
+        "readiness",
+        lambda **_: {"status": "ready", "cached": True},
+    )
+    monkeypatch.setattr(
+        knowledge_semantic_service.embeddings,
+        "encode",
+        lambda texts, **_: [[1.0, 0.0] for _ in texts],
+    )
+
+    publish_write_entered = threading.Event()
+    allow_publish_write = threading.Event()
+    cleanup_lock_attempted = threading.Event()
+    cleanup_started = threading.Event()
+    cleanup_thread_id: int | None = None
+    original_write_index_record = rag_vector_index_service.write_index_record
+
+    def block_publish_after_canonical_validation(item, **kwargs):
+        publish_write_entered.set()
+        if not allow_publish_write.wait(timeout=5):
+            raise TimeoutError("test did not release the paused semantic publisher")
+        return original_write_index_record(item, **kwargs)
+
+    underlying_knowledge_lock = team_knowledge_service._LOCK
+
+    class CleanupObservedRLock:
+        def acquire(self, *args, **kwargs):
+            if threading.get_ident() == cleanup_thread_id:
+                cleanup_lock_attempted.set()
+            return underlying_knowledge_lock.acquire(*args, **kwargs)
+
+        def release(self):
+            return underlying_knowledge_lock.release()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            self.release()
+            return False
+
+    monkeypatch.setattr(rag_vector_index_service, "write_index_record", block_publish_after_canonical_validation)
+    monkeypatch.setattr(team_knowledge_service, "_LOCK", CleanupObservedRLock())
+
+    def run_cleanup():
+        nonlocal cleanup_thread_id
+        cleanup_thread_id = threading.get_ident()
+        cleanup_started.set()
+        return memory_cleanup_service.execute_memory_cleanup(
+            [target],
+            confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+            preview_token=preview["previewToken"],
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        publisher = pool.submit(
+            knowledge_semantic_service.sync_reviewed_item,
+            base["knowledgeBaseId"],
+            reviewed_item,
+            agent_id=publisher_agent["agentId"],
+        )
+        cleanup = None
+        try:
+            write_started = publish_write_entered.wait(timeout=5)
+            assert write_started, (
+                "publisher did not reach post-validation vector write; "
+                f"error={publisher.exception(timeout=0) if publisher.done() else 'still running'}"
+            )
+            cleanup = pool.submit(run_cleanup)
+            assert cleanup_started.wait(timeout=5)
+            assert cleanup_lock_attempted.wait(timeout=5), "cleanup did not attempt the canonical knowledge lock"
+            assert not cleanup.done(), "cleanup passed the publisher while it held the canonical lock"
+        finally:
+            allow_publish_write.set()
+
+        publish_result = publisher.result(timeout=5)
+        cleanup_result = cleanup.result(timeout=5) if cleanup is not None else {}
+
+    assert publish_result == {"status": "indexed", "embeddingModel": knowledge_semantic_service.embeddings.DEFAULT_MODEL_NAME}
+    assert cleanup_result["outcome"] == "succeeded"
+    assert team_knowledge_service._read_jsonl(team_knowledge_service._items_path_for_owner(owner)) == []
+    assert rag_vector_index_service._load_all_index_records() == []
+
+
+def test_global_runtime_memory_cleanup_preserves_formal_knowledge_and_its_vector(
+    cleanup_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    env = _knowledge_env()
+    monkeypatch.setattr(knowledge_semantic_service, "sync_reviewed_item", lambda *args, **kwargs: {"status": "unavailable"})
+    reviewed_item = _promote_source_to_item(env)
+    indexable_item = next(
+        item
+        for item in rag_vector_index_service.list_indexable_knowledge_items(internal=True)
+        if item["knowledgeItemId"] == reviewed_item["knowledgeItemId"]
+    )
+    rag_vector_index_service.write_index_record(
+        indexable_item,
+        embedding_provider="test",
+        embedding_model="cleanup-v1",
+        chunks=[{"start": 0, "end": 1, "vector": [1.0, 0.0]}],
+    )
+    runtime_memory_file = _write(cleanup_project / "workspace" / "memory" / "runtime.md", "runtime memory")
+    owner = {"ownerType": "team", "ownerId": env["team"]["teamId"]}
+    item_path = team_knowledge_service._items_path_for_owner(owner)
+
+    preview = memory_cleanup_service.preview_memory_cleanup([{"targetType": "global_runtime_memory"}])
+    result = memory_cleanup_service.execute_memory_cleanup(
+        [{"targetType": "global_runtime_memory"}],
+        confirmation_phrase=memory_cleanup_service.CONFIRMATION_PHRASE,
+        preview_token=preview["previewToken"],
+    )
+
+    assert result["outcome"] == "succeeded"
+    assert not runtime_memory_file.exists()
+    assert [item["knowledgeItemId"] for item in team_knowledge_service._read_jsonl(item_path)] == [
+        reviewed_item["knowledgeItemId"]
+    ]
+    assert [record["knowledgeItemId"] for record in rag_vector_index_service._load_all_index_records()] == [
+        reviewed_item["knowledgeItemId"]
+    ]
 
 
 def test_memory_cleanup_agent_private_memory_and_policy_reset(cleanup_project: Path):

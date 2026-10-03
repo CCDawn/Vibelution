@@ -1,7 +1,14 @@
+import { useState } from "react";
 import { CheckCircle2, Copy as CopyIcon, Database, Eye, FileText, Link2, Pencil, XCircle } from "lucide-react";
 
-import type { KnowledgeCentralSource, KnowledgeOwnerSource } from "../api/types";
-import { VButton, VNativeInput, VNativeTextarea, VStatusChip, VStringSelect } from "../components/vui";
+import { updateKnowledgeSourceLifecycle } from "../api/knowledgeLifecycle";
+import type {
+  KnowledgeCentralSource,
+  KnowledgeOwnerSource,
+  KnowledgeSourceArtifact,
+  KnowledgeSourceLifecycleStatus,
+} from "../api/types";
+import { VButton, VNativeInput, VNativeTextarea, VStatusChip, VStringSelect, VTextarea } from "../components/vui";
 import styles from "./MemoryKnowledgeSourceGovernancePanel.styles";
 
 export type MemoryKnowledgeSourceOwnerType = "team" | "agent";
@@ -67,6 +74,15 @@ export type MemoryKnowledgeSourceGovernancePanelCopy = {
   duplicateSources: string;
   needsMoreContextSources: string;
   allSourceStatuses: string;
+  linkedKnowledgeSources: string;
+  lifecycleReason: string;
+  lifecycleReasonPlaceholder: string;
+  withdrawLinkedSource: string;
+  expireLinkedSource: string;
+  restoreLinkedSource: string;
+  lifecycleUpdated: string;
+  lifecycleReasonRequired: string;
+  noLinkedKnowledgeSources: string;
 };
 
 type MemoryKnowledgeSourceGovernancePanelProps = {
@@ -89,6 +105,11 @@ type MemoryKnowledgeSourceGovernancePanelProps = {
   knowledgeBusy: boolean;
   canSubmitOwnerSource: boolean;
   canAttachCentralSource: boolean;
+  knowledgeBaseId: string;
+  knowledgeAgentId: string;
+  canReviewKnowledge: boolean;
+  linkedKnowledgeSources: KnowledgeSourceArtifact[];
+  onLifecycleChanged: () => void;
   onSourceOwnerTypeChange: (value: MemoryKnowledgeSourceOwnerType) => void;
   onSourceOwnerIdChange: (value: string) => void;
   onSourceInboxStatusChange: (value: MemoryKnowledgeSourceInboxStatusFilter) => void;
@@ -164,6 +185,11 @@ export function MemoryKnowledgeSourceGovernancePanel({
   knowledgeBusy,
   canSubmitOwnerSource,
   canAttachCentralSource,
+  knowledgeBaseId,
+  knowledgeAgentId,
+  canReviewKnowledge,
+  linkedKnowledgeSources,
+  onLifecycleChanged,
   onSourceOwnerTypeChange,
   onSourceOwnerIdChange,
   onSourceInboxStatusChange,
@@ -177,6 +203,36 @@ export function MemoryKnowledgeSourceGovernancePanel({
   onAttachCentralSource,
   formatTimestamp,
 }: MemoryKnowledgeSourceGovernancePanelProps) {
+  const [lifecycleReasons, setLifecycleReasons] = useState<Record<string, string>>({});
+  const [lifecycleBusySourceId, setLifecycleBusySourceId] = useState("");
+  const [lifecycleError, setLifecycleError] = useState("");
+  const [lifecycleNotice, setLifecycleNotice] = useState("");
+
+  const updateLinkedSourceLifecycle = async (source: KnowledgeSourceArtifact, status: KnowledgeSourceLifecycleStatus) => {
+    const reason = String(lifecycleReasons[source.sourceArtifactId] || "").trim();
+    if (!knowledgeBaseId || !knowledgeAgentId || !canReviewKnowledge || !reason) {
+      setLifecycleError(copy.lifecycleReasonRequired);
+      return;
+    }
+    setLifecycleBusySourceId(source.sourceArtifactId);
+    setLifecycleError("");
+    setLifecycleNotice("");
+    try {
+      await updateKnowledgeSourceLifecycle(knowledgeBaseId, source.sourceArtifactId, {
+        status,
+        reason,
+        actorAgentId: knowledgeAgentId,
+      });
+      setLifecycleReasons((previous) => ({ ...previous, [source.sourceArtifactId]: "" }));
+      setLifecycleNotice(copy.lifecycleUpdated);
+      onLifecycleChanged();
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLifecycleBusySourceId("");
+    }
+  };
+
   return (
     <section className={styles.managementPanel}>
       <div className={styles.managementHeader}>
@@ -379,6 +435,60 @@ export function MemoryKnowledgeSourceGovernancePanel({
           </div>
         </div>
       </div>
+      <section className={styles.linkedSourceLifecycle} aria-label={copy.linkedKnowledgeSources}>
+        <div className={styles.managementHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.sourceGovernance}</p>
+            <h3>{copy.linkedKnowledgeSources}</h3>
+          </div>
+          <span className={styles.countPill}>{linkedKnowledgeSources.length}</span>
+        </div>
+        {lifecycleError ? <p className={styles.lifecycleError} role="alert">{lifecycleError}</p> : null}
+        {lifecycleNotice ? <p className={styles.lifecycleNotice} role="status">{lifecycleNotice}</p> : null}
+        {linkedKnowledgeSources.map((source) => {
+          const sourceStatus = String(source.status || "active");
+          const sourcePending = lifecycleBusySourceId === source.sourceArtifactId;
+          const lifecycleDisabled = !canReviewKnowledge || !knowledgeBaseId || !knowledgeAgentId || knowledgeBusy || sourcePending;
+          return (
+            <article key={source.sourceArtifactId} className={styles.linkedSourceRow}>
+              <div className={styles.sourceRecordHeader}>
+                <strong>{source.title || source.sourceArtifactId}</strong>
+                <VStatusChip tone={sourceStatus === "active" ? "success" : "warning"}>{sourceStatus}</VStatusChip>
+              </div>
+              <p>{source.summary || source.sourceType}</p>
+              <span className={styles.statusPillMuted}>{source.sourceArtifactId}</span>
+              {source.expiresAt ? <span className={styles.statusPillMuted}>{copy.status}: {source.expiresAt}</span> : null}
+              <label className={styles.lifecycleReasonField}>
+                <span>{copy.lifecycleReason}</span>
+                <VTextarea
+                  rows={2}
+                  value={lifecycleReasons[source.sourceArtifactId] || ""}
+                  placeholder={copy.lifecycleReasonPlaceholder}
+                  isDisabled={lifecycleDisabled}
+                  onChange={(event) => setLifecycleReasons((previous) => ({ ...previous, [source.sourceArtifactId]: event.target.value }))}
+                />
+              </label>
+              <div className={styles.sourceRecordActions}>
+                {sourceStatus === "active" ? (
+                  <>
+                    <VButton type="button" isDisabled={lifecycleDisabled || !lifecycleReasons[source.sourceArtifactId]?.trim()} isPending={sourcePending} onPress={() => void updateLinkedSourceLifecycle(source, "withdrawn")}>
+                      {copy.withdrawLinkedSource}
+                    </VButton>
+                    <VButton type="button" isDisabled={lifecycleDisabled || !lifecycleReasons[source.sourceArtifactId]?.trim()} isPending={sourcePending} onPress={() => void updateLinkedSourceLifecycle(source, "expired")}>
+                      {copy.expireLinkedSource}
+                    </VButton>
+                  </>
+                ) : (
+                  <VButton type="button" isDisabled={lifecycleDisabled || !lifecycleReasons[source.sourceArtifactId]?.trim()} isPending={sourcePending} onPress={() => void updateLinkedSourceLifecycle(source, "active")}>
+                    {copy.restoreLinkedSource}
+                  </VButton>
+                )}
+              </div>
+            </article>
+          );
+        })}
+        {!linkedKnowledgeSources.length ? <p className={styles.statusPillMuted}>{copy.noLinkedKnowledgeSources}</p> : null}
+      </section>
       <div className={styles.sourceRecordList}>
         {centralSources.map((source) => (
           <article key={source.centralSourceId} className={styles.sourceRecord}>

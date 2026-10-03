@@ -23,6 +23,9 @@ from .team_knowledge import permissions as _tk_permissions
 from .team_knowledge import source_inbox as _tk_source_inbox
 from .team_knowledge import public_catalog as _tk_public_catalog
 from .team_knowledge import financial as _tk_financial
+from .team_knowledge import governance as _tk_governance
+from .team_knowledge import retrieval as _tk_retrieval
+from .team_knowledge import lifecycle as _tk_lifecycle
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -826,98 +829,6 @@ def _normalize_formal_knowledge_content(value: Any) -> str:
     return content.strip()
 
 
-def create_refinement_proposal(
-    knowledge_base_id: str,
-    *,
-    source_artifact_ids: list[str] | None,
-    proposed_by_agent_id: str = "",
-    title: str,
-    summary: str = "",
-    content: str,
-    tags: list[str] | None = None,
-    required_reviewer_agent_id: str = "",
-    research_project_id: str = "",
-    question_id: str = "",
-    source_collection_run_id: str = "",
-    source_candidate_id: str = "",
-    source_identity_hash: str = "",
-    evidence_level: str = "",
-) -> dict[str, Any]:
-    owner, base = _require_base_with_owner(knowledge_base_id)
-    actor_agent_id = str(proposed_by_agent_id or "").strip()
-    _require_permission(owner, base, actor_agent_id, "propose")
-    normalized_title = trim_lines(title or "", max_lines=1).strip()
-    normalized_content = _normalize_formal_knowledge_content(content)
-    if not normalized_title:
-        raise TeamKnowledgeError("Proposal title is required.")
-    if not normalized_content:
-        raise TeamKnowledgeError("Proposal content is required.")
-    artifact_ids = _unique_strings(source_artifact_ids or [])
-    if not artifact_ids:
-        raise TeamKnowledgeError("Formal knowledge proposals require at least one central source artifact.")
-    central_source_ids: list[str] = []
-    artifacts_by_id = {
-        str(item.get("sourceArtifactId") or ""): item
-        for item in _source_artifacts_for_base(owner, base["knowledgeBaseId"])
-    }
-    known_artifacts = set(artifacts_by_id)
-    missing = [item for item in artifact_ids if item not in known_artifacts]
-    if missing:
-        raise TeamKnowledgeError(f"Unknown source artifact ids: {', '.join(missing[:3])}")
-    ungoverned = [
-        item_id
-        for item_id in artifact_ids
-        if not str((artifacts_by_id.get(item_id) or {}).get("centralSourceId") or "").strip()
-    ]
-    if ungoverned:
-        raise TeamKnowledgeError("Formal knowledge proposals require central-curated source artifacts.")
-    central_source_ids = _unique_strings(
-        str((artifacts_by_id.get(item_id) or {}).get("centralSourceId") or "")
-        for item_id in artifact_ids
-    )
-    financial_tags = _tk_financial.validate_financial_proposal(owner, base, artifact_ids, normalized_content)
-    now = utc_now_iso()
-    proposal = {
-        "proposalId": _new_event_id("kprop"),
-        "ownerType": owner["ownerType"],
-        "ownerId": owner["ownerId"],
-        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
-        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
-        "targetKnowledgeBaseId": base["knowledgeBaseId"],
-        "sourceArtifactIds": artifact_ids,
-        "centralSourceIds": central_source_ids,
-        "proposedByAgentId": actor_agent_id,
-        "requiredReviewerAgentId": trim_lines(required_reviewer_agent_id or "", max_lines=1).strip(),
-        "researchProjectId": trim_lines(research_project_id or "", max_lines=1).strip(),
-        "questionId": trim_lines(question_id or "", max_lines=1).strip(),
-        "sourceCollectionRunId": trim_lines(source_collection_run_id or "", max_lines=1).strip(),
-        "sourceCandidateId": trim_lines(source_candidate_id or "", max_lines=1).strip(),
-        "sourceIdentityHash": trim_lines(source_identity_hash or "", max_lines=1).strip(),
-        "evidenceLevel": trim_lines(evidence_level or "", max_lines=1).strip(),
-        "status": "pending",
-        "title": normalized_title,
-        "summary": trim_lines(summary or "", max_lines=6).strip(),
-        "content": normalized_content,
-        "tags": _unique_strings(_tk_financial.merge_financial_tags(financial_tags, tags))[:24],
-        "createdAt": now,
-        "updatedAt": now,
-        "reviewedAt": "",
-        "reviewedByAgentId": "",
-        "resolutionNote": "",
-        "batchId": "",
-        "knowledgeItemIds": [],
-    }
-    with _LOCK:
-        _append_jsonl(_proposals_path_for_owner(owner), proposal)
-        _append_audit(owner, "knowledge.proposal.created", proposal, actor_agent_id=actor_agent_id)
-    _record_event(
-        "knowledge.proposal.created",
-        owner,
-        base["knowledgeBaseId"],
-        actor_agent_id=actor_agent_id,
-        fields={"proposalId": proposal["proposalId"], "sourceArtifactCount": len(artifact_ids)},
-    )
-    return proposal
 
 
 def create_ingestion_package(
@@ -1017,128 +928,10 @@ def create_ingestion_package(
     return payload
 
 
-def review_refinement_proposal(
-    knowledge_base_id: str,
-    proposal_id: str,
-    *,
-    status: str,
-    reviewed_by_agent_id: str = "",
-    resolution_note: str = "",
-) -> dict[str, Any]:
-    owner, base = _require_base_with_owner(knowledge_base_id)
-    reviewer_id = str(reviewed_by_agent_id or "").strip()
-    _require_permission(owner, base, reviewer_id, "review")
-    normalized_status = str(status or "").strip().lower()
-    if normalized_status not in {"approved", "applied", "rejected"}:
-        raise TeamKnowledgeError("Review status must be approved, applied, or rejected.")
-    with _LOCK:
-        proposals = _read_jsonl(_proposals_path_for_owner(owner))
-        proposal = _find_by_id(proposals, "proposalId", proposal_id)
-        if not proposal or str(proposal.get("targetKnowledgeBaseId") or "") != base["knowledgeBaseId"]:
-            raise TeamKnowledgeNotFoundError("Knowledge proposal not found.")
-        if str(proposal.get("status") or "") != "pending":
-            raise TeamKnowledgeError("Only pending proposals can be reviewed.")
-        required_reviewer_id = str(proposal.get("requiredReviewerAgentId") or "").strip()
-        proposer_id = str(proposal.get("proposedByAgentId") or "").strip()
-        if required_reviewer_id and reviewer_id != required_reviewer_id:
-            raise TeamKnowledgePermissionError("This proposal must be reviewed by its designated reviewer.")
-        if required_reviewer_id and proposer_id and reviewer_id == proposer_id:
-            raise TeamKnowledgePermissionError("A designated reviewer cannot review their own proposal.")
-        if owner["ownerType"] == "team" and proposer_id and reviewer_id == proposer_id:
-            raise TeamKnowledgePermissionError("Team proposals must be reviewed by an Agent other than the proposer.")
-        if normalized_status != "rejected":
-            _tk_financial.validate_financial_proposal(
-                owner,
-                base,
-                list(proposal.get("sourceArtifactIds") or []),
-                str(proposal.get("content") or ""),
-            )
-        now = utc_now_iso()
-        proposal["status"] = "rejected" if normalized_status == "rejected" else "applied"
-        proposal["updatedAt"] = now
-        proposal["reviewedAt"] = now
-        proposal["reviewedByAgentId"] = reviewer_id
-        proposal["resolutionNote"] = trim_lines(resolution_note or "", max_lines=4).strip()
-        batch: dict[str, Any] | None = None
-        item: dict[str, Any] | None = None
-        if proposal["status"] == "applied":
-            batch = _batch_from_proposal(owner, base, proposal, reviewer_id, now)
-            item = _item_from_proposal(owner, base, proposal, batch, reviewer_id, now)
-            proposal["batchId"] = batch["batchId"]
-            proposal["knowledgeItemIds"] = [item["knowledgeItemId"]]
-            _append_jsonl(_batches_path_for_owner(owner), batch)
-            _append_jsonl(_items_path_for_owner(owner), item)
-            _append_audit(owner, "knowledge.batch.applied", batch, actor_agent_id=reviewer_id)
-        _write_jsonl(_proposals_path_for_owner(owner), proposals)
-        _append_audit(owner, "knowledge.proposal.reviewed", proposal, actor_agent_id=reviewer_id)
-    _record_event(
-        "knowledge.proposal.reviewed",
-        owner,
-        base["knowledgeBaseId"],
-        actor_agent_id=reviewer_id,
-        fields={"proposalId": proposal["proposalId"], "status": proposal["status"], "batchId": proposal.get("batchId") or ""},
-    )
-    if batch:
-        _record_event(
-            "knowledge.batch.applied",
-            owner,
-            base["knowledgeBaseId"],
-            actor_agent_id=reviewer_id,
-            fields={"batchId": batch["batchId"], "knowledgeItemCount": 1},
-        )
-    return {"proposal": proposal, "batch": batch, "item": item}
 
 
-def list_knowledge_items(knowledge_base_id: str, *, agent_id: str = "") -> dict[str, Any]:
-    owner, base = _require_base_with_owner(knowledge_base_id)
-    _require_permission(owner, base, agent_id, "read")
-    items = [
-        item
-        for item in _read_jsonl(_items_path_for_owner(owner))
-        if str(item.get("knowledgeBaseId") or "") == base["knowledgeBaseId"]
-    ]
-    items.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
-    return {
-        "schemaVersion": SCHEMA_VERSION,
-        "ownerType": owner["ownerType"],
-        "ownerId": owner["ownerId"],
-        "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
-        "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
-        "knowledgeBase": _knowledge_base_to_api(base, owner),
-        "items": items,
-        "summary": {"itemCount": len(items)},
-        "updatedAt": utc_now_iso(),
-    }
 
 
-def get_readable_knowledge_item(
-    knowledge_base_id: str,
-    knowledge_item_id: str,
-    *,
-    agent_id: str,
-) -> dict[str, Any]:
-    """Read one formal item under the same ACL and eligibility as retrieval."""
-
-    owner, base = _require_base_with_owner(knowledge_base_id)
-    _require_permission(owner, base, agent_id, "read")
-    if owner["ownerType"] == "agent" and owner["ownerId"] != str(agent_id or "").strip():
-        raise TeamKnowledgePermissionError("Agent private knowledge is only readable by its owner through this tool.")
-    if str(base.get("status") or "active") != "active":
-        raise TeamKnowledgeNotFoundError("Knowledge item not found.")
-    stored_items = _read_jsonl(_items_path_for_owner(owner))
-    item = _find_by_id(stored_items, "knowledgeItemId", str(knowledge_item_id or "").strip())
-    if not item or str(item.get("knowledgeBaseId") or "") != base["knowledgeBaseId"]:
-        raise TeamKnowledgeNotFoundError("Knowledge item not found.")
-    artifacts_by_id = {
-        str(source.get("sourceArtifactId") or ""): source
-        for source in _source_artifacts_for_base(owner, base["knowledgeBaseId"])
-    }
-    eligible = _tk_financial.eligible_financial_items(owner, base, stored_items, artifacts_by_id)
-    if eligible is not None:
-        if item["knowledgeItemId"] not in eligible:
-            raise TeamKnowledgeNotFoundError("Knowledge item not found.")
-        item = _tk_financial.financial_item_projection(item, eligible[item["knowledgeItemId"]])
-    return {**item, "ownerType": owner["ownerType"], "ownerId": owner["ownerId"]}
 
 
 def update_knowledge_item_metadata(
@@ -1204,6 +997,13 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open",
                 for source_id in [str(value or "") for value in list(proposal.get("sourceArtifactIds") or [])]
                 if source_id
             }
+            formal_source_ids = {
+                str(source_id)
+                for item in _read_jsonl(_items_path_for_owner(owner))
+                if str(item.get("knowledgeBaseId") or "") == base_id
+                for source_id in item.get("sourceArtifactIds") or []
+                if source_id
+            }
             for proposal in proposals:
                 proposal_status = str(proposal.get("status") or "")
                 task_closed = proposal_status != "pending"
@@ -1253,7 +1053,7 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open",
             if normalized_status in {"open", "all"}:
                 for artifact in _source_artifacts_for_base(owner, base_id):
                     source_id = str(artifact.get("sourceArtifactId") or "")
-                    if source_id in proposal_source_ids:
+                    if source_id in proposal_source_ids or source_id in formal_source_ids:
                         continue
                     tasks.append(
                         _governance_task(
@@ -1481,10 +1281,10 @@ def _build_knowledge_steward_workbench(
 
 
 def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str = "") -> dict[str, Any]:
-    """Return the source -> proposal -> batch -> item -> rating trail for one knowledge object."""
+    """Return relationships and version metadata without knowledge/proposal bodies."""
 
     owner, base = _require_base_with_owner(knowledge_base_id)
-    _require_permission(owner, base, agent_id, "read")
+    _tk_retrieval._require_owner_read_permission(owner, base, agent_id)
     normalized_target_id = str(target_id or "").strip()
     if not normalized_target_id:
         raise TeamKnowledgeError("Knowledge trace target id is required.")
@@ -1570,11 +1370,23 @@ def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str
                     changed = True
                 if _add_all(proposal_ids, [str(suggestion.get("proposalId") or "")]):
                     changed = True
+    states = _tk_lifecycle.lifecycle_states_for_base(
+        owner, base, items, {row["sourceArtifactId"]: row for row in artifacts},
+    )
+
+    def version_metadata(row: dict[str, Any]) -> dict[str, Any]:
+        metadata = {key: value for key, value in row.items() if key != "content"}
+        metadata.update(contentLength=len(str(row.get("content") or "")), contentSha256=_tk_lifecycle.content_sha256(row))
+        if row.get("knowledgeItemId"):
+            metadata["knowledgeState"] = states.get(row["knowledgeItemId"], "unknown")
+            metadata["revision"] = int(row.get("revision") or 1)
+        return metadata
+
     nodes = {
         "sourceArtifacts": [item for item in artifacts if str(item.get("sourceArtifactId") or "") in source_ids],
-        "proposals": [item for item in proposals if str(item.get("proposalId") or "") in proposal_ids],
+        "proposals": [version_metadata(item) for item in proposals if str(item.get("proposalId") or "") in proposal_ids],
         "batches": [item for item in batches if str(item.get("batchId") or "") in batch_ids],
-        "items": [item for item in items if str(item.get("knowledgeItemId") or "") in item_ids],
+        "items": [version_metadata(item) for item in items if str(item.get("knowledgeItemId") or "") in item_ids],
         "ratingSuggestions": [item for item in suggestions if str(item.get("suggestionId") or "") in suggestion_ids],
     }
     local_copies = _local_copies_from_source_artifacts(nodes["sourceArtifacts"])
@@ -1925,199 +1737,6 @@ def review_rating_suggestion(
     return {"suggestion": suggestion, "item": applied_item}
 
 
-def search_knowledge_items(
-    *,
-    agent_id: str = "",
-    query: str = "",
-    team_id: str = "",
-    owner_type: str = "",
-    owner_id: str = "",
-    knowledge_base_id: str = "",
-    research_project_id: str = "",
-    question_id: str = "",
-    source_collection_run_id: str = "",
-    tags: list[str] | None = None,
-    source_type: str = "",
-    importance_level: str = "",
-    confidence_min: float | None = None,
-    stability: str = "",
-    created_from: str = "",
-    created_to: str = "",
-    search_mode: str = "exact",
-    limit: int = 25,
-) -> dict[str, Any]:
-    _sync_roots()
-    normalized_query = trim_lines(query or "", max_lines=4).strip().lower()
-    normalized_team_id = str(team_id or "").strip()
-    normalized_owner_type = _normalize_owner_type(owner_type)
-    normalized_owner_id = str(owner_id or "").strip()
-    scoped_owner_type, scoped_owner_id, normalized_base_id = _parse_owner_scoped_knowledge_base_id(knowledge_base_id)
-    normalized_owner_type = normalized_owner_type or scoped_owner_type
-    normalized_owner_id = normalized_owner_id or scoped_owner_id
-    normalized_tags = {item.lower() for item in _unique_strings(tags or [])}
-    normalized_research_project_id = str(research_project_id or "").strip()
-    normalized_question_id = str(question_id or "").strip()
-    normalized_source_collection_run_id = str(source_collection_run_id or "").strip()
-    normalized_source_type = str(source_type or "").strip()
-    if normalized_source_type and normalized_source_type not in SOURCE_TYPES:
-        raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
-    normalized_importance = _enum_value(importance_level, IMPORTANCE_LEVELS, "importance level") if importance_level else ""
-    normalized_stability = _enum_value(stability, STABILITY_VALUES, "stability") if stability else ""
-    normalized_search_mode = str(search_mode or "exact").strip().lower()
-    if normalized_search_mode not in KNOWLEDGE_SEARCH_MODES:
-        raise TeamKnowledgeError(f"Unsupported knowledge search mode: {search_mode}")
-    bounded_limit = max(1, min(100, int(limit or 25)))
-    score_after_scan = normalized_search_mode == "bm25"
-    results: list[dict[str, Any]] = []
-    scanned_bases = 0
-    owner_candidates = _iter_knowledge_owners(agent_id=agent_id, include_archived=True)
-    if normalized_owner_type and normalized_owner_id and not any(
-        str(owner.get("ownerType") or "") == normalized_owner_type and str(owner.get("ownerId") or "") == normalized_owner_id
-        for owner in owner_candidates
-    ):
-        owner_candidates.append(_owner_context(normalized_owner_type, normalized_owner_id))
-    if normalized_base_id and not (normalized_owner_type and normalized_owner_id):
-        visible_matches = [
-            owner
-            for owner in owner_candidates
-            for base in _knowledge_bases_for_owner(owner)
-            if str(base.get("knowledgeBaseId") or "") == normalized_base_id
-            and _can_access(owner, base, agent_id, "read")
-        ]
-        unique_owner_keys = {
-            (str(owner.get("ownerType") or ""), str(owner.get("ownerId") or ""))
-            for owner in visible_matches
-        }
-        if len(unique_owner_keys) > 1:
-            raise TeamKnowledgeAmbiguousKnowledgeBaseError(
-                "Knowledge base id is ambiguous across owners; use scopedKnowledgeBaseId."
-            )
-    for owner in owner_candidates:
-        current_owner_type = str(owner.get("ownerType") or "").strip()
-        current_owner_id = str(owner.get("ownerId") or "").strip()
-        if normalized_owner_type and current_owner_type != normalized_owner_type:
-            continue
-        if normalized_owner_id and current_owner_id != normalized_owner_id:
-            continue
-        if normalized_team_id and not (current_owner_type == "team" and current_owner_id == normalized_team_id):
-            continue
-        readable_bases = [
-            base
-            for base in _knowledge_bases_for_owner(owner)
-            if (not normalized_base_id or str(base.get("knowledgeBaseId") or "") == normalized_base_id)
-            and _can_access(owner, base, agent_id, "read")
-        ]
-        if not readable_bases:
-            continue
-        owner_artifacts = _read_jsonl(_source_artifacts_path_for_owner(owner))
-        stored_items = _read_jsonl(_items_path_for_owner(owner))
-        for base in readable_bases:
-            base_id = str(base.get("knowledgeBaseId") or "")
-            scanned_bases += 1
-            artifacts_by_id = {
-                str(artifact.get("sourceArtifactId") or ""): _public_source_artifact(artifact)
-                for artifact in owner_artifacts
-                if str(artifact.get("knowledgeBaseId") or "") == base_id
-                and str(artifact.get("sourceArtifactId") or "")
-            }
-            financial_items = _tk_financial.eligible_financial_items(owner, base, stored_items, artifacts_by_id)
-            for item in stored_items:
-                if financial_items is not None and item.get("knowledgeItemId") not in financial_items:
-                    continue
-                if financial_items is not None:
-                    item = _tk_financial.financial_item_projection(item, financial_items[item["knowledgeItemId"]])
-                if str(item.get("knowledgeBaseId") or "") != base_id:
-                    continue
-                linked_artifacts = {
-                    source_id: artifacts_by_id[source_id]
-                    for source_id in [str(value or "") for value in list(item.get("sourceArtifactIds") or [])]
-                    if source_id in artifacts_by_id
-                }
-                search_document = _knowledge_item_search_document(item, linked_artifacts)
-                if not _item_matches_filters(
-                    item,
-                    query="" if score_after_scan else normalized_query,
-                    tags=normalized_tags,
-                    source_type=normalized_source_type,
-                    importance_level=normalized_importance,
-                    confidence_min=confidence_min,
-                    stability=normalized_stability,
-                    created_from=created_from,
-                    created_to=created_to,
-                    artifacts_by_id=linked_artifacts,
-                    search_mode=normalized_search_mode,
-                    research_project_id=normalized_research_project_id,
-                    question_id=normalized_question_id,
-                    source_collection_run_id=normalized_source_collection_run_id,
-                    search_document=search_document,
-                ):
-                    continue
-                view = _search_item_view(
-                    item,
-                    base,
-                    owner,
-                    linked_artifacts,
-                    query=normalized_query,
-                    search_document=search_document,
-                )
-                view["_searchDocument"] = search_document
-                if financial_items is not None:
-                    view["financialEvidence"] = financial_items[item["knowledgeItemId"]]
-                if score_after_scan:
-                    view["semanticScore"] = 1.0 if not normalized_query else 0.0
-                    view["searchMode"] = normalized_search_mode
-                    view["matchReason"] = "no_query" if not normalized_query else "metadata_filter"
-                else:
-                    score = _semantic_match_score(search_document, normalized_query) if normalized_query else 1.0
-                    if normalized_query and normalized_search_mode == "semantic" and score <= 0:
-                        continue
-                    view["semanticScore"] = score
-                    view["searchMode"] = normalized_search_mode
-                    view["matchReason"] = _search_match_reason(search_document, normalized_query, score)
-                results.append(view)
-    if score_after_scan:
-        results = _rank_bm25_search_results(results, normalized_query)
-        if normalized_query:
-            results = [item for item in results if float(item.get("semanticScore") or 0.0) > 0]
-        results = results[:bounded_limit]
-    else:
-        results.sort(key=lambda item: (float(item.get("semanticScore") or 0.0), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
-        results = results[:bounded_limit]
-    for result in results:
-        result.pop("_searchDocument", None)
-    _record_event(
-        "knowledge.search.executed",
-        normalized_team_id,
-        normalized_base_id,
-        actor_agent_id=agent_id,
-        fields={"queryLength": len(normalized_query), "resultCount": len(results), "scannedKnowledgeBaseCount": scanned_bases},
-    )
-    return {
-        "schemaVersion": SCHEMA_VERSION,
-        "agentId": str(agent_id or "").strip(),
-        "filters": {
-            "query": normalized_query,
-            "teamId": normalized_team_id,
-            "ownerType": normalized_owner_type,
-            "ownerId": normalized_owner_id,
-            "knowledgeBaseId": normalized_base_id,
-            "researchProjectId": normalized_research_project_id,
-            "questionId": normalized_question_id,
-            "sourceCollectionRunId": normalized_source_collection_run_id,
-            "tags": sorted(normalized_tags),
-            "sourceType": normalized_source_type,
-            "importanceLevel": normalized_importance,
-            "confidenceMin": confidence_min,
-            "stability": normalized_stability,
-            "createdFrom": str(created_from or "").strip(),
-            "createdTo": str(created_to or "").strip(),
-            "searchMode": normalized_search_mode,
-            "limit": bounded_limit,
-        },
-        "summary": {"resultCount": len(results), "scannedKnowledgeBaseCount": scanned_bases},
-        "results": results,
-        "updatedAt": utc_now_iso(),
-    }
 
 
 def get_knowledge_operations_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
@@ -2192,7 +1811,14 @@ def _compute_knowledge_operations_health(*, agent_id: str = "", internal: bool =
                 for source_id in list(proposal.get("sourceArtifactIds") or [])
                 if str(source_id or "").strip()
             }
-            orphan_sources = [item for item in artifacts if str(item.get("sourceArtifactId") or "") not in proposal_source_ids]
+            formal_source_ids = {
+                str(source_id) for item in items for source_id in list(item.get("sourceArtifactIds") or [])
+                if str(source_id or "").strip()
+            }
+            orphan_sources = [
+                item for item in artifacts
+                if str(item.get("sourceArtifactId") or "") not in proposal_source_ids | formal_source_ids
+            ]
             pending_proposals = [item for item in proposals if str(item.get("status") or "") == "pending"]
             pending_suggestions = [item for item in suggestions if str(item.get("status") or "") == "pending"]
             unrated_items = [
@@ -3062,6 +2688,28 @@ financial_item_projection = _tk_financial.financial_item_projection
 
 update_owner_source_governance = _tk_source_inbox.update_owner_source_governance
 ensure_owner_source_review_grant = _tk_source_inbox.ensure_owner_source_review_grant
+# Canonical governance, eligibility and bounded source reads share one public entry.
+create_refinement_proposal = _tk_governance.create_refinement_proposal
+review_refinement_proposal = _tk_governance.review_refinement_proposal
+list_knowledge_items = _tk_retrieval.list_knowledge_items
+get_readable_knowledge_item = _tk_retrieval.get_readable_knowledge_item
+search_knowledge_items = _tk_retrieval.search_knowledge_items
+
+
+def build_knowledge_index(knowledge_base_id: str, *, agent_id: str, prepare_model: bool = False) -> dict[str, Any]:
+    from .team_knowledge import semantic
+    return semantic.build_knowledge_index(knowledge_base_id, agent_id=agent_id, prepare_model=prepare_model)
+
+
+def get_semantic_index_health(*, agent_id: str = "", internal: bool = False) -> dict[str, Any]:
+    from .team_knowledge import semantic
+    return semantic.get_semantic_index_health(agent_id=agent_id, internal=internal)
+
+
+set_knowledge_source_lifecycle = _tk_lifecycle.set_knowledge_source_lifecycle
+list_knowledge_item_versions = _tk_lifecycle.list_knowledge_item_versions
+read_knowledge_source_snapshot = _tk_lifecycle.read_knowledge_source_snapshot
+
 collect_source_to_inbox = _tk_source_inbox.collect_source_to_inbox
 collect_session_attachment_to_inbox = _tk_source_inbox.collect_session_attachment_to_inbox
 list_owner_source_inbox = _tk_source_inbox.list_owner_source_inbox

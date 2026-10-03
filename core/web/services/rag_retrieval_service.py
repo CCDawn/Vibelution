@@ -29,6 +29,9 @@ def get_rag_retrieval_health(*, agent_id: str = "", internal: bool = False) -> d
 
     normalized_agent_id = str(agent_id or "").strip()
     vector_health = rag_vector_index_service.get_vector_index_health(agent_id=normalized_agent_id, internal=internal)
+    from .team_knowledge_service import get_semantic_index_health
+
+    semantic_health = get_semantic_index_health(agent_id=normalized_agent_id, internal=internal)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "agentId": normalized_agent_id,
@@ -38,11 +41,14 @@ def get_rag_retrieval_health(*, agent_id: str = "", internal: bool = False) -> d
             {
                 "provider": "local",
                 "status": "ready",
-                "vectorEnabled": False,
+                "vectorEnabled": semantic_health["vectorEnabled"],
                 "bm25Enabled": True,
-                "semanticBackend": "local_token_overlap",
-                "embeddingEnabled": False,
-                "indexedItemCount": 0,
+                "semanticBackend": "fastembed",
+                "embeddingEnabled": semantic_health["vectorEnabled"],
+                "semanticStatus": semantic_health["status"],
+                "embeddingModel": semantic_health["embeddingModel"],
+                "modelPrepared": semantic_health["modelPrepared"],
+                "indexedItemCount": semantic_health["indexedItemCount"],
                 "staleItemCount": 0,
             },
             {
@@ -59,7 +65,7 @@ def get_rag_retrieval_health(*, agent_id: str = "", internal: bool = False) -> d
                 "lastIndexedAt": str(vector_health.get("lastIndexedAt") or ""),
             },
         ],
-        "retrievalPolicy": _retrieval_policy("local"),
+        "retrievalPolicy": _retrieval_policy("local", embedding_enabled=semantic_health["vectorEnabled"]),
         "updatedAt": utc_now_iso(),
     }
 
@@ -80,6 +86,7 @@ def retrieve_rag_contexts(
     provider: str = "local",
     top_k: int = DEFAULT_TOP_K,
     max_context_chars: int = DEFAULT_CONTEXT_CHARS,
+    private_memory_enabled: bool = True,
 ) -> dict[str, Any]:
     """Return compact, cited context blocks from reviewed Team Knowledge.
 
@@ -116,6 +123,7 @@ def retrieve_rag_contexts(
         tags=tags or [],
         search_mode=normalized_mode,
         limit=normalized_top_k,
+        **({"private_memory_enabled": False} if not private_memory_enabled else {}),
     )
     contexts = [
         _context_from_search_result(
@@ -133,6 +141,7 @@ def retrieve_rag_contexts(
     return {
         "schemaVersion": SCHEMA_VERSION,
         "agentId": str(agent_id or "").strip(),
+        **({"semanticRetrieval": search_payload["semanticRetrieval"]} if "semanticRetrieval" in search_payload else {}),
         "request": {
             "queryLength": len(normalized_query),
             "teamId": str(team_id or "").strip(),
@@ -157,7 +166,8 @@ def retrieve_rag_contexts(
         "contexts": contexts,
         "citations": citations,
         "retrievalPolicy": {
-            **_retrieval_policy(normalized_provider),
+            **_retrieval_policy(normalized_provider, embedding_enabled=bool((search_payload.get("semanticRetrieval") or {}).get("indexedCandidateCount", 0))
+                                and (search_payload.get("semanticRetrieval") or {}).get("effectiveMode") in {"semantic", "hybrid"}),
         },
         "updatedAt": utc_now_iso(),
     }
@@ -312,7 +322,7 @@ def _scoped_knowledge_base_id(record: dict[str, Any]) -> str:
     return str(record.get("scopedKnowledgeBaseId") or "").strip()
 
 
-def _retrieval_policy(provider: str) -> dict[str, Any]:
+def _retrieval_policy(provider: str, *, embedding_enabled: bool = False) -> dict[str, Any]:
     return {
         "provider": str(provider or "local").strip().lower() or "local",
         "honorsKnowledgeAcl": True,
@@ -320,8 +330,8 @@ def _retrieval_policy(provider: str) -> dict[str, Any]:
         "mutatesFormalKnowledge": False,
         "injectsPromptByDefault": False,
         "supportedRetrievalModes": sorted(SUPPORTED_RETRIEVAL_MODES),
-        "semanticBackend": "local_token_overlap",
-        "embeddingEnabled": False,
+        "semanticBackend": "fastembed",
+        "embeddingEnabled": bool(embedding_enabled),
     }
 
 

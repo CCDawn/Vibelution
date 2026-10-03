@@ -20,6 +20,16 @@ const styles = {
   formActionRow: `formActionRow min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full`,
   knowledgeFormGrid:
     "knowledgeFormGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  linkedSourceLifecycle:
+    `linkedSourceLifecycle min-w-0 grid gap-1.5 ${vuiFlatPanelClass} p-2`,
+  linkedSourceRow:
+    `linkedSourceRow min-w-0 grid gap-1.5 ${vuiOpaqueRowClass} p-2 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]`,
+  lifecycleError:
+    "lifecycleError min-w-0 [font-size:var(--vui-font-xs)] text-[var(--state-error)]",
+  lifecycleNotice:
+    "lifecycleNotice min-w-0 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  lifecycleReasonField:
+    "lifecycleReasonField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_textarea]:w-full",
   managementHeader:
     "managementHeader min-w-0 flex flex-wrap items-center gap-1.5",
   managementPanel: `managementPanel min-w-0 ${vuiFlatPanelClass} p-2`,

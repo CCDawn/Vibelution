@@ -20,6 +20,8 @@
 | RAG **向量索引元数据**（可选 local vector） | `rag_vector_index_service.py` | 索引层当 KB SSOT；cleanup 不走 preview grant |
 | **统一只读搜索**（Agent/Team memory + 可选 user content） | `unified_knowledge_search_service.py` | unified search 写删除/索引；把 tool 授权塞进来 |
 | **正式知识全文分页回读**（Agent 工具） | `knowledge_read_service.py` → `team_knowledge_service.get_readable_knowledge_item` | 任意来源路径读取、绕过 ACL/MemoryPolicy、读取其他 Agent 私有正文 |
+| 受审修订、版本历史、来源撤回/过期 | `team_knowledge/governance.py` + `lifecycle.py` + `retrieval.py` | 覆写旧正文；过期来源恢复后自动复活旧结论 |
+| 真实中文语义索引/混合排序 | `team_knowledge/semantic.py` + `knowledge_embeddings.py` | 查询时下载模型；用词重合度冒充向量检索 |
 | 用户 Markdown 空间（import/index/delete 语义） | `user_content_markdown_service.py`（route：`user_content.py`） | 与 formal knowledge JSONL 混写同一 owner 路径 |
 | 外部 Skill Library 索引/搜索 | `skill_library_service.py` | 与 team_knowledge 双写同一路径 |
 | 开源 GitHub 项目索引（默认主干浅克隆 + 生成 INDEX） | `github_project_library_service.py` | 把整仓正文写入 KnowledgeItem / RAG；未落盘就把网页当结论 |
@@ -28,7 +30,9 @@
 
 **「谁负责硬删除？」** → 仅 `memory_cleanup_service.execute_memory_cleanup`（需 preview token + 确认短语 `硬删除记忆`）；KB 行级删除仍走其 target 编排，不得散落各 service。
 
-**「谁负责索引？」** → formal knowledge 内容 SSOT 在 `team_knowledge/*`；可选 vector 元数据在 `rag_vector_index_service`；BM25/semantic 检索编排看 `rag_retrieval_service` + `team_knowledge/search_ranking.py`（纯函数，不写盘）。
+**「谁负责索引？」** → formal knowledge 内容 SSOT 在 `team_knowledge/*`。`rag_vector_index_service` 保存 owner-scoped 派生向量和全文指纹；`knowledge_semantic_service` 按完整正文分块，用 FastEmbed BGE 中文模型构建，混合检索采用 BM25 + cosine 的 RRF。查询先由 canonical ACL/lifecycle 选出候选，再读取其索引，不能截断候选后才排序。旧 metadata-only 记录不代表 semantic ready，未准备或过期时返回明确状态。模型下载只由显式 prepare/build 触发，审核同步仅处理当前新条目且只用本地权重。
+
+修订不覆写 `items.jsonl` 的旧正文：新条目使用独立 ID 与 `revision/rootKnowledgeItemId/supersedesKnowledgeItemId/contentSha256`；提案创建和审核都检查父正文哈希，防止并发覆盖。来源撤回/过期修改 owner-local SourceArtifact，原始文件保留；重新激活来源不能使旧知识自动复活，须新修订审核。受控 `readMode=source` 只读取直接关联、路径与 SHA 校验通过的 UTF-8 中央文本快照；历史读取只返回版本元数据。
 
 ---
 
@@ -67,15 +71,19 @@
 
 检索的匹配与排序使用完整正式正文及该条目关联来源的标题/摘要，跨可读库排序后取 Top K；
 响应保留旧 `content` 摘录并新增有界 `matchedExcerpt`，统一搜索和 RAG 优先使用命中段落。
-`semantic` 当前是 `local_token_overlap`，RAG health/policy 明示 `embeddingEnabled=false`，
-不把本地关键词服务就绪解释为向量语义能力就绪。
+`semantic` 使用本地 FastEmbed 向量，`hybrid` 结合 BM25 与 cosine 排名；查询不会准备或下载模型，
+只有显式 prepare/build 才会触发模型准备。RAG health/policy 分别报告模型就绪和索引覆盖情况。
+向量缺失或不可用时，`hybrid` 会回退到 BM25，并通过 `semanticRetrieval.status/reason/effectiveMode/impact`
+说明实际检索能力；纯 `semantic` 不会伪装成关键词结果。知识审核先写入 canonical item，再尝试同步派生索引；
+同步失败不撤销已审核正文，`semanticIndex` 会报告失败状态，索引可通过显式 build 重建。
 
 正式条目的 `content` 当前可能包含知识管家保存的 JSON 审计包；本轮检索和回读保持其
 原始含义，不解包、不改写存量数据。审计字段或候选文献清单仍可能命中，不能把每一次
 匹配都解释为已核实的知识结论；知识正文与治理元数据的读取投影需要独立确定契约。
 
 `read_knowledge_item_tool` 绑定当前 Agent 和 MemoryPolicy，按字符分页正式条目正文；
-返回 `hasMore/nextOffset`、来源引用和不可信材料标记，不沿 `centralPath/localCopies` 打开文件。
+返回 `hasMore/nextOffset`、来源引用和不可信材料标记。`item` 模式只读取当前正文及来源引用；
+`source` 模式经关联、owner 路径边界和哈希校验后读取中央文本快照，不接受调用者提供的文件路径。
 原始来源正文未读时明确返回 `sourceBodyStatus=source_body_unavailable`；财务证据资格由
 正式知识 facade 校验，失效或已归档内容不通过该工具回读。运营健康检查通过请求内读取计数
 报告 JSONL 坏行和 I/O 失败，不输出原始行、正文或存储路径。

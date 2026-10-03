@@ -24,6 +24,12 @@ const styles = {
   ragPreviewHeader:
     "ragPreviewHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
   ragPreviewPanel: `ragPreviewPanel min-w-0 ${vuiFlatPanelClass} p-2`,
+  semanticIndexPanel: `semanticIndexPanel min-w-0 grid gap-1.5 ${vuiFlatPanelClass} p-2`,
+  semanticIndexHeader: "semanticIndexHeader min-w-0 flex flex-wrap items-center justify-between gap-2",
+  semanticIndexStatus: "semanticIndexStatus min-w-0 flex flex-wrap items-center gap-2 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  semanticIndexMeta: "semanticIndexMeta min-w-0 flex flex-wrap items-center gap-2 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  semanticIndexNote: "semanticIndexNote min-w-0 [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--fg-tertiary)]",
+  semanticIndexError: "semanticIndexError min-w-0 [font-size:var(--vui-font-xs)] leading-relaxed text-[var(--state-error)]",
 } as const;
 
 export default styles;

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileSearch, FolderCog, Import, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, FileSearch, FolderCog, Import, Search } from "lucide-react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 import {
   fetchUserMarkdownSpacePage,
@@ -23,7 +23,7 @@ import type {
   UserMarkdownSpaceSearchPayload,
   UserMarkdownSpaceSummary,
 } from "../api/types";
-import { VButton, VNativeInput, VStateSurface, VStringSelect } from "../components/vui";
+import { VButton, VNativeButton, VNativeInput, VStateSurface, VStringSelect } from "../components/vui";
 import styles from "./MemoryUserContentPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
@@ -98,6 +98,8 @@ function sourceRefPreview(sourceRef?: Record<string, unknown>) {
 export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUserContentPanelProps) {
   const queryClient = useQueryClient();
   const userId = String(defaultUserId || "default").trim() || "default";
+  const contentPanelId = useId();
+  const [contentExpanded, setContentExpanded] = useState(false);
   const [sourcePath, setSourcePath] = useState("");
   const [spaceName, setSpaceName] = useState("");
   const [selectedSpaceId, setSelectedSpaceId] = useState("");
@@ -126,7 +128,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
   }, [selectedSpaceId, spaces]);
 
   const pagesQuery = useQuery({
-    enabled: Boolean(selectedSpaceId),
+    enabled: contentExpanded && Boolean(selectedSpaceId),
     queryKey: queryKeys.userMarkdownSpacePages(userId, selectedSpaceId, searchQuery, tagFilter),
     queryFn: () =>
       listUserMarkdownSpacePages<UserMarkdownSpacePageListPayload>(selectedSpaceId, {
@@ -149,7 +151,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
   }, [pages, selectedPageId]);
 
   const pageQuery = useQuery({
-    enabled: Boolean(selectedSpaceId && selectedPageId),
+    enabled: contentExpanded && Boolean(selectedSpaceId && selectedPageId),
     queryKey: queryKeys.userMarkdownSpacePage(userId, selectedSpaceId, selectedPageId),
     queryFn: () =>
       fetchUserMarkdownSpacePage<UserMarkdownSpacePagePayload>(selectedSpaceId, selectedPageId, {
@@ -158,7 +160,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
   });
 
   const searchResultsQuery = useQuery({
-    enabled: Boolean(searchQuery.trim()),
+    enabled: contentExpanded && Boolean(searchQuery.trim()),
     queryKey: queryKeys.userMarkdownSpaceSearch(userId, searchQuery, selectedSpaceId, 10),
     queryFn: () =>
       searchUserMarkdownSpaces<UserMarkdownSpaceSearchPayload>({
@@ -220,9 +222,27 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
           <p className={styles.panelEyebrow}>User Markdown</p>
           <h2>用户内容</h2>
         </div>
-        <span className={styles.badge}>{spacesQuery.data?.summary.spaceCount ?? spaces.length}</span>
+        <div className={styles.headerActions}>
+          <span className={styles.badge}>{spacesQuery.data?.summary.spaceCount ?? spaces.length}</span>
+          <VNativeButton
+            type="button"
+            className={styles.contentToggle}
+            aria-controls={contentPanelId}
+            aria-expanded={contentExpanded}
+            data-testid="memory-user-content-toggle"
+            onClick={() => setContentExpanded((current) => !current)}
+          >
+            {contentExpanded ? "收起" : "展开"}
+            <ChevronDown
+              aria-hidden="true"
+              size={14}
+              className={contentExpanded ? styles.contentToggleIconExpanded : styles.contentToggleIcon}
+            />
+          </VNativeButton>
+        </div>
       </div>
 
+      <div id={contentPanelId} hidden={!contentExpanded} className={contentExpanded ? styles.content : undefined}>
       <div className={styles.toolbar}>
         <section className={styles.panel}>
           <div className={styles.panelHeader}>
@@ -443,6 +463,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
             ) : null}
           </div>
         </section>
+      </div>
       </div>
     </section>
   );

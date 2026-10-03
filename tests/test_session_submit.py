@@ -185,7 +185,18 @@ def test_submit_entrypoint_reuses_one_journal_backed_turn_in_development_mode(
         str(development_root),
     )
     _seed_chat_state(tmp_path)
-    _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    seeded_agent = _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
+    resolved_reference_context: dict = {}
+
+    def capture_knowledge_reference_context(_session_id, _references, **kwargs):
+        resolved_reference_context.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        submit.conversation_references,
+        "resolve_knowledge_file_references",
+        capture_knowledge_reference_context,
+    )
     scheduled_contexts: list[dict] = []
     monkeypatch.setattr(
         session_service,
@@ -199,6 +210,7 @@ def test_submit_entrypoint_reuses_one_journal_backed_turn_in_development_mode(
             "development journal bridge",
             client_submission_id="submission-development-1",
             mental_model_enabled=False,
+            references=[{"kind": "knowledge_base", "knowledgeBaseId": "kb-test"}],
         )
         retried = submit.submit_session_message_lightweight(
             session_id,
@@ -215,6 +227,7 @@ def test_submit_entrypoint_reuses_one_journal_backed_turn_in_development_mode(
         assert first["turnId"]
         assert retried["accepted"] is True
         assert retried["turnId"] == first["turnId"]
+        assert resolved_reference_context["memory_policy"] == (seeded_agent.get("memoryPolicy") or {})
         assert [event.event_type for event in matching_events] == [
             EVENT_TURN_STARTED,
             EVENT_USER_MESSAGE,
@@ -784,6 +797,92 @@ def test_submit_acceptance_window_failure_settles_running_turn(tmp_path: Path, m
         assert len(admission_failure_events) == 1
         assert admission_failure_events[0]["fields"]["failedStage"] == "initial_journal_markers"
         assert admission_failure_events[0]["fields"]["errorType"] == "TimeoutError"
+    finally:
+        _reset_seeded_session_runtime(session_id)
+
+
+def test_running_work_run_persist_failure_settles_and_allows_same_session_retry(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A failed running snapshot write must release admission state for retry."""
+
+    from core.web.services import agent_directory_service
+
+    session_id = "session-running-work-run-persist-failure"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, [session_id])
+
+    fail_first_running_snapshot = True
+    work_run_calls: list[dict] = []
+
+    def persist_work_run(**kwargs):
+        nonlocal fail_first_running_snapshot
+        if kwargs.get("status") == "running" and fail_first_running_snapshot:
+            fail_first_running_snapshot = False
+            raise OSError("work-run snapshot lock path is unavailable")
+        work_run_calls.append(dict(kwargs))
+
+    monkeypatch.setattr(session_service, "_persist_chat_turn_work_run", persist_work_run)
+    scheduled_turns: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_turns.append(dict(context)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_submit_session_cycle_message_projection",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_enqueue_direct_session_submit_kernel_trace",
+        lambda **kwargs: None,
+    )
+    scene_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda component, phase, event_code, **kwargs: scene_events.append(
+            {"component": component, "phase": phase, "event_code": event_code, **kwargs}
+        ),
+    )
+
+    try:
+        with pytest.raises(OSError, match="work-run snapshot lock path is unavailable"):
+            submit.submit_session_message_lightweight(
+                session_id,
+                "first submit hits snapshot failure",
+                mental_model_enabled=False,
+            )
+
+        assert session_service._is_session_running(session_id) is False
+        assert session_service._get_session_turn_control(session_id) is None
+        with session_service._RUNNING_SESSIONS_LOCK:
+            assert session_id not in session_service._SESSION_ACTIVE_TURN_IDS
+            assert session_id not in session_service._SESSION_ACTIVE_TURN_LEASES
+        failed_calls = [call for call in work_run_calls if call.get("status") == "failed"]
+        assert failed_calls, "expected the admitted turn work run to be settled as failed"
+        assert failed_calls[0]["session_id"] == session_id
+        assert failed_calls[0]["leases"]
+        assert scheduled_turns == [], "the failed admission must not reach the worker scheduler"
+        failure_events = [
+            event for event in scene_events if event["event_code"] == "conversation.submit.admission_window_failed"
+        ]
+        assert len(failure_events) == 1
+        assert failure_events[0]["fields"]["failedStage"] == "work_run_running"
+        assert failure_events[0]["fields"]["errorType"] == "OSError"
+
+        retry = submit.submit_session_message_lightweight(
+            session_id,
+            "retry after snapshot failure",
+            mental_model_enabled=False,
+        )
+        assert retry["accepted"] is True
+        assert [context["user_message"] for context in scheduled_turns] == ["retry after snapshot failure"]
+        running_retry_calls = [call for call in work_run_calls if call.get("status") == "running"]
+        assert len(running_retry_calls) == 1
     finally:
         _reset_seeded_session_runtime(session_id)
 

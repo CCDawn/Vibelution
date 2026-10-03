@@ -906,6 +906,20 @@ def review_owner_inbox_source(
         s._write_jsonl(s._owner_source_index_path(owner), sources)
         s._rewrite_owner_source_review_queue_locked(owner, sources)
         s._append_audit(owner, "knowledge.source_inbox.reviewed", source, actor_agent_id=reviewer_id)
+    if direct_ingestion and direct_ingestion.get("item"):
+        try:
+            from .semantic import sync_reviewed_item
+
+            direct_ingestion["semanticIndex"] = sync_reviewed_item(
+                direct_ingestion["knowledgeBaseId"],
+                direct_ingestion["item"],
+                agent_id=reviewer_id,
+            )
+        except Exception:
+            # The canonical review and item writes are already complete. Keep
+            # indexing failure visible without turning a committed ingestion
+            # into a failed review response.
+            direct_ingestion["semanticIndex"] = {"status": "failed", "reason": "index_sync_failed"}
     s._record_event(
         "knowledge.source_inbox.reviewed",
         owner,
@@ -1109,6 +1123,15 @@ def _direct_ingest_accepted_source_locked(
         "markingReason": "",
         "ingestionMode": "source_review_direct",
     }
+    source_revisions = s._tk_lifecycle.require_active_sources(
+        owner,
+        base,
+        [source_artifact["sourceArtifactId"]],
+    )
+    item = s._tk_lifecycle.decorate_revision_item(
+        item,
+        {"sourceLifecycleRevisions": source_revisions},
+    )
     s._append_jsonl(s._batches_path_for_owner(owner), batch)
     s._append_jsonl(s._items_path_for_owner(owner), item)
     s._append_audit(owner, "knowledge.item.direct_ingested", item, actor_agent_id=reviewer_id)
@@ -1177,7 +1200,7 @@ def _write_owner_inbox_source_file(
     path.parent.mkdir(parents=True, exist_ok=True)
     write_path = s._extended_fs_path(path)
     if str(original_content or ""):
-        write_path.write_text(str(original_content), encoding="utf-8")
+        write_path.write_text(str(original_content), encoding="utf-8", newline="")
     else:
         write_path.write_text(
             json.dumps(
@@ -1238,6 +1261,9 @@ def _promote_owner_source_to_central_locked(
             "title": trim_lines(str(source.get("title") or ""), max_lines=1).strip(),
             "summary": trim_lines(str(source.get("summary") or ""), max_lines=16).strip(),
             "centralPath": s._project_relative_path(central_path),
+            "snapshotYear": central_path.parent.parent.name,
+            "snapshotFilename": central_path.name,
+            "snapshotSha256": hashlib.sha256(central_path.read_bytes()).hexdigest(),
             "localCopies": local_copies,
             "originOwnerType": owner["ownerType"],
             "originOwnerId": owner["ownerId"],

@@ -407,21 +407,32 @@ def _execute_target(target: CleanupTarget, *, before: dict[str, Any] | None = No
     before = before or _preview_target(target)
     results: list[dict[str, Any]] = []
     if target.target_type == "global_runtime_memory":
+        # Runtime memory uses workspace/memory, selected SQLite tables, and
+        # STATE_MEMORY.md. Formal knowledge owners and the derived RAG index
+        # live in separate stores and are intentionally outside this target.
         for cleanup_path in _paths_for_target(target):
             results.append(_execute_global_path(cleanup_path))
     elif target.target_type == "sqlite_database_compact":
         for cleanup_path in _paths_for_target(target):
             results.append(_execute_compact_path(cleanup_path))
-    elif target.target_type == "knowledge_base":
-        results.extend(_remove_knowledge_base_records(target))
-        results.extend(_delete_vector_records_for_target(target))
+    elif target.target_type in {"knowledge_base", "agent_formal_knowledge", "team_knowledge"}:
+        # Semantic publication uses this same knowledge -> index lock order
+        # while it revalidates the canonical item and writes its derived vector.
+        # Keep hard deletion in one critical section so a publisher already past
+        # validation either finishes first (and is deleted here) or sees the
+        # missing canonical item afterward. Embedding/inference stays outside.
+        with team_knowledge_service._LOCK, rag_vector_index_service._LOCK:
+            if target.target_type == "knowledge_base":
+                results.extend(_remove_knowledge_base_records(target))
+            else:
+                for cleanup_path in _paths_for_target(target):
+                    results.append(_execute_delete_path(cleanup_path))
+            results.extend(_delete_vector_records_for_target(target))
     elif target.target_type == "agent_memory_policy":
         results.append(_reset_agent_memory_policy(target.agent_id))
     else:
         for cleanup_path in _paths_for_target(target):
             results.append(_execute_delete_path(cleanup_path))
-        if target.target_type in {"agent_formal_knowledge", "team_knowledge"}:
-            results.extend(_delete_vector_records_for_target(target))
     counts = _counts_from_execution(before, results)
     failed_count = sum(1 for result in results if result.get("status") == "failed")
     if failed_count == len(results) and failed_count > 0:

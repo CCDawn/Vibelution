@@ -309,6 +309,22 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("setActiveItemId(flatVisibleItems[0]?.item.id ?? \"\")");
   });
 
+  it("keeps the knowledge workspace reachable through the existing responsive VCanvas drawers", () => {
+    const knowledgeViewIndex = routeSource.indexOf("const renderKnowledgeView = () => {");
+    const knowledgeWorkspaceIndex = routeSource.indexOf("<VCanvasWorkbenchPage", knowledgeViewIndex);
+    const knowledgeWorkspaceEndIndex = routeSource.indexOf("</VCanvasWorkbenchPage>", knowledgeWorkspaceIndex);
+    const knowledgeWorkspaceSource = routeSource.slice(knowledgeWorkspaceIndex, knowledgeWorkspaceEndIndex);
+
+    expect(knowledgeWorkspaceIndex).toBeGreaterThan(knowledgeViewIndex);
+    expect(knowledgeWorkspaceSource).toContain("responsive={{");
+    expect(knowledgeWorkspaceSource).toContain("enabled: true");
+    expect(knowledgeWorkspaceSource).toContain("rail: { label: copy.knowledgeBases }");
+    expect(knowledgeWorkspaceSource).toContain("inspector: { label: copy.selectedKnowledgeDetail }");
+    expect(knowledgeWorkspaceSource).toContain("rail={(");
+    expect(knowledgeWorkspaceSource).toContain("canvas={(");
+    expect(knowledgeWorkspaceSource).toContain("inspector={(");
+  });
+
   it("delegates source and item audit panels to a dedicated view component", () => {
     expect(routeSource).toContain('from "./MemorySourceAndItemPanels"');
     expect(routeSource).toContain("<MemorySourcePanel");

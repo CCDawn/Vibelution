@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field
 from core.web.routes.knowledge_models import KnowledgeRouteResponse
 from core.web.services.rag_retrieval_service import RagRetrievalError, get_rag_retrieval_health, retrieve_rag_contexts
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.knowledge_read_service import (
+    KnowledgeReadError, KnowledgeReadNotFoundError, KnowledgeReadPermissionError, read_knowledge_item,
+)
+from core.web.services.team_knowledge_service import build_knowledge_index, get_semantic_index_health
 from core.web.services.team_knowledge_service import (
     TeamKnowledgeError,
     TeamKnowledgeIdempotencyConflictError,
@@ -46,12 +50,87 @@ from core.web.services.team_knowledge_service import (
     review_rating_suggestion,
     review_refinement_proposal,
     search_knowledge_items,
+    set_knowledge_source_lifecycle,
     update_owner_source_governance,
     update_knowledge_item_rating,
 )
 
 
 router = APIRouter(tags=["knowledge"])
+
+
+class SourceLifecyclePayload(BaseModel):
+    status: Literal["active", "withdrawn", "expired"]
+    reason: str = Field(..., min_length=1, max_length=1000)
+    actorAgentId: str = Field(..., min_length=1, max_length=160)
+    expiresAt: str = Field("", max_length=80)
+
+
+class KnowledgeIndexBuildPayload(BaseModel):
+    actorAgentId: str = Field(..., min_length=1, max_length=160)
+    prepareModel: bool = False
+
+
+@router.get("/knowledge/semantic-index/health", response_model=KnowledgeRouteResponse, response_model_exclude_unset=True)
+def knowledge_semantic_index_health(agentId: str = "") -> dict:
+    return get_semantic_index_health(agent_id=_require_agent_id(agentId))
+
+
+@router.post("/knowledge-bases/{knowledge_base_id}/semantic-index", response_model=KnowledgeRouteResponse, response_model_exclude_unset=True)
+def knowledge_semantic_index_build(knowledge_base_id: str, payload: KnowledgeIndexBuildPayload) -> dict:
+    try:
+        return build_knowledge_index(knowledge_base_id, agent_id=_require_agent_id(payload.actorAgentId), prepare_model=payload.prepareModel)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="The local embedding model could not be prepared or loaded.") from exc
+
+
+@router.get(
+    "/knowledge-bases/{knowledge_base_id}/items/{knowledge_item_id}/body",
+    response_model=KnowledgeRouteResponse, response_model_exclude_unset=True,
+)
+def knowledge_item_body(
+    knowledge_base_id: str, knowledge_item_id: str, agentId: str = "",
+    offset: int = Query(0, ge=0), maxChars: int = Query(2400, ge=1, le=4000),
+    sourceArtifactId: str = "", readMode: Literal["item", "source", "history"] = "item",
+) -> dict:
+    actor = _require_agent_id(agentId, purpose="knowledge body reading")
+    try:
+        return read_knowledge_item(
+            knowledge_base_id=knowledge_base_id, knowledge_item_id=knowledge_item_id, agent_id=actor,
+            offset=offset, max_chars=maxChars, source_artifact_id=sourceArtifactId, read_mode=readMode,
+        )
+    except KnowledgeReadPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except KnowledgeReadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except KnowledgeReadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/knowledge-bases/{knowledge_base_id}/source-artifacts/{source_artifact_id}/lifecycle",
+    response_model=KnowledgeRouteResponse, response_model_exclude_unset=True,
+)
+def knowledge_source_lifecycle_update(
+    knowledge_base_id: str, source_artifact_id: str, payload: SourceLifecyclePayload,
+) -> dict:
+    try:
+        return set_knowledge_source_lifecycle(
+            knowledge_base_id, source_artifact_id, status=payload.status, reason=payload.reason,
+            actor_agent_id=_require_agent_id(payload.actorAgentId), expires_at=payload.expiresAt,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _require_agent_id(agent_id: str, *, purpose: str = "governed Team Knowledge access") -> str:
@@ -126,6 +205,9 @@ class RefinementProposalCreatePayload(BaseModel):
     sourceCandidateId: str = Field("", max_length=200)
     sourceIdentityHash: str = Field("", max_length=160)
     evidenceLevel: str = Field("", max_length=80)
+    supersedesKnowledgeItemId: str = Field("", max_length=160)
+    expectedContentSha256: str = Field("", max_length=80)
+    revisionReason: str = Field("", max_length=1000)
 
 
 class IngestionPackageCreatePayload(BaseModel):
@@ -838,11 +920,16 @@ def knowledge_refinement_proposal_create(knowledge_base_id: str, payload: Refine
             source_candidate_id=payload.sourceCandidateId,
             source_identity_hash=payload.sourceIdentityHash,
             evidence_level=payload.evidenceLevel,
+            supersedes_knowledge_item_id=payload.supersedesKnowledgeItemId,
+            expected_content_sha256=payload.expectedContentSha256,
+            revision_reason=payload.revisionReason,
         )
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeIdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -908,6 +995,8 @@ def knowledge_refinement_proposal_review(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamKnowledgeIdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

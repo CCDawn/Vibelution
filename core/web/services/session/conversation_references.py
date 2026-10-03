@@ -111,6 +111,7 @@ def resolve_knowledge_file_references(
     *,
     agent_id: str = "",
     query: str = "",
+    memory_policy: dict[str, Any] | None = None,
     lang: str = "",
 ) -> list[dict[str, Any]]:
     """Resolve normalized knowledge/file/message references into content-bearing rows.
@@ -127,6 +128,7 @@ def resolve_knowledge_file_references(
     normalized = normalize_knowledge_file_references(references)
     if not normalized:
         return []
+    current_memory_policy = memory_policy if isinstance(memory_policy, dict) else {}
     remaining_budget = knowledge_file_total_content_char_limit()
     resolved: list[dict[str, Any]] = []
     for index, reference in enumerate(normalized, start=1):
@@ -138,9 +140,14 @@ def resolve_knowledge_file_references(
                     reference,
                     agent_id=agent_id,
                     query=query,
+                    memory_policy=current_memory_policy,
                 )
             elif kind == KNOWLEDGE_ITEM_REFERENCE_KIND:
-                title, content, source = _resolve_knowledge_item_reference(reference, agent_id=agent_id)
+                title, content, source = _resolve_knowledge_item_reference(
+                    reference,
+                    agent_id=agent_id,
+                    memory_policy=current_memory_policy,
+                )
             elif kind == FILE_REFERENCE_KIND:
                 title, content, source = _resolve_file_reference(session_id, reference)
             elif kind == MESSAGE_REFERENCE_KIND:
@@ -187,12 +194,18 @@ def _resolve_knowledge_base_reference(
     *,
     agent_id: str,
     query: str,
+    memory_policy: dict[str, Any],
 ) -> tuple[str, str, dict[str, Any]]:
     from core.web.services import rag_retrieval_service
 
     knowledge_base_id = str(reference.get("knowledgeBaseId") or "").strip()
     if not knowledge_base_id:
         raise ValueError("knowledgeBaseId is required")
+    private_memory_enabled = _validate_knowledge_base_reference(
+        knowledge_base_id,
+        agent_id=agent_id,
+        memory_policy=memory_policy,
+    )
     payload = rag_retrieval_service.retrieve_rag_contexts(
         agent_id=agent_id,
         query=str(query or "").strip(),
@@ -201,6 +214,7 @@ def _resolve_knowledge_base_reference(
         provider="local",
         top_k=_RAG_TOP_K_PER_BASE_REFERENCE,
         max_context_chars=_RAG_MAX_CONTEXT_CHARS,
+        private_memory_enabled=private_memory_enabled,
     )
     contexts = [item for item in list(payload.get("contexts") or []) if isinstance(item, dict)]
     blocks: list[str] = []
@@ -223,6 +237,7 @@ def _resolve_knowledge_item_reference(
     reference: dict[str, Any],
     *,
     agent_id: str,
+    memory_policy: dict[str, Any],
 ) -> tuple[str, str, dict[str, Any]]:
     from core.web.services import team_knowledge_service
 
@@ -230,14 +245,16 @@ def _resolve_knowledge_item_reference(
     knowledge_item_id = str(reference.get("knowledgeItemId") or "").strip()
     if not knowledge_base_id or not knowledge_item_id:
         raise ValueError("knowledgeBaseId and knowledgeItemId are required")
-    payload = team_knowledge_service.list_knowledge_items(knowledge_base_id, agent_id=agent_id)
-    items = [item for item in list(payload.get("items") or []) if isinstance(item, dict)]
-    item = next(
-        (candidate for candidate in items if str(candidate.get("knowledgeItemId") or "").strip() == knowledge_item_id),
-        None,
+    _validate_knowledge_base_reference(
+        knowledge_base_id,
+        agent_id=agent_id,
+        memory_policy=memory_policy,
     )
-    if item is None:
-        raise ValueError("knowledge item was not found in the target base")
+    item = team_knowledge_service.get_readable_knowledge_item(
+        knowledge_base_id,
+        knowledge_item_id,
+        agent_id=agent_id,
+    )
     title = str(item.get("title") or reference.get("title") or knowledge_item_id).strip()
     content = str(item.get("content") or "").strip()
     source = {
@@ -246,6 +263,43 @@ def _resolve_knowledge_item_reference(
         "evidenceLevel": str(item.get("evidenceLevel") or "").strip(),
     }
     return title, content, source
+
+
+def _validate_knowledge_base_reference(
+    knowledge_base_id: str,
+    *,
+    agent_id: str,
+    memory_policy: dict[str, Any],
+) -> bool:
+    """Enforce the current Agent's MemoryPolicy and Team ACL before injection.
+
+    Returns whether private Agent-owned knowledge may be included in RAG.
+    Shared Team knowledge remains readable when private memory is disabled.
+    """
+
+    from core.web.services import team_knowledge_service
+
+    owner, base = team_knowledge_service._require_base_with_owner(knowledge_base_id)
+    owner_type = str(owner.get("ownerType") or "").strip()
+    if str(base.get("status") or "active").strip() != "active":
+        raise ValueError("knowledge base is no longer active")
+    team_knowledge_service._require_permission(owner, base, agent_id, "read")
+
+    private_memory_enabled = bool(memory_policy.get("enabled", True))
+    if owner_type == "agent" and not private_memory_enabled:
+        raise ValueError("Agent private knowledge is disabled by MemoryPolicy")
+
+    scoped_knowledge_base_id = team_knowledge_service._owner_scoped_knowledge_base_id(
+        owner,
+        str(base.get("knowledgeBaseId") or "").strip(),
+    )
+    allowed_knowledge_base_ids = memory_policy.get("readKnowledgeBaseIds") or []
+    if not team_knowledge_service.knowledge_base_policy_allows(
+        scoped_knowledge_base_id,
+        allowed_knowledge_base_ids,
+    ):
+        raise ValueError("knowledge base is outside MemoryPolicy.readKnowledgeBaseIds")
+    return private_memory_enabled
 
 
 def _resolve_file_reference(

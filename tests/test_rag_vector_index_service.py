@@ -350,6 +350,7 @@ def test_vector_index_health_detects_indexed_and_stale_items(vector_index_env):
         item,
         embedding_provider="test-embedder",
         embedding_model="deterministic-v1",
+        chunks=[{"start": 0, "end": 8, "vector": [1.0, 0.0]}],
     )
 
     indexed = rag_vector_index_service.get_vector_index_health(internal=True)
@@ -368,13 +369,28 @@ def test_vector_index_health_detects_indexed_and_stale_items(vector_index_env):
         changed,
         embedding_provider="test-embedder",
         embedding_model="deterministic-v1",
+        chunks=[{"start": 0, "end": 8, "vector": [1.0, 0.0]}],
     )
 
     stale = rag_vector_index_service.get_vector_index_health(internal=True)
 
-    assert stale["status"] == "degraded"
-    assert stale["vectorEnabled"] is True
+    assert stale["status"] == "unavailable"
+    assert stale["vectorEnabled"] is False
     assert stale["indexedItemCount"] == 0
     assert stale["staleItemCount"] == 1
     assert stale["missingItemCount"] == 0
     assert stale["items"][0]["status"] == "stale"
+
+
+def test_vector_index_metadata_alone_does_not_report_vectors_ready(vector_index_env):
+    from core.web.services import rag_vector_index_service as index
+
+    item = index.list_indexable_knowledge_items(internal=True)[0]
+    index.write_index_record(item, embedding_provider="test", embedding_model="metadata-only")
+    health = index.get_vector_index_health(internal=True)
+
+    assert health["indexedItemCount"] == 1
+    assert health["metadataOnlyItemCount"] == 1
+    assert health["vectorItemCount"] == 0
+    assert health["vectorEnabled"] is False
+    assert health["status"] == "unavailable"

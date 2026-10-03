@@ -372,6 +372,16 @@ rules:
     notes:
       - "Chat UI changes run the route and conversation behavior tests, the global VUI policy contracts, the zero-budget API boundary, and incremental typecheck. They do not run a source-string layout file or backend pytest."
 
+  - id: team-bundle-route-contract
+    description: "Portable team export/import response DTOs and route behavior."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/web/routes/team_bundles.py"
+      - "tests/test_team_bundle_routes.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_bundle_routes.py tests/test_team_bundle_service.py -q"
+
   - id: web-route-contract-coverage
     description: "Low-churn Web route modules share one importable public-route contract and a direct focused selector boundary."
     executionLayers:

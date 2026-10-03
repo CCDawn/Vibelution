@@ -258,6 +258,11 @@ export type KnowledgeSourceArtifact = {
   centralSourceId?: string;
   inboxSourceId?: string;
   curationStatus?: string;
+  status?: "active" | "withdrawn" | "expired" | string;
+  expiresAt?: string;
+  lifecycleReason?: string;
+  lifecycleUpdatedAt?: string;
+  lifecycleUpdatedByAgentId?: string;
 };
 
 export type KnowledgeRefinementProposal = {
@@ -279,6 +284,11 @@ export type KnowledgeRefinementProposal = {
   resolutionNote: string;
   batchId: string;
   knowledgeItemIds: string[];
+  supersedesKnowledgeItemId?: string;
+  rootKnowledgeItemId?: string;
+  revision?: number;
+  expectedContentSha256?: string;
+  revisionReason?: string;
 };
 
 export type KnowledgeBatch = {
@@ -317,6 +327,131 @@ export type KnowledgeItem = {
   markedBy: string;
   markedAt: string;
   markingReason: string;
+  knowledgeState?: string;
+  revision?: number;
+  rootKnowledgeItemId?: string;
+  supersedesKnowledgeItemId?: string;
+  revisionReason?: string;
+  contentSha256?: string;
+  contentLength?: number;
+};
+
+export type KnowledgeItemBodyPage = {
+  knowledgeBaseId: string;
+  scopedKnowledgeBaseId?: string;
+  knowledgeItemId: string;
+  title: string;
+  ownerType?: string;
+  ownerId?: string;
+  content: string;
+  contentLength: number;
+  offset: number;
+  returnedChars: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+  sourceArtifactIds: string[];
+  centralSourceIds: string[];
+  citations: Array<{
+    knowledgeBaseId: string;
+    scopedKnowledgeBaseId?: string;
+    knowledgeItemId: string;
+    sourceArtifactId: string;
+    sourceType: string;
+    title: string;
+    capturedAt: string;
+    sourceHash: string;
+    centralSourceId?: string;
+    sourceUrl?: string;
+    page?: string;
+    contentTrust: string;
+  }>;
+  sourceBodyStatus: "source_body_available" | "source_body_not_requested" | "source_body_unavailable" | string;
+  contentSha256?: string;
+  revision?: number;
+  rootKnowledgeItemId?: string;
+  readMode?: "item" | "source";
+  untrusted: boolean;
+  contentTrust: string;
+  embeddedInstructionsAreData: boolean;
+};
+
+export type KnowledgeItemVersion = {
+  knowledgeItemId: string;
+  revision: number;
+  contentSha256: string;
+  contentLength: number;
+  state: string;
+  title: string;
+  reviewedAt: string;
+  reviewedByAgentId: string;
+  supersedesKnowledgeItemId: string;
+  revisionReason: string;
+};
+
+export type KnowledgeItemHistoryPage = {
+  knowledgeBaseId: string;
+  ownerType: string;
+  ownerId: string;
+  rootKnowledgeItemId: string;
+  versionCount: number;
+  versions: KnowledgeItemVersion[];
+  offset: number;
+  nextOffset: number | null;
+  hasMore: boolean;
+  offsetUnit: "versions";
+  readMode: "history";
+  untrusted: boolean;
+  embeddedInstructionsAreData: boolean;
+};
+
+export type KnowledgeSourceLifecycleStatus = "active" | "withdrawn" | "expired";
+
+export type KnowledgeSourceLifecycleUpdate = {
+  status: KnowledgeSourceLifecycleStatus;
+  reason: string;
+  actorAgentId: string;
+  expiresAt?: string;
+};
+
+export type KnowledgeSourceLifecycleResponse = {
+  sourceArtifact: KnowledgeSourceArtifact;
+};
+
+export type KnowledgeRevisionProposalPayload = {
+  sourceArtifactIds: string[];
+  title: string;
+  summary: string;
+  content: string;
+  proposedByAgentId: string;
+  supersedesKnowledgeItemId: string;
+  expectedContentSha256: string;
+  revisionReason: string;
+  tags?: string[];
+};
+
+export type KnowledgeSemanticIndexHealthPayload = {
+  status: "ready" | "degraded" | "unavailable" | string;
+  modelPrepared: boolean;
+  modelLoaded: boolean;
+  embeddingModel: string;
+  indexedItemCount: number;
+  missingItemCount: number;
+  indexableItemCount: number;
+  vectorEnabled: boolean;
+};
+
+export type KnowledgeSemanticIndexBuildPayload = {
+  actorAgentId: string;
+  prepareModel?: boolean;
+};
+
+export type KnowledgeSemanticIndexBuildResponse = {
+  status: "ready" | "degraded" | "unavailable" | string;
+  indexedItemCount: number;
+  failedItemCount?: number;
+  candidateItemCount?: number;
+  embeddingModel?: string;
+  knowledgeBaseId?: string;
 };
 
 export type KnowledgeReviewResponse = {
@@ -867,9 +1002,9 @@ export type KnowledgeTracePayload = {
   targetType: string;
   nodes: {
     sourceArtifacts: KnowledgeSourceArtifact[];
-    proposals: KnowledgeRefinementProposal[];
+    proposals: (Omit<KnowledgeRefinementProposal, "content"> & { contentLength: number; contentSha256: string })[];
     batches: KnowledgeBatch[];
-    items: KnowledgeItem[];
+    items: (Omit<KnowledgeItem, "content"> & { contentLength: number })[];
     ratingSuggestions: KnowledgeRatingSuggestion[];
   };
   summary: Record<string, number>;

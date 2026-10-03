@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from core.web.services import team_knowledge_service, unified_knowledge_search_service
 
 
@@ -50,6 +52,8 @@ def test_unified_search_preserves_source_trust_for_formal_and_rag_results(monkey
             "semanticScore": 0.9,
             "matchReason": "bm25",
             "matchedExcerpt": "A matched passage from the complete formal item.",
+            "localCopies": [{"filename": "source.txt", "sha256": "expected", "centralPath": "private/source.txt",
+                              "originalPath": "C:/private/source.txt", "arbitraryNested": {"path": "secret"}}],
         }
     )
 
@@ -85,6 +89,7 @@ def test_unified_search_preserves_source_trust_for_formal_and_rag_results(monkey
 
     assert formal_payload["results"][0]["resultType"] == "knowledge_item"
     assert formal_payload["results"][0]["excerpt"] == "A matched passage from the complete formal item."
+    assert formal_payload["results"][0]["localCopies"] == [{"filename": "source.txt", "sha256": "expected"}]
     assert formal_payload["results"][0]["scopedKnowledgeBaseId"] == "agent:agent-1:base-1"
     assert formal_payload["results"][0]["sourceSummaries"] == expected_trust
     assert formal_payload["citations"] == [
@@ -112,6 +117,19 @@ def test_unified_search_preserves_source_trust_for_formal_and_rag_results(monkey
     assert rag_payload["results"][0]["sourceSummaries"] == expected_trust
     assert rag_payload["citations"][0]["scopedKnowledgeBaseId"] == "agent:agent-1:base-1"
     assert rag_payload["citations"][0]["sourceSummaries"] == expected_trust
+
+
+@pytest.mark.parametrize("mode", ["exact", "bm25", "semantic", "hybrid", "regex", "rag"])
+def test_disabled_private_policy_reaches_every_search_backend(monkeypatch, mode):
+    calls = []
+    monkeypatch.setattr(team_knowledge_service, "search_knowledge_items", lambda **kwargs:
+        calls.append(kwargs.get("private_memory_enabled")) or {"results": []})
+    payload = unified_knowledge_search_service.search_unified_memory(
+        agent_id="owner", query="text", query_mode=mode, allowed_knowledge_base_ids=["team:team-id:base-id"],
+        private_memory_enabled=False,
+    )
+    assert calls == [False]
+    assert payload["results"] == []
 
 
 def test_search_source_summary_only_emits_a_present_content_trust_marker(monkeypatch):

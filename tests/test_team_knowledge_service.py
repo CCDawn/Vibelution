@@ -99,6 +99,24 @@ def _promote_central_source(
     return reviewed["centralSource"]
 
 
+def test_source_snapshot_preserves_original_utf8_line_endings(knowledge_env):
+    content = "第一行\n第二行\r\n末段保持原始换行\n"
+    source = team_knowledge_service.collect_source_to_inbox(
+        "team", knowledge_env["team"]["teamId"],
+        source_type="manual_user_entry", source_ref={"note": "line-ending-integrity"},
+        original_content=content, original_filename="line-endings.txt",
+        title="Source line ending integrity", actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    path = team_knowledge_service._project_path_from_relative(source["originalPath"])
+    assert path.read_bytes() == content.encode("utf-8")
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team", knowledge_env["team"]["teamId"], source["inboxSourceId"],
+        decision="accepted", reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    central_path = team_knowledge_service._project_path_from_relative(reviewed["centralSource"]["centralPath"])
+    assert central_path.read_bytes() == content.encode("utf-8")
+
+
 def _create_central_source_artifact(
     knowledge_base_id: str,
     *,
@@ -641,6 +659,11 @@ def test_owner_source_review_directly_ingests_accepted_source_into_formal_knowle
     assert items["summary"]["itemCount"] == 1
     assert items["items"][0]["knowledgeItemId"] == direct["item"]["knowledgeItemId"]
     assert governance["summary"]["proposalReviewCount"] == 0
+    assert direct["sourceArtifact"]["sourceArtifactId"] not in {
+        task["targetId"] for task in governance["tasks"] if task["taskType"] == "source_needs_proposal"
+    }
+    health = team_knowledge_service.get_knowledge_operations_health(agent_id=knowledge_env["lead"]["agentId"])
+    assert health["summary"]["orphanSourceCount"] == 0
 
 
 def test_source_reviewer_without_base_review_cannot_direct_ingest_team_knowledge(knowledge_env):
@@ -1276,6 +1299,7 @@ def test_agent_formal_knowledge_is_private_and_governed(tmp_path, monkeypatch):
         reviewed_by_agent_id=owner["agentId"],
     )
 
+    _index_test_semantic_items(monkeypatch, [base["knowledgeBaseId"]], owner["agentId"])
     owner_results = team_knowledge_service.search_knowledge_items(
         agent_id=owner["agentId"],
         owner_type="agent",
@@ -2375,7 +2399,25 @@ def test_ingestion_package_preserves_team_chat_room_guard(knowledge_env):
     assert package["proposal"]["status"] == "pending"
 
 
-def test_semantic_search_matches_token_overlap_without_exact_substring(knowledge_env):
+def _index_test_semantic_items(monkeypatch, base_ids, reviewer_id, *, passage_vector=None):
+    from core.web.services.team_knowledge import semantic as semantic
+
+    monkeypatch.setattr(semantic.embeddings, "readiness", lambda **_: {"status": "ready", "dimension": 2})
+    monkeypatch.setattr(
+        semantic.embeddings, "encode",
+        lambda texts, *, purpose="passage", **_: [
+            [1.0, 0.0] if purpose == "query" or passage_vector is None else passage_vector(text)
+            for text in texts
+        ],
+    )
+    for base_id in base_ids:
+        assert semantic.build_knowledge_index(base_id, agent_id=reviewer_id)["status"] == "ready"
+
+
+def test_semantic_search_does_not_mislabel_token_overlap_without_vectors(knowledge_env, monkeypatch):
+    from core.web.services.team_knowledge import semantic as semantic_index
+
+    monkeypatch.setattr(semantic_index.embeddings, "readiness", lambda **_: {"status": "unavailable", "cached": False})
     proposal = team_knowledge_service.create_refinement_proposal(
         knowledge_env["base"]["knowledgeBaseId"],
         source_artifact_ids=_source_ids_for_env(knowledge_env, title="Planner cadence source"),
@@ -2405,9 +2447,15 @@ def test_semantic_search_matches_token_overlap_without_exact_substring(knowledge
     )
 
     assert exact["summary"]["resultCount"] == 0
-    assert semantic["summary"]["resultCount"] == 1
-    assert semantic["results"][0]["semanticScore"] > 0
-    assert semantic["results"][0]["matchReason"] == "token_overlap"
+    assert semantic["summary"]["resultCount"] == 0
+    assert semantic["semanticRetrieval"]["status"] == "unavailable"
+    assert semantic["semanticRetrieval"]["reason"] == "model_not_prepared"
+    lexical = team_knowledge_service.search_knowledge_items(
+        agent_id=knowledge_env["member"]["agentId"],
+        knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+        query="health governance missing", search_mode="bm25",
+    )
+    assert lexical["summary"]["resultCount"] == 1
 
 
 def _approve_search_test_item(
@@ -2467,7 +2515,10 @@ def test_exact_search_does_not_match_unlinked_source_artifact(knowledge_env):
 
 
 @pytest.mark.parametrize("search_mode", ["exact", "bm25", "semantic", "hybrid"])
-def test_linked_source_metadata_is_matched_and_ranked_consistently(knowledge_env, search_mode):
+def test_linked_source_metadata_is_keyword_searchable_without_inventing_embeddings(knowledge_env, search_mode, monkeypatch):
+    from core.web.services.team_knowledge import semantic as semantic_index
+
+    monkeypatch.setattr(semantic_index.embeddings, "readiness", lambda **_: {"status": "unavailable", "cached": False})
     base_id = knowledge_env["base"]["knowledgeBaseId"]
     member_id = knowledge_env["member"]["agentId"]
     lead_id = knowledge_env["lead"]["agentId"]
@@ -2496,13 +2547,17 @@ def test_linked_source_metadata_is_matched_and_ranked_consistently(knowledge_env
         search_mode=search_mode,
     )
 
+    if search_mode == "semantic":
+        assert result["summary"]["resultCount"] == 0
+        assert result["semanticRetrieval"]["reason"] == "model_not_prepared"
+        return
     assert result["summary"]["resultCount"] == 1
     assert result["results"][0]["knowledgeItemId"] == item["knowledgeItemId"]
     assert needle in result["results"][0]["matchedExcerpt"]
 
 
 @pytest.mark.parametrize("search_mode", ["exact", "bm25", "semantic", "hybrid"])
-def test_search_modes_match_full_knowledge_body_and_return_bounded_match_excerpt(knowledge_env, search_mode):
+def test_search_modes_match_full_knowledge_body_and_return_bounded_match_excerpt(knowledge_env, search_mode, monkeypatch):
     base_id = knowledge_env["base"]["knowledgeBaseId"]
     member_id = knowledge_env["member"]["agentId"]
     lead_id = knowledge_env["lead"]["agentId"]
@@ -2518,6 +2573,11 @@ def test_search_modes_match_full_knowledge_body_and_return_bounded_match_excerpt
         content=content,
     )
 
+    if search_mode == "semantic":
+        _index_test_semantic_items(
+            monkeypatch, [base_id], lead_id,
+            passage_vector=lambda text: [1.0, 0.0] if needle in text else [0.0, 1.0],
+        )
     result = team_knowledge_service.search_knowledge_items(
         agent_id=member_id,
         knowledge_base_id=base_id,
@@ -2533,7 +2593,7 @@ def test_search_modes_match_full_knowledge_body_and_return_bounded_match_excerpt
     assert len(result["results"][0]["matchedExcerpt"]) <= 1200
 
 
-def test_semantic_search_ranks_all_readable_bases_before_applying_limit(knowledge_env):
+def test_semantic_search_ranks_all_readable_bases_before_applying_limit(knowledge_env, monkeypatch):
     team_id = knowledge_env["team"]["teamId"]
     lead_id = knowledge_env["lead"]["agentId"]
     member_id = knowledge_env["member"]["agentId"]
@@ -2569,6 +2629,10 @@ def test_semantic_search_ranks_all_readable_bases_before_applying_limit(knowledg
         content="alpha appears first; beta is elsewhere; gamma is at the end.",
     )
 
+    _index_test_semantic_items(
+        monkeypatch, [first_base_id, second_base["knowledgeBaseId"]], lead_id,
+        passage_vector=lambda text: [1.0, 0.0] if "beta" in text and "gamma" in text else [0.0, 1.0],
+    )
     result = team_knowledge_service.search_knowledge_items(
         agent_id=member_id,
         query="alpha beta gamma",
@@ -2578,6 +2642,7 @@ def test_semantic_search_ranks_all_readable_bases_before_applying_limit(knowledg
 
     assert result["summary"]["resultCount"] == 1
     assert result["results"][0]["knowledgeItemId"] == strongest["knowledgeItemId"]
+    assert result["semanticRetrieval"]["indexedCandidateCount"] == 2
 
 
 def test_search_reads_owner_items_and_source_artifacts_once_across_bases(knowledge_env, monkeypatch):

@@ -49,6 +49,10 @@ type MemoryKnowledgeSearchPanelProps = {
   ragContextCount: number;
   ragCitationCount: number;
   ragPending: boolean;
+  knowledgeBaseId: string;
+  agentId: string;
+  canReviewKnowledge: boolean;
+  onIndexBuilt: () => void;
   onDraftChange: (draft: MemoryKnowledgeSearchDraft) => void;
 };
 
@@ -66,6 +70,10 @@ export function MemoryKnowledgeSearchPanel({
   ragContextCount,
   ragCitationCount,
   ragPending,
+  knowledgeBaseId,
+  agentId,
+  canReviewKnowledge,
+  onIndexBuilt,
   onDraftChange,
 }: MemoryKnowledgeSearchPanelProps) {
   return (
@@ -159,6 +167,7 @@ export function MemoryKnowledgeSearchPanel({
         ) : null}
       </div>
       <MemoryKnowledgeRagPanel
+        key={agentId}
         copy={copy}
         contexts={contexts}
         health={ragHealth}
@@ -167,6 +176,10 @@ export function MemoryKnowledgeSearchPanel({
         contextCount={ragContextCount}
         citationCount={ragCitationCount}
         isPending={ragPending}
+        knowledgeBaseId={knowledgeBaseId}
+        agentId={agentId}
+        canReviewKnowledge={canReviewKnowledge}
+        onIndexBuilt={onIndexBuilt}
       />
     </section>
   );

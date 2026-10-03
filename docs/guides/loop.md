@@ -59,6 +59,7 @@ Set-Location "<ROOT_MAIN>"
 # 外部托管工作区待停止使用后由所属管理器归档，不得对它运行 --cleanup-only。
 .\.venv\Scripts\python.exe "<TASK_WORKTREE>\scripts\task_closeout.py" --task-worktree "<TASK_WORKTREE>" --retain-worktree
 # selector 中的 .venv 是逻辑命令；同 requirements 指纹时由 gate 只读解析到根 main .venv，禁止在任务树创建 junction
+# requirements 变更需要独立依赖时，可复用已创建的物理任务 .venv；gate 会检查完整依赖与 pip health，仍不创建或安装环境。
 # 已有 manifest 或 integration 冲突返回 manifest：原样复用，禁止再跑测试
 .\.venv\Scripts\python.exe scripts\task_closeout.py --task-worktree "<TASK_WORKTREE>" --manifest "<MANIFEST_PATH>"
 # 仅 stale_main：同步/提交最新 main 后，携带返回的一次性 token 做一次 reserve retry
