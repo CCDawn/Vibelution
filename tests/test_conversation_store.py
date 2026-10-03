@@ -7,6 +7,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,6 +36,114 @@ def safe_sqlite_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
         "sqlite_version_info",
         (3, 51, 3),
     )
+
+
+class _BootstrapProbeConnection:
+    def __init__(self, on_wal):
+        self.on_wal = on_wal
+        self.wal_calls = 0
+        self.busy_timeouts = []
+        self.closed = False
+
+    def execute(self, sql):
+        if sql.startswith("PRAGMA busy_timeout="):
+            self.busy_timeouts.append(int(sql.split("=", 1)[1]))
+        if sql == "PRAGMA journal_mode=WAL":
+            self.wal_calls += 1
+            self.on_wal(self)
+        return SimpleNamespace(fetchone=lambda: (1,) if sql == "PRAGMA foreign_keys" else ("wal",))
+
+    def close(self):
+        self.closed = True
+
+
+def _bootstrap_lock_error(primary_result=5):
+    driver_error = RuntimeError("synthetic SQLite driver error")
+    driver_error.result = primary_result
+    error = conversation_sqlite_runtime.OperationalError("database is locked")
+    error.__cause__ = driver_error
+    return error
+
+
+def test_bootstrap_retries_immediate_wal_busy_then_restores_migration_timeout(monkeypatch, tmp_path):
+    error = _bootstrap_lock_error()
+
+    def on_wal(connection):
+        if connection.wal_calls < 3:
+            raise error
+
+    connection = _BootstrapProbeConnection(on_wal)
+    monkeypatch.setattr(conversation_database.sqlite3, "connect", lambda *_args, **_kwargs: connection)
+    database = conversation_database.ConversationDatabase(tmp_path / "store.sqlite3")
+
+    assert database._bootstrap_connection() is connection
+    assert connection.wal_calls == 3
+    assert min(connection.busy_timeouts) < 5000
+    assert connection.busy_timeouts[-1] == 5000
+    assert not connection.closed
+
+
+def test_bootstrap_wal_busy_retries_and_native_wait_share_one_budget(monkeypatch, tmp_path):
+    clock = [0.0]
+    error = _bootstrap_lock_error()
+
+    def on_wal(connection):
+        # Include native waiting in the clock, not just the retry sleeps.
+        clock[0] += min(1.0, connection.busy_timeouts[-1] / 1000)
+        assert connection.wal_calls <= 6, "WAL bootstrap ignored its total deadline"
+        raise error
+
+    connection = _BootstrapProbeConnection(on_wal)
+    monkeypatch.setattr(conversation_database.sqlite3, "connect", lambda *_args, **_kwargs: connection)
+    monkeypatch.setattr(conversation_database.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(conversation_database.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    database = conversation_database.ConversationDatabase(tmp_path / "store.sqlite3")
+
+    with pytest.raises(conversation_sqlite_runtime.OperationalError) as raised:
+        database._bootstrap_connection()
+    assert raised.value is error
+    assert 5.0 <= clock[0] <= 5.001
+    assert connection.closed
+
+
+@pytest.mark.parametrize("primary_result", [6, 14, None])
+def test_bootstrap_does_not_retry_other_wal_errors(monkeypatch, tmp_path, primary_result):
+    error = _bootstrap_lock_error(primary_result)
+
+    def on_wal(_connection):
+        raise error
+
+    connection = _BootstrapProbeConnection(on_wal)
+    monkeypatch.setattr(conversation_database.sqlite3, "connect", lambda *_args, **_kwargs: connection)
+    database = conversation_database.ConversationDatabase(tmp_path / "store.sqlite3")
+
+    with pytest.raises(conversation_sqlite_runtime.OperationalError) as raised:
+        database._bootstrap_connection()
+    assert raised.value is error
+    assert connection.wal_calls == 1
+    assert connection.closed
+
+
+def test_concurrent_first_store_opens_share_wal_bootstrap(tmp_path):
+    database_path = tmp_path / "store.sqlite3"
+    barrier = threading.Barrier(4)
+
+    def open_and_close():
+        store = ConversationStore(database_path)
+        barrier.wait(timeout=3)
+        try:
+            return store.open()["quickCheck"]
+        finally:
+            store.close()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(open_and_close) for _ in range(4)]
+        assert [future.result(timeout=10) for future in futures] == ["ok"] * 4
+    connection = conversation_sqlite_runtime.connect(str(database_path))
+    try:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    finally:
+        connection.close()
 
 
 def _open_store(
