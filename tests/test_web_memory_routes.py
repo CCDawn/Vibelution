@@ -1197,6 +1197,7 @@ def test_memory_usage_contract_reuses_recent_aggregate(tmp_path, monkeypatch):
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
     memory_service._clear_memory_usage_contract_cache()
     calls = {"overview": 0, "health": 0, "plan": 0}
+    operations_health = {"summary": {"knowledgeBaseCount": 1, "findingCount": 0}}
 
     def fake_overview(*, internal=False):
         calls["overview"] += 1
@@ -1204,9 +1205,10 @@ def test_memory_usage_contract_reuses_recent_aggregate(tmp_path, monkeypatch):
 
     def fake_health(*, internal=False):
         calls["health"] += 1
-        return {"summary": {"knowledgeBaseCount": 1, "findingCount": 0}}
+        return operations_health
 
-    def fake_plan(*, limit=8, internal=False):
+    def fake_plan(*, limit=8, health=None, internal=False):
+        assert health is operations_health
         calls["plan"] += 1
         return {
             "summary": {"actionCount": 3},
