@@ -5,9 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .protocol_constants import (
+    ENABLE_THINKING_FIELD,
+    GPT_REASONING_EFFORT_VALUES,
+    KNOWN_REASONING_EFFORT_VALUES,
+    REASONING_EFFORT_ADAPTER_NONE,
+    REASONING_EFFORT_ADAPTER_REASONING_EFFORT,
+    REASONING_EFFORT_ADAPTER_REASONING_OBJECT,
+    REASONING_EFFORT_ADAPTER_THINKING_TOGGLE,
+    REASONING_EFFORT_FIELD,
+    REASONING_EFFORT_OBJECT_KEY,
+    REASONING_OBJECT_FIELD,
+    THINKING_TOGGLE_OFF_VALUES,
+)
 
-GPT_REASONING_EFFORT_VALUES = ("low", "medium", "high")
-KNOWN_REASONING_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+# Value sets live in protocol_constants (single authority); re-exported here
+# for backward-compatible import paths.
 
 
 def normalize_reasoning_effort(value: Any) -> str:
@@ -27,21 +40,33 @@ class ReasoningEffortResolution:
 
 def resolve_reasoning_effort_request(profile: Any) -> ReasoningEffortResolution:
     requested = normalize_reasoning_effort(getattr(profile, "reasoning_effort", ""))
-    adapter = str(getattr(profile, "reasoning_effort_adapter", "") or "none").strip().lower()
+    adapter = str(
+        getattr(profile, "reasoning_effort_adapter", "") or REASONING_EFFORT_ADAPTER_NONE
+    ).strip().lower()
     mapping = dict(getattr(profile, "reasoning_effort_map", {}) or {})
     effective = str(mapping.get(requested) or requested).strip().lower()
-    if not requested or adapter == "none":
-        return ReasoningEffortResolution(requested, "", "none", {})
-    if adapter == "reasoning_object":
-        return ReasoningEffortResolution(requested, effective, adapter, {"reasoning": {"effort": effective}})
-    if adapter == "reasoning_effort":
-        return ReasoningEffortResolution(requested, effective, adapter, {"reasoning_effort": effective})
-    if adapter == "thinking_toggle":
+    if not requested or adapter == REASONING_EFFORT_ADAPTER_NONE:
+        return ReasoningEffortResolution(requested, "", REASONING_EFFORT_ADAPTER_NONE, {})
+    if adapter == REASONING_EFFORT_ADAPTER_REASONING_OBJECT:
         return ReasoningEffortResolution(
             requested,
             effective,
             adapter,
-            {"enable_thinking": effective not in {"off", "none"}},
+            {REASONING_OBJECT_FIELD: {REASONING_EFFORT_OBJECT_KEY: effective}},
+        )
+    if adapter == REASONING_EFFORT_ADAPTER_REASONING_EFFORT:
+        return ReasoningEffortResolution(
+            requested,
+            effective,
+            adapter,
+            {REASONING_EFFORT_FIELD: effective},
+        )
+    if adapter == REASONING_EFFORT_ADAPTER_THINKING_TOGGLE:
+        return ReasoningEffortResolution(
+            requested,
+            effective,
+            adapter,
+            {ENABLE_THINKING_FIELD: effective not in THINKING_TOGGLE_OFF_VALUES},
         )
     raise ValueError(f"unsupported reasoning effort adapter: {adapter}")
 

@@ -14,6 +14,7 @@ from config.models import LLMProfile, PromptCacheConfig
 from config.protocol_families import apply_model_entry_family_defaults
 
 from .adapters import capabilities_for_adapter
+from .protocol_constants import SUPPORTED_REASONING_STATE_FIELDS
 from .types import DiagnosticReport, LLMCapabilities, ResolvedModelSpec
 
 
@@ -47,7 +48,8 @@ JSON_MODE_MODEL_HINTS = (
     "qwen",
     "claude",
 )
-SUPPORTED_REASONING_STATE_FIELDS = {"reasoning_content"}
+# SUPPORTED_REASONING_STATE_FIELDS is imported from protocol_constants
+# (single authority); no local copy is kept here.
 
 _CAPABILITY_FIELD_ALIASES = {
     "streaming": "supports_streaming",
