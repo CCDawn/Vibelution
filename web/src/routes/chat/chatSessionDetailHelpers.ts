@@ -84,6 +84,22 @@ export function prefetchSessionDetailWindow(
   });
 }
 
+/** Release only a neighbor warmup with no current consumer or selected target. */
+export function cancelUnobservedSessionPrefetches(
+  queryClient: QueryClient,
+  sessionIds: Iterable<string>,
+  activeSessionId = "",
+): Promise<void> {
+  const pendingIds = new Set(sessionIds);
+  return queryClient.cancelQueries({
+    predicate: (query) => query.queryKey.length === 2
+      && query.queryKey[0] === "sessions"
+      && pendingIds.has(String(query.queryKey[1]))
+      && query.queryKey[1] !== activeSessionId
+      && query.getObserversCount() === 0,
+  });
+}
+
 /** Prefer recently updated sessions other than the active one (list order as-is). */
 export function resolveNeighborSessionIdsForPrefetch(input: {
   sessions: Array<Pick<SessionSummary, "id">> | null | undefined;

@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFinancialAssistant, listFinancialAssistants, type FinancialAssistant } from "../api/financialAssistant";
 import { FinanceRoute } from "./FinanceRoute";
+import { FinancialAssistantChatNote } from "./finance/FinancialAssistantChatNote";
 
 vi.mock("../api/financialAssistant", () => ({ createFinancialAssistant: vi.fn(), listFinancialAssistants: vi.fn() }));
 vi.mock("./ChatCodingRoute", () => ({ ChatCodingRoute: () => <div>finance-workspace</div> }));
@@ -52,6 +53,14 @@ describe("financial assistant page", () => {
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
     expect(container.textContent).toContain("finance-workspace");
     expect(container.textContent).not.toContain("Conversation Agents");
+    await act(async () => root.render(
+      <QueryClientProvider client={client}><MemoryRouter initialEntries={["/finance?session=native-session"]}>
+        <FinancialAssistantChatNote sessionId="native-session" lang="zh" />
+      </MemoryRouter></QueryClientProvider>,
+    ));
+    await settle();
+    expect(listFinancialAssistants).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("不会自动下单");
   });
 
   it("creates the assistant once, then stays on this page", async () => {
@@ -61,6 +70,14 @@ describe("financial assistant page", () => {
     expect(createFinancialAssistant).toHaveBeenCalledTimes(1);
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
     expect(container.textContent).toContain("finance-workspace");
+    await act(async () => root.render(
+      <QueryClientProvider client={client}><MemoryRouter initialEntries={["/finance?session=native-session"]}>
+        <FinancialAssistantChatNote sessionId="native-session" lang="zh" />
+      </MemoryRouter></QueryClientProvider>,
+    ));
+    await settle();
+    expect(listFinancialAssistants).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("不会自动下单");
   });
 
   it("uses the session already on this page without creating another assistant", async () => {
@@ -73,7 +90,9 @@ describe("financial assistant page", () => {
     let resolve!: (value: FinancialAssistant[]) => void;
     vi.mocked(listFinancialAssistants).mockReturnValue(new Promise((done) => { resolve = done; }));
     await render();
+    const signal = vi.mocked(listFinancialAssistants).mock.calls[0][0]!.signal!;
     await act(async () => root.render(<div>another route</div>));
+    expect(signal.aborted).toBe(true);
     await act(async () => resolve([row]));
     await settle();
     expect(container.textContent).toBe("another route");
@@ -93,6 +112,21 @@ describe("financial assistant page", () => {
     expect(container.textContent).toContain("offline");
     await act(async () => button("重试")!.click());
     await settle();
+    expect(container.textContent).toContain("finance-workspace");
+  });
+
+  it("does not create twice when effects replay during entry", async () => {
+    vi.mocked(listFinancialAssistants).mockResolvedValue([]);
+    vi.mocked(createFinancialAssistant).mockResolvedValue({ created: true, assistant: row });
+    await act(async () => root.render(
+      <React.StrictMode><QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/finance"]}>
+          <Routes><Route path="/finance" element={<FinanceRoute />} /></Routes>
+        </MemoryRouter>
+      </QueryClientProvider></React.StrictMode>,
+    ));
+    await settle();
+    expect(createFinancialAssistant).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain("finance-workspace");
   });
 });

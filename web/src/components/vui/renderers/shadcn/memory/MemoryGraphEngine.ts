@@ -792,7 +792,6 @@ function initializeMemoryGraphEngine(
   controls.update();
   resize();
   updateSelection(selectedNodeId);
-  updateHighlights(options.highlightIds);
   updateLabels(options.showLabels);
   refreshTheme();
   invalidate();

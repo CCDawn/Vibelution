@@ -5,12 +5,18 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useChatWorkbenchCatalogQueries, type ChatWorkbenchCatalogQueriesInput } from "./useChatWorkbenchCatalogQueries";
+import { queryKeys } from "../../api/queryKeys";
 
 const reads = vi.hoisted(() => ({ signals: new Map<string, AbortSignal>() }));
 const bootstrapControl = vi.hoisted(() => ({
   payload: new Promise<Record<string, unknown>>(() => {}),
 }));
 const sessionIndexGate = vi.hoisted(() => ({ enabledFlags: [] as boolean[] }));
+const directoryReads = vi.hoisted(() => ({
+  conversations: vi.fn(async () => ({ items: [], nextCursor: "" })),
+  teams: vi.fn(async () => []),
+  archived: vi.fn(async () => ({ items: [] })),
+}));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 function pendingRead(name: string, signal?: AbortSignal): Promise<never> {
   if (signal) reads.signals.set(name, signal);
@@ -24,10 +30,13 @@ vi.mock("../../api/chat", () => ({
   fetchChatRoomDetail: (_id: string, { signal }: { signal?: AbortSignal } = {}) => pendingRead("room", signal),
   listChatRoomModes: async () => [],
   listChatRoomPurposes: async () => [],
-  queryConversations: async () => ({ items: [], nextCursor: "" }),
+  queryConversations: directoryReads.conversations,
 }));
 vi.mock("../../api/agents", () => ({ listAgentSummaries: async () => [] }));
-vi.mock("../../api/teams", () => ({ listTeams: async () => [] }));
+vi.mock("../../api/teams", () => ({ listTeams: directoryReads.teams }));
+vi.mock("../../api/sessionArchive", () => ({ listArchivedChatSessions: directoryReads.archived }));
+vi.mock("../../api/runtime", () => ({ fetchRuntimeSummary: async () => ({}) }));
+vi.mock("../../api/skills", () => ({ fetchSkillLibrary: async () => ({ skills: [] }) }));
 vi.mock("../chatSessionIndexQuery", () => ({
   useSessionIndexQuery: (options: { enabled: boolean }) => {
     sessionIndexGate.enabledFlags.push(options.enabled);
@@ -42,6 +51,7 @@ afterEach(() => {
   reads.signals.clear();
   sessionIndexGate.enabledFlags.length = 0;
   bootstrapControl.payload = new Promise<Record<string, unknown>>(() => {});
+  vi.clearAllMocks();
 });
 
 /**
@@ -64,6 +74,41 @@ async function actUntil(check: () => boolean, attempts = 100): Promise<boolean> 
 }
 
 describe("Chat catalog request lifecycle", () => {
+  it("skips hidden Finance directory reads and cached catalog auto-pagination", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(queryKeys.conversationsCatalogQuery(100), {
+      pages: [{ items: [], nextCursor: "page-2" }], pageParams: [""],
+    });
+    bootstrapControl.payload = Promise.resolve({
+      activeSessionId: "finance-session", sessionPage: { items: [], nextCursor: "" },
+      agents: [], conversations: [], directoryReady: true,
+    });
+    const input = {
+      queryClient: client, secondaryChatDataEnabled: true, sessionDirectoryEnabled: false,
+      chatSecondaryPollPolicy: {}, chatLiveQueryPolicy: {}, sessionQueryText: "",
+      activeSessionId: "finance-session", requestedSessionId: "finance-session", requestedRoomId: "",
+      activeGroupRoomId: "", expandedGroupAgentSessionIds: [], groupComposerOpen: false,
+      standardGroupRoomActive: false, projectBusActive: false, chatPollingVisible: true,
+      chatStartupWarmupActive: false, groupBackgroundSyncActive: false, groupStreamConnected: true,
+      showArchivedSessions: true,
+    } as ChatWorkbenchCatalogQueriesInput;
+    function Page() { useChatWorkbenchCatalogQueries(input); return null; }
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
+      expect(await actUntil(() => client.getQueryState(["sessions", "active-bootstrap"])?.status === "success")).toBe(true);
+      expect(sessionIndexGate.enabledFlags.every((enabled) => !enabled)).toBe(true);
+      expect(directoryReads.conversations).not.toHaveBeenCalled();
+      expect(directoryReads.teams).not.toHaveBeenCalled();
+      expect(directoryReads.archived).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      client.clear();
+      container.remove();
+    }
+  });
+
   it("releases obsolete config, group and expanded-session requests on page exit", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const input = {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSessionDetailShellFromSummary,
+  cancelUnobservedSessionPrefetches,
   fetchSessionDetailWindow,
   isForeignSessionDetailQueryKey,
   isProvisionalSessionTranscript,
@@ -16,13 +17,58 @@ import {
 } from "./chatSessionDetailHelpers";
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import * as client from "../../api/client";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { queryKeys } from "../../api/queryKeys";
 import { vi } from "vitest";
 import { resolveAssistantTurnRenderSurface } from "../chatTurnProtocol";
 import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 
 describe("chatSessionDetailHelpers", () => {
+  it("aborts an owned unobserved neighbor warmup on page exit", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let signal: AbortSignal | undefined;
+    const fetch = vi.spyOn(client, "fetchJson").mockImplementation((_url, options) => {
+      signal = options?.signal ?? undefined;
+      return new Promise(() => {});
+    });
+    try {
+      const warmup = prefetchSessionDetailWindow(queryClient, "neighbor");
+      await vi.waitFor(() => expect(signal).toBeDefined());
+      await cancelUnobservedSessionPrefetches(queryClient, ["neighbor"]);
+      expect(signal!.aborted).toBe(true);
+      await warmup;
+    } finally {
+      queryClient.clear();
+      fetch.mockRestore();
+    }
+  });
+
+  it("preserves a warmup adopted by a visible query or selected target", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const signals: AbortSignal[] = [];
+    const fetch = vi.spyOn(client, "fetchJson").mockImplementation((_url, options) => {
+      if (options?.signal) signals.push(options.signal);
+      return new Promise(() => {});
+    });
+    let unsubscribe = () => {};
+    try {
+      const visible = prefetchSessionDetailWindow(queryClient, "visible");
+      const selected = prefetchSessionDetailWindow(queryClient, "selected");
+      await vi.waitFor(() => expect(signals).toHaveLength(2));
+      const observer = new QueryObserver(queryClient, { queryKey: queryKeys.session("visible") });
+      unsubscribe = observer.subscribe(() => {});
+      await cancelUnobservedSessionPrefetches(queryClient, ["visible", "selected"], "selected");
+      expect(signals.every((signal) => !signal.aborted)).toBe(true);
+      unsubscribe();
+      await queryClient.cancelQueries();
+      await Promise.all([visible, selected]);
+    } finally {
+      unsubscribe();
+      queryClient.clear();
+      fetch.mockRestore();
+    }
+  });
+
   it("detects session-not-found errors across locales", () => {
     expect(isSessionNotFoundError(new Error("Session not found"))).toBe(true);
     expect(isSessionNotFoundError(new Error("会话不存在"))).toBe(true);

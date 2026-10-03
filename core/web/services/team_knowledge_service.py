@@ -2262,10 +2262,21 @@ def _compute_knowledge_operations_health(*, agent_id: str = "", internal: bool =
     }
 
 
-def get_knowledge_governance_plan(*, agent_id: str = "", limit: int = 12, internal: bool = False) -> dict[str, Any]:
+def get_knowledge_governance_plan(
+    *,
+    agent_id: str = "",
+    limit: int = 12,
+    health: dict[str, Any] | None = None,
+    internal: bool = False,
+) -> dict[str, Any]:
     """Return a read-only governance plan derived from health and steward workbench state."""
 
-    payload = _build_knowledge_governance_plan(agent_id=agent_id, limit=limit, internal=internal)
+    payload = _build_knowledge_governance_plan(
+        agent_id=agent_id,
+        limit=limit,
+        health=health,
+        internal=internal,
+    )
     _record_event(
         "knowledge.governance.plan.viewed",
         "",
@@ -2289,7 +2300,8 @@ def _build_knowledge_governance_plan(
     normalized_agent_id = str(agent_id or "").strip()
     bounded_limit = max(1, min(50, int(limit or 12)))
     workbench = workbench or _build_knowledge_steward_workbench(agent_id=normalized_agent_id, limit=bounded_limit, internal=internal)
-    health = health or _build_knowledge_operations_health(agent_id=normalized_agent_id, internal=internal)
+    if health is None:
+        health = _build_knowledge_operations_health(agent_id=normalized_agent_id, internal=internal)
     actions: list[dict[str, Any]] = []
     for item in list(workbench.get("nextActions") or []):
         actions.append(

@@ -103,8 +103,10 @@ const styles = {
     "flex min-w-[70px] items-baseline justify-start gap-2 text-vui-xs text-[var(--fg-secondary)] [&_strong]:text-vui-md [&_strong]:text-[var(--fg-primary)]",
   bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
   queueList: "flex min-h-0 max-w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] max-[980px]:max-h-none",
+  queueVirtualSpacer: "relative min-w-0 w-full shrink-0",
+  queueVirtualRow: "absolute left-0 top-0 min-w-0 w-full",
   queueItem:
-    `w-full cursor-pointer px-2.5 py-2 text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:!bg-[var(--vui-surface-row-hover)] ${reviewRowSurface}`,
+    `w-full cursor-pointer px-2.5 py-2 text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:!bg-[var(--vui-surface-row-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent-warm-2)] focus-visible:outline-offset-1 ${reviewRowSurface}`,
   queueItemActive:
     "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,var(--vui-surface-row))]",
   queueItemTop: "flex items-center justify-between gap-2.5",

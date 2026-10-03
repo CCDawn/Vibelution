@@ -31,7 +31,7 @@ async function settle() { await act(async () => new Promise((resolve) => setTime
 describe("financial assistant chat note", () => {
   it("shows the boundary and the two existing destinations only for that chat", async () => {
     await act(async () => root.render(
-      <QueryClientProvider client={client}><MemoryRouter>
+      <QueryClientProvider client={client}><MemoryRouter initialEntries={["/finance?session=native-session"]}>
         <FinancialAssistantChatNote sessionId="native-session" lang="zh" />
       </MemoryRouter></QueryClientProvider>,
     ));
@@ -46,12 +46,13 @@ describe("financial assistant chat note", () => {
 
   it("stays quiet in an ordinary chat", async () => {
     await act(async () => root.render(
-      <QueryClientProvider client={client}><MemoryRouter>
+      <QueryClientProvider client={client}><MemoryRouter initialEntries={["/chat?session=ordinary-session"]}>
         <FinancialAssistantChatNote sessionId="ordinary-session" lang="zh" />
       </MemoryRouter></QueryClientProvider>,
     ));
     await settle();
     expect(container.textContent).toBe("");
+    expect(listFinancialAssistants).not.toHaveBeenCalled();
   });
 
   it("puts connection status on the matching agent and skips everyone else", async () => {

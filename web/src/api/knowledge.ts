@@ -151,7 +151,7 @@ export function searchKnowledgeItems<T>(options: {
     params.set("query", options.query.trim());
   }
   commaList(options.tags ?? "").forEach((tag) => params.append("tags", tag));
-  params.set("searchMode", options.searchMode ?? "keyword");
+  params.set("searchMode", options.searchMode ?? "exact");
   params.set("limit", String(options.limit ?? 12));
   if (options.teamId) {
     params.set("teamId", options.teamId);

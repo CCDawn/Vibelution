@@ -110,3 +110,36 @@ def test_runtime_scene_list_survives_retention_delete_races(
     assert delete_error.__name__ in warning_messages[0]
     assert "=1" in warning_messages[0]
     assert "scene-00" not in warning_messages[0]
+
+
+def test_runtime_scene_detail_and_content_support_external_storage_paths(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    runtime_scene_root = tmp_path / "external-storage" / "logs" / "runtime_scenes"
+    runtime_scene_root.mkdir(parents=True)
+    scene_dir = _write_scene(runtime_scene_root, project_root, 1)
+    raw_dir = scene_dir / "raw"
+    raw_dir.mkdir()
+    (raw_dir / "backend.stdout.log").write_text("external scene log\n", encoding="utf-8")
+
+    launcher_state_path = project_root / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True)
+    launcher_state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(runtime_scene_service, "_runtime_scene_root", lambda: runtime_scene_root.resolve())
+
+    app = FastAPI()
+    app.include_router(logs_router, prefix="/api")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        detail_response = client.get("/api/logs/runtime-scenes/scene-01")
+        content_response = client.get(
+            "/api/logs/runtime-scenes/scene-01/content",
+            params={"path": "raw/backend.stdout.log"},
+        )
+
+    assert detail_response.status_code == 200, detail_response.text
+    assert detail_response.json()["manifestPath"] == (scene_dir / "manifest.json").resolve().as_posix()
+    assert content_response.status_code == 200, content_response.text
+    assert content_response.json()["rootPath"] == scene_dir.resolve().as_posix()
+    assert content_response.json()["content"].replace("\r\n", "\n") == "external scene log\n"

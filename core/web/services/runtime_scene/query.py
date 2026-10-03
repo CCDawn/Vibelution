@@ -967,7 +967,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
         "directoryName": scene_dir.name,
         "displayName": package_index["displayName"],
         "packageIndex": package_index,
-        "manifestPath": str((scene_dir / "manifest.json").relative_to(s.PROJECT_ROOT).as_posix()),
+        "manifestPath": _runtime_scene_display_path(scene_dir / "manifest.json"),
         "manifest": manifest,
         "startedAt": package_index["startedAt"],
         "endedAt": str(manifest.get("ended_at") or ""),
@@ -1004,6 +1004,16 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
         "packageDiagnosis": package_diagnosis,
         "diagnosisSummary": s._runtime_scene_list_diagnosis_summary(summary_payload),
     }
+
+
+def _runtime_scene_display_path(path: Path) -> str:
+    """Keep project-local paths relative and represent external storage paths directly."""
+    s = _service()
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(Path(s.PROJECT_ROOT).resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
 
 
 def list_runtime_scene_evidence_for_agent(
@@ -1320,7 +1330,7 @@ def read_runtime_scene_file(scene_id: str, relative_path: str) -> dict:
     truncated = len(content) > s.MAX_TEXT_CHARS
     if truncated:
         content = content[:s.MAX_TEXT_CHARS] + "\n\n... preview truncated ..."
-    scene_root_path = scene_dir.relative_to(s.PROJECT_ROOT).as_posix()
+    scene_root_path = _runtime_scene_display_path(scene_dir)
     return {
         "rootId": "runtime_scenes",
         "rootPath": scene_root_path,

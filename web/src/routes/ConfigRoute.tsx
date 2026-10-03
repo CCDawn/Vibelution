@@ -95,7 +95,7 @@ import {
   markProviderOnboardingSeen,
   shouldAutoOpenProviderOnboarding,
 } from "./config/onboardingGate";
-import { useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
+import { useConfigHealthDiagnosticsQuery, useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
 import {
   buildConfigApplyRequestPayload,
   isConfigBaselineStaleErrorMessage,
@@ -243,7 +243,7 @@ export function ConfigRoute() {
     baseHash: string;
     modelCatalog: ConfigWorkspace["modelCatalog"];
   } | null>(null);
-  const { workspaceQuery, healthDiagnosticsQuery } = useConfigWorkspaceQueries();
+  const { workspaceQuery } = useConfigWorkspaceQueries();
 
   const [draftConfig, setDraftConfig] = useState<PublicConfigShape | null>(null);
   const [baseConfig, setBaseConfig] = useState<PublicConfigShape | null>(null);
@@ -573,6 +573,8 @@ export function ConfigRoute() {
     return !showingSettingsIndex && (!requestedFocusSectionId || requestedFocusSectionId === sectionId)
       && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
+
+  const healthDiagnosticsQuery = useConfigHealthDiagnosticsQuery(isSectionVisible("health-diagnostics"));
 
   function navigateSettingsSelection(groupId: ConfigSettingsGroupId, pageId: string, focusSectionId?: string, focusFieldId?: string) {
     pendingFocusSectionRef.current = focusSectionId ?? "";

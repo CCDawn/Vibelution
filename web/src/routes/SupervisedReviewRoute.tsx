@@ -1,8 +1,9 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowUpRight, CheckCircle2, LibraryBig, LoaderCircle, Search, Square, SquareCheckBig, Trash2, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 
 import {
@@ -67,6 +68,88 @@ type SupervisedReviewTranscriptProps = {
   positiveDatasetPath?: string;
   negativeDatasetPath?: string;
 };
+
+type ReviewQueueVirtualListProps<T> = {
+  items: T[];
+  getItemKey: (item: T, index: number) => string;
+  renderItem: (item: T, index: number) => ReactNode;
+  ariaLabel: string;
+};
+
+/** Keeps long review queues responsive while retaining measured, variable-height rows. */
+export function ReviewQueueVirtualList<T>({ items, getItemKey, renderItem, ariaLabel }: ReviewQueueVirtualListProps<T>) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [pendingFocusIndex, setPendingFocusIndex] = useState<number | null>(null);
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 132,
+    getItemKey: (index) => getItemKey(items[index], index),
+    overscan: 8,
+    gap: 6,
+    initialRect: { width: 380, height: 540 },
+    useAnimationFrameWithResizeObserver: true,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+
+  useEffect(() => {
+    if (pendingFocusIndex === null) return;
+    const row = scrollRef.current?.querySelector<HTMLElement>(`[data-review-row-index="${pendingFocusIndex}"]`);
+    const target = row?.querySelector<HTMLElement>("[role=button]");
+    if (target) {
+      target.focus();
+      setPendingFocusIndex(null);
+    }
+  }, [pendingFocusIndex, virtualItems]);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    const row = target.closest<HTMLElement>("[data-review-row-index]");
+    if (!row || row.querySelector("[role=button]") !== target) return;
+    const currentIndex = Number(row.dataset.reviewRowIndex);
+    if (!Number.isInteger(currentIndex)) return;
+
+    const nextIndex = event.key === "ArrowDown"
+      ? Math.min(items.length - 1, currentIndex + 1)
+      : event.key === "ArrowUp"
+        ? Math.max(0, currentIndex - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? items.length - 1
+            : currentIndex;
+    if (nextIndex === currentIndex) return;
+
+    event.preventDefault();
+    setPendingFocusIndex(nextIndex);
+    virtualizer.scrollToIndex(nextIndex, { align: "auto" });
+    const mountedTarget = scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-review-row-index="${nextIndex}"] [role=button]`);
+    if (mountedTarget) {
+      mountedTarget.focus();
+      setPendingFocusIndex(null);
+    }
+  }
+
+  return (
+    <div ref={scrollRef} className={styles.queueList} onKeyDown={handleKeyDown} aria-label={ariaLabel}>
+      <div className={styles.queueVirtualSpacer} style={{ height: virtualizer.getTotalSize() }}>
+        {virtualItems.map((row) => (
+          <div
+            key={row.key}
+            ref={virtualizer.measureElement}
+            data-index={row.index}
+            data-review-row-index={row.index}
+            className={styles.queueVirtualRow}
+            style={{ transform: `translateY(${row.start}px)` }}
+          >
+            {renderItem(items[row.index], row.index)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function SupervisedReviewTranscript({
   lang,
@@ -633,15 +716,19 @@ export function SupervisedReviewRoute() {
               <p>{lang === "zh" ? "换个筛选条件，或者等新的多轮片段进入审核队列。" : "Try another filter or wait for new multi-turn excerpts to enter the queue."}</p>
             </div>
           ) : (
-            <div className={styles.queueList}>
-              {visibleItems.map((item) => {
+            <ReviewQueueVirtualList
+              items={visibleItems}
+              getItemKey={(item) => item.candidateId}
+              ariaLabel={lang === "zh" ? "审核样本列表" : "Review samples"}
+              renderItem={(item, index) => {
                 const itemSelected = selectedCandidateIds.includes(item.candidateId);
                 const selectable = item.status === "pending";
                 return (
                 <article
-                  key={item.candidateId}
                   role="button"
                   tabIndex={0}
+                  aria-setsize={visibleItems.length}
+                  aria-posinset={index + 1}
                   className={
                     selectedCandidate?.candidateId === item.candidateId
                       ? `${styles.queueItem} ${styles.queueItemActive}`
@@ -692,8 +779,8 @@ export function SupervisedReviewRoute() {
                   </div>
                 </article>
                 );
-              })}
-            </div>
+              }}
+            />
           )}
         </div>
       )}

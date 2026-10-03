@@ -11,7 +11,8 @@ export function FinancialAssistantChatNote({
   sessionId?: string | null;
   lang: "zh" | "en";
 }) {
-  const assistants = useFinancialAssistants(Boolean(sessionId));
+  const location = useLocation();
+  const assistants = useFinancialAssistants(Boolean(sessionId) && location.pathname === "/finance");
   const row = assistants.data?.find((item) => item.directSessionId === sessionId && item.status === "active");
   if (!sessionId || !row) {
     return null;
@@ -53,3 +54,4 @@ export function FinancialAssistantChatNote({
     </VStateSurface>
   );
 }
+import { useLocation } from "react-router-dom";

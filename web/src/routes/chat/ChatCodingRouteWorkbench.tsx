@@ -295,6 +295,7 @@ import {
   fetchSessionDetailWindow,
   isSessionDetailHardLoading,
   prefetchSessionDetailWindow,
+  cancelUnobservedSessionPrefetches,
   resolveActiveSessionDetailForUi,
   resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
@@ -1194,6 +1195,7 @@ export function ChatCodingRouteWorkbench() {
     requestedSessionId,
     requestedRoomId,
     showArchivedSessions,
+    sessionDirectoryEnabled: !financeSurface,
   });
 
   // Session-level archive (ZCode-style metadata flip). Optimistic cache update
@@ -1889,8 +1891,10 @@ export function ChatCodingRouteWorkbench() {
   }, [activeSessionId, groupPanelActive]);
 
   // C: idle-prefetch a few neighbor session detail windows (Cursor list warm pattern).
+  const activePrefetchTargetRef = useRef(activeSessionId);
+  activePrefetchTargetRef.current = activeSessionId;
   useEffect(() => {
-    if (groupPanelActive || !secondaryChatDataEnabled || !pageVisible || !sessionsQuery.data?.length) {
+    if (financeSurface || groupPanelActive || !secondaryChatDataEnabled || !pageVisible || !sessionsQuery.data?.length) {
       return;
     }
     const neighborIds = resolveNeighborSessionIdsForPrefetch({
@@ -1901,15 +1905,20 @@ export function ChatCodingRouteWorkbench() {
       return;
     }
     let cancelled = false;
+    const ownedPendingIds = new Set<string>();
     const run = async () => {
       for (const sessionId of neighborIds) {
         if (cancelled) {
           return;
         }
         try {
+          const alreadyFetching = queryClient.getQueryState(queryKeys.session(sessionId))?.fetchStatus === "fetching";
+          if (!alreadyFetching) ownedPendingIds.add(sessionId);
           await prefetchSessionDetailWindow(queryClient, sessionId);
         } catch {
           return;
+        } finally {
+          ownedPendingIds.delete(sessionId);
         }
       }
     };
@@ -1921,13 +1930,14 @@ export function ChatCodingRouteWorkbench() {
       : window.setTimeout(() => void run(), 280);
     return () => {
       cancelled = true;
+      void cancelUnobservedSessionPrefetches(queryClient, ownedPendingIds, activePrefetchTargetRef.current || "");
       if (typeof idleRequest === "function") {
         (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(handle as number);
       } else {
         window.clearTimeout(handle as number);
       }
     };
-  }, [activeSessionId, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
+  }, [activeSessionId, financeSurface, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
 
 
   const workspace = activeSessionId
@@ -2974,7 +2984,8 @@ export function ChatCodingRouteWorkbench() {
   });
   useEffect(() => {
     if (
-      !rawSessionsQuery.hasMore
+      financeSurface
+      || !rawSessionsQuery.hasMore
       || rawSessionsQuery.isLoadingMore
       || rawSessionsQuery.isFetchNextPageError
     ) {
@@ -2982,6 +2993,7 @@ export function ChatCodingRouteWorkbench() {
     }
     void rawSessionsQuery.loadMore();
   }, [
+    financeSurface,
     rawSessionsQuery.hasMore,
     rawSessionsQuery.isLoadingMore,
     rawSessionsQuery.isFetchNextPageError,

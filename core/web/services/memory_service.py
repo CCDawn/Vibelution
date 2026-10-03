@@ -475,7 +475,11 @@ def _build_memory_usage_contract(root: Path) -> tuple[dict[str, Any], bool]:
 
         knowledge_overview = list_knowledge_overview(internal=True)
         operations_health = get_knowledge_operations_health(internal=True)
-        governance_plan = get_knowledge_governance_plan(limit=8, internal=True)
+        governance_plan = get_knowledge_governance_plan(
+            limit=8,
+            health=operations_health,
+            internal=True,
+        )
         cacheable = True
     except Exception:
         knowledge_overview = {"summary": {}}

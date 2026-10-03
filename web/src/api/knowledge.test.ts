@@ -1,8 +1,43 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { resetControlTokenForTests, seedControlTokenForTests } from "./client";
+import { searchKnowledgeItems } from "./knowledge";
 
 import apiSource from "./knowledge.ts?raw";
 import mutationsSource from "../routes/memory/useMemoryKnowledgeMutations.ts?raw";
 import workbenchQueriesSource from "../routes/memory/useMemoryWorkbenchQueries.ts?raw";
+
+afterEach(() => {
+  resetControlTokenForTests();
+  vi.unstubAllGlobals();
+});
+
+describe("knowledge search requests", () => {
+  it("uses the server's exact default for a chat's implicit search", async () => {
+    seedControlTokenForTests();
+    const transport = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [] })));
+    vi.stubGlobal("fetch", transport);
+    const signal = new AbortController().signal;
+    await searchKnowledgeItems({ agentId: "agent/a", limit: 20, signal });
+    const [path, options] = transport.mock.calls[0];
+    const request = new URL(String(path), "http://localhost");
+    expect(request.pathname).toBe("/api/knowledge/search");
+    expect(request.searchParams.get("agentId")).toBe("agent/a");
+    expect(request.searchParams.get("searchMode")).toBe("exact");
+    expect(request.searchParams.get("limit")).toBe("20");
+    expect(options.signal).toBe(signal);
+  });
+
+  it("preserves an explicitly selected search mode and query", async () => {
+    seedControlTokenForTests();
+    const transport = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [] })));
+    vi.stubGlobal("fetch", transport);
+    await searchKnowledgeItems({ agentId: "a", query: "  report  ", searchMode: "bm25" });
+    const request = new URL(String(transport.mock.calls[0][0]), "http://localhost");
+    expect(request.searchParams.get("searchMode")).toBe("bm25");
+    expect(request.searchParams.get("query")).toBe("report");
+  });
+});
 
 describe("knowledge catalog API", () => {
   it("owns the knowledge platform transports including unused C5 routes", () => {

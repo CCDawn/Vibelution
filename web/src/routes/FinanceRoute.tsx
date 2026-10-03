@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, useLocation } from "react-router-dom";
 
-import { createFinancialAssistant, listFinancialAssistants } from "../api/financialAssistant";
+import { createFinancialAssistant, type FinancialAssistant } from "../api/financialAssistant";
+import { queryKeys } from "../api/queryKeys";
 import { VButton, VDenseOpsPage, VStateSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { ChatCodingRoute } from "./ChatCodingRoute";
 import { planFinancialAssistantEntry } from "./finance/financialAssistantEntry";
+import { useFinancialAssistants } from "./finance/useFinancialAssistants";
 import styles from "./FinanceRoute.styles";
 
 export function FinanceRoute() {
@@ -23,22 +26,38 @@ function FinanceEntryGate() {
   const [sessionId, setSessionId] = useState("");
   const [failure, setFailure] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const queryClient = useQueryClient();
+  const assistants = useFinancialAssistants();
+  const creationRef = useRef<ReturnType<typeof createFinancialAssistant> | null>(null);
   useEffect(() => {
+    if (assistants.error) {
+      setFailure(assistants.error instanceof Error ? assistants.error.message : (zh ? "打开失败，请重试。" : "Could not open the chat. Retry."));
+      return;
+    }
+    if (!assistants.isSuccess) {
+      return;
+    }
     let active = true;
     void (async () => {
       try {
-        const rows = await listFinancialAssistants();
-        if (!active) {
-          return;
-        }
-        const plan = planFinancialAssistantEntry(rows, lang);
+        const plan = planFinancialAssistantEntry(assistants.data, lang);
         if (plan.kind === "blocked") {
           setFailure(plan.message);
           return;
         }
-        const nextId = plan.kind === "open"
-          ? plan.sessionId
-          : (await createFinancialAssistant()).assistant.directSessionId;
+        let nextId = plan.kind === "open" ? plan.sessionId : "";
+        if (plan.kind === "create") {
+          // Keep a single creation across effect replays and publish its row to
+          // the same cache the chat note reads after the entry gate unmounts.
+          creationRef.current ??= createFinancialAssistant().then((result) => {
+            queryClient.setQueryData<FinancialAssistant[]>(queryKeys.financialAssistants(), (rows) => [
+              ...(rows ?? []).filter((row) => row.agentId !== result.assistant.agentId),
+              result.assistant,
+            ]);
+            return result;
+          });
+          nextId = (await creationRef.current).assistant.directSessionId;
+        }
         if (!active) {
           return;
         }
@@ -48,6 +67,7 @@ function FinanceEntryGate() {
         }
         setSessionId(nextId);
       } catch (error) {
+        creationRef.current = null;
         if (active) {
           setFailure(error instanceof Error ? error.message : (zh ? "打开失败，请重试。" : "Could not open the chat. Retry."));
         }
@@ -56,7 +76,7 @@ function FinanceEntryGate() {
     return () => {
       active = false;
     };
-  }, [attempt, lang, zh]);
+  }, [assistants.data, assistants.error, assistants.isSuccess, attempt, lang, queryClient, zh]);
 
   if (sessionId) {
     return <Navigate to={`/finance?session=${encodeURIComponent(sessionId)}`} replace />;
@@ -73,7 +93,11 @@ function FinanceEntryGate() {
           <VStateSurface
             title={zh ? "还没打开这个助手" : "This assistant did not open"}
             tone="error"
-            actions={<VButton onPress={() => { setFailure(""); setAttempt((current) => current + 1); }}>{zh ? "重试" : "Retry"}</VButton>}
+            actions={<VButton onPress={() => {
+              setFailure("");
+              if (assistants.isError) void assistants.refetch();
+              else setAttempt((current) => current + 1);
+            }}>{zh ? "重试" : "Retry"}</VButton>}
           >
             {failure}
           </VStateSurface>

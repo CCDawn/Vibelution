@@ -80,6 +80,8 @@ export type ChatWorkbenchCatalogQueriesInput = {
   requestedRoomId: string;
   /** Archived view toggle: lazily fetches the archived-session listing. */
   showArchivedSessions: boolean;
+  /** Finance reuses the conversation center without displaying the directory. */
+  sessionDirectoryEnabled?: boolean;
 };
 
 export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQueriesInput) {
@@ -100,6 +102,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     chatStartupWarmupActive,
     groupBackgroundSyncActive,
     groupStreamConnected,
+    sessionDirectoryEnabled = true,
   } = input;
 
   const runtimeQuery = useQuery({
@@ -187,7 +190,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const directoryGatePending = !bootstrapDirectoryReady && !directoryReadyWaitExpired;
   // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
   // the canonical session index recover instead of leaving the directory gated.
-  const sessionIndexQueryEnabled = shouldEnableSessionIndexQuery({
+  const sessionIndexQueryEnabled = sessionDirectoryEnabled && shouldEnableSessionIndexQuery({
     hasRouteTarget: Boolean(input.requestedSessionId || input.requestedRoomId),
     hasActiveSession: Boolean(activeSessionId),
     bootstrapIsFetched: activeSessionBootstrapQuery.isFetched,
@@ -230,13 +233,13 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const archivedSessionsQuery = useQuery({
     queryKey: queryKeys.sessionArchive(),
     queryFn: ({ signal }) => listArchivedChatSessions({ signal }),
-    enabled: input.showArchivedSessions,
+    enabled: sessionDirectoryEnabled && input.showArchivedSessions,
     staleTime: 5_000,
   });
   const conversationsQueryRaw = useInfiniteQuery({
     queryKey: queryKeys.conversationsCatalogQuery(CONVERSATIONS_CATALOG_PAGE_SIZE),
     initialPageParam: "",
-    enabled: secondaryChatDataEnabled && bootstrapSettled,
+    enabled: sessionDirectoryEnabled && secondaryChatDataEnabled && bootstrapSettled,
     staleTime: 5_000,
     refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground,
@@ -256,11 +259,12 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   // The rail renders every team room, so exhaust the cursor like the session
   // index does instead of stopping at the first catalog page.
   useEffect(() => {
-    if (!conversationsQueryRaw.hasNextPage || conversationsQueryRaw.isFetchingNextPage) {
+    if (!sessionDirectoryEnabled || !conversationsQueryRaw.hasNextPage || conversationsQueryRaw.isFetchingNextPage) {
       return;
     }
     void conversationsQueryRaw.fetchNextPage();
   }, [
+    sessionDirectoryEnabled,
     conversationsQueryRaw.hasNextPage,
     conversationsQueryRaw.isFetchingNextPage,
     conversationsQueryRaw.fetchNextPage,
@@ -290,7 +294,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     // Must load whenever the left-rail agent directory is active — not only when the
     // group-room picker is open. With teams=[], research/evolution members all dump into
     // 「特殊 Agent」and team rooms fall into 未归属.
-    enabled: secondaryChatDataEnabled || sessionIndexQueryEnabled,
+    enabled: sessionDirectoryEnabled && (secondaryChatDataEnabled || sessionIndexQueryEnabled),
     refetchInterval: chatSecondaryPollPolicy.teamsRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });

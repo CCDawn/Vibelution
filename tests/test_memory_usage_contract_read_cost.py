@@ -157,6 +157,76 @@ def test_explicit_usage_contract_cache_clear_forces_a_fresh_build(tmp_path, monk
     assert calls == Counter({"overview": 2, "health": 2, "plan": 2})
 
 
+def test_usage_contract_reuses_health_for_governance_plan_without_changing_summary(tmp_path, monkeypatch):
+    _prepare_usage_contract_cache(tmp_path, monkeypatch)
+    calls: Counter[str] = Counter()
+    overview = {"summary": {"knowledgeBaseCount": 3, "itemCount": 11}}
+    health = {
+        "summary": {
+            "knowledgeBaseCount": 3,
+            "findingCount": 2,
+            "corruptJsonlLineCount": 0,
+            "storageReadErrorCount": 0,
+        },
+        "findings": [
+            {
+                "findingType": "unrated_items",
+                "findingId": "health-finding-1",
+                "knowledgeBaseId": "kb-1",
+                "knowledgeBaseName": "Research",
+            }
+        ],
+    }
+
+    def build_health(*, agent_id="", internal=False):
+        calls["health"] += 1
+        return health
+
+    def build_workbench(*, agent_id="", limit=12, internal=False):
+        calls["workbench"] += 1
+        return {"nextActions": [], "summary": {"recommendationCount": 4}}
+
+    original_build_plan = team_knowledge_service._build_knowledge_governance_plan
+    health_received_by_plan: list[dict] = []
+
+    def capture_health_for_plan(**kwargs):
+        health_received_by_plan.append(kwargs.get("health"))
+        return original_build_plan(**kwargs)
+
+    monkeypatch.setattr(
+        team_knowledge_service,
+        "list_knowledge_overview",
+        lambda *, internal=False: calls.update(overview=1) or overview,
+    )
+    monkeypatch.setattr(team_knowledge_service, "_build_knowledge_operations_health", build_health)
+    monkeypatch.setattr(team_knowledge_service, "_build_knowledge_steward_workbench", build_workbench)
+    monkeypatch.setattr(team_knowledge_service, "_build_knowledge_governance_plan", capture_health_for_plan)
+    monkeypatch.setattr(team_knowledge_service, "_record_event", lambda *_args, **_kwargs: None)
+
+    contract = memory_service.get_memory_usage_contract()
+
+    assert calls == Counter({"overview": 1, "health": 1, "workbench": 1})
+    assert health_received_by_plan == [health]
+    assert health_received_by_plan[0] is health
+    assert contract["currentState"] == {
+        "knowledge": overview["summary"],
+        "operationsHealth": health["summary"],
+        "governancePlan": {
+            "actionCount": 1,
+            "healthFindingCount": 2,
+            "workbenchRecommendationCount": 4,
+        },
+        "operatingBoundary": {
+            "canDirectlyApplyKnowledge": False,
+            "canDeleteKnowledge": False,
+            "canChangeAcl": False,
+            "canBypassReviewer": False,
+            "formalKnowledgeRequiresReviewer": True,
+            "planOnly": True,
+        },
+    }
+
+
 def test_cache_clear_during_build_prevents_stale_payload_from_waking_waiter(tmp_path, monkeypatch):
     _prepare_usage_contract_cache(tmp_path, monkeypatch)
     calls: Counter[str] = Counter()

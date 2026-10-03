@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { listAgentSummaries, updateAgentToolPolicy, validateAgentToolPolicy } from "../api/agents";
@@ -95,6 +95,42 @@ type ToolPermissionGroup = {
   inheritedCount: number;
   highRiskCount: number;
 };
+
+type ToolPermissionGroupDisclosureProps = {
+  summary: ReactNode;
+  summaryClassName: string;
+  renderChildren: () => ReactNode;
+  className: string;
+  listClassName: string;
+  forceOpen?: boolean;
+};
+
+/** Only mounts per-tool controls while the permission group is visible. */
+export function ToolPermissionGroupDisclosure({
+  summary,
+  summaryClassName,
+  renderChildren,
+  className,
+  listClassName,
+  forceOpen = false,
+}: ToolPermissionGroupDisclosureProps) {
+  const [expanded, setExpanded] = useState(false);
+  const open = forceOpen || expanded;
+
+  return (
+    <details
+      open={open}
+      onToggle={(event) => {
+        if (!forceOpen) setExpanded(event.currentTarget.open);
+      }}
+      className={className}
+    >
+      <summary className={summaryClassName}>{summary}</summary>
+      {open ? <div className={listClassName}>{renderChildren()}</div> : null}
+    </details>
+  );
+}
+
 type ToolRowClickEvent = {
   ctrlKey: boolean;
   metaKey: boolean;
@@ -2003,13 +2039,19 @@ export function ToolsRoute() {
               {editablePolicyTools.length ? (
                 <div className={styles.toolPermissionList}>
                   {editablePolicyGroups.map((group) => (
-                    <details key={`${group.bundleId}:${Boolean(toolPolicySearchText.trim())}`} open={Boolean(toolPolicySearchText.trim())} className={styles.toolPermissionGroup}>
-                      <summary className={styles.permissionSummary}>
-                        <span>{group.label}</span>
-                        <small>{group.tools.length} · {lang === "zh" ? "允许" : "Allowed"} {group.allowedCount} · {lang === "zh" ? "禁用" : "Blocked"} {group.blockedCount} · {lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small>
-                      </summary>
-                      <div className={styles.toolPermissionGroupList}>
-                        {group.tools.map((tool) => {
+                    <ToolPermissionGroupDisclosure
+                      key={group.bundleId}
+                      className={styles.toolPermissionGroup}
+                      summaryClassName={styles.permissionSummary}
+                      listClassName={styles.toolPermissionGroupList}
+                      forceOpen={Boolean(toolPolicySearchText.trim())}
+                      summary={(
+                        <>
+                          <span>{group.label}</span>
+                          <small>{group.tools.length} · {lang === "zh" ? "允许" : "Allowed"} {group.allowedCount} · {lang === "zh" ? "禁用" : "Blocked"} {group.blockedCount} · {lang === "zh" ? "高风险" : "High risk"} {group.highRiskCount}</small>
+                        </>
+                      )}
+                      renderChildren={() => group.tools.map((tool) => {
                           const mode = policyDraftMode(toolPolicyDraft, tool.name);
                           const tags = [...(tool.capabilityTags ?? []), ...(tool.riskTags ?? [])].slice(0, 4);
                           return (
@@ -2065,8 +2107,7 @@ export function ToolsRoute() {
                             </div>
                           );
                         })}
-                      </div>
-                    </details>
+                    />
                   ))}
                 </div>
               ) : (
