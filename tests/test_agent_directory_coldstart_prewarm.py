@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import threading
 
+from fastapi import FastAPI
+
 from core.web import lifecycle
 from core.web.routes import agents as agents_route
 from core.web.services import agent_directory_service
@@ -129,6 +131,41 @@ def test_prewarm_agent_registry_skips_under_pytest(monkeypatch):
     assert result == {"skipped": "pytest"}
 
 
+def test_gated_agent_registry_prewarm_waits_for_routes_ready_then_warms(monkeypatch):
+    """门控顺序：routes ready 事件 set 前不预热；set + settle 后目录等待→预热。"""
+
+    monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0.01")
+    order: list[str] = []
+    monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: False)
+
+    def fake_wait(*, timeout=None):
+        order.append("wait")
+        return "ready"
+
+    monkeypatch.setattr(directory_runtime, "wait_for_directory_startup", fake_wait)
+
+    def fake_prewarm():
+        order.append("warm")
+        return {"repairCacheHit": True, "repairMs": 0.0, "summaryPrewarmMs": 0.0}
+
+    monkeypatch.setattr(agent_directory_service, "prewarm_registry_caches", fake_prewarm)
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
+
+    app = FastAPI()
+    app.state.web_routes_ready_event = asyncio.Event()
+
+    async def exercise():
+        worker = asyncio.create_task(lifecycle._run_agent_registry_prewarm_after_routes_ready(app))
+        await asyncio.sleep(0.05)
+        assert order == [], "routes-ready 事件 set 前不得启动目录等待或预热"
+        app.state.web_routes_ready_event.set()
+        await asyncio.wait_for(worker, timeout=5)
+
+    asyncio.run(exercise())
+
+    assert order == ["wait", "warm"]
+
+
 def test_web_lifespan_schedules_agent_registry_prewarm(monkeypatch):
     entered = threading.Event()
     prewarm_started = threading.Event()
@@ -141,7 +178,12 @@ def test_web_lifespan_schedules_agent_registry_prewarm(monkeypatch):
         prewarm_started.set()
         return {}
 
+    async def gated_prewarm(app) -> dict:
+        # 默认门控下 lifespan 必须经 routes-ready 包装器调度 registry 预热。
+        return await asyncio.to_thread(prewarm)
+
     monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", record_ready_event)
+    monkeypatch.setattr(lifecycle, "_run_agent_registry_prewarm_after_routes_ready", gated_prewarm)
     monkeypatch.setattr(lifecycle, "_prewarm_agent_registry_on_startup", prewarm)
     monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
     monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda: None)

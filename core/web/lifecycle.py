@@ -234,6 +234,131 @@ async def _run_runtime_scene_retention_after_routes_ready(app: FastAPI) -> None:
         raise
 
 
+# ---------------------------------------------------------------------------
+# Startup cache prewarm gating.
+#
+# The heavy boot prewarms (config workspace alias scan ≈12s of pure-Python
+# rglob+read, agent registry repair/summary) used to start as to_thread workers
+# alongside the background route mount.  With ~15 workers pulled up at once the
+# scans held the GIL for seconds at a time and multiplied every concurrent
+# request's latency by 10-800x during the 2026-10-02 16:26 window.  The
+# frontend's startup volley does not read these caches, so deferring them past
+# route readiness plus a settle window is free.
+# ---------------------------------------------------------------------------
+
+# Aligns with wait_for_web_routes / WaitForWebRoutesMiddleware (route_bootstrap).
+_ROUTES_READY_WAIT_TIMEOUT_SECONDS = 120.0
+_DEFAULT_STARTUP_PREWARM_STAGGER_SECONDS = 12.0
+
+
+def _startup_cache_prewarm_gate_enabled() -> bool:
+    """Operator switch for the routes-ready prewarm gate (default: enabled).
+
+    Set ``VIBELUTION_DEFER_STARTUP_CACHE_PREWARM=0`` (or false/no/off) to
+    restore the legacy behavior of starting the scans immediately at boot.
+    """
+
+    raw = str(os.environ.get("VIBELUTION_DEFER_STARTUP_CACHE_PREWARM") or "").strip().lower()
+    if not raw:
+        return True
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _startup_prewarm_stagger_seconds() -> float:
+    """Settle window between route readiness and the heavy prewarm scans.
+
+    ``VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS`` (float, default 12.0, 0 =
+    only wait for route readiness) bounds how long the scans wait for the
+    frontend's first request volley to drain before grabbing the GIL.
+    """
+
+    raw = str(os.environ.get("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS") or "").strip()
+    if not raw:
+        return _DEFAULT_STARTUP_PREWARM_STAGGER_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning(
+            "Invalid VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS=%r; using default %s.",
+            raw,
+            _DEFAULT_STARTUP_PREWARM_STAGGER_SECONDS,
+        )
+        return _DEFAULT_STARTUP_PREWARM_STAGGER_SECONDS
+    return max(0.0, value)
+
+
+async def _await_web_routes_ready_for_prewarm(app: FastAPI | None) -> int:
+    """Bounded wait for the background route mount before heavy prewarm work.
+
+    Same event and 120s semantics as the routes middleware; a timeout (or a
+    mount failure that sets the event early) never fails the prewarm — it only
+    bounds how long startup defers it.  Returns the elapsed wait in ms.
+    """
+
+    ready_event = getattr(getattr(app, "state", None), "web_routes_ready_event", None)
+    if ready_event is None:
+        return 0
+    started = time.perf_counter()
+    try:
+        await asyncio.wait_for(ready_event.wait(), timeout=_ROUTES_READY_WAIT_TIMEOUT_SECONDS)
+    except TimeoutError:
+        # Routes never became ready within the serving contract's own window;
+        # run the prewarm anyway instead of failing startup work over it.
+        pass
+    return max(0, int((time.perf_counter() - started) * 1000))
+
+
+async def _run_prewarm_heavy_after_routes_ready(
+    app: FastAPI | None,
+    heavy: Callable[[dict[str, Any]], Any],
+    *,
+    worker_name: str,
+) -> Any:
+    """Shared ready→settle→to_thread gate for the CPU-heavy startup prewarms."""
+
+    waited_ms = await _await_web_routes_ready_for_prewarm(app)
+    stagger_seconds = _startup_prewarm_stagger_seconds()
+    if stagger_seconds > 0:
+        await asyncio.sleep(stagger_seconds)
+    gate_timings = {
+        "waitedForRoutesMs": waited_ms,
+        "staggerMs": max(0, int(round(stagger_seconds * 1000))),
+    }
+    worker = asyncio.create_task(asyncio.to_thread(heavy, gate_timings), name=worker_name)
+    try:
+        # Shield the scan so cancellation reaches this owner first; shutdown
+        # then joins the read-only executor work instead of orphaning it.
+        return await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        with suppress(asyncio.CancelledError):
+            await asyncio.shield(worker)
+        raise
+
+
+async def _run_config_workspace_prewarm_after_routes_ready(app: FastAPI | None) -> dict[str, Any]:
+    from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    return await _run_prewarm_heavy_after_routes_ready(
+        app,
+        _prewarm_config_workspace_on_startup,
+        worker_name="config-workspace-prewarm-worker",
+    )
+
+
+async def _run_agent_registry_prewarm_after_routes_ready(app: FastAPI | None) -> dict[str, Any]:
+    from .services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+
+    if should_skip_directory_runtime_for_pytest():
+        return {"skipped": "pytest"}
+    return await _run_prewarm_heavy_after_routes_ready(
+        app,
+        _prewarm_agent_registry_on_startup,
+        worker_name="agent-registry-prewarm-worker",
+    )
+
+
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
     if os.name != "nt":
         return False
@@ -309,16 +434,31 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_catalog_task = asyncio.create_task(
         asyncio.to_thread(initialize_session_catalog_on_startup)
     )
-    # Registry prewarm must trail the directory startup task (see the worker):
-    # the wait itself happens inside the thread, never blocking startup.
-    startup_agent_registry_prewarm_task = asyncio.create_task(
-        asyncio.to_thread(_prewarm_agent_registry_on_startup)
-    )
-    # Config workspace prewarm trails the directory startup task for the same
-    # reason (the alias scan reads sessions under the serving root).
-    startup_config_workspace_prewarm_task = asyncio.create_task(
-        asyncio.to_thread(_prewarm_config_workspace_on_startup)
-    )
+    # The alias scans are multi-second pure-Python CPU and would hold the GIL
+    # against the route mount and the frontend's first request volley; defer
+    # them behind route readiness + a settle window unless the operator
+    # disables the gate.
+    if _startup_cache_prewarm_gate_enabled():
+        # Registry prewarm must trail the directory startup task (see the
+        # worker): the wait itself happens inside the thread, never blocking
+        # startup.
+        startup_agent_registry_prewarm_task = asyncio.create_task(
+            _run_agent_registry_prewarm_after_routes_ready(app),
+            name="agent-registry-prewarm",
+        )
+        # Config workspace prewarm trails the directory startup task for the
+        # same reason (the alias scan reads sessions under the serving root).
+        startup_config_workspace_prewarm_task = asyncio.create_task(
+            _run_config_workspace_prewarm_after_routes_ready(app),
+            name="config-workspace-prewarm",
+        )
+    else:
+        startup_agent_registry_prewarm_task = asyncio.create_task(
+            asyncio.to_thread(_prewarm_agent_registry_on_startup)
+        )
+        startup_config_workspace_prewarm_task = asyncio.create_task(
+            asyncio.to_thread(_prewarm_config_workspace_on_startup)
+        )
     startup_agent_inbox_recovery_task = asyncio.create_task(
         asyncio.to_thread(_recover_wakeable_agent_inbox_messages_on_startup)
     )
@@ -590,12 +730,14 @@ def _write_running_code_fingerprint_on_startup(app: Any | None = None) -> None:
 def _prewarm_git_memory_on_startup() -> tuple[Any, int]:
     from core.infrastructure import git_memory
 
-    started = time.perf_counter()
-    state = git_memory.refresh_git_memory(force=True)
-    # Warm the code-freshness verdict cache too (45s fast-path TTL): the
-    # frontend polls freshness a few seconds after boot, and a prewarmed cache
-    # turns that first poll into a cache hit instead of a full git-backed
-    # resolution. Best effort — a freshness failure never fails git prewarm.
+    # Warm the code-freshness verdict cache FIRST (45s fast-path TTL): the
+    # frontend polls freshness ~20s after boot while refresh_git_memory's
+    # subprocess-heavy pass runs for tens of seconds, and resolving freshness
+    # after the refresh made that first poll miss the cache, pay the full
+    # git-backed resolution itself, and then have the prewarm repeat the same
+    # walk (double compute).  Resolving before the refresh fills the cache in
+    # time for the first poll and removes the duplicate scan.  Best effort — a
+    # freshness failure never fails git prewarm.
     try:
         from .routes.runtime import PROJECT_ROOT
         from .services.code_freshness import resolve_code_freshness
@@ -603,10 +745,13 @@ def _prewarm_git_memory_on_startup() -> tuple[Any, int]:
         resolve_code_freshness(project_root=PROJECT_ROOT)
     except Exception:  # noqa: BLE001 - freshness prewarm is best effort
         pass
+    started = time.perf_counter()
+    state = git_memory.refresh_git_memory(force=True)
+    # durationMs stays scoped to the git memory refresh itself.
     return state, max(0, int((time.perf_counter() - started) * 1000))
 
 
-def _prewarm_config_workspace_on_startup() -> dict[str, Any]:
+def _prewarm_config_workspace_on_startup(gate_timings: dict[str, Any] | None = None) -> dict[str, Any]:
     """Warm the config workspace payload cache before the first request.
 
     ``GET /api/config/workspace`` pays a multi-second full rebuild on a cold
@@ -617,6 +762,8 @@ def _prewarm_config_workspace_on_startup() -> dict[str, Any]:
     path. The session directory startup task aligns the serving root the
     alias scan reads, so wait for it (bounded) first — same reason as the
     registry prewarm. Pytest skips like the directory runtime itself.
+    ``gate_timings`` (routes-ready wait + settle stagger, from the gated async
+    wrapper) is merged into the reported timings when present.
     """
 
     from .services.session.directory_runtime import (
@@ -632,6 +779,8 @@ def _prewarm_config_workspace_on_startup() -> dict[str, Any]:
     started = time.perf_counter()
     config_service.prewarm_config_workspace()
     timings = {"totalMs": max(0, int((time.perf_counter() - started) * 1000))}
+    if isinstance(gate_timings, dict) and gate_timings:
+        timings.update(gate_timings)
     try:
         from .services.runtime_scene_service import record_runtime_scene_event
 
@@ -649,7 +798,7 @@ def _prewarm_config_workspace_on_startup() -> dict[str, Any]:
     return timings
 
 
-def _prewarm_agent_registry_on_startup() -> dict[str, Any]:
+def _prewarm_agent_registry_on_startup(gate_timings: dict[str, Any] | None = None) -> dict[str, Any]:
     """Warm the Agent registry repair + summary caches before the first request.
 
     The session directory startup task is what aligns
@@ -658,6 +807,8 @@ def _prewarm_agent_registry_on_startup() -> dict[str, Any]:
     otherwise the repair cache would be built against the wrong registry.
     Pytest skips like the directory runtime itself: boot-time heavy work has no
     value under TestClient lifespans and must never touch the real checkout.
+    ``gate_timings`` (routes-ready wait + settle stagger, from the gated async
+    wrapper) is merged into the reported timings when present.
     """
 
     from .services.session.directory_runtime import (
@@ -673,6 +824,8 @@ def _prewarm_agent_registry_on_startup() -> dict[str, Any]:
     started = time.perf_counter()
     timings = agent_directory_service.prewarm_registry_caches()
     timings["totalMs"] = max(0, int((time.perf_counter() - started) * 1000))
+    if isinstance(gate_timings, dict) and gate_timings:
+        timings.update(gate_timings)
     try:
         from .services.runtime_scene_service import record_runtime_scene_event
 
