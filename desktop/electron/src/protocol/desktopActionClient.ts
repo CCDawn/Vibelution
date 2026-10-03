@@ -87,10 +87,12 @@ export async function fetchLauncherControlToken(input: {
   launcherOrigin: string;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<string> {
   const response = await boundedDesktopControlFetch({
     fetchImpl: input.fetchImpl,
     resource: `${new URL(input.launcherOrigin).origin}/api/control-token`,
+    init: { signal: input.signal },
     operation: "launcher control token",
     requestTimeoutMs: input.requestTimeoutMs
   });

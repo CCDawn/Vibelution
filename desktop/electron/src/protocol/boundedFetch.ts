@@ -14,12 +14,12 @@ export async function boundedDesktopControlFetch(input: {
   );
   const controller = new AbortController();
   const existingSignal = input.init?.signal;
-  const forwardAbort = () => controller.abort(existingSignal?.reason);
-  if (existingSignal?.aborted) {
-    forwardAbort();
-  } else {
-    existingSignal?.addEventListener("abort", forwardAbort, { once: true });
-  }
+  // Keep both budgets attached after headers arrive: response.json() may still
+  // be reading a body when either the request or caller deadline expires.
+  const requestTimeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signals = [controller.signal, requestTimeoutSignal];
+  if (existingSignal) signals.push(existingSignal);
+  const signal = AbortSignal.any(signals);
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   const timeout = new Promise<never>((_resolve, reject) => {
@@ -31,13 +31,17 @@ export async function boundedDesktopControlFetch(input: {
 
   try {
     return await Promise.race([
-      fetcher(input.resource, { ...input.init, signal: controller.signal }),
+      fetcher(input.resource, { ...input.init, signal }),
       timeout
     ]);
+  } catch (error) {
+    if (requestTimeoutSignal.aborted && !existingSignal?.aborted) {
+      throw new Error(`${input.operation} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
   } finally {
     if (timer !== null) {
       clearTimeout(timer);
     }
-    existingSignal?.removeEventListener("abort", forwardAbort);
   }
 }

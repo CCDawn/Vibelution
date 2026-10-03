@@ -14,9 +14,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from config import AppConfig
-from config.models import LLMProfile, PromptCacheConfig
+from config.models import LLMProfile
 
-from .discovery import discover_model
+from .discovery import build_llm_profile_from_model_entry, discover_model, llm_model_entry_issues
 from .reasoning_effort import (
     normalize_reasoning_effort,
     resolve_reasoning_effort_request,
@@ -212,48 +212,43 @@ def config_for_agent_llm_model(
     provider_id = str(entry.get("provider_id") or "").strip()
     if not model_name or not provider_id:
         raise AgentLlmResolutionError(f"Agent {slot} model is incomplete: {normalized_model_id}")
-    if runtime_config.llm.providers.get(provider_id) is None:
+    provider = runtime_config.llm.providers.get(provider_id)
+    if provider is None:
         raise AgentLlmResolutionError(f"Agent {slot} model provider not found: {provider_id}")
 
-    current_primary = copy.deepcopy(runtime_config.llm.get_profile(role=runtime_profile_id))
-    selected_payload = current_primary.model_dump()
-    for key in (
-        "transport",
-        "contract",
-        "protocol",
-        "compat",
-        "reasoning_state_field",
-        "strict_compatibility",
-        "temperature",
-        "max_output_tokens",
-        "timeout",
-        "connect_timeout",
-        "streaming",
-        "tool_calling_mode",
-        "discovery_enabled",
-        "prompt_cache",
-        "thinking_type",
-        "thinking_display",
-        "reasoning_effort",
-        "reasoning_effort_values",
-        "default_reasoning_effort",
-        "reasoning_effort_adapter",
-        "reasoning_effort_map",
-        "supports_image_input",
-    ):
-        if key in entry:
-            selected_payload[key] = copy.deepcopy(entry[key])
-    selected_payload.update(
-        {
-            "profile_id": runtime_profile_id,
-            "provider_id": provider_id,
-            "model_ref": normalized_model_id,
-            "model": model_name,
-            "api_key_env": str(entry.get("api_key_env") or "").strip(),
-            "prompt_cache": entry.get("prompt_cache") if "prompt_cache" in entry else PromptCacheConfig(),
-        }
-    )
-    selected = LLMProfile(**selected_payload)
+    # 换模型运行时校验闸（纯内存）：在构造出的 profile 安装进 runtime 配置之前
+    # 拦下非法字段组合（如 reasoning_chat 缺 reasoning_state_field、
+    # interaction_contract 误存进 model_protocol）。失败即拒绝切换，
+    # 调用方的原配置（会话当前模型）不受影响。
+    current_primary = runtime_config.llm.get_profile(role=runtime_profile_id)
+    try:
+        selected = build_llm_profile_from_model_entry(
+            current_primary.model_dump(),
+            entry,
+            profile_id=runtime_profile_id,
+            provider_id=provider_id,
+            model_ref=normalized_model_id,
+            model_name=model_name,
+        )
+    except Exception as exc:
+        raise AgentLlmResolutionError(
+            f"模型 `{normalized_model_id}` 配置无法构造运行档案，已取消切换（会话保持当前模型）：{exc}"
+        ) from exc
+    entry_errors, entry_warnings = llm_model_entry_issues(selected, provider, model_entry=entry)
+    if entry_errors and bool(getattr(selected, "strict_compatibility", True)):
+        detail = "\n".join(f"- {item}" for item in entry_errors)
+        raise AgentLlmResolutionError(
+            f"模型 `{normalized_model_id}` 配置校验失败，已取消切换（会话保持当前模型）：\n{detail}\n"
+            f"请在设置中修正上述字段组合后重试。"
+        )
+    if entry_errors:
+        _logger.warning(
+            "model switch validation tolerated (strict_compatibility=False): model=%s issues=%s",
+            normalized_model_id,
+            "; ".join(entry_errors),
+        )
+    for warning in entry_warnings:
+        _logger.warning("model switch advisory: model=%s %s", normalized_model_id, warning)
     runtime_config.llm.profiles[runtime_profile_id] = selected
     return runtime_config
 

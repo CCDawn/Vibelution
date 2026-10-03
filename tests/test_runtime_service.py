@@ -1,4 +1,19 @@
+from types import SimpleNamespace
+
+import pytest
+
 from core.web.services import runtime_service
+
+
+def test_local_backend_exit_requires_an_owned_uvicorn_server(monkeypatch):
+    monkeypatch.setattr(runtime_service, "sys", SimpleNamespace(modules={}))
+    monkeypatch.setattr(
+        "core.web.server_shutdown.schedule_server_shutdown",
+        lambda **_kwargs: False,
+    )
+
+    with pytest.raises(RuntimeError, match="requires an owned Uvicorn server"):
+        runtime_service._schedule_local_backend_exit()
 
 
 def test_work_run_summary_includes_source_collection_active_item(monkeypatch):

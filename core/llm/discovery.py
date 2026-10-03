@@ -3,13 +3,18 @@
 
 from __future__ import annotations
 
+import copy
+from collections.abc import Collection, Mapping
 from dataclasses import replace
 from typing import Any
 
 from config import AppConfig
 from config.model_catalog import load_model_catalog_state, resolve_model_capabilities
+from config.models import LLMProfile, PromptCacheConfig
+from config.protocol_families import apply_model_entry_family_defaults
 
 from .adapters import capabilities_for_adapter
+from .protocol_constants import SUPPORTED_REASONING_STATE_FIELDS
 from .types import DiagnosticReport, LLMCapabilities, ResolvedModelSpec
 
 
@@ -43,7 +48,8 @@ JSON_MODE_MODEL_HINTS = (
     "qwen",
     "claude",
 )
-SUPPORTED_REASONING_STATE_FIELDS = {"reasoning_content"}
+# SUPPORTED_REASONING_STATE_FIELDS is imported from protocol_constants
+# (single authority); no local copy is kept here.
 
 _CAPABILITY_FIELD_ALIASES = {
     "streaming": "supports_streaming",
@@ -163,6 +169,102 @@ def _catalog_discovered_context_window(model_record: dict[str, Any]) -> int:
         if window > 0:
             return window
     return 0
+
+
+def _declared_context_window(entry: Any) -> int:
+    """条目显式声明的上下文窗口；0 表示未声明（与 discover_model 同一套键）。"""
+    if not isinstance(entry, Mapping):
+        return 0
+    for key in ("context_window", "contextWindow", "max_model_len", "context_length"):
+        candidate = _positive_context_window(entry.get(key))
+        if candidate > 0:
+            return candidate
+    return 0
+
+
+def _catalog_record_for_ref(catalog_providers: Any, provider_id: str, model_ref: str) -> dict[str, Any]:
+    """从已加载的 catalog providers 里取 provider+model 的实证记录；无则空 dict。
+
+    与 ``_catalog_model_details`` 同一匹配语义：model_ref 的 provider 段必须与
+    条目 provider_id 一致，避免错配 provider 时捡到同名的无关记录。
+    """
+    if not isinstance(catalog_providers, dict) or "/" not in model_ref:
+        return {}
+    ref_provider_id, model_key = model_ref.split("/", 1)
+    if ref_provider_id != provider_id or not model_key:
+        return {}
+    provider_record = catalog_providers.get(provider_id, {})
+    models = provider_record.get("models", {}) if isinstance(provider_record, dict) else {}
+    record = models.get(model_key, {}) if isinstance(models, dict) else {}
+    return record if isinstance(record, dict) else {}
+
+
+# 只有这两类来源是「模型发现实证」；operator_override 是声明镜像进 catalog 的
+# 值（比它会变成自己比自己），driver_default / curated_snapshot 不是实证。
+_EMPIRICAL_CAPABILITY_SOURCES = frozenset({"provider_endpoint", "runtime_probe"})
+
+
+def discovery_declaration_mismatches(
+    entry: Any,
+    catalog_model: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """比对条目声明与模型发现实证，返回 ``(warnings, 结构化失配列表)``。
+
+    只比双侧都有确定值的可比字段：context_window（条目显式声明 vs 发现写入的
+    limits）与条目 capabilities 声明 vs provider_endpoint/runtime_probe 实证。
+    catalog 无该模型、无该字段或值为 unknown 都不算失配；operator 声明永远赢，
+    本函数纯只读提示，不改写任何配置。
+    """
+    warnings: list[str] = []
+    mismatches: list[dict[str, Any]] = []
+    if not isinstance(catalog_model, dict) or not catalog_model:
+        return warnings, mismatches
+
+    declared_window = _declared_context_window(entry)
+    discovered_window = _catalog_discovered_context_window(catalog_model)
+    if declared_window > 0 and discovered_window > 0 and declared_window != discovered_window:
+        warnings.append(
+            f"context_window 失配：条目声明 {declared_window} vs 模型发现实证 {discovered_window}；"
+            "当前以声明为准，请核对条目数值或重新运行模型发现"
+        )
+        mismatches.append(
+            {
+                "field": "context_window",
+                "declared": declared_window,
+                "discovered": discovered_window,
+                "discoveredSource": "provider_discovery",
+            }
+        )
+
+    declared_capabilities, _fields = _declared_capability_overrides(entry)
+    raw_capabilities = catalog_model.get("capabilities", {})
+    if declared_capabilities and isinstance(raw_capabilities, dict):
+        for runtime_field, declared_value in declared_capabilities.items():
+            catalog_field = _RUNTIME_TO_CATALOG_CAPABILITY.get(runtime_field, runtime_field)
+            record = raw_capabilities.get(catalog_field)
+            if not isinstance(record, dict):
+                continue
+            source = str(record.get("source") or "").strip()
+            if source not in _EMPIRICAL_CAPABILITY_SOURCES:
+                continue
+            empirical = str(record.get("value") or "unknown").strip().lower()
+            if empirical not in {"supported", "unsupported"}:
+                continue
+            if (empirical == "supported") != bool(declared_value):
+                declared_label = "supported" if declared_value else "unsupported"
+                warnings.append(
+                    f"{runtime_field} 失配：条目声明 {declared_label} vs 模型发现实证 {empirical}；"
+                    "当前以声明为准，请核对条目能力设置"
+                )
+                mismatches.append(
+                    {
+                        "field": runtime_field,
+                        "declared": bool(declared_value),
+                        "discovered": empirical,
+                        "discoveredSource": source,
+                    }
+                )
+    return warnings, mismatches
 
 
 def _declared_capability_overrides(model_entry: Any) -> tuple[dict[str, bool], list[str]]:
@@ -397,7 +499,17 @@ def discover_model(config: AppConfig, profile_id: str) -> ResolvedModelSpec:
     )
 
 
-def _compatibility_issues(profile, provider) -> tuple[list[str], list[str]]:
+_INTERACTION_CONTRACT_VALUES = frozenset({"basic_chat", "tool_chat", "reasoning_chat", "responses_agent"})
+
+
+def llm_profile_entry_issues(profile: Any, provider: Any) -> tuple[list[str], list[str]]:
+    """单条目（profile, provider）兼容性校验；纯内存、无 IO。
+
+    语义与历史内部实现一致：返回 (errors, warnings)。调用方：
+    - ``assert_llm_compatibility``（写配置事务，整配置级循环）
+    - ``doctor_llm_profile``（单 profile 启动体检）
+    - ``llm_model_entry_issues``（换模型运行时闸门，见下）
+    """
     errors: list[str] = []
     warnings: list[str] = []
     transport = str(profile.transport or "chat_completions").strip().lower()
@@ -443,6 +555,210 @@ def _compatibility_issues(profile, provider) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def llm_model_entry_issues(
+    profile: Any,
+    provider: Any,
+    *,
+    model_entry: Mapping[str, Any] | None = None,
+) -> tuple[list[str], list[str]]:
+    """model_library 条目级校验闸：契约层规则 + 结构性跨字段硬规则。
+
+    在 ``llm_profile_entry_issues`` 之上叠加 canonical schema（config/llm_canonical_schema.py）
+    与 protocol_resolver 的硬规则，用于换模型运行时路径与启动 doctor 的全量体检。
+    纯内存、无 IO，单次微秒级。
+    """
+    errors, warnings = llm_profile_entry_issues(profile, provider)
+    seen = set(errors)
+
+    def _add_error(message: str) -> None:
+        if message not in seen:
+            seen.add(message)
+            errors.append(message)
+
+    protocol = str(getattr(profile, "protocol", "") or "").strip().lower()
+    if protocol in _INTERACTION_CONTRACT_VALUES:
+        _add_error(
+            f"model_protocol 里存的是 interaction contract（`{protocol}`）；"
+            f"interaction_contract 与 model_protocol 是两层，请把 `{protocol}` 移到 "
+            "interaction_contract（运行时条目的 contract 字段），model_protocol 留空或填协议值"
+        )
+    if protocol == "deepseek_reasoning" and str(getattr(profile, "transport", "") or "").strip().lower() == "responses":
+        _add_error(
+            "model_protocol=deepseek_reasoning 隐含强制 chat_completions wire（reasoning_content 回放）；"
+            "当前 transport=responses，请把 transport/wire_protocol 改为 chat_completions"
+        )
+
+    if model_entry is not None:
+        raw_model_protocol = str(model_entry.get("model_protocol") or "").strip().lower()
+        if raw_model_protocol in _INTERACTION_CONTRACT_VALUES and raw_model_protocol != protocol:
+            _add_error(
+                f"model_protocol 里存的是 interaction contract（`{raw_model_protocol}`）；"
+                "请把它移到 interaction_contract 字段，model_protocol 留空或填协议值"
+            )
+        adapter = str(model_entry.get("reasoning_effort_adapter") or "").strip().lower()
+        effort_values = [
+            str(value or "").strip()
+            for value in (model_entry.get("reasoning_effort_values") or [])
+            if str(value or "").strip()
+        ]
+        if adapter not in {"", "none"} and not effort_values:
+            _add_error(
+                f"reasoning_effort_adapter=`{adapter}` 已声明但 reasoning_effort_values 为空；"
+                "请补充思考强度可选值，或清空 reasoning_effort_adapter"
+            )
+
+    return errors, warnings
+
+
+def build_llm_profile_from_model_entry(
+    base_payload: Mapping[str, Any],
+    entry: Mapping[str, Any],
+    *,
+    profile_id: str,
+    provider_id: str,
+    model_ref: str,
+    model_name: str,
+) -> LLMProfile:
+    """把 model_library 条目覆盖到基准 profile 载荷上，构造换模型后的 LLMProfile。
+
+    从 agent_runtime.config_for_agent_llm_model 原地抽出，键拷贝语义保持不变；
+    供换模型运行时收口点与 doctor_model_library 共用，避免两处漂移。
+
+    合成顺序（稀疏 overlay）：基准 profile 载荷 < 协议族默认值（config/
+    protocol_families.py，只填条目为空/缺失的字段）< 条目显式字段。条目显式
+    声明永远赢；未知协议族不改写。
+    """
+    effective_entry = apply_model_entry_family_defaults(entry)
+    selected_payload = dict(base_payload)
+    for key in (
+        "transport",
+        "contract",
+        "protocol",
+        "compat",
+        "reasoning_state_field",
+        "strict_compatibility",
+        "temperature",
+        "max_output_tokens",
+        "timeout",
+        "connect_timeout",
+        "streaming",
+        "tool_calling_mode",
+        "discovery_enabled",
+        "prompt_cache",
+        "thinking_type",
+        "thinking_display",
+        "reasoning_effort",
+        "reasoning_effort_values",
+        "default_reasoning_effort",
+        "reasoning_effort_adapter",
+        "reasoning_effort_map",
+        "supports_image_input",
+    ):
+        if key in effective_entry:
+            selected_payload[key] = copy.deepcopy(effective_entry[key])
+    selected_payload.update(
+        {
+            "profile_id": profile_id,
+            "provider_id": provider_id,
+            "model_ref": model_ref,
+            "model": model_name,
+            "api_key_env": str(effective_entry.get("api_key_env") or "").strip(),
+            "prompt_cache": (
+                effective_entry.get("prompt_cache") if "prompt_cache" in effective_entry else PromptCacheConfig()
+            ),
+        }
+    )
+    return LLMProfile(**selected_payload)
+
+
+def doctor_model_library(
+    config: AppConfig,
+    *,
+    skip_model_refs: Collection[str] = (),
+) -> list[dict[str, Any]]:
+    """对全部 enabled 的 pinned model 条目做启动体检；聚合问题、不抛异常、不阻塞。
+
+    每个条目用与换模型运行时同一套 ``llm_model_entry_issues`` 校验；primary 条目
+    由 ``doctor_llm_profile`` 单独覆盖，调用方通过 ``skip_model_refs`` 传入以去重。
+    返回 finding 列表：``{modelId, modelRef, providerId, model, errors, warnings}``，
+    ``errors`` 为会阻断换模型的字段组合问题，``warnings`` 为建议项。条目声明与
+    模型发现实证失配时，``warnings`` 里追加一条「以声明为准」的告警，并在
+    ``discoveryMismatches``（可选字段，结构化列表 ``{field, declared, discovered,
+    discoveredSource}``）里给出机器可读明细；catalog 无该模型记录不算失配，
+    告警不改写任何配置。
+    """
+    findings: list[dict[str, Any]] = []
+    model_library = getattr(config.llm, "model_library", {}) or {}
+    if not isinstance(model_library, Mapping):
+        return findings
+    skipped = {str(ref or "").strip() for ref in skip_model_refs}
+    primary_profile = config.llm.get_profile(role="primary")
+    base_payload = primary_profile.model_dump()
+    # 目录状态整个 sweep 只读一次磁盘；循环内全部纯内存查询。
+    try:
+        catalog_state = load_model_catalog_state()
+    except ValueError:
+        catalog_state = {}
+    catalog_providers = catalog_state.get("providers", {}) if isinstance(catalog_state, dict) else {}
+    for model_id, entry in model_library.items():
+        if not isinstance(entry, Mapping):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        model_ref = str(entry.get("model_ref") or model_id or "").strip()
+        if model_ref and model_ref in skipped:
+            continue
+        provider_id = str(entry.get("provider_id") or "").strip()
+        model_name = str(entry.get("model") or "").strip()
+        context = {
+            "modelId": str(model_id),
+            "modelRef": model_ref,
+            "providerId": provider_id,
+            "model": model_name,
+        }
+        errors: list[str] = []
+        warnings: list[str] = []
+        discovery_mismatches: list[dict[str, Any]] = []
+        provider = config.llm.providers.get(provider_id) if provider_id else None
+        if provider is None:
+            errors.append(f"provider `{provider_id or '(missing)'}` 不存在，模型条目不可用；请修正条目的 provider 或删除该模型")
+        else:
+            try:
+                profile = build_llm_profile_from_model_entry(
+                    base_payload,
+                    entry,
+                    profile_id=str(model_id),
+                    provider_id=provider_id,
+                    model_ref=model_ref,
+                    model_name=model_name,
+                )
+            except Exception as exc:
+                errors.append(f"模型条目无法构造运行档案：{exc}")
+            else:
+                entry_errors, entry_warnings = llm_model_entry_issues(profile, provider, model_entry=entry)
+                errors.extend(entry_errors)
+                warnings.extend(entry_warnings)
+                catalog_model = _catalog_record_for_ref(catalog_providers, provider_id, model_ref)
+                window = _declared_context_window(entry)
+                if window <= 0:
+                    window = _positive_context_window(getattr(provider, "context_window", None))
+                if window <= 0:
+                    window = _catalog_discovered_context_window(catalog_model)
+                if window <= 0:
+                    warnings.append(
+                        "未配置 context_window（条目/provider/发现目录均无）；"
+                        "选中该模型前请先在设置中填写，或运行模型发现写入"
+                    )
+                mismatch_warnings, discovery_mismatches = discovery_declaration_mismatches(entry, catalog_model)
+                warnings.extend(mismatch_warnings)
+        if errors or warnings:
+            finding = {**context, "errors": errors, "warnings": warnings}
+            if discovery_mismatches:
+                finding["discoveryMismatches"] = discovery_mismatches
+            findings.append(finding)
+    return findings
+
+
 def doctor_llm_profile(config: AppConfig, profile_id: str) -> DiagnosticReport:
     profile = config.llm.get_profile(profile_id)
     provider = config.llm.get_provider(profile.provider_id)
@@ -453,7 +769,7 @@ def doctor_llm_profile(config: AppConfig, profile_id: str) -> DiagnosticReport:
     if not provider.base_url:
         warnings.append(f"provider `{provider.provider_id}` 未设置 base_url")
     spec = discover_model(config, profile_id)
-    compat_errors, compat_warnings = _compatibility_issues(profile, provider)
+    compat_errors, compat_warnings = llm_profile_entry_issues(profile, provider)
     errors.extend(compat_errors)
     warnings.extend(compat_warnings)
     if int(getattr(spec, "context_window", 0) or 0) <= 0:
@@ -482,7 +798,7 @@ def assert_llm_compatibility(config: AppConfig) -> AppConfig:
     issues: list[str] = []
     for profile_id, profile in config.llm.profiles.items():
         provider = config.llm.get_provider(profile.provider_id)
-        errors, _warnings = _compatibility_issues(profile, provider)
+        errors, _warnings = llm_profile_entry_issues(profile, provider)
         if errors and bool(getattr(profile, "strict_compatibility", True)):
             issues.extend(f"[{profile_id}] {item}" for item in errors)
     if issues:

@@ -106,6 +106,7 @@ from core.llm import (
     LLMInvocationContext,
     discover_model,
     doctor_llm_profile,
+    doctor_model_library,
     get_llm_client,
     invoke_llm,
     stream_llm,
@@ -819,6 +820,34 @@ class AgentRuntime:
         if doctor.errors:
             for item in doctor.errors:
                 _debug_logger.error(item, tag="LLM")
+        # 模型库全量体检：primary 之外的全部 enabled pinned model 条目用同一套
+        # 字段组合校验。问题只记 warning 聚合日志，不阻塞启动——一个坏模型
+        # 不许拖死整个产品；换模型时会由运行时闸门拒绝该条目。
+        # 体检自身异常也只降级为日志，绝不成为新的启动失败点。
+        try:
+            primary_profile = self.config.llm.get_profile(primary_profile_id)
+            skip_model_refs = {str(primary_profile.model_ref or "").strip()}
+            primary_entry_id, _primary_entry = self.config.llm.get_model_library_entry_for_profile(primary_profile)
+            if primary_entry_id:
+                skip_model_refs.add(str(primary_entry_id).strip())
+            library_findings = doctor_model_library(
+                self.config,
+                skip_model_refs={ref for ref in skip_model_refs if ref},
+            )
+            for finding in library_findings:
+                label = finding.get("modelRef") or finding.get("modelId") or "unknown"
+                for item in finding.get("errors", []):
+                    _debug_logger.warning(f"[模型库体检] {label}: {item}", tag="LLM")
+                for item in finding.get("warnings", []):
+                    _debug_logger.warning(f"[模型库体检] {label}: {item}", tag="LLM")
+            if library_findings:
+                _debug_logger.warning(
+                    f"模型库体检发现 {len(library_findings)} 个条目存在问题（见上方明细）；"
+                    "这些问题不阻塞启动，但选中对应模型切换时会被拒绝。",
+                    tag="LLM",
+                )
+        except Exception as exc:
+            _debug_logger.warning(f"模型库全量体检跳过（不影响启动）：{exc}", tag="LLM")
         self.model_info = discover_model(self.config, primary_profile_id)
         context_window = int(getattr(self.model_info, "context_window", 0) or 0)
         if context_window <= 0:

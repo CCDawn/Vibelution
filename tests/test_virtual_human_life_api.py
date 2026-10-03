@@ -1220,12 +1220,19 @@ def test_companion_lobby_omits_unbound_and_sessionless_agents(tmp_path, monkeypa
 
 
 def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) -> None:
+    from core.web.services.agent_plugin_service import (
+        _native_session_activity_by_id,
+        _reset_companion_activity_stamp_cache_for_tests,
+    )
+
+    _reset_companion_activity_stamp_cache_for_tests()
     calls: list[dict[str, object]] = []
 
     def fake_query_sessions(**kwargs):
         calls.append(kwargs)
         return {
             "items": [{
+                "agentId": "agent-nora",
                 "id": "session-nora",
                 "status": "ready",
                 "currentPhase": "ready",
@@ -1258,7 +1265,6 @@ def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) ->
             )
         ] if session_id == "session-nora" else [],
     )
-    from core.web.services.agent_plugin_service import _native_session_activity_by_id
 
     assert _native_session_activity_by_id([{
         "agentId": "agent-nora",
@@ -1273,7 +1279,221 @@ def test_companion_activity_reuses_hidden_native_session_summary(monkeypatch) ->
             "activityStamp": "turn:turn-nora-1:turn_completed",
         }
     }
-    assert calls == [{"limit": 1, "agent_id": "agent-nora"}]
+    assert calls == [{"limit": 100}]
+
+
+def test_companion_activity_batches_one_query_across_companions(monkeypatch) -> None:
+    from core.web.services.agent_plugin_service import (
+        _native_session_activity_by_id,
+        _reset_companion_activity_stamp_cache_for_tests,
+    )
+
+    _reset_companion_activity_stamp_cache_for_tests()
+    calls: list[dict[str, object]] = []
+
+    def fake_query_sessions(**kwargs):
+        calls.append(kwargs)
+        return {
+            "items": [
+                {
+                    "agentId": "agent-sage",
+                    "id": "session-sage-batch",
+                    "status": "running",
+                    "currentPhase": "working",
+                    "taskSummary": "整理花房",
+                    "updatedAt": "2026-08-27T09:05:00Z",
+                    "messages": [{"role": "assistant", "content": "must not leak"}],
+                    "workspacePath": "private/path",
+                },
+                {
+                    "agentId": "agent-ivy",
+                    "id": "session-ivy-batch",
+                    "status": "ready",
+                    "currentPhase": "ready",
+                    "lastTurnStatus": "completed",
+                    "updatedAt": "2026-08-27T09:02:00Z",
+                },
+                {
+                    "agentId": "agent-nora",
+                    "id": "session-nora-batch",
+                    "status": "ready",
+                    "currentPhase": "ready",
+                    "taskSummary": "一起去散步吧",
+                    "updatedAt": "2026-08-27T09:01:00Z",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.session_service.query_sessions",
+        fake_query_sessions,
+    )
+    monkeypatch.setattr(
+        "core.web.services.session_service.list_sessions",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Companion activity must not enumerate every Session")
+        ),
+    )
+    monkeypatch.setattr(
+        "core.web.services.session.journal_bridge.load_session_conversation_events_snapshot",
+        lambda session_id: [
+            SimpleNamespace(
+                event_type="turn_completed",
+                turn_id=f"turn-{session_id}",
+                sequence=8,
+            )
+        ],
+    )
+
+    companion_rows = [
+        {"agentId": "agent-nora", "directSessionId": "session-nora-batch"},
+        {"agentId": "agent-ivy", "directSessionId": "session-ivy-batch"},
+        {"agentId": "agent-sage", "directSessionId": "session-sage-batch"},
+    ]
+    assert _native_session_activity_by_id(companion_rows) == {
+        "session-nora-batch": {
+            "id": "session-nora-batch",
+            "status": "ready",
+            "currentPhase": "ready",
+            "taskSummary": "一起去散步吧",
+            "updatedAt": "2026-08-27T09:01:00Z",
+            "activityStamp": "turn:turn-session-nora-batch:turn_completed",
+        },
+        "session-ivy-batch": {
+            "id": "session-ivy-batch",
+            "status": "ready",
+            "currentPhase": "ready",
+            "lastTurnStatus": "completed",
+            "updatedAt": "2026-08-27T09:02:00Z",
+            "activityStamp": "turn:turn-session-ivy-batch:turn_completed",
+        },
+        "session-sage-batch": {
+            "id": "session-sage-batch",
+            "status": "running",
+            "currentPhase": "working",
+            "taskSummary": "整理花房",
+            "updatedAt": "2026-08-27T09:05:00Z",
+            "activityStamp": "turn:turn-session-sage-batch:turn_completed",
+        },
+    }
+    # One batched page replaces the per-companion query round trip.
+    assert calls == [{"limit": 100}]
+
+
+def test_companion_activity_falls_back_to_agent_scoped_query_on_page_miss(monkeypatch) -> None:
+    from core.web.services.agent_plugin_service import (
+        _native_session_activity_by_id,
+        _reset_companion_activity_stamp_cache_for_tests,
+    )
+
+    _reset_companion_activity_stamp_cache_for_tests()
+    calls: list[dict[str, object]] = []
+
+    def fake_query_sessions(**kwargs):
+        calls.append(kwargs)
+        agent_id = str(kwargs.get("agent_id") or "")
+        if not agent_id:
+            # Global page: an unrelated session plus a newer non-direct session
+            # for the fallback companion.
+            return {
+                "items": [
+                    {
+                        "agentId": "agent-other",
+                        "id": "session-other",
+                        "status": "ready",
+                        "updatedAt": "2026-08-27T09:30:00Z",
+                    },
+                    {
+                        "agentId": "agent-ivy",
+                        "id": "session-ivy-task",
+                        "status": "running",
+                        "updatedAt": "2026-08-27T09:20:00Z",
+                    },
+                ],
+            }
+        if agent_id == "agent-nora":
+            # Hidden/stub direct sessions only surface through the agent-scoped read.
+            return {
+                "items": [{
+                    "agentId": "agent-nora",
+                    "id": "session-nora-fallback",
+                    "status": "ready",
+                    "taskSummary": "fallback row",
+                    "updatedAt": "2026-08-27T09:01:00Z",
+                    "messages": [{"role": "assistant", "content": "must not leak"}],
+                }],
+            }
+        # agent-ivy / agent-missing: the agent-scoped page holds no direct row.
+        return {"items": []}
+
+    monkeypatch.setattr(
+        "core.web.services.session_service.query_sessions",
+        fake_query_sessions,
+    )
+    monkeypatch.setattr(
+        "core.web.services.session.journal_bridge.load_session_conversation_events_snapshot",
+        lambda _session_id: [],
+    )
+
+    assert _native_session_activity_by_id([
+        {"agentId": "agent-nora", "directSessionId": "session-nora-fallback"},
+        {"agentId": "agent-ivy", "directSessionId": "session-ivy-direct"},
+        {"agentId": "agent-missing", "directSessionId": "session-missing"},
+    ]) == {
+        "session-nora-fallback": {
+            "id": "session-nora-fallback",
+            "status": "ready",
+            "taskSummary": "fallback row",
+            "updatedAt": "2026-08-27T09:01:00Z",
+        }
+    }
+    assert calls == [
+        {"limit": 100},
+        {"limit": 1, "agent_id": "agent-nora"},
+        {"limit": 1, "agent_id": "agent-ivy"},
+        {"limit": 1, "agent_id": "agent-missing"},
+    ]
+
+
+def test_companion_terminal_stamp_reuses_memo_until_journal_changes(monkeypatch, tmp_path) -> None:
+    from core.chat.conversation_ledger import conversation_ledger_path
+    from core.web.services import agent_plugin_service as plugin_service_module
+    from core.web.services.session import journal_bridge
+
+    plugin_service_module._reset_companion_activity_stamp_cache_for_tests()
+    monkeypatch.setattr(journal_bridge, "PROJECT_ROOT", tmp_path)
+    snapshot_calls: list[str] = []
+
+    def fake_snapshot(session_id, **_kwargs):
+        snapshot_calls.append(session_id)
+        return [
+            SimpleNamespace(
+                event_type="turn_completed",
+                turn_id=f"turn-{len(snapshot_calls)}",
+                sequence=len(snapshot_calls) * 10,
+            )
+        ]
+
+    monkeypatch.setattr(
+        "core.web.services.session.journal_bridge.load_session_conversation_events_snapshot",
+        fake_snapshot,
+    )
+    journal_path = conversation_ledger_path(tmp_path, "session-memo")
+    journal_path.parent.mkdir(parents=True, exist_ok=True)
+    journal_path.write_text("{}\n", encoding="utf-8")
+
+    stamp_one = plugin_service_module._companion_terminal_activity_stamp("session-memo")
+    stamp_two = plugin_service_module._companion_terminal_activity_stamp("session-memo")
+    assert stamp_one == stamp_two == "turn:turn-1:turn_completed"
+    assert snapshot_calls == ["session-memo"]
+
+    # Same stat signature keeps serving the memo; a changed journal file falls
+    # through to the shared snapshot loader exactly once.
+    journal_path.write_text("{}\n{}\n", encoding="utf-8")
+    stamp_three = plugin_service_module._companion_terminal_activity_stamp("session-memo")
+    assert stamp_three == "turn:turn-2:turn_completed"
+    assert snapshot_calls == ["session-memo", "session-memo"]
+    plugin_service_module._reset_companion_activity_stamp_cache_for_tests()
 
 
 def test_virtual_human_command_rejects_agent_id_mismatch_and_stale_version(tmp_path) -> None:

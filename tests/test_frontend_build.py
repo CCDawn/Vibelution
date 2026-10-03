@@ -5,9 +5,12 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
+import psutil
 import pytest
 
 import scripts.vibelution_launcher as launcher
@@ -648,6 +651,40 @@ def test_hot_restart_backup_includes_the_active_release_directory() -> None:
     assert "web/.vibelution-builds" in hot_restart_backup.BACKUP_TARGETS
 
 
+@pytest.mark.parametrize("has_holder", [True, False])
+def test_stale_lock_cleanup_failure_respects_wait_budget(monkeypatch, tmp_path, has_holder):
+    lock = frontend_build.frontend_build_lock_path(tmp_path)
+    lock.mkdir(parents=True)
+    if has_holder:
+        (lock / "holder.json").write_text(json.dumps({"pid": 123}), encoding="utf-8")
+    os.utime(lock, (0, 0))
+    monkeypatch.setattr(frontend_build, "_pid_is_alive", lambda _pid: False)
+    clock = [0.0]
+    sleeps = []
+    cleanup_attempts = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    def reject_cleanup(path, *args, **kwargs):
+        assert path == lock
+        cleanup_attempts.append(path)
+        # Also bound the regression itself if the retry loop ignores its clock.
+        assert len(cleanup_attempts) <= 4, "stale-lock cleanup spun without waiting"
+        raise PermissionError("lock directory is temporarily busy")
+
+    monkeypatch.setattr(frontend_build.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(frontend_build.time, "sleep", sleep)
+    monkeypatch.setattr(frontend_build.shutil, "rmtree", reject_cleanup)
+    with pytest.raises(TimeoutError, match="frontend build lock"):
+        with frontend_build.frontend_build_lock(tmp_path, timeout_seconds=0.2):
+            pytest.fail("a busy stale lock must not be acquired")
+    assert len(sleeps) >= 2
+    assert cleanup_attempts
+    assert lock.is_dir()
+
+
 def test_stale_build_lock_is_reclaimed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     lock = frontend_build.frontend_build_lock_path(tmp_path)
     lock.mkdir(parents=True)
@@ -725,6 +762,95 @@ def test_build_lock_does_not_remove_a_replacement_owner_on_release(tmp_path: Pat
     shutil.rmtree(lock)
 
 
+def test_successful_build_retries_transient_lock_release_before_next_build(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    (web / "node_modules" / "typescript" / "bin").mkdir(parents=True)
+    (web / "node_modules" / "typescript" / "bin" / "tsc").write_text("", encoding="utf-8")
+    (web / "node_modules" / "vite" / "bin").mkdir(parents=True)
+    (web / "node_modules" / "vite" / "bin" / "vite.js").write_text("", encoding="utf-8")
+    monkeypatch.setattr(frontend_build, "_node_command", lambda: "node")
+    monkeypatch.setattr(frontend_build, "_npm_cli", lambda _node: "npm-cli.js")
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+
+    original_release = frontend_build._release_build_lock
+    release_calls: list[tuple[Path, str]] = []
+
+    def transient_release_failure(path: Path, token: str) -> bool:
+        release_calls.append((path, token))
+        if len(release_calls) == 1:
+            return False
+        return original_release(path, token)
+
+    monkeypatch.setattr(frontend_build, "_release_build_lock", transient_release_failure)
+    key = frontend_build._pending_build_cleanup_key(tmp_path)
+    lock_dir = frontend_build.frontend_build_lock_path(tmp_path)
+    try:
+        first = frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0.0)
+
+        assert first["rebuilt"] is True
+        published_pointer = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+        assert published_pointer["release"] != "release-old"
+        pending = frontend_build._PENDING_BUILD_CLEANUPS[key]
+        assert pending["owner"] is None
+        assert pending["stage"] is None
+        assert pending["lockToken"] == release_calls[0][1]
+        assert lock_dir.is_dir()
+
+        second = frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=0.0)
+
+        assert second["rebuilt"] is False
+        assert second["skipped"] is True
+        assert frontend_build._PENDING_BUILD_CLEANUPS.get(key) is None
+        assert not lock_dir.exists()
+        assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8")) == published_pointer
+        assert len(release_calls) == 3
+    finally:
+        with frontend_build._PENDING_BUILD_CLEANUPS_LOCK:
+            leftovers = frontend_build._PENDING_BUILD_CLEANUPS.pop(key, None)
+        if leftovers is not None:
+            frontend_build._release_build_lock(leftovers["lockPath"], leftovers["lockToken"])
+
+
+def test_pending_build_lock_cleanup_preserves_a_replacement_owner(tmp_path: Path) -> None:
+    lock_dir = frontend_build.frontend_build_lock_path(tmp_path)
+    key = frontend_build._pending_build_cleanup_key(tmp_path)
+    try:
+        with frontend_build.frontend_build_lock(tmp_path) as lock_state:
+            original_token = lock_state["token"]
+            frontend_build._retain_pending_build_cleanup(
+                tmp_path,
+                lock_state,
+                stage=None,
+                owner=None,
+            )
+
+        shutil.rmtree(lock_dir)
+        lock_dir.mkdir()
+        (lock_dir / "holder.json").write_text(
+            json.dumps({"pid": os.getpid(), "startedAt": time.time(), "token": "replacement"}),
+            encoding="utf-8",
+        )
+
+        frontend_build._retry_pending_build_cleanup(tmp_path, timeout_seconds=1.0)
+
+        replacement = json.loads((lock_dir / "holder.json").read_text(encoding="utf-8"))
+        assert original_token != replacement["token"]
+        assert replacement["token"] == "replacement"
+        assert lock_dir.is_dir()
+        assert key not in frontend_build._PENDING_BUILD_CLEANUPS
+    finally:
+        with frontend_build._PENDING_BUILD_CLEANUPS_LOCK:
+            frontend_build._PENDING_BUILD_CLEANUPS.pop(key, None)
+        if lock_dir.exists():
+            shutil.rmtree(lock_dir)
+
+
 def test_missing_compiler_entries_trigger_dependency_recovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _write_project(tmp_path)
     _stub_build_identity(monkeypatch)
@@ -746,20 +872,314 @@ def test_missing_compiler_entries_trigger_dependency_recovery(monkeypatch: pytes
 def test_checked_build_timeout_terminates_the_owned_process_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class TimedOutProcess:
         returncode: int | None = None
+        stdin = stdout = stderr = None
 
-        def communicate(self, *, timeout: float) -> tuple[str, str]:
-            assert timeout == 900
+        def wait(self, *, timeout: float) -> None:
+            assert 0 < timeout <= frontend_build.FRONTEND_BUILD_TIMEOUT_SECONDS
             raise subprocess.TimeoutExpired(["node", "tsc", "-b"], timeout)
 
+        def poll(self) -> int | None:
+            return self.returncode
+
+    class TimedOutOwner:
+        def __init__(self, process: TimedOutProcess) -> None:
+            self.process = process
+            self.terminated: list[float] = []
+            self.closed: list[float] = []
+
+        def terminate(self, *, timeout: float) -> bool:
+            self.terminated.append(timeout)
+            self.process.returncode = -1
+            return True
+
+        def close(self, *, timeout: float) -> None:
+            self.closed.append(timeout)
+
     process = TimedOutProcess()
-    terminated: list[object] = []
-    monkeypatch.setattr(frontend_build.subprocess, "Popen", lambda *args, **kwargs: process)
-    monkeypatch.setattr(frontend_build, "terminate_process_tree", lambda candidate: terminated.append(candidate))
+    owner = TimedOutOwner(process)
+    monkeypatch.setattr(frontend_build.OwnedProcess, "spawn", lambda *args, **kwargs: owner)
 
     with pytest.raises(RuntimeError, match=r"tsc -b failed: TimeoutExpired"):
         frontend_build._run_checked(["node", "tsc", "-b"], cwd=tmp_path, label="tsc -b")
 
-    assert terminated == [process]
+    assert len(owner.terminated) == 1
+    assert len(owner.closed) == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job containment")
+def test_checked_build_retires_child_after_root_exits_with_inherited_pipe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    pid_file = tmp_path / "child.pid"
+    parent_script = tmp_path / "spawn_child_then_exit.py"
+    parent_script.write_text(
+        "import subprocess,sys\n"
+        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)'])\n"
+        "open(sys.argv[1],'w',encoding='ascii').write(str(p.pid))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(frontend_build, "FRONTEND_BUILD_TIMEOUT_SECONDS", 2.0)
+    owners: list[frontend_build.OwnedProcess] = []
+    original_spawn = frontend_build.OwnedProcess.spawn
+
+    def capture_owner(*args: object, **kwargs: object) -> frontend_build.OwnedProcess:
+        owner = original_spawn(*args, **kwargs)
+        owners.append(owner)
+        return owner
+
+    monkeypatch.setattr(frontend_build.OwnedProcess, "spawn", capture_owner)
+    original_retire = frontend_build._retire_build_process
+    retirement_observations: list[dict[str, object]] = []
+
+    def observe_retirement(
+        owner: frontend_build.OwnedProcess | None,
+        readers: list[threading.Thread],
+        *,
+        timeout: float,
+    ) -> bool:
+        job = owner._job if owner is not None else None
+        active_before = job.active_count() if job is not None else None
+        retired = original_retire(owner, readers, timeout=timeout)
+        try:
+            active_after = job.active_count() if job is not None else None
+        except OSError as exc:
+            active_after = f"{type(exc).__name__}: {exc}"
+        retirement_observations.append({
+            "retired": retired,
+            "jobActiveBefore": active_before,
+            "jobActiveAfter": active_after,
+            "jobHandleClosed": job is not None and job._handle is None,
+            "rootReturnCode": owner.process.poll() if owner is not None else None,
+            "timeout": timeout,
+        })
+        return retired
+
+    monkeypatch.setattr(frontend_build, "_retire_build_process", observe_retirement)
+    errors: list[BaseException] = []
+
+    def run_build_command() -> None:
+        try:
+            frontend_build._run_checked(
+                [sys.executable, str(parent_script), str(pid_file)],
+                cwd=tmp_path,
+                label="tsc -b",
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    runner = threading.Thread(target=run_build_command, name="frontend-build-test-runner", daemon=True)
+    child_pid: int | None = None
+    try:
+        runner.start()
+        deadline = time.monotonic() + 8.0
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert pid_file.exists(), "root process did not start its child"
+        child_pid = int(pid_file.read_text(encoding="ascii"))
+        child = psutil.Process(child_pid)
+        child_created_at = child.create_time()
+        child_status_before = child.status()
+        assert owners, "OwnedProcess was not created"
+        root = owners[0].process
+        while root.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert root.returncode == 0, "test root must exit before its child"
+        assert owners[0]._job is not None, "Windows Job Object must own the child"
+        assert psutil.pid_exists(child_pid), "child should still be alive while keeping the output pipe open"
+
+        runner.join(timeout=8.0)
+        assert not runner.is_alive(), "build command did not finish after its shared deadline"
+        assert len(errors) == 1 and "TimeoutExpired" in str(errors[0])
+        final_child: dict[str, object] | None = None
+        retirement_check_started = time.monotonic()
+        process_deadline = time.monotonic() + 2.0
+        while time.monotonic() < process_deadline:
+            try:
+                current_child = psutil.Process(child_pid)
+                current_created_at = current_child.create_time()
+                final_child = {
+                    "pid": child_pid,
+                    "createTime": current_created_at,
+                    "status": current_child.status(),
+                    "sameProcess": current_created_at == child_created_at,
+                }
+                if current_created_at != child_created_at:
+                    break
+            except psutil.NoSuchProcess:
+                final_child = None
+                break
+            time.sleep(0.02)
+        retirement_check_seconds = time.monotonic() - retirement_check_started
+        assert retirement_observations and retirement_observations[0]["retired"] is True, (
+            f"Job retirement failed: {retirement_observations}"
+        )
+        job_active_before = retirement_observations[0]["jobActiveBefore"]
+        assert isinstance(job_active_before, int) and job_active_before >= 1, (
+            f"the child was not contained by the expected Job: {retirement_observations}"
+        )
+        assert retirement_observations[0]["jobActiveAfter"] == 0
+        assert retirement_observations[0]["jobHandleClosed"] is True
+        assert not (final_child and final_child["sameProcess"]), (
+            "the Windows Job must retire the inherited-pipe child; "
+            f"before={{'pid': {child_pid}, 'createTime': {child_created_at}, 'status': {child_status_before}}}, "
+            f"after={final_child}, retirement={retirement_observations}, "
+            f"waited={retirement_check_seconds:.3f}s"
+        )
+        assert not any(
+            thread.name.startswith("frontend-build-output-") and thread.is_alive()
+            for thread in threading.enumerate()
+        )
+    finally:
+        readers = list(getattr(errors[-1], "readers", []) or []) if errors else []
+        if owners and not owners[0].process._handle.closed:
+            frontend_build._retire_build_process(owners[0], readers, timeout=5.0)
+        if runner.is_alive():
+            runner.join(timeout=8.0)
+        if child_pid is not None and psutil.pid_exists(child_pid):
+            try:
+                child = psutil.Process(child_pid)
+                child.kill()
+                psutil.wait_procs([child], timeout=3.0)
+            except psutil.Error:
+                pass
+
+
+def test_pending_build_cleanup_keeps_stage_and_lock_until_next_call_retries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    web = tmp_path / "web"
+    (web / "node_modules" / "typescript" / "bin").mkdir(parents=True)
+    (web / "node_modules" / "typescript" / "bin" / "tsc").write_text("", encoding="utf-8")
+    (web / "node_modules" / "vite" / "bin").mkdir(parents=True)
+    (web / "node_modules" / "vite" / "bin" / "vite.js").write_text("", encoding="utf-8")
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_node_command", lambda: "node")
+    monkeypatch.setattr(frontend_build, "FRONTEND_BUILD_TIMEOUT_SECONDS", 5.0)
+
+    events: list[str] = []
+    clock: list[float] | None = None
+    observed_deadlines: list[float | None] = []
+
+    class RetryOwner:
+        def __init__(self) -> None:
+            self.process = type("Process", (), {"stdin": None, "stdout": None, "stderr": None})()
+
+        def terminate(self, *, timeout: float) -> bool:
+            events.append("cleanup")
+            if clock is not None:
+                clock[0] += 2.0
+            return True
+
+        def close(self, *, timeout: float) -> None:
+            events.append("owner-closed")
+
+    owner = RetryOwner()
+    first_command = True
+
+    def runner(command: list[str], *, cwd: Path, label: str) -> str:
+        nonlocal first_command
+        events.append(label)
+        observed_deadlines.append(frontend_build._FRONTEND_BUILD_DEADLINE.get())
+        if first_command:
+            first_command = False
+            raise frontend_build._PendingBuildCleanupError(
+                "synthetic unconfirmed process cleanup",
+                owner=owner,  # type: ignore[arg-type]
+                readers=[],
+            )
+        return _successful_runner(command, cwd=cwd, label=label)
+
+    monkeypatch.setattr(frontend_build, "_run_checked", runner)
+    key = frontend_build._pending_build_cleanup_key(tmp_path)
+    lock_timeouts: list[float] = []
+    try:
+        with pytest.raises(frontend_build._PendingBuildCleanupError):
+            frontend_build.ensure_frontend_build(tmp_path)
+
+        entry = frontend_build._PENDING_BUILD_CLEANUPS[key]
+        stage = entry["stage"]
+        lock_dir = frontend_build.frontend_build_lock_path(tmp_path)
+        assert isinstance(stage, Path) and stage.is_dir()
+        assert lock_dir.is_dir()
+        assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+
+        original_lock = frontend_build.frontend_build_lock
+
+        def record_lock(*args: object, **kwargs: object):
+            events.append("lock")
+            lock_timeouts.append(float(kwargs["timeout_seconds"]))
+            return original_lock(*args, **kwargs)
+
+        monkeypatch.setattr(frontend_build, "frontend_build_lock", record_lock)
+        events.clear()
+        observed_deadlines.clear()
+        clock = [100.0]
+        monkeypatch.setattr(frontend_build.time, "monotonic", lambda: clock[0])
+        result = frontend_build.ensure_frontend_build(tmp_path)
+        assert events[:3] == ["cleanup", "owner-closed", "lock"]
+        assert lock_timeouts == [3.0]
+        assert observed_deadlines == [105.0, 105.0]
+        assert result["rebuilt"] is True
+        assert not stage.exists()
+        assert not lock_dir.exists()
+        assert key not in frontend_build._PENDING_BUILD_CLEANUPS
+        assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] != "release-old"
+    finally:
+        with frontend_build._PENDING_BUILD_CLEANUPS_LOCK:
+            leftovers = frontend_build._PENDING_BUILD_CLEANUPS.pop(key, None)
+        if leftovers is not None:
+            frontend_build._retire_build_process(leftovers.get("owner"), leftovers.get("readers") or [], timeout=5.0)
+            leftover_stage = leftovers.get("stage")
+            if isinstance(leftover_stage, Path):
+                shutil.rmtree(leftover_stage, ignore_errors=True)
+            frontend_build._release_build_lock(leftovers["lockPath"], leftovers["lockToken"])
+
+
+def test_frontend_build_deadline_covers_lock_install_and_both_build_steps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_node_command", lambda: "node")
+    monkeypatch.setattr(frontend_build, "_npm_cli", lambda _node: "npm-cli.js")
+    monkeypatch.setattr(frontend_build, "FRONTEND_BUILD_TIMEOUT_SECONDS", 5.0)
+
+    clock = [100.0]
+    monkeypatch.setattr(frontend_build.time, "monotonic", lambda: clock[0])
+    original_lock = frontend_build.frontend_build_lock
+    lock_timeouts: list[float] = []
+
+    @contextmanager
+    def delayed_lock(project_root: Path | str, *, timeout_seconds: float):
+        lock_timeouts.append(timeout_seconds)
+        with original_lock(project_root, timeout_seconds=timeout_seconds) as lock:
+            clock[0] += 2.0
+            yield lock
+
+    monkeypatch.setattr(frontend_build, "frontend_build_lock", delayed_lock)
+    deadlines: list[float | None] = []
+
+    def runner(command: list[str], *, cwd: Path, label: str) -> str:
+        deadlines.append(frontend_build._FRONTEND_BUILD_DEADLINE.get())
+        clock[0] += 1.0
+        return _successful_runner(command, cwd=cwd, label=label)
+
+    monkeypatch.setattr(frontend_build, "_run_checked", runner)
+    with pytest.raises(RuntimeError, match="deadline expired"):
+        frontend_build.ensure_frontend_build(tmp_path, lock_timeout_seconds=1000.0)
+
+    assert lock_timeouts == [5.0]
+    assert deadlines == [105.0, 105.0, 105.0]
+    assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+    assert not any(path.name.startswith("stage-") for path in frontend_build.frontend_releases_dir(tmp_path).iterdir())
 
 
 def test_maintenance_reset_treats_active_releases_as_rebuildable_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

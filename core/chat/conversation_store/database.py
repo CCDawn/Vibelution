@@ -15,6 +15,9 @@ from . import runtime as sqlite3
 from .schema import MIGRATIONS, SCHEMA_VERSION
 
 DEFAULT_BUSY_TIMEOUT_MS = 250
+BOOTSTRAP_BUSY_TIMEOUT_SECONDS = 5.0
+# The runtime adapter retains the driver's primary SQLite result on __cause__.
+SQLITE_BUSY_PRIMARY_RESULT = 5
 _SAFE_BACKPORTS = {(3, 44, 6), (3, 50, 7)}
 _FIRST_FULLY_FIXED_VERSION = (3, 51, 3)
 class ConversationStoreError(RuntimeError):
@@ -427,11 +430,32 @@ class ConversationDatabase:
         )
         try:
             _configure_common(connection, busy_timeout_ms=5000)
-            row = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+            deadline = time.monotonic() + BOOTSTRAP_BUSY_TIMEOUT_SECONDS
+            last_busy_error: sqlite3.OperationalError | None = None
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 and last_busy_error is not None:
+                    raise last_busy_error
+                # Concurrent first opens can return BUSY immediately while
+                # switching to WAL. Keep native waits and retries in one budget.
+                connection.execute(f"PRAGMA busy_timeout={max(1, int(remaining * 1000))}")
+                try:
+                    row = connection.execute("PRAGMA journal_mode=WAL").fetchone()
+                    break
+                except sqlite3.OperationalError as exc:
+                    if getattr(exc.__cause__, "result", None) != SQLITE_BUSY_PRIMARY_RESULT:
+                        raise
+                    last_busy_error = exc
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise
+                    time.sleep(min(0.01, remaining))
             if row is None or str(row[0]).lower() != "wal":
                 raise ConversationStoreUnavailableError(
                     "Canonical conversation storage requires SQLite WAL support."
                 )
+            # Schema initialization keeps its existing native wait policy.
+            connection.execute("PRAGMA busy_timeout=5000")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA wal_autocheckpoint=1000")
             return connection

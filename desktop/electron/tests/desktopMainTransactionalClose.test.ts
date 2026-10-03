@@ -45,7 +45,7 @@ describe("Electron main transactional Workbench close", () => {
     const stopSource = source.slice(stopStart, stopEnd);
 
     expect(source).toContain("electron.workbench_close.backend_stopping");
-    expect(source).toContain("stopWorkbenchBackend(paths, bootstrap, transaction)");
+    expect(source).toContain("stopWorkbenchBackend(paths, bootstrap, transaction, signal)");
     expect(source).toContain('let activeWorkState: ActiveWorkProbeState = "unknown"');
     expect(source).toContain("activeWorkState = status.state");
     expect(source).toContain("mainWorkbenchCloseStore.confirm(transaction.closeId, transaction.requestId!)");
@@ -57,7 +57,8 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("!shouldDeferOrchestratedWindowClose(payload)");
     expect(source).toContain('from "./lifecycle/workbenchBackendCloseReadiness.js"');
     expect(source).toContain("waitForWorkbenchBackendSettledForWindowClose({");
-    expect(source).toContain("timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS");
+    expect(source).toContain("createDesktopShellExitDeadline(WORKBENCH_CLOSE_BACKEND_WAIT_MS)");
+    expect(source).toContain("timeoutMs: closeDeadline.remainingMs()");
     expect(source).toContain("mainWorkbenchCloseStore.fail(");
     expect(source).toContain('"backend_stop_timeout"');
     expect(source).toContain("onWorkbenchClosed: () =>");
@@ -111,7 +112,7 @@ describe("Electron main transactional Workbench close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("async function recoverWorkbenchCloseControlContext(");
-    expect(source).toContain("await fetchLauncherControlToken({ launcherOrigin })");
+    expect(source.includes("await fetchLauncherControlToken({ launcherOrigin, signal: options.signal })")).toBe(true);
     expect(source).toContain("context = await resolveDesktopActionLoopContext(bootstrap);");
     expect(source).toContain("runtimeSceneBridge = null;");
   });
