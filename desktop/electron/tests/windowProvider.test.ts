@@ -1542,6 +1542,7 @@ describe("IPC channels", () => {
       "openPath",
       "refreshLauncherState",
       "requestDesktopShellExit",
+      "requestWorkbenchRestart",
       "showItemInFolder"
     ]);
   });
