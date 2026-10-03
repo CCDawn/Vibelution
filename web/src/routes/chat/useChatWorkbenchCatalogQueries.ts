@@ -122,6 +122,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   const [directoryReadyWaitExpired, setDirectoryReadyWaitExpired] = useState(false);
   const activeSessionBootstrapQuery = useQuery({
     queryKey: ["sessions", "active-bootstrap"],
+    enabled: sessionDirectoryEnabled,
     queryFn: async ({ signal }) => {
       const payload = await fetchChatWorkbenchBootstrap({ signal });
       signal.throwIfAborted();
@@ -173,12 +174,12 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     refetchInterval: (query) =>
       query.state.data?.directoryReady === false ? DIRECTORY_READY_POLL_MS : false,
   });
-  const bootstrapSettled = activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError;
+  const bootstrapSettled = !sessionDirectoryEnabled || activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError;
   const bootstrapDirectoryReady = activeSessionBootstrapQuery.data?.directoryReady !== false;
   // Bounded fallback: if the directory never reports ready, open the gate so the
   // index recovers through the normal poll cycle instead of waiting forever.
   useEffect(() => {
-    if (bootstrapDirectoryReady || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired) {
+    if (!sessionDirectoryEnabled || bootstrapDirectoryReady || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired) {
       return;
     }
     const timer = window.setTimeout(
@@ -186,8 +187,8 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
       DIRECTORY_READY_WAIT_TIMEOUT_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [bootstrapDirectoryReady, activeSessionBootstrapQuery.isError, directoryReadyWaitExpired]);
-  const directoryGatePending = !bootstrapDirectoryReady && !directoryReadyWaitExpired;
+  }, [sessionDirectoryEnabled, bootstrapDirectoryReady, activeSessionBootstrapQuery.isError, directoryReadyWaitExpired]);
+  const directoryGatePending = sessionDirectoryEnabled && !bootstrapDirectoryReady && !directoryReadyWaitExpired;
   // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
   // the canonical session index recover instead of leaving the directory gated.
   const sessionIndexQueryEnabled = sessionDirectoryEnabled && shouldEnableSessionIndexQuery({

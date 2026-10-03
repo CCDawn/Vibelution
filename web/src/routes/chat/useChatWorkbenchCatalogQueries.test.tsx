@@ -10,6 +10,7 @@ import { queryKeys } from "../../api/queryKeys";
 const reads = vi.hoisted(() => ({ signals: new Map<string, AbortSignal>() }));
 const bootstrapControl = vi.hoisted(() => ({
   payload: new Promise<Record<string, unknown>>(() => {}),
+  requestCount: 0,
 }));
 const sessionIndexGate = vi.hoisted(() => ({ enabledFlags: [] as boolean[] }));
 const directoryReads = vi.hoisted(() => ({
@@ -26,7 +27,10 @@ function pendingRead(name: string, signal?: AbortSignal): Promise<never> {
 }
 vi.mock("../../api/config", () => ({ fetchPublicConfig: ({ signal }: { signal?: AbortSignal } = {}) => pendingRead("config", signal) }));
 vi.mock("../../api/chat", () => ({
-  fetchChatWorkbenchBootstrap: () => bootstrapControl.payload,
+  fetchChatWorkbenchBootstrap: () => {
+    bootstrapControl.requestCount += 1;
+    return bootstrapControl.payload;
+  },
   fetchChatRoomDetail: (_id: string, { signal }: { signal?: AbortSignal } = {}) => pendingRead("room", signal),
   listChatRoomModes: async () => [],
   listChatRoomPurposes: async () => [],
@@ -51,6 +55,7 @@ afterEach(() => {
   reads.signals.clear();
   sessionIndexGate.enabledFlags.length = 0;
   bootstrapControl.payload = new Promise<Record<string, unknown>>(() => {});
+  bootstrapControl.requestCount = 0;
   vi.clearAllMocks();
 });
 
@@ -97,7 +102,8 @@ describe("Chat catalog request lifecycle", () => {
     const root = createRoot(container);
     try {
       await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
-      expect(await actUntil(() => client.getQueryState(["sessions", "active-bootstrap"])?.status === "success")).toBe(true);
+      expect(await actUntil(() => client.getQueryState(queryKeys.agents())?.status === "success")).toBe(true);
+      expect(bootstrapControl.requestCount).toBe(0);
       expect(sessionIndexGate.enabledFlags.every((enabled) => !enabled)).toBe(true);
       expect(directoryReads.conversations).not.toHaveBeenCalled();
       expect(directoryReads.teams).not.toHaveBeenCalled();
