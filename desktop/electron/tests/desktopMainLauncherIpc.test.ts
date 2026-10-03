@@ -446,4 +446,47 @@ describe("Electron main Launcher IPC facade", () => {
       .join("\n");
     expect(closeWindowCode).not.toMatch(/AllocConsole|spawn|execFile|powershell|cmd\.exe/i);
   });
+
+  it("registers a narrow workbench restart verb that mirrors the panel restart invoke", () => {
+    const ipcSource = readFileSync(fileURLToPath(new URL("../src/ipc.ts", import.meta.url)), "utf8");
+    expect(ipcSource).toContain('requestWorkbenchRestart: "launcher:request-workbench-restart"');
+
+    const restartStart = mainSource.indexOf("IPC_CHANNELS.requestWorkbenchRestart");
+    const restartEnd = mainSource.indexOf("});", restartStart);
+    const restartHandler = mainSource.slice(restartStart, restartEnd);
+    // The workbench origin is trusted for this verb; the panel-only Launcher
+    // list must stay out of it.
+    expect(restartHandler).toContain("assertTrustedIpcSender(event, trustedIpcOrigins())");
+    expect(restartHandler).not.toContain("launcherIpcTrustedOrigins()");
+    // The forwarded payload must equal what the panel renderer sends for
+    // "restart" so the web side normalizes both answers alike.
+    expect(restartHandler).toContain("resolveLauncherIpcHost().invoke(");
+    expect(restartHandler).toContain('path: "restart"');
+    expect(restartHandler).toContain('method: "POST"');
+    expect(restartHandler).toContain('"X-Vibelution-Launcher-Trigger"');
+    // An empty or absent trigger drops the header entirely, matching the web caller.
+    expect(restartHandler).toContain('String(trigger ?? "").trim()');
+    expect(restartHandler).toContain(
+      '...(normalizedTrigger ? { headers: { "X-Vibelution-Launcher-Trigger": normalizedTrigger } } : {})'
+    );
+  });
+
+  it("exposes requestWorkbenchRestart only on the workbench preload branch", () => {
+    const workbenchBranchStart = preloadSource.indexOf("!isLauncherControlWindow && !isDesktopPetWindow");
+    const workbenchBranchEnd = preloadSource.indexOf("} : {})", workbenchBranchStart);
+    const workbenchBranch = preloadSource.slice(workbenchBranchStart, workbenchBranchEnd);
+    expect(workbenchBranch).toContain(
+      "requestWorkbenchRestart: (trigger?: string) => ipcRenderer.invoke(IPC_CHANNELS.requestWorkbenchRestart, trigger)"
+    );
+
+    const controlBranchStart = preloadSource.indexOf("...(isLauncherControlWindow");
+    const controlBranchEnd = preloadSource.indexOf("} : {})", controlBranchStart);
+    const controlBranch = preloadSource.slice(controlBranchStart, controlBranchEnd);
+    expect(controlBranch).toContain("launcherInvoke");
+    expect(controlBranch).not.toContain("requestWorkbenchRestart");
+
+    const petBranchStart = preloadSource.indexOf("...(isDesktopPetWindow");
+    const petBranchEnd = preloadSource.indexOf("} : {})", petBranchStart);
+    expect(preloadSource.slice(petBranchStart, petBranchEnd)).not.toContain("requestWorkbenchRestart");
+  });
 });

@@ -4777,6 +4777,23 @@ ipcMain.handle(IPC_CHANNELS.launcherInvoke, async (event, payload: LauncherIpcIn
   return await resolveLauncherIpcHost().invoke(payload);
 });
 
+// The workbench window has no launcherInvoke bridge; this narrow verb lets it
+// reach the same restart orchestration as the Launcher panel without widening
+// the general Launcher IPC surface. The payload must mirror what the panel
+// renderer sends for "restart" so the web side can normalize both answers alike.
+ipcMain.handle(IPC_CHANNELS.requestWorkbenchRestart, async (event, trigger?: string) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  const normalizedTrigger = String(trigger ?? "").trim();
+  return await resolveLauncherIpcHost().invoke({
+    schemaVersion: 1,
+    path: "restart",
+    init: {
+      method: "POST",
+      ...(normalizedTrigger ? { headers: { "X-Vibelution-Launcher-Trigger": normalizedTrigger } } : {})
+    }
+  });
+});
+
 ipcMain.handle(IPC_CHANNELS.getLauncherState, (event) => {
   assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
   return launcherStateStore.snapshot();
