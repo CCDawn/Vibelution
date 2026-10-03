@@ -720,12 +720,27 @@ describe("configProviderLogic", () => {
       ],
       {
         models: {
-          "gpt-5.5": { upstream_id: "gpt-5.5", label: "GPT 5.5", enabled: true },
+          "gpt-5.5": {
+            upstream_id: "gpt-5.5",
+            label: "GPT 5.5",
+            enabled: true,
+            wire_protocol: "responses",
+            defaults: { reasoning_effort_adapter: "reasoning_object" },
+          },
         },
       },
     );
     expect(projected).toHaveLength(1);
     expect(projected[0].availability).toBe("pinned");
+    // Wave 3 governance path B: pinned rows carry the raw draft entry so the
+    // whitelist editor can read values and protocol-layer facts.
+    expect(projected[0].draftEntry).toEqual({
+      upstream_id: "gpt-5.5",
+      label: "GPT 5.5",
+      enabled: true,
+      wire_protocol: "responses",
+      defaults: { reasoning_effort_adapter: "reasoning_object" },
+    });
   });
 
   it("accepts the redacted provider mutation allowlist without inventing identity", () => {

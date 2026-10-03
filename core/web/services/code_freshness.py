@@ -15,7 +15,10 @@ GitHub-Desktop convention of not competing with user git operations.
 The combined resolver keeps a short-TTL verdict cache guarded by pure file
 observation (``.git/HEAD`` text + fingerprint file stamps), so the 120s UI
 polling loop usually spawns no git process at all; dirty-tree walks run on an
-independent, longer throttle.  See ``resolve_code_freshness``.
+independent, longer throttle.  See ``resolve_code_freshness``.  Concurrent
+full resolutions for one project root collapse into a single flight (the
+startup prewarm and an early frontend poll share one git-backed walk instead
+of paying it twice).
 """
 
 from __future__ import annotations
@@ -69,6 +72,18 @@ _freshness_cache: dict[str, dict[str, Any]] = {}
 # key -> {"at": monotonic, "head_text": str, "fingerprint": str, "dirty": dict}
 _dirty_summary_cache: dict[str, dict[str, Any]] = {}
 
+# Per-project-root single-flight gate: same-root concurrent full resolutions
+# share one compute.  Modeled on config_service._config_result_cache_single_flight
+# (Condition + generation: waiters share a successful compute through the
+# normal fast-path cache, a failed compute is never shared and every waiter
+# falls through to its own resolution).  The TTL fast-path hit stays entirely
+# outside this gate (zero contention on the hot path); only the git-backed
+# full-resolution path enters it.  The gate guards only the flight bookkeeping
+# below — never the caches themselves — so cache writes stay lock-free.
+_FRESHNESS_FLIGHT_WAIT_TIMEOUT_SECONDS = 30.0
+_FRESHNESS_FLIGHTS: dict[str, dict[str, Any]] = {}
+_FRESHNESS_FLIGHT_LOCK = threading.Condition()
+
 
 def _monotonic() -> float:
     return time.monotonic()
@@ -79,6 +94,15 @@ def reset_freshness_caches_for_tests() -> None:
     with _freshness_cache_lock:
         _freshness_cache.clear()
         _dirty_summary_cache.clear()
+    with _FRESHNESS_FLIGHT_LOCK:
+        _FRESHNESS_FLIGHTS.clear()
+
+
+def _freshness_root_flight_key(project_root: Path | str) -> str:
+    try:
+        return os.path.normcase(str(Path(project_root).resolve()))
+    except OSError:
+        return os.path.normcase(str(project_root))
 
 
 def _now_iso() -> str:
@@ -169,10 +193,7 @@ def _observe_freshness_inputs(project_root: Path | str) -> tuple[str, tuple[tupl
 
 
 def _freshness_cache_key(project_root: Path | str, fallback_snapshot: dict[str, Any] | None) -> str:
-    try:
-        root = os.path.normcase(str(Path(project_root).resolve()))
-    except OSError:
-        root = os.path.normcase(str(project_root))
+    root = _freshness_root_flight_key(project_root)
     if isinstance(fallback_snapshot, dict) and fallback_snapshot:
         signature = "|".join(
             [
@@ -594,27 +615,16 @@ def resolve_frontend_freshness(*, project_root: Path | str) -> dict[str, Any]:
     }
 
 
-def resolve_code_freshness(
-    *,
+def _freshness_fast_path_hit(
     project_root: Path | str,
-    fallback_snapshot: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Combine backend + frontend freshness into one verdict for the UI.
+    fallback_snapshot: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return the cached verdict when the TTL + file observation still hold.
 
-    A behind verdict is never suppressed by the other panel being unknown:
-    before the 2026-09-11 fix, a missing backend fingerprint forced the whole
-    verdict to ``unknown`` even when the frontend panel independently proved
-    the serving build was behind, and the UI rendered ``unknown`` as a neutral
-    chip with no stale warning at all.
-
-    Hot path (zero git processes): the cached verdict is replayed whenever the
-    HEAD text read straight from ``.git/HEAD`` (the VS Code DotGitWatcher
-    approach of watching the HEAD file instead of spawning git) and the
-    fingerprint file stamps are unchanged and the TTL has not elapsed.  Any
-    HEAD/fingerprint/TTL change falls back to the full git-backed verdict and
-    refreshes the cache.  Cached responses are deep-copied on the way in and
-    out so callers cannot mutate the shared cache.
+    Zero git processes, one short lock block, and no flight bookkeeping: this
+    is the polling hot path and must never queue behind a full resolution.
     """
+
     cache_key = _freshness_cache_key(project_root, fallback_snapshot)
     observation = _observe_freshness_inputs(project_root)
     now = _monotonic()
@@ -626,6 +636,22 @@ def resolve_code_freshness(
             and cached["observation"] == observation
         ):
             return copy.deepcopy(cached["response"])
+    return None
+
+
+def _compute_freshness_response(
+    *,
+    project_root: Path | str,
+    fallback_snapshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Run one full git-backed freshness resolution and refresh the cache."""
+
+    cache_key = _freshness_cache_key(project_root, fallback_snapshot)
+    # Observe at compute time (not caller arrival): after a single-flight wait
+    # the inputs may have moved, and the cache write must key off the inputs
+    # of the actual run so the next poll's observation can match it.
+    observation = _observe_freshness_inputs(project_root)
+    now = _monotonic()
 
     dirty = _throttled_dirty_summary(
         project_root,
@@ -697,3 +723,92 @@ def resolve_code_freshness(
                 "response": copy.deepcopy(response),
             }
     return response
+
+
+def _freshness_resolve_single_flight(
+    *,
+    project_root: Path | str,
+    fallback_snapshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Collapse same-root concurrent full resolutions into one compute.
+
+    Modeled on config_service._config_result_cache_single_flight: the first
+    full-path miss becomes the flight leader; same-root concurrent callers
+    wait (bounded), then replay the leader's verdict through the normal fast
+    path so TTL/observation rules still apply.  A leader failure is never
+    shared — waiters fall through and compute their own verdict, and the
+    leader's exception propagates to the leader only.  A caller whose cache
+    key differs from the leader's (different fallback snapshot) also falls
+    through: sharing stays keyed by the same verdict inputs, never merged.
+    """
+
+    flight_key = _freshness_root_flight_key(project_root)
+    with _FRESHNESS_FLIGHT_LOCK:
+        flight = _FRESHNESS_FLIGHTS.setdefault(
+            flight_key, {"inflight": False, "generation": 0}
+        )
+        arrival_generation = flight["generation"]
+        if flight["inflight"]:
+            deadline = _monotonic() + _FRESHNESS_FLIGHT_WAIT_TIMEOUT_SECONDS
+            while flight["inflight"]:
+                remaining = deadline - _monotonic()
+                if remaining <= 0:
+                    break
+                _FRESHNESS_FLIGHT_LOCK.wait(remaining)
+            if flight["generation"] != arrival_generation:
+                # The leader finished successfully and refreshed the verdict
+                # cache; hand its payload out through the normal fast path so
+                # signature/TTL rules still apply.
+                shared = _freshness_fast_path_hit(project_root, fallback_snapshot)
+                if shared is not None:
+                    return shared
+            # Leader failed, hit its own timeout window, or its verdict does
+            # not cover this caller's cache key: fall through and compute.
+        flight["inflight"] = True
+    succeeded = False
+    try:
+        response = _compute_freshness_response(
+            project_root=project_root,
+            fallback_snapshot=fallback_snapshot,
+        )
+        succeeded = True
+        return response
+    finally:
+        with _FRESHNESS_FLIGHT_LOCK:
+            flight["inflight"] = False
+            if succeeded:
+                flight["generation"] += 1
+            _FRESHNESS_FLIGHT_LOCK.notify_all()
+
+
+def resolve_code_freshness(
+    *,
+    project_root: Path | str,
+    fallback_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Combine backend + frontend freshness into one verdict for the UI.
+
+    A behind verdict is never suppressed by the other panel being unknown:
+    before the 2026-09-11 fix, a missing backend fingerprint forced the whole
+    verdict to ``unknown`` even when the frontend panel independently proved
+    the serving build was behind, and the UI rendered ``unknown`` as a neutral
+    chip with no stale warning at all.
+
+    Hot path (zero git processes): the cached verdict is replayed whenever the
+    HEAD text read straight from ``.git/HEAD`` (the VS Code DotGitWatcher
+    approach of watching the HEAD file instead of spawning git) and the
+    fingerprint file stamps are unchanged and the TTL has not elapsed.  Any
+    HEAD/fingerprint/TTL change falls back to the full git-backed verdict and
+    refreshes the cache.  Cached responses are deep-copied on the way in and
+    out so callers cannot mutate the shared cache.  Concurrent full
+    resolutions for one project root (e.g. the startup prewarm racing the
+    frontend's first poll) collapse into a single flight instead of each
+    paying the full git-backed walk.
+    """
+    hit = _freshness_fast_path_hit(project_root, fallback_snapshot)
+    if hit is not None:
+        return hit
+    return _freshness_resolve_single_flight(
+        project_root=project_root,
+        fallback_snapshot=fallback_snapshot,
+    )

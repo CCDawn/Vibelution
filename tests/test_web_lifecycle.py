@@ -118,6 +118,66 @@ def test_begin_owned_lifecycle_reopens_loaded_owners_without_cold_imports(monkey
     assert called == ["background", "terminal"]
 
 
+def test_gated_prewarm_stops_before_route_readiness_without_starting_worker(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0")
+    called = []
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_routes_ready_event = asyncio.Event()
+        jobs = StartupJobGroup()
+        task = jobs.start_async(
+            "gated-prewarm",
+            lifecycle._run_prewarm_heavy_after_routes_ready(
+                app,
+                lambda _timings: called.append("started"),
+                worker_name="owned-gated-prewarm",
+                startup_jobs=jobs,
+            ),
+        )
+        await asyncio.sleep(0)
+        result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+        assert task.cancelled()
+
+    asyncio.run(exercise())
+    assert called == []
+
+
+def test_gated_prewarm_retains_real_worker_until_it_exits(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_STARTUP_PREWARM_STAGGER_SECONDS", "0")
+    started = threading.Event()
+    release = threading.Event()
+
+    def heavy(_timings):
+        started.set()
+        assert release.wait(2)
+
+    async def exercise():
+        app = FastAPI()
+        app.state.web_routes_ready_event = asyncio.Event()
+        app.state.web_routes_ready_event.set()
+        jobs = StartupJobGroup()
+        jobs.start_async(
+            "gated-prewarm",
+            lifecycle._run_prewarm_heavy_after_routes_ready(
+                app, heavy, worker_name="owned-gated-prewarm", startup_jobs=jobs,
+            ),
+        )
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            result = await jobs.shutdown(deadline=time.monotonic() + 0.03)
+            assert result["closed"] is False
+            assert result["pendingWorkers"] == ["owned-gated-prewarm"]
+        finally:
+            release.set()
+            result = await jobs.shutdown(deadline=time.monotonic() + 1)
+        assert result["closed"] is True
+        assert result["pendingWorkers"] == []
+
+    asyncio.run(exercise())
+
+
 def test_begin_owned_lifecycle_rejects_unjoined_session_executor(monkeypatch):
     monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(modules={
         "core.web.services.session_service": session_service,
