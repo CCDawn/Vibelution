@@ -72,3 +72,24 @@ def test_superseded_directory_initializer_cannot_publish_over_new_generation(mon
         assert directory_runtime.current_directory_runtime_status().status == "ready"
     finally:
         directory_runtime.shutdown_session_directory_runtime()
+
+
+def test_is_directory_ready_holds_only_mid_startup_and_never_wedges():
+    directory_runtime.shutdown_session_directory_runtime()
+    try:
+        # Unknown / never-started runtime (including pytest skips) stays open.
+        assert directory_runtime.is_directory_ready()
+        directory_runtime.begin_directory_startup()
+        assert not directory_runtime.is_directory_ready()
+        # Every terminal phase opens the gate so a broken startup cannot block
+        # first paint forever.
+        directory_runtime.shutdown_session_directory_runtime()
+        assert directory_runtime.is_directory_ready()
+    finally:
+        directory_runtime.shutdown_session_directory_runtime()
+
+
+def test_list_query_startup_wait_is_a_bounded_backstop():
+    # Strictly bounded: never the old always-empty 0s gate, never the 30s
+    # STARTING_WAIT_SECONDS hang that would stall bootstrap first paint.
+    assert 0 < directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS < directory_runtime.STARTING_WAIT_SECONDS

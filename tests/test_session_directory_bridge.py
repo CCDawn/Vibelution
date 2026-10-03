@@ -67,3 +67,63 @@ def test_archive_directory_session_safe_returns_failed_future_when_dispatch_fail
 
     assert returned is not None
     assert isinstance(returned.exception(), OSError)
+
+
+def test_query_session_summaries_serves_bounded_startup_empty_page(monkeypatch):
+    """Mid-startup queries stay non-blocking but never look like real empty data."""
+
+    observed_timeouts: list[float] = []
+
+    def fake_wait(*, timeout):
+        observed_timeouts.append(timeout)
+        return "starting"
+
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "wait_for_directory_startup",
+        fake_wait,
+    )
+
+    payload = directory_bridge.query_session_summaries()
+
+    assert payload is not None
+    assert payload["items"] == []
+    assert payload["nextCursor"] == ""
+    # The wait must stay the bounded startup backstop, not the 30s full wait.
+    assert observed_timeouts == [directory_bridge.directory_runtime.LIST_QUERY_STARTUP_WAIT_SECONDS]
+
+
+def test_list_session_summaries_serves_bounded_startup_empty_page(monkeypatch):
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "wait_for_directory_startup",
+        lambda *, timeout: "starting",
+    )
+
+    assert directory_bridge.list_session_summaries() == []
+
+
+def test_query_session_summaries_proceeds_past_gate_once_startup_resolves(monkeypatch):
+    """A wait that resolves to a terminal phase must reach the store read path."""
+
+    degraded_sources: list[str] = []
+    monkeypatch.setattr(
+        directory_bridge,
+        "note_session_read_degraded",
+        lambda *, source, error_type="": degraded_sources.append(source),
+    )
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "wait_for_directory_startup",
+        lambda *, timeout: "ready",
+    )
+    monkeypatch.setattr(
+        directory_bridge.directory_runtime,
+        "get_open_directory_store",
+        lambda: None,
+    )
+
+    # A missing store on the resolved path reports degraded instead of serving
+    # the startup empty page, proving the gate no longer holds the query.
+    assert directory_bridge.query_session_summaries() is None
+    assert degraded_sources == ["session query"]

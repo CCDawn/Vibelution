@@ -28,6 +28,8 @@ export type UseChatIndexDerivedStateInput = {
   agentsHasData: boolean;
   agentsIsLoading: boolean;
   visibleSessionCount: number;
+  /** True while the session index is held back by the directory ready gate. */
+  directoryGatePending?: boolean;
 };
 
 export type UseChatIndexDerivedStateResult = {
@@ -61,6 +63,7 @@ export function useChatIndexDerivedState({
   agentsHasData,
   agentsIsLoading,
   visibleSessionCount,
+  directoryGatePending = false,
 }: UseChatIndexDerivedStateInput): UseChatIndexDerivedStateResult {
   const contextMenuSession = useMemo(() => {
     if (!sessionContextMenu) {
@@ -101,6 +104,7 @@ export function useChatIndexDerivedState({
     agentsHasData,
     agentsIsLoading,
     visibleSessionCount,
+    directoryGatePending,
   });
   const contextMenuAgentArchivePending = Boolean(
     agentContextMenu

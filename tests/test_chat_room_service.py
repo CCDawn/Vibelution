@@ -218,6 +218,9 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
+    # The route fingerprint tracks environment/config changes, not this test's
+    # resolver replacement. Drop paths cached by the outer fixture first.
+    agent_directory_service._invalidate_repaired_state_cache()
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_root)
 
     def _configured_test_context_window(self):
@@ -226,6 +229,20 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
         return 200000
 
     monkeypatch.setattr(AgentRuntime, "_init_model_discovery", _configured_test_context_window)
+
+
+def test_isolate_chat_room_kernel_invalidates_cached_workspace_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
+    agent_directory_service._invalidate_repaired_state_cache()
+    # Prime the outer fixture's route before the room helper replaces the
+    # resolver. The environment fingerprint stays identical across that swap.
+    old_workspace = agent_directory_service._workspace_path("agents", "agent-route-probe")
+    assert old_workspace == tmp_path / "workspace" / "agents" / "agent-route-probe"
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+
+    workspace = agent_directory_service._ensure_agent_workspace("workspace/agents/agent-route-probe")
+    assert workspace == tmp_path / "operator-data" / "workspace" / "agents" / "agent-route-probe"
 
 
 def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-test-model") -> dict[str, dict[str, str]]:
@@ -246,6 +263,7 @@ def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-t
         # tool calling is an illegal combo the runtime switch gate rejects.
         "contract": "basic_chat",
         "streaming": False,
+        "contract": "basic_chat",
         "tool_calling_mode": "disabled",
         "context_window": 200000,
     }
@@ -2744,6 +2762,7 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
         # and the inherited live-config contract may be tool_chat.
         "contract": "basic_chat",
         "streaming": False,
+        "contract": "basic_chat",
         "tool_calling_mode": "disabled",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
@@ -2998,6 +3017,7 @@ def test_formal_meeting_speaker_turn_projects_receipt_outside_journal(
         # and the inherited live-config contract may be tool_chat.
         "contract": "basic_chat",
         "streaming": False,
+        "contract": "basic_chat",
         "tool_calling_mode": "disabled",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
@@ -4489,6 +4509,7 @@ def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(t
             }
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+    room_thread: threading.Thread | None = None
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha direct turn")
@@ -4521,13 +4542,16 @@ def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(t
         assert not release_direct.is_set()
         release_room.set()
         release_direct.set()
-        room_thread.join(timeout=2.0)
     finally:
         release_direct.set()
         release_room.set()
         executor.shutdown(wait=True, cancel_futures=True)
+        # The round thread can still be persisting its result after the Agent
+        # executor drains. Join it before fixture roots and stores are restored.
+        if room_thread is not None and room_thread.ident is not None:
+            room_thread.join(timeout=10.0)
 
-    assert not room_thread.is_alive()
+    assert room_thread is not None and not room_thread.is_alive()
     assert result_holder["detail"]["rounds"][-1]["status"] == "completed"
     assert prompts[0] == "alpha direct turn"
     assert "群聊也想让 alpha 发言" in prompts[1]
@@ -4739,6 +4763,7 @@ def test_chat_room_same_session_wait_does_not_block_later_different_session_turn
             }
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+    room_thread: threading.Thread | None = None
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha first direct")
@@ -4768,14 +4793,15 @@ def test_chat_room_same_session_wait_does_not_block_later_different_session_turn
         release_first_direct.set()
         assert room_started.wait(15.0)
         release_room.set()
-        room_thread.join(timeout=2.0)
     finally:
         release_first_direct.set()
         release_room.set()
         release_second_direct.set()
         executor.shutdown(wait=True, cancel_futures=True)
+        if room_thread is not None and room_thread.ident is not None:
+            room_thread.join(timeout=10.0)
 
-    assert not room_thread.is_alive()
+    assert room_thread is not None and not room_thread.is_alive()
     assert result_holder["detail"]["rounds"][-1]["status"] == "completed"
     assert run_order == [
         "first_direct",

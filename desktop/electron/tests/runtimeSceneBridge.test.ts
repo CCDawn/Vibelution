@@ -1,7 +1,64 @@
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import { RuntimeSceneBridge, electronEventPayload } from "../src/lifecycle/runtimeSceneBridge.js";
 
 describe("RuntimeSceneBridge", () => {
+  it("releases a real response socket after accepting headers with an unfinished body", async () => {
+    let socketClosed = false;
+    const server = createServer((request, response) => {
+      request.socket.once("close", () => { socketClosed = true; });
+      response.writeHead(202, { "content-type": "application/json" });
+      response.write("{\"accepted\":");
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = (server.address() as { port: number }).port;
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: `http://127.0.0.1:${port}`,
+      controlToken: "isolated-token",
+      maxBufferedEvents: 2
+    });
+    try {
+      await bridge.record({ eventCode: "exit.requested", message: "message", fields: {} });
+      expect(bridge.bufferedCount()).toBe(0);
+      await vi.waitFor(() => expect(socketClosed).toBe(true));
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+  it("bounds a hung event request and keeps its head available for retry", async () => {
+    vi.useFakeTimers();
+    try {
+      let observedSignal: AbortSignal | undefined;
+      let hang = true;
+      const fetchImpl: typeof fetch = async (_url, init) => {
+        if (!hang) return new Response("{}", { status: 202 });
+        observedSignal = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener("abort", () => reject(observedSignal?.reason), { once: true });
+        });
+      };
+      const bridge = new RuntimeSceneBridge({
+        launcherOrigin: "http://127.0.0.1:8765",
+        controlToken: "token",
+        maxBufferedEvents: 2,
+        fetchImpl
+      });
+      const pending = bridge.record({ eventCode: "exit.failed", message: "message", fields: {} });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await pending;
+      expect(observedSignal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(bridge.bufferedCount()).toBe(1);
+      hang = false;
+      await bridge.flush();
+      expect(bridge.bufferedCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("posts bounded events to the launcher runtime-scene route", async () => {
     const fetchImpl = vi.fn(async () => new Response("{}", { status: 202 }));
     const bridge = new RuntimeSceneBridge({

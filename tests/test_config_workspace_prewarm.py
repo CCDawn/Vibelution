@@ -378,11 +378,11 @@ def test_lifespan_prewarm_gate_disabled_starts_prewarm_immediately(monkeypatch):
         lambda *args, **kwargs: config_built.set() or {},
     )
     monkeypatch.setattr(lifecycle, "_prewarm_agent_registry_on_startup", lambda *a, **kw: {})
-    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda **_kwargs: asyncio.sleep(0))
     monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
-    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda: None)
-    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
     monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
     from core.web.services import cli_agent_terminal_service, session_service

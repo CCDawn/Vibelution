@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import ContextVar
@@ -57,6 +58,7 @@ from .workbench_contract_service import get_workbench_contract
 from vibelution_storage import resolve_project_runtime_home
 
 
+logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_STATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ui_runtime_state.json")
 LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
@@ -1246,13 +1248,11 @@ def _schedule_local_backend_exit(delay_seconds: float = 0.35) -> None:
     if "pytest" in sys.modules:
         _record_pytest_hard_exit_skip("runtime_service.local_backend_exit")
         return
+    from core.web.server_shutdown import schedule_server_shutdown
 
-    def _exit_later() -> None:
-        time.sleep(max(0.0, float(delay_seconds)))
-        os._exit(0)
-
-    thread = threading.Thread(target=_exit_later, name="web-runtime-shutdown", daemon=True)
-    thread.start()
+    if not schedule_server_shutdown(delay_seconds=delay_seconds):
+        logger.error("Local backend shutdown cannot be scheduled without an owned Uvicorn server.")
+        raise RuntimeError("Local backend shutdown requires an owned Uvicorn server.")
 
 
 def _load_runtime_state() -> dict:

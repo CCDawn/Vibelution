@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from core.chat.turn_journal import (
     EVENT_SESSION_RECOVERY_RESUMED,
@@ -68,6 +68,16 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+def _shutdown_requested(should_stop: Callable[[], bool] | None) -> bool:
+    if should_stop is None:
+        return False
+    try:
+        return bool(should_stop())
+    except Exception:  # noqa: BLE001 - uncertainty must stop recovery writes
+        logger.warning("Session startup recovery stop fence failed; aborting the sweep.")
+        return True
 
 
 def _new_summary() -> dict[str, Any]:
@@ -213,13 +223,18 @@ def _persist_recovery_state(
     origin_turn_id: str,
     resumed_turn_id: str,
     attempts: int,
-) -> None:
+    should_stop: Callable[[], bool] | None = None,
+) -> bool:
     """Persist the retry ledger on the conversation state (crash-safe count)."""
 
+    if _shutdown_requested(should_stop):
+        return False
     with s._CHAT_STATE_LOCK:
+        if _shutdown_requested(should_stop):
+            return False
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is None:
-            return
+            return False
         conversation[RECOVERY_STATE_KEY] = {
             "originTurnId": str(origin_turn_id or "").strip(),
             "resumedTurnId": str(resumed_turn_id or "").strip(),
@@ -228,6 +243,7 @@ def _persist_recovery_state(
         }
         conversation["updated_at"] = s._now_timestamp()
         s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
+        return True
 
 
 def _append_recovery_status_line(
@@ -283,7 +299,10 @@ def _resume_interrupted_turn(
     open_turn_id: str,
     events: list[Any],
     summary: dict[str, Any],
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
+    if _shutdown_requested(should_stop):
+        return
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
     if conversation is None or s._conversation_is_read_only(conversation):
         summary["noInterruptedTurnCount"] += 1
@@ -317,17 +336,26 @@ def _resume_interrupted_turn(
         else open_turn_id
     )
 
-    turn_key = f"{session_id}:{open_turn_id}"
-    with _RESUMED_TURN_KEYS_LOCK:
-        if turn_key in _RESUMED_TURN_KEYS:
-            return
-        _RESUMED_TURN_KEYS.add(turn_key)
-
     turn_label = _recovery_turn_label(prompt)
     if not turn_label and attachment_ids:
         # Attachment-only turn: an empty text resubmit is valid (submit accepts
         # attachments without content), the label just needs something visible.
         turn_label = "[图片]"
+    if _shutdown_requested(should_stop):
+        return
+
+    turn_key = f"{session_id}:{open_turn_id}"
+    with _RESUMED_TURN_KEYS_LOCK:
+        if _shutdown_requested(should_stop):
+            return
+        if turn_key in _RESUMED_TURN_KEYS:
+            return
+        _RESUMED_TURN_KEYS.add(turn_key)
+
+    if _shutdown_requested(should_stop):
+        with _RESUMED_TURN_KEYS_LOCK:
+            _RESUMED_TURN_KEYS.discard(turn_key)
+        return
     try:
         detail = s.submit_session_message(
             session_id,
@@ -355,6 +383,7 @@ def _resume_interrupted_turn(
                 origin_turn_id=origin_turn_id,
                 resumed_turn_id="",
                 attempts=attempts + 1,
+                should_stop=should_stop,
             )
         except Exception:  # noqa: BLE001 - ledger persistence is best effort
             pass
@@ -366,14 +395,20 @@ def _resume_interrupted_turn(
         )
         return
 
+    if _shutdown_requested(should_stop):
+        return
     resumed_turn_id = str((detail or {}).get("startedTurnId") or (detail or {}).get("turnId") or "").strip()
-    _persist_recovery_state(
+    if not _persist_recovery_state(
         s,
         session_id,
         origin_turn_id=origin_turn_id,
         resumed_turn_id=resumed_turn_id,
         attempts=attempts + 1,
-    )
+        should_stop=should_stop,
+    ):
+        return
+    if _shutdown_requested(should_stop):
+        return
     _append_recovery_status_line(
         s,
         session_id,
@@ -392,21 +427,28 @@ def _recover_session_on_startup(
     *,
     companion_session_ids: set[str],
     summary: dict[str, Any],
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
+    if _shutdown_requested(should_stop):
+        return
     if session_id in companion_session_ids:
         summary["companionSkipCount"] += 1
         return
     summary["scannedSessionCount"] += 1
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
-    if conversation is None:
+    if conversation is None or _shutdown_requested(should_stop):
         return
     queued_rows = s._session_queued_turn_rows(conversation)
     if any(str(row.get("status") or "") in {"queued", "starting"} for row in queued_rows):
+        if _shutdown_requested(should_stop):
+            return
         # The idle gate and stale-"starting" reset are built into the drain;
         # after a restart nothing else re-triggers it.
         s._schedule_session_queued_turn_drain(session_id)
         summary["queuedDrainScheduledCount"] += 1
     if s._is_session_running(session_id):
+        return
+    if _shutdown_requested(should_stop):
         return
     events = s._load_session_conversation_events_cached(session_id)
     open_turn_id = latest_open_turn_id(events)
@@ -418,10 +460,13 @@ def _recover_session_on_startup(
         open_turn_id=open_turn_id,
         events=events,
         summary=summary,
+        should_stop=should_stop,
     )
 
 
-def recover_interrupted_session_turns_on_startup() -> dict[str, Any]:
+def recover_interrupted_session_turns_on_startup(
+    *, should_stop: Callable[[], bool] | None = None
+) -> dict[str, Any]:
     """Sweep every session once after startup: resume + queue drain.
 
     Never raises. The operator switch gates the whole sweep: disabled means
@@ -446,7 +491,13 @@ def recover_interrupted_session_turns_on_startup() -> dict[str, Any]:
         if companion_session_ids is None:
             summary["skipped"] = "companion_scope_unavailable"
             return summary
+        if _shutdown_requested(should_stop):
+            summary["stopped"] = True
+            return summary
         for session_id in list(s.list_session_runtime_ids(s.PROJECT_ROOT) or []):
+            if _shutdown_requested(should_stop):
+                summary["stopped"] = True
+                break
             normalized = str(session_id or "").strip()
             if not normalized:
                 continue
@@ -456,6 +507,7 @@ def recover_interrupted_session_turns_on_startup() -> dict[str, Any]:
                     normalized,
                     companion_session_ids=companion_session_ids,
                     summary=summary,
+                    should_stop=should_stop,
                 )
             except Exception as exc:  # noqa: BLE001 - one bad session never blocks startup
                 summary["errorCount"] += 1
@@ -466,7 +518,8 @@ def recover_interrupted_session_turns_on_startup() -> dict[str, Any]:
                 )
     finally:
         summary["durationMs"] = s._elapsed_ms(started_at)
-        _record_sweep_scene_event(s, summary)
+        if not _shutdown_requested(should_stop):
+            _record_sweep_scene_event(s, summary)
         with _SWEEP_LOCK:
             _SWEEP_IN_FLIGHT = False
     return summary

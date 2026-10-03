@@ -265,10 +265,17 @@ def _store_directory_rows(*, include_hidden: bool = True) -> list[dict]:
     return list(page.get("rows") or [])
 
 
-def test_startup_query_waits_for_migration_and_does_not_flash_legacy(
+def test_startup_query_waits_for_migration_and_returns_store_backed_rows(
     isolated_directory_runtime: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    """A query racing startup rides out the bounded wait instead of flashing empty.
+
+    Issued mid-migration, it must observe the store's post-migration view (the
+    legacy session is a legitimate store row once migration lands) and never a
+    pre-migration or legacy-JSON view.
+    """
+
     project_root = isolated_directory_runtime
     _write_agents_registry(agent_directory_service.registry_path())
     _seed_legacy_session(project_root)
@@ -312,8 +319,10 @@ def test_startup_query_waits_for_migration_and_does_not_flash_legacy(
     assert isinstance(payload, dict)
     query_ids = {str(item.get("id") or "") for item in payload.get("items") or []}
     listed_ids = {str(item.get("id") or "") for item in query_holder["listed"] or []}
-    assert "legacy-session" not in query_ids
-    assert "legacy-session" not in listed_ids
+    # The wait resolved within its window, so both reads observe the migrated
+    # store instead of the startup empty page.
+    assert "legacy-session" in query_ids
+    assert "legacy-session" in listed_ids
 
 
 def test_startup_timeout_does_not_fall_back_to_legacy_json(
@@ -324,7 +333,9 @@ def test_startup_timeout_does_not_fall_back_to_legacy_json(
     _write_agents_registry(agent_directory_service.registry_path())
     _seed_legacy_session(project_root)
     directory_runtime.begin_directory_startup()
-    monkeypatch.setattr(directory_runtime, "STARTING_WAIT_SECONDS", 0.05)
+    # The list/query timeout is the bounded startup backstop; shrinking it keeps
+    # this test fast while exercising the same timed-out-starting path.
+    monkeypatch.setattr(directory_runtime, "LIST_QUERY_STARTUP_WAIT_SECONDS", 0.05)
     payload = session_service.query_sessions(limit=10)
     assert payload.get("items") == []
     assert session_service.list_sessions() == []

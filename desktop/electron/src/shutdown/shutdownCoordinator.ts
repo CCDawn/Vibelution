@@ -158,10 +158,12 @@ export async function resolveQuitActiveWorkStatus(input: {
 export async function fetchLauncherActiveWorkStatus(input: {
   launcherOrigin: string;
   controlToken: string;
+  signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<ActiveWorkStatus> {
   const fetcher = input.fetchImpl ?? fetch;
   const response = await fetcher(`${new URL(input.launcherOrigin).origin}/api/launcher/status`, {
+    signal: input.signal,
     headers: {
       "X-Vibelution-Control-Token": input.controlToken
     }

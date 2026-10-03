@@ -49,6 +49,15 @@ import { fetchSessionDetailWindow } from "./chatSessionDetailHelpers";
  */
 const CONVERSATIONS_CATALOG_PAGE_SIZE = 100;
 
+/**
+ * While the backend reports the directory store as mid-startup, poll the cheap
+ * bootstrap endpoint for the flipped bit instead of firing session queries that
+ * can only receive the startup empty page.
+ */
+const DIRECTORY_READY_POLL_MS = 1_000;
+/** Bounded fallback so a wedged directory startup can never gate the list forever. */
+const DIRECTORY_READY_WAIT_TIMEOUT_MS = 20_000;
+
 export type ChatWorkbenchCatalogQueriesInput = {
   queryClient: QueryClient;
   secondaryChatDataEnabled: boolean;
@@ -107,6 +116,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     staleTime: 30_000,
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [directoryReadyWaitExpired, setDirectoryReadyWaitExpired] = useState(false);
   const activeSessionBootstrapQuery = useQuery({
     queryKey: ["sessions", "active-bootstrap"],
     queryFn: async ({ signal }) => {
@@ -155,8 +165,26 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
       };
     },
     staleTime: 5_000,
+    // Re-check the directory ready bit while the backend store is mid-startup;
+    // once it flips (or the payload omits it), this stops polling on its own.
+    refetchInterval: (query) =>
+      query.state.data?.directoryReady === false ? DIRECTORY_READY_POLL_MS : false,
   });
   const bootstrapSettled = activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError;
+  const bootstrapDirectoryReady = activeSessionBootstrapQuery.data?.directoryReady !== false;
+  // Bounded fallback: if the directory never reports ready, open the gate so the
+  // index recovers through the normal poll cycle instead of waiting forever.
+  useEffect(() => {
+    if (bootstrapDirectoryReady || activeSessionBootstrapQuery.isError || directoryReadyWaitExpired) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setDirectoryReadyWaitExpired(true),
+      DIRECTORY_READY_WAIT_TIMEOUT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [bootstrapDirectoryReady, activeSessionBootstrapQuery.isError, directoryReadyWaitExpired]);
+  const directoryGatePending = !bootstrapDirectoryReady && !directoryReadyWaitExpired;
   // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
   // the canonical session index recover instead of leaving the directory gated.
   const sessionIndexQueryEnabled = shouldEnableSessionIndexQuery({
@@ -165,6 +193,8 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     bootstrapIsFetched: activeSessionBootstrapQuery.isFetched,
     bootstrapIsError: activeSessionBootstrapQuery.isError,
     bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus,
+    directoryReady: bootstrapDirectoryReady,
+    directoryReadyWaitExpired,
   });
   const modelLabelsById = useMemo(
     () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
@@ -343,6 +373,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
     setSelectedAgentId,
     activeSessionBootstrapQuery,
     sessionIndexQueryEnabled,
+    directoryGatePending,
     modelLabelsById,
     modelImageInputSupportById,
     resolveModelLabel,

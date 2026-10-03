@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { executeApprovedDesktopShellShutdown, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { createDesktopShellExitDeadline, executeApprovedDesktopShellShutdown, withDesktopShellExitTimeout } from "../src/shutdown/desktopShellExit.js";
 import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
@@ -294,6 +296,52 @@ describe("resolveQuitActiveWorkStatus", () => {
 });
 
 describe("fetchLauncherActiveWorkStatus", () => {
+  it("closes a real loopback request when shutdown probing times out", async () => {
+    let requestSeen = false;
+    let requestClosed = false;
+    const server = createServer((request) => {
+      requestSeen = true;
+      request.socket.once("close", () => { requestClosed = true; });
+      // Deliberately leave this owned request unanswered.
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = (server.address() as { port: number }).port;
+    const deadline = createDesktopShellExitDeadline(200);
+    try {
+      await expect(withDesktopShellExitTimeout((signal) => fetchLauncherActiveWorkStatus({
+        launcherOrigin: `http://127.0.0.1:${port}`,
+        controlToken: "isolated-token",
+        signal
+      }), deadline, "real active work probe")).rejects.toThrow("timed out");
+      expect(requestSeen).toBe(true);
+      await vi.waitFor(() => expect(requestClosed).toBe(true));
+    } finally {
+      deadline.dispose();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("aborts the outstanding request when its exit budget expires", async () => {
+    const deadline = createDesktopShellExitDeadline(10);
+    let observedSignal: AbortSignal | null = null;
+    try {
+      await expect(withDesktopShellExitTimeout((signal) => fetchLauncherActiveWorkStatus({
+        launcherOrigin: "http://127.0.0.1:8765",
+        controlToken: "token",
+        signal,
+        fetchImpl: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+          observedSignal = init!.signal!;
+          init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+        })
+      }), deadline, "active work probe")).rejects.toThrow("timed out");
+      expect(observedSignal).not.toBeNull();
+      expect(observedSignal!.aborted).toBe(true);
+    } finally {
+      deadline.dispose();
+    }
+  });
   it("reads active-work count from the existing launcher status projection", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {

@@ -22,10 +22,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port  # noqa: E402
+from core.web.server_shutdown import own_server  # noqa: E402
 
 
 USER_ENV_FALLBACK_ENV = "VIBELUTION_ENABLE_USER_ENV_FALLBACK"
 DEFER_RUNTIME_SCENE_RETENTION_ENV = "VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION"
+HTTP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 2
 
 # Runtime scene opened by this backend process (see bootstrap below); the exit
 # seal only touches the pointer while it still references this scene.
@@ -121,6 +123,19 @@ def install_access_log_filters() -> None:
     logger.addFilter(WorkbenchAccessLogFilter())
 
 
+def create_workbench_server(app: object, *, host: str, port: int) -> uvicorn.Server:
+    """Build the product server with a bounded HTTP drain before lifespan cleanup."""
+
+    return uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            timeout_graceful_shutdown=HTTP_GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS,
+        )
+    )
+
+
 def open_runtime_scene_for_startup() -> dict[str, object]:
     """Open a fresh runtime scene for this backend start.
 
@@ -207,7 +222,14 @@ def main() -> None:
     previous_retention_flag = os.environ.get(DEFER_RUNTIME_SCENE_RETENTION_ENV)
     os.environ[DEFER_RUNTIME_SCENE_RETENTION_ENV] = "1" if scene_opened else "0"
     try:
-        uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=args.reload)
+        if args.reload:
+            # Uvicorn's reload supervisor owns child servers; keep its standard
+            # runner and do not register the supervisor as the serving process.
+            uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=True)
+        else:
+            server = create_workbench_server("core.web.app:app", host=args.host, port=args.port)
+            with own_server(server):
+                server.run()
     finally:
         if previous_retention_flag is None:
             os.environ.pop(DEFER_RUNTIME_SCENE_RETENTION_ENV, None)

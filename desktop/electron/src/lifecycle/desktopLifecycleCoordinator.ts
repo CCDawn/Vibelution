@@ -37,12 +37,14 @@ export class DesktopLifecycleCoordinator {
     this.reason = reason;
     const pending = operation(reason);
     this.pending = pending;
-    void pending.finally(() => {
+    const cleanup = () => {
       if (this.pending === pending) {
         this.pending = null;
         this.reason = null;
       }
-    });
+    };
+    // Observe both outcomes without creating an unhandled rejecting promise.
+    void pending.then(cleanup, cleanup);
     return pending;
   }
 

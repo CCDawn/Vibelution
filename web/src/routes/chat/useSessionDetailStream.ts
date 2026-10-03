@@ -159,7 +159,7 @@ export function useSessionDetailStream({
         window.clearTimeout(graceCloseTimerRef.current);
         graceCloseTimerRef.current = null;
       }
-      if (prev === false && graceClosedSessionRef.current) {
+      if (prev === false && (!activeStreamRef.current || graceClosedSessionRef.current)) {
         graceClosedSessionRef.current = false;
         setStreamReconnectTick((tick) => tick + 1);
       }
@@ -870,9 +870,10 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
-      if (routed.payload.resume === "partial") {
-        // The gap exceeded the server's bounded replay window and was honestly
-        // skipped; the authoritative refetch restores the missed body.
+      if (routed.payload.resume === "replayed" || routed.payload.resume === "partial") {
+        // Journal replay frames are diagnostic only; the session detail query
+        // remains authoritative for every replay outcome. Partial replay also
+        // uses this refetch to restore the bounded-window gap.
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
       }
       postBrowserTelemetry({

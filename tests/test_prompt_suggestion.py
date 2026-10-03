@@ -420,6 +420,84 @@ def test_composer_example_route_uses_current_project_root(tmp_path, monkeypatch)
     assert exc_info.value.status_code == 404
 
 
+def test_composer_example_route_is_bound_to_the_session_handler():
+    from core.web.routes import sessions as session_routes
+
+    matches = [
+        route
+        for route in session_routes.router.routes
+        if getattr(route, "path", "") == "/sessions/{session_id}/composer-example"
+        and "GET" in getattr(route, "methods", set())
+    ]
+    assert len(matches) == 1
+    assert matches[0].endpoint is session_routes.session_composer_example
+
+
+@pytest.mark.parametrize("financial", [False, True])
+def test_composer_example_http_get_needs_no_body_and_uses_session_profile(
+    monkeypatch, financial
+):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from core.web.routes import sessions as session_routes
+
+    agent_id = "agent-finance" if financial else "agent-coding"
+    session_id = "session-finance" if financial else "session-coding"
+    coding = [{"heading": "修复问题", "command": "修复 lint 报错"}]
+    research = [{"heading": "新闻参考", "command": "查一家公司的公开新闻"}]
+    detail_reads = []
+
+    def read_detail(selected_id, **kwargs):
+        detail_reads.append((selected_id, kwargs))
+        return {"agentId": agent_id}
+
+    monkeypatch.setattr(session_routes, "get_session_detail", read_detail)
+    monkeypatch.setattr(
+        "core.web.services.financial_assistant_service.composer_starters_for_agent",
+        lambda selected_id: research if selected_id == "agent-finance" else None,
+    )
+    monkeypatch.setattr(session_routes, "get_composer_starter_commands", lambda root: coding)
+    app = FastAPI()
+    app.include_router(session_routes.router, prefix="/api")
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/sessions/{session_id}/composer-example")
+
+    starters = research if financial else coding
+    assert response.status_code == 200
+    assert response.json() == {"command": starters[0]["command"], "starters": starters}
+    assert detail_reads == [(session_id, {"message_limit": 0, "transcript_scope": "none"})]
+
+
+@pytest.mark.parametrize("missing_as_none", [False, True])
+def test_composer_example_http_missing_session_returns_404(monkeypatch, missing_as_none):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from core.web.routes import sessions as session_routes
+
+    def missing_detail(*args, **kwargs):
+        if missing_as_none:
+            return None
+        raise session_routes.SessionNotFoundError("Session not found")
+
+    monkeypatch.setattr(session_routes, "get_session_detail", missing_detail)
+    monkeypatch.setattr(
+        session_routes,
+        "get_composer_starter_commands",
+        lambda root: pytest.fail("A missing session must not expose project starter commands"),
+    )
+    app = FastAPI()
+    app.include_router(session_routes.router, prefix="/api")
+
+    with TestClient(app) as client:
+        response = client.get("/api/sessions/missing/composer-example")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Session not found"}
+
+
 def test_composer_example_route_uses_financial_research_starters(monkeypatch):
     from core.web.routes import sessions as session_routes
 

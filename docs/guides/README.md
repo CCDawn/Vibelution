@@ -28,6 +28,7 @@
 | [project-map.md](project-map.md) | **项目地图**：三主线速查 + 数据布局 + 需求→文件 + 排障口诀 | ~140 | 已按 route/ownership 精确定位时 |
 | [route.md](route.md) | 任务类型 → READ / EDIT / TEST / 禁止 | ~78 | 续接且任务类型/触面未变 |
 | [ownership.md](ownership.md) | 路径 ownership | ~122 | 只读；或 owner 已由 route 唯一确定 |
+| [github-project-governance.md](github-project-governance.md) | 本地治理参考的检索入口、版本证据与适用边界 | ~40 | 不需要治理或成熟方案参考 |
 | [loop.md](loop.md) | 分级、命令、验证与合入；对用户汇报见根 `AGENTS.md` §5 | ~148 | 未到验证/收束；FAST_PATCH 只看 §1+§3 |
 | [agent-log-routing.md](agent-log-routing.md) | **统一日志入口** `firstRead` 四段 | ~52 | 非 Bug/回归/卡住/运行不一致 |
 | [playbook.md](playbook.md) | 系统边界 + 红线速查 + SSOT | ~105 | standards § 已覆盖当前疑问 |

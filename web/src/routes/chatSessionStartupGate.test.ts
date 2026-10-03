@@ -53,6 +53,76 @@ describe("chat session startup gate", () => {
   });
 });
 
+describe("directory ready gating", () => {
+  const settledGateInput = {
+    hasRouteTarget: false,
+    bootstrapIsFetched: true,
+    bootstrapIsError: false,
+    bootstrapFetchStatus: "idle" as const,
+  };
+
+  it("holds the session index while the backend directory store is mid-startup", () => {
+    expect(shouldEnableSessionIndexQuery({
+      ...settledGateInput,
+      directoryReady: false,
+    })).toBe(false);
+  });
+
+  it("holds the session index even for a route target until the directory reports", () => {
+    expect(shouldEnableSessionIndexQuery({
+      ...settledGateInput,
+      hasRouteTarget: true,
+      directoryReady: false,
+    })).toBe(false);
+  });
+
+  it("enables the session index once the directory reports ready", () => {
+    expect(shouldEnableSessionIndexQuery({
+      ...settledGateInput,
+      directoryReady: true,
+    })).toBe(true);
+  });
+
+  it("treats an unknown readiness as ready so older payloads never wedge the list", () => {
+    expect(shouldEnableSessionIndexQuery({
+      ...settledGateInput,
+      directoryReady: undefined,
+    })).toBe(true);
+  });
+
+  it("reopens the session index when the bounded readiness wait expires", () => {
+    expect(shouldEnableSessionIndexQuery({
+      ...settledGateInput,
+      directoryReady: false,
+      directoryReadyWaitExpired: true,
+    })).toBe(true);
+  });
+});
+
+describe("directory gate loading state", () => {
+  it("shows a skeleton while the directory gate holds the index back", () => {
+    expect(shouldShowConversationIndexLoading({
+      bootstrapIsLoading: false,
+      conversationsHasData: false,
+      conversationsIsLoading: false,
+      sessionsHasData: false,
+      sessionsIsLoading: false,
+      directoryGatePending: true,
+    })).toBe(true);
+  });
+
+  it("does not claim a loading gate once the directory reports ready", () => {
+    expect(shouldShowConversationIndexLoading({
+      bootstrapIsLoading: false,
+      conversationsHasData: false,
+      conversationsIsLoading: false,
+      sessionsHasData: false,
+      sessionsIsLoading: false,
+      directoryGatePending: false,
+    })).toBe(false);
+  });
+});
+
 describe("conversation index loading state", () => {
   it("does not show a skeleton for disabled pending queries", () => {
     expect(shouldShowConversationIndexLoading({
