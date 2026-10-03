@@ -241,6 +241,10 @@ def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-t
     base_config.llm.model_library[model_id] = {
         "provider_id": provider_id,
         "model": "chat-room-test-model",
+        # Pin the contract: the entry inherits the primary profile's contract
+        # from the live operator config otherwise, and tool_chat + disabled
+        # tool calling is an illegal combo the runtime switch gate rejects.
+        "contract": "basic_chat",
         "streaming": False,
         "tool_calling_mode": "disabled",
         "context_window": 200000,
@@ -2736,6 +2740,9 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     base_config.llm.model_library["agent-explorer-model"] = {
         "provider_id": base_config.llm.profiles["primary"].provider_id,
         "model": "explorer-model",
+        # Pin basic_chat: disabled tool calling is only legal under basic_chat,
+        # and the inherited live-config contract may be tool_chat.
+        "contract": "basic_chat",
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
@@ -2987,6 +2994,9 @@ def test_formal_meeting_speaker_turn_projects_receipt_outside_journal(
     base_config.llm.model_library[_model_key] = {
         "provider_id": _provider_id,
         "model": "explorer-model",
+        # Pin basic_chat: disabled tool calling is only legal under basic_chat,
+        # and the inherited live-config contract may be tool_chat.
+        "contract": "basic_chat",
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
