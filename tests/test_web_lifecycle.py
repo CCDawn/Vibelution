@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import os
 import subprocess
 import sys
@@ -128,6 +129,47 @@ def test_startup_job_group_stop_before_worker_start_skips_callback():
         assert called == []
         assert not jobs._workers
         assert not jobs._tasks
+
+    asyncio.run(exercise())
+
+
+def test_unawaited_startup_worker_failure_is_consumed_by_owner():
+    async def exercise() -> None:
+        loop = asyncio.get_running_loop()
+        exception_contexts = []
+        previous_handler = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: exception_contexts.append(context))
+        jobs = StartupJobGroup()
+        worker_started = threading.Event()
+
+        def fail_worker() -> None:
+            worker_started.set()
+            raise RuntimeError("synthetic unobserved startup worker failure")
+
+        try:
+            task = jobs.start_thread("unobserved-failing-worker", fail_worker)
+            assert await asyncio.to_thread(worker_started.wait, 1)
+            # Let the Task deliver the worker error before shutdown can cancel
+            # it. Reading done() leaves that exception unobserved.
+            async with asyncio.timeout(1):
+                while not task.done():
+                    await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
+            del task
+
+            result = await jobs.shutdown(deadline=time.monotonic() + 1)
+            await asyncio.sleep(0)
+            gc.collect()
+            await asyncio.sleep(0)
+
+            assert result["closed"] is False
+            assert result["failedOwnerCount"] == 1
+            assert not any(
+                context.get("message") == "Task exception was never retrieved"
+                for context in exception_contexts
+            )
+        finally:
+            loop.set_exception_handler(previous_handler)
 
     asyncio.run(exercise())
 

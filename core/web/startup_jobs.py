@@ -156,6 +156,15 @@ class StartupJobGroup:
             self._tasks.discard(completed)
             if worker is not None:
                 self._retire_worker(worker)
+                if not completed.cancelled():
+                    # Worker failures are counted from worker.error by
+                    # _retire_worker. Consume the Task exception as well so
+                    # an unawaited owner does not emit asyncio's
+                    # "Task exception was never retrieved" warning.
+                    try:
+                        completed.exception()
+                    except BaseException:  # noqa: BLE001 - retirement must not leak callback errors
+                        pass
                 return
             if completed.cancelled():
                 return
