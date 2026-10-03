@@ -242,6 +242,7 @@ def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-t
         "provider_id": provider_id,
         "model": "chat-room-test-model",
         "streaming": False,
+        "contract": "basic_chat",
         "tool_calling_mode": "disabled",
         "context_window": 200000,
     }
@@ -2737,6 +2738,7 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
         "provider_id": base_config.llm.profiles["primary"].provider_id,
         "model": "explorer-model",
         "streaming": False,
+        "contract": "basic_chat",
         "tool_calling_mode": "disabled",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
@@ -2988,6 +2990,7 @@ def test_formal_meeting_speaker_turn_projects_receipt_outside_journal(
         "provider_id": _provider_id,
         "model": "explorer-model",
         "streaming": False,
+        "contract": "basic_chat",
         "tool_calling_mode": "disabled",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
