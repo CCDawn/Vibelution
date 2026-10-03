@@ -18,7 +18,9 @@ import re
 import shutil
 import stat
 import tempfile
+import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -28,6 +30,27 @@ DEFAULT_AGENT_PRIMARY_MODE = "chat"
 
 _source_authority_ref_fn = None
 _projection_edit_contract_fn = None
+
+# Memoized workspace event paths. ``_resolve_project_path`` ends in a Windows
+# ``Path.resolve()`` (realpath syscalls), and the session list used to pay one
+# per agent row for the inbox pending-count probe. The routed path is a pure
+# function of the active project root, the raw workspace string, the filename,
+# and the developer-sandbox routing fingerprint — the same validation
+# ``repair_store._WORKSPACE_PATH_CACHE`` applies — so memoize under that key
+# as a bounded LRU. Fingerprint or lookup failures fail open (recompute
+# without memoizing); downstream ``path.exists()``/signature checks are
+# untouched, so a workspace switch or deleted directory still behaves exactly
+# as before.
+_AGENT_WORKSPACE_EVENT_PATH_CACHE: "OrderedDict[tuple[str, str, str], tuple[tuple[Any, ...], Path]]" = OrderedDict()
+_AGENT_WORKSPACE_EVENT_PATH_CACHE_LOCK = threading.Lock()
+_AGENT_WORKSPACE_EVENT_PATH_CACHE_MAX_ENTRIES = 2048
+
+
+def _reset_agent_workspace_event_path_cache_for_tests() -> None:
+    """Drop memoized workspace event paths (test isolation only)."""
+
+    with _AGENT_WORKSPACE_EVENT_PATH_CACHE_LOCK:
+        _AGENT_WORKSPACE_EVENT_PATH_CACHE.clear()
 
 
 def _service():
@@ -286,7 +309,33 @@ def _agent_runtime_from_env() -> dict[str, Any]:
 
 def _agent_workspace_event_path(agent: dict[str, Any], filename: str) -> Path:
     s = _service()
-    return s._resolve_project_path(str(agent.get("workspacePath") or "")) / "events" / filename
+    workspace_path = str(agent.get("workspacePath") or "")
+    # Key on the raw payload string: a different workspace string is a
+    # different key, so an agent switching workspaces can never observe a
+    # stale path. The active root rides along because ``_resolve_project_path``
+    # resolves relative/workspace strings against it.
+    cache_key = (str(s._active_project_root()), workspace_path, str(filename))
+    fingerprint: tuple[Any, ...] | None = None
+    try:
+        fingerprint = s._developer_sandbox_module().workspace_routing_fingerprint(
+            Path(cache_key[0])
+        )
+        with _AGENT_WORKSPACE_EVENT_PATH_CACHE_LOCK:
+            cached = _AGENT_WORKSPACE_EVENT_PATH_CACHE.get(cache_key)
+            if cached is not None and cached[0] == fingerprint:
+                _AGENT_WORKSPACE_EVENT_PATH_CACHE.move_to_end(cache_key)
+                return cached[1]
+    except Exception:
+        # Fail open: any fingerprint/lookup problem just recomputes.
+        fingerprint = None
+    resolved = s._resolve_project_path(workspace_path) / "events" / filename
+    if fingerprint is not None:
+        with _AGENT_WORKSPACE_EVENT_PATH_CACHE_LOCK:
+            _AGENT_WORKSPACE_EVENT_PATH_CACHE[cache_key] = (fingerprint, resolved)
+            _AGENT_WORKSPACE_EVENT_PATH_CACHE.move_to_end(cache_key)
+            while len(_AGENT_WORKSPACE_EVENT_PATH_CACHE) > _AGENT_WORKSPACE_EVENT_PATH_CACHE_MAX_ENTRIES:
+                _AGENT_WORKSPACE_EVENT_PATH_CACHE.popitem(last=False)
+    return resolved
 
 
 def _agent_workspace_territory(agent: dict[str, Any]) -> dict[str, Any]:

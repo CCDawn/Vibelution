@@ -40,6 +40,62 @@ def _service():
 _CONVERSATION_AGENT_PROBE_LOCK = threading.Lock()
 _CONVERSATION_AGENT_PROBE_STATE: dict[str, tuple[str, frozenset[str]]] = {}
 
+# Memoized hidden-team-member id sets for agent-directory conversation stubs.
+# ``list_teams_compact`` re-reads and re-parses the Team index plus the whole
+# chat-room state file on every call, and ``query_sessions`` used to pay that
+# I/O per request. The hidden set is a pure function of exactly two files
+# (see ``_agent_directory_stub_hidden_team_member_ids_signature``), so an
+# unchanged stat signature guarantees the memoized value; any mutation of
+# either file is an atomic replace that flips mtime_ns/size and invalidates.
+# Signature collection failures bypass the cache (fail-open, nothing memoized).
+_AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE: dict[tuple[Any, ...], frozenset[str]] = {}
+_AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE_LOCK = threading.Lock()
+_AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE_MAX_ENTRIES = 16
+
+
+def _reset_agent_directory_stub_hidden_team_member_ids_cache_for_tests() -> None:
+    """Drop memoized hidden-team-member id sets (test isolation only)."""
+
+    with _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE_LOCK:
+        _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE.clear()
+
+
+def _agent_directory_stub_hidden_team_member_ids_signature() -> tuple[Any, ...] | None:
+    """Cheap stat identity of every file behind the hidden-team-member set.
+
+    The compact Team projection reads only ``teams.json`` (members are carried
+    verbatim; ``_members_to_api`` is pure) and ``chat_rooms.json`` (linked-room
+    metadata repair feeds ``teamSource``/``teamKind``). Round reconciliation
+    may consult the WorkRun store, but it can only change this set's inputs by
+    rewriting the room state file, whose mtime/size then changes. Paths come
+    from the owning modules so routing drift keeps the signature correct.
+    """
+
+    s = _service()
+    try:
+        from .. import chat_room_service
+        from .. import team_service
+
+        # list_teams_compact syncs chat_room_service.PROJECT_ROOT from the
+        # team service before reading; mirror that so the stat path is the
+        # path actually read.
+        team_service._sync_chat_room_root()
+        paths = (
+            team_service._teams_index_path(),
+            chat_room_service._store().state_path,
+        )
+    except Exception:
+        return None
+    signature: list[tuple[Any, ...]] = [str(s.PROJECT_ROOT)]
+    for path in paths:
+        try:
+            stat_result = path.stat()
+        except OSError:
+            signature.append((str(path), None))
+            continue
+        signature.append((str(path), int(stat_result.st_mtime_ns), int(stat_result.st_size)))
+    return tuple(signature)
+
 
 def _conversation_agent_binding_probe_signature(
     agent_by_id: dict[str, dict[str, Any]],
@@ -2451,7 +2507,9 @@ def _agent_directory_stub_hidden_from_user_index(
     return False
 
 
-def _agent_directory_stub_hidden_team_member_ids() -> set[str]:
+def _compute_agent_directory_stub_hidden_team_member_ids() -> set[str]:
+    """Unmemoized hidden-team-member id computation (the ordinary read path)."""
+
     s = _service()
     try:
         from .. import team_service
@@ -2476,6 +2534,38 @@ def _agent_directory_stub_hidden_team_member_ids() -> set[str]:
             agent_id = str(member.get("agentId") or "").strip()
             if agent_id:
                 hidden_agent_ids.add(agent_id)
+    return hidden_agent_ids
+
+
+def _agent_directory_stub_hidden_team_member_ids() -> set[str]:
+    """Hidden team-member agent ids, memoized per backing-file stat signature.
+
+    Stored and returned as copies so callers cannot pollute the memoized set
+    in place; a changed signature (any team/room state rewrite) recomputes.
+    """
+
+    try:
+        signature = _agent_directory_stub_hidden_team_member_ids_signature()
+    except Exception:
+        # Fail open: an unusable signature just recomputes and caches nothing.
+        signature = None
+    if signature is not None:
+        with _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE_LOCK:
+            cached = _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE.get(signature)
+            if cached is not None:
+                return set(cached)
+    hidden_agent_ids = _compute_agent_directory_stub_hidden_team_member_ids()
+    if signature is not None:
+        with _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE_LOCK:
+            _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE[signature] = frozenset(
+                hidden_agent_ids
+            )
+            while (
+                len(_AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE)
+                > _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE_MAX_ENTRIES
+            ):
+                oldest_key = next(iter(_AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE))
+                _AGENT_DIRECTORY_STUB_HIDDEN_TEAM_MEMBER_IDS_CACHE.pop(oldest_key, None)
     return hidden_agent_ids
 
 

@@ -250,6 +250,21 @@ def _reset_agent_directory_caches(agent_directory_service):
     count_cache = getattr(agent_directory_service, "_JSONL_COUNT_CACHE", None)
     if isinstance(count_cache, dict):
         count_cache.clear()
+    # Process-level memo caches added for the session-list read path: drop
+    # them together with the per-test PROJECT_ROOT swap so no tmp-root path
+    # can leak across tests.
+    try:
+        from core.web.services.agent_directory import ops_residual
+
+        ops_residual._reset_agent_workspace_event_path_cache_for_tests()
+    except Exception:
+        pass
+    try:
+        from core.web.services.session import conversation_index
+
+        conversation_index._reset_agent_directory_stub_hidden_team_member_ids_cache_for_tests()
+    except Exception:
+        pass
 
 
 # ============================================================================
