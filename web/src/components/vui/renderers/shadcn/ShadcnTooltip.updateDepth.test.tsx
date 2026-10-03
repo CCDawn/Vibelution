@@ -181,6 +181,7 @@ describe("ShadcnTooltip React 19 update depth", () => {
     act(() => {
       host?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
       host?.focus();
+      if (host) pointerOver(host);
       vi.advanceTimersByTime(500);
     });
     expect(container.querySelector("button")).toBe(host);
@@ -208,5 +209,66 @@ describe("ShadcnTooltip React 19 update depth", () => {
       container.querySelector<HTMLButtonElement>("[data-testid=next]")?.focus();
     });
     expect(document.activeElement).toBe(container.querySelector("[data-testid=next]"));
+  });
+
+  it.each([0, 320])("retains label activation when focus arrives after pointer release with delay %s", (delay) => {
+    vi.useFakeTimers();
+    const onChange = vi.fn();
+    function PickTool() {
+      const [checked, setChecked] = useState(false);
+      return (
+        <VTooltip content="pick-tip" delay={delay}>
+          <label><span>Pick</span><input type="checkbox" checked={checked} onChange={(event) => {
+            onChange();
+            setChecked(event.target.checked);
+          }} /></label>
+        </VTooltip>
+      );
+    }
+    mount(
+      <VuiProvider>
+        <PickTool />
+      </VuiProvider>,
+    );
+    const label = container.querySelector("label");
+    const input = container.querySelector("input");
+    act(() => {
+      label?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      vi.advanceTimersByTime(500);
+    });
+    act(() => label?.dispatchEvent(new MouseEvent("pointerup", { bubbles: true })));
+    act(() => input?.focus());
+    expect(container.querySelector("label")).toBe(label);
+    expect(container.querySelector("input")).toBe(input);
+    act(() => label?.click());
+    expect(input?.checked).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(delay + 1));
+    expect(container.querySelector("input")?.checked).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector("input"));
+  });
+
+  it.each(["pointerup", "pointercancel"])("clears the pressed guard after %s even if focus leaves", (releaseEvent) => {
+    vi.useFakeTimers();
+    mount(
+      <VuiProvider>
+        <VTooltip content="recover-tip"><button type="button">host</button></VTooltip>
+        <button type="button" data-testid="next">next</button>
+      </VuiProvider>,
+    );
+    const host = container.querySelector("button");
+    const next = container.querySelector<HTMLButtonElement>("[data-testid=next]");
+    act(() => {
+      host?.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      host?.focus();
+    });
+    act(() => host?.dispatchEvent(new MouseEvent(releaseEvent, { bubbles: true })));
+    act(() => next?.focus());
+    act(() => vi.advanceTimersByTime(1));
+    expect(document.activeElement).toBe(next);
+    expect(document.querySelector("[data-vui='tooltip-content']")).toBeNull();
+    act(() => host?.focus());
+    expect(document.activeElement).toBe(container.querySelector("button"));
+    expect(document.querySelector("[data-vui='tooltip-content']")?.textContent).toContain("recover-tip");
   });
 });

@@ -154,6 +154,7 @@ export function ShadcnTooltip({
   const [overlayMounted, setOverlayMounted] = useState(eager);
   const intentRef = useRef({ pointer: false, focus: false });
   const openTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const pointerReleaseTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const pointerPressedRef = useRef(false);
   const pointerReleaseCleanupRef = useRef<(() => void) | null>(null);
   const armedTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -188,6 +189,10 @@ export function ShadcnTooltip({
         window.clearTimeout(openTimerRef.current);
         openTimerRef.current = null;
       }
+      if (pointerReleaseTimerRef.current !== null) {
+        window.clearTimeout(pointerReleaseTimerRef.current);
+        pointerReleaseTimerRef.current = null;
+      }
       pointerReleaseCleanupRef.current?.();
     };
   }, []);
@@ -199,6 +204,7 @@ export function ShadcnTooltip({
     };
     const armPointer = () => {
       intentRef.current.pointer = true;
+      if (pointerPressedRef.current) return;
       if (openTimerRef.current !== null) return;
       const wait = Math.max(0, delay);
       if (wait === 0) {
@@ -222,6 +228,10 @@ export function ShadcnTooltip({
         // Keep the native host through mouseup/click, including label default
         // actions. Arming during pointer focus would swallow the first click.
         clearOpenTimer();
+        if (pointerReleaseTimerRef.current !== null) {
+          window.clearTimeout(pointerReleaseTimerRef.current);
+          pointerReleaseTimerRef.current = null;
+        }
         pointerPressedRef.current = true;
         pointerReleaseCleanupRef.current?.();
         const owner = event.currentTarget.ownerDocument;
@@ -232,11 +242,11 @@ export function ShadcnTooltip({
         const release = () => {
           cleanup();
           pointerReleaseCleanupRef.current = null;
-          pointerPressedRef.current = false;
           // Defer past click/default label actions even when delay is zero.
-          openTimerRef.current = window.setTimeout(() => {
-            openTimerRef.current = null;
-            if (!pointerPressedRef.current && (intentRef.current.pointer || intentRef.current.focus)) armPointer();
+          pointerReleaseTimerRef.current = window.setTimeout(() => {
+            pointerReleaseTimerRef.current = null;
+            pointerPressedRef.current = false;
+            if (intentRef.current.pointer || intentRef.current.focus) armPointer();
           }, 0);
         };
         pointerReleaseCleanupRef.current = cleanup;
