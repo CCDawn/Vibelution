@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 
+from .query import _runtime_scene_display_path
+
 
 def read_runtime_scene_file(scene_id: str, relative_path: str) -> dict:
     from core.web.services import runtime_scene_service as s
@@ -27,7 +29,7 @@ def read_runtime_scene_file(scene_id: str, relative_path: str) -> dict:
     truncated = offset > 0 or len(content) > s.MAX_TEXT_CHARS
     if truncated:
         content = "... earlier content omitted ...\n\n" + content[-s.MAX_TEXT_CHARS:]
-    scene_root_path = scene_dir.relative_to(s.PROJECT_ROOT).as_posix()
+    scene_root_path = _runtime_scene_display_path(scene_dir)
     return {
         "rootId": "runtime_scenes",
         "rootPath": scene_root_path,

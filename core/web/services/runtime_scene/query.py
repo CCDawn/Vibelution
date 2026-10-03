@@ -1330,7 +1330,7 @@ def read_runtime_scene_file(scene_id: str, relative_path: str) -> dict:
     truncated = len(content) > s.MAX_TEXT_CHARS
     if truncated:
         content = content[:s.MAX_TEXT_CHARS] + "\n\n... preview truncated ..."
-    scene_root_path = _runtime_scene_display_path(scene_dir)
+    scene_root_path = scene_dir.relative_to(s.PROJECT_ROOT).as_posix()
     return {
         "rootId": "runtime_scenes",
         "rootPath": scene_root_path,
