@@ -22,6 +22,87 @@ from core.web.services import virtual_human_life_service
 from core.web.startup_jobs import StartupJobGroup
 
 
+def test_shutdown_step_preserves_deferred_owner_cleanup_result():
+    called = []
+
+    async def exercise():
+        deadline = time.monotonic() + 1
+        return await lifecycle._run_shutdown_step(
+            "deferred-store",
+            lambda: lifecycle.run_sync_bounded(
+                lambda: called.append("closed") or {"closed": True},
+                deadline_at=deadline,
+                name="deferred-store-worker",
+            ),
+            deadline=deadline,
+        )
+
+    result = asyncio.run(exercise())
+    assert called == ["closed"]
+    assert result == (True, {"closed": True})
+
+
+def test_shutdown_step_bounds_deferred_owner_before_awaiting_it():
+    async def exercise():
+        finalized = asyncio.Event()
+
+        async def slow_owner():
+            try:
+                await asyncio.sleep(0.25)
+            finally:
+                finalized.set()
+
+        started = time.monotonic()
+        result = await lifecycle._run_shutdown_step(
+            "slow-deferred-owner", slow_owner, deadline=started + 0.02
+        )
+        elapsed = time.monotonic() - started
+        await asyncio.sleep(0)
+        assert result is None
+        assert elapsed < 0.2
+        assert finalized.is_set()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("stores_closed", [True, False])
+def test_lifespan_marks_server_clean_only_after_owned_cleanup(monkeypatch, stores_closed):
+    called = []
+    clean = []
+
+    class IdleStartupJobs(StartupJobGroup):
+        def start_thread(self, name, _callback, *_args, **_kwargs):
+            return super().start_async(name, asyncio.sleep(0))
+
+        def start_async(self, name, awaitable):
+            awaitable.close()
+            return super().start_async(name, asyncio.sleep(0))
+
+    async def close_runtime(**_kwargs):
+        called.append("runtime")
+        return {"closed": True}
+
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", IdleStartupJobs)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: called.append("companion"))
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: called.append("workflow"))
+    monkeypatch.setattr(lifecycle, "_shutdown_owned_runtime_resources", close_runtime)
+    monkeypatch.setattr(
+        lifecycle,
+        "shutdown_session_catalog_on_shutdown",
+        lambda **_kwargs: called.append("stores") or {"closed": stores_closed},
+    )
+    monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: clean.append(tuple(called)))
+
+    async def exercise():
+        async with lifecycle.web_workbench_lifespan(None):
+            await asyncio.sleep(0)
+
+    asyncio.run(exercise())
+    assert called == ["companion", "workflow", "runtime", "stores"]
+    assert clean == ([tuple(called)] if stores_closed else [])
+
+
 def test_begin_owned_lifecycle_reopens_loaded_owners_without_cold_imports(monkeypatch):
     called = []
     monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(modules={}))
