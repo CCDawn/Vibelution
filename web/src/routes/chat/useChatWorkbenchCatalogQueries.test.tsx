@@ -44,6 +44,25 @@ afterEach(() => {
   bootstrapControl.payload = new Promise<Record<string, unknown>>(() => {});
 });
 
+/**
+ * Deterministic propagation wait: react-query notifies observers through its
+ * batched notifyManager, so a resolved refetch can commit one macrotask after
+ * the await resumes. Yield microtasks plus that batch inside act and re-check
+ * until `check` holds or the bounded attempts run out — no fixed sleeps.
+ */
+async function actUntil(check: () => boolean, attempts = 100): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (check()) {
+      return true;
+    }
+    await act(async () => {
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+  return check();
+}
+
 describe("Chat catalog request lifecycle", () => {
   it("releases obsolete config, group and expanded-session requests on page exit", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -122,9 +141,14 @@ describe("Chat catalog request lifecycle", () => {
         directoryReady: false,
       });
       await act(async () => root.render(<QueryClientProvider client={client}><Page /></QueryClientProvider>));
-      await act(async () => {});
-      // The directory store is mid-startup: the index query must stay held even
-      // though the bootstrap itself has settled.
+      const bootstrapState = () =>
+        client.getQueryState(["sessions", "active-bootstrap"])?.data as
+          | { directoryReady?: boolean }
+          | undefined;
+      // The directory store is mid-startup: the bootstrap must settle with the
+      // bit false and the index query must stay held even though the bootstrap
+      // itself has settled.
+      expect(await actUntil(() => bootstrapState()?.directoryReady === false)).toBe(true);
       expect(sessionIndexGate.enabledFlags.length > 0).toBe(true);
       expect(sessionIndexGate.enabledFlags.at(-1)).toBe(false);
 
@@ -138,7 +162,9 @@ describe("Chat catalog request lifecycle", () => {
       await act(async () => {
         await client.refetchQueries({ queryKey: ["sessions", "active-bootstrap"] });
       });
-      expect(sessionIndexGate.enabledFlags.at(-1)).toBe(true);
+      // A resolved refetch can commit one notifyManager batch later; wait for
+      // the flip deterministically instead of asserting on a single flush.
+      expect(await actUntil(() => sessionIndexGate.enabledFlags.at(-1) === true)).toBe(true);
     } finally {
       await act(async () => root.unmount());
       client.clear();
