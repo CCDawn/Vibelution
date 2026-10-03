@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from config.settings import AppConfig
 from core.infrastructure.mental_model import (
     active_mental_workspace,
@@ -16,6 +18,45 @@ from core.web.services import agent_directory_service, chat_room_service, conver
 from tools.memory_tools import memory_storage_override
 from tools.shell_tools import create_file, workspace_root_override
 from tools.memory_tools import task_create_tool
+
+
+@pytest.fixture(autouse=True)
+def _seed_dialogue_context_windows(monkeypatch):
+    """Give the base config's dialogue models an explicit context window.
+
+    The submit path refuses silent numeric fallbacks: a turn whose resolved
+    dialogue model has no ``context_window`` (the stock config's primary model
+    ships without one) fails SessionValidationError before the turn runs. Tests
+    here exercise workspace injection / prompt snapshots, not window policy, so
+    seed a window for the primary model (bare and provider-prefixed ids) in a
+    private config copy. Tests that build their own ``base_config`` start from
+    this patched ``get_config`` and keep the seeding.
+    """
+
+    original_get_config = session_service.get_config
+
+    def _patched_get_config():
+        config = original_get_config().model_copy(deep=True)
+        profile = config.llm.profiles["primary"]
+        provider_id = str(profile.provider_id or "").strip()
+        model = str(profile.model or "").strip()
+        for model_id in (f"{provider_id}/{model}", model):
+            if not model_id:
+                continue
+            entry = config.llm.model_library.get(model_id)
+            if isinstance(entry, dict):
+                if not entry.get("context_window"):
+                    entry["context_window"] = 200000
+            else:
+                config.llm.model_library[model_id] = {
+                    "provider_id": provider_id,
+                    "model": model,
+                    "context_window": 200000,
+                    "contract": "basic_chat",
+                }
+        return config
+
+    monkeypatch.setattr(session_service, "get_config", _patched_get_config)
 
 
 def _seed_session(project_root: Path, session_id: str = "session-live") -> None:
@@ -193,6 +234,8 @@ def test_run_session_turn_ignores_legacy_profile_and_uses_agent_binding(tmp_path
     base_config.llm.model_library["agent-dialogue-model"] = {
         "provider_id": base_config.llm.profiles["primary"].provider_id,
         "model": "agent-dialogue-runtime",
+        "context_window": 200000,
+        "contract": "basic_chat",
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
@@ -254,6 +297,8 @@ def test_run_session_turn_prefers_agent_instance_profile_over_legacy_profile(tmp
     base_config.llm.model_library["model-subagent-explorer"] = {
         "provider_id": base_config.llm.profiles["primary"].provider_id,
         "model": "agent-instance-model",
+        "context_window": 200000,
+        "contract": "basic_chat",
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
@@ -302,6 +347,8 @@ def test_run_session_turn_restores_persisted_llm_key_env_before_agent_create(tmp
         "provider_id": provider_id,
         "model": "agent-dialogue-runtime",
         "api_key_env": model_env,
+        "context_window": 200000,
+        "contract": "basic_chat",
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
@@ -479,6 +526,8 @@ def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch
     base_config.llm.model_library["model-primary"] = {
         "provider_id": base_config.llm.profiles["primary"].provider_id,
         "model": base_config.llm.profiles["primary"].model,
+        "context_window": 200000,
+        "contract": "basic_chat",
         "streaming": False,
         "tool_calling_mode": "disabled",
     }
