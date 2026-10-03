@@ -48,7 +48,8 @@ MEMORY_OVERVIEW_PREWARM_LOCK = Lock()
 MEMORY_OVERVIEW_PREWARM_INFLIGHT = False
 MEMORY_USAGE_CONTRACT_CACHE_TTL_SECONDS = 8.0
 MEMORY_USAGE_CONTRACT_CACHE_LOCK = Lock()
-MEMORY_USAGE_CONTRACT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None}
+MEMORY_USAGE_CONTRACT_CACHE: dict[str, Any] = {"root": "", "expiresAt": 0.0, "payload": None, "generation": 0}
+MEMORY_USAGE_CONTRACT_BUILD_LOCK = Lock()
 MEMORY_USAGE_CONTRACT_SLOW_MS = 250.0
 GIT_SNAPSHOT_CACHE_TTL_SECONDS = 3.0
 GIT_SNAPSHOT_CACHE_LOCK = Lock()
@@ -416,17 +417,54 @@ def get_memory_usage_contract() -> dict[str, Any]:
     started_at = time.perf_counter()
     root = PROJECT_ROOT.resolve()
     cache_root = str(root)
+    contract, cache_generation = _cached_memory_usage_contract(cache_root)
+    cache_hit = contract is not None
+    if contract is None:
+        with MEMORY_USAGE_CONTRACT_BUILD_LOCK:
+            contract, cache_generation = _cached_memory_usage_contract(cache_root)
+            cache_hit = contract is not None
+            if contract is None:
+                contract, cacheable = _build_memory_usage_contract(root)
+                if cacheable:
+                    _store_memory_usage_contract(cache_root, contract, cache_generation)
+                cache_hit = False
+    _record_memory_contract_viewed_event(
+        contract,
+        cache_hit=cache_hit,
+        duration_ms=(time.perf_counter() - started_at) * 1000,
+    )
+    return contract
+
+
+def _cached_memory_usage_contract(cache_root: str) -> tuple[dict[str, Any] | None, int]:
     now = time.monotonic()
     with MEMORY_USAGE_CONTRACT_CACHE_LOCK:
         cached_payload = MEMORY_USAGE_CONTRACT_CACHE.get("payload")
+        generation = int(MEMORY_USAGE_CONTRACT_CACHE.get("generation") or 0)
         if (
             MEMORY_USAGE_CONTRACT_CACHE.get("root") == cache_root
             and cached_payload is not None
             and float(MEMORY_USAGE_CONTRACT_CACHE.get("expiresAt") or 0.0) > now
         ):
-            contract = copy.deepcopy(cached_payload)
-            _record_memory_contract_viewed_event(contract, cache_hit=True, duration_ms=(time.perf_counter() - started_at) * 1000)
-            return contract
+            return copy.deepcopy(cached_payload), generation
+    return None, generation
+
+
+def _store_memory_usage_contract(cache_root: str, contract: dict[str, Any], generation: int) -> None:
+    with MEMORY_USAGE_CONTRACT_CACHE_LOCK:
+        if int(MEMORY_USAGE_CONTRACT_CACHE.get("generation") or 0) != generation:
+            return
+        MEMORY_USAGE_CONTRACT_CACHE.update(
+            {
+                "root": cache_root,
+                "expiresAt": time.monotonic() + MEMORY_USAGE_CONTRACT_CACHE_TTL_SECONDS,
+                "payload": copy.deepcopy(contract),
+            }
+        )
+
+
+def _build_memory_usage_contract(root: Path) -> tuple[dict[str, Any], bool]:
+    """Build one contract payload and report whether its source reads succeeded."""
 
     try:
         from core.web.services.team_knowledge_service import (
@@ -438,10 +476,12 @@ def get_memory_usage_contract() -> dict[str, Any]:
         knowledge_overview = list_knowledge_overview(internal=True)
         operations_health = get_knowledge_operations_health(internal=True)
         governance_plan = get_knowledge_governance_plan(limit=8, internal=True)
+        cacheable = True
     except Exception:
         knowledge_overview = {"summary": {}}
         operations_health = {"summary": {}}
         governance_plan = {"summary": {}, "operatingBoundary": {}}
+        cacheable = False
     contract = {
         "schemaVersion": 1,
         "generatedAt": _now_iso(),
@@ -592,16 +632,7 @@ def get_memory_usage_contract() -> dict[str, Any]:
             "operatingBoundary": governance_plan.get("operatingBoundary") or {},
         },
     }
-    with MEMORY_USAGE_CONTRACT_CACHE_LOCK:
-        MEMORY_USAGE_CONTRACT_CACHE.update(
-            {
-                "root": cache_root,
-                "expiresAt": time.monotonic() + MEMORY_USAGE_CONTRACT_CACHE_TTL_SECONDS,
-                "payload": copy.deepcopy(contract),
-            }
-        )
-    _record_memory_contract_viewed_event(contract, cache_hit=False, duration_ms=(time.perf_counter() - started_at) * 1000)
-    return contract
+    return contract, cacheable
 
 
 def create_user_memory_item(payload: dict[str, Any]) -> dict[str, Any]:
@@ -850,7 +881,14 @@ def _clear_memory_overview_section_cache() -> None:
 
 def _clear_memory_usage_contract_cache() -> None:
     with MEMORY_USAGE_CONTRACT_CACHE_LOCK:
-        MEMORY_USAGE_CONTRACT_CACHE.update({"root": "", "expiresAt": 0.0, "payload": None})
+        MEMORY_USAGE_CONTRACT_CACHE.update(
+            {
+                "root": "",
+                "expiresAt": 0.0,
+                "payload": None,
+                "generation": int(MEMORY_USAGE_CONTRACT_CACHE.get("generation") or 0) + 1,
+            }
+        )
 
 
 def _load_timed_base_memory_sections(root: Path, warnings: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

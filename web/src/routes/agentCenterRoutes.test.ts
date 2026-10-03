@@ -32,6 +32,15 @@ describe("agentCenterRoutes", () => {
     expect(agentCenterMemoryRoute({ agentId: "agent-1", teamId: "team-a", view: "agents", returnLabel: "teams", returnTo: "/teams?team=team-a" })).toBe(
       "/memory/agents?agentId=agent-1&teamId=team-a&view=agents&returnTo=%2Fteams%3Fteam%3Dteam-a&returnLabel=teams",
     );
+    expect(agentCenterMemoryRoute({
+      agentId: "agent-1",
+      knowledgeBaseId: "agent:agent-1:reports",
+      view: "knowledge",
+      returnLabel: "炒股智能体",
+      returnTo: "/finance?session=native-session",
+    })).toBe(
+      "/memory/knowledge?agentId=agent-1&knowledgeBaseId=agent%3Aagent-1%3Areports&view=knowledge&returnTo=%2Ffinance%3Fsession%3Dnative-session&returnLabel=%E7%82%92%E8%82%A1%E6%99%BA%E8%83%BD%E4%BD%93",
+    );
     expect(teamMemoryRoute({ teamId: "team-a", view: "knowledge", returnLabel: "teams", returnTo: "/teams?team=team-a" })).toBe(
       "/memory/knowledge?teamId=team-a&view=knowledge&returnTo=%2Fteams%3Fteam%3Dteam-a&returnLabel=teams",
     );

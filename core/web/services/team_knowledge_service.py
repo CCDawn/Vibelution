@@ -814,6 +814,18 @@ def create_source_artifact(
     return _public_source_artifact(result_artifact)
 
 
+MAX_FORMAL_KNOWLEDGE_CONTENT_CHARS = 40_000
+
+
+def _normalize_formal_knowledge_content(value: Any) -> str:
+    content = str(value or "")
+    if len(content) > MAX_FORMAL_KNOWLEDGE_CONTENT_CHARS:
+        raise TeamKnowledgeError(
+            f"Knowledge content must not exceed {MAX_FORMAL_KNOWLEDGE_CONTENT_CHARS} characters."
+        )
+    return content.strip()
+
+
 def create_refinement_proposal(
     knowledge_base_id: str,
     *,
@@ -835,7 +847,7 @@ def create_refinement_proposal(
     actor_agent_id = str(proposed_by_agent_id or "").strip()
     _require_permission(owner, base, actor_agent_id, "propose")
     normalized_title = trim_lines(title or "", max_lines=1).strip()
-    normalized_content = trim_lines(content or "", max_lines=80).strip()
+    normalized_content = _normalize_formal_knowledge_content(content)
     if not normalized_title:
         raise TeamKnowledgeError("Proposal title is required.")
     if not normalized_content:
@@ -945,7 +957,9 @@ def create_ingestion_package(
     normalized_source_summary = trim_lines(source_summary or normalized_excerpt, max_lines=8).strip()
     normalized_proposal_title = trim_lines(proposal_title or source_title or normalized_type, max_lines=1).strip()
     normalized_proposal_summary = trim_lines(proposal_summary or normalized_source_summary, max_lines=6).strip()
-    normalized_content = trim_lines(proposal_content or normalized_excerpt or normalized_source_summary, max_lines=80).strip()
+    normalized_content = _normalize_formal_knowledge_content(
+        proposal_content or normalized_excerpt or normalized_source_summary
+    )
     if not normalized_content:
         raise TeamKnowledgeError("Ingestion requires proposalContent, excerpt, or sourceSummary.")
     source = create_source_artifact(

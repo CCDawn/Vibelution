@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,20 @@ from vibelution_storage import resolve_project_runtime_home, resolve_project_wor
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _HISTORICAL_REFERENCE_LIMIT = 50
+# Chunk size for cooperative GIL yields inside workspace file scans: long
+# pure-Python loops otherwise starve concurrent request threads for seconds.
+_SCAN_YIELD_EVERY = 25
 _ACTIVE_RUN_STATUSES = {"", "active", "queued", "running", "paused", "stopping", "started", "in_progress"}
 MIGRATION_WRITABLE_RUN_STATUSES = frozenset({"active", "running", "paused"})
+
+
+def _yield_gil() -> None:
+    """Cooperatively release the GIL so concurrent requests can interleave.
+
+    ``time.sleep(0)`` is a pure scheduler hand-off: no timer wait and no
+    observable state change, so scan results stay byte-for-byte identical.
+    """
+    time.sleep(0)
 
 
 class ModelReferenceConflictError(ValueError):
@@ -741,7 +754,9 @@ def _team_live_policy_paths(project_root: Path) -> tuple[Path, ...]:
 
 
 def _scan_team_live_prompt_cache_refs(refs: list[dict[str, Any]], model_id: str, project_root: Path) -> None:
-    for path in _team_live_policy_paths(project_root):
+    for index, path in enumerate(_team_live_policy_paths(project_root)):
+        if index and index % _SCAN_YIELD_EVERY == 0:
+            _yield_gil()
         payload = _load_json(path)
         policy = payload.get("promptCachePolicy") if isinstance(payload, dict) else None
         if not isinstance(policy, dict):
@@ -790,7 +805,9 @@ def _scan_historical_supervised_refs(
             continue
         for path in sorted(root.rglob("*.json"), key=lambda item: str(item)):
             candidates.append((source_name, path))
-    for source_name, path in candidates:
+    for index, (source_name, path) in enumerate(candidates):
+        if index and index % _SCAN_YIELD_EVERY == 0:
+            _yield_gil()
         if len(refs) >= limit:
             return
         try:
@@ -1181,6 +1198,7 @@ def scan_model_alias_usage(public_config: dict[str, Any], *, project_root: Path 
                 "historicalReferenceCount": impact["historicalReferenceCount"],
             }
         )
+        _yield_gil()
     return {
         "aliases": summaries,
         "totalLiveReferenceCount": live_total,

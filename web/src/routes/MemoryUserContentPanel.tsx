@@ -401,7 +401,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 </div>
                 <div className={styles.pre}>{selectedPageContent || "No content."}</div>
               </>
-            ) : pageQuery.isPending ? (
+            ) : pageQuery.isFetching ? (
               <ProgressiveRegionSkeleton variant="detail" label="正在读取页面" />
             ) : (
               <VStateSurface fill tone="empty" title="未选择页面">

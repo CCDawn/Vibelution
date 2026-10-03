@@ -212,6 +212,43 @@ def test_persona_and_boundaries_reach_native_runtime_context(entry_env):
     assert service.TASK["constraints"] in context
     assert service.PERSONA["identityNotes"] in context
     assert row["knowledgeBaseId"] in context
+    assert "lint/test/git" not in context
+    assert "ToolCallBudget:" in context
+
+
+def test_composer_starters_follow_the_financial_profile_only(monkeypatch):
+    def fake_get(agent_id, **kwargs):
+        if agent_id == "finance":
+            return {"metadata": {"financialAssistantProfile": service.PROFILE}}
+        if agent_id == "plain":
+            return {"metadata": {}}
+        return None
+
+    monkeypatch.setattr(directory, "get_agent", fake_get)
+    starters = service.composer_starters_for_agent("finance")
+    assert starters is not None
+    assert [item["heading"] for item in starters] == ["新闻参考", "财报证据", "风险边界"]
+    assert service.composer_starters_for_agent("plain") is None
+    assert service.composer_starters_for_agent("") is None
+
+    def broken_get(*args, **kwargs):
+        raise RuntimeError("directory down")
+
+    monkeypatch.setattr(directory, "get_agent", broken_get)
+    assert service.composer_starters_for_agent("finance") is None
+
+
+def test_tool_budget_keeps_coding_reserve_for_full_or_coding_access():
+    from core.web.services.agent_directory.projections import _runtime_tool_budget_lines
+
+    full_access = _runtime_tool_budget_lines(8, [])
+    coding = _runtime_tool_budget_lines(8, ["grep_search_tool"])
+    research = _runtime_tool_budget_lines(8, list(service.READ_TOOLS))
+    assert any("lint/test/git" in line for line in full_access)
+    assert any("lint/test/git" in line for line in coding)
+    assert all("lint/test/git" not in line for line in research)
+    assert any("maxCallsPerTurn=8" in line for line in research)
+    assert _runtime_tool_budget_lines(0, list(service.READ_TOOLS)) == []
 
 
 def test_creation_does_not_reset_shared_default_tool_policy(entry_env):

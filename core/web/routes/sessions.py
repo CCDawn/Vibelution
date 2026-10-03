@@ -836,12 +836,30 @@ def session_prompt_suggestion(
     response_model=SessionComposerExampleResponse,
     response_model_exclude_unset=True,
 )
+def _composer_starters_for_detail(detail: dict | None) -> list[dict[str, str]]:
+    agent_id = ""
+    if isinstance(detail, dict):
+        agent_id = str(detail.get("agentId") or "").strip()
+    if agent_id:
+        try:
+            from core.web.services.financial_assistant_service import (
+                composer_starters_for_agent,
+            )
+
+            specialized = composer_starters_for_agent(agent_id)
+        except Exception:
+            specialized = None
+        if specialized:
+            return specialized
+    return get_composer_starter_commands(session_service.PROJECT_ROOT)
+
+
 def session_composer_example(session_id: str) -> dict:
     try:
-        get_session_detail(session_id, message_limit=0, transcript_scope="none")
+        detail = get_session_detail(session_id, message_limit=0, transcript_scope="none")
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    starters = get_composer_starter_commands(session_service.PROJECT_ROOT)
+    starters = _composer_starters_for_detail(detail)
     return {
         "command": starters[0]["command"] if starters else None,
         "starters": starters,

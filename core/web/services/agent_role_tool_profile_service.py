@@ -779,6 +779,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "agent_message_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
+            "knowledge_stage_session_attachment_tool",
             "skill_library_search_tool",
             "github_project_library_search_tool",
             "unified_memory_search_tool",

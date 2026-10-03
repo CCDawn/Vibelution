@@ -507,12 +507,23 @@ def _stage_phase_status(
     *,
     workflow: dict[str, Any],
     team: dict[str, Any],
+    readiness_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     stage_rounds = [item for item in rounds if str(item.get("stageType") or "") == stage_type]
     active_round = s._active_stage_round(rounds, stage_type)
     latest_round = active_round or s._latest_stage_round(stage_rounds)
     defaults = s.RESEARCH_STAGE_DEFAULTS[stage_type]
+    readiness = (
+        s._stage_readiness(team_id, stage_type, rounds)
+        if not isinstance(readiness_override, dict)
+        else {
+            **readiness_override,
+            "reason": readiness_override.get("reasonZh")
+            or readiness_override.get("reason")
+            or "",
+        }
+    )
     return {
         "stageType": stage_type,
         "label": s._stage_label(stage_type),
@@ -526,7 +537,7 @@ def _stage_phase_status(
         "canContinue": bool(active_round),
         "canNewRound": bool(stage_rounds),
         "requiresUserDecision": stage_type in {"experiment", "iteration"},
-        "readiness": s._stage_readiness(team_id, stage_type, rounds),
+        "readiness": readiness,
         "coordinationRoomId": str(team.get("linkedChatRoomId") or ""),
         "storagePath": s._relative_path(s._stage_round_store_path(team_id)),
     }

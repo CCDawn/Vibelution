@@ -82,9 +82,17 @@ describe("memory workbench queries contract", () => {
     expect(graph).toContain("teamId: requestedTeamId || undefined");
     const detail = extractQueryBlock("memoryKnowledgeGraphNodeDetailQuery");
     expect(detail).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
-    expect(routeSource).toContain('if (forcedView === "graph") return;');
+    expect(routeSource).toContain('if (forcedView === "graph" || forcedView === "knowledge") return;');
     expect(routeSource).toContain("graphActorAgentId={fallbackKnowledgeActorAgentId}");
     expect(routeSource).toContain("graphTeamId={requestedTeamId}");
+  });
+
+  it("does not present a disabled knowledge-item query as a loading detail panel", () => {
+    expect(routeSource).toContain(
+      "const knowledgeItemsPending = Boolean(activeKnowledgeBaseForItems && activeKnowledgeActorAgentId) && knowledgeItemsQuery.isPending;",
+    );
+    expect(routeSource).toContain("knowledgeItemsPending={knowledgeItemsPending}");
+    expect(routeSource).not.toContain("knowledgeItemsPending={knowledgeItemsQuery.isPending}");
   });
 
   it("keeps polled queries cache-first with staleTime >= refetchInterval", () => {
