@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -841,3 +842,155 @@ def test_dirty_summary_keeps_last_known_value_within_throttle(tmp_path: Path, mo
     second = code_freshness.resolve_code_freshness(project_root=tmp_path)
     assert len(status_calls) == calls_after_first
     assert second == first
+
+
+# --- concurrent full resolutions: per-root single flight ---
+
+def test_resolve_code_freshness_single_flight_shares_one_full_resolution(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """并发 full resolution 必须合并为一个 flight：follower 等待并共享 leader 的 verdict。"""
+
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="head00000000")
+    _write_git_dir(tmp_path, head="head00000000")
+    holder = {"head": "head00000000"}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(code_freshness, "_capture_git_text", _freshness_git_fake(holder, calls))
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("head00000000"))
+
+    entered_frontend = threading.Event()
+    release_frontend = threading.Event()
+    frontend_entries: list[int] = []
+    real_frontend = code_freshness.resolve_frontend_freshness
+
+    def slow_frontend(*, project_root):
+        frontend_entries.append(1)
+        entered_frontend.set()
+        assert release_frontend.wait(timeout=5)
+        return real_frontend(project_root=project_root)
+
+    monkeypatch.setattr(code_freshness, "resolve_frontend_freshness", slow_frontend)
+
+    # 打点 flight 锁的 wait：follower 真正进入 flight 等待队列后再放行 leader，
+    # 避免 join 先于 release 造成测试自身死锁。
+    follower_waiting = threading.Event()
+    flight_lock = code_freshness._FRESHNESS_FLIGHT_LOCK
+    original_wait = flight_lock.wait
+
+    def tracked_wait(timeout=None):
+        follower_waiting.set()
+        return original_wait(timeout)
+
+    monkeypatch.setattr(flight_lock, "wait", tracked_wait)
+
+    results: list[dict] = []
+
+    def worker():
+        results.append(code_freshness.resolve_code_freshness(project_root=tmp_path))
+
+    leader = threading.Thread(target=worker)
+    leader.start()
+    assert entered_frontend.wait(timeout=5), "leader must enter the full resolution"
+    follower = threading.Thread(target=worker)
+    follower.start()
+    assert follower_waiting.wait(timeout=5), "follower must wait inside the flight gate"
+    # follower 在 leader 完成前只等待，不再自己全价解析。
+    assert frontend_entries == [1]
+
+    release_frontend.set()
+    leader.join(timeout=5)
+    follower.join(timeout=5)
+
+    assert not leader.is_alive()
+    assert not follower.is_alive()
+    assert len(results) == 2
+    assert results[0] == results[1]
+    assert results[0]["verdict"] == "current"
+    assert frontend_entries == [1], "leader + waiter must share exactly one full resolution"
+
+
+def test_resolve_code_freshness_leader_failure_is_not_shared(tmp_path: Path, monkeypatch) -> None:
+    """leader 失败不共享：waiter 落回并自己算，异常只打在 leader 上。"""
+
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="head00000000")
+    _write_git_dir(tmp_path, head="head00000000")
+    holder = {"head": "head00000000"}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(code_freshness, "_capture_git_text", _freshness_git_fake(holder, calls))
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("head00000000"))
+
+    entered_frontend = threading.Event()
+    release_frontend = threading.Event()
+    frontend_attempts: list[int] = []
+    real_frontend = code_freshness.resolve_frontend_freshness
+
+    def flaky_frontend(*, project_root):
+        frontend_attempts.append(1)
+        if len(frontend_attempts) == 1:
+            entered_frontend.set()
+            assert release_frontend.wait(timeout=5)
+            raise RuntimeError("injected leader failure")
+        return real_frontend(project_root=project_root)
+
+    monkeypatch.setattr(code_freshness, "resolve_frontend_freshness", flaky_frontend)
+
+    outcomes: dict[str, object] = {}
+
+    def leader_worker():
+        try:
+            outcomes["leader"] = code_freshness.resolve_code_freshness(project_root=tmp_path)
+        except Exception as exc:  # noqa: BLE001 - test probes the leader failure path
+            outcomes["leader"] = exc
+
+    def follower_worker():
+        try:
+            outcomes["follower"] = code_freshness.resolve_code_freshness(project_root=tmp_path)
+        except Exception as exc:  # noqa: BLE001 - a shared failure would surface here
+            outcomes["follower"] = exc
+
+    leader = threading.Thread(target=leader_worker)
+    leader.start()
+    assert entered_frontend.wait(timeout=5)
+    follower = threading.Thread(target=follower_worker)
+    follower.start()
+    release_frontend.set()
+    leader.join(timeout=5)
+    follower.join(timeout=5)
+
+    assert not leader.is_alive() and not follower.is_alive()
+    assert isinstance(outcomes["leader"], RuntimeError), outcomes["leader"]
+    # waiter 未继承 leader 的失败：自己重算并成功返回。
+    assert isinstance(outcomes["follower"], dict), outcomes["follower"]
+    assert outcomes["follower"]["verdict"] == "current"
+    assert len(frontend_attempts) == 2
+
+
+def test_resolve_code_freshness_fast_path_stays_outside_flight_gate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """TTL 快路径命中不得进 flight 锁：缓存命中不创建/触碰 flight 记录。"""
+
+    code_freshness.reset_freshness_caches_for_tests()
+    _write_snapshot(tmp_path, head="head00000000")
+    _write_git_dir(tmp_path, head="head00000000")
+    holder = {"head": "head00000000"}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(code_freshness, "_capture_git_text", _freshness_git_fake(holder, calls))
+    monkeypatch.setattr(code_freshness, "_inspect_active_frontend_build", _current_frontend_mock("head00000000"))
+
+    first = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert first["verdict"] == "current"
+
+    # 全价路径已结束（flight 不再 inflight）；清掉 flight 记录后，缓存命中
+    # 必须原样返回且不重建任何 flight 状态。
+    with code_freshness._FRESHNESS_FLIGHT_LOCK:
+        assert all(
+            not flight["inflight"] for flight in code_freshness._FRESHNESS_FLIGHTS.values()
+        )
+        code_freshness._FRESHNESS_FLIGHTS.clear()
+
+    second = code_freshness.resolve_code_freshness(project_root=tmp_path)
+    assert second == first
+    assert code_freshness._FRESHNESS_FLIGHTS == {}, "fast-path hit must not touch the flight gate"
