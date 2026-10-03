@@ -709,6 +709,12 @@ describe("AppShell layout contract", () => {
     expect(restartRegion).toContain('payload.code === "user_restart_pause_failed"');
     expect(restartRegion).toContain("重启前未能保存任务状态，已有记录仍保留");
     expect(restartRegion).toContain("window.location.reload()");
+    // A control-plane-not-ready failure never started a restart: the overlay
+    // must say so honestly and tag the unconfirmed telemetry with a reason.
+    expect(restartRegion).toContain("isLauncherControlPlaneNotReady(error)");
+    expect(restartRegion).toContain("restartNotDeliveredBody");
+    expect(restartRegion).toContain('"ipc_bridge_absent"');
+    expect(shellSource).toContain("restartRequestNotDeliveredBody(lang)");
     expect(shellSource).toContain("ready && restartWaitsForDocumentReloadRef.current");
   });
 

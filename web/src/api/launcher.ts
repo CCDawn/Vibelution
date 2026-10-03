@@ -220,6 +220,21 @@ function ipcInitForRequest(init?: RequestInit): LauncherIpcInvokePayload["init"]
   };
 }
 
+/**
+ * Normalizes a raw preload IPC invoke result into the same shape
+ * invokeLauncherJson returns for the launcher-panel bridge, so every caller
+ * sees one contract regardless of which desktop path carried the request.
+ */
+function unwrapLauncherIpcInvokeResult<T>(result: LauncherIpcInvokeResult): T {
+  if (result.ok) {
+    return result.payload as T;
+  }
+  if (result.error.code === LAUNCHER_IPC_HOST_NOT_READY) {
+    throw new LauncherControlPlaneNotReadyError(result.error.message);
+  }
+  throw new Error(result.error.message || `Launcher IPC request failed: ${result.error.code}`);
+}
+
 async function invokeLauncherJson<T>(path: string, init?: RequestInit): Promise<T> {
   const bridge = launcherIpcBridge();
   if (bridge === null) {
@@ -230,13 +245,7 @@ async function invokeLauncherJson<T>(path: string, init?: RequestInit): Promise<
     path,
     ...(ipcInitForRequest(init) ? { init: ipcInitForRequest(init) } : {}),
   });
-  if (result.ok) {
-    return result.payload as T;
-  }
-  if (result.error.code === LAUNCHER_IPC_HOST_NOT_READY) {
-    throw new LauncherControlPlaneNotReadyError(result.error.message);
-  }
-  throw new Error(result.error.message || `Launcher IPC request failed: ${result.error.code}`);
+  return unwrapLauncherIpcInvokeResult<T>(result);
 }
 
 type WorkbenchWindowSizeOption = {
@@ -589,8 +598,36 @@ export function forceStopLauncherBundle(trigger = "launcher_route_force_stop_but
   });
 }
 
+type WorkbenchRestartVerb = (trigger?: string) => Promise<LauncherIpcInvokeResult>;
+
+/**
+ * Narrow lifecycle verb that preload exposes to non-launcher-control windows
+ * (e.g. the workbench). Unlike the full launcherInvoke bridge it carries only
+ * restart, so the workbench restart banner keeps a desktop path now that the
+ * HTTP lifecycle endpoints are retired; every other lifecycle verb stays
+ * launcher-panel-only.
+ */
+function workbenchRestartVerb(): WorkbenchRestartVerb | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const candidate = (globalThis as { vibelutionLauncher?: unknown }).vibelutionLauncher;
+  if (typeof candidate !== "object" || candidate === null) {
+    return null;
+  }
+  const verb = (candidate as { requestWorkbenchRestart?: unknown }).requestWorkbenchRestart;
+  return typeof verb === "function" ? (verb as WorkbenchRestartVerb) : null;
+}
+
 export function restartLauncherBundle(trigger?: string) {
   const normalizedTrigger = String(trigger ?? "").trim();
+  if (launcherIpcBridge() === null) {
+    const restartVerb = workbenchRestartVerb();
+    if (restartVerb !== null) {
+      return restartVerb(normalizedTrigger || undefined)
+        .then((result) => unwrapLauncherIpcInvokeResult<LauncherControlResponse>(result));
+    }
+  }
   return invokeLauncherLifecycleJson<LauncherControlResponse>("restart", {
     method: "POST",
     ...(normalizedTrigger

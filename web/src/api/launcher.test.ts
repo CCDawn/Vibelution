@@ -406,6 +406,95 @@ describe("launcher api helpers", () => {
     expect(request.init.headers).toBeUndefined();
   });
 
+  it("falls back to the narrow workbench restart verb when the bridge is absent", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const restartVerb = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "restart", commandId: "cmd-narrow" },
+    });
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    vi.stubGlobal("vibelutionLauncher", { requestWorkbenchRestart: restartVerb });
+
+    const payload = await restartLauncherBundle("app_shell_restart_button");
+
+    expect(payload.commandId).toBe("cmd-narrow");
+    expect(restartVerb).toHaveBeenCalledTimes(1);
+    expect(restartVerb).toHaveBeenCalledWith("app_shell_restart_button");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("normalizes narrow restart-verb failures exactly like the bridge path", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const hostNotReady = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: "LAUNCHER_IPC_HOST_NOT_READY", message: "host not ready" },
+    });
+    vi.stubGlobal("vibelutionLauncher", { requestWorkbenchRestart: hostNotReady });
+
+    await expect(restartLauncherBundle()).rejects.toBeInstanceOf(LauncherControlPlaneNotReadyError);
+    expect(hostNotReady).toHaveBeenCalledWith(undefined);
+
+    const proxyRejected = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: "LAUNCHER_IPC_HTTP_409", message: "active work blocks restart" },
+    });
+    vi.stubGlobal("vibelutionLauncher", { requestWorkbenchRestart: proxyRejected });
+
+    await expect(restartLauncherBundle()).rejects.toThrow("active work blocks restart");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still rejects restart when neither the bridge nor the narrow verb exists", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    // Preload may expose unrelated verbs only; restart must stay unavailable.
+    vi.stubGlobal("vibelutionLauncher", { openExternalUrl: vi.fn() });
+
+    await expect(restartLauncherBundle()).rejects.toBeInstanceOf(LauncherControlPlaneNotReadyError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("prefers the full IPC bridge over the narrow restart verb", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const restartVerb = vi.fn();
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "restart", commandId: "cmd-bridge" },
+    });
+    stubLauncherIpcBridge(invoke);
+    vi.stubGlobal("vibelutionLauncher", {
+      launcherInvoke: invoke,
+      requestWorkbenchRestart: restartVerb,
+    });
+
+    const payload = await restartLauncherBundle("app_shell_restart_button");
+
+    expect(payload.commandId).toBe("cmd-bridge");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(restartVerb).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("force closes the bundle through the preload IPC bridge", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

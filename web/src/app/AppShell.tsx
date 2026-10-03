@@ -33,7 +33,7 @@ import {
   storeAgentBroadcastReadAtMs,
 } from "./agentBroadcastBadge";
 import { loadPrimaryRouteChunk } from "./primaryRouteChunkLoader";
-import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
+import { cancelRuntimeLifecycleCommand, getLocalBranchInstances, isLauncherControlPlaneNotReady, requestWorkbenchWindowCloseOnPageHide } from "../api/launcher";
 import { currentInstanceWindowTitle } from "./instanceWindowTitle";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -861,7 +861,10 @@ export function buildShutdownRequestUnconfirmedTelemetry(errorMessage: string): 
   };
 }
 
-export function buildRestartRequestUnconfirmedTelemetry(errorMessage: string): BrowserTelemetryEventInput {
+export function buildRestartRequestUnconfirmedTelemetry(
+  errorMessage: string,
+  reason?: string,
+): BrowserTelemetryEventInput {
   return {
     phase: "restart",
     eventCode: "browser.user_action.restart_request_unconfirmed",
@@ -871,6 +874,7 @@ export function buildRestartRequestUnconfirmedTelemetry(errorMessage: string): B
       action: "restart",
       source: "app_shell",
       errorMessage,
+      ...(reason ? { reason } : {}),
     },
   };
 }
@@ -921,6 +925,12 @@ export function restartRequestUnconfirmedBody(lang: string): string {
   return lang === "en"
     ? "The restart flow has started, but this window did not receive a final confirmation yet. The workbench is still checking the runtime state."
     : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
+}
+
+export function restartRequestNotDeliveredBody(lang: string): string {
+  return lang === "en"
+    ? "The restart request did not reach the desktop control channel. Restart from the launcher panel or the system tray, or retry from the launcher panel."
+    : "重启请求没有送达桌面控制通道。请从启动器面板或系统托盘发起重启，或在启动器面板重试。";
 }
 
 export function restartActiveWorkBlockedMessage(lang: string, activeWorkLabels: string): string {
@@ -1403,6 +1413,7 @@ export function AppShell() {
     ? "The runtime manager could not restart the workbench. Check the launcher and runtime-manager logs."
     : "运行时管理器没有成功重启工作台。请检查 launcher 和 runtime-manager 日志。";
   const restartUnconfirmedBody = restartRequestUnconfirmedBody(lang);
+  const restartNotDeliveredBody = restartRequestNotDeliveredBody(lang);
   const workbenchCloseGuardMessage = projectWindowCloseGuardMessage(lang, "workbench");
   const frontendState = deriveFrontendSystemState({
     online: frontendOnline,
@@ -1986,6 +1997,10 @@ export function AppShell() {
         return;
       }
       const errorMessage = error instanceof Error ? error.message : String(error || "");
+      // A control-plane-not-ready failure is deterministic: the request never
+      // reached the desktop control channel, so the honest overlay says the
+      // restart did not start instead of claiming it may already be running.
+      const restartNotDelivered = isLauncherControlPlaneNotReady(error);
       setRestartRequested(false);
       setShutdownRequested(false);
       setShutdownOpen(true);
@@ -1997,8 +2012,16 @@ export function AppShell() {
         ? (lang === "en"
           ? "Task state could not be saved before restart. Existing records are retained; close this notice and retry."
           : "重启前未能保存任务状态，已有记录仍保留。关闭此提示后可以重试。")
-        : restartUnconfirmedBody);
-      emitBrowserTelemetry(buildRestartRequestUnconfirmedTelemetry(errorMessage), { preferBeacon: true });
+        : restartNotDelivered
+          ? restartNotDeliveredBody
+          : restartUnconfirmedBody);
+      emitBrowserTelemetry(
+        buildRestartRequestUnconfirmedTelemetry(
+          errorMessage,
+          restartNotDelivered ? "ipc_bridge_absent" : undefined,
+        ),
+        { preferBeacon: true },
+      );
     }).finally(() => {
       restartPromiseRef.current = null;
     });
@@ -2015,6 +2038,7 @@ export function AppShell() {
     requestLifecycle,
     restartBody,
     restartHeading,
+    restartNotDeliveredBody,
     restartUnconfirmedBody,
     shutdownRequested,
   ]);

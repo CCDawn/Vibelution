@@ -9,6 +9,7 @@ import {
   buildShutdownLocallyCompleteTelemetry,
   buildShutdownRequestUnconfirmedTelemetry,
   buildShutdownRequestedTelemetry,
+  restartRequestNotDeliveredBody,
   restartRequestUnconfirmedBody,
   shouldSuppressApiFailureTelemetry,
   shouldTreatShutdownAsLocallyComplete,
@@ -237,6 +238,23 @@ describe("api failure telemetry", () => {
         action: "restart",
         source: "app_shell",
         errorMessage: "Failed to fetch",
+      },
+    });
+  });
+
+  it("tells the truth when the restart request never reached the control channel", () => {
+    expect(restartRequestNotDeliveredBody("zh")).toContain("没有送达桌面控制通道");
+    expect(restartRequestNotDeliveredBody("zh")).not.toContain("已经开始");
+    expect(restartRequestNotDeliveredBody("en")).toContain("did not reach the desktop control channel");
+    expect(buildRestartRequestUnconfirmedTelemetry("host not ready", "ipc_bridge_absent")).toMatchObject({
+      phase: "restart",
+      eventCode: "browser.user_action.restart_request_unconfirmed",
+      level: "warning",
+      fields: {
+        action: "restart",
+        source: "app_shell",
+        errorMessage: "host not ready",
+        reason: "ipc_bridge_absent",
       },
     });
   });
