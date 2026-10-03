@@ -126,7 +126,7 @@
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
-| `github_project_library_service.py` | Persistent public GitHub clones of the default-branch tip (depth 1) under project memory, with a generated index. | — | `memory.py` | `test_unified_knowledge_search_github_projects.py`, `test_github_project_library_service.py`, `test_reuse_research_contract.py` |
+| `github_project_library_service.py` | Persistent public GitHub clones with a generated index; `github_project_governance_catalog.py` owns pinned governance assessments, not clone identity or runtime acceptance. | — | `memory.py` | `test_unified_knowledge_search_github_projects.py`, `test_github_project_library_service.py`, `test_github_project_governance_catalog.py`, `test_reuse_research_contract.py` |
 | `memory_cleanup_service.py` | Hard-delete cleanup helpers for Memory Library targets. | — | `memory.py` | `test_web_memory_routes.py`, `test_memory_cleanup_service.py`, `test_select_tests.py` |
 | `memory_graph_service.py` | Read-only project memory knowledge graph service. | — | `memory.py` | `test_team_knowledge_service.py`, `test_web_memory_routes.py` |
 | `memory_service.py` | Agent memory overview and user management service. | — | `memory.py` | `test_self_evolution_autonomous_loop_runtime.py`, `test_supervised_conversation_harness_adapter.py`, `test_codebase_map_builder.py` |

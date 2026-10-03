@@ -30,6 +30,7 @@ import httpx
 
 from core.chat.chat_task_types import trim_lines
 from core.infrastructure.no_console_git import run_git
+from core.web.services.github_project_governance_catalog import governance_metadata
 from vibelution_storage import resolve_project_memory_home
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -57,6 +58,11 @@ _README_NAMES = ("README.md", "README.rst", "README.txt", "README")
 _MAX_README_SEARCH_BYTES = 64 * 1024
 _README_TOKEN_CACHE: dict[str, tuple[int, int, Counter[str]]] = {}
 _CJK_SEARCH_ALIASES = (
+    ("前端", "frontend"),
+    ("后端", "backend"),
+    ("治理", "governance"),
+    ("检查点", "checkpoint"),
+    ("恢复", "recovery"),
     ("智能体", "agent"),
     ("代理", "agent"),
     ("记忆", "memory"),
@@ -126,7 +132,7 @@ def list_github_projects(*, query: str = "", project_root: Path | None = None, i
     root = github_project_library_root(project_root=project_root)
     registry = _read_registry(root)
     projects = [
-        project
+        _with_governance_metadata(root, project)
         for project in list(registry.get("projects") or [])
         if isinstance(project, dict) and (include_archived or str(project.get("status") or "") != "archived")
     ]
@@ -168,6 +174,9 @@ def search_github_project_cards(*, query: str, limit: int = 8, project_root: Pat
                     "status": str(project.get("status") or "").strip(),
                     "matchedTerms": list(project.get("matchedTerms") or []),
                     "searchScore": float(project.get("searchScore") or 0.0),
+                    "capabilities": list(project.get("capabilities") or []),
+                    "useCases": list(project.get("useCases") or []),
+                    **({"governanceReview": project["governanceReview"]} if project.get("governanceReview") else {}),
                 },
             }
         )
@@ -378,6 +387,7 @@ def _library_payload(root: Path, registry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _project_api(root: Path, project: dict[str, Any]) -> dict[str, Any]:
+    project = _with_governance_metadata(root, project)
     project_id = str(project.get("projectId") or "").strip()
     dest = _repo_dir(root, project_id) if project_id else root / REPOS_DIRNAME
     return {
@@ -394,6 +404,9 @@ def _project_api(root: Path, project: dict[str, Any]) -> dict[str, Any]:
         "language": str(project.get("language") or "").strip(),
         "stars": int(project.get("stars") or 0),
         "topics": _string_list(project.get("topics")),
+        "capabilities": _string_list(project.get("capabilities")),
+        "useCases": _string_list(project.get("useCases")),
+        **({"governanceReview": project["governanceReview"]} if project.get("governanceReview") else {}),
         "hasSubmodules": bool(project.get("hasSubmodules")),
         "status": str(project.get("status") or "").strip(),
         "clonedAt": str(project.get("clonedAt") or "").strip(),
@@ -408,6 +421,18 @@ def _project_api(root: Path, project: dict[str, Any]) -> dict[str, Any]:
             if project.get("searchScore") is not None
             else {}
         ),
+    }
+
+
+def _with_governance_metadata(root: Path, project: dict[str, Any]) -> dict[str, Any]:
+    assessment = governance_metadata(root, project)
+    if not assessment:
+        return {key: value for key, value in project.items() if key != "governanceReview"}
+    return {
+        **project,
+        **assessment,
+        "capabilities": list(dict.fromkeys([*_string_list(project.get("capabilities")), *assessment["capabilities"]])),
+        "useCases": list(dict.fromkeys([*_string_list(project.get("useCases")), *assessment["useCases"]])),
     }
 
 
@@ -483,12 +508,13 @@ def _write_registry(root: Path, registry: dict[str, Any]) -> None:
 
 def _write_index(root: Path, registry: dict[str, Any]) -> None:
     rows = [
-        "| 名字 | 描述 | GitHub | 本地路径 | HEAD | 许可 | 子模块 | 状态 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| 名字 | 描述 | GitHub | 本地路径 | HEAD | 许可 | 子模块 | 状态 | 治理能力 | 审查 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for project in list(registry.get("projects") or []):
         if not isinstance(project, dict) or str(project.get("status") or "") == "archived":
             continue
+        project = _with_governance_metadata(root, project)
         name = _md_cell(project.get("name") or project.get("fullName") or "")
         description = _md_cell(project.get("description") or "")
         url = _md_cell(project.get("githubUrl") or "")
@@ -497,17 +523,21 @@ def _write_index(root: Path, registry: dict[str, Any]) -> None:
         license_id = _md_cell(project.get("license") or "")
         submodules = "yes" if bool(project.get("hasSubmodules")) else "no"
         status = _md_cell(project.get("status") or "")
+        capabilities = _md_cell("、".join(_string_list(project.get("capabilities"))))
+        review = _md_cell((project.get("governanceReview") or {}).get("status") or "未审查")
         rows.append(
-            f"| {name} | {description} | {url} | {local_path} | {head} | {license_id} | {submodules} | {status} |"
+            f"| {name} | {description} | {url} | {local_path} | {head} | {license_id} | {submodules} | {status} | {capabilities} | {review} |"
         )
     if len(rows) == 2:
-        rows.append("| （空） | 还没有落盘的开源项目 |  |  |  |  |  |  |")
+        rows.append("| （空） | 还没有落盘的开源项目 |  |  |  |  |  |  |  |  |")
     body = "\n".join(
         [
             "# 开源项目索引",
             "",
             "借鉴外部 GitHub 项目时：先查本表 → 未命中则克隆默认主干最新提交到本目录（浅克隆，不拉历史）→ 再对本地仓调研。",
             "不要把整仓正文写入正式知识库或 RAG。子模块默认不拉。",
+            "治理能力与审查由版本化 governance catalog 补充；static_reviewed 仅表示固定版本源码和测试配置已审查，运行效果未验证。",
+            "按任务搜索（如前端治理、后端治理、工作流检查点恢复），再读取卡片 evidenceRefs 的具体文件与 reuseBoundary；版本变化或证据缺失会标为 review_required。",
             "",
             "路径解析：`python scripts/migrate_project_storage.py inventory` 的 `activePaths.memory/github-projects/`。",
             "",
