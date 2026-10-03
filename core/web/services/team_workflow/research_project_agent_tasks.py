@@ -1128,13 +1128,27 @@ def research_project_iteration_readiness(
     s.get_research_project(normalized_team_id, normalized_project_id)
     with s._WORKFLOW_LOCK:
         store = s._load_experiment_plan_store(normalized_team_id)
-    plans = [
+    plans = list(store.get("plans") or [])
+    return _research_project_iteration_readiness_from_plans(
+        normalized_project_id,
+        plans,
+    )
+
+
+def _research_project_iteration_readiness_from_plans(
+    research_project_id: str,
+    plans: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Project iteration readiness from an already-read plan snapshot."""
+    s = _service()
+    normalized_project_id = _text(research_project_id)
+    project_plans = [
         item
-        for item in list(store.get("plans") or [])
+        for item in plans
         if isinstance(item, dict)
         and _text(item.get("researchProjectId")) == normalized_project_id
     ]
-    frozen_plan = s._latest_frozen_experiment_design(plans)
+    frozen_plan = s._latest_frozen_experiment_design(project_plans)
     if frozen_plan is None:
         return {
             "ready": False,

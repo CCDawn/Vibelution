@@ -17,6 +17,12 @@ from config import AppConfig, LLMProfile, ProviderConfig
 from core.chat.model_messages import ProviderMessageChain
 
 from .adapters import ProviderAdapter
+from .protocol_constants import (
+    CHAT_TEMPLATE_KWARGS_FIELD,
+    ENABLE_THINKING_FIELD,
+    EXTRA_BODY_FIELD,
+    REASONING_CONTENT_FIELD,
+)
 from .protocol_resolver import ResolvedProtocolRoute
 from .payload_validator import assert_payload_valid
 from .schema import sanitize_tool_schema
@@ -625,13 +631,13 @@ def _outgoing_reasoning_content_count(messages: List[Any]) -> int:
     for message in messages:
         reasoning: Any = None
         if isinstance(message, dict):
-            reasoning = message.get("reasoning_content")
+            reasoning = message.get(REASONING_CONTENT_FIELD)
             if reasoning in (None, "") and isinstance(message.get("additional_kwargs"), dict):
-                reasoning = message["additional_kwargs"].get("reasoning_content")
+                reasoning = message["additional_kwargs"].get(REASONING_CONTENT_FIELD)
         else:
             additional_kwargs = getattr(message, "additional_kwargs", None)
             if isinstance(additional_kwargs, dict):
-                reasoning = additional_kwargs.get("reasoning_content")
+                reasoning = additional_kwargs.get(REASONING_CONTENT_FIELD)
         if str(extract_text_content(reasoning) or "").strip():
             count += 1
     return count
@@ -670,9 +676,9 @@ def _apply_reasoning_roundtrip_policy(
     normalized: List[Dict[str, Any]] = []
     for item in messages:
         message = dict(item)
-        if "reasoning_content" in message:
+        if REASONING_CONTENT_FIELD in message:
             actions.reasoning_content_stripped += 1
-            message.pop("reasoning_content", None)
+            message.pop(REASONING_CONTENT_FIELD, None)
         normalized.append(message)
     return normalized
 
@@ -694,7 +700,7 @@ def _apply_final_message_policy(
         return normalized
     if str(extract_text_content(last.get("content")) or "").strip():
         return normalized
-    if last.get("reasoning_content"):
+    if last.get(REASONING_CONTENT_FIELD):
         return normalized
     normalized.pop()
     actions.empty_assistant_prefill_removed += 1
@@ -752,7 +758,7 @@ def _payload_thinking_parameters(
         # so undeclared models keep today's payload byte-for-byte.
         enabled = thinking_type != "disabled"
         actions.qwen_thinking_parameter = "enabled" if enabled else "disabled"
-        return {"extra_body": {"enable_thinking": enabled}}
+        return {EXTRA_BODY_FIELD: {ENABLE_THINKING_FIELD: enabled}}
     if thinking_type == "disabled":
         actions.qwen_thinking_parameter = "disabled"
         enabled = False
@@ -770,20 +776,20 @@ def _qwen_thinking_payload(
     provider: ProviderConfig,
     route: ResolvedProtocolRoute,
 ) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"enable_thinking": enabled}
+    payload: Dict[str, Any] = {ENABLE_THINKING_FIELD: enabled}
     provider_kind = str(getattr(provider, "kind", "") or "").strip().lower()
     protocol = str(getattr(route.protocol, "value", route.protocol) or "").strip().lower()
     if provider_kind == "local" and protocol == "qwen_thinking_no_prefill":
-        payload["extra_body"] = {"chat_template_kwargs": {"enable_thinking": enabled}}
+        payload[EXTRA_BODY_FIELD] = {CHAT_TEMPLATE_KWARGS_FIELD: {ENABLE_THINKING_FIELD: enabled}}
     return payload
 
 
 def _merge_extra_body(payload: Dict[str, Any], extra_body: Any) -> None:
     if not isinstance(extra_body, dict) or not extra_body:
         return
-    existing = payload.get("extra_body")
+    existing = payload.get(EXTRA_BODY_FIELD)
     if not isinstance(existing, dict):
-        payload["extra_body"] = dict(extra_body)
+        payload[EXTRA_BODY_FIELD] = dict(extra_body)
         return
     merged = dict(existing)
     for key, value in extra_body.items():
@@ -791,7 +797,7 @@ def _merge_extra_body(payload: Dict[str, Any], extra_body: Any) -> None:
             merged[key] = {**merged[key], **value}
         else:
             merged[key] = value
-    payload["extra_body"] = merged
+    payload[EXTRA_BODY_FIELD] = merged
 
 
 def _content_cache_marker_count(content: Any) -> int:
@@ -1258,7 +1264,7 @@ def build_llm_payload(
     payload.update(adapter.payload_sampling_parameters())
     payload.update(adapter.payload_thinking_parameters())
     thinking_payload = _payload_thinking_parameters(profile, build_input.provider, route, policy_actions)
-    thinking_extra_body = thinking_payload.pop("extra_body", None)
+    thinking_extra_body = thinking_payload.pop(EXTRA_BODY_FIELD, None)
     payload.update(thinking_payload)
     _merge_extra_body(payload, thinking_extra_body)
 
@@ -1413,7 +1419,7 @@ def compose_runtime_wire_payload(
     payload.update(adapter.payload_sampling_parameters())
     payload.update(adapter.payload_thinking_parameters())
     thinking_payload = _payload_thinking_parameters(profile, build_input.provider, route, actions)
-    thinking_extra_body = thinking_payload.pop("extra_body", None)
+    thinking_extra_body = thinking_payload.pop(EXTRA_BODY_FIELD, None)
     payload.update(thinking_payload)
     _merge_extra_body(payload, thinking_extra_body)
 

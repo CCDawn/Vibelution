@@ -19,7 +19,14 @@ from .agent_runtime import (
     ResolvedAgentLlm,
     resolve_agent_llm,
 )
-from .discovery import assert_llm_compatibility, discover_model, doctor_llm_profile
+from .discovery import (
+    assert_llm_compatibility,
+    discover_model,
+    doctor_llm_profile,
+    doctor_model_library,
+    llm_model_entry_issues,
+    llm_profile_entry_issues,
+)
 from .errors import classify_exception
 from .recovery import LLMRecoveryDecision, plan_recovery
 from .types import (
@@ -57,6 +64,9 @@ __all__ = [
     "assert_llm_compatibility",
     "discover_model",
     "doctor_llm_profile",
+    "doctor_model_library",
+    "llm_model_entry_issues",
+    "llm_profile_entry_issues",
     "get_llm_client",
     "invoke_llm",
     "list_profiles",

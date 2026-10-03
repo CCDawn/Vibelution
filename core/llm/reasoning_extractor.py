@@ -7,6 +7,14 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .protocol_constants import (
+    REASONING_DELTA_FIELD_CANDIDATES,
+    REASONING_FIELD_CANDIDATES,
+)
+
+# Candidate field lists live in protocol_constants (single authority);
+# re-exported here for backward-compatible import paths.
+
 
 TextExtractor = Callable[[Any], str]
 
@@ -21,21 +29,6 @@ class ReasoningExtraction:
 class ThinkTagStreamResult:
     reasoning_text: str = ""
     visible_text: str = ""
-
-
-REASONING_FIELD_CANDIDATES = (
-    "reasoning_content_delta",
-    "reasoning_delta",
-    "reasoning_content",
-    "reasoning",
-    "thinking",
-    "thought",
-)
-
-REASONING_DELTA_FIELD_CANDIDATES = (
-    "reasoning_content_delta",
-    "reasoning_delta",
-)
 
 
 _THINK_BLOCK_RE = re.compile(

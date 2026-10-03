@@ -287,17 +287,20 @@ def _describe_children(dir_path: Path, prefix: str) -> list[_WalkEntry]:
     Windows, where stat is a slow syscall).
     """
     children: list[_WalkEntry] = []
-    for child in dir_path.iterdir():
-        relative = f"{prefix}/{child.name}" if prefix else child.name
-        try:
-            stat_result = child.stat()
-            is_dir = S_ISDIR(stat_result.st_mode)
-        except OSError:
-            stat_result = None
-            is_dir = False
-        children.append(
-            _WalkEntry(path=child, relative=relative, stat_result=stat_result, is_dir=is_dir)
-        )
+    # On Windows scandir retains attributes from directory enumeration. Path.stat
+    # discards them and opens every child again, dominating a cold summary read.
+    with os.scandir(dir_path) as entries:
+        for entry in entries:
+            relative = f"{prefix}/{entry.name}" if prefix else entry.name
+            try:
+                stat_result = entry.stat()
+                is_dir = S_ISDIR(stat_result.st_mode)
+            except OSError:
+                stat_result = None
+                is_dir = False
+            children.append(
+                _WalkEntry(path=Path(entry.path), relative=relative, stat_result=stat_result, is_dir=is_dir)
+            )
     return children
 
 

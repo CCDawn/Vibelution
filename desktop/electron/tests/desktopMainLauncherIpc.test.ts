@@ -240,6 +240,34 @@ describe("Electron main Launcher IPC facade", () => {
     expect(lifecycleBody).toContain("approveWorkbenchCloseOnce");
   });
 
+  it("routes an unpackaged rebuild-and-start through the promotion update pipeline", () => {
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleEnd = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle", lifecycleStart);
+    const lifecycleBody = mainSource.slice(lifecycleStart, lifecycleEnd);
+    const gateStart = lifecycleBody.indexOf("let refreshBeforeLifecycle = shouldRefreshBeforeLifecycle");
+    const gateEnd = lifecycleBody.indexOf("const preMutationBackendState", gateStart);
+    const gateBody = lifecycleBody.slice(gateStart, gateEnd);
+    // The refresh decision is evaluated for both shell kinds; the packaged
+    // status inspection only refines launchBlocking for packaged shells.
+    expect(gateBody).toContain("isPackaged: app.isPackaged");
+    const promoteBody = gateBody.slice(gateBody.indexOf("if (refreshBeforeLifecycle)"));
+    expect(promoteBody).toContain("restartLauncherToLatestBuild(");
+    // The refresh helper must promote and relaunch the packaged shell, never
+    // relaunch the unpackaged one, or rebuild-and-start would silently degrade
+    // into a forced frontend rebuild.
+    expect(promoteBody).toContain('shellKind: "packaged"');
+    // Active work still gates the promotion: only an operator restart may
+    // interrupt running tasks on this lane.
+    expect(promoteBody).toContain('operation === "restart" && provenance === "operator"');
+  });
+
+  it("keeps the shell-kind fallback for non-lifecycle update callers", () => {
+    const fnStart = mainSource.indexOf("async function restartLauncherToLatestBuild");
+    const fnEnd = mainSource.indexOf("async function resolveLauncherUpdateActiveWork", fnStart);
+    const fnBody = mainSource.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('options.shellKind ?? (app.isPackaged ? "packaged" : "unpackaged")');
+  });
+
   it("routes approved desktop shutdown through the same lifecycle supervisor", () => {
     const shutdownStart = mainSource.indexOf("async function stopMainRuntimeForApprovedShutdown");
     const shutdownBody = mainSource.slice(shutdownStart, mainSource.indexOf("async function requestDesktopShellExit", shutdownStart));

@@ -118,6 +118,21 @@ describe("desktop shell freshness", () => {
     expect(shouldRefreshBeforeLifecycle("start", { isPackaged: true, launchBlocking: false })).toBe(false);
     expect(shouldRefreshBeforeLifecycle("stop", { isPackaged: true, launchBlocking: true })).toBe(false);
     expect(shouldRefreshBeforeLifecycle("start", { isPackaged: false, launchBlocking: true })).toBe(false);
+    // Packaged shells keep their existing semantics exactly: rebuild-and-start
+    // only refreshes when the shell is launch-blocking.
+    expect(shouldRefreshBeforeLifecycle("rebuild-and-start", { isPackaged: true, launchBlocking: true })).toBe(true);
+    expect(shouldRefreshBeforeLifecycle("rebuild-and-start", { isPackaged: true, launchBlocking: false })).toBe(false);
+    expect(shouldRefreshBeforeLifecycle("restart", { isPackaged: true, launchBlocking: true })).toBe(true);
+    expect(shouldRefreshBeforeLifecycle("restart", { isPackaged: true, launchBlocking: false })).toBe(false);
+  });
+
+  it("promotes rebuild-and-start on an unpackaged shell while start/restart keep workbench semantics", () => {
+    expect(shouldRefreshBeforeLifecycle("rebuild-and-start", { isPackaged: false, launchBlocking: false })).toBe(true);
+    expect(shouldRefreshBeforeLifecycle("rebuild-and-start", { isPackaged: false, launchBlocking: true })).toBe(true);
+    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: false, launchBlocking: true })).toBe(false);
+    expect(shouldRefreshBeforeLifecycle("restart", { isPackaged: false, launchBlocking: true })).toBe(false);
+    expect(shouldRefreshBeforeLifecycle("open", { isPackaged: false, launchBlocking: false })).toBe(false);
+    expect(shouldRefreshBeforeLifecycle("", { isPackaged: false, launchBlocking: true })).toBe(false);
   });
 
   it("keeps periodic refresh observing full stale so frontend-only staleness still converges", () => {
@@ -219,6 +234,29 @@ describe("desktop shell freshness", () => {
     });
     const [, args] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
     expect(args).toContain("--force-refresh");
+  });
+
+  it("forwards the packaged shell kind so the helper promotes instead of relaunching unpackaged", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({
+        schemaVersion: 1,
+        scheduled: true,
+        helperPid: 97,
+        waitPid: 12,
+        thenLifecycle: "rebuild-and-start"
+      })
+    );
+    await scheduleDesktopShellRefresh({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      waitPid: 12,
+      thenLifecycle: "rebuild-and-start",
+      shellKind: "packaged",
+      spawnImpl
+    });
+    const [, args] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
+    expect(args[args.indexOf("--shell-kind") + 1]).toBe("packaged");
+    expect(args[args.indexOf("--then-lifecycle") + 1]).toBe("rebuild-and-start");
   });
 
   it("ensures unpackaged launcher assets through the Python JSON bridge", async () => {

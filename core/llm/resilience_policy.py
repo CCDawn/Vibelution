@@ -107,6 +107,20 @@ CATEGORY_STAGES: Mapping[str, ResilienceStage] = MappingProxyType(
         "provider_protocol_error": ResilienceStage.TURN_TERMINAL,
         "payload_protocol_error": ResilienceStage.TURN_TERMINAL,
         "user_interrupt": ResilienceStage.TURN_TERMINAL,
+        # Pass-through LLMError categories (never constructed by
+        # classify_exception itself). Explicit TURN_TERMINAL entries keep the
+        # recovery table's coverage guard honest without changing the ladder:
+        # each previously fell through the same terminal default.
+        # output_truncated: provider cut the output at the token ceiling.
+        "output_truncated": ResilienceStage.TURN_TERMINAL,
+        # gate_timeout: the call never reached the provider (route gate
+        # rejection); the client's main retry budget already replays it via
+        # retryable=True, so the route-level stage stays terminal instead of
+        # opening a new fallback-switch path.
+        "gate_timeout": ResilienceStage.TURN_TERMINAL,
+        # cancelled: the turn was stopped by the operator; the adapter checks
+        # this category before any recovery action.
+        "cancelled": ResilienceStage.TURN_TERMINAL,
     }
 )
 
