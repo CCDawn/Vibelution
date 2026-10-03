@@ -26,6 +26,8 @@ const styles = {
     "knowledgeGovernanceDeck min-w-0 grid hidden max-[900px]:grid-cols-[minmax(0,1fr)]",
   knowledgeMain:
     "knowledgeMain min-w-0 grid h-full min-h-0 content-start gap-1.5 overflow-auto p-0.5 [&_.managementPanel]:content-start",
+  knowledgeWorkbenchPage:
+    "min-w-0 h-full min-h-0 flex-1 overflow-hidden",
   knowledgeViewStack:
     "knowledgeViewStack min-w-0 grid !flex h-full flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] max-[720px]:[&>.summaryGrid]:[grid-template-columns:repeat(2,minmax(0,1fr))] max-[460px]:[&>.summaryGrid]:[grid-template-columns:minmax(0,1fr)] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
   // Width ownership: VSplitWorkspace + WORKBENCH_LAYOUT_IDS.memory (left/right pane ids).

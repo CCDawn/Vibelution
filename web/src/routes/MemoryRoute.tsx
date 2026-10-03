@@ -4216,7 +4216,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         ariaLabel={copy.knowledgeView}
         title={copy.knowledgeView}
         hideHeader
-        className="min-w-0 h-full min-h-0 flex-1 overflow-hidden"
+        className={styles.knowledgeWorkbenchPage}
         workspaceClassName={`${styles.workspace} ${styles.knowledgeWorkspace}`}
         domainRecipe="memory-knowledge-workbench"
         layoutId={MEMORY_LAYOUT_ID}
