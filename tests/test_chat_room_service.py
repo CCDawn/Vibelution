@@ -4479,6 +4479,7 @@ def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(t
             }
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+    room_thread: threading.Thread | None = None
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha direct turn")
@@ -4511,13 +4512,16 @@ def test_chat_room_participant_runs_with_active_direct_turn_in_another_session(t
         assert not release_direct.is_set()
         release_room.set()
         release_direct.set()
-        room_thread.join(timeout=2.0)
     finally:
         release_direct.set()
         release_room.set()
         executor.shutdown(wait=True, cancel_futures=True)
+        # The round thread can still be persisting its result after the Agent
+        # executor drains. Join it before fixture roots and stores are restored.
+        if room_thread is not None and room_thread.ident is not None:
+            room_thread.join(timeout=10.0)
 
-    assert not room_thread.is_alive()
+    assert room_thread is not None and not room_thread.is_alive()
     assert result_holder["detail"]["rounds"][-1]["status"] == "completed"
     assert prompts[0] == "alpha direct turn"
     assert "群聊也想让 alpha 发言" in prompts[1]
@@ -4729,6 +4733,7 @@ def test_chat_room_same_session_wait_does_not_block_later_different_session_turn
             }
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+    room_thread: threading.Thread | None = None
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha first direct")
@@ -4758,14 +4763,15 @@ def test_chat_room_same_session_wait_does_not_block_later_different_session_turn
         release_first_direct.set()
         assert room_started.wait(15.0)
         release_room.set()
-        room_thread.join(timeout=2.0)
     finally:
         release_first_direct.set()
         release_room.set()
         release_second_direct.set()
         executor.shutdown(wait=True, cancel_futures=True)
+        if room_thread is not None and room_thread.ident is not None:
+            room_thread.join(timeout=10.0)
 
-    assert not room_thread.is_alive()
+    assert room_thread is not None and not room_thread.is_alive()
     assert result_holder["detail"]["rounds"][-1]["status"] == "completed"
     assert run_order == [
         "first_direct",
