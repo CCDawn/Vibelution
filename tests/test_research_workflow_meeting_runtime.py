@@ -657,10 +657,16 @@ def _session_transcript(session_id: str) -> str:
 _PREFORMAL_FIXTURE_LINE = "cand-a 的机制证据最完整"
 
 
+@pytest.mark.parametrize("structured_context", [True, False])
 def test_preformal_review_room_binds_participants_to_hidden_child_sessions(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, structured_context
 ):
-    """A preformal review speaks through Child Sessions, never direct Sessions."""
+    """Keep scoped identities and the configured transcript owner separate."""
+
+    monkeypatch.setenv(
+        "VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED",
+        "1" if structured_context else "0",
+    )
 
     team_id, agents, opened = _open_meeting(
         tmp_path,
@@ -698,9 +704,15 @@ def test_preformal_review_room_binds_participants_to_hidden_child_sessions(
         assert not direct_detail["childSessionIds"]
 
     assert any(
-        _PREFORMAL_FIXTURE_LINE in _session_transcript(session_id)
-        for session_id in bound.values()
+        _PREFORMAL_FIXTURE_LINE in str(message.get("content") or "")
+        for room_round in room["rounds"]
+        for message in room_round["messages"]
     )
+    child_transcripts = [_session_transcript(session_id) for session_id in bound.values()]
+    if structured_context:
+        assert all(_PREFORMAL_FIXTURE_LINE not in content for content in child_transcripts)
+    else:
+        assert any(_PREFORMAL_FIXTURE_LINE in content for content in child_transcripts)
     for agent_id in direct_ids:
         assert _PREFORMAL_FIXTURE_LINE not in _session_transcript(direct_ids[agent_id])
 
