@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { discoverDraftProvider, fetchConfigWorkspace, pinDraftProviderModel } from "../../api/config";
+import { discoverDraftProvider, fetchConfigWorkspace, pinDraftProviderModel, updateDraftProvider } from "../../api/config";
 import type { ConfigCatalogModel, ConfigWorkspace } from "../../api/types";
 import { CONFIG_COPY } from "./configCopy";
 import { useConfigProviderDraftActions, type UseConfigProviderDraftActionsOptions } from "./useConfigProviderDraftActions";
@@ -88,5 +88,90 @@ describe("provider draft baseline and failure recovery", () => {
     }
     expect(calls[1][1].publicConfig).toHaveProperty("marker", "one");
     expect(input.syncWorkspace).toHaveBeenLastCalledWith(expect.anything(), "success", { resetBase: false });
+  });
+});
+
+describe("pinned model whitelist edit (wave 3 governance path B)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function pinnedEntryOptions() {
+    const input = options();
+    const draft = input.draftConfig as Record<string, unknown>;
+    const llm = draft.llm as Record<string, unknown>;
+    const providers = llm.providers as Record<string, unknown>;
+    providers.relay = {
+      label: "Relay",
+      models: {
+        luna: {
+          upstream_id: "luna-upstream",
+          label: "Luna",
+          enabled: true,
+          wire_protocol: "responses",
+          interaction_contract: "tool_chat",
+          defaults: {
+            reasoning_effort_values: ["low", "medium", "high"],
+            reasoning_effort_adapter: "reasoning_object",
+            default_reasoning_effort: "medium",
+            temperature: 0.7,
+          },
+        },
+      },
+    };
+    input.providerDraftRequestRef.current = {
+      publicConfig: structuredClone(draft),
+      draftMeta: input.draftMeta,
+      baseHash: "baseline",
+    };
+    return input;
+  }
+
+  it("applies only whitelist edits to the draft entry and keeps protocol fields", async () => {
+    const input = pinnedEntryOptions();
+    vi.mocked(updateDraftProvider).mockImplementation(async (_id, request) => ({
+      publicConfig: request.publicConfig, draftMeta: request.draftMeta,
+      hash: "draft-hash", baseHash: request.baseHash, modelCatalog: { providers: {} },
+    }) as ConfigWorkspace);
+    await run(input, async (actions) => {
+      const ok = await actions.handleUpdatePinnedModel("relay/luna", {
+        label: "Luna fast",
+        temperature: "0.2",
+        default_reasoning_effort: "high",
+        // @ts-expect-error — protocol keys are not valid edits; the gate drops them.
+        wire_protocol: "chat_completions",
+      });
+      expect(ok).toBe(true);
+    });
+    const request = vi.mocked(updateDraftProvider).mock.calls[0][1];
+    const models = (request.provider.models as Record<string, unknown>);
+    expect(models.luna).toEqual({
+      upstream_id: "luna-upstream",
+      label: "Luna fast",
+      enabled: true,
+      wire_protocol: "responses",
+      interaction_contract: "tool_chat",
+      defaults: {
+        reasoning_effort_values: ["low", "medium", "high"],
+        reasoning_effort_adapter: "reasoning_object",
+        default_reasoning_effort: "high",
+        temperature: 0.2,
+      },
+    });
+    expect(input.syncWorkspace).toHaveBeenLastCalledWith(expect.anything(), "success", { resetBase: false });
+    expect(input.setProviderActionFeedback).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "model", phase: "success" }),
+    );
+  });
+
+  it("reports an error without writing when the model is not pinned in the draft", async () => {
+    const input = pinnedEntryOptions();
+    await run(input, async (actions) => {
+      const ok = await actions.handleUpdatePinnedModel("relay/ghost", { label: "X" });
+      expect(ok).toBe(false);
+    });
+    expect(updateDraftProvider).not.toHaveBeenCalled();
+    expect(input.syncWorkspace).not.toHaveBeenCalled();
+    expect(input.setProviderActionFeedback).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "model", phase: "error" }),
+    );
   });
 });

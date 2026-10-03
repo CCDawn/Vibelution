@@ -35,6 +35,7 @@ import type {
   ProviderActionFeedback,
 } from "../ConfigProviderRegistryPanel";
 import { type ConfigCopy, formatConfigCopy } from "./configCopy";
+import { applyModelEntryEdits, type ModelFieldEdits } from "./modelEditableFields";
 import {
   formatProviderPinBusyMessage,
   formatProviderPinErrorMessage,
@@ -490,6 +491,64 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     syncWorkspace,
   ]);
 
+  /**
+   * Wave 3 governance path B: hand-edit a pinned model entry through the
+   * editable-field whitelist. Only whitelist paths are applied
+   * (applyModelEntryEdits); protocol-layer fields stay rule/discovery-supplied.
+   * Draft-only mutation via the existing provider update — no new backend API.
+   */
+  const handleUpdatePinnedModel = useCallback(async (modelRef: string, edits: ModelFieldEdits) => {
+    const separator = modelRef.indexOf("/");
+    if (separator <= 0) return false;
+    const providerId = modelRef.slice(0, separator);
+    const modelKey = modelRef.slice(separator + 1);
+    setBusyAction(copy.actionModelUpdateBusy);
+    setProviderActionError("");
+    setProviderActionFeedback({ kind: "model", providerId, phase: "busy", message: copy.actionModelUpdateBusy });
+    try {
+      const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
+      const models = asRecord(provider.models);
+      const entry = models[modelKey];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error(copy.actionModelUpdateMissing);
+      }
+      // Attach unconditionally: asRecord returns a fresh object when the
+      // provider had no models map, and the clone is safe to mutate.
+      provider.models = models;
+      models[modelKey] = applyModelEntryEdits(entry, edits);
+      const response = await updateDraftProvider(
+        providerId,
+        buildProviderDraftRequest({ providerId, provider }),
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setProviderActionFeedback({
+        kind: "model",
+        providerId,
+        phase: "success",
+        message: copy.actionModelUpdateSaved,
+      });
+      return true;
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "model", providerId, phase: "error", message });
+      setProviderActionError(message);
+      markError(error);
+      return false;
+    } finally {
+      setBusyAction("");
+    }
+  }, [
+    buildProviderDraftRequest,
+    copy,
+    markError,
+    readableErrorMessage,
+    requireDraft,
+    setBusyAction,
+    setProviderActionError,
+    setProviderActionFeedback,
+    syncWorkspace,
+  ]);
+
   const handleUpdateProviderContextWindow = useCallback(async (providerId: string, contextWindow: number | null) => {
     setBusyAction(copy.actionContextWindowBusy);
     setProviderActionError("");
@@ -667,6 +726,7 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     handleConfirmDeleteProvider,
     handleCancelDeleteProvider,
     handleUpdateProviderCredential,
+    handleUpdatePinnedModel,
     handleUpdateProviderContextWindow,
     handleToggleProviderEnabled,
     handleBeginProviderRouteEdit,
