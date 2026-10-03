@@ -259,7 +259,7 @@ const styles = {
   refreshButton:
     `refreshButton min-w-0 ${buttonBase}`,
   resizeHandle:
-    "resizeHandle min-w-0 max-[760px]:hidden",
+    "resizeHandle min-w-0 max-[760px]:!hidden",
   resultCard:
     `resultCard min-w-0 max-w-full ${quietPanelSurface}`,
   resultSummaryGrid:
@@ -479,7 +479,7 @@ const styles = {
   ts:
     "ts min-w-0",
   workspace:
-    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[minmax(0,var(--pane-w-left))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:!grid-cols-[minmax(0,1fr)] max-[760px]:!grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:!overflow-y-auto max-[760px]:!overflow-x-hidden ${vuiWorkspaceFillClass}`,
   workspaceScopePanel:
     `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1 px-2 py-1 [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
 } as const;
