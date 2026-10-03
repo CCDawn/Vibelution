@@ -152,11 +152,16 @@ export function shouldRefreshBeforeLifecycle(
   operation: string,
   input: { isPackaged: boolean; launchBlocking: boolean }
 ): boolean {
-  return Boolean(
-    input.isPackaged
-      && input.launchBlocking
-      && REFRESH_BEFORE_LIFECYCLE.has(String(operation || "").trim().toLowerCase())
-  );
+  const normalized = String(operation || "").trim().toLowerCase();
+  if (input.isPackaged) {
+    return Boolean(input.launchBlocking && REFRESH_BEFORE_LIFECYCLE.has(normalized));
+  }
+  // An unpackaged running shell still owes "rebuild-and-start" a real shell
+  // promotion: route it through the same approved-exit update pipeline so the
+  // staged (or rebuilt) packaged shell replaces it, instead of silently
+  // degrading into a forced frontend rebuild. Plain start/restart keep their
+  // workbench-rotation semantics and never swap the shell kind.
+  return normalized === "rebuild-and-start";
 }
 
 export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
