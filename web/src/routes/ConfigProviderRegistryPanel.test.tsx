@@ -127,7 +127,7 @@ afterEach(async () => {
   document.body.innerHTML = "";
 });
 
-async function renderModelDetails(models: ConfigCatalogModel[], options: {liveReferences?: Record<string, number>; imageCapabilityBusy?: boolean; onTestModel?: (modelRef: string) => void} = {}) {
+async function renderModelDetails(models: ConfigCatalogModel[], options: {liveReferences?: Record<string, number>; imageCapabilityBusy?: boolean; onTestModel?: (modelRef: string) => void; onUpdateModel?: (providerId: string, modelKey: string, edits: Record<string, string | boolean>) => void; modelUpdateBusy?: boolean} = {}) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -135,7 +135,8 @@ async function renderModelDetails(models: ConfigCatalogModel[], options: {liveRe
   await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider(models)} disabled={false}
     modelQuery="" modelFilter="all" liveReferenceCountByModelRef={options.liveReferences ?? {}}
     onQueryChange={() => {}} onFilterChange={() => {}} onPin={() => {}} onUnpin={() => {}}
-    onTestModel={options.onTestModel ?? (() => {})} onProbeImageInput={() => {}} imageCapabilityBusy={options.imageCapabilityBusy} />));
+    onTestModel={options.onTestModel ?? (() => {})} onProbeImageInput={() => {}} imageCapabilityBusy={options.imageCapabilityBusy}
+    onUpdateModel={options.onUpdateModel} modelUpdateBusy={options.modelUpdateBusy} />));
   // P1 list/detail split: clicking the model row opens the detail pane (no dialog).
   const row = container.querySelector<HTMLButtonElement>('[data-model-row] button');
   expect(row).not.toBeNull();
@@ -295,6 +296,104 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(listPane.innerHTML).not.toContain('data-model-action');
     await act(async () => pinButton!.click());
     expect(onPin).toHaveBeenCalledWith("relay_a", [observed]);
+  });
+
+  // Wave 3 governance path B: whitelist-governed model entry editing.
+  function pinnedModelWithDraft(): ConfigCatalogModel {
+    return {
+      ...model("luna", "pinned", "Luna"),
+      reasoningEffortValues: ["low", "medium", "high"],
+      defaultReasoningEffort: "medium",
+      draftEntry: {
+        upstream_id: "luna-upstream",
+        label: "Luna",
+        enabled: true,
+        context_window: 262144,
+        wire_protocol: "responses",
+        interaction_contract: "tool_chat",
+        defaults: {
+          reasoning_effort_values: ["low", "medium", "high"],
+          reasoning_effort_adapter: "reasoning_object",
+          default_reasoning_effort: "medium",
+          streaming: true,
+        },
+      },
+    };
+  }
+
+  it("renders the whitelist edit form with read-only protocol facts for pinned models", async () => {
+    const markup = await renderModelDetails(
+      [pinnedModelWithDraft()],
+      { onUpdateModel: () => undefined },
+    );
+    expect(markup).toContain('data-model-section="edit"');
+    // Every whitelist field renders an editable control, in whitelist order.
+    const fields = [...markup.matchAll(/data-model-edit-field="([^"]+)"/g)].map((match) => match[1]);
+    expect(fields).toEqual([
+      "label",
+      "model",
+      "context_window",
+      "temperature",
+      "max_output_tokens",
+      "timeout",
+      "enabled",
+      "streaming",
+      "default_reasoning_effort",
+    ]);
+    // Protocol-layer facts are visible but read-only, with the rule-supplied note.
+    expect(markup).toContain('data-model-protocol-field="wire_protocol"');
+    expect(markup).toContain('data-model-protocol-field="interaction_contract"');
+    expect(markup).toContain('data-model-protocol-field="reasoning_effort_adapter"');
+    expect(markup).toContain("由协议规则供给");
+    // Save starts disabled (nothing edited yet).
+    const save = markup.match(/<button[^>]*data-model-action="save-edit"[^>]*>/)?.[0] ?? "";
+    expect(save).toContain("disabled");
+  });
+
+  it("keeps the edit form away from discovered models and legacy callers", async () => {
+    const observed = model("novas", "observed");
+    const withCallback = await renderModelDetails([observed], { onUpdateModel: () => undefined });
+    expect(withCallback).not.toContain('data-model-section="edit"');
+    const withoutCallback = await renderModelDetails([pinnedModelWithDraft()]);
+    expect(withoutCallback).not.toContain('data-model-section="edit"');
+    // Credential fields never appear as editable model fields.
+    const markup = await renderModelDetails([pinnedModelWithDraft()], { onUpdateModel: () => undefined });
+    expect(markup).not.toContain('data-model-edit-field="api_key_env"');
+    expect(markup).not.toContain('data-model-edit-field="wire_protocol"');
+  });
+
+  it("sends only changed whitelist fields on save", async () => {
+    const onUpdateModel = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    await act(async () => root.render(<ProviderModelsTab copy={CONFIG_COPY.zh} provider={provider([pinnedModelWithDraft()])} disabled={false}
+      modelQuery="" modelFilter="all" liveReferenceCountByModelRef={{}}
+      onQueryChange={() => {}} onFilterChange={() => {}} onPin={() => {}} onUnpin={() => {}}
+      onTestModel={() => {}} onProbeImageInput={() => {}} onUpdateModel={onUpdateModel} />));
+    const row = container.querySelector<HTMLButtonElement>('[data-model-row] button');
+    await act(async () => row!.click());
+    // Edit two whitelist fields through the real controlled inputs.
+    const labelInput = container.querySelector<HTMLInputElement>('[data-model-edit-field="label"] input')!;
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      valueSetter.call(labelInput, "Luna fast");
+      labelInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const windowInput = container.querySelector<HTMLInputElement>('[data-model-edit-field="context_window"] input')!;
+    await act(async () => {
+      valueSetter.call(windowInput, "131072");
+      windowInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const save = container.querySelector<HTMLButtonElement>('[data-model-action="save-edit"]')!;
+    expect(save.disabled).toBe(false);
+    await act(async () => save.click());
+    expect(onUpdateModel).toHaveBeenCalledTimes(1);
+    expect(onUpdateModel).toHaveBeenCalledWith("relay_a", "luna", {
+      label: "Luna fast",
+      context_window: "131072",
+    });
   });
 
   it("converges model-domain buttons to one primary weight, ghost filters, and a single danger", async () => {

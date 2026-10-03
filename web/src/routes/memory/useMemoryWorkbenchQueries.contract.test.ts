@@ -87,6 +87,14 @@ describe("memory workbench queries contract", () => {
     expect(routeSource).toContain("graphTeamId={requestedTeamId}");
   });
 
+  it("does not present a disabled knowledge-item query as a loading detail panel", () => {
+    expect(routeSource).toContain(
+      "const knowledgeItemsPending = Boolean(activeKnowledgeBaseForItems && activeKnowledgeActorAgentId) && knowledgeItemsQuery.isPending;",
+    );
+    expect(routeSource).toContain("knowledgeItemsPending={knowledgeItemsPending}");
+    expect(routeSource).not.toContain("knowledgeItemsPending={knowledgeItemsQuery.isPending}");
+  });
+
   it("keeps polled queries cache-first with staleTime >= refetchInterval", () => {
     // Remounts inside one poll cycle must render from cache (no blocking reload)
     // while the interval keeps refreshing in place.

@@ -2121,6 +2121,77 @@ def _looks_like_stream_usage_options_rejection(exc: Exception, llm_error: LLMErr
     return "stream_options" in text or "stream options" in text or "include_usage" in text
 
 
+# ---------------------------------------------------------------------------
+# 聚合器/中转通道协议错误止血（2026-10-02 事件）。
+#
+# 背景：opencode go（service_class=aggregator）经 litellm 中转池访问
+# deepseek-v4.1-flash 时，带 reasoning_effort 的请求被池内部分节点以
+# litellm.UnsupportedParamsError（HTTP 400）拒绝，同一 body 原样重放又可过
+# ——池子节点配置不齐导致的非确定性拒绝，而非载荷缺陷。该错误被分类为
+# provider_protocol_error / PERMANENT / retryable=False（error_classification
+# 的 fail-closed 设计，刻意保留），不设窄门会整轮 fail-fast。以下两个有界
+# 手段只针对这个非确定性子集：
+#
+#   B) 窄门有界重试：aggregator/relay 通道 + provider_protocol_error + 错误
+#      正文含 "litellm." 佐证 → 最多重试 2 次（独立小预算，不占 5xx 退避
+#      额度；直连 provider 行为完全不变）。
+#   C) 「不认参数」去参降级：错误正文匹配 "does not support parameters" 时
+#      解析被点名参数，从 payload 剥除后立即重发（每请求最多剥 2 轮）。
+#      C 优先于 B；B/C 共享同一份额外尝试预算，总尝试次数 ≤
+#      max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET，不会叠加爆炸。
+# ---------------------------------------------------------------------------
+
+#: B 的通道窄门：只有聚合/中转 service_class 允许协议错误有界重试。直连
+#: provider 上的真协议错误在同一适配器路径上确定性复现，重放无意义。
+_AGGREGATOR_PROTOCOL_RETRY_SERVICE_CLASSES = frozenset({"aggregator", "relay"})
+
+#: B/C 共享的每请求额外尝试预算（独立于 profile.retry_policy 的主重试预算，
+#: 不挤占 5xx/network 退避额度）。
+_PROTOCOL_EXTRA_ATTEMPT_BUDGET = 2
+
+#: litellm.UnsupportedParamsError 及同族正文：参数名以 repr 列表出现，
+# 形如 ``openai does not support parameters: ['reasoning_effort']``。
+_UNSUPPORTED_PARAMS_PATTERN = re.compile(
+    r"does not support parameters\s*:\s*\[([^\]]*)\]", re.IGNORECASE
+)
+_UNSUPPORTED_PARAM_NAME_PATTERN = re.compile(r"['\"]([A-Za-z0-9_.\-]+)['\"]")
+
+
+def _parse_unsupported_params(error_text: str) -> Tuple[str, ...]:
+    """解析「不认参数」错误正文里被点名的参数名集合（保序去重）。
+
+    正文形如 ``... does not support parameters: ['reasoning_effort']``，参数
+    名以 repr 列表出现（单/双引号、可多个）。解析不出返回空元组。
+    """
+    names: List[str] = []
+    for match in _UNSUPPORTED_PARAMS_PATTERN.finditer(str(error_text or "")):
+        for item in _UNSUPPORTED_PARAM_NAME_PATTERN.finditer(match.group(1) or ""):
+            name = (item.group(1) or "").strip()
+            if name and name not in names:
+                names.append(name)
+    return tuple(names)
+
+
+def _strip_unsupported_params(payload: Dict[str, Any], params: Tuple[str, ...]) -> Dict[str, Any]:
+    """返回剥除被点名顶层参数后的 payload 副本；只删被点名的，其余不动。"""
+    stripped = dict(payload)
+    for name in params:
+        stripped.pop(name, None)
+    return stripped
+
+
+def _named_unsupported_params_present_in_payload(
+    exc: Exception, payload: Mapping[str, Any]
+) -> Tuple[str, ...]:
+    """C 的可执行集：被点名的参数里真正出现在当前 payload 顶层的那部分。
+
+    只挑 present 的参数：对 payload 里本来就没有的参数剥除是无操作重发，
+    只会白烧一次尝试预算。
+    """
+    named = _parse_unsupported_params(str(exc or ""))
+    return tuple(name for name in named if name in payload)
+
+
 def _llm_cancelled_error(reason: str) -> LLMError:
     return LLMError(
         "cancelled",
@@ -4678,6 +4749,76 @@ class LLMClient:
             return self._responses_websocket_backend
         return self._responses_backend if _payload_uses_responses(payload) else self._backend
 
+    def _route_service_class(self) -> str:
+        """本路由解析出的 provider service_class（小写；协议解析缺省 official_api）。"""
+        return str(getattr(self.protocol_route, "service_class", "") or "").strip().lower()
+
+    def _is_aggregator_litellm_protocol_error(self, llm_error: LLMError) -> bool:
+        """B 的窄门判定（2026-10-02 事件，见模块注释）。
+
+        全部满足才允许协议错误有界重试：通道是 aggregator/relay（池子配置不
+        齐的非确定性拒绝只发生在中转侧）、类别是 provider_protocol_error、
+        错误正文带 "litellm." 佐证（litellm.UnsupportedParamsError 等）。直连
+        provider 的行为完全不变。
+        """
+        if self._route_service_class() not in _AGGREGATOR_PROTOCOL_RETRY_SERVICE_CLASSES:
+            return False
+        if str(getattr(llm_error, "category", "")) != "provider_protocol_error":
+            return False
+        return "litellm." in str(llm_error or "").lower()
+
+    def _record_protocol_degrade_recovery(
+        self,
+        *,
+        phase: str,
+        stripped_params: List[str],
+        protocol_retries_used: int,
+    ) -> None:
+        """协议级降级/重试后成功的可观测收尾（2026-10-02 事件，见模块注释）。
+
+        warning 只携带被剥参数名、模型与通道 service_class，不携带 API key
+        或错误正文大段；场景事件走既有 runtime scene telemetry 通道。
+        """
+        service_class = self._route_service_class()
+        message_parts = [f"LLM {phase} recovered after protocol-level degradation."]
+        if stripped_params:
+            message_parts.append(
+                f"stripped unsupported params {stripped_params} for "
+                f"provider={self.provider.kind} model={self.profile.model} "
+                f"serviceClass={service_class}."
+            )
+        if protocol_retries_used:
+            message_parts.append(
+                f"used {protocol_retries_used} aggregator protocol retries for "
+                f"provider={self.provider.kind} model={self.profile.model} "
+                f"serviceClass={service_class}."
+            )
+        message = " ".join(message_parts)
+        try:
+            from core.logging import logger as unified_logger
+
+            unified_logger.warning(message, tag="LLM")
+        except Exception:  # noqa: BLE001 - telemetry must never fail LLM invoke
+            pass
+        _record_llm_scene_event(
+            phase,
+            f"llm.{phase}.protocol_degrade_recovered",
+            message=message,
+            level="warning" if stripped_params else "info",
+            outcome="succeeded",
+            fields={
+                "role": self.role,
+                "profileId": self.profile_id,
+                "provider": self.provider.kind,
+                "model": self.profile.model,
+                "serviceClass": service_class,
+                "unsupportedParamsStripped": bool(stripped_params),
+                "strippedParams": list(stripped_params),
+                "aggregatorProtocolRetries": int(protocol_retries_used),
+            },
+            lifecycle=False,
+        )
+
     def _invoke_backend_with_retry(
         self,
         payload: Dict[str, Any],
@@ -4691,8 +4832,14 @@ class LLMClient:
     ) -> Any:
         max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
         last_error: LLMError | None = None
+        # 2026-10-02 聚合器协议错误止血（见模块注释）：B 有界重试与 C 去参降级
+        # 共享这份独立小预算，不计入 5xx/network 的主重试预算；总尝试次数上
+        # 限 = max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET。
+        protocol_retries_used = 0
+        param_degrade_rounds = 0
+        stripped_params_log: List[str] = []
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(1, max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET + 1):
             attempt_scope = self._attempt_invocation_scope(invocation_scope, attempt)
             attempt_started_at_ms = int(time.time() * 1000)
             request_payload = dict(payload)
@@ -4727,6 +4874,12 @@ class LLMClient:
                             response = self._backend_for_payload(request_payload)(request_payload)
                         _raise_if_llm_cancelled()
                         _LLM_BACKEND_ATTEMPT_CONTEXT.set((attempt, max(0, attempt - 1)))
+                        if param_degrade_rounds or protocol_retries_used:
+                            self._record_protocol_degrade_recovery(
+                                phase=phase,
+                                stripped_params=sorted(set(stripped_params_log)),
+                                protocol_retries_used=protocol_retries_used,
+                            )
                         return response
                     except LLMCancelledError:
                         raise
@@ -4780,7 +4933,63 @@ class LLMClient:
                     llm_error=llm_error,
                     disposition=classification.disposition,
                 )
-                if not classification.is_transient_retryable or attempt >= max_attempts:
+                # 2026-10-02 聚合器协议错误止血（见模块注释）：C 去参降级优先
+                # 于 B 盲重试；两者共享 _PROTOCOL_EXTRA_ATTEMPT_BUDGET，预算耗
+                # 尽后走既有失败路径（provider_protocol_error 仍 fail-closed）。
+                extra_budget_left = (
+                    param_degrade_rounds + protocol_retries_used
+                ) < _PROTOCOL_EXTRA_ATTEMPT_BUDGET
+                unsupported_params = (
+                    _named_unsupported_params_present_in_payload(exc, payload)
+                    if extra_budget_left and llm_error.category == "provider_protocol_error"
+                    else ()
+                )
+                if unsupported_params:
+                    payload = _strip_unsupported_params(payload, unsupported_params)
+                    param_degrade_rounds += 1
+                    stripped_params_log.extend(unsupported_params)
+                    _record_llm_scene_event(
+                        phase,
+                        f"llm.{phase}.unsupported_params_degraded",
+                        message=(
+                            "provider rejected unsupported parameters; "
+                            "retrying once without them."
+                        ),
+                        level="warning",
+                        outcome="retrying",
+                        fields={
+                            **fields,
+                            "strippedParams": list(unsupported_params),
+                            "degradeRound": param_degrade_rounds,
+                            "serviceClass": self._route_service_class(),
+                        },
+                        lifecycle=True,
+                    )
+                    continue
+                if extra_budget_left and self._is_aggregator_litellm_protocol_error(llm_error):
+                    protocol_retries_used += 1
+                    _record_llm_scene_event(
+                        phase,
+                        f"llm.{phase}.protocol_retrying",
+                        message=(
+                            "aggregator/relay channel rejected the request "
+                            "nondeterministically; replaying the same payload."
+                        ),
+                        level="warning",
+                        outcome="retrying",
+                        fields={
+                            **fields,
+                            "aggregatorProtocolRetry": protocol_retries_used,
+                            "serviceClass": self._route_service_class(),
+                        },
+                        lifecycle=True,
+                    )
+                    continue
+                # 瞬态错误（5xx/network）的主重试预算不因协议重试/剥参降级而
+                # 缩水：终止上限按已消耗的协议预算等额放宽（总尝试次数仍被
+                # range 的 max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET 封顶）。
+                extra_used = param_degrade_rounds + protocol_retries_used
+                if not classification.is_transient_retryable or attempt >= max_attempts + extra_used:
                     _record_llm_scene_event(
                         phase,
                         event_code,
@@ -5492,8 +5701,14 @@ class LLMClient:
         last_error: LLMError | None = None
         previous_attempt_emitted = False
         stream_usage_options_downgraded = False
+        # 2026-10-02 聚合器协议错误止血（见模块注释）：B 有界重试与 C 去参降
+        # 级共享这份独立小预算，不计入 5xx/network 的主重试预算；总尝试次数
+        # 上限 = max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET。
+        protocol_retries_used = 0
+        param_degrade_rounds = 0
+        stripped_params_log: List[str] = []
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
-        for attempt in range(1, max_attempts + 1):
+        for attempt in range(1, max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET + 1):
             attempt_scope = self._attempt_invocation_scope(invocation_scope, attempt)
             try:
                 _raise_if_llm_cancelled()
@@ -5840,9 +6055,19 @@ class LLMClient:
                         else 0,
                         "interChunkCount": inter_chunk_count,
                         "toolCallCount": tool_call_count,
+                        # 2026-10-02 止血可观测：本轮成功前发生过协议级降级/重试。
+                        "unsupportedParamsStripped": bool(stripped_params_log),
+                        "strippedParams": sorted(set(stripped_params_log)),
+                        "aggregatorProtocolRetries": protocol_retries_used,
                     },
                     lifecycle=False,
                 )
+                if param_degrade_rounds or protocol_retries_used:
+                    self._record_protocol_degrade_recovery(
+                        phase="stream",
+                        stripped_params=sorted(set(stripped_params_log)),
+                        protocol_retries_used=protocol_retries_used,
+                    )
                 canonical_outcome = outcome_fn()
                 if canonical_outcome is None:
                     raise LLMError(
@@ -5936,6 +6161,9 @@ class LLMClient:
                 # 刚失败的这次 attempt 是否已向消费者发出过 chunk（含工具调用
                 # 部分）。所有 continue 重试路径都依赖这里记录的值。
                 previous_attempt_emitted = bool(emitted)
+                # 瞬态错误的主重试预算不因协议重试/剥参降级而缩水：判定上限按
+                # 已消耗的协议预算等额放宽（总尝试次数仍被循环 range 封顶）。
+                extra_used = param_degrade_rounds + protocol_retries_used
                 if provider_started:
                     self._capture_operator_attempt_receipt(
                         error=llm_error,
@@ -5987,7 +6215,7 @@ class LLMClient:
                         tool_count=tool_count,
                         metadata=event_metadata,
                         attempt=attempt,
-                        max_attempts=max_attempts,
+                        max_attempts=max_attempts + extra_used,
                         llm_error=llm_error,
                     )
                     if not should_retry:
@@ -6046,6 +6274,96 @@ class LLMClient:
                         lifecycle=True,
                     )
                     continue
+                # 2026-10-02 聚合器协议错误止血（见模块注释）：C 去参降级优先于
+                # B 盲重试，两者共享 _PROTOCOL_EXTRA_ATTEMPT_BUDGET，预算耗尽后
+                # 走既有失败路径（provider_protocol_error 仍 fail-closed）。剥参
+                # 只删被点名的顶层参数，其余不动；该错误发生在首 chunk 之前
+                # （provider 即时 400 拒绝），不存在已发内容的边界问题。
+                extra_budget_left = (
+                    param_degrade_rounds + protocol_retries_used
+                ) < _PROTOCOL_EXTRA_ATTEMPT_BUDGET
+                unsupported_params = (
+                    _named_unsupported_params_present_in_payload(exc, payload)
+                    if extra_budget_left and llm_error.category == "provider_protocol_error"
+                    else ()
+                )
+                if unsupported_params:
+                    payload = _strip_unsupported_params(payload, unsupported_params)
+                    param_degrade_rounds += 1
+                    stripped_params_log.extend(unsupported_params)
+                    route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
+                    responses_continuation_summary = _safe_responses_continuation_summary(payload)
+                    payload_shape_summary = _safe_payload_shape_summary(payload)
+                    event_metadata = {
+                        "sessionId": invocation_scope.session_id,
+                        "turnId": invocation_scope.turn_id,
+                        "invocationId": invocation_scope.invocation_id,
+                        "iteration": invocation_scope.iteration,
+                        "invocationContextPresent": bool(metadata),
+                        **(metadata or {}),
+                        **message_role_summary,
+                        **route_summary,
+                        **responses_continuation_summary,
+                        **payload_shape_summary,
+                        **prompt_cache_design_summary,
+                        **_safe_prompt_cache_payload_summary(payload),
+                        **_safe_payload_thinking_summary(payload),
+                        **protocol_summary,
+                        **capability_source_summary,
+                        "llmPayloadTraceId": llm_payload_trace.get("traceId", ""),
+                        "retryRequestMode": "wire_payload_without_unsupported_params",
+                        "unsupportedParamsStripped": True,
+                        "strippedParams": list(stripped_params_log),
+                    }
+                    _record_llm_scene_event(
+                        "stream",
+                        "llm.stream.unsupported_params_degraded",
+                        message="provider rejected unsupported parameters; retrying once without them.",
+                        level="warning",
+                        outcome="retrying",
+                        fields=_llm_retry_event_fields(
+                            role=self.role,
+                            profile_id=self.profile_id,
+                            provider=self.provider.kind,
+                            model=self.profile.model,
+                            message_count=message_count,
+                            tool_count=tool_count,
+                            metadata=event_metadata,
+                            attempt=attempt,
+                            max_attempts=max_attempts,
+                            llm_error=llm_error,
+                            disposition=classification.disposition,
+                        ),
+                        lifecycle=True,
+                    )
+                    continue
+                if extra_budget_left and self._is_aggregator_litellm_protocol_error(llm_error):
+                    protocol_retries_used += 1
+                    _record_llm_scene_event(
+                        "stream",
+                        "llm.stream.protocol_retrying",
+                        message=(
+                            "aggregator/relay channel rejected the request "
+                            "nondeterministically; replaying the same payload."
+                        ),
+                        level="warning",
+                        outcome="retrying",
+                        fields=_llm_retry_event_fields(
+                            role=self.role,
+                            profile_id=self.profile_id,
+                            provider=self.provider.kind,
+                            model=self.profile.model,
+                            message_count=message_count,
+                            tool_count=tool_count,
+                            metadata=event_metadata,
+                            attempt=attempt,
+                            max_attempts=max_attempts,
+                            llm_error=llm_error,
+                            disposition=classification.disposition,
+                        ),
+                        lifecycle=True,
+                    )
+                    continue
                 should_retry = self._record_llm_retry_or_failure(
                     phase="stream",
                     event_code="llm.stream.failed",
@@ -6054,7 +6372,7 @@ class LLMClient:
                     tool_count=tool_count,
                     metadata=event_metadata,
                     attempt=attempt,
-                    max_attempts=max_attempts,
+                    max_attempts=max_attempts + extra_used,
                     llm_error=llm_error,
                 )
                 if not should_retry:

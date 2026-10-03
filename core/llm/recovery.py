@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
-from .errors import classify_exception
+from .errors import CLASSIFIER_CATEGORIES, classify_exception
 from .resilience_policy import DEGRADED_RETRY_CATEGORIES
 from .types import LLMError
 
@@ -119,7 +119,35 @@ _ACTION_FOR_CATEGORY: Mapping[str, str] = MappingProxyType(
         "quota_error": "fail_fast",
         "auth_error": "fail_fast",
         "configuration_error": "fail_fast",
+        # provider_protocol_error stays fail-fast on purpose (real protocol
+        # rejections reproduce deterministically, so same-shape replay is
+        # pointless) — but the recovery for its *nondeterministic* aggregator
+        # subset lives one layer down, in core/llm/client.py: the 2026-10-02
+        # event (litellm relay pool rejecting reasoning_effort on some nodes
+        # while replaying the same body passes) is handled there by the narrow
+        # bounded protocol retry and the unsupported-param strip degrade, both
+        # gated on service_class + "litellm." evidence. This table entry is
+        # explicit so the category can never silently fall through the
+        # ``.get`` default again (key-drift guard).
         "provider_protocol_error": "fail_fast",
+        # Local payload validation failed before any provider call; the same
+        # request reproduces it deterministically. Explicit entry: the
+        # classifier produces this category and it previously fell through the
+        # silent ``.get`` default (key-drift instance fixed alongside the
+        # 2026-10-02 protocol-error drift).
+        "payload_protocol_error": "fail_fast",
+        # Provider cut the output at max output tokens; replaying hits the same
+        # ceiling. Budget-family failure, explicit fail-fast (matching the
+        # current effective behavior of the previous silent default).
+        "output_truncated": "fail_fast",
+        # Route concurrency gate rejection: the call never reached the provider
+        # and LLMRouteGateTimeoutError is retryable=True, so the action agrees
+        # with the transport-retry family instead of the silent fail_fast.
+        "gate_timeout": "retry_with_backoff",
+        # Turn stop request surface (LLMError("cancelled", ...) from the client
+        # cancel paths). The adapter checks this category explicitly; the table
+        # entry just keeps the lookup out of the silent default.
+        "cancelled": "stop",
         "user_interrupt": "stop",
     }
 )
@@ -145,7 +173,26 @@ def _validate_degraded_actions_match_policy_stages() -> None:
         )
 
 
+def _validate_table_covers_classifier_categories() -> None:
+    """Machine-checked key-drift guard between the classifier and this table.
+
+    2026-10-02 事件背景：分类器产出 ``provider_protocol_error``，而恢复表里可
+    恢复的协议条目只挂在分类器从不产出的 ``protocol_error`` 键下——键名漂移
+    让协议错误整轮 fail-fast、走不到任何恢复动作。此后凡 ``classify_exception``
+    能构造的 category 都必须在 ``_ACTION_FOR_CATEGORY`` 有显式条目，漂移在
+    import 时报错，而不是靠 ``.get`` 的静默默认吞掉。
+    """
+    missing = sorted(set(CLASSIFIER_CATEGORIES) - set(_ACTION_FOR_CATEGORY))
+    if missing:
+        raise ValueError(
+            "core/llm/recovery.py _ACTION_FOR_CATEGORY drifted from "
+            "core/llm/errors.py CLASSIFIER_CATEGORIES: missing explicit "
+            f"entries for {missing}"
+        )
+
+
 _validate_degraded_actions_match_policy_stages()
+_validate_table_covers_classifier_categories()
 
 
 def _retry_wait_seconds(error: LLMError, attempt: int, max_attempts: int) -> int:

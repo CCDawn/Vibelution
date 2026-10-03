@@ -132,6 +132,22 @@ const styles = {
   connectionAddress: "text-vui-xs text-vui-fg-secondary break-words [overflow-wrap:anywhere]",
   modelName: "min-w-0 break-words [overflow-wrap:anywhere]",
   modelDetailSection: "grid min-w-0 gap-2 [&_h3]:font-semibold [&_h3]:text-vui-fg-secondary [&_strong]:whitespace-normal [&_strong]:break-all [&_span]:max-w-full",
+  modelEditForm:
+    "vui-routes-configproviderregistrypanel modelEditForm grid min-w-0 content-start gap-2",
+  modelEditHint:
+    "vui-routes-configproviderregistrypanel modelEditHint m-0 min-w-0 text-vui-xs leading-snug text-vui-fg-tertiary",
+  modelEditGrid:
+    "vui-routes-configproviderregistrypanel modelEditGrid grid min-w-0 gap-2 max-[560px]:grid-cols-1 [grid-template-columns:repeat(2,minmax(0,1fr))]",
+  modelEditField:
+    "vui-routes-configproviderregistrypanel modelEditField grid min-w-0 content-start gap-1 [&_span]:text-vui-xs [&_span]:font-semibold [&_span]:text-vui-fg-secondary",
+  modelEditProtocol:
+    "vui-routes-configproviderregistrypanel modelEditProtocol grid min-w-0 content-start gap-1 rounded-md border border-vui-border-subtle bg-vui-surface-row/60 p-2",
+  modelEditProtocolHeading:
+    "vui-routes-configproviderregistrypanel modelEditProtocolHeading min-w-0 text-vui-xs font-semibold text-vui-fg-tertiary",
+  modelEditProtocolFact:
+    "vui-routes-configproviderregistrypanel modelEditProtocolFact flex min-w-0 flex-wrap items-center gap-1.5 [&_code]:rounded [&_code]:bg-vui-control-muted [&_code]:px-1 [&_code]:text-vui-xs [&_code]:text-vui-fg-secondary",
+  modelEditProtocolValue:
+    "vui-routes-configproviderregistrypanel modelEditProtocolValue min-w-0 break-all text-vui-xs text-vui-fg-primary [overflow-wrap:anywhere]",
   modelIdentity: "vui-routes-configproviderregistrypanel modelIdentity grid min-w-0 gap-0.5",
   modelActionState:
     "vui-routes-configproviderregistrypanel modelActionState inline-flex min-h-6 items-center rounded-full border border-vui-border-subtle bg-vui-surface-row/70 px-2 [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-tertiary",

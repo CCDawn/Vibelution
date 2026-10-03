@@ -124,6 +124,8 @@ def _enforce_runtime_scene_retention(
     delete_items = [item for item in ordinary_items if item["path"].resolve() not in keep_paths]
 
     deleted_scene_ids: list[str] = []
+    deletion_error_counts: dict[str, int] = {}
+    missing_scene_count = 0
     stopped = False
     for item in delete_items:
         if should_stop is not None and should_stop():
@@ -131,22 +133,41 @@ def _enforce_runtime_scene_retention(
             break
         scene_dir = item["path"]
         if not s._can_delete_runtime_scene_for_retention(scene_dir):
+            if not scene_dir.exists():
+                missing_scene_count += 1
             continue
-        shutil.rmtree(scene_dir)
+        try:
+            shutil.rmtree(scene_dir)
+        except (FileNotFoundError, PermissionError) as exc:
+            error_type = type(exc).__name__
+            deletion_error_counts[error_type] = deletion_error_counts.get(error_type, 0) + 1
+            if isinstance(exc, FileNotFoundError) and not scene_dir.exists():
+                missing_scene_count += 1
+            continue
         deleted_scene_ids.append(str(item["sceneId"] or scene_dir.name))
 
+    kept_count = max(0, len(items) - len(deleted_scene_ids) - missing_scene_count)
     if deleted_scene_ids:
         s._record_runtime_scene_retention_pruned(
             retention_limit=retention_limit,
-            kept_count=len(items) - len(deleted_scene_ids),
+            kept_count=kept_count,
             protected_count=len(protected_items),
             deleted_scene_ids=deleted_scene_ids,
+        )
+    if deletion_error_counts:
+        error_summary = ", ".join(
+            f"{error_type}={count}"
+            for error_type, count in sorted(deletion_error_counts.items())
+        )
+        _debug_logger.warning(
+            "Runtime scene retention encountered filesystem deletion errors "
+            f"({sum(deletion_error_counts.values())} package(s): {error_summary})."
         )
 
     result = {
         "retentionLimit": retention_limit,
         "deletedCount": len(deleted_scene_ids),
-        "keptCount": len(items) - len(deleted_scene_ids),
+        "keptCount": kept_count,
         "protectedCount": len(protected_items),
         "deletedSceneIds": deleted_scene_ids,
     }
