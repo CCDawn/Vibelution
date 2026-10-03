@@ -171,6 +171,102 @@ def _catalog_discovered_context_window(model_record: dict[str, Any]) -> int:
     return 0
 
 
+def _declared_context_window(entry: Any) -> int:
+    """条目显式声明的上下文窗口；0 表示未声明（与 discover_model 同一套键）。"""
+    if not isinstance(entry, Mapping):
+        return 0
+    for key in ("context_window", "contextWindow", "max_model_len", "context_length"):
+        candidate = _positive_context_window(entry.get(key))
+        if candidate > 0:
+            return candidate
+    return 0
+
+
+def _catalog_record_for_ref(catalog_providers: Any, provider_id: str, model_ref: str) -> dict[str, Any]:
+    """从已加载的 catalog providers 里取 provider+model 的实证记录；无则空 dict。
+
+    与 ``_catalog_model_details`` 同一匹配语义：model_ref 的 provider 段必须与
+    条目 provider_id 一致，避免错配 provider 时捡到同名的无关记录。
+    """
+    if not isinstance(catalog_providers, dict) or "/" not in model_ref:
+        return {}
+    ref_provider_id, model_key = model_ref.split("/", 1)
+    if ref_provider_id != provider_id or not model_key:
+        return {}
+    provider_record = catalog_providers.get(provider_id, {})
+    models = provider_record.get("models", {}) if isinstance(provider_record, dict) else {}
+    record = models.get(model_key, {}) if isinstance(models, dict) else {}
+    return record if isinstance(record, dict) else {}
+
+
+# 只有这两类来源是「模型发现实证」；operator_override 是声明镜像进 catalog 的
+# 值（比它会变成自己比自己），driver_default / curated_snapshot 不是实证。
+_EMPIRICAL_CAPABILITY_SOURCES = frozenset({"provider_endpoint", "runtime_probe"})
+
+
+def discovery_declaration_mismatches(
+    entry: Any,
+    catalog_model: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """比对条目声明与模型发现实证，返回 ``(warnings, 结构化失配列表)``。
+
+    只比双侧都有确定值的可比字段：context_window（条目显式声明 vs 发现写入的
+    limits）与条目 capabilities 声明 vs provider_endpoint/runtime_probe 实证。
+    catalog 无该模型、无该字段或值为 unknown 都不算失配；operator 声明永远赢，
+    本函数纯只读提示，不改写任何配置。
+    """
+    warnings: list[str] = []
+    mismatches: list[dict[str, Any]] = []
+    if not isinstance(catalog_model, dict) or not catalog_model:
+        return warnings, mismatches
+
+    declared_window = _declared_context_window(entry)
+    discovered_window = _catalog_discovered_context_window(catalog_model)
+    if declared_window > 0 and discovered_window > 0 and declared_window != discovered_window:
+        warnings.append(
+            f"context_window 失配：条目声明 {declared_window} vs 模型发现实证 {discovered_window}；"
+            "当前以声明为准，请核对条目数值或重新运行模型发现"
+        )
+        mismatches.append(
+            {
+                "field": "context_window",
+                "declared": declared_window,
+                "discovered": discovered_window,
+                "discoveredSource": "provider_discovery",
+            }
+        )
+
+    declared_capabilities, _fields = _declared_capability_overrides(entry)
+    raw_capabilities = catalog_model.get("capabilities", {})
+    if declared_capabilities and isinstance(raw_capabilities, dict):
+        for runtime_field, declared_value in declared_capabilities.items():
+            catalog_field = _RUNTIME_TO_CATALOG_CAPABILITY.get(runtime_field, runtime_field)
+            record = raw_capabilities.get(catalog_field)
+            if not isinstance(record, dict):
+                continue
+            source = str(record.get("source") or "").strip()
+            if source not in _EMPIRICAL_CAPABILITY_SOURCES:
+                continue
+            empirical = str(record.get("value") or "unknown").strip().lower()
+            if empirical not in {"supported", "unsupported"}:
+                continue
+            if (empirical == "supported") != bool(declared_value):
+                declared_label = "supported" if declared_value else "unsupported"
+                warnings.append(
+                    f"{runtime_field} 失配：条目声明 {declared_label} vs 模型发现实证 {empirical}；"
+                    "当前以声明为准，请核对条目能力设置"
+                )
+                mismatches.append(
+                    {
+                        "field": runtime_field,
+                        "declared": bool(declared_value),
+                        "discovered": empirical,
+                        "discoveredSource": source,
+                    }
+                )
+    return warnings, mismatches
+
+
 def _declared_capability_overrides(model_entry: Any) -> tuple[dict[str, bool], list[str]]:
     if not isinstance(model_entry, dict):
         return {}, []
@@ -585,7 +681,11 @@ def doctor_model_library(
     每个条目用与换模型运行时同一套 ``llm_model_entry_issues`` 校验；primary 条目
     由 ``doctor_llm_profile`` 单独覆盖，调用方通过 ``skip_model_refs`` 传入以去重。
     返回 finding 列表：``{modelId, modelRef, providerId, model, errors, warnings}``，
-    ``errors`` 为会阻断换模型的字段组合问题，``warnings`` 为建议项。
+    ``errors`` 为会阻断换模型的字段组合问题，``warnings`` 为建议项。条目声明与
+    模型发现实证失配时，``warnings`` 里追加一条「以声明为准」的告警，并在
+    ``discoveryMismatches``（可选字段，结构化列表 ``{field, declared, discovered,
+    discoveredSource}``）里给出机器可读明细；catalog 无该模型记录不算失配，
+    告警不改写任何配置。
     """
     findings: list[dict[str, Any]] = []
     model_library = getattr(config.llm, "model_library", {}) or {}
@@ -618,6 +718,7 @@ def doctor_model_library(
         }
         errors: list[str] = []
         warnings: list[str] = []
+        discovery_mismatches: list[dict[str, Any]] = []
         provider = config.llm.providers.get(provider_id) if provider_id else None
         if provider is None:
             errors.append(f"provider `{provider_id or '(missing)'}` 不存在，模型条目不可用；请修正条目的 provider 或删除该模型")
@@ -637,32 +738,24 @@ def doctor_model_library(
                 entry_errors, entry_warnings = llm_model_entry_issues(profile, provider, model_entry=entry)
                 errors.extend(entry_errors)
                 warnings.extend(entry_warnings)
-                window = _positive_context_window(entry.get("context_window"))
+                catalog_model = _catalog_record_for_ref(catalog_providers, provider_id, model_ref)
+                window = _declared_context_window(entry)
                 if window <= 0:
                     window = _positive_context_window(getattr(provider, "context_window", None))
                 if window <= 0:
-                    catalog_model = {}
-                    if "/" in model_ref:
-                        ref_provider_id, model_key = model_ref.split("/", 1)
-                        provider_record = (
-                            catalog_providers.get(provider_id, {})
-                            if isinstance(catalog_providers, dict)
-                            else {}
-                        )
-                        provider_models = (
-                            provider_record.get("models", {}) if isinstance(provider_record, dict) else {}
-                        )
-                        candidate = provider_models.get(model_key, {}) if isinstance(provider_models, dict) else {}
-                        if isinstance(candidate, dict):
-                            catalog_model = candidate
                     window = _catalog_discovered_context_window(catalog_model)
                 if window <= 0:
                     warnings.append(
                         "未配置 context_window（条目/provider/发现目录均无）；"
                         "选中该模型前请先在设置中填写，或运行模型发现写入"
                     )
+                mismatch_warnings, discovery_mismatches = discovery_declaration_mismatches(entry, catalog_model)
+                warnings.extend(mismatch_warnings)
         if errors or warnings:
-            findings.append({**context, "errors": errors, "warnings": warnings})
+            finding = {**context, "errors": errors, "warnings": warnings}
+            if discovery_mismatches:
+                finding["discoveryMismatches"] = discovery_mismatches
+            findings.append(finding)
     return findings
 
 
