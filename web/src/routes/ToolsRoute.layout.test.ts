@@ -550,10 +550,10 @@ describe("ToolsRoute layout contract", () => {
 
   it("stacks the Tools workspace on narrow screens instead of clipping the detail panel", () => {
     expect(styles.workspace).toContain("max-[760px]:!grid-cols-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("max-[760px]:!grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)]");
+    expect(styles.workspace).toContain("max-[760px]:!grid-rows-[minmax(420px,42vh)_minmax(420px,1fr)]");
     expect(styles.workspace).toContain("max-[760px]:!overflow-y-auto");
     expect(styles.workspace).toContain("max-[760px]:!overflow-x-hidden");
-    expect(styles.listPanel).toContain("max-[760px]:max-h-[42vh]");
+    expect(styles.listPanel).toContain("max-[760px]:!max-h-none");
     expect(styles.detailPanel).toContain("overflow-auto");
     expect(styles.resizeHandle).toContain("max-[760px]:!hidden");
   });

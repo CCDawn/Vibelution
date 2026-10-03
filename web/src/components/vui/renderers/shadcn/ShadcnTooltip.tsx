@@ -233,7 +233,11 @@ export function ShadcnTooltip({
           cleanup();
           pointerReleaseCleanupRef.current = null;
           pointerPressedRef.current = false;
-          if (intentRef.current.pointer || intentRef.current.focus) armPointer();
+          // Defer past click/default label actions even when delay is zero.
+          openTimerRef.current = window.setTimeout(() => {
+            openTimerRef.current = null;
+            if (!pointerPressedRef.current && (intentRef.current.pointer || intentRef.current.focus)) armPointer();
+          }, 0);
         };
         pointerReleaseCleanupRef.current = cleanup;
         owner.addEventListener("pointerup", release);

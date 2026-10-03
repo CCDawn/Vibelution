@@ -119,7 +119,7 @@ export function ToolRegistryVirtualList({
   footer,
 }: ToolRegistryVirtualListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const focusedToolRowKeyRef = useRef<string | null>(null);
+  const focusedRegistryRowKeyRef = useRef<string | null>(null);
   const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
   const toolRowIndexes = useMemo(
     () => rows.flatMap((row, index) => row.kind === "tool" ? [index] : []),
@@ -127,7 +127,7 @@ export function ToolRegistryVirtualList({
   );
   const rangeExtractor = useCallback((range: Parameters<typeof defaultRangeExtractor>[0]) => {
     const visibleRange = defaultRangeExtractor(range);
-    const focusedKey = focusedToolRowKeyRef.current;
+    const focusedKey = focusedRegistryRowKeyRef.current;
     if (!focusedKey) return visibleRange;
     const focusedIndex = rows.findIndex((row) => row.key === focusedKey);
     if (focusedIndex < 0 || visibleRange.includes(focusedIndex)) return visibleRange;
@@ -206,12 +206,12 @@ export function ToolRegistryVirtualList({
       onKeyDown={handleKeyDown}
       onFocusCapture={(event) => {
         const rowElement = (event.target as HTMLElement).closest<HTMLElement>("[data-tool-row-key]");
-        focusedToolRowKeyRef.current = rowElement?.dataset.toolRowKey ?? null;
+        focusedRegistryRowKeyRef.current = rowElement?.dataset.toolRowKey ?? null;
       }}
       onBlurCapture={(event) => {
         const nextTarget = event.relatedTarget;
         if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-          focusedToolRowKeyRef.current = null;
+          focusedRegistryRowKeyRef.current = null;
         }
       }}
     >
@@ -225,7 +225,7 @@ export function ToolRegistryVirtualList({
               key={virtualRow.key}
               ref={virtualizer.measureElement}
               data-index={virtualRow.index}
-              data-tool-row-key={isToolRow ? row.key : undefined}
+              data-tool-row-key={row.key}
               data-tool-row-index={isToolRow ? virtualRow.index : undefined}
               data-tool-id={isToolRow ? row.tool.id : undefined}
               className={`${styles.toolVirtualItem} ${row.kind === "group"

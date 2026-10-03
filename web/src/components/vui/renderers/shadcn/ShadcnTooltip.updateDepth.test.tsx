@@ -167,12 +167,12 @@ describe("ShadcnTooltip React 19 update depth", () => {
     expect(document.activeElement).toBe(container.querySelector("input"));
   });
 
-  it("keeps the idle host through a pointer click before arming the overlay", () => {
+  it.each([0, 320])("keeps the idle host through a pointer click with delay %s", (delay) => {
     vi.useFakeTimers();
     const onClick = vi.fn();
     mount(
       <VuiProvider>
-        <VTooltip content="click-tip" delay={320}>
+        <VTooltip content="click-tip" delay={delay}>
           <button type="button" onClick={onClick}>host</button>
         </VTooltip>
       </VuiProvider>,
@@ -191,7 +191,7 @@ describe("ShadcnTooltip React 19 update depth", () => {
     });
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(container.querySelector("button")).toBe(host);
-    act(() => vi.advanceTimersByTime(320));
+    act(() => vi.advanceTimersByTime(delay + 1));
     expect(document.activeElement).toBe(container.querySelector("button"));
     expect(document.querySelector("[data-vui='tooltip-content']")?.textContent).toContain("click-tip");
   });
