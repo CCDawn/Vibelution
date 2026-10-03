@@ -15,6 +15,42 @@ default:
     - "No focused rule matched; use the runner smoke as a small signal and decide broader validation from the changed surface."
 
 rules:
+  - id: owned-runtime-shutdown
+    description: "Physical worker retirement and bounded backend shutdown/reopen."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/infrastructure/owned_executor.py"
+      - "core/infrastructure/tool_execution_scope.py"
+      - "core/web/lifecycle.py"
+      - "core/web/services/session/catalog_runtime.py"
+      - "tests/test_owned_executor.py"
+      - "tests/test_tool_execution_scope.py"
+      - "tests/test_web_lifecycle.py"
+      - "tests/test_workflow_executor_lifecycle.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_owned_executor.py tests/test_tool_execution_scope.py tests/test_web_lifecycle.py tests/test_session_catalog_runtime.py tests/test_workflow_executor_lifecycle.py -q -n 4 --dist loadfile"
+  - id: physical-tool-execution
+    description: "Tool timeout, cancellation and real tool completion remain separate."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/infrastructure/tool_executor.py"
+      - "core/infrastructure/tool_execution_scope.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_executor.py -q"
+  - id: workflow-worker-shutdown
+    description: "Meeting, heartbeat and command queue shutdown preserves durable intent and scheduling ownership."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/team_workflow/meeting_runtime.py"
+      - "core/web/services/team_workflow/meeting_driver_work.py"
+      - "core/web/services/team_workflow/research_runtime/hypothesis_command_attempts.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_research_workflow_meeting_runtime.py tests/test_research_workflow_meeting_driver_recovery.py tests/test_research_workflow_hypothesis_command_attempts.py -q -n 3 --dist loadfile"
   - id: financial-report-knowledge-integration
     description: "Financial report transport, owner-scoped evidence profile, native RAG provenance, and schema-aware tool arguments."
     executionLayers:

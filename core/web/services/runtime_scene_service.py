@@ -204,8 +204,8 @@ from .runtime_scene.query import (
     list_runtime_scene_evidence_for_agent,
     list_runtime_scenes,
     query_browser_user_action_telemetry,
-    read_runtime_scene_file,
 )
+from .runtime_scene.file_preview import read_runtime_scene_file
 from .runtime_scene.diagnosis import (
     _append_key_entry,
     _append_unique_path,

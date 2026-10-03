@@ -6,15 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliAgentRunView, CliAgentTerminalSession } from "../ChatCodingRoute";
 import { CliAgentRunTerminalPanel } from "./CliAgentRunTerminalPanel";
 
-const { terminalInstances, ensureTerminalSession } = vi.hoisted(() => ({
-  terminalInstances: [] as Array<{ written: string[]; disposed: boolean }>,
+const { terminalInstances, ensureTerminalSession, sendTerminalInput } = vi.hoisted(() => ({
+  terminalInstances: [] as Array<{ written: string[]; disposed: boolean; input: ((value: string) => void) | null }>,
   ensureTerminalSession: vi.fn(),
+  sendTerminalInput: vi.fn(),
 }));
 
 vi.mock("../../api/cliAgents", () => ({
   ensureCliAgentTerminalSession: ensureTerminalSession,
   resizeCliAgentTerminal: vi.fn().mockResolvedValue({}),
-  sendCliAgentTerminalInput: vi.fn().mockResolvedValue({}),
+  sendCliAgentTerminalInput: sendTerminalInput,
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
@@ -29,6 +30,7 @@ vi.mock("@xterm/xterm", () => ({
     cols = 80;
     written: string[] = [];
     disposed = false;
+    input: ((value: string) => void) | null = null;
 
     constructor() {
       terminalInstances.push(this);
@@ -36,7 +38,10 @@ vi.mock("@xterm/xterm", () => ({
 
     loadAddon() {}
     open() {}
-    onData() { return { dispose() {} }; }
+    onData(callback: (value: string) => void) {
+      this.input = callback;
+      return { dispose: () => { this.input = null; } };
+    }
     write(value: string) { this.written.push(value); }
     reset() {}
     focus() {}
@@ -52,6 +57,7 @@ class FakeEventSource {
   closed = false;
   closeCount = 0;
   onerror: ((event: Event) => void) | null = null;
+  onopen: ((event: Event) => void) | null = null;
 
   constructor(public readonly url: string) {
     FakeEventSource.instances.push(this);
@@ -154,6 +160,7 @@ describe("CliAgentRunTerminalPanel EventSource lifecycle", () => {
     FakeEventSource.instances = [];
     terminalInstances.length = 0;
     ensureTerminalSession.mockReset();
+    sendTerminalInput.mockReset().mockResolvedValue({ alive: true });
     vi.stubGlobal("EventSource", FakeEventSource);
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
@@ -216,6 +223,29 @@ describe("CliAgentRunTerminalPanel EventSource lifecycle", () => {
       stream.emit("terminal_output", { type: "terminal_output", chunk: "still connected" });
     });
     expect(terminalInstances[0]?.written).toContain("still connected");
+    unmount(root);
+  });
+
+  it("keeps input enabled during reconnect until the server confirms exit", async () => {
+    const { container, root } = mount(terminalSession("terminal-1", {
+      canInput: true, canResume: false, resumeAction: "none", displayMode: "live_terminal",
+    }));
+    await settleReact();
+    const stream = FakeEventSource.instances[0];
+    act(() => stream.fail());
+    expect(container.textContent).toContain("Reconnecting");
+    act(() => terminalInstances[0].input?.("first\n"));
+    await settleReact();
+    expect(sendTerminalInput).toHaveBeenCalledWith("terminal-1", { data: "first\n" });
+    act(() => stream.onopen?.(new Event("open")));
+    expect(container.textContent).not.toContain("Reconnecting");
+    act(() => stream.emit("terminal_status", {
+      type: "terminal_status", session: terminalSession("terminal-1", { alive: false }),
+    }));
+    act(() => terminalInstances[0].input?.("blocked\n"));
+    await settleReact();
+    expect(sendTerminalInput).toHaveBeenCalledTimes(1);
+    expect(stream.closed).toBe(true);
     unmount(root);
   });
 

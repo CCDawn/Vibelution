@@ -9,6 +9,9 @@ import ctypes
 import os
 from ctypes import wintypes
 
+JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
 
 class _Limits(ctypes.Structure):
     _fields_ = [("user", ctypes.c_int64), ("job_user", ctypes.c_int64),
@@ -57,8 +60,13 @@ class WindowsProcessJob:
         if not self._handle:
             raise ctypes.WinError(ctypes.get_last_error())
         limits = _ExtendedLimits()
-        limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        if not self._api.SetInformationJobObject(self._handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+        limits.basic.flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not self._api.SetInformationJobObject(
+            self._handle,
+            JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        ):
             error = ctypes.WinError(ctypes.get_last_error())
             self.close()
             raise error
@@ -83,6 +91,37 @@ class WindowsProcessJob:
         if not self._api.QueryInformationJobObject(self._handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting), None):
             raise ctypes.WinError(ctypes.get_last_error())
         return int(accounting.active)
+
+    def set_kill_on_job_close(self, enabled: bool) -> None:
+        """Toggle owner-exit cleanup while preserving every other Job limit.
+
+        The default remains enabled from construction. Detached helpers may
+        clear it only after ownership transfer succeeds, so closing their
+        owner's Job handle lets the child tree continue running.
+        """
+
+        if not self._handle:
+            raise OSError("Windows Job is already closed")
+        limits = _ExtendedLimits()
+        if not self._api.QueryInformationJobObject(
+            self._handle,
+            JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+            None,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if enabled:
+            limits.basic.flags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        else:
+            limits.basic.flags &= ~JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not self._api.SetInformationJobObject(
+            self._handle,
+            JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
 
     def terminate(self) -> None:
         if self._handle and not self._api.TerminateJobObject(self._handle, 1):

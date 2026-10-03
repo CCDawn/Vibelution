@@ -25,6 +25,7 @@ from ..runtime_scene_service import record_runtime_scene_event
 
 
 _MAX_INCREMENTAL_RECONCILE_ATTEMPTS = 3
+_DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 1.0
 _RUNTIME_SUPERVISOR_LOCK = threading.Lock()
 _RUNTIME_SUPERVISOR: "_CatalogRuntimeSupervisor | None" = None
 _RUNTIME_GENERATION = 0
@@ -56,6 +57,7 @@ class _CatalogRuntimeSupervisor:
         self._delay_seconds = max(0, int(delay_ms)) / 1000
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
+        self._workers: set[threading.Thread] = set()
         self._running = False
         self._closed = False
         self._retry_attempt = 0
@@ -76,13 +78,43 @@ class _CatalogRuntimeSupervisor:
         )
         self._schedule(reset_retry_budget=True)
 
-    def close(self) -> None:
+    def close(
+        self, *, timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+    ) -> dict[str, Any]:
+        deadline = time.monotonic() + max(0.0, float(timeout))
         with self._lock:
             self._closed = True
             timer = self._timer
             self._timer = None
+            workers = set(self._workers)
         if timer is not None:
             timer.cancel()
+            workers.add(timer)
+
+        current = threading.current_thread()
+        for worker in workers:
+            if worker is current or worker.ident is None or not worker.is_alive():
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            try:
+                worker.join(remaining)
+            except RuntimeError:
+                # A timer can be cancelled before its thread is started.
+                continue
+
+        with self._lock:
+            self._workers = {worker for worker in self._workers if worker.is_alive()}
+            pending = {
+                worker
+                for worker in self._workers | ({timer} if timer is not None else set())
+                if worker.is_alive()
+            }
+        return {
+            "closed": not pending,
+            "pendingWorkers": sorted(worker.name for worker in pending),
+        }
 
     def _schedule(self, *, reset_retry_budget: bool = False) -> None:
         with self._lock:
@@ -95,14 +127,20 @@ class _CatalogRuntimeSupervisor:
             self._schedule_locked(self._delay_seconds)
 
     def _schedule_locked(self, delay_seconds: float) -> None:
+        self._workers = {worker for worker in self._workers if worker.is_alive()}
         timer = threading.Timer(max(0.0, delay_seconds), self._run_reconcile)
         timer.daemon = True
+        timer.name = "vibelution-session-catalog-reconcile"
+        self._workers.add(timer)
         self._timer = timer
         timer.start()
 
     def _run_reconcile(self) -> None:
+        worker = threading.current_thread()
         with self._lock:
-            self._timer = None
+            self._workers = {item for item in self._workers if item.is_alive()}
+            if self._timer is worker:
+                self._timer = None
             if self._closed or self._running:
                 return
             self._running = True
@@ -194,18 +232,31 @@ class _CatalogRuntimeSupervisor:
             return
 
 
-def shutdown_session_catalog_runtime() -> None:
-    """Detach runtime observers and cancel pending catalog-only work."""
+def shutdown_session_catalog_runtime(
+    *, timeout: float = _DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+) -> dict[str, Any]:
+    """Detach catalog observers and drain incremental reconcile workers boundedly.
+
+    A supervisor that misses the deadline remains installed as a retiring
+    supervisor. Initializers must wait for a later successful drain before
+    opening another catalog generation.
+    """
 
     global _RUNTIME_GENERATION, _RUNTIME_SUPERVISOR
     with _RUNTIME_SUPERVISOR_LOCK:
         _RUNTIME_GENERATION += 1
         supervisor = _RUNTIME_SUPERVISOR
-        _RUNTIME_SUPERVISOR = None
         set_session_catalog_dirty_observer(None)
         catalog_bridge.set_session_query_shadow_provider(None)
-    if supervisor is not None:
-        supervisor.close()
+    if supervisor is None:
+        return {"closed": True, "pendingWorkers": []}
+
+    result = supervisor.close(timeout=timeout)
+    if result["closed"]:
+        with _RUNTIME_SUPERVISOR_LOCK:
+            if _RUNTIME_SUPERVISOR is supervisor:
+                _RUNTIME_SUPERVISOR = None
+    return result
 
 
 def initialize_session_catalog_runtime(
@@ -222,7 +273,14 @@ def initialize_session_catalog_runtime(
 
     global _RUNTIME_SUPERVISOR
 
-    shutdown_session_catalog_runtime()
+    shutdown_result = shutdown_session_catalog_runtime(
+        timeout=_DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+    )
+    if not shutdown_result["closed"]:
+        return SessionCatalogRuntimeStatus(
+            status="degraded",
+            error_type="CatalogShutdownPending",
+        )
     with _RUNTIME_SUPERVISOR_LOCK:
         generation = _RUNTIME_GENERATION
     mode = str(getattr(catalog_config, "mode", "off") or "off").strip().lower()

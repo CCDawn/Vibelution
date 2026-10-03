@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
 import { probeBackendHealthy, waitForBackendHealthy, workbenchHealthUrl } from "../src/process/workbenchBackendHealth.js";
@@ -30,6 +31,7 @@ import {
   runningCodeFingerprintReadPaths,
   sameProjectRoot,
   spawnWorkbenchBackend,
+  waitForWorkbenchBackendLogDrain,
   writeLauncherStateFile,
   workbenchBackendArgs,
   workbenchBackendEnv
@@ -40,6 +42,7 @@ import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
 import { runWorkbenchLifecycle, parseWorkbenchLifecycleResult } from "../src/process/workbenchLifecycle.js";
 import { __setWorkbenchJobNativeForTests, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess } from "../src/process/workbenchJob.js";
+import { BoundedStdioSink } from "../src/process/boundedStdio.js";
 
 function fakeBackendChild(pid = 4242) {
   return {
@@ -50,6 +53,49 @@ function fakeBackendChild(pid = 4242) {
     kill: () => true
   };
 }
+
+describe("workbench backend pipe ownership", () => {
+  it("leaves injected spawn seams file-free", () => {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-stdio-seam-"));
+    try {
+      const spawnImpl = vi.fn(() => fakeBackendChild());
+      spawnWorkbenchBackend({ workspaceRoot: root, pythonPath: "python", port: 8000, spawnImpl });
+      expect(spawnImpl.mock.calls[0][2].stdio).toEqual(["ignore", "ignore", "ignore"]);
+      expect(readdirSync(root)).toEqual([]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("keeps ownership until both log streams drain and then permits a replacement", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vibelution-stdio-owner-"));
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    try {
+      const input = {
+        workspaceRoot: root, pythonPath: "python", port: 8000,
+        spawnImpl: vi.fn(() => ({ ...fakeBackendChild(), stdout, stderr })),
+        logSinkFactory: (path: string) => new BoundedStdioSink(join(root, basename(path)), { maxBytes: 16 })
+      };
+      const spawned = spawnWorkbenchBackend(input);
+      expect(input.spawnImpl.mock.calls[0][2].stdio).toEqual(["ignore", "pipe", "pipe"]);
+      stdout.write("latest stdout");
+      stderr.write("latest stderr");
+      expect(await waitForWorkbenchBackendLogDrain(root, 4242, 5)).toBe(false);
+      expect(() => spawnWorkbenchBackend(input)).toThrow("log pipes have not drained");
+      expect(input.spawnImpl).toHaveBeenCalledOnce();
+      stdout.end();
+      expect(await waitForWorkbenchBackendLogDrain(root, 4242, 5)).toBe(false);
+      stderr.end();
+      expect(await waitForWorkbenchBackendLogDrain(root, 4242, 1000)).toBe(true);
+      expect(spawned.logStatus?.().every((status) => status.complete)).toBe(true);
+      expect(readFileSync(join(root, "backend.stdout.log"), "utf8")).toBe("latest stdout");
+      expect(() => spawnWorkbenchBackend({ ...input, spawnImpl: () => fakeBackendChild(), logSinkFactory: undefined })).not.toThrow();
+    } finally {
+      stdout.end(); stderr.end();
+      await waitForWorkbenchBackendLogDrain(root, 4242, 1000);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("blocked lifecycle diagnostics", () => {
   it("persists the blocked reason so an operator can see why a restart was refused", () => {
@@ -1367,7 +1413,8 @@ describe("runWorkbenchLifecycle", () => {
     const controller = new AbortController();
     __setWorkbenchJobNativeForTests({
       spawn: () => ({ pid: 4242, job: {} }), terminate,
-      activeCount: () => active, close: () => undefined
+      activeCount: () => active, close: () => undefined,
+      drainStatus: () => ({ complete: active === 0, channels: [] })
     });
     try {
       await expect(runWorkbenchLifecycle({

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.web.services import runtime_scene_service as facade
-from core.web.services.runtime_scene import diagnosis, package_index, query, record
+from core.web.services.runtime_scene import diagnosis, file_preview, package_index, query, record
 
 
 def test_facade_reexports_record_pack() -> None:
@@ -26,7 +26,7 @@ def test_electron_supervisor_catalog_accepts_workbench_navigation_outcomes() -> 
 def test_facade_reexports_query_pack() -> None:
     assert facade.list_runtime_scenes is query.list_runtime_scenes
     assert facade.get_runtime_scene_detail is query.get_runtime_scene_detail
-    assert facade.read_runtime_scene_file is query.read_runtime_scene_file
+    assert facade.read_runtime_scene_file is file_preview.read_runtime_scene_file
     assert facade.list_runtime_scene_evidence_for_agent is query.list_runtime_scene_evidence_for_agent
     assert facade.build_runtime_scene_prompt_index is query.build_runtime_scene_prompt_index
 

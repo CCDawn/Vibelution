@@ -646,11 +646,100 @@ def test_desktop_shell_status_bridge_uses_workspace_root(monkeypatch, tmp_path):
 
 def test_parse_args_accepts_desktop_shell_refresh_flags():
     args = desktop_entry.parse_args(
-        ["--action", "schedule-desktop-shell-refresh", "--wait-pid", "12", "--then-lifecycle", "start"]
+        [
+            "--action",
+            "schedule-desktop-shell-refresh",
+            "--wait-pid",
+            "12",
+            "--then-lifecycle",
+            "start",
+            "--scheduled-owner-token",
+            "owner-token",
+        ]
     )
     assert args.action == "schedule-desktop-shell-refresh"
     assert args.wait_pid == 12
     assert args.then_lifecycle == "start"
+    assert args.scheduled_owner_token == "owner-token"
+
+
+@pytest.mark.parametrize(
+    ("action", "lock_relative", "bridge_name"),
+    [
+        ("refresh-desktop-shell", ".runtime/launcher/desktop-shell-refresh.lock", "_refresh_desktop_shell_bridge"),
+        ("prebuild-desktop-shell", ".runtime/launcher/desktop-shell-prebuild.lock", "_prebuild_desktop_shell_bridge"),
+    ],
+)
+def test_scheduled_desktop_shell_entry_claims_lock_before_business(
+    monkeypatch,
+    capsys,
+    tmp_path,
+    action,
+    lock_relative,
+    bridge_name,
+):
+    import core.launcher.desktop_shell as shell
+
+    events: list[str] = []
+
+    def claim(root, *, lock_relative, lock_token):
+        events.append("claim")
+        assert Path(root) == tmp_path.resolve()
+        assert str(lock_relative).replace("\\", "/") == lock_relative_expected
+        assert lock_token == "owner-token"
+        return True
+
+    lock_relative_expected = lock_relative
+    monkeypatch.setattr(shell, "_claim_scheduled_desktop_shell_helper_lock", claim)
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        desktop_entry,
+        bridge_name,
+        lambda _args: events.append("business") or {"schemaVersion": 1, "ok": True},
+    )
+
+    result = desktop_entry.main(
+        [
+            "--action",
+            action,
+            "--output",
+            "json",
+            "--workspace",
+            str(tmp_path),
+            "--scheduled-owner-token",
+            "owner-token",
+        ]
+    )
+    assert result == 0
+    assert events == ["claim", "business"]
+    assert json.loads(capsys.readouterr().out)["ok"] is True
+
+
+def test_scheduled_desktop_shell_entry_stops_when_lock_claim_fails(monkeypatch, capsys, tmp_path):
+    import core.launcher.desktop_shell as shell
+
+    monkeypatch.setattr(shell, "_claim_scheduled_desktop_shell_helper_lock", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        desktop_entry,
+        "_refresh_desktop_shell_bridge",
+        lambda _args: pytest.fail("refresh must not run without a successful lock claim"),
+    )
+
+    result = desktop_entry.main(
+        [
+            "--action",
+            "refresh-desktop-shell",
+            "--output",
+            "json",
+            "--workspace",
+            str(tmp_path),
+            "--scheduled-owner-token",
+            "wrong-token",
+        ]
+    )
+    assert result == 2
+    assert json.loads(capsys.readouterr().out)["reason"] == "scheduled_helper_lock_claim_failed"
 
 
 def test_parse_args_accepts_launch_desktop_shell_flags():

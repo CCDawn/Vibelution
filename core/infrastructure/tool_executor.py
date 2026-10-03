@@ -19,7 +19,7 @@ import time
 import json
 from typing import Dict, Callable, Any, Optional
 from contextvars import ContextVar, copy_context
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import TimeoutError
 
 # 核心模块导入
 from core.chat.chat_result_contract import verification_from_tool_record
@@ -33,7 +33,11 @@ from core.infrastructure.tool_result import (
     package_tool_result_facts,
     tool_result_facts_payload,
 )
-from core.infrastructure.tool_execution_scope import register_current_tool_future
+from core.infrastructure.tool_execution_scope import (
+    ToolStopEvent,
+    create_owned_tool_executor,
+    register_current_tool_future,
+)
 from core.logging import debug as _debug_logger
 
 
@@ -730,13 +734,17 @@ class ToolExecutor:
         except Exception:
             return ""
 
-    def _bind_tool_cancel_checker(self, checker: Optional[Callable[[], str]]) -> Callable[[], str]:
+    def _bind_tool_cancel_checker(
+        self, checker: Optional[Callable[[], str]], stop_event: threading.Event | None = None,
+    ) -> Callable[[], str]:
         """Copy the session stop event onto the callable injected into the tool."""
 
         def probe() -> str:
-            return self._current_cancel_reason(checker)
+            return self._current_cancel_reason(checker) or (
+                "tool_stop_requested" if stop_event is not None and stop_event.is_set() else ""
+            )
 
-        event = getattr(checker, "_vibelution_stop_event", None)
+        event = stop_event if stop_event is not None else getattr(checker, "_vibelution_stop_event", None)
         if isinstance(event, threading.Event):
             setattr(probe, "_vibelution_stop_event", event)
         return probe
@@ -1006,10 +1014,15 @@ class ToolExecutor:
             )
             return (argument_error, None)
         cancel_checker = self._snapshot_cancel_checker()
+        session_stop_event = getattr(cancel_checker, "_vibelution_stop_event", None)
+        tool_stop_event = ToolStopEvent(
+            session_stop_event if isinstance(session_stop_event, threading.Event) else None
+        )
+        cancel_checker = self._bind_tool_cancel_checker(cancel_checker, tool_stop_event)
         if _tool_accepts_cancel_checker(func) and "_cancel_checker" not in call_args:
-            call_args["_cancel_checker"] = self._bind_tool_cancel_checker(cancel_checker)
+            call_args["_cancel_checker"] = cancel_checker
 
-        executor = ThreadPoolExecutor(max_workers=1)
+        executor = create_owned_tool_executor(tool_stop_event)
         future = None
 
         try:
@@ -1052,6 +1065,7 @@ class ToolExecutor:
             while True:
                 cancel_reason = self._current_cancel_reason(cancel_checker)
                 if cancel_reason:
+                    tool_stop_event.set()
                     future.cancel()
                     executor.shutdown(wait=False, cancel_futures=True)
                     error_msg = f"[取消] {tool_name} 已因停止请求中断：{cancel_reason}"
@@ -1187,6 +1201,7 @@ class ToolExecutor:
             return (result, None)
 
         except TimeoutError:
+            tool_stop_event.set()
             if future is not None:
                 future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
@@ -1274,6 +1289,7 @@ class ToolExecutor:
             return (error_msg, None)
 
         except Exception as e:
+            tool_stop_event.set()
             executor.shutdown(wait=False, cancel_futures=True)
             error_msg = f"[错误] {type(e).__name__}: {e}"
             publish_tool_event(EventNames.TOOL_ERROR, {
@@ -1314,6 +1330,10 @@ class ToolExecutor:
                 lifecycle=True,
             )
             return (error_msg, None)
+
+        finally:
+            # Even a call skipped before submit must retire its registered pool.
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _resolve_timeout(self, tool_name: str, tool_args: dict) -> int:
         timeout = self._timeout_map.get(tool_name, 30)

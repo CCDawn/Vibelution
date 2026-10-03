@@ -112,6 +112,50 @@ DISCUSSION_STEP_MARGIN_MS = 60_000
 # whose progress stamp went stale inside one step.
 WEDGED_DRIVER_PROBLEM = "driver_lease_lapsed_no_progress"
 
+_LEASE_HEARTBEAT_LOCK = threading.Lock()
+_LEASE_HEARTBEATS: dict[threading.Thread, threading.Event] = {}
+
+
+def _prune_lease_heartbeats_locked() -> None:
+    for thread in tuple(_LEASE_HEARTBEATS):
+        if not thread.is_alive():
+            del _LEASE_HEARTBEATS[thread]
+
+
+def stop_lease_heartbeats() -> int:
+    """Signal every owned lease heartbeat to exit during backend shutdown."""
+
+    with _LEASE_HEARTBEAT_LOCK:
+        _prune_lease_heartbeats_locked()
+        events = tuple(_LEASE_HEARTBEATS.values())
+    for stop_event in events:
+        stop_event.set()
+    return len(events)
+
+
+def lease_heartbeat_snapshot() -> dict[str, Any]:
+    """Report physical heartbeat threads still owned by this module."""
+
+    with _LEASE_HEARTBEAT_LOCK:
+        _prune_lease_heartbeats_locked()
+        pending = tuple(thread for thread in _LEASE_HEARTBEATS if thread.is_alive())
+    return {
+        "closed": not pending,
+        "pendingCount": len(pending),
+        "pendingThreads": sorted(thread.name for thread in pending),
+    }
+
+
+def join_lease_heartbeats_until(deadline: float) -> dict[str, Any]:
+    """Join registered heartbeat threads using the caller's shared deadline."""
+
+    with _LEASE_HEARTBEAT_LOCK:
+        threads = tuple(_LEASE_HEARTBEATS)
+    for thread in threads:
+        if thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, float(deadline) - time.monotonic()))
+    return lease_heartbeat_snapshot()
+
 _LOCK = threading.RLock()
 _WORKER_BOOT_ID = uuid.uuid4().hex
 # In-memory driver progress stamps: (teamId, meetingRoundId, actionKind) ->
@@ -552,7 +596,7 @@ def start_lease_heartbeat(
     interval_s = max(int(interval_ms), 10) / 1000.0
     heartbeat_state = {"lapsed": False}
 
-    def _loop() -> None:
+    def _run() -> None:
         while not stop_event.wait(interval_s):
             try:
                 if progress_window_ms is not None and not heartbeat_state["lapsed"]:
@@ -574,11 +618,20 @@ def start_lease_heartbeat(
                 continue
 
     thread = threading.Thread(
-        target=_loop,
+        target=_run,
         name=f"meeting-driver-lease:{meeting_round_id}",
         daemon=True,
     )
-    thread.start()
+    with _LEASE_HEARTBEAT_LOCK:
+        # Retain the handle through the thread's entire physical exit. Removing
+        # it in its own finally would let shutdown miss the worker tail.
+        _prune_lease_heartbeats_locked()
+        _LEASE_HEARTBEATS[thread] = stop_event
+        try:
+            thread.start()
+        except BaseException:
+            _LEASE_HEARTBEATS.pop(thread, None)
+            raise
     return thread
 
 

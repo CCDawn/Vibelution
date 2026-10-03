@@ -366,18 +366,36 @@ def test_owned_runtime_shutdown_runs_all_owners_when_one_fails_or_cancels(
 
     monkeypatch.setattr(background_tasks, "shutdown_background_tasks", background_shutdown)
     monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions",
-                        lambda: called.append("terminal"))
+                         lambda: called.append("terminal") or {"closed": True})
     monkeypatch.setattr(
         session_service,
         "shutdown_session_service",
         lambda **_kwargs: called.append("session-executors") or {"closed": True},
     )
+    for module_name, function_name, owner_name in (
+        ("core.infrastructure.tool_execution_scope", "shutdown_tool_execution", "tools"),
+        ("core.web.services.chat_room_service", "shutdown_chat_room_executors", "rooms"),
+        ("core.web.services.team_workflow.meeting_runtime", "shutdown_meeting_discussion_executor", "meeting"),
+        ("core.web.services.team_workflow.research_runtime.hypothesis_command_attempts", "shutdown_hypothesis_command_executor", "commands"),
+    ):
+        callback = lambda owner=owner_name, **_kwargs: called.append(owner) or {"closed": True}
+        monkeypatch.setitem(sys.modules, module_name, SimpleNamespace(**{function_name: callback}))
 
     result = asyncio.run(
         lifecycle._shutdown_owned_runtime_resources(deadline=time.monotonic() + 1)
     )
-    assert sorted(called) == ["background", "session-executors", "terminal"]
+    assert sorted(called) == ["background", "commands", "meeting", "rooms", "session-executors", "terminal", "tools"]
     assert result["closed"] is False
+
+
+@pytest.mark.parametrize("owner_result", [{"closed": False}, None, {}])
+def test_session_catalog_shutdown_propagates_unverified_worker(monkeypatch, owner_result):
+    from core.web.services.session import catalog_runtime, directory_runtime
+
+    monkeypatch.setattr(directory_runtime, "shutdown_session_directory_runtime", lambda **_kwargs: None)
+    monkeypatch.setattr(catalog_runtime, "shutdown_session_catalog_runtime", lambda **_kwargs: owner_result)
+    result = lifecycle.shutdown_session_catalog_on_shutdown(deadline=time.monotonic() + 1)
+    assert result == {"closed": False, "failedOwners": ["session_catalog"]}
 
 
 def test_session_executor_shutdown_reopens_both_pools_across_lifecycles(monkeypatch):

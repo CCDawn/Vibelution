@@ -1,17 +1,17 @@
 import { execFileSync, spawn as nodeSpawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  closeSync,
   existsSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync
 } from "node:fs";
 import { dirname, join, resolve as resolvePath } from "node:path";
+import type { Readable } from "node:stream";
 
+import { BoundedStdioSink, type BoundedStdioStatus } from "./boundedStdio.js";
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 import {
   PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
@@ -36,7 +36,7 @@ import {
   type WorkbenchPortOwnerResolution
 } from "./resolveWorkbenchPortOwner.js";
 import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
-import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
+import { captureTrackedWorkbenchJobRetirement, closeTrackedWorkbenchJob, hasTrackedWorkbenchJob, spawnTrackedWorkbenchProcess, terminateTrackedWorkbenchJob } from "./workbenchJob.js";
 import {
   BACKEND_HEALTH_HTTP_TIMEOUT_MS,
   defaultFetchWorkbenchHealth,
@@ -74,6 +74,8 @@ export type WorkbenchBackendSpawnChild = {
   pid?: number;
   killed?: boolean;
   exitCode?: number | null;
+  stdout?: Readable | null;
+  stderr?: Readable | null;
   unref?: () => void;
   kill: (signal?: NodeJS.Signals) => boolean;
   once?: (event: "error", listener: (error: Error) => void) => unknown;
@@ -87,7 +89,7 @@ export type WorkbenchBackendSpawn = (
     env: NodeJS.ProcessEnv;
     windowsHide: boolean;
     detached: boolean;
-    stdio: ["ignore", number, number] | ["ignore", "ignore", "ignore"];
+    stdio: ["ignore", "pipe", "pipe"] | ["ignore", "ignore", "ignore"];
   }
 ) => WorkbenchBackendSpawnChild;
 
@@ -815,9 +817,14 @@ export async function reclaimStaleWorkbenchBackend(input: {
   const killPid = input.killPid ?? terminatePid;
   const failedTreePids = new Set<number>();
   const terminateOne = async (pid: number): Promise<boolean> => {
+    const finishLogDrain = async (): Promise<boolean> => {
+      const drained = await waitForWorkbenchBackendLogDrain(input.workspaceRoot, pid);
+      if (!drained) failedTreePids.add(pid);
+      return drained;
+    };
     if (await terminateTrackedWorkbenchJob(input.workspaceRoot)) {
       if (!pidAlive(pid)) {
-        return true;
+        return await finishLogDrain();
       }
     }
     if (input.terminateProcessTree) {
@@ -832,7 +839,7 @@ export async function reclaimStaleWorkbenchBackend(input: {
         // PID-reuse mis-kill to hit. If the owned port is also free, no
         // live listener remains to account for either.
         if (!pidAlive(pid)) {
-          return true;
+          return await finishLogDrain();
         }
         failedTreePids.add(pid);
         return false;
@@ -841,10 +848,10 @@ export async function reclaimStaleWorkbenchBackend(input: {
       if (!terminated) {
         failedTreePids.add(pid);
       }
-      return terminated;
+      return terminated && await finishLogDrain();
     }
     await killPid(pid);
-    return true;
+    return await finishLogDrain();
   };
   const extraPids = [...new Set((input.extraPids ?? [])
     .map((pid) => Math.trunc(Number(pid)))
@@ -945,7 +952,15 @@ export async function reclaimStaleWorkbenchBackend(input: {
       });
       gracefulCompleted = graceful.completed;
       if (gracefulCompleted) {
-        await closeTrackedWorkbenchJob(input.workspaceRoot);
+        const ownedJob = hasTrackedWorkbenchJob(input.workspaceRoot);
+        const jobClosed = await closeTrackedWorkbenchJob(input.workspaceRoot);
+        if ((ownedJob && !jobClosed) || !(await waitForWorkbenchBackendLogDrain(input.workspaceRoot, occupant.pid))) {
+          return {
+            reclaimed: false,
+            reason: `backend pid ${occupant.pid} exited but its owned log drains remain pending`,
+            verifiedPid: occupant.pid
+          };
+        }
       }
     }
     const restartPauseConfirmed = graceful?.status === 202 && graceful.requested;
@@ -1256,7 +1271,36 @@ export type SpawnedWorkbenchBackend = {
   pythonPath: string;
   args: string[];
   spawnError: () => Error | null;
+  logStatus?: () => BoundedStdioStatus[];
 };
+
+type BackendLogOwner = { pid: number; sinks: BoundedStdioSink[] };
+const backendLogOwners = new Map<string, BackendLogOwner>();
+function backendLogKey(workspaceRoot: string): string {
+  const path = resolvePath(workspaceRoot);
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+export function readWorkbenchBackendLogStatus(workspaceRoot: string): BoundedStdioStatus[] {
+  return backendLogOwners.get(backendLogKey(workspaceRoot))?.sinks.map((sink) => sink.snapshot()) ?? [];
+}
+
+export async function waitForWorkbenchBackendLogDrain(
+  workspaceRoot: string, expectedPid?: number, timeoutMs = 8_000
+): Promise<boolean> {
+  const key = backendLogKey(workspaceRoot);
+  const owner = backendLogOwners.get(key);
+  if (!owner || (expectedPid !== undefined && owner.pid !== expectedPid)) return true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const complete = await Promise.race([
+      Promise.all(owner.sinks.map((sink) => sink.retire())).then((results) => results.every((result) => result.complete)),
+      new Promise<boolean>((resolveWait) => { timer = setTimeout(() => resolveWait(false), Math.max(0, timeoutMs)); })
+    ]);
+    if (complete && backendLogOwners.get(key) === owner) backendLogOwners.delete(key);
+    return complete;
+  } finally { if (timer) clearTimeout(timer); }
+}
 
 export function spawnWorkbenchBackend(input: {
   workspaceRoot: string;
@@ -1272,6 +1316,8 @@ export function spawnWorkbenchBackend(input: {
   spawnImpl?: WorkbenchBackendSpawn;
   fileExists?: (path: string) => boolean;
   extraEnv?: NodeJS.ProcessEnv;
+  /** Explicit test seam; injected spawn alone never creates log files. */
+  logSinkFactory?: (path: string) => BoundedStdioSink;
 }): SpawnedWorkbenchBackend {
   const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
   const fileExists = input.fileExists ?? existsSync;
@@ -1332,38 +1378,38 @@ export function spawnWorkbenchBackend(input: {
     };
     return { child, pythonPath, args, spawnError: () => null };
   }
-  let stdio: ["ignore", number, number] | ["ignore", "ignore", "ignore"] = ["ignore", "ignore", "ignore"];
-  let stdoutFd: number | undefined;
-  let stderrFd: number | undefined;
-  if (!input.spawnImpl) {
-    const runtimeDir = resolveLauncherRuntimeDir(input.workspaceRoot);
-    mkdirSync(runtimeDir, { recursive: true });
-    stdoutFd = openSync(join(runtimeDir, "backend.stdout.log"), "a");
-    stderrFd = openSync(join(runtimeDir, "backend.stderr.log"), "a");
-    stdio = ["ignore", stdoutFd, stderrFd];
-  }
-  try {
-    const child = spawnImpl(pythonPath, args, {
-      cwd: input.workspaceRoot,
-      env,
-      windowsHide: true,
-      detached: true,
-      stdio
-    });
-    let spawnError: Error | null = null;
-    child.once?.("error", (error) => {
-      spawnError = error instanceof Error ? error : new Error(String(error));
-    });
-    child.unref?.();
-    return { child, pythonPath, args, spawnError: () => spawnError };
-  } finally {
-    if (stdoutFd !== undefined) {
-      closeSync(stdoutFd);
+  const captureLogs = !input.spawnImpl || Boolean(input.logSinkFactory);
+  const key = backendLogKey(input.workspaceRoot);
+  if (backendLogOwners.has(key)) throw new Error("Previous workbench log pipes have not drained");
+  const runtimeDir = resolveLauncherRuntimeDir(input.workspaceRoot);
+  if (captureLogs && !input.logSinkFactory) mkdirSync(runtimeDir, { recursive: true });
+  const child = spawnImpl(pythonPath, args, {
+    cwd: input.workspaceRoot, env, windowsHide: true, detached: true,
+    stdio: captureLogs ? ["ignore", "pipe", "pipe"] : ["ignore", "ignore", "ignore"]
+  });
+  let spawnError: Error | null = null;
+  child.once?.("error", (error) => {
+    spawnError = error instanceof Error ? error : new Error(String(error));
+  });
+  const sinks: BoundedStdioSink[] = [];
+  if (captureLogs) {
+    const owner: BackendLogOwner = { pid: Number(child.pid || 0), sinks };
+    backendLogOwners.set(key, owner);
+    for (const [name, source] of [["stdout", child.stdout], ["stderr", child.stderr]] as const) {
+      if (!source) continue;
+      const path = join(runtimeDir, `backend.${name}.log`);
+      const sink = input.logSinkFactory?.(path) ?? new BoundedStdioSink(path);
+      sinks.push(sink);
+      source.once("error", (error) => { sink.recordError(error); sink.end(); });
+      source.once("close", () => { if (!sink.writableEnded) sink.end(); });
+      source.pipe(sink);
     }
-    if (stderrFd !== undefined) {
-      closeSync(stderrFd);
-    }
+    void Promise.all(sinks.map((sink) => sink.completion)).then((results) => {
+      if (results.every((result) => result.complete) && backendLogOwners.get(key) === owner) backendLogOwners.delete(key);
+    });
   }
+  child.unref?.();
+  return { child, pythonPath, args, spawnError: () => spawnError, logStatus: () => sinks.map((sink) => sink.snapshot()) };
 }
 
 // launcherLifecycleSupervisor.beginIntent aborts a superseded lease with an
@@ -1929,10 +1975,16 @@ export async function executeMainLineWorkbench(
     });
   };
   const retireSpawnedTree = async (): Promise<void> => {
+    const finishLogDrain = async (): Promise<void> => {
+      if (!(await waitForWorkbenchBackendLogDrain(input.workspaceRoot, spawnPid))) {
+        throw new Error(`workbench backend log drain remains pending for pid ${spawnPid}`);
+      }
+    };
     if (spawnPid <= 0) {
       return;
     }
     if (retireOwnedJob && await retireOwnedJob()) {
+      await finishLogDrain();
       return;
     }
     if (terminateProcessTree) {
@@ -1942,10 +1994,12 @@ export async function executeMainLineWorkbench(
       if (!(await terminateProcessTree(spawnPid, backendIdentity))) {
         throw new Error(`workbench backend process-tree retirement was not verified for pid ${spawnPid}`);
       }
+      await finishLogDrain();
       return;
     }
     if (input.killPid) {
       await input.killPid(spawnPid);
+      await finishLogDrain();
       return;
     }
     throw new Error(`workbench backend process-tree terminator was not configured for pid ${spawnPid}`);

@@ -43,9 +43,10 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+
+from core.infrastructure.owned_executor import OwnedThreadPoolExecutor
 
 SCHEMA_VERSION = 1
 ATTEMPT_CONTRACT = "hypothesis-first-command-attempt/v1"
@@ -82,12 +83,18 @@ def _command_max_workers() -> int:
 
 # Dedicated bounded pool: command bodies schedule meeting discussions on the
 # governed meeting executor, so they must not compete for those workers.
-_COMMAND_EXECUTOR = ThreadPoolExecutor(
+_COMMAND_EXECUTOR = OwnedThreadPoolExecutor(
     max_workers=_command_max_workers(),
     thread_name_prefix="hypothesis-command",
 )
 
 _LOCK = threading.RLock()
+_COMMAND_LIFECYCLE_LOCK = threading.RLock()
+_COMMAND_FUTURE_LOCK = threading.Lock()
+_COMMAND_FUTURES: dict[Any, dict[str, Any]] = {}
+_COMMAND_CANCELLED_ATTEMPTS: list[dict[str, Any]] = []
+_COMMAND_LIFECYCLE_STOPPING = False
+_COMMAND_LIFECYCLE_FAILURES: set[str] = set()
 _WORKER_BOOT_ID = uuid.uuid4().hex
 # In-flight submissions, mirroring meeting_runtime's dedup registry.
 _ACTIVE_ATTEMPTS: set[str] = set()
@@ -469,7 +476,13 @@ def submit_execution(
             return
         _ACTIVE_ATTEMPTS.add(attempt_id)
     try:
-        _COMMAND_EXECUTOR.submit(_run_attempt, attempt, run)
+        with _COMMAND_LIFECYCLE_LOCK:
+            if _COMMAND_LIFECYCLE_STOPPING:
+                raise RuntimeError("hypothesis command lifecycle is shutting down")
+            future = _COMMAND_EXECUTOR.submit(_run_attempt, attempt, run)
+            with _COMMAND_FUTURE_LOCK:
+                _COMMAND_FUTURES[future] = dict(attempt)
+            future.add_done_callback(_command_future_done)
     except Exception as exc:
         with _LOCK:
             _ACTIVE_ATTEMPTS.discard(attempt_id)
@@ -670,3 +683,114 @@ def _record_attempt_event(
         )
     except Exception:  # noqa: BLE001 - diagnostics must never alter outcomes
         return
+
+
+def _command_future_done(future: Any) -> None:
+    """Track canceled queued attempts without doing I/O in Future callbacks."""
+
+    with _COMMAND_FUTURE_LOCK:
+        attempt = _COMMAND_FUTURES.pop(future, None)
+        if future.cancelled() and attempt is not None:
+            _COMMAND_CANCELLED_ATTEMPTS.append(attempt)
+
+
+def _finalize_cancelled_command_attempts() -> tuple[int, list[str]]:
+    with _COMMAND_FUTURE_LOCK:
+        cancelled = list(_COMMAND_CANCELLED_ATTEMPTS)
+        _COMMAND_CANCELLED_ATTEMPTS.clear()
+    failed: list[str] = []
+    for attempt in cancelled:
+        attempt_id = str(attempt.get("attemptId") or "")
+        with _LOCK:
+            _ACTIVE_ATTEMPTS.discard(attempt_id)
+        try:
+            finish_attempt(
+                attempt,
+                status=STATUS_FAILED,
+                error={
+                    "code": "command_attempt_cancelled_on_shutdown",
+                    "message": "The command had not started before backend shutdown.",
+                    "statusCode": 503,
+                },
+            )
+            _record_attempt_event(
+                "hypothesis_command.attempt_failed",
+                outcome="failed",
+                level="warning",
+                fields={
+                    "teamId": str(attempt.get("teamId") or ""),
+                    "questionId": str(attempt.get("questionId") or ""),
+                    "command": str(attempt.get("command") or ""),
+                    "attemptId": attempt_id,
+                    "errorType": "ShutdownBeforeStart",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - expose durable closeout failure
+            failed.append(f"attempt:{attempt_id or 'unknown'}:{type(exc).__name__}")
+            with _COMMAND_FUTURE_LOCK:
+                _COMMAND_CANCELLED_ATTEMPTS.append(attempt)
+    return len(cancelled), failed
+
+
+def begin_hypothesis_command_lifecycle() -> dict[str, Any]:
+    """Reopen command admission only after all prior command workers exit."""
+
+    global _COMMAND_LIFECYCLE_STOPPING
+    with _COMMAND_LIFECYCLE_LOCK:
+        if _COMMAND_LIFECYCLE_FAILURES:
+            _, failures = _finalize_cancelled_command_attempts()
+            if failures:
+                _COMMAND_LIFECYCLE_FAILURES.update(failures)
+                return {
+                    "opened": False,
+                    "recreated": False,
+                    "failed": sorted(_COMMAND_LIFECYCLE_FAILURES),
+                }
+            _COMMAND_LIFECYCLE_FAILURES.clear()
+        result = dict(_COMMAND_EXECUTOR.begin())
+        if result.get("opened"):
+            _COMMAND_LIFECYCLE_STOPPING = False
+        return result
+
+
+def stop_hypothesis_command_admission() -> dict[str, Any]:
+    """Close command admission and fail durable attempts canceled before start."""
+
+    global _COMMAND_LIFECYCLE_STOPPING
+    with _COMMAND_LIFECYCLE_LOCK:
+        _COMMAND_LIFECYCLE_STOPPING = True
+    failures: list[str] = []
+    try:
+        _COMMAND_EXECUTOR.stop_admission(cancel_futures=True)
+    except Exception as exc:  # noqa: BLE001 - still close durable canceled attempts
+        failures.append(f"executor_stop:{type(exc).__name__}")
+    canceled_count, finalize_failures = _finalize_cancelled_command_attempts()
+    failures.extend(finalize_failures)
+    if failures:
+        _COMMAND_LIFECYCLE_FAILURES.update(failures)
+    else:
+        _COMMAND_LIFECYCLE_FAILURES.clear()
+    return {
+        "closed": not failures,
+        "admissionClosed": not failures,
+        "cancelledQueuedAttempts": canceled_count,
+        "failed": sorted(set(failures)),
+    }
+
+
+def shutdown_hypothesis_command_executor(*, deadline: float) -> dict[str, Any]:
+    """Drain accepted command work against the shared backend deadline."""
+
+    stop_result = stop_hypothesis_command_admission()
+    result = dict(_COMMAND_EXECUTOR.shutdown_until(deadline))
+    _, finalize_failures = _finalize_cancelled_command_attempts()
+    failed = sorted(
+        set(result.get("failed", []))
+        | set(stop_result.get("failed", []))
+        | set(finalize_failures)
+    )
+    result["failed"] = failed
+    result["closed"] = bool(result.get("closed")) and not failed
+    if result["closed"]:
+        _COMMAND_LIFECYCLE_FAILURES.clear()
+    return result

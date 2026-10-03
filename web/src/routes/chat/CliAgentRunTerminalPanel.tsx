@@ -60,6 +60,10 @@ export function CliAgentRunTerminalPanel({
 }) {
   const [terminalSession, setTerminalSession] = useState<CliAgentTerminalSession | null>(null);
   const [terminalError, setTerminalError] = useState("");
+  const [terminalStreamDisconnected, setTerminalStreamDisconnected] = useState(false);
+  const terminalDisplayError = terminalError || (terminalStreamDisconnected
+    ? (lang === "zh" ? "终端连接中断，正在重新连接。" : "Terminal connection interrupted. Reconnecting.")
+    : "");
   const [connecting, setConnecting] = useState(false);
   const [terminalHasOutput, setTerminalHasOutput] = useState(false);
   const [terminalStreamGeneration, setTerminalStreamGeneration] = useState(0);
@@ -91,7 +95,7 @@ export function CliAgentRunTerminalPanel({
     : run.commandLine);
   const snapshotFallbackAvailable = Boolean(String(terminalSession?.screenText || "").trim());
   const transcriptReplayBlocked = terminalReadonly && terminalSession?.transcriptTailReplayable === false && !snapshotFallbackAvailable;
-  const emptyText = terminalError
+  const emptyText = terminalDisplayError
     || (terminalReadonly
       ? (terminalCanResume
         ? (lang === "zh" ? "当前显示的是历史终端。恢复会话后才能继续输入。" : "This is terminal history. Resume the session before typing.")
@@ -418,6 +422,11 @@ export function CliAgentRunTerminalPanel({
       return;
     }
     const stream = new EventSource(`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/events`);
+    let disposed = false;
+    setTerminalStreamDisconnected(false);
+    stream.onopen = () => {
+      if (!disposed) setTerminalStreamDisconnected(false);
+    };
     const handleEvent = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(String(event.data || "{}")) as CliAgentTerminalEvent;
@@ -426,6 +435,7 @@ export function CliAgentRunTerminalPanel({
           return;
         }
         if (payload.session) {
+          setTerminalStreamDisconnected(false);
           setTerminalSession(payload.session);
           const eventType = String(payload.type || event.type || "");
           if (
@@ -451,9 +461,12 @@ export function CliAgentRunTerminalPanel({
     stream.onerror = () => {
       // EventSource retries transport failures itself. Keep this separate from
       // the server-confirmed terminal_snapshot / terminal_status close path.
-      setTerminalSession((current) => current ? { ...current, alive: false, canInput: false } : current);
+      if (!disposed) setTerminalStreamDisconnected(true);
     };
     return () => {
+      disposed = true;
+      stream.onopen = null;
+      stream.onerror = null;
       stream.removeEventListener("terminal_snapshot", handleEvent as EventListener);
       stream.removeEventListener("terminal_output", handleEvent as EventListener);
       stream.removeEventListener("terminal_status", handleEvent as EventListener);
@@ -498,12 +511,12 @@ export function CliAgentRunTerminalPanel({
           aria-label={`${run.title} ${lang === "zh" ? "终端输出" : "terminal output"}`}
         >
           <div ref={terminalElementRef} className={styles.cliAgentTerminalOutput} />
-          {terminalError || terminalReadonly || !terminalHasOutput ? (
+          {terminalDisplayError || terminalReadonly || !terminalHasOutput ? (
             <div
-              className={styles.cliAgentTerminalOverlay}
-              data-tone={terminalError ? "error" : "muted"}
-              role={terminalError ? "alert" : "status"}
-              aria-live={terminalError ? "assertive" : "polite"}
+              className={`${styles.cliAgentTerminalOverlay} ${terminalCanInput ? "pointer-events-none" : ""}`}
+              data-tone={terminalDisplayError ? "error" : "muted"}
+              role={terminalDisplayError ? "alert" : "status"}
+              aria-live={terminalDisplayError ? "assertive" : "polite"}
               aria-atomic="true"
             >
               {emptyText}

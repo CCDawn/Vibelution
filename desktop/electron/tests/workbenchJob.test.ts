@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,8 @@ import {
   type WorkbenchJobNative
 } from "../src/process/workbenchJob.js";
 
+const completeDrainStatus = () => ({ complete: true, channels: [] });
+
 describe("workbench job registry", () => {
   afterEach(() => {
     __setWorkbenchJobNativeForTests(undefined);
@@ -25,7 +27,7 @@ describe("workbench job registry", () => {
     const close = vi.fn();
     __setWorkbenchJobNativeForTests({
       spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
-      activeCount: () => active, close
+      activeCount: () => active, drainStatus: completeDrainStatus, close
     });
     spawnTrackedWorkbenchProcess("C:/natural-exit", {
       executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
@@ -37,27 +39,35 @@ describe("workbench job registry", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("does not let an old retirement delete or terminate a replacement job", async () => {
+  it("keeps the old job registered until both output drains finish before replacement", async () => {
     vi.useFakeTimers();
     let generation = 0;
     const counts = new Map<object, number>();
+    const drains = new Map<object, boolean>();
+    const jobs: object[] = [];
     const close = vi.fn((job) => counts.set(job, 0));
-    const terminate = vi.fn(() => true);
+    const terminate = vi.fn((job: object) => { counts.set(job, 0); return true; });
     __setWorkbenchJobNativeForTests({
       spawn: () => {
         const job = {};
+        jobs.push(job);
         counts.set(job, 1);
+        drains.set(job, false);
         return { pid: process.pid + (++generation), job };
-      }, terminate, activeCount: (job) => counts.get(job) ?? 0, close
+      }, terminate, activeCount: (job) => counts.get(job) ?? 0,
+      drainStatus: (job) => ({ complete: drains.get(job) ?? true, channels: [] }), close
     });
     const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
     const old = spawnTrackedWorkbenchProcess("C:/replacement", input);
     const retireOld = captureTrackedWorkbenchJobRetirement("C:/replacement", old.pid)!;
     const retirement = terminateTrackedWorkbenchJob("C:/replacement", old.pid);
-    const replacement = spawnTrackedWorkbenchProcess("C:/replacement", input);
+    expect(() => spawnTrackedWorkbenchProcess("C:/replacement", input)).toThrow("still terminating or draining");
+    expect(hasTrackedWorkbenchJob("C:/replacement")).toBe(true);
+    drains.set(jobs[0], true);
     await vi.advanceTimersByTimeAsync(100);
     await retirement;
-    expect(hasTrackedWorkbenchJob("C:/replacement")).toBe(true);
+    expect(hasTrackedWorkbenchJob("C:/replacement")).toBe(false);
+    const replacement = spawnTrackedWorkbenchProcess("C:/replacement", input);
     const calls = terminate.mock.calls.length;
     await expect(terminateTrackedWorkbenchJob("C:/replacement", old.pid)).resolves.toBe(false);
     expect(terminate.mock.calls.length).toBe(calls);
@@ -70,9 +80,10 @@ describe("workbench job registry", () => {
     "retains ownership and blocks replacement when %s",
     async (failure) => {
       const spawn = vi.fn(() => ({ pid: process.pid, job: {} }));
-      const terminate = vi.fn(() => true);
+      let active = failure === "close throws" ? 0 : 1;
+      const terminate = vi.fn(() => { active = 0; return true; });
       const close = vi.fn();
-      __setWorkbenchJobNativeForTests({ spawn, terminate, activeCount: () => 0, close });
+      __setWorkbenchJobNativeForTests({ spawn, terminate, activeCount: () => active, drainStatus: completeDrainStatus, close });
       const input = { executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err" };
       const old = spawnTrackedWorkbenchProcess("C:/failed-replacement", input);
       if (failure === "terminate throws") terminate.mockImplementationOnce(() => { throw new Error("terminate failed"); });
@@ -90,7 +101,8 @@ describe("workbench job registry", () => {
     const terminate = vi.fn(() => false);
     const close = vi.fn();
     __setWorkbenchJobNativeForTests({
-      spawn: () => ({ pid: process.pid, job: {} }), terminate, activeCount: () => 0, close
+      spawn: () => ({ pid: process.pid, job: {} }), terminate, activeCount: () => 0,
+      drainStatus: completeDrainStatus, close
     });
     const old = spawnTrackedWorkbenchProcess("C:/unconfirmed-retirement", {
       executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
@@ -120,6 +132,7 @@ describe("workbench job registry", () => {
         return true;
       },
       activeCount: () => active,
+      drainStatus: completeDrainStatus,
       close: () => undefined
     };
     __setWorkbenchJobNativeForTests(native);
@@ -238,10 +251,11 @@ nativeAddon("windows workbench job", () => {
       expect(native.activeCount(spawned.job)).toBeGreaterThan(0);
       native.terminate(spawned.job);
       const gone = Date.now() + 8_000;
-      while (Date.now() < gone && native.activeCount(spawned.job) > 0) {
+      while (Date.now() < gone && (native.activeCount(spawned.job) > 0 || !native.drainStatus(spawned.job).complete)) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       expect(native.activeCount(spawned.job)).toBe(0);
+      expect(native.drainStatus(spawned.job).complete).toBe(true);
       expect(pidAlive(spawned.pid)).toBe(false);
       expect(pidAlive(childPid)).toBe(false);
     } finally {
@@ -260,6 +274,170 @@ nativeAddon("windows workbench job", () => {
       }
     }
   }, 20_000);
+
+  it("bounds both output logs, drains both streams, and releases file handles on exit", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-bounded-job-"));
+    const stdoutPath = join(directory, "stdout.log");
+    const stderrPath = join(directory, "stderr.log");
+    const maxLogBytes = 64 * 1024;
+    const native = (await import("../src/process/workbenchJob.js")).loadWorkbenchJobNative();
+    const script = [
+      "const fs=require('node:fs');const out=Buffer.alloc(4096,65);const err=Buffer.alloc(4096,66);",
+      "for(let i=0;i<1024;i++){fs.writeSync(1,out);fs.writeSync(2,err);}"
+    ].join("");
+    const spawned = native.spawn({
+      executable: process.execPath,
+      arguments: ["-e", script],
+      cwd: directory,
+      env: { ...process.env },
+      stdoutPath,
+      stderrPath,
+      maxLogBytes
+    });
+    try {
+      const deadline = Date.now() + 12_000;
+      let status = native.drainStatus(spawned.job);
+      while (Date.now() < deadline && (native.activeCount(spawned.job) > 0 || !status.complete)) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        status = native.drainStatus(spawned.job);
+      }
+      expect(native.activeCount(spawned.job)).toBe(0);
+      expect(status.complete).toBe(true);
+      expect(status.channels).toEqual(expect.arrayContaining([
+        expect.objectContaining({ stream: "stdout", complete: true, errorCode: 0 }),
+        expect.objectContaining({ stream: "stderr", complete: true, errorCode: 0 })
+      ]));
+      expect(status.channels.every((channel) => channel.rotations > 0)).toBe(true);
+      for (const path of [stdoutPath, stderrPath]) {
+        const files = [path, `${path}.1`, `${path}.2`, `${path}.3`].filter(existsSync);
+        expect(files.length).toBeGreaterThan(1);
+        expect(files.every((file) => statSync(file).size <= maxLogBytes)).toBe(true);
+        expect(files.reduce((total, file) => total + statSync(file).size, 0)).toBeLessThanOrEqual(maxLogBytes * 4);
+      }
+      expect(pidAlive(spawned.pid)).toBe(false);
+      native.close(spawned.job);
+      rmSync(directory, { recursive: true, force: false });
+      expect(existsSync(directory)).toBe(false);
+    } finally {
+      try {
+        if (native.activeCount(spawned.job) > 0) native.terminate(spawned.job);
+        const deadline = Date.now() + 8_000;
+        while (Date.now() < deadline && (native.activeCount(spawned.job) > 0 || !native.drainStatus(spawned.job).complete)) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        if (native.activeCount(spawned.job) === 0 && native.drainStatus(spawned.job).complete) {
+          native.close(spawned.job);
+        }
+      } catch {
+        // Preserve the original assertion; the native finalizer remains the last cleanup owner.
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("keeps the newest bytes when bounding an existing log before appending", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-trimmed-job-"));
+    const stdoutPath = join(directory, "stdout.log");
+    const stderrPath = join(directory, "stderr.log");
+    const maxLogBytes = 64 * 1024;
+    const recentBytes = Buffer.alloc(maxLogBytes, 0x42);
+    writeFileSync(stdoutPath, Buffer.concat([Buffer.alloc(maxLogBytes, 0x41), recentBytes]));
+    const native = (await import("../src/process/workbenchJob.js")).loadWorkbenchJobNative();
+    const spawned = native.spawn({
+      executable: process.execPath,
+      arguments: ["-e", "require('node:fs').writeSync(1, Buffer.from('current-output'))"],
+      cwd: directory,
+      env: { ...process.env },
+      stdoutPath,
+      stderrPath,
+      maxLogBytes
+    });
+    try {
+      const deadline = Date.now() + 8_000;
+      while (Date.now() < deadline
+        && (native.activeCount(spawned.job) > 0 || !native.drainStatus(spawned.job).complete)) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(native.activeCount(spawned.job)).toBe(0);
+      expect(native.drainStatus(spawned.job).complete).toBe(true);
+      expect(readFileSync(`${stdoutPath}.1`)).toEqual(recentBytes);
+      expect(readFileSync(stdoutPath, "utf8")).toBe("current-output");
+      expect(statSync(`${stdoutPath}.1`).size).toBe(maxLogBytes);
+      native.close(spawned.job);
+    } finally {
+      try {
+        if (native.activeCount(spawned.job) > 0) native.terminate(spawned.job);
+        const deadline = Date.now() + 8_000;
+        while (Date.now() < deadline
+          && (native.activeCount(spawned.job) > 0 || !native.drainStatus(spawned.job).complete)) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        if (native.activeCount(spawned.job) === 0 && native.drainStatus(spawned.job).complete) {
+          native.close(spawned.job);
+        }
+      } catch {
+        // Preserve the original assertion; the native finalizer remains the last cleanup owner.
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("fills the remaining log capacity before rotating a drain buffer", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-split-job-"));
+    const stdoutPath = join(directory, "stdout.log");
+    const stderrPath = join(directory, "stderr.log");
+    const maxLogBytes = 32 * 1024;
+    const existingBytes = 30_000;
+    const outputBytes = maxLogBytes;
+    writeFileSync(stdoutPath, Buffer.alloc(existingBytes, 0x41));
+    const native = (await import("../src/process/workbenchJob.js")).loadWorkbenchJobNative();
+    const spawned = native.spawn({
+      executable: process.execPath,
+      arguments: ["-e", `require('node:fs').writeSync(1, Buffer.alloc(${outputBytes}, 0x42))`],
+      cwd: directory,
+      env: { ...process.env },
+      stdoutPath,
+      stderrPath,
+      maxLogBytes
+    });
+    try {
+      const deadline = Date.now() + 8_000;
+      while (Date.now() < deadline
+        && (native.activeCount(spawned.job) > 0 || !native.drainStatus(spawned.job).complete)) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(native.activeCount(spawned.job)).toBe(0);
+      const status = native.drainStatus(spawned.job);
+      expect(status.complete).toBe(true);
+      expect(status.channels).toEqual(expect.arrayContaining([
+        expect.objectContaining({ stream: "stdout", errorCode: 0, rotations: 1 })
+      ]));
+      expect(readFileSync(`${stdoutPath}.1`)).toEqual(Buffer.concat([
+        Buffer.alloc(existingBytes, 0x41),
+        Buffer.alloc(maxLogBytes - existingBytes, 0x42)
+      ]));
+      expect(readFileSync(stdoutPath)).toEqual(Buffer.alloc(outputBytes - (maxLogBytes - existingBytes), 0x42));
+      native.close(spawned.job);
+    } finally {
+      try {
+        if (native.activeCount(spawned.job) > 0) native.terminate(spawned.job);
+        const deadline = Date.now() + 8_000;
+        while (Date.now() < deadline
+          && (native.activeCount(spawned.job) > 0 || !native.drainStatus(spawned.job).complete)) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        if (native.activeCount(spawned.job) === 0 && native.drainStatus(spawned.job).complete) {
+          native.close(spawned.job);
+        }
+      } catch {
+        // Preserve the original assertion; the native finalizer remains the last cleanup owner.
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
 });
 
 function pidAlive(pid: number): boolean {

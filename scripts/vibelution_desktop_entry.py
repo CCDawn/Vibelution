@@ -2084,6 +2084,30 @@ def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]
     return payload
 
 
+def _claim_scheduled_desktop_shell_helper(args: argparse.Namespace, *, lock_relative: Path) -> bool:
+    """Claim a scheduler-owned refresh lock before running helper business work."""
+
+    token = str(getattr(args, "scheduled_owner_token", "") or "").strip()
+    if not token:
+        # Keep the bridge usable for explicit/manual invocations. Scheduler
+        # helpers always receive a token from desktop_shell before they resume.
+        return True
+    from core.launcher.desktop_shell import _claim_scheduled_desktop_shell_helper_lock
+
+    claimed = _claim_scheduled_desktop_shell_helper_lock(
+        _workspace_root(args),
+        lock_relative=lock_relative,
+        lock_token=token,
+    )
+    _append_log(
+        "desktop_entry_python.desktop_shell.helper_lock_claimed" if claimed else
+        "desktop_entry_python.desktop_shell.helper_lock_claim_rejected",
+        pid=os.getpid(),
+        lock_relative=str(lock_relative),
+    )
+    return claimed
+
+
 def _prebuild_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
     from core.launcher.desktop_shell import run_desktop_shell_prebuild
 
@@ -2274,6 +2298,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="",
         help="Refresh helper target: packaged or unpackaged. Empty keeps the packaged refresh.",
     )
+    parser.add_argument(
+        "--scheduled-owner-token",
+        default="",
+        help=argparse.SUPPRESS,
+    )
     return parser.parse_args(argv)
 
 
@@ -2388,12 +2417,38 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"Desktop shell refresh scheduled helperPid={payload.get('helperPid')}")
         elif action == "refresh-desktop-shell":
+            from core.launcher.desktop_shell import REFRESH_LOCK_RELATIVE
+
+            if not _claim_scheduled_desktop_shell_helper(args, lock_relative=REFRESH_LOCK_RELATIVE):
+                payload = {
+                    "schemaVersion": 1,
+                    "ok": False,
+                    "reason": "scheduled_helper_lock_claim_failed",
+                }
+                if args.output == "json":
+                    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+                else:
+                    print("Desktop shell refresh helper lock claim failed")
+                return 2
             payload = _refresh_desktop_shell_bridge(args)
             if args.output == "json":
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print("Desktop shell refreshed")
         elif action == "prebuild-desktop-shell":
+            from core.launcher.desktop_shell import PREBUILD_LOCK_RELATIVE
+
+            if not _claim_scheduled_desktop_shell_helper(args, lock_relative=PREBUILD_LOCK_RELATIVE):
+                payload = {
+                    "schemaVersion": 1,
+                    "ok": False,
+                    "reason": "scheduled_helper_lock_claim_failed",
+                }
+                if args.output == "json":
+                    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+                else:
+                    print("Desktop shell prebuild helper lock claim failed")
+                return 2
             payload = _prebuild_desktop_shell_bridge(args)
             if args.output == "json":
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -27,6 +28,7 @@ from uuid import uuid4
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.no_console_git import run_git
 from core.infrastructure.owned_process import OwnedProcess
+from core.infrastructure.windows_process_job import WindowsProcessJob
 from core.launcher.frontend_build import (
     frontend_releases_dir,
     inspect_frontend_build,
@@ -118,7 +120,11 @@ REFRESH_LOCK_PID_REUSE_TOLERANCE_SECONDS = 3.0
 CREATE_NEW_PROCESS_GROUP = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 DETACHED_PROCESS = int(getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+CREATE_SUSPENDED = 0x00000004
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+SCHEDULED_HELPER_RETIRE_TIMEOUT_SECONDS = 1.0
+SCHEDULED_HELPER_LOCK_CLAIM_RETRY_SECONDS = 0.5
+SCHEDULED_HELPER_LOCK_CLAIM_POLL_SECONDS = 0.025
 
 
 def packaged_desktop_exe(project_root: Path | str = PROJECT_ROOT) -> Path:
@@ -249,7 +255,15 @@ def _acquire_desktop_shell_refresh_lock(
             try:
                 started_at = datetime.now(timezone.utc).isoformat()
                 with path.open("x", encoding="utf-8") as handle:
-                    handle.write(json.dumps({"pid": os.getpid(), "startedAt": started_at}))
+                    handle.write(
+                        json.dumps(
+                            {
+                                "pid": os.getpid(),
+                                "startedAt": started_at,
+                                "ownerToken": uuid4().hex,
+                            }
+                        )
+                    )
                 return True
             except FileExistsError:
                 # Do not unlink after a separate stale check. Moving the observed
@@ -266,7 +280,9 @@ def _assign_desktop_shell_refresh_helper(
     project_root: Path | str,
     helper_pid: int,
     lock_relative: Path = REFRESH_LOCK_RELATIVE,
-) -> None:
+    *,
+    lock_token: str,
+) -> tuple[int, int, int, bytes] | None:
     """Transfer refresh-lock ownership from the scheduler to its helper."""
 
     path = _refresh_lock_path(project_root, lock_relative)
@@ -279,8 +295,82 @@ def _assign_desktop_shell_refresh_helper(
             raise OSError(f"desktop shell refresh lock could not be read: {path}") from exc
         if not isinstance(payload, dict):
             raise OSError(f"desktop shell refresh lock is invalid: {path}")
+        if not lock_token or payload.get("ownerToken") != lock_token:
+            raise OSError(f"desktop shell refresh lock owner changed before handoff: {path}")
         started_at = str(payload.get("startedAt") or "").strip() or datetime.now(timezone.utc).isoformat()
-        atomic_write_json(path, {"pid": int(helper_pid), "startedAt": started_at})
+        payload.update({"pid": int(helper_pid), "startedAt": started_at})
+        atomic_write_json(path, payload)
+        snapshot = _refresh_lock_snapshot(path)
+        if snapshot is None:
+            raise OSError(f"desktop shell refresh lock handoff could not be verified: {path}")
+        return snapshot
+
+
+def _claim_scheduled_desktop_shell_helper_lock(
+    project_root: Path | str,
+    *,
+    lock_relative: Path,
+    lock_token: str,
+) -> bool:
+    """Transfer the wrapper's lock to its real Python helper process.
+
+    The venv ``pythonw.exe`` launcher may remain alive as the helper's parent,
+    so the lock starts at ``Popen.pid`` and must be claimed by its direct child
+    before any prebuild ownership checks or refresh work begin.
+    """
+
+    token = str(lock_token or "")
+    if not token:
+        return False
+    path = _refresh_lock_path(project_root, lock_relative)
+    current_pid = os.getpid()
+    parent_pid = os.getppid()
+    deadline = time.monotonic() + max(0.0, SCHEDULED_HELPER_LOCK_CLAIM_RETRY_SECONDS)
+    while True:
+        with _refresh_lock_breaker(path) as acquired:
+            if acquired:
+                snapshot = _refresh_lock_snapshot(path)
+                if snapshot is None:
+                    return False
+                try:
+                    payload = json.loads(snapshot[3].decode("utf-8"))
+                    holder_pid = int(payload.get("pid") or 0) if isinstance(payload, dict) else 0
+                except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                    return False
+                if not isinstance(payload, dict) or payload.get("ownerToken") != token:
+                    return False
+                if holder_pid not in {current_pid, parent_pid}:
+                    return False
+
+                # The lock timestamp represents the actual worker lifetime after
+                # handoff, so stale-lock recovery never inherits wrapper startup delay.
+                started_at = datetime.now(timezone.utc).isoformat()
+                payload.update({"pid": current_pid, "startedAt": started_at})
+                try:
+                    atomic_write_json(path, payload)
+                except OSError:
+                    return False
+                claimed = _refresh_lock_snapshot(path)
+                if claimed is None:
+                    return False
+                try:
+                    verified = json.loads(claimed[3].decode("utf-8"))
+                    verified_pid = int(verified.get("pid") or 0) if isinstance(verified, dict) else 0
+                except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+                    return False
+                return (
+                    isinstance(verified, dict)
+                    and verified.get("ownerToken") == token
+                    and verified_pid == current_pid
+                    and verified.get("startedAt") == started_at
+                )
+
+        # Another short stale-lock inspection may own the nonblocking breaker.
+        # Retry only that transient condition; an identity/token mismatch exits above.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(SCHEDULED_HELPER_LOCK_CLAIM_POLL_SECONDS, remaining))
 
 
 def _refresh_lock_is_stale(path: Path) -> bool:
@@ -349,6 +439,338 @@ def _refresh_lock_snapshot(path: Path) -> tuple[int, int, int, bytes] | None:
         return (int(stat.st_ino), int(stat.st_size), int(stat.st_mtime_ns), path.read_bytes())
     except OSError:
         return None
+
+
+@dataclass
+class _ScheduledHelperOwner:
+    process: subprocess.Popen[Any]
+    job: WindowsProcessJob | None
+
+
+@dataclass
+class _PendingScheduledHelperRetirement:
+    owner: _ScheduledHelperOwner
+    project_root: Path
+    lock_relative: Path
+    lock_token: str
+
+
+_PENDING_SCHEDULED_HELPER_RETIREMENTS: list[_PendingScheduledHelperRetirement] = []
+# Refresh and prebuild use different lock files but share process and Job owners.
+_PENDING_SCHEDULED_HELPER_RETIREMENTS_LOCK = threading.RLock()
+
+
+class ScheduledHelperRetirementError(RuntimeError):
+    """A failed helper handoff could not yet be retired safely."""
+
+    def __init__(self, message: str, owner: _ScheduledHelperOwner) -> None:
+        super().__init__(message)
+        self.owner = owner
+
+
+def _scheduled_helper_lock_token(snapshot: tuple[int, int, int, bytes] | None) -> str:
+    if snapshot is None:
+        return ""
+    try:
+        payload = json.loads(snapshot[3].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return ""
+    return str(payload.get("ownerToken") or "").strip() if isinstance(payload, dict) else ""
+
+
+def _release_scheduled_helper_lock(
+    project_root: Path,
+    *,
+    lock_relative: Path,
+    lock_token: str,
+) -> bool:
+    """Release this handoff by token, allowing its PID to change at claim time."""
+
+    path = _refresh_lock_path(project_root, lock_relative)
+    with _refresh_lock_breaker(path) as acquired:
+        if not acquired:
+            return False
+        current = _refresh_lock_snapshot(path)
+        if current is None:
+            return not path.exists()
+        try:
+            payload = json.loads(current[3].decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            return False
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("ownerToken") != lock_token:
+            # A later claimant replaced the lock. Its lock is untouched, and
+            # cleanup for this already-retired helper is complete.
+            return True
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        return True
+
+
+def _new_scheduled_helper_job() -> WindowsProcessJob | None:
+    return WindowsProcessJob() if os.name == "nt" else None
+
+
+def _resume_scheduled_helper(process: subprocess.Popen[Any]) -> None:
+    """Resume the Windows venv launcher only after it owns the refresh lock."""
+
+    if os.name != "nt":
+        return
+    try:
+        import psutil
+    except ImportError as exc:
+        raise RuntimeError("psutil is required to resume a suspended desktop helper") from exc
+    try:
+        psutil.Process(int(process.pid)).resume()
+    except psutil.Error as exc:
+        raise OSError(f"desktop helper could not be resumed: {exc}") from exc
+
+
+def _wait_scheduled_helper_process_exit(process: subprocess.Popen[Any], *, timeout: float) -> bool:
+    try:
+        process.wait(timeout=max(0.0, float(timeout)))
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    try:
+        return process.poll() is not None
+    except OSError:
+        return False
+
+
+def _retire_scheduled_helper_owner(owner: _ScheduledHelperOwner, *, timeout: float) -> bool:
+    """Stop and confirm the helper process tree within a bounded deadline."""
+
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    process = owner.process
+    job = owner.job
+    if job is not None:
+        try:
+            # Pending failures must still die with the scheduler if it exits
+            # before a later retry can retire the retained owner.
+            job.set_kill_on_job_close(True)
+            if job.active_count() > 0:
+                job.terminate()
+        except OSError:
+            try:
+                job.terminate()
+            except OSError:
+                pass
+
+    try:
+        already_exited = process.poll() is not None
+    except OSError:
+        already_exited = False
+    if not already_exited:
+        try:
+            process.terminate()
+        except OSError:
+            pass
+        first_wait = min(0.2, max(0.0, deadline - time.monotonic()))
+        if not _wait_scheduled_helper_process_exit(process, timeout=first_wait):
+            if job is not None:
+                try:
+                    job.terminate()
+                except OSError:
+                    pass
+            try:
+                process.kill()
+            except OSError:
+                pass
+            if not _wait_scheduled_helper_process_exit(
+                process,
+                timeout=max(0.0, deadline - time.monotonic()),
+            ):
+                return False
+
+    if job is None:
+        return True
+    while time.monotonic() < deadline:
+        try:
+            if job.active_count() == 0:
+                return True
+        except OSError:
+            return False
+        time.sleep(min(0.02, max(0.0, deadline - time.monotonic())))
+    return False
+
+
+def _close_scheduled_helper_owner(owner: _ScheduledHelperOwner) -> bool:
+    try:
+        if owner.job is not None:
+            owner.job.close()
+            owner.job = None
+        process_handle = getattr(owner.process, "_handle", None)
+        close_handle = getattr(process_handle, "Close", None)
+        if callable(close_handle):
+            close_handle()
+            owner.process._handle = None  # type: ignore[attr-defined]
+    except OSError:
+        return False
+    return True
+
+
+def _register_pending_scheduled_helper_retirement(
+    project_root: Path,
+    owner: _ScheduledHelperOwner,
+    *,
+    lock_relative: Path,
+    lock_token: str,
+) -> None:
+    with _PENDING_SCHEDULED_HELPER_RETIREMENTS_LOCK:
+        if any(item.owner is owner for item in _PENDING_SCHEDULED_HELPER_RETIREMENTS):
+            return
+        _PENDING_SCHEDULED_HELPER_RETIREMENTS.append(
+            _PendingScheduledHelperRetirement(
+                owner=owner,
+                project_root=project_root.resolve(),
+                lock_relative=lock_relative,
+                lock_token=lock_token,
+            )
+        )
+
+
+def _retry_pending_scheduled_helper_retirements(project_root: Path) -> bool:
+    with _PENDING_SCHEDULED_HELPER_RETIREMENTS_LOCK:
+        root = project_root.resolve()
+        for item in tuple(_PENDING_SCHEDULED_HELPER_RETIREMENTS):
+            if item.project_root != root:
+                continue
+            retired = _retire_scheduled_helper_owner(
+                item.owner,
+                timeout=SCHEDULED_HELPER_RETIRE_TIMEOUT_SECONDS,
+            )
+            if not retired:
+                return False
+            if not _release_scheduled_helper_lock(
+                item.project_root,
+                lock_relative=item.lock_relative,
+                lock_token=item.lock_token,
+            ):
+                return False
+            if not _close_scheduled_helper_owner(item.owner):
+                return False
+            _PENDING_SCHEDULED_HELPER_RETIREMENTS.remove(item)
+        return True
+
+
+def _start_scheduled_desktop_shell_helper(
+    args: list[str],
+    *,
+    project_root: Path,
+    lock_relative: Path,
+    label: str,
+) -> int:
+    lock_path = _refresh_lock_path(project_root, lock_relative)
+    initial_lock_snapshot = _refresh_lock_snapshot(lock_path)
+    lock_token = _scheduled_helper_lock_token(initial_lock_snapshot)
+    if initial_lock_snapshot is None or not lock_token:
+        _release_desktop_shell_refresh_lock(project_root, lock_relative=lock_relative)
+        raise RuntimeError(f"desktop shell {label} lock ownership could not be verified")
+
+    job: WindowsProcessJob | None = None
+    try:
+        job = _new_scheduled_helper_job()
+    except OSError as exc:
+        _release_scheduled_helper_lock(
+            project_root,
+            lock_relative=lock_relative,
+            lock_token=lock_token,
+        )
+        raise RuntimeError(f"desktop shell {label} helper ownership could not be created: {exc}") from exc
+
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+    if os.name == "nt":
+        flags |= CREATE_SUSPENDED
+    kwargs = no_window_subprocess_kwargs(creationflags=flags)
+    try:
+        process = subprocess.Popen(
+            [*args, "--scheduled-owner-token", lock_token],
+            cwd=str(project_root),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            **kwargs,
+        )
+    except OSError as exc:
+        if job is not None:
+            try:
+                job.close()
+            except OSError:
+                pass
+        released = _release_scheduled_helper_lock(
+            project_root,
+            lock_relative=lock_relative,
+            lock_token=lock_token,
+        )
+        if not released:
+            raise RuntimeError(f"desktop shell {label} helper did not start and its lock cleanup is pending") from exc
+        raise RuntimeError(f"desktop shell {label} helper did not start: {exc}") from exc
+
+    helper_pid = int(getattr(process, "pid", 0) or 0)
+    owner = _ScheduledHelperOwner(process=process, job=job)
+    try:
+        if helper_pid <= 0:
+            raise OSError("desktop shell helper returned an invalid process id")
+        if job is not None:
+            job.assign_handle(process._handle)
+        assigned_snapshot = _assign_desktop_shell_refresh_helper(
+            project_root,
+            helper_pid,
+            lock_relative=lock_relative,
+            lock_token=lock_token,
+        )
+        if assigned_snapshot is None:
+            assigned_snapshot = _refresh_lock_snapshot(lock_path)
+        if assigned_snapshot is None or _scheduled_helper_lock_token(assigned_snapshot) != lock_token:
+            raise OSError(f"desktop shell {label} lock handoff could not be verified")
+        _resume_scheduled_helper(process)
+        if owner.job is not None:
+            owner.job.set_kill_on_job_close(False)
+            owner.job.close()
+            owner.job = None
+        return helper_pid
+    except BaseException as exc:
+        retired = _retire_scheduled_helper_owner(
+            owner,
+            timeout=SCHEDULED_HELPER_RETIRE_TIMEOUT_SECONDS,
+        )
+        if retired and _release_scheduled_helper_lock(
+            project_root,
+            lock_relative=lock_relative,
+            lock_token=lock_token,
+        ):
+            if not _close_scheduled_helper_owner(owner):
+                _register_pending_scheduled_helper_retirement(
+                    project_root,
+                    owner,
+                    lock_relative=lock_relative,
+                    lock_token=lock_token,
+                )
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                raise ScheduledHelperRetirementError(
+                    f"desktop shell {label} helper exited but owner handles remain open",
+                    owner,
+                ) from exc
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            raise RuntimeError(f"desktop shell {label} helper could not be started safely: {exc}") from exc
+        _register_pending_scheduled_helper_retirement(
+            project_root,
+            owner,
+            lock_relative=lock_relative,
+            lock_token=lock_token,
+        )
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise ScheduledHelperRetirementError(
+            f"desktop shell {label} helper retirement is unconfirmed; its lock remains held for retry",
+            owner,
+        ) from exc
 
 
 @contextmanager
@@ -728,6 +1150,15 @@ def schedule_desktop_shell_refresh(
     """Start a detached helper that rebuilds the shell after ``wait_pid`` exits."""
 
     root = Path(project_root)
+    if not _retry_pending_scheduled_helper_retirements(root):
+        return {
+            "schemaVersion": 1,
+            "scheduled": False,
+            "helperPid": 0,
+            "waitPid": int(wait_pid),
+            "thenLifecycle": str(then_lifecycle or "").strip().lower(),
+            "reason": "helper_retirement_pending",
+        }
     if force:
         clear_desktop_shell_refresh_failure(root)
     if recent_desktop_shell_refresh_failure(root) is not None:
@@ -768,30 +1199,12 @@ def schedule_desktop_shell_refresh(
     kind = str(shell_kind or "").strip().lower()
     if kind:
         args.extend(["--shell-kind", kind])
-    # The refresh helper must outlive the desktop shell. Workbench jobs allow
-    # explicit breakaway and nothing else, so this flag is the only exit.
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
-    kwargs = no_window_subprocess_kwargs(creationflags=flags)
-    try:
-        process = subprocess.Popen(
-            args,
-            cwd=str(root),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-            **kwargs,
-        )
-    except OSError as exc:
-        _release_desktop_shell_refresh_lock(root)
-        raise RuntimeError(f"desktop shell refresh helper did not start: {exc}") from exc
-    helper_pid = int(getattr(process, "pid", 0) or 0)
-    if helper_pid > 0:
-        try:
-            _assign_desktop_shell_refresh_helper(root, helper_pid)
-        except OSError as exc:
-            _release_desktop_shell_refresh_lock(root)
-            raise RuntimeError(f"desktop shell refresh lock could not be transferred: {exc}") from exc
+    helper_pid = _start_scheduled_desktop_shell_helper(
+        args,
+        project_root=root,
+        lock_relative=REFRESH_LOCK_RELATIVE,
+        label="refresh",
+    )
     return {
         "schemaVersion": 1,
         "scheduled": True,
@@ -894,6 +1307,8 @@ def schedule_desktop_shell_prebuild(
     """
 
     root = Path(project_root)
+    if not _retry_pending_scheduled_helper_retirements(root):
+        return {"schemaVersion": 1, "scheduled": False, "helperPid": 0, "reason": "helper_retirement_pending"}
     if (
         _recent_shell_failure_marker(_prebuild_failure_path(root), cooldown_seconds=PREBUILD_COOLDOWN_SECONDS)
         is not None
@@ -918,31 +1333,12 @@ def schedule_desktop_shell_prebuild(
         "--workspace",
         str(root),
     ]
-    # The prebuild helper must outlive the closeout that scheduled it, without
-    # any visible console. Workbench jobs allow explicit breakaway and nothing
-    # else, so this flag set is the only exit.
-    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
-    kwargs = no_window_subprocess_kwargs(creationflags=flags)
-    try:
-        process = subprocess.Popen(
-            args,
-            cwd=str(root),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-            **kwargs,
-        )
-    except OSError as exc:
-        _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
-        raise RuntimeError(f"desktop shell prebuild helper did not start: {exc}") from exc
-    helper_pid = int(getattr(process, "pid", 0) or 0)
-    if helper_pid > 0:
-        try:
-            _assign_desktop_shell_refresh_helper(root, helper_pid, lock_relative=PREBUILD_LOCK_RELATIVE)
-        except OSError as exc:
-            _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
-            raise RuntimeError(f"desktop shell prebuild lock could not be transferred: {exc}") from exc
+    helper_pid = _start_scheduled_desktop_shell_helper(
+        args,
+        project_root=root,
+        lock_relative=PREBUILD_LOCK_RELATIVE,
+        label="prebuild",
+    )
     return {"schemaVersion": 1, "scheduled": True, "helperPid": helper_pid}
 
 

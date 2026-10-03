@@ -9,6 +9,7 @@ Ownership map for structured runtime scene bundles.
 |-------------------|------------|
 | `record_*` writers / manifests / delete | `record.py` |
 | list / get detail / evidence / prompt index / retention | `query.py` |
+| Bounded file preview / latest live output | `file_preview.py` |
 | diagnosis / issue / work-run / startup signals | `diagnosis.py` |
 | package_index sidecar stale detect/sync | `package_index.py` |
 | Public import surface | `../runtime_scene_service.py` (re-export shell) |

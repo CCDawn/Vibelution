@@ -29,7 +29,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -54,6 +54,7 @@ from core.research.workflow.contracts.discussion_scope import (
     session_scope_key,
 )
 from core.ui.chat_state import borrowing_session_chat_state
+from core.infrastructure.owned_executor import OwnedThreadPoolExecutor
 from core.web.services.team_workflow import meeting_driver_work, meeting_rounds
 from core.web.services.team_workflow.research_runtime.challenge_cup_maintenance_fence import (
     assert_writes_allowed,
@@ -198,10 +199,17 @@ def _meeting_discussion_max_workers() -> int:
     return _MEETING_DISCUSSION_MAX_WORKERS_DEFAULT
 
 
-_MEETING_DISCUSSION_EXECUTOR = ThreadPoolExecutor(
+_MEETING_DISCUSSION_EXECUTOR = OwnedThreadPoolExecutor(
     max_workers=_meeting_discussion_max_workers(),
     thread_name_prefix="hypothesis-meeting",
 )
+_MEETING_EXECUTOR_LIFECYCLE_LOCK = threading.RLock()
+_MEETING_EXECUTOR_FUTURE_LOCK = threading.Lock()
+_MEETING_EXECUTOR_FUTURES: dict[Future[Any], dict[str, str]] = {}
+_MEETING_CANCELLED_EXECUTOR_JOBS: list[dict[str, str]] = []
+_MEETING_EXECUTOR_STOPPING = False
+_MEETING_EXECUTOR_STOPPING_KEYS: set[tuple[str, str]] = set()
+_MEETING_EXECUTOR_LIFECYCLE_FAILURES: set[str] = set()
 _MEETING_DISCUSSION_JOBS_LOCK = threading.Lock()
 # Dedup registry for live discussion drivers: (teamId, meetingRoundId) ->
 # scheduling session token.  A driver's cleanup only releases its own token,
@@ -2110,8 +2118,9 @@ def run_meeting_discussion(
     # The heartbeat gates lease renewal on the progress stamps written at each
     # step boundary below, and a superseded attempt aborts at the next
     # boundary instead of racing the lease-lapse re-drive.
-    _DISCUSSION_DRIVER.session = _current_discussion_session(
-        team_id, meeting_round_id
+    _DISCUSSION_DRIVER.session = (
+        str(getattr(_DISCUSSION_DRIVER, "scheduled_session", "") or "").strip()
+        or _current_discussion_session(team_id, meeting_round_id)
     )
     meeting_driver_work.mark_driver_progress(team_id, meeting_round_id)
     try:
@@ -2140,12 +2149,12 @@ def _discussion_step_boundary(team_id: str, meeting_round_id: str) -> None:
     replacement driver.
     """
 
-    meeting_driver_work.mark_driver_progress(team_id, meeting_round_id)
     session = getattr(_DISCUSSION_DRIVER, "session", "")
     if session and not _owns_discussion_session(team_id, meeting_round_id, session):
         raise _DiscussionSupersededError(
             "discussion driver superseded by a lease-lapse re-drive"
         )
+    meeting_driver_work.mark_driver_progress(team_id, meeting_round_id)
 
 
 def _record_meeting_discussion_driver_event(
@@ -2200,7 +2209,7 @@ def _record_driver_work_state(
     status: str,
     error: Exception | None = None,
     deadline_at_ms: int = 0,
-) -> None:
+) -> bool:
     """Persist the durable driver intent; storage outages never alter the run."""
 
     try:
@@ -2211,8 +2220,9 @@ def _record_driver_work_state(
             deadline_at_ms=deadline_at_ms,
             last_problem=None if error is None else meeting_driver_work.format_problem(error),
         )
+        return True
     except Exception:  # noqa: BLE001 - durable intent accelerates recovery only
-        return
+        return False
 
 
 class _DiscussionSupersededError(RuntimeError):
@@ -2493,6 +2503,188 @@ def _record_digest_work_state(
         return None
 
 
+def _meeting_executor_future_done(future: Future[Any]) -> None:
+    """Collect queued cancellations; persistence stays outside Future callbacks."""
+
+    with _MEETING_EXECUTOR_FUTURE_LOCK:
+        metadata = _MEETING_EXECUTOR_FUTURES.pop(future, None)
+        if future.cancelled() and metadata is not None:
+            _MEETING_CANCELLED_EXECUTOR_JOBS.append(metadata)
+
+
+def _submit_meeting_executor(
+    fn: Callable[..., Any],
+    *args: Any,
+    kind: str,
+    team_id: str,
+    meeting_round_id: str,
+    job_token: str = "",
+) -> Future[Any]:
+    """Submit under the lifecycle gate and retain cancellation identity."""
+
+    with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+        if _MEETING_EXECUTOR_STOPPING:
+            raise RuntimeError("meeting executor lifecycle is shutting down")
+        future = _MEETING_DISCUSSION_EXECUTOR.submit(fn, *args)
+        add_done_callback = getattr(future, "add_done_callback", None)
+        if callable(add_done_callback):
+            with _MEETING_EXECUTOR_FUTURE_LOCK:
+                _MEETING_EXECUTOR_FUTURES[future] = {
+                    "kind": kind,
+                    "teamId": team_id,
+                    "meetingRoundId": meeting_round_id,
+                    "jobToken": job_token,
+                }
+            add_done_callback(_meeting_executor_future_done)
+        return future
+
+
+def _finalize_cancelled_meeting_jobs() -> tuple[int, list[str]]:
+    with _MEETING_EXECUTOR_FUTURE_LOCK:
+        cancelled = list(_MEETING_CANCELLED_EXECUTOR_JOBS)
+        _MEETING_CANCELLED_EXECUTOR_JOBS.clear()
+    failures: list[str] = []
+    retry: list[dict[str, str]] = []
+    for metadata in cancelled:
+        team_id = metadata.get("teamId", "")
+        meeting_round_id = metadata.get("meetingRoundId", "")
+        kind = metadata.get("kind", "")
+        error = RuntimeError("meeting work was canceled before starting during shutdown")
+        if kind == "discussion":
+            persisted = _record_driver_work_state(
+                team_id,
+                meeting_round_id,
+                status=meeting_driver_work.STATUS_FAILED,
+                error=error,
+            )
+            _release_discussion_session(
+                team_id,
+                meeting_round_id,
+                metadata.get("jobToken", ""),
+            )
+        else:
+            persisted = _record_digest_work_state(
+                team_id,
+                meeting_round_id,
+                status=meeting_driver_work.STATUS_FAILED,
+                error=error,
+            ) is not None
+            with _MEETING_DIGEST_JOBS_LOCK:
+                _MEETING_DIGEST_JOBS.discard((team_id, meeting_round_id))
+        if not persisted:
+            failures.append(f"{kind}:{team_id}:{meeting_round_id}:persist_failed")
+            retry.append(metadata)
+    if retry:
+        with _MEETING_EXECUTOR_FUTURE_LOCK:
+            _MEETING_CANCELLED_EXECUTOR_JOBS.extend(retry)
+    return len(cancelled), failures
+
+
+def begin_meeting_discussion_lifecycle() -> dict[str, Any]:
+    """Reopen discussion/digest admission only after prior workers have exited."""
+
+    global _MEETING_EXECUTOR_STOPPING
+    with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+        if _MEETING_EXECUTOR_STOPPING:
+            heartbeat_state = meeting_driver_work.lease_heartbeat_snapshot()
+            if not heartbeat_state.get("closed"):
+                return {
+                    "opened": False,
+                    "recreated": False,
+                    "pendingCount": int(heartbeat_state.get("pendingCount") or 0),
+                    "pendingThreads": list(heartbeat_state.get("pendingThreads") or []),
+                    "failed": [],
+                }
+        if _MEETING_EXECUTOR_LIFECYCLE_FAILURES:
+            _, failures = _finalize_cancelled_meeting_jobs()
+            if failures:
+                _MEETING_EXECUTOR_LIFECYCLE_FAILURES.update(failures)
+                return {
+                    "opened": False,
+                    "recreated": False,
+                    "failed": sorted(_MEETING_EXECUTOR_LIFECYCLE_FAILURES),
+                }
+            _MEETING_EXECUTOR_LIFECYCLE_FAILURES.clear()
+        result = dict(_MEETING_DISCUSSION_EXECUTOR.begin())
+        if result.get("opened") and result.get("recreated"):
+            _MEETING_EXECUTOR_STOPPING = False
+            _MEETING_EXECUTOR_STOPPING_KEYS.clear()
+            with _MEETING_DISCUSSION_JOBS_LOCK:
+                _MEETING_DISCUSSION_JOBS.clear()
+                _MEETING_DISCUSSION_SESSIONS.clear()
+            with _MEETING_DIGEST_JOBS_LOCK:
+                _MEETING_DIGEST_JOBS.clear()
+        return result
+
+
+def stop_meeting_discussion_admission() -> dict[str, Any]:
+    """Close submissions and fence active discussion drivers at step boundaries."""
+
+    global _MEETING_EXECUTOR_STOPPING
+    failures: list[str] = []
+    with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+        _MEETING_EXECUTOR_STOPPING = True
+        # Invalidate the existing owner token before queued work is canceled.
+        # A worker that starts in this small window also fails its token check.
+        with _MEETING_DISCUSSION_JOBS_LOCK:
+            discussion_keys = set(_MEETING_DISCUSSION_JOBS)
+            _MEETING_DISCUSSION_SESSIONS.clear()
+            _MEETING_EXECUTOR_STOPPING_KEYS.update(discussion_keys)
+        stopped_heartbeats = meeting_driver_work.stop_lease_heartbeats()
+        try:
+            _MEETING_DISCUSSION_EXECUTOR.shutdown(wait=False, cancel_futures=False)
+        except Exception as exc:  # noqa: BLE001 - still cancel and fence jobs
+            failures.append(f"admission:{type(exc).__name__}")
+    try:
+        _MEETING_DISCUSSION_EXECUTOR.stop_admission(cancel_futures=True)
+    except Exception as exc:  # noqa: BLE001 - preserve failed state records
+        failures.append(f"queue_cancel:{type(exc).__name__}")
+    cancelled_count, persist_failures = _finalize_cancelled_meeting_jobs()
+    failures.extend(persist_failures)
+    if failures:
+        _MEETING_EXECUTOR_LIFECYCLE_FAILURES.update(failures)
+    else:
+        _MEETING_EXECUTOR_LIFECYCLE_FAILURES.clear()
+    return {
+        "closed": not failures,
+        "admissionClosed": not failures,
+        "cancelledQueuedJobs": cancelled_count,
+        "stoppedHeartbeats": stopped_heartbeats,
+        "failed": sorted(set(failures)),
+    }
+
+
+def shutdown_meeting_discussion_executor(*, deadline: float) -> dict[str, Any]:
+    """Drain discussion and digest work against the shared server deadline."""
+
+    stop_result = stop_meeting_discussion_admission()
+    result = dict(_MEETING_DISCUSSION_EXECUTOR.shutdown_until(deadline))
+    heartbeat_result = meeting_driver_work.join_lease_heartbeats_until(deadline)
+    _, persist_failures = _finalize_cancelled_meeting_jobs()
+    failed = sorted(
+        set(result.get("failed", []))
+        | set(stop_result.get("failed", []))
+        | set(persist_failures)
+        | _MEETING_EXECUTOR_LIFECYCLE_FAILURES
+    )
+    result["pendingThreads"] = sorted(
+        set(result.get("pendingThreads", []))
+        | set(heartbeat_result.get("pendingThreads", []))
+    )
+    result["pendingCount"] = int(result.get("pendingCount") or 0) + int(
+        heartbeat_result.get("pendingCount") or 0
+    )
+    result["failed"] = failed
+    result["closed"] = (
+        bool(result.get("closed"))
+        and bool(heartbeat_result.get("closed"))
+        and not failed
+    )
+    if result["closed"]:
+        _MEETING_EXECUTOR_LIFECYCLE_FAILURES.clear()
+    return result
+
+
 def _run_scheduled_meeting_discussion(
     team_id: str, meeting_round_id: str, job_token: str = ""
 ) -> None:
@@ -2500,6 +2692,13 @@ def _run_scheduled_meeting_discussion(
     heartbeat_stop = threading.Event()
     heartbeat_thread: threading.Thread | None = None
     try:
+        with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+            if _MEETING_EXECUTOR_STOPPING or not _owns_discussion_session(
+                team_id, meeting_round_id, job_token
+            ):
+                raise _DiscussionSupersededError(
+                    "meeting discussion stopped before its worker began"
+                )
         governed_deadline_ms = 0
         try:
             meeting_round = meeting_rounds.get_meeting_round(
@@ -2508,12 +2707,19 @@ def _run_scheduled_meeting_discussion(
             governed_deadline_ms = _digest_recovery_deadline_ms(meeting_round)
         except Exception:  # noqa: BLE001 - deadline is an optimization, not a gate
             governed_deadline_ms = 0
-        _record_driver_work_state(
-            team_id,
-            meeting_round_id,
-            status=meeting_driver_work.STATUS_RUNNING,
-            deadline_at_ms=governed_deadline_ms,
-        )
+        with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+            if _MEETING_EXECUTOR_STOPPING or not _owns_discussion_session(
+                team_id, meeting_round_id, job_token
+            ):
+                raise _DiscussionSupersededError(
+                    "meeting discussion stopped before its durable start"
+                )
+            _record_driver_work_state(
+                team_id,
+                meeting_round_id,
+                status=meeting_driver_work.STATUS_RUNNING,
+                deadline_at_ms=governed_deadline_ms,
+            )
         # Progress-gated heartbeat (T1): renewal requires this driver to keep
         # advancing its progress stamp.  If the driver thread wedges inside an
         # unbounded blocking call, the stamp goes stale, the heartbeat stops
@@ -2521,17 +2727,31 @@ def _run_scheduled_meeting_discussion(
         # through _handle_wedged_discussion — a same-boot wedge has a real
         # in-run exit instead of a permanently renewed lease.
         meeting_driver_work.mark_driver_progress(team_id, meeting_round_id)
-        heartbeat_thread = meeting_driver_work.start_lease_heartbeat(
-            team_id,
-            meeting_round_id,
-            stop_event=heartbeat_stop,
-            interval_ms=meeting_driver_work.HEARTBEAT_INTERVAL_MS,
-            progress_window_ms=meeting_driver_work.discussion_step_window_ms(),
-            on_lapse=lambda: _handle_wedged_discussion(
+        with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+            if _MEETING_EXECUTOR_STOPPING or not _owns_discussion_session(
                 team_id, meeting_round_id, job_token
-            ),
+            ):
+                raise _DiscussionSupersededError(
+                    "meeting discussion stopped before lease heartbeat started"
+                )
+            heartbeat_thread = meeting_driver_work.start_lease_heartbeat(
+                team_id,
+                meeting_round_id,
+                stop_event=heartbeat_stop,
+                interval_ms=meeting_driver_work.HEARTBEAT_INTERVAL_MS,
+                progress_window_ms=meeting_driver_work.discussion_step_window_ms(),
+                on_lapse=lambda: _handle_wedged_discussion(
+                    team_id, meeting_round_id, job_token
+                ),
+            )
+        previous_scheduled_session = getattr(
+            _DISCUSSION_DRIVER, "scheduled_session", ""
         )
-        result = run_meeting_discussion(team_id, meeting_round_id)
+        _DISCUSSION_DRIVER.scheduled_session = job_token
+        try:
+            result = run_meeting_discussion(team_id, meeting_round_id)
+        finally:
+            _DISCUSSION_DRIVER.scheduled_session = previous_scheduled_session
         if _owns_discussion_session(team_id, meeting_round_id, job_token):
             _record_driver_work_state(
                 team_id, meeting_round_id, status=meeting_driver_work.STATUS_COMPLETED
@@ -2543,6 +2763,15 @@ def _run_scheduled_meeting_discussion(
                 outcome=str(result.get("stopReason") or "completed"),
             )
         else:
+            with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+                shutting_down = key in _MEETING_EXECUTOR_STOPPING_KEYS
+            if shutting_down:
+                _record_driver_work_state(
+                    team_id,
+                    meeting_round_id,
+                    status=meeting_driver_work.STATUS_FAILED,
+                    error=RuntimeError("meeting discussion was stopped for backend shutdown"),
+                )
             _record_meeting_discussion_driver_event(
                 team_id,
                 meeting_round_id,
@@ -2552,6 +2781,15 @@ def _run_scheduled_meeting_discussion(
     except _DiscussionSupersededError:
         # A lease-lapse re-drive owns this meeting now; the wedged attempt
         # must not write terminal state over the replacement's running intent.
+        with _MEETING_EXECUTOR_LIFECYCLE_LOCK:
+            shutting_down = key in _MEETING_EXECUTOR_STOPPING_KEYS
+        if shutting_down:
+            _record_driver_work_state(
+                team_id,
+                meeting_round_id,
+                status=meeting_driver_work.STATUS_FAILED,
+                error=RuntimeError("meeting discussion was stopped for backend shutdown"),
+            )
         _record_meeting_discussion_driver_event(
             team_id,
             meeting_round_id,
@@ -2671,11 +2909,15 @@ def schedule_meeting_discussion(team_id: str, meeting_round_id: str) -> dict[str
         deadline_at_ms=_digest_recovery_deadline_ms(meeting_round),
     )
     try:
-        _MEETING_DISCUSSION_EXECUTOR.submit(
+        _submit_meeting_executor(
             _run_scheduled_meeting_discussion,
             normalized_team_id,
             normalized_round_id,
             job_token,
+            kind="discussion",
+            team_id=normalized_team_id,
+            meeting_round_id=normalized_round_id,
+            job_token=job_token,
         )
     except Exception as exc:
         _release_discussion_session(normalized_team_id, normalized_round_id, job_token)
@@ -2789,10 +3031,13 @@ def schedule_meeting_digest_redrive(team_id: str, meeting_round_id: str) -> dict
             }
         _MEETING_DIGEST_JOBS.add(key)
     try:
-        _MEETING_DISCUSSION_EXECUTOR.submit(
+        _submit_meeting_executor(
             _run_scheduled_meeting_digest_redrive,
             normalized_team_id,
             normalized_round_id,
+            kind="digest",
+            team_id=normalized_team_id,
+            meeting_round_id=normalized_round_id,
         )
     except Exception as exc:
         with _MEETING_DIGEST_JOBS_LOCK:
@@ -3334,6 +3579,10 @@ def _run_meeting_discussion_impl(
                 },
             )
             raise
+        # A shutdown may have stopped the room while this synchronous step
+        # was finishing. Re-check ownership before the driver starts another
+        # round or drafts a digest from a partially stopped meeting.
+        _discussion_step_boundary(normalized_team_id, normalized_round_id)
         bound = bound_result
         meeting_round = bound["meetingRound"]
         bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))

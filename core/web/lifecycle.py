@@ -175,7 +175,10 @@ def shutdown_session_catalog_on_shutdown(*, deadline: float | None = None) -> di
     try:
         from .services.session.catalog_runtime import shutdown_session_catalog_runtime
 
-        shutdown_session_catalog_runtime()
+        catalog_result = shutdown_session_catalog_runtime(timeout=remaining_seconds(deadline))
+        if not isinstance(catalog_result, dict) or catalog_result.get("closed") is not True:
+            failed_owners.append("session_catalog")
+            logger.error("Session catalog reconciliation is still retiring.")
     except Exception as exc:  # noqa: BLE001 - isolate the catalog owner
         failed_owners.append("session_catalog")
         logger.error("Session catalog shutdown failed (%s).", type(exc).__name__)
@@ -809,6 +812,10 @@ def _begin_owned_runtime_lifecycle() -> None:
         ("core.infrastructure.background_tasks", "begin_background_task_lifecycle"),
         ("core.web.services.cli_agent_terminal_service", "begin_cli_agent_terminal_lifecycle"),
         ("core.web.services.session_service", "begin_session_service_lifecycle"),
+        ("core.infrastructure.tool_execution_scope", "begin_tool_execution_lifecycle"),
+        ("core.web.services.chat_room_service", "begin_chat_room_lifecycle"),
+        ("core.web.services.team_workflow.meeting_runtime", "begin_meeting_discussion_lifecycle"),
+        ("core.web.services.team_workflow.research_runtime.hypothesis_command_attempts", "begin_hypothesis_command_lifecycle"),
     ):
         module = sys.modules.get(module_name)
         if module is not None:
@@ -847,10 +854,30 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
 
         return shutdown_session_service(deadline=deadline)
 
+    def _stop_tool_executors() -> Any:
+        from core.infrastructure.tool_execution_scope import shutdown_tool_execution
+        return shutdown_tool_execution(deadline=deadline)
+
+    def _stop_chat_room_executors() -> Any:
+        from .services.chat_room_service import shutdown_chat_room_executors
+        return shutdown_chat_room_executors(deadline=deadline)
+
+    def _stop_meeting_executor() -> Any:
+        from .services.team_workflow.meeting_runtime import shutdown_meeting_discussion_executor
+        return shutdown_meeting_discussion_executor(deadline=deadline)
+
+    def _stop_command_executor() -> Any:
+        from .services.team_workflow.research_runtime.hypothesis_command_attempts import shutdown_hypothesis_command_executor
+        return shutdown_hypothesis_command_executor(deadline=deadline)
+
     owners = (
         ("background-tasks", _stop_background_tasks, {}),
         ("cli-terminals", _stop_cli_terminals, {}),
         ("session-executors", _stop_session_executors, {}),
+        ("physical-tools", _stop_tool_executors, {}),
+        ("chat-room-executors", _stop_chat_room_executors, {}),
+        ("meeting-discussion", _stop_meeting_executor, {}),
+        ("hypothesis-commands", _stop_command_executor, {}),
     )
 
     async def _shutdown_owner(name: str, callback: Callable[..., Any], kwargs: dict[str, Any]) -> bool:
@@ -867,7 +894,7 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
         except Exception as exc:  # noqa: BLE001 - isolate each runtime owner
             logger.error("Owned runtime shutdown failed: %s (%s)", name, type(exc).__name__)
             return False
-        if not completed or (isinstance(result, dict) and result.get("closed") is False):
+        if not completed or not isinstance(result, dict) or result.get("closed") is not True:
             logger.error("Owned runtime shutdown incomplete: %s", name)
             return False
         return True

@@ -8,6 +8,9 @@ from core.infrastructure.tool_execution_scope import (
     current_tool_execution_scope,
     register_current_tool_future,
     tool_execution_scope,
+    begin_tool_execution_lifecycle,
+    shutdown_tool_execution,
+    ToolStopEvent,
 )
 
 
@@ -29,6 +32,65 @@ def test_tool_execution_scope_waits_for_registered_future():
 
     assert scope.wait_for_quiescence(timeout=0.1) is True
     assert scope.is_quiescent() is True
+
+
+def test_timed_out_tool_remains_owned_until_physical_exit():
+    assert begin_tool_execution_lifecycle()["opened"] is True
+    executor = ToolExecutor()
+    started, release = Event(), Event()
+
+    def blocking_tool():
+        started.set()
+        release.wait(2)
+        return "late result"
+
+    executor.register_tool("shutdown_blocked_tool", blocking_tool, timeout=0.1)
+    try:
+        result, _ = executor.execute("shutdown_blocked_tool", {})
+        assert started.is_set()
+        assert "超时" in result
+        closed = shutdown_tool_execution(deadline=time.monotonic() + 0.02)
+        assert closed["closed"] is False
+        assert closed["pendingCount"] == 1
+        assert begin_tool_execution_lifecycle()["opened"] is False
+    finally:
+        release.set()
+        assert shutdown_tool_execution(deadline=time.monotonic() + 1)["closed"] is True
+        assert begin_tool_execution_lifecycle()["opened"] is True
+
+
+def test_tool_timeout_signals_cooperative_tool_without_stopping_session():
+    executor = ToolExecutor()
+    session_stop = Event()
+    checker = lambda: "session stopped" if session_stop.is_set() else ""
+    checker._vibelution_stop_event = session_stop
+    executor.set_cancel_checker(checker)
+    stopped = Event()
+
+    def cooperative_tool(_cancel_checker=None):
+        assert _cancel_checker._vibelution_stop_event.wait(1)
+        assert _cancel_checker()
+        stopped.set()
+        return "stopped"
+
+    executor.register_tool("cooperative_timeout_tool", cooperative_tool, timeout=0.1)
+    try:
+        result, _ = executor.execute("cooperative_timeout_tool", {})
+        assert "超时" in result
+        assert stopped.wait(1)
+        assert not session_stop.is_set()
+    finally:
+        assert shutdown_tool_execution(deadline=time.monotonic() + 1)["closed"] is True
+        assert begin_tool_execution_lifecycle()["opened"] is True
+
+
+def test_tool_stop_event_preserves_session_stop():
+    session = Event()
+    combined = ToolStopEvent(session)
+    assert not combined.is_set()
+    session.set()
+    assert combined.is_set()
+    assert combined.wait(0)
 
 
 def test_tool_execution_scope_unblocks_waiter_after_future_finishes():

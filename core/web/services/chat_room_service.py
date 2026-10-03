@@ -49,7 +49,7 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator, Mapping
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -83,6 +83,7 @@ from core.chatroom.context_runtime import (
 from core.chatroom.scheduler import get_scheduler_registry
 from core.chatroom.store import ChatRoomStore, ChatRoomStoreReadError, utc_now_iso
 from core.infrastructure import developer_sandbox
+from core.infrastructure.owned_executor import OwnedThreadPoolExecutor
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
 from core.orchestration.turn_runner import prepare_agent_turn, run_existing_agent_single_turn
@@ -217,10 +218,13 @@ def _chat_room_executor_max_workers() -> int:
 _CHAT_ROOM_EXECUTOR_MAX_WORKERS_DEFAULT = 4
 _CHAT_ROOM_EXECUTOR_MAX_WORKERS_LIMIT = 32
 _CHAT_ROOM_EXECUTOR_MAX_WORKERS = _chat_room_executor_max_workers()
-_CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(
+_CHAT_ROOM_EXECUTOR = OwnedThreadPoolExecutor(
     max_workers=_CHAT_ROOM_EXECUTOR_MAX_WORKERS,
     thread_name_prefix="web-chat-room",
 )
+_CHAT_ROOM_LIFECYCLE_LOCK = threading.RLock()
+_CHAT_ROOM_LIFECYCLE_STOPPING = False
+_CHAT_ROOM_LIFECYCLE_FAILURES: set[str] = set()
 # The executor queue is unbounded, so cap submitted-but-not-finished rounds;
 # otherwise N rooms can all flip to durable "running" while queueing forever.
 _CHAT_ROOM_MAX_INFLIGHT_ROUNDS = 16
@@ -365,8 +369,7 @@ _SPEAKER_DUPLICATE_GUARD_MIN_CONTENT_CHARS = 64
 # four-call LLM budget so an opt-in batch cannot recreate the oversized hidden
 # queue. ``VIBELUTION_LLM_MAX_CONCURRENT`` still overrides the width up or
 # down (>=1).
-_CHAT_ROOM_SPEAKER_BATCH_EXECUTOR_LOCK = threading.Lock()
-_CHAT_ROOM_SPEAKER_BATCH_EXECUTOR: ThreadPoolExecutor | None = None
+_CHAT_ROOM_SPEAKER_BATCH_EXECUTOR: OwnedThreadPoolExecutor | None = None
 _CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT = 4
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
@@ -2001,14 +2004,14 @@ def _submit_chat_room_round_background(
     runner: AgentRunner,
     lang: str,
     receipt_authority: dict[str, Any] | None,
-) -> None:
+) -> Future[Any]:
     """Submit the worker; the wrapper always releases the inflight slot.
 
     A failed ``submit`` never enqueues the wrapper, so the caller's launch
     window handler stays responsible for the release in that case.
     """
 
-    _CHAT_ROOM_EXECUTOR.submit(
+    future = _CHAT_ROOM_EXECUTOR.submit(
         _run_chat_room_round_background_with_release,
         room_id,
         round_id,
@@ -2020,6 +2023,21 @@ def _submit_chat_room_round_background(
         receipt_authority,
         _perf_counter(),
     )
+    add_done_callback = getattr(future, "add_done_callback", None)
+    if callable(add_done_callback):
+        add_done_callback(
+            lambda completed: _chat_room_round_future_done(completed, round_id)
+        )
+    return future
+
+
+def _chat_room_round_future_done(future: Future[Any], round_id: str) -> None:
+    """Release only queued rounds that never entered the worker wrapper."""
+
+    if not future.cancelled():
+        return
+    _release_chat_room_inflight()
+    _clear_chat_room_round_control(round_id)
 
 
 def _run_chat_room_round_background_with_release(*args: Any, **kwargs: Any) -> Any:
@@ -2962,6 +2980,22 @@ def force_stop_active_chat_room_rounds_for_shutdown(reason: str) -> list[dict[st
                 round_payload["summary"] = summary
                 round_payload["updatedAt"] = stopped_at
                 round_payload["finishedAt"] = stopped_at
+                # The room is the durable authority for both round and
+                # speaker progress. Queued batch futures canceled by executor
+                # shutdown will never get a worker-side completion callback,
+                # so close their visible states in the same terminal write.
+                for progress in list(round_payload.get("speakerProgress") or []):
+                    if not isinstance(progress, dict):
+                        continue
+                    if str(progress.get("state") or "").strip().lower() not in {
+                        "queued",
+                        "running",
+                    }:
+                        continue
+                    progress["state"] = "settled"
+                    progress["status"] = "stopped"
+                    progress["updatedAt"] = stopped_at
+                    progress["stopReason"] = stop_reason[:160]
                 room["status"] = "ready"
                 if active_round_id == round_id:
                     room["activeRoundId"] = ""
@@ -3319,20 +3353,194 @@ def _speaker_batch_max_workers() -> int:
     return _CHAT_ROOM_SPEAKER_BATCH_MAX_WORKERS_DEFAULT
 
 
-def _speaker_batch_executor() -> ThreadPoolExecutor:
+def _speaker_batch_executor() -> OwnedThreadPoolExecutor:
     """Bounded worker pool for one round's speaker batch fan-out."""
 
     global _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
-    executor = _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
-    if executor is not None:
-        return executor
-    with _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR_LOCK:
+    with _CHAT_ROOM_LIFECYCLE_LOCK:
+        if _CHAT_ROOM_LIFECYCLE_STOPPING:
+            raise RuntimeError("chat room lifecycle is shutting down")
         if _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR is None:
-            _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR = ThreadPoolExecutor(
+            _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR = OwnedThreadPoolExecutor(
                 max_workers=_speaker_batch_max_workers(),
                 thread_name_prefix="web-chat-room-speaker",
             )
         return _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
+
+
+def _executor_begin(executor: Any) -> dict[str, Any]:
+    begin = getattr(executor, "begin", None)
+    if callable(begin):
+        return dict(begin())
+    # Test seams may substitute a plain ThreadPoolExecutor. Production owners
+    # always use OwnedThreadPoolExecutor, which can prove physical retirement.
+    if bool(getattr(executor, "_shutdown", False)):
+        return {"opened": False, "recreated": False, "pendingThreads": ["unowned-test-executor"]}
+    return {"opened": True, "recreated": False}
+
+
+def _executor_shutdown_until(executor: Any, deadline: float) -> dict[str, Any]:
+    shutdown_until = getattr(executor, "shutdown_until", None)
+    if callable(shutdown_until):
+        return dict(shutdown_until(deadline))
+    shutdown = getattr(executor, "shutdown", None)
+    threads_value = getattr(executor, "_threads", None)
+    if not callable(shutdown) or threads_value is None:
+        return {
+            "closed": False,
+            "pendingCount": 0,
+            "pendingThreads": [],
+            "failed": ["unowned_executor_unverifiable"],
+        }
+    shutdown(wait=False, cancel_futures=True)
+    threads = tuple(threads_value)
+    for thread in threads:
+        if thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+    pending = sorted(thread.name for thread in threads if thread.is_alive())
+    return {"closed": not pending, "pendingCount": 0, "pendingThreads": pending, "failed": []}
+
+
+def begin_chat_room_lifecycle() -> dict[str, Any]:
+    """Open room-round and speaker-batch pools only after prior workers exit."""
+
+    global _CHAT_ROOM_LIFECYCLE_STOPPING, _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
+    with _CHAT_ROOM_LIFECYCLE_LOCK:
+        if _CHAT_ROOM_LIFECYCLE_FAILURES:
+            return {
+                "opened": False,
+                "recreated": False,
+                "failed": sorted(_CHAT_ROOM_LIFECYCLE_FAILURES),
+            }
+        room_result = _executor_begin(_CHAT_ROOM_EXECUTOR)
+        speaker_executor = _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR
+        speaker_result = (
+            _executor_begin(speaker_executor)
+            if speaker_executor is not None
+            else {"opened": True, "recreated": False}
+        )
+        results = (room_result, speaker_result)
+        if not all(bool(result.get("opened")) for result in results):
+            _CHAT_ROOM_LIFECYCLE_STOPPING = True
+            for executor in (_CHAT_ROOM_EXECUTOR, speaker_executor):
+                if executor is None:
+                    continue
+                try:
+                    stop = getattr(executor, "stop_admission", None)
+                    if callable(stop):
+                        stop(cancel_futures=True)
+                    else:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                except Exception as exc:  # noqa: BLE001 - preserve the failed reopen
+                    _CHAT_ROOM_LIFECYCLE_FAILURES.add(
+                        f"reopen_rollback:{type(exc).__name__}"
+                    )
+            return {
+                "opened": False,
+                "recreated": False,
+                "pendingThreads": sorted(
+                    {
+                        str(name)
+                        for result in results
+                        for name in result.get("pendingThreads", [])
+                    }
+                ),
+                "failed": sorted(
+                    {
+                        str(name)
+                        for result in results
+                        for name in result.get("failed", [])
+                    }
+                    | _CHAT_ROOM_LIFECYCLE_FAILURES
+                ),
+            }
+        _CHAT_ROOM_LIFECYCLE_STOPPING = False
+        return {
+            "opened": True,
+            "recreated": any(bool(result.get("recreated")) for result in results),
+        }
+
+
+def stop_chat_room_admission() -> dict[str, Any]:
+    """Fence submissions, stop durable active rounds, and cancel queued work."""
+
+    global _CHAT_ROOM_LIFECYCLE_STOPPING
+    with _CHAT_ROOM_LIFECYCLE_LOCK:
+        _CHAT_ROOM_LIFECYCLE_STOPPING = True
+        executors = [_CHAT_ROOM_EXECUTOR]
+        if _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR is not None:
+            executors.append(_CHAT_ROOM_SPEAKER_BATCH_EXECUTOR)
+        failures: list[str] = []
+        # First reject all new submissions while allowing the existing room
+        # stop controls below to reach workers before queued calls are canceled.
+        for executor in executors:
+            try:
+                executor.shutdown(wait=False, cancel_futures=False)
+            except Exception as exc:  # noqa: BLE001 - continue stopping every owner
+                failures.append(f"admission:{type(exc).__name__}")
+
+    stopped_rounds: list[dict[str, object]] = []
+    try:
+        stopped_rounds = force_stop_active_chat_room_rounds_for_shutdown(
+            "Workbench backend is shutting down."
+        )
+    except Exception as exc:  # noqa: BLE001 - never skip executor cancellation
+        failures.append(f"round_stop:{type(exc).__name__}")
+
+    for executor in executors:
+        try:
+            stop = getattr(executor, "stop_admission", None)
+            if callable(stop):
+                stop(cancel_futures=True)
+            else:
+                executor.shutdown(wait=False, cancel_futures=True)
+        except Exception as exc:  # noqa: BLE001 - keep closing sibling owners
+            failures.append(f"queue_cancel:{type(exc).__name__}")
+    if failures:
+        with _CHAT_ROOM_LIFECYCLE_LOCK:
+            _CHAT_ROOM_LIFECYCLE_FAILURES.update(failures)
+    else:
+        with _CHAT_ROOM_LIFECYCLE_LOCK:
+            _CHAT_ROOM_LIFECYCLE_FAILURES.clear()
+    return {
+        "closed": not failures,
+        "admissionClosed": not failures,
+        "stoppedRounds": len(stopped_rounds),
+        "failed": sorted(set(failures)),
+    }
+
+
+def shutdown_chat_room_executors(*, deadline: float) -> dict[str, Any]:
+    """Drain both chat-room pools against the shared server deadline."""
+
+    stop_result = stop_chat_room_admission()
+    with _CHAT_ROOM_LIFECYCLE_LOCK:
+        executors = [_CHAT_ROOM_EXECUTOR]
+        if _CHAT_ROOM_SPEAKER_BATCH_EXECUTOR is not None:
+            executors.append(_CHAT_ROOM_SPEAKER_BATCH_EXECUTOR)
+    results = [_executor_shutdown_until(executor, deadline) for executor in executors]
+    pending_threads = sorted(
+        {str(name) for result in results for name in result.get("pendingThreads", [])}
+    )
+    failed = sorted(
+        {
+            str(name)
+            for result in results
+            for name in result.get("failed", [])
+        }
+        | set(stop_result.get("failed", []))
+        | _CHAT_ROOM_LIFECYCLE_FAILURES
+    )
+    closed = all(bool(result.get("closed")) for result in results) and not failed
+    if closed:
+        with _CHAT_ROOM_LIFECYCLE_LOCK:
+            _CHAT_ROOM_LIFECYCLE_FAILURES.clear()
+    return {
+        "closed": closed,
+        "pendingCount": sum(int(result.get("pendingCount") or 0) for result in results),
+        "pendingThreads": pending_threads,
+        "failed": failed,
+    }
 
 
 def _speaker_auto_continue_max_turns() -> int:

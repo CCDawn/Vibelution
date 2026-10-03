@@ -5,7 +5,10 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import types
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -519,6 +522,8 @@ def test_schedule_desktop_shell_refresh_spawns_pythonw_helper(tmp_path, monkeypa
     pythonw = tmp_path / "pythonw.exe"
     pythonw.write_text("", encoding="utf-8")
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: None)
+    monkeypatch.setattr(desktop_shell, "_resume_scheduled_helper", lambda _process: None)
     result = desktop_shell.schedule_desktop_shell_refresh(
         wait_pid=44,
         then_lifecycle="start",
@@ -534,6 +539,7 @@ def test_schedule_desktop_shell_refresh_spawns_pythonw_helper(tmp_path, monkeypa
     assert captured["kwargs"]["stdin"] is desktop_shell.subprocess.DEVNULL
     flags = int(captured["kwargs"].get("creationflags") or 0)
     assert flags & int(getattr(desktop_shell.subprocess, "CREATE_NO_WINDOW", 0x08000000))
+    assert flags & desktop_shell.CREATE_SUSPENDED
     assert result["helperPid"] == 321
     assert result["scheduled"] is True
 
@@ -566,6 +572,8 @@ def test_schedule_desktop_shell_refresh_force_bypasses_recent_failure(tmp_path, 
             self.pid = 654
 
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: None)
+    monkeypatch.setattr(desktop_shell, "_resume_scheduled_helper", lambda _process: None)
     result = desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path, force=True)
     assert result["scheduled"] is True
     assert result["helperPid"] == 654
@@ -674,6 +682,8 @@ def test_schedule_desktop_shell_refresh_forwards_shell_kind(tmp_path, monkeypatc
     python = tmp_path / "python.exe"
     python.write_text("", encoding="utf-8")
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: None)
+    monkeypatch.setattr(desktop_shell, "_resume_scheduled_helper", lambda _process: None)
     result = desktop_shell.schedule_desktop_shell_refresh(
         wait_pid=44,
         then_lifecycle="rebuild-and-start",
@@ -1345,6 +1355,8 @@ def test_schedule_desktop_shell_prebuild_spawns_pythonw_helper_and_transfers_loc
     pythonw = tmp_path / "pythonw.exe"
     pythonw.write_text("", encoding="utf-8")
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: None)
+    monkeypatch.setattr(desktop_shell, "_resume_scheduled_helper", lambda _process: None)
 
     result = desktop_shell.schedule_desktop_shell_prebuild(tmp_path, python_executable=str(python))
 
@@ -1357,6 +1369,7 @@ def test_schedule_desktop_shell_prebuild_spawns_pythonw_helper_and_transfers_loc
     assert flags & int(getattr(desktop_shell.subprocess, "CREATE_NO_WINDOW", 0x08000000))
     assert flags & desktop_shell.CREATE_NEW_PROCESS_GROUP
     assert flags & desktop_shell.CREATE_BREAKAWAY_FROM_JOB
+    assert flags & desktop_shell.CREATE_SUSPENDED
     assert result["scheduled"] is True
     assert result["helperPid"] == 4321
     lock_payload = json.loads(
@@ -1366,6 +1379,598 @@ def test_schedule_desktop_shell_prebuild_spawns_pythonw_helper_and_transfers_loc
     desktop_shell._release_desktop_shell_refresh_lock(
         tmp_path, lock_relative=desktop_shell.PREBUILD_LOCK_RELATIVE
     )
+
+
+@pytest.mark.parametrize(
+    ("kind", "lock_relative"),
+    [
+        ("refresh", desktop_shell.REFRESH_LOCK_RELATIVE),
+        ("prebuild", desktop_shell.PREBUILD_LOCK_RELATIVE),
+    ],
+)
+def test_scheduled_helper_hands_off_lock_before_resume(tmp_path, monkeypatch, kind, lock_relative):
+    events: list[str] = []
+
+    class FakePopen:
+        pid = 8412
+        _handle = 18
+
+    class FakeJob:
+        def assign_handle(self, _handle):
+            events.append("job-assign")
+
+        def set_kill_on_job_close(self, enabled):
+            events.append(f"kill-on-close-{enabled}")
+
+        def close(self):
+            events.append("job-close")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", lambda *_args, **_kwargs: FakePopen())
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", FakeJob)
+    assign = desktop_shell._assign_desktop_shell_refresh_helper
+
+    def record_handoff(
+        root,
+        helper_pid,
+        *,
+        lock_relative=desktop_shell.REFRESH_LOCK_RELATIVE,
+        lock_token,
+    ):
+        events.append("handoff")
+        return assign(root, helper_pid, lock_relative=lock_relative, lock_token=lock_token)
+
+    def record_resume(process):
+        payload = json.loads(
+            desktop_shell._refresh_lock_path(tmp_path, lock_relative).read_text(encoding="utf-8")
+        )
+        assert payload["pid"] == process.pid
+        events.append("resume")
+
+    monkeypatch.setattr(desktop_shell, "_assign_desktop_shell_refresh_helper", record_handoff)
+    monkeypatch.setattr(desktop_shell, "_resume_scheduled_helper", record_resume)
+
+    if kind == "refresh":
+        result = desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path)
+    else:
+        result = desktop_shell.schedule_desktop_shell_prebuild(tmp_path)
+
+    assert result["scheduled"] is True
+    assert events == ["job-assign", "handoff", "resume", "kill-on-close-False", "job-close"]
+
+
+def test_scheduled_helper_claim_transfers_parent_lock_and_refreshes_started_at(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": 8411,
+                "startedAt": "2026-10-01T00:00:00+00:00",
+                "ownerToken": "claim-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell.os, "getpid", lambda: 8412)
+    monkeypatch.setattr(desktop_shell.os, "getppid", lambda: 8411)
+
+    assert desktop_shell._claim_scheduled_desktop_shell_helper_lock(
+        tmp_path,
+        lock_relative=desktop_shell.REFRESH_LOCK_RELATIVE,
+        lock_token="claim-token",
+    ) is True
+
+    claimed = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert claimed["pid"] == 8412
+    assert claimed["ownerToken"] == "claim-token"
+    assert claimed["startedAt"] != "2026-10-01T00:00:00+00:00"
+
+
+@pytest.mark.parametrize(
+    ("holder_pid", "token"),
+    [(8410, "claim-token"), (8411, "replaced-token")],
+)
+def test_scheduled_helper_claim_rejects_wrong_parent_or_replaced_owner(
+    tmp_path,
+    monkeypatch,
+    holder_pid,
+    token,
+):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    original = json.dumps(
+        {"pid": holder_pid, "startedAt": "2026-10-01T00:00:00+00:00", "ownerToken": "claim-token"}
+    )
+    lock_path.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(desktop_shell.os, "getpid", lambda: 8412)
+    monkeypatch.setattr(desktop_shell.os, "getppid", lambda: 8411)
+
+    assert desktop_shell._claim_scheduled_desktop_shell_helper_lock(
+        tmp_path,
+        lock_relative=desktop_shell.REFRESH_LOCK_RELATIVE,
+        lock_token=token,
+    ) is False
+    assert lock_path.read_text(encoding="utf-8") == original
+
+
+def test_scheduled_helper_claim_retries_only_transient_busy_breaker(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps({"pid": 8411, "startedAt": "2026-10-01T00:00:00+00:00", "ownerToken": "claim-token"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell.os, "getpid", lambda: 8412)
+    monkeypatch.setattr(desktop_shell.os, "getppid", lambda: 8411)
+    monkeypatch.setattr(desktop_shell.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(desktop_shell, "SCHEDULED_HELPER_LOCK_CLAIM_RETRY_SECONDS", 0.2)
+    real_breaker = desktop_shell._refresh_lock_breaker
+    attempts = 0
+
+    @contextmanager
+    def busy_twice(path):
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 2:
+            yield False
+            return
+        with real_breaker(path) as acquired:
+            yield acquired
+
+    monkeypatch.setattr(desktop_shell, "_refresh_lock_breaker", busy_twice)
+    assert desktop_shell._claim_scheduled_desktop_shell_helper_lock(
+        tmp_path,
+        lock_relative=desktop_shell.REFRESH_LOCK_RELATIVE,
+        lock_token="claim-token",
+    ) is True
+    assert attempts == 3
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["pid"] == 8412
+
+
+def test_scheduled_helper_retirement_releases_updated_pid_but_preserves_new_token(tmp_path):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(
+        json.dumps({"pid": 8412, "ownerToken": "retiring-token", "startedAt": "updated"}),
+        encoding="utf-8",
+    )
+    assert desktop_shell._release_scheduled_helper_lock(
+        tmp_path,
+        lock_relative=desktop_shell.REFRESH_LOCK_RELATIVE,
+        lock_token="retiring-token",
+    ) is True
+    assert not lock_path.exists()
+
+    lock_path.write_text(
+        json.dumps({"pid": 9200, "ownerToken": "new-token", "startedAt": "new-owner"}),
+        encoding="utf-8",
+    )
+    assert desktop_shell._release_scheduled_helper_lock(
+        tmp_path,
+        lock_relative=desktop_shell.REFRESH_LOCK_RELATIVE,
+        lock_token="retiring-token",
+    ) is True
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["ownerToken"] == "new-token"
+
+
+@pytest.mark.parametrize(
+    ("kind", "lock_relative"),
+    [
+        ("refresh", desktop_shell.REFRESH_LOCK_RELATIVE),
+        ("prebuild", desktop_shell.PREBUILD_LOCK_RELATIVE),
+    ],
+)
+def test_scheduled_helper_handoff_failure_retires_process_before_releasing_lock(
+    tmp_path,
+    monkeypatch,
+    kind,
+    lock_relative,
+):
+    class FakePopen:
+        pid = 8413
+
+        def __init__(self):
+            self.returncode = None
+            self.terminate_calls = 0
+            self.kill_calls = 0
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminate_calls += 1
+            self.returncode = -15
+
+        def kill(self):
+            self.kill_calls += 1
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                raise desktop_shell.subprocess.TimeoutExpired("helper", timeout)
+            return self.returncode
+
+    process = FakePopen()
+    spawn_count = 0
+
+    def spawn(*_args, **_kwargs):
+        nonlocal spawn_count
+        spawn_count += 1
+        return process
+
+    def fail_handoff(*_args, **_kwargs):
+        raise OSError("synthetic lock handoff failure")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", spawn)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: None)
+    monkeypatch.setattr(desktop_shell, "_assign_desktop_shell_refresh_helper", fail_handoff)
+    monkeypatch.setattr(
+        desktop_shell,
+        "_resume_scheduled_helper",
+        lambda _process: (_ for _ in ()).throw(AssertionError("failed handoff must not resume helper")),
+    )
+
+    if kind == "refresh":
+        schedule = lambda: desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path)
+    else:
+        schedule = lambda: desktop_shell.schedule_desktop_shell_prebuild(tmp_path)
+
+    with pytest.raises(RuntimeError, match="helper could not be started safely"):
+        schedule()
+
+    assert process.terminate_calls == 1
+    assert process.poll() is not None
+    assert not desktop_shell._refresh_lock_path(tmp_path, lock_relative).exists()
+    assert spawn_count == 1
+
+
+@pytest.mark.parametrize("retire_job_tree", [True, False])
+def test_clear_kill_on_job_close_failure_retires_before_unlocking(tmp_path, monkeypatch, retire_job_tree):
+    events: list[str] = []
+
+    class FakePopen:
+        pid = 8415
+        _handle = 19
+
+        def __init__(self):
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            if retire_job_tree:
+                self.returncode = -15
+
+        def kill(self):
+            if retire_job_tree:
+                self.returncode = -9
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                raise desktop_shell.subprocess.TimeoutExpired("helper", timeout)
+            return self.returncode
+
+    process = FakePopen()
+
+    class FakeJob:
+        def __init__(self):
+            self.active = 1
+
+        def assign_handle(self, _handle):
+            events.append("job-assign")
+
+        def set_kill_on_job_close(self, enabled):
+            events.append(f"kill-on-close-{enabled}")
+            if not enabled:
+                raise OSError("synthetic Job detach failure")
+
+        def active_count(self):
+            return self.active
+
+        def terminate(self):
+            events.append("job-terminate")
+            if retire_job_tree:
+                self.active = 0
+                process.returncode = -9
+
+        def close(self):
+            events.append("job-close")
+
+    job = FakeJob()
+    monkeypatch.setattr(desktop_shell, "SCHEDULED_HELPER_RETIRE_TIMEOUT_SECONDS", 0.02)
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: job)
+    monkeypatch.setattr(desktop_shell, "_resume_scheduled_helper", lambda _process: events.append("resume"))
+
+    if retire_job_tree:
+        with pytest.raises(RuntimeError, match="helper could not be started safely"):
+            desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path)
+        assert process.poll() is not None
+        assert not desktop_shell._refresh_lock_path(tmp_path).exists()
+    else:
+        with pytest.raises(desktop_shell.ScheduledHelperRetirementError, match="lock remains held"):
+            desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path)
+        assert desktop_shell._refresh_lock_path(tmp_path).is_file()
+        job.active = 0
+        process.returncode = -9
+        assert desktop_shell._retry_pending_scheduled_helper_retirements(tmp_path) is True
+        assert not desktop_shell._refresh_lock_path(tmp_path).exists()
+
+    assert events.index("resume") < events.index("kill-on-close-False")
+    assert events.index("kill-on-close-False") < events.index("kill-on-close-True")
+
+
+@pytest.mark.parametrize(
+    ("kind", "lock_relative"),
+    [
+        ("refresh", desktop_shell.REFRESH_LOCK_RELATIVE),
+        ("prebuild", desktop_shell.PREBUILD_LOCK_RELATIVE),
+    ],
+)
+def test_unconfirmed_helper_retirement_keeps_lock_and_blocks_reschedule(
+    tmp_path,
+    monkeypatch,
+    kind,
+    lock_relative,
+):
+    class FakePopen:
+        pid = 8414
+
+        def __init__(self):
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            return None
+
+        def kill(self):
+            return None
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                raise desktop_shell.subprocess.TimeoutExpired("helper", timeout)
+            return self.returncode
+
+    process = FakePopen()
+    spawn_count = 0
+    monkeypatch.setattr(desktop_shell, "SCHEDULED_HELPER_RETIRE_TIMEOUT_SECONDS", 0.02)
+
+    def spawn(*_args, **_kwargs):
+        nonlocal spawn_count
+        spawn_count += 1
+        return process
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", spawn)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: None)
+    monkeypatch.setattr(
+        desktop_shell,
+        "_assign_desktop_shell_refresh_helper",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("synthetic handoff failure")),
+    )
+
+    if kind == "refresh":
+        schedule = lambda: desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path)
+    else:
+        schedule = lambda: desktop_shell.schedule_desktop_shell_prebuild(tmp_path)
+
+    with pytest.raises(desktop_shell.ScheduledHelperRetirementError, match="lock remains held"):
+        schedule()
+
+    lock_path = desktop_shell._refresh_lock_path(tmp_path, lock_relative)
+    assert lock_path.is_file()
+    blocked = schedule()
+    assert blocked["scheduled"] is False
+    assert blocked["reason"] == "helper_retirement_pending"
+    assert spawn_count == 1
+    assert lock_path.is_file()
+
+    process.returncode = -9
+    assert desktop_shell._retry_pending_scheduled_helper_retirements(tmp_path) is True
+    assert not lock_path.exists()
+
+
+def test_pending_helper_retirement_keeps_handles_open_until_lock_release_succeeds(tmp_path, monkeypatch):
+    class FakeHandle:
+        closed = False
+
+        def Close(self):
+            self.closed = True
+
+    class FakePopen:
+        pid = 8416
+
+        def __init__(self):
+            self.returncode = None
+            self._handle = FakeHandle()
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            if self.returncode is None:
+                raise desktop_shell.subprocess.TimeoutExpired("helper", timeout)
+            return self.returncode
+
+    class FakeJob:
+        def __init__(self):
+            self.active = 1
+            self.closed = False
+
+        def assign_handle(self, _handle):
+            pass
+
+        def set_kill_on_job_close(self, enabled):
+            if not enabled:
+                raise OSError("synthetic Job detach failure")
+
+        def active_count(self):
+            return self.active
+
+        def terminate(self):
+            self.active = 0
+
+        def close(self):
+            self.closed = True
+
+    process = FakePopen()
+    job = FakeJob()
+    release_attempts = 0
+    release_lock = desktop_shell._release_scheduled_helper_lock
+
+    def fail_first_release(*args, **kwargs):
+        nonlocal release_attempts
+        release_attempts += 1
+        if release_attempts == 1:
+            return False
+        return release_lock(*args, **kwargs)
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(desktop_shell, "_new_scheduled_helper_job", lambda: job)
+    monkeypatch.setattr(
+        desktop_shell,
+        "_resume_scheduled_helper",
+        lambda _process: None,
+    )
+    monkeypatch.setattr(desktop_shell, "_release_scheduled_helper_lock", fail_first_release)
+
+    with pytest.raises(desktop_shell.ScheduledHelperRetirementError, match="lock remains held"):
+        desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path)
+
+    assert process.poll() is not None
+    assert process._handle.closed is False
+    assert job.closed is False
+    assert desktop_shell._refresh_lock_path(tmp_path).is_file()
+
+    assert desktop_shell._retry_pending_scheduled_helper_retirements(tmp_path) is True
+    assert process._handle is None
+    assert job.closed is True
+    assert not desktop_shell._refresh_lock_path(tmp_path).exists()
+
+
+def test_concurrent_pending_helper_retries_retire_and_close_owner_once(tmp_path, monkeypatch):
+    retire_started = threading.Event()
+    allow_retire_to_finish = threading.Event()
+    second_retire_started = threading.Event()
+    second_call_started = threading.Event()
+    counts = {"retire": 0, "release": 0, "close": 0}
+    owner = desktop_shell._ScheduledHelperOwner(process=object(), job=object())
+
+    def retire(_owner, *, timeout):
+        assert _owner is owner
+        assert timeout == desktop_shell.SCHEDULED_HELPER_RETIRE_TIMEOUT_SECONDS
+        counts["retire"] += 1
+        if counts["retire"] == 1:
+            retire_started.set()
+            assert allow_retire_to_finish.wait(timeout=2)
+        else:
+            second_retire_started.set()
+        return True
+
+    def release(_project_root, **_kwargs):
+        counts["release"] += 1
+        return True
+
+    def close(_owner):
+        assert _owner is owner
+        counts["close"] += 1
+        return True
+
+    monkeypatch.setattr(desktop_shell, "_retire_scheduled_helper_owner", retire)
+    monkeypatch.setattr(desktop_shell, "_release_scheduled_helper_lock", release)
+    monkeypatch.setattr(desktop_shell, "_close_scheduled_helper_owner", close)
+    desktop_shell._register_pending_scheduled_helper_retirement(
+        tmp_path,
+        owner,
+        lock_relative=desktop_shell.REFRESH_LOCK_RELATIVE,
+        lock_token="owner-token",
+    )
+
+    results: list[bool] = []
+    errors: list[BaseException] = []
+
+    def retry(*, signal_start: threading.Event | None = None):
+        try:
+            if signal_start is not None:
+                signal_start.set()
+            results.append(desktop_shell._retry_pending_scheduled_helper_retirements(tmp_path))
+        except BaseException as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=retry, name="scheduled-helper-retry-first")
+    second = threading.Thread(
+        target=retry,
+        kwargs={"signal_start": second_call_started},
+        name="scheduled-helper-retry-second",
+    )
+    first.start()
+    try:
+        assert retire_started.wait(timeout=1)
+        second.start()
+        assert second_call_started.wait(timeout=1)
+        assert not second_retire_started.wait(timeout=0.1)
+    finally:
+        allow_retire_to_finish.set()
+        first.join(timeout=2)
+        if second.ident is not None:
+            second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert results == [True, True]
+    assert counts == {"retire": 1, "release": 1, "close": 1}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real suspended process rollback is Windows-specific")
+def test_refresh_handoff_failure_never_runs_isolated_suspended_helper(tmp_path, monkeypatch):
+    python = Path(sys.executable)
+    pythonw = python.with_name("pythonw.exe")
+    if not pythonw.is_file():
+        pytest.skip("the active interpreter has no sibling pythonw.exe")
+    entry = tmp_path / "scripts" / "vibelution_desktop_entry.py"
+    entry.parent.mkdir(parents=True)
+    marker = tmp_path / "helper-started.txt"
+    entry.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('started', encoding='utf-8')\n"
+        "import time\n"
+        "time.sleep(10)\n",
+        encoding="utf-8",
+    )
+    real_popen = desktop_shell.subprocess.Popen
+    spawned: list[subprocess.Popen] = []
+
+    def capture_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def delayed_handoff_failure(*_args, **_kwargs):
+        time.sleep(0.2)
+        raise OSError("synthetic isolated handoff failure")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", capture_popen)
+    monkeypatch.setattr(desktop_shell, "_assign_desktop_shell_refresh_helper", delayed_handoff_failure)
+
+    with pytest.raises(RuntimeError, match="helper could not be started safely"):
+        desktop_shell.schedule_desktop_shell_refresh(
+            wait_pid=0,
+            project_root=tmp_path,
+            python_executable=str(python),
+        )
+
+    assert len(spawned) == 1
+    assert spawned[0].poll() is not None
+    assert not marker.exists()
 
 
 def test_schedule_desktop_shell_prebuild_skips_while_refresh_lock_held(tmp_path, monkeypatch):

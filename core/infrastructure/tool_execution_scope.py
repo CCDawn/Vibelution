@@ -7,8 +7,91 @@ from concurrent.futures import Future
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from threading import Condition
+from threading import Condition, Event, RLock
 from typing import Any, Iterator
+
+from .owned_executor import OwnedThreadPoolExecutor
+
+
+_TOOL_OWNER_LOCK = RLock()
+_TOOL_EXECUTORS: dict[OwnedThreadPoolExecutor, Event] = {}
+_TOOL_ADMISSION_CLOSED = False
+
+
+class ToolStopEvent(Event):
+    """Combine a call-local timeout fence with the existing session stop event."""
+
+    def __init__(self, session_event: Event | None = None) -> None:
+        super().__init__()
+        self._session_event = session_event
+
+    def is_set(self) -> bool:
+        return super().is_set() or bool(self._session_event and self._session_event.is_set())
+
+    def wait(self, timeout: float | None = None) -> bool:
+        if self._session_event is None:
+            return super().wait(timeout)
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
+        while not self.is_set():
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return False
+            super().wait(0.05 if remaining is None else min(0.05, remaining))
+        return True
+
+
+def _prune_tool_executors_locked() -> None:
+    for executor in tuple(_TOOL_EXECUTORS):
+        if executor.snapshot()["closed"]:
+            del _TOOL_EXECUTORS[executor]
+
+
+def create_owned_tool_executor(stop_event: Event) -> OwnedThreadPoolExecutor:
+    """Register physical ownership before the first submission can race shutdown."""
+    with _TOOL_OWNER_LOCK:
+        _prune_tool_executors_locked()
+        executor = OwnedThreadPoolExecutor(max_workers=1, thread_name_prefix="physical-tool")
+        if _TOOL_ADMISSION_CLOSED:
+            stop_event.set()
+            executor.stop_admission()
+        else:
+            _TOOL_EXECUTORS[executor] = stop_event
+        return executor
+
+
+def stop_tool_execution_admission() -> None:
+    global _TOOL_ADMISSION_CLOSED
+    with _TOOL_OWNER_LOCK:
+        _TOOL_ADMISSION_CLOSED = True
+        executors = tuple(_TOOL_EXECUTORS.items())
+    for executor, stop_event in executors:
+        stop_event.set()
+        executor.stop_admission()
+
+
+def shutdown_tool_execution(*, deadline: float) -> dict[str, Any]:
+    stop_tool_execution_admission()
+    with _TOOL_OWNER_LOCK:
+        executors = tuple(_TOOL_EXECUTORS)
+    results = [executor.shutdown_until(deadline) for executor in executors]
+    with _TOOL_OWNER_LOCK:
+        _prune_tool_executors_locked()
+    return {
+        "closed": all(result["closed"] for result in results),
+        "pendingCount": sum(result["pendingCount"] for result in results),
+        "pendingThreads": [name for result in results for name in result["pendingThreads"]][:16],
+        "failed": [name for result in results for name in result["failed"]][:16],
+    }
+
+
+def begin_tool_execution_lifecycle() -> dict[str, Any]:
+    global _TOOL_ADMISSION_CLOSED
+    with _TOOL_OWNER_LOCK:
+        _prune_tool_executors_locked()
+        if _TOOL_ADMISSION_CLOSED and _TOOL_EXECUTORS:
+            return {"opened": False, "pendingExecutors": len(_TOOL_EXECUTORS)}
+        _TOOL_ADMISSION_CLOSED = False
+        return {"opened": True}
 
 
 _CURRENT_TOOL_EXECUTION_SCOPE: ContextVar["ToolExecutionScope | None"] = ContextVar(

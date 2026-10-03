@@ -18,8 +18,8 @@ describe("CliAgentRunTerminalPanel layout contract", () => {
   it("announces terminal output and overlay states with semantic regions", () => {
     expect(terminalPanelSource).toContain('role="region"');
     expect(terminalPanelSource).toContain('aria-label={`${run.title} ${lang === "zh" ? "终端输出" : "terminal output"}`}');
-    expect(terminalPanelSource).toContain('role={terminalError ? "alert" : "status"}');
-    expect(terminalPanelSource).toContain('aria-live={terminalError ? "assertive" : "polite"}');
+    expect(terminalPanelSource).toContain('role={terminalDisplayError ? "alert" : "status"}');
+    expect(terminalPanelSource).toContain('aria-live={terminalDisplayError ? "assertive" : "polite"}');
     expect(terminalPanelSource).toContain('aria-atomic="true"');
   });
 });

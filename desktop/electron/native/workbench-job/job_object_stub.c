@@ -15,6 +15,8 @@ static napi_value init(napi_env env, napi_value exports) {
   napi_set_named_property(env, exports, "terminate", fn);
   napi_create_function(env, "activeCount", NAPI_AUTO_LENGTH, unsupported, NULL, &fn);
   napi_set_named_property(env, exports, "activeCount", fn);
+  napi_create_function(env, "drainStatus", NAPI_AUTO_LENGTH, unsupported, NULL, &fn);
+  napi_set_named_property(env, exports, "drainStatus", fn);
   napi_create_function(env, "close", NAPI_AUTO_LENGTH, unsupported, NULL, &fn);
   napi_set_named_property(env, exports, "close", fn);
   return exports;

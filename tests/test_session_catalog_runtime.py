@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from threading import Event
 
 import pytest
 
@@ -160,6 +161,76 @@ def test_runtime_shutdown_removes_candidate_provider(tmp_path):
 
     assert status.status == "ready"
     assert comparison.status == "disabled"
+
+
+def test_runtime_shutdown_retains_blocked_reconcile_until_drained(tmp_path):
+    config = AppConfig.model_validate(
+        {
+            "session_catalog": {
+                "mode": "shadow",
+                "incremental_reconcile_delay_ms": 0,
+            }
+        }
+    ).session_catalog
+    summaries = build_session_query_summaries(1)
+    status = initialize_session_catalog_runtime(
+        project_root=tmp_path,
+        catalog_config=config,
+        summary_loader=lambda: summaries,
+    )
+    assert status.status == "ready"
+
+    supervisor = catalog_runtime._RUNTIME_SUPERVISOR
+    assert supervisor is not None
+    reconcile_entered = Event()
+    release_reconcile = Event()
+
+    class BlockingReconciler:
+        def reconcile(self, **_kwargs):
+            reconcile_entered.set()
+            assert release_reconcile.wait(5.0), "test did not release the reconcile worker"
+            return catalog_bridge.CatalogReconcileResult(
+                status="complete",
+                session_count=1,
+                source_revision="test-revision",
+            )
+
+    supervisor._reconciler = BlockingReconciler()
+    supervisor.observe(tmp_path, "session-1", "test-revision")
+    try:
+        assert reconcile_entered.wait(2.0), "incremental reconcile did not start"
+
+        timed_out = catalog_runtime.shutdown_session_catalog_runtime(timeout=0.01)
+        assert timed_out["closed"] is False
+        assert timed_out["pendingWorkers"] == ["vibelution-session-catalog-reconcile"]
+        assert catalog_runtime._RUNTIME_SUPERVISOR is supervisor
+        comparison = catalog_bridge.run_session_query_shadow(
+            {"items": [], "nextCursor": "", "totalEstimate": 0},
+            request={"limit": 1},
+        )
+        assert comparison.status == "disabled"
+
+        blocked_start = initialize_session_catalog_runtime(
+            project_root=tmp_path,
+            catalog_config=config,
+            summary_loader=lambda: summaries,
+        )
+        assert blocked_start.status == "degraded"
+        assert blocked_start.error_type == "CatalogShutdownPending"
+        assert catalog_runtime._RUNTIME_SUPERVISOR is supervisor
+    finally:
+        release_reconcile.set()
+
+    drained = catalog_runtime.shutdown_session_catalog_runtime(timeout=2.0)
+    assert drained == {"closed": True, "pendingWorkers": []}
+    assert catalog_runtime._RUNTIME_SUPERVISOR is None
+
+    reopened = initialize_session_catalog_runtime(
+        project_root=tmp_path,
+        catalog_config=config,
+        summary_loader=lambda: summaries,
+    )
+    assert reopened.status == "ready"
 
 
 def test_shadow_runtime_source_failure_degrades_to_legacy(tmp_path):
