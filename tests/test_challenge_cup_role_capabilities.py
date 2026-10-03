@@ -211,8 +211,9 @@ def test_canonical_challenge_cup_mutation_and_write_scopes_match_role_ownership(
 
 
 def test_legacy_challenge_cup_role_profiles_remain_read_compatible():
-    # Pin the current canonical legacy profiles. The governed item reader is
-    # granted only to knowledge_steward and must not change these profiles.
+    # Pin legacy permission fields independently of the shared schema version.
+    # New steward lifecycle tools may be denied by these profiles but must not
+    # expand their allowed tools or change their existing capabilities.
     expected_fingerprints = {
         "source_finder": "346ad5fba96208d4",
         "source_extractor": "1fd4fae2b8ef11e9",
@@ -223,10 +224,30 @@ def test_legacy_challenge_cup_role_profiles_remain_read_compatible():
         "challenge_cup_iteration_planner": "d973b8c5d8e8d92f",
         "challenge_cup_versioning": "5bb3872312d084e2",
     }
-    assert {
-        role_key: svc.ROLE_TOOL_PROFILES[role_key]["profileFingerprint"]
-        for role_key in expected_fingerprints
-    } == expected_fingerprints
+    fingerprints = {}
+    for role_key in expected_fingerprints:
+        profile = svc.ROLE_TOOL_PROFILES[role_key]
+        assert set(svc.KNOWLEDGE_LIFECYCLE_TOOLS).isdisjoint(profile["allowedTools"])
+        legacy = {
+            **profile,
+            "profileVersion": 1,
+            "forbiddenTools": [tool for tool in profile["forbiddenTools"]
+                               if tool not in svc.KNOWLEDGE_LIFECYCLE_TOOLS],
+        }
+        fingerprints[role_key] = svc.role_tool_profile_fingerprint(legacy)
+    assert fingerprints == expected_fingerprints
+
+
+def test_knowledge_lifecycle_tools_are_granted_only_to_knowledge_steward():
+    for role_key, profile in svc.ROLE_TOOL_PROFILES.items():
+        expected = set(svc.KNOWLEDGE_LIFECYCLE_TOOLS) if role_key == "knowledge_steward" else set()
+        assert set(profile["allowedTools"]) & set(svc.KNOWLEDGE_LIFECYCLE_TOOLS) == expected, role_key
+        if role_key not in {"knowledge_steward", "source_ingestor", "challenge_cup_knowledge_manager"}:
+            continue
+        policy = svc.build_policy_v2_from_role_profile(
+            profile, f"tool-{role_key}", registered_tool_names=tool_catalog.TOOL_CATALOG,
+        )
+        assert set(policy.allowed_tools) & set(svc.KNOWLEDGE_LIFECYCLE_TOOLS) == expected, role_key
 
 
 def test_collection_role_sees_only_the_single_facade_tool():
@@ -365,4 +386,5 @@ def test_role_capability_contract_snapshot_is_stable():
     snapshot = svc.role_capability_contract_snapshot()
     assert [item["roleKey"] for item in snapshot] == sorted(item["roleKey"] for item in snapshot)
     assert {item["roleKey"] for item in snapshot} == set(svc.ROLE_CAPABILITY_CONTRACTS)
-    assert svc.role_capability_contract_fingerprint() == "a86027bcd9fc0892c6d13151e19152bcaa8141e525d21e1626fb814890f52f2f"
+    assert svc.ROLE_TOOL_PROFILE_VERSION == 2
+    assert svc.role_capability_contract_fingerprint() == "92436fa803e79163d9b85bb9a34c8d2fd7320a8cef54680cb044d1c701944889"

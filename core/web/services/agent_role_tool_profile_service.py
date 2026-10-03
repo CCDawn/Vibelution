@@ -10,13 +10,16 @@ from typing import Any
 
 ROLE_TOOL_PROFILE_VERSION = 2
 
-FORMAL_KNOWLEDGE_WRITE_TOOLS = (
+FORMAL_KNOWLEDGE_INGESTION_TOOLS = (
     "knowledge_proposal_tool",
     "knowledge_proposal_review_tool",
-    "knowledge_source_lifecycle_tool",
-    "knowledge_index_build_tool",
     "knowledge_ingestion_tool",
 )
+KNOWLEDGE_LIFECYCLE_TOOLS = (
+    "knowledge_source_lifecycle_tool",
+    "knowledge_index_build_tool",
+)
+FORMAL_KNOWLEDGE_WRITE_TOOLS = FORMAL_KNOWLEDGE_INGESTION_TOOLS + KNOWLEDGE_LIFECYCLE_TOOLS
 KNOWLEDGE_GOVERNANCE_TOOLS = (
     "knowledge_governance_tasks_tool",
     "knowledge_operations_health_tool",
@@ -26,6 +29,7 @@ KNOWLEDGE_GOVERNANCE_TOOLS = (
     "knowledge_rating_suggestion_tool",
 )
 KNOWLEDGE_STEWARD_TOOLS = FORMAL_KNOWLEDGE_WRITE_TOOLS + KNOWLEDGE_GOVERNANCE_TOOLS
+KNOWLEDGE_INGESTION_TOOLS = FORMAL_KNOWLEDGE_INGESTION_TOOLS + KNOWLEDGE_GOVERNANCE_TOOLS
 SEARCH_DISABLED_TOOLS = ("web_search_tool",)
 CODE_MUTATION_TOOLS = (
     "cli_tool",
@@ -410,7 +414,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "unified_memory_search_tool",
-            *KNOWLEDGE_STEWARD_TOOLS,
+            *KNOWLEDGE_INGESTION_TOOLS,
         ),
         preferred_tools=(
             "task_list_tool",
@@ -518,7 +522,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "source_collection_stage_writeback_tool",
             "unified_memory_search_tool",
             "research_knowledge_query_tool",
-            *KNOWLEDGE_STEWARD_TOOLS,
+            *KNOWLEDGE_INGESTION_TOOLS,
         ),
         preferred_tools=(
             "source_collection_context_tool",
