@@ -218,6 +218,9 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_kernel_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: data_home / "workspace")
+    # The route fingerprint tracks environment/config changes, not this test's
+    # resolver replacement. Drop paths cached by the outer fixture first.
+    agent_directory_service._invalidate_repaired_state_cache()
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_root)
 
     def _configured_test_context_window(self):
@@ -226,6 +229,20 @@ def _isolate_chat_room_kernel(tmp_path, monkeypatch):
         return 200000
 
     monkeypatch.setattr(AgentRuntime, "_init_model_discovery", _configured_test_context_window)
+
+
+def test_isolate_chat_room_kernel_invalidates_cached_workspace_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
+    agent_directory_service._invalidate_repaired_state_cache()
+    # Prime the outer fixture's route before the room helper replaces the
+    # resolver. The environment fingerprint stays identical across that swap.
+    old_workspace = agent_directory_service._workspace_path("agents", "agent-route-probe")
+    assert old_workspace == tmp_path / "workspace" / "agents" / "agent-route-probe"
+
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+
+    workspace = agent_directory_service._ensure_agent_workspace("workspace/agents/agent-route-probe")
+    assert workspace == tmp_path / "operator-data" / "workspace" / "agents" / "agent-route-probe"
 
 
 def _install_chat_room_test_llm_config(monkeypatch, model_id: str = "chat-room-test-model") -> dict[str, dict[str, str]]:
