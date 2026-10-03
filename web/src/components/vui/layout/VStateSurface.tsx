@@ -122,16 +122,9 @@ export function VStateSurface({
   ...props
 }: VStateSurfaceProps) {
   const compact = density === "compact";
-  const resolvedSkeleton =
-    skeletonLines === undefined && (fill || tone === "loading")
-      ? fill
-        ? 3
-        : tone === "loading"
-          ? 2
-          : false
-      : skeletonLines;
-  const lineCount = skeletonLineCount(resolvedSkeleton);
   const isBusy = busy ?? tone === "loading";
+  const resolvedSkeleton = isBusy ? (skeletonLines ?? (fill ? 3 : 2)) : false;
+  const lineCount = skeletonLineCount(resolvedSkeleton);
 
   return (
     <section

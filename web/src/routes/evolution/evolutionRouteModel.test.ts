@@ -16,12 +16,43 @@ import {
   supervisedProposalStatusLabel,
   supervisedRoleConversationSession,
   supervisedWorkflowStepLabel,
+  supervisedWorkflowStepStatus,
   toLimitInput,
   SUPERVISED_WORKFLOW_STEPS,
   SUPERVISED_RUN_MEMBER_ROLES,
 } from "./evolutionRouteModel";
 
 describe("evolutionRouteModel", () => {
+  it.each(["cancelled", "failed", "done"])("settles stale live stage statuses when the run is %s", (runStatus) => {
+    for (const stepStatus of ["queued", "running", "paused", "stopping", "starting"]) {
+      const expectedCurrentStatus = runStatus === "done" && ["queued", "starting"].includes(stepStatus) ? "pending" : runStatus;
+      expect(supervisedWorkflowStepStatus(runStatus, stepStatus, true)).toBe(expectedCurrentStatus);
+      expect(supervisedWorkflowStepStatus(runStatus, stepStatus, false)).toBe("pending");
+    }
+    expect(supervisedWorkflowStepStatus(runStatus, "done", false)).toBe("done");
+    expect(supervisedWorkflowStepStatus(runStatus, "pending", false)).toBe("pending");
+    expect(supervisedWorkflowStepStatus(runStatus, "failed", false)).toBe("failed");
+  });
+
+  it("does not invent running or completed stages from missing evidence", () => {
+    expect(supervisedWorkflowStepStatus("cancelled", "", true)).toBe("cancelled");
+    expect(supervisedWorkflowStepStatus("failed", undefined, true)).toBe("failed");
+    expect(supervisedWorkflowStepStatus("done", "", true)).toBe("pending");
+    expect(supervisedWorkflowStepStatus("cancelled", "", false)).toBe("pending");
+    expect(supervisedWorkflowStepStatus(undefined, undefined, true)).toBe("pending");
+  });
+
+  it("does not mark an unstarted stage done when the whole run has finished", () => {
+    expect(supervisedWorkflowStepStatus("done", "queued", true)).toBe("pending");
+    expect(supervisedWorkflowStepStatus("done", "starting", true)).toBe("pending");
+  });
+
+  it.each(["queued", "running", "paused", "stopping"])("uses the current run's %s status for its live stage", (runStatus) => {
+    expect(supervisedWorkflowStepStatus(runStatus, "", true)).toBe(runStatus);
+    expect(supervisedWorkflowStepStatus(runStatus, "running", true)).toBe(runStatus);
+    expect(supervisedWorkflowStepStatus(runStatus, "", false)).toBe("pending");
+  });
+
   it("keeps the selected approval mode in the optimistic run projection", () => {
     const run = buildSupervisedStartPlaceholder({
       sourceKind: "dataset",

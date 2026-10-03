@@ -14,6 +14,7 @@ import type {
   EvolutionWorkflowStep,
 } from "../../api/types";
 import { modelDisplayLabel } from "../agentDisplay";
+import { isLiveSupervisedRunStatus, isTerminalSupervisedRunStatus, normalizedSupervisedRunStatus } from "../evolutionLiveRun";
 import { supervisedDecisionLabel } from "../supervisedRunRecordLabel";
 
 export type SupervisedMemberRole = "baseline" | "baseline_rerun" | "candidate" | "reviewer" | "auditor" | "judge";
@@ -180,6 +181,28 @@ export function supervisedWorkflowStepLabel(step: SupervisedWorkflowDefinition |
   }
   const definition = SUPERVISED_WORKFLOW_STEPS.find((item) => item.id === step.id);
   return lang === "zh" ? definition?.zh ?? step.id : definition?.en ?? step.id;
+}
+
+export function supervisedWorkflowStepStatus(
+  runStatus: string | null | undefined,
+  stepStatus: string | null | undefined,
+  current: boolean,
+): string {
+  const run = normalizedSupervisedRunStatus(runStatus || "");
+  const step = normalizedSupervisedRunStatus(stepStatus || "");
+  const transient = isLiveSupervisedRunStatus(step) || step === "starting";
+  if (isTerminalSupervisedRunStatus(run)) {
+    if (transient) {
+      // An old live marker is not completion evidence for another stage.
+      if (!current || (run === "done" && (step === "queued" || step === "starting"))) return "pending";
+      return run;
+    }
+    if (current && !step && run !== "done") return run;
+    // A finished run does not prove that an unrecorded stage completed.
+    return step || "pending";
+  }
+  if (current && isLiveSupervisedRunStatus(run) && (!step || transient)) return run;
+  return step || "pending";
 }
 
 export function activeSupervisedWorkflowStep(

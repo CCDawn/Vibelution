@@ -97,6 +97,7 @@ import {
   supervisedRoleConversationSession,
   supervisedRunBucketLabel,
   supervisedWorkflowStepLabel,
+  supervisedWorkflowStepStatus,
   toLimitInput,
   type ProposalEditDraft,
   type SupervisedClosedLoopRecord,
@@ -690,8 +691,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       const displayName = String(binding.displayName || binding.agentCode || agentId || "").trim();
       const modelId = supervisedMemberModelId(binding);
       const isActive =
-        currentRole === role
-        || (!currentRole && Boolean(currentAgentId) && Boolean(agentId) && currentAgentId === agentId);
+        Boolean(supervisedWorkflowRun && isLiveSupervisedRunStatus(supervisedWorkflowRun.status))
+        && (currentRole === role
+          || (!currentRole && Boolean(currentAgentId) && Boolean(agentId) && currentAgentId === agentId));
       return {
         role,
         label: roleText,
@@ -713,6 +715,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     supervisedMembersBindings,
     backendWorkflowCurrent?.role,
     supervisedWorkflowRun?.workflowSteps,
+    supervisedWorkflowRun?.status,
     supervisedMembersRun?.currentAgentBinding?.agentId,
     supervisedMembersRun?.currentRole,
     supervisedMembersRun?.roleConversationSessions,
@@ -732,8 +735,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const fallbackSessionId = member?.conversationSession?.conversationSessionId || "";
     const conversationSessionId = String(backendStep?.conversationSessionId || fallbackSessionId || "").trim();
     const chatRoute = backendStep?.chatRoute || supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel);
-    const fallbackStatus = definition.id === supervisedRuntimeWorkflowStepId ? "running" : "pending";
-    const backendStatus = backendStep?.status || fallbackStatus;
+    const current = backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId;
+    const backendStatus = supervisedWorkflowStepStatus(supervisedWorkflowRun?.status, backendStep?.status, current);
     return {
       id: definition.id,
       label: backendStep?.label || supervisedWorkflowStepLabel(definition, lang),
@@ -742,7 +745,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       status: definition.id === "approval"
         ? supervisedApprovalWorkflowStatus(reviewCandidateWorktree, backendStatus)
         : backendStatus,
-      current: backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId,
+      current,
       summary: backendStep?.summary || (
         definition.id === "approval"
           ? (lang === "zh" ? "Judge 复评结论与用户审批合入动作集中在这里。" : "The final Judge decision and user-approved merge are gathered here.")

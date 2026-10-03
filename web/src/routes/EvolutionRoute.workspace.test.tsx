@@ -190,6 +190,7 @@ vi.mock("./SupervisedConversationWorkspace", async () => {
           type: "button",
           "data-testid": "select-phase",
           "data-phase-id": phase.id,
+          "data-phase-status": phase.statusLabel,
           onClick: () => props.onSelectStep(phase.id),
         },
         phase.label,
@@ -237,6 +238,7 @@ vi.mock("./SupervisedAgentConversationPanel", async () => {
       return ReactModule.createElement("output", {
         "data-testid": "conversation-session",
         "data-live": String(Boolean(props.isLive)),
+        "data-member-status": member?.status,
       }, member?.conversationSession?.conversationSessionId || "no-session");
     },
   };
@@ -513,6 +515,28 @@ describe("EvolutionRoute unified workspace run selection", () => {
     host?.remove();
     root = null;
     host = null;
+  });
+
+  it.each(["", "running"])("does not revive a cancelled run's rerun stage with status %s", async (stageStatus) => {
+    const cancelled = worktreeRun(historyRunId, "cancelled", "已取消评估集", {
+      currentRole: "baseline_rerun",
+      workflowSteps: [
+        workflowStep("baseline_eval", "baseline", "baseline-history"),
+        { ...workflowStep("rerun_eval", "baseline_rerun", "", true), status: stageStatus },
+      ],
+    });
+    currentSnapshot.worktreeActiveRun = null;
+    currentSnapshot.worktreeRuns = [{ ...cancelled, detailLevel: "summary", workflowSteps: undefined }];
+    apiMocks.fetchEvolutionWorktreeRun.mockResolvedValue(cancelled);
+
+    await renderRoute();
+    await waitFor(() => expect(elementByTestId("workspace-title").textContent).toBe("已取消评估集"));
+    await waitFor(() => expect(elementByTestId("selected-step").textContent).toBe("rerun_eval"));
+
+    expect(host?.querySelector('[data-phase-id="rerun_eval"]')?.getAttribute("data-phase-status")).toBe("cancelled");
+    expect(host?.querySelector('[data-phase-id="baseline_eval"]')?.getAttribute("data-phase-status")).toBe("done");
+    expect(elementByTestId("conversation-session").getAttribute("data-live")).toBe("false");
+    expect(elementByTestId("conversation-session").getAttribute("data-member-status")).toBe("configured");
   });
 
   it("lets a forced supervised route switch to self evolution without navigating away", async () => {

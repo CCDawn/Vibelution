@@ -144,6 +144,10 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<NodeDragState | null>(null);
   const dragFrameRef = useRef(0);
+  const previousRequestedTeamSelectionRef = useRef({
+    requestedVisibleTeamId,
+    requestedVisibleAgentTeamId,
+  });
 
   const selectedShellTeamKind = shellTeamKindFor(selectedTeamId);
   // Before the selection effect resolves selectedTeamId (first render), the URL's
@@ -206,12 +210,26 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   }, [requestedTeamShellMode, shellTeamKind, teamShellMode]);
 
   useEffect(() => {
+    const requestedTeamSelectionChanged =
+      previousRequestedTeamSelectionRef.current.requestedVisibleTeamId !== requestedVisibleTeamId
+      || previousRequestedTeamSelectionRef.current.requestedVisibleAgentTeamId !== requestedVisibleAgentTeamId;
+    previousRequestedTeamSelectionRef.current = {
+      requestedVisibleTeamId,
+      requestedVisibleAgentTeamId,
+    };
+
     if (requestedVisibleTeamId) {
-      setSelectedTeamId(requestedVisibleTeamId);
+      // A user selection updates local state before the router commits its URL.
+      // Do not replay the previous route's team just because that local state changed.
+      if (requestedTeamSelectionChanged || !selectedTeamId) {
+        setSelectedTeamId(requestedVisibleTeamId);
+      }
       return;
     }
     if (requestedVisibleAgentTeamId) {
-      setSelectedTeamId(requestedVisibleAgentTeamId);
+      if (requestedTeamSelectionChanged || !selectedTeamId) {
+        setSelectedTeamId(requestedVisibleAgentTeamId);
+      }
       return;
     }
     if (selectedTeamId && !visibleTeamIds.has(selectedTeamId)) {

@@ -198,14 +198,14 @@ export function SupervisedAgentConversationPanel({
   const selectedPanelId = `supervised-agent-panel-${selectedRole}`;
   const emptyTitle = sessionId
     ? lang === "zh" ? `${assistantDisplayName} 暂无可展示消息` : `${assistantDisplayName} has no visible messages`
-    : lang === "zh" ? `${assistantDisplayName} 尚未启动` : `${assistantDisplayName} has not started`;
+    : lang === "zh" ? `${assistantDisplayName} 暂无会话记录` : `${assistantDisplayName} has no linked session record`;
   const emptyCopy = sessionId
     ? lang === "zh"
-      ? "会话已建立，等待该 Agent 产生第一条可展示消息。"
-      : "The session exists and is waiting for its first visible message."
+      ? "会话已建立，但暂无可展示消息；请结合本轮运行状态查看，不代表运行仍在进行。"
+      : "The session exists but has no visible messages. Check the run status; this does not mean it is still running."
     : lang === "zh"
-      ? "启动一轮监督进化后，这里会显示该 Agent 的真实会话轨迹；不会借用其他 Agent 的消息。"
-      : "Start a supervised evolution run to show this Agent's real session without borrowing another Agent's messages.";
+      ? "当前角色没有关联到可读取的会话记录。可切换阶段或查看运行证据；这里不会借用其他 Agent 的消息。"
+      : "No readable session is linked to this role. Select another stage or inspect the run evidence, without borrowing another Agent's messages.";
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
     memberIndex: number,

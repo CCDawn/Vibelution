@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.llm.error_classification import classify_error
+from core.llm.types import LLMError
 from core.web.services.session.timebase import parse_timestamp_utc
 from core.web.services.session.turn_failure_classification import (
     BUDGET_EXHAUSTED_PROBLEM_CODE,
@@ -2137,6 +2139,17 @@ def _make_session_turn_error(
     s = _service()
     normalized_error_type = str(error_type or s._failure_error_type(str(raw_error or ""))).strip() or "runtime_error"
     provider_reason = s._provider_error_user_reason(raw_error, lang=lang)
+    # A provider wrapper can carry a stale/generic protocol marker while its
+    # nested response body contains the actual account/quota failure. Keep the
+    # existing provider_error presentation type for that concrete diagnosis.
+    if (
+        normalized_error_type == "provider_protocol_error"
+        and str(provider_reason.get("code") or "").strip() not in {"", "provider_protocol_error"}
+    ):
+        normalized_error_type = "provider_error"
+    summary_error = str(raw_error or "")
+    if normalized_error_type == "provider_error" and provider_reason.get("code") != "provider_protocol_error":
+        summary_error = re.sub(r"(?i)\bprovider_protocol_error\b", "provider_error", summary_error)
     provider_diagnostics = s._provider_error_diagnostics(raw_error, llm_failure=llm_failure)
     structured_failure = dict(llm_failure or {})
     payload_trace = dict(llm_payload_trace or {})
@@ -2203,7 +2216,7 @@ def _make_session_turn_error(
         # An empty raw_error yields no user-visible text, so the structured
         # llm_failure message still surfaces.
         "message": (
-            s._user_visible_failure_summary(raw_error, lang=lang, provider_reason=provider_reason)
+            s._user_visible_failure_summary(summary_error, lang=lang, provider_reason=provider_reason)
             if str(raw_error or "").strip()
             else ""
         )
@@ -2297,11 +2310,90 @@ def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> d
     lower = value.lower()
     detail = s._provider_error_reason_detail(value)
 
+    nested_provider_type = ""
+    nested_provider_message = ""
+    for parsed in s._iter_provider_error_json(value):
+        nested_provider_type = nested_provider_type or s._extract_provider_error_type_from_json(parsed)
+        nested_provider_message = nested_provider_message or s._extract_provider_error_message_from_json(parsed)
+    nested_provider_type = str(nested_provider_type or "").strip()
+    nested_provider_message = str(nested_provider_message or "").strip()
+    nested_lower = f"{nested_provider_type} {nested_provider_message}".lower()
+
     def reason(code: str, zh: str, en: str) -> dict[str, str]:
         return {"code": code, "summary": s.text_for(language, zh=zh, en=en), "detail": detail}
 
     if "api key" in lower and ("额度" in value or "限额" in value or "用完" in value or "quota" in lower or "rate_limit" in lower):
         return reason("quota_exhausted", "API Key 额度或当日限额已用完", "API key quota or daily limit is exhausted")
+    # Preserve genuine local payload/tool protocol failures. A generic
+    # ``provider_protocol_error`` prefix from a provider wrapper is not enough:
+    # classify the concrete nested response first, when one is available.
+    duplicate_tool_call_id = re.search(
+        r"\bduplicate(?:d)?\s+tool(?:[_\s]+)call\s+id\b",
+        lower,
+    )
+    if "payload_protocol_error" in lower or "tool_protocol_error" in lower or duplicate_tool_call_id:
+        return reason(
+            "provider_protocol_error",
+            "模型返回了违反协议的响应（例如重复的工具调用 id）",
+            "the model returned a protocol-violating response (for example a duplicated tool call id)",
+        )
+
+    nested_category = ""
+    normalized_nested_type = re.sub(r"[^a-z0-9]+", "_", nested_provider_type.lower()).strip("_")
+    explicit_balance_failure = normalized_nested_type in {
+        "insufficient_balance",
+        "insufficient_account_balance",
+        "account_balance_insufficient",
+        "balance_insufficient",
+    } or bool(
+        re.search(
+            r"\binsufficient\s+(?:account\s+)?balance\b|\b(?:account\s+)?balance\s+(?:is\s+)?insufficient\b",
+            nested_provider_message,
+            re.IGNORECASE,
+        )
+    )
+    if explicit_balance_failure:
+        # Normalize this provider-specific concrete type into the existing
+        # quota category, then let the shared classifier remain authoritative
+        # for the category vocabulary.
+        nested_category = classify_error(
+            LLMError("quota_error", nested_provider_message or nested_provider_type, retryable=False)
+        ).category
+    elif nested_lower:
+        nested_category = classify_error(RuntimeError(nested_lower)).category
+
+    if nested_category == "quota_error":
+        return reason(
+            "quota_exhausted",
+            "provider 账户余额不足或额度已耗尽",
+            "provider account balance or quota is insufficient",
+        )
+    if nested_category == "rate_limit":
+        return reason("rate_limited", "provider 正在限流", "provider is rate limiting requests")
+    if nested_category == "context_length_error":
+        return reason("context_limit", "输入上下文超过模型限制", "input context exceeded the model limit")
+    if nested_category == "auth_error":
+        return reason("auth_failed", "provider 认证失败，请检查 API Key 或权限", "provider authentication failed; check the API key or permissions")
+    if nested_category in {"server_error", "network_error"}:
+        return reason("upstream_unavailable", "provider 上游服务不可用或网关失败", "provider upstream service is unavailable or failed at the gateway")
+    if nested_category == "timeout":
+        return reason("timeout", "provider 响应超时", "provider response timed out")
+    nested_protocol_type = normalized_nested_type in {
+        "invalid_request_error",
+        "bad_request_error",
+        "bad_request",
+        "payload_protocol_error",
+        "tool_protocol_error",
+    }
+    if nested_protocol_type or any(
+        marker in nested_lower
+        for marker in ("bad_request", "bad request", "invalid params", "payload_protocol_error", "tool_protocol_error")
+    ):
+        return reason(
+            "provider_protocol_error",
+            "模型返回了违反协议的响应（例如重复的工具调用 id）",
+            "the model returned a protocol-violating response (for example a duplicated tool call id)",
+        )
     if (
         "prompt_cache_unsupported" in lower
         or "不支持显式 prompt cache" in value
@@ -2331,7 +2423,7 @@ def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> d
         or "service unavailable" in lower
     ):
         return reason("upstream_unavailable", "provider 上游服务不可用或网关失败", "provider upstream service is unavailable or failed at the gateway")
-    if "provider_protocol_error" in lower or "payload_protocol_error" in lower:
+    if "bad_request" in lower or "bad request" in lower or "invalid params" in lower:
         return reason(
             "provider_protocol_error",
             "模型返回了违反协议的响应（例如重复的工具调用 id）",
