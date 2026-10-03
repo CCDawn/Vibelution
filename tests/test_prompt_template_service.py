@@ -27,7 +27,10 @@ def test_knowledge_steward_workflow_reaches_role_snapshot_without_leaking(tmp_pa
     assert "knowledge_ingestion_tool" in snapshot["content"]
     assert "workflowReconciliation" in snapshot["content"]
     assert "不要推断截断或隐藏候选" in snapshot["content"]
-    assert "正式条目正文替换" in snapshot["content"]
+    assert "supersedes_knowledge_item_id" in snapshot["content"]
+    assert "expected_content_sha256" in snapshot["content"]
+    assert "提交待审核修订" in snapshot["content"]
+    assert "旧版本保留为历史并退出有效检索" in snapshot["content"]
     assert snapshot["content"].count("## 固定处理流程") == 1
     assert snapshot["reason"] == ""
 
