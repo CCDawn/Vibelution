@@ -274,13 +274,19 @@ def test_main_scopes_deferred_retention_flag_around_uvicorn(
         or scene_opened
     )
     monkeypatch.delenv(web_workbench.DEFER_RUNTIME_SCENE_RETENTION_ENV, raising=False)
-    monkeypatch.setattr(
-        web_workbench.uvicorn,
-        "run",
-        lambda app, **kwargs: calls.append(
-            f"uvicorn:{app}:{os.environ.get(web_workbench.DEFER_RUNTIME_SCENE_RETENTION_ENV)}"
-        ),
-    )
+
+    def fake_create_server(app, *, host, port):
+        assert host == "127.0.0.1" and port == 8000
+
+        class FakeServer:
+            def run(self):
+                calls.append(
+                    f"uvicorn:{app}:{os.environ.get(web_workbench.DEFER_RUNTIME_SCENE_RETENTION_ENV)}"
+                )
+
+        return FakeServer()
+
+    monkeypatch.setattr(web_workbench, "create_workbench_server", fake_create_server)
 
     web_workbench.main()
 

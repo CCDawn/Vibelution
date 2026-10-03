@@ -447,6 +447,11 @@ const styles = {
     "inline-flex items-center gap-1.5",
   toolBundleItems:
     "toolBundleItems min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
+  toolVirtualSpacer: "relative min-w-0 w-full shrink-0",
+  toolVirtualItem: "absolute left-0 top-0 min-w-0 w-full",
+  toolBundleVirtualHeader: "min-w-0 max-w-full pt-3",
+  toolBundleVirtualRow: "min-w-0 max-w-full",
+  toolBundleVirtualLastRow: "min-w-0 max-w-full border-b border-vui-border-subtle pb-3.5",
   toolBundleSelect:
     "toolBundleSelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
   toolBundleSummary:

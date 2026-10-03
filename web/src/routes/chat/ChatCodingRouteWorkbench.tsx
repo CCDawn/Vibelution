@@ -2936,7 +2936,7 @@ export function ChatCodingRouteWorkbench() {
     agentsById,
     allVisibleSessions,
     activeSessionId,
-    secondaryChatDataEnabled,
+    secondaryChatDataEnabled: secondaryChatDataEnabled && !financeSurface,
     sessionsRefetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
     directRefetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });

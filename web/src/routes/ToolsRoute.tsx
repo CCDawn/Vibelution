@@ -1,8 +1,9 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { listAgentSummaries, updateAgentToolPolicy, validateAgentToolPolicy } from "../api/agents";
@@ -95,6 +96,154 @@ type ToolPermissionGroup = {
   inheritedCount: number;
   highRiskCount: number;
 };
+export type ToolRegistryVirtualRow =
+  | { key: string; kind: "group"; group: ToolBundleGroup }
+  | { key: string; kind: "tool"; tool: ToolRegistryItem; position: number; total: number; isLastInGroup: boolean };
+
+type ToolRegistryVirtualListProps = {
+  rows: ToolRegistryVirtualRow[];
+  className: string;
+  ariaLabel: string;
+  renderRow: (row: ToolRegistryVirtualRow) => ReactNode;
+  onActivateTool: (tool: ToolRegistryItem) => void;
+  footer?: ReactNode;
+};
+
+/** Keeps the registered-tools panel small while retaining measured, grouped rows. */
+export function ToolRegistryVirtualList({
+  rows,
+  className,
+  ariaLabel,
+  renderRow,
+  onActivateTool,
+  footer,
+}: ToolRegistryVirtualListProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const focusedToolRowKeyRef = useRef<string | null>(null);
+  const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
+  const toolRowIndexes = useMemo(
+    () => rows.flatMap((row, index) => row.kind === "tool" ? [index] : []),
+    [rows],
+  );
+  const rangeExtractor = useCallback((range: Parameters<typeof defaultRangeExtractor>[0]) => {
+    const visibleRange = defaultRangeExtractor(range);
+    const focusedKey = focusedToolRowKeyRef.current;
+    if (!focusedKey) return visibleRange;
+    const focusedIndex = rows.findIndex((row) => row.key === focusedKey);
+    if (focusedIndex < 0 || visibleRange.includes(focusedIndex)) return visibleRange;
+    return [...visibleRange, focusedIndex].sort((left, right) => left - right);
+  }, [rows]);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => rows[index]?.kind === "group" ? 52 : 62,
+    getItemKey: (index) => rows[index]?.key ?? `tool-registry-row-${index}`,
+    rangeExtractor,
+    overscan: 7,
+    gap: 4,
+    initialRect: { width: 380, height: 440 },
+    useAnimationFrameWithResizeObserver: true,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+
+  useEffect(() => {
+    if (!pendingFocusKey) return;
+    const targetIndex = rows.findIndex((row) => row.key === pendingFocusKey);
+    if (targetIndex < 0) {
+      setPendingFocusKey(null);
+      return;
+    }
+    const target = scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-tool-row-index="${targetIndex}"] button`);
+    if (target) {
+      target.focus();
+      setPendingFocusKey(null);
+    }
+  }, [pendingFocusKey, rows, virtualItems]);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (!target.matches("button")) return;
+    const rowElement = target.closest<HTMLElement>("[data-tool-row-index]");
+    if (!rowElement || rowElement.querySelector("button") !== target) return;
+    const currentRowIndex = Number(rowElement.dataset.toolRowIndex);
+    if (!Number.isInteger(currentRowIndex)) return;
+    const currentToolPosition = toolRowIndexes.indexOf(currentRowIndex);
+    if (currentToolPosition < 0) return;
+
+    const nextToolPosition = event.key === "ArrowDown"
+      ? Math.min(toolRowIndexes.length - 1, currentToolPosition + 1)
+      : event.key === "ArrowUp"
+        ? Math.max(0, currentToolPosition - 1)
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? toolRowIndexes.length - 1
+            : currentToolPosition;
+    if (nextToolPosition === currentToolPosition) return;
+
+    const nextRowIndex = toolRowIndexes[nextToolPosition];
+    const nextRow = rows[nextRowIndex];
+    if (!nextRow || nextRow.kind !== "tool") return;
+    event.preventDefault();
+    onActivateTool(nextRow.tool);
+    setPendingFocusKey(nextRow.key);
+    virtualizer.scrollToIndex(nextRowIndex, { align: "auto" });
+    const mountedTarget = scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-tool-row-index="${nextRowIndex}"] button`);
+    if (mountedTarget) {
+      mountedTarget.focus();
+      setPendingFocusKey(null);
+    }
+  }
+
+  return (
+    <div
+      ref={scrollRef}
+      className={className}
+      role="region"
+      aria-label={ariaLabel}
+      onKeyDown={handleKeyDown}
+      onFocusCapture={(event) => {
+        const rowElement = (event.target as HTMLElement).closest<HTMLElement>("[data-tool-row-key]");
+        focusedToolRowKeyRef.current = rowElement?.dataset.toolRowKey ?? null;
+      }}
+      onBlurCapture={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          focusedToolRowKeyRef.current = null;
+        }
+      }}
+    >
+      <div className={styles.toolVirtualSpacer} style={{ height: virtualizer.getTotalSize() }}>
+        {virtualItems.map((virtualRow) => {
+          const row = rows[virtualRow.index];
+          if (!row) return null;
+          const isToolRow = row.kind === "tool";
+          return (
+            <div
+              key={virtualRow.key}
+              ref={virtualizer.measureElement}
+              data-index={virtualRow.index}
+              data-tool-row-key={isToolRow ? row.key : undefined}
+              data-tool-row-index={isToolRow ? virtualRow.index : undefined}
+              data-tool-id={isToolRow ? row.tool.id : undefined}
+              className={`${styles.toolVirtualItem} ${row.kind === "group"
+                ? styles.toolBundleVirtualHeader
+                : row.isLastInGroup
+                  ? styles.toolBundleVirtualLastRow
+                  : styles.toolBundleVirtualRow}`}
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
+            >
+              {renderRow(row)}
+            </div>
+          );
+        })}
+      </div>
+      {footer}
+    </div>
+  );
+}
 
 type ToolPermissionGroupDisclosureProps = {
   summary: ReactNode;
@@ -1023,6 +1172,26 @@ export function ToolsRoute() {
     () => toolBundleGroups(visibleTools, toolBundles, lang),
     [lang, toolBundles, visibleTools],
   );
+  const toolRegistryRows = useMemo(() => {
+    const total = visibleToolBundleGroups.reduce((count, group) => count + group.tools.length, 0);
+    const rows: ToolRegistryVirtualRow[] = [];
+    let position = 0;
+    for (const group of visibleToolBundleGroups) {
+      rows.push({ key: `group:${group.bundleId}`, kind: "group", group });
+      group.tools.forEach((tool, index) => {
+        position += 1;
+        rows.push({
+          key: `tool:${tool.id}:${group.bundleId}`,
+          kind: "tool",
+          tool,
+          position,
+          total,
+          isLastInGroup: index === group.tools.length - 1,
+        });
+      });
+    }
+    return rows;
+  }, [visibleToolBundleGroups]);
   const selectedTools = useMemo(
     () => visibleTools.filter((tool) => selectedToolIds.has(tool.id)),
     [selectedToolIds, visibleTools],
@@ -1832,85 +2001,96 @@ export function ToolsRoute() {
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.delete}</span>
             </VButton>
           </section>
-          <div className={styles.toolList}>
-            {visibleToolBundleGroups.map((group) => (
-              <section key={group.bundleId} className={styles.toolBundleGroup}>
-                <VPanelHeader
-                  className={styles.toolBundleHeader}
-                  headingLevel={null}
-                  title={(
-                    <span className={styles.toolBundleTitle}>
-                      {group.label}
-                      <VContextualHint content={group.description || group.label} label={`${group.label}说明`} width="wide" />
+          <ToolRegistryVirtualList
+            rows={toolRegistryRows}
+            className={styles.toolList}
+            ariaLabel={lang === "zh" ? "工具注册表" : "Tool registry"}
+            onActivateTool={(tool) => setActiveToolId(tool.id)}
+            renderRow={(row) => {
+              if (row.kind === "group") {
+                const group = row.group;
+                return (
+                  <VPanelHeader
+                    className={`${styles.toolBundleHeader} !pb-0`}
+                    headingLevel={null}
+                    title={(
+                      <span className={styles.toolBundleTitle}>
+                        {group.label}
+                        <VContextualHint content={group.description || group.label} label={`${group.label}说明`} width="wide" />
+                      </span>
+                    )}
+                    eyebrow={`${group.tools.length} ${lang === "zh" ? "个工具" : "tools"}`}
+                    actions={(
+                      <small>
+                        {lang === "zh" ? "高风险" : "High risk"} {group.highRiskToolCount} · {lang === "zh" ? "显式授权" : "Explicit"} {group.explicitAllowToolCount}
+                      </small>
+                    )}
+                  />
+                );
+              }
+
+              const { tool } = row;
+              const isActive = tool.id === activeTool?.id;
+              const bulkSelected = selectedToolIds.has(tool.id);
+              return (
+                <div className={styles.selectableToolRow}>
+                  <VTooltip content={`${bulkCopy.selected}: ${tool.name}`} width="compact">
+                    <label className={styles.rowSelect}>
+                      <VNativeInput
+                        type="checkbox"
+                        checked={bulkSelected}
+                        aria-label={`${bulkCopy.selected}: ${tool.name}`}
+                        onChange={(event) => toggleBulkTool(
+                          tool.id,
+                          event.target.checked,
+                          Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
+                        )}
+                      />
+                      {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+                    </label>
+                  </VTooltip>
+                  <VButton
+                    type="button"
+                    variant="ghost"
+                    contentLayout="plain"
+                    className={`${styles.toolButton} ${isActive ? styles.toolButtonActive : ""}`}
+                    tooltip={tool.description || t("toolsNoDescription")}
+                    aria-posinset={row.position}
+                    aria-setsize={row.total}
+                    onClick={(event) => handleToolRowClick(tool, event)}
+                  >
+                    <VStatusChip tone={statusToneToVui(statusTone(tool))} className={styles.toolStatusChip}>
+                      {toolStatusLabel(tool, lang)}
+                    </VStatusChip>
+                    <span className={styles.toolCopy}>
+                      <strong>{tool.name}</strong>
+                      <span>
+                        {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
+                      </span>
                     </span>
-                  )}
-                  eyebrow={`${group.tools.length} ${lang === "zh" ? "个工具" : "tools"}`}
-                  actions={(
-                    <small>
-                      {lang === "zh" ? "高风险" : "High risk"} {group.highRiskToolCount} · {lang === "zh" ? "显式授权" : "Explicit"} {group.explicitAllowToolCount}
-                    </small>
-                  )}
-                />
-                <div className={styles.toolBundleItems}>
-                  {group.tools.map((tool) => {
-                    const isActive = tool.id === activeTool?.id;
-                    const bulkSelected = selectedToolIds.has(tool.id);
-                    return (
-                      <div key={`${group.bundleId}-${tool.source}-${tool.id}`} className={styles.selectableToolRow}>
-                        <VTooltip content={`${bulkCopy.selected}: ${tool.name}`} width="compact">
-                          <label className={styles.rowSelect}>
-                            <VNativeInput
-                              type="checkbox"
-                              checked={bulkSelected}
-                              aria-label={`${bulkCopy.selected}: ${tool.name}`}
-                              onChange={(event) => toggleBulkTool(
-                                tool.id,
-                                event.target.checked,
-                                Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
-                              )}
-                            />
-                            {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
-                          </label>
-                        </VTooltip>
-                        <VButton
-                          type="button"
-                          variant="ghost"
-                          contentLayout="plain"
-                          className={`${styles.toolButton} ${isActive ? styles.toolButtonActive : ""}`}
-                          tooltip={tool.description || t("toolsNoDescription")}
-                          onClick={(event) => handleToolRowClick(tool, event)}
-                        >
-                          <VStatusChip tone={statusToneToVui(statusTone(tool))} className={styles.toolStatusChip}>
-                            {toolStatusLabel(tool, lang)}
-                          </VStatusChip>
-                          <span className={styles.toolCopy}>
-                            <strong>{tool.name}</strong>
-                            <span>
-                            {toolCategoryLabel(tool.category, tool.categoryLabel, lang)} · {toolTierLabel(tool.permissionTier, lang)}
-                          </span>
-                        </span>
-                        </VButton>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
-            {toolsQuery.isError && !toolsQuery.data ? (
-              <VStateSurface
-                tone="error"
-                title={t("loadFailed")}
-                actions={(
-                  <VButton type="button" variant="secondary" onPress={() => void toolsQuery.refetch()}>
-                    {lang === "zh" ? "重试" : "Retry"}
                   </VButton>
-                )}
-              >
-                {toolsQuery.error instanceof Error ? toolsQuery.error.message : String(toolsQuery.error)}
-              </VStateSurface>
-            ) : null}
-            {!toolsQuery.isError && !visibleTools.length ? <VStateSurface tone="empty" title={t("toolsNoMatches")} /> : null}
-          </div>
+                </div>
+              );
+            }}
+            footer={(
+              <>
+                {toolsQuery.isError && !toolsQuery.data ? (
+                  <VStateSurface
+                    tone="error"
+                    title={t("loadFailed")}
+                    actions={(
+                      <VButton type="button" variant="secondary" onPress={() => void toolsQuery.refetch()}>
+                        {lang === "zh" ? "重试" : "Retry"}
+                      </VButton>
+                    )}
+                  >
+                    {toolsQuery.error instanceof Error ? toolsQuery.error.message : String(toolsQuery.error)}
+                  </VStateSurface>
+                ) : null}
+                {!toolsQuery.isError && !visibleTools.length ? <VStateSurface tone="empty" title={t("toolsNoMatches")} /> : null}
+              </>
+            )}
+          />
         </aside>
 
         <PaneCollapseHandle

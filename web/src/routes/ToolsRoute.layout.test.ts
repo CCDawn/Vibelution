@@ -209,15 +209,21 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("setSelectedToolIds(new Set(context.previousSelectedToolIds))");
   });
 
-  it("groups the tool browser by tool packages instead of a flat tool list", () => {
+  it("keeps package grouping while virtualizing the registered tool rows", () => {
     expect(routeSource).toContain("toolsQuery.data?.toolBundles");
     expect(routeSource).toContain("toolBundleGroups");
     expect(routeSource).toContain("visibleToolBundleGroups");
     expect(routeSource).toContain("tool.bundleIds");
-    expect(routeSource).toContain("styles.toolBundleGroup");
+    expect(routeSource).toContain("ToolRegistryVirtualList");
+    expect(routeSource).toContain("getItemKey: (index) => rows[index]?.key");
+    expect(routeSource).toContain("ref={virtualizer.measureElement}");
+    expect(routeSource).toContain('key: `tool:${tool.id}:${group.bundleId}`');
+    expect(routeSource).toContain('event.key === "End"');
+    expect(styles.toolVirtualSpacer).toContain("relative");
+    expect(styles.toolVirtualItem).toContain("absolute");
     expect(routeSource).toContain("styles.toolBundleHeader");
     expect(routeSource).toContain("所属工具包");
-    expect(routeSource).not.toContain("{visibleTools.map((tool)");
+    expect(routeSource).not.toContain("{group.tools.map((tool)");
   });
 
   it("supports agent-scoped tool lists and test requests", () => {
