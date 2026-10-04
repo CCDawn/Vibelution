@@ -95,11 +95,11 @@ class FetchSessionEventStream implements SessionEventStream {
   private scheduleReconnect(): void {
     if (this.closed || this.reconnectTimer !== null) return;
     this.readyState = 0;
-    this.onerror?.(new Event("error"));
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       void this.connect();
     }, SESSION_STREAM_RECONNECT_MS);
+    this.onerror?.(new Event("error"));
   }
 }
 

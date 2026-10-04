@@ -21,6 +21,13 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
+from .agent_runtime_retirement import (
+    close_retired_runtime_agent_entries,
+    retain_runtime_agent_entry_locked,
+    retire_runtime_agent_entries_locked,
+    retire_session_agent_runtime_cache,
+)
+
 SESSION_LLM_SLOT_DIALOGUE = "dialogue"
 
 
@@ -738,19 +745,58 @@ def _session_agent_runtime_config_fingerprint_payload(config: Any) -> Any:
 
 
 def _invalidate_session_agent_runtime_cache(session_id: str = "") -> int:
-    s = _service()
-    normalized_session_id = str(session_id or "").strip()
-    removed = 0
-    with s._SESSION_AGENT_RUNTIME_CACHE_LOCK:
-        if not normalized_session_id:
-            removed = len(s._SESSION_AGENT_RUNTIME_CACHE)
-            s._SESSION_AGENT_RUNTIME_CACHE.clear()
-            return removed
-        prefix = f"{normalized_session_id}|"
-        for cache_key in [key for key in s._SESSION_AGENT_RUNTIME_CACHE if key.startswith(prefix)]:
-            s._SESSION_AGENT_RUNTIME_CACHE.pop(cache_key, None)
-            removed += 1
-    return removed
+    return retire_session_agent_runtime_cache(session_id=session_id)["removed"]
+
+
+def _retire_session_agent_runtime_cache_for_shutdown(*, deadline: float | None = None) -> dict[str, int]:
+    return retire_session_agent_runtime_cache(close_cache=True, deadline=deadline)
+
+
+def _release_chat_agent_runtime(runtime_agent_cache: Any) -> None:
+    if not isinstance(runtime_agent_cache, dict):
+        return
+    lease = runtime_agent_cache.get("_lease")
+    release = getattr(lease, "release", None)
+    if callable(release):
+        release()
+
+
+def _runtime_agent_cache_entry(agent: Any, *, fingerprint: str, last_access: float) -> dict[str, Any]:
+    return {
+        "agent": agent,
+        "fingerprint": fingerprint,
+        "lastAccess": last_access,
+        "activeLeases": 0,
+        "retired": False,
+        "closeInProgress": False,
+        "closeErrorType": "",
+    }
+
+
+def _runtime_agent_cache_metadata(
+    *,
+    status: str,
+    hit: bool,
+    entry_count: int,
+    lease: Any,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "hit": hit,
+        "entryCount": entry_count,
+        "_lease": lease,
+    }
+
+
+def _prepare_reused_agent(runtime_agent: Any, lease: Any) -> None:
+    prepare_reuse = getattr(runtime_agent, "prepare_for_session_turn_reuse", None)
+    if not callable(prepare_reuse):
+        return
+    try:
+        prepare_reuse()
+    except Exception:
+        lease.release()
+        raise
 
 
 def _acquire_chat_agent_for_session(
@@ -768,17 +814,24 @@ def _acquire_chat_agent_for_session(
     normalized_mode = str(mode or "chat").strip() or "chat"
     cache_allowed = bool(normalized_session_id and isinstance(agent_instance, dict) and normalized_mode == "chat")
     if not cache_allowed:
+        runtime_agent = s._create_chat_agent_for_session(
+            session_workspace,
+            agent_instance,
+            llm_slot=normalized_slot,
+            resolved_llm=resolved_llm,
+            mode=normalized_mode,
+        )
+        entry = _runtime_agent_cache_entry(runtime_agent, fingerprint="", last_access=s._perf_counter())
         with s._SESSION_AGENT_RUNTIME_CACHE_LOCK:
             entry_count = len(s._SESSION_AGENT_RUNTIME_CACHE)
-        return (
-            s._create_chat_agent_for_session(
-                session_workspace,
-                agent_instance,
-                llm_slot=normalized_slot,
-                resolved_llm=resolved_llm,
-                mode=normalized_mode,
-            ),
-            {"status": "bypassed", "hit": False, "entryCount": entry_count},
+            lease = retain_runtime_agent_entry_locked(entry)
+            due = retire_runtime_agent_entries_locked([entry])
+        close_retired_runtime_agent_entries(due)
+        return runtime_agent, _runtime_agent_cache_metadata(
+            status="bypassed",
+            hit=False,
+            entry_count=entry_count,
+            lease=lease,
         )
 
     fingerprint = s._session_agent_runtime_cache_fingerprint(
@@ -791,45 +844,91 @@ def _acquire_chat_agent_for_session(
     )
     cache_key = f"{normalized_session_id}|{normalized_slot}"
     with s._SESSION_AGENT_RUNTIME_CACHE_LOCK:
+        if s._SESSION_AGENT_RUNTIME_CACHE_CLOSED:
+            cache_closed = True
+            generation = s._SESSION_AGENT_RUNTIME_CACHE_GENERATION
+        else:
+            cache_closed = False
+            generation = s._SESSION_AGENT_RUNTIME_CACHE_GENERATION
         cached = s._SESSION_AGENT_RUNTIME_CACHE.get(cache_key)
-        if cached and str(cached.get("fingerprint") or "") == fingerprint:
+        if not cache_closed and cached and str(cached.get("fingerprint") or "") == fingerprint:
             cached["lastAccess"] = s._perf_counter()
             runtime_agent = cached.get("agent")
+            lease = retain_runtime_agent_entry_locked(cached)
             entry_count = len(s._SESSION_AGENT_RUNTIME_CACHE)
         else:
             runtime_agent = None
+            lease = None
             entry_count = len(s._SESSION_AGENT_RUNTIME_CACHE)
     if runtime_agent is not None:
-        prepare_reuse = getattr(runtime_agent, "prepare_for_session_turn_reuse", None)
-        if callable(prepare_reuse):
-            prepare_reuse()
-        return runtime_agent, {
-            "status": "hit",
-            "hit": True,
-            "entryCount": entry_count,
-        }
+        _prepare_reused_agent(runtime_agent, lease)
+        return runtime_agent, _runtime_agent_cache_metadata(
+            status="hit",
+            hit=True,
+            entry_count=entry_count,
+            lease=lease,
+        )
 
-    runtime_agent = s._create_chat_agent_for_session(
+    created_agent = s._create_chat_agent_for_session(
         session_workspace,
         agent_instance,
         llm_slot=normalized_slot,
         resolved_llm=resolved_llm,
         mode=normalized_mode,
     )
+    created_entry = _runtime_agent_cache_entry(
+        created_agent,
+        fingerprint=fingerprint,
+        last_access=s._perf_counter(),
+    )
+    entries_to_retire: list[dict[str, Any]] = []
+    prepare_reused = False
     with s._SESSION_AGENT_RUNTIME_CACHE_LOCK:
-        s._SESSION_AGENT_RUNTIME_CACHE[cache_key] = {
-            "agent": runtime_agent,
-            "fingerprint": fingerprint,
-            "lastAccess": s._perf_counter(),
-        }
-        while len(s._SESSION_AGENT_RUNTIME_CACHE) > s._SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES:
-            oldest_key = min(
-                s._SESSION_AGENT_RUNTIME_CACHE,
-                key=lambda key: float(s._SESSION_AGENT_RUNTIME_CACHE.get(key, {}).get("lastAccess") or 0.0),
-            )
-            s._SESSION_AGENT_RUNTIME_CACHE.pop(oldest_key, None)
+        current = s._SESSION_AGENT_RUNTIME_CACHE.get(cache_key)
+        if (
+            not s._SESSION_AGENT_RUNTIME_CACHE_CLOSED
+            and current is not None
+            and str(current.get("fingerprint") or "") == fingerprint
+        ):
+            current["lastAccess"] = s._perf_counter()
+            runtime_agent = current.get("agent")
+            lease = retain_runtime_agent_entry_locked(current)
+            entries_to_retire.append(created_entry)
+            status = "hit"
+            prepare_reused = True
+        elif (
+            s._SESSION_AGENT_RUNTIME_CACHE_CLOSED
+            or s._SESSION_AGENT_RUNTIME_CACHE_GENERATION != generation
+        ):
+            runtime_agent = created_agent
+            lease = retain_runtime_agent_entry_locked(created_entry)
+            entries_to_retire.append(created_entry)
+            status = "bypassed"
+        else:
+            if current is not None:
+                s._SESSION_AGENT_RUNTIME_CACHE.pop(cache_key, None)
+                entries_to_retire.append(current)
+            runtime_agent = created_agent
+            lease = retain_runtime_agent_entry_locked(created_entry)
+            s._SESSION_AGENT_RUNTIME_CACHE[cache_key] = created_entry
+            while len(s._SESSION_AGENT_RUNTIME_CACHE) > s._SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES:
+                oldest_key = min(
+                    s._SESSION_AGENT_RUNTIME_CACHE,
+                    key=lambda key: float(s._SESSION_AGENT_RUNTIME_CACHE.get(key, {}).get("lastAccess") or 0.0),
+                )
+                entries_to_retire.append(s._SESSION_AGENT_RUNTIME_CACHE.pop(oldest_key))
+            status = "miss"
+        due = retire_runtime_agent_entries_locked(entries_to_retire)
         entry_count = len(s._SESSION_AGENT_RUNTIME_CACHE)
-    return runtime_agent, {"status": "miss", "hit": False, "entryCount": entry_count}
+    close_retired_runtime_agent_entries(due)
+    if prepare_reused:
+        _prepare_reused_agent(runtime_agent, lease)
+    return runtime_agent, _runtime_agent_cache_metadata(
+        status=status,
+        hit=status == "hit",
+        entry_count=entry_count,
+        lease=lease,
+    )
 
 
 def _create_chat_agent_for_session(

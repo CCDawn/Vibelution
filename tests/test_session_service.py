@@ -133,6 +133,8 @@ def test_session_agent_runtime_cache_reuses_transport_and_invalidates_on_prompt_
     assert third_cache["status"] == "miss"
     assert third is not first
     assert len(created) == 2
+    for metadata in (first_cache, second_cache, third_cache):
+        session_service._release_chat_agent_runtime(metadata)
     session_service._invalidate_session_agent_runtime_cache()
 
 
@@ -204,6 +206,8 @@ def test_session_agent_runtime_cache_ignores_unrelated_app_config_domains(tmp_pa
     assert compression_cache["status"] == "miss"
     assert compression_change is not llm_change
     assert len(created) == 3
+    for metadata in (first_cache, unrelated_cache, llm_cache, compression_cache):
+        session_service._release_chat_agent_runtime(metadata)
     session_service._invalidate_session_agent_runtime_cache()
 
 

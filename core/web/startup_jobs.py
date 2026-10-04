@@ -38,7 +38,7 @@ async def run_sync_bounded(
 
     worker = threading.Thread(target=_run, name=name, daemon=True)
     worker.start()
-    while not finished.is_set():
+    while not finished.is_set() or worker.is_alive():
         remaining = remaining_seconds(deadline_at)
         if remaining <= 0:
             logger.error("Shutdown owner exceeded the shared deadline: %s", name)

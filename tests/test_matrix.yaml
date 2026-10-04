@@ -24,6 +24,7 @@ rules:
       - "core/infrastructure/owned_executor.py"
       - "core/infrastructure/tool_execution_scope.py"
       - "core/web/lifecycle.py"
+      - "core/web/startup_jobs.py"
       - "core/web/services/session/catalog_runtime.py"
       - "tests/test_owned_executor.py"
       - "tests/test_tool_execution_scope.py"
@@ -31,6 +32,17 @@ rules:
       - "tests/test_workflow_executor_lifecycle.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_owned_executor.py tests/test_tool_execution_scope.py tests/test_web_lifecycle.py tests/test_session_catalog_runtime.py tests/test_workflow_executor_lifecycle.py -q -n 4 --dist loadfile"
+  - id: diagnostic-transcript-retirement
+    description: "Bounded diagnostic writer admission, watermark flush and physical shutdown/reopen."
+    executionLayers:
+      - "focused"
+    paths:
+      - "core/logging/transcript_logger.py"
+      - "core/logging/unified_logger.py"
+      - "tests/test_transcript_logger_lifecycle.py"
+      - "tests/test_conversation_logger.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_transcript_logger_lifecycle.py tests/test_conversation_logger.py -q"
   - id: physical-tool-execution
     description: "Tool timeout, cancellation and real tool completion remain separate."
     executionLayers:
@@ -346,6 +358,7 @@ rules:
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_session_routes.py tests/test_chat_room_service.py tests/test_chat_room_routes.py -n 4 --dist load -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_session_submit.py tests/test_session_worker.py -n 2 --dist loadfile -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_session_agent_retirement.py tests/test_session_service.py tests/test_llm_responses_websocket.py -q -n 3 --dist loadfile"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_web_app.py -k \"branch_edit_reports_versions or regenerate_with_base_message_id\" -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_session_chat_stream_e2e.py tests/test_session_sse_http_e2e.py -q"
     notes:
@@ -534,6 +547,20 @@ rules:
     notes:
       - "core/llm/client.py is by far the highest-churn LLM file; these four test files import it directly."
       - "Excluded from config-models so one client edit no longer pulls the protocol/wire batch or the web config panel batch."
+
+  - id: session-model-resource-retirement
+    description: "Leased Agent cache retirement and owned model transport shutdown."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "agent.py"
+      - "core/llm/responses_websocket.py"
+      - "tests/test_session_agent_retirement.py"
+      - "tests/test_session_service.py"
+      - "tests/test_llm_responses_websocket.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_session_agent_retirement.py tests/test_session_service.py tests/test_llm_responses_websocket.py -q -n 3 --dist loadfile"
 
   - id: config-schema-hotspots
     description: "High-churn operator/public config schema files and their shared schema contract test."

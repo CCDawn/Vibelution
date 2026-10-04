@@ -4,9 +4,22 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
+from core.logging import transcript_logger as transcript_logger_module
 from core.logging.logger import ConversationLogger
 from core.logging.trace_context import bind_trace_context, new_trace_context
 from core.logging.transcript_logger import TranscriptLogger
+
+
+@pytest.fixture(autouse=True)
+def _retire_transcript_writer_after_test():
+    yield
+    logger = TranscriptLogger._instance
+    if logger is not None:
+        logger.shutdown(timeout=1.0)
+    transcript_logger_module._transcript_logger = None
+    TranscriptLogger._instance = None
 
 
 def _fresh_logger(tmp_path: Path) -> ConversationLogger:
@@ -386,19 +399,31 @@ def test_transcript_logger_uses_external_workspace_home(tmp_path, monkeypatch):
 
     assert logger._logs_dir == data_home / "workspace" / "logs" / "transcripts"
     assert logger._logs_dir.exists()
-    logger._write_queue.put((None, ""))
-    logger._writer_thread.join(timeout=1)
+    assert logger.shutdown(timeout=1.0)["closed"] is True
 
 
-def test_transcript_writer_marks_failed_items_done(tmp_path):
+def test_transcript_writer_marks_failed_items_done(tmp_path, monkeypatch):
     TranscriptLogger._instance = None
     logger = TranscriptLogger()
     logger._logs_dir = tmp_path
-    logger._write_queue.put((tmp_path, "cannot append to directory"))
+    logger.start_session()
 
-    logger._flush_pending_writes()
+    import builtins
+
+    real_open = builtins.open
+
+    def failing_open(path, *args, **kwargs):
+        if Path(path) == logger._get_transcript_file():
+            raise OSError("isolated transcript sink failure")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", failing_open)
+    logger.write_external_request("bounded failure probe")
+
+    assert logger.flush(timeout=1.0) is True
 
     assert logger._write_queue.unfinished_tasks == 0
+    assert logger.diagnostics()["write_failures"] == 1
 
 
 def _make_old_conversation_files(tmp_path: Path, count: int, base_mtime: float) -> list[Path]:
