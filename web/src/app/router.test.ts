@@ -169,8 +169,8 @@ describe("router route contracts", () => {
     expect(markup).toContain('data-route-loading="finance"');
     expect(markup).toContain('data-vui-domain-recipe="financial-assistant-workspace"');
     expect(markup).toContain("炒股智能体");
-    expect(markup).toContain("研究记录");
-    expect(markup).toContain("财报资料");
+    expect(markup).toContain("自选与研究");
+    expect(markup).toContain("研究过程与引用");
     expect(markup).not.toContain("正在打开工作台");
   });
 
