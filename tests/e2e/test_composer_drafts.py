@@ -74,7 +74,8 @@ def test_failed_send_restored_draft_survives_reload(page, e2e_instance):
         page.unroute(f"**/api/sessions/{sid}/messages", fail_send)
     page.reload(wait_until="domcontentloaded")
     expect(page.locator(COMPOSER).first).to_have_value(marker, timeout=15000)
-    expect(page.locator(THREAD).first).not_to_contain_text(marker, timeout=15000)
+    expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0", timeout=15000)
+    assert marker not in json.dumps(fetch_json(e2e_instance.port, f"/api/sessions/{sid}"), ensure_ascii=False)
 
 
 def test_session_drafts_stay_separate_on_full_navigation(page, e2e_instance):
