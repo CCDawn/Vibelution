@@ -64,5 +64,7 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 
 ## Related
 
+- Memory operation telemetry: [memory-operation-logging.md](../../../../docs/agents/memory-operation-logging.md); `core/logging/memory_events.py` owns safe failure signals, while `episodic_memory.py` remains the personal-memory store.
+
 - Routes: `core/web/routes/agents.py`
 - Historical plans: `docs/archive/plans/2026-06-07/`

@@ -1058,7 +1058,10 @@ class ToolExecutor:
                     lifecycle=True,
                 )
                 return (error_msg, None)
-            tool_context = copy_context()
+            from core.logging.memory_events import memory_tool_call_scope
+
+            with memory_tool_call_scope(call_id):
+                tool_context = copy_context()
             future = executor.submit(tool_context.run, func, **call_args)
             register_current_tool_future(future, tool_name=tool_name)
             deadline = time.monotonic() + max(float(timeout), 0.1)

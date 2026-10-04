@@ -773,29 +773,28 @@ def _record_agent_territory_write_blocked(
 
 def _record_memory_event(event_code: str, payload: dict[str, Any], *, agent_id: str, lifecycle: bool = False) -> None:
     s = _service()
-    try:
-        s.record_runtime_scene_event(
-            "agent_memory",
-            "events",
-            event_code,
-            message=event_code,
-            level="info",
-            outcome="written",
-            fields={
-                "agentId": agent_id,
-                "eventId": str(payload.get("eventId") or "").strip(),
-                "messageId": str(payload.get("messageId") or "").strip(),
-                "sourceAgentId": str(payload.get("sourceAgentId") or "").strip(),
-                "targetAgentId": str(payload.get("targetAgentId") or agent_id).strip(),
-                "sourceRoomId": str(payload.get("sourceRoomId") or "").strip(),
-                "sourceRoundId": str(payload.get("sourceRoundId") or "").strip(),
-                "status": str(payload.get("status") or "").strip(),
-                "promptEligible": bool(payload.get("promptEligible", True)),
-            },
-            lifecycle=lifecycle,
-        )
-    except Exception:
-        return
+    from core.logging.memory_events import record_memory_event
+
+    record_memory_event(
+        "agent_memory",
+        "events",
+        event_code,
+        level="info",
+        outcome="written",
+        fields={
+            "agentId": agent_id,
+            "eventId": str(payload.get("eventId") or "").strip(),
+            "messageId": str(payload.get("messageId") or "").strip(),
+            "sourceAgentId": str(payload.get("sourceAgentId") or "").strip(),
+            "targetAgentId": str(payload.get("targetAgentId") or agent_id).strip(),
+            "sourceRoomId": str(payload.get("sourceRoomId") or "").strip(),
+            "sourceRoundId": str(payload.get("sourceRoundId") or "").strip(),
+            "status": str(payload.get("status") or "").strip(),
+            "promptEligible": bool(payload.get("promptEligible", True)),
+        },
+        lifecycle=lifecycle,
+        writer=s.record_runtime_scene_event,
+    )
 
 
 def _safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
