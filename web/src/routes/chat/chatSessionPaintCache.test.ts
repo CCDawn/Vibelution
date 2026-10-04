@@ -12,11 +12,12 @@ import {
   listSessionKeepAliveIds,
   nextSessionKeepAliveIds,
   rememberSessionDetailPaint,
+  removeOptimisticUserMessagePaint,
   resolveStickySessionDetailPaint,
   shouldShowStickyTranscriptPending,
   touchSessionKeepAlive,
 } from "./chatSessionPaintCache";
-import { applyOptimisticEditResubmit } from "../chatSessionState";
+import { appendOptimisticUserMessage, applyOptimisticEditResubmit, removeOptimisticUserMessage } from "../chatSessionState";
 
 function detail(id: string, messages: number, provisional = false): SessionDetail {
   return {
@@ -80,6 +81,59 @@ describe("chatSessionPaintCache", () => {
   beforeEach(() => {
     clearSessionDetailPaintCacheForTests();
     clearSessionTimelineScrollMemoryForTests();
+  });
+
+  it.each([false, true])("does not resurrect a removed optimistic submission (windowed=%s)", (windowed) => {
+    const original = windowed
+      ? windowedDetail("s1", 40, [{ index: 1, role: "user", content: "真实历史" }], { total: 1, oldest: 1, newest: 1 })
+      : detail("s1", 1);
+    const submission = { sessionId: "s1", clientSubmissionId: "failed-submit", content: "没有发出的消息" };
+    const pending = appendOptimisticUserMessage(original, submission)!;
+    rememberSessionDetailPaint(pending);
+    const removed = removeOptimisticUserMessage(pending, submission)!;
+    removeOptimisticUserMessagePaint("s1", submission);
+
+    const paint = resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: removed });
+    expect(paint?.messages).toEqual(original.messages);
+    // A later provisional shell must not revive the removed submission either.
+    expect(resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: detail("s1", 0, true) })?.messages).toEqual(original.messages);
+  });
+
+  it("keeps a pending submission while only a provisional shell is available", () => {
+    const pending = appendOptimisticUserMessage(detail("s1", 1), {
+      sessionId: "s1", clientSubmissionId: "still-pending", content: "等待中的消息",
+    })!;
+    rememberSessionDetailPaint(pending);
+    const paint = resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: detail("s1", 0, true) });
+    expect(paint?.messages).toHaveLength(pending.messages.length);
+    expect(paint?.messages).toEqual(expect.arrayContaining(pending.messages));
+  });
+
+  it("withdraws only the failed submission in its own session", () => {
+    const failed = { sessionId: "s1", clientSubmissionId: "failed", content: "相同正文" };
+    const other = { ...failed, clientSubmissionId: "still-pending" };
+    const first = appendOptimisticUserMessage(detail("s1", 1), failed)!;
+    const both = appendOptimisticUserMessage(first, other)!;
+    const foreign = appendOptimisticUserMessage(detail("s2", 1), { ...failed, sessionId: "s2" })!;
+    rememberSessionDetailPaint(both);
+    rememberSessionDetailPaint(foreign);
+    removeOptimisticUserMessagePaint("s1", failed);
+    const live = removeOptimisticUserMessage(both, failed)!;
+
+    const paint = resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: live });
+    expect(paint?.messages.map((message) => message.id).sort()).toEqual(live.messages.map((message) => message.id).sort());
+    const foreignPaint = resolveStickySessionDetailPaint({ activeSessionId: "s2", detail: detail("s2", 0, true) });
+    expect(foreignPaint?.messages).toEqual(expect.arrayContaining(foreign.messages));
+    expect(foreignPaint?.messages).toHaveLength(foreign.messages.length);
+  });
+
+  it("keeps current optimistic submissions and committed history outside a thin live window", () => {
+    const submission = { sessionId: "s1", clientSubmissionId: "still-pending", content: "等待中的消息" };
+    const pending = appendOptimisticUserMessage(detail("s1", 3), submission)!;
+    rememberSessionDetailPaint(pending);
+    const live = appendOptimisticUserMessage(detail("s1", 1), submission)!;
+    expect(resolveStickySessionDetailPaint({ activeSessionId: "s1", detail: live })?.messages.map((message) => message.id).sort())
+      .toEqual(pending.messages.map((message) => message.id).sort());
   });
 
   it("does not resurrect messages a strictly newer authoritative window truncated", () => {

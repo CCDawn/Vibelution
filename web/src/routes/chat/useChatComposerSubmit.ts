@@ -102,6 +102,7 @@ import {
 import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { appendStoredPromptHistoryEntry } from "../../components/conversation/conversationPromptHistory";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
+import { removeOptimisticUserMessagePaint } from "./chatSessionPaintCache";
 import { startUserAction, type UserActionTracker } from "../../app/userActionTelemetry";
 import { isEditAcknowledged, rollbackEditResubmit } from "./chatEditResubmitState";
 import {
@@ -132,6 +133,7 @@ function removeOptimisticUserMessageFromCache(
   sessionId: string,
   input: OptimisticUserMessageInput,
 ): void {
+  removeOptimisticUserMessagePaint(sessionId, input);
   const query = queryClient
     .getQueryCache()
     .find<SessionDetail>({ queryKey: queryKeys.session(sessionId), exact: true });

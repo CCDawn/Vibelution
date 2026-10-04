@@ -13,7 +13,7 @@
 
 import type { ConversationMessage, SessionDetail } from "../../api/types";
 import { forgetSessionTimelineScroll } from "../../components/conversation/conversationSessionScrollMemory";
-import { mergeSessionDetailMessageWindow } from "../chatSessionState";
+import { mergeSessionDetailMessageWindow, removeOptimisticUserMessage, type OptimisticUserMessageInput } from "../chatSessionState";
 import { mergeEditResubmitDetail } from "./chatEditResubmitState";
 
 const MAX_LAST_GOOD_SESSIONS = 12;
@@ -115,6 +115,16 @@ export function rememberSessionDetailPaint(detail: SessionDetail | null | undefi
     return;
   }
   touchOrder(sessionId, { ...detail, provisionalTranscript: undefined });
+}
+
+/** A failed submission is an explicit removal, not a thin transcript window.
+ * Remove only its optimistic row so sticky paint cannot resurrect it. */
+export function removeOptimisticUserMessagePaint(sessionId: string, input: OptimisticUserMessageInput) {
+  const existing = lastGoodBySessionId.get(sessionId);
+  const next = removeOptimisticUserMessage(existing, input);
+  if (next && next !== existing) {
+    touchOrder(sessionId, next);
+  }
 }
 
 /** Drop cache entry when a session is deleted / cleared. */
