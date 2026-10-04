@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 import pytest
 
 from tests.e2e.conftest import e2e_enabled
@@ -89,3 +90,68 @@ def test_session_drafts_stay_separate_on_full_navigation(page, e2e_instance):
     composer_b.fill("只属于会话 B")
     expect(_ready_composer(page, e2e_instance, a)).to_have_value("只属于会话 A")
     expect(_ready_composer(page, e2e_instance, b)).to_have_value("只属于会话 B")
+
+
+def _assert_late_failure_preserves_edit(page, instance, *, clear_draft):
+    from playwright.sync_api import expect
+
+    sid = create_session(instance.port, title="late send failure draft regression")
+    composer = _ready_composer(page, instance, sid)
+    original = "已发送但仍在等待的旧草稿"
+    newer = "等待期间逐字输入的新草稿"
+    expected = "" if clear_draft else newer
+    pending = []
+    captured = []
+    pattern = f"**/api/sessions/{sid}/messages"
+
+    def hold_send(route):
+        captured.append(route.request.url)
+        pending.append(route)
+
+    composer.fill(original)
+    page.route(pattern, hold_send)
+    try:
+        page.get_by_role("button", name="发送", exact=True).click()
+        deadline = time.monotonic() + 10
+        while not pending and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert len(captured) == 1, "The original submission must reach the held transport"
+        expect(composer).to_have_value("")
+        expect(composer).to_be_enabled()
+        composer.click()
+        composer.press_sequentially(newer, delay=20)
+        expect(composer).to_have_value(newer)
+        if clear_draft:
+            composer.press("ControlOrMeta+A")
+            composer.press("Backspace")
+            expect(composer).to_have_value("")
+
+        pending.pop().abort("internetdisconnected")
+        expect(page.locator('[role="alert"]').first).to_contain_text("没有发出", timeout=15000)
+        expect(composer).to_have_value(expected)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0", timeout=15000)
+        assert len(captured) == 1
+        assert original not in json.dumps(fetch_json(instance.port, f"/api/sessions/{sid}"), ensure_ascii=False)
+
+        # Verify the user's latest choice also survives document replacement,
+        # including an intentional empty draft.
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sid, timeout=30000)
+        expect(page.locator(COMPOSER).first).to_have_value(expected, timeout=15000)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0", timeout=15000)
+        stored = page.evaluate('() => JSON.parse(localStorage.getItem("vibelution.chat.drafts.v1") || "[]")')
+        rows = [row for row in stored if row.get("sessionId") == sid]
+        assert (rows[0].get("draft", "") if rows else "") == expected
+        assert original not in json.dumps(fetch_json(instance.port, f"/api/sessions/{sid}"), ensure_ascii=False)
+    finally:
+        for route in pending:
+            route.abort("internetdisconnected")
+        page.unroute(pattern, hold_send)
+
+
+def test_late_send_failure_keeps_newer_draft_after_reload(page, e2e_instance):
+    _assert_late_failure_preserves_edit(page, e2e_instance, clear_draft=False)
+
+
+def test_late_send_failure_keeps_intentional_clear_after_reload(page, e2e_instance):
+    _assert_late_failure_preserves_edit(page, e2e_instance, clear_draft=True)
