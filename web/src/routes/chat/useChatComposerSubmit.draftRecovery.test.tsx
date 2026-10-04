@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import React, { act, useRef, useState } from "react";
+import React, { act, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,12 +22,27 @@ vi.mock("../../app/userActionTelemetry", () => ({
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const sid = "draft-recovery-session";
 const originalDraft = "发送失败后仍需要保留的文字";
-let controls: { change: (value: string) => void; submit: () => void; draft: string; error: string };
+let controls: {
+  change: (value: string) => void;
+  submit: () => void;
+  draft: string;
+  error: string;
+  deferDraftUpdates: () => void;
+  replayDeferredDraftUpdates: () => void;
+};
 const roots: Root[] = [];
 const clients: QueryClient[] = [];
 
 function Harness({ client, attachments }: { client: QueryClient; attachments: ComposerImageAttachment[] }) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({ [sid]: originalDraft });
+  const [drafts, setDraftsState] = useState<Record<string, string>>({ [sid]: originalDraft });
+  const deferredDraftUpdatesRef = useRef<Array<(current: Record<string, string>) => Record<string, string>> | null>(null);
+  const setDrafts: Dispatch<SetStateAction<Record<string, string>>> = (action) => {
+    if (typeof action === "function" && deferredDraftUpdatesRef.current) {
+      deferredDraftUpdatesRef.current.push(action as (current: Record<string, string>) => Record<string, string>);
+      return;
+    }
+    setDraftsState(action);
+  };
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [images, setImages] = useState<Record<string, ComposerImageAttachment[]>>({ [sid]: attachments });
   const uploadInFlight = useRef<Record<string, boolean>>({});
@@ -60,7 +75,18 @@ function Harness({ client, attachments }: { client: QueryClient; attachments: Co
     latestUserMessageId: "", activeTurnId: undefined, detail: undefined,
     setMentalModelEnabledForNextTurn: () => undefined, setRuntimeStatusEnabledForNextTurn: () => undefined,
   });
-  controls = { change: actions.handleComposerChange, submit: actions.handleSubmitTurn, draft: drafts[sid] ?? "", error: errors[sid] ?? "" };
+  controls = {
+    change: actions.handleComposerChange,
+    submit: actions.handleSubmitTurn,
+    draft: drafts[sid] ?? "",
+    error: errors[sid] ?? "",
+    deferDraftUpdates: () => { deferredDraftUpdatesRef.current = []; },
+    replayDeferredDraftUpdates: () => {
+      const updates = deferredDraftUpdatesRef.current ?? [];
+      deferredDraftUpdatesRef.current = null;
+      setDraftsState((current) => updates.reduce((next, update) => update(next), current));
+    },
+  };
   return null;
 }
 
@@ -122,5 +148,43 @@ describe("failed composer draft recovery", () => {
     flushPendingSessionDraftWrites();
     expect(controls.draft).toBe("用户在等待时输入的新草稿");
     expect(readStoredSessionDrafts()[sid]).toBe("用户在等待时输入的新草稿");
+  });
+
+  it("keeps an intentional empty draft when an older message request fails", async () => {
+    let rejectRequest!: (error: Error) => void;
+    vi.mocked(submitSessionMessage).mockImplementation(() => new Promise((_, reject) => { rejectRequest = reject; }));
+    mount();
+    await act(async () => controls.submit());
+    await settle();
+    act(() => controls.change("后来输入的文字"));
+    act(() => controls.change(""));
+    await act(async () => rejectRequest(new Error("late failure")));
+    await settle();
+    flushPendingSessionDraftWrites();
+    expect(controls.draft).toBe("");
+    expect(readStoredSessionDrafts()[sid] ?? "").toBe("");
+  });
+
+  it("does not let a replayed failure updater overwrite newer persisted input", async () => {
+    let rejectRequest!: (error: Error) => void;
+    vi.mocked(submitSessionMessage).mockImplementation(() => new Promise((_, reject) => { rejectRequest = reject; }));
+    mount();
+    await act(async () => controls.submit());
+    await settle();
+
+    // Simulate React interrupting and rebasing the queued restore updater. The
+    // newer change event saves immediately, then both state updaters replay.
+    act(() => controls.deferDraftUpdates());
+    await act(async () => {
+      rejectRequest(new Error("late failure"));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    act(() => controls.change("重放恢复更新时用户输入的新草稿"));
+    act(() => controls.replayDeferredDraftUpdates());
+    await settle();
+
+    flushPendingSessionDraftWrites();
+    expect(controls.draft).toBe("重放恢复更新时用户输入的新草稿");
+    expect(readStoredSessionDrafts()[sid]).toBe("重放恢复更新时用户输入的新草稿");
   });
 });

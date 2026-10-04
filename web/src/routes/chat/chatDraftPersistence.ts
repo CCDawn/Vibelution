@@ -84,7 +84,77 @@ const REFERENCE_IDENTITY_FIELDS = [
 
 const pendingDraftSaves = new Map<string, string>();
 const pendingDraftMetas = new Map<string, StoredSessionDraftMeta>();
+const activeDraftRecoveryGuards = new Map<string, Set<number>>();
+const draftRecoveryRevisionBySession = new Map<string, number>();
+let nextDraftRecoveryGuardId = 1;
 let pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+export type SessionDraftRecoveryGuard = {
+  readonly id: number;
+  readonly sessionId: string;
+  readonly revision: number;
+};
+
+function advanceDraftRecoveryRevision(sessionId: string) {
+  if (!activeDraftRecoveryGuards.get(sessionId)?.size) {
+    return;
+  }
+  draftRecoveryRevisionBySession.set(
+    sessionId,
+    (draftRecoveryRevisionBySession.get(sessionId) ?? 0) + 1,
+  );
+}
+
+/** Mark a submitted draft so a later failure can restore it only if no newer
+ * composer edit has been scheduled for the same session. */
+export function beginSessionDraftRecoveryGuard(sessionId: string): SessionDraftRecoveryGuard | null {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return null;
+  }
+  const guard: SessionDraftRecoveryGuard = {
+    id: nextDraftRecoveryGuardId++,
+    sessionId: normalizedSessionId,
+    revision: draftRecoveryRevisionBySession.get(normalizedSessionId) ?? 0,
+  };
+  const active = activeDraftRecoveryGuards.get(normalizedSessionId) ?? new Set<number>();
+  active.add(guard.id);
+  activeDraftRecoveryGuards.set(normalizedSessionId, active);
+  return guard;
+}
+
+/** Release a submission guard; safe to call from both a failure path and its
+ * cleanup path. */
+export function releaseSessionDraftRecoveryGuard(guard: SessionDraftRecoveryGuard | null | undefined) {
+  if (!guard) {
+    return;
+  }
+  const active = activeDraftRecoveryGuards.get(guard.sessionId);
+  active?.delete(guard.id);
+  if (!active?.size) {
+    activeDraftRecoveryGuards.delete(guard.sessionId);
+    draftRecoveryRevisionBySession.delete(guard.sessionId);
+  }
+}
+
+/** Persist a failed submission's text only while its session has no newer
+ * scheduled draft edit. The caller invokes this outside React state updaters. */
+export function scheduleSessionDraftRecoverySave(
+  guard: SessionDraftRecoveryGuard | null | undefined,
+  draft: string,
+): boolean {
+  if (!guard) {
+    return false;
+  }
+  const isCurrent = activeDraftRecoveryGuards.get(guard.sessionId)?.has(guard.id)
+    && (draftRecoveryRevisionBySession.get(guard.sessionId) ?? guard.revision) === guard.revision;
+  releaseSessionDraftRecoveryGuard(guard);
+  if (!isCurrent) {
+    return false;
+  }
+  scheduleSessionDraftSave(guard.sessionId, draft);
+  return true;
+}
 
 /**
  * Composer draft persistence: per-session drafts survive a reload/restart via
@@ -373,6 +443,7 @@ export function scheduleSessionDraftSave(sessionId: string, draft: string) {
   if (!normalizedSessionId) {
     return;
   }
+  advanceDraftRecoveryRevision(normalizedSessionId);
   pendingDraftSaves.set(normalizedSessionId, String(draft ?? ""));
   ensureDraftLifecycleFlush();
   if (pendingSaveTimer !== null) {
@@ -412,6 +483,7 @@ export function removeStoredSessionDraft(sessionId: string) {
   if (!normalizedSessionId) {
     return;
   }
+  advanceDraftRecoveryRevision(normalizedSessionId);
   pendingDraftSaves.delete(normalizedSessionId);
   pendingDraftMetas.delete(normalizedSessionId);
   writeStoredSessionDraftEntries(
@@ -467,4 +539,7 @@ export function resetChatDraftPersistenceForTests() {
   }
   pendingDraftSaves.clear();
   pendingDraftMetas.clear();
+  activeDraftRecoveryGuards.clear();
+  draftRecoveryRevisionBySession.clear();
+  nextDraftRecoveryGuardId = 1;
 }

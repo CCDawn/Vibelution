@@ -6,11 +6,13 @@ import {
   CHAT_DRAFTS_STORAGE_KEY,
   CHAT_DRAFT_MAX_CHARS,
   capStoredSessionDrafts,
+  beginSessionDraftRecoveryGuard,
   clampStoredSessionDraft,
   flushPendingSessionDraftWrites,
   readStoredSessionDrafts,
   readStoredSessionDraftState,
   removeStoredSessionDraft,
+  scheduleSessionDraftRecoverySave,
   resetChatDraftPersistenceForTests,
   sanitizeStoredDraftReferences,
   scheduleSessionDraftMetaSave,
@@ -154,6 +156,17 @@ describe("chatDraftPersistence", () => {
     flushPendingSessionDraftWrites();
     expect(storedEntry("session-2")).toBeUndefined();
     expect(readStoredSessionDrafts()).toEqual({});
+  });
+
+  it("rejects failed-submit recovery after a newer composer edit", () => {
+    const guard = beginSessionDraftRecoveryGuard("session-1");
+    expect(guard).not.toBeNull();
+
+    scheduleSessionDraftSave("session-1", "用户后来输入的草稿");
+
+    expect(scheduleSessionDraftRecoverySave(guard, "已经提交的旧内容")).toBe(false);
+    flushPendingSessionDraftWrites();
+    expect(storedEntry("session-1")).toBe("用户后来输入的草稿");
   });
 
   it("persists rich meta (turn model selection + reference chips) next to the draft text", () => {

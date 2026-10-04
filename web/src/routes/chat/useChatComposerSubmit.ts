@@ -91,7 +91,14 @@ import {
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
-import { removeStoredSessionDraft, scheduleSessionDraftSave } from "./chatDraftPersistence";
+import {
+  beginSessionDraftRecoveryGuard,
+  releaseSessionDraftRecoveryGuard,
+  removeStoredSessionDraft,
+  scheduleSessionDraftRecoverySave,
+  scheduleSessionDraftSave,
+  type SessionDraftRecoveryGuard,
+} from "./chatDraftPersistence";
 import { type ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
 import { appendStoredPromptHistoryEntry } from "../../components/conversation/conversationPromptHistory";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
@@ -138,20 +145,25 @@ function removeOptimisticUserMessageFromCache(
   query.setState({ data: next, dataUpdatedAt: Date.now() });
 }
 
-function restoreAndPersistSubmittedDraft(current: Record<string, string>, sessionId: string, content: string) {
-  const restored = restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content);
-  if (restored !== current) {
-    // Schedule only the applied restoration, never overwrite newer user input.
-    // The session-keyed debounce coalesces repeated React updater evaluations.
-    scheduleSessionDraftSave(sessionId, restored[sessionId]);
+function restoreSubmittedDraftAfterFailure(
+  setSessionDrafts: Dispatch<SetStateAction<Record<string, string>>>,
+  sessionId: string,
+  content: string,
+  recoveryGuard: SessionDraftRecoveryGuard | null | undefined,
+) {
+  // Persistence is a side effect and must stay outside React's replayable
+  // functional updater. The guard rejects late failures after newer input.
+  if (recoveryGuard && !scheduleSessionDraftRecoverySave(recoveryGuard, content)) {
+    return;
   }
-  return restored;
+  setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
 }
 
 export type SubmitTurnVariables = {
   sessionId: string;
   clientSubmissionId: string;
   content: string;
+  draftRecoveryGuard?: SessionDraftRecoveryGuard | null;
   mentalModelEnabled: boolean;
   runtimeStatusEnabled: boolean;
   turnStatusTail?: ReturnType<typeof loadTurnStatusTailConfig>;
@@ -491,6 +503,7 @@ export function useChatComposerTurnMutations({
       return { telemetry };
     },
     onSuccess: (acceptedTurn, variables, context) => {
+      releaseSessionDraftRecoveryGuard(variables.draftRecoveryGuard);
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         clientSubmissionId: variables.clientSubmissionId,
@@ -619,7 +632,12 @@ export function useChatComposerTurnMutations({
           setActiveTurnLayerForSession(current, variables.sessionId, undefined)
         );
       }
-      setSessionDrafts((current) => restoreAndPersistSubmittedDraft(current, variables.sessionId, variables.content));
+      restoreSubmittedDraftAfterFailure(
+        setSessionDrafts,
+        variables.sessionId,
+        variables.content,
+        variables.draftRecoveryGuard,
+      );
       setSessionComposerErrors((current) => ({
         ...current,
         // Classified human copy (e.g. 409 -> "a turn is already generating");
@@ -1863,6 +1881,8 @@ export function useChatComposerSubmitActions({
     setSessionDrafts((current) => clearSessionDraftForSubmittedTurn(current, sessionId));
     // The submitted draft must not resurrect from localStorage after a reload.
     removeStoredSessionDraft(sessionId);
+    const draftRecoveryGuard = beginSessionDraftRecoveryGuard(sessionId);
+    let mutationOwnsRecoveryGuard = false;
     setSessionComposerErrors((current) => ({
       ...current,
       [sessionId]: "",
@@ -1934,7 +1954,7 @@ export function useChatComposerSubmitActions({
         }));
         if (content || references.length) {
           removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
-          setSessionDrafts((current) => restoreAndPersistSubmittedDraft(current, sessionId, content));
+          restoreSubmittedDraftAfterFailure(setSessionDrafts, sessionId, content, draftRecoveryGuard);
         }
         restorePendingStopAfterUploadFailure(sessionId);
         return;
@@ -1977,6 +1997,7 @@ export function useChatComposerSubmitActions({
         sessionId,
         clientSubmissionId,
         content,
+        draftRecoveryGuard,
         mentalModelEnabled,
         runtimeStatusEnabled,
         turnStatusTail: loadTurnStatusTailConfig(sessionId),
@@ -1986,6 +2007,7 @@ export function useChatComposerSubmitActions({
         queuedBehindActiveTurn,
         modelSelection,
       });
+      mutationOwnsRecoveryGuard = true;
     } catch (error) {
       if (!isMountedRef.current) {
         return;
@@ -2012,10 +2034,13 @@ export function useChatComposerSubmitActions({
       }));
       if (content || references.length) {
         removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
-        setSessionDrafts((current) => restoreAndPersistSubmittedDraft(current, sessionId, content));
+        restoreSubmittedDraftAfterFailure(setSessionDrafts, sessionId, content, draftRecoveryGuard);
       }
       restorePendingStopAfterUploadFailure(sessionId);
     } finally {
+      if (!mutationOwnsRecoveryGuard) {
+        releaseSessionDraftRecoveryGuard(draftRecoveryGuard);
+      }
       if (pendingUploadSubmissionRef.current.get(sessionId) === clientSubmissionId) {
         pendingUploadSubmissionRef.current.delete(sessionId);
       }
