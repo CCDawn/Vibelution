@@ -2742,7 +2742,15 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
         workspaceRoot: createDesktopPathsForApp().workspaceRoot,
         pythonPath
       });
+      // Preparation never replaces a loaded native addon. The same refresh
+      // helper as the update button waits for this Electron owner to exit.
+      shellRefreshInFlight = true;
+      await scheduleCurrentDesktopShellRefresh("", { force: true, shellKind: "unpackaged" });
+      shutdownApproved = true;
+      app.exit(0);
+      return;
     } catch (error: unknown) {
+      shellRefreshInFlight = false;
       const detail = error instanceof Error ? error.message : String(error);
       notifyDesktopTray("Vibelution", `无法重建最新前端，仍将重启当前壳：${detail.slice(0, 220)}`, "warning");
     }

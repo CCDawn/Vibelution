@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import { ScriptTarget, transpileModule } from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import { executeLauncherUpdate, projectLauncherUpdateFreshness } from "../src/process/launcherUpdate.js";
 import type { ActiveWorkStatus } from "../src/shutdown/shutdownCoordinator.js";
@@ -85,6 +87,36 @@ describe("guarded local Launcher update", () => {
     expect(update).toContain("stopIsolatedInstancesForApprovedShutdown");
     expect(update).not.toContain("bestEffortStopIsolatedInstancesForShutdown");
     expect(update).not.toContain('"force-stop"');
+  });
+
+  it("hands a prepared unpackaged tray update to the helper before exiting", async () => {
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const begin = main.indexOf("async function exitAndRelaunchLauncherShell(");
+    const end = main.indexOf("async function runTrayRestartLauncher(", begin);
+    expect(begin).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(begin);
+    const events: string[] = [];
+    const schedule = vi.fn(async () => { events.push("schedule"); });
+    const relaunch = vi.fn();
+    const sandbox: Record<string, unknown> = {
+      app: { isPackaged: false, relaunch, exit: () => { events.push("exit"); } },
+      shellRefreshInFlight: false, shutdownApproved: false,
+      decideLauncherShellRestart: () => "ensure-and-relaunch",
+      desktopPythonPath: () => "pythonw.exe",
+      createDesktopPathsForApp: () => ({ workspaceRoot: "test-workspace" }),
+      notifyDesktopTray: vi.fn(),
+      ensureLatestLauncher: async () => { events.push("prepare"); },
+      scheduleCurrentDesktopShellRefresh: schedule,
+    };
+    const code = transpileModule(main.slice(begin, end) + "\nglobalThis.restart = exitAndRelaunchLauncherShell;", {
+      compilerOptions: { target: ScriptTarget.ES2022 },
+    }).outputText;
+    runInNewContext(code, sandbox);
+    await (sandbox.restart as () => Promise<void>)();
+    expect(events).toEqual(["prepare", "schedule", "exit"]);
+    expect(schedule).toHaveBeenCalledWith("", { force: true, shellKind: "unpackaged" });
+    expect(relaunch).not.toHaveBeenCalled();
+    expect(sandbox.shutdownApproved).toBe(true);
   });
 });
 

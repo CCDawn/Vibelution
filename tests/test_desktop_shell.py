@@ -1064,10 +1064,181 @@ def test_publish_staged_electron_dist_keeps_live_dist_when_rename_is_busy(tmp_pa
     assert not (electron / ".dist-incoming").exists()
 
 
-def test_ensure_latest_launcher_rebuilds_electron_and_frontend(tmp_path, monkeypatch):
+@pytest.mark.skipif(os.name != "nt", reason="Windows loaded-image file locking")
+def test_publish_staged_electron_dist_retries_locked_previous_cleanup(tmp_path):
+    import ctypes
+    from ctypes import wintypes
+
+    electron = tmp_path / "desktop" / "electron"
+    dist = electron / "dist"
+    dist.mkdir(parents=True)
+    (dist / "main.js").write_text("old", encoding="utf-8")
+    previous = electron / ".dist-previous"
+    native = previous / "native" / "workbench_job.node"
+    native.parent.mkdir(parents=True)
+    shutil.copyfile(Path(os.environ["SystemRoot"]) / "System32" / "version.dll", native)
+    loaded = ctypes.WinDLL(str(native))
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.FreeLibrary.argtypes = [wintypes.HMODULE]
+    kernel.FreeLibrary.restype = wintypes.BOOL
+    stage = electron / ".build-stage"
+    stage.mkdir()
+    (stage / "main.js").write_text("new", encoding="utf-8")
+    try:
+        desktop_shell._publish_staged_electron_dist(stage, dist)
+        assert (dist / "main.js").read_text(encoding="utf-8") == "new"
+        assert native.is_file()
+    finally:
+        assert kernel.FreeLibrary(loaded._handle)
+    desktop_shell._publish_staged_electron_dist(stage, dist)
+    assert not previous.exists()
+    assert not list(electron.glob(".dist-previous-*"))
+
+
+def _install_unpackaged_update_compiler(root, monkeypatch, calls, tree):
+    def compile_stage(command, **kwargs):
+        calls.append(command)
+        stage = Path(kwargs["env"]["VIBELUTION_ELECTRON_DIST"])
+        (stage / "main.js").write_text("new-main", encoding="utf-8")
+        (stage / "preload.cjs").write_text("new-preload", encoding="utf-8")
+        native = stage / "native" / "workbench_job.node"
+        native.parent.mkdir(exist_ok=True)
+        native.write_bytes(b"new-native")
+
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda *_: tree[0])
+    monkeypatch.setattr(desktop_shell, "_run_owned_process", compile_stage)
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda *_args, **_kwargs: {"ok": True, "skipped": True},
+    )
+
+
+def test_latest_launcher_prepares_without_publishing_and_refresh_promotes_after_exit(tmp_path, monkeypatch):
+    _write_unpackaged_electron(tmp_path, tree_hash="b" * 40)
+    main = desktop_shell.unpackaged_main_js(tmp_path)
+    old = main.read_bytes()
+    calls = []
+    tree = ["a" * 40]
+    _install_unpackaged_update_compiler(tmp_path, monkeypatch, calls, tree)
+
+    prepared = desktop_shell.ensure_latest_launcher(tmp_path)
+    assert prepared["ok"] is True
+    assert main.read_bytes() == old
+    assert desktop_shell.inspect_unpackaged_electron(tmp_path)["stale"] is True
+    staged = tmp_path / desktop_shell.UNPACKAGED_STAGING_RELATIVE
+    assert (staged / "native" / "workbench_job.node").read_bytes() == b"new-native"
+    assert len(calls) == 3
+    assert desktop_shell.ensure_latest_launcher(tmp_path)["electron"]["prepared"] is True
+    assert len(calls) == 3
+
+    events = []
+    def wait_for_exit(pid, **_kwargs):
+        assert pid == 123
+        assert main.read_bytes() == old
+        events.append("old-exited")
+
+    def launch(**_kwargs):
+        assert events == ["old-exited"]
+        assert main.read_text(encoding="utf-8") == "new-main"
+        assert desktop_shell.inspect_unpackaged_electron(tmp_path)["stale"] is False
+        events.append("launch")
+        return {"pid": 456}
+
+    monkeypatch.setattr(desktop_shell, "_wait_for_pid_exit", wait_for_exit)
+    monkeypatch.setattr(desktop_shell, "launch_desktop_shell", launch)
+    result = desktop_shell.run_desktop_shell_refresh(
+        project_root=tmp_path, wait_pid=123, shell_kind="unpackaged",
+    )
+    assert result["refreshed"] is True
+    assert events == ["old-exited", "launch"]
+    assert len(calls) == 3
+    assert not staged.exists()
+
+
+def test_prepared_launcher_source_change_rebuilds_before_promotion(tmp_path, monkeypatch):
+    _write_unpackaged_electron(tmp_path, tree_hash="b" * 40)
+    calls = []
+    tree = ["a" * 40]
+    _install_unpackaged_update_compiler(tmp_path, monkeypatch, calls, tree)
+    desktop_shell.ensure_latest_launcher(tmp_path)
+    tree[0] = "c" * 40
+    result = desktop_shell.ensure_unpackaged_electron(tmp_path)
+    assert result["rebuilt"] is True
+    assert len(calls) == 6
+    assert desktop_shell.inspect_unpackaged_electron(tmp_path)["bundledElectronTree"] == tree[0]
+    assert not (tmp_path / desktop_shell.UNPACKAGED_STAGING_RELATIVE).exists()
+
+
+def test_launcher_preparation_rejects_sources_changed_during_build(tmp_path, monkeypatch):
+    _write_unpackaged_electron(tmp_path, tree_hash="b" * 40)
+    main = desktop_shell.unpackaged_main_js(tmp_path)
+    old = main.read_bytes()
+    calls = []
+    tree = ["a" * 40]
+    _install_unpackaged_update_compiler(tmp_path, monkeypatch, calls, tree)
+    compile_stage = desktop_shell._run_owned_process
+
+    def changing_source(command, **kwargs):
+        compile_stage(command, **kwargs)
+        tree[0] = "c" * 40
+
+    monkeypatch.setattr(desktop_shell, "_run_owned_process", changing_source)
+    with pytest.raises(RuntimeError, match="sources changed during the build"):
+        desktop_shell.ensure_latest_launcher(tmp_path)
+    assert main.read_bytes() == old
+    assert not (tmp_path / desktop_shell.UNPACKAGED_STAGING_RELATIVE).exists()
+    assert not list(main.parent.parent.glob(".build-stage-*"))
+
+
+def test_launcher_preparation_rejects_incomplete_artifacts_before_stopping(tmp_path, monkeypatch):
+    _write_unpackaged_electron(tmp_path, tree_hash="b" * 40)
+    main = desktop_shell.unpackaged_main_js(tmp_path)
+    old = main.read_bytes()
+    _install_unpackaged_update_compiler(tmp_path, monkeypatch, [], ["a" * 40])
+    compile_stage = desktop_shell._run_owned_process
+
+    def missing_preload(command, **kwargs):
+        compile_stage(command, **kwargs)
+        (Path(kwargs["env"]["VIBELUTION_ELECTRON_DIST"]) / "preload.cjs").unlink()
+
+    monkeypatch.setattr(desktop_shell, "_run_owned_process", missing_preload)
+    with pytest.raises(RuntimeError, match="build is incomplete"):
+        desktop_shell.ensure_latest_launcher(tmp_path)
+    assert main.read_bytes() == old
+    assert not (tmp_path / desktop_shell.UNPACKAGED_STAGING_RELATIVE).exists()
+
+
+def test_prepared_launcher_failed_promotion_restores_live_and_can_retry(tmp_path, monkeypatch):
+    _write_unpackaged_electron(tmp_path, tree_hash="b" * 40)
+    main = desktop_shell.unpackaged_main_js(tmp_path)
+    old = main.read_bytes()
+    calls = []
+    _install_unpackaged_update_compiler(tmp_path, monkeypatch, calls, ["a" * 40])
+    desktop_shell.ensure_latest_launcher(tmp_path)
+    rename = desktop_shell._rename_dir
+
+    def fail_promotion(source, target):
+        if source.name == ".dist-incoming" and target == main.parent:
+            error = PermissionError(13, "in use", str(source))
+            error.winerror = 32
+            raise error
+        rename(source, target)
+
+    monkeypatch.setattr(desktop_shell, "_rename_dir", fail_promotion)
+    with pytest.raises(desktop_shell.UnpackagedElectronPublishBusy):
+        desktop_shell.ensure_unpackaged_electron(tmp_path)
+    assert main.read_bytes() == old
+    assert (tmp_path / desktop_shell.UNPACKAGED_STAGING_RELATIVE).is_dir()
+    assert not list(main.parent.parent.glob(".dist-previous-*"))
+    monkeypatch.setattr(desktop_shell, "_rename_dir", rename)
+    assert desktop_shell.ensure_unpackaged_electron(tmp_path)["ensured"] is True
+    assert len(calls) == 3
+
+
+def test_ensure_latest_launcher_prepares_electron_and_frontend(tmp_path, monkeypatch):
     monkeypatch.setattr(
         desktop_shell,
-        "ensure_unpackaged_electron",
+        "prepare_unpackaged_electron",
         lambda root: {"ensured": True, "rebuilt": False, "reason": "current"},
     )
     monkeypatch.setattr(
@@ -1083,7 +1254,7 @@ def test_ensure_latest_launcher_rebuilds_electron_and_frontend(tmp_path, monkeyp
 def test_ensure_latest_launcher_raises_when_frontend_preflight_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(
         desktop_shell,
-        "ensure_unpackaged_electron",
+        "prepare_unpackaged_electron",
         lambda root: {"ensured": True, "rebuilt": True, "reason": "current"},
     )
     monkeypatch.setattr(

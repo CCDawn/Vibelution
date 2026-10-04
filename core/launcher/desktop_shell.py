@@ -47,6 +47,7 @@ ELECTRON_SRC_RELATIVE = Path("desktop") / "electron" / "src"
 ELECTRON_PACKAGE_DIR = Path("desktop") / "electron"
 UNPACKAGED_MAIN_RELATIVE = Path("desktop") / "electron" / "dist" / "main.js"
 UNPACKAGED_PROVENANCE_RELATIVE = Path("desktop") / "electron" / "dist" / "unpackaged-provenance.json"
+UNPACKAGED_STAGING_RELATIVE = Path("dist") / "desktop-unpackaged-staging"
 UNPACKAGED_ELECTRON_EXE_RELATIVE = (
     Path("desktop") / "electron" / "node_modules" / "electron" / "dist" / "electron.exe"
 )
@@ -1766,23 +1767,72 @@ def ensure_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[
             "desktop/electron/node_modules/electron/dist/electron.exe. "
             "Install desktop/electron dependencies, then retry."
         )
-    rebuilt = _rebuild_unpackaged_electron(root)
-    current_tree = str(rebuilt.get("currentElectronTree") or _git_tree_hash(root, "HEAD:desktop/electron"))
+    if not _promote_prepared_unpackaged_electron(root):
+        _rebuild_unpackaged_electron(root)
     status = inspect_unpackaged_electron(root)
     if status["stale"]:
         raise RuntimeError(f"checkout Electron main is still stale after build: {status['reason']}")
     return {"ensured": True, "rebuilt": True, **status}
 
 
-def ensure_latest_launcher(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
-    """Rebuild unpackaged Electron and ensure the active frontend release is current.
+def _unpackaged_electron_dist_is_complete(stage: Path) -> bool:
+    required = [stage / "main.js", stage / "preload.cjs"]
+    if os.name == "nt":
+        required.append(stage / "native" / "workbench_job.node")
+    return all(path.is_file() for path in required)
 
-    Tray "启动最新 Launcher" on an unpackaged shell relaunches the same process;
-    without this step it keeps serving a stale frontend release after local sources move.
+
+def _prepared_unpackaged_electron_is_current(root: Path) -> bool:
+    stage = root / UNPACKAGED_STAGING_RELATIVE
+    tree = _git_tree_hash(root, "HEAD:desktop/electron")
+    provenance = _read_json(stage / "unpackaged-provenance.json")
+    return bool(
+        tree and provenance.get("electronTreeHash") == tree
+        and _unpackaged_electron_dist_is_complete(stage)
+        and not _electron_sources_newer_than(root, stage / "main.js")
+    )
+
+
+def _promote_prepared_unpackaged_electron(root: Path) -> bool:
+    if not (root / UNPACKAGED_STAGING_RELATIVE).is_dir():
+        return False
+    deadline = time.monotonic() + DESKTOP_SHELL_BUILD_DEADLINE_SECONDS
+    _ensure_desktop_shell_build_lock(root, deadline=deadline)
+    try:
+        if not _prepared_unpackaged_electron_is_current(root):
+            return False
+        stage = root / UNPACKAGED_STAGING_RELATIVE
+        tree = str(_read_json(stage / "unpackaged-provenance.json")["electronTreeHash"])
+        _publish_staged_electron_dist(stage, root / ELECTRON_PACKAGE_DIR / "dist")
+        shutil.rmtree(stage, ignore_errors=True)
+        _append_refresh_log(root, "unpackaged.promoted_from_staging", electronTreeHash=tree)
+        return True
+    finally:
+        _release_desktop_shell_refresh_lock(root, lock_relative=PREBUILD_LOCK_RELATIVE)
+
+
+def prepare_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Prepare a complete replacement without touching the live Electron dist."""
+
+    root = Path(project_root)
+    status = inspect_unpackaged_electron(root)
+    if not status["stale"]:
+        return {"rebuilt": False, **status}
+    if status["reason"] == "missing_binary":
+        raise RuntimeError("Unpackaged Electron binary is missing; install desktop/electron dependencies.")
+    if _prepared_unpackaged_electron_is_current(root):
+        return {"rebuilt": False, "prepared": True, "reason": "prepared"}
+    return _rebuild_unpackaged_electron(root, prepare_only=True)
+
+
+def ensure_latest_launcher(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Prepare Electron and the frontend while the old shell remains usable.
+
+    The refresh helper publishes the prepared Electron tree after wait_pid exits.
     """
 
     root = Path(project_root)
-    electron = ensure_unpackaged_electron(root)
+    electron = prepare_unpackaged_electron(root)
     from core.runtime_manager.daemon import _preflight_frontend_build_for_restart
 
     frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher", project_root=root)
@@ -1793,6 +1843,7 @@ def ensure_latest_launcher(project_root: Path | str = PROJECT_ROOT) -> dict[str,
         "ok": True,
         "electron": {
             "rebuilt": bool(electron.get("rebuilt")),
+            "prepared": bool(electron.get("prepared")),
             "reason": str(electron.get("reason") or ""),
         },
         "frontend": {
@@ -2106,18 +2157,41 @@ def _rename_dir(src: Path, dest: Path) -> None:
     os.rename(src, dest)
 
 
+def _retire_previous_electron_dists(parent: Path) -> None:
+    """Retry only our backup directories; loaded Windows images remain owned."""
+
+    for previous in parent.glob(".dist-previous*"):
+        suffix = previous.name.removeprefix(".dist-previous")
+        if suffix and not (
+            len(suffix) == 33 and suffix[0] == "-"
+            and all(char in "0123456789abcdef" for char in suffix[1:])
+        ):
+            continue
+        try:
+            if (
+                previous.is_symlink()
+                or getattr(previous, "is_junction", lambda: False)()
+                or previous.resolve().parent != parent.resolve()
+            ):
+                continue
+            shutil.rmtree(previous)
+        except OSError:
+            # Cleanup is retryable and must not undo a successfully published
+            # replacement. A mapped .node can outlive its original directory.
+            continue
+
+
 def _publish_staged_electron_dist(stage: Path, dist: Path) -> None:
     """Swap a finished stage into dist. A locked live dist is left untouched."""
 
     if not (stage / "main.js").is_file():
         raise RuntimeError(f"staged Electron build is missing main.js: {stage}")
     parent = dist.parent
+    parent.mkdir(parents=True, exist_ok=True)
     incoming = parent / ".dist-incoming"
-    previous = parent / ".dist-previous"
+    previous = parent / f".dist-previous-{uuid4().hex}"
     if incoming.exists():
         shutil.rmtree(incoming)
-    if previous.exists():
-        shutil.rmtree(previous)
     shutil.copytree(stage, incoming)
     busy = UnpackagedElectronPublishBusy(
         "桌面壳正在使用 workbench_job.node，这次没有替换正在运行的壳，也没有改动已经装好的 dist。"
@@ -2141,8 +2215,8 @@ def _publish_staged_electron_dist(stage: Path, dist: Path) -> None:
                 raise busy from exc
             raise
     finally:
-        if previous.exists() and dist.exists():
-            shutil.rmtree(previous, ignore_errors=True)
+        if dist.exists():
+            _retire_previous_electron_dists(parent)
 
 
 def build_unpackaged_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
@@ -2150,7 +2224,7 @@ def build_unpackaged_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> d
     return _rebuild_unpackaged_electron(Path(project_root).resolve())
 
 
-def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
+def _rebuild_unpackaged_electron(project_root: Path, *, prepare_only: bool = False) -> dict[str, Any]:
     """Build Electron main beside dist, then publish only after the stage is complete."""
 
     electron_dir = project_root / ELECTRON_PACKAGE_DIR
@@ -2159,6 +2233,7 @@ def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
     stage = electron_dir / f".build-stage-{uuid4().hex}"
     try:
         stage.mkdir(parents=True)
+        current_tree = _git_tree_hash(project_root, "HEAD:desktop/electron")
         node_command = _node_command()
         env = os.environ.copy()
         env["VIBELUTION_DESKTOP_BUILD_MANAGED"] = "1"
@@ -2203,9 +2278,15 @@ def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
                     lock_relative=PREBUILD_LOCK_RELATIVE,
                 )
                 raise
-        _publish_staged_electron_dist(stage, electron_dir / "dist")
-        current_tree = _git_tree_hash(project_root, "HEAD:desktop/electron")
-        _write_unpackaged_provenance(project_root, current_tree)
+        if _git_tree_hash(project_root, "HEAD:desktop/electron") != current_tree:
+            raise RuntimeError("Electron sources changed during the build; retry Launcher update.")
+        if not _unpackaged_electron_dist_is_complete(stage):
+            raise RuntimeError("Staged Electron build is incomplete; retry Launcher update.")
+        _write_unpackaged_provenance(project_root, current_tree, dist=stage)
+        destination = project_root / UNPACKAGED_STAGING_RELATIVE if prepare_only else electron_dir / "dist"
+        _publish_staged_electron_dist(stage, destination)
+        if not prepare_only:
+            shutil.rmtree(project_root / UNPACKAGED_STAGING_RELATIVE, ignore_errors=True)
     except Exception as exc:
         _append_refresh_log(project_root, "unpackaged.build.failed", detail=str(exc)[-800:])
         raise
@@ -2214,14 +2295,22 @@ def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
             shutil.rmtree(stage, ignore_errors=True)
         if not _pending_build_retirement_for(project_root):
             _release_desktop_shell_refresh_lock(project_root, lock_relative=PREBUILD_LOCK_RELATIVE)
-    main_js = unpackaged_main_js(project_root)
+    main_js = (
+        project_root / UNPACKAGED_STAGING_RELATIVE / "main.js"
+        if prepare_only else unpackaged_main_js(project_root)
+    )
     if not main_js.is_file():
         raise RuntimeError(f"checkout Electron main was not produced: {main_js}")
-    return {"rebuilt": True, "currentElectronTree": current_tree}
+    return {
+        "rebuilt": True,
+        "prepared": prepare_only,
+        "reason": "prepared" if prepare_only else "current",
+        "currentElectronTree": current_tree,
+    }
 
 
-def _write_unpackaged_provenance(project_root: Path, tree_hash: str) -> None:
-    path = unpackaged_provenance_path(project_root)
+def _write_unpackaged_provenance(project_root: Path, tree_hash: str, *, dist: Path | None = None) -> None:
+    path = dist / "unpackaged-provenance.json" if dist is not None else unpackaged_provenance_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schemaVersion": 1,

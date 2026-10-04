@@ -85,3 +85,5 @@ npm test -- --run launcher
 产品用户测的是 `dist\desktop\win-unpacked\Vibelution.exe`。版本检查同时核对桌面壳源码与包内真实 `resources/web-dist`：前端内容摘要、构建来源和当前 production inputs 必须一致，不能用 `HEAD:web` 标签代替实际打包内容。`package:dir` 复用已验证的 active frontend release，不再直接复制旧 `web/dist`。旧包缺少前端内容证明时需要重建。
 
 Launcher 首页和工具页共用顶栏更新入口，收起详情不会隐藏提醒；当前只比较本地代码，不检测远端发布。确认更新后，先检查任务、准备前端与桌面壳，再检查一次任务；准备失败或普通停止被拒绝时不安排换版。最后由无控制台 helper 在旧壳退出后完成 `win-unpacked` 换版。不要让用户手跑 `package:dir`。只 `stop` Python `:8765` 不会加载新 `app.asar`。
+
+Unpackaged 更新也遵循同一顺序：`ensure-latest-launcher` 仅构建到 `dist/desktop-unpackaged-staging`，不替换正在运行的 `desktop/electron/dist`；后台 refresh helper 等旧 Electron 退出后，核对源码与完整产物，再发布暂存目录。源码已变化时重新构建。每次发布使用独立旧目录并重试清理历史备份；Windows 仍映射的 `.node` 保留到后续清理，不阻断新版发布。托盘「启动最新 Launcher」同样走 helper，不能直接 `app.relaunch()` 跳过暂存产物发布。
