@@ -1,12 +1,21 @@
+/** @vitest-environment happy-dom */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import React, { type ComponentProps, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import React, { type ComponentProps, type ReactNode, act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
 import { AgentSessionTabStrip, agentSessionStatusTone } from "./AgentSessionTabStrip";
 import styles from "./AgentSessionTabStrip.styles";
 import { markSessionActivitySeen, sessionActivityStamp } from "./sessionActivityIndicator";
+
+// The tab strip scrolls the active tab into view on mount; happy-dom lacks it.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => undefined;
+}
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
   const status = overrides.status ?? "idle";
@@ -429,5 +438,205 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("agentSessionTabMainActionActive");
     expect(markup).toContain("agentSessionTabStatusRunning");
     expect(markup).toContain("agentSessionTabStatusError");
+  });
+});
+
+describe("AgentSessionTabStrip two-stage close confirm", () => {
+  const CLOSE_LABEL = "deleteSession 顾明澈";
+  const ARMED_LABEL = "deleteSessionConfirmArmed 顾明澈";
+  let root: Root | null = null;
+  let container: HTMLDivElement | null = null;
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    if (root) {
+      await act(async () => {
+        root?.unmount();
+      });
+    }
+    container?.remove();
+    root = null;
+    container = null;
+  });
+
+  function closeButton(label: string) {
+    return container?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`) ?? null;
+  }
+  function armedCloseButton() {
+    return container?.querySelector<HTMLButtonElement>('button[data-session-tab-close-armed="true"]') ?? null;
+  }
+
+  async function mountStrip(options: {
+    onDeleteSession: ComponentProps<typeof AgentSessionTabStrip>["onDeleteSession"];
+    sessions?: SessionSummary[];
+    activeSessionId?: string | null;
+  }) {
+    const rootSession = session();
+    const props: ComponentProps<typeof AgentSessionTabStrip> = {
+      activeSessionId: options.activeSessionId ?? null,
+      agentsById: new Map([["agent-1", agent()]]),
+      buildSessionReferencePayload: (item: SessionSummary, displayName: string, summary: string): SessionReferenceAttachment => ({
+        referenceId: `session:${item.id}`,
+        kind: "session",
+        sessionId: item.id,
+        title: item.title,
+        agentDisplayName: displayName,
+        summary,
+        createdAt: "2026-06-09T00:00:00.000Z",
+      }),
+      contextMenuSessionId: "",
+      editingSessionId: null,
+      editingSessionTitle: "",
+      lang: "zh",
+      renamePending: false,
+      renameSessionId: "",
+      resolveModelLabel: () => undefined,
+      sessions: options.sessions ?? [rootSession],
+      statusLabel: (status: string) => status,
+      t: (key) => key,
+      workspaceActiveTab: "agent",
+      onCancelRename: () => undefined,
+      onContextMenu: () => undefined,
+      onDragReference: () => undefined,
+      onOpenDirectSession: () => undefined,
+      onCreateSession: () => undefined,
+      onDeleteSession: options.onDeleteSession,
+      onRenameTitleChange: () => undefined,
+      onSetActiveTab: () => undefined,
+      onSubmitRename: () => undefined,
+    };
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <AgentSessionTabStrip {...props} />
+        </QueryClientProvider>,
+      );
+    });
+  }
+
+  it("first click arms the control without deleting; second click confirms the delete", async () => {
+    const onDeleteSession = vi.fn();
+    await mountStrip({ onDeleteSession });
+
+    const initial = closeButton(CLOSE_LABEL);
+    expect(initial).toBeTruthy();
+    expect(initial?.getAttribute("data-session-tab-close-armed")).toBeNull();
+    expect(initial?.getAttribute("aria-label")).toBe(CLOSE_LABEL);
+
+    await act(async () => {
+      initial?.click();
+    });
+    expect(onDeleteSession).not.toHaveBeenCalled();
+    const armed = armedCloseButton();
+    expect(armed).toBeTruthy();
+    expect(armed?.getAttribute("aria-label")).toBe(ARMED_LABEL);
+    expect(armed?.className).toContain("agentSessionTabCloseButtonArmed");
+
+    await act(async () => {
+      armedCloseButton()?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+    expect(onDeleteSession.mock.calls[0]?.[0]?.id).toBe("session-root");
+    expect(onDeleteSession.mock.calls[0]?.[1]).toEqual({ confirmed: true });
+    // Back to the plain close control after confirming.
+    expect(armedCloseButton()).toBeNull();
+    expect(closeButton(CLOSE_LABEL)).toBeTruthy();
+  });
+
+  it("disarms by itself after the 3s timeout without deleting", async () => {
+    vi.useFakeTimers();
+    const onDeleteSession = vi.fn();
+    await mountStrip({ onDeleteSession });
+
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    expect(armedCloseButton()).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(2999);
+    });
+    expect(armedCloseButton()).toBeTruthy();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(armedCloseButton()).toBeNull();
+    expect(onDeleteSession).not.toHaveBeenCalled();
+    expect(closeButton(CLOSE_LABEL)).toBeTruthy();
+  });
+
+  it("disarms on Escape without deleting", async () => {
+    const onDeleteSession = vi.fn();
+    await mountStrip({ onDeleteSession });
+
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    expect(armedCloseButton()).toBeTruthy();
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(armedCloseButton()).toBeNull();
+    expect(onDeleteSession).not.toHaveBeenCalled();
+    expect(closeButton(CLOSE_LABEL)).toBeTruthy();
+  });
+
+  it("disarms when a press lands outside the armed control", async () => {
+    const onDeleteSession = vi.fn();
+    await mountStrip({ onDeleteSession });
+
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    expect(armedCloseButton()).toBeTruthy();
+
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    });
+    expect(armedCloseButton()).toBeNull();
+    expect(onDeleteSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps at most one armed control when another tab's close is clicked", async () => {
+    const onDeleteSession = vi.fn();
+    await mountStrip({
+      onDeleteSession,
+      activeSessionId: "session-child",
+      sessions: [
+        session(),
+        session({
+          id: "session-child",
+          title: "子任务标题",
+          sessionKind: "child",
+          parentSessionId: "session-root",
+          rootSessionId: "session-root",
+        }),
+      ],
+    });
+
+    await act(async () => {
+      closeButton(CLOSE_LABEL)?.click();
+    });
+    expect(armedCloseButton()?.getAttribute("aria-label")).toBe(ARMED_LABEL);
+
+    // Clicking another tab's close moves the arm; the first control falls back.
+    await act(async () => {
+      closeButton("deleteSession 子任务标题")?.click();
+    });
+    expect(armedCloseButton()?.getAttribute("aria-label")).toBe("deleteSessionConfirmArmed 子任务标题");
+    expect(closeButton(CLOSE_LABEL)?.getAttribute("data-session-tab-close-armed")).toBeNull();
+    expect(onDeleteSession).not.toHaveBeenCalled();
+
+    await act(async () => {
+      armedCloseButton()?.click();
+    });
+    expect(onDeleteSession).toHaveBeenCalledTimes(1);
+    expect(onDeleteSession.mock.calls[0]?.[0]?.id).toBe("session-child");
+    expect(onDeleteSession.mock.calls[0]?.[1]).toEqual({ confirmed: true });
   });
 });
