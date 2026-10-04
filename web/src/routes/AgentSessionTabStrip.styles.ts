@@ -14,6 +14,9 @@ const styles = {
   // Override VButton secondary border so the close control is icon-only (no chip outline).
   agentSessionTabCloseButton:
     "vui-routes-chatcodingroute agentSessionTabCloseButton h-6 min-h-6 w-6 min-w-6 shrink-0 rounded-[var(--radius-control)] !border-0 border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] shadow-none hover:!border-transparent hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] hover:shadow-none",
+  // Armed (two-stage confirm) close: same icon-only geometry, danger tone so the pending state reads instantly.
+  agentSessionTabCloseButtonArmed:
+    "vui-routes-chatcodingroute agentSessionTabCloseButtonArmed !border-0 bg-[color-mix(in_srgb,var(--fg-danger)_12%,transparent)] px-0 text-[var(--fg-danger)] shadow-none hover:!border-transparent hover:bg-[color-mix(in_srgb,var(--fg-danger)_20%,transparent)] hover:text-[var(--fg-danger)] hover:shadow-none",
   agentSessionTabCreateButton:
     "vui-routes-chatcodingroute agentSessionTabCreateButton h-8 min-h-8 w-8 min-w-8 shrink-0 rounded-[var(--radius-control)] !border-0 border-transparent bg-transparent px-0 text-[var(--fg-secondary)] shadow-none hover:!border-transparent hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] hover:shadow-none",
   agentSessionTabContextTarget:

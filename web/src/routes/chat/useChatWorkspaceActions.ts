@@ -113,7 +113,7 @@ export type UseChatWorkspaceActionsResult = {
   handleApplyGroupRoomManagement: () => void;
   handleDeleteActiveGroupRoom: () => void;
   handleResetActiveGroupRoom: () => void;
-  handleDeleteSession: (session: SessionSummary) => void;
+  handleDeleteSession: (session: SessionSummary, options?: { confirmed?: boolean }) => void;
   handleClearSessionHistory: (session: SessionSummary) => void;
   handleAddSessionToReview: (session: SessionSummary) => void;
 };
@@ -489,7 +489,7 @@ export function useChatWorkspaceActions({
     standardGroupRoomActive,
   ]);
 
-  const handleDeleteSession = useCallback((session: SessionSummary) => {
+  const handleDeleteSession = useCallback((session: SessionSummary, options?: { confirmed?: boolean }) => {
     setSessionContextMenu(null);
     const alreadyDeletingThisSession = Boolean(
       deleteSessionMutation.isPending
@@ -515,6 +515,17 @@ export function useChatWorkspaceActions({
         [session.id]: t("deleteSessionBusy"),
         __sessions__: "",
       }));
+      return;
+    }
+    if (options?.confirmed) {
+      // Two-stage inline confirm already completed at the tab close control —
+      // execute the same delete the dialog's confirm button runs, without a dialog.
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: "",
+        __sessions__: "",
+      }));
+      deleteSessionMutation.mutate({ sessionId: session.id });
       return;
     }
     openDeleteSessionConfirm(session);

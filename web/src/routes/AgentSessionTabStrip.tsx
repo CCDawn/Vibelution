@@ -1,6 +1,6 @@
 import { Bot, Check, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
@@ -15,6 +15,14 @@ import {
 import styles from "./AgentSessionTabStrip.styles";
 import { isBusyPhase } from "./chat/chatCodingRouteViewModel";
 import { SessionTeamBindingTag } from "./chat/SessionTeamBindingTag";
+
+/** How long the armed (two-stage confirm) close control waits before disarming itself. */
+const CLOSE_CONFIRM_ARM_TIMEOUT_MS = 3000;
+
+/** Options accepted by the delete callback; `confirmed` marks the second click of the inline confirm. */
+export type AgentSessionTabDeleteOptions = {
+  confirmed?: boolean;
+};
 
 export type CliAgentRunTab = {
   id: string;
@@ -155,7 +163,11 @@ export type AgentSessionTabStripProps = {
   onOpenCliAgentRun?: (runId: string) => void;
   onCloseCliAgentRun?: (runId: string) => void;
   onCreateSession: () => void;
-  onDeleteSession: (session: SessionSummary) => void;
+  /**
+   * First × click arms the inline confirm; the second click on the armed control
+   * passes `{ confirmed: true }` so the route deletes without a dialog.
+   */
+  onDeleteSession: (session: SessionSummary, options?: AgentSessionTabDeleteOptions) => void;
   onRenameTitleChange: (title: string) => void;
   onSetActiveTab: (sessionId: string, tab: "agent") => void;
   onSubmitRename: (session: SessionSummary, options?: { reason?: "blur" | "explicit" }) => void;
@@ -204,6 +216,37 @@ export function AgentSessionTabStrip({
 }: AgentSessionTabStripProps) {
   const visibleSessions = recentAgentSessions(sessions, [activeSessionId, editingSessionId, contextMenuSessionId]);
   const tabGroupRef = useRef<HTMLDivElement>(null);
+  // Two-stage inline confirm for tab close: at most one armed control at a time.
+  const [armedCloseSessionId, setArmedCloseSessionId] = useState<string | null>(null);
+  const disarmCloseConfirm = useCallback(() => setArmedCloseSessionId(null), []);
+  useEffect(() => {
+    if (!armedCloseSessionId) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setArmedCloseSessionId(null), CLOSE_CONFIRM_ARM_TIMEOUT_MS);
+    const isEventInsideArmedControl = (event: Event) => (
+      event.target instanceof Element
+      && Boolean(event.target.closest('[data-session-tab-close-armed="true"]'))
+    );
+    const handleDocumentPointerDown = (event: Event) => {
+      // A press inside the armed control is the confirm click; anywhere else disarms.
+      if (!isEventInsideArmedControl(event)) {
+        setArmedCloseSessionId(null);
+      }
+    };
+    const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setArmedCloseSessionId(null);
+      }
+    };
+    document.addEventListener("pointerdown", handleDocumentPointerDown, true);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      window.clearTimeout(timeout);
+      document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [armedCloseSessionId]);
   useEffect(() => {
     const activeTab = tabGroupRef.current?.querySelector<HTMLElement>('[data-session-tab-active="true"]');
     activeTab?.closest<HTMLElement>("[data-agent-session-tab-container]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -309,6 +352,12 @@ export function AgentSessionTabStrip({
           || (deletePendingSessionId && deletePendingSessionId === session.id),
         );
         const deleteDisabled = isBusyPhase(session.currentPhase || session.status) || sessionDeletePending;
+        const tabCloseArmed = !deleteDisabled && armedCloseSessionId === session.id;
+        const tabCloseTitle = deleteDisabled
+          ? t("deleteSessionBusy")
+          : tabCloseArmed
+            ? t("deleteSessionConfirmArmed")
+            : t("deleteSession");
         const tabClassName = [
           styles.agentSessionTab,
           styles.agentSessionTabRoot,
@@ -456,14 +505,23 @@ export function AgentSessionTabStrip({
             <VIconButton
               type="button"
               variant="ghost"
-              className={styles.agentSessionTabCloseButton}
+              className={[
+                styles.agentSessionTabCloseButton,
+                tabCloseArmed ? styles.agentSessionTabCloseButtonArmed : "",
+              ].filter(Boolean).join(" ")}
+              data-session-tab-close-armed={tabCloseArmed ? "true" : undefined}
               onClick={(event) => {
                 event.stopPropagation();
-                onDeleteSession(session);
+                if (!tabCloseArmed) {
+                  setArmedCloseSessionId(session.id);
+                  return;
+                }
+                disarmCloseConfirm();
+                onDeleteSession(session, { confirmed: true });
               }}
               isDisabled={deleteDisabled}
-              title={deleteDisabled ? t("deleteSessionBusy") : t("deleteSession")}
-              label={`${deleteDisabled ? t("deleteSessionBusy") : t("deleteSession")} ${sessionTitle}`}
+              title={tabCloseTitle}
+              label={`${tabCloseTitle} ${sessionTitle}`}
               icon={<X size={13} />}
             />
           </div>
