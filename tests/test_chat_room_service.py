@@ -6136,6 +6136,260 @@ def test_reconcile_gate_reruns_after_store_change_or_inflight_release(tmp_path, 
 
 
 # ---------------------------------------------------------------------------
+# Reconcile signature-skip gate (input-signature cache + single-flight)
+# ---------------------------------------------------------------------------
+
+
+class _CountingWorkRunStore(work_run_store.WorkRunStore):
+    """Real store that records every snapshot load (freeze-safe subclass)."""
+
+    def __init__(self, root, loads):
+        super().__init__(root=root)
+        self._loads = loads
+
+    def load_snapshot(self, run_kind, run_id):
+        self._loads.append(str(run_id))
+        return super().load_snapshot(run_kind, run_id)
+
+
+def _seed_terminal_round_with_snapshot(tmp_path, monkeypatch, *, title, round_id, snapshot_finished=True):
+    """Room with one terminal round plus a run-index-visible WorkRun snapshot.
+
+    With ``snapshot_finished`` the snapshot already carries ``finishedAt`` so a
+    reconcile pass loads (never repairs) it — a stable per-pass load signal.
+    """
+
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title=title,
+        participant_session_ids=["session-alpha"],
+    )
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["rounds"] = [
+        {
+            "roundId": round_id,
+            "status": "completed",
+            "topic": "签名门种子",
+            "summary": "",
+            "messages": [],
+            "speakerOrder": [],
+            "startedAt": "2026-09-01T00:00:00+00:00",
+            "updatedAt": "2026-09-01T00:05:00+00:00",
+            "finishedAt": "2026-09-01T00:05:00+00:00",
+        }
+    ]
+    chat_room_service._store().save(state)
+    chat_room_service._work_run_store().persist_snapshot(
+        chat_room_service.RUN_KIND,
+        {
+            "runId": round_id,
+            "runKind": chat_room_service.RUN_KIND,
+            "roomId": stored_room["roomId"],
+            "roundId": round_id,
+            "status": "running",
+            "currentPhase": "running",
+            "startedAt": "2026-09-01T00:00:00+00:00",
+            "updatedAt": "2026-09-01T00:05:00+00:00",
+            "finishedAt": "2026-09-01T00:05:00+00:00" if snapshot_finished else "",
+        },
+        active_run_id="",
+    )
+    return stored_room
+
+
+def _install_counting_work_run_store(monkeypatch, loads):
+    real_store = chat_room_service._work_run_store()
+    monkeypatch.setattr(
+        chat_room_service,
+        "_work_run_store",
+        lambda: _CountingWorkRunStore(root=real_store.root, loads=loads),
+    )
+    return real_store
+
+
+def test_reconcile_signature_gate_skips_second_pass_without_snapshot_loads(tmp_path, monkeypatch):
+    """同签名第二次进门必须零快照加载（输入签名缓存命中）。"""
+
+    _seed_terminal_round_with_snapshot(
+        tmp_path, monkeypatch, title="签名门跳过", round_id="round-signature-skip"
+    )
+    chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    loads = []
+    _install_counting_work_run_store(monkeypatch, loads)
+
+    first = chat_room_service._reconcile_chat_room_round_state_locked_gate()
+    assert first == []
+    assert loads == ["round-signature-skip"]
+
+    loads.clear()
+    second = chat_room_service._reconcile_chat_room_round_state_locked_gate()
+    assert second == []
+    assert loads == []
+
+
+def test_reconcile_signature_gate_reruns_after_room_state_change(tmp_path, monkeypatch):
+    """房间状态文件落盘变化后，签名失配、重新全量扫描。"""
+
+    stored_room = _seed_terminal_round_with_snapshot(
+        tmp_path, monkeypatch, title="签名门房间变化", round_id="round-room-change"
+    )
+    chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    loads = []
+    _install_counting_work_run_store(monkeypatch, loads)
+
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == []
+
+    state = chat_room_service._store().load()
+    target = next(item for item in state["rooms"] if item["roomId"] == stored_room["roomId"])
+    target["title"] = "签名门房间变化-已改名"
+    chat_room_service._store().save(state)
+
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == ["round-room-change"]
+
+
+def test_reconcile_signature_gate_reruns_after_run_index_change(tmp_path, monkeypatch):
+    """run 索引文件落盘变化后，签名失配、重新全量扫描。"""
+
+    _seed_terminal_round_with_snapshot(
+        tmp_path, monkeypatch, title="签名门索引变化", round_id="round-index-change"
+    )
+    chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    loads = []
+    _install_counting_work_run_store(monkeypatch, loads)
+
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == []
+
+    chat_room_service._work_run_store().save_run_index(
+        chat_room_service.RUN_KIND,
+        latest_run_id="round-index-change",
+        active_run_ids=[],
+        emit_event=False,
+    )
+
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == ["round-index-change"]
+
+
+def test_reconcile_signature_gate_advances_after_repair_then_converges(tmp_path, monkeypatch):
+    """真实 desync 修复改写签名输入：修复轮后自然多跑一轮收敛，之后永跳。"""
+
+    _seed_terminal_round_with_snapshot(
+        tmp_path,
+        monkeypatch,
+        title="签名门修复收敛",
+        round_id="round-repair-converge",
+        snapshot_finished=False,
+    )
+    chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    loads = []
+    real_store = _install_counting_work_run_store(monkeypatch, loads)
+
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    repaired = real_store.load_snapshot(chat_room_service.RUN_KIND, "round-repair-converge")
+    assert str(repaired.get("runtimeStatus") or "") == "orphan_reconciled"
+
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == ["round-repair-converge"]
+
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == []
+
+
+def test_reset_chat_room_reconcile_gate_for_tests_clears_signature_cache(tmp_path, monkeypatch):
+    """reset 钩子清空已完成签名与单飞登记，恢复冷门。"""
+
+    _seed_terminal_round_with_snapshot(
+        tmp_path, monkeypatch, title="签名门重置", round_id="round-signature-reset"
+    )
+    chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    loads = []
+    _install_counting_work_run_store(monkeypatch, loads)
+
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert chat_room_service._CHAT_ROOM_RECONCILE_COMPLETED_SIGNATURES
+    assert chat_room_service._CHAT_ROOM_RECONCILE_SIGNATURE_FLIGHTS
+
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == []
+
+    chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    assert chat_room_service._CHAT_ROOM_RECONCILE_COMPLETED_SIGNATURES == {}
+    assert chat_room_service._CHAT_ROOM_RECONCILE_SIGNATURE_FLIGHTS == {}
+
+    loads.clear()
+    assert chat_room_service._reconcile_chat_room_round_state_locked_gate() == []
+    assert loads == ["round-signature-reset"]
+
+
+def test_reconcile_signature_gate_single_flight_runs_scan_once(tmp_path, monkeypatch):
+    """并发两个门调用只跑一次扫描：后到者等待后按新签名跳过。"""
+
+    _seed_terminal_round_with_snapshot(
+        tmp_path, monkeypatch, title="签名门单飞", round_id="round-single-flight"
+    )
+    chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    loads = []
+    real_store = chat_room_service._work_run_store()
+    scan_started = threading.Event()
+    release_scan = threading.Event()
+
+    class GatedWorkRunStore(work_run_store.WorkRunStore):
+        def load_snapshot(self, run_kind, run_id):
+            loads.append(str(run_id))
+            scan_started.set()
+            assert release_scan.wait(timeout=5)
+            return work_run_store.WorkRunStore.load_snapshot(self, run_kind, run_id)
+
+    monkeypatch.setattr(
+        chat_room_service, "_work_run_store", lambda: GatedWorkRunStore(root=real_store.root)
+    )
+
+    results = {}
+
+    def runner():
+        results[threading.get_ident()] = (
+            chat_room_service._reconcile_chat_room_round_state_locked_gate()
+        )
+
+    leader = threading.Thread(target=runner)
+    leader.start()
+    try:
+        assert scan_started.wait(timeout=5)
+        follower = threading.Thread(target=runner)
+        follower.start()
+        try:
+            time.sleep(0.3)
+            assert len(loads) == 1
+        finally:
+            release_scan.set()
+            follower.join(timeout=5)
+    finally:
+        release_scan.set()
+        leader.join(timeout=5)
+
+    assert len(loads) == 1
+    assert loads == ["round-single-flight"]
+    assert len(results) == 2
+    assert all(value == [] for value in results.values())
+
+
+# ---------------------------------------------------------------------------
 # Speaker batch parallelism + per-call fence in-turn retry (meeting path)
 # ---------------------------------------------------------------------------
 

@@ -265,6 +265,12 @@ def _reset_agent_directory_caches(agent_directory_service):
         conversation_index._reset_agent_directory_stub_hidden_team_member_ids_cache_for_tests()
     except Exception:
         pass
+    try:
+        from core.web.services import chat_room_service
+
+        chat_room_service.reset_chat_room_reconcile_gate_for_tests()
+    except Exception:
+        pass
 
 
 # ============================================================================

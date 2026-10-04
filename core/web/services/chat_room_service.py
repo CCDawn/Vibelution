@@ -259,6 +259,21 @@ _CHAT_ROOM_RECONCILE_LAST_RUN_AT: float | None = None
 _CHAT_ROOM_RECONCILE_LAST_STORE_TOKEN: str | None = None
 _CHAT_ROOM_RECONCILE_INFLIGHT = False
 _CHAT_ROOM_RECONCILE_MIN_INTERVAL_SECONDS = 30.0
+# Signature-skip layer on top of the same gate (stat-signature cache pattern,
+# 5th internal reuse — conversation_index hidden-ids cache, freshness
+# single-flight, and friends).  A completed reconcile pass that observed NO
+# active rounds records the (path, mtime_ns, size) signature of the two durable
+# inputs it read — the chat-room state file and the chat-room WorkRun index —
+# keyed by those paths so swapped project roots never share verdicts.  A later
+# entry whose signature still matches skips the full scan with zero snapshot
+# loads; passes that DID see active rounds record nothing, so active-session
+# monitoring keeps today's TTL-cadence behavior (see the correctness note on
+# _chat_room_reconcile_input_signature for why the active-rounds carve-out is
+# load-bearing).
+_CHAT_ROOM_RECONCILE_SIGNATURE_LOCK = threading.Condition()
+_CHAT_ROOM_RECONCILE_SIGNATURE_FLIGHTS: dict[str, dict[str, bool]] = {}
+_CHAT_ROOM_RECONCILE_COMPLETED_SIGNATURES: dict[str, tuple[Any, ...]] = {}
+_CHAT_ROOM_RECONCILE_FLIGHT_WAIT_TIMEOUT_SECONDS = 30.0
 _CHALLENGE_ROOM_DEADLINE_CONFIG_KEY = "challengeDeadlineAtMs"
 _CHALLENGE_ROOM_PER_CALL_DEADLINE_CONTEXT_KEY = "challengePerCallDeadlineAtMs"
 _CHALLENGE_ROOM_DEADLINE_STOP_REASON = "challenge_logical_task_deadline_exhausted"
@@ -8327,9 +8342,168 @@ def _resync_desynced_chat_room_work_run_snapshots(
     return repaired
 
 
+def _chat_room_reconcile_gate_paths() -> tuple[Path, Path] | None:
+    """Durable inputs whose on-disk identity decides the reconcile verdict.
+
+    Deliberately fail-open: any resolution failure (OSError, missing
+    ``index_path``/``state_path`` attributes on mocked stores, unexpected
+    shapes) returns None so callers fall back to the original unconditional
+    full scan instead of skipping on incomplete evidence.
+    """
+
+    try:
+        room_state_path = Path(_store().state_path)
+        run_index_path = Path(_work_run_store().index_path(RUN_KIND))
+    except Exception:
+        return None
+    return room_state_path, run_index_path
+
+
+def _chat_room_reconcile_input_signature() -> tuple[Any, ...] | None:
+    """(path, mtime_ns, size) of both durable reconcile inputs, or None.
+
+    Correctness argument for skipping when this signature is unchanged.  A new
+    reconciliation need can only arise from:
+
+    * a room-state round transition — ``chat_rooms.json`` is rewritten, which
+      is in the signature;
+    * a run-set change (new/active run claims) — the WorkRun index is
+      rewritten, which is in the signature;
+    * a snapshot lifecycle write — ``WorkRunStore.persist_snapshot`` always
+      rewrites ``index.json`` in the same critical section (even a no-op
+      payload replay refreshes the index when it is stale), so a snapshot
+      change without an index change cannot happen through the store API.
+
+    One carve-out is load-bearing: the ``missing_process_controller``
+    close-out fires on wall-clock heartbeat expiry plus the loss of an
+    in-memory round control (a backend restart) — neither leaves a file
+    trace.  It only ever targets *active* rounds, so a pass that observed no
+    active rounds has a purely file-derived verdict and may record its
+    signature, while a pass that saw active rounds records nothing and the
+    next entry re-runs the scan at the outer gate's existing TTL cadence.
+    That keeps the pre-restart healing semantics byte-for-byte instead of
+    stranding a phantom active round behind an unchanged signature.
+    """
+
+    paths = _chat_room_reconcile_gate_paths()
+    if paths is None:
+        return None
+    room_state_path, run_index_path = paths
+    try:
+        room_stat = room_state_path.stat()
+        index_stat = run_index_path.stat()
+    except OSError:
+        return None
+    return (
+        os.path.normcase(str(room_state_path)),
+        int(room_stat.st_mtime_ns),
+        int(room_stat.st_size),
+        os.path.normcase(str(run_index_path)),
+        int(index_stat.st_mtime_ns),
+        int(index_stat.st_size),
+    )
+
+
+def _chat_room_reconcile_gate_key() -> str:
+    """Per-store gate key so multi-root (tests, multi-project) never share."""
+
+    paths = _chat_room_reconcile_gate_paths()
+    if paths is None:
+        return ""
+    room_state_path, run_index_path = paths
+    return os.path.normcase(f"{room_state_path}|{run_index_path}")
+
+
+def _claim_chat_room_reconcile_flight(gate_key: str) -> bool:
+    """Single-flight admission for the full reconcile scan.
+
+    The first caller for a gate key becomes the flight leader.  Later callers
+    wait (bounded) for the leader to finish instead of returning empty
+    immediately, then re-run the signature check themselves — a leader whose
+    pass repaired files hands a converged store to exactly one follower.
+    A caller whose patience expires skips its pass entirely: two concurrent
+    cold full scans (2x multi-second snapshot walks) must never happen.
+    """
+
+    with _CHAT_ROOM_RECONCILE_SIGNATURE_LOCK:
+        flight = _CHAT_ROOM_RECONCILE_SIGNATURE_FLIGHTS.setdefault(
+            gate_key, {"inflight": False}
+        )
+        deadline = time.monotonic() + _CHAT_ROOM_RECONCILE_FLIGHT_WAIT_TIMEOUT_SECONDS
+        while flight["inflight"]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            _CHAT_ROOM_RECONCILE_SIGNATURE_LOCK.wait(remaining)
+        flight["inflight"] = True
+        return True
+
+
+def _release_chat_room_reconcile_flight(gate_key: str) -> None:
+    with _CHAT_ROOM_RECONCILE_SIGNATURE_LOCK:
+        flight = _CHAT_ROOM_RECONCILE_SIGNATURE_FLIGHTS.setdefault(
+            gate_key, {"inflight": False}
+        )
+        flight["inflight"] = False
+        _CHAT_ROOM_RECONCILE_SIGNATURE_LOCK.notify_all()
+
+
+def reset_chat_room_reconcile_gate_for_tests() -> None:
+    """Drop the process-level signature-skip gate state (test isolation).
+
+    Clears the completed signatures and single-flight bookkeeping so a test
+    that swapped PROJECT_ROOT or store files always starts from a cold gate.
+    The legacy TTL globals stay monkeypatch-managed by the tests that assert
+    them; this helper owns only the signature layer.
+    """
+
+    with _CHAT_ROOM_RECONCILE_SIGNATURE_LOCK:
+        _CHAT_ROOM_RECONCILE_COMPLETED_SIGNATURES.clear()
+        _CHAT_ROOM_RECONCILE_SIGNATURE_FLIGHTS.clear()
+
+
 def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
+    """Gate wrapper: signature skip, single-flight, then the real scan.
+
+    The wrapper owns only admission control; ``_reconcile_chat_room_round_state_scan``
+    is the untouched reconciliation body.
+    """
+
     if _chat_room_lock_owned_by_current_thread():
         return []
+    gate_key = _chat_room_reconcile_gate_key()
+    entry_signature = _chat_room_reconcile_input_signature()
+    if (
+        entry_signature is not None
+        and entry_signature == _CHAT_ROOM_RECONCILE_COMPLETED_SIGNATURES.get(gate_key)
+    ):
+        # Unchanged durable inputs since the last completed pass: the verdict
+        # is still valid, skip the whole snapshot walk (zero load_snapshot).
+        return []
+    if not _claim_chat_room_reconcile_flight(gate_key):
+        # Leader still mid-pass past our patience window.  Never double-run
+        # the scan; the leader's own recorded verdict (or the next read after
+        # it) converges the store.
+        return []
+    try:
+        # Wait-then-recheck: a preceding flight may have repaired room or
+        # snapshot files between the cheap pre-check above and this claim, so
+        # re-read the input signature now that the flight is ours.
+        entry_signature = _chat_room_reconcile_input_signature()
+        if (
+            entry_signature is not None
+            and entry_signature == _CHAT_ROOM_RECONCILE_COMPLETED_SIGNATURES.get(gate_key)
+        ):
+            return []
+        return _reconcile_chat_room_round_state_scan(gate_key, entry_signature)
+    finally:
+        _release_chat_room_reconcile_flight(gate_key)
+
+
+def _reconcile_chat_room_round_state_scan(
+    gate_key: str,
+    entry_signature: tuple[Any, ...] | None,
+) -> list[dict[str, Any]]:
     store = _work_run_store()
     reconciled_at = utc_now_iso()
     desync_candidate_run_ids = _desync_repair_candidate_run_ids(store)
@@ -8538,6 +8712,18 @@ def _reconcile_chat_room_round_state_locked_gate() -> list[dict[str, Any]]:
     # reconciled-round return contract; they are observable through the
     # re-projected snapshot and the work_run_snapshot_resynced scene event.
     _resync_desynced_chat_room_work_run_snapshots(store, desync_candidates)
+    if not active_rounds and entry_signature is not None:
+        # End-of-pass self-assignment, the idempotency keystone of the gate:
+        # record the signature observed at ENTRY, not a re-stat.  A pass that
+        # repaired anything rewrote the signed inputs, so the next entry
+        # computes a different signature and deliberately re-runs one
+        # convergence pass; once that pass observes the repaired state with no
+        # active rounds, its own signature matches and every later entry
+        # skips.  Passes that saw active rounds record nothing on purpose:
+        # their verdict also depends on wall-clock heartbeat expiry and
+        # in-memory process controls, which no file signature can cover.
+        with _CHAT_ROOM_RECONCILE_SIGNATURE_LOCK:
+            _CHAT_ROOM_RECONCILE_COMPLETED_SIGNATURES[gate_key] = entry_signature
     return reconciled
 
 
