@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 
+from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service
@@ -45,8 +46,18 @@ def grant_financial_memory(agent_id: str, *actions: str) -> str:
     return scoped
 
 
-def test_actual_executor_stages_and_searches_only_after_review(finance_env):
+def test_actual_executor_stages_and_searches_only_after_review(finance_env, monkeypatch):
     env = finance_env
+    events = []
+    bus = get_event_bus()
+    original_publish = bus.publish
+
+    def capture_tool_outcome(name, payload, *args, **kwargs):
+        if name in {EventNames.TOOL_SUCCESS, EventNames.TOOL_ERROR}:
+            events.append((name, payload))
+        return original_publish(name, payload, *args, **kwargs)
+
+    monkeypatch.setattr(bus, "publish", capture_tool_outcome)
     grant_financial_memory(env["owner"], "read", "propose", "review")
     meta = evidence()
     meta.pop("excerptSha256")
@@ -63,7 +74,13 @@ def test_actual_executor_stages_and_searches_only_after_review(finance_env):
             SEARCH, {"query": "营业收入", "ticker": "600519", "report_period": "2025FY"}
         )
         assert raw.startswith("{"), raw
-        assert json.loads(raw)["status"] == "insufficient_evidence"
+        result = json.loads(raw)
+        assert result["status"] == "insufficient_evidence"
+        assert result["results"] == [] and result["citations"] == []
+        assert result["ok"] is True
+        event_name, event = events[-1]
+        assert event_name == EventNames.TOOL_SUCCESS
+        assert event["semanticStatus"] == "succeeded"
     source = knowledge.list_owner_source_inbox(
         "agent", env["owner"], agent_id=env["owner"]
     )["sources"][0]
@@ -94,7 +111,13 @@ def test_actual_executor_stages_and_searches_only_after_review(finance_env):
             SEARCH, {"query": "营业收入", "ticker": "600519", "report_period": "2025FY"}
         )
         assert raw.startswith("{"), raw
-        assert json.loads(raw)["status"] == "insufficient_evidence"
+        result = json.loads(raw)
+        assert result["status"] == "insufficient_evidence"
+        assert result["results"] == [] and result["citations"] == []
+        assert result["ok"] is True
+        event_name, event = events[-1]
+        assert event_name == EventNames.TOOL_SUCCESS
+        assert event["semanticStatus"] == "succeeded"
 
 
 def test_executor_denied_stage_cannot_create_a_library(finance_env):

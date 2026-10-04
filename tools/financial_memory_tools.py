@@ -58,8 +58,11 @@ def _run(action: str, callback: Callable) -> str:
             )
         result = callback(knowledge, actor, allowed)
         output = {
-            "ok": result.get("status")
-            in {"found", "pending_review", "already_staged", "withdrawn"},
+            "ok": (
+                result.get("status")
+                in {"found", "pending_review", "already_staged", "withdrawn"}
+                or (action == "read" and result.get("status") == "insufficient_evidence")
+            ),
             **result,
         }
         encoded = json.dumps(output, ensure_ascii=False, allow_nan=False)
