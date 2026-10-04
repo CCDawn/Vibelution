@@ -20,6 +20,9 @@ POST /api/sessions、POST /api/agents 等，控制令牌同 GET 口径）。
 - 环境变量：
   - `VIBELUTION_E2E=1`：启用本车道（唯一开关）。
   - `VIBELUTION_E2E_MODE=headless|cdp`：浏览器模式，默认 headless。
+  - `VIBELUTION_E2E_LAUNCHER_TRANSPORT=native|desktop_ipc`：生命周期请求通道，
+    默认 native。desktop_ipc 要求已运行且可发现的共享桌面壳；仅操作当前测试树的
+    `codex/` 任务分支，通过唯一 Launcher 页的官方 bridge 发送请求。
   - `VIBELUTION_E2E_KEEP_DATA=1`：会话结束后保留实例数据目录并打印路径
     （默认清理，保证下一次运行回到空态）。
 - 测试代码与 fixture 一律 `CREATE_NO_WINDOW` 子进程，禁止 taskkill、禁止可见控制台。
@@ -64,6 +67,21 @@ $env:VIBELUTION_E2E = "1"; .\.venv\Scripts\python.exe -m pytest tests/e2e -m ser
 实例数据目录（registry 条目 `dataHome`）默认在会话结束时清理以回到空态；
 `VIBELUTION_E2E_KEEP_DATA=1` 时保留并打印路径。
 
+已运行桌面壳时，可在任务 worktree 用 IPC 通道执行无模型回归。根 checkout 的
+Python 路径应由实际 Git common-dir 解析，不要求任务树自带 `.venv`：
+
+```powershell
+$root = Split-Path (git rev-parse --path-format=absolute --git-common-dir)
+$env:VIBELUTION_E2E = "1"
+$env:VIBELUTION_E2E_MODE = "headless"
+$env:VIBELUTION_E2E_LAUNCHER_TRANSPORT = "desktop_ipc"
+& "$root\.venv\Scripts\python.exe" -m pytest tests/e2e/test_composer_drafts.py tests/e2e/test_finance_focus.py tests/e2e/test_composer_upload_recovery.py -m serial
+```
+
+IPC 与浏览器模式独立，headless 默认隐藏分支窗口。IPC 受理后仍须通过上述
+registry/health 就绪与关闭核对；失败直接报告，不自动切换 native 或重试生命周期
+请求，不聚焦、导航或关闭共享壳。IPC 成功不能作为原生 CLI 通道通过的证据。
+
 ## 后端 API 访问口径（控制令牌）
 
 `/api/*` 的 GET（除 `/api/health`、`/api/control-token`）要求携带控制令牌头
@@ -75,7 +93,8 @@ $env:VIBELUTION_E2E = "1"; .\.venv\Scripts\python.exe -m pytest tests/e2e -m ser
 ## 架构：隔离分支实例 + headless/CDP 双模式
 
 - 生命周期归属官方 Launcher（`%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe
-  --project "<worktree>" start|stop`），registry 是运行权威，语义见
+  --project "<worktree>" start|stop`，或显式 desktop_ipc 的官方 `launcherInvoke`），
+  registry 是运行权威，语义见
   [launcher-branch-development.md](launcher-branch-development.md)。
 - **headless（默认）**：函数级 `page` fixture 启动 Playwright 自带 chromium
   （1440x900、zh-CN），指向实例 URL，等 route-header h1 或状态面离开 loading。

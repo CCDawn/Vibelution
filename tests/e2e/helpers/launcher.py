@@ -1,7 +1,7 @@
-"""通过官方 Launcher 原生进程起停分支实例（无可见控制台红线合规）。
+"""通过官方 Launcher 起停分支实例（默认原生进程，显式可选桌面 IPC）。
 
 命令形态：``VibelutionLauncher.exe --project "<worktree>" start|stop``。
-自动化只等待并读取原生 Launcher 自身的退码（对应
+native 通道只等待并读取原生 Launcher 自身的退码（对应
 docs/guides/launcher-branch-development.md 中 .NET Process 的等价物），
 子进程一律 ``CREATE_NO_WINDOW``，禁止 taskkill / 裸 shell。
 """
@@ -23,11 +23,27 @@ _CREATION_FLAGS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 class LauncherCommandError(RuntimeError):
-    """Launcher 原生退码非零或执行超时。"""
+    """Launcher 命令失败、被拒绝或执行超时。"""
 
 
 def _e2e_mode() -> str:
     return os.environ.get("VIBELUTION_E2E_MODE", "headless").strip().lower()
+
+
+def _run_instance_command(
+    project_root: str | os.PathLike[str], command: str, *, hidden_presentation: bool = False,
+) -> None:
+    transport = os.environ.get("VIBELUTION_E2E_LAUNCHER_TRANSPORT", "native").strip().lower()
+    if transport == "desktop_ipc":
+        from tests.e2e.helpers.launcher_ipc import invoke_instance_command
+
+        invoke_instance_command(project_root, command, hidden_presentation=hidden_presentation)
+        return
+    if transport != "native":
+        raise LauncherCommandError(f"未知 E2E Launcher transport: {transport!r}（native|desktop_ipc）")
+    completed = run_launcher_command(project_root, command, hidden_presentation=hidden_presentation)
+    if completed.returncode != 0:
+        raise LauncherCommandError(_failure(command, project_root, completed))
 
 
 def run_launcher_command(
@@ -78,15 +94,11 @@ def start_instance(
     """
     if hidden_presentation is None:
         hidden_presentation = _e2e_mode() != "cdp"
-    completed = run_launcher_command(project_root, "start", hidden_presentation=hidden_presentation)
-    if completed.returncode != 0:
-        raise LauncherCommandError(_failure("start", project_root, completed))
+    _run_instance_command(project_root, "start", hidden_presentation=hidden_presentation)
 
 
 def stop_instance(project_root: str | os.PathLike[str]) -> None:
-    completed = run_launcher_command(project_root, "stop")
-    if completed.returncode != 0:
-        raise LauncherCommandError(_failure("stop", project_root, completed))
+    _run_instance_command(project_root, "stop")
 
 
 def _failure(command: str, project_root: str | os.PathLike[str], completed: subprocess.CompletedProcess[str]) -> str:
