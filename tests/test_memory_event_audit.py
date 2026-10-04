@@ -264,6 +264,26 @@ def test_terminal_audit_does_not_refresh_full_scene_on_request(tmp_path, monkeyp
     assert full_refreshes == []
 
 
+def test_actual_scene_writer_failure_hides_exception_text(tmp_path, monkeypatch, caplog):
+    from core.logging.memory_events import record_memory_event
+    from core.web.services.runtime_scene import record as scene_record
+    from tests.test_runtime_scene_projection_fastpath import _point_runtime_scene_at
+
+    _point_runtime_scene_at(tmp_path, monkeypatch, scene_id="scene-memory-writer-failure")
+    warnings = []
+    monkeypatch.setattr(scene_record._debug_logger, "warning",
+                        lambda message, **kwargs: warnings.append(message))
+    def fail(*args, **kwargs):
+        raise OSError("PRIVATE-ERROR-MARKER")
+    monkeypatch.setattr(runtime_scene_service, "_append_scene_event", fail)
+    with caplog.at_level(logging.WARNING):
+        record_memory_event("agent_memory", "tool", "memory.tool.execution.succeeded", fields={})
+    assert "memory.event.write_failed" in caplog.text
+    assert "OSError" in caplog.text
+    assert "OSError" in str(warnings)
+    assert "PRIVATE-ERROR-MARKER" not in caplog.text + str(warnings)
+
+
 def test_real_memory_operations_persist_safe_correlated_runtime_events(tmp_path, monkeypatch):
     from core.infrastructure.tool_executor import ToolExecutor
     from tests.test_runtime_scene_projection_fastpath import _point_runtime_scene_at

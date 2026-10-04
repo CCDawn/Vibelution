@@ -9,6 +9,7 @@
 - `tools/episodic_memory_tools.py`：记录追加、作废和替换的成功、拒绝及失败，带当前 Agent、Session、Turn、工具调用和记忆标识。
 - `tools/team_knowledge_tools.py`：补齐提前拒绝、参数错误和失败返回的终态，保留已有成功和治理事件。
 - Agent directory 与 Team Knowledge 的既有事件写入者使用同一失败告警；它们继续保有原来的组件、事件名称和持久化职责。
+- 底层运行场景记录器的写入失败告警也仅保留异常类型，防止安全元数据在外层脱敏后又经内层异常消息泄露。
 
 ## 记录内容
 
