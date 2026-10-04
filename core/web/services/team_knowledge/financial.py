@@ -287,9 +287,15 @@ def validate_financial_proposal(
         central.get("sourceRef", {}),
         content=content,
     )
+    artifact_meta = validate_financial_source(
+        base,
+        artifact.get("sourceType", ""),
+        artifact.get("sourceRef", {}),
+        content=content,
+    )
     if (
         artifact.get("sourceType") != central.get("sourceType")
-        or artifact.get("sourceRef", {}).get("financialEvidence") != meta
+        or artifact_meta != meta
     ):
         _fail("Financial artifact provenance differs from its reviewed central source.")
     return financial_tags(meta)
@@ -377,9 +383,13 @@ def eligible_financial_items(
                 source.get("sourceRef", {}),
                 content=item.get("content"),
             )
-            if artifact.get("sourceRef", {}).get(
-                "financialEvidence"
-            ) != meta or artifact.get("sourceHash") != source.get("sourceHash"):
+            artifact_meta = validate_financial_source(
+                base,
+                artifact.get("sourceType", ""),
+                artifact.get("sourceRef", {}),
+                content=item.get("content"),
+            )
+            if artifact_meta != meta or artifact.get("sourceHash") != source.get("sourceHash"):
                 continue
         except (s.TeamKnowledgeError, TypeError, AttributeError):
             continue

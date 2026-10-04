@@ -227,6 +227,43 @@ def test_reviewed_excerpt_uses_existing_rag_and_preserves_citations(finance_env)
     )
 
 
+@pytest.mark.parametrize(
+    "omitted_fields",
+    [("expiresAt",), ("supersedesSha256",), ("expiresAt", "supersedesSha256")],
+)
+def test_generic_inbox_optional_financial_metadata_remains_reviewable_and_searchable(
+    finance_env, omitted_fields
+):
+    env = finance_env
+    base = knowledge.get_financial_knowledge_base(
+        agent_id=env["owner"], create_if_missing=True
+    )["knowledgeBase"]
+    raw_metadata = evidence()
+    for field in omitted_fields:
+        raw_metadata.pop(field)
+    source = knowledge.collect_source_to_inbox(
+        "agent",
+        env["owner"],
+        source_type="pdf_refinement",
+        source_ref={"financialEvidence": raw_metadata},
+        original_content=EXCERPT,
+        actor_agent_id=env["owner"],
+    )
+    reviewed = review(env, {"source": source, "knowledgeBase": base})
+    assert reviewed["source"]["status"] == "accepted"
+    assert reviewed["centralSource"]["sourceRef"]["financialEvidence"] == raw_metadata
+    result = search(env)
+    assert result["status"] == "found"
+    assert result["citations"][0]["financialEvidence"][0] == evidence()
+    assert (
+        result["results"][0]["knowledgeItemId"]
+        == reviewed["directIngestion"]["item"]["knowledgeItemId"]
+    )
+    assert len(
+        rag_vector_index_service.list_indexable_knowledge_items(agent_id=env["owner"])
+    ) == 1
+
+
 def test_explicit_company_period_and_memory_policy_limits(finance_env):
     env = finance_env
     staged = stage(env)
