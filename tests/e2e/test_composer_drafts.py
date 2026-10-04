@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 import pytest
 
 from tests.e2e.conftest import e2e_enabled
@@ -155,3 +156,78 @@ def test_late_send_failure_keeps_newer_draft_after_reload(page, e2e_instance):
 
 def test_late_send_failure_keeps_intentional_clear_after_reload(page, e2e_instance):
     _assert_late_failure_preserves_edit(page, e2e_instance, clear_draft=True)
+
+
+def test_late_send_failure_stays_in_original_session_after_switch(page, e2e_instance):
+    from playwright.sync_api import expect
+
+    case_id = uuid.uuid4().hex[:8]
+    title_a = f"等待失败的会话 A {case_id}"
+    title_b = f"继续编辑的会话 B {case_id}"
+    b = create_session(e2e_instance.port, title=title_b)
+    a = create_session(e2e_instance.port, title=title_a)
+    original = "只应恢复到会话 A 的发送文字"
+    newer = "切换后只属于会话 B 的新草稿"
+    composer = _ready_composer(page, e2e_instance, a)
+    pending = []
+    captured = []
+    pattern = "**/api/sessions/*/messages"
+
+    def hold_send(route):
+        captured.append({"url": route.request.url, "method": route.request.method})
+        pending.append(route)
+
+    def switch_session(title, sid):
+        page.get_by_role("button").filter(has=page.get_by_text(title, exact=True)).first.click()
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sid, timeout=30000)
+        assert page.evaluate("() => window.__draftIsolationDocument") == "same-document", "Switch must retain the pending request in the same document"
+        return page.locator(COMPOSER).first
+
+    composer.fill(original)
+    page.evaluate("() => { window.__draftIsolationDocument = 'same-document'; }")
+    page.route(pattern, hold_send)
+    try:
+        page.get_by_role("button", name="发送", exact=True).click()
+        deadline = time.monotonic() + 10
+        while not pending and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert len(captured) == 1 and captured[0]["method"] == "POST"
+        assert captured[0]["url"].endswith(f"/api/sessions/{a}/messages")
+        expect(composer).to_have_value("")
+        page.wait_for_function("sid => !JSON.parse(localStorage.getItem('vibelution.chat.drafts.v1') || '[]').some(row => row.sessionId === sid && row.draft)", arg=a)
+
+        composer_b = switch_session(title_b, b)
+        expect(composer_b).to_have_value("")
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0")
+        composer_b.click()
+        composer_b.press_sequentially(newer, delay=20)
+        expect(composer_b).to_have_value(newer)
+        pending.pop().abort("internetdisconnected")
+        # A's persisted recovery proves its late failure has been processed
+        # before inspecting the still-active B session.
+        page.wait_for_function("({sid, draft}) => JSON.parse(localStorage.getItem('vibelution.chat.drafts.v1') || '[]').some(row => row.sessionId === sid && row.draft === draft)", arg={"sid": a, "draft": original})
+        expect(composer_b).to_have_value(newer)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", b)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0")
+        expect(page.locator('[role="alert"]').filter(has_text="没有发出")).to_have_count(0)
+        # Selecting a session dismisses its transient composer error; the
+        # restored text and withdrawn optimistic message must remain correct.
+        expect(switch_session(title_a, a)).to_have_value(original)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0")
+        expect(switch_session(title_b, b)).to_have_value(newer)
+        assert len(captured) == 1, "Switching and recovery must not submit B's draft"
+
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", b, timeout=30000)
+        expect(page.locator(COMPOSER).first).to_have_value(newer, timeout=15000)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0")
+        stored = page.evaluate('() => JSON.parse(localStorage.getItem("vibelution.chat.drafts.v1") || "[]")')
+        drafts = {row.get("sessionId"): row.get("draft") for row in stored}
+        assert drafts.get(a) == original and drafts.get(b) == newer
+        for sid in (a, b):
+            detail = json.dumps(fetch_json(e2e_instance.port, f"/api/sessions/{sid}"), ensure_ascii=False)
+            assert original not in detail and newer not in detail
+    finally:
+        for route in pending:
+            route.abort("internetdisconnected")
+        page.unroute(pattern, hold_send)
