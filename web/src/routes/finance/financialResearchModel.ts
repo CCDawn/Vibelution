@@ -20,9 +20,19 @@ export function isFinancialSession(row: SessionSummary, agentId: string) {
 }
 
 export function activeFinancialItems(items: KnowledgeItem[], knowledgeBaseId: string) {
-  return items.filter((item) => item.knowledgeBaseId === knowledgeBaseId
+  return items.filter((item) => financialItemMatchesLibrary(item, knowledgeBaseId)
     && (!item.knowledgeState || item.knowledgeState === "active")
     && item.stability !== "deprecated");
+}
+
+function financialItemMatchesLibrary(item: KnowledgeItem, knowledgeBaseId: string) {
+  if (item.knowledgeBaseId === knowledgeBaseId) return true;
+  // The API returns local item ids for an Agent-scoped request. Require its owner
+  // before accepting a local id, since other Agents can have identically named libraries.
+  const scoped = /^agent:([^:]+):([^:]+)$/.exec(knowledgeBaseId);
+  return Boolean(scoped && item.knowledgeBaseId === scoped[2]
+    && item.ownerType === "agent" && item.ownerId === scoped[1]
+    && (!item.agentId || item.agentId === scoped[1]));
 }
 
 function textField(value: unknown) {
@@ -43,6 +53,8 @@ export function activeFinancialSources(item: KnowledgeItem, sources: KnowledgeSo
     const evidence = source.sourceRef?.financialEvidence;
     const metadata = evidence && typeof evidence === "object" && !Array.isArray(evidence) ? evidence as Record<string, unknown> : {};
     return source.knowledgeBaseId === item.knowledgeBaseId
+      && (!item.ownerId || (source.ownerType === item.ownerType && source.ownerId === item.ownerId))
+      && (!item.agentId || !source.agentId || source.agentId === item.agentId)
       && item.sourceArtifactIds.includes(source.sourceArtifactId)
       && source.sourceType === "pdf_refinement"
       && (!source.status || source.status === "active")

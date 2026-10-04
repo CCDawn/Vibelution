@@ -305,6 +305,9 @@ export type KnowledgeBatch = {
 
 export type KnowledgeItem = {
   knowledgeItemId: string;
+  ownerType?: "team" | "agent" | "shared" | string;
+  ownerId?: string;
+  agentId?: string;
   teamId: string;
   knowledgeBaseId: string;
   batchId: string;

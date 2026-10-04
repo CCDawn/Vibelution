@@ -33,6 +33,26 @@ async function render(row = assistant) {
   for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 }
 describe("financial report library", () => {
+  it("shows reviewed local items and original text returned for a scoped Agent library", async () => {
+    const scopedId = "agent:finance:financial-kb";
+    const ownership = { ownerType: "agent", ownerId: "finance", agentId: "finance" };
+    vi.mocked(listKnowledgeItems).mockResolvedValue({ items: [
+      { ...item, ...ownership },
+      { ...item, ...ownership, knowledgeItemId: "foreign", ownerId: "another-agent", agentId: "another-agent", title: "其他Agent私有财报" },
+    ] });
+    vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [{ ...source, ...ownership }] } });
+    vi.mocked(fetchKnowledgeItemBody).mockResolvedValue({
+      knowledgeBaseId: scopedId, scopedKnowledgeBaseId: scopedId, knowledgeItemId: "item",
+      sourceArtifactIds: ["source"], sourceBodyStatus: "source_body_available", content: "已审核PDF原文", hasMore: false,
+    } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>);
+    await render({ ...assistant, knowledgeBaseId: scopedId });
+    expect(node.textContent).toContain("年度财报");
+    expect(node.textContent).not.toContain("暂无有效财报");
+    expect(node.textContent).not.toContain("其他Agent私有财报");
+    expect(fetchKnowledgeTrace).toHaveBeenCalledWith(scopedId, "item", expect.objectContaining({ agentId: "finance" }));
+    expect(node.querySelector("blockquote")?.textContent).toBe("已审核PDF原文");
+    expect(node.querySelector<HTMLAnchorElement>('a[target="_blank"]')?.href).toBe("https://example.com/report.pdf");
+  });
   it("reads only the bound agent library and shows source text as plain data", async () => {
     await render();
     expect(listKnowledgeItems).toHaveBeenCalledWith("financial-kb", expect.objectContaining({ agentId: "finance", signal: expect.any(AbortSignal) }));
