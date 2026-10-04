@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import React, { act, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { submitSessionMessage, uploadSessionImageAttachment } from "../../api/chat";
@@ -118,9 +118,27 @@ afterEach(() => {
   clients.splice(0).forEach((client) => client.clear());
   resetChatDraftPersistenceForTests();
   document.body.replaceChildren();
+  onlineManager.setOnline(true);
 });
 
 describe("failed composer draft recovery", () => {
+  it("attempts an offline submission and recovers instead of silently pausing until reconnect", async () => {
+    mount();
+    onlineManager.setOnline(false);
+    await act(async () => controls.submit());
+    await settle();
+    expect(submitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(controls.error).not.toBe("");
+    expect(controls.draft).toBe(originalDraft);
+    flushPendingSessionDraftWrites();
+    expect(readStoredSessionDrafts()[sid]).toBe(originalDraft);
+    act(() => controls.change("离线失败后用户改写的新内容"));
+    onlineManager.setOnline(true);
+    await settle();
+    expect(submitSessionMessage).toHaveBeenCalledTimes(1);
+    expect(controls.draft).toBe("离线失败后用户改写的新内容");
+  });
+
   it.each(["message", "attachment"])("persists the recovered text after %s failure", async (kind) => {
     const attachments: ComposerImageAttachment[] = kind === "attachment" ? [{
       id: "image-1", file: new File(["bytes"], "test.png", { type: "image/png" }),

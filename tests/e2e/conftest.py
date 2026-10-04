@@ -121,9 +121,27 @@ def _remove_instance_data(data_home: Path) -> None:
         print(f"[e2e] 实例数据目录清理失败（可手动删除）: {data_home} ({exc})")
 
 
+def _start_or_attach_instance() -> None:
+    """显式恢复本任务已就绪实例；不把失败 start 自动当作成功。"""
+    from tests.e2e.helpers import instance_registry, launcher, launcher_ipc
+
+    attach = os.environ.get("VIBELUTION_E2E_ATTACH", "0").strip()
+    if attach not in {"0", "1"}:
+        raise instance_registry.InstanceRegistryError(f"VIBELUTION_E2E_ATTACH 必须是 0 或 1: {attach!r}")
+    if attach == "0":
+        launcher.start_instance(WORKTREE_ROOT)
+        return
+    # 与 IPC 相同的当前测试树 + codex/ 分支门，禁止接管 main 或其他任务。
+    launcher_ipc._task_root(WORKTREE_ROOT)
+    _, entry = instance_registry.find_entry(WORKTREE_ROOT)
+    if not instance_registry.entry_is_ready(entry):
+        raise instance_registry.InstanceRegistryError("显式接管要求本任务实例已经就绪，不会补发 start")
+    print("[e2e] 显式接管本任务已就绪实例（未发送 start；仍须 health 身份校验）")
+
+
 @pytest.fixture(scope="session")
 def e2e_instance() -> E2EInstance:
-    """起一个本 worktree 的分支实例并核对就绪口径；会话结束优雅停机并断言关闭。"""
+    """启动或显式接管本 worktree 实例并核对身份；会话结束优雅停机并断言关闭。"""
     from tests.e2e.helpers import ensure_web_build, instance_registry, launcher
 
     build = ensure_web_build.ensure_web_build(WORKTREE_ROOT)
@@ -132,7 +150,7 @@ def e2e_instance() -> E2EInstance:
         f"（head={build.head[:12]}，dist={build.dist_dir}）"
     )
 
-    launcher.start_instance(WORKTREE_ROOT)
+    _start_or_attach_instance()
     instance: E2EInstance | None = None
     try:
         entry = instance_registry.wait_for_entry(

@@ -25,6 +25,10 @@ POST /api/sessions、POST /api/agents 等，控制令牌同 GET 口径）。
     `codex/` 任务分支，通过唯一 Launcher 页的官方 bridge 发送请求。
   - `VIBELUTION_E2E_KEEP_DATA=1`：会话结束后保留实例数据目录并打印路径
     （默认清理，保证下一次运行回到空态）。
+  - `VIBELUTION_E2E_ATTACH=1`：显式接管当前测试树已就绪的任务实例，不发 start。
+    必须是当前 `codex/` worktree 且 registry 已就绪，随后仍校验 health 身份。
+    默认 0；本次 pytest 仍负责正常 stop 与数据清理。用于启动响应丢失后的明确恢复，
+    不自动启用，也不能把此前的 CLI/IPC 失败改记为通过。
 - 测试代码与 fixture 一律 `CREATE_NO_WINDOW` 子进程，禁止 taskkill、禁止可见控制台。
 
 ## 运行前置

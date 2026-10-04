@@ -395,6 +395,10 @@ export function useChatComposerTurnMutations({
     SubmitTurnVariables,
     ChatSubmitMutationContext
   >({
+    // The backend is local: navigator.onLine must not silently retain a
+    // submit for later reconnect. Attempt now so transport failure follows
+    // the existing optimistic rollback and draft recovery path.
+    networkMode: "always",
     mutationFn: async (
       {
         sessionId,
