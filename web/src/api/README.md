@@ -36,6 +36,7 @@
 | `diagnostics.ts` | `/api/diagnostics/*` |
 | `evolution.ts` | `/api/evolution/*` supervised/review JSON |
 | `financialAssistant.ts` | `/api/financial-assistants`, projection/setup over native Agent Directory |
+| `financialMarket.ts` | `/api/financial-market/*`, read-only public A-share quotes/search/OHLC; domain query keys |
 | `files.ts` | `/api/files/content` |
 | `git.ts` | `/api/git/*` |
 | `hypothesisFirst.ts` | `/api/teams/.../workflow-orchestration/hypothesis-first/*`, `meeting-rounds`, `hypothesis-rounds` (HF-5) |

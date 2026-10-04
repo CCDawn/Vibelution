@@ -177,6 +177,8 @@ import {
 import { agentCenterConfigRoute, agentCenterMemoryRoute } from "../agentCenterRoutes";
 import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
 import { useFinancialResearchSessionBridge } from "../finance/FinancialResearchBridge";
+import { FinancialResearchLiveProjection } from "../finance/FinancialResearchLiveProjection";
+import { EMPTY_FINANCIAL_MESSAGES } from "../finance/stockResearchModel";
 import { useFinancialAssistants } from "../finance/useFinancialAssistants";
 import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
@@ -3562,7 +3564,7 @@ export function ChatCodingRouteWorkbench() {
           ? composerFocusRequest.signal
           : "",
       onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
-      composer: companionConversationComposer,
+      composer: financeSurface ? { ...companionConversationComposer, placeholder: lang === "zh" ? "追问这只股票…" : "Ask about this stock…" } : companionConversationComposer,
       composerLeadingControl: verifiedCompanionMode ? undefined : (
         <ChatComposerPlusMenu
           lang={lang}
@@ -3604,7 +3606,7 @@ export function ChatCodingRouteWorkbench() {
           } : null}
         />
       ),
-      permissionControl: !verifiedCompanionMode && activeSessionAgent ? {
+      permissionControl: !financeSurface && !verifiedCompanionMode && activeSessionAgent ? {
         value: activeSessionAgent.permissionPreset || "request_approval",
         disabled: (
           agentPermissionPresetMutation.isPending
@@ -3635,10 +3637,10 @@ export function ChatCodingRouteWorkbench() {
           });
         },
       } : undefined,
-      llmControl: verifiedCompanionMode ? undefined : sessionLlmControl,
-      turnModelControl: verifiedCompanionMode ? undefined : turnModelControl,
-      composerContextRing: verifiedCompanionMode ? null : composerContextRing,
-      onOpenComposerContextDetail: !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
+      llmControl: financeSurface || verifiedCompanionMode ? undefined : sessionLlmControl,
+      turnModelControl: financeSurface || verifiedCompanionMode ? undefined : turnModelControl,
+      composerContextRing: financeSurface || verifiedCompanionMode ? null : composerContextRing,
+      onOpenComposerContextDetail: !financeSurface && !verifiedCompanionMode && cacheDetailAvailable ? openCacheDetail : undefined,
       onCreateSession: !verifiedCompanionMode && selectedChatAgent ? () => handleCreateAgentSession(selectedChatAgent) : undefined,
       slashCommandSuggestions: verifiedCompanionMode ? [] : slashCommandSuggestions,
       slashSkillsCatalogState: verifiedCompanionMode ? "ready" : slashSkillsCatalogState,
@@ -3777,12 +3779,21 @@ export function ChatCodingRouteWorkbench() {
     status: detail?.status ?? "",
     busy: sessionBusy,
     stopping: sessionStopping,
+    messages: detail?.messages,
+    phase: detail?.currentPhase,
+    error: detail?.lastTurnError?.message || companionConversationComposer.error,
+    submitPending,
+    transcriptPending: sessionTranscriptPending,
+    approvalPending: Boolean(toolApproval),
     onComposerChange: handleComposerChange,
     onFocusComposer: requestSessionComposerFocus,
+    composerValue: companionConversationComposer.value,
+    onSubmit: handleSubmitTurn,
   });
 
   return (
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
+    {financeSurface ? <FinancialResearchLiveProjection sessionId={activeSessionId ?? ""} agentId={detail?.agentId} messages={detail?.messages ?? EMPTY_FINANCIAL_MESSAGES} /> : null}
     <ChatSessionWorkbenchShell
       layoutRef={layoutRef}
       className={chatLayoutClassName}

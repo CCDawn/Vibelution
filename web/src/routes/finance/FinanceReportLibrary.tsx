@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { BookOpen, ExternalLink, RefreshCw } from "lucide-react";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 import { fetchKnowledgeTrace, listKnowledgeItems } from "../../api/knowledge";
@@ -9,9 +9,10 @@ import { VButton, VInput, VRouteLinkButton, VSkeleton, VStateSurface } from "../
 import { agentCenterMemoryRoute } from "../agentCenterRoutes";
 import styles from "../FinanceRoute.styles";
 import { activeFinancialItems, activeFinancialSources, financialSourceMetadata } from "./financialResearchModel";
+import type { ReportCitation } from "./stockResearchModel";
 
-export function FinanceReportLibrary({ assistant, zh, returnTo }: {
-  assistant: FinancialAssistant; zh: boolean; returnTo: string;
+export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null }: {
+  assistant: FinancialAssistant; zh: boolean; returnTo: string; citation?: ReportCitation | null;
 }) {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -23,7 +24,31 @@ export function FinanceReportLibrary({ assistant, zh, returnTo }: {
     queryFn: ({ signal }) => listKnowledgeItems<KnowledgeItemsPayload>(knowledgeBaseId, { agentId, signal }),
     enabled: readable, staleTime: 15_000, retry: false, refetchInterval: 60_000,
   });
-  const items = activeFinancialItems(itemsQuery.data?.items ?? [], knowledgeBaseId).filter((item) =>
+  const canonicalItems = useMemo(() => activeFinancialItems(itemsQuery.data?.items ?? [], knowledgeBaseId), [itemsQuery.data?.items, knowledgeBaseId]);
+  const citationItems = canonicalItems.slice(0, 20);
+  const citationTraces = useQueries({ queries: citationItems.map((item) => ({
+    queryKey: ["finance", "source-trace", agentId, knowledgeBaseId, item.knowledgeItemId],
+    queryFn: ({ signal }: { signal: AbortSignal }) => fetchKnowledgeTrace<KnowledgeTracePayload>(knowledgeBaseId, item.knowledgeItemId, { agentId, signal }),
+    enabled: readable && Boolean(citation), staleTime: 60_000, retry: false,
+  })) });
+  let citationMatch: { itemId: string; sourceId: string } | null = null;
+  for (const [index, trace] of citationTraces.entries()) {
+    if (!citation) break;
+    const matched = activeFinancialSources(citationItems[index], trace.data?.nodes.sourceArtifacts ?? []).find((source) => {
+      const metadata = financialSourceMetadata(source);
+      return metadata.url === citation.url && (!citation.page || metadata.page === citation.page);
+    });
+    if (matched) {
+      citationMatch = { itemId: citationItems[index].knowledgeItemId, sourceId: matched.sourceArtifactId };
+      break;
+    }
+  }
+  const matchedItemId = citationMatch?.itemId;
+  const matchedSourceId = citationMatch?.sourceId;
+  useEffect(() => {
+    if (matchedItemId && matchedSourceId) { setSearch(""); setSelectedId(matchedItemId); setSourceId(matchedSourceId); }
+  }, [matchedItemId, matchedSourceId]);
+  const items = canonicalItems.filter((item) =>
     `${item.title} ${item.summary}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const selected = items.find((item) => item.knowledgeItemId === selectedId) ?? items[0];
   const traceQuery = useQuery({
@@ -59,7 +84,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo }: {
           if (source) void bodyQuery.refetch();
         }}><RefreshCw size={14} /></VButton>
       </div>
-      <p className={styles.small}>{zh ? "库内资料 · 本次引用见研究回答" : "Library sources · citations appear in the answer"}</p>
+      {citation ? <div className="grid gap-2 border-b border-[var(--vui-border-subtle)] pb-3"><strong className="text-xs">{zh ? "当前引用" : "Selected citation"} · {citation.label}</strong><VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={styles.link}><ExternalLink size={14} />{zh ? "打开原文" : "Open source"}</VRouteLinkButton>{!matchedItemId && !citationTraces.some((trace) => trace.isPending) ? <span className={styles.small}>{zh ? "当前库未找到对应页原文" : "This source page is not in the current library"}</span> : null}</div> : null}
       {knowledgeBaseId ? <VRouteLinkButton to={libraryUrl} className={styles.link}>{zh ? "管理财报库" : "Manage library"}</VRouteLinkButton> : null}
       {!readable ? <VStateSurface density="compact" tone="unavailable" title={zh ? "财报库不可读" : "Library unavailable"} /> :
         itemsQuery.isError ? <VStateSurface density="compact" tone="error" title={zh ? "资料加载失败" : "Could not load reports"} actions={<VButton onPress={() => void itemsQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> :
@@ -87,7 +112,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo }: {
                   bodyQuery.isPending ? <VSkeleton /> :
                   sourceContent ? <><blockquote className={styles.excerpt}>{sourceContent}</blockquote>{body?.hasMore ? <span className={styles.small}>{zh ? "仅显示开头摘录" : "Opening excerpt only"}</span> : null}</> :
                   <p className={styles.small}>{zh ? "原文未提供" : "Source text unavailable"}</p>}
-                {metadata?.url ? <VRouteLinkButton to={metadata.url} target="_blank" rel="noopener noreferrer" reloadDocument className={styles.link}><ExternalLink size={14} aria-hidden="true" />{zh ? "查看原始财报" : "Open original report"}</VRouteLinkButton> : null}
+                {metadata?.url ? <VRouteLinkButton to={`${metadata.url}${/^\d+$/.test(metadata.page) ? `#page=${metadata.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={styles.link}><ExternalLink size={14} aria-hidden="true" />{zh ? "查看原始财报" : "Open original report"}</VRouteLinkButton> : null}
               </>}
           </section> : null}
         </>}

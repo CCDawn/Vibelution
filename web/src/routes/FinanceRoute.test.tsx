@@ -11,9 +11,14 @@ import { fetchSessionDetail, createChatSession, querySessions } from "../api/cha
 import { listKnowledgeItems } from "../api/knowledge";
 import { useFinancialResearchSessionBridge } from "./finance/FinancialResearchBridge";
 import type { SessionDetail, SessionQueryResponse } from "../api/types";
+import { fetchFinancialStock, searchFinancialStocks } from "../api/financialMarket";
+
+const nativeSubmit = vi.fn();
+let nativeMessages: SessionDetail["messages"] = [];
 
 vi.mock("../api/financialAssistant", () => ({ createFinancialAssistant: vi.fn(), listFinancialAssistants: vi.fn() }));
 vi.mock("../api/chat", () => ({ fetchSessionDetail: vi.fn(), createChatSession: vi.fn(), querySessions: vi.fn() }));
+vi.mock("../api/financialMarket", async (original) => ({ ...await original<typeof import("../api/financialMarket")>(), fetchFinancialStock: vi.fn(), searchFinancialStocks: vi.fn() }));
 vi.mock("../api/knowledge", () => ({ listKnowledgeItems: vi.fn(), fetchKnowledgeTrace: vi.fn() }));
 vi.mock("../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
 vi.mock("./ChatCodingRoute", () => ({ ChatCodingRoute: () => {
@@ -21,7 +26,9 @@ vi.mock("./ChatCodingRoute", () => ({ ChatCodingRoute: () => {
   const [draft, setDraft] = React.useState("");
   useFinancialResearchSessionBridge({
     sessionId: id, agentId: "finance-a", title: "原生研究", status: "idle", busy: false, stopping: false,
+    messages: nativeMessages,
     onComposerChange: setDraft, onFocusComposer: () => {},
+    composerValue: draft, onSubmit: () => nativeSubmit(draft),
   });
   return <div>finance-workspace<textarea aria-label="native draft" value={draft} onChange={(event) => setDraft(event.target.value)} /></div>;
 } }));
@@ -41,6 +48,7 @@ function LocationEcho() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  nativeMessages = [];
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -50,6 +58,8 @@ beforeEach(() => {
   vi.mocked(fetchSessionDetail).mockImplementation(async (id) => nativeSession(id));
   vi.mocked(querySessions).mockResolvedValue({ items: [nativeSession("native-session"), { ...nativeSession("history-session"), title: "年度研究" }], nextCursor: "" } as SessionQueryResponse);
   vi.mocked(createChatSession).mockResolvedValue(nativeSession("new-session"));
+  vi.mocked(fetchFinancialStock).mockRejectedValue(new Error("行情暂不可用"));
+  vi.mocked(searchFinancialStocks).mockResolvedValue([{ symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" }]);
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); vi.clearAllMocks(); });
 async function render(path = "/finance") {
@@ -118,6 +128,9 @@ describe("financial assistant page", () => {
     expect(createFinancialAssistant).not.toHaveBeenCalled();
     expect(fetchSessionDetail).not.toHaveBeenCalled();
     expect(container.textContent).toContain("finance-workspace");
+    const sourceTab = [...container.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === "引用与资料");
+    await act(async () => sourceTab?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await settle();
     expect(listKnowledgeItems).toHaveBeenCalledWith(row.knowledgeBaseId, expect.objectContaining({ agentId: row.agentId, signal: expect.any(AbortSignal) }));
   });
 
@@ -187,13 +200,29 @@ describe("financial assistant page", () => {
     expect(querySessions).not.toHaveBeenCalled();
   });
 
-  it("fills only the native draft when choosing a research task", async () => {
+  it("starts research through the committed native composer once on a double click", async () => {
     await render("/finance?session=native-session");
-    await input("公司或股票代码", "600519 贵州茅台");
     await input("报告期", "2025FY");
-    await act(async () => button("财报")!.click());
-    expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="native draft"]')?.value).toContain("600519 贵州茅台，报告期 2025FY");
+    const start = button("开始研究")!;
+    await act(async () => { start.click(); start.click(); });
+    await settle();
+    expect(nativeSubmit).toHaveBeenCalledTimes(1);
+    expect(nativeSubmit.mock.calls[0][0]).toContain("贵州茅台（600519，上交所）");
+    expect(nativeSubmit.mock.calls[0][0]).toContain("报告期 2025FY");
     expect(createChatSession).not.toHaveBeenCalled();
+  });
+
+  it("creates and starts one new native Session when researching after an existing turn", async () => {
+    nativeMessages = [{ role: "user", id: "existing", content: "核对贵州茅台（600519）", timestamp: "" }];
+    await render("/finance?session=native-session");
+    await input("报告期", "2024FY");
+    await act(async () => { button("开始研究")!.click(); button("开始研究")!.click(); });
+    await settle();
+    await settle();
+    expect(createChatSession).toHaveBeenCalledTimes(1);
+    expect(container.querySelector("output")?.textContent).toBe("/finance?session=new-session");
+    expect(nativeSubmit).toHaveBeenCalledTimes(1);
+    expect(nativeSubmit.mock.calls[0][0]).toContain("报告期 2024FY");
   });
 
   it("opens real financial history and filters foreign and archived rows", async () => {

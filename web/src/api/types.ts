@@ -10,3 +10,4 @@ export * from "./types/config";
 export * from "./types/hypothesisFirst";
 export * from "./types/virtualHumanLife";
 export * from "./types/teamBundles";
+export * from "./types/financialMarket";

@@ -8,6 +8,7 @@ export const WORKBENCH_LAYOUT_IDS = {
   auxConversations: "aux-conversations",
   agents: "agents",
   chat: "chat",
+  finance: "finance",
   configSettings: "config-settings",
   configModelAssets: "config-model-assets",
   evolution: "evolution",

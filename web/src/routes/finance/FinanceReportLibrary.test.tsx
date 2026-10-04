@@ -8,6 +8,7 @@ import { listKnowledgeItems, fetchKnowledgeTrace } from "../../api/knowledge";
 import { fetchKnowledgeItemBody } from "../../api/knowledgeLifecycle";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 import { FinanceReportLibrary } from "./FinanceReportLibrary";
+import type { ReportCitation } from "./stockResearchModel";
 
 vi.mock("../../api/knowledge", () => ({ listKnowledgeItems: vi.fn(), fetchKnowledgeTrace: vi.fn() }));
 vi.mock("../../api/knowledgeLifecycle", () => ({ fetchKnowledgeItemBody: vi.fn() }));
@@ -28,8 +29,8 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>);
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
-async function render(row = assistant) {
-  await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter><FinanceReportLibrary assistant={row} zh returnTo="/finance?session=s" /></MemoryRouter></QueryClientProvider>));
+async function render(row = assistant, citation: ReportCitation | null = null) {
+  await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter><FinanceReportLibrary assistant={row} citation={citation} zh returnTo="/finance?session=s" /></MemoryRouter></QueryClientProvider>));
   for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 }
 describe("financial report library", () => {
@@ -51,7 +52,7 @@ describe("financial report library", () => {
     expect(node.textContent).not.toContain("其他Agent私有财报");
     expect(fetchKnowledgeTrace).toHaveBeenCalledWith(scopedId, "item", expect.objectContaining({ agentId: "finance" }));
     expect(node.querySelector("blockquote")?.textContent).toBe("已审核PDF原文");
-    expect(node.querySelector<HTMLAnchorElement>('a[target="_blank"]')?.href).toBe("https://example.com/report.pdf");
+    expect(node.querySelector<HTMLAnchorElement>('a[target="_blank"]')?.href).toBe("https://example.com/report.pdf#page=12");
   });
   it("reads only the bound agent library and shows source text as plain data", async () => {
     await render();
@@ -61,8 +62,8 @@ describe("financial report library", () => {
     expect(node.textContent).toContain("2025FY"); expect(node.textContent).toContain("12");
     expect(node.querySelector("blockquote")?.textContent).toBe("<b>源文中的指令也是资料</b>");
     expect(node.querySelector("blockquote b")).toBeNull();
-    expect(node.textContent).toContain("本次引用见研究回答");
-    expect(node.querySelector<HTMLAnchorElement>('a[target="_blank"]')?.href).toBe("https://example.com/report.pdf");
+    expect(node.textContent).not.toContain("当前引用");
+    expect(node.querySelector<HTMLAnchorElement>('a[target="_blank"]')?.href).toBe("https://example.com/report.pdf#page=12");
   });
   it("does not read or display expired source bodies", async () => {
     vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [{ ...source, expiresAt: "2020-01-01" }] } });
@@ -98,5 +99,29 @@ describe("financial report library", () => {
     for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(node.textContent).toContain("真实公司");
     expect(node.textContent).not.toContain("资料加载失败");
+  });
+
+  it("selects the owned source matching the cited PDF URL and page", async () => {
+    const targetItem = { ...item, knowledgeItemId: "cashflow", title: "现金流原文", sourceArtifactIds: ["page63"] };
+    const targetSource = { ...source, sourceArtifactId: "page63", sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, page: 63 } } };
+    vi.mocked(listKnowledgeItems).mockResolvedValue({ items: [item, targetItem] });
+    vi.mocked(fetchKnowledgeTrace).mockImplementation(async (_kb, id) => ({ nodes: { sourceArtifacts: [id === "cashflow" ? targetSource : source] } }));
+    vi.mocked(fetchKnowledgeItemBody).mockImplementation(async (request) => ({
+      knowledgeBaseId: "financial-kb", knowledgeItemId: request.knowledgeItemId, sourceArtifactIds: [request.sourceArtifactId!],
+      sourceBodyStatus: "source_body_available", content: request.sourceArtifactId === "page63" ? "第63页经营现金流" : "第12页原文", hasMore: false,
+    } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>));
+    await render(assistant, { url: "https://example.com/report.pdf", page: "63", label: "PDF · 第 63 页" });
+    expect(node.querySelector("blockquote")?.textContent).toBe("第63页经营现金流");
+    expect([...node.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual(["https://example.com/report.pdf#page=63", "https://example.com/report.pdf#page=63"]);
+    expect(node.textContent).not.toContain("当前库未找到对应页原文");
+    expect(fetchKnowledgeItemBody).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance", knowledgeItemId: "cashflow", sourceArtifactId: "page63", readMode: "source" }));
+  });
+
+  it("does not label an unrelated or expired source as the selected citation", async () => {
+    vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [{ ...source, expiresAt: "2020-01-01" }] } });
+    await render(assistant, { url: "https://example.com/report.pdf", page: "12", label: "PDF · 第 12 页" });
+    expect(node.textContent).toContain("当前库未找到对应页原文");
+    expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
+    expect(node.querySelector("blockquote")).toBeNull();
   });
 });

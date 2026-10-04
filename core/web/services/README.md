@@ -28,9 +28,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**82**
+- Facade `*_service.py`：**83**
 - 有 pack README：**6**
-- 仅单文件 facade：**76**
+- 仅单文件 facade：**77**
 
 ## Domain 速查
 
@@ -95,6 +95,7 @@
 | `agent_model_promotion_service.py` | Atomic promotion of one observed Provider model into one Agent binding. | — | `agents.py` | `test_agent_config_workspace_routes.py`, `test_agent_model_promotion_service.py` |
 | `agent_operation_service.py` | Shared Agent catalog operations for HTTP routes and governed tools. | — | `agents.py` | `test_project_operation_tools.py` |
 | `financial_assistant_service.py` | Financial specialist entry and explicit setup over native Agent/Session/knowledge lifecycle. | — | `financial_assistant.py` | `test_financial_assistant_service.py` |
+| `financial_market_service.py` | Read-only public A-share quotes, OHLC and search with source/time/unit validation. | — | `financial_assistant.py` | `test_financial_market_service.py` |
 | `agent_plugin_service.py` | Trusted first-party Agent plugin catalog and binding facade. | — | `agent_plugins.py` | `test_virtual_human_life_api.py` |
 | `agent_role_tool_profile_service.py` | Single source of truth for fixed-role Agent tool profiles. | — | — | `test_tool_policy_evaluator.py`, `test_tool_authorization_contract.py`, `test_agent_role_tool_profile_service.py` |
 | `agent_tool_governance_service.py` | Controlled Agent tool-permission governance. | — | `agents.py` | `test_agent_support_route_contract.py`, `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py` |
