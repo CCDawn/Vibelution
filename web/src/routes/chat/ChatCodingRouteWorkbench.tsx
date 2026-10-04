@@ -3785,7 +3785,7 @@ export function ChatCodingRouteWorkbench() {
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
     <ChatSessionWorkbenchShell
       layoutRef={layoutRef}
-      className={financialResearchBridge ? `${chatLayoutClassName} !h-full !max-h-full !min-h-0` : chatLayoutClassName}
+      className={chatLayoutClassName}
       style={layoutStyle}
       responsiveMode={responsiveLayout.mode}
       statusRailCollapsed={statusRailCollapsed}

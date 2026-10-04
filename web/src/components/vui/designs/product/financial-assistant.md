@@ -48,5 +48,6 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 复用 `VStateSurface` 与 `VRouteLinkButton`。列表查询失败时说明不出现，不挡住对话。
 
 ### 非职责与反冗余
+`FinanceResearchFrame`、`FinanceResearchWorkspace` 与 `FinanceReportLibrary` 共用 `FinanceRoute.styles`，保持加载、工作台与资料栏一致；三个消费者在 `vuiImportBoundary` 中逐项登记，不另建重复样式映射。
 不新增 VUI primitive、第二套身份/配置存储、聊天组件、transcript、SSE 或后台调度。
 金融建议与工具沿原生 Agent 权限；未来行情图仍需成熟图表库和独立来源验证。

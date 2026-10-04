@@ -52,7 +52,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo }: {
   return (
     <div className={styles.aside} data-finance-report-library>
       <div className={styles.sectionHeading}>
-        <span className="flex items-center gap-2"><BookOpen size={15} aria-hidden="true" />{zh ? "财报资料" : "Report library"}</span>
+        <span className={styles.libraryHeading}><BookOpen size={15} aria-hidden="true" />{zh ? "财报资料" : "Report library"}</span>
         <VButton variant="ghost" aria-label={zh ? "刷新财报资料" : "Refresh reports"} isDisabled={!readable || itemsQuery.isFetching} onPress={() => {
           void itemsQuery.refetch();
           if (selected) void traceQuery.refetch();
