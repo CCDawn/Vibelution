@@ -5,6 +5,7 @@ import {
   clearWorkbenchLauncherRuntimeState,
   readDaemonIdentity,
   readDaemonPid,
+  readLauncherStateFile,
   sameProjectRoot,
   reclaimStaleWorkbenchBackend,
   type WorkbenchRuntimeStateCleanupResult
@@ -185,6 +186,14 @@ export type IsolatedStartReuseInspection =
   | { kind: "start" }
   | { kind: "pending"; generation: number };
 
+function readLauncherBackendIdentity(workspaceRoot: string): PythonProcessIdentity | null {
+  const state = readLauncherStateFile(workspaceRoot);
+  const pid = positiveInt(state.backendPid);
+  const createTime = Number(state.backendCreateTime);
+  const executable = String(state.backendExecutable || "").trim();
+  return pid > 0 && createTime > 0 && executable ? { pid, createTime, executable } : null;
+}
+
 /** Cached alive truth never acknowledges a start or authorizes retirement. */
 export async function inspectIsolatedStartReuse(input: {
   target: IsolatedClaimTarget;
@@ -194,6 +203,7 @@ export async function inspectIsolatedStartReuse(input: {
   dependencies?: Partial<{
     readRegistry: typeof readRegistry;
     readDaemonIdentity: typeof readDaemonIdentity;
+    readBackendIdentity: typeof readLauncherBackendIdentity;
     captureIdentity: typeof capturePythonProcessIdentity;
     connect: (port: number, host: string) => Promise<boolean>;
   }>;
@@ -201,6 +211,7 @@ export async function inspectIsolatedStartReuse(input: {
   const dependencies = {
     readRegistry,
     readDaemonIdentity,
+    readBackendIdentity: readLauncherBackendIdentity,
     captureIdentity: capturePythonProcessIdentity,
     connect: (port: number, host: string) => probeTcpConnect(port, host),
     ...input.dependencies
@@ -220,7 +231,8 @@ export async function inspectIsolatedStartReuse(input: {
     && Number(entry?.spawnCreateTime) > 0 && String(entry?.spawnExecutable || "").trim()
     ? { pid: positiveInt(entry?.spawnPid), createTime: Number(entry?.spawnCreateTime), executable: String(entry?.spawnExecutable) }
     : null;
-  const expected = registered || dependencies.readDaemonIdentity(input.target.projectRoot);
+  const expected = registered || dependencies.readDaemonIdentity(input.target.projectRoot)
+    || dependencies.readBackendIdentity(input.target.projectRoot);
   if (!expected) {
     return { kind: "start" };
   }
@@ -244,6 +256,7 @@ export async function inspectIsolatedStartReuse(input: {
   }
   input.signal?.throwIfAborted();
   const latest = (await dependencies.readRegistry(registryPath)).instances[input.target.instanceId];
+  input.signal?.throwIfAborted();
   const fields = ["generation", "commandId", "status", "desiredState", "phase", "cleanupInProgress",
     "projectRoot", "spawnPid", "spawnCreateTime", "spawnExecutable", "port", "controlPort", "host", "portLeaseStatus"] as const;
   if (!latest || fields.some((field) => latest[field] !== entry[field])) {

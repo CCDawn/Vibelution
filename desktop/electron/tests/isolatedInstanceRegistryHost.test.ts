@@ -56,6 +56,7 @@ describe("isolatedInstanceRegistryHost", () => {
     return {
       readRegistry: vi.fn(async () => ({ schemaVersion: 3, instances: entry ? { "worktree:task": entry } : {} })),
       readDaemonIdentity: vi.fn(() => null as typeof liveIdentity | null),
+      readBackendIdentity: vi.fn(() => null as typeof liveIdentity | null),
       captureIdentity: vi.fn(async () => liveIdentity as typeof liveIdentity | null),
       connect: vi.fn(async () => true)
     };
@@ -95,6 +96,16 @@ describe("isolatedInstanceRegistryHost", () => {
     dependencies.readRegistry.mockResolvedValue({ schemaVersion: 3, instances: {} });
     dependencies.readDaemonIdentity.mockReturnValue(liveIdentity);
     expect(await inspectReuse(dependencies)).toEqual({ kind: "pending", generation: 0 });
+  });
+
+  it("preserves an unregistered live backend recorded outside Runtime Manager", async () => {
+    const dependencies = reuseDependencies();
+    dependencies.readRegistry.mockResolvedValue({ schemaVersion: 3, instances: {} });
+    dependencies.readBackendIdentity.mockReturnValue(liveIdentity);
+    expect(await inspectReuse(dependencies)).toEqual({ kind: "pending", generation: 0 });
+    expect(dependencies.captureIdentity).toHaveBeenCalledWith({
+      pythonPath: "python", workspaceRoot: "C:/wt/task", pid: 4242
+    });
   });
 
   it.each([
