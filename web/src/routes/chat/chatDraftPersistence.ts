@@ -326,6 +326,27 @@ function writeStoredSessionDraftEntries(entries: StoredSessionDraftEntry[]) {
   }
 }
 
+let draftLifecycleWindow: Window | null = null;
+let draftLifecycleDocument: Document | null = null;
+
+function handleDraftVisibilityChange() {
+  if (draftLifecycleDocument?.visibilityState === "hidden") {
+    flushPendingSessionDraftSaves();
+  }
+}
+
+function ensureDraftLifecycleFlush() {
+  if (draftLifecycleWindow || typeof window === "undefined") {
+    return;
+  }
+  draftLifecycleWindow = window;
+  draftLifecycleDocument = window.document;
+  // pagehide preserves bfcache eligibility and covers full reload/navigation.
+  // Hidden documents also flush before a mobile/background page can be killed.
+  draftLifecycleWindow.addEventListener("pagehide", flushPendingSessionDraftSaves);
+  draftLifecycleDocument.addEventListener("visibilitychange", handleDraftVisibilityChange);
+}
+
 function flushPendingSessionDraftSaves() {
   if (pendingSaveTimer !== null) {
     clearTimeout(pendingSaveTimer);
@@ -353,6 +374,7 @@ export function scheduleSessionDraftSave(sessionId: string, draft: string) {
     return;
   }
   pendingDraftSaves.set(normalizedSessionId, String(draft ?? ""));
+  ensureDraftLifecycleFlush();
   if (pendingSaveTimer !== null) {
     return;
   }
@@ -374,6 +396,7 @@ export function scheduleSessionDraftMetaSave(sessionId: string, meta: StoredSess
     return;
   }
   pendingDraftMetas.set(normalizedSessionId, sanitizeStoredDraftMeta(meta));
+  ensureDraftLifecycleFlush();
   if (pendingSaveTimer !== null) {
     return;
   }
@@ -434,6 +457,10 @@ export function flushPendingSessionDraftWrites() {
 }
 
 export function resetChatDraftPersistenceForTests() {
+  draftLifecycleWindow?.removeEventListener("pagehide", flushPendingSessionDraftSaves);
+  draftLifecycleDocument?.removeEventListener("visibilitychange", handleDraftVisibilityChange);
+  draftLifecycleWindow = null;
+  draftLifecycleDocument = null;
   if (pendingSaveTimer !== null) {
     clearTimeout(pendingSaveTimer);
     pendingSaveTimer = null;

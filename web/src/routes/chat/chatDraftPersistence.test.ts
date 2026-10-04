@@ -61,6 +61,27 @@ describe("chatDraftPersistence", () => {
     expect(storedEntry("session-1")).toBe("第二版");
   });
 
+  it("flushes pending text and metadata when the document leaves before the debounce", () => {
+    scheduleSessionDraftSave("session-1", "最后输入的草稿");
+    scheduleSessionDraftMetaSave("session-1", { turnModelSelection: { modelId: "model-1" } });
+    expect(storedRaw()).toBeNull();
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(storedEntry("session-1")).toBe("最后输入的草稿");
+    expect(readStoredSessionDraftState().turnModelSelections["session-1"]).toEqual({ modelId: "model-1" });
+  });
+
+  it("never resurrects a submitted draft when the page hides", () => {
+    scheduleSessionDraftSave("session-1", "已经发送");
+    scheduleSessionDraftSave("session-2", "另一个会话仍未发送");
+    removeStoredSessionDraft("session-1");
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(readStoredSessionDrafts()).toEqual({ "session-2": "另一个会话仍未发送" });
+  });
+
   it("hydrates the in-memory draft map and ignores corrupted storage", () => {
     scheduleSessionDraftSave("session-1", "草稿甲");
     scheduleSessionDraftSave("session-2", "草稿乙");

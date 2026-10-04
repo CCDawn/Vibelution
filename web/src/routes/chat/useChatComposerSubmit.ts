@@ -138,6 +138,16 @@ function removeOptimisticUserMessageFromCache(
   query.setState({ data: next, dataUpdatedAt: Date.now() });
 }
 
+function restoreAndPersistSubmittedDraft(current: Record<string, string>, sessionId: string, content: string) {
+  const restored = restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content);
+  if (restored !== current) {
+    // Schedule only the applied restoration, never overwrite newer user input.
+    // The session-keyed debounce coalesces repeated React updater evaluations.
+    scheduleSessionDraftSave(sessionId, restored[sessionId]);
+  }
+  return restored;
+}
+
 export type SubmitTurnVariables = {
   sessionId: string;
   clientSubmissionId: string;
@@ -609,7 +619,7 @@ export function useChatComposerTurnMutations({
           setActiveTurnLayerForSession(current, variables.sessionId, undefined)
         );
       }
-      setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content));
+      setSessionDrafts((current) => restoreAndPersistSubmittedDraft(current, variables.sessionId, variables.content));
       setSessionComposerErrors((current) => ({
         ...current,
         // Classified human copy (e.g. 409 -> "a turn is already generating");
@@ -1924,7 +1934,7 @@ export function useChatComposerSubmitActions({
         }));
         if (content || references.length) {
           removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
-          setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
+          setSessionDrafts((current) => restoreAndPersistSubmittedDraft(current, sessionId, content));
         }
         restorePendingStopAfterUploadFailure(sessionId);
         return;
@@ -2002,7 +2012,7 @@ export function useChatComposerSubmitActions({
       }));
       if (content || references.length) {
         removeOptimisticUserMessageFromCache(queryClient, sessionId, { sessionId, content, references, clientSubmissionId });
-        setSessionDrafts((current) => restoreSubmittedDraftIfComposerStillEmpty(current, sessionId, content));
+        setSessionDrafts((current) => restoreAndPersistSubmittedDraft(current, sessionId, content));
       }
       restorePendingStopAfterUploadFailure(sessionId);
     } finally {
