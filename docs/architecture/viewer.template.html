@@ -1,0 +1,2268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>项目架构地图</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f5f7fa;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #182230;
+      --muted: #5d6b7d;
+      --soft: #8793a2;
+      --line: #dbe2ea;
+      --line-strong: #c8d2de;
+      --accent: #b4533c;
+      --accent-soft: #fff1ec;
+      --blue: #315b78;
+      --blue-soft: #eaf2f8;
+      --green: #28725b;
+      --green-soft: #eaf6f1;
+      --focus: #2563eb;
+      --sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+      --mono: "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+      --rail-width: 232px;
+      --detail-width: 352px;
+      --top-height: 72px;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 320px; height: 100%; margin: 0; }
+    body { overflow: hidden; background: var(--paper); color: var(--ink); font: 14px/1.5 var(--sans); }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, summary:focus-visible, [tabindex="0"]:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--focus) 70%, white);
+      outline-offset: 2px;
+    }
+    .topbar {
+      height: var(--top-height); display: flex; align-items: center; gap: 18px;
+      padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--surface);
+      position: relative; z-index: 5;
+    }
+    .brand { min-width: 240px; display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      width: 34px; height: 34px; border: 1px solid #b9c8d5; border-radius: 9px;
+      display: grid; place-items: center; color: var(--blue); background: var(--blue-soft);
+      font: 700 14px/1 var(--mono); letter-spacing: -1px;
+    }
+    .brand-copy { min-width: 0; }
+    .eyebrow { margin: 0 0 1px; color: var(--muted); font: 600 10px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 16px; line-height: 1.25; font-weight: 650; }
+    .top-meta { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; color: var(--muted); }
+    .meta-chip {
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      border: 1px solid var(--line); border-radius: 999px; background: var(--surface-soft);
+      padding: 4px 9px; font: 11px/1.3 var(--mono);
+    }
+    .top-actions { display: flex; align-items: center; gap: 7px; }
+    .button {
+      min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      border: 1px solid var(--line-strong); border-radius: 7px; padding: 6px 10px;
+      background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap;
+    }
+    .button:hover:not(:disabled) { border-color: #9eafbf; background: #f7f9fb; }
+    .button:disabled { opacity: .45; cursor: default; }
+    .button-primary { border-color: #a6bac9; color: #244e6a; background: #f0f6fa; }
+    .button-quiet { border-color: transparent; background: transparent; }
+    .button-small { min-height: 29px; padding: 4px 8px; font-size: 12px; }
+    .button-icon { width: 34px; padding: 0; font: 16px/1 var(--sans); }
+    .shortcut { margin-left: 3px; color: var(--soft); font: 10px/1 var(--mono); }
+    .app-shell {
+      height: calc(100% - var(--top-height)); min-height: 0; display: grid;
+      grid-template-columns: var(--rail-width) minmax(320px, 1fr) var(--detail-width);
+    }
+    .sidebar, .detail-panel { min-height: 0; background: var(--surface); }
+    .sidebar { border-right: 1px solid var(--line); overflow: hidden; display: flex; flex-direction: column; }
+    .sidebar-scroll { min-height: 0; overflow: auto; padding: 15px 12px 24px; }
+    .search-wrap { position: relative; margin: 0 1px 16px; }
+    .search-label { display: flex; justify-content: space-between; align-items: center; margin: 0 1px 6px; color: var(--muted); font-size: 11px; font-weight: 600; }
+    .search-input-wrap { display: flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); }
+    .search-input-wrap:focus-within { border-color: #83a7c0; box-shadow: 0 0 0 3px #dceaf3; }
+    #atlas-search { width: 100%; min-width: 0; height: 36px; border: 0; outline: 0; background: transparent; padding: 0 9px; color: var(--ink); }
+    #atlas-search:focus-visible { outline: 0; }
+    #clear-search { border: 0; background: transparent; padding: 5px 9px; color: var(--muted); cursor: pointer; }
+    .search-results {
+      position: absolute; z-index: 6; top: 65px; left: -1px; right: -1px; max-height: min(65vh, 520px);
+      overflow: auto; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+      box-shadow: 0 12px 32px rgb(24 34 48 / 13%); padding: 6px;
+    }
+    .search-result { width: 100%; display: block; text-align: left; border: 0; border-radius: 5px; padding: 8px; background: transparent; cursor: pointer; }
+    .search-result:hover { background: var(--blue-soft); }
+    .search-result-label { display: block; color: var(--ink); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+    .search-result-meta { display: block; margin-top: 2px; color: var(--muted); font: 10px/1.4 var(--mono); overflow-wrap: anywhere; }
+    .search-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line); margin-top: 5px; padding: 8px 4px 2px; color: var(--muted); font-size: 11px; }
+    .nav-section { margin-top: 17px; }
+    .nav-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 5px 6px; color: var(--muted); font: 650 10px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    .nav-list { display: grid; gap: 2px; }
+    .nav-item {
+      min-width: 0; width: 100%; display: flex; align-items: center; gap: 8px; border: 0;
+      border-radius: 6px; padding: 7px 8px; background: transparent; color: #39495a;
+      text-align: left; font-size: 12px; cursor: pointer;
+    }
+    .nav-item:hover { background: #f4f7fa; }
+    .nav-item[aria-current="page"] { background: var(--blue-soft); color: #234d68; font-weight: 650; }
+    .nav-dot { flex: 0 0 auto; width: 7px; height: 7px; border: 1px solid #9aa8b7; border-radius: 50%; background: white; }
+    .nav-item[aria-current="page"] .nav-dot { border-color: var(--blue); background: var(--blue); }
+    .nav-item-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-count { margin-left: auto; color: var(--soft); font: 10px/1 var(--mono); }
+    .domain-group { border-bottom: 1px solid #eef1f4; }
+    .domain-summary { min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 5px 6px; cursor: pointer; list-style: none; color: #3e4f61; font-size: 12px; }
+    .domain-summary::-webkit-details-marker { display: none; }
+    .domain-summary::before { content: "›"; width: 11px; color: var(--soft); font-size: 16px; transition: transform .12s ease; }
+    details[open] > .domain-summary::before { transform: rotate(90deg); }
+    .domain-summary-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .module-tree { padding: 0 0 6px 10px; }
+    .module-tree .nav-item { padding-top: 5px; padding-bottom: 5px; font-size: 11px; }
+    .tree-branch { border-left: 1px solid #e5eaf0; margin-left: 8px; padding-left: 4px; }
+    .nav-empty { padding: 7px 8px; color: var(--soft); font-size: 11px; }
+    .sidebar-foot { border-top: 1px solid var(--line); padding: 10px 13px; color: var(--soft); font-size: 10px; line-height: 1.5; }
+    main { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 18px 20px 14px; gap: 12px; }
+    .canvas-heading { min-width: 0; display: grid; gap: 5px; }
+    .breadcrumbs { min-width: 0; display: flex; align-items: center; gap: 4px; overflow: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .crumb { border: 0; padding: 1px 3px; background: transparent; color: inherit; cursor: pointer; }
+    .crumb:hover { color: var(--blue); text-decoration: underline; }
+    .crumb-separator { color: #a9b4bf; }
+    .current-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    h2 { margin: 0; font-size: 19px; line-height: 1.25; font-weight: 650; letter-spacing: -.01em; }
+    .current-description { max-width: 900px; margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .canvas-toolbar { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .graph-caption { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+    .legend-mark { width: 12px; height: 9px; display: inline-block; border: 1px solid #aebdca; border-radius: 3px; background: white; vertical-align: -1px; }
+    .toolbar-actions { display: flex; align-items: center; gap: 5px; }
+    .zoom-readout { min-width: 48px; color: var(--muted); text-align: center; font: 10px/1 var(--mono); }
+    .pager { display: flex; align-items: center; gap: 5px; color: var(--muted); font: 10px/1.3 var(--mono); }
+    .canvas-frame {
+      flex: 1; min-height: 260px; position: relative; overflow: hidden; border: 1px solid var(--line);
+      border-radius: 9px; background: #fbfcfd;
+    }
+    #diagram { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; cursor: grab; }
+    #diagram.is-panning { cursor: grabbing; }
+    .diagram-bg { fill: #fbfcfd; }
+    .edge-trunk, .edge-rail { fill: none; stroke: #aab6c2; stroke-width: 1.25; }
+    .edge-line { fill: none; stroke: #63778a; stroke-width: 1.35; }
+    .edge-line.is-containment { stroke: #8091a1; stroke-dasharray: 4 4; }
+    .edge-hit { fill: none; stroke: transparent; stroke-width: 16; cursor: pointer; }
+    .diagram-edge { cursor: pointer; }
+    .diagram-edge:hover .edge-line, .diagram-edge.is-selected .edge-line { stroke: var(--accent); stroke-width: 2.2; }
+    .diagram-edge.is-dimmed { opacity: .18; }
+    .edge-label-bg { fill: #fbfcfd; stroke: #e5eaf0; stroke-width: .8; }
+    .edge-label { fill: #506276; font: 11px var(--mono); text-anchor: middle; }
+    .edge-relation-label { fill: #52667a; font: 11px var(--mono); text-anchor: middle; }
+    .diagram-node { cursor: pointer; }
+    .node-card { fill: #fff; stroke: #cbd6e0; stroke-width: 1.25; }
+    .node-domain .node-card { fill: #f4f8fb; stroke: #95afc2; }
+    .node-file .node-card { fill: #f8fafc; stroke: #cad4de; }
+    .node-view .node-card { fill: #fff; stroke: #aebdc9; }
+    .node-module .node-card { fill: #fff; stroke: #aabac7; }
+    .node-group .node-card { fill: #edf4f8; stroke: #829eb2; }
+    .node-accent-bar { fill: #496f89; }
+    .node-file .node-accent-bar { fill: #9b7258; }
+    .node-domain .node-accent-bar { fill: #496f89; }
+    .node-label { fill: #1e2d3c; font: 650 15px var(--sans); }
+    .node-description { fill: #5e6d7e; font: 11px var(--sans); }
+    .node-kind { fill: #8793a0; font: 9px var(--mono); letter-spacing: .02em; }
+    .diagram-node:hover .node-card, .diagram-node.is-selected .node-card { stroke: var(--accent); stroke-width: 2; }
+    .diagram-node.is-dimmed { opacity: .24; }
+    .diagram-node:focus-visible .node-card { stroke: var(--focus); stroke-width: 2.5; }
+    .canvas-message {
+      position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center;
+      color: var(--muted); pointer-events: none;
+    }
+    .canvas-message[hidden] { display: none; }
+    .canvas-message-card { max-width: 480px; border: 1px solid var(--line); border-radius: 8px; padding: 16px 19px; background: var(--surface); }
+    .canvas-message-title { margin: 0 0 5px; color: var(--ink); font-weight: 650; }
+    .canvas-message-copy { margin: 0; font-size: 12px; }
+    .status-line { min-height: 16px; color: var(--muted); font-size: 10px; }
+    .detail-panel { min-width: 0; border-left: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+    .detail-head { min-height: 60px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding: 10px 14px; }
+    .detail-head h2 { font-size: 13px; letter-spacing: 0; }
+    .detail-head p { margin: 2px 0 0; color: var(--muted); font-size: 10px; }
+    .detail-scroll { min-height: 0; overflow: auto; padding: 14px; }
+    .detail-empty { display: grid; place-items: center; min-height: 180px; color: var(--muted); text-align: center; font-size: 12px; }
+    .detail-kicker { margin: 0 0 5px; color: var(--muted); font: 600 10px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    .detail-title { margin: 0 0 7px; font-size: 17px; line-height: 1.3; overflow-wrap: anywhere; }
+    .detail-copy { margin: 0 0 11px; color: #455669; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+    .detail-path { display: block; margin: 0 0 10px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: var(--surface-soft); color: #3b5268; font: 11px/1.5 var(--mono); overflow-wrap: anywhere; }
+    .detail-grid { display: grid; grid-template-columns: 82px minmax(0,1fr); gap: 5px 8px; margin: 8px 0 14px; font-size: 11px; }
+    .detail-grid dt { color: var(--muted); }
+    .detail-grid dd { min-width: 0; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+    .detail-section { margin-top: 15px; border-top: 1px solid var(--line); padding-top: 11px; }
+    .detail-section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 7px; }
+    .detail-section-head h3 { margin: 0; color: #34475a; font-size: 11px; font-weight: 700; }
+    .detail-section-head span { color: var(--soft); font: 10px/1.2 var(--mono); }
+    .detail-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+    .detail-row { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 7px; border: 1px solid #e8edf2; border-radius: 5px; padding: 6px 7px; background: #fcfdfe; }
+    .detail-row-main { min-width: 0; display: grid; gap: 2px; }
+    .detail-row-title { color: #30465a; font: 11px/1.45 var(--mono); overflow-wrap: anywhere; }
+    .detail-row-meta { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+    .detail-link { max-width: 100%; border: 0; padding: 0; background: transparent; color: #315d7a; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    .detail-link:hover { color: var(--accent); text-decoration: underline; }
+    .detail-note { margin: 6px 0; border-left: 3px solid #9ab0c1; padding: 6px 8px; background: #f3f7fa; color: #4d6174; font-size: 10px; line-height: 1.5; }
+    .detail-warning { border-color: #d5a083; background: #fff7f2; color: #76503e; }
+    .inline-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+    .list-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px; color: var(--muted); font: 10px/1.3 var(--mono); }
+    .list-pager-actions { display: flex; gap: 4px; }
+    .modal-layer {
+      position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px;
+      background: rgb(23 34 47 / 28%);
+    }
+    .modal-layer[hidden] { display: none; }
+    .modal {
+      width: min(760px, 100%); max-height: min(82vh, 820px); display: flex; flex-direction: column;
+      border: 1px solid #cdd7e0; border-radius: 10px; background: var(--surface);
+      box-shadow: 0 20px 60px rgb(20 34 48 / 18%);
+    }
+    .modal-header { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding: 15px 17px; }
+    .modal-header h2 { font-size: 16px; }
+    .modal-header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+    .modal-body { min-height: 0; overflow: auto; padding: 15px 17px 18px; }
+    .modal-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; margin-bottom: 13px; }
+    .metric { border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; background: var(--surface-soft); }
+    .metric-label { color: var(--muted); font-size: 10px; }
+    .metric-value { margin-top: 2px; color: #26394c; font: 650 16px/1.3 var(--mono); overflow-wrap: anywhere; }
+    .modal-copy { margin: 0 0 12px; color: #415368; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+    .coverage-search { width: 100%; height: 36px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 0 9px; background: #fff; }
+    .coverage-list { display: grid; gap: 5px; margin-top: 10px; }
+    .coverage-item { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; border: 1px solid #e7edf2; border-radius: 5px; padding: 7px 8px; }
+    .coverage-path { min-width: 0; color: #31536f; font: 10px/1.45 var(--mono); overflow-wrap: anywhere; }
+    .coverage-owner { display: block; color: var(--muted); font: 10px/1.35 var(--sans); }
+    .coverage-actions { display: flex; align-items: center; gap: 5px; }
+    .coverage-empty { padding: 18px 5px; color: var(--muted); text-align: center; font-size: 12px; }
+    .backdrop { display: none; }
+    @media (min-width: 971px) {
+      body.detail-collapsed .app-shell { grid-template-columns: var(--rail-width) minmax(320px,1fr); }
+      body.detail-collapsed .detail-panel { display: none; }
+      body.nav-collapsed .app-shell { grid-template-columns: minmax(320px,1fr) var(--detail-width); }
+      body.nav-collapsed .sidebar { display: none; }
+      body.nav-collapsed.detail-collapsed .app-shell { grid-template-columns: minmax(320px,1fr); }
+    }
+    @media (max-width: 1180px) {
+      :root { --detail-width: 320px; --rail-width: 220px; }
+      .top-meta .meta-chip:nth-child(3) { display: none; }
+    }
+    @media (max-width: 970px) {
+      .app-shell { grid-template-columns: var(--rail-width) minmax(320px,1fr); }
+      .detail-panel {
+        position: fixed; z-index: 10; top: var(--top-height); right: 0; bottom: 0; width: min(var(--detail-width), 92vw);
+        border-left: 1px solid var(--line); box-shadow: -12px 0 28px rgb(26 42 56 / 9%);
+        transform: translateX(102%); transition: transform .18s ease;
+      }
+      body.detail-open .detail-panel { transform: translateX(0); }
+      body.detail-open .backdrop { display: block; position: fixed; z-index: 8; inset: var(--top-height) 0 0; background: rgb(20 31 43 / 18%); }
+    }
+    @media (max-width: 690px) {
+      :root { --top-height: 62px; --rail-width: min(290px, 88vw); }
+      body { overflow: hidden; }
+      .topbar { gap: 9px; padding: 0 10px; }
+      .brand { min-width: 0; flex: 1; gap: 8px; }
+      .brand-mark { width: 30px; height: 30px; }
+      .brand h1 { max-width: 180px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .brand .eyebrow { display: none; }
+      .top-meta { display: none; }
+      .top-actions { gap: 3px; }
+      .top-actions .button { min-height: 31px; padding: 4px 7px; font-size: 11px; }
+      .top-actions .button-wide-label { display: none; }
+      .app-shell { display: block; position: relative; }
+      .sidebar {
+        position: fixed; z-index: 10; top: var(--top-height); left: 0; bottom: 0; width: var(--rail-width);
+        border-right: 1px solid var(--line); box-shadow: 12px 0 28px rgb(26 42 56 / 9%);
+        transform: translateX(-102%); transition: transform .18s ease;
+      }
+      body.sidebar-open .sidebar { transform: translateX(0); }
+      body.sidebar-open .backdrop { display: block; position: fixed; z-index: 8; inset: var(--top-height) 0 0; background: rgb(20 31 43 / 18%); }
+      main { height: 100%; padding: 12px 10px 9px; gap: 8px; }
+      .canvas-heading { gap: 3px; }
+      h2 { font-size: 16px; }
+      .current-description { font-size: 11px; }
+      .canvas-toolbar { align-items: flex-start; }
+      .graph-caption { max-width: 58%; }
+      .toolbar-actions { gap: 3px; }
+      .toolbar-actions .button { min-height: 30px; }
+      .canvas-frame { min-height: 220px; border-radius: 6px; }
+      .modal-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .modal { max-height: 88vh; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <button class="button button-icon button-quiet" id="sidebar-toggle" type="button" aria-label="打开源码单元目录" aria-expanded="false" aria-controls="sidebar">☰</button>
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">A/</div>
+      <div class="brand-copy">
+        <p class="eyebrow">SOURCE MAP · OFFLINE HTML</p>
+        <h1 id="atlas-title">项目架构地图</h1>
+      </div>
+    </div>
+    <div class="top-meta" aria-label="架构图生成信息">
+      <span class="meta-chip" id="meta-branch">main</span>
+      <span class="meta-chip" id="meta-commit">版本待注入</span>
+      <span class="meta-chip" id="meta-generated">生成时间待注入</span>
+    </div>
+    <div class="top-actions">
+      <button class="button button-quiet" id="updates-open" type="button"><span class="button-wide-label">更新说明</span><span aria-hidden="true">↻</span></button>
+      <button class="button button-quiet" id="coverage-open" type="button"><span class="button-wide-label">覆盖清单</span><span aria-hidden="true">▤</span></button>
+      <button class="button button-primary" id="export-svg" type="button"><span class="button-wide-label">导出当前图</span><span aria-hidden="true">⇩</span></button>
+      <button class="button button-icon button-quiet" id="detail-toggle" type="button" aria-label="打开技术详情" aria-expanded="false" aria-controls="detail-panel">ⓘ</button>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="架构图导航">
+      <div class="sidebar-scroll">
+        <div class="search-wrap">
+          <label class="search-label" for="atlas-search"><span>搜索源码单元、文件、函数</span><span class="shortcut">/</span></label>
+          <div class="search-input-wrap">
+            <input id="atlas-search" type="search" autocomplete="off" spellcheck="false" placeholder="输入名称或路径…" aria-controls="search-results">
+            <button id="clear-search" type="button" aria-label="清空搜索">×</button>
+          </div>
+          <div class="search-results" id="search-results" role="listbox" aria-label="搜索结果" hidden></div>
+        </div>
+        <section class="nav-section" aria-labelledby="views-heading">
+          <h2 class="nav-heading" id="views-heading"><span>架构视图</span><span id="view-count"></span></h2>
+          <nav class="nav-list" id="views-nav" aria-label="架构视图"></nav>
+        </section>
+        <section class="nav-section" aria-labelledby="domains-heading">
+          <h2 class="nav-heading" id="domains-heading"><span>领域与源码单元</span><span id="module-count"></span></h2>
+          <div id="domains-nav"></div>
+        </section>
+      </div>
+      <div class="sidebar-foot">图中关系来自此快照的源码索引。点击节点、连线或来源条目查看技术细节。</div>
+    </aside>
+
+    <main id="main-content">
+      <div class="canvas-heading">
+        <nav class="breadcrumbs" id="breadcrumbs" aria-label="当前位置"></nav>
+        <div class="current-title-row">
+          <div>
+            <h2 id="current-title">正在载入架构数据</h2>
+            <p class="current-description" id="current-description"></p>
+          </div>
+          <button class="button button-small button-quiet" id="back-button" type="button" aria-label="返回上一级">← 返回</button>
+        </div>
+      </div>
+      <div class="canvas-toolbar">
+        <div class="graph-caption">
+          <span><i class="legend-mark" aria-hidden="true"></i> 节点可点击查看细节</span>
+          <span>·</span>
+          <span>拖动平移，滚轮缩放</span>
+          <span id="graph-count"></span>
+        </div>
+        <div class="toolbar-actions">
+          <div class="pager" id="graph-pager" hidden>
+            <button class="button button-small button-icon" id="page-prev" type="button" aria-label="上一页">‹</button>
+            <span id="page-label"></span>
+            <button class="button button-small button-icon" id="page-next" type="button" aria-label="下一页">›</button>
+          </div>
+          <button class="button button-small button-icon" id="zoom-out" type="button" aria-label="缩小">−</button>
+          <span class="zoom-readout" id="zoom-readout">100%</span>
+          <button class="button button-small button-icon" id="zoom-in" type="button" aria-label="放大">+</button>
+          <button class="button button-small" id="fit-view" type="button" aria-label="适配画布">适配</button>
+        </div>
+      </div>
+      <div class="canvas-frame" id="canvas-frame">
+        <svg id="diagram" role="group" aria-labelledby="diagram-title diagram-desc" xmlns="http://www.w3.org/2000/svg">
+          <title id="diagram-title">项目架构图</title>
+          <desc id="diagram-desc">可缩放的交互式架构图。使用 Tab 选择节点或连线，按 Enter 查看技术细节。</desc>
+          <defs>
+            <marker id="atlas-arrow" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L8,4 L0,8 z" fill="#63778a"></path>
+            </marker>
+            <marker id="atlas-arrow-focus" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L8,4 L0,8 z" fill="#b4533c"></path>
+            </marker>
+          </defs>
+          <g id="diagram-root"></g>
+        </svg>
+        <div class="canvas-message" id="canvas-message" hidden>
+          <div class="canvas-message-card">
+            <p class="canvas-message-title" id="canvas-message-title"></p>
+            <p class="canvas-message-copy" id="canvas-message-copy"></p>
+          </div>
+        </div>
+      </div>
+      <div class="status-line" id="status-line" role="status" aria-live="polite"></div>
+    </main>
+
+    <aside class="detail-panel" id="detail-panel" aria-label="技术详情">
+      <div class="detail-head">
+        <div><h2>技术详情</h2><p id="detail-context">选择图中的节点或连线</p></div>
+        <button class="button button-icon button-quiet" id="detail-close" type="button" aria-label="关闭技术详情">×</button>
+      </div>
+      <div class="detail-scroll" id="detail-scroll">
+        <div class="detail-empty" id="detail-content">点击图中的节点、关系连线或源码引用，查看职责、实现入口、静态依赖与测试位置。</div>
+      </div>
+    </aside>
+  </div>
+  <div class="backdrop" id="drawer-backdrop" aria-hidden="true"></div>
+
+  <div class="modal-layer" id="updates-modal" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="updates-title" aria-describedby="updates-description">
+      <header class="modal-header">
+        <div><h2 id="updates-title">快照与更新说明</h2><p id="updates-description">显示此架构图的数据来源和本次索引变更。</p></div>
+        <button class="button button-icon button-quiet modal-close" type="button" aria-label="关闭更新说明">×</button>
+      </header>
+      <div class="modal-body" id="updates-body"></div>
+    </section>
+  </div>
+
+  <div class="modal-layer" id="coverage-modal" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="coverage-title" aria-describedby="coverage-description">
+      <header class="modal-header">
+        <div><h2 id="coverage-title">源码覆盖清单</h2><p id="coverage-description">浏览已索引源码、未映射文件和解析问题。</p></div>
+        <button class="button button-icon button-quiet modal-close" type="button" aria-label="关闭覆盖清单">×</button>
+      </header>
+      <div class="modal-body" id="coverage-body"></div>
+    </section>
+  </div>
+
+  <!-- Replace the data token in this script with serialized schema data. Escape every '<' as \u003c before embedding JSON in the script element. -->
+  <script type="application/json" id="atlas-data">__ATLAS_DATA__</script>
+  <script>
+  (function () {
+    "use strict";
+
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const NODE_W = 224;
+    const NODE_H = 88;
+    const PAGE_SIZE = 4;
+    const SEARCH_PAGE_SIZE = 20;
+    const FILE_PAGE_SIZE = 40;
+    const SYMBOL_PAGE_SIZE = 60;
+    const MODAL_PAGE_SIZE = 50;
+    const $ = function (id) { return document.getElementById(id); };
+    const state = {
+      data: null, route: null, graph: null, selected: null, camera: null, fitBox: null,
+      searchPage: 0, searchTimer: 0, modalFocus: null, coveragePage: 0, coverageQuery: "",
+      detailPages: Object.create(null), reverseImports: new Map(), fileByPath: new Map(),
+      moduleById: new Map(), domainById: new Map(), viewById: new Map(),
+      childrenById: new Map(), modulesByDomain: new Map(), navBuilt: false
+    };
+
+    function asArray(value) { return Array.isArray(value) ? value : []; }
+    function asObject(value) { return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }
+    function string(value, fallback) {
+      if (value === null || value === undefined) return fallback || "";
+      return typeof value === "string" ? value : String(value);
+    }
+    function cleanId(value) { return string(value, "").trim(); }
+    function finite(value, fallback) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    }
+    function normalizedPath(value) { return string(value, "").replace(/\\/g, "/").toLowerCase(); }
+    function basename(path) {
+      const parts = string(path, "").replace(/\\/g, "/").split("/");
+      return parts[parts.length - 1] || string(path, "");
+    }
+    function clear(element) { while (element.firstChild) element.removeChild(element.firstChild); }
+    function el(tag, className, parent) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (parent) parent.appendChild(node);
+      return node;
+    }
+    function setText(element, value) { element.textContent = string(value, ""); return element; }
+    function svgEl(tag, attributes, parent) {
+      const node = document.createElementNS(SVG_NS, tag);
+      Object.keys(attributes || {}).forEach(function (key) {
+        const value = attributes[key];
+        if (value !== null && value !== undefined) node.setAttribute(key, String(value));
+      });
+      if (parent) parent.appendChild(node);
+      return node;
+    }
+    function makeButton(parent, label, className, action, ariaLabel) {
+      const button = el("button", className || "button button-small", parent);
+      button.type = "button";
+      button.textContent = string(label, "");
+      if (ariaLabel) button.setAttribute("aria-label", ariaLabel);
+      button.addEventListener("click", action);
+      return button;
+    }
+    function setStatus(message) { setText($("status-line"), message); }
+    function safeCount(value, actual) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : actual;
+    }
+    function selectedText(value) { return string(value, ""); }
+    function classColor(value, fallback) {
+      const color = string(value, "");
+      return /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3}|[0-9a-fA-F]{5})?$/.test(color) ? color : fallback;
+    }
+    function domainColor(domainId) {
+      const domain = state.domainById.get(cleanId(domainId));
+      return classColor(domain && domain.color, "#496f89");
+    }
+    function moduleForDomain(moduleId) {
+      const module = state.moduleById.get(cleanId(moduleId));
+      return module && state.domainById.get(cleanId(module.domain));
+    }
+    function countLabel(count) { return new Intl.NumberFormat("zh-CN").format(count); }
+    function visualUnits(value) {
+      return Array.from(string(value, "")).reduce(function (total, character) {
+        return total + (/^[\u1100-\u11ff\u2e80-\u9fff\uf900-\ufaff\uff01-\uff60]$/.test(character) ? 2 : 1);
+      }, 0);
+    }
+    function ellipsizeUnits(value, limit) {
+      let result = "";
+      for (const character of Array.from(string(value, ""))) {
+        if (visualUnits(result + character) > Math.max(1, limit - 2)) break;
+        result += character;
+      }
+      return result + "…";
+    }
+    function wrapLabel(value, limit, maxLines) {
+      const tokens = string(value, "").trim().split(/(\s+)/).filter(Boolean);
+      const lines = [];
+      let line = "", overflow = false;
+      for (let i = 0; i < tokens.length && !overflow; i += 1) {
+        const token = tokens[i];
+        if (visualUnits(token) <= limit) {
+          const candidate = line + token;
+          if (visualUnits(candidate) <= limit) line = candidate;
+          else {
+            if (line.trim()) lines.push(line.trimEnd());
+            if (lines.length >= maxLines) { overflow = true; break; }
+            line = token.trimStart();
+          }
+          continue;
+        }
+        for (const character of Array.from(token)) {
+          if (visualUnits(line + character) > limit) {
+            if (line.trim()) lines.push(line.trimEnd());
+            if (lines.length >= maxLines) { overflow = true; break; }
+            line = "";
+          }
+          line += character;
+        }
+      }
+      if (line.trim() && lines.length < maxLines) lines.push(line.trimEnd());
+      if (overflow && lines.length) lines[lines.length - 1] = ellipsizeUnits(lines[lines.length - 1], limit);
+      return lines.length ? lines : ["未命名"];
+    }
+    function truncate(value, limit) {
+      const text = string(value, "");
+      return visualUnits(text) > limit ? ellipsizeUnits(text, limit) : text;
+    }
+    function translateStatus(value) {
+      const status = string(value, "").toLowerCase();
+      const known = {
+        implemented: "已实现", complete: "已实现", active: "当前使用",
+        planned: "规划中", proposed: "规划中", deprecated: "已弃用",
+        archived: "已归档", partial: "部分实现", unknown: "待核实",
+        runtime_verified: "已运行验证", source_verified: "源码已核实"
+      };
+      return known[status] || string(value, "未标注");
+    }
+    function staleEvidenceItems(value) {
+      if (Array.isArray(value)) return value;
+      if (value && typeof value === "object") return Object.keys(value).map(function (key) {
+        const entry = value[key];
+        return entry && typeof entry === "object" ? Object.assign({ id: key }, entry) : { id: key, detail: string(entry, "") };
+      });
+      return [];
+    }
+    function showMessage(title, copy) {
+      $("canvas-message").hidden = false;
+      setText($("canvas-message-title"), title);
+      setText($("canvas-message-copy"), copy);
+    }
+    function hideMessage() { $("canvas-message").hidden = true; }
+
+    function parseAtlas() {
+      const raw = $("atlas-data").textContent.trim();
+      if (!raw || raw === ("__ATLAS_" + "DATA__")) throw new Error("模板还未注入架构索引数据。");
+      const data = JSON.parse(raw);
+      data.meta = asObject(data.meta);
+      data.domains = asArray(data.domains);
+      data.modules = asArray(data.modules);
+      data.files = asArray(data.files);
+      data.views = asArray(data.views);
+      data.coverage = asObject(data.coverage);
+      data.changes = asObject(data.changes);
+      return data;
+    }
+
+    function buildIndexes() {
+      state.moduleById.clear();
+      state.domainById.clear();
+      state.viewById.clear();
+      state.fileByPath.clear();
+      state.reverseImports.clear();
+      state.childrenById.clear();
+      state.modulesByDomain.clear();
+      state.data.modules.forEach(function (module) {
+        const id = cleanId(module.id);
+        if (id) {
+          state.moduleById.set(id, module);
+          state.childrenById.set(id, []);
+          const domainId = cleanId(module.domain);
+          if (!state.modulesByDomain.has(domainId)) state.modulesByDomain.set(domainId, []);
+          state.modulesByDomain.get(domainId).push(module);
+        }
+      });
+      state.data.domains.forEach(function (domain) {
+        const id = cleanId(domain.id);
+        if (id) state.domainById.set(id, domain);
+      });
+      state.data.views.forEach(function (view) {
+        const id = cleanId(view.id);
+        if (id) state.viewById.set(id, view);
+      });
+      state.data.modules.forEach(function (module) {
+        const parentId = cleanId(module.parent);
+        if (state.childrenById.has(parentId)) state.childrenById.get(parentId).push(module);
+      });
+      state.childrenById.forEach(function (items) {
+        items.sort(function (a, b) { return string(a.label, a.id).localeCompare(string(b.label, b.id), "zh-CN"); });
+      });
+      state.data.files.forEach(function (file) {
+        const path = string(file.path, "");
+        if (path) state.fileByPath.set(normalizedPath(path), file);
+      });
+      state.data.files.forEach(function (file) {
+        const importer = string(file.path, "");
+        asArray(file.imports).forEach(function (dependency) {
+          const target = string(dependency && dependency.target, "");
+          if (!target) return;
+          const key = normalizedPath(target);
+          if (!state.reverseImports.has(key)) state.reverseImports.set(key, []);
+          state.reverseImports.get(key).push({ file: file, dependency: dependency, importer: importer });
+        });
+      });
+    }
+
+    function routeHash(route) {
+      const params = new URLSearchParams();
+      if (route.kind === "overview") params.set("overview", "1");
+      else {
+        params.set(route.kind, string(route.value, ""));
+        if (route.page) params.set("page", String(route.page));
+        if (route.line) params.set("line", String(route.line));
+        if (route.symbol) params.set("symbol", string(route.symbol, ""));
+      }
+      return "#" + params.toString();
+    }
+    function pushRoute(route) {
+      const nextHash = routeHash(route);
+      if (window.location.hash !== nextHash) window.history.pushState(null, "", nextHash);
+    }
+    function readRouteHash() {
+      const params = new URLSearchParams(window.location.hash.slice(1));
+      if (params.has("view")) return { kind: "view", value: params.get("view"), page: finite(params.get("page"), 0) };
+      if (params.has("domain")) return { kind: "domain", value: params.get("domain"), page: finite(params.get("page"), 0) };
+      if (params.has("module")) return { kind: "module", value: params.get("module"), page: finite(params.get("page"), 0) };
+      if (params.has("file")) return { kind: "file", value: params.get("file"), page: finite(params.get("page"), 0), line: finite(params.get("line"), 0), symbol: params.get("symbol") || "" };
+      if (params.has("overview")) return { kind: "overview" };
+      return null;
+    }
+
+    function fileForPath(path) { return state.fileByPath.get(normalizedPath(path)) || null; }
+    function filesForModule(moduleId) {
+      const module = state.moduleById.get(cleanId(moduleId));
+      const paths = [];
+      const seen = new Set();
+      asArray(module && module.files).forEach(function (entry) {
+        const path = typeof entry === "string" ? entry : string(entry && entry.path, "");
+        const key = normalizedPath(path);
+        if (path && !seen.has(key)) { seen.add(key); paths.push(path); }
+      });
+      state.data.files.forEach(function (file) {
+        if (cleanId(file.module) !== cleanId(moduleId)) return;
+        const path = string(file.path, "");
+        const key = normalizedPath(path);
+        if (path && !seen.has(key)) { seen.add(key); paths.push(path); }
+      });
+      return paths;
+    }
+    function childModules(moduleId) {
+      return state.childrenById.get(cleanId(moduleId)) || [];
+    }
+    function modulesInDomain(domainId) {
+      return state.modulesByDomain.get(cleanId(domainId)) || [];
+    }
+    function rootModules(domainId) {
+      const all = modulesInDomain(domainId);
+      const roots = all.filter(function (module) {
+        const parent = state.moduleById.get(cleanId(module.parent));
+        return !parent || cleanId(parent.domain) !== cleanId(domainId);
+      });
+      return { items: roots.length ? roots : all, fallback: roots.length === 0 && all.length > 0 };
+    }
+
+    function autoGroupGraph(kind, id, page) {
+      const start = Math.max(0, Math.floor(finite(page, 0)));
+      let header;
+      let items = [];
+      let relation = "包含";
+      let pageTitle = "";
+      let pageDescription = "";
+      let fallbackNote = "";
+      if (kind === "domain") {
+        const domain = state.domainById.get(cleanId(id));
+        if (!domain) return null;
+        const roots = rootModules(id);
+        items = roots.items;
+        if (roots.fallback) fallbackNote = "未发现可确认的父级源码单元根节点，当前列出此领域全部源码单元。";
+        pageTitle = string(domain.label, id);
+        pageDescription = string(domain.description, "该领域下的源码单元。");
+        header = {
+          id: "__atlas_domain_header__", label: pageTitle, description: pageDescription,
+          kind: "group", domainId: id, detail: pageDescription
+        };
+        relation = "包含";
+        fallbackNote = roots.fallback ? fallbackNote : "";
+      } else {
+        const module = state.moduleById.get(cleanId(id));
+        if (!module) return null;
+        const children = childModules(id);
+        if (children.length) {
+          items = children;
+          relation = "包含";
+        } else {
+          items = filesForModule(id).map(function (path) {
+            const file = fileForPath(path);
+            return {
+              id: "file:" + path, path: path, label: basename(path), module: id,
+              description: file ? string(file.summary, "") : "此路径未出现在文件索引中",
+              kind: "file", filePath: path
+            };
+          });
+          relation = "包含文件";
+        }
+        pageTitle = string(module.label, id);
+        pageDescription = string(module.description, "查看此源码单元的子级单元、文件和源码入口。");
+        header = Object.assign({}, module, { id: "__atlas_module_header__", kind: "module-header", sourceModuleId: id });
+      }
+      const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+      const safePage = Math.min(start, pageCount - 1);
+      const visibleItems = items.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+      const positions = [];
+      visibleItems.forEach(function (item, index) {
+        positions.push(Object.assign({}, item, {
+          x: 24 + index * 264, y: 248, kind: item.kind || (item.path ? "file" : "module")
+        }));
+      });
+      const headerCenter = visibleItems.length
+        ? visibleItems.reduce(function (sum, item, index) { return sum + 24 + index * 264 + NODE_W / 2; }, 0) / visibleItems.length
+        : 532;
+      const headerNode = Object.assign({}, header, { x: headerCenter - NODE_W / 2, y: 24, w: NODE_W, h: NODE_H });
+      const childrenWithDefaults = positions.map(function (node) {
+        return Object.assign({ w: NODE_W, h: NODE_H }, node);
+      });
+      const edges = childrenWithDefaults.map(function (node) {
+        return {
+          id: "contains:" + cleanId(header.id) + ":" + cleanId(node.id || node.path),
+          from: headerNode.id, to: node.id || node.path, label: "包含",
+          detail: pageTitle + " " + (node.kind === "file" ? "包含文件" : "包含子级源码单元") + " " + string(node.label, node.path),
+          refs: [], relationKind: "containment"
+        };
+      });
+      return {
+        id: kind + ":" + cleanId(id), title: pageTitle, description: pageDescription,
+        nodes: [headerNode].concat(childrenWithDefaults), edges: edges,
+        autoContainment: true, headerNode: headerNode, relation: relation,
+        page: safePage, pageCount: pageCount, itemCount: items.length, fallbackNote: fallbackNote,
+        mode: kind, ownerId: id
+      };
+    }
+
+    function overviewGraph(page) {
+      const domains = state.data.domains.slice().sort(function (a, b) {
+        return string(a.label, a.id).localeCompare(string(b.label, b.id), "zh-CN");
+      });
+      const pageCount = Math.max(1, Math.ceil(domains.length / PAGE_SIZE));
+      const safePage = Math.min(Math.max(0, Math.floor(finite(page, 0))), pageCount - 1);
+      const items = domains.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+      const nodes = items.map(function (domain, index) {
+        return {
+          id: "domain:" + cleanId(domain.id), label: string(domain.label, domain.id),
+          description: string(domain.description, ""),
+          kind: "domain", domainId: cleanId(domain.id),
+          moduleCount: modulesInDomain(domain.id).length,
+          x: 24 + index * 264, y: 156, w: NODE_W, h: NODE_H
+        };
+      });
+      return {
+        id: "__overview__", title: "项目领域总览",
+        description: "按领域浏览当前源码索引。选择一个领域进入源码单元图，也可以使用左侧搜索定位文件、接口与函数。",
+        nodes: nodes, edges: [], page: safePage, pageCount: pageCount,
+        itemCount: domains.length, mode: "overview"
+      };
+    }
+
+    function staticGraph(view) {
+      const nodes = asArray(view.nodes).map(function (node, index) {
+        const cloned = Object.assign({}, node);
+        cloned.id = cleanId(node.id) || "node-" + index;
+        cloned.label = string(node.label, cloned.id);
+        cloned.kind = "view";
+        cloned.x = finite(node.x, 24 + (index % 4) * 264);
+        cloned.y = finite(node.y, 24 + Math.floor(index / 4) * 142);
+        cloned.w = NODE_W;
+        cloned.h = NODE_H;
+        cloned.refs = asArray(node.refs);
+        return cloned;
+      });
+      return {
+        id: cleanId(view.id), title: string(view.label, view.id),
+        description: string(view.description, ""), nodes: nodes,
+        edges: asArray(view.edges).map(function (edge, index) {
+          return Object.assign({}, edge, { id: cleanId(edge.id) || "edge-" + index, refs: asArray(edge.refs) });
+        }),
+        mode: "view", rawView: view
+      };
+    }
+
+    function fileDependencyGraph(path, page) {
+      const file=fileForPath(path);
+      if (!file) return overviewGraph(0);
+      const outgoing=[...new Map(asArray(file.imports).filter(function(i){return i.target;}).map(function(i){return [i.target,i];})).values()];
+      const incoming=[...new Map((state.reverseImports.get(normalizedPath(path))||[]).map(function(i){return [i.importer,i];})).values()];
+      const pageCount=Math.max(1,Math.ceil(outgoing.length/4),Math.ceil(incoming.length/4));
+      const current=Math.min(Math.max(0,page||0),pageCount-1);
+      function node(p,x,y) {const f=fileForPath(p);return {id:p,label:basename(p),description:p,kind:"file",filePath:p,module:f&&f.module,x:x,y:y,w:NODE_W,h:NODE_H};}
+      const nodes=[node(path,390,230)],edges=[];
+      outgoing.slice(current*4,current*4+4).forEach(function(i,n){
+        nodes.push(node(i.target,740,n*170));
+        edges.push({id:"import-out:"+n,from:path,to:i.target,label:"静态 import",relationKind:"static_import",status:"source_verified",detail:"当前文件声明导入此源码文件。Python AST / TS 启发式解析；不代表实际运行调用。",refs:[{path:path,line:i.line,symbol:i.module}]});
+      });
+      incoming.slice(current*4,current*4+4).forEach(function(i,n){
+        nodes.push(node(i.importer,40,n*170));
+        edges.push({id:"import-in:"+n,from:i.importer,to:path,label:"静态 import",relationKind:"static_import",status:"source_verified",detail:"此文件声明导入当前源码文件；条件分支和动态行为未展开。",refs:[{path:i.importer,line:i.dependency.line,symbol:i.dependency.module}]});
+      });
+      return {id:"file:"+path,title:basename(path)+" · 静态依赖",description:"左侧：谁导入当前文件 · 中央：当前文件 · 右侧：当前文件导入谁。只显示已解析仓内路径；其余 import 在详情中可查。",nodes:nodes,edges:edges,page:current,pageCount:pageCount,itemCount:incoming.length+outgoing.length,mode:"file"};
+    }
+
+    function setRoute(route, updateHash) {
+      state.route = route;
+      if (updateHash) pushRoute(route);
+      state.selected = null;
+      state.detailPages = Object.create(null);
+      let graph = null;
+      if (route.kind === "overview") graph = overviewGraph(route.page || 0);
+      else if (route.kind === "domain") graph = autoGroupGraph("domain", route.value, route.page || 0);
+      else if (route.kind === "module") graph = autoGroupGraph("module", route.value, route.page || 0);
+      else if (route.kind === "file") {
+        graph = fileDependencyGraph(route.value, route.page || 0);
+      } else if (route.kind === "view") {
+        const view = state.viewById.get(cleanId(route.value));
+        if (view) graph = staticGraph(view);
+      }
+      if (!graph) {
+        route = { kind: "overview" };
+        state.route = route;
+        if (updateHash) pushRoute(route);
+        graph = overviewGraph(0);
+      }
+      state.graph = graph;
+      state.camera = null;
+      renderNavigation();
+      renderHeading();
+      renderPager();
+      renderDiagram(true);
+      renderDetails();
+      closeDrawers();
+    }
+
+    function renderNavigation() {
+      if (state.navBuilt) { updateNavigationActive(); return; }
+      const viewsNav = $("views-nav");
+      clear(viewsNav);
+      const overviewButton = el("button", "nav-item", viewsNav);
+      overviewButton.type = "button";
+      overviewButton.setAttribute("data-route-kind", "overview");
+      overviewButton.setAttribute("data-route-id", "");
+      overviewButton.setAttribute("aria-current", state.route && state.route.kind === "overview" ? "page" : "false");
+      el("span", "nav-dot", overviewButton);
+      setText(el("span", "nav-item-text", overviewButton), "项目领域总览");
+      overviewButton.addEventListener("click", function () { setRoute({ kind: "overview" }, true); });
+      state.data.views.forEach(function (view) {
+        const button = el("button", "nav-item", viewsNav);
+        button.type = "button";
+        button.setAttribute("data-route-kind", "view");
+        button.setAttribute("data-route-id", cleanId(view.id));
+        const active = state.route && state.route.kind === "view" && cleanId(state.route.value) === cleanId(view.id);
+        button.setAttribute("aria-current", active ? "page" : "false");
+        el("span", "nav-dot", button);
+        setText(el("span", "nav-item-text", button), string(view.label, view.id));
+        button.title = string(view.description, view.label);
+        button.addEventListener("click", function () { setRoute({ kind: "view", value: cleanId(view.id) }, true); });
+      });
+      setText($("view-count"), countLabel(state.data.views.length));
+      setText($("module-count"), countLabel(state.data.modules.length));
+
+      const domainsNav = $("domains-nav");
+      clear(domainsNav);
+      state.data.domains.forEach(function (domain) {
+        const group = el("details", "domain-group", domainsNav);
+        const isCurrent = state.route && state.route.kind === "domain" && cleanId(state.route.value) === cleanId(domain.id);
+        group.open = !!isCurrent;
+        const summary = el("summary", "domain-summary", group);
+        summary.setAttribute("data-domain-id", cleanId(domain.id));
+        setText(el("span", "domain-summary-label", summary), string(domain.label, domain.id));
+        setText(el("span", "nav-count", summary), countLabel(modulesInDomain(domain.id).length));
+        summary.addEventListener("click", function (event) {
+          if (event.target === summary || summary.contains(event.target)) {
+            if (!group.open) setRoute({ kind: "domain", value: cleanId(domain.id) }, true);
+          }
+        });
+        const tree = el("div", "module-tree", group);
+        const roots = rootModules(domain.id);
+        const visited = new Set();
+        roots.items.forEach(function (module) { renderModuleBranch(tree, module, 0, visited, 0); });
+        modulesInDomain(domain.id).forEach(function (module) {
+          const id = cleanId(module.id);
+          if (!visited.has(id)) {
+            const row = el("div", "tree-branch", tree);
+            const button = makeButton(row, string(module.label, id), "nav-item", function () {
+              setRoute({ kind: "module", value: id }, true);
+            });
+            button.title = string(module.path, module.label);
+            visited.add(id);
+          }
+        });
+        if (!roots.items.length) setText(el("div", "nav-empty", tree), "此领域暂无源码单元条目");
+      });
+      state.navBuilt = true;
+      updateNavigationActive();
+    }
+
+    function renderModuleBranch(parent, module, depth, visited, count) {
+      const id = cleanId(module.id);
+      if (!id || visited.has(id) || count > 3000) return;
+      visited.add(id);
+      const row = el("div", depth ? "tree-branch" : "", parent);
+      const button = el("button", "nav-item", row);
+      button.type = "button";
+      button.setAttribute("data-route-kind", "module");
+      button.setAttribute("data-route-id", id);
+      const active = state.route && (state.route.kind === "module" && cleanId(state.route.value) === id ||
+        state.route.kind === "file" && cleanId((fileForPath(state.route.value) || {}).module) === id);
+      button.setAttribute("aria-current", active ? "page" : "false");
+      el("span", "nav-dot", button);
+      setText(el("span", "nav-item-text", button), string(module.label, id));
+      button.title = string(module.path, module.label);
+      button.addEventListener("click", function () { setRoute({ kind: "module", value: id }, true); });
+      childModules(id).forEach(function (child) { renderModuleBranch(parent, child, depth + 1, visited, count + 1); });
+    }
+
+    function updateNavigationActive() {
+      document.querySelectorAll("#views-nav .nav-item, #domains-nav .nav-item").forEach(function (button) {
+        const kind = button.getAttribute("data-route-kind");
+        const id = button.getAttribute("data-route-id");
+        let active = false;
+        if (kind === "overview") active = state.route && state.route.kind === "overview";
+        else if (kind === "view") active = state.route && state.route.kind === "view" && cleanId(state.route.value) === id;
+        else if (kind === "module") {
+          const file = state.route && state.route.kind === "file" ? fileForPath(state.route.value) : null;
+          active = state.route && state.route.kind === "module" && cleanId(state.route.value) === id ||
+            !!(file && cleanId(file.module) === id);
+        }
+        button.setAttribute("aria-current", active ? "page" : "false");
+      });
+      document.querySelectorAll("#domains-nav .domain-group").forEach(function (group) {
+        const summary = group.querySelector(".domain-summary");
+        const domainId = summary && summary.getAttribute("data-domain-id");
+        let routeDomain = state.route && state.route.kind === "domain" ? cleanId(state.route.value) : "";
+        if (state.route && (state.route.kind === "module" || state.route.kind === "file")) {
+          const file = state.route.kind === "file" ? fileForPath(state.route.value) : null;
+          const module = state.moduleById.get(cleanId(state.route.kind === "module" ? state.route.value : file && file.module));
+          routeDomain = cleanId(module && module.domain);
+        }
+        group.open = !!routeDomain && routeDomain === domainId;
+      });
+    }
+
+    function renderHeading() {
+      const graph = state.graph;
+      if (!graph) return;
+      setText($("current-title"), graph.title);
+      setText($("current-description"), graph.description);
+      const breadcrumbs = $("breadcrumbs");
+      clear(breadcrumbs);
+      const overviewCrumb = makeButton(breadcrumbs, "项目总览", "crumb", function () {
+        setRoute({ kind: "overview" }, true);
+      });
+      overviewCrumb.setAttribute("aria-label", "返回项目总览");
+      const separator = el("span", "crumb-separator", breadcrumbs);
+      setText(separator, "›");
+      if (state.route.kind === "view") {
+        makeButton(breadcrumbs, graph.title, "crumb", function () {
+          setRoute({ kind: "view", value: state.route.value }, true);
+        });
+      } else if (state.route.kind === "domain") {
+        const domain = state.domainById.get(cleanId(state.route.value));
+        makeButton(breadcrumbs, string(domain && domain.label, state.route.value), "crumb", function () {
+          setRoute({ kind: "domain", value: state.route.value, page: state.route.page }, true);
+        });
+      } else if (state.route.kind === "module" || state.route.kind === "file") {
+        const file = state.route.kind === "file" ? fileForPath(state.route.value) : null;
+        const moduleId = cleanId(state.route.kind === "module" ? state.route.value : file && file.module);
+        const module = state.moduleById.get(moduleId);
+        const ancestry = [];
+        let cursor = module;
+        const seen = new Set();
+        while (cursor && !seen.has(cleanId(cursor.id)) && ancestry.length < 20) {
+          seen.add(cleanId(cursor.id));
+          ancestry.unshift(cursor);
+          cursor = state.moduleById.get(cleanId(cursor.parent));
+        }
+        ancestry.forEach(function (item) {
+          makeButton(breadcrumbs, string(item.label, item.id), "crumb", function () {
+            setRoute({ kind: "module", value: cleanId(item.id) }, true);
+          });
+          el("span", "crumb-separator", breadcrumbs).textContent = "›";
+        });
+        if (state.route.kind === "file") {
+          const crumb = makeButton(breadcrumbs, basename(state.route.value), "crumb", function () {
+            openFile(state.route.value, state.route.line, state.route.symbol);
+          });
+          crumb.title = state.route.value;
+        } else if (!module) {
+          makeButton(breadcrumbs, graph.title, "crumb", function () {
+            setRoute({ kind: "module", value: state.route.value }, true);
+          });
+        }
+      } else {
+        makeButton(breadcrumbs, graph.title, "crumb", function () { setRoute({ kind: "overview" }, true); });
+      }
+      $("back-button").disabled = state.route.kind === "overview" || state.route.kind === "view";
+    }
+
+    function backRoute() {
+      if (!state.route) return;
+      if (state.route.kind === "overview" || state.route.kind === "view") return;
+      if (state.route.kind === "file") {
+        const file = fileForPath(state.route.value);
+        if (file && file.module) setRoute({ kind: "module", value: cleanId(file.module) }, true);
+        else setRoute({ kind: "overview" }, true);
+        return;
+      }
+      if (state.route.kind === "domain") { setRoute({ kind: "overview" }, true); return; }
+      const module = state.moduleById.get(cleanId(state.route.value));
+      const parent = state.moduleById.get(cleanId(module && module.parent));
+      if (parent) setRoute({ kind: "module", value: cleanId(parent.id) }, true);
+      else if (module && state.domainById.has(cleanId(module.domain))) setRoute({ kind: "domain", value: cleanId(module.domain) }, true);
+      else setRoute({ kind: "overview" }, true);
+    }
+
+    function graphNodesMap() {
+      const map = new Map();
+      asArray(state.graph && state.graph.nodes).forEach(function (node) { map.set(cleanId(node.id), node); });
+      return map;
+    }
+    function boundsForGraph(graph) {
+      const nodes = asArray(graph.nodes);
+      if (!nodes.length) return { x: 0, y: 0, width: 960, height: 600 };
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      nodes.forEach(function (node) {
+        const x = finite(node.x, 0), y = finite(node.y, 0);
+        const w = finite(node.w, NODE_W), h = finite(node.h, NODE_H);
+        minX = Math.min(minX, x); minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+      });
+      asArray(graph.edges).forEach(function (edge) {
+        const from = graphNodesMap().get(cleanId(edge.from));
+        const to = graphNodesMap().get(cleanId(edge.to));
+        if (from && to) {
+          minX = Math.min(minX, from.x, to.x); maxX = Math.max(maxX, from.x + NODE_W, to.x + NODE_W);
+          minY = Math.min(minY, from.y); maxY = Math.max(maxY, from.y + NODE_H, to.y + NODE_H);
+        }
+      });
+      if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 960, height: 600 };
+      const padding = 64;
+      return { x: minX - padding, y: minY - padding, width: Math.max(320, maxX - minX + padding * 2), height: Math.max(240, maxY - minY + padding * 2) };
+    }
+    function fitCamera() {
+      if (!state.graph) return;
+      state.fitBox = boundsForGraph(state.graph);
+      state.camera = Object.assign({}, state.fitBox);
+      applyCamera();
+    }
+    function applyCamera() {
+      if (!state.camera) return;
+      $("diagram").setAttribute("viewBox", [state.camera.x, state.camera.y, state.camera.width, state.camera.height].join(" "));
+      setText($("zoom-readout"), Math.round(state.fitBox.width / state.camera.width * 100) + "%");
+    }
+
+    function segmentHitsRect(a, b, rect, inset) {
+      const gap = inset || 1;
+      const left = rect.x + gap, right = rect.x + rect.w - gap;
+      const top = rect.y + gap, bottom = rect.y + rect.h - gap;
+      if (Math.abs(a.x - b.x) < .01) {
+        return a.x > left && a.x < right && Math.max(Math.min(a.y, b.y), top) < Math.min(Math.max(a.y, b.y), bottom);
+      }
+      if (Math.abs(a.y - b.y) < .01) {
+        return a.y > top && a.y < bottom && Math.max(Math.min(a.x, b.x), left) < Math.min(Math.max(a.x, b.x), right);
+      }
+      return true;
+    }
+    function pathIsClear(points, nodes, sourceId, targetId) {
+      for (let i = 0; i < points.length - 1; i += 1) {
+        nodes.forEach(function (node) {
+          const id = cleanId(node.id);
+          if ((i === 0 && id === sourceId) || (i === points.length - 2 && id === targetId)) return;
+          if (segmentHitsRect(points[i], points[i + 1], { x: finite(node.x, 0), y: finite(node.y, 0), w: NODE_W, h: NODE_H }, 2)) {
+            points.blocked = true;
+          }
+        });
+      }
+      return !points.blocked;
+    }
+    function routeEdge(edge, from, to, allNodes) {
+      const sourceId = cleanId(from.id), targetId = cleanId(to.id);
+      const a = { x: finite(from.x, 0), y: finite(from.y, 0), w: NODE_W, h: NODE_H };
+      const b = { x: finite(to.x, 0), y: finite(to.y, 0), w: NODE_W, h: NODE_H };
+      const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
+      const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+      const dx = bc.x - ac.x, dy = bc.y - ac.y;
+      const sourceSides = Math.abs(dx) > Math.abs(dy)
+        ? [dx >= 0 ? "right" : "left", dy >= 0 ? "bottom" : "top", dx >= 0 ? "left" : "right"]
+        : [dy >= 0 ? "bottom" : "top", dx >= 0 ? "right" : "left", dy >= 0 ? "top" : "bottom"];
+      const targetSides = Math.abs(dx) > Math.abs(dy)
+        ? [dx >= 0 ? "left" : "right", dy >= 0 ? "top" : "bottom", dx >= 0 ? "right" : "left"]
+        : [dy >= 0 ? "top" : "bottom", dx >= 0 ? "left" : "right", dy >= 0 ? "bottom" : "top"];
+      const sidePoint = function (rect, side, outward) {
+        if (side === "left") return { x: rect.x + (outward ? -14 : 0), y: rect.y + rect.h / 2 };
+        if (side === "right") return { x: rect.x + rect.w + (outward ? 14 : 0), y: rect.y + rect.h / 2 };
+        if (side === "top") return { x: rect.x + rect.w / 2, y: rect.y + (outward ? -14 : 0) };
+        return { x: rect.x + rect.w / 2, y: rect.y + rect.h + (outward ? 14 : 0) };
+      };
+      const global = boundsForGraph(state.graph);
+      let best = null;
+      sourceSides.forEach(function (sourceSide) {
+        targetSides.forEach(function (targetSide) {
+          const sourceAnchor = sidePoint(a, sourceSide, false);
+          const sourceExit = sidePoint(a, sourceSide, true);
+          const targetAnchor = sidePoint(b, targetSide, false);
+          const targetExit = sidePoint(b, targetSide, true);
+          const candidates = [];
+          const midX = (sourceExit.x + targetExit.x) / 2;
+          const midY = (sourceExit.y + targetExit.y) / 2;
+          candidates.push([sourceAnchor, sourceExit, { x: midX, y: sourceExit.y }, { x: midX, y: targetExit.y }, targetExit, targetAnchor]);
+          candidates.push([sourceAnchor, sourceExit, { x: sourceExit.x, y: midY }, { x: targetExit.x, y: midY }, targetExit, targetAnchor]);
+          const lanesX = [global.x - 24, global.x + global.width + 24];
+          const lanesY = [global.y - 24, global.y + global.height + 24];
+          lanesX.forEach(function (laneX) {
+            candidates.push([sourceAnchor, sourceExit, { x: laneX, y: sourceExit.y }, { x: laneX, y: targetExit.y }, targetExit, targetAnchor]);
+          });
+          lanesY.forEach(function (laneY) {
+            candidates.push([sourceAnchor, sourceExit, { x: sourceExit.x, y: laneY }, { x: targetExit.x, y: laneY }, targetExit, targetAnchor]);
+          });
+          candidates.forEach(function (points) {
+            const compact = points.filter(function (point, index) {
+              return !index || point.x !== points[index - 1].x || point.y !== points[index - 1].y;
+            });
+            if (!pathIsClear(compact, allNodes, sourceId, targetId)) return;
+            let length = 0;
+            for (let i = 0; i < compact.length - 1; i += 1) {
+              length += Math.abs(compact[i + 1].x - compact[i].x) + Math.abs(compact[i + 1].y - compact[i].y);
+            }
+            if (!best || length < best.length) best = { points: compact, length: length };
+          });
+        });
+      });
+      if (!best) {
+        const source = sidePoint(a, dx >= 0 ? "right" : "left", false);
+        const target = sidePoint(b, dx >= 0 ? "left" : "right", false);
+        const laneX = dx >= 0 ? global.x + global.width + 24 : global.x - 24;
+        best = { points: [source, sidePoint(a, dx >= 0 ? "right" : "left", true), { x: laneX, y: source.y }, { x: laneX, y: target.y }, sidePoint(b, dx >= 0 ? "left" : "right", true), target], length: Infinity };
+      }
+      const d = best.points.map(function (point, index) { return (index ? "L" : "M") + point.x + " " + point.y; }).join(" ");
+      let labelPoint = best.points[Math.max(1, Math.floor((best.points.length - 1) / 2))];
+      if (best.points.length > 2) {
+        const p0 = best.points[1], p1 = best.points[2];
+        labelPoint = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 - 8 };
+      }
+      return { d: d, labelPoint: labelPoint, points: best.points };
+    }
+
+    function placeEdgeLabel(edge, route, nodes, occupied) {
+      const width = Math.max(38, visualUnits(string(edge.label, "")) * 6 + 12);
+      const candidates = [];
+      const points = route.points || [];
+      points.forEach(function(p){ candidates.push({x:p.x,y:p.y-8}); candidates.push({x:p.x,y:p.y+26}); });
+      for (let i = points.length - 2; i >= 0; i -= 1) {
+        const a = points[i], b = points[i + 1];
+        if (Math.abs(a.x-b.x)+Math.abs(a.y-b.y)<24) continue;
+        [.5, .3, .7].forEach(function (t) {
+          const x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t;
+          if (a.y===b.y) { candidates.push({x:x,y:y-8}); candidates.push({x:x,y:y+26}); }
+          else { candidates.push({x:x+width/2+10,y:y+9}); candidates.push({x:x-width/2-10,y:y+9}); }
+        });
+      }
+      points.forEach(function(p){
+        candidates.push({x:p.x,y:p.y-72,origin:p});
+        candidates.push({x:p.x,y:p.y+82,origin:p});
+      });
+      candidates.push(route.labelPoint);
+      const boxes = nodes.map(function (n) { return {x:n.x-8,y:n.y-8,w:NODE_W+16,h:NODE_H+16}; }).concat(occupied);
+      const chosen = candidates.find(function (p) {
+        if (!p) return false;
+        const r={x:p.x-width/2-4,y:p.y-19,w:width+8,h:26};
+        return !boxes.some(function(b){return r.x<b.x+b.w && r.x+r.w>b.x && r.y<b.y+b.h && r.y+r.h>b.y;});
+      }) || route.labelPoint;
+      if (chosen) { route.labelPoint=chosen; route.labelLeader=chosen.origin; occupied.push({x:chosen.x-width/2-4,y:chosen.y-19,w:width+8,h:26}); }
+      return route;
+    }
+
+    function edgeAccessibleName(edge, from, to) {
+      const fromName = string(from && from.label, edge.from);
+      const toName = string(to && to.label, edge.to);
+      return fromName + " → " + toName + "；" + string(edge.label, "关系") + "。按 Enter 查看关系说明。";
+    }
+    function addEdgeGroup(edge, from, to, route, parent, selected, dimmed) {
+      const group = svgEl("g", {
+        class: "diagram-edge" + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
+        role: "button", tabindex: "0", "aria-label": edgeAccessibleName(edge, from, to)
+      }, parent);
+      const hit = svgEl("path", { d: route.d, class: "edge-hit" }, group);
+      const line = svgEl("path", {
+        d: route.d,
+        class: "edge-line" + (edge.relationKind === "containment" ? " is-containment" : ""),
+        "marker-end": selected ? "url(#atlas-arrow-focus)" : "url(#atlas-arrow)"
+      }, group);
+      const label = string(edge.label, "");
+      if (label) {
+        const point = route.labelPoint || { x: (finite(from.x, 0) + finite(to.x, 0)) / 2, y: (finite(from.y, 0) + finite(to.y, 0)) / 2 };
+        if(route.labelLeader) svgEl("line", {x1:route.labelLeader.x,y1:route.labelLeader.y,x2:point.x,y2:point.y-6,stroke:"#9daab8","stroke-width":1,"stroke-dasharray":"3 3"}, group);
+        const chars = Array.from(label).length;
+        const width = Math.max(38, visualUnits(label) * 5.5 + 14);
+        svgEl("rect", { x: point.x - width / 2, y: point.y - 15, width: width, height: 18, rx: 4, class: "edge-label-bg" }, group);
+        const text = svgEl("text", { x: point.x, y: point.y - 3, class: "edge-label" }, group);
+        text.textContent = label;
+      }
+      function activate() { selectEdge(edge, from, to); }
+      group.addEventListener("click", activate);
+      group.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); }
+      });
+      return { group: group, hit: hit, line: line };
+    }
+    function drawContainment(edges, header, nodes, parent) {
+      const children = nodes.filter(function (node) { return cleanId(node.id) !== cleanId(header.id); });
+      if (!children.length) return;
+      const headerX = finite(header.x, 0), headerY = finite(header.y, 0);
+      const centers = children.map(function (node) { return finite(node.x, 0) + NODE_W / 2; });
+      const headerCenter = headerX + NODE_W / 2;
+      const railY = headerY + NODE_H + 64;
+      if (children.length > 1) {
+        svgEl("path", { d: "M " + headerCenter + " " + (headerY + NODE_H) + " V " + railY, class: "edge-trunk" }, parent);
+        svgEl("path", { d: "M " + Math.min.apply(null, centers) + " " + railY + " H " + Math.max.apply(null, centers), class: "edge-rail" }, parent);
+        const labelPoint = svgEl("text", {
+          x: (Math.min.apply(null, centers) + Math.max.apply(null, centers)) / 2,
+          y: railY - 6, class: "edge-relation-label"
+        }, parent);
+        labelPoint.textContent = string(state.graph.relation, "包含");
+      }
+      edges.forEach(function (edge) {
+        const child = children.find(function (node) { return cleanId(node.id || node.path) === cleanId(edge.to); });
+        if (!child) return;
+        const from = header;
+        const to = child;
+        const centerX = finite(child.x, 0) + NODE_W / 2;
+        const edgeRoute = {
+          d: children.length > 1
+            ? "M " + centerX + " " + railY + " V " + finite(child.y, 0)
+            : "M " + headerCenter + " " + (headerY + NODE_H) + " V " + (finite(child.y, 0) - 14) + " H " + centerX + " V " + finite(child.y, 0),
+          labelPoint: { x: centerX, y: (railY + finite(child.y, 0)) / 2 }
+        };
+        addEdgeGroup(edge, from, to, edgeRoute, parent, false, false);
+      });
+    }
+
+    function renderDiagram(fit) {
+      const graph = state.graph;
+      const root = $("diagram-root");
+      clear(root);
+      if (!graph) { showMessage("没有可显示的图", "当前视图没有对应的架构数据。"); return; }
+      const nodeMap = new Map();
+      asArray(graph.nodes).forEach(function (node) { nodeMap.set(cleanId(node.id), node); });
+      const selected = state.selected;
+      const related = new Set();
+      if (selected && selected.type === "node") {
+        const nodeId = cleanId(selected.node.id);
+        related.add(nodeId);
+        asArray(graph.edges).forEach(function (edge) {
+          if (cleanId(edge.from) === nodeId || cleanId(edge.to) === nodeId) {
+            related.add(cleanId(edge.from)); related.add(cleanId(edge.to));
+          }
+        });
+      } else if (selected && selected.type === "edge") {
+        related.add(cleanId(selected.edge.from)); related.add(cleanId(selected.edge.to));
+      }
+      const edges = asArray(graph.edges);
+      const labelBoxes = [];
+      if (graph.autoContainment) {
+        drawContainment(edges, graph.headerNode, asArray(graph.nodes), root);
+      } else {
+        edges.forEach(function (edge) {
+          const from = nodeMap.get(cleanId(edge.from));
+          const to = nodeMap.get(cleanId(edge.to));
+          if (!from || !to) return;
+          const route = placeEdgeLabel(edge, routeEdge(edge, from, to, asArray(graph.nodes)), asArray(graph.nodes), labelBoxes);
+          const isSelected = !!(selected && selected.type === "edge" && cleanId(selected.edge.id) === cleanId(edge.id));
+          const dimmed = !!selected && !isSelected && !(related.has(cleanId(edge.from)) && related.has(cleanId(edge.to)));
+          addEdgeGroup(edge, from, to, route, root, isSelected, dimmed);
+        });
+      }
+      const nodes = asArray(graph.nodes);
+      nodes.forEach(function (node) {
+        const id = cleanId(node.id);
+        const isSelected = !!(selected && selected.type === "node" && cleanId(selected.node.id) === id);
+        const dimmed = !!selected && !isSelected && !related.has(id);
+        drawNode(node, root, isSelected, dimmed);
+      });
+      if (fit || !state.camera) fitCamera();
+      else applyCamera();
+      const itemCount = graph.itemCount !== undefined ? graph.itemCount : nodes.length;
+      setText($("graph-count"), "· " + countLabel(itemCount) + " 项");
+      if (!nodes.length) showMessage("此视图暂无图节点", "架构数据中没有为当前视图提供节点。可以从左侧选择其他视图或搜索源码单元。");
+      else hideMessage();
+    }
+
+    function drawNode(node, parent, selected, dimmed) {
+      const kind = string(node.kind, "view");
+      const classKind = kind === "domain" ? "node-domain" :
+        kind === "file" ? "node-file" :
+        kind === "group" ? "node-group" :
+        kind === "module" || kind === "module-header" ? "node-module" : "node-view";
+      const group = svgEl("g", {
+        class: "diagram-node " + classKind + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
+        role: "button", tabindex: "0",
+        "aria-label": string(node.label, node.id) + "；按 Enter 查看技术细节。",
+        "data-node-id": cleanId(node.id)
+      }, parent);
+      const x = finite(node.x, 0), y = finite(node.y, 0);
+      svgEl("rect", { x: x, y: y, width: finite(node.w, NODE_W), height: finite(node.h, NODE_H), rx: 7, class: "node-card" }, group);
+      const color = node.domainId ? domainColor(node.domainId) :
+        node.module ? domainColor((moduleForDomain(node.module) || {}).id) : "#496f89";
+      svgEl("rect", { x: x, y: y + 7, width: 4, height: NODE_H - 14, rx: 2, fill: color, class: "node-accent-bar" }, group);
+      const lines = wrapLabel(string(node.label, node.id), 25, 2);
+      const label = svgEl("text", { x: x + 15, y: y + 24, class: "node-label" }, group);
+      lines.forEach(function (line, index) {
+        const tspan = svgEl("tspan", { x: x + 15, dy: index ? 18 : 0 }, label);
+        tspan.textContent = line;
+      });
+      const description = string(node.description, node.detail || "");
+      const descText = svgEl("text", { x: x + 15, y: y + 61, class: "node-description" }, group);
+      descText.textContent = truncate(description, 34);
+      let kindLabel = kind === "domain" ? "领域" :
+        kind === "file" ? "源码文件" :
+        kind === "module" || kind === "module-header" ? "源码单元" :
+        kind === "group" ? "领域源码单元" : "架构节点";
+      if (Number.isFinite(Number(node.moduleCount))) kindLabel += " · " + countLabel(Number(node.moduleCount)) + " 个源码单元";
+      if (Array.isArray(node.refs) && node.refs.length) kindLabel += " · " + node.refs.length + " 个来源";
+      const meta = svgEl("text", { x: x + 15, y: y + 78, class: "node-kind" }, group);
+      meta.textContent = kindLabel;
+      function activate() { selectNode(node); }
+      group.addEventListener("click", activate);
+      group.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); }
+      });
+    }
+
+    function selectNode(node) {
+      if (node.kind === "file" && node.filePath) { openFile(node.filePath); return; }
+      state.selected = { type: "node", node: node };
+      renderDiagram(false);
+      renderDetails();
+      revealDetails();
+      setStatus("已选择：" + string(node.label, node.id));
+    }
+    function selectEdge(edge, from, to) {
+      state.selected = { type: "edge", edge: edge, from: from, to: to };
+      renderDiagram(false);
+      renderDetails();
+      revealDetails();
+      setStatus("已选择关系：" + string(edge.label, "未命名关系"));
+    }
+
+    function renderPager() {
+      const graph = state.graph;
+      const pager = $("graph-pager");
+      if (!graph || !(graph.pageCount > 1)) { pager.hidden = true; return; }
+      pager.hidden = false;
+      $("page-prev").disabled = graph.page <= 0;
+      $("page-next").disabled = graph.page >= graph.pageCount - 1;
+      setText($("page-label"), (graph.page + 1) + " / " + graph.pageCount);
+      $("page-prev").onclick = function () { changeGraphPage(-1); };
+      $("page-next").onclick = function () { changeGraphPage(1); };
+    }
+    function changeGraphPage(delta) {
+      if (!state.graph || state.graph.pageCount <= 1) return;
+      const route = Object.assign({}, state.route, { page: Math.max(0, Math.min(state.graph.pageCount - 1, state.graph.page + delta)) });
+      setRoute(route, true);
+    }
+
+    function detailSection(parent, title, count, key, items, renderItem, pageSize) {
+      const section = el("section", "detail-section", parent);
+      const head = el("div", "detail-section-head", section);
+      setText(el("h3", "", head), title);
+      setText(el("span", "", head), countLabel(items.length) + " 项");
+      if (!items.length) return section;
+      const size = pageSize || SYMBOL_PAGE_SIZE;
+      const pageCount = Math.max(1, Math.ceil(items.length / size));
+      const page = Math.max(0, Math.min(finite(state.detailPages[key], 0), pageCount - 1));
+      state.detailPages[key] = page;
+      const list = el("ul", "detail-list", section);
+      items.slice(page * size, (page + 1) * size).forEach(function (item, index) {
+        const row = el("li", "detail-row", list);
+        renderItem(row, item, page * size + index);
+      });
+      if (pageCount > 1) {
+        const footer = el("div", "list-pager", section);
+        setText(el("span", "", footer), "第 " + (page + 1) + " / " + pageCount + " 页");
+        const actions = el("div", "list-pager-actions", footer);
+        const previous = makeButton(actions, "上一页", "button button-small", function () {
+          state.detailPages[key] = Math.max(0, page - 1); renderDetails();
+        });
+        previous.disabled = page <= 0;
+        const next = makeButton(actions, "下一页", "button button-small", function () {
+          state.detailPages[key] = Math.min(pageCount - 1, page + 1); renderDetails();
+        });
+        next.disabled = page >= pageCount - 1;
+      }
+      return section;
+    }
+
+    function detailRow(row, title, meta, action, actionLabel) {
+      const main = el("div", "detail-row-main", row);
+      const titleNode = action
+        ? makeButton(main, title, "detail-link detail-row-title", action)
+        : setText(el("span", "detail-row-title", main), title);
+      if (meta) setText(el("span", "detail-row-meta", main), meta);
+      if (action && actionLabel) {
+        const button = makeButton(row, actionLabel, "button button-small button-quiet", action);
+        button.setAttribute("aria-label", actionLabel + "：" + string(title, ""));
+      }
+      return titleNode;
+    }
+    function detailIntro(parent, kicker, title, copy) {
+      setText(el("p", "detail-kicker", parent), kicker);
+      setText(el("h3", "detail-title", parent), title);
+      if (copy) setText(el("p", "detail-copy", parent), copy);
+    }
+    function detailGrid(parent, pairs) {
+      const grid = el("dl", "detail-grid", parent);
+      pairs.forEach(function (pair) {
+        setText(el("dt", "", grid), pair[0]);
+        setText(el("dd", "", grid), pair[1]);
+      });
+      return grid;
+    }
+    function refsSection(parent, refs) {
+      const list = asArray(refs);
+      detailSection(parent, "实现来源", list.length, "refs", list, function (row, ref) {
+        const path = string(ref.path, "");
+        const line = finite(ref.line, 0);
+        const symbol = string(ref.symbol, "");
+        const label = path + (line ? ":" + line : "") + (symbol ? " · " + symbol : "");
+        detailRow(row, label, symbol ? "符号定位" : "源码入口", function () {
+          openFile(path, line, symbol);
+        }, "打开");
+      }, SYMBOL_PAGE_SIZE);
+    }
+    function appendPathButton(parent, path, meta, action) {
+      const button = makeButton(parent, path, "detail-link", action);
+      button.title = path;
+      if (meta) setText(el("span", "detail-row-meta", parent), meta);
+      return button;
+    }
+    function renderSelectedDetails(parent) {
+      const selected = state.selected;
+      if (!selected) return false;
+      if (selected.type === "edge") {
+        const edge = selected.edge;
+        detailIntro(parent, translateStatus(edge.status || "源码归属") + " · 关系 / " + string(edge.label, "未命名"), string(selected.from && selected.from.label, edge.from) + " → " + string(selected.to && selected.to.label, edge.to), string(edge.detail, ""));
+        const reviewNote = el("p", "detail-note", parent);
+        const relationKind = string(edge.relationKind || edge.kind, "").toLowerCase();
+        const isStaticImport = relationKind === "static_import" || relationKind === "static-import" ||
+          string(edge.label, "").toLowerCase().includes("import") || string(edge.label, "").includes("导入");
+        setText(reviewNote, isStaticImport
+          ? "静态 import 关系，未表达动态运行时调用。"
+          : edge.status === "source_verified" ? "此关系已按快照源码核实；未在本次文档工作中验证产品运行。" : edge.status === "unknown" ? "证据文件已变化，需要重新核对该关系。" : "目录包含关系，不表示调用。");
+        detailGrid(parent, [
+          ["关系类型", string(edge.label, "未标注")],
+          ["来源节点", string(selected.from && selected.from.label, edge.from)],
+          ["目标节点", string(selected.to && selected.to.label, edge.to)]
+        ]);
+        if (edge.relationKind === "containment") {
+          const note = el("p", "detail-note", parent);
+          setText(note, "这是源码目录或源码单元的包含关系，不表示运行时调用。");
+        }
+        refsSection(parent, edge.refs);
+        return true;
+      }
+      if (selected.type !== "node") return false;
+      const node = selected.node;
+      const reviewNote = el("p", "detail-note", parent);
+      setText(reviewNote, node.status === "source_verified" ? "源码已核实 · 本次未运行产品验证" : node.status === "unknown" ? "源码已变化，节点职责与关系待复核。" : "来自固定版本的源码目录索引。");
+      if (node.kind === "domain" || node.domainId) {
+        const domainId = cleanId(node.domainId || node.id);
+        const domain = state.domainById.get(domainId);
+        detailIntro(parent, "领域", string(domain && domain.label, node.label), string(domain && domain.description, node.description));
+        const modules = modulesInDomain(domainId);
+        detailGrid(parent, [["源码单元数", countLabel(modules.length)], ["领域标识", domainId]]);
+        makeButton(parent, "查看领域源码单元图", "button button-primary", function () {
+          setRoute({ kind: "domain", value: domainId }, true);
+        });
+        return true;
+      }
+      if (node.kind === "group") {
+        const domainId = cleanId(node.domainId);
+        const domain = state.domainById.get(domainId);
+        detailIntro(parent, "领域分组", string(domain && domain.label, node.label), string(node.description, ""));
+        makeButton(parent, "打开领域源码单元图", "button button-primary", function () {
+          setRoute({ kind: "domain", value: domainId }, true);
+        });
+        return true;
+      }
+      if (node.kind === "view") {
+        detailIntro(parent, translateStatus(node.status) + " · 架构节点", string(node.label, node.id), string(node.detail || node.description, ""));
+        if (node.path) {
+          const pathNode = el("code", "detail-path", parent);
+          setText(pathNode, string(node.path, "") + (finite(node.line, 0) ? ":" + finite(node.line, 0) : ""));
+        }
+        if (node.module) {
+          const module = state.moduleById.get(cleanId(node.module));
+          const button = makeButton(parent, "进入源码单元图", "button button-primary", function () {
+            setRoute({ kind: "module", value: cleanId(node.module) }, true);
+          });
+          button.title = string(module && module.path, "");
+        }
+        refsSection(parent, node.refs);
+        return true;
+      }
+      if (node.module || node.kind === "module-header") {
+        const moduleId = cleanId(node.sourceModuleId || node.module || node.id);
+        const module = state.moduleById.get(moduleId);
+        renderModuleDetail(parent, module || node, moduleId);
+        return true;
+      }
+      detailIntro(parent, translateStatus(node.status) + " · 架构节点", string(node.label, node.id), string(node.detail || node.description, ""));
+      if (node.path) {
+        const pathNode = el("code", "detail-path", parent);
+        setText(pathNode, string(node.path, "") + (finite(node.line, 0) ? ":" + finite(node.line, 0) : ""));
+      }
+      if (node.module) {
+        const module = state.moduleById.get(cleanId(node.module));
+        const button = makeButton(parent, "进入源码单元图", "button button-primary", function () {
+          setRoute({ kind: "module", value: cleanId(node.module) }, true);
+        });
+        button.title = string(module && module.path, "");
+      }
+      refsSection(parent, node.refs);
+      return true;
+    }
+
+    function renderDetails() {
+      const parent = $("detail-content");
+      clear(parent);
+      parent.classList.remove("detail-empty");
+      $("detail-scroll").scrollTop = 0;
+      if (renderSelectedDetails(parent)) return;
+      const route = state.route;
+      if (!route) { setText(parent, "选择图中的节点或连线，查看对应的技术细节。"); return; }
+      if (route.kind === "file") { renderFileDetail(parent, route.value, route.line, route.symbol); return; }
+      if (route.kind === "module") {
+        renderModuleDetail(parent, state.moduleById.get(cleanId(route.value)), cleanId(route.value));
+        return;
+      }
+      if (route.kind === "domain") { renderDomainDetail(parent, state.domainById.get(cleanId(route.value))); return; }
+      if (route.kind === "view") { renderViewDetail(parent, state.viewById.get(cleanId(route.value))); return; }
+      renderOverviewDetail(parent);
+    }
+
+    function renderOverviewDetail(parent) {
+      detailIntro(parent, "项目总览", string(state.data.meta.title, "项目架构地图"),
+        "架构视图按源码单元和关键流程组织。选择左侧领域进入源码单元目录，或搜索文件、符号与接口。");
+      detailGrid(parent, [
+        ["分支", string(state.data.meta.sourceBranch, "未标注")],
+        ["索引文件", countLabel(asArray(state.data.files).length)],
+        ["源码单元", countLabel(asArray(state.data.modules).length)],
+        ["领域", countLabel(asArray(state.data.domains).length)]
+      ]);
+      makeButton(parent, "查看覆盖清单", "button button-primary", openCoverage);
+      const defaultView = state.data.views.find(function (view) { return cleanId(view.id) === "overview"; });
+      if (defaultView) {
+        makeButton(parent, "打开源码总览图", "button", function () {
+          setRoute({ kind: "view", value: cleanId(defaultView.id) }, true);
+        });
+      }
+    }
+    function renderDomainDetail(parent, domain) {
+      if (!domain) { setText(parent, "找不到此领域的数据。"); return; }
+      const domainId = cleanId(domain.id);
+      const modules = modulesInDomain(domainId).slice().sort(function (a, b) {
+        return string(a.label, a.id).localeCompare(string(b.label, b.id), "zh-CN");
+      });
+      detailIntro(parent, "领域", string(domain.label, domainId), string(domain.description, ""));
+      detailGrid(parent, [["领域标识", domainId], ["源码单元数量", countLabel(modules.length)]]);
+      makeButton(parent, "查看领域源码单元图", "button button-primary", function () {
+        setRoute({ kind: "domain", value: domainId }, true);
+      });
+      detailSection(parent, "领域源码单元", modules.length, "domain-modules", modules, function (row, module) {
+        const id = cleanId(module.id);
+        detailRow(row, string(module.label, id), string(module.path, "路径未提供"), function () {
+          setRoute({ kind: "module", value: id }, true);
+        }, "打开");
+      }, FILE_PAGE_SIZE);
+    }
+    function renderModuleDetail(parent, module, moduleId) {
+      if (!module) { setText(parent, "找不到此源码单元的数据。"); return; }
+      const id = cleanId(module.id || moduleId);
+      const childList = childModules(id);
+      const filePaths = filesForModule(id);
+      detailIntro(parent, "源码单元 · 待复核", string(module.label, id), string(module.description, ""));
+      if (module.path) {
+        const path = el("code", "detail-path", parent);
+        setText(path, string(module.path, ""));
+      }
+      detailGrid(parent, [
+        ["领域", string((state.domainById.get(cleanId(module.domain)) || {}).label, module.domain || "未归属")],
+        ["状态", translateStatus(module.status)],
+        ["父级源码单元", string((state.moduleById.get(cleanId(module.parent)) || {}).label, module.parent || "无")]
+      ]);
+      const reviewNote = el("p", "detail-note", parent);
+      setText(reviewNote, "自动索引可以定位源码单元和文件归属；职责描述仍需打开源码入口核对。");
+      const actions = el("div", "inline-actions", parent);
+      if (childList.length) makeButton(actions, "展开子级源码单元图", "button button-primary button-small", function () {
+        setRoute({ kind: "module", value: id }, true);
+      });
+      if (filePaths.length) makeButton(actions, "查看首个源码文件", "button button-small", function () {
+        openFile(filePaths[0]);
+      });
+      detailSection(parent, "子级源码单元", childList.length, "child-modules:" + id, childList, function (row, child) {
+        const childId = cleanId(child.id);
+        detailRow(row, string(child.label, childId), string(child.path, "路径未提供"), function () {
+          setRoute({ kind: "module", value: childId }, true);
+        }, "打开");
+      }, FILE_PAGE_SIZE);
+      detailSection(parent, "源码文件", filePaths.length, "module-files:" + id, filePaths, function (row, path) {
+        const file = fileForPath(path);
+        detailRow(row, path, file ? string(file.summary, "打开源码索引详情") : "未纳入文件索引", function () {
+          openFile(path);
+        }, "详情");
+      }, FILE_PAGE_SIZE);
+    }
+
+    function renderViewDetail(parent, view) {
+      if (!view) { setText(parent, "找不到此视图的数据。"); return; }
+      const nodes = asArray(view.nodes), edges = asArray(view.edges);
+      detailIntro(parent, "架构视图", string(view.label, view.id), string(view.description, ""));
+      detailGrid(parent, [["节点", countLabel(nodes.length)], ["关系", countLabel(edges.length)], ["视图标识", cleanId(view.id)]]);
+      detailSection(parent, "图中节点", nodes.length, "view-nodes", nodes, function (row, node) {
+        detailRow(row, string(node.label, node.id), string(node.detail, "选择画布中的节点查看"), function () {
+          const found = asArray(state.graph.nodes).find(function (entry) { return cleanId(entry.id) === cleanId(node.id); });
+          if (found) selectNode(found);
+        }, "定位");
+      }, FILE_PAGE_SIZE);
+    }
+
+    function renderRefs(parent, refs, pageKey) {
+      detailSection(parent, "实现来源", asArray(refs).length, pageKey || "refs", asArray(refs), function (row, ref) {
+        const path = string(ref.path, "");
+        const line = finite(ref.line, 0);
+        const symbol = string(ref.symbol, "");
+        const label = path + (line ? ":" + line : "") + (symbol ? " · " + symbol : "");
+        detailRow(row, label, symbol ? "符号定位" : "源码位置", function () {
+          openFile(path, line, symbol);
+        }, "打开");
+      }, SYMBOL_PAGE_SIZE);
+    }
+
+    function renderImportItem(row, dependency, index) {
+      const moduleLabel = string((state.moduleById.get(cleanId(dependency.module)) || {}).label, dependency.module || "");
+      const target = string(dependency.target, "");
+      const line = finite(dependency.line, 0);
+      const path = string(dependency.path, "");
+      const display = target || path || moduleLabel || "未命名静态依赖";
+      detailRow(row, display + (line ? ":" + line : ""), moduleLabel ? "导入目标源码单元：" + moduleLabel : "静态 import 依赖",
+        target ? function () { openFile(target, line); } :
+          dependency.module ? function () { setRoute({ kind: "module", value: cleanId(dependency.module) }, true); } :
+          null, target || dependency.module ? "打开" : "");
+    }
+
+    function renderFileDetail(parent, path, focusLine, focusSymbol) {
+      const file = fileForPath(path);
+      detailIntro(parent, "源码文件", basename(path), file ? string(file.summary, "") : "此路径在源码单元目录中出现，但没有单独的文件索引条目。");
+      const pathEl = el("code", "detail-path", parent);
+      setText(pathEl, path + (focusLine ? ":" + focusLine : ""));
+      if (!file) {
+        detailGrid(parent, [["路径", path], ["索引状态", "未索引"]]);
+        return;
+      }
+      const module = state.moduleById.get(cleanId(file.module));
+      detailGrid(parent, [
+        ["所属源码单元", string(module && module.label, file.module || "未映射")],
+        ["代码行", file.lines ? String(file.lines) : "未记录"],
+        ["内容摘要", string(file.summary, "未提供")]
+      ]);
+      if (module) makeButton(parent, "进入所属源码单元", "button button-primary", function () {
+        setRoute({ kind: "module", value: cleanId(module.id) }, true);
+      });
+      const imports = asArray(file.imports);
+      if (imports.length) {
+        const note = el("p", "detail-note", parent);
+        setText(note, "以下是静态 import 依赖线索，表示源码声明的导入关系，不等同于运行时调用或动态控制流。");
+      }
+      detailSection(parent, "静态 import 依赖", imports.length, "imports:" + normalizedPath(path), imports,
+        function (row, dependency, index) { renderImportItem(row, dependency, index); }, SYMBOL_PAGE_SIZE);
+
+      const reverse = state.reverseImports.get(normalizedPath(path)) || [];
+      if (reverse.length) {
+        const note = el("p", "detail-note", parent);
+        setText(note, "反向使用者依据 imports.target 的静态路径索引生成，不代表运行时调用关系。");
+      }
+      detailSection(parent, "静态反向使用者", reverse.length, "reverse:" + normalizedPath(path), reverse,
+        function (row, entry) {
+          const line = finite(entry.dependency && entry.dependency.line, 0);
+          detailRow(row, string(entry.importer, ""), line ? "import 行 " + line : "静态 import 使用者", function () {
+            openFile(entry.importer, line);
+          }, "打开");
+        }, FILE_PAGE_SIZE);
+
+      const symbols = asArray(file.symbols);
+      detailSection(parent, "符号与函数", symbols.length, "symbols:" + normalizedPath(path), symbols, function (row, symbol) {
+        const name = string(symbol.name, "未命名符号");
+        const line = finite(symbol.line, 0);
+        detailRow(row, name, string(symbol.kind, "符号") + (line ? " · 第 " + line + " 行" : ""), function () {
+          openFile(path, line, name);
+        }, "定位");
+        if (focusSymbol && name === focusSymbol) row.classList.add("is-focused-source");
+      }, SYMBOL_PAGE_SIZE);
+
+      const apis = asArray(file.apis);
+      detailSection(parent, "API / 路由", apis.length, "apis:" + normalizedPath(path), apis, function (row, api) {
+        const method = string(api.method, "");
+        const route = string(api.path, "");
+        const line = finite(api.line, 0);
+        detailRow(row, (method ? method + " " : "") + route, line ? "第 " + line + " 行" : "接口声明", function () {
+          openFile(path, line, method + " " + route);
+        }, "定位");
+      }, SYMBOL_PAGE_SIZE);
+
+      const tests = asArray(file.tests);
+      detailSection(parent, "相关测试", tests.length, "tests:" + normalizedPath(path), tests, function (row, testPath) {
+        const value = typeof testPath === "string" ? testPath : string(testPath && testPath.path, "");
+        detailRow(row, value, "测试路径", function () { openFile(value); }, "打开");
+      }, FILE_PAGE_SIZE);
+    }
+
+    function sourceRefsFromEntity(entity) {
+      const refs = asArray(entity && entity.refs);
+      if (refs.length) return refs;
+      if (entity && entity.path) return [{ path: entity.path, line: entity.line, symbol: entity.symbol }];
+      return [];
+    }
+
+    function renderSearchResultItems(results, parent) {
+      results.forEach(function (result) {
+        const button = el("button", "search-result", parent);
+        button.type = "button";
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", "false");
+        setText(el("span", "search-result-label", button), result.label);
+        setText(el("span", "search-result-meta", button), result.meta);
+        button.addEventListener("click", function () {
+          $("atlas-search").value = "";
+          state.searchPage = 0;
+          $("search-results").hidden = true;
+          result.activate();
+        });
+      });
+    }
+    function searchMatches(query, page) {
+      if (!state.data || !query) return { total: 0, items: [], deepSearchSkipped: false };
+      const needle = query.toLocaleLowerCase();
+      const queryLength = Array.from(query).length;
+      const searchSymbolsAndApis = queryLength >= 2;
+      const searchDescriptions = queryLength >= 3;
+      const skip = page * SEARCH_PAGE_SIZE;
+      const results = [];
+      let total = 0;
+      function add(type, label, meta, activate) {
+        total += 1;
+        if (total > skip && results.length < SEARCH_PAGE_SIZE) {
+          results.push({ type: type, label: label, meta: meta, activate: activate });
+        }
+      }
+      state.data.modules.forEach(function (module) {
+        const label = string(module.label, module.id);
+        const path = string(module.path, "");
+        if ((label + " " + path + " " + cleanId(module.id)).toLocaleLowerCase().includes(needle)) {
+          const id = cleanId(module.id);
+          add("module", label, "源码单元 · " + (path || id), function () { setRoute({ kind: "module", value: id }, true); });
+        }
+      });
+      state.data.domains.forEach(function (domain) {
+        const label = string(domain.label, domain.id);
+        const description = string(domain.description, "");
+        if ((label + (searchDescriptions ? " " + description : "")).toLocaleLowerCase().includes(needle)) {
+          const id = cleanId(domain.id);
+          add("domain", label, "领域", function () { setRoute({ kind: "domain", value: id }, true); });
+        }
+      });
+      state.data.views.forEach(function (view) {
+        const label = string(view.label, view.id);
+        if ((label + " " + string(view.description, "")).toLocaleLowerCase().includes(needle)) {
+          const id = cleanId(view.id);
+          add("view", label, "架构视图", function () { setRoute({ kind: "view", value: id }, true); });
+        }
+        asArray(view.nodes).forEach(function (node) {
+          const haystack = [node.label, node.module, node.path, searchDescriptions ? node.detail : ""].map(function (item) { return string(item, ""); }).join(" ").toLocaleLowerCase();
+          if (haystack.includes(needle)) {
+            const viewId = cleanId(view.id), nodeId = cleanId(node.id);
+            add("node", string(node.label, nodeId), "节点 · " + label, function () {
+              setRoute({ kind: "view", value: viewId }, true);
+              const found = asArray(state.graph && state.graph.nodes).find(function (entry) { return cleanId(entry.id) === nodeId; });
+              if (found) selectNode(found);
+            });
+          }
+        });
+      });
+      state.data.files.forEach(function (file) {
+        const path = string(file.path, "");
+        const module = state.moduleById.get(cleanId(file.module));
+        const moduleLabel = string(module && module.label, file.module || "未映射");
+        if ((path + " " + moduleLabel + (searchDescriptions ? " " + string(file.summary, "") : "")).toLocaleLowerCase().includes(needle)) {
+          add("file", path, "文件 · " + moduleLabel, function () { openFile(path); });
+        }
+        if (searchSymbolsAndApis) asArray(file.symbols).forEach(function (symbol) {
+          const name = string(symbol.name, "");
+          if (name.toLocaleLowerCase().includes(needle)) {
+            const line = finite(symbol.line, 0);
+            add("symbol", name, "符号 · " + path + (line ? ":" + line : ""), function () { openFile(path, line, name); });
+          }
+        });
+        if (searchSymbolsAndApis) asArray(file.apis).forEach(function (api) {
+          const title = string(api.method, "") + " " + string(api.path, "");
+          if (title.toLocaleLowerCase().includes(needle)) {
+            const line = finite(api.line, 0);
+            add("api", title.trim(), "API · " + path + (line ? ":" + line : ""), function () { openFile(path, line, title.trim()); });
+          }
+        });
+      });
+      return { total: total, items: results, deepSearchSkipped: !searchSymbolsAndApis };
+    }
+    function renderSearch() {
+      const query = $("atlas-search").value.trim();
+      const resultsBox = $("search-results");
+      clear(resultsBox);
+      if (!query) { resultsBox.hidden = true; return; }
+      resultsBox.hidden = false;
+      const results = searchMatches(query, state.searchPage);
+      renderSearchResultItems(results.items, resultsBox);
+      const footer = el("div", "search-footer", resultsBox);
+      const start = results.total ? state.searchPage * SEARCH_PAGE_SIZE + 1 : 0;
+      const end = Math.min(state.searchPage * SEARCH_PAGE_SIZE + results.items.length, results.total);
+      setText(el("span", "", footer), countLabel(results.total) + " 项匹配 · " + start + "–" + end);
+      const actions = el("span", "", footer);
+      if (results.total > SEARCH_PAGE_SIZE) {
+        const previous = makeButton(actions, "‹", "button button-small button-icon", function () {
+          state.searchPage = Math.max(0, state.searchPage - 1); renderSearch();
+        }, "上一页搜索结果");
+        previous.disabled = state.searchPage <= 0;
+        const next = makeButton(actions, "›", "button button-small button-icon", function () {
+          state.searchPage += 1; renderSearch();
+        }, "继续查看搜索结果");
+        next.disabled = end >= results.total;
+      }
+      if (results.deepSearchSkipped) {
+        const hint = el("div", "nav-empty", resultsBox);
+        setText(hint, "输入至少 2 个字符以搜索完整符号、函数和 API 索引。");
+      }
+      if (!results.total) setText(el("div", "nav-empty", resultsBox), "没有匹配的源码单元、文件、符号或接口。");
+    }
+    function scheduleSearch(resetPage) {
+      if (resetPage) state.searchPage = 0;
+      window.clearTimeout(state.searchTimer);
+      state.searchTimer = window.setTimeout(renderSearch, 140);
+    }
+
+    function openFile(path, line, symbol) {
+      if (!path) return;
+      const file = fileForPath(path);
+      const moduleId = cleanId(file && file.module);
+      setRoute({ kind: "file", value: path, line: finite(line, 0), symbol: string(symbol, "") }, true);
+      revealDetails();
+    }
+
+    function openModal(modal) {
+      state.modalFocus = document.activeElement;
+      modal.hidden = false;
+      const first = modal.querySelector("button, input, [tabindex='0']");
+      if (first) first.focus();
+    }
+    function closeModal(modal) {
+      modal.hidden = true;
+      if (state.modalFocus && typeof state.modalFocus.focus === "function") state.modalFocus.focus();
+    }
+    function fillListModalChanges(body, title, items) {
+      detailSection(body, title, asArray(items).length, "modal-" + title, asArray(items), function (row, value) {
+        const object = asObject(value);
+        const entry = typeof value === "string" ? value :
+          [object.flow, object.process, object.title, object.path, object.id, object.label].map(function (item) { return string(item, ""); }).filter(Boolean).join(" · ") || "待核对条目";
+        const note = typeof value === "string" ? "" :
+          [object.reason, object.impact, object.note, object.detail].map(function (item) { return string(item, ""); }).filter(Boolean).join(" · ");
+        detailRow(row, entry, note, null, "");
+      }, MODAL_PAGE_SIZE);
+    }
+    function openUpdates() {
+      if (!state.data) { setStatus("架构数据尚未载入，暂无更新说明。"); return; }
+      const body = $("updates-body");
+      clear(body);
+      const meta = state.data && state.data.meta || {};
+      const changes = state.data && state.data.changes || {};
+      const metrics = el("div", "modal-grid", body);
+      [
+        ["基准分支", string(meta.sourceBranch, "未标注")],
+        ["源码版本", string(meta.commit, "未标注")],
+        ["生成时间", string(meta.generatedAt, "未标注")],
+        ["源码根目录", string(meta.sourceRoot, "未标注")],
+        ["跟踪文件", countLabel(safeCount(state.data.coverage.trackedFiles, state.data.files.length))],
+        ["已索引文件", countLabel(safeCount(state.data.coverage.indexedFiles, state.data.files.length))]
+      ].forEach(function (pair) {
+        const card = el("div", "metric", metrics);
+        setText(el("div", "metric-label", card), pair[0]);
+        setText(el("div", "metric-value", card), pair[1]);
+      });
+      asArray(meta.limitations).forEach(function (item) {
+        setText(el("p", "detail-note", body), string(item, ""));
+      });
+      const stale = staleEvidenceItems(meta.staleEvidence);
+      if (stale.length) {
+        const note = el("p", "detail-note detail-warning", body);
+        setText(note, "以下关键流程受到源码变化影响，需要重新复核；此提示不代表已经运行验证。");
+        fillListModalChanges(body, "源码变更影响流程 · 待复核", stale);
+      }
+      fillListModalChanges(body, "新增", changes.added);
+      fillListModalChanges(body, "移除", changes.removed);
+      fillListModalChanges(body, "变更", changes.changed);
+      openModal($("updates-modal"));
+    }
+
+    function renderCoverageList(body) {
+      const list = $("coverage-file-list");
+      if (!list) return;
+      clear(list);
+      const query = state.coverageQuery.toLocaleLowerCase();
+      const files = state.data.files;
+      let total = 0, start = state.coveragePage * MODAL_PAGE_SIZE;
+      const shown = [];
+      files.forEach(function (file) {
+        const path = string(file.path, "");
+        const module = state.moduleById.get(cleanId(file.module));
+        const owner = string(module && module.label, file.module || "未映射");
+        if (query && !(path + " " + owner).toLocaleLowerCase().includes(query)) return;
+        if (total >= start && shown.length < MODAL_PAGE_SIZE) shown.push({ file: file, owner: owner });
+        total += 1;
+      });
+      const count = $("coverage-file-count");
+      setText(count, countLabel(total) + " 个匹配文件 · 第 " + (Math.min(state.coveragePage + 1, Math.max(1, Math.ceil(total / MODAL_PAGE_SIZE)))) +
+        " / " + Math.max(1, Math.ceil(total / MODAL_PAGE_SIZE)) + " 页");
+      shown.forEach(function (entry) {
+        const row = el("div", "coverage-item", list);
+        const main = el("div", "", row);
+        const button = makeButton(main, string(entry.file.path, ""), "detail-link coverage-path", function () {
+          closeModal($("coverage-modal")); openFile(string(entry.file.path, ""));
+        });
+        button.title = string(entry.file.path, "");
+        setText(el("span", "coverage-owner", main), entry.owner);
+        makeButton(row, "详情", "button button-small button-quiet", function () {
+          closeModal($("coverage-modal")); openFile(string(entry.file.path, ""));
+        });
+      });
+      if (!shown.length) setText(el("div", "coverage-empty", list), "没有匹配的文件。");
+      const pageCount = Math.max(1, Math.ceil(total / MODAL_PAGE_SIZE));
+      $("coverage-prev").disabled = state.coveragePage <= 0;
+      $("coverage-next").disabled = state.coveragePage >= pageCount - 1;
+    }
+    function openCoverage() {
+      if (!state.data) { setStatus("架构数据尚未载入，暂无覆盖清单。"); return; }
+      const body = $("coverage-body");
+      clear(body);
+      const coverage = state.data.coverage;
+      const actualFiles = state.data.files.length;
+      const metrics = el("div", "modal-grid", body);
+      [
+        ["Git 跟踪文件", countLabel(safeCount(coverage.trackedFiles, actualFiles))],
+        ["已索引文件", countLabel(safeCount(coverage.indexedFiles, actualFiles))],
+        ["源码单元数", countLabel(state.data.modules.length)],
+        ["未映射文件", countLabel(asArray(coverage.unmappedFiles).length)],
+        ["解析错误", countLabel(asArray(coverage.parseErrors).length)],
+        ["领域数", countLabel(state.data.domains.length)]
+      ].forEach(function (pair) {
+        const card = el("div", "metric", metrics);
+        setText(el("div", "metric-label", card), pair[0]);
+        setText(el("div", "metric-value", card), pair[1]);
+      });
+      asArray(coverage.notes).forEach(function (note) { setText(el("p", "modal-copy", body), string(note, "")); });
+      if (asArray(coverage.unmappedFiles).length) {
+        fillListModalChanges(body, "未映射文件", coverage.unmappedFiles);
+      }
+      if (asArray(coverage.parseErrors).length) {
+        const errors = el("section", "detail-section", body);
+        setText(el("h3", "", errors), "解析问题");
+        const list = el("ul", "detail-list", errors);
+        asArray(coverage.parseErrors).slice(0, 200).forEach(function (error) {
+          const row = el("li", "detail-row", list);
+          const path = typeof error === "string" ? error : string(error.path, "");
+          detailRow(row, path || "解析问题", typeof error === "string" ? "" : string(error.message, ""), path ? function () {
+            closeModal($("coverage-modal")); openFile(path);
+          } : null, path ? "打开" : "");
+        });
+        if (coverage.parseErrors.length > 200) setText(el("p", "modal-copy", errors), "另有 " + (coverage.parseErrors.length - 200) + " 项解析问题；请查看数据源中的 parseErrors 完整清单。");
+      }
+      const section = el("section", "detail-section", body);
+      const head = el("div", "detail-section-head", section);
+      setText(el("h3", "", head), "已索引源码文件");
+      setText(el("span", "", head), countLabel(actualFiles) + " 项");
+      const search = el("input", "coverage-search", section);
+      search.type = "search"; search.placeholder = "筛选文件路径或所属源码单元…"; search.value = state.coverageQuery;
+      search.setAttribute("aria-label", "筛选文件路径或所属源码单元");
+      const count = el("div", "coverage-owner", section); count.id = "coverage-file-count";
+      const list = el("div", "coverage-list", section); list.id = "coverage-file-list";
+      const footer = el("div", "list-pager", section);
+      const actions = el("div", "list-pager-actions", footer);
+      const previous = makeButton(actions, "上一页", "button button-small", function () {
+        state.coveragePage = Math.max(0, state.coveragePage - 1); renderCoverageList(body);
+      });
+      previous.id = "coverage-prev";
+      const next = makeButton(actions, "下一页", "button button-small", function () {
+        state.coveragePage += 1; renderCoverageList(body);
+      });
+      next.id = "coverage-next";
+      search.addEventListener("input", function () { state.coverageQuery = search.value.trim(); state.coveragePage = 0; renderCoverageList(body); });
+      renderCoverageList(body);
+      openModal($("coverage-modal"));
+    }
+
+    function addComputedStyles(source, clone) {
+      const sourceNodes = [source].concat(Array.from(source.querySelectorAll("*")));
+      const cloneNodes = [clone].concat(Array.from(clone.querySelectorAll("*")));
+      sourceNodes.forEach(function (sourceNode, index) {
+        const cloneNode = cloneNodes[index];
+        if (!cloneNode || cloneNode.nodeType !== 1) return;
+        const computed = window.getComputedStyle(sourceNode);
+        const props = ["fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-linecap", "stroke-linejoin",
+          "opacity", "font-family", "font-size", "font-weight", "text-anchor", "dominant-baseline", "color"];
+        const style = props.map(function (property) {
+          return property + ":" + computed.getPropertyValue(property);
+        }).join(";");
+        cloneNode.setAttribute("style", style);
+      });
+    }
+    function exportCurrentSvg() {
+      if (!state.graph || !state.graph.nodes.length) { setStatus("当前图没有可导出的节点。"); return; }
+      const source = $("diagram");
+      const clone = source.cloneNode(true);
+      clone.setAttribute("xmlns", SVG_NS);
+      clone.setAttribute("width", "1600");
+      clone.setAttribute("height", "1000");
+      addComputedStyles(source, clone);
+      const serializer = new XMLSerializer();
+      const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + serializer.serializeToString(clone);
+      const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "architecture-atlas-" + cleanId(state.graph.id).replace(/[^a-zA-Z0-9_-]+/g, "-") + ".svg";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      setStatus("已导出当前视图 SVG。");
+    }
+
+    function setZoom(factor, centerX, centerY) {
+      if (!state.camera || !state.fitBox) return;
+      const box = state.camera;
+      const minWidth = Math.max(120, state.fitBox.width / 8);
+      const maxWidth = state.fitBox.width * 5;
+      const nextWidth = Math.max(minWidth, Math.min(maxWidth, box.width * factor));
+      const scale = nextWidth / box.width;
+      const nextHeight = box.height * scale;
+      const cx = centerX === undefined ? box.x + box.width / 2 : centerX;
+      const cy = centerY === undefined ? box.y + box.height / 2 : centerY;
+      const fx = (cx - box.x) / box.width;
+      const fy = (cy - box.y) / box.height;
+      state.camera = { x: cx - fx * nextWidth, y: cy - fy * nextHeight, width: nextWidth, height: nextHeight };
+      applyCamera();
+    }
+    function zoomAtClient(factor, clientX, clientY) {
+      const svg = $("diagram");
+      const rect = svg.getBoundingClientRect();
+      const view = svg.viewBox.baseVal;
+      const x = view.x + (clientX - rect.left) / rect.width * view.width;
+      const y = view.y + (clientY - rect.top) / rect.height * view.height;
+      setZoom(factor, x, y);
+    }
+    let drag = null;
+    function wireCanvas() {
+      const svg = $("diagram");
+      svg.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0 || event.target.closest(".diagram-node, .diagram-edge")) return;
+        const rect = svg.getBoundingClientRect();
+        drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, camera: Object.assign({}, state.camera), rect: rect };
+        svg.classList.add("is-panning");
+        svg.setPointerCapture(event.pointerId);
+      });
+      svg.addEventListener("pointermove", function (event) {
+        if (!drag || drag.pointerId !== event.pointerId || !state.camera) return;
+        const dx = (event.clientX - drag.x) * drag.camera.width / drag.rect.width;
+        const dy = (event.clientY - drag.y) * drag.camera.height / drag.rect.height;
+        state.camera = Object.assign({}, drag.camera, { x: drag.camera.x - dx, y: drag.camera.y - dy });
+        applyCamera();
+      });
+      function finishDrag(event) {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        drag = null; svg.classList.remove("is-panning");
+      }
+      svg.addEventListener("pointerup", finishDrag);
+      svg.addEventListener("pointercancel", finishDrag);
+      svg.addEventListener("wheel", function (event) {
+        event.preventDefault();
+        zoomAtClient(event.deltaY < 0 ? .88 : 1.14, event.clientX, event.clientY);
+      }, { passive: false });
+      $("zoom-in").addEventListener("click", function () { setZoom(.8); });
+      $("zoom-out").addEventListener("click", function () { setZoom(1.25); });
+      $("fit-view").addEventListener("click", fitCamera);
+    }
+
+    function openDrawer(which) {
+      if (which === "sidebar") {
+        document.body.classList.add("sidebar-open");
+        $("sidebar-toggle").setAttribute("aria-expanded", "true");
+      } else {
+        document.body.classList.add("detail-open");
+        $("detail-toggle").setAttribute("aria-expanded", "true");
+      }
+    }
+    function revealDetails() {
+      document.body.classList.remove("detail-collapsed", "sidebar-open");
+      if (window.innerWidth <= 970) openDrawer("detail");
+      else $("detail-toggle").setAttribute("aria-expanded", "true");
+    }
+    function closeDrawers() {
+      document.body.classList.remove("sidebar-open", "detail-open");
+      $("sidebar-toggle").setAttribute("aria-expanded", "false");
+      $("detail-toggle").setAttribute("aria-expanded", "false");
+    }
+    function wireControls() {
+      $("back-button").addEventListener("click", backRoute);
+      $("sidebar-toggle").addEventListener("click", function () {
+        if (window.innerWidth > 970) { document.body.classList.toggle("nav-collapsed"); return; }
+        if (document.body.classList.contains("sidebar-open")) closeDrawers(); else openDrawer("sidebar");
+      });
+      $("detail-toggle").addEventListener("click", function () {
+        if (window.innerWidth > 970) { document.body.classList.toggle("detail-collapsed"); $("detail-toggle").setAttribute("aria-expanded", String(!document.body.classList.contains("detail-collapsed"))); return; }
+        if (document.body.classList.contains("detail-open")) closeDrawers(); else openDrawer("detail");
+      });
+      $("detail-close").addEventListener("click", function () {
+        if (window.innerWidth > 970) document.body.classList.add("detail-collapsed");
+        closeDrawers();
+      });
+      $("drawer-backdrop").addEventListener("click", closeDrawers);
+      $("updates-open").addEventListener("click", openUpdates);
+      $("coverage-open").addEventListener("click", openCoverage);
+      $("export-svg").addEventListener("click", exportCurrentSvg);
+      $("atlas-search").addEventListener("input", function () { scheduleSearch(true); });
+      $("atlas-search").addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          const first = $("search-results").querySelector(".search-result");
+          if (first) first.click();
+        }
+      });
+      $("clear-search").addEventListener("click", function () {
+        $("atlas-search").value = ""; state.searchPage = 0; renderSearch(); $("atlas-search").focus();
+      });
+      document.querySelectorAll(".modal-close").forEach(function (button) {
+        button.addEventListener("click", function () { closeModal(button.closest(".modal-layer")); });
+      });
+      document.querySelectorAll(".modal-layer").forEach(function (modal) {
+        modal.addEventListener("click", function (event) {
+          if (event.target === modal) closeModal(modal);
+        });
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          const visibleModal = Array.from(document.querySelectorAll(".modal-layer")).find(function (modal) { return !modal.hidden; });
+          if (visibleModal) closeModal(visibleModal);
+          else if (document.body.classList.contains("sidebar-open") || document.body.classList.contains("detail-open")) closeDrawers();
+          else if ($("atlas-search").value) { $("atlas-search").value = ""; renderSearch(); }
+          else if (state.selected) { state.selected=null; renderDiagram(false); renderDetails(); }
+          return;
+        }
+        if ((event.key === "/" || (event.ctrlKey && event.key === "/")) &&
+            !event.ctrlKey && !event.metaKey && !event.altKey &&
+            !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+          event.preventDefault(); $("atlas-search").focus();
+        }
+      });
+      window.addEventListener("popstate", function () {
+        const route = readRouteHash();
+        if (route) setRoute(route, false);
+        else setRoute(defaultRoute(), false);
+      });
+    }
+
+    function defaultRoute() {
+      const overview = state.data.views.find(function (view) { return cleanId(view.id) === "overview"; });
+      return overview ? { kind: "view", value: "overview" } : { kind: "overview" };
+    }
+    function applyMetadata() {
+      const meta = state.data.meta;
+      const title = string(meta.title, "项目架构地图");
+      document.title = title;
+      setText($("atlas-title"), title);
+      setText($("meta-branch"), string(meta.sourceBranch, "main"));
+      setText($("meta-commit"), string(meta.commit, "版本未标注"));
+      $("meta-commit").title = string(meta.commit, "");
+      setText($("meta-generated"), string(meta.generatedAt, "生成时间未标注"));
+      $("meta-generated").title = string(meta.sourceRoot, "");
+    }
+    function showDataError(error) {
+      setText($("current-title"), "架构数据尚未载入");
+      setText($("current-description"), "此 HTML 是可交互图集模板；生成器应将项目索引写入内嵌 JSON 数据区。");
+      clear($("diagram-root"));
+      showMessage("无法读取架构数据", string(error && error.message, "请检查 atlas-data 中的数据格式。"));
+      clear($("detail-content"));
+      const note = el("p", "detail-note detail-warning", $("detail-content"));
+      setText(note, string(error && error.message, "未知的数据读取问题。"));
+      setStatus("没有外部服务或资源依赖；请检查内嵌数据区。");
+    }
+    function main() {
+      wireControls();
+      wireCanvas();
+      try {
+        state.data = parseAtlas();
+        buildIndexes();
+        applyMetadata();
+        renderNavigation();
+        const route = readRouteHash() || defaultRoute();
+        setRoute(route, !window.location.hash);
+        if (asArray(state.data.coverage.unmappedFiles).length || asArray(state.data.coverage.parseErrors).length) {
+          setStatus("此快照包含未映射文件或解析问题；可在“覆盖清单”查看明细。");
+        } else {
+          setStatus("当前图来自 " + string(state.data.meta.sourceBranch, "未标注分支") + " 源码快照。");
+        }
+      } catch (error) {
+        showDataError(error);
+      }
+    }
+    main();
+  })();
+  </script>
+</body>
+</html>
