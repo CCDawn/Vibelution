@@ -21,7 +21,9 @@ _PREVIOUS_READ_TOOLS = (
     "financial_report_query_tool",
     "financial_evidence_search_tool",
 )
-READ_TOOLS = (*_PREVIOUS_READ_TOOLS, "news_search_tool")
+_NEWS_READ_TOOLS = (*_PREVIOUS_READ_TOOLS, "news_search_tool")
+MARKET_TOOL = "financial_market_snapshot_tool"
+READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL)
 READ_POLICY = {
     "allowedTools": list(READ_TOOLS),
     "preferredTools": list(READ_TOOLS),
@@ -39,13 +41,13 @@ _PREVIOUS_TASK_TEXT = {
 _PREVIOUS_EXPERTISE = ["A股财报证据", "个人投资目标澄清", "风险分析"]
 _LOCK = threading.RLock()
 
-PERSONA = {
+_NEWS_PERSONA = {
     "personality": "审慎、证据优先，区分已知事实、假设和不确定性。",
     "communicationStyle": "先说明结论和数据时间，再列来源、风险与需要用户确认的信息。",
     "identityNotes": "个人投资研究助手，主要关注 A 股；不代表持牌机构，不承诺收益。",
     "expertise": [*_PREVIOUS_EXPERTISE, "公开新闻真伪判断"],
 }
-TASK = {
+_NEWS_TASK = {
     "mission": "基于可核验财报证据，为用户提供只读投资研究与风险建议。",
     "responsibilities": "使用财报工具时明确公司证券代码和报告期，保留来源、页码与版本；证据不足则明确说明。公开新闻只作参考，须判断来源是否可信并写明依据。",
     "preferredTasks": "财报检索、来源对照、公开新闻参考、风险因素梳理和投资需求澄清。",
@@ -55,6 +57,17 @@ TASK = {
     "successCriteria": "证据可回链，时间与局限明确，建议不执行交易。",
     "deliverables": "有来源和风险说明的研究答复。",
     "taskTypes": ["financial_research", "risk_review"],
+}
+PERSONA = {
+    **_NEWS_PERSONA,
+    "expertise": [*_NEWS_PERSONA["expertise"], "公开行情与K线"],
+}
+TASK = {
+    **_NEWS_TASK,
+    "mission": "基于公开行情和可核验财报证据，为用户提供只读投资研究与风险建议。",
+    "responsibilities": _NEWS_TASK["responsibilities"] + "需要最新报价或日、周、月K线时，主动调用已授权行情工具；标明行情时间、来源、复权和单位，查询失败或数据不足时明确说明。",
+    "preferredTasks": "公开行情与K线查询、财报检索、来源对照、公开新闻参考、风险因素梳理和投资需求澄清。",
+    "constraints": _NEWS_TASK["constraints"] + "公开行情可能延迟或来自缓存；查询时间不等于行情时间，追问不能沿用首次快照冒充最新数据。行情工具只发送股票代码、周期和数量。",
 }
 # Empty-composer cards for this profile only. Ordinary chats keep the shared
 # code starters from composer_example_commands.
@@ -156,6 +169,7 @@ def _project(agent: dict) -> dict:
         "reportStatus": financial_report_availability()["status"],
         # Capability status only; each quote request reports provider failures.
         "marketDataStatus": "public_quotes",
+        "marketToolStatus": _market_tool_status(agent),
         "newsDelegationStatus": "disabled",
         "privateLedgerStatus": "not_implemented",
         "tradingEnabled": False,
@@ -170,19 +184,49 @@ def _names(policy: dict, key: str) -> set[str]:
 
 
 _NEWS_REFERENCE_MARKER = "financialAssistantNewsReferenceGranted"
+_MARKET_REFERENCE_MARKER = "financialAssistantMarketReferenceGranted"
 
 
-def _grant_news_reference(agent: dict) -> bool:
-    """Grant same-session news search only when stage-1 defaults are still untouched.
+def _default_read_policy(policy: dict, tools: tuple[str, ...]) -> bool:
+    return (
+        _names(policy, "allowedTools") == set(tools)
+        and _names(policy, "preferredTools") == set(tools)
+        and policy.get("networkAccess") == "controlled"
+        and policy.get("mutationAccess") == "none"
+    )
 
-    Write-path migration: called from provisioning/update flows only — listing
-    is a pure read and never calls this. Idempotent via the
-    ``financialAssistantNewsReferenceGranted`` metadata marker, so the check
-    (and any registry write) runs at most once per assistant. Returns True
-    when a migration write happened.
-    """
+
+def _market_tool_status(agent: dict) -> str:
+    """Configuration projection only; it never queries a provider or writes."""
+    metadata = agent.get("metadata") or {}
+    policy = agent.get("toolPolicy") or {}
+    if (
+        agent.get("status") != "active"
+        or agent.get("roleKey") != ROLE
+        or agent.get("primaryMode") != "general"
+        or metadata.get("financialAssistantSetup") != "ready"
+    ):
+        return "not_assigned"
+    blocked = _names(policy, "blockedTools")
+    if MARKET_TOOL in _names(policy, "allowedTools") and MARKET_TOOL not in blocked:
+        return "assigned" if policy.get("networkAccess") != "none" else "not_assigned"
+    if metadata.get(_MARKET_REFERENCE_MARKER) or MARKET_TOOL in blocked:
+        return "not_assigned"
+    if _default_read_policy(policy, _NEWS_READ_TOOLS) or (
+        not metadata.get(_NEWS_REFERENCE_MARKER)
+        and "news_search_tool" not in blocked
+        and _default_read_policy(policy, _PREVIOUS_READ_TOOLS)
+    ):
+        return "upgrade_available"
+    return "not_assigned"
+
+
+def _grant_default_references(agent: dict) -> bool:
+    """One write-path upgrade for untouched defaults; GET remains a pure read."""
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    if metadata.get(_NEWS_REFERENCE_MARKER):
+    news_pending = not metadata.get(_NEWS_REFERENCE_MARKER)
+    market_pending = not metadata.get(_MARKET_REFERENCE_MARKER)
+    if not news_pending and not market_pending:
         return False
     if agent.get("status") != "active":
         return False
@@ -192,61 +236,57 @@ def _grant_news_reference(agent: dict) -> bool:
         return False
     policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
     updates: dict = {}
-    if (
-        _names(policy, "allowedTools") == set(_PREVIOUS_READ_TOOLS)
-        and _names(policy, "preferredTools") == set(_PREVIOUS_READ_TOOLS)
+    grant_news = (
+        news_pending
+        and _default_read_policy(policy, _PREVIOUS_READ_TOOLS)
         and "news_search_tool" not in _names(policy, "blockedTools")
-        and policy.get("networkAccess") == "controlled"
-        and policy.get("mutationAccess") == "none"
-    ):
+    )
+    grant_market = market_pending and _market_tool_status(agent) == "upgrade_available"
+    if grant_news or grant_market:
+        tools = READ_TOOLS if grant_market else _NEWS_READ_TOOLS
         updates["tool_policy"] = {
-            "allowedTools": list(READ_TOOLS),
-            "preferredTools": list(READ_TOOLS),
-            "blockedTools": list(policy.get("blockedTools") or []),
-            "readScopes": list(policy.get("readScopes") or []),
-            "writeScopes": list(policy.get("writeScopes") or []),
-            "allowedCommandKinds": list(policy.get("allowedCommandKinds") or []),
-            "blockedCommandPatterns": list(policy.get("blockedCommandPatterns") or []),
-            "networkAccess": "controlled",
-            "mutationAccess": "none",
-            "maxCallsPerTurn": policy.get("maxCallsPerTurn", 8),
-            "maxCallsPerTurnByModelFamily": dict(
-                policy.get("maxCallsPerTurnByModelFamily") or {}
-            ),
-            "perToolRules": dict(policy.get("perToolRules") or {}),
+            **policy,
+            "allowedTools": list(tools),
+            "preferredTools": list(tools),
         }
+        updates["expected_tool_policy_fingerprint"] = directory.tool_policy_fingerprint(policy)
     task = agent.get("taskProfile") if isinstance(agent.get("taskProfile"), dict) else {}
+    target_task = TASK if grant_market else _NEWS_TASK
+    previous_tasks = [_PREVIOUS_TASK_TEXT] if news_pending else []
+    if grant_market:
+        previous_tasks.append(_NEWS_TASK)
     task_changes = {
-        key: TASK[key]
-        for key, previous in _PREVIOUS_TASK_TEXT.items()
-        if task.get(key) == previous
+        key: target_task[key]
+        for previous_task in previous_tasks
+        for key, previous in previous_task.items()
+        if task.get(key) == previous and target_task[key] != previous
     }
     if task_changes:
         updates["task_profile"] = {**task, **task_changes}
     persona = (
         agent.get("personaProfile") if isinstance(agent.get("personaProfile"), dict) else {}
     )
-    if list(persona.get("expertise") or []) == _PREVIOUS_EXPERTISE:
+    previous_expertise = [_PREVIOUS_EXPERTISE] if news_pending else []
+    if grant_market:
+        previous_expertise.append(_NEWS_PERSONA["expertise"])
+    if list(persona.get("expertise") or []) in previous_expertise:
         updates["persona_profile"] = {
             **persona,
-            "expertise": list(PERSONA["expertise"]),
+            "expertise": list((PERSONA if grant_market else _NEWS_PERSONA)["expertise"]),
         }
-    if not updates:
-        # Nothing left to migrate (user customized): still mark the check as
-        # done so later write paths stop re-evaluating. One write, once.
-        directory.update_agent_instance(
-            agent["agentId"], metadata={_NEWS_REFERENCE_MARKER: True}
-        )
-        return False
-    updates["metadata"] = {_NEWS_REFERENCE_MARKER: True}
+    migrated = bool(updates)
+    updates["metadata"] = {
+        **({_NEWS_REFERENCE_MARKER: True} if news_pending else {}),
+        **({_MARKET_REFERENCE_MARKER: True} if market_pending else {}),
+    }
     directory.update_agent_instance(agent["agentId"], **updates)
-    return True
+    return migrated
 
 
 def list_financial_assistants() -> list[dict]:
     """Project assistants. Pure read: never create, restore, migrate, or write.
 
-    An untouched stage-1 tool list gains same-session news search on the next
+    Untouched older defaults gain public reference tools on an explicit
     provisioning/update write (create_financial_assistant), not here.
     """
     with _LOCK:
@@ -326,12 +366,13 @@ def create_financial_assistant(display_name: str = "炒股智能体") -> dict:
                 agent["agentId"],
                 metadata={
                     "financialAssistantSetup": "ready",
-                    # Provisioning writes the current defaults (news reference
-                    # included); record the migration as done for this assistant.
+                    # Provisioning writes current read-only reference defaults;
+                    # record both upgrades as done for this assistant.
                     _NEWS_REFERENCE_MARKER: True,
+                    _MARKET_REFERENCE_MARKER: True,
                 },
             )
         else:
-            _grant_news_reference(agent)
+            _grant_default_references(agent)
         agent = directory.get_agent(agent["agentId"], include_archived=True)
         return {"created": created, "assistant": _project(agent)}

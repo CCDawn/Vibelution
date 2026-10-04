@@ -88,6 +88,35 @@ async function input(label: string, value: string) {
 }
 
 describe("financial assistant page", () => {
+  it("keeps reads pure and upgrades market queries only on an explicit single click", async () => {
+    vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, marketToolStatus: "upgrade_available" }]);
+    let resolve!: (value: { created: boolean; assistant: FinancialAssistant }) => void;
+    vi.mocked(createFinancialAssistant).mockReturnValue(new Promise((done) => { resolve = done; }));
+    await render("/finance?session=native-session");
+    expect(createFinancialAssistant).not.toHaveBeenCalled();
+    const enable = button("启用行情查询")!;
+    expect(enable).toBeTruthy();
+    await act(async () => { enable.click(); enable.click(); });
+    expect(createFinancialAssistant).toHaveBeenCalledTimes(1);
+    expect(button("启用行情查询")?.disabled).toBe(true);
+    await act(async () => resolve({ created: false, assistant: { ...row, marketToolStatus: "assigned" } }));
+    await settle();
+    expect(button("启用行情查询")).toBeUndefined();
+    expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
+    expect(createChatSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed market activation retryable without sending research", async () => {
+    vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, marketToolStatus: "upgrade_available" }]);
+    vi.mocked(createFinancialAssistant).mockRejectedValue(new Error("启用未完成"));
+    await render("/finance?session=native-session");
+    await act(async () => button("启用行情查询")!.click());
+    await settle();
+    expect(container.textContent).toContain("启用未完成");
+    expect(button("启用行情查询")?.disabled).toBe(false);
+    expect(nativeSubmit).not.toHaveBeenCalled();
+  });
+
   it("opens the assistant workspace on its own page", async () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([row]);
     await render();

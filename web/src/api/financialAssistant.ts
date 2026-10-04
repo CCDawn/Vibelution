@@ -5,6 +5,7 @@ export type FinancialAssistant = {
   setupStatus: string; directSessionId: string; knowledgeBaseId: string;
   knowledgeReadable: boolean; modelStatus: string; reportStatus: string;
   marketDataStatus: string; newsDelegationStatus: string; privateLedgerStatus: string;
+  marketToolStatus?: "assigned" | "upgrade_available" | "not_assigned";
   tradingEnabled: boolean;
 };
 

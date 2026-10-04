@@ -130,6 +130,7 @@ HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
     "financial_report_query_tool",
+    "financial_market_snapshot_tool",
     "financial_evidence_search_tool",
     "financial_evidence_stage_tool",
     "financial_evidence_withdraw_tool",
@@ -829,6 +830,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["memory_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "financial_market_snapshot_tool": {
+        "category": "web_research",
+        "capabilityTags": ["financial_market", "read_only", "network"],
+        "riskTags": ["network_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "financial_report_query_tool": {
         "category": "web_research",
         "capabilityTags": ["financial_reports", "rag_retrieval", "citations", "read_only"],
@@ -998,11 +1005,11 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "bundleId": "financial_reports",
-        "label": "财报证据问答包",
-        "description": "连接已配置的 RAGFlow 财报助手；按公司/报告期检索，提供来源与页码，可能产生模型费用。",
+        "label": "行情与财报研究包",
+        "description": "只读公开报价与日/周/月 K 线；检索财报证据并保留来源与页码。外部财报助手可能产生模型费用。",
         "category": "research",
-        "toolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_evidence_stage_tool", "financial_evidence_withdraw_tool"],
-        "preferredToolNames": ["financial_report_query_tool", "financial_evidence_search_tool"],
+        "toolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_evidence_stage_tool", "financial_evidence_withdraw_tool", "financial_market_snapshot_tool"],
+        "preferredToolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_market_snapshot_tool"],
     },
     {
         "bundleId": "virtual_human_life",

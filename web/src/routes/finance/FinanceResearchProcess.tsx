@@ -8,16 +8,20 @@ import { latestResearchTurn, projectStockReport, researchRecordStatus } from "./
 const toolLabels: Record<string, string> = {
   financial_evidence_search_tool: "检索财报证据",
   financial_report_query_tool: "读取财报数据",
+  financial_market_snapshot_tool: "查询行情与K线",
   news_search_tool: "检索新闻线索",
   agent_delegate_tool: "委派资料查询",
   knowledge_search_tool: "检索资料库",
 };
 
-export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat }: {
+export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEnableMarket, marketPending, marketDisabled }: {
   view: FinancialSessionView | null;
   activeTurn: AssistantConversationTurn | null;
   zh: boolean;
   onOpenChat: () => void;
+  onEnableMarket?: () => void;
+  marketPending?: boolean;
+  marketDisabled?: boolean;
 }) {
   const turn = activeTurn ?? latestResearchTurn(view?.messages ?? []);
   const tools = turn?.turnItems.filter((item) => item.type === "tool_call") ?? [];
@@ -82,6 +86,9 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat }: {
           <span className={styles.errorText}>{errorPreview}</span>
         </VStateSurface>
       ) : null}
+      {onEnableMarket ? <VButton variant="secondary" onPress={onEnableMarket} isPending={marketPending} isDisabled={marketDisabled || marketPending}>
+        {zh ? "启用行情查询" : "Enable market queries"}
+      </VButton> : null}
       <VButton variant="secondary" onPress={onOpenChat}>
         {approvalPending ? (zh ? "查看并授权" : "Review and approve")
           : running ? (zh ? "查看研究 / 停止" : "View / stop research")

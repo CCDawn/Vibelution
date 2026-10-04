@@ -27,6 +27,7 @@ class FinancialAssistantResponse(BaseModel):
     modelStatus: str
     reportStatus: str
     marketDataStatus: str
+    marketToolStatus: Literal["assigned", "upgrade_available", "not_assigned"] = "not_assigned"
     newsDelegationStatus: str
     privateLedgerStatus: str
     tradingEnabled: bool

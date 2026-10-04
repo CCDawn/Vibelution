@@ -92,7 +92,7 @@ def test_catalog_describes_network_cost_and_explicit_assignment():
         for b in tool_catalog.list_tool_bundles()
         if b["bundleId"] == "financial_reports"
     )
-    assert NAME in bundle["toolNames"] and bundle["explicitAllowToolCount"] == 4
+    assert NAME in bundle["toolNames"] and bundle["explicitAllowToolCount"] == 5
 
 
 @pytest.mark.parametrize(

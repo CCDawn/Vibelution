@@ -1,18 +1,18 @@
 // @vitest-environment happy-dom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FinanceResearchProcess } from "./FinanceResearchProcess";
 import type { FinancialSessionView } from "./FinancialResearchBridge";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let cleanup = async () => {};
 afterEach(async () => cleanup());
-async function render(view: FinancialSessionView) {
+async function render(view: FinancialSessionView, props: Partial<React.ComponentProps<typeof FinanceResearchProcess>> = {}) {
   const node = document.createElement("div"); document.body.appendChild(node);
   const root = createRoot(node);
   cleanup = async () => { await act(async () => root.unmount()); node.remove(); };
-  await act(async () => root.render(<FinanceResearchProcess view={view} activeTurn={null} zh onOpenChat={() => {}} />));
+  await act(async () => root.render(<FinanceResearchProcess view={view} activeTurn={null} zh onOpenChat={() => {}} {...props} />));
   return node;
 }
 const view: FinancialSessionView = { sessionId: "finance", title: "财报研究", status: "ready", busy: false, stopping: false, messages: [
@@ -33,5 +33,24 @@ describe("native financial process outcomes", () => {
     expect(node.querySelector('[role="status"]')?.textContent).toBe("已完成");
     expect(node.textContent).toContain("本轮未调用外部工具");
     expect(node.textContent).not.toContain("尚未开始研究");
+  });
+  it("offers market activation only when supplied and disables it during a write", async () => {
+    const enable = vi.fn();
+    const node = await render(view, { onEnableMarket: enable, marketPending: true });
+    const button = Array.from(node.querySelectorAll("button")).find((item) => item.textContent?.includes("启用行情查询"));
+    expect(button?.disabled).toBe(true);
+    await act(async () => button?.click());
+    expect(enable).not.toHaveBeenCalled();
+  });
+  it("labels the canonical market call using native tool state", async () => {
+    const turn = view.messages[0];
+    if (turn.role !== "assistant") throw new Error("Expected assistant fixture");
+    const node = await render(view, { activeTurn: { ...turn, turnItems: [{
+      type: "tool_call", id: "market", itemId: "market", version: 3, sessionId: "finance", turnId: "native-turn",
+      revision: 1, sequence: 1, toolName: "financial_market_snapshot_tool", status: "failed", title: "financial_market_snapshot_tool",
+    }] } });
+    expect(node.querySelector("ol")?.textContent).toContain("查询行情与K线");
+    expect(node.querySelector("ol")?.textContent).toContain("失败");
+    expect(node.textContent).not.toContain("启用行情查询");
   });
 });
