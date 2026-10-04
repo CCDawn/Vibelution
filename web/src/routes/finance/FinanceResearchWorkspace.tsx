@@ -3,7 +3,8 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { FileText, History, LayoutDashboard, Plus, Search, Settings2, Star } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { createChatSession, fetchSessionDetail, querySessions } from "../../api/chat";
-import type { FinancialAssistant } from "../../api/financialAssistant";
+import { createFinancialAssistant, type FinancialAssistant } from "../../api/financialAssistant";
+import { queryKeys } from "../../api/queryKeys";
 import { fetchFinancialStock, financialMarketKeys, searchFinancialStocks, type StockIdentity, type StockPeriod } from "../../api/financialMarket";
 import type { AssistantConversationTurn, SessionSummary } from "../../api/types";
 import { VButton, VInput, VRouteLinkButton, VSkeleton, VStateSurface, VSurface, VTabs } from "../../components/vui";
@@ -33,6 +34,8 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
   const [config, setConfig] = useState<FinanceResearchConfigValue>({ period: "", date: localResearchDate(), scope: "comprehensive", depth: "brief" });
   const [citation, setCitation] = useState<ReportCitation | null>(null);
   const [creating, setCreating] = useState(false), [launching, setLaunching] = useState(false), [createError, setCreateError] = useState("");
+  const [upgradingMarket, setUpgradingMarket] = useState(false);
+  const marketUpgradeGate = useRef(false);
   const createGate = useRef(false), launchGate = useRef(false), createKey = useRef("");
   const mounted = useRef(false), requestSequence = useRef(0), hydratedSession = useRef("");
   const recordSequence = useRef(0);
@@ -51,6 +54,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
   const report = useMemo(() => projectStockReport(messages, currentView), [messages, currentView?.terminalReason, currentView?.lastTurnStatus, currentView?.lastTurnTerminalTurnId]);
   const stockReport = reportMatchesStock(report, messages, stocks.selected) ? report : null;
   const busy = Boolean(currentView?.busy || currentView?.submitPending);
+  const marketUpgradeDisabled = busy || creating || launching || Boolean(currentView?.stopping);
   const readyForResearch = nativeReady && !currentView?.transcriptPending && !currentView?.stopping;
   const onSessionView = useCallback((next: FinancialSessionView) => setView((current) => current?.sessionId === next.sessionId && Object.keys(next).every((key) => current[key as keyof FinancialSessionView] === next[key as keyof FinancialSessionView]) ? current : next), []);
   const onActiveTurn = useCallback((id: string, turn: AssistantConversationTurn | null) => setActiveTurn((current) => current?.sessionId === id && current.turn === turn ? current : { sessionId: id, turn }), []);
@@ -115,6 +119,22 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
     draft(stockResearchPrompt(market.data?.stock ?? stocks.selected, config.period, config.date, config.scope, config.depth, market.data), sessionId, true);
   }
   function focusCitation(next: ReportCitation) { setCitation(next); setAsideTab("evidence"); }
+  async function enableMarketQueries() {
+    if (marketUpgradeGate.current || marketUpgradeDisabled || assistant.marketToolStatus !== "upgrade_available") return;
+    marketUpgradeGate.current = true; setUpgradingMarket(true); setCreateError("");
+    try {
+      const result = await createFinancialAssistant();
+      if (result.assistant.agentId !== assistant.agentId) throw new Error(zh ? "助手身份已变化，请刷新后核对" : "Assistant identity changed; refresh and check");
+      client.setQueryData<FinancialAssistant[]>(queryKeys.financialAssistants(), (rows) => [
+        ...(rows ?? []).filter((row) => row.agentId !== result.assistant.agentId), result.assistant,
+      ]);
+    } catch (error) {
+      if (mounted.current) setCreateError(error instanceof Error ? error.message : (zh ? "行情查询启用失败，请重试" : "Could not enable market queries"));
+    } finally {
+      marketUpgradeGate.current = false;
+      if (mounted.current) setUpgradingMarket(false);
+    }
+  }
   const researchConfig = <FinanceResearchConfig value={config} onChange={setConfig} onStart={startResearch} disabled={!readyForResearch || busy || creating || launching || !isValidResearchDate(config.date) || assistant.modelStatus !== "configured_unverified"} pending={creating || launching} zh={zh} />;
   function historyContent(compact = true) { return history.isError ? <VStateSurface density="compact" tone="error" title={zh ? "记录加载失败" : "History unavailable"} actions={<VButton onPress={() => void history.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : history.isPending ? <div className={styles.workspaceHistoryLoading}><VSkeleton /><VSkeleton /></div> : <FinanceResearchHistory records={records} selectedId={sessionId} onOpen={openRecord} zh={zh} compact={compact} />; }
   const sidebar = <div className={styles.rail}>
@@ -126,7 +146,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
     <div className={styles.workspaceSection}><span className={styles.sectionHeading}><span>{zh ? "我的自选" : "Following"}</span><span>{stocks.watchlist.length}</span></span>{stocks.watchlist.length ? stocks.watchlist.map((stock) => <VButton key={stock.symbol} variant="ghost" className={styles.workspaceWatchlistButton} aria-pressed={stocks.selected.symbol === stock.symbol} onPress={() => selectStock(stock)}><span className={styles.workspaceWatchlistRow}><span className={styles.workspaceTruncate}>{stock.name}</span><span className={styles.workspaceTicker}>{stock.ticker}</span></span></VButton>) : <span className={styles.small}>{zh ? "点击股票右上角 ☆ 添加" : "Use ☆ to follow a stock"}</span>}{stocks.storageError ? <span className={styles.workspaceStorageWarning}>{zh ? "自选未保存，关闭页面后会丢失" : "Watchlist could not be saved"}</span> : null}</div>
     <div className={styles.workspaceRecent}><div className={styles.sectionHeading}><span>{zh ? "最近研究" : "Recent research"}</span><History size={14} /></div>{historyContent()}{history.hasNextPage ? <VButton variant="ghost" isDisabled={history.isFetchingNextPage} onPress={() => void history.fetchNextPage()}>{zh ? "更多记录" : "More history"}</VButton> : null}</div>
   </div>;
-  const aside = <div className={styles.workspaceAside}><VTabs value={asideTab} onValueChange={setAsideTab} aria-label={zh ? "研究辅助面板" : "Research inspector"} className={styles.workspaceAsideTabs} items={[{ id: "process", label: zh ? "研究过程" : "Activity" }, { id: "evidence", label: zh ? "引用与资料" : "Sources" }]} /><div className={styles.workspaceAsideBody}>{asideTab === "process" ? <FinanceResearchProcess view={currentView} activeTurn={activeTurn?.sessionId === sessionId ? activeTurn.turn : null} zh={zh} onOpenChat={() => { setArea("workspace"); setTab("research"); }} /> : <FinanceReportLibrary assistant={assistant} zh={zh} returnTo={returnTo} citation={citation} />}</div></div>;
+  const aside = <div className={styles.workspaceAside}><VTabs value={asideTab} onValueChange={setAsideTab} aria-label={zh ? "研究辅助面板" : "Research inspector"} className={styles.workspaceAsideTabs} items={[{ id: "process", label: zh ? "研究过程" : "Activity" }, { id: "evidence", label: zh ? "引用与资料" : "Sources" }]} /><div className={styles.workspaceAsideBody}>{asideTab === "process" ? <FinanceResearchProcess view={currentView} activeTurn={activeTurn?.sessionId === sessionId ? activeTurn.turn : null} zh={zh} onEnableMarket={assistant.marketToolStatus === "upgrade_available" ? () => void enableMarketQueries() : undefined} marketPending={upgradingMarket} marketDisabled={marketUpgradeDisabled} onOpenChat={() => { setArea("workspace"); setTab("research"); }} /> : <FinanceReportLibrary assistant={assistant} zh={zh} returnTo={returnTo} citation={citation} />}</div></div>;
   return <FinancialResearchBridgeContext.Provider value={bridge}><FinanceResearchFrame zh={zh} sidebar={sidebar} aside={aside} actions={<VRouteLinkButton to={agentCenterConfigRoute({ agentId: assistant.agentId, returnTo, returnLabel: zh ? "炒股智能体" : "Investment assistant" })} aria-label={zh ? "模型与助手配置" : "Assistant settings"}><Settings2 size={16} /></VRouteLinkButton>}>
     {createError ? <VStateSurface tone="error" title={zh ? "操作未完成" : "Could not complete action"}><span className={styles.workspaceErrorText}>{createError}</span></VStateSurface> : null}
     {area === "workspace" ? <><FinanceStockHeader stock={stocks.selected} query={market} starred={stocks.watchlist.some((stock) => stock.symbol === stocks.selected.symbol)} onToggleStar={() => stocks.toggleStock(market.data?.stock ?? stocks.selected)} zh={zh} /><div className={styles.workspaceViewTabs}><VTabs value={tab} onValueChange={setTab} aria-label={zh ? "股票研究视图" : "Stock research view"} items={[{ id: "overview", label: zh ? "股票概览" : "Overview" }, { id: "research", label: zh ? "AI 研究" : "AI research" }, { id: "report", label: zh ? "研究报告" : "Report" }]} /></div>

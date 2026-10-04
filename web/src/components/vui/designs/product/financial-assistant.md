@@ -27,6 +27,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 只打开服务端验证 Agent/Session 绑定后返回的 sessionId，经 `useChatRouteSelection.openSession`。
 离开入口后，晚到的结果不导航。已归档或身份已改不另建。
 公开新闻复用既有 `news_search_tool`，只在本会话作参考；助手判断真伪，不写入财报库，不开启跨团队委派。
+原生 `financial_market_snapshot_tool` 允许金融助手在追问中读取公开报价与日/周/月 K 线。研究过程只展示原生 tool call 名称与状态，不另建工具结果流。旧助手仅在服务端投影 `marketToolStatus=upgrade_available` 时展示 `VButton`「启用行情查询」；点击才调用既有幂等 POST，默认策略可升级，禁网、黑名单与自定义工具策略保持原样。写入中或原生研究运行/停止中按钮禁用；失败复用操作错误面，成功刷新助手查询缓存。GET 与页面读取不修改权限。
 
 ### 研究记录与输入
 研究记录由 `querySessions` 按金融 Agent 查询并核对绑定。历史深链先读取轻量会话元数据，拒绝其他 Agent、已归档及 Companion 身份；不把普通会话套上金融身份。新研究走原生 `createChatSession`，同步 ref 防双击，未知结果重试沿用幂等键，晚到结果经当前路由 CAS 不抢页面。

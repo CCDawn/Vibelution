@@ -2,7 +2,7 @@
 
 ## 接入范围
 
-`financial_report_query_tool` 已接入 Vibelution 的 `Key_Tools`、Tool Registry、ToolPolicy 和现有对话工具结果展示链。工具目录中的「财报证据问答包」提供显式配置入口，不自动修改任何现有 Agent 的权限。无需新增页面或平行 MCP registry。
+`financial_report_query_tool` 与 `financial_market_snapshot_tool` 已接入 Vibelution 的 `Key_Tools`、Tool Registry、ToolPolicy 和现有对话工具结果展示链。工具目录中的「行情与财报研究包」提供显式配置入口，列表读取不修改现有 Agent 的权限。无需平行 MCP registry。
 
 此工具是**外部财报业务服务的适配器**。RAGFlow 财报助手拥有文档索引、检索、系统提示词和模型配置；Vibelution 不在本适配器中新建通用 LLM 路由、不覆写模型、不把系统消息或会话历史转发给另一模型。
 
@@ -40,7 +40,7 @@
 
 ## 在现有 Agent 中使用
 
-在工具策略中给目标 Agent **显式分配**「财报证据问答包」/`financial_report_query_tool`，并保留现有网络访问和审批约束。该工具有 `network_access` 与 `model_cost` 风险标签，默认 `on_request`。零工具 Agent、未分配的 Agent、拒绝网络的 Agent 和被 turn grant 限制的调用仍应被现有授权链阻止。
+在工具策略中给目标 Agent **显式分配**「行情与财报研究包」/`financial_report_query_tool`，并保留现有网络访问和审批约束。该工具有 `network_access` 与 `model_cost` 风险标签，默认 `on_request`。零工具 Agent、未分配的 Agent、拒绝网络的 Agent 和被 turn grant 限制的调用仍应被现有授权链阻止。
 
 工具参数示例（仅格式示意，不是已运行的财报结果）：
 
@@ -154,15 +154,21 @@ Agent 接入保持工具适配形式，不自动创建新团队、Agent 或权�
 顶部“智能体”菜单分为“炒股智能体”和“虚拟人智能体”。原人物大厅、深链及虚拟人插件保持原路径。
 
 1. 点顶部“智能体”里的“炒股智能体”，或打开 `/finance`，进入这个助手自己的页面，页面里只有它的对话。还没有助手时，这一下会创建普通 `general` Agent、空的财报库和原生会话，不会启动模型调用。创建失败、身份已改或已归档时停在说明上，不另外再建一个。
-2. 新身份默认允许 `financial_report_query_tool`、`financial_evidence_search_tool` 和 `news_search_tool`。`news_search_tool` 只在本会话检索公开新闻作参考，助手自行判断真伪；结果标为质量不足时不得引用，也不得写入财报库。财报库 MemoryPolicy 仅授予自身 scoped base 的读取权限；不授予知识审批、跨团队委派、代码执行或交易工具。已完成初始化且仍保持上述两项财报工具的身份，会在下次列出或继续配置时补上新闻检索；用户清空或改过的工具列表保持原样。
+2. 新身份默认允许 `financial_report_query_tool`、`financial_evidence_search_tool`、`news_search_tool` 和 `financial_market_snapshot_tool`。公开新闻只作参考，助手自行判断真伪；质量不足的结果不得引用或入财报库。行情工具复用页面已有的腾讯公开行情服务，仅接受股票代码、周期和数量，保留来源、行情时点和单位，不发送问题或私人上下文。财报库 MemoryPolicy 仅授予自身 scoped base 的读取权限；不授予知识审批、跨团队委派、代码执行或交易工具。
 3. 对话开头有一条固定说明，并从那里进入原“身份与模型配置”和财报库。会话菜单里也能打开财报库。名称、persona、模型和权限仍在原配置页编辑；财报服务仍由 operator 配置。模型“已填写”和财报服务“已填写”只表示配置存在，连接状态写在这两个页面上，不是实连通过。
 4. 财报知识库使用既有待审、审核、版本与撤回链。空库返回证据不足。后续需要主动采集/审核时，按原权限流程单独配置；金融专家不自审入库。
-5. 重复点击和同进程并发创建复用同一项目身份；初始化中断可继续。初始化完成后重试不会覆盖用户编辑；若工具列表和任务说明仍是第一阶段默认值，才会补上公开新闻检索。已归档身份不会自动恢复或另建。生命周期仍从 Agent 管理维护。
+5. 重复点击和同进程并发创建复用同一项目身份；初始化中断可继续。旧助手保留默认两项财报或三项新闻工具时，研究过程显示「启用行情查询」，点击调用显式 POST provisioning，按原生权限升级一次；GET 列表和页面读取始终纯读。自定义/清空工具列表、禁网或行情黑名单不扩权。原策略预算、审批覆盖、delegationAccess、scopes 和 perToolRules 保留；任务/persona 只替换完全匹配旧默认的字段。迁移完成后用户移除工具不会重新补回；并发权限修改使本次升级失败。已归档身份不会自动恢复或另建。
 6. 只打开服务端已验证归属的原生会话。离开页面后，晚到的创建结果不会把人拉走。没有独立 transcript、Turn 或 SSE。
+
+### 行情工具与边界
+
+`financial_market_snapshot_tool(ticker, period="day", limit=20)` 只接受有效 A 股六位代码或 sh/sz/bj 前缀代码；周期为 day/week/month，数量 1–120。结果最多3200字符，以有列名的 OHLC/volumeLots 行返回最新 K 线，并用 requestedLimit/availableCandleCount/returnedCandleCount/omittedCandleCount 说明裁剪。报价成功而 K 线失败时返回 `ok=true,status=partial` 和 K 线错误；报价失败返回 `ok=false,status=unavailable`，非法输入不联网。报价单位元、成交量单位手（1手100股），K 线为前复权。
+
+`quote.timestamp` 与 K 线日期是数据时点，`fetchedAt` 是查询时点。公开源可能延迟、休市或来自30秒报价/300秒 K 线缓存，不能当实时分钟行情。它不产生额外模型服务费用，但仍有网络访问风险并遵循原生审批；分配工具不等于免审批。首次需要批准时，现有原生研究对话保留「查看并授权」入口。`marketToolStatus` 只投影分配/默认升级资格，不代表行情源在线。
 
 ### 当前未提供的能力
 
-- 分钟行情、成熟 K 线图尚未接入。公开新闻只作参考，不作为公告或财报原文，不得入库。新闻跨团队权限保持关闭；不可通过给工具传 Agent 名或复用外部 MCP 绕过团队边界。`newsDelegationStatus` 仍表示跨团队委派关闭。
+- 分钟行情、批量选股和多分析师编排尚未接入。日、周、月 K 线已用于页面和已授权的 Agent 查询。公开新闻只作参考，不作为公告或财报原文，不得入库。新闻跨团队权限保持关闭；不可通过给工具传 Agent 名或复用外部 MCP 绕过团队边界。`newsDelegationStatus` 仍表示跨团队委派关闭。
 - 个人现金流/持仓结构化账本尚未实现，这个对话不采集账户金额。未来必须使用用户/项目私有结构化域，不写公共新闻或财报中央来源。
 - 不能因为创建身份成功就声称真实模型、RAGFlow 或投资效果已验证；无下单或券商执行接口。
 - 复用项目现有单操作员/项目隔离，不把它宣称为已实现的互联网多租户金融账户认证。
