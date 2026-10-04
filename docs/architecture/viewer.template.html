@@ -25,9 +25,9 @@
       --focus: #2563eb;
       --sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
       --mono: "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
-      --rail-width: 232px;
-      --detail-width: 352px;
-      --top-height: 72px;
+      --rail-width: 216px;
+      --detail-width: 384px;
+      --top-height: 64px;
     }
     * { box-sizing: border-box; }
     html, body { width: 100%; min-width: 320px; height: 100%; margin: 0; }
@@ -148,9 +148,9 @@
     .edge-hit { fill: none; stroke: transparent; stroke-width: 16; cursor: pointer; }
     .diagram-edge { cursor: pointer; }
     .diagram-edge:hover .edge-line, .diagram-edge.is-selected .edge-line { stroke: var(--accent); stroke-width: 2.2; }
-    .diagram-edge.is-dimmed { opacity: .18; }
+    .diagram-edge.is-dimmed { opacity: .62; }
     .edge-label-bg { fill: #fbfcfd; stroke: #e5eaf0; stroke-width: .8; }
-    .edge-label { fill: #506276; font: 11px var(--mono); text-anchor: middle; }
+    .edge-label { fill: #506276; font: 13px var(--sans); text-anchor: middle; }
     .edge-relation-label { fill: #52667a; font: 11px var(--mono); text-anchor: middle; }
     .diagram-node { cursor: pointer; }
     .node-card { fill: #fff; stroke: #cbd6e0; stroke-width: 1.25; }
@@ -162,11 +162,12 @@
     .node-accent-bar { fill: #496f89; }
     .node-file .node-accent-bar { fill: #9b7258; }
     .node-domain .node-accent-bar { fill: #496f89; }
-    .node-label { fill: #1e2d3c; font: 650 15px var(--sans); }
-    .node-description { fill: #5e6d7e; font: 11px var(--sans); }
-    .node-kind { fill: #8793a0; font: 9px var(--mono); letter-spacing: .02em; }
+    .node-label { fill: #1e2d3c; font: 650 18px var(--sans); }
+    .node-description { fill: #4e6275; font: 12px var(--sans); }
+    .node-kind { fill: #60758a; font: 11px var(--sans); }
+    .node-subtitle { fill: #46617a; font: 11px var(--mono); }
     .diagram-node:hover .node-card, .diagram-node.is-selected .node-card { stroke: var(--accent); stroke-width: 2; }
-    .diagram-node.is-dimmed { opacity: .24; }
+    .diagram-node.is-dimmed { opacity: .76; }
     .diagram-node:focus-visible .node-card { stroke: var(--focus); stroke-width: 2.5; }
     .canvas-message {
       position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center;
@@ -289,9 +290,75 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
     }
+    /* Reading comes first; full source navigation stays one level deeper. */
+    h2 { font-size: 23px; }
+    .current-description { font-size: 13px; }
+    .top-meta #meta-commit, .top-meta #meta-generated { display: none; }
+    .nav-heading { font: 650 12px/1.5 var(--sans); letter-spacing: 0; }
+    .nav-item { min-height: 38px; font-size: 13px; }
+    .reading-nav-group { margin: 14px 0 0; }
+    .reading-nav-group > summary { cursor: pointer; color: var(--muted); padding: 5px 8px; font-size: 12px; font-weight: 650; }
+    .reading-nav-group .nav-list { padding-top: 5px; }
+    #source-index { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 12px; }
+    #source-index > summary { cursor: pointer; color: #4d6174; padding: 6px; font-size: 12px; }
+    #source-index .nav-section { margin-top: 10px; }
+    .source-index-note { margin: 8px 5px; font-size: 11px; color: var(--muted); }
+    .view-layer { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; padding: 2px; background: #f1f5f9; }
+    .view-layer[hidden] { display: none; }
+    .view-layer button { min-height: 30px; border: 0; background: transparent; border-radius: 5px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+    .view-layer button[aria-pressed="true"] { background: #fff; color: #234d68; box-shadow: 0 1px 4px #21364919; font-weight: 650; }
+    .reading-strip { display: flex; align-items: center; gap: 6px; overflow-x: auto; flex: 0 0 auto; padding-bottom: 2px; }
+    .reading-strip[hidden] { display: none; }
+    .reading-step { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; color: #496177; background: transparent; font-size: 12px; cursor: pointer; }
+    .reading-step:hover, .reading-step[aria-current="step"] { border-color: #9fb6ca; background: #eaf2f8; color: #224d6a; }
+    .step-number { display: inline-grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #e4ebf2; color: #4f6478; font: 11px var(--mono); }
+    .diagram-zone { fill: #f3f6fa; stroke: #dbe4ee; stroke-width: 1; }
+    .zone-label { fill: #405a72; font: 650 15px var(--sans); }
+    .node-role-control .node-card { fill: #fffaf0; stroke: #b49b6b; }
+    .node-role-store .node-card { fill: #eff8f4; stroke: #78a895; }
+    .node-role-external .node-card { fill: #f6f2fb; stroke: #a08bbc; stroke-dasharray: 5 3; }
+    .node-role-entry .node-card { fill: #edf5fb; stroke: #8aaec8; }
+    .node-role-process .node-card { fill: #fff; stroke: #9db2c5; }
+    .reading-legend { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .reading-legend i { width: 10px; height: 10px; border: 1px solid #9db2c5; border-radius: 3px; background: #fff; }
+    .reading-legend .legend-store { border-color: #78a895; background: #eff8f4; }
+    .reading-legend .legend-control { border-color: #b49b6b; background: #fffaf0; }
+    .reading-legend .legend-external { border-color: #a08bbc; background: #f6f2fb; border-style: dashed; }
+    .reading-context { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; font-size: 12px; color: #53697e; }
+    .reading-context[hidden] { display: none; }
+    .reading-context p { margin: 0; line-height: 1.6; }
+    .related-reading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .related-reading[hidden] { display: none; }
+    .related-reading-label { color: var(--muted); font-size: 11px; margin-right: 3px; }
+    .related-reading .button { min-height: 29px; font-size: 12px; background: transparent; }
+    .detail-title { font-size: 20px; }
+    .technical-name { color: #4b647a; font: 12px/1.6 var(--mono); overflow-wrap: anywhere; margin: 0 0 14px; }
+    .learning-block { margin: 16px 0; }
+    .learning-block h4 { font-size: 12px; margin: 0 0 7px; color: #2b4c68; }
+    .learning-block p { margin: 0 0 6px; font-size: 13px; line-height: 1.7; color: #3b5268; overflow-wrap: anywhere; }
+    .learning-block ul { margin: 0; padding-left: 17px; font-size: 12px; line-height: 1.7; color: #566a7d; }
+    .learning-block li { margin: 4px 0; }
+    .detail-flow-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0; }
+    .source-disclosure { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 12px; }
+    .source-disclosure > summary { cursor: pointer; font-size: 12px; color: #4d657a; }
+    .walk-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 15px 0; border-top: 1px solid var(--line); padding-top: 12px; }
+    .walk-controls span { font-size: 11px; color: var(--muted); }
+    @media (max-width: 1180px) { :root { --rail-width: 202px; --detail-width: 344px; } }
+    @media (max-width: 690px) {
+      :root { --rail-width: min(290px, 88vw); }
+      .reading-context { display: block; font-size: 11px; }
+      .reading-context p + p { margin-top: 4px; }
+      .graph-caption .reading-legend { display: none; }
+      .canvas-toolbar { flex-wrap: wrap; }
+      .reading-strip { max-height: 43px; }
+      .button, .reading-step, .view-layer button { min-height: 40px; }
+      .current-title-row h2 { font-size: 20px; }
+      .related-reading { max-height: 48px; flex-wrap: nowrap; overflow-x: auto; }
+      .related-reading .button { flex: 0 0 auto; }
+    }
   </style>
 </head>
-<body>
+<body class="detail-collapsed">
   <header class="topbar">
     <button class="button button-icon button-quiet" id="sidebar-toggle" type="button" aria-label="打开源码单元目录" aria-expanded="false" aria-controls="sidebar">☰</button>
     <div class="brand">
@@ -318,7 +385,7 @@
     <aside class="sidebar" id="sidebar" aria-label="架构图导航">
       <div class="sidebar-scroll">
         <div class="search-wrap">
-          <label class="search-label" for="atlas-search"><span>搜索源码单元、文件、函数</span><span class="shortcut">/</span></label>
+          <label class="search-label" for="atlas-search"><span>搜索功能或源码</span><span class="shortcut">/</span></label>
           <div class="search-input-wrap">
             <input id="atlas-search" type="search" autocomplete="off" spellcheck="false" placeholder="输入名称或路径…" aria-controls="search-results">
             <button id="clear-search" type="button" aria-label="清空搜索">×</button>
@@ -326,15 +393,19 @@
           <div class="search-results" id="search-results" role="listbox" aria-label="搜索结果" hidden></div>
         </div>
         <section class="nav-section" aria-labelledby="views-heading">
-          <h2 class="nav-heading" id="views-heading"><span>架构视图</span><span id="view-count"></span></h2>
+          <h2 class="nav-heading" id="views-heading"><span>从这里读起</span><span id="view-count" hidden></span></h2>
           <nav class="nav-list" id="views-nav" aria-label="架构视图"></nav>
         </section>
-        <section class="nav-section" aria-labelledby="domains-heading">
-          <h2 class="nav-heading" id="domains-heading"><span>领域与源码单元</span><span id="module-count"></span></h2>
-          <div id="domains-nav"></div>
-        </section>
+        <details id="source-index">
+          <summary>源码索引 · 按需查阅</summary>
+          <p class="source-index-note">目录归属与静态 import 用于定位实现。业务流程从上方的架构视图进入。</p>
+          <section class="nav-section" aria-labelledby="domains-heading">
+            <h2 class="nav-heading" id="domains-heading"><span>领域与源码单元</span><span id="module-count"></span></h2>
+            <div id="domains-nav"></div>
+          </section>
+        </details>
       </div>
-      <div class="sidebar-foot">图中关系来自此快照的源码索引。点击节点、连线或来源条目查看技术细节。</div>
+      <div class="sidebar-foot">先看主流程，再展开实现。点击节点查看输入、处理、输出和源码位置。</div>
     </aside>
 
     <main id="main-content">
@@ -350,12 +421,17 @@
       </div>
       <div class="canvas-toolbar">
         <div class="graph-caption">
-          <span><i class="legend-mark" aria-hidden="true"></i> 节点可点击查看细节</span>
-          <span>·</span>
-          <span>拖动平移，滚轮缩放</span>
-          <span id="graph-count"></span>
+          <span class="reading-legend"><i></i>执行步骤</span>
+          <span class="reading-legend"><i class="legend-control"></i>调度 / 权限</span>
+          <span class="reading-legend"><i class="legend-store"></i>数据记录</span>
+          <span class="reading-legend"><i class="legend-external"></i>模型接口</span>
+          <span id="graph-count" hidden></span>
         </div>
         <div class="toolbar-actions">
+          <div class="view-layer" id="view-layer" aria-label="图的细节层级" hidden>
+            <button id="layer-story" type="button" aria-pressed="true">主流程</button>
+            <button id="layer-full" type="button" aria-pressed="false">完整实现</button>
+          </div>
           <div class="pager" id="graph-pager" hidden>
             <button class="button button-small button-icon" id="page-prev" type="button" aria-label="上一页">‹</button>
             <span id="page-label"></span>
@@ -367,6 +443,7 @@
           <button class="button button-small" id="fit-view" type="button" aria-label="适配画布">适配</button>
         </div>
       </div>
+      <div class="reading-strip" id="reading-strip" aria-label="节点阅读导航，序号不表示调用顺序" hidden></div>
       <div class="canvas-frame" id="canvas-frame">
         <svg id="diagram" role="group" aria-labelledby="diagram-title diagram-desc" xmlns="http://www.w3.org/2000/svg">
           <title id="diagram-title">项目架构图</title>
@@ -388,6 +465,8 @@
           </div>
         </div>
       </div>
+      <div class="reading-context" id="reading-context" hidden><p id="reading-entry"></p><p id="reading-outcome"></p></div>
+      <div class="related-reading" id="related-reading" aria-label="继续阅读" hidden></div>
       <div class="status-line" id="status-line" role="status" aria-live="polite"></div>
     </main>
 
@@ -430,8 +509,8 @@
     "use strict";
 
     const SVG_NS = "http://www.w3.org/2000/svg";
-    const NODE_W = 224;
-    const NODE_H = 88;
+    const NODE_W = 244;
+    const NODE_H = 132;
     const PAGE_SIZE = 4;
     const SEARCH_PAGE_SIZE = 20;
     const FILE_PAGE_SIZE = 40;
@@ -439,7 +518,7 @@
     const MODAL_PAGE_SIZE = 50;
     const $ = function (id) { return document.getElementById(id); };
     const state = {
-      data: null, route: null, graph: null, selected: null, camera: null, fitBox: null,
+      data: null, route: null, graph: null, selected: null, camera: null, fitBox: null, layer: "story",
       searchPage: 0, searchTimer: 0, modalFocus: null, coveragePage: 0, coverageQuery: "",
       detailPages: Object.create(null), reverseImports: new Map(), fileByPath: new Map(),
       moduleById: new Map(), domainById: new Map(), viewById: new Map(),
@@ -645,6 +724,7 @@
       if (route.kind === "overview") params.set("overview", "1");
       else {
         params.set(route.kind, string(route.value, ""));
+        if (route.kind === "view" && route.layer === "full") params.set("layer", "full");
         if (route.page) params.set("page", String(route.page));
         if (route.line) params.set("line", String(route.line));
         if (route.symbol) params.set("symbol", string(route.symbol, ""));
@@ -657,7 +737,7 @@
     }
     function readRouteHash() {
       const params = new URLSearchParams(window.location.hash.slice(1));
-      if (params.has("view")) return { kind: "view", value: params.get("view"), page: finite(params.get("page"), 0) };
+      if (params.has("view")) return { kind: "view", value: params.get("view"), layer: params.get("layer"), page: finite(params.get("page"), 0) };
       if (params.has("domain")) return { kind: "domain", value: params.get("domain"), page: finite(params.get("page"), 0) };
       if (params.has("module")) return { kind: "module", value: params.get("module"), page: finite(params.get("page"), 0) };
       if (params.has("file")) return { kind: "file", value: params.get("file"), page: finite(params.get("page"), 0), line: finite(params.get("line"), 0), symbol: params.get("symbol") || "" };
@@ -748,11 +828,11 @@
       const positions = [];
       visibleItems.forEach(function (item, index) {
         positions.push(Object.assign({}, item, {
-          x: 24 + index * 264, y: 248, kind: item.kind || (item.path ? "file" : "module")
+          x: 24 + index * 312, y: 268, kind: item.kind || (item.path ? "file" : "module")
         }));
       });
       const headerCenter = visibleItems.length
-        ? visibleItems.reduce(function (sum, item, index) { return sum + 24 + index * 264 + NODE_W / 2; }, 0) / visibleItems.length
+        ? visibleItems.reduce(function (sum, item, index) { return sum + 24 + index * 312 + NODE_W / 2; }, 0) / visibleItems.length
         : 532;
       const headerNode = Object.assign({}, header, { x: headerCenter - NODE_W / 2, y: 24, w: NODE_W, h: NODE_H });
       const childrenWithDefaults = positions.map(function (node) {
@@ -788,7 +868,7 @@
           description: string(domain.description, ""),
           kind: "domain", domainId: cleanId(domain.id),
           moduleCount: modulesInDomain(domain.id).length,
-          x: 24 + index * 264, y: 156, w: NODE_W, h: NODE_H
+          x: 24 + index * 312, y: 156, w: NODE_W, h: NODE_H
         };
       });
       return {
@@ -800,13 +880,20 @@
     }
 
     function staticGraph(view) {
-      const nodes = asArray(view.nodes).map(function (node, index) {
+      const primary = asArray(view.focusNodes);
+      const isFocus = state.layer !== "full" && primary.length > 0;
+      const order = isFocus ? primary : asArray(view.readingOrder);
+      const nodes = asArray(view.nodes).filter(function (node) {
+        return !isFocus || primary.includes(node.id);
+      }).map(function (node, index) {
         const cloned = Object.assign({}, node);
         cloned.id = cleanId(node.id) || "node-" + index;
         cloned.label = string(node.label, cloned.id);
         cloned.kind = "view";
-        cloned.x = finite(node.x, 24 + (index % 4) * 264);
-        cloned.y = finite(node.y, 24 + Math.floor(index / 4) * 142);
+        const position = isFocus && view.focusPositions ? view.focusPositions[node.id] : null;
+        cloned.x = finite(position ? position.x : node.x, 24 + (index % 4) * 312);
+        cloned.y = finite(position ? position.y : node.y, 24 + Math.floor(index / 4) * 216);
+        cloned.step = view.id === "overview" ? null : order.indexOf(node.id) + 1;
         cloned.w = NODE_W;
         cloned.h = NODE_H;
         cloned.refs = asArray(node.refs);
@@ -815,10 +902,11 @@
       return {
         id: cleanId(view.id), title: string(view.label, view.id),
         description: string(view.description, ""), nodes: nodes,
-        edges: asArray(view.edges).map(function (edge, index) {
+        edges: asArray(isFocus ? view.focusEdges : view.edges).map(function (edge, index) {
           return Object.assign({}, edge, { id: cleanId(edge.id) || "edge-" + index, refs: asArray(edge.refs) });
         }),
-        mode: "view", rawView: view
+        mode: "view", rawView: view, isFocus: isFocus, readingOrder: order,
+        zones: isFocus ? asArray(view.focusZones) : asArray(view.zones)
       };
     }
 
@@ -844,6 +932,7 @@
 
     function setRoute(route, updateHash) {
       state.route = route;
+      state.layer = route.layer === "full" ? "full" : "story";
       if (updateHash) pushRoute(route);
       state.selected = null;
       state.detailPages = Object.create(null);
@@ -865,6 +954,15 @@
       }
       state.graph = graph;
       state.camera = null;
+      closeDrawers();
+      if (route.kind === "view") {
+        document.body.classList.add("detail-collapsed");
+        $("detail-toggle").setAttribute("aria-expanded", "false");
+      } else {
+        document.body.classList.remove("detail-collapsed");
+        $("detail-toggle").setAttribute("aria-expanded", "true");
+        $("source-index").open = true;
+      }
       renderNavigation();
       renderHeading();
       renderPager();
@@ -877,16 +975,12 @@
       if (state.navBuilt) { updateNavigationActive(); return; }
       const viewsNav = $("views-nav");
       clear(viewsNav);
-      const overviewButton = el("button", "nav-item", viewsNav);
-      overviewButton.type = "button";
-      overviewButton.setAttribute("data-route-kind", "overview");
-      overviewButton.setAttribute("data-route-id", "");
-      overviewButton.setAttribute("aria-current", state.route && state.route.kind === "overview" ? "page" : "false");
-      el("span", "nav-dot", overviewButton);
-      setText(el("span", "nav-item-text", overviewButton), "项目领域总览");
-      overviewButton.addEventListener("click", function () { setRoute({ kind: "overview" }, true); });
-      state.data.views.forEach(function (view) {
-        const button = el("button", "nav-item", viewsNav);
+      const primaryIds = ["overview", "session", "llm", "storage"];
+      const groups = [{ label: "执行细节", ids: ["startup", "http", "stream", "tools"] },
+        { label: "业务与能力", ids: ["teams", "research", "knowledge", "knowledge-write", "self-evolution", "supervised", "gym", "companion", "finance"] }];
+      function addView(view, parent) {
+        if (!view) return;
+        const button = el("button", "nav-item", parent);
         button.type = "button";
         button.setAttribute("data-route-kind", "view");
         button.setAttribute("data-route-id", cleanId(view.id));
@@ -896,6 +990,14 @@
         setText(el("span", "nav-item-text", button), string(view.label, view.id));
         button.title = string(view.description, view.label);
         button.addEventListener("click", function () { setRoute({ kind: "view", value: cleanId(view.id) }, true); });
+      }
+      primaryIds.forEach(function (id) { addView(state.viewById.get(id), viewsNav); });
+      groups.forEach(function (group) {
+        const disclosure = el("details", "reading-nav-group", viewsNav);
+        const summary = el("summary", "", disclosure);
+        setText(summary, group.label);
+        const list = el("div", "nav-list", disclosure);
+        group.ids.forEach(function (id) { addView(state.viewById.get(id), list); });
       });
       setText($("view-count"), countLabel(state.data.views.length));
       setText($("module-count"), countLabel(state.data.modules.length));
@@ -987,10 +1089,11 @@
       if (!graph) return;
       setText($("current-title"), graph.title);
       setText($("current-description"), graph.description);
+      renderReadingGuide();
       const breadcrumbs = $("breadcrumbs");
       clear(breadcrumbs);
       const overviewCrumb = makeButton(breadcrumbs, "项目总览", "crumb", function () {
-        setRoute({ kind: "overview" }, true);
+        setRoute(defaultRoute(), true);
       });
       overviewCrumb.setAttribute("aria-label", "返回项目总览");
       const separator = el("span", "crumb-separator", breadcrumbs);
@@ -1035,12 +1138,71 @@
       } else {
         makeButton(breadcrumbs, graph.title, "crumb", function () { setRoute({ kind: "overview" }, true); });
       }
-      $("back-button").disabled = state.route.kind === "overview" || state.route.kind === "view";
+      $("back-button").disabled = state.route.kind === "overview" || (state.route.kind === "view" && state.route.value === "overview");
+      setText($("back-button"), state.route.kind === "view" ? "← 总览" : "← 返回");
+    }
+
+    function renderReadingGuide() {
+      const graph = state.graph;
+      const view = graph && graph.rawView;
+      const strip = $("reading-strip"), related = $("related-reading");
+      clear(strip); clear(related);
+      strip.hidden = !view || view.id === "overview"; related.hidden = !view;
+      $("reading-context").hidden = !view;
+      $("view-layer").hidden = !view || !asArray(view.focusNodes).length;
+      $("layer-story").setAttribute("aria-pressed", String(state.layer !== "full"));
+      $("layer-full").setAttribute("aria-pressed", String(state.layer === "full"));
+      if (!view) return;
+      const order = asArray(graph.readingOrder);
+      if (view.id !== "overview") setText(el("span", "related-reading-label", strip), "阅读导航");
+      order.forEach(function (id, index) {
+        const node = asArray(graph.nodes).find(function (n) { return n.id === id; });
+        if (!node) return;
+        const button = makeButton(strip, "", "reading-step", function () { selectNode(node); });
+        const current = state.selected && state.selected.type === "node" && state.selected.node.id === id;
+        button.setAttribute("aria-current", current ? "step" : "false");
+        setText(el("span", "step-number", button), String(index + 1));
+        setText(el("span", "", button), node.label);
+        button.title = string(node.summary, node.detail);
+      });
+      setText($("reading-entry"), "起点：" + string(view.entry, ""));
+      setText($("reading-outcome"), "结果：" + string(view.outcome, ""));
+      setText(el("span", "related-reading-label", related), view.id === "overview" ? "继续看业务能力" : "继续阅读");
+      const targetIds = view.id === "overview" ? ["research", "knowledge", "supervised", "companion", "finance"] : asArray(view.relatedViews);
+      targetIds.forEach(function (id) {
+        const target = state.viewById.get(id);
+        if (target && id !== view.id) makeButton(related, target.label, "button button-small", function () {
+          setRoute({ kind: "view", value: id }, true);
+        });
+      });
+      document.querySelectorAll("#views-nav .reading-nav-group").forEach(function (group) {
+        if (group.querySelector('[aria-current="page"]')) group.open = true;
+      });
+    }
+
+    function readingOrder() {
+      return state.graph && state.graph.rawView ? asArray(state.graph.readingOrder) : [];
+    }
+    function walkReading(direction) {
+      const order = readingOrder();
+      if (!order.length) return;
+      const id = state.selected && state.selected.type === "node" ? state.selected.node.id : "";
+      let index = order.indexOf(id);
+      index = index < 0 ? 0 : Math.max(0, Math.min(order.length - 1, index + direction));
+      const node = asArray(state.graph.nodes).find(function (n) { return n.id === order[index]; });
+      if (node) selectNode(node);
+    }
+    function showImplementationStep(id) {
+      const viewId = state.route.value;
+      setRoute({ kind: "view", value: viewId, layer: "full" }, true);
+      const node = asArray(state.graph.nodes).find(function (n) { return n.id === id; });
+      if (node) selectNode(node);
     }
 
     function backRoute() {
       if (!state.route) return;
-      if (state.route.kind === "overview" || state.route.kind === "view") return;
+      if (state.route.kind === "overview") return;
+      if (state.route.kind === "view") { setRoute(defaultRoute(), true); return; }
       if (state.route.kind === "file") {
         const file = fileForPath(state.route.value);
         if (file && file.module) setRoute({ kind: "module", value: cleanId(file.module) }, true);
@@ -1070,6 +1232,14 @@
         minX = Math.min(minX, x); minY = Math.min(minY, y);
         maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
       });
+      asArray(graph.zones).forEach(function (zone) {
+        minX = Math.min(minX, zone.x); minY = Math.min(minY, zone.y);
+        maxX = Math.max(maxX, zone.x + zone.w); maxY = Math.max(maxY, zone.y + zone.h);
+      });
+      if (graph.drawBounds) {
+        minX = Math.min(minX, graph.drawBounds.minX); minY = Math.min(minY, graph.drawBounds.minY);
+        maxX = Math.max(maxX, graph.drawBounds.maxX); maxY = Math.max(maxY, graph.drawBounds.maxY);
+      }
       asArray(graph.edges).forEach(function (edge) {
         const from = graphNodesMap().get(cleanId(edge.from));
         const to = graphNodesMap().get(cleanId(edge.to));
@@ -1125,6 +1295,29 @@
       const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
       const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
       const dx = bc.x - ac.x, dy = bc.y - ac.y;
+      if (edge.parallelLane) {
+        const offset = edge.parallelLane;
+        const horizontal = Math.abs(dx) >= Math.abs(dy);
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const gap = (Math.abs(offset) + attempt) * 48;
+          let points;
+          if (horizontal) {
+            const above = offset < 0;
+            const y1 = above ? a.y : a.y + a.h, y2 = above ? b.y : b.y + b.h;
+            const lane = above ? Math.min(a.y, b.y) - gap : Math.max(a.y + a.h, b.y + b.h) + gap;
+            points = [{x:ac.x,y:y1},{x:ac.x,y:lane},{x:bc.x,y:lane},{x:bc.x,y:y2}];
+          } else {
+            const left = offset < 0;
+            const x1 = left ? a.x : a.x + a.w, x2 = left ? b.x : b.x + b.w;
+            const lane = left ? Math.min(a.x, b.x) - gap : Math.max(a.x + a.w, b.x + b.w) + gap;
+            points = [{x:x1,y:ac.y},{x:lane,y:ac.y},{x:lane,y:bc.y},{x:x2,y:bc.y}];
+          }
+          if (pathIsClear(points, allNodes, sourceId, targetId)) return {
+            d: points.map(function (p, i) { return (i ? "L" : "M") + p.x + " " + p.y; }).join(" "),
+            points: points, labelPoint: {x:(points[1].x+points[2].x)/2,y:(points[1].y+points[2].y)/2-8}
+          };
+        }
+      }
       const sourceSides = Math.abs(dx) > Math.abs(dy)
         ? [dx >= 0 ? "right" : "left", dy >= 0 ? "bottom" : "top", dx >= 0 ? "left" : "right"]
         : [dy >= 0 ? "bottom" : "top", dx >= 0 ? "right" : "left", dy >= 0 ? "top" : "bottom"];
@@ -1187,10 +1380,9 @@
     }
 
     function placeEdgeLabel(edge, route, nodes, occupied) {
-      const width = Math.max(38, visualUnits(string(edge.label, "")) * 6 + 12);
+      const width = Math.max(38, visualUnits(string(edge.label, "")) * 7 + 12);
       const candidates = [];
       const points = route.points || [];
-      points.forEach(function(p){ candidates.push({x:p.x,y:p.y-8}); candidates.push({x:p.x,y:p.y+26}); });
       for (let i = points.length - 2; i >= 0; i -= 1) {
         const a = points[i], b = points[i + 1];
         if (Math.abs(a.x-b.x)+Math.abs(a.y-b.y)<24) continue;
@@ -1200,9 +1392,11 @@
           else { candidates.push({x:x+width/2+10,y:y+9}); candidates.push({x:x-width/2-10,y:y+9}); }
         });
       }
+      points.forEach(function(p){ candidates.push({x:p.x,y:p.y-8}); candidates.push({x:p.x,y:p.y+26}); });
       points.forEach(function(p){
-        candidates.push({x:p.x,y:p.y-72,origin:p});
-        candidates.push({x:p.x,y:p.y+82,origin:p});
+        [-72, 82, -108, 108, -144, 144].forEach(function (offset) {
+          candidates.push({x:p.x,y:p.y+offset,origin:p});
+        });
       });
       candidates.push(route.labelPoint);
       const boxes = nodes.map(function (n) { return {x:n.x-8,y:n.y-8,w:NODE_W+16,h:NODE_H+16}; }).concat(occupied);
@@ -1235,10 +1429,9 @@
       if (label) {
         const point = route.labelPoint || { x: (finite(from.x, 0) + finite(to.x, 0)) / 2, y: (finite(from.y, 0) + finite(to.y, 0)) / 2 };
         if(route.labelLeader) svgEl("line", {x1:route.labelLeader.x,y1:route.labelLeader.y,x2:point.x,y2:point.y-6,stroke:"#9daab8","stroke-width":1,"stroke-dasharray":"3 3"}, group);
-        const chars = Array.from(label).length;
-        const width = Math.max(38, visualUnits(label) * 5.5 + 14);
-        svgEl("rect", { x: point.x - width / 2, y: point.y - 15, width: width, height: 18, rx: 4, class: "edge-label-bg" }, group);
-        const text = svgEl("text", { x: point.x, y: point.y - 3, class: "edge-label" }, group);
+        const width = Math.max(38, visualUnits(label) * 7 + 12);
+        svgEl("rect", { x: point.x - width / 2, y: point.y - 18, width: width, height: 24, rx: 4, class: "edge-label-bg" }, group);
+        const text = svgEl("text", { x: point.x, y: point.y - 1, class: "edge-label" }, group);
         text.textContent = label;
       }
       function activate() { selectEdge(edge, from, to); }
@@ -1285,6 +1478,7 @@
       const root = $("diagram-root");
       clear(root);
       if (!graph) { showMessage("没有可显示的图", "当前视图没有对应的架构数据。"); return; }
+      graph.drawBounds = null;
       const nodeMap = new Map();
       asArray(graph.nodes).forEach(function (node) { nodeMap.set(cleanId(node.id), node); });
       const selected = state.selected;
@@ -1302,18 +1496,48 @@
       }
       const edges = asArray(graph.edges);
       const labelBoxes = [];
+      const renderedPoints = [];
+      asArray(graph.zones).forEach(function (zone) {
+        svgEl("rect", { x: zone.x, y: zone.y, width: zone.w, height: zone.h, rx: 12, class: "diagram-zone" }, root);
+        const text = svgEl("text", { x: zone.x + 16, y: zone.y + 28, class: "zone-label" }, root);
+        text.textContent = zone.label;
+        labelBoxes.push({ x: zone.x + 8, y: zone.y + 8, w: zone.w - 16, h: 30 });
+      });
       if (graph.autoContainment) {
         drawContainment(edges, graph.headerNode, asArray(graph.nodes), root);
       } else {
+        const parallel = new Map();
+        edges.forEach(function (edge) {
+          const key = edge.from + "\u0000" + edge.to;
+          if (!parallel.has(key)) parallel.set(key, []);
+          parallel.get(key).push(edge);
+        });
         edges.forEach(function (edge) {
           const from = nodeMap.get(cleanId(edge.from));
           const to = nodeMap.get(cleanId(edge.to));
           if (!from || !to) return;
-          const route = placeEdgeLabel(edge, routeEdge(edge, from, to, asArray(graph.nodes)), asArray(graph.nodes), labelBoxes);
+          const siblings = parallel.get(edge.from + "\u0000" + edge.to);
+          const index = siblings.findIndex(function (item) { return item.id === edge.id; });
+          const central = Math.max(0, siblings.findIndex(function (item) { return item.relationKind !== "composed_path"; }));
+          const lane = index < central ? index : index - 1;
+          const routed = siblings.length > 1 && index !== central ? Object.assign({}, edge, {
+            parallelLane: (lane % 2 ? 1 : -1) * (Math.floor(lane / 2) + 1)
+          }) : edge;
+          const route = placeEdgeLabel(edge, routeEdge(routed, from, to, asArray(graph.nodes)), asArray(graph.nodes), labelBoxes);
+          renderedPoints.push.apply(renderedPoints, route.points);
           const isSelected = !!(selected && selected.type === "edge" && cleanId(selected.edge.id) === cleanId(edge.id));
           const dimmed = !!selected && !isSelected && !(related.has(cleanId(edge.from)) && related.has(cleanId(edge.to)));
           addEdgeGroup(edge, from, to, route, root, isSelected, dimmed);
         });
+      }
+      if (renderedPoints.length || labelBoxes.length) {
+        const points = renderedPoints.concat(labelBoxes.flatMap(function (box) { return [{x:box.x,y:box.y},{x:box.x+box.w,y:box.y+box.h}]; }));
+        graph.drawBounds = {
+          minX: Math.min.apply(null, points.map(function (p) { return p.x; })),
+          minY: Math.min.apply(null, points.map(function (p) { return p.y; })),
+          maxX: Math.max.apply(null, points.map(function (p) { return p.x; })),
+          maxY: Math.max.apply(null, points.map(function (p) { return p.y; }))
+        };
       }
       const nodes = asArray(graph.nodes);
       nodes.forEach(function (node) {
@@ -1337,7 +1561,7 @@
         kind === "group" ? "node-group" :
         kind === "module" || kind === "module-header" ? "node-module" : "node-view";
       const group = svgEl("g", {
-        class: "diagram-node " + classKind + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
+        class: "diagram-node " + classKind + (node.role ? " node-role-" + node.role : "") + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
         role: "button", tabindex: "0",
         "aria-label": string(node.label, node.id) + "；按 Enter 查看技术细节。",
         "data-node-id": cleanId(node.id)
@@ -1347,23 +1571,35 @@
       const color = node.domainId ? domainColor(node.domainId) :
         node.module ? domainColor((moduleForDomain(node.module) || {}).id) : "#496f89";
       svgEl("rect", { x: x, y: y + 7, width: 4, height: NODE_H - 14, rx: 2, fill: color, class: "node-accent-bar" }, group);
-      const lines = wrapLabel(string(node.label, node.id), 25, 2);
-      const label = svgEl("text", { x: x + 15, y: y + 24, class: "node-label" }, group);
+      const lines = wrapLabel(string(node.label, node.id), 23, 2);
+      const label = svgEl("text", { x: x + 16, y: y + 31, class: "node-label" }, group);
       lines.forEach(function (line, index) {
-        const tspan = svgEl("tspan", { x: x + 15, dy: index ? 18 : 0 }, label);
+        const tspan = svgEl("tspan", { x: x + 16, dy: index ? 22 : 0 }, label);
         tspan.textContent = line;
       });
-      const description = string(node.description, node.detail || "");
-      const descText = svgEl("text", { x: x + 15, y: y + 61, class: "node-description" }, group);
-      descText.textContent = truncate(description, 34);
+      const subtitleY = y + (lines.length > 1 ? 74 : 54);
+      if (node.subtitle) {
+        const subtitle = svgEl("text", { x: x + 16, y: subtitleY, class: "node-subtitle" }, group);
+        subtitle.textContent = wrapLabel(node.subtitle, 34, 1)[0];
+      }
+      const description = string(node.summary, node.description || node.detail || "");
+      const descText = svgEl("text", { x: x + 16, y: node.subtitle ? subtitleY + 23 : y + 77, class: "node-description" }, group);
+      wrapLabel(description, 32, lines.length > 1 ? 1 : 2).forEach(function (line, index) {
+        const tspan = svgEl("tspan", { x: x + 16, dy: index ? 17 : 0 }, descText);
+        tspan.textContent = line;
+      });
       let kindLabel = kind === "domain" ? "领域" :
         kind === "file" ? "源码文件" :
         kind === "module" || kind === "module-header" ? "源码单元" :
         kind === "group" ? "领域源码单元" : "架构节点";
       if (Number.isFinite(Number(node.moduleCount))) kindLabel += " · " + countLabel(Number(node.moduleCount)) + " 个源码单元";
-      if (Array.isArray(node.refs) && node.refs.length) kindLabel += " · " + node.refs.length + " 个来源";
-      const meta = svgEl("text", { x: x + 15, y: y + 78, class: "node-kind" }, group);
-      meta.textContent = kindLabel;
+      const meta = svgEl("text", { x: x + 16, y: y + 118, class: "node-kind" }, group);
+      meta.textContent = node.role ? roleLabel(node.role) : kindLabel;
+      if (node.step) {
+        svgEl("circle", { cx: x + NODE_W - 19, cy: y + 19, r: 11, fill: "#e5edf4" }, group);
+        const step = svgEl("text", { x: x + NODE_W - 19, y: y + 23, "text-anchor": "middle", fill: "#466179", "font-size": 11 }, group);
+        step.textContent = node.step;
+      }
       function activate() { selectNode(node); }
       group.addEventListener("click", activate);
       group.addEventListener("keydown", function (event) {
@@ -1377,6 +1613,8 @@
       renderDiagram(false);
       renderDetails();
       revealDetails();
+      renderReadingGuide();
+      focusReadingNode(node);
       setStatus("已选择：" + string(node.label, node.id));
     }
     function selectEdge(edge, from, to) {
@@ -1384,7 +1622,21 @@
       renderDiagram(false);
       renderDetails();
       revealDetails();
+      renderReadingGuide();
       setStatus("已选择关系：" + string(edge.label, "未命名关系"));
+    }
+
+    function roleLabel(role) {
+      return ({entry: "接收入口", process: "处理", control: "调度与控制", store: "持久记录", external: "外部服务接口"})[role] || "架构节点";
+    }
+    function focusReadingNode(node) {
+      if (!state.graph.rawView || window.innerWidth <= 970) return;
+      const rect = $("diagram").getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const scale = Math.max(.85, Math.min(rect.width / state.camera.width, rect.height / state.camera.height));
+      const width = rect.width / scale, height = rect.height / scale;
+      state.camera = { x: node.x + NODE_W / 2 - width / 2, y: node.y + NODE_H / 2 - height / 2, width: width, height: height };
+      applyCamera();
     }
 
     function renderPager() {
@@ -1478,17 +1730,69 @@
       if (meta) setText(el("span", "detail-row-meta", parent), meta);
       return button;
     }
+    function learningBlock(parent, title, values) {
+      const items = asArray(values).filter(Boolean);
+      if (!items.length) return;
+      const section = el("section", "learning-block", parent);
+      setText(el("h4", "", section), title);
+      const list = el("ul", "", section);
+      items.forEach(function (value) { setText(el("li", "", list), value); });
+      return section;
+    }
+    function relatedViewButtons(parent, ids) {
+      const targets = asArray(ids).map(function (id) { return state.viewById.get(id); }).filter(function (view) {
+        return view && !(state.route.kind === "view" && state.route.value === view.id);
+      });
+      if (!targets.length) return;
+      const section = el("section", "learning-block", parent);
+      setText(el("h4", "", section), "展开相关流程");
+      const actions = el("div", "detail-flow-actions", section);
+      targets.forEach(function (view) {
+        const button = makeButton(actions, view.label, "button button-primary button-small", function () {
+          setRoute({ kind: "view", value: view.id }, true);
+        });
+        button.setAttribute("data-view-id", view.id);
+      });
+    }
+    function sourceDisclosure(parent, item) {
+      const details = el("details", "source-disclosure", parent);
+      setText(el("summary", "", details), "源码入口与关系证据");
+      setText(el("p", "detail-note", details), item.status === "unknown"
+        ? "证据文件已变化，需重新核对上述说明。"
+        : "以下位置来自所列 main 源码快照；流程说明不代表产品运行验证。");
+      if (item.ownerPath) setText(el("code", "detail-path", details), "实现归属：" + item.ownerPath);
+      const actions = el("div", "inline-actions", details);
+      if (item.implementationFile) makeButton(actions, "打开主要实现", "button button-small", function () {
+        openFile(item.implementationFile);
+      });
+      if (item.module) makeButton(actions, "查看实现目录", "button button-small", function () {
+        setRoute({ kind: "module", value: cleanId(item.module) }, true);
+      });
+      refsSection(details, item.refs);
+    }
+    function readingControls(parent, nodeId) {
+      const order = readingOrder(), index = order.indexOf(nodeId);
+      if (index < 0) return;
+      const controls = el("div", "walk-controls", parent);
+      const previous = makeButton(controls, "← 上一步", "button button-small", function () { walkReading(-1); });
+      previous.disabled = index === 0;
+      setText(el("span", "", controls), "阅读 " + (index + 1) + " / " + order.length);
+      const next = makeButton(controls, "下一步 →", "button button-small", function () { walkReading(1); });
+      next.disabled = index === order.length - 1;
+    }
     function renderSelectedDetails(parent) {
       const selected = state.selected;
       if (!selected) return false;
       if (selected.type === "edge") {
         const edge = selected.edge;
-        detailIntro(parent, translateStatus(edge.status || "源码归属") + " · 关系 / " + string(edge.label, "未命名"), string(selected.from && selected.from.label, edge.from) + " → " + string(selected.to && selected.to.label, edge.to), string(edge.detail, ""));
+        detailIntro(parent, "关系 · " + string(edge.label, "未命名"), string(selected.from && selected.from.label, edge.from) + " → " + string(selected.to && selected.to.label, edge.to), string(edge.detail, ""));
         const reviewNote = el("p", "detail-note", parent);
         const relationKind = string(edge.relationKind || edge.kind, "").toLowerCase();
         const isStaticImport = relationKind === "static_import" || relationKind === "static-import" ||
           string(edge.label, "").toLowerCase().includes("import") || string(edge.label, "").includes("导入");
-        setText(reviewNote, isStaticImport
+        setText(reviewNote, edge.relationKind === "composed_path"
+          ? "这是沿原图已有路径合并的流程关系，包含下列实现步骤；不表示两个节点直接调用。"
+          : isStaticImport
           ? "静态 import 关系，未表达动态运行时调用。"
           : edge.status === "source_verified" ? "此关系已按快照源码核实；未在本次文档工作中验证产品运行。" : edge.status === "unknown" ? "证据文件已变化，需要重新核对该关系。" : "目录包含关系，不表示调用。");
         detailGrid(parent, [
@@ -1500,13 +1804,18 @@
           const note = el("p", "detail-note", parent);
           setText(note, "这是源码目录或源码单元的包含关系，不表示运行时调用。");
         }
-        refsSection(parent, edge.refs);
+        if (edge.relationKind === "composed_path") {
+          const view = state.graph.rawView;
+          const steps = asArray(edge.via).map(function (id) { return asArray(view.nodes).find(function (node) { return node.id === id; }); }).filter(Boolean);
+          detailSection(parent, "包含的实现步骤", steps.length, "composed:" + edge.id, steps, function (row, node) {
+            detailRow(row, node.label, node.summary, function () { showImplementationStep(node.id); }, "展开");
+          });
+        }
+        sourceDisclosure(parent, edge);
         return true;
       }
       if (selected.type !== "node") return false;
       const node = selected.node;
-      const reviewNote = el("p", "detail-note", parent);
-      setText(reviewNote, node.status === "source_verified" ? "源码已核实 · 本次未运行产品验证" : node.status === "unknown" ? "源码已变化，节点职责与关系待复核。" : "来自固定版本的源码目录索引。");
       if (node.kind === "domain" || node.domainId) {
         const domainId = cleanId(node.domainId || node.id);
         const domain = state.domainById.get(domainId);
@@ -1528,19 +1837,16 @@
         return true;
       }
       if (node.kind === "view") {
-        detailIntro(parent, translateStatus(node.status) + " · 架构节点", string(node.label, node.id), string(node.detail || node.description, ""));
-        if (node.path) {
-          const pathNode = el("code", "detail-path", parent);
-          setText(pathNode, string(node.path, "") + (finite(node.line, 0) ? ":" + finite(node.line, 0) : ""));
-        }
-        if (node.module) {
-          const module = state.moduleById.get(cleanId(node.module));
-          const button = makeButton(parent, "进入源码单元图", "button button-primary", function () {
-            setRoute({ kind: "module", value: cleanId(node.module) }, true);
-          });
-          button.title = string(module && module.path, "");
-        }
-        refsSection(parent, node.refs);
+        detailIntro(parent, roleLabel(node.role), node.label, string(node.summary, node.detail || node.description));
+        setText(el("p", "technical-name", parent), node.subtitle);
+        if (node.status === "unknown") setText(el("p", "detail-note detail-warning", parent), "证据文件已变化，上述流程语义待复核。");
+        learningBlock(parent, "输入", node.inputs);
+        learningBlock(parent, "处理", node.mechanism);
+        learningBlock(parent, "输出", node.outputs);
+        learningBlock(parent, "边界", node.boundaries);
+        relatedViewButtons(parent, node.relatedViews);
+        readingControls(parent, node.id);
+        sourceDisclosure(parent, node);
         return true;
       }
       if (node.module || node.kind === "module-header") {
@@ -1623,18 +1929,19 @@
       const id = cleanId(module.id || moduleId);
       const childList = childModules(id);
       const filePaths = filesForModule(id);
-      detailIntro(parent, "源码单元 · 待复核", string(module.label, id), string(module.description, ""));
+      detailIntro(parent, "源码单元", string(module.label, id), string(module.description, ""));
       if (module.path) {
         const path = el("code", "detail-path", parent);
         setText(path, string(module.path, ""));
       }
       detailGrid(parent, [
         ["领域", string((state.domainById.get(cleanId(module.domain)) || {}).label, module.domain || "未归属")],
-        ["状态", translateStatus(module.status)],
+        ["索引类型", "目录归属与静态声明"],
         ["父级源码单元", string((state.moduleById.get(cleanId(module.parent)) || {}).label, module.parent || "无")]
       ]);
       const reviewNote = el("p", "detail-note", parent);
       setText(reviewNote, "自动索引可以定位源码单元和文件归属；职责描述仍需打开源码入口核对。");
+      relatedViewButtons(parent, module.learningViews);
       const actions = el("div", "inline-actions", parent);
       if (childList.length) makeButton(actions, "展开子级源码单元图", "button button-primary button-small", function () {
         setRoute({ kind: "module", value: id }, true);
@@ -1658,15 +1965,18 @@
 
     function renderViewDetail(parent, view) {
       if (!view) { setText(parent, "找不到此视图的数据。"); return; }
-      const nodes = asArray(view.nodes), edges = asArray(view.edges);
       detailIntro(parent, "架构视图", string(view.label, view.id), string(view.description, ""));
-      detailGrid(parent, [["节点", countLabel(nodes.length)], ["关系", countLabel(edges.length)], ["视图标识", cleanId(view.id)]]);
-      detailSection(parent, "图中节点", nodes.length, "view-nodes", nodes, function (row, node) {
-        detailRow(row, string(node.label, node.id), string(node.detail, "选择画布中的节点查看"), function () {
-          const found = asArray(state.graph.nodes).find(function (entry) { return cleanId(entry.id) === cleanId(node.id); });
-          if (found) selectNode(found);
-        }, "定位");
-      }, FILE_PAGE_SIZE);
+      learningBlock(parent, "从哪里开始", [view.entry]);
+      learningBlock(parent, "最终得到什么", [view.outcome]);
+      makeButton(parent, "从第一步开始阅读", "button button-primary", function () { walkReading(1); });
+      setText(el("p", "detail-note", parent), "点击节点查看输入、处理、输出和边界；点击箭头查看具体关系。阅读序号用于导航，不额外表示调用关系。");
+      if (state.graph.isFocus && asArray(view.hiddenImplementation).length) {
+        const steps = view.hiddenImplementation.map(function (id) { return view.nodes.find(function (node) { return node.id === id; }); });
+        detailSection(parent, "完整实现中可展开的步骤", steps.length, "hidden:" + view.id, steps, function (row, node) {
+          detailRow(row, node.label, node.summary, function () { showImplementationStep(node.id); }, "展开");
+        });
+      }
+      relatedViewButtons(parent, view.relatedViews);
     }
 
     function renderRefs(parent, refs, pageKey) {
@@ -1711,6 +2021,7 @@
       if (module) makeButton(parent, "进入所属源码单元", "button button-primary", function () {
         setRoute({ kind: "module", value: cleanId(module.id) }, true);
       });
+      if (module) relatedViewButtons(parent, module.learningViews);
       const imports = asArray(file.imports);
       if (imports.length) {
         const note = el("p", "detail-note", parent);
@@ -2071,6 +2382,11 @@
       clone.setAttribute("width", "1600");
       clone.setAttribute("height", "1000");
       addComputedStyles(source, clone);
+      const background = document.createElementNS(SVG_NS, "rect");
+      const box = state.camera;
+      ["x", "y", "width", "height"].forEach(function (key) { background.setAttribute(key, box[key]); });
+      background.setAttribute("fill", "#fbfcfd");
+      clone.insertBefore(background, clone.firstChild);
       const serializer = new XMLSerializer();
       const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + serializer.serializeToString(clone);
       const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
@@ -2157,10 +2473,19 @@
     function closeDrawers() {
       document.body.classList.remove("sidebar-open", "detail-open");
       $("sidebar-toggle").setAttribute("aria-expanded", "false");
-      $("detail-toggle").setAttribute("aria-expanded", "false");
+      $("detail-toggle").setAttribute("aria-expanded", String(window.innerWidth > 970 && !document.body.classList.contains("detail-collapsed")));
     }
     function wireControls() {
       $("back-button").addEventListener("click", backRoute);
+      ["story", "full"].forEach(function (layer) {
+        $("layer-" + layer).addEventListener("click", function () {
+          if (state.route.kind !== "view" || state.layer === layer) return;
+          const selectedId = state.selected && state.selected.type === "node" ? state.selected.node.id : "";
+          setRoute({ kind: "view", value: state.route.value, layer: layer }, true);
+          const selectedNode = asArray(state.graph.nodes).find(function (node) { return node.id === selectedId; });
+          if (selectedNode) selectNode(selectedNode);
+        });
+      });
       $("sidebar-toggle").addEventListener("click", function () {
         if (window.innerWidth > 970) { document.body.classList.toggle("nav-collapsed"); return; }
         if (document.body.classList.contains("sidebar-open")) closeDrawers(); else openDrawer("sidebar");
@@ -2201,7 +2526,7 @@
           if (visibleModal) closeModal(visibleModal);
           else if (document.body.classList.contains("sidebar-open") || document.body.classList.contains("detail-open")) closeDrawers();
           else if ($("atlas-search").value) { $("atlas-search").value = ""; renderSearch(); }
-          else if (state.selected) { state.selected=null; renderDiagram(false); renderDetails(); }
+          else if (state.selected) { state.selected=null; renderDiagram(false); renderDetails(); renderReadingGuide(); }
           return;
         }
         if ((event.key === "/" || (event.ctrlKey && event.key === "/")) &&
@@ -2255,7 +2580,7 @@
         if (asArray(state.data.coverage.unmappedFiles).length || asArray(state.data.coverage.parseErrors).length) {
           setStatus("此快照包含未映射文件或解析问题；可在“覆盖清单”查看明细。");
         } else {
-          setStatus("当前图来自 " + string(state.data.meta.sourceBranch, "未标注分支") + " 源码快照。");
+          setStatus("点击节点查看技术细节；箭头表示关系，序号用于阅读导航。");
         }
       } catch (error) {
         showDataError(error);

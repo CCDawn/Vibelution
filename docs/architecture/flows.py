@@ -130,6 +130,7 @@ def add_domain_views(view):
         ('schedule','scheduler','排队 / 并发槽','传入本轮 context 和执行、释放回调。','core/web/services/session/schedule.py','def _schedule_session_turn('),
         ('scheduler','worker','执行回调','获准后 _submit_scheduled_session_turn 经 executor/包装函数调 worker。','core/web/services/session/schedule.py','def _submit_scheduled_session_turn('),
         ('worker','context','准备上下文','worker 初始化当前 Agent 回合所需上下文。','core/web/services/session/worker.py','def _run_session_turn_impl('),
+        ('context','turn','传入上下文','Session worker 将 context packet 派生的 blocks/history 传入单轮调用；ContextEngine 产出数据，调用者仍是 worker。','core/web/services/session/worker.py','def _run_session_continuation_loop('),
         ('worker','turn','执行本轮','worker 驱动已有 Agent 的单轮 runner。','core/web/services/session/worker.py','def _run_session_turn_impl('),
         ('worker','persist','结算结果','完成路径统一调用结果持久化。','core/web/services/session/worker.py','def _finish_session_turn_worker('),
         ('submit','journal','初始事件','初始 turn markers 与用户消息进入日志。','core/web/services/session/submit.py','def _append_initial_session_journal_markers('),
@@ -156,6 +157,7 @@ def add_domain_views(view):
         ('invoke','模型 Invocation','经 LLMClient 按 profile/provider 解析协议和 wire；含流式与用量处理。','core/llm/invocation.py','def invoke_llm('),
         ('tools','本轮工具 Schema','只物化获准工具；具体执行仍有最终授权。','core/orchestration/tool_authorization_binding.py','def materialize_authorized_tools('),
     ],[
+        ('context','turn','回合输入','worker 把组装后的上下文和消息历史交给单轮 runner；这条边表示数据传入，不表示 ContextEngine 直接调用 runner。','core/web/services/session/worker.py','def _run_session_continuation_loop('),
         ('turn','agent','运行回合','Runner 调用现有 Agent 的执行入口，Agent 内部进入模型调用。','core/orchestration/turn_runner.py','def run_existing_agent_single_turn('),
         ('agent','adapter','模型适配','Agent _invoke_llm 委托 invoke_agent_llm_turn。','agent.py','def _invoke_llm('),
         ('adapter','invoke','统一调用','适配器委托 invocation。','core/orchestration/turn_llm_adapter.py','def invoke_agent_llm_turn('),
@@ -187,7 +189,7 @@ def add_domain_views(view):
         ('canonical','Team Knowledge Search','正式知识条目的范围、来源、eligibility 与权限筛选。','core/web/services/team_knowledge/retrieval.py','def search_knowledge_items('),
         ('acl','知识权限','owner/base 范围按读取权限检查。','core/web/services/team_knowledge/permissions.py','def _require_permission('),
         ('rank','检索排序','精确/BM25 或 semantic/hybrid；hybrid 向量不可用可降级 BM25。','core/web/services/team_knowledge/semantic.py','def rank_candidates('),
-        ('index','可重建向量索引','canonical items 的派生索引，不是正式知识正文权威。','core/web/services/rag_vector_index_service.py','def write_index_record('),
+        ('index','可重建向量索引','查询读取 canonical items 的派生索引，不是正式知识正文权威。','core/web/services/rag_vector_index_service.py','def _read_json('),
     ],[
         ('tool','unified','受控查询','校验主体与允许范围后调用统一搜索。','tools/team_knowledge_tools.py','def unified_memory_search_tool('),
         ('unified','rag','rag 模式','_rag_search 显式委托 RAG retrieval。','core/web/services/unified_knowledge_search_service.py','def _rag_search('),

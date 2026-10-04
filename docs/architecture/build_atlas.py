@@ -183,11 +183,22 @@ def build(root: Path, ref: str, previous: Path | None):
         ids = {n['id'] for n in view['nodes']}
         assert len(ids) == len(view['nodes']), view['id']
         for node in view['nodes']:
-            if node.get('refs'):
-                node['module'] = by_path[node['refs'][0]['path']]['module']
+            owner = node['ownerPath']
+            candidates = [m for m in modules.values() if m['path'] == owner]
+            if owner in by_path:
+                node['module'] = by_path[owner]['module']
+                node['implementationFile'] = owner
+            elif candidates:
+                node['module'] = candidates[0]['id']
+            else:
+                raise ValueError(f"Unknown implementation owner: {view['id']}/{node['id']}: {owner}")
+            module = modules[node['module']]
+            module.setdefault('learningViews', [])
+            if view['id'] not in module['learningViews']:
+                module['learningViews'].append(view['id'])
         for edge in view['edges']:
             assert edge['from'] in ids and edge['to'] in ids and edge['refs'], edge
-        for item in view['nodes'] + view['edges']:
+        for item in view['nodes'] + view['edges'] + view.get('focusEdges', []):
             changed = [r['path'] for r in item['refs'] if reviewed_blobs.get(r['path']) != r['blob']]
             item['status'] = 'unknown' if changed else 'source_verified'
             if changed:

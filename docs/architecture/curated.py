@@ -4,7 +4,7 @@ Inventory grouping is navigational. Only make_views describes reviewed execution
 relationships. Update these descriptions after reviewing changed source evidence.
 """
 
-REVIEWED_COMMIT = 'd1864e446eda384069fd273ed8d0a70e95412d69'
+REVIEWED_COMMIT = 'b3b9ee2916d62b3bc31aeabd00ecbab44e937a6d'
 
 DOMAIN_ROWS = [
  ('desktop','桌面与生命周期','Electron 主进程、Launcher、Runtime Manager、实例与进程管理。','#5b67c7'),
@@ -100,7 +100,7 @@ def describe_module(path, domain):
 def make_views(ref):
     views = []
     def view(vid, title, desc, nodes, edges):
-        # Explicit grid positions keep connectors stable and readable offline.
+        # Reading layouts are applied below after the reviewed graph is built.
         ns = []
         for i, (nid, label, detail, path, anchor) in enumerate(nodes):
             ns.append({'id': nid, 'label': label, 'detail': detail,
@@ -110,24 +110,26 @@ def make_views(ref):
             es.append({'id': f'{vid}-edge-{i}', 'from':a,'to':b,'label':label,'detail':detail,'refs':[ref(path,anchor)]})
         views.append({'id':vid,'label':title,'description':desc,'nodes':ns,'edges':es})
 
-    view('overview','系统总览','从运行入口到业务能力。先选节点看证据；完整模块在左侧领域目录中展开。',[
+    view('overview','系统如何运转','从工作台发出消息，经 Session 调度 Agent 执行；模型、工具、实时输出与会话记录各有职责。',[
         ('desktop','Electron / Launcher','桌面主进程拥有窗口、IPC 与生命周期控制。','desktop/electron/src/main.ts','ipcMain.handle(IPC_CHANNELS.launcherInvoke'),
         ('web','React 工作台','路由加载业务页面，经领域 API 发起请求。','web/src/app/router.tsx','createBrowserRouter(['),
         ('api','FastAPI 服务入口','控制来源校验、健康端点、路由注册和静态前端。','core/web/app.py','def create_app('),
-        ('session','Session / Agent','会话 API 委托 Session 服务；执行细节见会话流程。','core/web/router_registry.py','core.web.routes.sessions'),
-        ('research','团队 / 科研','研究、团队、证据、工作流路由进入对应领域。','core/web/router_registry.py','core.web.routes.team_workflows'),
-        ('knowledge','知识 / 记忆','知识与记忆保留独立路由及治理边界。','core/web/router_registry.py','core.web.routes.knowledge'),
-        ('evolution','进化 / 评测','进化控制与投影通过 evolution 路由提供。','core/web/router_registry.py','core.web.routes.evolution'),
-        ('plugins','人物 / 专业插件','虚拟人与金融助手为独立入口，底层复用原生能力。','core/web/router_registry.py','core.web.routes.virtual_human_life'),
-        ('storage','配置 / 存储路径','集中解析项目、实例与配置路径；不是额外的业务数据库。','vibelution_storage.py','def resolve_project_storage_paths('),
+        ('session','Session 调度','会话接收与登记后，把回合交给 scheduler 和 worker。','core/web/services/session/schedule.py','def _schedule_session_turn('),
+        ('agent','Agent 回合执行','worker 驱动 Agent 单轮 runner；单轮可发生多次模型和工具交互。','core/web/services/session/worker.py','def _run_session_turn_impl('),
+        ('llm','模型调用','统一 invocation 解析模型与协议并处理返回。','core/llm/invocation.py','def invoke_llm('),
+        ('tools','受控工具执行','工具可见性和真正执行的授权分别检查。','core/infrastructure/tool_executor.py','class ToolExecutor:'),
+        ('journal','会话事件记录','用户消息、assistant 结果、工具与生命周期事件写入 Journal。','core/chat/turn_journal.py','def append_turn_event('),
+        ('stream','实时输出','worker 捕获 UI 事件，Session publisher 将增量交给 SSE 订阅者。','core/web/services/session/stream_capture.py','def _capture_session_ui_stream('),
     ],[
         ('desktop','api','启动后台','Electron 创建所属工作台后台进程；健康和页面可用是不同阶段。','desktop/electron/src/process/workbenchBackend.ts','export function spawnWorkbenchBackend('),
         ('web','api','JSON / HTTP','工作台领域 API 通过公共 fetchJson 传输；Launcher 控制另走 IPC。','web/src/api/client.ts','export async function fetchJson<'),
-        ('api','session','挂载会话路由','register_web_routers_from_modules 给路由统一添加 /api 前缀。','core/web/router_registry.py','app.include_router(module.router, prefix="/api")'),
-        ('api','research','挂载科研路由','研究流服务入口由注册表维护。','core/web/router_registry.py','core.web.routes.team_workflows'),
-        ('api','knowledge','挂载知识路由','知识和 memory 为不同路由模块。','core/web/router_registry.py','core.web.routes.knowledge'),
-        ('api','evolution','挂载进化路由','进化 API 属于统一 Web 路由注册。','core/web/router_registry.py','core.web.routes.evolution'),
-        ('api','plugins','挂载插件路由','插件入口显式注册；不是绕过会话核心的第二种 transcript。','core/web/router_registry.py','core.web.routes.virtual_human_life'),
+        ('api','session','提交消息','Session route 将消息委托接收服务，随后进入调度。','core/web/routes/sessions.py','def session_submit_message('),
+        ('session','agent','调度回合','scheduler 获得执行槽后回调 worker 执行本轮。','core/web/services/session/schedule.py','def _submit_scheduled_session_turn('),
+        ('agent','llm','请求模型','Agent 的模型调用集中委托 LLM 回合适配与 invocation。','agent.py','def _invoke_llm('),
+        ('agent','tools','执行调用','ToolLifecycleBridge 将模型提出的工具调用交给执行回调；授权通过后才执行。','core/orchestration/tool_lifecycle.py','def execute_tool('),
+        ('session','journal','登记 / 结算','接收阶段登记用户消息；worker 完成或失败后走持久化，写最终结果与终态。','core/web/services/session/persist.py','def _persist_session_turn_result('),
+        ('agent','stream','捕获增量','Session worker 的 UI 捕获层收集 assistant 和工具事件，再经 publish 发送。','core/web/services/session/stream_capture.py','def _capture_session_ui_stream('),
+        ('stream','web','SSE 回显','前端 Session 事件通道订阅事件并更新会话呈现。','web/src/routes/chat/sessionEventStream.ts','export function createSessionEventStream('),
     ])
     view('startup','启动与桌面控制','Launcher IPC → Electron 控制队列 → 工作台进程 → 分阶段就绪。具体端口由运行实例解析，不把默认端口当现场事实。',[
         ('ui','Launcher UI','Launcher API 首先识别 IPC 桥。','web/src/api/launcher.ts','export function hasLauncherIpcBridge('),
@@ -153,6 +155,7 @@ def make_views(ref):
         ('routes','/api 业务入口','注册表挂载领域路由；装饰器的局部 URL 需要加前缀。','core/web/router_registry.py','def register_web_routers_from_modules('),
         ('lifecycle','后台生命周期','启动恢复、后台工作与退出由 lifespan 管理。','core/web/app.py','lifespan=web_workbench_lifespan'),
     ],[
+        ('router','transport','页面发起请求','以 Chat composer 提交为例：页面动作进入 submitSessionMessage，再经 fetchJson；Launcher 控制另走 IPC。','web/src/api/chat.ts','export function submitSessionMessage('),
         ('transport','guard','HTTP 请求','请求进入中间件链，拒绝不可信控制来源。','core/web/app.py','app.add_middleware(WebControlGuardMiddleware)'),
         ('guard','routes','受控分发','通过控制校验后按注册的路由处理。','core/web/control.py','class WebControlGuardMiddleware('),
         ('bootstrap','routes','include_router','所有注册业务模块统一添加 /api。','core/web/router_registry.py','app.include_router(module.router, prefix="/api")'),
@@ -161,11 +164,8 @@ def make_views(ref):
     # Additional reviewed domain flows are appended below by the source audit.
     from flows import add_domain_views
     add_domain_views(view)
-    overview_positions = {'desktop':(40,65), 'web':(40,270), 'api':(390,190),
-                          'session':(800,0), 'research':(800,140), 'knowledge':(800,280),
-                          'evolution':(800,420), 'plugins':(800,560), 'storage':(40,560)}
-    for node in views[0]['nodes']:
-        node['x'], node['y'] = overview_positions[node['id']]
+    from reading_layout import apply_reading
+    apply_reading(views)
     order = ['overview','startup','http','session','stream','llm','tools','teams','research','knowledge','knowledge-write','self-evolution','supervised','gym','companion','finance','storage']
     views.sort(key=lambda item: order.index(item['id']))
     return views
