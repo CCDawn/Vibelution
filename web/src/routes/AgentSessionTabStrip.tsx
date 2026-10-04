@@ -13,6 +13,7 @@ import {
   type SessionActivityTone,
 } from "./sessionActivityIndicator";
 import styles from "./AgentSessionTabStrip.styles";
+import "./AgentSessionTabStrip.armed.css";
 import { isBusyPhase } from "./chat/chatCodingRouteViewModel";
 import { SessionTeamBindingTag } from "./chat/SessionTeamBindingTag";
 
