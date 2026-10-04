@@ -6,6 +6,38 @@ import pytest
 from core.web.services.session import directory_bridge
 
 
+def test_directory_page_batches_authoritative_terminal_outcomes(monkeypatch):
+    from core.web.services.session.session_ops import _terminal_reason_from_conversation
+    calls = []
+    def terminal_states(ids):
+        calls.append(ids)
+        return {
+            "done": {"last_turn_status": "completed", "last_turn_terminal_reason": "success", "last_turn_terminal_turn_id": "turn-1"},
+            "stop": {"last_turn_status": "ready", "last_turn_terminal_reason": "stopped_by_user", "last_turn_terminal_turn_id": "turn-2"},
+        }
+    store = SimpleNamespace(repository=SimpleNamespace(get_session_terminal_states=terminal_states))
+    monkeypatch.setattr(directory_bridge, "_service", lambda: SimpleNamespace(_terminal_reason_from_conversation=_terminal_reason_from_conversation))
+    items = [{"id": "done", "status": "ready"}, {"id": "stop", "status": "ready"}, {"id": "continue", "status": "needs_continue"}]
+    result = directory_bridge._with_terminal_states(items, store=store)
+    assert calls == [["done", "stop", "continue"]]
+    assert [item["terminalReason"] for item in result] == ["success", "stopped_by_user", "needs_continue"]
+    assert result[0]["lastTurnStatus"] == "completed"
+    assert result[1]["lastTurnTerminalTurnId"] == "turn-2"
+
+
+def test_missing_terminal_metadata_never_guesses_success_from_idle_phase(monkeypatch):
+    from core.web.services.session.session_ops import _terminal_reason_from_conversation
+    degraded = []
+    def fail(_ids):
+        raise OSError("metadata read unavailable")
+    store = SimpleNamespace(repository=SimpleNamespace(get_session_terminal_states=fail))
+    monkeypatch.setattr(directory_bridge, "_service", lambda: SimpleNamespace(_terminal_reason_from_conversation=_terminal_reason_from_conversation))
+    monkeypatch.setattr(directory_bridge, "note_session_read_degraded", lambda **values: degraded.append(values))
+    result = directory_bridge._with_terminal_states([{"id": "idle", "status": "ready"}], store=store)
+    assert result[0]["terminalReason"] == "ready"
+    assert degraded == [{"source": "session terminal metadata", "error_type": "OSError"}]
+
+
 @pytest.mark.parametrize("terminal_status", ["needs_continue", "paused_limit", "failed", "ready"])
 def test_directory_sync_preserves_canonical_last_turn_status(monkeypatch, terminal_status):
     writes = []

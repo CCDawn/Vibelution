@@ -9,6 +9,9 @@ export type FinancialSessionView = {
   status: string;
   busy: boolean;
   stopping: boolean;
+  terminalReason?: string;
+  lastTurnStatus?: string;
+  lastTurnTerminalTurnId?: string;
   messages?: readonly ConversationMessage[];
   phase?: string;
   error?: string;
@@ -26,7 +29,7 @@ type FinancialResearchBridgeValue = {
 export const FinancialResearchBridgeContext = createContext<FinancialResearchBridgeValue | null>(null);
 
 export function useFinancialResearchSessionBridge({
-  sessionId, agentId, title, status, busy, stopping, messages, phase, error, submitPending, transcriptPending, approvalPending,
+  sessionId, agentId, title, status, busy, stopping, terminalReason, lastTurnStatus, lastTurnTerminalTurnId, messages, phase, error, submitPending, transcriptPending, approvalPending,
   onComposerChange, onFocusComposer, composerValue, onSubmit,
 }: FinancialSessionView & {
   agentId?: string;
@@ -58,7 +61,7 @@ export function useFinancialResearchSessionBridge({
   }, [authorized, busy, composerValue, onSubmit, request, sessionId, stopping, submitPending, submitted, transcriptPending]);
   const publish = bridge?.onSessionView;
   useEffect(() => {
-    if (authorized) publish?.({ sessionId, title, status, busy, stopping, messages, phase, error, submitPending, transcriptPending, approvalPending });
-  }, [approvalPending, authorized, busy, error, messages, phase, publish, sessionId, status, stopping, submitPending, title, transcriptPending]);
+    if (authorized) publish?.({ sessionId, title, status, busy, stopping, terminalReason, lastTurnStatus, lastTurnTerminalTurnId, messages, phase, error, submitPending, transcriptPending, approvalPending });
+  }, [approvalPending, authorized, busy, error, lastTurnStatus, lastTurnTerminalTurnId, messages, phase, publish, sessionId, status, stopping, submitPending, terminalReason, title, transcriptPending]);
   return bridge !== null;
 }

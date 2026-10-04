@@ -13,10 +13,10 @@ const submitted = vi.fn();
 let cleanup = async () => {};
 afterEach(async () => { await cleanup(); vi.clearAllMocks(); });
 
-function Consumer({ sessionId = "research", agentId = "finance", composerValue, busy = true, stopping = false, submitPending = false, transcriptPending = false }: {
-  sessionId?: string; agentId?: string; composerValue?: string; busy?: boolean; stopping?: boolean; submitPending?: boolean; transcriptPending?: boolean;
+function Consumer({ sessionId = "research", agentId = "finance", composerValue, busy = true, stopping = false, submitPending = false, transcriptPending = false, terminalReason }: {
+  sessionId?: string; agentId?: string; composerValue?: string; busy?: boolean; stopping?: boolean; submitPending?: boolean; transcriptPending?: boolean; terminalReason?: string;
 }) {
-  useFinancialResearchSessionBridge({ sessionId, agentId, title: "研究", status: busy ? "running" : "ready", busy, stopping, submitPending, transcriptPending, onComposerChange: change, onFocusComposer: focus, composerValue, onSubmit: submit });
+  useFinancialResearchSessionBridge({ sessionId, agentId, title: "研究", status: busy ? "running" : "ready", busy, stopping, terminalReason, lastTurnStatus: "ready", lastTurnTerminalTurnId: "native-turn", submitPending, transcriptPending, onComposerChange: change, onFocusComposer: focus, composerValue, onSubmit: submit });
   return null;
 }
 function value(sessionId = "research") {
@@ -49,6 +49,12 @@ describe("financial native composer bridge", () => {
     expect(change).not.toHaveBeenCalled();
     await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={value()}><Consumer /></FinancialResearchBridgeContext.Provider>));
     expect(change).toHaveBeenCalledExactlyOnceWith("请核对财报证据");
+  });
+
+  it("publishes the native stopped outcome without converting ready to success", async () => {
+    const root = setup();
+    await act(async () => root.render(<FinancialResearchBridgeContext.Provider value={value()}><Consumer busy={false} terminalReason="stopped_by_user" /></FinancialResearchBridgeContext.Provider>));
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ status: "ready", terminalReason: "stopped_by_user", lastTurnStatus: "ready", lastTurnTerminalTurnId: "native-turn" }));
   });
 
   it("submits once in StrictMode only after the exact native draft commits", async () => {

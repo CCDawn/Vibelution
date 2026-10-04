@@ -5,17 +5,29 @@ import { safeFinancialSourceUrl } from "./financialResearchModel";
 export type ReportCitation = { url: string; page: string; label: string };
 export type StockResearchReport = { turnId: string; timestamp: string; text: string; summary: string; sections: { id: string; title: string; text: string }[]; citations: ReportCitation[] };
 export type ResearchScope = "financial" | "events" | "risk" | "comprehensive";
+export type ResearchTerminalState = Pick<SessionSummary, "terminalReason" | "lastTurnStatus" | "lastTurnTerminalTurnId">;
 export const EMPTY_FINANCIAL_MESSAGES: ConversationMessage[] = [];
 
 export function cleanResearchPreview(text: string, limit = 100) {
   return text.replace(/https?:\/\/\S+/g, "").replace(/[|#*_`>]/g, " ").replace(/\s+/g, " ").trim().slice(0, limit);
 }
 export function researchRecordStatus(row: Pick<SessionSummary, "status" | "terminalReason" | "lastTurnStatus">, zh = true) {
-  if (row.status === "running") return zh ? "研究中" : "Running";
-  if (row.terminalReason === "needs_continue") return zh ? "待继续" : "Needs continuation";
+  if (["running", "queued"].includes(row.status)) return zh ? "研究中" : "Running";
+  if (row.status === "stopping") return zh ? "正在停止" : "Stopping";
+  const outcome = row.terminalReason || row.lastTurnStatus || row.status;
+  if (["needs_continue", "paused_limit", "paused"].includes(outcome) || ["needs_continue", "paused_limit"].includes(row.status)) return zh ? "待继续" : "Needs continuation";
+  if (["stopped_by_user", "stopped", "aborted", "cancelled", "superseded"].includes(outcome)) return zh ? "已停止" : "Stopped";
   if (row.status === "failed" || row.lastTurnStatus === "failed" || row.terminalReason?.startsWith("failed")) return zh ? "失败" : "Failed";
-  if (row.terminalReason === "success" || row.lastTurnStatus === "completed") return zh ? "已完成" : "Completed";
+  if (row.terminalReason === "success" || row.lastTurnStatus === "completed" || row.status === "completed") return zh ? "已完成" : "Completed";
   return zh ? "研究会话" : "Research session";
+}
+export function localResearchDate(now = new Date()) {
+  return `${String(now.getFullYear()).padStart(4, "0")}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+export function isValidResearchDate(value: string, now = new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isFinite(date.getTime()) && date.getFullYear() > 0 && localResearchDate(date) === value && value <= localResearchDate(now);
 }
 export function latestResearchTurn(messages: readonly ConversationMessage[]): AssistantConversationTurn | undefined {
   return [...messages].reverse().find((message): message is AssistantConversationTurn => message.role === "assistant");
@@ -31,13 +43,31 @@ export function reportMatchesStock(report: StockResearchReport | null, messages:
   }
   return false;
 }
-export function projectStockReport(messages: readonly ConversationMessage[]): StockResearchReport | null {
+export function projectStockReport(messages: readonly ConversationMessage[], terminal?: ResearchTerminalState | null): StockResearchReport | null {
   // Read final-answer items from the native transcript. Never promote commentary,
   // reasoning, a tool output, or an unfinished assistant turn into a report.
-  const turn = [...messages].reverse().find((message): message is AssistantConversationTurn => message.role === "assistant" && message.status === "completed" && message.turnItems.some((item) => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed"));
-  if (!turn) return null;
-  const text = turn.turnItems.filter((item) => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed").map((item) => item.type === "agent_message" ? item.text : "").join("\n\n");
-  if (!text.trim()) return null;
+  const candidates: { turn: AssistantConversationTurn; text: string; request: string }[] = [];
+  const latest = latestResearchTurn(messages);
+  let request = "";
+  for (const message of messages) {
+    if (message.role === "user") { request = message.content; continue; }
+    if (message.status !== "completed") continue;
+    const terminalTurn = terminal?.lastTurnTerminalTurnId || latest?.turnId;
+    const outcome = terminal?.terminalReason || terminal?.lastTurnStatus || "";
+    if (message.turnId === terminalTurn && /^(?:stopped|aborted|cancelled|superseded|failed|needs_continue|paused)/.test(outcome)) continue;
+    const text = message.turnItems.filter((item) => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed").map((item) => item.type === "agent_message" ? item.text : "").join("\n\n");
+    // Older native interrupted turns may be represented as completed messages.
+    // Their native stop notice remains a notice even after a successful resume.
+    if (!text.trim() || /(?:^|\n\n)(?:本轮已按请求停止[。，]|This turn was stopped (?:as requested|before it started)\.)/i.test(text)) continue;
+    candidates.push({ turn: message, text, request });
+  }
+  // Native finance starts carry this request contract. Ordinary follow-ups stay
+  // in the conversation, leaving the full report and its export stable.
+  const isResearchRequest = (text: string) => /分析日期 \d{4}-\d{2}-\d{2}[\s\S]*使用 Markdown 二级标题/.test(text)
+    || /(?:重新生成|更新|重写)(?:完整)?(?:研究报告|研报)|(?:regenerate|update|rewrite) (?:the )?(?:full )?(?:research )?report/i.test(text);
+  const selected = candidates.filter((candidate) => isResearchRequest(candidate.request)).at(-1) ?? candidates[0];
+  if (!selected) return null;
+  const { turn, text } = selected;
   const sections: StockResearchReport["sections"] = [];
   const headings = [...text.matchAll(/^\s{0,3}#{1,3}\s+(.+)$/gm)];
   headings.forEach((heading, index) => sections.push({ id: `section-${index}`, title: cleanResearchPreview(heading[1], 25), text: text.slice(heading.index, headings[index + 1]?.index ?? text.length).trim() }));
@@ -45,7 +75,7 @@ export function projectStockReport(messages: readonly ConversationMessage[]): St
   const conclusion = sections.find((section) => /结论|摘要|简报|summary|conclusion/i.test(section.title))?.text || intro || sections[0]?.text || text;
   const conclusions = [...conclusion.matchAll(/^\s*[-*]\s+(.+)$/gm)].slice(0, 2).map((match) => match[1]).join(" ");
   const citations: ReportCitation[] = [];
-  for (const match of text.matchAll(/https?:\/\/[^\s<>"\])]+/g)) {
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"\])。，；、）]+/g)) {
     const safeUrl = safeFinancialSourceUrl(match[0].replace(/[。，；、.]+$/, ""));
     if (!safeUrl) continue;
     const parsed = new URL(safeUrl);
@@ -53,15 +83,16 @@ export function projectStockReport(messages: readonly ConversationMessage[]): St
     if (anchoredPage) parsed.hash = "";
     const url = parsed.toString();
     const lineStart = Math.max(text.lastIndexOf("\n", match.index) + 1, match.index - 200);
-    const before = text.slice(lineStart, match.index);
+    const before = text.slice(lineStart, match.index).split(/https?:\/\/[^\s<>"\])。，；、）]+/).at(-1) || "";
     const after = text.slice(match.index + match[0].length).split("\n", 1)[0].slice(0, 40);
     const pagesIn = (value: string) => [...value.matchAll(/(?:第\s*|PDF\s*)(\d{1,6})\s*页|\b(?:p\.|page\s+)(\d{1,6})\b/gi)].map((item) => item[1] || item[2]);
-    const directPage = anchoredPage || pagesIn(before).at(-1) || pagesIn(after)[0];
+    const precedingPages = pagesIn(before);
+    const directPages = /\.pdf$/i.test(parsed.pathname) ? (precedingPages.length ? precedingPages : pagesIn(after)) : [];
     // A common report citation lists its pages on the title line and the PDF
     // URL on the following line. Only that same contiguous source block counts.
     const block = text.slice(Math.max(text.lastIndexOf("\n\n", match.index) + 2, match.index - 400, 0), match.index);
-    const blockPages = /\.pdf$/i.test(parsed.pathname) && /财报|年报|年度报告|原文|annual report/i.test(block) ? pagesIn(block) : [];
-    const pages = directPage ? [directPage] : blockPages.length ? [...new Set(blockPages)] : [""];
+    const blockPages = /\.pdf$/i.test(parsed.pathname) && !/https?:\/\//.test(block) && /财报|年报|年度报告|原文|annual report/i.test(block) ? pagesIn(block) : [];
+    const pages = anchoredPage ? [anchoredPage] : directPages.length ? [...new Set(directPages)] : blockPages.length ? [...new Set(blockPages)] : [""];
     for (const page of pages) {
       if (citations.some((item) => item.url === url && item.page === page)) continue;
       citations.push({ url, page, label: page ? `PDF · 第 ${page} 页` : parsed.hostname });

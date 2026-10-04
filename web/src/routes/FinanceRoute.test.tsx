@@ -225,6 +225,17 @@ describe("financial assistant page", () => {
     expect(nativeSubmit.mock.calls[0][0]).toContain("报告期 2024FY");
   });
 
+  it("prevents future dates from creating or submitting a native research", async () => {
+    await render("/finance?session=native-session");
+    await input("分析日期", "2099-01-01");
+    const start = button("开始研究")!;
+    expect(start.disabled).toBe(true);
+    expect(container.querySelector('[aria-label="分析日期"]')?.getAttribute("aria-invalid")).toBe("true");
+    await act(async () => start.click());
+    expect(nativeSubmit).not.toHaveBeenCalled();
+    expect(createChatSession).not.toHaveBeenCalled();
+  });
+
   it("opens real financial history and filters foreign and archived rows", async () => {
     vi.mocked(querySessions).mockResolvedValue({
       items: [nativeSession("native-session"), { ...nativeSession("history-session"), title: "年度研究" }, { ...nativeSession("foreign"), agentId: "other", title: "外部会话" }, { ...nativeSession("archived"), title: "已归档记录", archiveState: { status: "archived" } }], nextCursor: "",

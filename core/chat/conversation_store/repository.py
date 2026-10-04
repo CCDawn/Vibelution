@@ -1008,6 +1008,35 @@ class WorkspaceChatStateDao:
             )
         return decoded
 
+    def terminal_states(self, session_ids: Sequence[str]) -> dict[str, dict[str, str]]:
+        """Read only terminal metadata for a directory page, without transcripts."""
+        ids = tuple(dict.fromkeys(str(value).strip() for value in session_ids if str(value).strip()))
+        if not ids:
+            return {}
+        rows = self._connection.execute(
+            """
+            SELECT session_id,
+              COALESCE(NULLIF(json_extract(payload_json, '$.last_turn_status'), ''),
+                       json_extract(payload_json, '$.lastTurnStatus')) AS last_turn_status,
+              COALESCE(NULLIF(json_extract(payload_json, '$.last_turn_terminal_reason'), ''),
+                       NULLIF(json_extract(payload_json, '$.lastTurnTerminalReason'), ''),
+                       json_extract(payload_json, '$.terminalReason')) AS last_turn_terminal_reason,
+              COALESCE(NULLIF(json_extract(payload_json, '$.last_turn_terminal_turn_id'), ''),
+                       json_extract(payload_json, '$.lastTurnTerminalTurnId')) AS last_turn_terminal_turn_id
+            FROM session_runtime_state
+            WHERE session_id IN (SELECT value FROM json_each(?))
+            """,
+            (json.dumps(ids),),
+        ).fetchall()
+        fields = ("last_turn_status", "last_turn_terminal_reason", "last_turn_terminal_turn_id")
+        return {
+            str(row["session_id"]): {
+                field: row[field].strip() if isinstance(row[field], str) else ""
+                for field in fields
+            }
+            for row in rows
+        }
+
     def upsert_one(
         self,
         session_id: str,
@@ -1615,6 +1644,10 @@ class ConversationRepository:
     def get_session_runtime_state(self, session_id: str) -> dict[str, Any] | None:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).get_one(session_id)
+
+    def get_session_terminal_states(self, session_ids: Sequence[str]) -> dict[str, dict[str, str]]:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).terminal_states(session_ids)
 
     def list_session_runtime_ids(self) -> list[str]:
         with self._database.reader() as connection:
