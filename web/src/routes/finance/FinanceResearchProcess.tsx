@@ -1,3 +1,4 @@
+import styles from "./FinanceResearchProcess.styles";
 import { CheckCircle2, Circle, Loader2, ShieldAlert, XCircle } from "lucide-react";
 import type { AssistantConversationTurn } from "../../api/types";
 import { VButton, VStateSurface } from "../../components/vui";
@@ -34,32 +35,32 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat }: {
   const errorPreview = error && (error.length > 110 ? `${error.slice(0, 110)}…` : error);
 
   return (
-    <div className="grid gap-5 p-4" data-finance-research-process>
+    <div className={styles.panel} data-finance-research-process>
       <div>
-        <span className="text-xs text-[var(--fg-tertiary)]">{zh ? "当前研究" : "Current research"}</span>
-        <p className="text-sm font-medium mt-2 mb-0 break-words">
+        <span className={styles.caption}>{zh ? "当前研究" : "Current research"}</span>
+        <p className={styles.title}>
           {view?.title || (zh ? "等待发起研究" : "Ready to research")}
         </p>
       </div>
-      <div className="flex items-center gap-2 text-sm" role="status">
-        {approvalPending ? <ShieldAlert size={16} className="text-[var(--state-warning)]" />
-          : running ? <Loader2 size={16} className="animate-spin motion-reduce:animate-none text-[var(--accent-cool)]" />
-          : error ? <XCircle size={16} className="text-[var(--state-error)]" />
-          : report ? <CheckCircle2 size={16} className="text-[var(--state-success)]" />
-          : <Circle size={16} className="text-[var(--fg-tertiary)]" />}
+      <div className={styles.status} role="status">
+        {approvalPending ? <ShieldAlert size={16} className={styles.warning} />
+          : running ? <Loader2 size={16} className={styles.running} />
+          : error ? <XCircle size={16} className={styles.error} />
+          : report ? <CheckCircle2 size={16} className={styles.success} />
+          : <Circle size={16} className={styles.muted} />}
         <strong>{status}</strong>
       </div>
       {tools.length ? (
-        <ol className="list-none grid gap-4 p-0 m-0">
+        <ol className={styles.tools}>
           {tools.map((item) => (
-            <li key={item.itemId} className="flex items-start gap-2.5 text-xs">
-              {item.status === "running" ? <Loader2 size={14} className="shrink-0 animate-spin motion-reduce:animate-none text-[var(--accent-cool)]" />
-                : item.status === "pending" ? <Circle size={14} className="shrink-0 text-[var(--fg-tertiary)]" />
-                : item.status === "failed" ? <XCircle size={14} className="shrink-0 text-[var(--state-error)]" />
-                : <CheckCircle2 size={14} className="shrink-0 text-[var(--state-success)]" />}
-              <div className="min-w-0">
-                <strong className="font-medium">{zh ? toolLabels[item.toolName] || item.title || item.toolName : item.title || item.toolName}</strong>
-                <p className="mt-1 mb-0 text-[var(--fg-tertiary)]">
+            <li key={item.itemId} className={styles.tool}>
+              {item.status === "running" ? <Loader2 size={14} className={styles.runningTool} />
+                : item.status === "pending" ? <Circle size={14} className={styles.pendingTool} />
+                : item.status === "failed" ? <XCircle size={14} className={styles.failedTool} />
+                : <CheckCircle2 size={14} className={styles.completedTool} />}
+              <div className={styles.toolText}>
+                <strong className={styles.toolTitle}>{zh ? toolLabels[item.toolName] || item.title || item.toolName : item.title || item.toolName}</strong>
+                <p className={styles.toolStatus}>
                   {item.status === "completed" ? (zh ? "已完成" : "Completed")
                     : item.status === "failed" ? (zh ? "失败" : "Failed")
                     : item.status === "pending" ? (zh ? "等待执行" : "Pending")
@@ -69,10 +70,10 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat }: {
             </li>
           ))}
         </ol>
-      ) : <p className="text-xs leading-6 text-[var(--fg-tertiary)] m-0">{running ? (zh ? "正在分析…" : "Analyzing…") : (zh ? "尚未开始研究" : "No research started")}</p>}
+      ) : <p className={styles.empty}>{running ? (zh ? "正在分析…" : "Analyzing…") : (zh ? "尚未开始研究" : "No research started")}</p>}
       {errorPreview ? (
         <VStateSurface tone="error" title={zh ? "需要处理" : "Needs attention"}>
-          <span className="block break-words">{errorPreview}</span>
+          <span className={styles.errorText}>{errorPreview}</span>
         </VStateSurface>
       ) : null}
       <VButton variant="secondary" onPress={onOpenChat}>

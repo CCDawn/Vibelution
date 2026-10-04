@@ -1,0 +1,11 @@
+export default {
+  surface: "border border-[var(--vui-border-subtle)] rounded-lg min-w-0",
+  heading: "flex items-center justify-between gap-3 mb-3",
+  title: "flex items-center gap-2 text-sm",
+  actions: "flex items-center gap-3",
+  timestamp: "text-xs text-[var(--fg-tertiary)]",
+  summary: "text-sm leading-7 font-medium text-[var(--fg-primary)] mt-0 mb-4",
+  chapters: "mb-4",
+  body: "min-w-0 text-sm leading-7 break-words [&_table]:w-full [&_table]:text-xs [&_th]:text-left [&_td]:p-2 [&_th]:p-2 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_a]:text-[var(--accent-cool)]",
+  citations: "flex flex-wrap items-center gap-2 border-t border-[var(--vui-border-subtle)] pt-3 mt-4",
+} as const;

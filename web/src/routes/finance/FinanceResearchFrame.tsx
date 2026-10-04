@@ -58,10 +58,10 @@ function FramePlaceholder({ zh, evidence = false, loading }: { zh: boolean; evid
 
 export function FinanceResearchLoading({ zh = true }: { zh?: boolean }) {
   return <FinanceResearchFrame zh={zh}>
-    <div className="flex min-h-0 flex-1 flex-col gap-5 p-6 overflow-hidden" role="status" aria-label={zh ? "正在加载研究工作台" : "Loading research workspace"} aria-busy="true" data-vui-app="workbench" data-route-loading="finance" data-finance-entry-state="loading">
-      <div className="grid grid-cols-[2fr_1fr] gap-6"><VSkeleton className="h-12" /><VSkeleton className="h-12" /></div>
-      <div className="grid grid-cols-6 gap-5"><VSkeleton /><VSkeleton /><VSkeleton /><VSkeleton /><VSkeleton /><VSkeleton /></div>
-      <VSkeleton className="min-h-[290px] flex-1" /><VSkeleton className="h-24" />
+    <div className={styles.frameLoading} role="status" aria-label={zh ? "正在加载研究工作台" : "Loading research workspace"} aria-busy="true" data-vui-app="workbench" data-route-loading="finance" data-finance-entry-state="loading">
+      <div className={styles.frameLoadingHeading}><VSkeleton className={styles.frameLoadingTitle} /><VSkeleton className={styles.frameLoadingTitle} /></div>
+      <div className={styles.frameLoadingFacts}><VSkeleton /><VSkeleton /><VSkeleton /><VSkeleton /><VSkeleton /><VSkeleton /></div>
+      <VSkeleton className={styles.frameLoadingChart} /><VSkeleton className={styles.frameLoadingConfig} />
     </div>
   </FinanceResearchFrame>;
 }

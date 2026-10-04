@@ -1,3 +1,4 @@
+import styles from "./FinanceStockChart.styles";
 import { useEffect, useMemo, useState } from "react";
 import type { StockCandle, StockPeriod } from "../../api/financialMarket";
 import { VSurface, VTabs } from "../../components/vui";
@@ -19,17 +20,17 @@ export function FinanceStockChart({ candles, period, onPeriodChange, zh }: { can
   const active = hover === null ? candles.length - 1 : hover;
   const candle = candles[active];
   const path = (values: (number | null)[]) => values.flatMap((value, index) => value === null ? [] : [`${index === values.findIndex((v) => v !== null) ? "M" : "L"}${x(index)},${y(value)}`]).join(" ");
-  return <VSurface tone="panel" padding="normal" className="min-w-0 border border-[var(--vui-border-subtle)] rounded-lg" ariaLabel={zh ? "股价与成交量" : "Price and volume"}>
-    <div className="flex items-center justify-between gap-4 mb-3">
-      <div className="flex items-center gap-4"><strong className="text-sm">{zh ? "价格走势" : "Price chart"}</strong><span className="text-xs text-[var(--fg-tertiary)]">{zh ? "前复权" : "Forward adjusted"}</span></div>
+  return <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "股价与成交量" : "Price and volume"}>
+    <div className={styles.heading}>
+      <div className={styles.titleRow}><strong className={styles.title}>{zh ? "价格走势" : "Price chart"}</strong><span className={styles.adjustment}>{zh ? "前复权" : "Forward adjusted"}</span></div>
       <VTabs value={period} onValueChange={(value) => onPeriodChange(value as StockPeriod)} aria-label={zh ? "K 线周期" : "Chart period"} items={[{ id: "day", label: zh ? "日 K" : "Daily" }, { id: "week", label: zh ? "周 K" : "Weekly" }, { id: "month", label: zh ? "月 K" : "Monthly" }]} />
     </div>
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums text-[var(--fg-secondary)] min-h-6">
+    <div className={styles.legend}>
       <span>{candle?.date ?? "—"}</span><span>{zh ? "开" : "O"} {quoteNumber(candle?.open)}</span><span>{zh ? "高" : "H"} {quoteNumber(candle?.high)}</span><span>{zh ? "低" : "L"} {quoteNumber(candle?.low)}</span><span>{zh ? "收" : "C"} {quoteNumber(candle?.close)}</span>
-      <span className="text-[var(--state-warning)]">MA5 {quoteNumber(series.short[active])}</span><span className="text-[var(--accent-cool)]">MA20 {quoteNumber(series.long[active])}</span>
+      <span className={styles.shortAverage}>MA5 {quoteNumber(series.short[active])}</span><span className={styles.longAverage}>MA20 {quoteNumber(series.long[active])}</span>
     </div>
     {/* Financial chart geometry is SVG; all controls stay on the VUI API. */}
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[330px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]" role="img" aria-label={zh ? "K 线与成交量，左右方向键查看数据" : "Candles and volume; use arrow keys to inspect"} tabIndex={0}
+    <svg viewBox={`0 0 ${W} ${H}`} className={styles.chart} role="img" aria-label={zh ? "K 线与成交量，左右方向键查看数据" : "Candles and volume; use arrow keys to inspect"} tabIndex={0}
       onPointerMove={(event) => { const box = event.currentTarget.getBoundingClientRect(); setHover(Math.max(0, Math.min(candles.length - 1, Math.floor(((event.clientX - box.left) / box.width * W - left) / spacing)))); }}
       onPointerLeave={() => setHover(null)} onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setHover(Math.max(0, Math.min(candles.length - 1, active + (event.key === "ArrowLeft" ? -1 : 1)))); } }}>
       <title>{zh ? "历史价格与成交量" : "Historical price and volume"}</title>
@@ -39,6 +40,6 @@ export function FinanceStockChart({ candles, period, onPeriodChange, zh }: { can
       {hover !== null ? <line x1={x(hover)} x2={x(hover)} y1={top} y2={288} stroke="var(--fg-tertiary)" strokeDasharray="3 3" /> : null}
       <text x={left} y={305} fontSize="11" fill="var(--fg-tertiary)">{candles[0]?.date}</text><text x={W - right} y={305} fontSize="11" textAnchor="end" fill="var(--fg-tertiary)">{candles.at(-1)?.date}</text>
     </svg>
-    <div className="flex justify-between text-xs text-[var(--fg-tertiary)]"><span>{zh ? "成交量" : "Volume"} {quoteNumber(candle?.volumeLots, 0)} {zh ? "手" : "lots"}</span><span>{zh ? "1 手 = 100 股" : "1 lot = 100 shares"}</span></div>
+    <div className={styles.footer}><span>{zh ? "成交量" : "Volume"} {quoteNumber(candle?.volumeLots, 0)} {zh ? "手" : "lots"}</span><span>{zh ? "1 手 = 100 股" : "1 lot = 100 shares"}</span></div>
   </VSurface>;
 }

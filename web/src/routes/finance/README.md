@@ -3,6 +3,7 @@
 The approved reference is TradingAgents-CN v3.0 at `51060a7682cf51810b4bc3a704829438d18cd8dc`, specifically its stock detail, single-analysis, reports and favorites surfaces. Its frontend is restricted Source Available: this implementation borrows information architecture only, and uses existing VUI APIs throughout. The user explicitly requested desktop only; there is no mobile layout or mobile acceptance scope.
 
 - `FinanceResearchFrame` owns the desktop three-column shell; `WORKBENCH_LAYOUT_IDS.finance` owns persisted widths and VSplitWorkspace provides resizing/collapse.
+- Stock, chart, configuration, history, process and report components keep visual classes in their own `.styles.ts` modules; the frame, workspace and library share the existing route-owned style map.
 - `FinanceResearchWorkspace` composes stock search, selected-stock overview, watchlist preferences, native research and report history. Preferences store only validated stock identities, never market data or transcripts.
 - `financialMarket` API → `financial_assistant` route → `financial_market_service` reads Tencent public A-share quotes and OHLC. It preserves quote time, provider, yuan and lot units, and fails visibly. There are no account or order endpoints.
 - `FinancialResearchBridge` prepares a native composer draft and optionally requests native submission after that exact draft commits. Native Session, Journal, worker and SSE remain all conversation authorities. The live projection subscribes to the existing active-turn store at the presentation edge.
