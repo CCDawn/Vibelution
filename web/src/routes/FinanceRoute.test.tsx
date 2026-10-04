@@ -214,10 +214,13 @@ describe("financial assistant page", () => {
     await render();
     expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"]')).not.toBeNull();
     expect(container.querySelector('[data-finance-entry-state="loading"]')).not.toBeNull();
+    expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"] header')).toBeNull();
     await act(async () => resolve([row]));
     await settle();
     expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"]')).not.toBeNull();
     expect(container.textContent).toContain("finance-workspace");
+    expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"] header')).toBeNull();
+    expect(container.querySelector('[data-vui="split-sidebar"] a[aria-label="模型与助手配置"]')).not.toBeNull();
   });
 
   it("rejects a session belonging to an ordinary agent", async () => {
@@ -276,6 +279,26 @@ describe("financial assistant page", () => {
     await settle();
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=history-session");
     expect(fetchSessionDetail).toHaveBeenCalledWith("history-session", expect.objectContaining({ transcriptScope: "none", includeSecondary: false }));
+  });
+
+  it("searches all native research bodies without changing the recent-history rail", async () => {
+    vi.mocked(querySessions).mockImplementation(async (params) => ({
+      items: params?.q ? [{ ...nativeSession("body-match"), title: "经营质量", taskSummary: "现金流正常" }, nativeSession("native-session")] : [{ ...nativeSession("recent"), title: "年度研究" }], nextCursor: "",
+    } as SessionQueryResponse));
+    await render("/finance?session=native-session");
+    await act(async () => button("报告中心")!.click());
+    await settle();
+    const input = container.querySelector('input[aria-label="搜索研究记录"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "只在正文出现的关键词");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 280)));
+    await settle();
+    expect(querySessions).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance-a", q: "只在正文出现的关键词" }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(input.closest('[data-finance-report-history]')?.textContent).toContain("经营质量");
+    expect(input.closest('[data-finance-report-history]')?.textContent).not.toContain("原生研究");
+    expect(container.textContent).toContain("年度研究");
   });
 
   it("creates once on a double click and does not steal selection after opening history", async () => {

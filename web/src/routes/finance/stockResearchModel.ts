@@ -8,8 +8,39 @@ export type ResearchScope = "financial" | "events" | "risk" | "comprehensive";
 export type ResearchTerminalState = Pick<SessionSummary, "terminalReason" | "lastTurnStatus" | "lastTurnTerminalTurnId">;
 export const EMPTY_FINANCIAL_MESSAGES: ConversationMessage[] = [];
 
+export function isResearchSearchResult(row: SessionSummary, query: string) {
+  const needle = query.trim().toLocaleLowerCase();
+  // The native Agent query also appends an unpersisted direct-session stub.
+  // Such a blank stub has no searchable body; indexed body-only hits must stay.
+  const blankStub = !row.updatedAt && !row.lastActive && !row.taskSummary
+    && !row.lastTurnStatus && !row.terminalReason;
+  return !needle || !blankStub || row.title.toLocaleLowerCase().includes(needle);
+}
+
 export function cleanResearchPreview(text: string, limit = 100) {
-  return text.replace(/https?:\/\/\S+/g, "").replace(/[|#*_`>]/g, " ").replace(/\s+/g, " ").trim().slice(0, limit);
+  // Tables and source metadata are not prose. Keep them in the canonical report
+  // instead of flattening financial columns into an unreadable summary.
+  return text.replace(/```[\s\S]*?```/g, "").split("\n")
+    .filter((line) => !line.includes("|") && !/^\s*[-: ]{3,}\s*$/.test(line)
+      && !/^\s*(?:[-*]\s*)?(?:来源|证据来源|PDF|source)\s*[：:]/i.test(line)
+      && !/^\s{0,3}#{1,3}\s/.test(line))
+    .join(" ").replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "").replace(/[#*_`>]/g, " ")
+    .replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+/** An exact, bounded table excerpt for reports that have no prose conclusion. */
+export function researchTablePreview(text: string) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line, index) => line.includes("|")
+    && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1] ?? ""));
+  if (start < 0) return "";
+  const rows: string[] = [];
+  for (const line of lines.slice(start, start + 7)) {
+    if (!line.includes("|")) break;
+    rows.push(line);
+  }
+  return rows.join("\n");
 }
 export function researchRecordStatus(row: Pick<SessionSummary, "status" | "terminalReason" | "lastTurnStatus">, zh = true) {
   if (["running", "queued"].includes(row.status)) return zh ? "研究中" : "Running";

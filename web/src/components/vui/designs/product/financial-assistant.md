@@ -22,7 +22,7 @@ pathname 决定当前项及按钮高亮。Radix 管理键盘、Esc、外点和�
 本地项目单一金融专家，桌面端只读 A 股研究。参考 TradingAgents-CN v3.0 的股票详情、分析、报告和自选信息架构；不复制其受限前端源码，不宣称 Pro 工坊、自动交易或账户账本能力。
 
 ### 使用方式
-复用 `VSplitWorkspace`、`VStateSurface`、`VSkeleton`、`VInput`、`VSelect`、`VTabs`、`VButton`、`VChip`、`VIconButton`、`VSurface` 与 `VRouteLinkButton`。桌面三栏可拖动、折叠，宽度只经 `WORKBENCH_LAYOUT_IDS.finance` 与共享 pane persistence 保存。不做手机版和手机弹窗；1280px 与 1920px 桌面窗口均需验收。Finance 样式来源显式登记在 shell Tailwind 入口；路由代码分块加载与入口初始化均使用同一 frame，避免冷启动闪过通用壳。金融页面隐藏泛化聊天 starter 与模型、权限等技术设置，配置入口保留在页头；原生工具授权入口仍完整保留。
+复用 `VSplitWorkspace`、`VStateSurface`、`VSkeleton`、`VInput`、`VSelect`、`VTabs`、`VButton`、`VChip`、`VIconButton`、`VSurface` 与 `VRouteLinkButton`。桌面三栏可拖动、折叠，宽度只经 `WORKBENCH_LAYOUT_IDS.finance` 与共享 pane persistence 保存。不做手机版和手机弹窗；1280px 与 1920px 桌面窗口均需验收。Finance 样式来源显式登记在 shell Tailwind 入口；路由代码分块加载与入口初始化均使用同一 frame，避免冷启动闪过通用壳。金融页面隐藏泛化聊天 starter 与模型、权限等技术设置，配置入口保留在左栏新研究按钮旁；原生工具授权入口仍完整保留。
 GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且并发串行。
 只打开服务端验证 Agent/Session 绑定后返回的 sessionId，经 `useChatRouteSelection.openSession`。
 离开入口后，晚到的结果不导航。已归档或身份已改不另建。
@@ -38,6 +38,11 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 `FinanceResearchReport` 只投影已完成原生 Turn 的 `final_answer`，不把思考、工具返回或未完成内容变成报告。摘要、章节和引用都来自实际回答，Markdown 导出仅导出该回答。报告章节使用 `VTabs`，正文复用原生 Markdown renderer；股票上下文不匹配时显示空态。相同 PDF 的不同页分别保留。`FinanceResearchHistory` 只读原生研究记录，提供关键词、状态筛选与分页。
 自选只保存金融 Agent 范围内的有效股票身份，不保存行情、报告、transcript 或第二套会话状态。
 
+### 桌面研究交互补充
+沿用已确认的 TradingAgents-CN 单股详情方向和现有三栏布局，使用现有 VUI 控件扩展。图表以 `VTabs` 切换 MA、BOLL、MACD、RSI 及 30/60/全部已加载 K 线，`VIconButton` 向前/向后平移；SVG 只负责金融图形与命中，拖动和 Shift+方向键平移，方向键选择 K 线并播报真实日期/OHLC。指标基于完整已加载数据计算后再裁剪；样本不足显示缺值，不补造历史。股票/周期改变后重置窗口。
+报告摘要只保留实际结论文字；纯财务表格直接保留列与单位，完整报告不重复压平摘要。工具“部分结果/备用来源/数据不可用”等语义沿原生字段投影，用警示图标和文字同时说明，不画成普通成功。
+报告中心关键词通过原生 `querySessions(q)` 搜索全部本助手研究正文，输入加载、失败重试、空结果与同条件分页保留在原列表。最近研究不受关键词影响。原生 API 没有报告结果筛选契约，结果状态选择器明确只过滤已加载列表，不能把空闲阶段标成已完成。
+
 ### 财报资料
 资料栏使用已绑定的 Agent-owned 财报库，所有条目、trace、source body 请求携带同一 agentId 和 knowledgeBaseId。仅显示有效条目；原文来源另核对 sourceArtifactIds、库归属、PDF 类型、生命周期与过期时间。公司、代码、报告期、版本、页码及链接只来自 sourceRef.financialEvidence，不解析自由标题当事实。无元数据就不显示对应字段，无有效原文就不展示摘录。
 摘录使用 React 纯文本；外链只允许无认证信息的 HTTP/HTTPS，打开新窗口使用 noopener。点击报告引用时按有效 sourceRef URL 和 PDF 页码匹配本库来源，定位原文与 `#page=N` 链接；未匹配时明确告知，不把无关资料当引用。最多读取20条有效条目的 trace。
@@ -45,7 +50,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ## 对话说明与连接状态
 
 ### 功能
-正式工作台在页头说明只读 A 股研究，行情区域单独显示来源与报价时点。配置与财报管理链接留在对应栏位，避免与原对话说明重复。其他金融会话入口仍可用 `FinancialAssistantChatNote`；普通会话不增加说明。模型未配置时给简短状态，已填写不等于连接已验证。会话原有 HTML 导出保留。
+正式工作台不设重复产品标题栏，三栏直接接在应用导航下；三栏宽度以当前容器为上限，右栏和报告列表约束最小内容宽度，长文本换行或截断单行标题。行情区域单独显示来源与报价时点。配置与财报管理链接留在对应栏位，避免与原对话说明重复。其他金融会话入口仍可用 `FinancialAssistantChatNote`；普通会话不增加说明。模型未配置时给简短状态，已填写不等于连接已验证。会话原有 HTML 导出保留。
 
 ### 适用范围
 只在该助手自己的会话、配置和财报库出现。普通会话、其他 Agent 和虚拟人会话不出现。

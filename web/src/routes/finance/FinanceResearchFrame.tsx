@@ -1,31 +1,22 @@
 import { type ReactNode, useState } from "react";
-import { TrendingUp } from "lucide-react";
 import { VSplitWorkspace, VSkeleton } from "../../components/vui";
 import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 import { persistPaneVisibility, readPaneVisibility } from "../../components/layout/paneVisibilityPersistence";
 import styles from "../FinanceRoute.styles";
 
 export function FinanceResearchFrame({
-  zh, sidebar, aside, children, actions, loading = true,
+  zh, sidebar, aside, children, loading = true,
 }: {
   zh: boolean;
   sidebar?: ReactNode;
   aside?: ReactNode;
   children: ReactNode;
-  actions?: ReactNode;
   loading?: boolean;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => !readPaneVisibility(WORKBENCH_LAYOUT_IDS.finance, "sidebar", true));
   const [asideCollapsed, setAsideCollapsed] = useState(() => !readPaneVisibility(WORKBENCH_LAYOUT_IDS.finance, "aside", true));
   return (
     <section className={styles.frame} aria-label={zh ? "炒股智能体" : "Investment assistant"} data-vui-domain-recipe="financial-assistant-workspace">
-      <header className={styles.heading}>
-        <div className={styles.brand}><span className={styles.brandIcon}><TrendingUp size={18} aria-hidden="true" /></span>{zh ? "炒股智能体" : "Investment assistant"}</div>
-        <div className={styles.actions}>
-          <span className={styles.market}>{zh ? "A 股研究 · 只读" : "A-share research · Read-only"}</span>
-          {actions}
-        </div>
-      </header>
       <VSplitWorkspace
         resize={{ layoutId: WORKBENCH_LAYOUT_IDS.finance,
           sidebar: { defaultWidth: 230, minWidth: 200, maxWidth: 360 },

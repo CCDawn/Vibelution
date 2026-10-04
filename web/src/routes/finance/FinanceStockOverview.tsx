@@ -45,5 +45,5 @@ export function FinanceMarketPanel({ query, period, onPeriodChange, zh }: { quer
   if (query.isPending) return <VSurface tone="panel" padding="normal" className={styles.loadingPanel} aria-busy="true"><span className={styles.chartTitle}>{zh ? "价格走势" : "Price chart"}</span><div className={styles.loadingSkeleton}><VSkeleton /><VSkeleton /><VSkeleton /></div></VSurface>;
   if (query.isError) return <VStateSurface tone="error" title={zh ? "行情加载失败" : "Quotes unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>;
   if (!query.data?.candles.length) return <VStateSurface tone={query.data?.candleError ? "error" : "empty"} title={zh ? "暂无 K 线数据" : "No chart data"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.data?.candleError || undefined}</VStateSurface>;
-  return <FinanceStockChart candles={query.data.candles} period={period} onPeriodChange={onPeriodChange} zh={zh} />;
+  return <FinanceStockChart key={`${query.data.stock.symbol}:${period}`} candles={query.data.candles} period={period} onPeriodChange={onPeriodChange} zh={zh} />;
 }
