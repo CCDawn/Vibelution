@@ -38,11 +38,11 @@
   GET-only 窄口（仅图片扩展名 artifact id 放行；文档 artifact 与 mutating
   方法仍要 token，trusted-source 校验保留），test_history_image_renders_as_img
   已是硬断言，钉住图片必须以 ``<img>`` 真实加载。
-- 次要缺陷（取证后按事实记录，不作断言）：上传失败批次被拦下后，乐观用户行
-  残留在时间线上（submitTurnWithAttachments 失败分支的
-  removeOptimisticUserMessage 未生效，截图 + thread count=1 取证），视觉上像
-  「已发出一条消息」，重发后该残留行仍在。不影响 allSettled 语义本体（无
-  turn、无回复、无主调用），报告附证据。
+- 上传失败后的乐观用户行撤回已提升为硬断言：历史上失败批次被拦下后，
+  thread count=1，视觉上像已发出消息。现在失败后必须回到 count=0；重试与
+  后续发送都只复用成功项的 artifactId，不重复上传已成功的文件。独立的
+  test_composer_upload_recovery.py 通过真实上传与消息边界拦截验证这部分，
+  不需要注册共享 mock provider；本文件继续验收重试后的模型回复与图片可见性。
 
 写法约定照抄 test_mock_llm_flow.py：serial + skipif 环境门（禁模块级 skip），
 锚点用 ARIA/结构属性，不猜 class。
@@ -1007,6 +1007,8 @@ def test_multi_file_upload_allsettled_retry(
     - 解除注入 → 单 chip 重试成功（chip 回已上传态、成功项不重传）→ 再次发送，
       turn 正常收口且两张图都在用户消息里可见。
     """
+    from playwright.sync_api import expect
+
     good_path = tmp_path / "e2e-img-good.png"
     bad_path = tmp_path / "e2e-img-bad.png"
     good_path.write_bytes(build_png(rgb=(40, 160, 90)))
@@ -1015,6 +1017,18 @@ def test_multi_file_upload_allsettled_retry(
     open_agent_chat(page, e2e_instance, img_agent["sessionId"])
 
     add_attachments(page, [good_path, bad_path])
+
+    upload_filenames: list[str] = []
+
+    def record_upload(request: Any) -> None:
+        if request.method != "POST" or not request.url.endswith(f"/api/sessions/{img_agent['sessionId']}/attachments"):
+            return
+        filename = urllib.parse.unquote(request.header_value("x-vibelution-filename") or "")
+        if not filename and (request.header_value("content-type") or "").startswith("application/json"):
+            filename = (request.post_data_json or {}).get("filename", "")
+        upload_filenames.append(filename)
+
+    page.on("request", record_upload)
 
     def fail_bad_uploads(route: Any) -> None:
         request = route.request
@@ -1039,11 +1053,10 @@ def test_multi_file_upload_allsettled_retry(
         assert alert.count() >= 1, "composer 未出现上传失败提示（role=alert）"
         retry_all = page.locator('p[role="alert"] button:has-text("重试上传")')
         assert retry_all.count() >= 1, "错误行未出现「重试上传」retry-all 按钮"
-        # allSettled 闸门：整批不发送——没有 turn 启动、没有回复上屏、mock 没有
-        # 主调用（实测：乐观用户行会残留在时间线上，见模块头缺陷记录；这里钉
-        # 「不发送」语义本身，不钉乐观行的清理时序）。
+        # allSettled 闸门：整批不发送，临时用户消息也必须撤回。
         status, _count = thread_status_and_count(page)
         assert status == "idle", f"上传失败后 thread 未回到 idle: {status!r}"
+        expect(page.locator(THREAD_ROOT).first).to_have_attribute("data-agent-thread-message-count", "0", timeout=15_000)
         texts_now = thread_text(page)
         assert IMG_REPLY_RETRY not in texts_now, "失败批次不应有任何回复上屏"
         mains_now = [
@@ -1066,6 +1079,8 @@ def test_multi_file_upload_allsettled_retry(
     while page.locator('p[role="alert"]').count() > 0 and time.monotonic() < deadline:
         page.wait_for_timeout(200)
     assert page.locator('p[role="alert"]').count() == 0, "重试成功后失败提示未清除"
+    assert upload_filenames.count(good_path.name) == 1, "重试不应重传已成功的附件"
+    assert upload_filenames.count(bad_path.name) == 2, "失败附件应只补传一次"
 
     # 整批完成后可发送：草稿仍在，直接发送。
     composer = page.locator(COMPOSER_TEXTAREA).first
@@ -1074,6 +1089,8 @@ def test_multi_file_upload_allsettled_retry(
         composer.fill(draft)
     composer.press("Enter")
     wait_turn_closed(page, expected_messages=2)
+    assert upload_filenames.count(good_path.name) == 1
+    assert upload_filenames.count(bad_path.name) == 2
     assert_no_error_surface(page)
     assert_no_turn_error_card(page)
     texts = wait_thread_text(page, IMG_REPLY_RETRY)
