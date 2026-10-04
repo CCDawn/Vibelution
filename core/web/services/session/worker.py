@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -1725,6 +1726,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         summary="Chat turn worker started.",
     )
     s._set_session_turn_progress_live_output(session_id, "agent_prepare", turn_id=turn_id)
+    runtime_agent_cache: dict[str, Any] | None = None
     try:
         if agent_id and (not agent_instance or current_agent_status == "archived"):
             status = current_agent_status or str((historical_agent or {}).get("status") or "").strip().lower()
@@ -2434,15 +2436,28 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             else:
                 s._persist_session_turn_failure(session_id, context, exc)
     finally:
-        from core.agent_plugins.runtime_extensions import is_agent_plugin_proactive_turn
+        try:
+            from core.agent_plugins.runtime_extensions import is_agent_plugin_proactive_turn
 
-        if is_agent_plugin_proactive_turn(context):
-            from core.web.services.session.proactive import (
-                release_proactive_turn_context,
+            if is_agent_plugin_proactive_turn(context):
+                from core.web.services.session.proactive import (
+                    release_proactive_turn_context,
+                )
+
+                release_proactive_turn_context(context)
+        except Exception as exc:  # noqa: BLE001 - continue releasing independent turn owners
+            logging.getLogger(__name__).warning(
+                "Proactive turn context release failed (%s).", type(exc).__name__
             )
-
-            release_proactive_turn_context(context)
-        _finish_session_turn_worker(session_id, turn_id, turn_control)
+        try:
+            if runtime_agent_cache is not None:
+                s._release_chat_agent_runtime(runtime_agent_cache)
+        except Exception as exc:  # noqa: BLE001 - worker bookkeeping must still finish
+            logging.getLogger(__name__).warning(
+                "Session Agent runtime lease release failed (%s).", type(exc).__name__
+            )
+        finally:
+            _finish_session_turn_worker(session_id, turn_id, turn_control)
 
 
 def _turn_llm_usage_tokens(result: Any) -> int:

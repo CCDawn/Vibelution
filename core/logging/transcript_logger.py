@@ -15,11 +15,11 @@ import hashlib
 import json
 import os
 import queue
-import re
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from config.paths import resolve_workspace_home
 from core.logging.safe_payload import summarize_tool_arguments
@@ -40,7 +40,12 @@ class TranscriptLogger:
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls):
+    DEFAULT_MAX_PENDING_WRITES = 512
+    DEFAULT_MAX_PENDING_BYTES = 8 * 1024 * 1024
+    DEFAULT_FLUSH_TIMEOUT_SECONDS = 1.0
+    DEFAULT_END_SESSION_FLUSH_TIMEOUT_SECONDS = 0.25
+
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -48,7 +53,12 @@ class TranscriptLogger:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        max_pending_writes: int = DEFAULT_MAX_PENDING_WRITES,
+        max_pending_bytes: int = DEFAULT_MAX_PENDING_BYTES,
+    ):
         if self._initialized:
             return
         self._initialized = True
@@ -62,34 +72,238 @@ class TranscriptLogger:
         self._is_first_message = True
         self._system_prompt_written = False
 
-        # 后台写入线程，避免磁盘 I/O 阻塞主循环
-        self._write_queue = queue.Queue()
-        self._writer_thread = threading.Thread(
-            target=self._writer_loop, daemon=True, name="transcript-writer"
-        )
-        self._writer_thread.start()
+        # 队列容量同时按记录条数和 UTF-8 字节数限制；pending 统计包含正在写入的记录。
+        self._max_pending_writes = max(1, int(max_pending_writes))
+        self._max_pending_bytes = max(1, int(max_pending_bytes))
+        self._write_queue = queue.Queue(maxsize=self._max_pending_writes)
+        self._state = threading.Condition(threading.RLock())
+        self._writer_thread = None
+        self._accepting_writes = False
+        self._sentinel_queued = False
+        self._pending_writes = 0
+        self._pending_bytes = 0
+        self._last_accepted_sequence = 0
+        self._last_completed_sequence = 0
+        self._dropped_writes = 0
+        self._dropped_characters = 0
+        self._dropped_capacity_writes = 0
+        self._dropped_oversized_writes = 0
+        self._write_failures = 0
+        self.begin()
+
+    @staticmethod
+    def _utf8_size_up_to(content: str, limit: int) -> Optional[int]:
+        """Return exact UTF-8 size up to limit with only a small temporary encoding buffer."""
+        if len(content) > limit:
+            return None
+        if content.isascii():
+            return len(content)
+
+        size = 0
+        try:
+            for start in range(0, len(content), 8192):
+                size += len(content[start : start + 8192].encode("utf-8"))
+                if size > limit:
+                    return None
+        except UnicodeEncodeError:
+            return None
+        return size
+
+    def begin(self) -> bool:
+        """Open the writer for a lifespan; never overlap an unretired writer."""
+        with self._state:
+            if self._writer_thread is not None and self._writer_thread.is_alive():
+                return self._accepting_writes
+            if self._pending_writes:
+                return False
+
+            self._write_queue = queue.Queue(maxsize=self._max_pending_writes)
+            self._sentinel_queued = False
+            self._accepting_writes = True
+            self._writer_thread = threading.Thread(
+                target=self._writer_loop,
+                daemon=True,
+                name="transcript-writer",
+            )
+            try:
+                self._writer_thread.start()
+            except Exception:
+                self._writer_thread = None
+                self._accepting_writes = False
+                raise
+            return True
 
     def _writer_loop(self):
         """后台线程：从队列中取出内容并写入文件"""
         while True:
-            filepath, content = self._write_queue.get()
+            item = self._write_queue.get()
             try:
-                if filepath is None:
+                if item is None:
                     return
-                with open(filepath, 'a', encoding='utf-8') as f:
-                    f.write(content)
-            except Exception:
-                pass
+                filepath, content, sequence, content_bytes = item
+                try:
+                    with open(filepath, 'a', encoding='utf-8') as f:
+                        f.write(content)
+                except Exception:
+                    with self._state:
+                        self._write_failures += 1
             finally:
                 self._write_queue.task_done()
+                if item is not None:
+                    with self._state:
+                        self._pending_writes = max(0, self._pending_writes - 1)
+                        self._pending_bytes = max(0, self._pending_bytes - content_bytes)
+                        self._last_completed_sequence = sequence
+                        self._state.notify_all()
 
-    def _enqueue_write(self, content: str):
-        """将写入内容放入队列，由后台线程异步写入"""
-        self._write_queue.put((self._get_transcript_file(), content))
+    def _enqueue_write(self, content: str) -> Optional[int]:
+        """非阻塞入队；超出容量时拒收并累计不含正文的丢失计数。"""
+        if not isinstance(content, str):
+            content = str(content)
+        content_bytes = self._utf8_size_up_to(content, self._max_pending_bytes)
+        with self._state:
+            if content_bytes is None:
+                self._dropped_writes += 1
+                self._dropped_characters += len(content)
+                self._dropped_oversized_writes += 1
+                return None
+            if (
+                not self._accepting_writes
+                or self._pending_writes >= self._max_pending_writes
+                or self._pending_bytes + content_bytes > self._max_pending_bytes
+            ):
+                self._dropped_writes += 1
+                self._dropped_characters += len(content)
+                self._dropped_capacity_writes += 1
+                return None
 
-    def _flush_pending_writes(self):
-        """等待所有待处理的写入完成"""
-        self._write_queue.join()
+            sequence = self._last_accepted_sequence + 1
+            item = (self._get_transcript_file(), content, sequence, content_bytes)
+            try:
+                self._write_queue.put_nowait(item)
+            except queue.Full:
+                self._dropped_writes += 1
+                self._dropped_characters += len(content)
+                self._dropped_capacity_writes += 1
+                return None
+
+            self._last_accepted_sequence = sequence
+            self._pending_writes += 1
+            self._pending_bytes += content_bytes
+            return sequence
+
+    def _flush_through(self, sequence: int, deadline: float) -> bool:
+        with self._state:
+            while self._last_completed_sequence < sequence:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._state.wait(remaining)
+            return True
+
+    def flush(self, timeout: float = DEFAULT_FLUSH_TIMEOUT_SECONDS) -> bool:
+        """Wait a bounded time for accepted write attempts, ignoring later producers."""
+        duration = max(0.0, float(timeout))
+        deadline = time.monotonic() + duration
+        with self._state:
+            sequence = self._last_accepted_sequence
+        return self._flush_through(sequence, deadline)
+
+    def _flush_pending_writes(
+        self, timeout: float = DEFAULT_FLUSH_TIMEOUT_SECONDS
+    ) -> bool:
+        """Compatibility wrapper for existing callers; never waits without a deadline."""
+        return self.flush(timeout)
+
+    def diagnostics(self) -> Dict[str, Any]:
+        """Return bounded counters and writer state without exposing transcript contents."""
+        with self._state:
+            writer_alive = bool(
+                self._writer_thread is not None and self._writer_thread.is_alive()
+            )
+            return {
+                "accepting": self._accepting_writes,
+                "writer_alive": writer_alive,
+                "pending_writes": self._pending_writes,
+                "pending_bytes": self._pending_bytes,
+                "max_pending_writes": self._max_pending_writes,
+                "max_pending_bytes": self._max_pending_bytes,
+                "dropped_writes": self._dropped_writes,
+                "dropped_characters": self._dropped_characters,
+                "dropped_capacity_writes": self._dropped_capacity_writes,
+                "dropped_oversized_writes": self._dropped_oversized_writes,
+                "write_failures": self._write_failures,
+            }
+
+    def shutdown(
+        self,
+        *,
+        deadline: Optional[float] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Stop accepting writes, drain to a monotonic deadline, and join the real writer."""
+        if deadline is None:
+            duration = self.DEFAULT_FLUSH_TIMEOUT_SECONDS if timeout is None else max(0.0, float(timeout))
+            deadline = time.monotonic() + duration
+
+        with self._state:
+            self._accepting_writes = False
+            target_sequence = self._last_accepted_sequence
+            writer = self._writer_thread
+            if writer is None:
+                return self._shutdown_result(
+                    closed=self._pending_writes == 0,
+                    drained=self._pending_writes == 0,
+                    timed_out=False,
+                )
+
+        drained = self._flush_through(target_sequence, deadline)
+        # Even if a write failed, retire the thread after it has attempted every accepted item.
+        with self._state:
+            if not self._sentinel_queued and self._last_completed_sequence >= target_sequence:
+                try:
+                    self._write_queue.put_nowait(None)
+                    self._sentinel_queued = True
+                except queue.Full:
+                    pass
+
+            while not self._sentinel_queued:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return self._shutdown_result(
+                        closed=False,
+                        drained=drained,
+                        timed_out=True,
+                    )
+                self._state.wait(min(remaining, 0.02))
+                if self._last_completed_sequence >= target_sequence:
+                    try:
+                        self._write_queue.put_nowait(None)
+                        self._sentinel_queued = True
+                    except queue.Full:
+                        pass
+
+        remaining = max(0.0, deadline - time.monotonic())
+        writer.join(timeout=remaining)
+        stopped = not writer.is_alive()
+        with self._state:
+            return self._shutdown_result(
+                closed=stopped,
+                drained=drained,
+                timed_out=not stopped,
+            )
+
+    def _shutdown_result(self, *, closed: bool, drained: bool, timed_out: bool) -> Dict[str, Any]:
+        writer_alive = bool(
+            self._writer_thread is not None and self._writer_thread.is_alive()
+        )
+        result = {
+            "closed": bool(closed and not writer_alive),
+            "drained": bool(drained),
+            "timed_out": bool(timed_out),
+        }
+        result.update(self.diagnostics())
+        return result
 
     def _ensure_logs_dir(self):
         """确保日志目录存在"""
@@ -153,6 +367,13 @@ session: {self._session_id}
 
     def start_session(self, system_prompt: str = None):
         """开始新的会话记录"""
+        if not self.begin():
+            raise RuntimeError("TranscriptLogger writer is still retiring")
+
+        with self._state:
+            self._session_dropped_writes_at_start = self._dropped_writes
+            self._session_write_failures_at_start = self._write_failures
+
         self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._current_turn = 0
         self._is_first_message = True
@@ -319,8 +540,7 @@ session: {self._session_id}
         self._enqueue_write(content_md)
 
     def end_session(self, summary: str = None):
-        """结束会话记录（等待所有待处理写入完成后写入结束标记）"""
-        self._flush_pending_writes()
+        """记录会话结束，并以固定上限等待已接收内容落盘。"""
 
         summary_str = f"\n\n## 📋 会话总结\n\n{summary}" if summary else ""
 
@@ -334,8 +554,19 @@ session: {self._session_id}
 > 对话轮次: {self._current_turn}{summary_str}
 
 """
-        self._enqueue_write(content)
-        self._flush_pending_writes()
+        sequence = self._enqueue_write(content)
+        if sequence is None:
+            return False
+        flushed = self._flush_through(
+            sequence,
+            time.monotonic() + self.DEFAULT_END_SESSION_FLUSH_TIMEOUT_SECONDS,
+        )
+        with self._state:
+            no_session_loss = (
+                self._dropped_writes == getattr(self, "_session_dropped_writes_at_start", 0)
+                and self._write_failures == getattr(self, "_session_write_failures_at_start", 0)
+            )
+        return flushed and no_session_loss
 
     def cleanup_old_transcripts(self, keep_recent: int = 5):
         """清理旧的 transcript 文件，只保留最近 N 个会话"""
@@ -363,11 +594,54 @@ session: {self._session_id}
 
 # 延迟初始化，避免循环导入
 _transcript_logger = None
+_transcript_logger_lock = threading.Lock()
+
+
+def _existing_transcript_logger() -> Optional[TranscriptLogger]:
+    """Return an already constructed instance without starting a writer."""
+    with _transcript_logger_lock:
+        return _transcript_logger or TranscriptLogger._instance
+
+
+def begin_transcript_logger_lifecycle() -> Dict[str, Any]:
+    """Reopen an existing logger after its prior writer has exited; never instantiate one."""
+    instance = _existing_transcript_logger()
+    if instance is None:
+        return {"opened": False, "present": False, "reason": "not_initialized"}
+
+    opened = instance.begin()
+    result = {"opened": opened, "present": True}
+    result.update(instance.diagnostics())
+    if not opened:
+        result["reason"] = "writer_still_retiring"
+    return result
+
+
+def shutdown_transcript_logger(*, deadline: float) -> Dict[str, Any]:
+    """Retire an existing logger by a monotonic deadline without creating a new owner."""
+    instance = _existing_transcript_logger()
+    if instance is None:
+        return {
+            "closed": True,
+            "present": False,
+            "drained": True,
+            "timed_out": False,
+            "write_failures": 0,
+            "dropped_writes": 0,
+            "pending_writes": 0,
+            "pending_bytes": 0,
+            "writer_alive": False,
+            "accepting": False,
+        }
+    result = instance.shutdown(deadline=deadline)
+    result["present"] = True
+    return result
 
 
 def get_transcript_logger() -> TranscriptLogger:
     """获取全局 TranscriptLogger 实例"""
     global _transcript_logger
-    if _transcript_logger is None:
-        _transcript_logger = TranscriptLogger()
-    return _transcript_logger
+    with _transcript_logger_lock:
+        if _transcript_logger is None:
+            _transcript_logger = TranscriptLogger()
+        return _transcript_logger

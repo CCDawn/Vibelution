@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import openai
+import pytest
 
 from core.llm.responses_websocket import ResponsesWebSocketBackend
 
@@ -41,11 +42,13 @@ class _FakeManager:
     def __init__(self, connection: _FakeConnection) -> None:
         self.connection = connection
         self.closed = False
+        self.exit_calls = 0
 
     def enter(self):
         return self.connection
 
     def __exit__(self, *_args) -> None:
+        self.exit_calls += 1
         self.closed = True
 
 
@@ -94,16 +97,24 @@ def test_responses_websocket_reuses_connection_and_sends_incremental_payload(mon
     connection = _FakeConnection()
     managers: list[_FakeManager] = []
     clients: list[dict] = []
+    sdk_clients = []
+    connect_options = []
 
     class _FakeOpenAI:
         def __init__(self, **kwargs) -> None:
             clients.append(kwargs)
+            self.close_calls = 0
+            sdk_clients.append(self)
             self.responses = SimpleNamespace(connect=self._connect)
 
-        def _connect(self, **_kwargs):
+        def _connect(self, **kwargs):
+            connect_options.append(kwargs)
             manager = _FakeManager(connection)
             managers.append(manager)
             return manager
+
+        def close(self):
+            self.close_calls += 1
 
     monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
     states: list[tuple[str, dict]] = []
@@ -121,6 +132,7 @@ def test_responses_websocket_reuses_connection_and_sends_incremental_payload(mon
     assert len(managers) == 1
     assert clients[0]["base_url"] == "https://provider.example/v1"
     assert clients[0]["default_headers"] == {"X-Provider": "test"}
+    assert connect_options[0]["websocket_connection_options"] == {"close_timeout": 1}
     assert connection.sent[0]["model"] == "gpt-5.6-terra"
     assert connection.sent[1]["previous_response_id"] == "resp-1"
     assert connection.sent[1]["input"][0]["content"][0]["text"] == "delta"
@@ -129,6 +141,48 @@ def test_responses_websocket_reuses_connection_and_sends_incremental_payload(mon
         for key in ("api_key", "base_url", "extra_headers", "timeout", "_vibelution_responses_websocket")
     )
     assert [state for state, _fields in states] == ["connected", "reused"]
+    backend.close()
+    backend.close()
+    assert managers[0].exit_calls == 1
+    assert sdk_clients[0].close_calls == 1
+
+
+def test_responses_websocket_close_failure_keeps_manager_for_retry_and_closes_sdk_client(monkeypatch):
+    connection = _FakeConnection()
+    manager = _FakeManager(connection)
+    client_closes = []
+
+    class _FailOnceManager(_FakeManager):
+        def __exit__(self, *_args) -> None:
+            self.exit_calls += 1
+            if self.exit_calls == 1:
+                raise RuntimeError("socket close failed")
+            self.closed = True
+
+    manager = _FailOnceManager(connection)
+
+    class _FakeOpenAI:
+        def __init__(self, **_kwargs) -> None:
+            self.responses = SimpleNamespace(connect=lambda **_options: manager)
+
+        def close(self):
+            client_closes.append(self)
+
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    backend = ResponsesWebSocketBackend(lambda _payload: ())
+    list(backend(_payload()))
+
+    with pytest.raises(RuntimeError, match="transport owner could not close"):
+        backend.close()
+    assert backend._manager is manager
+    assert backend._client is None
+    assert manager.exit_calls == 1
+    assert len(client_closes) == 1
+
+    backend.close()
+    backend.close()
+    assert manager.exit_calls == 2
+    assert len(client_closes) == 1
 
 
 def test_responses_websocket_never_sends_internal_client_callback_to_sdk(monkeypatch):

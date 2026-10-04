@@ -4136,6 +4136,45 @@ def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_
     assert archived_events[0][1]["fields"]["agentId"] == detail["agentId"]
 
 
+@pytest.mark.parametrize("failure_stage", ["none", "prepare", "run"])
+def test_chat_room_speaker_retires_one_off_agent_on_every_exit(
+    tmp_path, monkeypatch, failure_stage,
+):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    session = session_service.create_chat_session(title="一次性发言者资源回收")
+    room = chat_room_service.create_chat_room(
+        title="资源回收房间", participant_session_ids=[session["id"]],
+    )
+    closed = []
+    original_close = AgentRuntime.close
+
+    def record_close(runtime):
+        original_close(runtime)
+        closed.append(runtime)
+
+    def run_speaker(_runtime, **_kwargs):
+        if failure_stage == "run":
+            raise RuntimeError("isolated speaker run failure")
+        return {"status": "completed", "raw_output": "ok", "summary": "ok"}
+
+    monkeypatch.setattr(AgentRuntime, "close", record_close)
+    monkeypatch.setattr(chat_room_service, "run_existing_agent_single_turn", run_speaker)
+    if failure_stage == "prepare":
+        def fail_prepare(*_args, **_kwargs):
+            raise RuntimeError("isolated speaker prepare failure")
+        monkeypatch.setattr(chat_room_service, "prepare_agent_turn", fail_prepare)
+
+    context = {"roomId": room["roomId"], "roundId": "round-retire", "purpose": "discussion"}
+    if failure_stage == "none":
+        result = chat_room_service._run_participant_agent(room["participants"][0], "请发言", context)
+        assert result["status"] == "completed"
+    else:
+        with pytest.raises(RuntimeError, match="isolated speaker"):
+            chat_room_service._run_participant_agent(room["participants"][0], "请发言", context)
+    assert len(closed) == 1
+    assert closed[0]._owned_llm_clients == {}
+
+
 def test_chat_room_speaker_turn_passes_stable_prompt_cache_partition(tmp_path, monkeypatch):
     """Speaker LLM calls bind a non-empty, stable per-(room, session) cache partition.
 

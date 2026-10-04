@@ -450,18 +450,24 @@ export class ElectronWindowProvider {
       this.instanceWindows.delete(id);
       this.instanceCloseAuthorized.delete(id);
       this.instanceCloseInFlight.delete(id);
+      if (entry) this.attachedWindows.delete(entry.window);
       return { ...closedWindowState("workbench"), instanceId: id };
     }
     this.instanceCloseAuthorized.set(id, entry.window);
+    let closeFailure: unknown = null;
     try {
-      entry.window.close();
+      try {
+        entry.window.close();
+      } catch (error: unknown) {
+        closeFailure = error;
+      }
       if (!entry.window.isDestroyed()) {
         const outcome = await waitForWindowClosed(entry.window, this.hungCloseDestroyAfterMs);
         if (outcome === "timeout" && !entry.window.isDestroyed()) {
           try {
             entry.window.destroy();
-          } catch {
-            // A hung isolated window must not keep a stale renderer.
+          } catch (error: unknown) {
+            closeFailure ??= error;
           }
         }
       }
@@ -470,10 +476,16 @@ export class ElectronWindowProvider {
         this.instanceCloseAuthorized.delete(id);
       }
       this.instanceCloseInFlight.delete(id);
-      if (this.instanceWindows.get(id)?.window === entry.window) {
-        this.instanceWindows.delete(id);
+      if (entry.window.isDestroyed()) {
+        if (this.instanceWindows.get(id)?.window === entry.window) {
+          this.instanceWindows.delete(id);
+        }
+        this.attachedWindows.delete(entry.window);
       }
-      this.attachedWindows.delete(entry.window);
+    }
+    if (!entry.window.isDestroyed()) {
+      const detail = closeFailure instanceof Error ? `: ${closeFailure.message}` : "";
+      throw new Error(`Instance workbench window could not be closed; it remains tracked for retry${detail}`);
     }
     return { ...closedWindowState("workbench"), instanceId: id };
   }
@@ -639,6 +651,9 @@ export class ElectronWindowProvider {
         });
     });
     window.on("closed", () => {
+      if (!window.isDestroyed()) {
+        return;
+      }
       this.attachedWindows.delete(window);
       if (this.instanceCloseAuthorized.get(instanceId) === window) {
         this.instanceCloseAuthorized.delete(instanceId);

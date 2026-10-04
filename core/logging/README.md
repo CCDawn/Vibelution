@@ -52,3 +52,10 @@ from core.logging.logger import ConversationLogger
 - 工具调用追踪
 - 对话历史转录
 - LLM 请求/响应记录
+
+## Transcript writer 生命周期
+
+- Transcript 后台队列同时限制待写记录数（默认 512）和 UTF-8 正文大小（默认 8 MiB）；上限包括正在写入的记录。队列满或单条内容超限时立即拒收，并在 `TranscriptLogger.diagnostics()` 中累计 `dropped_writes` 与 `dropped_characters`，不记录被拒收正文。
+- `flush(timeout=...)` 只等待调用时已接收的写入，且始终有超时；`UnifiedLogger.end_session()` 对 Transcript 结束标记最多等待 250 ms，写入失败或会话期间发生丢失时返回 `False`。
+- 所有 producer 停止后，生命周期可调用 `shutdown_transcript_logger(deadline=time.monotonic() + budget)`。返回结果区分 `closed`、`drained`、`timed_out`、`pending_writes` 与写入/丢失计数；超时会保留 writer 实例以便再次调用关闭。
+- 新生命周期调用 `begin_transcript_logger_lifecycle()`。它只操作已存在实例；如果前一个 writer 仍存活或仍有未退休记录，则返回 `opened: false`，不会并行启动第二个线程。未初始化时 begin/shutdown 都不会创建实例或 writer。

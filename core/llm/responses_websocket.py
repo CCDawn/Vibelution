@@ -26,6 +26,10 @@ _TERMINAL_EVENT_TYPES = {
 }
 
 
+class _ResponsesWebSocketCloseError(RuntimeError):
+    """A transport remains owned because one of its close operations failed."""
+
+
 def _responses_service_root(value: Any) -> str:
     endpoint = str(value or "").strip().rstrip("/")
     if endpoint.lower().endswith("/responses"):
@@ -90,6 +94,7 @@ class ResponsesWebSocketBackend:
         self._http_backend = http_backend
         self._state_sink = state_sink
         self._lock = threading.RLock()
+        self._client: Any = None
         self._manager: Any = None
         self._connection: Any = None
         self._identity: tuple[str, str, tuple[tuple[str, str], ...]] | None = None
@@ -112,17 +117,36 @@ class ResponsesWebSocketBackend:
         )
         return service_root, api_key, header_items
 
-    def _close_locked(self) -> None:
+    def _close_locked(self, *, suppress_errors: bool = False) -> None:
+        failures: list[Exception] = []
         manager = self._manager
-        self._manager = None
-        self._connection = None
-        self._identity = None
-        if manager is None:
-            return
-        try:
-            manager.__exit__(None, None, None)
-        except Exception:
-            pass
+        if manager is not None:
+            try:
+                manager.__exit__(None, None, None)
+            except Exception as exc:
+                failures.append(exc)
+            else:
+                self._manager = None
+                self._connection = None
+                self._identity = None
+
+        client = self._client
+        if client is not None:
+            close = getattr(client, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as exc:
+                    failures.append(exc)
+                else:
+                    self._client = None
+            else:
+                self._client = None
+
+        if failures and not suppress_errors:
+            raise _ResponsesWebSocketCloseError(
+                "Responses WebSocket transport owner could not close."
+            ) from failures[0]
 
     def close(self) -> None:
         with self._lock:
@@ -147,12 +171,14 @@ class ResponsesWebSocketBackend:
         if payload.get("timeout") is not None:
             client_kwargs["timeout"] = payload["timeout"]
         client = OpenAI(**client_kwargs)
+        self._client = client
         manager = client.responses.connect(
             extra_headers={"OpenAI-Beta": RESPONSES_WEBSOCKET_BETA},
+            websocket_connection_options={"close_timeout": 1},
             max_retries=0,
         )
-        connection = manager.enter()
         self._manager = manager
+        connection = manager.enter()
         self._connection = connection
         self._identity = identity
         self._emit(
@@ -179,7 +205,8 @@ class ResponsesWebSocketBackend:
                     connection, reused = self._connect_locked(payload)
                 except Exception as exc:
                     self._disabled = True
-                    self._close_locked()
+                    if not isinstance(exc, _ResponsesWebSocketCloseError):
+                        self._close_locked(suppress_errors=True)
                     self._emit(
                         "fallback",
                         reasonType=type(exc).__name__,
@@ -204,7 +231,7 @@ class ResponsesWebSocketBackend:
                     # request can be sent.  HTTP can therefore take over once
                     # without risking a duplicated provider turn.
                     self._disabled = True
-                    self._close_locked()
+                    self._close_locked(suppress_errors=True)
                     self._emit(
                         "fallback",
                         reasonType=type(exc).__name__,
@@ -227,7 +254,7 @@ class ResponsesWebSocketBackend:
                         if str(getattr(event, "type", "") or "") in _TERMINAL_EVENT_TYPES:
                             return
                 except Exception as exc:
-                    self._close_locked()
+                    self._close_locked(suppress_errors=True)
                     close_code = _websocket_close_code(exc)
                     close_reason = _websocket_close_reason(exc)
                     failure_fields = {

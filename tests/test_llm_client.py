@@ -7935,6 +7935,66 @@ def test_owned_http_clients_close_once_after_invocation():
     assert client._cancellable_responses_http_handler is None
 
 
+def test_llm_client_close_releases_websocket_and_http_handlers_once():
+    client = LLMClient(config=make_config())
+    calls = {"websocket": 0, "http": []}
+
+    class WebSocketBackend:
+        def close(self):
+            calls["websocket"] += 1
+
+    class Handler:
+        def close(self):
+            calls["http"].append(self)
+
+    completion, responses = Handler(), Handler()
+    client._responses_websocket_backend = WebSocketBackend()
+    client._cancellable_completion_http_handler = completion
+    client._cancellable_responses_http_handler = responses
+
+    client.close()
+    client.close()
+
+    assert calls["websocket"] == 1
+    assert calls["http"] == [completion, responses]
+    assert client._responses_websocket_backend is None
+    assert client._cancellable_completion_http_handler is None
+    assert client._cancellable_responses_http_handler is None
+
+
+def test_llm_client_close_failure_retains_http_handler_for_retry():
+    client = LLMClient(config=make_config())
+    websocket_closes = []
+
+    class WebSocketBackend:
+        def close(self):
+            websocket_closes.append(self)
+
+    class FailOnceHandler:
+        def __init__(self):
+            self.calls = 0
+
+        def close(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary close failure")
+
+    handler = FailOnceHandler()
+    client._responses_websocket_backend = WebSocketBackend()
+    client._cancellable_completion_http_handler = handler
+
+    with pytest.raises(RuntimeError, match="LLM transport close failed"):
+        client.close()
+    assert client._responses_websocket_backend is None
+    assert client._cancellable_completion_http_handler is handler
+    assert len(websocket_closes) == 1
+
+    client.close()
+    client.close()
+    assert handler.calls == 2
+    assert len(websocket_closes) == 1
+
+
 def test_stream_emits_turn_level_ttft_breakdown_once(monkeypatch):
     from core.llm.ttft_breakdown import llm_ttft_chain_context
 

@@ -696,57 +696,97 @@ async def web_workbench_lifespan(app: FastAPI | None):
         shutdown_clean = True
         startup_jobs.request_stop()
 
-        human_stop_ok = await _run_shutdown_step(
-            "virtual-human-stop",
-            lambda: run_sync_bounded(
-                _stop_virtual_human_life_runtime,
-                deadline_at=deadline,
-                name="shutdown-virtual-human",
-            ),
-            deadline=deadline,
-        )
-        shutdown_clean &= _sync_owner_result_is_clean(human_stop_ok)
-
-        startup_result = await _run_shutdown_step(
-            "startup-jobs",
-            startup_jobs.shutdown(deadline=deadline),
-            deadline=deadline,
-        )
-        shutdown_clean &= bool(
-            isinstance(startup_result, dict) and startup_result.get("closed") is True
-        )
-
-        workflow_stop_ok = await _run_shutdown_step(
-            "research-workflow-stop",
-            lambda: run_sync_bounded(
-                _stop_research_workflow_runtime,
-                deadline_at=deadline,
-                name="shutdown-research-workflow",
-            ),
-            deadline=deadline,
-        )
-        shutdown_clean &= _sync_owner_result_is_clean(workflow_stop_ok)
-
-        owned_result = await _run_shutdown_step(
-            "owned-runtime-resources",
-            _shutdown_owned_runtime_resources(deadline=deadline),
-            deadline=deadline,
-        )
-        shutdown_clean &= bool(
-            isinstance(owned_result, dict) and owned_result.get("closed") is True
-        )
-
-        stores_ok = await _run_shutdown_step(
-            "session-stores",
-            lambda: run_sync_bounded(
-                shutdown_session_catalog_on_shutdown,
-                deadline_at=deadline,
-                name="shutdown-session-stores",
+        # Start every producer's stop operation before waiting for any one of
+        # them. A slow startup worker must not consume the deadline before the
+        # session/tool/process owners even receive their stop requests.
+        producer_group = asyncio.gather(
+            _run_shutdown_step(
+                "virtual-human-stop",
+                lambda: run_sync_bounded(
+                    _stop_virtual_human_life_runtime,
+                    deadline_at=deadline,
+                    name="shutdown-virtual-human",
+                ),
                 deadline=deadline,
             ),
-            deadline=deadline,
+            _run_shutdown_step(
+                "startup-jobs", startup_jobs.shutdown(deadline=deadline), deadline=deadline,
+            ),
+            _run_shutdown_step(
+                "research-workflow-stop",
+                lambda: run_sync_bounded(
+                    _stop_research_workflow_runtime,
+                    deadline_at=deadline,
+                    name="shutdown-research-workflow",
+                ),
+                deadline=deadline,
+            ),
+            _run_shutdown_step(
+                "owned-runtime-resources",
+                _shutdown_owned_runtime_resources(deadline=deadline),
+                deadline=deadline,
+            ),
         )
-        shutdown_clean &= _sync_owner_result_is_clean(stores_ok)
+        while not producer_group.done():
+            try:
+                await asyncio.shield(producer_group)
+            except asyncio.CancelledError:
+                logger.warning("Workbench shutdown cancelled; continuing producer retirement.")
+        human_stop_ok, startup_result, workflow_stop_ok, owned_result = producer_group.result()
+        human_closed = _sync_owner_result_is_clean(human_stop_ok)
+        workflow_closed = _sync_owner_result_is_clean(workflow_stop_ok)
+        runtime_closed = bool(isinstance(owned_result, dict) and owned_result.get("closed") is True)
+        startup_closed = bool(isinstance(startup_result, dict) and startup_result.get("closed") is True)
+        shutdown_clean &= human_closed and startup_closed and workflow_closed and runtime_closed
+        # A retired startup callback can have failed without leaving a live
+        # worker. Preserve that diagnostic failure, but still close stores
+        # safely once all physical startup owners have finished.
+        startup_joined = startup_closed or bool(
+            isinstance(startup_result, dict)
+            and "pendingTasks" in startup_result and "pendingWorkers" in startup_result
+            and not startup_result["pendingTasks"] and not startup_result["pendingWorkers"]
+        )
+        if human_closed and startup_joined and workflow_closed and runtime_closed:
+            stores_ok = await _run_shutdown_step(
+                "session-stores",
+                lambda: run_sync_bounded(
+                    shutdown_session_catalog_on_shutdown,
+                    deadline_at=deadline,
+                    name="shutdown-session-stores",
+                    deadline=deadline,
+                ),
+                deadline=deadline,
+            )
+            stores_closed = _sync_owner_result_is_clean(stores_ok)
+            shutdown_clean &= stores_closed
+            if stores_closed:
+                transcript_ok = await _run_shutdown_step(
+                    "transcript-writer",
+                    lambda: run_sync_bounded(
+                        _shutdown_transcript_writer,
+                        deadline_at=deadline,
+                        name="shutdown-transcript-writer",
+                        deadline=deadline,
+                    ),
+                    deadline=deadline,
+                )
+                transcript_closed = _sync_owner_result_is_clean(transcript_ok)
+                transcript_result = (
+                    transcript_ok[1]
+                    if transcript_closed and isinstance(transcript_ok[1], dict)
+                    else {}
+                )
+                shutdown_clean &= bool(
+                    transcript_closed
+                    and transcript_result.get("drained") is True
+                    and not transcript_result.get("write_failures", 0)
+                    and not transcript_result.get("dropped_writes", 0)
+                )
+            else:
+                logger.error("Transcript writer kept open while session stores are still retiring.")
+        else:
+            logger.error("Session stores kept open while runtime producers are still unjoined.")
+            shutdown_clean = False
         if shutdown_clean:
             mark_server_shutdown_clean()
         else:
@@ -758,6 +798,14 @@ def _stop_virtual_human_life_runtime() -> None:
     from .services.virtual_human_life_service import stop_virtual_human_life_runtime
 
     stop_virtual_human_life_runtime()
+
+
+def _shutdown_transcript_writer(*, deadline: float) -> dict[str, Any]:
+    # Diagnostics must not create a new writer merely to shut it down.
+    module = sys.modules.get("core.logging.transcript_logger")
+    if module is None:
+        return {"closed": True, "drained": True}
+    return module.shutdown_transcript_logger(deadline=deadline)
 
 
 def _sync_owner_result_is_clean(result: Any) -> bool:
@@ -816,12 +864,14 @@ def _begin_owned_runtime_lifecycle() -> None:
         ("core.web.services.chat_room_service", "begin_chat_room_lifecycle"),
         ("core.web.services.team_workflow.meeting_runtime", "begin_meeting_discussion_lifecycle"),
         ("core.web.services.team_workflow.research_runtime.hypothesis_command_attempts", "begin_hypothesis_command_lifecycle"),
+        ("core.logging.transcript_logger", "begin_transcript_logger_lifecycle"),
     ):
         module = sys.modules.get(module_name)
         if module is not None:
             try:
                 result = getattr(module, begin_name)()
-                if isinstance(result, dict) and result.get("opened") is False:
+                if (isinstance(result, dict) and result.get("opened") is False
+                        and result.get("present") is not False):
                     failures.append(module_name)
                     logger.error("Owned runtime lifecycle could not reopen: %s", module_name)
             except Exception as exc:  # noqa: BLE001 - assess every loaded owner

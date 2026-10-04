@@ -42,6 +42,42 @@ def test_shutdown_step_preserves_deferred_owner_cleanup_result():
     assert result == (True, {"closed": True})
 
 
+def test_sync_shutdown_owner_waits_for_physical_worker_exit(monkeypatch):
+    finishing = threading.Event()
+    release = threading.Event()
+    workers = []
+
+    class HeldExitThread(threading.Thread):
+        def run(self):
+            super().run()
+            finishing.set()
+            release.wait(timeout=2)
+
+    def make_thread(**kwargs):
+        worker = HeldExitThread(**kwargs)
+        workers.append(worker)
+        return worker
+
+    monkeypatch.setattr(
+        startup_jobs, "threading", SimpleNamespace(Thread=make_thread, Event=threading.Event),
+    )
+
+    async def exercise():
+        return await lifecycle.run_sync_bounded(
+            lambda: 42, deadline_at=time.monotonic() + 0.04, name="held-shutdown-owner",
+        )
+
+    try:
+        assert asyncio.run(exercise()) == (False, None)
+        assert finishing.is_set()
+        assert workers[0].is_alive()
+    finally:
+        release.set()
+        for worker in workers:
+            worker.join(timeout=1)
+    assert not workers[0].is_alive()
+
+
 def test_shutdown_step_bounds_deferred_owner_before_awaiting_it():
     async def exercise():
         finalized = asyncio.Event()
@@ -65,8 +101,130 @@ def test_shutdown_step_bounds_deferred_owner_before_awaiting_it():
     asyncio.run(exercise())
 
 
+def test_lifespan_stops_every_producer_before_waiting_for_slow_startup(monkeypatch):
+    called = []
+    clean = []
+
+    class SlowStartupJobs(StartupJobGroup):
+        def start_thread(self, name, _callback, *_args, **_kwargs):
+            return super().start_async(name, asyncio.sleep(0))
+
+        def start_async(self, name, awaitable):
+            awaitable.close()
+            return super().start_async(name, asyncio.sleep(0))
+
+        async def shutdown(self, *, deadline):
+            called.append("startup")
+            await asyncio.sleep(1)
+            return {"closed": True}
+
+    async def close_runtime(**_kwargs):
+        called.append("runtime")
+        return {"closed": True}
+
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", SlowStartupJobs)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "LIFESPAN_SHUTDOWN_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: called.append("companion"))
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: called.append("workflow"))
+    monkeypatch.setattr(lifecycle, "_shutdown_owned_runtime_resources", close_runtime)
+    monkeypatch.setattr(
+        lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: called.append("stores"),
+    )
+    monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: clean.append(True))
+
+    async def exercise():
+        async with lifecycle.web_workbench_lifespan(None):
+            await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(exercise())
+    assert set(called) == {"companion", "startup", "workflow", "runtime"}
+    assert clean == []
+
+
+def test_lifespan_keeps_stores_open_while_runtime_producers_are_unjoined(monkeypatch):
+    called = []
+
+    class IdleStartupJobs(StartupJobGroup):
+        def start_thread(self, name, _callback, *_args, **_kwargs):
+            return super().start_async(name, asyncio.sleep(0))
+
+        def start_async(self, name, awaitable):
+            awaitable.close()
+            return super().start_async(name, asyncio.sleep(0))
+
+    async def close_runtime(**_kwargs):
+        return {"closed": False}
+
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", IdleStartupJobs)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_shutdown_owned_runtime_resources", close_runtime)
+    monkeypatch.setattr(
+        lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: called.append("stores"),
+    )
+    monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: called.append("clean"))
+
+    async def exercise():
+        async with lifecycle.web_workbench_lifespan(None):
+            await asyncio.sleep(0)
+
+    asyncio.run(exercise())
+    assert called == []
+
+
+def test_lifespan_continues_producer_retirement_when_parent_is_cancelled(monkeypatch):
+    called = []
+    runtime_started = asyncio.Event()
+
+    class IdleStartupJobs(StartupJobGroup):
+        def start_thread(self, name, _callback, *_args, **_kwargs):
+            return super().start_async(name, asyncio.sleep(0))
+
+        def start_async(self, name, awaitable):
+            awaitable.close()
+            return super().start_async(name, asyncio.sleep(0))
+
+    async def close_runtime(**_kwargs):
+        runtime_started.set()
+        await asyncio.sleep(0.05)
+        called.append("runtime")
+        return {"closed": True}
+
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", IdleStartupJobs)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_shutdown_owned_runtime_resources", close_runtime)
+    monkeypatch.setattr(
+        lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: called.append("stores"),
+    )
+    monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: called.append("clean"))
+
+    async def exercise():
+        context = lifecycle.web_workbench_lifespan(None)
+        await context.__aenter__()
+        closing = asyncio.create_task(context.__aexit__(None, None, None))
+        await runtime_started.wait()
+        closing.cancel()
+        await closing
+
+    asyncio.run(exercise())
+    assert called == ["runtime", "stores", "clean"]
+
+
 @pytest.mark.parametrize("stores_closed", [True, False])
-def test_lifespan_marks_server_clean_only_after_owned_cleanup(monkeypatch, stores_closed):
+@pytest.mark.parametrize("transcript_result", [
+    {"closed": True, "drained": True},
+    {"closed": False, "drained": False, "writer_alive": True},
+    {"closed": True, "drained": True, "write_failures": 1},
+    {"closed": True, "drained": True, "dropped_writes": 1},
+])
+def test_lifespan_marks_server_clean_only_after_owned_cleanup(
+    monkeypatch, stores_closed, transcript_result,
+):
     called = []
     clean = []
 
@@ -93,14 +251,48 @@ def test_lifespan_marks_server_clean_only_after_owned_cleanup(monkeypatch, store
         lambda **_kwargs: called.append("stores") or {"closed": stores_closed},
     )
     monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: clean.append(tuple(called)))
+    monkeypatch.setattr(
+        lifecycle, "_shutdown_transcript_writer",
+        lambda **_kwargs: called.append("transcript") or transcript_result,
+    )
 
     async def exercise():
         async with lifecycle.web_workbench_lifespan(None):
             await asyncio.sleep(0)
 
     asyncio.run(exercise())
-    assert called == ["companion", "workflow", "runtime", "stores"]
-    assert clean == ([tuple(called)] if stores_closed else [])
+    assert set(called[:3]) == {"companion", "workflow", "runtime"}
+    assert called[3:] == (["stores", "transcript"] if stores_closed else ["stores"])
+    expected_clean = (
+        stores_closed and transcript_result["closed"]
+        and not transcript_result.get("write_failures")
+        and not transcript_result.get("dropped_writes")
+    )
+    assert clean == ([tuple(called)] if expected_clean else [])
+
+
+def test_transcript_lifecycle_uses_only_existing_owner_and_rejects_unjoined_writer(monkeypatch):
+    modules = {}
+    monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(modules=modules))
+    assert lifecycle._shutdown_transcript_writer(deadline=0) == {"closed": True, "drained": True}
+    modules["core.logging.transcript_logger"] = SimpleNamespace(
+        begin_transcript_logger_lifecycle=lambda: {"opened": False, "present": False},
+    )
+    lifecycle._begin_owned_runtime_lifecycle()
+
+    calls = []
+    modules["core.logging.transcript_logger"] = SimpleNamespace(
+        begin_transcript_logger_lifecycle=lambda: {"opened": True, "present": True},
+        shutdown_transcript_logger=lambda **kwargs: calls.append(kwargs) or {"closed": True},
+    )
+    lifecycle._begin_owned_runtime_lifecycle()
+    assert lifecycle._shutdown_transcript_writer(deadline=123) == {"closed": True}
+    assert calls == [{"deadline": 123}]
+    modules["core.logging.transcript_logger"].begin_transcript_logger_lifecycle = (
+        lambda: {"opened": False, "present": True}
+    )
+    with pytest.raises(RuntimeError, match="could not reopen"):
+        lifecycle._begin_owned_runtime_lifecycle()
 
 
 def test_begin_owned_lifecycle_reopens_loaded_owners_without_cold_imports(monkeypatch):
@@ -552,7 +744,7 @@ def test_web_lifespan_records_ready_scene_event_after_entering_context(monkeypat
         "reconcile_cli_agent_terminal_states_on_startup",
         lambda **_kwargs: {},
     )
-    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: {"closed": True})
     monkeypatch.setattr(
         session_service,
         "recover_wakeable_agent_inbox_messages_on_startup",
@@ -599,7 +791,7 @@ def test_web_lifespan_schedules_agent_inbox_recovery_without_blocking_startup(mo
         "reconcile_cli_agent_terminal_states_on_startup",
         reconcile,
     )
-    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: {"closed": True})
     monkeypatch.setattr(
         session_service,
         "recover_wakeable_agent_inbox_messages_on_startup",
@@ -647,7 +839,7 @@ def test_web_lifespan_does_not_await_cli_reconcile_before_yield(monkeypatch):
         "reconcile_cli_agent_terminal_states_on_startup",
         reconcile,
     )
-    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: {"closed": True})
     monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda **_kwargs: asyncio.sleep(0))
     monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
     monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
@@ -735,7 +927,7 @@ def test_runtime_scene_retention_waits_for_routes_and_is_reaped_on_shutdown(monk
         "reconcile_cli_agent_terminal_states_on_startup",
         lambda **_kwargs: {},
     )
-    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: None)
+    monkeypatch.setattr(cli_agent_terminal_service, "shutdown_cli_agent_terminal_sessions", lambda: {"closed": True})
     monkeypatch.setattr(
         session_service,
         "recover_wakeable_agent_inbox_messages_on_startup",

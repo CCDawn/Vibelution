@@ -2758,6 +2758,7 @@ class LLMClient:
         self._cancellable_completion_http_handler: Any = None
         self._cancellable_completion_http_handler_key: Any = None
         self._cancellable_completion_http_handler_lock = threading.Lock()
+        self._transport_close_lock = threading.RLock()
         self._cancellable_completion_stream_lock = threading.Lock()
         self._cancellable_completion_request_lock = self._cancellable_completion_stream_lock
         self.adapter = get_provider_adapter(self.provider, self.profile)
@@ -2808,16 +2809,49 @@ class LLMClient:
 
     def close_http_clients(self) -> None:
         """Release owned HTTP transports once this client's calls have finished."""
+        failures: list[Exception] = []
         for attribute, lock in (
             ("_cancellable_completion_http_handler", self._cancellable_completion_http_handler_lock),
             ("_cancellable_responses_http_handler", self._cancellable_responses_http_handler_lock),
         ):
             with lock:
                 handler = getattr(self, attribute)
-                setattr(self, attribute, None)
-                setattr(self, attribute + "_key", None)
-            if handler is not None:
-                handler.close()
+                if handler is None:
+                    continue
+                try:
+                    handler.close()
+                except Exception as exc:  # noqa: BLE001 - keep the failed transport owned for retry
+                    failures.append(exc)
+                    continue
+                if getattr(self, attribute) is handler:
+                    setattr(self, attribute, None)
+                    setattr(self, attribute + "_key", None)
+        if failures:
+            raise RuntimeError(
+                f"LLM HTTP transport close failed for {len(failures)} handler(s)."
+            ) from failures[0]
+
+    def close(self) -> None:
+        """Idempotently close persistent Responses WebSocket and HTTP transports."""
+
+        with self._transport_close_lock:
+            failures: list[Exception] = []
+            websocket_backend = getattr(self, "_responses_websocket_backend", None)
+            if websocket_backend is not None:
+                try:
+                    websocket_backend.close()
+                except Exception as exc:  # noqa: BLE001 - keep the backend owned for retry
+                    failures.append(exc)
+                else:
+                    self._responses_websocket_backend = None
+            try:
+                self.close_http_clients()
+            except Exception as exc:  # noqa: BLE001 - retryable HTTP handlers remain attached
+                failures.append(exc)
+            if failures:
+                raise RuntimeError(
+                    f"LLM transport close failed for {len(failures)} transport group(s)."
+                ) from failures[0]
 
     def _record_responses_websocket_state(self, state: str, fields: Dict[str, Any]) -> None:
         outcomes = {

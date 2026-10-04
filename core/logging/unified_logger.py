@@ -20,8 +20,6 @@
 """
 
 import threading
-from datetime import datetime
-from typing import Optional, List, Dict, Any
 
 from core.logging.value_redaction import redact_sensitive_text, redact_sensitive_values
 
@@ -230,9 +228,11 @@ class UnifiedLogger:
     # ==================== 会话管理 ====================
 
     def end_session(self, summary: dict = None):
-        """结束会话"""
+        """结束 JSON 会话，并对 Transcript 做有界 flush。"""
         # ConversationLogger: JSON 日志
         self._conversation.end_session(summary)
+        # Transcript 是辅助诊断流；慢磁盘不能让会话结束线程无限等待。
+        return self._transcript.end_session()
 
     # ==================== 新增事件转发 ====================
 
