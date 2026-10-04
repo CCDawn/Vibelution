@@ -16,7 +16,7 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabCloseButton h-6 min-h-6 w-6 min-w-6 shrink-0 rounded-[var(--radius-control)] !border-0 border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] shadow-none hover:!border-transparent hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] hover:shadow-none",
   // Armed (two-stage confirm) close: same icon-only geometry, danger tone so the pending state reads instantly.
   agentSessionTabCloseButtonArmed:
-    "vui-routes-chatcodingroute agentSessionTabCloseButtonArmed !border-0 bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] px-0 text-[color-mix(in_srgb,var(--danger)_80%,var(--vui-fg-primary))] shadow-none hover:!border-transparent hover:bg-[color-mix(in_srgb,var(--danger)_22%,transparent)] hover:text-[color-mix(in_srgb,var(--danger)_90%,var(--vui-fg-primary))] hover:shadow-none",
+    "vui-routes-chatcodingroute agentSessionTabCloseButtonArmed !border-0 !bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] px-0 !text-[color-mix(in_srgb,var(--danger)_80%,var(--vui-fg-primary))] shadow-none hover:!border-transparent hover:!bg-[color-mix(in_srgb,var(--danger)_22%,transparent)] hover:!text-[color-mix(in_srgb,var(--danger)_90%,var(--vui-fg-primary))] hover:shadow-none",
   agentSessionTabCreateButton:
     "vui-routes-chatcodingroute agentSessionTabCreateButton h-8 min-h-8 w-8 min-w-8 shrink-0 rounded-[var(--radius-control)] !border-0 border-transparent bg-transparent px-0 text-[var(--fg-secondary)] shadow-none hover:!border-transparent hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] hover:shadow-none",
   agentSessionTabContextTarget:
