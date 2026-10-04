@@ -121,6 +121,51 @@ def _remove_instance_data(data_home: Path) -> None:
         print(f"[e2e] 实例数据目录清理失败（可手动删除）: {data_home} ({exc})")
 
 
+def _fixture_task_entry() -> dict:
+    from tests.e2e.helpers import instance_registry
+
+    wanted = instance_registry.normalize_path(WORKTREE_ROOT)
+    for entry in instance_registry.load_registry()["instances"].values():
+        if not isinstance(entry, dict):
+            continue
+        project_root = str(entry.get("projectRoot") or "").strip()
+        if project_root and instance_registry.normalize_path(project_root) == wanted:
+            return dict(entry)
+    return {}
+
+
+def _start_task_instance() -> None:
+    from tests.e2e.helpers import instance_registry, launcher, launcher_ipc
+
+    launcher_ipc._task_root(WORKTREE_ROOT)
+    baseline = _fixture_task_entry()
+    if baseline and not instance_registry.entry_is_closed(baseline):
+        raise launcher.LauncherCommandError("本任务实例尚未关闭；须明确使用 VIBELUTION_E2E_ATTACH=1 接管，不会重复 start")
+    try:
+        launcher.start_instance(WORKTREE_ROOT)
+    except Exception:
+        # The response can fail after Electron has already started the backend.
+        # Only a new command generation in this exact task may be cleaned up.
+        try:
+            entry = _fixture_task_entry()
+            command_id = str(entry.get("commandId") or "")
+            if (
+                int(entry.get("generation") or 0) > int(baseline.get("generation") or 0)
+                and command_id
+                and command_id != str(baseline.get("commandId") or "")
+                and not instance_registry.entry_is_closed(entry)
+            ):
+                port = int(entry.get("port") or 0)
+                _teardown_instance(E2EInstance(
+                    port=port, base_url=f"http://127.0.0.1:{port}",
+                    instance_id=str(entry.get("instanceId") or entry.get("slotId") or ""),
+                    project_root=WORKTREE_ROOT, data_home=_resolve_data_home(entry),
+                ))
+        except Exception as cleanup_error:
+            print(f"[e2e] 启动失败后的本任务清理未闭环: {str(cleanup_error)[:300]}")
+        raise
+
+
 def _start_or_attach_instance() -> None:
     """显式恢复本任务已就绪实例；不把失败 start 自动当作成功。"""
     from tests.e2e.helpers import instance_registry, launcher, launcher_ipc
@@ -129,7 +174,7 @@ def _start_or_attach_instance() -> None:
     if attach not in {"0", "1"}:
         raise instance_registry.InstanceRegistryError(f"VIBELUTION_E2E_ATTACH 必须是 0 或 1: {attach!r}")
     if attach == "0":
-        launcher.start_instance(WORKTREE_ROOT)
+        _start_task_instance()
         return
     # 与 IPC 相同的当前测试树 + codex/ 分支门，禁止接管 main 或其他任务。
     launcher_ipc._task_root(WORKTREE_ROOT)

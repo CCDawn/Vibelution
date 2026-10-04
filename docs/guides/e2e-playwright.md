@@ -30,6 +30,10 @@ POST /api/sessions、POST /api/agents 等，控制令牌同 GET 口径）。
     默认 0；本次 pytest 仍负责正常 stop 与数据清理。用于启动响应丢失后的明确恢复，
     不自动启用，也不能把此前的 CLI/IPC 失败改记为通过。
 - 测试代码与 fixture 一律 `CREATE_NO_WINDOW` 子进程，禁止 taskkill、禁止可见控制台。
+- fixture 的 start/attach 都要求当前 `codex/` 任务 worktree。默认 start 遇到尚未关闭的
+  任务实例会拒绝，须显式 attach。start 响应失败时，仅清理精确属于本任务、相较启动前
+  新增 generation 且 commandId 更新的实例，保留原始错误，不重试 start、不计为通过。
+  尚未观察到新 generation 或清理被拒绝时保留现场与失败状态。
 
 ## 运行前置
 
