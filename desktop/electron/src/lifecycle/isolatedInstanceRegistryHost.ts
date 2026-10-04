@@ -191,7 +191,7 @@ function readLauncherBackendIdentity(workspaceRoot: string): PythonProcessIdenti
   const pid = positiveInt(state.backendPid);
   const createTime = Number(state.backendCreateTime);
   const executable = String(state.backendExecutable || "").trim();
-  return pid > 0 && createTime > 0 && executable ? { pid, createTime, executable } : null;
+  return pid > 0 && Number.isFinite(createTime) && createTime > 0 && executable ? { pid, createTime, executable } : null;
 }
 
 /** Cached alive truth never acknowledges a start or authorizes retirement. */
@@ -202,17 +202,17 @@ export async function inspectIsolatedStartReuse(input: {
   signal?: AbortSignal;
   dependencies?: Partial<{
     readRegistry: typeof readRegistry;
-    readDaemonIdentity: typeof readDaemonIdentity;
     readBackendIdentity: typeof readLauncherBackendIdentity;
     captureIdentity: typeof capturePythonProcessIdentity;
+    pidAlive: (pid: number) => boolean;
     connect: (port: number, host: string) => Promise<boolean>;
   }>;
 }): Promise<IsolatedStartReuseInspection> {
   const dependencies = {
     readRegistry,
-    readDaemonIdentity,
     readBackendIdentity: readLauncherBackendIdentity,
     captureIdentity: capturePythonProcessIdentity,
+    pidAlive: knownPidIsAlive,
     connect: (port: number, host: string) => probeTcpConnect(port, host),
     ...input.dependencies
   };
@@ -231,17 +231,32 @@ export async function inspectIsolatedStartReuse(input: {
     && Number(entry?.spawnCreateTime) > 0 && String(entry?.spawnExecutable || "").trim()
     ? { pid: positiveInt(entry?.spawnPid), createTime: Number(entry?.spawnCreateTime), executable: String(entry?.spawnExecutable) }
     : null;
-  const expected = registered || dependencies.readDaemonIdentity(input.target.projectRoot)
-    || dependencies.readBackendIdentity(input.target.projectRoot);
+  const backendIdentity = dependencies.readBackendIdentity(input.target.projectRoot);
+  const expected = registered || backendIdentity;
+  const livePortPending = async (): Promise<boolean> => {
+    const port = positiveInt(entry?.port || input.target.preferredBackend);
+    return port > 0 && (Boolean(registered) || input.target.alive)
+      && await dependencies.connect(port, String(entry?.host || "127.0.0.1"));
+  };
   if (!expected) {
-    return { kind: "start" };
+    return await livePortPending() ? pending() : { kind: "start" };
   }
-  const actual = await dependencies.captureIdentity({
-    pythonPath: input.pythonPath, workspaceRoot: input.target.projectRoot, pid: expected.pid
-  });
-  input.signal?.throwIfAborted();
-  if (!actual || actual.pid !== expected.pid || Math.abs(actual.createTime - expected.createTime) > 0.01
-    || !sameProjectRoot(actual.executable, expected.executable)) {
+  const matchesLiveIdentity = async (identity: PythonProcessIdentity): Promise<boolean> => {
+    const actual = await dependencies.captureIdentity({
+      pythonPath: input.pythonPath, workspaceRoot: input.target.projectRoot, pid: identity.pid
+    });
+    input.signal?.throwIfAborted();
+    return actual !== null && actual.pid === identity.pid && Math.abs(actual.createTime - identity.createTime) <= 0.01
+      && sameProjectRoot(actual.executable, identity.executable);
+  };
+  if (!(await matchesLiveIdentity(expected))) {
+    // An invalid old identity cannot authorize shutting down another live
+    // backend on the same project's port. Let the existing reconciler settle
+    // it before start preparation can retire anything.
+    if ((backendIdentity && await matchesLiveIdentity(backendIdentity))
+      || dependencies.pidAlive(expected.pid) || await livePortPending()) {
+      return pending();
+    }
     return { kind: "start" };
   }
   if (!entry || !registered || entry.status !== "steady" || entry.desiredState !== "open"

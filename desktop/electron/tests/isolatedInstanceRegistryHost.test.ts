@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AdmissionDeniedError } from "../src/lifecycle/instanceAdmissionControl.js";
+import * as backendState from "../src/process/workbenchBackend.js";
 import {
   admitLifecycleCommand,
   recordAdmissionOutcome,
@@ -55,8 +56,8 @@ describe("isolatedInstanceRegistryHost", () => {
   function reuseDependencies(entry: RegistryEntry | undefined = liveEntry) {
     return {
       readRegistry: vi.fn(async () => ({ schemaVersion: 3, instances: entry ? { "worktree:task": entry } : {} })),
-      readDaemonIdentity: vi.fn(() => null as typeof liveIdentity | null),
       readBackendIdentity: vi.fn(() => null as typeof liveIdentity | null),
+      pidAlive: vi.fn(() => false),
       captureIdentity: vi.fn(async () => liveIdentity as typeof liveIdentity | null),
       connect: vi.fn(async () => true)
     };
@@ -70,6 +71,7 @@ describe("isolatedInstanceRegistryHost", () => {
 
   it("starts again after stop despite stale cached alive truth", async () => {
     const dependencies = reuseDependencies({ ...liveEntry, status: "closed", desiredState: "closed", spawnPid: 0, spawnCreateTime: 0, spawnExecutable: "" });
+    dependencies.connect.mockResolvedValue(false);
     expect(await inspectReuse(dependencies)).toEqual({ kind: "start" });
     expect(dependencies.captureIdentity).not.toHaveBeenCalled();
   });
@@ -85,8 +87,8 @@ describe("isolatedInstanceRegistryHost", () => {
     "does not reuse dead or recycled process identity %j", async (identity) => {
       const dependencies = reuseDependencies();
       dependencies.captureIdentity.mockResolvedValue(identity);
+      dependencies.connect.mockResolvedValue(false);
       expect(await inspectReuse(dependencies)).toEqual({ kind: "start" });
-      expect(dependencies.connect).not.toHaveBeenCalled();
     }
   );
 
@@ -94,7 +96,7 @@ describe("isolatedInstanceRegistryHost", () => {
     const dependencies = reuseDependencies(undefined);
     // The default parameter models a live row; explicitly return a missing row.
     dependencies.readRegistry.mockResolvedValue({ schemaVersion: 3, instances: {} });
-    dependencies.readDaemonIdentity.mockReturnValue(liveIdentity);
+    dependencies.readBackendIdentity.mockReturnValue(liveIdentity);
     expect(await inspectReuse(dependencies)).toEqual({ kind: "pending", generation: 0 });
   });
 
@@ -106,6 +108,22 @@ describe("isolatedInstanceRegistryHost", () => {
     expect(dependencies.captureIdentity).toHaveBeenCalledWith({
       pythonPath: "python", workspaceRoot: "C:/wt/task", pid: 4242
     });
+  });
+
+  it("does not mistake a live Runtime Manager daemon for a backend", async () => {
+    const daemon = vi.spyOn(backendState, "readDaemonIdentity").mockReturnValue(liveIdentity);
+    try {
+      const dependencies = reuseDependencies({ ...liveEntry, status: "closed", spawnPid: 0, spawnCreateTime: 0, spawnExecutable: "" });
+      dependencies.connect.mockResolvedValue(false);
+      expect(await inspectReuse(dependencies)).toEqual({ kind: "start" });
+      expect(daemon).not.toHaveBeenCalled();
+    } finally { daemon.mockRestore(); }
+  });
+
+  it("does not authorize retirement when a stale registered identity has a live listener", async () => {
+    const dependencies = reuseDependencies();
+    dependencies.captureIdentity.mockResolvedValue({ ...liveIdentity, createTime: 999 });
+    expect(await inspectReuse(dependencies)).toEqual({ kind: "pending", generation: 7 });
   });
 
   it.each([
