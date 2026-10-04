@@ -27,6 +27,19 @@ function fakeWindow(pathname = "/teams") {
 }
 
 describe("route chunk recovery", () => {
+  it("keeps the current document while offline and allows recovery after reconnect", () => {
+    const win = fakeWindow("/chat");
+    Object.defineProperty(win, "navigator", { value: { onLine: false }, configurable: true });
+    const error = new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8787/assets/ConversationMarkdownRenderer.js");
+    expect(recoverFromDynamicImportFetchError(error, win)).toBe(false);
+    expect(recoverFromBuiltAssetResourceError("/assets/ConversationMarkdownRenderer.js", win)).toBe(false);
+    expect(win.location.reload).not.toHaveBeenCalled();
+    expect(win.sessionStorage.getItem(ROUTE_CHUNK_RELOAD_KEY)).toBeNull();
+    Object.defineProperty(win, "navigator", { value: { onLine: true } });
+    expect(recoverFromDynamicImportFetchError(error, win)).toBe(true);
+    expect(win.location.reload).toHaveBeenCalledTimes(1);
+  });
+
   it("recognizes stale dynamic import fetch failures", () => {
     expect(isDynamicImportFetchError(new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/TeamsRoute-old.js"))).toBe(true);
     expect(isDynamicImportFetchError(new Error("Loading chunk TeamsRoute failed."))).toBe(true);
