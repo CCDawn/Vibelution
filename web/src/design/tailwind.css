@@ -47,6 +47,13 @@
 @source "../routes/WorkbenchDomainRoute.tsx";
 @source "../routes/WorkbenchModeRoute.tsx";
 
+/* Finance shares its frame with the eager route fallback. Keep its utilities
+ * in the shell entry so cold navigation and the loaded workspace match. */
+@source "../routes/FinanceRoute.tsx";
+@source "../routes/FinanceRoute.styles.ts";
+@source "../routes/finance/**/*.{ts,tsx}";
+@source not "../routes/finance/**/*.test.{ts,tsx}";
+
 :where(small) {
   font-size: var(--vui-font-xs);
   line-height: var(--vui-line-readable);

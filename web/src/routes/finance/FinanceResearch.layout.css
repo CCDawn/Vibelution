@@ -1,0 +1,58 @@
+/* Route CSS chunks repeat shared Tailwind utilities during idle preloading.
+ * Scope the fixed VUI pane layout so their base rules cannot reset its media
+ * variants. The remaining visual styling stays in the Tailwind style map. */
+.finance-research-workspace > [data-vui="split-workspace"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.finance-research-workspace > [data-vui="split-workspace"] > [data-vui="split-sidebar"],
+.finance-research-workspace > [data-vui="split-workspace"] > [data-vui="split-aside"] {
+  display: none;
+}
+
+.finance-research-workspace > [data-vui="split-workspace"] > [data-vui="split-main"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.finance-market-state { display: none; }
+
+/* The existing Radix motion uses transform for centering. Tailwind v4's
+ * separate translate property must not apply a second offset to this portal.
+ * Keep transform centering when reduced motion disables the keyframes. */
+.finance-research-dialog {
+  --tw-translate-x: 0px !important;
+  --tw-translate-y: 0px !important;
+  transform: translate(-50%, -50%);
+  width: min(28rem, calc(100vw - 1.5rem));
+}
+
+/* Finance owns the context header and hides the native session tab strip. */
+.finance-research-workspace [data-vui="chat-session-workbench-shell"] .centerPane {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+@media (min-width: 640px) {
+  .finance-market-state { display: inline; }
+}
+
+@media (min-width: 800px) {
+  .finance-research-workspace > [data-vui="split-workspace"] {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .finance-research-workspace > [data-vui="split-workspace"] > [data-vui="split-sidebar"] {
+    display: block;
+  }
+  .finance-mobile-history { display: none !important; }
+}
+
+@media (min-width: 1200px) {
+  .finance-research-workspace > [data-vui="split-workspace"] {
+    grid-template-columns: 220px minmax(0, 1fr) 310px;
+  }
+  .finance-research-workspace > [data-vui="split-workspace"] > [data-vui="split-aside"] {
+    display: block;
+  }
+  .finance-mobile-evidence { display: none !important; }
+}

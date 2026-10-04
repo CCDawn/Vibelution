@@ -1,10 +1,11 @@
 import { LoaderCircle } from "lucide-react";
 
 import { ChatRouteLoadingShell } from "./ChatRouteLoadingShell";
+import { FinanceResearchLoading } from "../routes/finance/FinanceResearchFrame";
 import { type RouteErrorSurface } from "./RouteErrorBoundary";
 import styles from "./RouteLoadingShell.styles";
 
-export type RouteLoadingLayout = "chat" | "config" | "default" | "teams";
+export type RouteLoadingLayout = "chat" | "config" | "default" | "finance" | "teams";
 
 export type RouteLoadingShellProps = {
   label?: string;
@@ -130,6 +131,7 @@ export function RouteLoadingShell({
   meta,
   surface = "workbench",
 }: RouteLoadingShellProps) {
+  if (layout === "finance") return <FinanceResearchLoading />;
   if (layout === "chat") {
     return (
       <ChatRouteLoadingShell

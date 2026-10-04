@@ -164,6 +164,16 @@ describe("router route contracts", () => {
     expect(teamsMarkup).toContain("animate-spin");
   });
 
+  it("keeps the finance research frame visible while its route chunk loads", () => {
+    const markup = lazyFallbackMarkup(findWorkbenchRoute("finance"));
+    expect(markup).toContain('data-route-loading="finance"');
+    expect(markup).toContain('data-vui-domain-recipe="financial-assistant-workspace"');
+    expect(markup).toContain("炒股智能体");
+    expect(markup).toContain("研究记录");
+    expect(markup).toContain("财报资料");
+    expect(markup).not.toContain("正在打开工作台");
+  });
+
   it("guards the chat route while timing the chat chunk loader itself", async () => {
     const chatRoute = findWorkbenchRoute("chat");
     expectRouteErrorSurface(chatRoute, "workbench");

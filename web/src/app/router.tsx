@@ -186,7 +186,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "finance",
-        ...guardedLazyElement(<WorkbenchDomainRoute domain="chat"><FinanceRoute /></WorkbenchDomainRoute>),
+        ...guardedLazyElement(<WorkbenchDomainRoute domain="chat"><FinanceRoute /></WorkbenchDomainRoute>, "workbench", "finance"),
       },
       {
         path: "companions",

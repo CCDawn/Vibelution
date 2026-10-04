@@ -176,6 +176,7 @@ import {
 } from "../DirectSessionIndexItem";
 import { agentCenterConfigRoute, agentCenterMemoryRoute } from "../agentCenterRoutes";
 import { FinancialAssistantChatNote } from "../finance/FinancialAssistantChatNote";
+import { useFinancialResearchSessionBridge } from "../finance/FinancialResearchBridge";
 import { useFinancialAssistants } from "../finance/useFinancialAssistants";
 import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
@@ -3587,7 +3588,7 @@ export function ChatCodingRouteWorkbench() {
           onMentalModelEnabledChange={handleMentalModelEnabledChange}
           onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
           onPromptSuggestionEnabledChange={handlePromptSuggestionEnabledChange}
-          directSession={agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
+          directSession={!financeSurface && agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
             id: agentPrimaryDirectSessionId,
             label: sessionBindingMismatchLine,
             onOpen: () => handleOpenDirectSession(agentPrimaryDirectSessionId),
@@ -3712,6 +3713,7 @@ export function ChatCodingRouteWorkbench() {
       composerSessionReferenceOptions,
       currentTaskSummary,
       detail,
+      financeSurface,
       handleAddComposerAttachments,
       handleAddComposerReference,
       handleCancelEditMessage,
@@ -3768,11 +3770,22 @@ export function ChatCodingRouteWorkbench() {
     ],
   );
 
+  const financialResearchBridge = useFinancialResearchSessionBridge({
+    sessionId: activeSessionId ?? "",
+    agentId: detail?.agentId,
+    title: detail?.title ?? "",
+    status: detail?.status ?? "",
+    busy: sessionBusy,
+    stopping: sessionStopping,
+    onComposerChange: handleComposerChange,
+    onFocusComposer: requestSessionComposerFocus,
+  });
+
   return (
     <ActiveTurnLayersStoreProvider store={activeTurnLayersStore}>
     <ChatSessionWorkbenchShell
       layoutRef={layoutRef}
-      className={chatLayoutClassName}
+      className={financialResearchBridge ? `${chatLayoutClassName} !h-full !max-h-full !min-h-0` : chatLayoutClassName}
       style={layoutStyle}
       responsiveMode={responsiveLayout.mode}
       statusRailCollapsed={statusRailCollapsed}
@@ -4060,7 +4073,7 @@ export function ChatCodingRouteWorkbench() {
               invalidChildSessionLinkMessage={invalidChildSessionLinkMessage}
               lang={lang}
               loadingSessionLabel={t("loadingSession")}
-              preface={<FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
+              preface={financialResearchBridge ? null : <FinancialAssistantChatNote sessionId={activeSessionId} lang={lang} />}
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
