@@ -1,12 +1,13 @@
 /* Armed (two-stage confirm) close tint. Tailwind never emits the
    !text/[color-mix()] arbitrary combination, so the danger tint is a real
-   rule whose two-class selector outranks the base tab utilities. */
+   rule whose two-class selector outranks the base tab utilities, which carry their own !important
+   text color; ties break for this sheet because route css loads after index. */
 .vui-routes-chatcodingroute .agentSessionTabCloseButtonArmed {
-  background-color: color-mix(in srgb, var(--danger) 14%, transparent);
-  color: color-mix(in srgb, var(--danger) 80%, var(--vui-fg-primary));
+  background-color: color-mix(in srgb, var(--danger) 14%, transparent) !important;
+  color: color-mix(in srgb, var(--danger) 80%, var(--vui-fg-primary)) !important;
 }
 
 .vui-routes-chatcodingroute .agentSessionTabCloseButtonArmed:hover {
-  background-color: color-mix(in srgb, var(--danger) 22%, transparent);
-  color: color-mix(in srgb, var(--danger) 90%, var(--vui-fg-primary));
+  background-color: color-mix(in srgb, var(--danger) 22%, transparent) !important;
+  color: color-mix(in srgb, var(--danger) 90%, var(--vui-fg-primary)) !important;
 }
