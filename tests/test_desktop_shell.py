@@ -961,15 +961,16 @@ def test_resolve_desktop_shell_launch_falls_back_when_launch_blocking(tmp_path, 
     assert spec["args"][:2] == [str(electron_exe), str(desktop_shell.unpackaged_main_js(tmp_path))]
 
 
-def test_live_shell_owns_rebuild_decision_before_relaunch(tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation", ["start", "stop", "force-stop", "restart", "rebuild-and-start", "toggle", "status", "open", "close-window"])
+def test_live_shell_owns_rebuild_decision_before_relaunch(tmp_path, monkeypatch, operation):
     from core.launcher import desktop_shell_owner
     exe = _write_unpackaged_electron(tmp_path, tree_hash="a" * 40, main_mtime=2_000_000_000)
     monkeypatch.setattr(desktop_shell_owner, "read_desktop_shell_owner", lambda root: {"owner": "electron", "pid": 123, "executable": str(exe)})
     monkeypatch.setattr(desktop_shell_owner, "_identity_status", lambda owner: "match")
     monkeypatch.setattr(desktop_shell, "ensure_unpackaged_electron", lambda root: (_ for _ in ()).throw(AssertionError("Entry must not consume the live shell rebuild signal")))
-    spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="restart")
+    spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle=operation)
     assert spec["reason"] == "forward_to_live_shell"
-    assert spec["args"][-1] == "restart"
+    assert spec["args"][-1] == operation
     assert "--local-debugging" in spec["args"]
 
 

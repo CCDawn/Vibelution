@@ -9,6 +9,14 @@ import { queryKeys } from "../../api/queryKeys";
 import type { ReferenceTypeaheadOption } from "./conversationReferenceTypeahead";
 import { ConversationView } from "./ConversationView";
 
+vi.mock("../../api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/chat")>();
+  return {
+    ...actual,
+    fetchSessionComposerExample: vi.fn().mockResolvedValue({ command: null, starters: [] }),
+  };
+});
+
 vi.mock("./LazyConversationMarkdownRenderer", async () => {
   const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
   return { LazyConversationMarkdownRenderer: ConversationMarkdownRenderer };
@@ -35,6 +43,12 @@ function knowledgeOption(id: string, title: string): ReferenceTypeaheadOption {
 const referenceOptions: ReferenceTypeaheadOption[] = [
   knowledgeOption("knowledge-item:arch", "架构笔记"),
 ];
+
+const emptyRuntimeTaskList = {
+  revision: "test",
+  running: [],
+  ended: { items: [], total: 0, nextCursor: "" },
+};
 
 function typeIntoTextarea(textarea: HTMLTextAreaElement, value: string, caretIndex: number) {
   const nativeValueSetter = Object.getOwnPropertyDescriptor(
@@ -69,6 +83,18 @@ describe("composer Escape stop interaction", () => {
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
     queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+    queryClient.setQueryData(
+      queryKeys.sessionMessageCuration("session-escape-stop"),
+      { items: [] },
+    );
+    queryClient.setQueryData(
+      queryKeys.runtimeTasks("", "session-escape-stop"),
+      emptyRuntimeTaskList,
+    );
+    queryClient.setQueryData(
+      queryKeys.runtimeTasks("ended", "session-escape-stop"),
+      emptyRuntimeTaskList,
+    );
     queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
 
     function Harness() {

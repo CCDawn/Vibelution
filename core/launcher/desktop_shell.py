@@ -1944,9 +1944,13 @@ def resolve_desktop_shell_launch(
             "currentElectronTree": str(unpackaged.get("currentElectronTree") or ""),
             "rebuilt": bool(unpackaged.get("rebuilt")),
         }
-    # A live main owns freshness and guarded relaunch. Rebuilding here first
-    # consumes its `rebuilt` signal and leaves old main code running indefinitely.
-    if lifecycle in {"start", "restart", "rebuild-and-start"}:
+    # A live main owns freshness and guarded relaunch. Every supported lifecycle
+    # command must reach it before a build; even stop/status can otherwise block
+    # on stale artifacts. Rebuilding here also consumes its `rebuilt` signal.
+    if lifecycle in {
+        "start", "stop", "force-stop", "restart", "rebuild-and-start",
+        "toggle", "status", "open", "close-window",
+    }:
         from core.launcher.desktop_shell_owner import _identity_status, read_desktop_shell_owner
 
         owner = read_desktop_shell_owner(shell_root)

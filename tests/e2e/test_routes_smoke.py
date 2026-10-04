@@ -8,7 +8,8 @@
   27 条带该属性，见逐路由表）；``/usage``、``/reset`` 无该属性，进豁免表；
 - 次锚点：``header[data-vui="route-header"] h1`` 可见——只对实测可见的路由
   断言。chat/evolution 工作台布局没有 route-header h1；agents 家族与 /teams
-  的 route-header 存在于 DOM 但 pane 隐藏（空态布局事实），均登记豁免；
+ 的 route-header 存在于 DOM 但 pane 隐藏；MemoryRoute 对所有视图启用 hideHeader，
+ 以可见子导航和主工作区作为就绪锚点，均在路由表登记；
 - 不出现 ``state-surface[data-tone="error"]``；
 - 守卫路由（WorkbenchDomainRoute/WorkbenchModeRoute）先 GET
   ``/api/config/public``，被禁用时按 home 解析规则断言重定向后的 URL；
@@ -46,12 +47,19 @@ pytestmark = [
 # 路由表（与 web/src/app/router.tsx AppShell children 对齐）
 # recipe: 预期的 data-vui-domain-recipe 值；None = 实测无该属性（豁免）。
 # assert_h1: True = 断言 route-header h1 可见；False = 实测不可见/不存在（豁免）。
+# ready_selectors: recipe 之外还需等待可见的路由区域。
 # guard: ("domain", name) → WorkbenchDomainRoute；(mode, name) → WorkbenchModeRoute
 # ---------------------------------------------------------------------------
 
 _H1_NONE_EVOLUTION = "chat/evolution 工作台布局没有 route-header h1（实测）"
 _H1_HIDDEN_PANE = "route-header 存在于 DOM 但 pane 隐藏（空态布局事实，实测）"
+_H1_HIDDEN_MEMORY = "MemoryRoute 对所有视图启用 hideHeader（MemoryRoute.layout.test.ts）"
 _NO_RECIPE = "页面根没有 data-vui-domain-recipe（实测）"
+_MEMORY_READY_SELECTORS = (
+    '[data-vui-region="memory-subnav"] nav[aria-label] '
+    'a[data-vui="route-link-button"][data-chrome="shell-nav"]',
+    '[data-vui-region="memory-main"]',
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,20 @@ class RouteSpec:
     assert_h1: bool
     guard: tuple[str, str] | None = None
     note: str = ""
+    ready_selectors: tuple[str, ...] = ()
+    assert_h1_hidden: bool = False
+
+
+def _memory_route(path: str) -> RouteSpec:
+    """Use the visible workbench regions because MemoryRoute hides its page header."""
+    return RouteSpec(
+        path,
+        "memory-knowledge-workbench",
+        False,
+        note=_H1_HIDDEN_MEMORY,
+        ready_selectors=_MEMORY_READY_SELECTORS,
+        assert_h1_hidden=True,
+    )
 
 
 ROUTES: tuple[RouteSpec, ...] = (
@@ -75,16 +97,16 @@ ROUTES: tuple[RouteSpec, ...] = (
     RouteSpec("/agents/prompts", "prompt-templates-workbench", False, None, _H1_HIDDEN_PANE),
     RouteSpec("/agents/tools", "tools-workbench", False, None, _H1_HIDDEN_PANE),
     RouteSpec("/agents/skills", "skills-workbench", False, None, _H1_HIDDEN_PANE),
-    RouteSpec("/memory", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/team", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/library", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/agents", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/knowledge", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/manage", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/sources", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/effective", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/cleanup", "memory-knowledge-workbench", True),
-    RouteSpec("/memory/graph", "memory-knowledge-workbench", True),
+    _memory_route("/memory"),
+    _memory_route("/memory/team"),
+    _memory_route("/memory/library"),
+    _memory_route("/memory/agents"),
+    _memory_route("/memory/knowledge"),
+    _memory_route("/memory/manage"),
+    _memory_route("/memory/sources"),
+    _memory_route("/memory/effective"),
+    _memory_route("/memory/cleanup"),
+    _memory_route("/memory/graph"),
     RouteSpec("/teams", "teams-organization-workbench", False, None, _H1_HIDDEN_PANE),
     RouteSpec("/kernel", "kernel-task-center-workbench", True),
     RouteSpec("/git", "git-workbench", True),
@@ -152,7 +174,7 @@ def _url_on_path(page: Any, base_url: str, path: str) -> bool:
 
 
 def assert_route_surface(page: Any, spec: RouteSpec) -> str:
-    """就绪后的页面断言：domain-recipe（豁免除外）、h1（按路由表）、无 error 状态面。"""
+    """就绪后的页面断言：recipe、路由区域、h1 契约和无 error 状态面。"""
     title = ""
     if spec.recipe is None:
         print(f"[smoke] {spec.path}: {spec.note}")
@@ -165,20 +187,38 @@ def assert_route_surface(page: Any, spec: RouteSpec) -> str:
             f"{spec.path}: 预期 [data-vui-domain-recipe=\"{spec.recipe}\"] 可见（url={page.url}）"
         )
 
+    for selector in spec.ready_selectors:
+        region = page.locator(selector).first
+        region.wait_for(state="visible", timeout=15_000)
+        assert region.is_visible(), (
+            f"{spec.path}: 预期路由区域 {selector!r} 可见（url={page.url}）"
+        )
+
     if spec.assert_h1:
         header = page.locator(ROUTE_HEADER_H1)
         header.first.wait_for(state="visible", timeout=15_000)
         title = header.first.inner_text().strip()
         assert title, f"{spec.path}: route-header h1 可见但文本为空（url={page.url}）"
-    elif not spec.note:
-        raise AssertionError(f"{spec.path}: 路由表不一致——h1 豁免必须带理由（note）")
+    else:
+        if not spec.note:
+            raise AssertionError(f"{spec.path}: 路由表不一致——h1 豁免必须带理由（note）")
+        if spec.assert_h1_hidden:
+            header = page.locator(ROUTE_HEADER_H1)
+            visible_headers = [
+                header.nth(index)
+                for index in range(header.count())
+                if header.nth(index).is_visible()
+            ]
+            assert not visible_headers, (
+                f"{spec.path}: hideHeader 契约被破坏，route-header h1 意外可见（url={page.url}）"
+            )
 
     errors = page.locator(STATE_SURFACE_ERROR)
     assert errors.count() == 0, (
         f"{spec.path}: 出现 state-surface[data-tone=\"error\"]（url={page.url}, "
         f"count={errors.count()}）"
     )
-    return title or (spec.recipe or "")
+    return title
 
 
 def test_home_redirect(page: Any, e2e_instance: Any) -> None:

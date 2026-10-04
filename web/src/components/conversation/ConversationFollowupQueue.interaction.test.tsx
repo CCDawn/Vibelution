@@ -6,12 +6,26 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
 import { dictionary } from "../../i18n/dictionary";
+import type { ComposerQueueItem } from "./composerFollowupQueueModel";
 import {
   ConversationFollowupQueueBar,
   FollowupQueueTogglePauseContext,
 } from "./ConversationFollowupQueueBar";
 import { ConversationView } from "./ConversationView";
-import type { ComposerQueueItem } from "./composerFollowupQueueModel";
+
+vi.mock("../../api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/chat")>();
+  return {
+    ...actual,
+    fetchSessionComposerExample: vi.fn().mockResolvedValue({ command: null, starters: [] }),
+  };
+});
+
+const emptyRuntimeTaskList = {
+  revision: "test",
+  running: [],
+  ended: { items: [], total: 0, nextCursor: "" },
+};
 
 vi.mock("./LazyConversationMarkdownRenderer", async () => {
   const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
@@ -348,6 +362,15 @@ describe("ConversationView follow-up queue actions", () => {
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
     queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+    queryClient.setQueryData(queryKeys.sessionMessageCuration("session-1"), { items: [] });
+    queryClient.setQueryData(
+      queryKeys.runtimeTasks("", "session-1"),
+      emptyRuntimeTaskList,
+    );
+    queryClient.setQueryData(
+      queryKeys.runtimeTasks("ended", "session-1"),
+      emptyRuntimeTaskList,
+    );
     queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
     container = document.createElement("div");
     document.body.appendChild(container);

@@ -553,7 +553,17 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     if session_service is not None:
         previous_executor = session_service._SESSION_EXECUTOR
         isolated_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-web-chat-turn")
+        previous_projection_executor = session_service._SESSION_CYCLE_PROJECTION_EXECUTOR
+        isolated_projection_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="pytest-web-chat-cycle-projection",
+        )
         monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", isolated_executor)
+        monkeypatch.setattr(
+            session_service,
+            "_SESSION_CYCLE_PROJECTION_EXECUTOR",
+            isolated_projection_executor,
+        )
         monkeypatch.setattr(session_service, "_WORK_RUN_STORE", work_run_store.WorkRunStore(root=work_runs_dir))
         monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
         with session_service._RUNNING_SESSIONS_LOCK:
@@ -568,30 +578,44 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
                 session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
-        yield
-        with chat_room_service._CHAT_ROOM_ROUND_CONTROLS_LOCK:
-            chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
-        with chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
-            chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS.clear()
-        isolated_chat_room_executor.shutdown(wait=True, cancel_futures=True)
-        monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", previous_chat_room_executor)
-        isolated_executor.shutdown(wait=True, cancel_futures=True)
-        monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", previous_executor)
-        with session_service._RUNNING_SESSIONS_LOCK:
-            session_service._RUNNING_SESSION_IDS.clear()
-            session_service._SESSION_ACTIVE_TURN_IDS.clear()
-            session_service._SESSION_ACTIVE_TURN_LEASES.clear()
-        if hasattr(session_service, "_SESSION_TURN_SCHEDULER"):
-            session_service._SESSION_TURN_SCHEDULER.clear()
-        else:
-            with session_service._SESSION_AGENT_SCHEDULER_LOCK:
-                session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
-                session_service._SESSION_AGENT_QUEUES.clear()
-        with session_service._SESSION_TURN_CONTROLS_LOCK:
-            session_service._SESSION_TURN_CONTROLS.clear()
-        reset_formal_read_runtime_for_tests()
-        reset_formal_write_runtime_for_tests()
-        _reset_agent_directory_caches(agent_directory_service)
+        try:
+            yield
+        finally:
+            with chat_room_service._CHAT_ROOM_ROUND_CONTROLS_LOCK:
+                chat_room_service._CHAT_ROOM_ROUND_CONTROLS.clear()
+            with chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK:
+                chat_room_service._CHAT_ROOM_STREAM_SUBSCRIBERS.clear()
+            try:
+                isolated_chat_room_executor.shutdown(wait=True, cancel_futures=True)
+            finally:
+                monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", previous_chat_room_executor)
+                try:
+                    isolated_executor.shutdown(wait=True, cancel_futures=True)
+                finally:
+                    try:
+                        isolated_projection_executor.shutdown(wait=True, cancel_futures=True)
+                    finally:
+                        monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", previous_executor)
+                        monkeypatch.setattr(
+                            session_service,
+                            "_SESSION_CYCLE_PROJECTION_EXECUTOR",
+                            previous_projection_executor,
+                        )
+            with session_service._RUNNING_SESSIONS_LOCK:
+                session_service._RUNNING_SESSION_IDS.clear()
+                session_service._SESSION_ACTIVE_TURN_IDS.clear()
+                session_service._SESSION_ACTIVE_TURN_LEASES.clear()
+            if hasattr(session_service, "_SESSION_TURN_SCHEDULER"):
+                session_service._SESSION_TURN_SCHEDULER.clear()
+            else:
+                with session_service._SESSION_AGENT_SCHEDULER_LOCK:
+                    session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
+                    session_service._SESSION_AGENT_QUEUES.clear()
+            with session_service._SESSION_TURN_CONTROLS_LOCK:
+                session_service._SESSION_TURN_CONTROLS.clear()
+            reset_formal_read_runtime_for_tests()
+            reset_formal_write_runtime_for_tests()
+            _reset_agent_directory_caches(agent_directory_service)
     else:
         try:
             yield
