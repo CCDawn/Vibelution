@@ -13,12 +13,13 @@ import {
   claimIsolatedStart,
   claimIsolatedStop,
   collectExtraUsedPorts,
+  inspectIsolatedStartReuse,
   prepareIsolatedStart,
   resolveIsolatedClaimTarget,
   retireClaimedIsolatedRuntime,
   retireIsolatedRuntimeBeforeStart
 } from "../src/lifecycle/isolatedInstanceRegistryHost.js";
-import { claimStopIfGeneration, readRegistry, upsert } from "../src/lifecycle/instanceRegistryStore.js";
+import { claimStopIfGeneration, readRegistry, upsert, type RegistryEntry } from "../src/lifecycle/instanceRegistryStore.js";
 import {
   instanceIdForProject,
   normalizeInstanceKey,
@@ -44,6 +45,78 @@ const payload = {
 };
 
 describe("isolatedInstanceRegistryHost", () => {
+  const liveEntry: RegistryEntry = {
+    projectRoot: "C:/wt/task", status: "steady", desiredState: "open", phase: "steady",
+    portLeaseStatus: "held", generation: 7, commandId: "real-start-command",
+    port: 8012, controlPort: 8777, spawnPid: 4242, spawnCreateTime: 123.45,
+    spawnExecutable: "C:/python/pythonw.exe"
+  };
+  const liveIdentity = { pid: 4242, createTime: 123.45, executable: "C:/python/pythonw.exe" };
+  function reuseDependencies(entry: RegistryEntry | undefined = liveEntry) {
+    return {
+      readRegistry: vi.fn(async () => ({ schemaVersion: 3, instances: entry ? { "worktree:task": entry } : {} })),
+      readDaemonIdentity: vi.fn(() => null as typeof liveIdentity | null),
+      captureIdentity: vi.fn(async () => liveIdentity as typeof liveIdentity | null),
+      connect: vi.fn(async () => true)
+    };
+  }
+  function inspectReuse(dependencies: ReturnType<typeof reuseDependencies>, alive = true) {
+    return inspectIsolatedStartReuse({
+      target: { ...resolveIsolatedClaimTarget(payload, "worktree:task")!, alive },
+      pythonPath: "python", registryPath: "test-only.json", dependencies
+    });
+  }
+
+  it("starts again after stop despite stale cached alive truth", async () => {
+    const dependencies = reuseDependencies({ ...liveEntry, status: "closed", desiredState: "closed", spawnPid: 0, spawnCreateTime: 0, spawnExecutable: "" });
+    expect(await inspectReuse(dependencies)).toEqual({ kind: "start" });
+    expect(dependencies.captureIdentity).not.toHaveBeenCalled();
+  });
+
+  it("reuses authoritative command, generation and ports even when the cached alive flag is false", async () => {
+    const dependencies = reuseDependencies();
+    expect(await inspectReuse(dependencies, false)).toEqual({ kind: "reuse", entry: liveEntry });
+    expect(dependencies.connect).toHaveBeenCalledWith(8012, "127.0.0.1");
+    expect(dependencies.readRegistry).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([null, { ...liveIdentity, createTime: 124 }, { ...liveIdentity, executable: "C:/unrelated.exe" }])(
+    "does not reuse dead or recycled process identity %j", async (identity) => {
+      const dependencies = reuseDependencies();
+      dependencies.captureIdentity.mockResolvedValue(identity);
+      expect(await inspectReuse(dependencies)).toEqual({ kind: "start" });
+      expect(dependencies.connect).not.toHaveBeenCalled();
+    }
+  );
+
+  it("keeps a live unregistered runtime pending for existing reconciliation", async () => {
+    const dependencies = reuseDependencies(undefined);
+    // The default parameter models a live row; explicitly return a missing row.
+    dependencies.readRegistry.mockResolvedValue({ schemaVersion: 3, instances: {} });
+    dependencies.readDaemonIdentity.mockReturnValue(liveIdentity);
+    expect(await inspectReuse(dependencies)).toEqual({ kind: "pending", generation: 0 });
+  });
+
+  it.each([
+    { status: "closed", desiredState: "closed" }, { portLeaseStatus: "reclaimable" },
+    { commandId: "" }, { generation: 0 }, { projectRoot: "C:/another-task" }
+  ])("does not acknowledge an unusable generation %j", async (fields) => {
+    expect(await inspectReuse(reuseDependencies({ ...liveEntry, ...fields }))).toMatchObject({ kind: "pending" });
+  });
+
+  it("does not reuse a process without a listening backend", async () => {
+    const dependencies = reuseDependencies();
+    dependencies.connect.mockResolvedValue(false);
+    expect(await inspectReuse(dependencies)).toEqual({ kind: "pending", generation: 7 });
+  });
+
+  it("does not acknowledge the old generation when stop wins during the process probe", async () => {
+    const dependencies = reuseDependencies();
+    dependencies.readRegistry.mockResolvedValueOnce({ schemaVersion: 3, instances: { "worktree:task": liveEntry } })
+      .mockResolvedValueOnce({ schemaVersion: 3, instances: { "worktree:task": { ...liveEntry, generation: 8, status: "closed" } } });
+    expect(await inspectReuse(dependencies)).toEqual({ kind: "pending", generation: 7 });
+  });
+
   it("resolves claim targets and skips the selected row when collecting live ports", () => {
     const target = resolveIsolatedClaimTarget(payload, "worktree:task");
     expect(target).toEqual({

@@ -143,6 +143,7 @@ import {
 import {
   type BranchInstanceOperation,
   claimIsolatedStop,
+  inspectIsolatedStartReuse,
   observeIsolatedError,
   observeIsolatedReady,
   prepareIsolatedStart,
@@ -1958,23 +1959,24 @@ function desktopPythonPath(): string {
  * State-refresh driven registry SSOT repair: adopt live backends sitting on
  * missing/terminal registry rows, settle rows whose registered identity is
  * confirmed dead, sweep dead keys whose worktree is gone, and write Electron
- * window truth back into the registry's windowPid. Fire-and-forget: the
+ * window truth back into the registry's windowPid. Refresh callers can use it
+ * fire-and-forget; start waits when it must verify an adopted generation. The
  * reconciler is mutex-guarded and cooldown-limited, and a failure must never
- * fail the refresh (or the start short-circuit) that triggered it.
+ * fail the refresh that triggered it.
  * Skipped once shutdown is approved so it cannot fight the shutdown harvest.
  */
-function scheduleRegistryReconciliation(branchInstances: unknown): void {
+function scheduleRegistryReconciliation(branchInstances: unknown): Promise<void> {
   if (shutdownApproved) {
-    return;
+    return Promise.resolve();
   }
-  void reconcileRegistryWithObservation({
+  return reconcileRegistryWithObservation({
     branchInstances,
     pythonPath: desktopPythonPath() || undefined,
     // Electron window truth is authoritative for instance window pids. Attach
     // it only while a window provider exists: before that, an empty truth
     // would be misread as "every window closed" and clear live pids.
     ...(windowProvider ? { instanceWindowStates: currentLauncherWindowTruth().instances } : {})
-  }).catch((error: unknown) => {
+  }).then(() => undefined).catch((error: unknown) => {
     console.warn(error instanceof Error ? error.message : String(error));
   });
 }
@@ -4047,22 +4049,35 @@ async function runIsolatedRegistryMutation(input: {
   const target = resolveIsolatedClaimTarget(payload, input.instanceId);
 
   if (input.operation === "start" || input.operation === "restart") {
-    if (input.operation === "start" && target?.alive) {
-      // The cached projection says the backend is alive, but the registry row
-      // may still be terminal or missing (spawn outside a registered
-      // generation). Trigger the adopt pass asynchronously; the response stays
-      // non-blocking either way.
-      scheduleRegistryReconciliation(payload);
-      return {
-        schemaVersion: 1,
-        accepted: true,
-        operation: input.operation,
-        instanceId: input.instanceId,
-        commandId: randomUUID(),
-        port: target.preferredBackend,
-        controlPort: target.preferredControl,
-        message: "已打开该分支工作台窗口。"
-      };
+    if (input.operation === "start" && target) {
+      const inspectReuse = () => inspectIsolatedStartReuse({
+        target, pythonPath: input.pythonPath, signal: input.signal
+      });
+      let reuse = await inspectReuse();
+      if (reuse.kind === "pending") {
+        await scheduleRegistryReconciliation(payload);
+        reuse = await inspectReuse();
+      }
+      if (reuse.kind === "pending") {
+        return {
+          schemaVersion: 1, accepted: false, operation: input.operation,
+          instanceId: input.instanceId, generation: reuse.generation,
+          code: "instance_busy", message: "该分支进程仍在运行，启动记录正在核对，请稍后重试。"
+        };
+      }
+      if (reuse.kind === "reuse") {
+        return {
+          schemaVersion: 1,
+          accepted: true,
+          operation: input.operation,
+          instanceId: input.instanceId,
+          commandId: String(reuse.entry.commandId),
+          generation: Number(reuse.entry.generation),
+          port: Number(reuse.entry.port),
+          controlPort: Number(reuse.entry.controlPort),
+          message: "正在打开该分支工作台窗口。"
+        };
+      }
     }
     if (target) {
       input.signal?.throwIfAborted();

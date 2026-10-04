@@ -5,6 +5,7 @@ import {
   clearWorkbenchLauncherRuntimeState,
   readDaemonIdentity,
   readDaemonPid,
+  sameProjectRoot,
   reclaimStaleWorkbenchBackend,
   type WorkbenchRuntimeStateCleanupResult
 } from "../process/workbenchBackend.js";
@@ -12,7 +13,7 @@ import {
   reconcileDeadRegisteredHandles,
   requestGracefulWorkbenchShutdown
 } from "../process/workbenchBackendRetire.js";
-import { createPythonOwnedProcessTreeTerminator, type PythonProcessIdentity } from "../process/pythonJsonBridge.js";
+import { capturePythonProcessIdentity, createPythonOwnedProcessTreeTerminator, type PythonProcessIdentity } from "../process/pythonJsonBridge.js";
 import { knownPidIsAlive, probeTcpConnect } from "./mainLine/observation.js";
 import { instanceIdForProject, normalizeInstanceKey, resolveDataHomeForProject } from "./projectStoragePaths.js";
 
@@ -177,6 +178,78 @@ export function resolveIsolatedClaimTarget(
     extraUsed: collectExtraUsedPorts(payload, wanted),
     alive: item.alive === true
   };
+}
+
+export type IsolatedStartReuseInspection =
+  | { kind: "reuse"; entry: RegistryEntry }
+  | { kind: "start" }
+  | { kind: "pending"; generation: number };
+
+/** Cached alive truth never acknowledges a start or authorizes retirement. */
+export async function inspectIsolatedStartReuse(input: {
+  target: IsolatedClaimTarget;
+  pythonPath: string;
+  registryPath?: string;
+  signal?: AbortSignal;
+  dependencies?: Partial<{
+    readRegistry: typeof readRegistry;
+    readDaemonIdentity: typeof readDaemonIdentity;
+    captureIdentity: typeof capturePythonProcessIdentity;
+    connect: (port: number, host: string) => Promise<boolean>;
+  }>;
+}): Promise<IsolatedStartReuseInspection> {
+  const dependencies = {
+    readRegistry,
+    readDaemonIdentity,
+    captureIdentity: capturePythonProcessIdentity,
+    connect: (port: number, host: string) => probeTcpConnect(port, host),
+    ...input.dependencies
+  };
+  const registryPath = input.registryPath || instancesRegistryPath();
+  input.signal?.throwIfAborted();
+  const entry = (await dependencies.readRegistry(registryPath)).instances[input.target.instanceId];
+  const pending = (): IsolatedStartReuseInspection => ({ kind: "pending", generation: positiveInt(entry?.generation) });
+  if (entry && !sameProjectRoot(String(entry.projectRoot || ""), input.target.projectRoot)) {
+    return pending();
+  }
+  if (entry && (entry.cleanupInProgress || ["starting", "restarting", "stopping"].includes(String(entry.status)))) {
+    // The normal start preparation owns stale in-flight recovery and its CAS.
+    return { kind: "start" };
+  }
+  const registered: PythonProcessIdentity | null = positiveInt(entry?.spawnPid) > 0
+    && Number(entry?.spawnCreateTime) > 0 && String(entry?.spawnExecutable || "").trim()
+    ? { pid: positiveInt(entry?.spawnPid), createTime: Number(entry?.spawnCreateTime), executable: String(entry?.spawnExecutable) }
+    : null;
+  const expected = registered || dependencies.readDaemonIdentity(input.target.projectRoot);
+  if (!expected) {
+    return { kind: "start" };
+  }
+  const actual = await dependencies.captureIdentity({
+    pythonPath: input.pythonPath, workspaceRoot: input.target.projectRoot, pid: expected.pid
+  });
+  input.signal?.throwIfAborted();
+  if (!actual || actual.pid !== expected.pid || Math.abs(actual.createTime - expected.createTime) > 0.01
+    || !sameProjectRoot(actual.executable, expected.executable)) {
+    return { kind: "start" };
+  }
+  if (!entry || !registered || entry.status !== "steady" || entry.desiredState !== "open"
+    || entry.phase !== "steady" || entry.portLeaseStatus !== "held"
+    || positiveInt(entry.generation) === 0 || !String(entry.commandId || "").trim()) {
+    // Preserve existing observation-driven adoption without falsely accepting
+    // a missing/terminal generation or spawning beside a live owned process.
+    return pending();
+  }
+  if (!(await dependencies.connect(positiveInt(entry.port), String(entry.host || "127.0.0.1")))) {
+    return pending();
+  }
+  input.signal?.throwIfAborted();
+  const latest = (await dependencies.readRegistry(registryPath)).instances[input.target.instanceId];
+  const fields = ["generation", "commandId", "status", "desiredState", "phase", "cleanupInProgress",
+    "projectRoot", "spawnPid", "spawnCreateTime", "spawnExecutable", "port", "controlPort", "host", "portLeaseStatus"] as const;
+  if (!latest || fields.some((field) => latest[field] !== entry[field])) {
+    return pending();
+  }
+  return { kind: "reuse", entry: latest };
 }
 
 export async function claimIsolatedStart(input: {

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import { describe, expect, it, vi } from "vitest";
 
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 const preloadSource = readFileSync(fileURLToPath(new URL("../src/preload.ts", import.meta.url)), "utf8");
@@ -9,7 +11,66 @@ const launcherWindowSource = readFileSync(
   "utf8",
 );
 
+function isolatedMutationForTest(bindings: Record<string, unknown>) {
+  const start = mainSource.indexOf("async function runIsolatedRegistryMutation");
+  const end = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle", start);
+  const compiled = ts.transpileModule(mainSource.slice(start, end), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  return runInNewContext(`${compiled}\nrunIsolatedRegistryMutation`, bindings);
+}
+
 describe("Electron main Launcher IPC facade", () => {
+  it("does not acknowledge stale cached alive truth after the registry has closed", async () => {
+    // Execute the real main-process mutation with a stopped registry and a
+    // deliberately stale state projection. Stop at the build boundary so this
+    // wiring regression cannot spawn any product runtime.
+    const buildBoundary = new Error("reached actual start build");
+    const build = vi.fn(async () => { throw buildBoundary; });
+    const target = { alive: true, projectRoot: "C:/wt/task", preferredBackend: 8003, preferredControl: 8768 };
+    const mutate = isolatedMutationForTest({
+      launcherStateStore: { projectBranchInstances: () => ({ items: [target] }) },
+      resolveIsolatedClaimTarget: () => target,
+      inspectIsolatedStartReuse: async () => ({ kind: "start" }),
+      scheduleRegistryReconciliation: vi.fn(),
+      randomUUID: () => "must-not-be-a-fake-start",
+      runWithFrontendBuildGate: build,
+      updateLauncherWindowTruth: vi.fn()
+    });
+    await expect(mutate({ operation: "start", instanceId: "worktree:task" })).rejects.toBe(buildBoundary);
+    expect(build).toHaveBeenCalledOnce();
+  });
+
+  it("returns the verified existing generation instead of inventing a reuse command", async () => {
+    const mutate = isolatedMutationForTest({
+      launcherStateStore: { projectBranchInstances: () => ({}) },
+      resolveIsolatedClaimTarget: () => ({ projectRoot: "C:/wt/task", preferredBackend: 8003 }),
+      inspectIsolatedStartReuse: async () => ({ kind: "reuse", entry: {
+        commandId: "registered-start", generation: 9, port: 8012, controlPort: 8777
+      } })
+    });
+    expect(await mutate({ operation: "start", instanceId: "worktree:task" })).toMatchObject({
+      accepted: true, commandId: "registered-start", generation: 9, port: 8012, controlPort: 8777
+    });
+  });
+
+  it("does not accept or spawn while a live process remains unbound after reconciliation", async () => {
+    const reconcile = vi.fn(async () => undefined);
+    const build = vi.fn();
+    const mutate = isolatedMutationForTest({
+      launcherStateStore: { projectBranchInstances: () => ({}) },
+      resolveIsolatedClaimTarget: () => ({ projectRoot: "C:/wt/task" }),
+      inspectIsolatedStartReuse: async () => ({ kind: "pending", generation: 9 }),
+      scheduleRegistryReconciliation: reconcile,
+      runWithFrontendBuildGate: build
+    });
+    expect(await mutate({ operation: "start", instanceId: "worktree:task" })).toMatchObject({
+      accepted: false, code: "instance_busy", generation: 9
+    });
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(build).not.toHaveBeenCalled();
+  });
+
   it("registers a control-window-only launcher invoke handler", () => {
     expect(mainSource).toContain("IPC_CHANNELS.launcherInvoke");
     expect(mainSource).toContain("from \"./protocol/launcherIpcHost.js\"");
