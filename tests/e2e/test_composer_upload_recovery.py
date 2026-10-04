@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 import json
+import time
 import urllib.parse
 
 import pytest
@@ -107,3 +108,86 @@ def test_failed_upload_withdraws_message_and_retries_only_failed_file(page, e2e_
     finally:
         page.unroute(upload_pattern, upload)
         page.unroute(message_pattern, block_message)
+
+
+def _assert_pending_upload_failure(page, instance, tmp_path, *, clear_draft=False, double_click=False):
+    from playwright.sync_api import expect
+
+    sid = create_session(instance.port, title="pending image upload recovery")
+    composer = _ready_composer(page, instance, sid)
+    image = tmp_path / "pending-upload.png"
+    image.write_bytes(build_png())
+    original = "上传等待期间的原始提交文字"
+    newer = "上传等待时继续编辑的新文字"
+    expected = original if double_click else ("" if clear_draft else newer)
+    upload_pattern = f"**/api/sessions/{sid}/attachments"
+    message_pattern = f"**/api/sessions/{sid}/messages"
+    pending = []
+    uploads = []
+    messages = []
+
+    def hold_upload(route):
+        uploads.append(route.request.url)
+        pending.append(route)
+
+    def block_message(route):
+        messages.append(route.request.url)
+        route.abort("internetdisconnected")
+
+    page.route(upload_pattern, hold_upload)
+    page.route(message_pattern, block_message)
+    try:
+        add_attachments(page, [image])
+        composer.fill(original)
+        send = page.get_by_role("button", name="发送", exact=True)
+        if double_click:
+            send.dblclick()
+        else:
+            send.click()
+        deadline = time.monotonic() + 10
+        while not pending and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert len(uploads) == 1, "Only one image upload may be in flight"
+        if not double_click:
+            expect(composer).to_be_enabled()
+            expect(composer).to_have_value("")
+            composer.click()
+            composer.press_sequentially(newer, delay=20)
+            expect(composer).to_have_value(newer)
+            if clear_draft:
+                composer.press("ControlOrMeta+A")
+                composer.press("Backspace")
+                expect(composer).to_have_value("")
+
+        pending.pop().abort("internetdisconnected")
+        wait_upload_failed_chip(page, image.name)
+        expect(composer).to_have_value(expected)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0", timeout=15000)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-status", "idle")
+        assert len(uploads) == 1 and not messages
+        assert original not in json.dumps(fetch_json(instance.port, f"/api/sessions/{sid}"), ensure_ascii=False)
+
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sid, timeout=30000)
+        expect(page.locator(COMPOSER).first).to_have_value(expected, timeout=15000)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0")
+        rows = page.evaluate('() => JSON.parse(localStorage.getItem("vibelution.chat.drafts.v1") || "[]")')
+        stored = {row.get("sessionId"): row.get("draft") for row in rows}
+        assert stored.get(sid, "") == expected
+    finally:
+        for route in pending:
+            route.abort("internetdisconnected")
+        page.unroute(upload_pattern, hold_upload)
+        page.unroute(message_pattern, block_message)
+
+
+def test_pending_upload_failure_keeps_newer_text_after_reload(page, e2e_instance, tmp_path):
+    _assert_pending_upload_failure(page, e2e_instance, tmp_path)
+
+
+def test_pending_upload_failure_keeps_intentional_clear_after_reload(page, e2e_instance, tmp_path):
+    _assert_pending_upload_failure(page, e2e_instance, tmp_path, clear_draft=True)
+
+
+def test_double_click_with_pending_upload_does_not_duplicate_requests(page, e2e_instance, tmp_path):
+    _assert_pending_upload_failure(page, e2e_instance, tmp_path, double_click=True)
