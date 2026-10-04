@@ -188,6 +188,8 @@ describe("MemoryAgentMemoryPanel interaction", () => {
 
     expect(buttonContaining(host, "Beta Agent")).not.toBeNull();
     expect(host.querySelector('button[aria-pressed="true"]')?.textContent).not.toContain("Alpha Agent");
+    expect(host.querySelector('[role="tabpanel"] h2')?.textContent).toContain("Alpha Agent");
+    expect(host.querySelector('[role="tabpanel"] h2')?.textContent).toContain("preferences.md");
     expect(host.textContent).toContain("Alpha saved memory body");
     expect(onSelectAgent).not.toHaveBeenCalled();
   });
@@ -239,24 +241,32 @@ describe("MemoryAgentMemoryPanel interaction", () => {
 
   it("clears filters, tab and raw expansion when the selected owner changes", async () => {
     const host = await mount(<MemoryAgentMemoryPanel {...baseProps} />, container!, root!);
+    expect(host.querySelector('[role="tabpanel"] h2')?.textContent).toContain("Alpha Agent");
     await act(async () => setInputValue(host.querySelector<HTMLInputElement>('input[aria-label="搜索记忆正文"]')!, "Alpha"));
     await selectTab(host, "来源与变化");
     await act(async () => buttonContaining(host, copy.rawContent)?.click());
-    await mount(<MemoryAgentMemoryPanel {...baseProps} selectedAgent={{...baseProps.selectedAgent!, name: "Beta", privateRoot: "C:/beta"}}
+    await mount(<MemoryAgentMemoryPanel {...baseProps} selectedAgentId="agent-beta" selectedAgent={{...baseProps.selectedAgent!, name: "Beta Agent", privateRoot: "C:/beta"}}
       items={[{...baseProps.items[0], id: "beta", content: "Beta only"}]} />, container!, root!);
     expect(host.querySelector<HTMLInputElement>('input[aria-label="搜索记忆正文"]')?.value).toBe("");
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("正文");
     expect(host.querySelector("pre")).toBeNull();
     expect(host.textContent).not.toContain("Alpha saved memory body");
     expect(host.textContent).toContain("Beta only");
+    expect(host.querySelector('[role="tabpanel"] h2')?.textContent).toContain("Beta Agent");
+    expect(host.querySelector('[role="tabpanel"] h2')?.textContent).not.toContain("Alpha Agent");
   });
 
-  it("hides stale body during loading or failed detail reads", async () => {
+  it("hides stale body and owner during loading, failed, or unselected detail reads", async () => {
     const host = await mount(<MemoryAgentMemoryPanel {...baseProps} detailPending />, container!, root!);
     expect(host.textContent).not.toContain("Alpha saved memory body");
+    expect(host.querySelector('[role="tabpanel"] h2')).toBeNull();
     await mount(<MemoryAgentMemoryPanel {...baseProps} detailErrorText="Access denied" />, container!, root!);
     expect(host.textContent).toContain("Access denied");
     expect(host.textContent).not.toContain("Alpha saved memory body");
+    expect(host.querySelector('[role="tabpanel"] h2')).toBeNull();
+
+    await mount(<MemoryAgentMemoryPanel {...baseProps} selectedAgent={null} selectedItem={null} items={[]} />, container!, root!);
+    expect(host.querySelector('[role="tabpanel"] h2')).toBeNull();
   });
 });
 

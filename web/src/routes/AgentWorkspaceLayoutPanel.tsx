@@ -108,7 +108,7 @@ export function AgentWorkspaceLayoutPanel({
     >
       <VListDetailPage
         className={className}
-        headerClassName={styles.hiddenHeader}
+        hideHeader
         ariaLabel={ariaLabel}
         title={title}
         data-vui-domain-recipe="agents-management-workbench"

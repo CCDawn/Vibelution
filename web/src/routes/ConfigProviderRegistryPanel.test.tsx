@@ -615,6 +615,37 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain("已配置服务");
   });
 
+  it("compacts provider settings at medium widths without hiding existing controls or errors", () => {
+    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:grid-cols-2");
+    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:[&>*:nth-child(-n+2)]:col-span-full");
+    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:[&_[data-vui=settings-row]]:!py-2");
+    expect(panelStyles.providerSettings).toContain("min-[721px]:max-[1120px]:[&_[data-vui=settings-row]>div]:!grid-cols-[minmax(0,1fr)_auto]");
+    expect(panelStyles.providerSettings).toContain("min-w-0");
+    expect(panelStyles.providerSettings).toContain("[overflow-wrap:anywhere]");
+    expect(panelStyles.modelsColumn).toContain("min-[721px]:max-[1120px]:gap-3");
+
+    const markup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps([], {
+      actionFeedback: {
+        kind: "credential",
+        providerId: "relay_a",
+        phase: "error",
+        message: "API Key 保存失败",
+      },
+    })} />);
+    const summary = markup.slice(
+      markup.indexOf('data-vui-region="config-provider-connection"'),
+      markup.indexOf('data-provider-tab="models"'),
+    );
+    expect(summary).toContain('data-provider-action="route"');
+    expect(summary).toContain("修改地址与协议");
+    expect(summary).toContain("接口协议");
+    expect(summary).toContain("responses");
+    expect(summary).toContain("更新 API Key");
+    expect(summary).toContain("调整上限与部署详情");
+    expect(summary).toContain("默认上下文上限");
+    expect(markup).toContain('role="alert"');
+  });
+
   it("lists abnormal providers in one rail with a warn dot and no status words", () => {
     const healthy = provider([model("luna", "pinned")]);
     const broken = {
@@ -687,6 +718,49 @@ describe("ConfigProviderRegistryPanel", () => {
     const idleIndex = markup.indexOf("Idle Relay");
     expect(busyIndex).toBeGreaterThan(-1);
     expect(idleIndex).toBeGreaterThan(busyIndex);
+  });
+
+  it("disambiguates same-name providers without changing row selection or switch semantics", async () => {
+    const anthroDirect = { ...provider([]), providerId: "anthropic_direct", label: "Anthropic" };
+    const anthroRelay = { ...provider([]), providerId: "anthropic_relay", label: "Anthropic" };
+    const xiaomiDirect = { ...provider([]), providerId: "xiaomi_direct", label: "Xiaomi" };
+    const xiaomiRelay = { ...provider([]), providerId: "xiaomi_relay", label: "Xiaomi" };
+    const onSelectProvider = vi.fn();
+    const onToggleEnabled = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(async () => root.render(
+      <ConfigProviderRegistryPanel
+        {...panelProps([], {
+          rows: [anthroDirect, anthroRelay, xiaomiDirect, xiaomiRelay],
+          selectedProviderId: "xiaomi_relay",
+          onSelectProvider,
+          onToggleEnabled,
+        })}
+      />,
+    ));
+
+    const list = container.querySelector<HTMLElement>('[data-vui="entity-list"]')!;
+    const items = Array.from(list.querySelectorAll<HTMLElement>('[data-vui="entity-list-item"]'));
+    const itemFor = (providerId: string) => items.find((item) => item.textContent?.includes(providerId))!;
+    const selectedButton = itemFor("xiaomi_relay").querySelector<HTMLButtonElement>("button[aria-pressed]")!;
+    expect(selectedButton.tagName).toBe("BUTTON");
+    expect(selectedButton.getAttribute("aria-pressed")).toBe("true");
+    expect(itemFor("anthropic_direct").textContent).toContain("anthropic_direct");
+    expect(itemFor("anthropic_relay").textContent).toContain("anthropic_relay");
+    expect(itemFor("xiaomi_direct").textContent).toContain("xiaomi_direct");
+    expect(itemFor("xiaomi_relay").textContent).toContain("xiaomi_relay");
+
+    await act(async () => itemFor("anthropic_relay").querySelector<HTMLButtonElement>("button[aria-pressed]")!.click());
+    expect(onSelectProvider).toHaveBeenCalledWith("anthropic_relay");
+
+    const relaySwitch = itemFor("anthropic_relay").querySelector<HTMLElement>('[role="switch"]')!;
+    expect(relaySwitch.getAttribute("aria-label")).toContain("anthropic_relay");
+    await act(async () => relaySwitch.click());
+    expect(onToggleEnabled).toHaveBeenCalledWith("anthropic_relay", false);
   });
 
   it("renders the inline enable switch per row and toggles through the draft callback", async () => {

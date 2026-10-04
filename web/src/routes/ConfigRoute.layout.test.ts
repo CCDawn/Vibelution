@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { deriveConfigSettingsNavigationCollapsed } from "./ConfigRoute";
 import routeSourceRaw from "./ConfigRoute.tsx?raw";
 // Settings-align wave 3: route-local modules extracted from the ConfigRoute
 // monolith; layout contracts may live in any of them (concatenated below).
@@ -79,6 +80,28 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSourceRaw).toContain("handleNavigateSettings(groupId, pageId);");
     expect(routeSourceRaw).not.toContain("${styles.treeFieldCardView} ${styles.themeBackgroundImageCard}");
     expect(styles.settingsSplit).toContain("max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto");
+  });
+  it("prioritizes model content at medium widths while retaining shared panes and the narrow layout", () => {
+    expect(routeSourceRaw).toContain("WORKBENCH_LAYOUT_IDS.configSettings");
+    expect(routeSourceRaw).toContain("minWidth: 220");
+    expect(providerPanelStyles.registryWorkspaceMedium).toContain("min-[721px]:max-[1120px]:[&>[data-vui=split-sidebar]]:!max-w-48");
+    expect(providerPanelSource).toContain("WORKBENCH_LAYOUT_IDS.configModelAssets");
+    expect(providerPanelStyles.registryWorkspace).toContain("max-[720px]:[&>[data-vui=split-sidebar]]:!basis-auto");
+    expect(styles.configStatusActions).toContain("min-[961px]:max-[1120px]:[flex-wrap:nowrap]");
+    expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
+  });
+  it("collapses the settings rail by default at 1024 on the model page and preserves narrow navigation", () => {
+    const input = {
+      isModelConnectionPage: true,
+      isMediumViewport: true,
+      isNarrowViewport: false,
+      userOverride: null,
+    };
+    expect(deriveConfigSettingsNavigationCollapsed(input)).toBe(true);
+    expect(deriveConfigSettingsNavigationCollapsed({ ...input, userOverride: false })).toBe(false);
+    expect(deriveConfigSettingsNavigationCollapsed({ ...input, userOverride: true })).toBe(true);
+    expect(deriveConfigSettingsNavigationCollapsed({ ...input, isMediumViewport: false })).toBe(false);
+    expect(deriveConfigSettingsNavigationCollapsed({ ...input, isNarrowViewport: true, userOverride: true })).toBe(false);
   });
   it("hosts unsaved leave guard on VDialog instead of a hand-rolled overlay", () => {
     expect(routeSource).toContain("<VDialog");

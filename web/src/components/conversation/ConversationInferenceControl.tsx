@@ -63,7 +63,7 @@ export function ConversationInferenceControl({
   openSignal = "",
   onReasoningEffortChange,
 }: ConversationInferenceControlProps) {
-  const { t } = useAppI18n({ domains: ["chat"] });
+  const { lang, t } = useAppI18n({ domains: ["chat"] });
   const [open, setOpen] = useState(false);
   // Lifetime include/exclude tally for the model on display; cheap aggregate
   // endpoint, so a 5-minute freshness window keeps the popover quiet. The
@@ -85,6 +85,9 @@ export function ConversationInferenceControl({
     () => resolveConversationInferenceEffort(model, currentReasoningEffort),
     [currentReasoningEffort, model],
   );
+  const reasoningEffortLabel = lang === "zh" ? "推理强度" : "Reasoning effort";
+  const currentEffortLabel = current.option?.label || current.effort || (lang === "zh" ? "不支持调节" : "Not configurable");
+  const selectReasoningEffortLabel = lang === "zh" ? "选择推理强度" : "Select reasoning effort";
 
   // Avoid applying effort clicks from a menu opened on a previous session.
   useEffect(() => {
@@ -106,7 +109,7 @@ export function ConversationInferenceControl({
 
   if (!model) return null;
   if (!model.reasoningEffortValues?.length) {
-    return <span className={styles.fixedLabel}>{model.label || model.model}</span>;
+    return <span className={styles.fixedLabel}>{reasoningEffortLabel} · {currentEffortLabel}</span>;
   }
 
   return (
@@ -123,7 +126,7 @@ export function ConversationInferenceControl({
         side="top"
         align="end"
         sideOffset={6}
-        aria-label="选择推理强度"
+        aria-label={selectReasoningEffortLabel}
         contentClassName={styles.menu}
         data-vui="conversation-inference-menu"
         trigger={(
@@ -134,10 +137,11 @@ export function ConversationInferenceControl({
             isDisabled={disabled || pending}
             aria-haspopup="listbox"
             aria-expanded={open}
+            aria-label={`${reasoningEffortLabel}: ${currentEffortLabel}`}
             data-open={open ? "true" : "false"}
-            tooltip={`${model.label || model.model} · ${current.option?.label || current.effort}`}
+            tooltip={`${reasoningEffortLabel}: ${currentEffortLabel}`}
           >
-            <span className={styles.triggerModel}>{model.label || model.model}</span>
+            <span className={styles.triggerModel}>{reasoningEffortLabel}</span>
             <span className={styles.triggerSeparator} aria-hidden="true">·</span>
             <span className={styles.triggerEffort}>{current.option?.label || current.effort}</span>
             <ChevronDown className={styles.triggerChevron} data-open={open ? "true" : "false"} size={12} aria-hidden="true" />
@@ -146,7 +150,7 @@ export function ConversationInferenceControl({
       >
         <div
           role="listbox"
-          aria-label="选择推理强度"
+          aria-label={selectReasoningEffortLabel}
           data-testid="conversation-inference-menu"
         >
           {model.reasoningEffortOptions.map((option) => {

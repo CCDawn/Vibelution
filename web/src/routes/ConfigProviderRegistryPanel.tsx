@@ -218,7 +218,7 @@ function ProviderListRowItem({
   onSelect,
   onToggle,
 }: {
-  row: ProviderListRow & { status: string; dotTitle: string };
+  row: ProviderListRow & { status: string; dotTitle: string; showProviderId: boolean };
   selected: boolean;
   inspecting: boolean;
   disabled: boolean;
@@ -248,7 +248,12 @@ function ProviderListRowItem({
           data-provider-dot={row.dotClass}
           title={row.dotTitle}
         />
-        <span className={styles.providerLabel}>{row.name}</span>
+        <span className={styles.providerRowIdentity}>
+          <span className={styles.providerLabel}>{row.name}</span>
+          {row.showProviderId ? (
+            <small className={styles.providerDisambiguator} title={row.providerId}>{row.providerId}</small>
+          ) : null}
+        </span>
         {row.inUse ? (
           <span className={styles.providerInUseBadge} data-provider-inuse="true">{copy.inUseBadge}</span>
         ) : null}
@@ -259,7 +264,7 @@ function ProviderListRowItem({
           isSelected={row.enabled}
           isDisabled={disabled}
           data-provider-switch="true"
-          aria-label={`${row.name} · ${copy.providerSwitchAriaSuffix}`}
+          aria-label={`${row.name}${row.showProviderId ? ` · ${row.providerId}` : ""} · ${copy.providerSwitchAriaSuffix}`}
           title={copy.providerSwitchHint}
           onChange={(next) => onToggle(row.providerId, next)}
         />
@@ -1290,15 +1295,23 @@ export function ConfigProviderRegistryPanel({
     [liveReferenceCountByModelRef, rows],
   );
   const listItems = useMemo(
-    () => listRows.map((listRow) => {
-      const full = rows.find((row) => row.providerId === listRow.providerId);
-      return {
-        ...listRow,
-        id: listRow.providerId,
-        status: full?.status ?? "",
-        dotTitle: providerDotTitle(listRow.dotClass, full?.status ?? "", copy),
-      };
-    }),
+    () => {
+      const nameCounts = new Map<string, number>();
+      for (const listRow of listRows) {
+        const name = listRow.name.trim().toLowerCase();
+        if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+      }
+      return listRows.map((listRow) => {
+        const full = rows.find((row) => row.providerId === listRow.providerId);
+        return {
+          ...listRow,
+          id: listRow.providerId,
+          status: full?.status ?? "",
+          dotTitle: providerDotTitle(listRow.dotClass, full?.status ?? "", copy),
+          showProviderId: (nameCounts.get(listRow.name.trim().toLowerCase()) ?? 0) > 1,
+        };
+      });
+    },
     [copy, listRows, rows],
   );
   const provider =
@@ -1505,7 +1518,7 @@ export function ConfigProviderRegistryPanel({
         </div>
       ) : null}
       <VSplitWorkspace
-        className={styles.registryWorkspace}
+        className={`${styles.registryWorkspace} ${styles.registryWorkspaceMedium}`}
         resize={{
           layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
           sidebar: { defaultWidth: 224, minWidth: 180, maxWidth: 300 },

@@ -8,7 +8,6 @@ const panelReset =
 
 const styles = {
   shellHost: "relative grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] overflow-hidden",
-  hiddenHeader: "hidden",
   // Recipe owns resize (layoutId). Narrow screens use route-owned master/detail switching.
   workspace: `relative h-full min-h-0 w-full min-w-0 overflow-hidden border-t border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] ${vuiWorkspaceFillClass} max-[1180px]:[&>[data-vui=split-aside]]:!absolute max-[1180px]:[&>[data-vui=split-aside]]:inset-y-0 max-[1180px]:[&>[data-vui=split-aside]]:right-0 max-[1180px]:[&>[data-vui=split-aside]]:z-40 max-[680px]:[&>[data-vui=split-aside]]:!w-full max-[680px]:[&>[data-vui=split-aside]]:!min-w-0 max-[680px]:[&>[data-vui=split-aside]]:!max-w-[360px] max-[680px]:[&>[data-vui=split-aside]]:!basis-auto`,
   workspaceNarrowDirectory:

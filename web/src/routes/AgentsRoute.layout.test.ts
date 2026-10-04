@@ -1193,6 +1193,10 @@ describe("AgentsRoute layout contract", () => {
     expect(configDraftMutationsSource).toContain("status: payload.draft.status");
     expect(configDraftMutationsSource).toContain("updateAgent(payload.agentId");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
+    expect(coreConfigPanelSource).toContain("这是此 Agent 的工具调用批准方式；可用工具范围请到“工具”页配置。");
+    expect(coreConfigPanelSource).toContain("This sets how tool calls are approved for this Agent. Configure the available tool scope on the Tools page.");
+    expect(coreConfigPanelSource).not.toContain("唯一权限配置");
+    expect(coreConfigPanelSource).not.toContain("sole permission setting");
     expect(coreConfigStyles.healthGuidePanel).toBeTruthy();
     expect(coreConfigStyles.healthGuide_warning).toBeTruthy();
   });
@@ -1955,6 +1959,8 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutStyles.workspace).toContain("[data-vui=split-aside]]:z-40");
     expect(workspaceLayoutStyles.directory).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(workspaceLayoutPanelSource).toContain("VListDetailPage");
+    expect(workspaceLayoutPanelSource).toContain("hideHeader");
+    expect(workspaceLayoutPanelSource).not.toContain("styles.hiddenHeader");
     expect(workspaceLayoutPanelSource).toContain("layoutId={LAYOUT_ID}");
     expect(workspaceLayoutPanelSource).toContain("WORKBENCH_LAYOUT_IDS.agents");
     expect(workspaceLayoutPanelSource).toContain("data-agent-workspace=\"resizable\"");

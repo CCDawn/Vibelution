@@ -16,6 +16,8 @@ export type VListDetailPageProps = Omit<ComponentPropsWithoutRef<"section">, "ch
   /** Header actions (refresh, create, …). */
   actions?: ReactNode;
   headerClassName?: string;
+  /** Skip the route header when the surrounding chrome already names the page. */
+  hideHeader?: boolean;
   /** Optional strip between header and workspace (metrics, filters). */
   toolbar?: ReactNode;
   /** Left list / filter column. */
@@ -54,6 +56,7 @@ export function VListDetailPage({
   meta,
   actions,
   headerClassName,
+  hideHeader = false,
   toolbar,
   list,
   detail,
@@ -69,6 +72,7 @@ export function VListDetailPage({
   const resizeConfig = layoutId
     ? { layoutId, enabled: true, ...resize }
     : false;
+  const showChrome = !hideHeader || Boolean(toolbar);
 
   return (
     <VWorkbenchPage
@@ -76,21 +80,28 @@ export function VListDetailPage({
       className={className}
       data-vui-recipe="list-detail-page"
       fill={fill}
+      fillLayout={showChrome ? "header-body" : "stack"}
       {...props}
     >
-      <VRouteHeader
-        className={headerClassName}
-        eyebrow={eyebrow}
-        title={title}
-        meta={meta}
-        actions={actions}
-      />
-      {toolbar ? (
-        <div data-vui="list-detail-toolbar" className="min-w-0 shrink-0">
-          {toolbar}
+      {showChrome ? (
+        <div data-vui="list-detail-chrome" className="grid min-w-0 shrink-0 gap-0">
+          {!hideHeader ? (
+            <VRouteHeader
+              className={headerClassName}
+              eyebrow={eyebrow}
+              title={title}
+              meta={meta}
+              actions={actions}
+            />
+          ) : null}
+          {toolbar ? (
+            <div data-vui="list-detail-toolbar" className="min-w-0 shrink-0">
+              {toolbar}
+            </div>
+          ) : null}
         </div>
       ) : null}
-      <div className={fill ? VUI_PAGE_BODY_FILL_CLASS : "min-h-0 min-w-0"}>
+      <div data-vui="list-detail-body" className={fill ? VUI_PAGE_BODY_FILL_CLASS : "min-h-0 min-w-0"}>
         <VSplitWorkspace
           className={cn(fill ? "h-full min-h-0" : undefined, workspaceClassName)}
           columnsClassName={columnsClassName}

@@ -71,13 +71,24 @@ describe("ConversationTurnModelControl", () => {
   it("follows the session default model when no override is pinned", () => {
     const html = renderControl();
     expect(html).toContain("Luna 5.6");
+    expect(html).toContain("本轮模型");
+    expect(html).toContain('aria-label="本轮模型: Luna 5.6"');
     expect(html).not.toContain('data-override="true"');
   });
 
   it("marks a pinned non-default override with the ≠default chip state", () => {
     const html = renderControl({ selection: { modelId: "ai-pixel/sol-4" } });
     expect(html).toContain("Sol 4");
+    expect(html).toContain('aria-label="本轮模型: Sol 4"');
     expect(html).toContain('data-override="true"');
+  });
+
+  it("keeps the scope label visible and prefixes the existing follow or override tooltip", () => {
+    expect(controlSource).toContain('lang === "zh" ? "本轮模型" : "Model for this turn"');
+    expect(controlSource).toContain('t("turnModelOverrideTooltip").replace("{model}", effectiveLabel)');
+    expect(controlSource).toContain('t("turnModelFollowTooltip").replace("{model}", effectiveLabel)');
+    expect(controlSource).toContain("tooltip={turnModelTooltip}");
+    expect(controlSource).toContain("max-w-32 truncate");
   });
 
   it("does not mark an override that re-pins the session default model", () => {

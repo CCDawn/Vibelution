@@ -1,0 +1,42 @@
+@import "../../src/design/tokens.css";
+@import "../../src/design/base.css";
+@import "../../src/design/tailwind.css";
+@import "../../src/design/route-css/agents.tailwind.css";
+@import "../../src/design/route-css/memory.tailwind.css";
+@import "../../src/design/route-css/config.tailwind.css";
+@import "../../src/design/route-css/workbench-secondary.tailwind.css";
+@import "../../src/design/route-css/teams.tailwind.css";
+@import "../../src/design/vui-provider-theme.css";
+@import "../../src/design/vui-native-controls.css";
+@source "./*.tsx";
+
+html, body, #root { height: 100%; margin: 0; }
+.ux-preview { display: flex; height: 100dvh; min-width: 0; flex-direction: column; color: var(--fg-primary); background: var(--vui-surface-workspace); }
+.ux-preview-bar { display: flex; flex: none; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--vui-border-subtle); background: var(--vui-surface-toolbar); }
+.ux-preview-bar > span { font-size: var(--vui-font-xs); color: var(--fg-secondary); }
+.ux-preview-bar nav { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.ux-preview-content { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.memory-preview { display: flex; height: 100%; min-height: 0; min-width: 0; flex-direction: column; }
+.memory-preview__notice { flex: none; margin: 0; padding: 8px 12px; font-size: var(--vui-font-xs); color: var(--fg-secondary); border-bottom: 1px solid var(--vui-border-subtle); }
+.model-library-preview { display: grid; grid-template-columns: 240px minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+.teams-launch-main { display: flex; height: 100%; min-width: 0; overflow: auto; justify-content: center; padding: 24px; }
+.teams-launch-form { display: flex; width: min(100%, 680px); min-width: 0; flex-direction: column; }
+.teams-launch-form > [data-vui=surface] { min-height: auto; flex: none; gap: 16px; padding: 24px; border: 0; }
+.teams-launch-form [data-vui-region=launch-primary-action] { position: static; margin: 0; padding: 16px 0 0; background: transparent; box-shadow: none; }
+.teams-launch-context { display: flex; min-width: 0; flex-wrap: wrap; gap: 8px; padding: 0 24px 8px; align-items: center; }
+.teams-inspector { display: flex; min-width: 0; flex-direction: column; gap: 12px; padding: 16px; }
+.teams-inspector p { margin: 0; font-size: var(--vui-font-xs); line-height: 1.7; color: var(--fg-secondary); }
+.teams-inspector dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px 16px; margin: 0; font-size: var(--vui-font-xs); }
+.teams-inspector dt { color: var(--fg-tertiary); }
+.teams-inspector dd { margin: 0; }
+@media (max-width: 680px) {
+  .teams-launch-main { padding: 12px; }
+  .teams-launch-form > [data-vui=surface] { padding: 12px; }
+  .teams-launch-context { padding: 0 12px 8px; }
+  .teams-launch-form input { font-size: 16px; }
+  .ux-preview-bar button { min-height: 44px; }
+}
+@media (max-width: 720px) {
+  .model-library-preview { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+  .model-library-preview > [data-model-preview-main-nav] { display: none !important; }
+}

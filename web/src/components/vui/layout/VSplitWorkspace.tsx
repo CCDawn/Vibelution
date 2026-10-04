@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef, type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { PaneCollapseHandle } from "../../layout/PaneCollapseHandle";
 import { PaneResizeHandle } from "../../layout/PaneResizeHandle";
@@ -20,6 +20,15 @@ const DEFAULT_ASIDE: PaneSpec = {
   maxWidth: 480,
 };
 
+type CollapseControl = {
+  separatorLabel: string;
+  collapseLabel: string;
+  expandLabel: string;
+} & (
+  | { collapsed: boolean; onCollapsedChange: (collapsed: boolean) => void }
+  | { collapsed?: undefined; onCollapsedChange?: undefined }
+);
+
 export type VSplitWorkspaceResizeConfig = {
   /** Permanent memory key — required for resize + persistence. */
   layoutId: string;
@@ -27,16 +36,8 @@ export type VSplitWorkspaceResizeConfig = {
   aside?: Partial<PaneSpec>;
   /** Optional collapse controls. Width memory remains owned by layoutId. */
   collapse?: {
-    sidebar?: {
-      separatorLabel: string;
-      collapseLabel: string;
-      expandLabel: string;
-    };
-    aside?: {
-      separatorLabel: string;
-      collapseLabel: string;
-      expandLabel: string;
-    };
+    sidebar?: CollapseControl;
+    aside?: CollapseControl;
   };
   /** Set false to keep fixed CSS columns (legacy). Default true when layoutId is set. */
   enabled?: boolean;
@@ -137,11 +138,33 @@ function ResizableSplitWorkspace({
 
   const sidebarSpec = panes.find((pane) => pane.id === (resize.sidebar?.id || "sidebar"));
   const asideSpec = panes.find((pane) => pane.id === (resize.aside?.id || "aside"));
+  const sidebarControlledCollapsed = resize.collapse?.sidebar?.collapsed;
+  const asideControlledCollapsed = resize.collapse?.aside?.collapsed;
+  // Keep only accepted owner values as the fallback if control is later removed.
+  // A controlled click still requests a change without updating visibility.
+  useEffect(() => {
+    setCollapsedPaneIds((current) => {
+      const next = new Set(current);
+      for (const [id, collapsed] of [
+        [sidebarSpec?.id, sidebarControlledCollapsed],
+        [asideSpec?.id, asideControlledCollapsed],
+      ] as const) {
+        if (!id || collapsed === undefined) continue;
+        if (collapsed) next.add(id);
+        else next.delete(id);
+      }
+      return next.size === current.size && [...next].every((id) => current.has(id)) ? current : next;
+    });
+  }, [asideSpec?.id, asideControlledCollapsed, sidebarSpec?.id, sidebarControlledCollapsed]);
   const sidebarWidth = sidebarSpec ? widths[sidebarSpec.id] ?? sidebarSpec.defaultWidth : 0;
   const asideWidth = asideSpec ? widths[asideSpec.id] ?? asideSpec.defaultWidth : 0;
-  const sidebarCollapsed = Boolean(sidebarSpec && collapsedPaneIds.has(sidebarSpec.id));
-  const asideCollapsed = Boolean(asideSpec && collapsedPaneIds.has(asideSpec.id));
-  const togglePane = (paneId: string) => {
+  const sidebarCollapsed = Boolean(sidebarSpec && (resize.collapse?.sidebar?.collapsed ?? collapsedPaneIds.has(sidebarSpec.id)));
+  const asideCollapsed = Boolean(asideSpec && (resize.collapse?.aside?.collapsed ?? collapsedPaneIds.has(asideSpec.id)));
+  const togglePane = (paneId: string, control: CollapseControl | undefined, collapsed: boolean) => {
+    if (control?.collapsed !== undefined) {
+      control.onCollapsedChange(!collapsed);
+      return;
+    }
     setCollapsedPaneIds((current) => {
       const next = new Set(current);
       if (next.has(paneId)) {
@@ -196,7 +219,7 @@ function ResizableSplitWorkspace({
               valueMin={sidebarSpec.minWidth}
               valueMax={sidebarSpec.maxWidth}
               active={draggingPaneId === sidebarSpec.id}
-              onToggle={() => togglePane(sidebarSpec.id)}
+              onToggle={() => togglePane(sidebarSpec.id, resize.collapse?.sidebar, sidebarCollapsed)}
               onPointerDown={sidebarCollapsed ? undefined : (event) => startResize(sidebarSpec.id, event, { direction: 1 })}
               onKeyDown={sidebarCollapsed ? undefined : (event) => onResizeKeyDown(sidebarSpec.id, event, { direction: 1 })}
             />
@@ -232,7 +255,7 @@ function ResizableSplitWorkspace({
               valueMin={asideSpec.minWidth}
               valueMax={asideSpec.maxWidth}
               active={draggingPaneId === asideSpec.id}
-              onToggle={() => togglePane(asideSpec.id)}
+              onToggle={() => togglePane(asideSpec.id, resize.collapse?.aside, asideCollapsed)}
               onPointerDown={asideCollapsed ? undefined : (event) => startResize(asideSpec.id, event, { direction: -1 })}
               onKeyDown={asideCollapsed ? undefined : (event) => onResizeKeyDown(asideSpec.id, event, { direction: -1 })}
             />

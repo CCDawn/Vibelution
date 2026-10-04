@@ -47,7 +47,7 @@ function renderControl(ui: React.ReactElement) {
 }
 
 describe("ConversationInferenceControl", () => {
-  it("shows one fixed model and only its current effort", () => {
+  it("shows the reasoning-effort role and current value without repeating the model name", () => {
     const html = renderControl(
       <ConversationInferenceControl
         model={luna}
@@ -58,9 +58,11 @@ describe("ConversationInferenceControl", () => {
       />,
     );
 
-    expect(html).toContain("Luna 5.6");
+    expect(html).toContain("推理强度");
+    expect(html).toContain('aria-label="推理强度: 高"');
     expect(html).toContain("高");
     expect(html).toContain('aria-hidden="true">·</span>');
+    expect(html).not.toContain("Luna 5.6");
     expect(html).not.toContain('data-slot="vui-button-label"');
     expect(html).not.toContain("选择模型");
     expect(html).not.toContain("Sol");
@@ -103,8 +105,15 @@ describe("ConversationInferenceControl", () => {
       />,
     );
 
-    expect(html).toContain("Luna 5.6");
+    expect(html).toContain("推理强度 · 不支持调节");
+    expect(html).not.toContain("Luna 5.6");
     expect(html).not.toContain('aria-haspopup="listbox"');
+  });
+
+  it("keeps the reasoning-effort role copy localized in the component", () => {
+    expect(controlSource).toContain('lang === "zh" ? "推理强度" : "Reasoning effort"');
+    expect(controlSource).toContain('lang === "zh" ? "不支持调节" : "Not configurable"');
+    expect(controlSource).toContain('lang === "zh" ? "选择推理强度" : "Select reasoning effort"');
   });
 
   it("falls back to the declared model default", () => {

@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.app.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": true,
+    "tsBuildInfoFile": "./preview.tsbuildinfo"
+  },
+  "include": ["../../src/vite-env.d.ts", "./*.tsx", "./*.ts"],
+  "exclude": ["./*.test.ts", "./*.test.tsx"]
+}

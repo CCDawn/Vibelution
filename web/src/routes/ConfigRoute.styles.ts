@@ -90,7 +90,7 @@ const styles = {
   configEditorSection:
     "vui-routes-configroute configEditorSection [&>_.treeGrid]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.treeStack]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.helperText]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)]",
   configStatusActions:
-    "vui-routes-configroute configStatusActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap] max-[720px]:[justify-content:start]",
+    "vui-routes-configroute configStatusActions [display:flex] [align-items:center] [justify-content:end] [gap:6px] [flex-wrap:wrap] min-[961px]:max-[1120px]:[flex-wrap:nowrap] max-[720px]:[justify-content:start]",
   configHeader:
     "vui-routes-configroute configHeader min-w-0 !border-0 !rounded-none !shadow-none !bg-vui-surface-panel [&>[data-vui=route-header]]:!border-0 [&>[data-vui=route-header]]:!rounded-none [&>[data-vui=route-header]]:!shadow-none [&>[data-vui=route-header]]:!bg-transparent [&>[data-vui=route-header]]:!py-2 [&>[data-vui=route-header]]:!px-3",
   configStatusMeta:

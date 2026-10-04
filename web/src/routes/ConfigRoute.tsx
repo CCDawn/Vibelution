@@ -204,6 +204,63 @@ const CONFIG_SETTINGS_SIDEBAR_RESIZE = {
 /** 已生效徽标的最短展示时长：apply 成功后基线立即对齐，徽标短暂驻留后再清除。 */
 const IMMEDIATE_APPLIED_BADGE_HOLD_MS = 4000;
 
+type ConfigSettingsNavigationCollapseInput = {
+  isModelConnectionPage: boolean;
+  isMediumViewport: boolean;
+  isNarrowViewport: boolean;
+  userOverride: boolean | null;
+};
+
+export function deriveConfigSettingsNavigationCollapsed({
+  isModelConnectionPage,
+  isMediumViewport,
+  isNarrowViewport,
+  userOverride,
+}: ConfigSettingsNavigationCollapseInput): boolean {
+  if (isNarrowViewport) return false;
+  return userOverride ?? (isModelConnectionPage && isMediumViewport);
+}
+
+function useViewportQueryMatches(query: string): boolean {
+  const [matches, setMatches] = useState(() => (
+    typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(query).matches
+  ));
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mediaQuery = window.matchMedia(query);
+    const update = () => setMatches(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
+}
+
+export function useConfigSettingsNavigationCollapse(isModelConnectionPage: boolean, navigationKey: string) {
+  const [userOverride, setUserOverride] = useState<boolean | null>(null);
+  const isMediumViewport = useViewportQueryMatches("(min-width: 721px) and (max-width: 1120px)");
+  const isNarrowViewport = useViewportQueryMatches("(max-width: 720px)");
+
+  useEffect(() => {
+    setUserOverride(null);
+  }, [navigationKey]);
+
+  const onCollapsedChange = useCallback((collapsed: boolean) => setUserOverride(collapsed), []);
+  return {
+    collapsed: deriveConfigSettingsNavigationCollapsed({
+      isModelConnectionPage,
+      isMediumViewport,
+      isNarrowViewport,
+      userOverride,
+    }),
+    onCollapsedChange,
+  };
+}
+
 import {
   type ProviderRouteImpact,
   type ProviderRoutePreview,
@@ -573,6 +630,11 @@ export function ConfigRoute() {
     return !showingSettingsIndex && (!requestedFocusSectionId || requestedFocusSectionId === sectionId)
       && Boolean(activePage?.memberSectionIds.includes(sectionId));
   }
+
+  const settingsNavCollapse = useConfigSettingsNavigationCollapse(
+    isSectionVisible("models"),
+    `${showingSettingsIndex ? "index" : "page"}:${activeGroup?.id ?? ""}:${activePage?.id ?? ""}`,
+  );
 
   const healthDiagnosticsQuery = useConfigHealthDiagnosticsQuery(isSectionVisible("health-diagnostics"));
 
@@ -1576,7 +1638,13 @@ export function ConfigRoute() {
           layoutId: CONFIG_SETTINGS_LAYOUT_ID,
           sidebar: CONFIG_SETTINGS_SIDEBAR_RESIZE,
           collapse: {
-            sidebar: { separatorLabel: copy.navResizeSeparator, collapseLabel: copy.navCollapse, expandLabel: copy.navExpand },
+            sidebar: {
+              separatorLabel: copy.navResizeSeparator,
+              collapseLabel: copy.navCollapse,
+              expandLabel: copy.navExpand,
+              collapsed: settingsNavCollapse.collapsed,
+              onCollapsedChange: settingsNavCollapse.onCollapsedChange,
+            },
           },
         }}
         sidebar={(

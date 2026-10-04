@@ -222,7 +222,7 @@ function AgentMemoryLibrary({ lang, copy, items, selectedAgent, pending, fetchin
   </section>;
   const detail = <section className={styles.reader} aria-label={text.read} aria-busy={pending || fetching}>
     <VButton contentLayout="plain" variant="ghost" className={styles.mobileBack} onClick={() => setMobileReading(false)}><ArrowLeft size={15} />{copy.browseBack}</VButton>
-    {!pending && !error && item ? <MemoryRecord key={item.id} item={item} copy={copy} lang={lang} />
+    {!pending && !error && item ? <MemoryRecord key={item.id} item={item} copy={copy} lang={lang} ownerName={selectedAgent?.name} />
       : <div className={styles.emptyReader}><VStateSurface tone={error ? "error" : "empty"} title={pending ? copy.loading : error ? copy.loadFailed : selectedAgent ? (query.trim() || category !== "all" ? text.noMatches : copy.agentMemoryNoPrivateMemory) : copy.agentMemorySelectPrompt}>{error || undefined}</VStateSurface></div>}
   </section>;
   return <VSplitWorkspace className={`${styles.libraryWorkspace} ${mobileReading ? styles.mobileReading : styles.mobileListing}`}
@@ -230,14 +230,14 @@ function AgentMemoryLibrary({ lang, copy, items, selectedAgent, pending, fetchin
     sidebar={list} main={detail} />;
 }
 
-function MemoryRecord({ item, copy, lang }: {
-  item: ReturnType<typeof buildAgentMemoryReaderItems>[number]; copy: MemoryAgentMemoryPanelCopy; lang: "zh" | "en";
+function MemoryRecord({ item, copy, lang, ownerName }: {
+  item: ReturnType<typeof buildAgentMemoryReaderItems>[number]; copy: MemoryAgentMemoryPanelCopy; lang: "zh" | "en"; ownerName?: string;
 }) {
   const [tab, setTab] = useState("read");
   const [raw, setRaw] = useState(false);
   const text = readerCopy[lang];
   const heading = <header className={styles.documentHeader}>
-    <h2 className={styles.documentTitle}>{item.readerTitle}</h2>
+    <h2 className={styles.documentTitle}>{ownerName ? `${ownerName} · ${item.readerTitle}` : item.readerTitle}</h2>
     <p className={styles.documentMeta}>{item.updatedAtText} · {item.sizeText}</p>
   </header>;
   const body = <article className={styles.readingContent}>{heading}

@@ -167,7 +167,12 @@ import { VListDetailPage } from "@/components/vui";
 | --- | --- | --- |
 | list / detail / aside | 列内容 | 空选中用 `VEmptyState` |
 | layoutId / resize | 拖拽记忆 | 只用 registry id |
-| toolbar | 列表上过滤条 | 可选 |
+| `hideHeader` | 不渲染重复顶栏 | 外层已命名时使用，不用 CSS 隐藏顶栏；工具条仍保留 |
+| toolbar | 列表上过滤条 | 与顶栏包在同一 chrome 行；正文独占第二行，避免按钮被列表覆盖 |
+
+### 几何契约
+- `list-detail-chrome` 统一承载顶栏和工具条，`list-detail-body` 承载满高分栏。
+- `hideHeader` 且无工具条时复用 `VWorkbenchPage` 的 `stack` 满高布局；不保留空标题行。
 
 ### 反冗余
 - 禁止手写双栏宽度 localStorage。
@@ -469,6 +474,7 @@ import { VSplitWorkspace } from "@/components/vui";
 | sidebar / main / aside | 列 | 空列勿占宽 |
 | resize.layoutId | 宽度记忆 | 仅 registry id |
 | resize.collapse | 可选 sidebar / aside 收起 | 复用 `PaneCollapseHandle`；标签由消费者提供；收起不覆盖已记忆宽度 |
+| `resize.collapse.*.collapsed` / `onCollapsedChange` | 可选的受控折叠值与回调，必须一起提供 | 响应式策略归页面；未提供时保持内部手动切换。撤销受控值时沿用 owner 最后接受的状态，不采用尚未接受的点击请求。收起只隐藏列、不卸载草稿；点击请求 owner 更新，不另建宽度记忆 |
 | columnsClassName | 固定列模板覆盖 | 默认列宽带 16rem 回退，未注入页面变量时仍保持桌面横向分栏 |
 
 ### 实现落点

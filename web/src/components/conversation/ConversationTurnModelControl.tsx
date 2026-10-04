@@ -45,12 +45,18 @@ export function ConversationTurnModelControl({
   disabled,
   onSelectionChange,
 }: ConversationTurnModelControlProps) {
-  const { t } = useAppI18n({ domains: ["chat"] });
+  const { lang, t } = useAppI18n({ domains: ["chat"] });
   const [open, setOpen] = useState(false);
   const overrideActive = Boolean(selection?.modelId);
   const overrideLeavesDefault = overrideActive && selection?.modelId !== sessionDefaultModelId;
   const effectiveModelId = effectiveTurnModelId(sessionDefaultModelId, selection);
   const effectiveLabel = resolveTurnModelSelectionLabel(choices, effectiveModelId);
+  const turnModelScopeLabel = lang === "zh" ? "本轮模型" : "Model for this turn";
+  const turnModelLabel = `${turnModelScopeLabel}: ${effectiveLabel}`;
+  const turnModelStatusTooltip = overrideLeavesDefault
+    ? t("turnModelOverrideTooltip").replace("{model}", effectiveLabel)
+    : t("turnModelFollowTooltip").replace("{model}", effectiveLabel);
+  const turnModelTooltip = `${turnModelScopeLabel} · ${turnModelStatusTooltip}`;
   const overrideModel = useMemo(
     () => (overrideActive
       ? choices.find((choice) => choice.modelRef === selection?.modelId || choice.modelId === selection?.modelId)
@@ -170,14 +176,15 @@ export function ConversationTurnModelControl({
             isDisabled={disabled}
             aria-haspopup="listbox"
             aria-expanded={open}
+            aria-label={turnModelLabel}
             data-open={open ? "true" : "false"}
             data-override={overrideLeavesDefault ? "true" : "false"}
-            tooltip={overrideLeavesDefault
-              ? t("turnModelOverrideTooltip").replace("{model}", effectiveLabel)
-              : t("turnModelFollowTooltip").replace("{model}", effectiveLabel)}
+            tooltip={turnModelTooltip}
           >
             <Bot className={styles.triggerIcon} size={12} aria-hidden="true" />
-            <span className={styles.triggerModel}>{effectiveLabel}</span>
+            <span className="shrink-0 whitespace-nowrap">{turnModelScopeLabel}</span>
+            <span aria-hidden="true">·</span>
+            <span className={`${styles.triggerModel} max-w-32 truncate`} title={effectiveLabel}>{effectiveLabel}</span>
             {overrideLeavesDefault ? (
               <span className={styles.overrideDot} aria-label={t("turnModelOverrideBadge")} />
             ) : null}

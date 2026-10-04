@@ -298,8 +298,8 @@ export function AgentCoreConfigPanel({
             <VFieldRow
               label={lang === "zh" ? "工具调用批准" : "Tool approval"}
               tooltip={lang === "zh"
-                ? "这是此 Agent 的唯一权限配置。消息框中的选择会写回同一字段，并从下一回合生效。"
-                : "This is the Agent's sole permission setting. Composer changes write the same field and apply next turn."}
+                ? "这是此 Agent 的工具调用批准方式；可用工具范围请到“工具”页配置。消息框中的选择会写回同一字段，并从下一回合生效。"
+                : "This sets how tool calls are approved for this Agent. Configure the available tool scope on the Tools page. Composer changes write to the same field and apply next turn."}
             >
               <AgentPermissionPresetControl
                 value={draft.permissionPreset}
