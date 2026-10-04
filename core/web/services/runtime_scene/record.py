@@ -3161,7 +3161,7 @@ def record_runtime_scene_event(
     except Exception as exc:
         _debug_logger.warning(
             f"runtime scene event record failed ({component}/{phase}/{event_code}): "
-            f"{type(exc).__name__}: {exc}",
+            f"{type(exc).__name__}",
             tag="SCENE",
         )
         raise

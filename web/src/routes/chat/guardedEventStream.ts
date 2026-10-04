@@ -46,26 +46,55 @@ export async function consumeGuardedEventStream(options: {
   onActivity?: () => void;
   onFrame: (frame: GuardedSseFrame) => void;
 }): Promise<void> {
-  const response = await fetchWithControl(options.url, {
-    headers: { Accept: "text/event-stream", ...(options.headers ?? {}) },
-    signal: options.signal,
-  });
-  if (!response.body) throw new Error("事件流没有返回响应体");
-  options.onOpen?.();
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  const consumeFrames = (rawBuffer: string) => {
-    const parsed = splitCompleteSseFrames(rawBuffer);
-    for (const rawFrame of parsed.frames) {
-      options.onActivity?.();
-      const frame = parseGuardedSseFrame(rawFrame);
-      if (frame) options.onFrame(frame);
+  const requestController = new AbortController();
+  let response: Response | null = null;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let bodyCancellation: Promise<void> | null = null;
+  const cancelBody = (): void => {
+    if (bodyCancellation !== null) return;
+    let cancellation: Promise<unknown> | null = null;
+    try {
+      cancellation = reader ? reader.cancel() : response?.body?.cancel() ?? null;
+    } catch {
+      return;
     }
-    return parsed.rest;
+    if (cancellation !== null) {
+      bodyCancellation = cancellation.then(() => undefined, () => undefined);
+    }
   };
+  const abortRequest = (): void => {
+    if (!requestController.signal.aborted) {
+      requestController.abort(options.signal.reason);
+    }
+    cancelBody();
+  };
+  options.signal.addEventListener("abort", abortRequest, { once: true });
+  if (options.signal.aborted) abortRequest();
+
   try {
+    response = await fetchWithControl(options.url, {
+      headers: { Accept: "text/event-stream", ...(options.headers ?? {}) },
+      signal: requestController.signal,
+    });
+    if (options.signal.aborted) {
+      throw options.signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+    }
+    if (!response.body) throw new Error("事件流没有返回响应体");
+
+    reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const consumeFrames = (rawBuffer: string) => {
+      const parsed = splitCompleteSseFrames(rawBuffer);
+      for (const rawFrame of parsed.frames) {
+        options.onActivity?.();
+        const frame = parseGuardedSseFrame(rawFrame);
+        if (frame) options.onFrame(frame);
+      }
+      return parsed.rest;
+    };
+    options.onOpen?.();
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -75,6 +104,14 @@ export async function consumeGuardedEventStream(options: {
     buffer += decoder.decode();
     consumeFrames(buffer);
   } finally {
-    reader.releaseLock();
+    options.signal.removeEventListener("abort", abortRequest);
+    abortRequest();
+    if (reader) {
+      try {
+        reader.releaseLock();
+      } catch {
+        // Cleanup must not replace a fetch, read, or callback failure.
+      }
+    }
   }
 }

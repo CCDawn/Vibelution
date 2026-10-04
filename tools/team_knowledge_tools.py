@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.logging.memory_events import audit_memory_tool, record_memory_event
 
 
 UNIFIED_MEMORY_SEARCH_TOOL_NAME = "unified_memory_search_tool"
@@ -27,6 +28,7 @@ KNOWLEDGE_STEWARD_WORKBENCH_TOOL_NAME = "knowledge_steward_workbench_tool"
 KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME = "knowledge_rating_suggestion_tool"
 
 
+@audit_memory_tool("team_knowledge")
 def unified_memory_search_tool(
     query: str = "",
     query_mode: str = "auto",
@@ -124,6 +126,7 @@ def unified_memory_search_tool(
         )
 
 
+@audit_memory_tool("team_knowledge")
 def search_agent_private_memory_tool(
     query: str = "",
     query_mode: str = "auto",
@@ -218,6 +221,7 @@ def search_agent_private_memory_tool(
         )
 
 
+@audit_memory_tool("team_knowledge")
 def read_knowledge_item_tool(
     knowledge_base_id: str,
     knowledge_item_id: str,
@@ -352,6 +356,7 @@ def read_knowledge_item_tool(
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_stage_session_attachment_tool(
     attachment_id: str,
     team_id: str = "",
@@ -453,6 +458,7 @@ def knowledge_stage_session_attachment_tool(
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_source_lifecycle_tool(
     knowledge_base_id: str, source_artifact_id: str, status: str, reason: str, expires_at: str = "",
 ) -> str:
@@ -487,9 +493,15 @@ def knowledge_source_lifecycle_tool(
 
         if isinstance(exc, TeamKnowledgePermissionError):
             return _json_result(_blocked_result(actor, "knowledge_access_denied"))
+        _record_event(
+            "knowledge.tool.source_lifecycle.failed", runtime=runtime, level="warning", outcome="failed",
+            fields={"knowledgeBaseId": knowledge_base_id, "sourceArtifactId": source_artifact_id,
+                    "errorType": type(exc).__name__},
+        )
         return _json_result({"ok": False, "status": "failed", "error": str(exc), "agentId": actor})
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_index_build_tool(knowledge_base_id: str, prepare_model: bool = False) -> str:
     """Build real local embeddings for a reviewed knowledge base as its authorized reviewer."""
     runtime = _current_runtime()
@@ -509,9 +521,14 @@ def knowledge_index_build_tool(knowledge_base_id: str, prepare_model: bool = Fal
         result = build_knowledge_index(knowledge_base_id, agent_id=actor, prepare_model=prepare_model)
         return _json_result({"ok": result["status"] == "ready", "agentId": actor, **result})
     except Exception as exc:
+        _record_event(
+            "knowledge.tool.index_build.failed", runtime=runtime, level="warning", outcome="failed",
+            fields={"knowledgeBaseId": knowledge_base_id, "errorType": type(exc).__name__},
+        )
         return _json_result({"ok": False, "status": "failed", "error": type(exc).__name__, "agentId": actor})
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_proposal_tool(
     knowledge_base_id: str,
     source_type: str,
@@ -624,6 +641,7 @@ def knowledge_proposal_tool(
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_proposal_review_tool(
     knowledge_base_id: str,
     proposal_id: str,
@@ -697,6 +715,7 @@ def knowledge_proposal_review_tool(
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_ingestion_tool(
     knowledge_base_id: str,
     source_type: str,
@@ -903,6 +922,7 @@ def knowledge_ingestion_tool(
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_governance_tasks_tool(status: str = "open") -> str:
     """Read the current Agent's team knowledge governance task queue."""
 
@@ -938,6 +958,7 @@ def knowledge_governance_tasks_tool(status: str = "open") -> str:
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_operations_health_tool() -> str:
     """Read operational health for accessible team knowledge bases."""
 
@@ -976,6 +997,7 @@ def knowledge_operations_health_tool() -> str:
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_governance_plan_tool(limit: int = 8) -> str:
     """Read a read-only governance plan for accessible team knowledge bases."""
 
@@ -1014,6 +1036,7 @@ def knowledge_governance_plan_tool(limit: int = 8) -> str:
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
     """Read the current Agent's knowledge base admin governance recommendations."""
 
@@ -1052,6 +1075,7 @@ def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_steward_workbench_tool(limit: int = 8) -> str:
     """Read the current Agent's consolidated knowledge base admin workbench."""
 
@@ -1091,6 +1115,7 @@ def knowledge_steward_workbench_tool(limit: int = 8) -> str:
         )
 
 
+@audit_memory_tool("team_knowledge")
 def knowledge_rating_suggestion_tool(
     knowledge_base_id: str,
     target_type: str,
@@ -1239,25 +1264,14 @@ def _record_event(
     fields: dict[str, Any] | None = None,
     include_session_id: bool = True,
 ) -> None:
-    try:
-        from core.web.services.runtime_scene_service import record_runtime_scene_event
-
-        record_runtime_scene_event(
-            "team_knowledge",
-            "tool",
-            event_code,
-            message=event_code,
-            level=level,
-            outcome=outcome,
-            fields={
-                "agentId": str(runtime.get("agentId") or "").strip(),
-                **({"sessionId": str(runtime.get("sessionId") or "").strip()} if include_session_id else {}),
-                **dict(fields or {}),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
+    record_memory_event(
+        "team_knowledge", "tool", event_code, level=level, outcome=outcome,
+        fields={
+            "agentId": str(runtime.get("agentId") or "").strip(),
+            **({"sessionId": str(runtime.get("sessionId") or "").strip()} if include_session_id else {}),
+            **dict(fields or {}),
+        },
+    )
 
 
 def _json_result(payload: dict[str, Any]) -> str:

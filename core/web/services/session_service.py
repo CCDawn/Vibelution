@@ -552,7 +552,9 @@ from core.web.services.session.agent_runtime import (
     _session_agent_runtime_cache_fingerprint,
     _session_agent_runtime_config_fingerprint_payload,
     _invalidate_session_agent_runtime_cache,
+    _retire_session_agent_runtime_cache_for_shutdown,
     _acquire_chat_agent_for_session,
+    _release_chat_agent_runtime,
     _create_chat_agent_for_session,
     create_chat_agent,
     _attach_session_llm_runtime_diagnostics,
@@ -564,6 +566,11 @@ from core.web.services.session.agent_runtime import (
     _record_session_agent_binding_updated_event,
     _record_session_agent_missing_index_event,
     _record_session_agent_missing_index_batch_event,
+)
+from core.web.services.session.agent_runtime_retirement import (
+    retire_uncached_session_agent,
+    retry_retired_session_agents as _retry_retired_session_agents,
+    retired_session_agent_status as _retired_session_agent_status,
 )
 from core.web.services.session.cache_context import (
     _aggregate_session_provider_cache_usage,
@@ -1175,6 +1182,8 @@ _SESSION_TURN_CONTROLS: dict[str, "SessionTurnControl"] = {}
 _SESSION_AGENT_RUNTIME_CACHE_LOCK = threading.Lock()
 _SESSION_AGENT_RUNTIME_CACHE_MAX_ENTRIES = 16
 _SESSION_AGENT_RUNTIME_CACHE: dict[str, dict[str, Any]] = {}
+_SESSION_AGENT_RUNTIME_CACHE_GENERATION = 0
+_SESSION_AGENT_RUNTIME_CACHE_CLOSED = False
 _SESSION_AGENT_RUNTIME_CONFIG_FINGERPRINT_KEYS = (
     "llm",
     "agent",
@@ -1216,6 +1225,7 @@ def begin_session_service_lifecycle() -> dict[str, Any]:
     """Recreate the session executors after a completed lifespan shutdown."""
 
     global _SESSION_EXECUTOR, _SESSION_CYCLE_PROJECTION_EXECUTOR, _SESSION_EXECUTORS_CLOSED
+    global _SESSION_AGENT_RUNTIME_CACHE_CLOSED
     with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
         if not _SESSION_EXECUTORS_CLOSED:
             return {"opened": True, "recreated": False}
@@ -1233,6 +1243,21 @@ def begin_session_service_lifecycle() -> dict[str, Any]:
                 "pendingExecutors": pending,
                 "failedExecutors": failed,
             }
+        retired_agents = _retry_retired_session_agents()
+        if retired_agents["pending"] or retired_agents["failed"]:
+            logging.getLogger(__name__).error(
+                "Session Agents did not close cleanly across lifespan restart (pending=%s failed=%s).",
+                retired_agents["pending"],
+                retired_agents["failed"],
+            )
+            return {
+                "opened": False,
+                "recreated": False,
+                "pendingRuntimeAgents": retired_agents["pending"],
+                "failedRuntimeAgents": retired_agents["failed"],
+            }
+        with _SESSION_AGENT_RUNTIME_CACHE_LOCK:
+            _SESSION_AGENT_RUNTIME_CACHE_CLOSED = False
         _SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="web-chat-turn")
         _SESSION_CYCLE_PROJECTION_EXECUTOR = ThreadPoolExecutor(
             max_workers=1,
@@ -1315,10 +1340,20 @@ def shutdown_session_service(*, deadline: float) -> dict[str, Any]:
     pending = sorted(joiner.name for joiner in joiners if joiner.is_alive())
     with _SESSION_EXECUTOR_LIFECYCLE_LOCK:
         failed = sorted(_SESSION_EXECUTOR_DRAIN_ERRORS)
+    # Retry owners left behind by earlier invalidations/shutdowns before draining
+    # the current cache. This keeps a failed close retryable when the cache is
+    # already empty without immediately repeating a fresh close attempt.
+    _retry_retired_session_agents(deadline=deadline)
+    _retire_session_agent_runtime_cache_for_shutdown(deadline=deadline)
+    agent_retirements = _retired_session_agent_status()
+    closed = not pending and not failed
+    closed = closed and not agent_retirements["pending"] and not agent_retirements["failed"]
     return {
-        "closed": not pending and not failed,
+        "closed": closed,
         "pendingExecutors": pending,
         "failedExecutors": failed,
+        "pendingRuntimeAgents": agent_retirements["pending"],
+        "failedRuntimeAgents": agent_retirements["failed"],
     }
 
 

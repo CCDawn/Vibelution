@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 import time
+import threading
 import traceback
 import re
 from contextlib import nullcontext
@@ -329,6 +330,11 @@ class AgentRuntime:
         runtime_agent_binding: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化 Agent 实例"""
+        self._owned_llm_clients: Dict[int, Any] = {}
+        self._owned_llm_clients_lock = threading.RLock()
+        self._llm_close_lock = threading.Lock()
+        self._agent_llm_client_cache: Dict[tuple[str, str, str], Any] = {}
+        self._base_llm_client_cache_key: tuple[str, str, str] | None = None
         self.config = config or get_config()
         self.runtime_agent_binding = _runtime_agent_binding_from_env(runtime_agent_binding)
         self._runtime_agent_llm_resolution = None
@@ -1309,10 +1315,198 @@ class AgentRuntime:
 
     def _init_llm(self):
         """初始化统一 LLM client。"""
-        llm = get_llm_client(role="primary", config=self.config)
+        llm = self._get_or_create_agent_llm_client(
+            role="primary",
+            profile_id=None,
+            config=self.config,
+            factory=lambda: get_llm_client(role="primary", config=self.config),
+        )
+        self._base_llm_client_cache_key = self._agent_llm_client_identity(
+            role="primary",
+            profile_id=None,
+            config=self.config,
+        )
         self._base_llm = llm
         self.llm_with_tools = llm.bind_tools(self.key_tools)
         self._bound_llm_cache = {"default": self.llm_with_tools}
+
+    @staticmethod
+    def _agent_llm_client_identity(
+        *,
+        role: str,
+        profile_id: str | None,
+        config: Any,
+    ) -> tuple[str, str, str]:
+        llm_config = getattr(config, "llm", None)
+        resolved_profile = str(profile_id or "").strip()
+        if not resolved_profile:
+            resolve_role = getattr(llm_config, "get_role_profile_id", None)
+            if callable(resolve_role):
+                try:
+                    resolved_profile = str(resolve_role(role) or "").strip()
+                except Exception:
+                    resolved_profile = ""
+        snapshot: Any = llm_config
+        if hasattr(llm_config, "model_dump"):
+            try:
+                snapshot = llm_config.model_dump(mode="json")
+            except (TypeError, ValueError):
+                try:
+                    snapshot = llm_config.model_dump()
+                except Exception:
+                    snapshot = repr(llm_config)
+        elif hasattr(llm_config, "dict"):
+            try:
+                snapshot = llm_config.dict()
+            except Exception:
+                snapshot = repr(llm_config)
+        elif isinstance(llm_config, dict):
+            snapshot = llm_config
+        try:
+            encoded = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, default=str)
+        except Exception:
+            encoded = repr(snapshot)
+        digest = hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
+        return str(role or "primary"), resolved_profile, digest
+
+    def _get_or_create_agent_llm_client(
+        self,
+        *,
+        role: str,
+        profile_id: str | None,
+        config: Any,
+        factory: Any,
+    ) -> Any:
+        key = self._agent_llm_client_identity(role=role, profile_id=profile_id, config=config)
+        lock = getattr(self, "_owned_llm_clients_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._owned_llm_clients_lock = lock
+        clients = getattr(self, "_agent_llm_client_cache", None)
+        if not isinstance(clients, dict):
+            clients = {}
+            self._agent_llm_client_cache = clients
+        with lock:
+            cached = clients.get(key)
+            if cached is not None:
+                clients.pop(key)
+                clients[key] = cached
+                return cached
+
+        created = factory()
+        if not callable(getattr(created, "close", None)):
+            return created
+        with lock:
+            cached = clients.get(key)
+            if cached is None:
+                self._own_llm_client(created)
+                clients[key] = created
+                owner = created
+            else:
+                clients.pop(key)
+                clients[key] = cached
+                owner = cached
+                self._own_llm_client(created)
+            evicted: list[Any] = []
+            while len(clients) > 16:
+                victim_key = next(
+                    (
+                        candidate
+                        for candidate in clients
+                        if candidate != getattr(self, "_base_llm_client_cache_key", None)
+                        and candidate != key
+                    ),
+                    None,
+                )
+                if victim_key is None:
+                    break
+                victim = clients.pop(victim_key)
+                if (
+                    victim is not getattr(self, "_base_llm", None)
+                    and all(value is not victim for value in clients.values())
+                ):
+                    evicted.append(victim)
+        if created is not owner or evicted:
+            for client in ([created] if created is not owner else []) + evicted:
+                self._close_unused_agent_llm_client(client)
+        return owner
+
+    def _close_unused_agent_llm_client(self, client: Any) -> None:
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 - retain the raw client for Agent.close retry
+            _record_agent_scene_event(
+                "transport",
+                "agent.llm.retired_client_close_failed",
+                level="warning",
+                outcome="failed",
+                fields={"errorType": type(exc).__name__},
+            )
+            self._own_llm_client(client)
+            return
+        registry_lock = getattr(self, "_owned_llm_clients_lock", None)
+        clients = getattr(self, "_owned_llm_clients", None)
+        cache = getattr(self, "_agent_llm_client_cache", None)
+        if registry_lock is None or not isinstance(clients, dict):
+            return
+        with registry_lock:
+            still_cached = isinstance(cache, dict) and any(value is client for value in cache.values())
+            if client is not getattr(self, "_base_llm", None) and not still_cached:
+                clients.pop(id(client), None)
+
+    def _own_llm_client(self, client: Any) -> Any:
+        """Track each raw LLM client once so Agent retirement closes every slot."""
+
+        if client is None or not callable(getattr(client, "close", None)):
+            return client
+        lock = getattr(self, "_owned_llm_clients_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._owned_llm_clients_lock = lock
+        clients = getattr(self, "_owned_llm_clients", None)
+        if not isinstance(clients, dict):
+            clients = {}
+            self._owned_llm_clients = clients
+        with lock:
+            clients[id(client)] = client
+        return client
+
+    def close(self) -> None:
+        """Release every owned LLM transport; failed clients remain retryable."""
+
+        close_lock = getattr(self, "_llm_close_lock", None)
+        if close_lock is None:
+            close_lock = threading.Lock()
+            self._llm_close_lock = close_lock
+        with close_lock:
+            registry_lock = getattr(self, "_owned_llm_clients_lock", None)
+            if registry_lock is None:
+                registry_lock = threading.Lock()
+                self._owned_llm_clients_lock = registry_lock
+            clients = getattr(self, "_owned_llm_clients", None)
+            if not isinstance(clients, dict) or not clients:
+                return
+            with registry_lock:
+                pending = tuple(clients.items())
+            failures: list[Exception] = []
+            for client_id, client in pending:
+                try:
+                    client.close()
+                except Exception as exc:  # noqa: BLE001 - preserve this owner for retry
+                    failures.append(exc)
+                    continue
+                with registry_lock:
+                    if clients.get(client_id) is client:
+                        clients.pop(client_id, None)
+                    route_clients = getattr(self, "_agent_llm_client_cache", None)
+                    if isinstance(route_clients, dict):
+                        for route_key, route_client in tuple(route_clients.items()):
+                            if route_client is client:
+                                route_clients.pop(route_key, None)
+            if failures:
+                raise RuntimeError(
+                    f"Agent LLM transport close failed for {len(failures)} client(s)."
+                ) from failures[0]
 
     def _resolve_tool_authorization(self, registered_tools: List[Any]) -> Any:
         # Removal: keep while tests construct AgentRuntime and patch this method.
@@ -1350,7 +1544,12 @@ class AgentRuntime:
     ):
         base_llm = getattr(self, "_base_llm", None) or self.llm_with_tools
         if profile_id and profile_id != getattr(base_llm, "profile_id", None):
-            base_llm = get_llm_client(profile_id=profile_id, config=self.config)
+            base_llm = self._get_or_create_agent_llm_client(
+                role="primary",
+                profile_id=profile_id,
+                config=self.config,
+                factory=lambda: get_llm_client(profile_id=profile_id, config=self.config),
+            )
         if disable_tools:
             # 政策性关闭工具：保持原行为，静默返回未绑定工具的 client。
             return base_llm
@@ -1457,7 +1656,15 @@ class AgentRuntime:
                 config=getattr(self, "config", None),
                 fallback_to_dialogue=False,
             )
-            llm = get_llm_client(profile_id=resolved.runtime_profile_id, config=resolved.config)
+            llm = self._get_or_create_agent_llm_client(
+                role="primary",
+                profile_id=resolved.runtime_profile_id,
+                config=resolved.config,
+                factory=lambda: get_llm_client(
+                    profile_id=resolved.runtime_profile_id,
+                    config=resolved.config,
+                ),
+            )
             if disable_tools:
                 return llm
             return llm.bind_tools(self.key_tools)
@@ -1701,7 +1908,12 @@ class AgentRuntime:
             token_budget=self._effective_max_token_limit,
             compression_llm=(
                 self._get_llm_for_agent_slot(AGENT_LLM_SLOT_SUMMARY, disable_tools=True)
-                or get_llm_client(role="compression", config=self.config)
+                or self._get_or_create_agent_llm_client(
+                    role="compression",
+                    profile_id=None,
+                    config=self.config,
+                    factory=lambda: get_llm_client(role="compression", config=self.config),
+                )
             ),
         )
         try:

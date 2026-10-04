@@ -3195,26 +3195,25 @@ def _record_event(
     fields: dict[str, Any] | None = None,
 ) -> None:
     owner = _coerce_owner_context(owner_value)
-    try:
-        record_runtime_scene_event(
-            "team_knowledge_service",
-            "knowledge",
-            event_code,
-            message=event_code,
-            outcome="observed",
-            fields={
-                "ownerType": owner.get("ownerType"),
-                "ownerId": owner.get("ownerId"),
-                "teamId": owner.get("ownerId") if owner.get("ownerType") == "team" else "",
-                "agentId": owner.get("ownerId") if owner.get("ownerType") == "agent" else "",
-                "knowledgeBaseId": knowledge_base_id,
-                "actorAgentId": str(actor_agent_id or "").strip(),
-                **(fields or {}),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        pass
+    from core.logging.memory_events import record_memory_event
+
+    record_memory_event(
+        "team_knowledge_service",
+        "knowledge",
+        event_code,
+        outcome="observed",
+        fields={
+            "ownerType": owner.get("ownerType"),
+            "ownerId": owner.get("ownerId"),
+            "teamId": owner.get("ownerId") if owner.get("ownerType") == "team" else "",
+            "agentId": owner.get("ownerId") if owner.get("ownerType") == "agent" else "",
+            "knowledgeBaseId": knowledge_base_id,
+            "actorAgentId": str(actor_agent_id or "").strip(),
+            **(fields or {}),
+        },
+        lifecycle=True,
+        writer=record_runtime_scene_event,
+    )
 
 
 def _enum_value(value: str, allowed: set[str], label: str) -> str:

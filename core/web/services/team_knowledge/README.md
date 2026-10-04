@@ -45,6 +45,8 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 
 ## Related
 
+- Memory operation telemetry: [memory-operation-logging.md](../../../../docs/agents/memory-operation-logging.md); existing owner audit storage is unchanged.
+
 - Facade: `core/web/services/team_knowledge_service.py`
 - Routes: knowledge-related web routes
 - Structure pattern: `core/web/services/team/README.md`

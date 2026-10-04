@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.logging.memory_events import audit_memory_tool
 
 APPEND_PERSONAL_MEMORY_TOOL_NAME = "append_personal_memory_tool"
 SUPERSEDE_PERSONAL_MEMORY_TOOL_NAME = "supersede_personal_memory_tool"
@@ -19,6 +20,7 @@ APPEND_EPISODIC_MEMORY_TOOL_NAME = APPEND_PERSONAL_MEMORY_TOOL_NAME
 SUPERSEDE_EPISODIC_MEMORY_TOOL_NAME = SUPERSEDE_PERSONAL_MEMORY_TOOL_NAME
 
 
+@audit_memory_tool("agent_memory", record_success=True)
 def append_personal_memory_tool(
     text: str,
     kind: str = "note",
@@ -92,6 +94,7 @@ def append_personal_memory_tool(
         )
 
 
+@audit_memory_tool("agent_memory", record_success=True)
 def supersede_personal_memory_tool(
     episode_id: str,
     successor_text: str = "",

@@ -50,6 +50,7 @@ import time
 import uuid
 from collections.abc import Iterator, Mapping
 from concurrent.futures import Future, as_completed
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -5369,9 +5370,10 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                 if context.get("_structuredChatRoomContext")
                 else ""
             ),
-        ), session_service._session_tool_workspace_override(workspace):
+        ), session_service._session_tool_workspace_override(workspace), ExitStack() as runtime_cleanup:
             stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
+            runtime_cleanup.callback(session_service.retire_uncached_session_agent, agent_runtime)
             if context.get("_operatorDiscussion"):
                 from core.web.services.team_workflow.operator_optimization.discussion_output import output_contract
 

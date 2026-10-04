@@ -41,6 +41,7 @@ class FakeWindow implements ElectronWindowLike {
   sentIpc: Array<{ channel: string; payload: unknown }> = [];
   title = "";
   navigationError: Error | null = null;
+  destroyError: Error | null = null;
   private destroyed = false;
   private focused = false;
   private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -141,6 +142,9 @@ class FakeWindow implements ElectronWindowLike {
 
   destroy(): void {
     this.destroyCount += 1;
+    if (this.destroyError !== null) {
+      throw this.destroyError;
+    }
     if (this.destroyed) {
       return;
     }
@@ -406,6 +410,44 @@ describe("Electron window provider state", () => {
 
     expect(isolated.closeCount).toBe(1);
     expect(closeRequests).toEqual([]);
+    expect(provider.instanceWindowStates()).toEqual([]);
+  });
+
+  it("retains and reports an isolated window when forced destruction fails, then allows retry", async () => {
+    const isolated = new FakeWindow(99, "", 9999, false);
+    isolated.destroyError = new Error("destroy failed");
+    const createWorkbenchWindow = vi.fn(() => isolated);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow,
+      hungCloseDestroyAfterMs: 0,
+    });
+
+    const opened = await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+    });
+    await expect(provider.closeInstanceWorkbench("worktree:task")).rejects.toThrow("could not be closed");
+
+    expect(isolated.isDestroyed()).toBe(false);
+    expect(provider.instanceWindowStates()).toEqual([{
+      instanceId: "worktree:task",
+      open: true,
+      url: "http://127.0.0.1:8004/",
+      rendererProcessId: 9999,
+    }]);
+    expect(await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+    })).toMatchObject({ windowId: opened.windowId, open: true });
+    expect(createWorkbenchWindow).toHaveBeenCalledTimes(1);
+
+    isolated.destroyError = null;
+    await expect(provider.closeInstanceWorkbench("worktree:task")).resolves.toMatchObject({
+      open: false,
+      instanceId: "worktree:task",
+    });
+    expect(isolated.isDestroyed()).toBe(true);
     expect(provider.instanceWindowStates()).toEqual([]);
   });
 

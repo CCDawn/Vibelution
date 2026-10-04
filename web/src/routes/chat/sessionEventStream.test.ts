@@ -18,11 +18,12 @@ describe("session event stream", () => {
   it("opens through the control-token fetch boundary and routes named frames", async () => {
     seedControlTokenForTests("session-stream-token");
     const payload = JSON.stringify({ type: "session_detail", sessionId: "session-1" });
+    const cancel = vi.fn();
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode(`event: session_detail\ndata: ${payload}\n\n`));
-        controller.close();
       },
+      cancel,
     });
     const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
       status: 200,
@@ -48,6 +49,8 @@ describe("session event stream", () => {
     );
     const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(requestInit.headers).get("X-Vibelution-Control-Token")).toBe("session-stream-token");
+    expect(requestInit.signal?.aborted).toBe(true);
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it("mirrors the browser Last-Event-ID behavior: reconnects replay the last id line", async () => {
@@ -91,6 +94,30 @@ describe("session event stream", () => {
       expect(reconnectHeaders.get("Last-Event-ID")).toBe("7");
       stream.close();
       await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not leave a reconnect timer when onerror closes the stream", async () => {
+    seedControlTokenForTests("session-stream-token");
+    vi.useFakeTimers();
+    try {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      });
+      const fetchMock = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const stream = createSessionEventStream("session-1");
+      stream.onerror = () => stream.close();
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(stream.readyState).toBe(2);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
