@@ -5,6 +5,7 @@ from collections import Counter
 import json
 import time
 import urllib.parse
+import uuid
 
 import pytest
 
@@ -15,6 +16,7 @@ from tests.e2e.mock_llm.test_image_pipeline import (
     add_attachments,
     assert_chip_uploaded,
     build_png,
+    tray_chip,
     wait_upload_failed_chip,
 )
 from tests.e2e.test_composer_drafts import COMPOSER, THREAD, _ready_composer
@@ -191,3 +193,116 @@ def test_pending_upload_failure_keeps_intentional_clear_after_reload(page, e2e_i
 
 def test_double_click_with_pending_upload_does_not_duplicate_requests(page, e2e_instance, tmp_path):
     _assert_pending_upload_failure(page, e2e_instance, tmp_path, double_click=True)
+
+
+def _assert_upload_completion_after_switch(page, instance, tmp_path, *, remove_pending=False):
+    from playwright.sync_api import expect
+
+    case_id = uuid.uuid4().hex[:8]
+    title_a = f"等待上传 A {case_id}"
+    title_b = f"独立编辑 B {case_id}"
+    b = create_session(instance.port, title=title_b)
+    a = create_session(instance.port, title=title_a)
+    original = "会话 A 的图片提交文字"
+    newer = "会话 B 的独立图片草稿"
+    image_a = tmp_path / "session-a.png"
+    image_b = tmp_path / "session-b.png"
+    image_a.write_bytes(build_png(rgb=(180, 40, 40)))
+    image_b.write_bytes(build_png(rgb=(40, 160, 90)))
+    composer = _ready_composer(page, instance, a)
+    pending = []
+    uploads = []
+    messages = []
+    upload_pattern = "**/api/sessions/*/attachments"
+    message_pattern = "**/api/sessions/*/messages"
+
+    def hold_upload(route):
+        uploads.append(route.request.url)
+        pending.append(route)
+
+    def block_message(route):
+        messages.append({"url": route.request.url, "body": route.request.post_data_json})
+        route.abort("internetdisconnected")
+
+    def switch_session(title, sid):
+        page.get_by_role("button").filter(has=page.get_by_text(title, exact=True)).first.click()
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sid, timeout=30000)
+        assert page.evaluate("() => window.__uploadIsolationDocument") == "same-document"
+        return page.locator(COMPOSER).first
+
+    def assert_preview_loaded(filename):
+        preview = tray_chip(page, filename).locator("img").first
+        expect(preview).to_be_visible()
+        page.wait_for_function("img => img.complete && img.naturalWidth > 0", arg=preview.element_handle())
+        # Names alone cannot detect a wrong preview URL. These solid-color
+        # fixtures also verify the pixels still belong to the right file.
+        rgb = preview.evaluate("img => { const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, 1, 1); return Array.from(ctx.getImageData(0, 0, 1, 1).data).slice(0, 3); }")
+        assert rgb == ([180, 40, 40] if filename == image_a.name else [40, 160, 90])
+
+    page.evaluate("() => { window.__uploadIsolationDocument = 'same-document'; }")
+    page.route(upload_pattern, hold_upload)
+    page.route(message_pattern, block_message)
+    try:
+        add_attachments(page, [image_a])
+        composer.fill(original)
+        page.get_by_role("button", name="发送", exact=True).click()
+        deadline = time.monotonic() + 10
+        while not pending and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        assert len(uploads) == 1 and uploads[0].endswith(f"/api/sessions/{a}/attachments")
+        if remove_pending:
+            tray_chip(page, image_a.name).get_by_role("button", name="移除附件", exact=True).click()
+            expect(tray_chip(page, image_a.name)).to_have_count(0)
+
+        composer_b = switch_session(title_b, b)
+        add_attachments(page, [image_b])
+        composer_b.click()
+        composer_b.press_sequentially(newer, delay=20)
+        expect(composer_b).to_have_value(newer)
+        assert_preview_loaded(image_b.name)
+
+        route = pending.pop()
+        response = route.fetch()
+        assert response.ok, f"Upload failed: HTTP {response.status}"
+        artifact_id = response.json()["artifactId"]
+        route.fulfill(response=response)
+        page.wait_for_function("({sid, draft}) => JSON.parse(localStorage.getItem('vibelution.chat.drafts.v1') || '[]').some(row => row.sessionId === sid && row.draft === draft)", arg={"sid": a, "draft": original})
+        assert len(messages) == 1
+        assert messages[0]["url"].endswith(f"/api/sessions/{a}/messages")
+        assert messages[0]["body"]["content"] == original
+        assert messages[0]["body"]["attachmentIds"] == ([] if remove_pending else [artifact_id])
+        assert len(uploads) == 1, "B's unsent image must not be uploaded"
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", b)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0")
+        expect(composer_b).to_have_value(newer)
+        expect(tray_chip(page, image_a.name)).to_have_count(0)
+        expect(tray_chip(page, image_b.name)).to_be_visible()
+        assert_preview_loaded(image_b.name)
+        expect(page.locator('[role="alert"]').filter(has_text="没有发出")).to_have_count(0)
+
+        expect(switch_session(title_a, a)).to_have_value(original)
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0", timeout=15000)
+        if remove_pending:
+            expect(tray_chip(page, image_a.name)).to_have_count(0)
+        else:
+            assert_chip_uploaded(page, image_a.name)
+            assert_preview_loaded(image_a.name)
+        expect(tray_chip(page, image_b.name)).to_have_count(0)
+        expect(switch_session(title_b, b)).to_have_value(newer)
+        assert_preview_loaded(image_b.name)
+        for sid in (a, b):
+            detail = json.dumps(fetch_json(instance.port, f"/api/sessions/{sid}"), ensure_ascii=False)
+            assert original not in detail and newer not in detail
+    finally:
+        for route in pending:
+            route.abort("internetdisconnected")
+        page.unroute(upload_pattern, hold_upload)
+        page.unroute(message_pattern, block_message)
+
+
+def test_upload_completion_keeps_original_session_and_attachment(page, e2e_instance, tmp_path):
+    _assert_upload_completion_after_switch(page, e2e_instance, tmp_path)
+
+
+def test_upload_completion_does_not_restore_removed_attachment_after_switch(page, e2e_instance, tmp_path):
+    _assert_upload_completion_after_switch(page, e2e_instance, tmp_path, remove_pending=True)
