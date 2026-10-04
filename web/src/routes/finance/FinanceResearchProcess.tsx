@@ -3,7 +3,7 @@ import { CheckCircle2, Circle, Loader2, ShieldAlert, XCircle } from "lucide-reac
 import type { AssistantConversationTurn } from "../../api/types";
 import { VButton, VStateSurface } from "../../components/vui";
 import type { FinancialSessionView } from "./FinancialResearchBridge";
-import { latestResearchTurn, projectStockReport } from "./stockResearchModel";
+import { latestResearchTurn, projectStockReport, researchRecordStatus } from "./stockResearchModel";
 
 const toolLabels: Record<string, string> = {
   financial_evidence_search_tool: "检索财报证据",
@@ -22,17 +22,23 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat }: {
   const turn = activeTurn ?? latestResearchTurn(view?.messages ?? []);
   const tools = turn?.turnItems.filter((item) => item.type === "tool_call") ?? [];
   const error = view?.error || turn?.turnItems.find((item) => item.type === "error")?.text;
-  const report = projectStockReport(view?.messages ?? []);
+  const report = projectStockReport(view?.messages ?? [], view);
   const running = Boolean(view?.busy || view?.submitPending);
   const approvalPending = Boolean(view?.approvalPending);
+  const outcome = view ? researchRecordStatus(view, false) : "";
+  const stopped = outcome === "Stopped";
+  const needsContinue = outcome === "Needs continuation";
+  const failed = !stopped && !needsContinue && Boolean(error || outcome === "Failed" || turn?.status === "failed");
+  const completed = !stopped && !needsContinue && !failed && Boolean(report || outcome === "Completed");
   const status = view?.stopping ? (zh ? "正在停止" : "Stopping")
     : approvalPending ? (zh ? "等待授权" : "Awaiting approval")
     : running ? (zh ? "研究中" : "Research running")
-    : error ? (zh ? "研究未完成" : "Research incomplete")
-    : report ? (zh ? "已完成" : "Completed")
-    : view?.status === "stopped" ? (zh ? "已停止" : "Stopped")
+    : failed ? (zh ? "研究未完成" : "Research incomplete")
+    : stopped ? (zh ? "已停止" : "Stopped")
+    : needsContinue ? (zh ? "待继续" : "Needs continuation")
+    : completed ? (zh ? "已完成" : "Completed")
     : (zh ? "待开始" : "Ready");
-  const errorPreview = error && (error.length > 110 ? `${error.slice(0, 110)}…` : error);
+  const errorPreview = !stopped && error && (error.length > 110 ? `${error.slice(0, 110)}…` : error);
 
   return (
     <div className={styles.panel} data-finance-research-process>
@@ -45,8 +51,8 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat }: {
       <div className={styles.status} role="status">
         {approvalPending ? <ShieldAlert size={16} className={styles.warning} />
           : running ? <Loader2 size={16} className={styles.running} />
-          : error ? <XCircle size={16} className={styles.error} />
-          : report ? <CheckCircle2 size={16} className={styles.success} />
+          : failed ? <XCircle size={16} className={styles.error} />
+          : completed ? <CheckCircle2 size={16} className={styles.success} />
           : <Circle size={16} className={styles.muted} />}
         <strong>{status}</strong>
       </div>
@@ -70,7 +76,7 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat }: {
             </li>
           ))}
         </ol>
-      ) : <p className={styles.empty}>{running ? (zh ? "正在分析…" : "Analyzing…") : (zh ? "尚未开始研究" : "No research started")}</p>}
+      ) : <p className={styles.empty}>{running ? (zh ? "正在分析…" : "Analyzing…") : turn ? (zh ? "本轮未调用外部工具" : "No external tools used this turn") : (zh ? "尚未开始研究" : "No research started")}</p>}
       {errorPreview ? (
         <VStateSurface tone="error" title={zh ? "需要处理" : "Needs attention"}>
           <span className={styles.errorText}>{errorPreview}</span>

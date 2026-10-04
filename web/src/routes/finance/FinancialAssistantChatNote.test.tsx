@@ -36,7 +36,10 @@ describe("financial assistant chat note", () => {
       </MemoryRouter></QueryClientProvider>,
     ));
     await settle();
-    expect(container.textContent).toContain("自己判断真假");
+    expect(container.textContent).toContain("新闻仅供参考");
+    expect(container.textContent).toContain("日、周、月 K 线已接入");
+    expect(container.textContent).toContain("公开行情可能延迟");
+    expect(container.textContent).toContain("暂无分钟行情");
     expect(container.textContent).toContain("不会自动下单");
     const hrefs = [...container.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href") || "");
     const decoded = hrefs.map((href) => decodeURIComponent(href));

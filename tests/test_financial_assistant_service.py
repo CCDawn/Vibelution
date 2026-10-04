@@ -55,7 +55,7 @@ def test_explicit_setup_uses_native_identity_session_and_private_read_policy(ent
     assert agent["metadata"]["delegationPolicy"]["allowSubagents"] is False
     assert row["newsDelegationStatus"] == "disabled"
     assert row["privateLedgerStatus"] == "not_implemented"
-    assert row["marketDataStatus"] == "not_connected" and not row["tradingEnabled"]
+    assert row["marketDataStatus"] == "public_quotes" and not row["tradingEnabled"]
     assert not (agent.get("metadata") or {}).get("virtualHumanCompanion")
     detail = session_service.get_session_detail(row["directSessionId"], message_limit=0)
     assert detail["agentId"] == row["agentId"]

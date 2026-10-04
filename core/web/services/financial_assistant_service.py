@@ -154,7 +154,8 @@ def _project(agent: dict) -> dict:
         "knowledgeReadable": can_read,
         "modelStatus": "configured_unverified" if configured else "not_configured",
         "reportStatus": financial_report_availability()["status"],
-        "marketDataStatus": "not_connected",
+        # Capability status only; each quote request reports provider failures.
+        "marketDataStatus": "public_quotes",
         "newsDelegationStatus": "disabled",
         "privateLedgerStatus": "not_implemented",
         "tradingEnabled": False,

@@ -178,6 +178,35 @@ def _create_agent(store: ConversationStore, agent_id: str = "agent-a") -> str:
     return str(result["configRevisionId"])
 
 
+def test_directory_terminal_metadata_reads_only_requested_control_fields(tmp_path, monkeypatch):
+    from core.chat.conversation_store.repository import WorkspaceChatStateDao
+
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state({"version": 1, "conversations": [
+            {"conversation_id": "success", "last_turn_status": "completed",
+             "last_turn_terminal_reason": "success", "last_turn_terminal_turn_id": "turn-success"},
+            {"conversation_id": "stop", "lastTurnStatus": "ready",
+             "lastTurnTerminalReason": "stopped_by_user", "lastTurnTerminalTurnId": "turn-stop"},
+            {"conversation_id": "unrelated", "last_turn_status": "failed"},
+        ]}).result(timeout=3)
+        revision = store.repository.get_chat_state()["state_revision"]
+        def no_hydration(*_args, **_kwargs):
+            raise AssertionError("Directory terminal read must not hydrate session bodies")
+        monkeypatch.setattr(WorkspaceChatStateDao, "get", no_hydration)
+        monkeypatch.setattr(WorkspaceChatStateDao, "get_one", no_hydration)
+
+        assert store.repository.get_session_terminal_states(["success", "stop", "success", "missing"]) == {
+            "success": {"last_turn_status": "completed", "last_turn_terminal_reason": "success", "last_turn_terminal_turn_id": "turn-success"},
+            "stop": {"last_turn_status": "ready", "last_turn_terminal_reason": "stopped_by_user", "last_turn_terminal_turn_id": "turn-stop"},
+        }
+        assert store.repository.get_session_terminal_states([]) == {}
+        with store.database.reader() as connection:
+            assert connection.execute("SELECT state_revision FROM workspace_chat_state WHERE id=1").fetchone()[0] == revision
+    finally:
+        store.close()
+
+
 def test_chat_state_roundtrip_preserves_order_and_separates_debug_snapshots(tmp_path: Path):
     store = _open_store(tmp_path)
     try:

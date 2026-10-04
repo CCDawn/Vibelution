@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantConversationTurn, ConversationMessage, SessionTurnItem } from "../../api/types";
-import { movingAverage, projectStockReport, reportMatchesStock, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
+import { isValidResearchDate, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
 
 const stock = { symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" };
 function turn(status = "completed", items: unknown[] = []): AssistantConversationTurn { return { role: "assistant", id: "a", turnId: "t", status: status as AssistantConversationTurn["status"], timestamp: "2026-10-04T12:00:00Z", turnItems: items as SessionTurnItem[] }; }
@@ -19,6 +19,46 @@ describe("stock research projections", () => {
     expect(reportMatchesStock(report, messages, { ...stock, ticker: "000858", symbol: "sz000858", name: "五粮液" })).toBe(false);
   });
 
+  it("keeps the complete native research report after ordinary follow-ups", () => {
+    const request: ConversationMessage = { role: "user", id: "research", timestamp: "", content: stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief") };
+    const original = { ...turn("completed", [final]), turnId: "research-turn" };
+    const messages: ConversationMessage[] = [request, original, { role: "user", id: "follow", timestamp: "", content: "用三句话总结现金流风险" }, { ...turn("completed", [{ ...final, text: "这是三句话的追问答复。" }]), turnId: "follow-turn" }];
+    expect(projectStockReport(messages)?.turnId).toBe("research-turn");
+    expect(projectStockReport(messages)?.text).toBe(final.text);
+    expect(projectStockReport(messages)?.sections).toHaveLength(3);
+    // An explicit new full report may replace the older report.
+    messages.push({ ...request, id: "new-research" }, { ...original, turnId: "new-report" });
+    expect(projectStockReport(messages)?.turnId).toBe("new-report");
+  });
+
+  it("does not promote stopped or incomplete final answers and retains older reports", () => {
+    const original = { ...turn("completed", [final]), turnId: "original" };
+    const stopped = { ...turn("completed", [{ ...final, text: "本轮已按请求停止。" }]), turnId: "stopped" };
+    expect(projectStockReport([stopped], { terminalReason: "stopped_by_user", lastTurnTerminalTurnId: "stopped" })).toBeNull();
+    expect(projectStockReport([original, stopped], { terminalReason: "stopped_by_user", lastTurnTerminalTurnId: "stopped" })?.turnId).toBe("original");
+    const resumed = { ...original, turnId: "resumed" };
+    expect(projectStockReport([stopped, resumed], { terminalReason: "success" })?.turnId).toBe("resumed");
+    expect(projectStockReport([original], { terminalReason: "needs_continue", lastTurnTerminalTurnId: "original" })).toBeNull();
+  });
+
+  it("distinguishes native terminal outcomes from the ready phase", () => {
+    expect(researchRecordStatus({ status: "ready", terminalReason: "success", lastTurnStatus: "completed" })).toBe("已完成");
+    expect(researchRecordStatus({ status: "ready", terminalReason: "stopped_by_user", lastTurnStatus: "completed" })).toBe("已停止");
+    expect(researchRecordStatus({ status: "needs_continue" })).toBe("待继续");
+    expect(researchRecordStatus({ status: "ready", terminalReason: "paused_limit" })).toBe("待继续");
+    expect(researchRecordStatus({ status: "ready", terminalReason: "failed_provider" })).toBe("失败");
+    expect(researchRecordStatus({ status: "running", terminalReason: "success" })).toBe("研究中");
+    expect(researchRecordStatus({ status: "ready" })).toBe("研究会话");
+  });
+
+  it("rejects future, empty and invalid calendar dates using the local day", () => {
+    const now = new Date(2026, 9, 5, 0, 15);
+    expect(localResearchDate(now)).toBe("2026-10-05");
+    expect(isValidResearchDate("2026-10-05", now)).toBe(true);
+    expect(isValidResearchDate("2024-02-29", now)).toBe(true);
+    for (const value of ["", "0000-01-01", "2099-01-01", "2026-10-06", "2025-02-29", "2026-04-31", "2026-1-01"]) expect(isValidResearchDate(value, now)).toBe(false);
+  });
+
   it("keeps separate cited pages from the same PDF and does not borrow another line's page", () => {
     const text = "第5页：https://example.com/report.pdf\n第63页：[现金流](https://example.com/report.pdf)\n[同一页](https://example.com/report.pdf#page=63)\n新闻：https://example.com/news";
     expect(projectStockReport([turn("completed", [{ ...final, text }])])?.citations).toEqual([
@@ -33,6 +73,19 @@ describe("stock research projections", () => {
     const report = projectStockReport([turn("completed", [{ ...final, text }])])!;
     expect(report.summary).toBe("现金流覆盖利润 ：真实结论。");
     expect(report.citations.map((item) => item.page)).toEqual(["5", "63", ""]);
+  });
+  it("keeps all PDF pages listed on the same source line and honors explicit page anchors", () => {
+    const text = "原 PDF 第 5 页（主要会计数据）、第 63 页（合并利润表）：https://example.com/report.pdf\n原 PDF 第 5 页、第 63 页：https://example.com/anchored.pdf#page=63\n第5页、第63页：新闻 https://example.com/news";
+    expect(projectStockReport([turn("completed", [{ ...final, text }])])?.citations.map(({ url, page }) => [url, page])).toEqual([
+      ["https://example.com/report.pdf", "5"], ["https://example.com/report.pdf", "63"],
+      ["https://example.com/anchored.pdf", "63"], ["https://example.com/news", ""],
+    ]);
+  });
+  it("does not assign one PDF's cited page to a second PDF on the same line", () => {
+    const text = "第5页：https://example.com/a.pdf；第63页：https://example.com/b.pdf";
+    expect(projectStockReport([turn("completed", [{ ...final, text }])])?.citations.map(({ url, page }) => [url, page])).toEqual([
+      ["https://example.com/a.pdf", "5"], ["https://example.com/b.pdf", "63"],
+    ]);
   });
   it("computes averages from actual closes and has no fabricated warm-up values", () => {
     const candles = Array.from({ length: 25 }, (_, index) => ({ date: "", open: index + 1, close: index + 1, high: index + 1, low: index + 1, volumeLots: 1 }));

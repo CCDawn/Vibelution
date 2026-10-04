@@ -20,7 +20,7 @@ import { FinanceResearchConfig, type FinanceResearchConfigValue } from "./Financ
 import { FinanceResearchReport } from "./FinanceResearchReport";
 import { FinanceResearchProcess } from "./FinanceResearchProcess";
 import { FinanceResearchHistory } from "./FinanceResearchHistory";
-import { EMPTY_FINANCIAL_MESSAGES, projectStockReport, reportMatchesStock, stockResearchPrompt, type ReportCitation } from "./stockResearchModel";
+import { EMPTY_FINANCIAL_MESSAGES, isValidResearchDate, localResearchDate, projectStockReport, reportMatchesStock, stockResearchPrompt, type ReportCitation } from "./stockResearchModel";
 import { useFinanceWatchlist } from "./useFinanceWatchlist";
 
 export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assistant: FinancialAssistant; sessionId: string; zh: boolean }) {
@@ -30,7 +30,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
   const [search, setSearch] = useState(""), [debouncedSearch, setDebouncedSearch] = useState("");
   const [period, setPeriod] = useState<StockPeriod>("day");
   const [area, setArea] = useState("workspace"), [tab, setTab] = useState("overview"), [asideTab, setAsideTab] = useState("process");
-  const [config, setConfig] = useState<FinanceResearchConfigValue>({ period: "", date: new Date().toLocaleDateString("en-CA"), scope: "comprehensive", depth: "brief" });
+  const [config, setConfig] = useState<FinanceResearchConfigValue>({ period: "", date: localResearchDate(), scope: "comprehensive", depth: "brief" });
   const [citation, setCitation] = useState<ReportCitation | null>(null);
   const [creating, setCreating] = useState(false), [launching, setLaunching] = useState(false), [createError, setCreateError] = useState("");
   const createGate = useRef(false), launchGate = useRef(false), createKey = useRef("");
@@ -48,7 +48,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
   const records = (history.data?.pages.flatMap((page) => page.items) ?? []).filter((row) => isFinancialSession(row, assistant.agentId));
   const nativeReady = view?.sessionId === sessionId, currentView = nativeReady ? view : null;
   const messages = currentView?.messages ?? EMPTY_FINANCIAL_MESSAGES;
-  const report = useMemo(() => projectStockReport(messages), [messages]);
+  const report = useMemo(() => projectStockReport(messages, currentView), [messages, currentView?.terminalReason, currentView?.lastTurnStatus, currentView?.lastTurnTerminalTurnId]);
   const stockReport = reportMatchesStock(report, messages, stocks.selected) ? report : null;
   const busy = Boolean(currentView?.busy || currentView?.submitPending);
   const readyForResearch = nativeReady && !currentView?.transcriptPending && !currentView?.stopping;
@@ -109,13 +109,13 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
     finally { createGate.current = false; launchGate.current = false; if (mounted.current) { setCreating(false); setLaunching(false); } }
   }
   function startResearch() {
-    if (!readyForResearch || busy || createGate.current || launchGate.current || !config.date || assistant.modelStatus !== "configured_unverified") return;
+    if (!readyForResearch || busy || createGate.current || launchGate.current || !isValidResearchDate(config.date) || assistant.modelStatus !== "configured_unverified") return;
     launchGate.current = true; setLaunching(true);
     if (messages.length) { void newResearch(true); return; }
     draft(stockResearchPrompt(market.data?.stock ?? stocks.selected, config.period, config.date, config.scope, config.depth, market.data), sessionId, true);
   }
   function focusCitation(next: ReportCitation) { setCitation(next); setAsideTab("evidence"); }
-  const researchConfig = <FinanceResearchConfig value={config} onChange={setConfig} onStart={startResearch} disabled={!readyForResearch || busy || creating || launching || !config.date || assistant.modelStatus !== "configured_unverified"} pending={creating || launching} zh={zh} />;
+  const researchConfig = <FinanceResearchConfig value={config} onChange={setConfig} onStart={startResearch} disabled={!readyForResearch || busy || creating || launching || !isValidResearchDate(config.date) || assistant.modelStatus !== "configured_unverified"} pending={creating || launching} zh={zh} />;
   function historyContent(compact = true) { return history.isError ? <VStateSurface density="compact" tone="error" title={zh ? "记录加载失败" : "History unavailable"} actions={<VButton onPress={() => void history.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : history.isPending ? <div className={styles.workspaceHistoryLoading}><VSkeleton /><VSkeleton /></div> : <FinanceResearchHistory records={records} selectedId={sessionId} onOpen={openRecord} zh={zh} compact={compact} />; }
   const sidebar = <div className={styles.rail}>
     <nav className={styles.workspaceNav} aria-label={zh ? "股票研究导航" : "Stock research navigation"}>{[{ id: "workspace", label: zh ? "研究工作台" : "Research workspace", icon: <LayoutDashboard size={15} /> }, { id: "watchlist", label: zh ? "自选股票" : "Watchlist", icon: <Star size={15} /> }, { id: "reports", label: zh ? "报告中心" : "Reports", icon: <FileText size={15} /> }].map((item) => <VButton key={item.id} variant="ghost" className={[styles.workspaceNavButton, area === item.id ? styles.workspaceNavSelected : ""].join(" ")} icon={item.icon} aria-pressed={area === item.id} onPress={() => setArea(item.id)}>{item.label}</VButton>)}</nav>

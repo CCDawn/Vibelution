@@ -159,7 +159,7 @@ def query_session_summaries(
         end = min(start + normalized_limit, len(summaries))
         items = summaries[start:end]
         return {
-            "items": items,
+            "items": _with_terminal_states(items, store=store),
             "nextCursor": str(end) if end < len(summaries) else "",
             "totalEstimate": len(summaries),
         }
@@ -217,7 +217,7 @@ def query_session_summaries(
             runtime_statuses=runtime_statuses,
         )
     return {
-        "items": items,
+        "items": _with_terminal_states(items, store=store),
         "nextCursor": next_cursor if len(items) >= normalized_limit else "",
         "totalEstimate": int(page.get("total") or 0) if items or next_cursor else 0,
     }
@@ -359,7 +359,7 @@ def _query_session_summaries_with_body_search(
     start = min(offset_cursor, len(summaries))
     end = min(start + limit, len(summaries))
     return {
-        "items": summaries[start:end],
+        "items": _with_terminal_states(summaries[start:end], store=store),
         "nextCursor": str(end) if end < len(summaries) else "",
         "totalEstimate": len(summaries),
     }
@@ -418,7 +418,7 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
             -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
         )
     )
-    return summaries
+    return _with_terminal_states(summaries, store=store)
 
 
 def list_child_session_summaries(session_id: str) -> dict[str, Any] | None:
@@ -457,7 +457,7 @@ def list_child_session_summaries(session_id: str) -> dict[str, Any] | None:
         for row in rows
     ]
     items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
-    return {"rootSessionId": root_session_id, "items": items}
+    return {"rootSessionId": root_session_id, "items": _with_terminal_states(items, store=store)}
 
 
 def sync_conversation_record(
@@ -718,6 +718,26 @@ def _chat_state_directory_overlay() -> tuple[str, dict[str, dict[str, Any]]]:
         if (binding := _experiment_binding_for_directory(value)) is not None
     }
     return str(active_id or "").strip(), bindings
+
+
+def _with_terminal_states(
+    summaries: list[dict[str, Any]], *, store: Any,
+) -> list[dict[str, Any]]:
+    """Keep idle phase separate from the native turn's outcome in list DTOs."""
+    if not summaries:
+        return summaries
+    try:
+        states = store.repository.get_session_terminal_states([item["id"] for item in summaries])
+    except Exception as exc:
+        note_session_read_degraded(source="session terminal metadata", error_type=type(exc).__name__)
+        states = {}
+    s = _service()
+    for summary in summaries:
+        raw = states.get(summary["id"]) or {"last_turn_status": summary.get("status", "")}
+        summary["lastTurnStatus"] = str(raw.get("last_turn_status") or "").strip().lower()
+        summary["lastTurnTerminalTurnId"] = str(raw.get("last_turn_terminal_turn_id") or "").strip()
+        summary["terminalReason"] = s._terminal_reason_from_conversation(raw)
+    return summaries
 
 
 def _session_runtime_status_snapshot() -> dict[str, str] | None:
