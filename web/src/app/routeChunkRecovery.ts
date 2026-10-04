@@ -3,7 +3,7 @@ import { allowNextWorkbenchWindowUnload } from "./projectCloseGuard";
 export const ROUTE_CHUNK_RELOAD_KEY = "vibelution:route-chunk-reload";
 const ROUTE_CHUNK_RELOAD_RECORD_VERSION = 1;
 
-type ChunkRecoveryWindow = Pick<Window, "location" | "sessionStorage">;
+type ChunkRecoveryWindow = Pick<Window, "location" | "sessionStorage" | "navigator">;
 type ChunkRecoveryReporter = (event: {
   phase: string;
   eventCode: string;
@@ -127,6 +127,13 @@ export function recoverFromStaleRouteAsset(
   details: ChunkRecoveryDetails = {},
 ): boolean {
   if (!browserWindow) {
+    return false;
+  }
+
+  // An offline chunk fetch is not proof of a stale build. Reloading now
+  // replaces the editable document with a browser network error page.
+  // Keep the one-shot reload allowance for a later online failure.
+  if (browserWindow.navigator?.onLine === false) {
     return false;
   }
 

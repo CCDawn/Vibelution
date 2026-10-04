@@ -130,6 +130,7 @@ def test_offline_keyboard_failure_keeps_edit_and_requires_explicit_retry(page, e
     original, newer = "离线发送的第一份草稿", "联网前改写的新草稿"
     target = f"{e2e_instance.base_url}/api/sessions/{sid}/messages"
     requests, failures, retries = [], [], []
+    resource_failures = []
 
     def observe(request):
         if request.url == target and request.method == "POST":
@@ -138,6 +139,8 @@ def test_offline_keyboard_failure_keeps_edit_and_requires_explicit_retry(page, e
     def observe_failure(request):
         if request.url == target and request.method == "POST":
             failures.append(request.failure)
+        if request.resource_type in {"script", "document"}:
+            resource_failures.append({"type": request.resource_type, "url": request.url, "error": request.failure})
 
     def fail_retry(route):
         retries.append(route.request.post_data_json)
@@ -147,10 +150,12 @@ def test_offline_keyboard_failure_keeps_edit_and_requires_explicit_retry(page, e
     page.on("requestfailed", observe_failure)
     try:
         composer.fill(original)
+        page.evaluate("() => { window.__offlineDocument = 'original-document'; }")
         page.context.set_offline(True)
         composer.press("Enter")
         expect(page.locator('[role="alert"]').filter(has_text="没有发出").first).to_be_visible(timeout=15000)
         expect(composer).to_have_value(original)
+        assert page.evaluate("() => window.__offlineDocument") == "original-document", "Offline asset failure must not automatically reload the page"
         expect(composer).to_be_enabled()
         assert len(requests) == 1 and requests[0]["content"] == original
         assert any("INTERNET_DISCONNECTED" in str(error) for error in failures)
@@ -164,6 +169,7 @@ def test_offline_keyboard_failure_keeps_edit_and_requires_explicit_retry(page, e
         page.context.set_offline(False)
         page.wait_for_timeout(1000)
         assert len(requests) == 1 and retries == [], "Reconnection must not resend a rejected draft"
+        assert page.evaluate("() => window.__offlineDocument") == "original-document"
         page.reload(wait_until="domcontentloaded")
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sid, timeout=30000)
         composer = page.locator(COMPOSER).first
@@ -177,6 +183,20 @@ def test_offline_keyboard_failure_keeps_edit_and_requires_explicit_retry(page, e
         assert requests[1]["content"] == retries[0]["content"] == newer
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-message-count", "0", timeout=15000)
         _assert_not_recorded(e2e_instance, sid, original, newer)
+    except Exception:
+        print("[e2e offline diagnostic] " + json.dumps({
+            "browser": page.evaluate("""() => ({
+              online: navigator.onLine,
+              url: location.href, title: document.title, documentMarker: window.__offlineDocument,
+              body: document.body?.textContent?.slice(0, 400),
+              composer: Array.from(document.querySelectorAll('textarea[aria-label="发送消息"]')).map(el => ({value: el.value, disabled: el.disabled})),
+              alerts: Array.from(document.querySelectorAll('[role="alert"]')).map(el => el.textContent?.slice(0, 200)),
+              threadCounts: Array.from(document.querySelectorAll('[data-agent-thread-message-count]')).map(el => el.getAttribute('data-agent-thread-message-count')),
+              actionButtons: Array.from(document.querySelectorAll('button[aria-label]')).map(el => ({name: el.getAttribute('aria-label'), disabled: el.disabled})).filter(el => /发送|终止|引导|排队/.test(el.name))
+            })"""), "requestContents": [row.get("content") for row in requests[:5]], "failures": failures[:5], "retryContents": [row.get("content") for row in retries[:5]],
+            "resourceFailures": resource_failures[:8],
+        }, ensure_ascii=False))
+        raise
     finally:
         page.context.set_offline(False)
         page.unroute(target, fail_retry)
