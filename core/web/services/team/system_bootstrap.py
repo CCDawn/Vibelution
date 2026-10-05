@@ -34,12 +34,15 @@ def request_system_team_bootstrap(*, reason: str = "team_list", allow_sync_check
     with s._TEAM_SYSTEM_BOOTSTRAP_LOCK:
         if s._TEAM_SYSTEM_BOOTSTRAP_THREAD and s._TEAM_SYSTEM_BOOTSTRAP_THREAD.is_alive():
             return _system_team_bootstrap_state_snapshot_locked()
+        status = str(s._TEAM_SYSTEM_BOOTSTRAP_STATE.get("status") or "")
         ready_snapshot = (
-            str(s._TEAM_SYSTEM_BOOTSTRAP_STATE.get("status") or "") == "ready"
+            status == "ready"
             and not list(s._TEAM_SYSTEM_BOOTSTRAP_STATE.get("requiredSteps") or [])
         )
         checked_at = 0.0
-        if ready_snapshot:
+        # Catalog reads retain a recent failure as well as a ready result.
+        # Otherwise every navigation/poll restarts the same unsuccessful writes.
+        if ready_snapshot or status in {"failed", "needs_retry"}:
             try:
                 checked_at = float(s._TEAM_SYSTEM_BOOTSTRAP_STATE.get("checkedAtMonotonic") or 0.0)
             except (TypeError, ValueError):
@@ -108,6 +111,7 @@ def request_system_team_bootstrap(*, reason: str = "team_list", allow_sync_check
                     "finishedAt": s.utc_now_iso(),
                     "lastError": f"{type(exc).__name__}: {exc}",
                     "elapsedMs": 0,
+                    "checkedAtMonotonic": s._perf_counter(),
                 }
             )
             snapshot = _system_team_bootstrap_state_snapshot_locked()
@@ -180,6 +184,7 @@ def _run_system_team_bootstrap_discovery(request_id: str, reason: str) -> None:
                     "lastError": f"{type(exc).__name__}: {exc}",
                     "elapsedMs": 0,
                     "requestId": request_id,
+                    "checkedAtMonotonic": s._perf_counter(),
                 }
             )
         _record_system_team_bootstrap_event(
@@ -338,15 +343,28 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
         outcome="started",
         fields={"requestId": request_id, "requiredSteps": list(required_steps), "reason": reason},
     )
+    remaining_steps = list(required_steps)
     try:
-        if "challenge_cup_research_team" in required_steps:
-            s.bootstrap_challenge_cup_research_team()
-        if "ai_search_system_team" in required_steps:
-            s.ensure_ai_search_system_team()
-        if "knowledge_expansion_team_agents" in required_steps:
-            s.ensure_knowledge_expansion_team_agents(purge_stale=True)
-        if "evolution_system_teams" in required_steps:
-            s.ensure_evolution_system_teams()
+        errors: list[tuple[str, Exception]] = []
+        actions = (
+            ("challenge_cup_research_team", s.bootstrap_challenge_cup_research_team),
+            ("ai_search_system_team", s.ensure_ai_search_system_team),
+            ("knowledge_expansion_team_agents", lambda: s.ensure_knowledge_expansion_team_agents(purge_stale=True)),
+            ("evolution_system_teams", s.ensure_evolution_system_teams),
+        )
+        for step, action in actions:
+            if step not in required_steps:
+                continue
+            try:
+                action()
+            except Exception as exc:  # noqa: BLE001 - isolate and report each independent Team failure
+                # These are independent Teams. A missing Directory asset in
+                # one must not starve initialization of all the others.
+                errors.append((step, exc))
+                _record_system_team_bootstrap_event(
+                    "team.system_bootstrap.step_failed", outcome="failed",
+                    fields={"requestId": request_id, "step": step, "errorType": type(exc).__name__},
+                )
         # Fail-soft version-gated migration for the six Challenge Cup roles;
         # runs unconditionally so a freshly materialized team converges within
         # the same bootstrap run, and is a read-only no-op once migrated.
@@ -355,6 +373,11 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
         # record copy (description/purpose); read-only no-op once current.
         _apply_challenge_cup_team_copy_refresh(reason=reason)
         remaining_steps = _system_team_bootstrap_required_steps()
+        for step, _ in errors:
+            if step not in remaining_steps:
+                remaining_steps.append(step)
+        if errors:
+            raise errors[0][1]
         elapsed_ms = s._elapsed_ms(started_at)
         status = "ready" if not remaining_steps else "needs_retry"
         outcome = "succeeded" if not remaining_steps else "blocked"
@@ -368,7 +391,7 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
                     "lastError": "",
                     "elapsedMs": elapsed_ms,
                     "requestId": request_id,
-                    "checkedAtMonotonic": s._perf_counter() if status == "ready" else 0.0,
+                    "checkedAtMonotonic": s._perf_counter(),
                 }
             )
         _record_system_team_bootstrap_event(
@@ -388,12 +411,13 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
             s._TEAM_SYSTEM_BOOTSTRAP_STATE.update(
                 {
                     "status": "failed",
-                    "requiredSteps": list(required_steps),
+                    "requiredSteps": list(remaining_steps),
                     "reason": reason,
                     "finishedAt": s.utc_now_iso(),
                     "lastError": f"{type(exc).__name__}: {exc}",
                     "elapsedMs": elapsed_ms,
                     "requestId": request_id,
+                    "checkedAtMonotonic": s._perf_counter(),
                 }
             )
         _record_system_team_bootstrap_event(
@@ -402,6 +426,7 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
             fields={
                 "requestId": request_id,
                 "requiredSteps": list(required_steps),
+                "remainingSteps": list(remaining_steps),
                 "reason": reason,
                 "elapsedMs": elapsed_ms,
                 "errorType": type(exc).__name__,
