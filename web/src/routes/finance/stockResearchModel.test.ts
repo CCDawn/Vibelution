@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import type { AssistantConversationTurn, ConversationMessage, SessionTurnItem } from "../../api/types";
-import { cleanResearchPreview, isValidResearchDate, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, researchTablePreview, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
+import type { AssistantConversationTurn, ConversationMessage, SessionSummary, SessionTurnItem } from "../../api/types";
+import { cleanResearchPreview, isResearchSearchResult, isValidResearchDate, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, researchTablePreview, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
 
 const stock = { symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" };
 function turn(status = "completed", items: unknown[] = []): AssistantConversationTurn { return { role: "assistant", id: "a", turnId: "t", status: status as AssistantConversationTurn["status"], timestamp: "2026-10-04T12:00:00Z", turnItems: items as SessionTurnItem[] }; }
 const final = { type: "agent_message", phase: "final_answer", status: "completed", text: "## 结论\n需继续核对现金流。\n## 关键事实\n来自原始PDF第5页：https://example.com/report.pdf\n## 风险\n资料不足。" };
 describe("stock research projections", () => {
+  it("excludes an unmatched Agent directory stub even when it inherits an old terminal outcome", () => {
+    const stub: SessionSummary = { id: "direct", title: "炒股智能体", status: "ready", currentPhase: "ready", taskSummary: "", lastActive: "", updatedAt: "", conversationIndexKind: "personal_agent", terminalReason: "success", lastTurnStatus: "ready", lastTurnTerminalTurnId: "old-direct-turn" };
+    expect(isResearchSearchResult(stub, "Markowitz")).toBe(false);
+    expect(isResearchSearchResult(stub, "炒股")).toBe(true);
+    expect(isResearchSearchResult({ ...stub, conversationIndexKind: "user_chat", updatedAt: "2026-10-05", searchSnippets: ["Markowitz"] }, "Markowitz")).toBe(true);
+  });
   it("keeps financial tables intact rather than manufacturing prose from columns", () => {
     const table = "| 指标 | 2024FY（元） | 同比 |\n| --- | ---: | ---: |\n| 净利润 | 86228146421.62 | +15.38% |\n| 经营现金流 | 92463692168.43 | +38.85% |";
     const text = `${table}\n来源：原 PDF 第 5 页，https://example.com/report.pdf`;

@@ -215,6 +215,28 @@ describe("Finance analyst team", () => {
     });
     expect(container.textContent).toContain("已恢复的行情结论");
   });
+  it.each(["running", "completed"])("combines the durable segment with the same Turn's %s live overlay", async (status) => {
+    currentRun = makeRun();
+    currentRun.analysts.market!.turnId = "turn-market";
+    api.session.mockImplementation(async (sessionId: string) => {
+      if (sessionId !== "session-market") return detailFor(sessionId, undefined, "");
+      const detail = detailFor(sessionId, currentRun!.analysts.market, "实时行情结论", status);
+      const live = { ...detail.messages[1], id: "assistant-live", metadata: { turnId: "turn-market" } };
+      const persisted = { ...detail.messages[1], id: "assistant-durable", status: "completed", turnItems: [] };
+      return { ...detail, messages: [detail.messages[0], persisted, live] };
+    });
+    await render();
+    const card = container.querySelector('article[data-role="market"]')!;
+    expect(card.textContent).not.toContain("缺少最终回答");
+    if (status === "running") {
+      expect(card.textContent).toContain("分析中");
+      expect(card.textContent).toContain("停止本轮");
+      expect(api.debate).not.toHaveBeenCalled();
+    } else {
+      expect(card.textContent).toContain("已完成");
+      expect(card.textContent).toContain("实时行情结论");
+    }
+  });
 
   it("does not display a neighboring assistant turn that belongs to another submission", async () => {
     currentRun = makeRun();
@@ -235,6 +257,19 @@ describe("Finance analyst team", () => {
     expect(api.record).not.toHaveBeenCalled();
   });
 
+  it.each(["本轮已按请求停止。", "This turn was stopped as requested."])("does not advance a stopped native notice represented as a completed answer: %s", async (notice) => {
+    currentRun = makeRun();
+    for (const role of ["market", "fundamental", "news"] as const) currentRun.analysts[role]!.turnId = "turn-" + role;
+    api.session.mockImplementation(async (sessionId: string) => {
+      const role = roleKeys.find((key) => currentRun?.analysts[key]?.sessionId === sessionId);
+      return detailFor(sessionId, role ? currentRun!.analysts[role] : undefined, role === "market" ? notice : "完成的分析");
+    });
+    await render();
+    expect(api.debate).not.toHaveBeenCalled();
+    expect(container.querySelector('article[data-role="market"]')?.textContent).toContain("缺少最终回答");
+    expect(container.textContent).toContain("重新开始研究");
+  });
+
   it("reuses the same run-creation key after an ambiguous transport failure", async () => {
     api.create.mockRejectedValueOnce(new Error("network timeout"));
     await render();
@@ -249,12 +284,12 @@ describe("Finance analyst team", () => {
     expect(api.create.mock.calls[1]?.[2]).toBe(firstKey);
   });
 
-  it("starts a fresh run with fresh submissions after a role Turn fails", async () => {
+  it.each([["failed", "失败"], ["completed", "缺少最终回答"]])("starts a fresh run with fresh submissions after a role Turn is %s without an answer", async (status, label) => {
     currentRun = makeRun();
     currentRun.analysts.market!.turnId = "turn-market-old";
     api.runs.mockResolvedValue({ assistantAgentId: assistant.agentId, runs: [currentRun] });
     api.session.mockImplementation(async (sessionId: string) => sessionId === "session-market"
-      ? detailFor(sessionId, { clientSubmissionId: "submission-market", turnId: "turn-market-old" }, "", "failed")
+      ? detailFor(sessionId, { clientSubmissionId: "submission-market", turnId: "turn-market-old" }, "", status)
       : detailFor(sessionId, undefined, ""));
 
     const restarted = makeRun();
@@ -266,7 +301,7 @@ describe("Finance analyst team", () => {
     });
 
     await render();
-    expect(container.textContent).toContain("失败");
+    expect(container.textContent).toContain(label);
     expect(container.textContent).toContain("重新开始研究");
     await act(async () => button("重新开始研究").click());
     await settle(12);

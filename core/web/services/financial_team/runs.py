@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -524,38 +525,131 @@ def record_financial_team_turn(
 
 
 def _final_answer_for_turn(session_id: str, turn_id: str) -> str:
+    expected_session_id = str(session_id or "").strip()
+    expected_turn_id = str(turn_id or "").strip()
+    if not expected_session_id or not expected_turn_id:
+        return ""
     detail = session_service.get_session_detail(
-        session_id,
+        expected_session_id,
         transcript_scope="all",
         include_secondary=False,
     )
     if not isinstance(detail, dict):
         return ""
-    for message in detail.get("messages", []):
+    detail_session_id = str(detail.get("id") or detail.get("sessionId") or "").strip()
+    if detail_session_id and detail_session_id != expected_session_id:
+        return ""
+
+    # Session detail can contain several durable/live projections for one Turn.
+    # Keep the latest native item revision; top-level message.content and message
+    # status alone are not evidence that a final answer was committed.
+    matching_messages: list[dict[str, Any]] = []
+    messages = detail.get("messages") if isinstance(detail.get("messages"), list) else []
+    for message in messages:
         if (
             not isinstance(message, dict)
-            or message.get("role") != "assistant"
-            or str(message.get("turnId") or "") != turn_id
+            or str(message.get("role") or "").strip().lower() != "assistant"
+            or str(message.get("turnId") or "").strip() != expected_turn_id
         ):
             continue
-        if str(message.get("status") or "").lower() != "completed":
+        message_session_id = str(message.get("sessionId") or "").strip()
+        if message_session_id and message_session_id != expected_session_id:
+            continue
+        matching_messages.append(message)
+    if not matching_messages:
+        return ""
+
+    # Session-level terminal state is authoritative only when its Turn ID is
+    # explicit. A missing ID must never apply the latest session outcome to a
+    # historical Turn from the same transcript.
+    if str(detail.get("lastTurnTerminalTurnId") or "").strip() == expected_turn_id:
+        terminal_reason = str(
+            detail.get("terminalReason") or detail.get("lastTurnStatus") or ""
+        ).strip().lower()
+        if terminal_reason and terminal_reason not in {"success", "completed"}:
             return ""
-        items = (
-            message.get("turnItems")
-            if isinstance(message.get("turnItems"), list)
-            else []
+
+    rejected_turn_statuses = {
+        "failed",
+        "failed_provider",
+        "failed_runtime",
+        "error",
+        "timeout",
+        "stop_failed",
+        "stopped",
+        "stopped_by_user",
+        "aborted",
+        "cancelled",
+        "canceled",
+        "interrupted",
+        "superseded",
+        "needs_continue",
+        "paused_limit",
+        "paused",
+        "incomplete",
+    }
+    latest_items: dict[str, tuple[int, int, int, dict[str, Any]]] = {}
+    encounter_order = 0
+    for message in matching_messages:
+        message_status = str(message.get("status") or "").strip().lower()
+        if message_status in rejected_turn_statuses:
+            return ""
+        items = message.get("turnItems")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if (
+                str(item.get("sessionId") or "").strip() != expected_session_id
+                or str(item.get("turnId") or "").strip() != expected_turn_id
+            ):
+                continue
+            item_id = str(item.get("itemId") or "").strip()
+            if not item_id:
+                continue
+            try:
+                revision = max(0, int(item.get("revision") or 0))
+            except (TypeError, ValueError, OverflowError):
+                revision = 0
+            try:
+                sequence = max(0, int(item.get("sequence") or 0))
+            except (TypeError, ValueError, OverflowError):
+                sequence = 0
+            current = latest_items.get(item_id)
+            if current is None or (revision, sequence) >= (current[0], current[1]):
+                latest_items[item_id] = (revision, sequence, encounter_order, item)
+            encounter_order += 1
+
+    if any(
+        item.get("type") == "error"
+        and str(item.get("status") or "").strip().lower() == "failed"
+        for _, _, _, item in latest_items.values()
+    ):
+        return ""
+
+    final_items = [
+        item
+        for _, _, _, item in sorted(
+            latest_items.values(), key=lambda entry: (entry[1], entry[2])
         )
-        texts = [
-            str(item.get("text") or "").strip()
-            for item in items
-            if isinstance(item, dict)
-            and item.get("type") == "agent_message"
-            and item.get("phase") == "final_answer"
-            and str(item.get("status") or "").lower() == "completed"
-            and str(item.get("text") or "").strip()
-        ]
-        return "\n\n".join(texts)
-    return ""
+        if item.get("type") == "agent_message"
+        and str(item.get("phase") or "").strip().lower() == "final_answer"
+        and str(item.get("status") or "").strip().lower() == "completed"
+        and item.get("terminal") is True
+        and not bool(item.get("provisional"))
+        and str(item.get("text") or "").strip()
+    ]
+    answer = "\n\n".join(
+        str(item.get("text") or "").strip() for item in final_items
+    )
+    if re.search(
+        r"(?:^|\n\n)(?:本轮已按请求停止[。，]|This turn was stopped (?:as requested|before it started)\.)",
+        answer,
+        flags=re.IGNORECASE,
+    ):
+        return ""
+    return answer
 
 
 def _submission_association(
@@ -606,22 +700,48 @@ def _submission_association(
     return matching_submission_seen, next(iter(associated_turn_ids), "")
 
 
-def _primary_role_prompt(run: dict[str, Any], role: str) -> str:
+def _primary_role_prompt(
+    run: dict[str, Any], role: str, *, public_fundamentals: dict[str, Any] | None = None
+) -> str:
     spec = ROLE_SPECS[role]
     depth = _DEPTH_LABELS.get(str(run.get("depth") or "standard"), "标准")
     task = spec.get("task") if isinstance(spec.get("task"), dict) else {}
-    return "\n".join(
-        [
-            f"你是股票研究团队中的独立原生{spec['teamRole']}，只处理本轮角色任务，不代表持牌机构。",
-            f"研究对象：{run['symbol']}；研究日期：{run.get('researchDate') or '未指定'}；观察周期：近{run['periodDays']}天；研究深度：{depth}。",
-            f"任务目标：{task.get('mission') or task.get('responsibilities') or ROLE_SPECS[role]['teamRole']}。",
-            f"职责：{task.get('responsibilities') or ''}",
-            f"优先任务：{task.get('preferredTasks') or ''}",
-            f"避免：{task.get('avoidTasks') or ''}",
-            f"约束：{task.get('constraints') or ''}",
-            "只调用本 Agent 当前已授权的工具；明确标注数据时间、来源、单位、事实与推断。无法核验的数据写明缺口，不编造报价、财报、新闻、工具结果、目标价或收益承诺，也不执行交易。",
-        ]
-    )
+    lines = [
+        f"你是股票研究团队中的独立原生{spec['teamRole']}，只处理本轮角色任务，不代表持牌机构。",
+        f"研究对象：{run['symbol']}；研究日期：{run.get('researchDate') or '未指定'}；观察周期：近{run['periodDays']}天；研究深度：{depth}。",
+        f"任务目标：{task.get('mission') or task.get('responsibilities') or ROLE_SPECS[role]['teamRole']}。",
+        f"职责：{task.get('responsibilities') or ''}",
+        f"优先任务：{task.get('preferredTasks') or ''}",
+        f"避免：{task.get('avoidTasks') or ''}",
+        f"约束：{task.get('constraints') or ''}",
+        "只调用本 Agent 当前已授权的工具；明确标注数据时间、来源、单位、事实与推断。无法核验的数据写明缺口，不编造报价、财报、新闻、工具结果、目标价或收益承诺，也不执行交易。",
+    ]
+    if role == "fundamental":
+        snapshot = (
+            public_fundamentals
+            if isinstance(public_fundamentals, dict)
+            else {
+                "status": "unavailable",
+                "source": "金融研究公共数据服务",
+                "items": [],
+            }
+        )
+        lines.extend(
+            [
+                "下方公开指标是补充来源快照，不等同于审核财报原文；已有授权财报工具可用时按原有权限核验，无法读取则明确数据缺口，不扩大权限或读取其他 Agent 私有资料。",
+                _REFERENCE_MATERIAL_SECURITY_BOUNDARY,
+                _untrusted_reference_materials(
+                    [
+                        {
+                            "source": snapshot.get("source") or "金融研究公共数据服务",
+                            "type": "public_fundamentals_data",
+                            "content": _format_public_fundamentals(snapshot),
+                        }
+                    ]
+                ),
+            ]
+        )
+    return "\n".join(lines)
 
 
 def submit_financial_team_primary_role(
@@ -690,7 +810,14 @@ def submit_financial_team_primary_role(
             run_id=run_id,
             submission_id=submission_id,
         )
-        prompt = _primary_role_prompt(run, role)
+        public_fundamentals = (
+            _public_fundamentals_snapshot(str(run["symbol"]))
+            if role == "fundamental"
+            else None
+        )
+        prompt = _primary_role_prompt(
+            run, role, public_fundamentals=public_fundamentals
+        )
         ref["submissionState"] = "submitting"
         _write_run(path, run)
         _record_financial_team_event(

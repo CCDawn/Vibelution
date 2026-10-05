@@ -21,9 +21,10 @@ import type { FinancialAssistant } from "../../api/financialAssistant";
 import type { StockIdentity } from "../../api/financialMarket";
 import type { AssistantConversationTurn, SessionDetail } from "../../api/types";
 import { LazyConversationMarkdownRenderer } from "../../components/conversation/LazyConversationMarkdownRenderer";
+import { projectTimelineProcessMessages } from "../../components/conversation/timelineMessageProcessProjection";
 import { VButton, VChip, VInput, VSelect, VStateSurface, VSurface } from "../../components/vui";
 import styles from "./FinanceAnalystTeam.styles";
-import { localResearchDate } from "./stockResearchModel";
+import { isNativeResearchStopNotice, localResearchDate } from "./stockResearchModel";
 
 type FinancialTeamPrimaryRole = Extract<FinancialTeamRole, "market" | "fundamental" | "news">;
 const PRIMARY_ROLES: FinancialTeamPrimaryRole[] = ["market", "fundamental", "news"];
@@ -73,7 +74,7 @@ function newFinancialRunRequestKey(): string {
 }
 
 function exactSubmission(detail: SessionDetail | undefined, submissionId: string, turnId: string): { turn: AssistantConversationTurn | null; submissionSeen: boolean } {
-  const messages = detail?.messages ?? [];
+  const messages = projectTimelineProcessMessages(detail?.messages ?? []);
   const userTurnIds = new Set(messages.flatMap((message) => {
     if (message.role !== "user" || String(message.metadata?.clientSubmissionId ?? "") !== submissionId) return [];
     const nativeTurnId = String(message.metadata?.turnId ?? "").trim();
@@ -107,11 +108,12 @@ function exactSubmission(detail: SessionDetail | undefined, submissionId: string
 
 function finalAnswer(turn: AssistantConversationTurn | null): string {
   if (!turn || turn.status !== "completed") return "";
-  return turn.turnItems
+  const answer = turn.turnItems
     .filter((item) => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed" && Boolean(item.text.trim()))
     .map((item) => item.type === "agent_message" ? item.text.trim() : "")
     .filter(Boolean)
     .join("\n\n");
+  return isNativeResearchStopNotice(answer) ? "" : answer;
 }
 
 function projectNativeTurn(detail: SessionDetail | undefined, ref: { clientSubmissionId: string; turnId: string }): NativeTurnProjection {
@@ -442,9 +444,9 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession }: {
     ALL_ROLES.some((role) => {
       const turnId = selectedRun.analysts[role]?.turnId;
       const state = projections.get(role)?.state;
-      return Boolean(turnId && (state === "failed" || state === "stopped"));
+      return Boolean(turnId && (state === "failed" || state === "stopped" || state === "incomplete"));
     })
-    || selectedRun.synthesis.turnId && (synthesisProjection?.state === "failed" || synthesisProjection?.state === "stopped")
+    || selectedRun.synthesis.turnId && (synthesisProjection?.state === "failed" || synthesisProjection?.state === "stopped" || synthesisProjection?.state === "incomplete")
   ));
 
   function renderTurnCard(role: FinancialTeamRole) {
@@ -506,7 +508,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession }: {
       {runs.length ? <div className={styles.history} aria-label={zh ? "最近分析轮次" : "Recent analyst runs"}>
         {runs.slice(0, 8).map((run) => <VButton key={run.runId} variant="secondary" className={[styles.historyButton, run.runId === selectedRun?.runId ? styles.historySelected : ""].join(" ")} aria-pressed={run.runId === selectedRun?.runId} onPress={() => setSelectedRunId(run.runId)}>
           <span><strong>{run.symbol}</strong><span>{run.researchDate || new Date(run.createdAt).toLocaleDateString()} · {run.periodDays}{zh ? "天" : "d"}</span></span>
-          <VChip tone={run.stage === "synthesis" ? "success" : "neutral"}>{run.stage === "synthesis" ? (zh ? "已汇总" : "Synthesized") : run.stage === "debate" ? (zh ? "多空分析" : "Debate") : (zh ? "基础分析" : "Research")}</VChip>
+          <VChip tone="neutral">{run.stage === "synthesis" ? (zh ? "汇总阶段" : "Synthesis stage") : run.stage === "debate" ? (zh ? "多空分析" : "Debate") : (zh ? "基础分析" : "Research")}</VChip>
         </VButton>)}
       </div> : !runsQuery.isPending && !runsQuery.isError ? <VStateSurface tone="empty" title={zh ? "还没有研究轮次" : "No analyst runs yet"} /> : null}
 

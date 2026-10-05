@@ -196,7 +196,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
           emptyText={zh ? "模拟账户暂无持仓" : "No open paper positions"}
           resizable
         />
-        <p className={styles.helper}>{zh ? "估值时间按每只股票的报价时间展示；个股研读会把持仓快照作为草稿提交到原生会话。" : "Marks retain per-stock quote times. Stock research sends the holding snapshot as a draft to the native Session."}</p>
+        <p className={styles.helper}>{zh ? "估值采用各股报价时点；个股研读准备持仓分析草稿。" : "Valuations retain per-stock quote times. Stock research prepares a holding analysis draft."}</p>
       </VSurface>
 
       <VSurface className={styles.panel}>
@@ -219,7 +219,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
           <span>{zh ? `预算跳过 ${data.coverage.budgetSkippedPositionCount} 只` : `${data.coverage.budgetSkippedPositionCount} holdings outside budget`}</span>
           <span>{zh ? `超时跳过 ${data.coverage.deadlineSkippedPositionCount} 只` : `${data.coverage.deadlineSkippedPositionCount} skipped at deadline`}</span>
         </div>
-        <p className={styles.helper}>{zh ? `相关性分析上限 ${data.coverage.maxAnalyzedPositions} 只持仓，并发读取 ${data.coverage.maxConcurrentFetches} 只，时限 ${data.coverage.deadlineSeconds} 秒。` : `Analysis is capped at ${data.coverage.maxAnalyzedPositions} holdings, ${data.coverage.maxConcurrentFetches} concurrent reads, and ${data.coverage.deadlineSeconds} seconds.`}</p>
+        {data.positions.length > data.coverage.maxAnalyzedPositions ? <p className={styles.helper}>{zh ? `本次分析前 ${data.coverage.maxAnalyzedPositions} 只持仓。` : `This analysis covers the first ${data.coverage.maxAnalyzedPositions} holdings.`}</p> : null}
       </VSurface>
     </section>
 

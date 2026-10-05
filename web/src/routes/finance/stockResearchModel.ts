@@ -20,7 +20,11 @@ export function isBlankResearchPlaceholder(row: SessionSummary) {
 
 export function isResearchSearchResult(row: SessionSummary, query: string) {
   const needle = query.trim().toLocaleLowerCase();
-  return !needle || !isBlankResearchPlaceholder(row) || row.title.toLocaleLowerCase().includes(needle);
+  // Native queries append the Agent's direct stub even when it is not a hit.
+  // It can inherit a prior terminal outcome without acquiring an indexed body.
+  const unindexedDirectStub = row.conversationIndexKind === "personal_agent"
+    && !row.updatedAt && !row.lastActive && !row.taskSummary && !row.searchSnippets?.length;
+  return !needle || !(unindexedDirectStub || isBlankResearchPlaceholder(row)) || row.title.toLocaleLowerCase().includes(needle);
 }
 
 export function cleanResearchPreview(text: string, limit = 100) {
@@ -33,6 +37,10 @@ export function cleanResearchPreview(text: string, limit = 100) {
     .join(" ").replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
     .replace(/https?:\/\/\S+/g, "").replace(/[#*_`>]/g, " ")
     .replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+export function isNativeResearchStopNotice(text: string) {
+  return /(?:^|\n\n)(?:本轮已按请求停止[。，]|This turn was stopped (?:as requested|before it started)\.)/i.test(text);
 }
 
 /** An exact, bounded table excerpt for reports that have no prose conclusion. */
@@ -95,7 +103,7 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
     const text = message.turnItems.filter((item) => item.type === "agent_message" && item.phase === "final_answer" && item.status === "completed").map((item) => item.type === "agent_message" ? item.text : "").join("\n\n");
     // Older native interrupted turns may be represented as completed messages.
     // Their native stop notice remains a notice even after a successful resume.
-    if (!text.trim() || /(?:^|\n\n)(?:本轮已按请求停止[。，]|This turn was stopped (?:as requested|before it started)\.)/i.test(text)) continue;
+    if (!text.trim() || isNativeResearchStopNotice(text)) continue;
     candidates.push({ turn: message, text, request });
   }
   // Native finance starts carry this request contract. Ordinary follow-ups stay
