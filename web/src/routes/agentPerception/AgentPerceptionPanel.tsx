@@ -327,7 +327,7 @@ function SourceCard({
         </VNativeSelect>
         <div className={panelStyles.triggerList}>
           {sourcePolicy.mode === "auto" ? TRIGGER_IDS.map((trigger) => (
-            <VCheckbox key={trigger} aria-label={label + " · " + (trigger === "task" ? copy.triggerTask : trigger === "update" ? copy.triggerUpdate : copy.triggerBackground)}
+            <VCheckbox key={trigger} className={panelStyles.touchControl} aria-label={label + " · " + (trigger === "task" ? copy.triggerTask : trigger === "update" ? copy.triggerUpdate : copy.triggerBackground)}
               isSelected={sourcePolicy.triggers[trigger]} onChange={(enabled) => updatePolicy((current) => setPerceptionTrigger(current, source, trigger, enabled))}>
               {trigger === "task" ? langText(lang, "任务", "Task") : trigger === "update" ? langText(lang, "更新", "Update") : langText(lang, "后台", "Schedule")}
             </VCheckbox>
@@ -336,7 +336,7 @@ function SourceCard({
         </div>
         <div className={panelStyles.scopeSummary}>
           <span className={panelStyles.detailText}>{scopeSummary}</span>
-          {scoped ? <VButton type="button" density="compact" variant="ghost" aria-expanded={expanded} aria-controls={scopeId}
+          {scoped ? <VButton type="button" density="compact" variant="ghost" className={panelStyles.touchControl} aria-expanded={expanded} aria-controls={scopeId}
             aria-label={label + " · " + langText(lang, expanded ? "收起范围" : "编辑范围", expanded ? "Collapse scope" : "Edit scope")}
             trailingIcon={expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setExpanded(!expanded)}>
             {langText(lang, expanded ? "收起" : "编辑", expanded ? "Collapse" : "Edit")}
@@ -385,7 +385,7 @@ function TopicEditor({ topics, copy, lang, onChange }: { topics: string[]; copy:
     <div className={panelStyles.topicsSection}>
       <div className={panelStyles.topicsHeading}>
         <div className={panelStyles.minWidthZero}><strong className={panelStyles.smallText}>{copy.topics} · {topics.length}/8</strong><p className={panelStyles.topicSummary}>{topics.join(" · ") || langText(lang, "尚未设置主题", "No topics configured")}</p></div>
-        <VButton type="button" density="compact" variant="ghost" aria-expanded={expanded} aria-controls={editorId} aria-label={langText(lang, expanded ? "收起调研主题" : "编辑调研主题", expanded ? "Collapse research topics" : "Edit research topics")} trailingIcon={expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setExpanded(!expanded)}>{langText(lang, expanded ? "收起主题" : "编辑主题", expanded ? "Collapse topics" : "Edit topics")}</VButton>
+        <VButton type="button" density="compact" variant="ghost" className={panelStyles.touchControl} aria-expanded={expanded} aria-controls={editorId} aria-label={langText(lang, expanded ? "收起调研主题" : "编辑调研主题", expanded ? "Collapse research topics" : "Edit research topics")} trailingIcon={expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setExpanded(!expanded)}>{langText(lang, expanded ? "收起主题" : "编辑主题", expanded ? "Collapse topics" : "Edit topics")}</VButton>
       </div>
       {expanded ? <div className={panelStyles.topicEditor} id={editorId}>
           <p className={panelStyles.hintText}>{copy.topicsHint}</p>
