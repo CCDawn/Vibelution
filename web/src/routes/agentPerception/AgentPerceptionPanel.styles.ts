@@ -1,24 +1,30 @@
-/**
- * The perception workspace keeps its inspector beside the active page on wide
- * screens and stacks it below the page on narrow screens. Width memory still
- * belongs to VSplitWorkspace's shared layout persistence.
- */
+/** Compact perception settings share the Agent detail pane; the save bar stays outside the content scroll. */
 const styles = {
-  workspace: [
-    // Route styles can be prefetched later; keep their generic flex utilities
-    // from changing this recipe's direction or its natural-height panes.
-    "[&[data-vui=split-workspace]]:!flex-col !overflow-visible xl:[&[data-vui=split-workspace]]:!flex-row",
-    "[&>[data-vui-layout-handle]]:hidden xl:[&>[data-vui-layout-handle]]:flex",
-    "[&>main[data-vui=split-main]]:!h-auto [&>main[data-vui=split-main]]:!flex-none [&>main[data-vui=split-main]]:!overflow-visible",
-    "xl:[&>main[data-vui=split-main]]:!flex-1",
-    "[&>aside[data-vui=split-aside]]:!h-auto [&>aside[data-vui=split-aside]]:!w-full",
-    "[&>aside[data-vui=split-aside]]:!basis-auto [&>aside[data-vui=split-aside]]:!min-w-0 [&>aside[data-vui=split-aside]]:!max-w-none [&>aside[data-vui=split-aside]]:!flex-none",
-    "xl:[&>aside[data-vui=split-aside]]:!w-[var(--pane-w-runtime)]",
-    "xl:[&>aside[data-vui=split-aside]]:!basis-[var(--pane-w-runtime)] xl:[&>aside[data-vui=split-aside]]:!min-w-[260px] xl:[&>aside[data-vui=split-aside]]:!max-w-[480px]",
-  ].join(" "),
-  mainContent: "mx-auto grid w-full max-w-5xl min-w-0 gap-3",
-  runtimeAside: "grid min-w-0 gap-3 xl:min-h-0 xl:overflow-y-auto",
-  panel: "grid min-w-0 gap-3 p-3 sm:p-4",
+  panel: "@container flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden p-3 sm:p-4",
+  panelHeader: "flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-2",
+  workspace: "min-h-0 flex-1 !overflow-hidden [&>main[data-vui=split-main]]:!overflow-auto",
+  mainContent: "mx-auto grid w-full max-w-[1440px] min-w-0 gap-4 pb-3",
+  enableLine: "flex min-w-0 items-start justify-between gap-4 px-4 py-3",
+  boundary: "m-0 border-t border-vui-border-subtle px-4 py-2 text-vui-xs leading-5 text-vui-fg-tertiary",
+  sources: "overflow-hidden",
+  sourceCard: "min-w-0 border-t border-vui-border-subtle first:border-t-0",
+  sourceLine: "grid min-w-0 grid-cols-[minmax(0,1fr)_112px] items-center gap-x-3 gap-y-2 px-3 py-3 @[480px]:grid-cols-[minmax(0,1fr)_140px] @[880px]:min-h-[76px] @[880px]:grid-cols-[minmax(210px,1.4fr)_124px_minmax(190px,1.1fr)_minmax(140px,.8fr)] @[880px]:px-4",
+  sourceColumnHead: "hidden grid-cols-[minmax(210px,1.4fr)_124px_minmax(190px,1.1fr)_minmax(140px,.8fr)] gap-3 border-b border-vui-border-subtle bg-vui-surface-rail px-4 py-2 text-vui-xs text-vui-fg-tertiary @[880px]:grid",
+  sourceTitleLine: "flex min-w-0 items-start gap-1",
+  scopeSummary: "col-span-2 flex min-w-0 items-center justify-between gap-2 @[480px]:col-span-1 @[480px]:justify-end @[880px]:justify-between",
+  scopeEditor: "grid min-w-0 gap-3 border-t border-vui-border-subtle bg-vui-surface-inset p-3 @[480px]:px-4",
+  scopeKind: "w-full max-w-sm",
+  budgetGrid: "grid min-w-0 grid-cols-2 items-start gap-3 p-3 @[600px]:grid-cols-3 @[880px]:grid-cols-[repeat(5,minmax(0,1fr))_90px] @[880px]:gap-4 @[880px]:p-4",
+  topicsSection: "min-w-0 border-t border-vui-border-subtle",
+  topicsHeading: "flex min-w-0 items-start justify-between gap-3 px-4 py-2",
+  topicSummary: "mb-0 mt-1 break-words text-vui-xs leading-5 text-vui-fg-secondary",
+  topicEditor: "grid min-w-0 gap-2 px-4 pb-3",
+  notificationRow: "grid min-w-0 gap-2 border-t border-vui-border-subtle px-4 py-3 @[480px]:grid-cols-[minmax(0,1fr)_220px] @[480px]:items-center",
+  helpTarget: "max-[600px]:!min-h-8 max-[600px]:!min-w-8",
+  runtimeSummary: "min-w-0 px-3 py-2",
+  runtimeStrip: "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2",
+  runtimeFacts: "mt-2 grid min-w-0 gap-1 text-vui-xs text-vui-fg-secondary [&>div]:flex [&>div]:min-w-0 [&>div]:flex-wrap [&>div]:gap-x-3 [&>div>strong]:font-medium [&>div>span]:break-words",
+  saveBar: "flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-3 border-t border-vui-border-subtle px-3 py-3",
   description: "m-0 max-w-[78ch] text-vui-xs leading-5 text-vui-fg-secondary",
   stack: "grid min-w-0 gap-3",
   sectionStack: "grid min-w-0 gap-2",
@@ -28,17 +34,17 @@ const styles = {
   scopeEmpty: "mt-2",
   scopeOption: "w-full justify-start rounded-vui-control border border-vui-border-subtle bg-vui-surface-panel px-2.5 py-2",
   scopeOptionBody: "grid min-w-0 gap-0.5 text-left",
-  scopeOptionTitle: "truncate text-vui-xs font-medium text-vui-fg-primary",
-  scopeOptionDetail: "truncate text-vui-xs text-vui-fg-tertiary",
+  scopeOptionTitle: "break-words text-vui-xs font-medium text-vui-fg-primary",
+  scopeOptionDetail: "break-words text-vui-xs text-vui-fg-tertiary",
   scopeOptions: "grid min-w-0 gap-1.5",
-  sourceHeading: "flex min-w-0 items-start gap-2 px-4 py-3",
-  sourceIcon: "mt-0.5 inline-grid size-7 shrink-0 place-items-center rounded-vui-control border border-vui-border-subtle text-vui-fg-secondary",
+  sourceHeading: "flex min-w-0 items-start gap-2",
+  sourceIcon: "mt-1 hidden shrink-0 text-vui-fg-secondary @[480px]:inline-flex",
   sourceTitle: "m-0 text-vui-sm font-semibold text-vui-fg-primary",
   sourceHint: "mb-0 mt-1 text-vui-xs leading-5 text-vui-fg-tertiary",
   ruleText: "m-0 text-vui-xs leading-5 text-vui-fg-secondary",
-  triggerList: "flex min-w-0 flex-wrap gap-x-4 gap-y-1",
+  triggerList: "col-span-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 @[480px]:col-span-1 @[880px]:col-auto",
   inlineControls: "flex min-w-0 flex-wrap items-center gap-2",
-  topicInput: "min-w-[14rem] flex-1",
+  topicInput: "min-w-0 flex-1",
   topicList: "m-0 flex min-w-0 flex-wrap gap-1.5 p-0",
   listItem: "list-none",
   topicChip: "inline-flex max-w-full items-center gap-1",
@@ -70,7 +76,7 @@ const styles = {
   linkedIdentifier: "break-all font-mono text-vui-fg-tertiary",
   updateList: "m-0 min-w-0 p-0",
   saveState: "text-vui-xs font-medium text-vui-fg-secondary",
-  actions: "flex flex-wrap gap-2",
+  actions: "flex flex-wrap gap-2 max-[600px]:w-full max-[600px]:[&>button]:min-h-11 max-[600px]:[&>button]:flex-1",
 } as const;
 
 export default styles;
