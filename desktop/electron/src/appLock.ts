@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { normalizeLaunchRequestId } from "./lifecycle/launchRequestReceipt.js";
 
 export type SingleInstanceDecision =
   | { action: "continue_as_primary" }
@@ -17,6 +18,7 @@ export type SingleInstanceLifecycleEnvelope = {
    * shared shell honor a per-request hidden intent.
    */
   hiddenPresentation: boolean;
+  launchRequestId?: string;
   lifecycle: {
     command: string;
     provenance: SingleInstanceLifecycleProvenance;
@@ -27,6 +29,7 @@ export type SingleInstanceLifecycleEnvelope = {
 };
 
 export type SingleInstanceLifecycleEnvelopeInput = {
+  launchRequestId?: string;
   projectRoot?: string;
   openWorkbench?: boolean;
   hiddenPresentation?: boolean;
@@ -45,6 +48,7 @@ export type SecondInstanceIntent =
   | { action: "focus_existing_shell" };
 
 export type SingleInstanceCliIntent = {
+  launchRequestId?: string;
   projectRoot: string;
   openWorkbench: boolean;
   hiddenPresentation: boolean;
@@ -85,6 +89,7 @@ export function createSingleInstanceEnvelope(
     projectRoot: String(input.projectRoot || "").trim(),
     openWorkbench: input.openWorkbench === true,
     hiddenPresentation: input.hiddenPresentation === true,
+    ...(normalizeLaunchRequestId(input.launchRequestId) ? { launchRequestId: input.launchRequestId } : {}),
     lifecycle: {
       command,
       provenance: explicitlyForwarded ? "forwarded" : "operator",
@@ -110,6 +115,7 @@ export function resolveSingleInstanceCliIntent(value: unknown): SingleInstanceCl
     projectRoot: typeof value.projectRoot === "string" ? value.projectRoot.trim() : "",
     openWorkbench: value.openWorkbench === true,
     hiddenPresentation: value.hiddenPresentation === true,
+    ...(normalizeLaunchRequestId(value.launchRequestId) ? { launchRequestId: value.launchRequestId } : {}),
     lifecycleCommand: value.lifecycle.command.trim().toLowerCase()
   };
 }

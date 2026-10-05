@@ -1511,6 +1511,7 @@ def _settlement_payload(
         "operation": operation,
         "observed": observed,
         "settled": observed in {
+            "launch_request_failed",
             "queue_settlement",
             "instance_registry_settlement",
             "reuse_backend_healthy",
@@ -1528,6 +1529,47 @@ def _read_branch_instance_snapshot(workspace_root: Path) -> dict[str, object]:
     from core.runtime_manager.instances_registry import find_instance_by_project_root
 
     return dict(find_instance_by_project_root(workspace_root))
+
+
+def _launch_request_receipt_path(workspace_root: Path, request_id: str) -> Path | None:
+    if not re.fullmatch(r"launch_[a-f0-9]{32}", request_id):
+        return None
+    from core.launcher.desktop_shell import resolve_desktop_shell_launch_roots
+
+    shell_root, _slot_root = resolve_desktop_shell_launch_roots(workspace_root)
+    return _runtime_manager_dir_for(shell_root).parent / "launcher" / "launch-requests" / f"{request_id}.json"
+
+
+def _read_launch_request_receipt(workspace_root: Path, request_id: str, operation: str, *, receipt_path: Path | None = None) -> dict[str, object]:
+    path = receipt_path or _launch_request_receipt_path(workspace_root, request_id)
+    if path is None:
+        return {}
+    try:
+        if path.is_symlink() or path.stat().st_size > 4096:
+            return {}
+        receipt = _read_json_object(path)
+        if (
+            receipt.get("schemaVersion") != 1 or receipt.get("requestId") != request_id
+            or receipt.get("operation") != operation
+            or receipt.get("status") not in {"received", "dispatched", "failed"}
+            or os.path.normcase(str(Path(str(receipt.get("projectRoot") or "")).resolve()))
+            != os.path.normcase(str(workspace_root.resolve()))
+        ):
+            return {}
+        return receipt
+    except (OSError, ValueError):
+        return {}
+
+
+@contextlib.contextmanager
+def _launch_request_receipt_scope(workspace_root: Path, request_id: str) -> Iterator[None]:
+    path = _launch_request_receipt_path(workspace_root, request_id) if request_id else None
+    try:
+        yield
+    finally:
+        if path is not None:
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
 
 
 def _capture_lifecycle_settlement_baseline(workspace_root: Path) -> dict[str, object]:
@@ -1564,6 +1606,7 @@ def wait_for_branch_instance_settlement(
     sleep=time.sleep,
     monotonic=time.monotonic,
     health_probe=None,
+    receipt_probe=None,
 ) -> dict[str, object]:
     """Wait for one isolated instance generation to reach its requested state."""
 
@@ -1575,9 +1618,19 @@ def wait_for_branch_instance_settlement(
     reuse_deadline = started_at + max(0.0, float(reuse_grace_seconds)) if operation == "start" else 0.0
     reuse_checked = False
     observed_fresh_generation = False
+    observed_received_request = False
     last_entry: dict[str, object] = {}
 
     while True:
+        receipt = receipt_probe() if receipt_probe else {}
+        if receipt:
+            observed_received_request = True
+            if receipt.get("status") == "failed":
+                return _settlement_payload(
+                    operation=operation, observed="launch_request_failed", accepted=False,
+                    code=str(receipt.get("code") or "launch_preparation_failed"),
+                    message=str(receipt.get("message") or "Launcher 启动准备失败。"),
+                )
         entry = _read_branch_instance_snapshot(workspace_root)
         if entry:
             last_entry = entry
@@ -1638,13 +1691,13 @@ def wait_for_branch_instance_settlement(
                 )
 
         if monotonic() >= deadline:
-            if observed_fresh_generation:
+            if observed_fresh_generation or observed_received_request:
                 return _settlement_payload(
                     operation=operation,
-                    observed="instance_registry_unsettled",
+                    observed="instance_registry_unsettled" if observed_fresh_generation else "launch_request_unsettled",
                     accepted=False,
                     message=(
-                        f"分支实例生命周期命令 {operation} 已进入 generation "
+                        f"分支实例生命周期命令 {operation} 已被接收，当前 generation "
                         f"{int(last_entry.get('generation') or 0)}，但在 {int(timeout_seconds)}s 内未完成。"
                     ),
                     command_id=str(last_entry.get("commandId") or "").strip(),
@@ -1816,12 +1869,17 @@ def _await_launch_lifecycle_settlement(
         )
     )
     if str(captured.get("kind") or "") == "branch_instance":
+        request_id = str(captured.get("launchRequestId") or "")
+        receipt_path = _launch_request_receipt_path(workspace_root, request_id) if request_id else None
         settlement = wait_for_branch_instance_settlement(
             workspace_root,
             lifecycle,
             baseline_generation=int(captured.get("generation") or 0),
             baseline_command_id=str(captured.get("commandId") or ""),
             timeout_seconds=settle_timeout,
+            **({"receipt_probe": lambda: _read_launch_request_receipt(
+                workspace_root, request_id, lifecycle, receipt_path=receipt_path
+            )} if request_id else {}),
         )
     else:
         settlement = wait_for_lifecycle_settlement(
@@ -2138,70 +2196,82 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
     # Electron so a fast claim cannot race ahead of our baseline read.
     not_before_epoch = time.time()
     baseline = _capture_lifecycle_settlement_baseline(workspace_root)
-    payload = launch_desktop_shell(
-        project_root=workspace_root,
-        then_lifecycle=str(args.then_lifecycle or ""),
-        open_workbench=bool(getattr(args, "open_workbench", False)),
-        hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
+    request_id = (
+        f"launch_{uuid.uuid4().hex}"
+        if baseline.get("kind") == "branch_instance" and str(args.then_lifecycle or "") in _LIFECYCLE_SETTLEMENT_OPERATION_VARIANTS
+        else ""
     )
-    _append_log(
-        "desktop_entry_python.desktop_shell.launched",
-        kind=str(payload.get("kind") or ""),
-        pid=int(payload.get("pid") or 0),
-        then_lifecycle=str(payload.get("thenLifecycle") or ""),
-        open_workbench=bool(payload.get("openWorkbench")),
-    )
-    payload = _await_launch_lifecycle_settlement(
-        args,
-        payload,
-        baseline=baseline,
-        not_before_epoch=not_before_epoch,
-    )
-    settlement = payload.get("lifecycleSettlement")
-    if isinstance(settlement, dict) and str(settlement.get("observed") or "") == "intent_not_consumed":
-        # The forwarded second-instance signal never reached the main-line
-        # queue. A dropped signal is retryable (unlike an unsettled intent that
-        # was already accepted into the queue), so re-forward once with a short
-        # bounded window; the native bridge deadline covers both attempts.
-        _append_log(
-            "desktop_entry_python.desktop_shell.launch_retry",
-            level="warning",
-            operation=str(settlement.get("operation") or ""),
-            timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+    if request_id:
+        baseline["launchRequestId"] = request_id
+    with _launch_request_receipt_scope(workspace_root, request_id):
+        payload = launch_desktop_shell(
+            project_root=workspace_root,
+            then_lifecycle=str(args.then_lifecycle or ""),
+            open_workbench=bool(getattr(args, "open_workbench", False)),
+            hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
+            **({"launch_request_id": request_id} if request_id else {}),
         )
-        retry_not_before_epoch = time.time()
-        retry_baseline = _capture_lifecycle_settlement_baseline(workspace_root)
-        try:
-            retry_payload = launch_desktop_shell(
-                project_root=workspace_root,
-                then_lifecycle=str(args.then_lifecycle or ""),
-                open_workbench=bool(getattr(args, "open_workbench", False)),
-                hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
-            )
-        except Exception as exc:  # noqa: BLE001 - keep the first visible failure
-            _append_log(
-                "desktop_entry_python.desktop_shell.launch_retry_failed",
-                level="error",
-                error=str(exc),
-            )
-            return payload
         _append_log(
             "desktop_entry_python.desktop_shell.launched",
-            kind=str(retry_payload.get("kind") or ""),
-            pid=int(retry_payload.get("pid") or 0),
-            then_lifecycle=str(retry_payload.get("thenLifecycle") or ""),
-            open_workbench=bool(retry_payload.get("openWorkbench")),
-            retry=True,
+            kind=str(payload.get("kind") or ""),
+            pid=int(payload.get("pid") or 0),
+            then_lifecycle=str(payload.get("thenLifecycle") or ""),
+            open_workbench=bool(payload.get("openWorkbench")),
         )
         payload = _await_launch_lifecycle_settlement(
             args,
-            retry_payload,
-            baseline=retry_baseline,
-            not_before_epoch=retry_not_before_epoch,
-            timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+            payload,
+            baseline=baseline,
+            not_before_epoch=not_before_epoch,
         )
-        payload["settlementAttempts"] = 2
-    return payload
+        settlement = payload.get("lifecycleSettlement")
+        if isinstance(settlement, dict) and str(settlement.get("observed") or "") == "intent_not_consumed":
+            # The forwarded second-instance signal never reached the main-line
+            # queue. A dropped signal is retryable (unlike an unsettled intent that
+            # was already accepted into the queue), so re-forward once with a short
+            # bounded window; the native bridge deadline covers both attempts.
+            _append_log(
+                "desktop_entry_python.desktop_shell.launch_retry",
+                level="warning",
+                operation=str(settlement.get("operation") or ""),
+                timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+            )
+            retry_not_before_epoch = time.time()
+            retry_baseline = _capture_lifecycle_settlement_baseline(workspace_root)
+            if request_id:
+                retry_baseline["launchRequestId"] = request_id
+            try:
+                retry_payload = launch_desktop_shell(
+                    project_root=workspace_root,
+                    then_lifecycle=str(args.then_lifecycle or ""),
+                    open_workbench=bool(getattr(args, "open_workbench", False)),
+                    hidden_presentation=bool(getattr(args, "hidden_presentation", False)),
+                    **({"launch_request_id": request_id} if request_id else {}),
+                )
+            except Exception as exc:  # noqa: BLE001 - keep the first visible failure
+                _append_log(
+                    "desktop_entry_python.desktop_shell.launch_retry_failed",
+                    level="error",
+                    error=str(exc),
+                )
+                return payload
+            _append_log(
+                "desktop_entry_python.desktop_shell.launched",
+                kind=str(retry_payload.get("kind") or ""),
+                pid=int(retry_payload.get("pid") or 0),
+                then_lifecycle=str(retry_payload.get("thenLifecycle") or ""),
+                open_workbench=bool(retry_payload.get("openWorkbench")),
+                retry=True,
+            )
+            payload = _await_launch_lifecycle_settlement(
+                args,
+                retry_payload,
+                baseline=retry_baseline,
+                not_before_epoch=retry_not_before_epoch,
+                timeout_seconds=LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+            )
+            payload["settlementAttempts"] = 2
+        return payload
 
 
 def _ensure_latest_launcher_bridge(args: argparse.Namespace) -> dict[str, object]:

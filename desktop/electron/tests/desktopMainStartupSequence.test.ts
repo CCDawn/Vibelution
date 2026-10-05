@@ -69,9 +69,11 @@ describe("hidden presentation forwarding", () => {
     );
     expect(pendingProjectIndex).toBeGreaterThan(0);
     expect(applyCallIndex).toBeGreaterThan(pendingProjectIndex);
-    expect(source.slice(applyCallIndex, applyCallIndex + 200)).toContain(
+    const applyCall = source.slice(applyCallIndex, source.indexOf("});", applyCallIndex) + 3);
+    expect(applyCall).toContain(
       "hiddenPresentation: desktopCliArgs.hiddenPresentation"
     );
+    expect(applyCall).toContain("launchRequestId: desktopCliArgs.launchRequestId");
   });
 
   it("carries hidden presentation on second-instance apply_project intents", () => {

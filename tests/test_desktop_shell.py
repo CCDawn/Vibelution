@@ -1381,12 +1381,16 @@ def test_launch_desktop_shell_forwards_hidden_presentation_to_electron_argv(tmp_
         lambda _requested: (_ for _ in ()).throw(BranchWorkspaceError("not a git checkout")),
     )
     result = desktop_shell.launch_desktop_shell(
-        project_root=tmp_path, open_workbench=True, hidden_presentation=True
+        project_root=tmp_path, open_workbench=True, hidden_presentation=True,
+        launch_request_id="launch_" + "a" * 32,
     )
     assert result["kind"] == "unpackaged"
     assert captured["args"][0] == str(electron_exe)
     assert "--hidden-presentation" in captured["args"]
     assert "--open-workbench" in captured["args"]
+    request_index = captured["args"].index("--launch-request-id")
+    assert captured["args"][request_index + 1] == "launch_" + "a" * 32
+    assert result["launchRequestId"] == "launch_" + "a" * 32
 
 
 def test_resolve_desktop_shell_launch_roots_falls_back_without_git(tmp_path):

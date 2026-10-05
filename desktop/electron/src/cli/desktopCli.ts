@@ -6,6 +6,7 @@ export type DesktopCliArgs = {
   openWorkbench: boolean;
   workbenchCloseCanary: boolean;
   lifecycleCommand: string;
+  launchRequestId?: string;
   /**
    * Hidden presentation intent forwarded from `VibelutionLauncher.exe --hidden`
    * via the desktop-entry bridge. Applies to branch instance workbench windows
@@ -65,6 +66,12 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     }
     if (item === "--project") {
       result.projectRoot = String(argv[index + 1] || "").trim();
+      index += 1;
+      continue;
+    }
+    if (item === "--launch-request-id") {
+      const value = String(argv[index + 1] || "");
+      if (/^launch_[a-f0-9]{32}$/.test(value)) result.launchRequestId = value;
       index += 1;
       continue;
     }

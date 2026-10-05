@@ -1538,10 +1538,94 @@ def test_default_launch_settlement_budget_depends_on_operation(monkeypatch, tmp_
     assert captured["timeout_seconds"] == budget
 
 
+def test_received_preparation_failure_is_reported_before_generation(monkeypatch, tmp_path):
+    clock = [0.0]
+    monkeypatch.setattr(desktop_entry, "_read_branch_instance_snapshot", lambda _root: {})
+    result = desktop_entry.wait_for_branch_instance_settlement(
+        tmp_path, "start", timeout_seconds=810,
+        sleep=_advance_clock(clock), monotonic=lambda: clock[0],
+        health_probe=lambda: False,
+        receipt_probe=lambda: {"status": "failed", "code": "frontend_preparation_failed",
+                               "message": "Frontend preparation failed."} if clock[0] >= 2 else {"status": "received"},
+    )
+    assert clock[0] == 2
+    assert result["observed"] == "launch_request_failed"
+    assert result["code"] == "frontend_preparation_failed"
+    assert result["accepted"] is False
+    assert result["settled"] is True
+
+
+@pytest.mark.parametrize("receipt", [{"status": "received"}, {"status": "dispatched"}])
+def test_received_launch_without_ready_generation_is_unsettled_not_retryable(monkeypatch, tmp_path, receipt):
+    clock = [0.0]
+    monkeypatch.setattr(desktop_entry, "_read_branch_instance_snapshot", lambda _root: {})
+    result = desktop_entry.wait_for_branch_instance_settlement(
+        tmp_path, "start", timeout_seconds=3,
+        sleep=_advance_clock(clock), monotonic=lambda: clock[0],
+        health_probe=lambda: False, receipt_probe=lambda: receipt,
+    )
+    assert result["observed"] == "launch_request_unsettled"
+    assert result["accepted"] is False
+    assert result["settled"] is False
+
+
+def test_bridge_reports_preparation_failure_without_relaunch_and_cleans_receipt(monkeypatch, tmp_path):
+    calls = []
+    path = tmp_path / "receipt.json"
+    monkeypatch.setattr(desktop_entry, "_launch_request_receipt_path", lambda *_args: path)
+    monkeypatch.setattr(desktop_entry, "_capture_lifecycle_settlement_baseline", lambda _root: {"kind": "branch_instance", "generation": 0})
+    monkeypatch.setattr(desktop_entry, "_read_branch_instance_snapshot", lambda _root: {})
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+
+    def launch(**kwargs):
+        calls.append(kwargs)
+        path.write_text(json.dumps({
+            "schemaVersion": 1, "requestId": kwargs["launch_request_id"],
+            "operation": "start", "projectRoot": str(tmp_path), "status": "failed",
+            "code": "frontend_preparation_failed", "message": "Frontend preparation failed.",
+        }), encoding="utf-8")
+        return {"thenLifecycle": "start"}
+
+    monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", launch)
+    args = desktop_entry.parse_args(["--workspace", str(tmp_path), "--action", "launch-desktop-shell", "--then-lifecycle", "start"])
+    result = desktop_entry._launch_desktop_shell_bridge(args)
+    assert len(calls) == 1
+    assert result["ok"] is False
+    assert result["lifecycleSettlement"]["code"] == "frontend_preparation_failed"
+    assert not path.exists()
+
+
+def test_dropped_branch_launch_retries_once_with_same_request_id(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(desktop_entry, "_capture_lifecycle_settlement_baseline", lambda _root: {"kind": "branch_instance", "generation": 0})
+    monkeypatch.setattr(desktop_entry, "_launch_request_receipt_path", lambda *_args: tmp_path / "missing.json")
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", lambda **kwargs: calls.append(kwargs) or {"thenLifecycle": "start"})
+    monkeypatch.setattr(desktop_entry, "_await_launch_lifecycle_settlement", lambda *_args, **_kwargs: {"lifecycleSettlement": {"observed": "intent_not_consumed"}})
+    args = desktop_entry.parse_args(["--workspace", str(tmp_path), "--action", "launch-desktop-shell", "--then-lifecycle", "start"])
+    result = desktop_entry._launch_desktop_shell_bridge(args)
+    assert len(calls) == 2
+    assert calls[0]["launch_request_id"] == calls[1]["launch_request_id"]
+    assert result["settlementAttempts"] == 2
+
+
+@pytest.mark.parametrize("override", [
+    {"requestId": "launch_" + "b" * 32}, {"operation": "stop"},
+    {"projectRoot": "another-workspace"}, {"schemaVersion": 2}, {"status": "unknown"},
+])
+def test_launch_receipt_rejects_unrelated_or_invalid_result(monkeypatch, tmp_path, override):
+    path = tmp_path / "receipt.json"
+    request_id = "launch_" + "a" * 32
+    monkeypatch.setattr(desktop_entry, "_launch_request_receipt_path", lambda *_args: path)
+    receipt = {"schemaVersion": 1, "requestId": request_id, "projectRoot": str(tmp_path), "operation": "start", "status": "failed"}
+    path.write_text(json.dumps({**receipt, **override}), encoding="utf-8")
+    assert desktop_entry._read_launch_request_receipt(tmp_path, request_id, "start") == {}
+
+
 def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         "core.launcher.desktop_shell.launch_desktop_shell",
-        lambda *, project_root, then_lifecycle, open_workbench, hidden_presentation=False: {
+        lambda *, project_root, then_lifecycle, open_workbench, hidden_presentation=False, launch_request_id="": {
             "schemaVersion": 1,
             "kind": "unpackaged",
             "pid": 9,
@@ -1586,7 +1670,7 @@ def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(m
 def test_launch_desktop_shell_skips_settlement_wait_for_non_lifecycle_ops(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         "core.launcher.desktop_shell.launch_desktop_shell",
-        lambda *, project_root, then_lifecycle, open_workbench, hidden_presentation=False: {
+        lambda *, project_root, then_lifecycle, open_workbench, hidden_presentation=False, launch_request_id="": {
             "schemaVersion": 1,
             "kind": "unpackaged",
             "pid": 9,

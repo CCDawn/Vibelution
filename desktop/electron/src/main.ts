@@ -58,6 +58,7 @@ import { appendSupervisorEventFallback } from "./lifecycle/supervisorEventFallba
 import { fulfillDeferredRestartIntentOnce } from "./lifecycle/deferredRestartIntents.js";
 import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
 import { runWithFrontendBuildGate } from "./lifecycle/frontendBuildState.js";
+import { beginLaunchRequestReceipt } from "./lifecycle/launchRequestReceipt.js";
 import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
   createConversationNotificationService,
@@ -371,6 +372,7 @@ const desktopLaunchArgv = process.argv.slice(1);
 const desktopCliArgs = parseDesktopCliArgs(desktopLaunchArgv);
 const desktopLifecycleLaunchMetadata = parseDesktopLifecycleLaunchMetadata(desktopLaunchArgv, process.env);
 const singleInstanceEnvelope = createSingleInstanceEnvelope({
+  launchRequestId: desktopCliArgs.launchRequestId,
   projectRoot: desktopCliArgs.projectRoot,
   openWorkbench: desktopCliArgs.openWorkbench,
   hiddenPresentation: desktopCliArgs.hiddenPresentation,
@@ -4869,26 +4871,32 @@ async function applyPendingProjectSlot(
   projectRoot: string,
   lifecycleCommand = "",
   provenance: LauncherLifecycleProvenance = "operator",
-  options: { hiddenPresentation?: boolean } = {}
+  options: { hiddenPresentation?: boolean; launchRequestId?: string } = {}
 ): Promise<void> {
   const hiddenPresentation = options.hiddenPresentation === true;
   const wanted = projectRoot.trim();
   if (!wanted) {
     return;
   }
-  if (windowProvider === null || launcherBootstrap === null) {
-    // A second-instance launch can arrive while the primary Electron shell is
-    // still bootstrapping. Wait for the same control-plane boundary instead of
-    // dropping the lifecycle command after merely starting Electron.
-    await launcherControlPlaneReady;
-  }
-  const provider = windowProvider;
-  if (provider === null || launcherBootstrap === null) {
-    pendingProjectRoot = wanted;
-    return;
-  }
-  pendingProjectRoot = "";
+  const receipt = beginLaunchRequestReceipt({
+    shellRoot: createDesktopPathsForApp().workspaceRoot,
+    projectRoot: wanted, operation: lifecycleCommand, requestId: options.launchRequestId
+  });
+  if (receipt.duplicate) return;
   try {
+    if (windowProvider === null || launcherBootstrap === null) {
+      // A second-instance launch can arrive while the primary Electron shell is
+      // still bootstrapping. Wait for the same control-plane boundary instead of
+      // dropping the lifecycle command after merely starting Electron.
+      await launcherControlPlaneReady;
+    }
+    const provider = windowProvider;
+    if (provider === null || launcherBootstrap === null) {
+      pendingProjectRoot = wanted;
+      receipt.failed("launcher_unavailable", "Launcher 控制面不可用，启动未执行。");
+      return;
+    }
+    pendingProjectRoot = "";
     await launcherStateStore.refresh("project_slot");
     let items = parseBranchInstanceRecords(launcherStateStore.projectBranchInstances());
     const needsLookup = () => {
@@ -4914,13 +4922,14 @@ async function applyPendingProjectSlot(
       lifecycleCommand
     });
     if (plan.operation) {
+      let result: { accepted: boolean; code?: string; message?: string };
       if (plan.isMain) {
-        await orchestrateLauncherLifecycle(plan.operation, {
+        result = await orchestrateLauncherLifecycle(plan.operation, {
           schemaVersion: 1,
           path: "project-slot"
         }, provenance);
       } else {
-        await orchestrateBranchInstanceLifecycle(plan.operation, {
+        result = await orchestrateBranchInstanceLifecycle(plan.operation, {
           schemaVersion: 1,
           path: `branch-instances/${plan.operation}`,
           init: {
@@ -4932,7 +4941,12 @@ async function applyPendingProjectSlot(
           }
         }, provenance);
       }
+      if (!result.accepted) {
+        receipt.failed(result.code || "lifecycle_rejected", result.message || "Launcher 拒绝了生命周期请求。");
+        return;
+      }
     }
+    receipt.dispatched();
     const windowAction = projectSlotWindowAction(plan);
     if (windowAction === "none") {
       // The isolated-start supervisor opens the instance-scoped window only
@@ -4967,6 +4981,7 @@ async function applyPendingProjectSlot(
     await provider.openOrFocusWorkbench(url);
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
+    receipt.failed("launch_preparation_failed", detail);
     notifyDesktopTray("Vibelution", `应用工作区失败：${detail.slice(0, 300)}`, "warning");
   }
 }
@@ -5123,6 +5138,7 @@ app.whenReady()
     }
     if (pendingProjectRoot) {
       await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle, desktopLifecycleProvenance, {
+        launchRequestId: desktopCliArgs.launchRequestId,
         hiddenPresentation: desktopCliArgs.hiddenPresentation
       });
     } else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
@@ -5181,6 +5197,7 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
   }
   if (intent.action === "apply_project") {
     void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand, secondInstanceProvenance, {
+      launchRequestId: secondCli.launchRequestId,
       hiddenPresentation: intent.hiddenPresentation
     });
     return;

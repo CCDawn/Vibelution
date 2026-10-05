@@ -11,6 +11,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -2020,6 +2021,7 @@ def launch_desktop_shell(
     open_workbench: bool = False,
     hidden_presentation: bool = False,
     prefer: str = "",
+    launch_request_id: str = "",
 ) -> dict[str, Any]:
     """Start Electron main for the current checkout without hiding the GUI."""
 
@@ -2030,13 +2032,19 @@ def launch_desktop_shell(
         hidden_presentation=hidden_presentation,
         prefer=prefer,
     )
-    process = _spawn_visible_electron(list(spec["args"]), cwd=Path(str(spec["cwd"])))
+    args = list(spec["args"])
+    if launch_request_id:
+        if not re.fullmatch(r"launch_[a-f0-9]{32}", launch_request_id):
+            raise ValueError("invalid desktop launch request id")
+        args.extend(["--launch-request-id", launch_request_id])
+    process = _spawn_visible_electron(args, cwd=Path(str(spec["cwd"])))
     return {
         **spec,
         "launched": True,
         "pid": int(getattr(process, "pid", 0) or 0),
         "thenLifecycle": str(then_lifecycle or "").strip().lower(),
         "openWorkbench": bool(open_workbench),
+        **({"launchRequestId": launch_request_id} if launch_request_id else {}),
     }
 
 
