@@ -255,7 +255,7 @@ function OptionList({
   const availableIds = new Set(options.map((option) => option.id));
   const missingIds = selectedIds.filter((id) => !availableIds.has(id));
   if (!options.length && !missingIds.length) {
-    return <VStateSurface className="mt-2" density="compact" tone="empty" title={emptyLabel} data-testid="perception-scope-empty" />;
+    return <VStateSurface className={panelStyles.scopeEmpty} density="compact" tone="empty" title={emptyLabel} data-testid="perception-scope-empty" />;
   }
   const renderOption = (id: string, label: string, detail: string | undefined, selected: boolean, missing = false) => (
     <VCheckbox
@@ -263,16 +263,16 @@ function OptionList({
       isSelected={selected}
       onChange={(next) => onToggle(id, next)}
       aria-label={label}
-      className="w-full justify-start rounded-vui-control border border-vui-border-subtle bg-vui-surface-panel px-2.5 py-2"
+      className={panelStyles.scopeOption}
     >
-      <span className="grid min-w-0 gap-0.5 text-left">
-        <span className="truncate text-vui-xs font-medium text-vui-fg-primary">{label}</span>
-        {detail || missing ? <span className="truncate text-vui-xs text-vui-fg-tertiary">{missing ? unknownLabel : detail}</span> : null}
+      <span className={panelStyles.scopeOptionBody}>
+        <span className={panelStyles.scopeOptionTitle}>{label}</span>
+        {detail || missing ? <span className={panelStyles.scopeOptionDetail}>{missing ? unknownLabel : detail}</span> : null}
       </span>
     </VCheckbox>
   );
   return (
-    <div className="grid min-w-0 gap-1.5" data-testid="perception-scope-options">
+    <div className={panelStyles.scopeOptions} data-testid="perception-scope-options">
       {options.map((option) => renderOption(option.id, option.label, option.detail, selectedIds.includes(option.id)))}
       {missingIds.map((id) => renderOption(id, id, undefined, true, true))}
     </div>
@@ -307,14 +307,14 @@ function SourceCard({
     { id: "auto", label: copy.modeAuto },
   ];
   return (
-    <VSettingsGroupCard className="min-w-0" data-testid={"perception-source-" + source}>
-      <div className="flex min-w-0 items-start gap-2 px-4 py-3">
-        <span className="mt-0.5 inline-grid size-7 shrink-0 place-items-center rounded-vui-control border border-vui-border-subtle text-vui-fg-secondary">
+    <VSettingsGroupCard className={panelStyles.minWidthZero} data-testid={"perception-source-" + source}>
+      <div className={panelStyles.sourceHeading}>
+        <span className={panelStyles.sourceIcon}>
           {sourceIcon(source)}
         </span>
-        <div className="min-w-0">
-          <h3 className="m-0 text-vui-sm font-semibold text-vui-fg-primary">{label}</h3>
-          <p className="mb-0 mt-1 text-vui-xs leading-5 text-vui-fg-tertiary">{hint}</p>
+        <div className={panelStyles.minWidthZero}>
+          <h3 className={panelStyles.sourceTitle}>{label}</h3>
+          <p className={panelStyles.sourceHint}>{hint}</p>
         </div>
       </div>
       <VSettingsRow
@@ -329,9 +329,9 @@ function SourceCard({
           </VNativeSelect>
         )}
         detail={sourcePolicy.mode === "manual"
-          ? <p className="m-0 text-vui-xs leading-5 text-vui-fg-secondary">{copy.manualRule}</p>
+          ? <p className={panelStyles.ruleText}>{copy.manualRule}</p>
           : sourcePolicy.mode === "auto"
-            ? <p className="m-0 text-vui-xs leading-5 text-vui-fg-secondary">{copy.aclHint}</p>
+            ? <p className={panelStyles.ruleText}>{copy.aclHint}</p>
             : undefined}
       />
       {sourcePolicy.mode === "auto" ? (
@@ -339,7 +339,7 @@ function SourceCard({
           label={langText(lang, "自动触发条件", "Automatic triggers")}
           description={langText(lang, "按任务、知识更新和后台计划分别启停。", "Control task, knowledge-update, and scheduled triggers separately.")}
           footer={(
-            <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-1">
+            <div className={panelStyles.triggerList}>
               {TRIGGER_IDS.map((trigger) => (
                 <VCheckbox
                   key={trigger}
@@ -447,8 +447,8 @@ function TopicEditor({ topics, copy, onChange }: { topics: string[]; copy: Copy;
       label={copy.topics}
       description={copy.topicsHint}
       footer={(
-        <div className="grid min-w-0 gap-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className={panelStyles.sectionStack}>
+          <div className={panelStyles.inlineControls}>
             <VInput
               aria-label={copy.topicPlaceholder}
               value={topic}
@@ -462,19 +462,19 @@ function TopicEditor({ topics, copy, onChange }: { topics: string[]; copy: Copy;
                   setTopic("");
                 }
               }}
-              className="min-w-[14rem] flex-1"
+              className={panelStyles.topicInput}
             />
             <VButton type="button" isDisabled={!canAdd} onPress={() => { onChange([...topics, normalizedTopic]); setTopic(""); }}>
               {copy.addTopic}
             </VButton>
           </div>
-          {topics.length >= 8 ? <p className="m-0 text-vui-xs text-vui-fg-tertiary">{copy.topicLimit}</p> : null}
+          {topics.length >= 8 ? <p className={panelStyles.hintText}>{copy.topicLimit}</p> : null}
           {topics.length ? (
-            <ul className="m-0 flex min-w-0 flex-wrap gap-1.5 p-0" aria-label={copy.topics}>
+            <ul className={panelStyles.topicList} aria-label={copy.topics}>
               {topics.map((value) => (
-                <li key={value} className="list-none">
-                  <VChip className="inline-flex max-w-full items-center gap-1">
-                    <span className="max-w-[18rem] truncate">{value}</span>
+                <li key={value} className={panelStyles.listItem}>
+                  <VChip className={panelStyles.topicChip}>
+                    <span className={panelStyles.topicText}>{value}</span>
                     <VButton
                       type="button"
                       variant="ghost"
@@ -507,10 +507,10 @@ function RunUsage({
   onOpenSession: (sessionId: string) => void;
 }) {
   return (
-    <VSettingsGroupCard className="min-w-0" data-testid="perception-run">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-4 py-3">
-        <strong className="text-vui-sm text-vui-fg-primary">{label}</strong>
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <VSettingsGroupCard className={panelStyles.minWidthZero} data-testid="perception-run">
+      <div className={panelStyles.cardHeading}>
+        <strong className={panelStyles.cardTitle}>{label}</strong>
+        <div className={panelStyles.inlineControls}>
           <VChip>{statusLabel(run.status, lang)}</VChip>
           {run.sessionId ? (
             <VButton
@@ -525,20 +525,20 @@ function RunUsage({
           ) : null}
         </div>
       </div>
-      {run.status === "failed" ? <p className="m-0 px-4 pb-2 text-vui-xs text-vui-fg-secondary">{copy.runFailedHint}</p> : null}
-      <VSettingsRow label={copy.runId} detail={<code className="break-all font-mono text-vui-xs">{run.runId}</code>} />
-      <VSettingsRow label={copy.startedAt} detail={<span className="text-vui-xs">{readableTime(run.startedAt, lang)}</span>} />
-      {run.finishedAt ? <VSettingsRow label={copy.finishedAt} detail={<span className="text-vui-xs">{readableTime(run.finishedAt, lang)}</span>} /> : null}
+      {run.status === "failed" ? <p className={panelStyles.runFailureHint}>{copy.runFailedHint}</p> : null}
+      <VSettingsRow label={copy.runId} detail={<code className={panelStyles.runIdentifier}>{run.runId}</code>} />
+      <VSettingsRow label={copy.startedAt} detail={<span className={panelStyles.smallText}>{readableTime(run.startedAt, lang)}</span>} />
+      {run.finishedAt ? <VSettingsRow label={copy.finishedAt} detail={<span className={panelStyles.smallText}>{readableTime(run.finishedAt, lang)}</span>} /> : null}
       {run.sources?.length ? (
         <VSettingsRow
           label={copy.actualSources}
-          detail={<span className="text-vui-xs text-vui-fg-secondary">{run.sources.map((source) => sourceNames[source]).join("、")}</span>}
+          detail={<span className={panelStyles.detailText}>{run.sources.map((source) => sourceNames[source]).join("、")}</span>}
         />
       ) : null}
       <VSettingsRow
         label={copy.usage}
         detail={(
-          <span className="flex flex-wrap gap-x-3 gap-y-1 text-vui-xs text-vui-fg-secondary">
+          <span className={panelStyles.usageRow}>
             <span>{copy.toolCalls}: {run.toolCallsUsed}</span>
             <span>{copy.sourceReadCalls}: {run.sourceReadCallsUsed}</span>
             <span>{copy.readCount}: {run.readCount}</span>
@@ -566,17 +566,17 @@ function NotificationRow({
   onOpenSession: (sessionId: string) => void;
 }) {
   return (
-    <li className="grid min-w-0 gap-1.5 border-t border-vui-border-subtle px-4 py-3 first:border-t-0">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <strong className="min-w-0 truncate text-vui-xs font-semibold text-vui-fg-primary">{knowledgeBaseName || item.knowledgeBaseId || "—"}</strong>
+    <li className={panelStyles.updateItem}>
+      <div className={panelStyles.rowHeading}>
+        <strong className={panelStyles.itemTitle}>{knowledgeBaseName || item.knowledgeBaseId || "—"}</strong>
         {!item.delivered ? <VChip>{copy.newUpdate}</VChip> : null}
       </div>
-      <div className="grid min-w-0 gap-1 text-vui-xs text-vui-fg-secondary sm:grid-cols-2">
-        {item.knowledgeBaseId ? <span className="break-all">{copy.knowledgeBaseId}: {item.knowledgeBaseId}</span> : null}
-        <span className="break-all">{copy.knowledgeItem}: {item.knowledgeItemId}</span>
+      <div className={panelStyles.updateDetails}>
+        {item.knowledgeBaseId ? <span className={panelStyles.breakAll}>{copy.knowledgeBaseId}: {item.knowledgeBaseId}</span> : null}
+        <span className={panelStyles.breakAll}>{copy.knowledgeItem}: {item.knowledgeItemId}</span>
         <span>{copy.revision}: {item.revision}</span>
         <span>{copy.observedAt}: {readableTime(item.observedAt, lang)}</span>
-        <span className="flex min-w-0 flex-wrap items-center gap-1 break-all">
+        <span className={panelStyles.updateLinks}>
           {copy.relatedResult}: {item.sessionId ? (
             <>
               <VButton type="button" variant="ghost" density="compact" aria-label={`${copy.openSession}: ${item.sessionId}`} onPress={() => onOpenSession(item.sessionId)}>{copy.openSession}</VButton>
@@ -586,7 +586,7 @@ function NotificationRow({
           {item.turnId ? <code>{item.turnId}</code> : null}
         </span>
       </div>
-      <span className="sr-only">{item.notificationId} · {item.contentHash} · {item.turnId}</span>
+      <span className={panelStyles.screenReader}>{item.notificationId} · {item.contentHash} · {item.turnId}</span>
     </li>
   );
 }
@@ -622,14 +622,14 @@ function RuntimeSummary({
     : runtime.lastActivity?.sources ?? [];
 
   return (
-    <div className="grid min-w-0 gap-3" data-testid="perception-runtime-summary">
+    <div className={panelStyles.stack} data-testid="perception-runtime-summary">
       <VSection title={copy.runtimeTitle} meta={runtime.updatedAt ? readableTime(runtime.updatedAt, lang) : undefined}>
         {error ? <VStateSurface tone="error" density="compact" title={copy.loadFailed} actions={<VButton type="button" onPress={onRetry}>{copy.retry}</VButton>}>{error}</VStateSurface> : null}
         <VSettingsGroupCard>
           <VSettingsRow
             label={copy.runtimeStatus}
             control={<VChip>{statusLabel(runtime.status, lang)}</VChip>}
-            detail={runtime.nextRunAt ? <span className="text-vui-xs text-vui-fg-tertiary">{copy.nextRun}: {readableTime(runtime.nextRunAt, lang)}</span> : undefined}
+            detail={runtime.nextRunAt ? <span className={panelStyles.mutedText}>{copy.nextRun}: {readableTime(runtime.nextRunAt, lang)}</span> : undefined}
           />
           {runtime.activeRun ? (
             <VSettingsRow label={copy.activeRun} control={<VChip>{statusLabel(runtime.activeRun.status, lang)}</VChip>} />
@@ -637,35 +637,35 @@ function RuntimeSummary({
           <VSettingsRow
             label={copy.readableSources}
             detail={runtime.readableSources.length ? (
-              <span className="text-vui-xs text-vui-fg-secondary">
+              <span className={panelStyles.detailText}>
                 {runtime.readableSources.map((source) => `${sourceNames[source.source]} (${source.readableCount})`).join("、")}
               </span>
-            ) : <span className="text-vui-xs text-vui-fg-tertiary">{copy.noReadableSources}</span>}
+            ) : <span className={panelStyles.mutedText}>{copy.noReadableSources}</span>}
           />
           <VSettingsRow
             label={copy.lastActivity}
             detail={runtime.lastActivity ? (
-              <span className="text-vui-xs text-vui-fg-secondary">{readableTime(runtime.lastActivity.completedAt, lang)}</span>
-            ) : <span className="text-vui-xs text-vui-fg-tertiary">{copy.noRun}</span>}
+              <span className={panelStyles.detailText}>{readableTime(runtime.lastActivity.completedAt, lang)}</span>
+            ) : <span className={panelStyles.mutedText}>{copy.noRun}</span>}
           />
           <VSettingsRow
             label={copy.actualSources}
             detail={latestActualSources.length ? (
-              <span className="text-vui-xs text-vui-fg-secondary">{latestActualSources.map((source) => sourceNames[source]).join("、")}</span>
-            ) : <span className="text-vui-xs text-vui-fg-tertiary">{copy.noSourcesRead}</span>}
+              <span className={panelStyles.detailText}>{latestActualSources.map((source) => sourceNames[source]).join("、")}</span>
+            ) : <span className={panelStyles.mutedText}>{copy.noSourcesRead}</span>}
           />
           <VSettingsRow
             label={copy.usage}
             detail={runtime.lastActivity ? (
-              <span className="text-vui-xs text-vui-fg-secondary">{copy.readCount}: {runtime.lastActivity.readCount} · {copy.resultCount}: {runtime.lastActivity.resultCount}</span>
-            ) : <span className="text-vui-xs text-vui-fg-tertiary">—</span>}
+              <span className={panelStyles.detailText}>{copy.readCount}: {runtime.lastActivity.readCount} · {copy.resultCount}: {runtime.lastActivity.resultCount}</span>
+            ) : <span className={panelStyles.mutedText}>—</span>}
           />
           <VSettingsRow
             label={copy.dailyBudget}
-            detail={<span className="text-vui-xs text-vui-fg-secondary">{runtime.dailyBudget.used} / {runtime.dailyBudget.limit} · {copy.budgetRemaining} {runtime.dailyBudget.remaining}</span>}
+            detail={<span className={panelStyles.detailText}>{runtime.dailyBudget.used} / {runtime.dailyBudget.limit} · {copy.budgetRemaining} {runtime.dailyBudget.remaining}</span>}
           />
         </VSettingsGroupCard>
-        <p className="m-0 text-vui-xs text-vui-fg-tertiary">{copy.runtimeHint}</p>
+        <p className={panelStyles.hintText}>{copy.runtimeHint}</p>
       </VSection>
     </div>
   );
@@ -715,34 +715,34 @@ function RuntimePanel({
     (configuration?.availableScopes.knowledgeBases ?? []).map((base) => [base.id, base.label]),
   );
   return (
-    <div className="grid min-w-0 gap-3" data-testid="perception-runtime">
+    <div className={panelStyles.stack} data-testid="perception-runtime">
       {error ? <VStateSurface tone="error" density="compact" title={copy.loadFailed} actions={<VButton type="button" onPress={onRetry}>{copy.retry}</VButton>}>{error}</VStateSurface> : null}
       <VSettingsGroupCard>
-        <VSettingsRow label={copy.runtimeStatus} control={<VChip>{statusLabel(runtime.status, lang)}</VChip>} detail={runtime.nextRunAt ? <span className="text-vui-xs text-vui-fg-tertiary">{copy.nextRun}: {readableTime(runtime.nextRunAt, lang)}</span> : undefined} />
-        <VSettingsRow label={copy.dailyBudget} detail={<span className="text-vui-xs text-vui-fg-secondary">{runtime.dailyBudget.used} / {runtime.dailyBudget.limit} · {copy.budgetRemaining} {runtime.dailyBudget.remaining}</span>} />
+        <VSettingsRow label={copy.runtimeStatus} control={<VChip>{statusLabel(runtime.status, lang)}</VChip>} detail={runtime.nextRunAt ? <span className={panelStyles.mutedText}>{copy.nextRun}: {readableTime(runtime.nextRunAt, lang)}</span> : undefined} />
+        <VSettingsRow label={copy.dailyBudget} detail={<span className={panelStyles.detailText}>{runtime.dailyBudget.used} / {runtime.dailyBudget.limit} · {copy.budgetRemaining} {runtime.dailyBudget.remaining}</span>} />
         <VSettingsRow
           label={copy.readableSources}
           footer={sources.length ? (
-            <ul className="m-0 grid min-w-0 gap-1 p-0">
+            <ul className={panelStyles.sourceList}>
               {sources.map((source) => (
-                <li key={source.source} className="flex min-w-0 list-none flex-wrap items-center justify-between gap-2 text-vui-xs">
-                  <span className="grid min-w-0 gap-1">
-                    <span className="text-vui-fg-primary">{sourceNames[source.source]}</span>
-                    <span className="text-vui-fg-tertiary">
+                <li key={source.source} className={panelStyles.sourceItem}>
+                  <span className={panelStyles.compactStack}>
+                    <span className={panelStyles.primaryText}>{sourceNames[source.source]}</span>
+                    <span className={panelStyles.tertiaryText}>
                       {copy.mode}: {modeNames[source.mode]} · {copy.activeTriggers}: {TRIGGER_IDS.filter((trigger) => source.triggers[trigger]).map((trigger) => triggerNames[trigger]).join("、") || "—"}
                       {source.requiresUserRequest ? ` · ${copy.requiresUserRequest}` : ""}
                     </span>
                   </span>
-                  <span className="text-vui-fg-tertiary">{copy.selectedCount} {source.selectedCount} · {copy.readableCount} {source.readableCount}</span>
+                  <span className={panelStyles.tertiaryText}>{copy.selectedCount} {source.selectedCount} · {copy.readableCount} {source.readableCount}</span>
                 </li>
               ))}
             </ul>
-          ) : <p className="m-0 text-vui-xs text-vui-fg-tertiary">{copy.noReadableSources}</p>}
+          ) : <p className={panelStyles.hintText}>{copy.noReadableSources}</p>}
         />
         {runtime.activeRun ? (
-          <div className="border-t border-vui-border-subtle px-4 py-3">
-            <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
-              <strong className="text-vui-sm text-vui-fg-primary">{copy.activeRun}</strong>
+          <div className={panelStyles.section}>
+            <div className={panelStyles.sectionHeading}>
+              <strong className={panelStyles.cardTitle}>{copy.activeRun}</strong>
               {runtime.cancelAvailable ? (
                 <VButton type="button" variant="danger" isPending={cancelPending} onPress={() => onCancelRun(runtime.activeRun!.runId)}>
                   {copy.cancel}
@@ -752,7 +752,7 @@ function RuntimePanel({
             <RunUsage run={runtime.activeRun} copy={copy} lang={lang} label={statusLabel(runtime.activeRun.status, lang)} sourceNames={sourceNames} onOpenSession={onOpenSession} />
           </div>
         ) : runtime.lastRun ? (
-          <div className="border-t border-vui-border-subtle px-4 py-3">
+          <div className={panelStyles.section}>
             <RunUsage run={runtime.lastRun} copy={copy} lang={lang} label={copy.lastRun} sourceNames={sourceNames} onOpenSession={onOpenSession} />
           </div>
         ) : null}
@@ -761,27 +761,27 @@ function RuntimePanel({
         <VSettingsRow
           label={copy.lastActivity}
           detail={runtime.lastActivity ? (
-            <span className="text-vui-xs text-vui-fg-secondary">
+            <span className={panelStyles.detailText}>
               {copy.trigger}: {triggerNames[runtime.lastActivity.trigger]} · {readableTime(runtime.lastActivity.completedAt, lang)}
             </span>
-          ) : <span className="text-vui-xs text-vui-fg-tertiary">{copy.noRun}</span>}
+          ) : <span className={panelStyles.mutedText}>{copy.noRun}</span>}
         />
         {runtime.lastActivity ? (
           <>
             <VSettingsRow
               label={copy.actualSources}
               detail={runtime.lastActivity.sources.length ? (
-                <span className="text-vui-xs text-vui-fg-secondary">{runtime.lastActivity.sources.map((source) => sourceNames[source]).join("、")}</span>
-              ) : <span className="text-vui-xs text-vui-fg-tertiary">{copy.noSourcesRead}</span>}
+                <span className={panelStyles.detailText}>{runtime.lastActivity.sources.map((source) => sourceNames[source]).join("、")}</span>
+              ) : <span className={panelStyles.mutedText}>{copy.noSourcesRead}</span>}
             />
             <VSettingsRow
               label={copy.usage}
-              detail={<span className="text-vui-xs text-vui-fg-secondary">{copy.readCount}: {runtime.lastActivity.readCount} · {copy.resultCount}: {runtime.lastActivity.resultCount}</span>}
+              detail={<span className={panelStyles.detailText}>{copy.readCount}: {runtime.lastActivity.readCount} · {copy.resultCount}: {runtime.lastActivity.resultCount}</span>}
             />
             <VSettingsRow
               label={copy.relatedResult}
               detail={(
-                <span className="flex min-w-0 flex-wrap items-center gap-1 text-vui-xs">
+                <span className={panelStyles.inlineDetails}>
                   {runtime.lastActivity.sessionId ? (
                     <VButton
                       type="button"
@@ -793,8 +793,8 @@ function RuntimePanel({
                       {copy.openResearchSession}
                     </VButton>
                   ) : null}
-                  {runtime.lastActivity.turnId ? <code className="break-all font-mono text-vui-fg-tertiary">{runtime.lastActivity.turnId}</code> : null}
-                  {runtime.lastActivity.runId ? <code className="break-all font-mono text-vui-fg-tertiary">{runtime.lastActivity.runId}</code> : null}
+                  {runtime.lastActivity.turnId ? <code className={panelStyles.linkedIdentifier}>{runtime.lastActivity.turnId}</code> : null}
+                  {runtime.lastActivity.runId ? <code className={panelStyles.linkedIdentifier}>{runtime.lastActivity.runId}</code> : null}
                   {!runtime.lastActivity.sessionId && !runtime.lastActivity.turnId && !runtime.lastActivity.runId ? "—" : null}
                 </span>
               )}
@@ -806,14 +806,14 @@ function RuntimePanel({
         <VSettingsRow
           label={copy.notifications}
           detail={(
-            <span className="text-vui-xs text-vui-fg-secondary">
+            <span className={panelStyles.detailText}>
               {copy.unread} {runtime.notifications.unreadCount} / {runtime.notifications.totalCount}
               {runtime.notifications.suppressedCount !== undefined ? " · " + copy.suppressed + " " + runtime.notifications.suppressedCount : ""}
             </span>
           )}
         />
         {runtime.notifications.items.length ? (
-          <ul className="m-0 min-w-0 p-0">
+          <ul className={panelStyles.updateList}>
             {runtime.notifications.items.map((item) => (
               <NotificationRow
                 key={item.notificationId}
@@ -827,9 +827,9 @@ function RuntimePanel({
               />
             ))}
           </ul>
-        ) : <VSettingsRow label={copy.notifications} detail={<span className="text-vui-xs text-vui-fg-tertiary">{copy.noNotifications}</span>} />}
+        ) : <VSettingsRow label={copy.notifications} detail={<span className={panelStyles.mutedText}>{copy.noNotifications}</span>} />}
       </VSettingsGroupCard>
-      <p className="m-0 text-vui-xs text-vui-fg-tertiary">{copy.runtimeHint}</p>
+      <p className={panelStyles.hintText}>{copy.runtimeHint}</p>
     </div>
   );
 }
@@ -856,9 +856,9 @@ export function AgentPerceptionPanel({
   }, [agentId]);
 
   return (
-    <div className="grid min-w-0 gap-3 p-3 sm:p-4" data-vui-region="agent-perception-panel" data-testid="agent-perception-panel">
+    <div className={panelStyles.panel} data-vui-region="agent-perception-panel" data-testid="agent-perception-panel">
       <VSection title={copy.title} meta={currentConfiguration?.configured ? copy.configured : copy.notConfigured}>
-        <p className="m-0 max-w-[78ch] text-vui-xs leading-5 text-vui-fg-secondary">{copy.description}</p>
+        <p className={panelStyles.description}>{copy.description}</p>
         {currentConfiguration?.configured === false ? <VStateSurface tone="info" density="compact" title={copy.notConfigured}>{copy.legacyHint}</VStateSurface> : null}
         {configurationError ? (
           <VStateSurface
@@ -919,12 +919,12 @@ export function AgentPerceptionPanel({
                         description={copy.enabledHint}
                         control={<VSwitch aria-label={copy.enabled} isSelected={draft.policy.enabled} onChange={(enabled) => updatePolicy((current) => ({ ...current, enabled }))} />}
                         status={<VChip>{draft.policy.enabled ? copy.modeAuto : copy.modeOff}</VChip>}
-                        footer={<p className="m-0 text-vui-xs text-vui-fg-tertiary">{copy.notGranted}</p>}
+                        footer={<p className={panelStyles.hintText}>{copy.notGranted}</p>}
                       />
                     </VSettingsGroupCard>
-                    <div className="grid min-w-0 gap-2">
-                      <VSection title={copy.sourceTitle}><p className="m-0 text-vui-xs leading-5 text-vui-fg-secondary">{copy.sourceHint}</p></VSection>
-                      <div className="grid min-w-0 gap-3 xl:grid-cols-2">
+                    <div className={panelStyles.sectionStack}>
+                      <VSection title={copy.sourceTitle}><p className={panelStyles.ruleText}>{copy.sourceHint}</p></VSection>
+                      <div className={panelStyles.sourceGrid}>
                         {SOURCE_IDS.map((source) => (
                           <SourceCard
                             key={source}
@@ -938,8 +938,8 @@ export function AgentPerceptionPanel({
                         ))}
                       </div>
                     </div>
-                    <div className="grid min-w-0 gap-2">
-                      <VSection title={copy.backgroundTitle}><p className="m-0 text-vui-xs leading-5 text-vui-fg-secondary">{copy.backgroundHint}</p></VSection>
+                    <div className={panelStyles.sectionStack}>
+                      <VSection title={copy.backgroundTitle}><p className={panelStyles.ruleText}>{copy.backgroundHint}</p></VSection>
                       <VSettingsGroupCard>
                         <VSettingsRow
                           label={copy.backgroundEnabled}
@@ -951,7 +951,7 @@ export function AgentPerceptionPanel({
                         <NumberSetting id="perception-background-calls" label={copy.maxCalls} value={draft.policy.background.maxCallsPerRun} min={1} max={32} onChange={(value) => updateNumber("maxCallsPerRun", value)} />
                         <NumberSetting id="perception-background-input-tokens" label={copy.maxInputTokens} value={draft.policy.background.maxInputTokensPerRun} min={1} max={131_072} onChange={(value) => updateNumber("maxInputTokensPerRun", value)} />
                         <NumberSetting id="perception-background-result-chars" label={copy.maxResultChars} value={draft.policy.background.maxResultChars} min={1} max={50_000} onChange={(value) => updateNumber("maxResultChars", value)} />
-                        <VSettingsRow label={copy.concurrent} detail={<span className="text-vui-xs text-vui-fg-secondary">{draft.policy.background.maxConcurrent}</span>} />
+                        <VSettingsRow label={copy.concurrent} detail={<span className={panelStyles.detailText}>{draft.policy.background.maxConcurrent}</span>} />
                         <TopicEditor topics={draft.policy.background.topics} copy={copy} onChange={(topics) => updatePolicy((current) => ({ ...current, background: { ...current.background, topics } }))} />
                       </VSettingsGroupCard>
                       <VSettingsGroupCard>
@@ -972,12 +972,12 @@ export function AgentPerceptionPanel({
                         />
                       </VSettingsGroupCard>
                     </div>
-                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                      <div className="grid min-w-0 gap-1">
-                        <span className="text-vui-xs font-medium text-vui-fg-secondary">{draft.isDirty ? copy.dirty : copy.saved}</span>
-                        <span className="text-vui-xs text-vui-fg-tertiary">{copy.savedHint}</span>
+                    <div className={panelStyles.rowHeading}>
+                      <div className={panelStyles.compactStack}>
+                        <span className={panelStyles.saveState}>{draft.isDirty ? copy.dirty : copy.saved}</span>
+                        <span className={panelStyles.mutedText}>{copy.savedHint}</span>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className={panelStyles.actions}>
                         <VButton type="button" isDisabled={!draft.isDirty || savePending} onPress={draft.reset}>{copy.discard}</VButton>
                         <VButton
                           type="button"
@@ -999,7 +999,7 @@ export function AgentPerceptionPanel({
               </VSection>
             ) : (
               <VSection title={copy.historyTab} meta={runtime?.updatedAt ? readableTime(runtime.updatedAt, lang) : undefined}>
-                <p className="m-0 text-vui-xs text-vui-fg-secondary">{copy.historyHint}</p>
+                <p className={panelStyles.paragraph}>{copy.historyHint}</p>
                 <RuntimePanel copy={copy} lang={lang} runtime={runtime} configuration={currentConfiguration} pending={runtimePending} error={runtimeError} onRetry={onRetryRuntime} cancelPending={cancelPending} onCancelRun={onCancelRun} onOpenSession={onOpenSession} />
                 {cancelError ? <VStateSurface tone="error" density="compact" title={copy.loadFailed}>{cancelError}</VStateSurface> : null}
               </VSection>
