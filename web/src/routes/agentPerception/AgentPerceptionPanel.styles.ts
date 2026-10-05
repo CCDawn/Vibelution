@@ -5,7 +5,9 @@
  */
 const styles = {
   workspace: [
-    "flex-col !overflow-visible xl:flex-row",
+    // Route styles can be prefetched later; keep their generic flex utilities
+    // from changing this recipe's direction or its natural-height panes.
+    "[&[data-vui=split-workspace]]:!flex-col !overflow-visible xl:[&[data-vui=split-workspace]]:!flex-row",
     "[&>[data-vui-layout-handle]]:hidden xl:[&>[data-vui-layout-handle]]:flex",
     "[&>main[data-vui=split-main]]:!h-auto [&>main[data-vui=split-main]]:!flex-none [&>main[data-vui=split-main]]:!overflow-visible",
     "xl:[&>main[data-vui=split-main]]:!flex-1",

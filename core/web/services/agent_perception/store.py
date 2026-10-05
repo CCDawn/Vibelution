@@ -26,6 +26,7 @@ def new_state(agent_id: str) -> dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "agentId": str(agent_id or "").strip(),
         "policyFingerprint": "",
+        "scheduleFingerprint": "",
         "status": "idle",
         "nextRunAt": "",
         "topicCursor": 0,

@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 _LOCAL_PROJECT_GOVERNANCE_BASE_ID = "local-project-governance"
 _MAX_PROJECT_REGISTRY_BYTES = _MAX_KNOWLEDGE_FILE_BYTES
 _MAX_PROJECT_REGISTRY_ITEMS = _MAX_KNOWLEDGE_ITEMS_PER_BASE
+_BOOT_EPOCH = uuid.uuid4().hex
 
 
 class AgentPerceptionRuntimeError(RuntimeError):
@@ -49,15 +50,16 @@ class AgentPerceptionBudgetExceeded(PermissionError):
 
 
 class _Permit:
-    __slots__ = ("runtime", "agent_id", "run_id", "session_id", "turn_id", "lifecycle_generation")
+    __slots__ = ("runtime", "agent_id", "run_id", "session_id", "turn_id", "lifecycle_generation", "boot_epoch")
 
-    def __init__(self, runtime: "AgentPerceptionRuntime", agent_id: str, run_id: str, session_id: str, turn_id: str, lifecycle_generation: int) -> None:
+    def __init__(self, runtime: "AgentPerceptionRuntime", agent_id: str, run_id: str, session_id: str, turn_id: str, lifecycle_generation: int, boot_epoch: str) -> None:
         self.runtime = runtime
         self.agent_id = agent_id
         self.run_id = run_id
         self.session_id = session_id
         self.turn_id = turn_id
         self.lifecycle_generation = lifecycle_generation
+        self.boot_epoch = boot_epoch
 
 
 _CURRENT_PERMIT: ContextVar[_Permit | None] = ContextVar("agent_perception_runtime_permit", default=None)
@@ -98,7 +100,12 @@ def _lifecycle_snapshot() -> tuple[bool, int]:
 
 def _lifecycle_allows_permit(permit: _Permit) -> bool:
     is_open, generation = _lifecycle_snapshot()
-    return is_open and permit.lifecycle_generation == generation
+    return is_open and permit.boot_epoch == _BOOT_EPOCH and permit.lifecycle_generation == generation
+
+
+def _run_boot_epoch(run: dict[str, Any]) -> str:
+    value = run.get("bootEpoch")
+    return value if isinstance(value, str) else ""
 
 
 def _run_lifecycle_generation(run: dict[str, Any]) -> int:
@@ -209,6 +216,13 @@ class AgentPerceptionRuntime:
             policy, fingerprint = self._policy(agent)
             state = self._store.load(agent)
             active = state.get("activeRun")
+            if isinstance(active, dict) and _run_boot_epoch(active) != _BOOT_EPOCH:
+                # A previous process may have left an accepted native turn
+                # behind. Fence only its exact durable run; do not stop or
+                # replay the Session during recovery.
+                self._finish_run(agent, str(active.get("runId") or ""), "interrupted", reason="boot_epoch_changed")
+                state = self._store.load(agent)
+                active = state.get("activeRun")
             if isinstance(active, dict):
                 if str(active.get("policyFingerprint") or "") != fingerprint or not _background_enabled(policy):
                     stop_ref = self._revoke_active(agent, state, fingerprint)
@@ -261,7 +275,7 @@ class AgentPerceptionRuntime:
                     "policyFingerprint": fingerprint, "startedAt": _iso(now), "finishedAt": None,
                     "toolCallsUsed": 0, "sourceReadCallsUsed": 0, "inputTokensUsed": 0,
                     "outputCharsUsed": 0, "readCount": 0, "resultCount": 0, "sources": [],
-                    "lifecycleGeneration": lifecycle_generation,
+                    "lifecycleGeneration": lifecycle_generation, "bootEpoch": _BOOT_EPOCH,
                 }
                 # Charge before external side effects. Crashes never refund a run
                 # or replay a possibly accepted native submission.
@@ -269,6 +283,7 @@ class AgentPerceptionRuntime:
                 state["dailyRuns"] = daily_runs
                 state["topicCursor"] = topic_cursor + 1
                 state["policyFingerprint"] = fingerprint
+                state["scheduleFingerprint"] = _background_schedule_fingerprint(policy)
                 state["activeRun"] = run
                 state["status"] = "running"
                 state["nextRunAt"] = _iso(now + timedelta(minutes=int(background["intervalMinutes"])))
@@ -303,6 +318,7 @@ class AgentPerceptionRuntime:
                 lifecycle_open, lifecycle_generation = _lifecycle_snapshot()
                 lifecycle_closed = (
                     not lifecycle_open
+                    or _run_boot_epoch(active) != _BOOT_EPOCH
                     or _run_lifecycle_generation(active) != lifecycle_generation
                 )
                 policy_changed = (
@@ -323,7 +339,10 @@ class AgentPerceptionRuntime:
                     with _PERMIT_LOCK:
                         lifecycle_open, lifecycle_generation = _lifecycle_snapshot()
                         run_generation = _run_lifecycle_generation(active)
-                        if lifecycle_open and run_generation == lifecycle_generation:
+                        if (
+                            lifecycle_open and _run_boot_epoch(active) == _BOOT_EPOCH
+                            and run_generation == lifecycle_generation
+                        ):
                             _PERMITS_BY_SESSION[session_id] = (self, normalized_id, run_id)
                         else:
                             cancel_pending = True
@@ -424,6 +443,8 @@ class AgentPerceptionRuntime:
             active = state.get("activeRun")
             if not isinstance(active, dict) or str(active.get("runId") or "") != run_id:
                 return
+            if _run_boot_epoch(active) != _BOOT_EPOCH:
+                return
             existing = str(active.get("turnId") or "")
             if existing and existing != turn_id:
                 raise AgentPerceptionRuntimeError("Native Session turn did not match the reserved run.")
@@ -432,6 +453,7 @@ class AgentPerceptionRuntime:
             lifecycle_open, lifecycle_generation = _lifecycle_snapshot()
             lifecycle_closed = (
                 not lifecycle_open
+                or _run_boot_epoch(active) != _BOOT_EPOCH
                 or _run_lifecycle_generation(active) != lifecycle_generation
             )
             cancel_pending = bool(active.get("cancelPending")) or str(active.get("status") or "") == "stopping" or lifecycle_closed
@@ -447,6 +469,7 @@ class AgentPerceptionRuntime:
                 "recorded": True,
                 "cancelPending": cancel_pending,
                 "lifecycleGeneration": run_generation,
+                "bootEpoch": _run_boot_epoch(active),
             })
 
         with self._lock_for(str(agent["agentId"])):
@@ -456,14 +479,20 @@ class AgentPerceptionRuntime:
             lifecycle_open, lifecycle_generation = _lifecycle_snapshot()
             if (
                 result["recorded"] and not result["cancelPending"] and lifecycle_open
+                and result["bootEpoch"] == _BOOT_EPOCH
                 and result["lifecycleGeneration"] == lifecycle_generation
             ):
                 _PERMITS_BY_SESSION[session_id] = (self, str(agent["agentId"]), run_id)
             else:
-                _PERMITS_BY_SESSION.pop(session_id, None)
+                entry = _PERMITS_BY_SESSION.get(session_id)
+                if entry == (self, str(agent["agentId"]), run_id):
+                    _PERMITS_BY_SESSION.pop(session_id, None)
                 if (
                     result["recorded"] and not result["cancelPending"]
-                    and (not lifecycle_open or result["lifecycleGeneration"] != lifecycle_generation)
+                    and (
+                        not lifecycle_open or result["bootEpoch"] != _BOOT_EPOCH
+                        or result["lifecycleGeneration"] != lifecycle_generation
+                    )
                 ):
                     mark_lifecycle_cancel = True
         if mark_lifecycle_cancel:
@@ -497,7 +526,9 @@ class AgentPerceptionRuntime:
             session_id = str(active.get("sessionId") or "")
             if session_id:
                 with _PERMIT_LOCK:
-                    _PERMITS_BY_SESSION.pop(session_id, None)
+                    entry = _PERMITS_BY_SESSION.get(session_id)
+                    if entry == (self, str(agent["agentId"]), run_id):
+                        _PERMITS_BY_SESSION.pop(session_id, None)
 
         self._store.update(agent, apply)
 
@@ -514,6 +545,9 @@ class AgentPerceptionRuntime:
             if not isinstance(active, dict):
                 return self._project_runtime(agent, state)
             run_id = str(active.get("runId") or "")
+            if _run_boot_epoch(active) != _BOOT_EPOCH:
+                self._finish_run(agent, run_id, "interrupted", reason="boot_epoch_changed")
+                return self._project_runtime(agent, self._store.load(agent))
             # Do not interpret a dispatcher currently crossing a native Session
             # boundary as orphaned. The network/runtime call happens without
             # holding this Agent lock, so GET and cancel remain responsive.
@@ -625,14 +659,21 @@ class AgentPerceptionRuntime:
         with lock:
             policy, fingerprint = self._policy(agent)
             state = self._store.load(agent)
+            schedule_fingerprint = _background_schedule_fingerprint(policy)
+            schedule_changed = str(state.get("scheduleFingerprint") or "") != schedule_fingerprint
             state["policyFingerprint"] = fingerprint
+            state["scheduleFingerprint"] = schedule_fingerprint
             if isinstance(state.get("activeRun"), dict) and str(state["activeRun"].get("policyFingerprint") or "") != fingerprint:
                 stop_ref = self._revoke_active(agent, state, fingerprint)
             if not _background_enabled(policy):
                 state["status"] = "disabled" if not state.get("activeRun") else "stopping"
-            elif not state.get("activeRun") and not str(state.get("nextRunAt") or ""):
-                state["status"] = "scheduled"
-                state["nextRunAt"] = _iso(self._now() + timedelta(minutes=int(policy["background"]["intervalMinutes"])))
+                state["nextRunAt"] = ""
+            elif schedule_changed or (not state.get("activeRun") and not str(state.get("nextRunAt") or "")):
+                state["nextRunAt"] = _iso(
+                    self._now() + timedelta(minutes=int(policy["background"]["intervalMinutes"]))
+                )
+                if not state.get("activeRun"):
+                    state["status"] = "scheduled"
             state["updatedAt"] = _iso(self._now())
             self._store.save(agent, state)
         if stop_ref:
@@ -1180,6 +1221,8 @@ class AgentPerceptionRuntime:
             active = state.get("activeRun")
             if not isinstance(active, dict) or str(active.get("runId") or "") != run_id:
                 return None
+            if _run_boot_epoch(active) != _BOOT_EPOCH:
+                return None
             if str(active.get("sessionId") or "") != session_key or str(active.get("status") or "") == "stopping":
                 return None
             if _run_lifecycle_generation(active) != _lifecycle_snapshot()[1]:
@@ -1197,9 +1240,12 @@ class AgentPerceptionRuntime:
             elif existing_turn_id != turn_key:
                 return None
             lifecycle_open, lifecycle_generation = _lifecycle_snapshot()
-            if not lifecycle_open or _run_lifecycle_generation(active) != lifecycle_generation:
+            if (
+                not lifecycle_open or _run_boot_epoch(active) != _BOOT_EPOCH
+                or _run_lifecycle_generation(active) != lifecycle_generation
+            ):
                 return None
-            return _Permit(runtime, agent_id, run_id, session_key, turn_key, lifecycle_generation)
+            return _Permit(runtime, agent_id, run_id, session_key, turn_key, lifecycle_generation, _run_boot_epoch(active))
         except Exception:
             return None
 
@@ -1226,6 +1272,8 @@ class AgentPerceptionRuntime:
             if str(active.get("sessionId") or "") != permit.session_id or str(active.get("turnId") or "") != permit.turn_id:
                 return state, None, None
             if _run_lifecycle_generation(active) != permit.lifecycle_generation:
+                return state, None, None
+            if _run_boot_epoch(active) != permit.boot_epoch or permit.boot_epoch != _BOOT_EPOCH:
                 return state, None, None
             if str(active.get("status") or "") == "stopping":
                 return state, None, None
@@ -1275,6 +1323,13 @@ class AgentPerceptionRuntime:
 
 def _background_enabled(policy: dict[str, Any] | None) -> bool:
     return bool(policy and policy.get("enabled") and (policy.get("background") or {}).get("enabled"))
+
+
+def _background_schedule_fingerprint(policy: dict[str, Any] | None) -> str:
+    if not _background_enabled(policy):
+        return "v1:disabled"
+    interval = int((policy.get("background") or {}).get("intervalMinutes") or 0)
+    return f"v1:enabled:{interval}"
 
 
 def _prune_daily_runs(daily_runs: dict[str, Any], today: date) -> dict[str, int]:

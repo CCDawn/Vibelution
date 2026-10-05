@@ -431,6 +431,51 @@ def test_policy_fingerprint_change_revokes_active_run(runtime):
     assert service.get_agent_perception_runtime("agent-test")["status"] == "stopping"
 
 
+def test_policy_save_clears_disabled_schedule_and_reenable_uses_new_interval(runtime):
+    service, store, _sessions, agent, current_policy = runtime
+    state = store.load(agent)
+    state["nextRunAt"] = "2026-10-12T12:00:00Z"
+    state["scheduleFingerprint"] = "v1:enabled:10080"
+    store.save(agent, state)
+    policy = current_policy()
+    policy["background"]["intervalMinutes"] = 10_080
+    policy["background"]["enabled"] = False
+
+    disabled = service.on_policy_saved("agent-test")
+
+    assert disabled["enabled"] is False
+    assert disabled["nextRunAt"] == ""
+    assert store.load(agent)["scheduleFingerprint"] == "v1:disabled"
+
+    policy["background"]["enabled"] = True
+    policy["background"]["intervalMinutes"] = 15
+    enabled = service.on_policy_saved("agent-test")
+
+    assert enabled["enabled"] is True
+    assert enabled["nextRunAt"] == "2026-10-05T12:15:00Z"
+    assert store.load(agent)["scheduleFingerprint"] == "v1:enabled:15"
+
+
+def test_policy_save_recalculates_interval_but_not_unrelated_changes(runtime):
+    service, store, _sessions, agent, current_policy = runtime
+    state = store.load(agent)
+    state["nextRunAt"] = "2026-10-05T13:00:00Z"
+    state["scheduleFingerprint"] = "v1:enabled:60"
+    store.save(agent, state)
+    policy = current_policy()
+    policy["background"]["topics"] = ["另一个主题"]
+
+    topic_update = service.on_policy_saved("agent-test")
+
+    assert topic_update["nextRunAt"] == "2026-10-05T13:00:00Z"
+
+    policy["background"]["intervalMinutes"] = 25
+    interval_update = service.on_policy_saved("agent-test")
+
+    assert interval_update["nextRunAt"] == "2026-10-05T12:25:00Z"
+    assert store.load(agent)["scheduleFingerprint"] == "v1:enabled:25"
+
+
 def test_zero_daily_budget_never_creates_a_queued_or_hidden_session(runtime):
     _service, store, sessions, _agent, _current_policy = runtime
     policy = _enabled_policy(daily_max_runs=0)
@@ -450,6 +495,8 @@ def test_zero_daily_budget_never_creates_a_queued_or_hidden_session(runtime):
 
 
 def test_recovery_adopts_exact_running_native_turn_without_duplicate_submit(runtime):
+    from core.web.services.agent_perception import runtime as runtime_module
+
     _old, store, sessions, agent, current_policy = runtime
     policy = current_policy()
     fingerprint = agent_perception_policy_fingerprint(policy)
@@ -468,6 +515,7 @@ def test_recovery_adopts_exact_running_native_turn_without_duplicate_submit(runt
         "inputTokensUsed": 20,
         "outputCharsUsed": 3,
         "lifecycleGeneration": _lifecycle_snapshot()[1],
+        "bootEpoch": runtime_module._BOOT_EPOCH,
     }
     state["policyFingerprint"] = fingerprint
     store.save(agent, state)
@@ -485,6 +533,80 @@ def test_recovery_adopts_exact_running_native_turn_without_duplicate_submit(runt
     assert recovered["activeRun"]["turnId"] == "turn-existing"
     assert sessions.created == []
     assert sessions.submitted == []
+
+
+def test_recovery_fences_previous_boot_run_without_touching_native_sessions(monkeypatch, tmp_path):
+    from core.web.services.agent_perception import runtime as runtime_module
+
+    policy = _enabled_policy(daily_max_runs=1)
+    fingerprint = agent_perception_policy_fingerprint(policy)
+    agent = {
+        "agentId": "agent-previous-boot",
+        "status": "active",
+        "workspacePath": "workspace/agents/agent-previous-boot",
+    }
+
+    class _ObservedSessions(_FakeSessions):
+        def __init__(self):
+            super().__init__()
+            self.inspected: list[str] = []
+
+        def get_session_detail(self, session_id, **kwargs):
+            self.inspected.append(session_id)
+            return super().get_session_detail(session_id, **kwargs)
+
+    sessions = _ObservedSessions()
+    sessions.running.update({
+        "session-previous-boot": "turn-previous-boot",
+        "ordinary-session": "ordinary-turn",
+    })
+    store = AgentPerceptionStore(path_resolver=lambda _agent: tmp_path / "previous-boot.json")
+    state = store.load(agent)
+    state["dailyRuns"] = {"2026-10-05": 1}
+    state["topicCursor"] = 1
+    state["activeRun"] = {
+        "runId": "run-previous-boot",
+        "topicId": "topic-1",
+        "status": "running",
+        "sessionId": "session-previous-boot",
+        "turnId": "turn-previous-boot",
+        "policyFingerprint": fingerprint,
+        "startedAt": "2026-10-05T11:00:00Z",
+        "toolCallsUsed": 1,
+        "inputTokensUsed": 20,
+        "outputCharsUsed": 3,
+        "lifecycleGeneration": _lifecycle_snapshot()[1],
+        "bootEpoch": "previous-process-epoch",
+    }
+    state["policyFingerprint"] = fingerprint
+    store.save(agent, state)
+    monkeypatch.setattr(runtime_module, "_BOOT_EPOCH", "current-process-epoch")
+    runtime = AgentPerceptionRuntime(
+        store=store,
+        agent_loader=lambda _agent_id: deepcopy(agent),
+        policy_loader=lambda _agent: (deepcopy(policy), fingerprint),
+        session_service=sessions,
+        clock=lambda: "2026-10-05T12:00:00Z",
+    )
+
+    recovered = runtime.recover_agent("agent-previous-boot")
+    persisted = store.load(agent)
+
+    assert recovered["activeRun"] is None
+    assert persisted["lastRun"]["runId"] == "run-previous-boot"
+    assert persisted["lastRun"]["bootEpoch"] == "previous-process-epoch"
+    assert persisted["lastRun"]["status"] == "interrupted"
+    assert persisted["lastRun"]["reason"] == "boot_epoch_changed"
+    assert persisted["dailyRuns"] == {"2026-10-05": 1}
+    assert persisted["topicCursor"] == 1
+    assert sessions.inspected == []
+    assert sessions.stopped == []
+    assert sessions.created == []
+    assert sessions.submitted == []
+    assert sessions.running == {
+        "session-previous-boot": "turn-previous-boot",
+        "ordinary-session": "ordinary-turn",
+    }
 
 
 def test_non_perception_turn_has_no_perception_budget():
