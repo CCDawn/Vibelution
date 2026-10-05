@@ -74,7 +74,7 @@ export function reportMatchesStock(report: StockResearchReport | null, messages:
   const index = messages.findIndex((message) => message.role === "assistant" && message.turnId === report.turnId);
   for (const message of messages.slice(0, index).reverse()) {
     if (message.role !== "user") continue;
-    const tickers = [...message.content.matchAll(/(?:^|[^\d])([036489]\d{5})(?!\d)/g)].map((match) => match[1]);
+    const tickers = [...new Set([...message.content.matchAll(/(?:^|[^\d])([036489]\d{5})(?!\d)/g)].map((match) => match[1]))];
     if (tickers.length) return tickers.length === 1 && tickers[0] === stock.ticker;
     if (message.content.includes(stock.name)) return true;
   }

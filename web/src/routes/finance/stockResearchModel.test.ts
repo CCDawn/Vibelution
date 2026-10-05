@@ -27,6 +27,13 @@ describe("stock research projections", () => {
     expect(reportMatchesStock(report, messages, stock)).toBe(true);
     expect(reportMatchesStock(report, messages, { ...stock, ticker: "000858", symbol: "sz000858", name: "五粮液" })).toBe(false);
   });
+  it("recognizes a stock repeated in source URLs while rejecting mixed stock reports", () => {
+    const request: ConversationMessage = { role: "user", id: "u", timestamp: "", content: "研究贵州茅台（600519），来源 https://qt.gtimg.cn/q=sh600519" };
+    const messages = [request, turn("completed", [final])];
+    expect(reportMatchesStock(projectStockReport(messages), messages, stock)).toBe(true);
+    const mixed = [{ ...request, content: `${request.content}，并比较五粮液（000858）` }, messages[1]];
+    expect(reportMatchesStock(projectStockReport(mixed), mixed, stock)).toBe(false);
+  });
 
   it("keeps the complete native research report after ordinary follow-ups", () => {
     const request: ConversationMessage = { role: "user", id: "research", timestamp: "", content: stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief") };
