@@ -783,6 +783,13 @@ class TestToolExecutorExecute:
 
         from core.authorization import tool_authorization_service
         from core.web.services import agent_directory_service
+        from core.web.services.agent_perception import service as perception_service
+
+        # This fixture represents a real legacy Agent without a perception
+        # policy, rather than an unresolvable runtime identity.
+        monkeypatch.setattr(perception_service, "_agent", lambda agent_id: {
+            "agentId": agent_id, "metadata": {},
+        })
 
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",

@@ -11,14 +11,18 @@ import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentSelectedDetailContentPanel.styles";
 import { FinancialAssistantStatusNote } from "./finance/FinancialAssistantStatusNote";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
+import type { AgentPerceptionDraftState, AgentPerceptionDraftStore } from "./agentPerception/useAgentPerceptionDraft";
 
-export type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
+export type AgentSelectedDetailPaneId = "overview" | "config" | "activity" | "perception";
 
 export type AgentConfigSectionId = "basic" | "profile" | "capability" | "ops";
 
 /** Secondary panes — kept off the default overview graph (F3-B). */
 const AgentActivityPanePanel = lazy(() =>
   import("./AgentActivityPanePanel").then((m) => ({ default: m.AgentActivityPanePanel })),
+);
+const AgentPerceptionPane = lazy(() =>
+  import("./AgentPerceptionPane").then((m) => ({ default: m.AgentPerceptionPane })),
 );
 const AgentConfigPrimaryPanePanel = lazy(() =>
   import("./AgentConfigPrimaryPanePanel").then((m) => ({ default: m.AgentConfigPrimaryPanePanel })),
@@ -58,6 +62,7 @@ export type AgentSelectedDetailContentPanelProps = {
   configReferences: ComponentProps<typeof AgentConfigReferencesPanePanel>;
   virtualHumanPlugin: ComponentProps<typeof AgentVirtualHumanPluginPanel>;
   activity: ComponentProps<typeof AgentActivityPanePanel>;
+  onOpenSession: (sessionId: string) => void;
   /** Prefer opening ops when agent has health issues. */
   preferOpsSection?: boolean;
 };
@@ -108,11 +113,17 @@ export function AgentSelectedDetailContentPanel({
   configReferences,
   virtualHumanPlugin,
   activity,
+  onOpenSession,
   preferOpsSection = false,
 }: AgentSelectedDetailContentPanelProps) {
   const [configSection, setConfigSection] = useState<AgentConfigSectionId>(
     preferOpsSection ? "ops" : "basic",
   );
+  const [perceptionDrafts, setPerceptionDrafts] = useState<AgentPerceptionDraftState>({});
+  const perceptionDraftStore = useMemo<AgentPerceptionDraftStore>(() => ({
+    drafts: perceptionDrafts,
+    setDrafts: setPerceptionDrafts,
+  }), [perceptionDrafts]);
   const labels = configSectionLabels(header.lang);
 
   useEffect(() => {
@@ -201,6 +212,18 @@ export function AgentSelectedDetailContentPanel({
           <div className={styles.paneContent}>
             <AgentActivityPanePanel {...activity} />
             <AgentConfigChangeHistoryPanel {...configChanges} lang={header.lang} />
+          </div>
+        </PaneSuspense>
+      ) : null}
+      {activePane === "perception" ? (
+        <PaneSuspense lang={header.lang}>
+          <div className={styles.paneContent}>
+            <AgentPerceptionPane
+              agentId={agentId}
+              lang={header.lang}
+              onOpenSession={onOpenSession}
+              draftStore={perceptionDraftStore}
+            />
           </div>
         </PaneSuspense>
       ) : null}

@@ -150,6 +150,24 @@ def _save_memory(memory: dict) -> bool:
         return False
 
 
+def _perception_personal_read_block() -> str:
+    from core.web.services.agent_directory_service import current_agent_runtime
+    from core.web.services.agent_perception.service import _agent, configured_policy
+
+    agent_id = str(current_agent_runtime().get("agentId") or "")
+    if not agent_id:
+        return ""
+    try:
+        if configured_policy(_agent(agent_id)) is None:
+            return ""
+    except ValueError:
+        pass
+    # Legacy project-wide memory stores are not Agent-private source grants.
+    # Configured Agents use the bounded, ACL-filtered private search instead.
+    return json.dumps({"ok": False, "status": "blocked", "error": "scoped_personal_search_required",
+                       "message": "请在本轮已允许的个人来源内使用 search_agent_private_memory_tool。"}, ensure_ascii=False)
+
+
 def read_memory_tool() -> str:
     """
     读取当前记忆索引（轻量级）。
@@ -159,6 +177,9 @@ def read_memory_tool() -> str:
         - core_wisdom: 核心智慧摘要
         - current_goal: 当前核心目标
     """
+    blocked = _perception_personal_read_block()
+    if blocked:
+        return blocked
     memory = _load_memory()
     return json.dumps(memory, ensure_ascii=False, indent=2)
 
@@ -170,6 +191,9 @@ def get_memory_summary_tool() -> str:
     Returns:
         格式化的记忆字符串
     """
+    blocked = _perception_personal_read_block()
+    if blocked:
+        return blocked
     memory = _load_memory()
     core_wisdom = memory.get('core_wisdom', '无')
     current_goal = memory.get('current_goal', '待定')
@@ -195,6 +219,9 @@ def get_current_goal_tool() -> str:
 
 def get_core_context_tool() -> str:
     """获取核心上下文"""
+    blocked = _perception_personal_read_block()
+    if blocked:
+        return blocked
     return _load_memory().get("core_wisdom", "")
 
 
@@ -606,6 +633,9 @@ def search_memory_tool(query: str, category: str = "") -> str:
     Returns:
         JSON 格式的匹配记忆列表
     """
+    blocked = _perception_personal_read_block()
+    if blocked:
+        return blocked
     wm = get_workspace()
     cat = category if category else None
     results = wm.search_long_term_memory(query=query, category=cat, limit=20)
@@ -627,6 +657,9 @@ def search_error_archive_tool(error_type: str = "") -> str:
     Returns:
         JSON 格式的错误记录列表
     """
+    blocked = _perception_personal_read_block()
+    if blocked:
+        return blocked
     wm = get_workspace()
     if error_type:
         results = wm.search_error_archive(error_type=error_type, limit=20)

@@ -476,7 +476,7 @@ export function AgentsRoute() {
     };
   }, []);
 
-  const fullWorkspaceNeeded = Boolean(selectedAgentId || activePane === "config" || activePane === "activity" || requestedAgentId);
+  const fullWorkspaceNeeded = Boolean(selectedAgentId || activePane === "config" || activePane === "activity" || activePane === "perception" || requestedAgentId);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: ({ signal }) => fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false, signal }),
@@ -2696,6 +2696,7 @@ export function AgentsRoute() {
         onSave: saveRuntimePolicy,
       },
     },
+    onOpenSession: openAgentSession,
   } : null, [
     // Dependency note: every non-module identifier referenced inside this view
     // model is listed; per-render closures (save/handler fns) only read values
@@ -2746,6 +2747,7 @@ export function AgentsRoute() {
     memoryPolicyDraft,
     memoryPolicyDirty,
     notice,
+    openAgentSession,
     overviewOperations,
     overviewResources,
     panes,

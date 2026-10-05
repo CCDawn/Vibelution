@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from core.infrastructure import developer_sandbox
 from core.llm import LLMInvocationContext, invoke_llm
 from core.llm.payload_builder import current_prompt_cache_partition
@@ -33,6 +35,36 @@ class _FakeClient:
             }
         )
         return _Response()
+
+
+@pytest.mark.parametrize("surface", [
+    "invoke_llm", "invoke_llm_outcome", "stream_llm", "run_streaming_llm_outcome",
+])
+def test_background_input_budget_blocks_every_provider_entrypoint(surface, monkeypatch):
+    from core.llm import invocation
+    from core.web.services.agent_perception import runtime
+    from core.web.services.agent_perception.access import perception_turn_scope
+    from core.web.services.agent_perception.service import AgentPerceptionDenied
+
+    client = _FakeClient()
+    for method in ("invoke", "invoke_outcome", "stream", "stream_events"):
+        monkeypatch.setattr(client, method, lambda *_args, **_kwargs: pytest.fail("provider called after budget exhaustion"), raising=False)
+    charged = []
+    monkeypatch.setattr(runtime, "reserve_perception_input_tokens", lambda amount: charged.append(amount) or False)
+    kwargs = {"context": LLMInvocationContext(surface="agent_turn", prompt_purpose="main_reply")}
+    if surface == "run_streaming_llm_outcome":
+        kwargs["on_event"] = lambda _event: None
+    with perception_turn_scope("budget-agent", trigger="background"):
+        with pytest.raises(AgentPerceptionDenied, match="input budget"):
+            result = getattr(invocation, surface)(
+                client, [{"role": "system", "content": "stable context"}, {"role": "user", "content": "research"}],
+                tools=[{"type": "function", "function": {"name": "unified_memory_search_tool"}}],
+                **kwargs,
+            )
+            if surface == "stream_llm":
+                list(result)
+    assert len(charged) == 1
+    assert charged[0] > 0
 
 
 def _enable_sandbox(tmp_path, monkeypatch):

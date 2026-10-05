@@ -5,6 +5,10 @@ from tools import github_project_library_tools as tools
 
 def test_search_tool_returns_local_index(monkeypatch):
     monkeypatch.setattr(
+        "core.web.services.agent_perception.service._agent",
+        lambda agent_id: {"agentId": agent_id, "status": "active", "metadata": {}},
+    )
+    monkeypatch.setattr(
         tools,
         "_current_runtime",
         lambda: {"agentId": "agent-dev"},

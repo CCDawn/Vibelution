@@ -329,7 +329,7 @@ def test_run_session_turn_impl_routes_provider_error_by_category(
 
     worker._run_session_turn_impl(context)
 
-    assert calls == [expected_persistence]
+    assert calls == [expected_persistence], lifecycle
     assert not [phase for phase, _kwargs in lifecycle if phase == "user_visible_finished"]
     exception_events = [kwargs for phase, kwargs in lifecycle if phase == "exception"]
     assert exception_events

@@ -499,6 +499,22 @@ def authorize_tool_execution(
             context,
             tool_name=normalized_tool,
         )
+    from core.web.services.agent_perception.access import legacy_tool_read_denial, current_perception_turn
+
+    perception_turn = current_perception_turn()
+    if (perception_turn is not None and perception_turn.trigger == "background"
+            and normalized_tool not in {"unified_memory_search_tool", "search_agent_private_memory_tool",
+                                        "github_project_library_search_tool", "read_knowledge_item_tool"}):
+        return _execution_denial(
+            "perception_background_read_only", "后台感知只允许已授权来源的只读检索。",
+            runtime_agent_id, runtime_turn_id, context, tool_name=normalized_tool,
+        )
+    perception_denial = legacy_tool_read_denial(normalized_tool, runtime_agent_id, dict(tool_args or {}))
+    if perception_denial:
+        return _execution_denial(
+            "perception_read_denied", "当前感知设置不允许此来源读取：" + perception_denial,
+            runtime_agent_id, runtime_turn_id, context, tool_name=normalized_tool,
+        )
     terminal_wait_session_id = _empty_terminal_wait_session_id(normalized_tool, tool_args)
     with context.call_count_lock:
         if terminal_wait_session_id:
@@ -613,6 +629,17 @@ def authorize_tool_execution(
         approval_code = approval_outcome.code
     else:
         approval_code = "allowed"
+    from core.web.services.agent_perception.runtime import charge_perception_tool_call
+
+    try:
+        budget_allowed = charge_perception_tool_call()
+    except (RuntimeError, ValueError, PermissionError):
+        budget_allowed = False
+    if budget_allowed is False:
+        return _execution_denial(
+            "perception_budget_exhausted", "后台感知已停止或本次工具额度已用尽。",
+            runtime_agent_id, runtime_turn_id, context, tool_name=normalized_tool,
+        )
     return ToolExecutionAuthorizationResult(
         enforced=True,
         allowed=True,

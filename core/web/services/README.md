@@ -24,12 +24,13 @@
 | `team/` | `team_service.py` | [team/README.md](team/README.md) |
 | `team_knowledge/` | `team_knowledge_service.py` | [team_knowledge/README.md](team_knowledge/README.md) |
 | `agent_directory/` | `agent_directory_service.py` | [agent_directory/README.md](agent_directory/README.md) |
+| `agent_perception/` | `agent_perception_service.py` | [agent_perception/README.md](agent_perception/README.md) |
 | `runtime_scene/` | `runtime_scene_service.py` | [runtime_scene/README.md](runtime_scene/README.md) |
 
 ## 统计
 
-- Facade `*_service.py`：**83**
-- 有 pack README：**6**
+- Facade `*_service.py`：**84**
+- 有 pack README：**7**
 - 仅单文件 facade：**77**
 
 ## Domain 速查
@@ -39,7 +40,7 @@
 | Session / Chat hot path (`session`) | 2 |
 | Team workflow / SC / experiment (`team_workflow`) | 1 |
 | Team registry / canvas (`team`) | 3 |
-| Agent directory / config (`agent`) | 18 |
+| Agent directory / config (`agent`) | 19 |
 | Chat room / conversation index (`chat`) | 3 |
 | Knowledge / RAG (`knowledge`) | 5 |
 | Memory (`memory`) | 4 |
@@ -94,6 +95,7 @@
 | `agent_model_candidate_service.py` | Read-only projection of configured and observed Provider models for Agents. | — | — | `test_session_llm_selection.py`, `test_agent_model_candidate_service.py` |
 | `agent_model_promotion_service.py` | Atomic promotion of one observed Provider model into one Agent binding. | — | `agents.py` | `test_agent_config_workspace_routes.py`, `test_agent_model_promotion_service.py` |
 | `agent_operation_service.py` | Shared Agent catalog operations for HTTP routes and governed tools. | — | `agents.py` | `test_project_operation_tools.py` |
+| `agent_perception_service.py` | Operator-scoped perception configuration, bounded source reads and native background runs. | `agent_perception/` | `agents.py` | `test_agent_perception_policy.py`, `test_agent_perception_service.py`, `test_agent_perception_routes.py`, `test_agent_perception_runtime.py` |
 | `financial_assistant_service.py` | Financial specialist entry and explicit setup over native Agent/Session/knowledge lifecycle. | — | `financial_assistant.py` | `test_financial_assistant_service.py` |
 | `financial_market_service.py` | Read-only public A-share quotes, OHLC and search with source/time/unit validation. | — | `financial_assistant.py` | `test_financial_market_service.py` |
 | `agent_plugin_service.py` | Trusted first-party Agent plugin catalog and binding facade. | — | `agent_plugins.py` | `test_virtual_human_life_api.py` |

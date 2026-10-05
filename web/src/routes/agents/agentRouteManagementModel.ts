@@ -23,7 +23,8 @@ import {
 export type AgentConfigPaneId =
   | "overview"
   | "config"
-  | "activity";
+  | "activity"
+  | "perception";
 
 export type AgentManagementAction = {
   id: string;
@@ -352,7 +353,7 @@ export function normalizeAgentConfigPane(value: string | null | undefined): Agen
   if (normalized === "effective" || normalized === "relations") {
     return "overview";
   }
-  return normalized === "config" || normalized === "activity" || normalized === "overview"
+  return normalized === "config" || normalized === "activity" || normalized === "overview" || normalized === "perception"
     ? normalized
     : "overview";
 }

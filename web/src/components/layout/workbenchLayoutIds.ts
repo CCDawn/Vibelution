@@ -6,6 +6,7 @@
 export const WORKBENCH_LAYOUT_IDS = {
   /** Aux conversations center (VListDetailPage sidebar width memory). */
   auxConversations: "aux-conversations",
+  agentPerception: "agent-perception",
   agents: "agents",
   chat: "chat",
   finance: "finance",

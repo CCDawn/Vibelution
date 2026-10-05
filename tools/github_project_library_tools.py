@@ -28,6 +28,15 @@ def github_project_library_search_tool(query: str = "", limit: int = 12) -> str:
 
     runtime = _current_runtime()
     try:
+        from core.web.services.agent_perception.access import configured_search
+
+        agent_id = str(runtime.get("agentId") or "").strip()
+        if agent_id:
+            perception = configured_search(agent_id, query=str(query or "").strip(), sources=["projects"], limit=limit,
+                                           invoked_tool=GITHUB_PROJECT_LIBRARY_SEARCH_TOOL_NAME)
+            if perception is not None:
+                return _json_result({"ok": True, "status": "succeeded", **perception,
+                                     "projects": perception["results"]})
         from core.web.services import github_project_library_service
 
         payload = github_project_library_service.list_github_projects(

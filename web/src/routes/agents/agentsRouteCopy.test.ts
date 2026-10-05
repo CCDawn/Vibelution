@@ -35,6 +35,7 @@ describe("agentsRouteCopy", () => {
     expect(panes.map((pane) => pane.id)).toEqual([
       "overview",
       "config",
+      "perception",
       "activity",
     ]);
     expect(panes.find((pane) => pane.id === "config")?.count).toBe(2);

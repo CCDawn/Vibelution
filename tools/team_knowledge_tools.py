@@ -71,6 +71,16 @@ def unified_memory_search_tool(
             return _json_result(_blocked_result(agent_id, "user_content_space_not_in_memory_policy"))
 
     try:
+        from core.web.services.agent_perception.access import configured_search
+
+        perception = configured_search(
+            agent_id, query=str(query or "").strip(), base_id=requested_base_id,
+            owner_type=str(owner_type or "").strip(), owner_id=str(owner_id or "").strip(), limit=limit,
+            invoked_tool=UNIFIED_MEMORY_SEARCH_TOOL_NAME,
+        )
+        if perception is not None:
+            return _json_result({"ok": True, "status": "succeeded", **perception,
+                                 "summary": {"resultCount": len(perception["results"])}})
         from core.web.services import unified_knowledge_search_service
 
         payload = unified_knowledge_search_service.search_unified_memory(
@@ -144,6 +154,13 @@ def search_agent_private_memory_tool(
         return _json_result(_blocked_result(agent_id, "personal_memory_disabled"))
 
     try:
+        from core.web.services.agent_perception.access import configured_search
+
+        perception = configured_search(agent_id, query=str(query or "").strip(), sources=["personal"], limit=limit,
+                                       invoked_tool=AGENT_PRIVATE_MEMORY_SEARCH_TOOL_NAME)
+        if perception is not None:
+            return _json_result({"ok": True, "status": "succeeded", **perception,
+                                 "summary": {"resultCount": len(perception["results"])}})
         from core.web.services import team_knowledge_service, unified_knowledge_search_service
 
         private_bases = team_knowledge_service.list_agent_knowledge_bases(
@@ -261,14 +278,21 @@ def read_knowledge_item_tool(
     if not _policy_allows_knowledge_base(base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
 
+    from core.web.services.knowledge_read_service import (
+        KnowledgeReadError,
+        KnowledgeReadNotFoundError,
+        KnowledgeReadPermissionError,
+        KnowledgeReadSourceRelationError,
+        read_knowledge_item,
+    )
+    from core.web.services.agent_perception_service import (
+        AgentPerceptionDenied,
+        begin_knowledge_item_read,
+        finish_knowledge_item_read,
+    )
+
     try:
-        from core.web.services.knowledge_read_service import (
-            KnowledgeReadError,
-            KnowledgeReadNotFoundError,
-            KnowledgeReadPermissionError,
-            KnowledgeReadSourceRelationError,
-            read_knowledge_item,
-        )
+        perception_ticket = begin_knowledge_item_read(agent_id, base_id)
 
         if memory_policy.get("enabled") is False:
             from core.web.services import team_knowledge_service
@@ -287,6 +311,11 @@ def read_knowledge_item_tool(
             read_mode=read_mode,
             private_memory_enabled=memory_policy.get("enabled") is not False,
         )
+        if not finish_knowledge_item_read(
+            perception_ticket, result_count=1,
+            result_chars=int(payload.get("returnedChars") or 0),
+        ):
+            return _json_result(_blocked_result(agent_id, "perception_scope_changed_during_read"))
         _record_event(
             "memory.tool.knowledge_item_read.succeeded",
             runtime=runtime,
@@ -301,6 +330,8 @@ def read_knowledge_item_tool(
             },
         )
         return _json_result({"ok": True, "status": "succeeded", "agentId": agent_id, **payload})
+    except AgentPerceptionDenied:
+        return _json_result(_blocked_result(agent_id, "perception_read_denied"))
     except KnowledgeReadPermissionError:
         return _json_result(_blocked_result(agent_id, "knowledge_access_denied"))
     except KnowledgeReadSourceRelationError:

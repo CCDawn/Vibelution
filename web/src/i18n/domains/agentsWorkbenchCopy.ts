@@ -25,6 +25,7 @@ export function agentConfigPanes(copy: AgentsRouteCopy, agent: AgentConfigWorksp
   return [
     { id: "overview", label: copy.overviewPane, count: 0 },
     { id: "config", label: copy.configTitle, count: configIssueCount },
+    { id: "perception", label: copy.perceptionPane, count: 0 },
     { id: "activity", label: copy.activityPane, count: activityCount },
   ];
 }
@@ -319,6 +320,7 @@ export function agentsRouteCopy(lang: "zh" | "en") {
         identityNotes: "人物说明",
         expertisePlaceholder: "用逗号分隔，例如 规划, 统计, 评审",
         overviewPane: "总览",
+        perceptionPane: "感知管理",
         effectiveConfiguration: "生效配置",
         teamRelations: "团队关系",
         configChanges: "草稿与版本",
@@ -721,6 +723,7 @@ export function agentsRouteCopy(lang: "zh" | "en") {
         identityNotes: "Identity notes",
         expertisePlaceholder: "Comma-separated, e.g. planning, statistics, review",
         overviewPane: "Overview",
+        perceptionPane: "Perception",
         effectiveConfiguration: "Effective config",
         teamRelations: "Team relations",
         configChanges: "Drafts & versions",

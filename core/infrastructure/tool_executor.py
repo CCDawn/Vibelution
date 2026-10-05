@@ -1144,6 +1144,9 @@ class ToolExecutor:
                 except TimeoutError:
                     continue
 
+            from core.web.services.agent_perception.access import cap_perception_tool_result
+
+            result = cap_perception_tool_result(result)
             duration_ms = int((time.monotonic() - started_at) * 1000)
             semantic = _classify_tool_semantic_result(tool_name, result)
             semantic_outcome = str(semantic.get("outcome") or "succeeded")

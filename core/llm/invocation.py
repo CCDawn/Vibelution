@@ -16,6 +16,8 @@ from .payload_builder import (
     prompt_cache_partition_scope,
 )
 
+from core.web.services.agent_perception.access import reserve_perception_llm_input
+
 
 def _header_identity_scope(context: LLMInvocationContext):
     """Bind the invocation's session/agent identity for extra_headers templates.
@@ -130,6 +132,7 @@ def invoke_llm(
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
         try:
+            reserve_perception_llm_input(messages, tools)
             result = client.invoke(messages, **kwargs)
         except Exception as exc:
             _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
@@ -162,6 +165,7 @@ def invoke_llm_outcome(
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
         try:
+            reserve_perception_llm_input(messages, tools)
             outcome = client.invoke_outcome(messages, **kwargs)
         except Exception as exc:
             _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
@@ -192,6 +196,7 @@ def stream_llm(
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
         try:
+            reserve_perception_llm_input(messages, tools)
             yield from client.stream(messages, **kwargs)
         except Exception as exc:
             _record_image_input_feedback_quietly(client, messages, ok=False, error=exc)
@@ -225,6 +230,7 @@ def run_streaming_llm_outcome(
         if output_schema is not None:
             kwargs["output_schema"] = output_schema
         try:
+            reserve_perception_llm_input(messages, tools)
             iterator = iter(
                 client.stream_events(messages, **kwargs)
             )

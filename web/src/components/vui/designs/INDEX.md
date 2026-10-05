@@ -171,6 +171,12 @@
 | `AgentWorkspacePanel` | [product/agent-management.md](./product/agent-management.md#agentworkspacepanel) |
 | `AgentPermissionPresetControl` | [product/agent-management.md](./product/agent-management.md#agentpermissionpresetcontrol) |
 
+## Product — agent-perception
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `AgentPerceptionManagementPanel` | [product/agent-perception.md](./product/agent-perception.md#agentperceptionmanagementpanel) |
+
 ## Product — team-management
 
 | 组件 | 设计说明 |

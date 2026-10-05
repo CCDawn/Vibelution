@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-# Roles that may control catalog runs, cancel/fork/rebind, extend budgets, or
-# resolve human gates.
+# Roles that may control catalog runs, cancel/fork/rebind, extend budgets,
+# resolve human gates, or change Agent-wide perception policy.
 OPERATOR_PRIVILEGED_ROLES: frozenset[str] = frozenset(
     {
         "operator",
@@ -28,6 +28,10 @@ HIGH_IMPACT_COMMANDS: frozenset[str] = frozenset(
         "fork_revision",
         "record_g12_calibration",
         "read_g12_calibration",
+        "read_agent_perception_configuration",
+        "configure_agent_perception",
+        "read_agent_perception_runtime",
+        "cancel_agent_perception_run",
     }
 )
 

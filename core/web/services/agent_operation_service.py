@@ -76,6 +76,10 @@ def create_agent_from_catalog_request(
     normalized_task_profile = dict(task_profile or {})
     normalized_tool_policy = dict(tool_policy or {})
     normalized_metadata = dict(metadata or {})
+    if "perceptionPolicy" in normalized_metadata:
+        raise AgentDirectoryError(
+            "Agent perception policy cannot be set at Agent creation; configure it through the operator-only perception API."
+        )
 
     validate_agent_create_request(
         display_name=normalized_display_name,

@@ -458,7 +458,9 @@ def build_agent_context(
     timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
     _stop("episodic_events")
     stage_started_at = _perf_counter()
-    if bool(memory_policy.get("enabled", True)):
+    from core.web.services.agent_perception.access import allows_personal_prefetch
+
+    if bool(memory_policy.get("enabled", True)) and allows_personal_prefetch(agent):
         episodic_events = agent_directory_service.list_current_episodic_events(
             normalized_agent_id,
             limit=agent_directory_service.PROMPT_LIST_LIMIT,

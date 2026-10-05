@@ -29,6 +29,7 @@ from .avatar_model_defaults import model_default_avatar_filename
 
 # Local default for signature evaluation (facade remains SSOT).
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
+_AGENT_PERCEPTION_POLICY_METADATA_KEY = "perceptionPolicy"
 
 
 def _service():
@@ -58,6 +59,7 @@ def update_agent_instance(
     persona_profile: dict[str, Any] | None = None,
     task_profile: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    allow_agent_perception_policy: bool = False,
     status: str | None = None,
     preserve_generated_display_name: bool = False,
     expected_updated_at: str = "",
@@ -66,6 +68,14 @@ def update_agent_instance(
     confirm_shared_tool_policy: bool = False,
 ) -> dict[str, Any]:
     s = _service()
+    if (
+        isinstance(metadata, dict)
+        and _AGENT_PERCEPTION_POLICY_METADATA_KEY in metadata
+        and not allow_agent_perception_policy
+    ):
+        raise s.AgentDirectoryError(
+            "Agent perception policy must be changed through the operator-only perception configuration API."
+        )
     updated_tool_policy: dict[str, Any] | None = None
     updated_memory_policy: dict[str, Any] | None = None
     updated_delegation_policy: dict[str, Any] | None = None
@@ -325,6 +335,10 @@ def create_agent_instance(
     initial_tool_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
+    if isinstance(metadata, dict) and _AGENT_PERCEPTION_POLICY_METADATA_KEY in metadata:
+        raise s.AgentDirectoryError(
+            "Agent perception policy cannot be set at Agent creation; configure it through the operator-only perception API."
+        )
     with s._STATE_LOCK:
         state = s.repair_agent_directory()
         existing_ids = {

@@ -306,6 +306,14 @@ def _execute_existing_agent_single_turn(
     """Execute one already-prepared Agent Turn."""
 
     runner = getattr(agent, "run_single_turn")
+    from core.web.services.agent_directory_service import current_agent_runtime
+    from core.web.services.agent_perception.access import build_perception_tail
+
+    runtime = current_agent_runtime()
+    perception_tail = build_perception_tail(str((runtime or {}).get("agentId") or ""))
+    seed_tail = getattr(agent, "seed_volatile_runtime_context", None)
+    if perception_tail and callable(seed_tail):
+        seed_tail(perception_tail)
     kwargs: dict[str, Any] = {"initial_prompt": _coerce_text(initial_prompt)}
     try:
         signature = inspect.signature(runner)

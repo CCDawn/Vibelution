@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,6 +45,13 @@ from core.web.routes.agent_config_change_models import (
     AgentConfigDraftResponse,
     AgentModelPromotionResponse,
 )
+from core.web.routes.agent_perception_models import (
+    AgentPerceptionCancelPayload,
+    AgentPerceptionCancelResponse,
+    AgentPerceptionConfigurationResponse,
+    AgentPerceptionRuntimeResponse,
+    AgentPerceptionUpdatePayload,
+)
 
 from config.operator_config_transaction import OperatorConfigTransactionError
 from core.agent_kernel import KernelAdapterError, KernelError, KernelValidationError, submit_agent_message_event
@@ -80,6 +88,15 @@ from core.web.services.agent_directory_service import (
 from core.web.services.agent_model_promotion_service import (
     AgentModelPromotionConflict,
     promote_agent_model,
+)
+from core.web.services.agent_perception_service import (
+    AgentPerceptionDenied,
+    AgentPerceptionError,
+    AgentPerceptionRuntimeUnavailable,
+    get_agent_perception_configuration,
+    get_agent_perception_runtime,
+    save_agent_perception_configuration,
+    cancel_agent_perception,
 )
 from core.web.services.agent_bulk_delete_service import (
     MAX_BULK_AGENT_IDS,
@@ -125,9 +142,27 @@ from core.web.services.supervised_agent_service import (
     SUPERVISED_AGENT_ROLES,
     ensure_supervised_agent_instances,
 )
+from core.web.control import ensure_control_source
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    require_privileged_server_operator,
+    server_operator_scope_from_http,
+)
 
 
 router = APIRouter(tags=["agents"])
+
+
+@contextmanager
+def _agent_perception_operator_scope(request: Request, *, command: str) -> Iterator[None]:
+    ensure_control_source(request)
+    if request.headers.get("X-OpenCode-Session") is not None:
+        raise HTTPException(status_code=403, detail="Agent perception control requires the local operator session.")
+    try:
+        with server_operator_scope_from_http(request):
+            require_privileged_server_operator(command=command)
+            yield
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="Agent perception control requires a privileged operator.") from exc
 
 
 class AgentCreatePayload(BaseModel):
@@ -1816,3 +1851,83 @@ def mode_binding_pool_update(mode: str, payload: ModeBindingPoolUpdatePayload) -
         return _with_agent_workspace_cache_invalidated(update_mode_binding(mode, pool=payload.agentIds))
     except AgentModeBindingError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/agents/{agent_id}/perception/configuration",
+    response_model=AgentPerceptionConfigurationResponse,
+)
+def agent_perception_configuration_get(agent_id: str, request: Request) -> dict:
+    with _agent_perception_operator_scope(request, command="read_agent_perception_configuration"):
+        try:
+            return get_agent_perception_configuration(agent_id)
+        except AgentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AgentPerceptionDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AgentPerceptionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put(
+    "/agents/{agent_id}/perception/configuration",
+    response_model=AgentPerceptionConfigurationResponse,
+)
+def agent_perception_configuration_put(
+    agent_id: str,
+    payload: AgentPerceptionUpdatePayload,
+    request: Request,
+) -> dict:
+    with _agent_perception_operator_scope(request, command="configure_agent_perception"):
+        try:
+            return save_agent_perception_configuration(
+                agent_id,
+                payload.policy.model_dump(mode="python"),
+                expected_agent_updated_at=payload.expectedAgentUpdatedAt,
+            )
+        except AgentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AgentStateConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AgentPerceptionDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AgentPerceptionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except AgentDirectoryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/agents/{agent_id}/perception/runtime",
+    response_model=AgentPerceptionRuntimeResponse,
+)
+def agent_perception_runtime_get(agent_id: str, request: Request) -> dict:
+    with _agent_perception_operator_scope(request, command="read_agent_perception_runtime"):
+        try:
+            return get_agent_perception_runtime(agent_id)
+        except AgentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AgentPerceptionRuntimeUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except AgentPerceptionError as exc:
+            raise HTTPException(status_code=409 if isinstance(exc, AgentPerceptionDenied) else 422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/agents/{agent_id}/perception/cancel",
+    response_model=AgentPerceptionCancelResponse,
+)
+def agent_perception_cancel_post(
+    agent_id: str,
+    request: Request,
+    payload: AgentPerceptionCancelPayload | None = None,
+) -> dict:
+    with _agent_perception_operator_scope(request, command="cancel_agent_perception_run"):
+        try:
+            return cancel_agent_perception(agent_id, run_id=str(payload.runId if payload else ""))
+        except AgentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AgentPerceptionRuntimeUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except AgentPerceptionError as exc:
+            raise HTTPException(status_code=409 if isinstance(exc, AgentPerceptionDenied) else 422, detail=str(exc)) from exc

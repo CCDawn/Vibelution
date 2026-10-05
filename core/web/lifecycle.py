@@ -95,6 +95,20 @@ def _recover_wakeable_agent_inbox_messages_on_startup() -> object:
     return recover_wakeable_agent_inbox_messages_on_startup()
 
 
+async def _start_perception_after_routes_ready(app: FastAPI | None, startup_jobs: StartupJobGroup) -> object:
+    await _await_web_routes_ready_for_prewarm(app)
+    if startup_jobs.should_stop() or os.environ.get("PYTEST_CURRENT_TEST"):
+        return {"started": False}
+    from .services.agent_perception.runtime import start_agent_perception_scheduler
+
+    def start_if_owned():
+        if startup_jobs.should_stop():
+            return {"started": False}
+        return start_agent_perception_scheduler()
+
+    return await startup_jobs.run_sync("startup-agent-perception", start_if_owned)
+
+
 def _recover_challenge_meeting_drivers_on_startup() -> object:
     from .services.team_workflow.meeting_driver_work import (
         recover_challenge_meeting_drivers,
@@ -555,6 +569,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
         "startup-virtual-human-life",
         run_virtual_human_life_runtime(run_sync=startup_jobs.run_sync),
     )
+    startup_perception_task = startup_jobs.start_async(
+        "startup-agent-perception", _start_perception_after_routes_ready(app, startup_jobs),
+    )
 
     def consume_startup_task_result(task: asyncio.Task[Any], *, message: str) -> None:
         try:
@@ -642,6 +659,9 @@ async def web_workbench_lifespan(app: FastAPI | None):
         lambda task: consume_startup_task_result(
             task, message="External Agent task reconciliation stopped unexpectedly."
         )
+    )
+    startup_perception_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="Agent perception scheduler startup failed.")
     )
     startup_code_fingerprint_task.add_done_callback(
         lambda task: consume_startup_task_result(
@@ -865,6 +885,7 @@ def _begin_owned_runtime_lifecycle() -> None:
         ("core.web.services.team_workflow.meeting_runtime", "begin_meeting_discussion_lifecycle"),
         ("core.web.services.team_workflow.research_runtime.hypothesis_command_attempts", "begin_hypothesis_command_lifecycle"),
         ("core.logging.transcript_logger", "begin_transcript_logger_lifecycle"),
+        ("core.web.services.agent_perception.runtime", "begin_agent_perception_lifecycle"),
     ):
         module = sys.modules.get(module_name)
         if module is not None:
@@ -894,6 +915,11 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
 
         return shutdown_background_tasks()
 
+    def _stop_perception() -> Any:
+        from .services.agent_perception.runtime import stop_agent_perception_scheduler
+
+        return stop_agent_perception_scheduler(wait=True, deadline=deadline)
+
     def _stop_cli_terminals() -> Any:
         from .services.cli_agent_terminal_service import shutdown_cli_agent_terminal_sessions
 
@@ -921,6 +947,7 @@ async def _shutdown_owned_runtime_resources(*, deadline: float | None = None) ->
         return shutdown_hypothesis_command_executor(deadline=deadline)
 
     owners = (
+        ("agent-perception", _stop_perception, {}),
         ("background-tasks", _stop_background_tasks, {}),
         ("cli-terminals", _stop_cli_terminals, {}),
         ("session-executors", _stop_session_executors, {}),

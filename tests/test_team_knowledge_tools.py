@@ -1249,7 +1249,9 @@ def test_unified_memory_search_tool_can_include_user_content(tmp_path, monkeypat
     from core.web.services import user_content_markdown_service
 
     monkeypatch.setattr(user_content_markdown_service, "PROJECT_ROOT", tmp_path / "project")
-    monkeypatch.setattr(team_knowledge_tools, "_current_runtime", lambda: {"agentId": "agent-1", "memoryPolicy": {}})
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path / "project")
+    agent = agent_directory_service.create_agent_instance(display_name="User Content Reader")
+    monkeypatch.setattr(team_knowledge_tools, "_current_runtime", lambda: {"agentId": agent["agentId"], "memoryPolicy": {}})
     source = tmp_path / "source"
     source.mkdir()
     (source / "Guide.md").write_text("# Guide\nagent-readable user note", encoding="utf-8")

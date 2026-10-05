@@ -10,3 +10,5 @@
 @source "../../routes/AgentsRoute.styles.ts";
 @source "../../routes/Agent*.tsx";
 @source "../../routes/Agent*.styles.ts";
+@source "../../routes/agentPerception/**/*.{ts,tsx}";
+@source not "../../routes/agentPerception/**/*.test.{ts,tsx}";

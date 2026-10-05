@@ -314,7 +314,9 @@ def build_agent_runtime_context_block(
     )
     from . import episodic_memory as episodic_memory_mod
 
-    if bool(memory_policy.get("enabled", True)):
+    from core.web.services.agent_perception.access import allows_personal_prefetch
+
+    if bool(memory_policy.get("enabled", True)) and allows_personal_prefetch(agent):
         episodes = (
             list(episodic_events_snapshot)
             if episodic_events_snapshot is not None

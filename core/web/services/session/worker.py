@@ -1755,6 +1755,17 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 turn_id=turn_id,
             )
             return
+        from core.web.services.agent_perception.access import host_user_sources, perception_turn_scope
+        from core.web.services.agent_perception.runtime import bind_perception_turn
+
+        perception_background = str(context.get("user_message_source") or "") == "agent_perception"
+        if not perception_background:
+            session_state = s.load_session_chat_state(s.PROJECT_ROOT, session_id) or {}
+            session_metadata = session_state.get("metadata") or {}
+            perception_background = (
+                isinstance(session_metadata, dict)
+                and session_metadata.get("source") == "agent_perception"
+            )
         with (
             s.active_agent_runtime(
                 agent_id,
@@ -1767,6 +1778,12 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
             ),
             s.mental_model_enabled_override(mental_model_enabled),
             task_workspace_context,
+            bind_perception_turn(session_id, turn_id, required=perception_background),
+            perception_turn_scope(
+                agent_id, requested_sources=host_user_sources(context),
+                trigger="background" if perception_background else "task",
+                session_id=session_id, turn_id=turn_id,
+            ),
         ):
             if _abort_session_turn_for_stop(
                 session_id=session_id,
