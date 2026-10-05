@@ -53,7 +53,7 @@ const DEPTH_OPTIONS = [
 const TEAM_POLL_MS = 1800;
 const MAX_LIVE_POLL_MS = 20 * 60 * 1000;
 
-type RoleState = "missing" | "waiting" | "running" | "completed" | "failed" | "stopped" | "incomplete";
+type RoleState = "missing" | "loading" | "unavailable" | "waiting" | "running" | "completed" | "failed" | "stopped" | "incomplete";
 type NativeTurnProjection = {
   turn: AssistantConversationTurn | null;
   answer: string;
@@ -132,7 +132,7 @@ function projectNativeTurn(detail: SessionDetail | undefined, ref: { clientSubmi
   const stopped = /stop|cancel|abort/.test(exactTerminal);
   const failed = turn?.status === "failed" || /failed|error/.test(exactTerminal);
   const state: RoleState = !turn
-    ? submissionSeen ? "waiting" : "missing"
+    ? !detail && ref.turnId ? "loading" : submissionSeen || ref.turnId ? "waiting" : "missing"
     : turn.status === "pending" || turn.status === "running" ? "running"
       : stopped ? "stopped"
         : failed ? "failed"
@@ -143,6 +143,8 @@ function projectNativeTurn(detail: SessionDetail | undefined, ref: { clientSubmi
 function statusText(state: RoleState, zh: boolean): string {
   const text: Record<RoleState, [string, string]> = {
     missing: ["未提交", "Not submitted"],
+    loading: ["读取对话", "Loading conversation"],
+    unavailable: ["读取失败", "Read unavailable"],
     waiting: ["等待响应", "Waiting for response"],
     running: ["分析中", "Running"],
     completed: ["已完成", "Completed"],
@@ -245,9 +247,13 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
   const details = useMemo(() => new Map(detailSpecs.map((spec, index) => [spec.key, detailQueries[index]?.data as SessionDetail | undefined])), [detailQueries, detailSpecs]);
   const projections = useMemo(() => {
     const result = new Map<FinancialTeamRole | "synthesis", NativeTurnProjection>();
-    detailSpecs.forEach((spec) => result.set(spec.key, projectNativeTurn(details.get(spec.key), spec.ref)));
+    detailSpecs.forEach((spec, index) => {
+      const projection = projectNativeTurn(details.get(spec.key), spec.ref);
+      if (detailQueries[index]?.isError && !details.get(spec.key)) projection.state = "unavailable";
+      result.set(spec.key, projection);
+    });
     return result;
-  }, [detailSpecs, details]);
+  }, [detailQueries, detailSpecs, details]);
 
   const updateRun = useCallback((next: FinancialTeamRun) => {
     queryClient.setQueryData<FinancialTeamRunList>(runsKey, (current) => ({
@@ -445,6 +451,8 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
   const hasMissingPrimary = Boolean(selectedRun && PRIMARY_ROLES.some((role) => !selectedRun.analysts[role]?.turnId));
   const serverCoordinated = Boolean(selectedRun?.coordinationStatus);
   const synthesisProjection = projections.get("synthesis");
+  const detailsLoading = [...projections.values()].some((projection) => projection.state === "loading");
+  const detailsUnavailable = [...projections.values()].some((projection) => projection.state === "unavailable");
   const hasRestartableTurn = Boolean(selectedRun && (
     ALL_ROLES.some((role) => {
       const turnId = selectedRun.analysts[role]?.turnId;
@@ -468,7 +476,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
         <VChip tone={statusTone(isPending ? "waiting" : projection.state)}>{statusText(isPending ? "waiting" : projection.state, zh)}</VChip>
       </div>
       {projection.activity && projection.state === "running" ? <p className={styles.activity} role="status">{projection.activity}</p> : null}
-      {projection.answer ? <div className={styles.answer} data-turn-id={projection.turn?.turnId}><LazyConversationMarkdownRenderer content={projection.answer} language={zh ? "zh" : "en"} /></div> : <p className={styles.placeholder}>{projection.state === "missing" ? (zh ? "等待提交" : "Ready to submit") : projection.state === "waiting" ? (zh ? "已提交，等待分析启动" : "Submitted; waiting for analysis") : projection.state === "running" || isPending ? (zh ? "正在生成分析结果" : "Generating analysis") : projection.state === "incomplete" ? (zh ? "本轮没有最终回答，可查看对话核对" : "No final answer; review the conversation") : projection.state === "failed" ? (zh ? "本轮失败，查看对话了解详情" : "Analysis failed; review the conversation") : projection.state === "stopped" ? (zh ? "本轮已停止" : "Analysis stopped") : (zh ? "尚无分析结果" : "No result yet")}</p>}
+      {projection.answer ? <div className={styles.answer} data-turn-id={projection.turn?.turnId}><LazyConversationMarkdownRenderer content={projection.answer} language={zh ? "zh" : "en"} /></div> : <p className={styles.placeholder}>{projection.state === "loading" ? (zh ? "正在读取本轮对话" : "Loading this run's conversation") : projection.state === "unavailable" ? (zh ? "会话暂无法读取，请刷新重试" : "Conversation unavailable; refresh to retry") : projection.state === "missing" ? (zh ? "等待提交" : "Ready to submit") : projection.state === "waiting" ? (zh ? "已提交，等待状态同步" : "Submitted; waiting for status") : projection.state === "running" || isPending ? (zh ? "正在生成分析结果" : "Generating analysis") : projection.state === "incomplete" ? (zh ? "本轮没有最终回答，可查看对话核对" : "No final answer; review the conversation") : projection.state === "failed" ? (zh ? "本轮失败，查看对话了解详情" : "Analysis failed; review the conversation") : projection.state === "stopped" ? (zh ? "本轮已停止" : "Analysis stopped") : (zh ? "尚无分析结果" : "No result yet")}</p>}
       <div className={styles.cardActions}>
         <VButton variant="ghost" icon={<ExternalLink size={14} />} onPress={() => onOpenSession(ref.sessionId)}>{zh ? "查看对话" : "View conversation"}</VButton>
         {canStop ? <VButton variant="secondary" icon={<StopCircle size={14} />} isPending={stoppingRole === role} isDisabled={Boolean(stoppingRole)} onPress={() => void stopExactTurn(role, ref)}>{zh ? "停止本轮" : "Stop turn"}</VButton> : null}
@@ -484,7 +492,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
       </div>
       <div className={styles.headerActions}>
         <VChip tone={teamQuery.isPending ? "neutral" : teamReady ? "success" : teamQuery.data?.status === "needs_attention" ? "warning" : "neutral"}>{teamQuery.isPending ? (zh ? "检查中" : "Checking") : teamReady ? readyCount + "/5 " + (zh ? "就绪" : "ready") : teamQuery.data?.status === "needs_attention" ? (zh ? "需检查配置" : "Needs attention") : (zh ? "未初始化" : "Not set up")}</VChip>
-        <VButton variant="ghost" icon={<RefreshCw size={14} />} isPending={teamQuery.isFetching || runsQuery.isFetching} onPress={() => { void teamQuery.refetch(); void runsQuery.refetch(); }}>{zh ? "刷新" : "Refresh"}</VButton>
+        <VButton variant="ghost" icon={<RefreshCw size={14} />} isPending={teamQuery.isFetching || runsQuery.isFetching} onPress={() => { void teamQuery.refetch(); void runsQuery.refetch(); detailQueries.forEach((query) => { void query.refetch(); }); }}>{zh ? "刷新" : "Refresh"}</VButton>
       </div>
     </div>
 
@@ -531,8 +539,8 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
         {selectedRun.schemaVersion < 2 ? <p className={styles.warning}>{zh ? "旧版三方研究；五方研究需新建一轮。" : "Legacy three-analyst research. Start a new run for five analysts."}</p> : null}
         <div className={styles.progress} role="status">
           <span>{zh ? "研究进度" : "Progress"}</span>
-          <strong>{ALL_ROLES.filter((role) => projections.get(role)?.state === "completed").length}/5</strong>
-          <span>{selectedRun.synthesis.turnId ? (synthesisProjection?.state === "completed" ? (zh ? "主助手已汇总" : "Synthesis complete") : synthesisProjection?.state === "running" ? (zh ? "主助手汇总中" : "Synthesis running") : `${zh ? "主助手汇总" : "Synthesis"} · ${statusText(synthesisProjection?.state ?? "missing", zh)}`) : selectedRun.schemaVersion < 2 ? (zh ? "旧版轮次" : "Legacy run") : selectedRun.stage === "debate" ? (zh ? "多空分析阶段" : "Debate stage") : (zh ? "基础研究阶段" : "Research stage")}</span>
+          <strong>{detailsLoading || detailsUnavailable ? "—" : ALL_ROLES.filter((role) => projections.get(role)?.state === "completed").length}/5</strong>
+          <span>{detailsLoading ? (zh ? "读取本轮对话" : "Loading run conversations") : detailsUnavailable ? (zh ? "部分对话暂无法读取" : "Some conversations are unavailable") : selectedRun.synthesis.turnId ? (synthesisProjection?.state === "completed" ? (zh ? "主助手已汇总" : "Synthesis complete") : synthesisProjection?.state === "running" ? (zh ? "主助手汇总中" : "Synthesis running") : `${zh ? "主助手汇总" : "Synthesis"} · ${statusText(synthesisProjection?.state ?? "missing", zh)}`) : selectedRun.schemaVersion < 2 ? (zh ? "旧版轮次" : "Legacy run") : selectedRun.stage === "debate" ? (zh ? "多空分析阶段" : "Debate stage") : (zh ? "基础研究阶段" : "Research stage")}</span>
         </div>
         <div className={styles.analystGrid}>{ALL_ROLES.map((role) => renderTurnCard(role))}</div>
         <VSurface as="section" tone="panel" padding="normal" className={styles.synthesis} data-financial-team-synthesis>

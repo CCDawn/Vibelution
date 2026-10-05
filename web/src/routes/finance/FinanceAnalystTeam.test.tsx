@@ -141,6 +141,27 @@ it("opens the selected synthesis and requires completed coordination with all Tu
   expect(openSession).toHaveBeenCalledWith("selected-synthesis");
 });
 
+it("keeps accepted Turns out of not-submitted state when reads fail and refreshes their details", async () => {
+  currentRun = makeRun();
+  currentRun.coordinationStatus = "completed";
+  roleKeys.forEach((role) => { currentRun!.analysts[role]!.turnId = "turn-" + role; });
+  currentRun.synthesis.turnId = "synthesis-turn";
+  api.session.mockRejectedValue(new Error("offline"));
+  await render();
+  expect(container.textContent).toContain("部分对话暂无法读取");
+  expect(container.querySelector('[role="status"]')?.textContent).toContain("—/5");
+  expect(container.textContent).not.toContain("未提交");
+  api.session.mockImplementation(async (sessionId: string) => {
+    const ref = sessionId === currentRun!.synthesis.sessionId ? currentRun!.synthesis : Object.values(currentRun!.analysts).find((item) => item?.sessionId === sessionId);
+    return detailFor(sessionId, ref, "本轮完成答案");
+  });
+  await act(async () => button("刷新").click());
+  await settle();
+  expect(container.querySelector('[role="status"]')?.textContent).toContain("5/5");
+  expect(container.textContent).not.toContain("部分对话暂无法读取");
+  expect(api.primary).not.toHaveBeenCalled();
+});
+
 beforeEach(() => {
   vi.resetAllMocks();
   currentRun = null;
@@ -283,7 +304,7 @@ describe("Finance analyst team", () => {
       return detail;
     });
     await render();
-    expect(container.textContent).toContain("已提交，等待分析启动");
+    expect(container.textContent).toContain("已提交，等待状态同步");
     expect(container.textContent).not.toContain("错误的相邻回答");
     expect(api.record).not.toHaveBeenCalled();
   });
