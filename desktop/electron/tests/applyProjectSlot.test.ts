@@ -132,4 +132,60 @@ describe("planProjectSlot", () => {
     });
     expect(projectSlotWindowAction(plan)).toBe("instance");
   });
+
+  it.each([0, 8001])("keeps status read-only for an idle branch with reserved port %i", (port) => {
+    const idleItems = parseBranchInstanceRecords({
+      items: listed.items.map(item => item.id === "worktree:task" ? { ...item, port } : item)
+    });
+    const plan = planProjectSlot({
+      items: idleItems,
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "status"
+    });
+    expect(plan).toMatchObject({ instanceId: "worktree:task", operation: "", alive: false });
+    expect(projectSlotWindowAction(plan)).toBe("none");
+  });
+
+  it("still delegates starting a branch without an address to its readiness supervisor", () => {
+    const idleItems = parseBranchInstanceRecords({
+      items: listed.items.map(item => item.id === "worktree:task" ? { ...item, port: 0 } : item)
+    });
+    const plan = planProjectSlot({
+      items: idleItems,
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "start"
+    });
+    expect(plan.operation).toBe("start");
+    expect(projectSlotWindowAction(plan)).toBe("none");
+  });
+
+  it("still rejects a live branch whose window has no verified address", () => {
+    const liveItems = parseBranchInstanceRecords({
+      items: listed.items.map(item => item.id === "worktree:task" ? { ...item, alive: true, port: 0 } : item)
+    });
+    expect(() => planProjectSlot({
+      items: liveItems,
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "status"
+    })).toThrow("工作区已匹配但没有可打开的地址");
+  });
+
+  it("preserves the existing idle toggle window action", () => {
+    const plan = planProjectSlot({
+      items,
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "toggle"
+    });
+    expect(plan).toMatchObject({ operation: "", statusQuery: false });
+    expect(projectSlotWindowAction(plan)).toBe("instance");
+  });
+
+  it("still admits a main start without an initial address", () => {
+    const idleMain = parseBranchInstanceRecords({
+      items: listed.items.map(item => item.id === "main" ? { ...item, alive: false, url: "", port: 0 } : item)
+    });
+    const plan = planProjectSlot({ items: idleMain, projectRoot: "C:/repo", lifecycleCommand: "start" });
+    expect(plan).toMatchObject({ operation: "start", url: "", statusQuery: false });
+    expect(projectSlotWindowAction(plan)).toBe("main");
+  });
 });

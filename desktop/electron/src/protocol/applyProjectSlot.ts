@@ -18,12 +18,18 @@ export type ProjectSlotPlan = {
   current: boolean;
   alive: boolean;
   isMain: boolean;
+  statusQuery: boolean;
   operation: "" | "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start";
 };
 
 export type ProjectSlotWindowAction = "none" | "main" | "instance";
 
 export function projectSlotWindowAction(plan: ProjectSlotPlan): ProjectSlotWindowAction {
+  if (plan.statusQuery && !plan.alive) {
+    // A read-only status plan must not present an inactive backend.
+    // A reserved port is not proof that a workbench is available there.
+    return "none";
+  }
   if (plan.operation === "stop" || plan.operation === "force-stop") {
     return "none";
   }
@@ -76,16 +82,22 @@ export function planProjectSlot(input: {
     operation = "start";
   }
   const url = instanceWorkbenchUrl(matched);
-  if (!url && operation !== "start" && operation !== "restart" && operation !== "rebuild-and-start") {
-    throw new Error(`工作区已匹配但没有可打开的地址：${matched.id}`);
-  }
-  return {
+  const plan: ProjectSlotPlan = {
     instanceId: matched.id,
     url,
     kind: matched.kind,
     current: matched.current,
     alive: matched.alive,
     isMain: isMainProjectSlot(matched),
+    statusQuery: requested === "status",
     operation
   };
+  if (
+    !url
+    && !["start", "restart", "rebuild-and-start"].includes(operation)
+    && !(plan.statusQuery && !plan.alive)
+  ) {
+    throw new Error(`工作区已匹配但没有可打开的地址：${matched.id}`);
+  }
+  return plan;
 }
