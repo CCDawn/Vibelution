@@ -394,8 +394,14 @@ def test_financial_team_submit_fails_closed_after_role_tool_policy_drift(
     bull_member = next(member for member in team["roles"] if member["role"] == role)
     bull_agent = agent_directory_service.get_agent(bull_member["agentId"])
     changed_policy = dict(bull_agent["toolPolicy"])
-    required = provisioning.ROLE_SPECS[role]["requiredTools"][0]
-    changed_policy["blockedTools"] = [*changed_policy.get("blockedTools", []), required]
+    required_tools = provisioning.ROLE_SPECS[role]["requiredTools"]
+    if required_tools:
+        changed_policy["blockedTools"] = [
+            *changed_policy.get("blockedTools", []),
+            required_tools[0],
+        ]
+    else:
+        changed_policy["allowedTools"] = ["financial_market_snapshot_tool"]
     agent_directory_service.update_agent_instance(
         bull_member["agentId"], tool_policy=changed_policy
     )
