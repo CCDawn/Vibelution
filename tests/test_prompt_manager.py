@@ -1049,6 +1049,34 @@ class TestLoadFunctions:
         assert "switch_to_child=false" in content
         assert "子对话只做一层" in content
 
+    def test_session_file_references_section_compute(self):
+        pm = PromptManager()
+        section = pm._sections.get("SESSION_FILE_REFERENCES")
+        assert section is not None, "SESSION_FILE_REFERENCES 章节应已注册"
+        content = section.compute()
+        assert content is not None
+        assert "## 文件与链接引用" in content
+        # ZCode desktop 场景措辞对齐：Markdown 链接形态 + 绝对路径或工作区段。
+        assert "本地文件引用一律输出为 Markdown 链接" in content
+        assert "[report.html](C:/workspace/output/report.html)" in content
+        assert "绝对路径" in content
+        assert "工作区目录段" in content
+        assert "[预览](http://127.0.0.1:8080)" in content
+        # 静态章节：内容跨轮字节稳定，可进前缀缓存。
+        assert section.cache_break is False
+        assert section.cache_prefix is True
+        assert section.required is False
+
+    def test_session_file_references_survives_default_include_via_protected_floor(self):
+        # default_components 不列本章节时（operator config 与 Pydantic 默认都
+        # 不含它），受保护楼层应把它补回；被显式排除时应让位（agent 侧按模式
+        # 排除非聊天回合）。
+        pm = PromptManager()
+        sp = pm.build()
+        assert "## 文件与链接引用" in to_string(sp)
+        sp_excluded = pm.build(exclude=["SESSION_FILE_REFERENCES"])
+        assert "## 文件与链接引用" not in to_string(sp_excluded)
+
     def test_spec_digest_section_compute(self):
         pm = PromptManager()
         section = pm._sections.get("SPEC_DIGEST")

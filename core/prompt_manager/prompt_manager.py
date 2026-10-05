@@ -204,6 +204,7 @@ class PromptManager:
         "GIT_MEMORY",
         "RUNTIME_LOG_INDEX",
         "SESSION_CHILD_ROUTING",
+        "SESSION_FILE_REFERENCES",
         "LANGUAGE_AWARENESS",
         "DELEGATION_RULES",
     ]
@@ -241,6 +242,7 @@ class PromptManager:
         "CONFIG_AWARENESS",
         "LANGUAGE_AWARENESS",
         "SESSION_CHILD_ROUTING",
+        "SESSION_FILE_REFERENCES",
         "GIT_RULES",
         "SPEC_DIGEST",
         "SPEC",

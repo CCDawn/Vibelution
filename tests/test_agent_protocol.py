@@ -560,6 +560,40 @@ def test_numbered_task_list_without_confirmation_keeps_user_goal():
     assert goal == prompt
 
 
+def test_session_file_references_section_scoped_to_chat_mode_turns():
+    # 聊天会话文件引用约定章节只在 CHAT 模式回合生效：非聊天模式（科研流水线、
+    # 进化等）一律排除，避免打进它们的前缀缓存；stable_session_prompt 仅影响
+    # RUNTIME_LOG_INDEX，与本章节无关。
+    def policy(mode: AgentMode) -> ModePolicy:
+        return ModePolicy(
+            mode=mode,
+            orchestrator_kind="test",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=True,
+            runtime_input_builder=lambda content: content,
+        )
+
+    agent = AgentRuntime.__new__(AgentRuntime)
+    agent.mode_policy = policy(AgentMode.CHAT)
+    chat_excluded = agent._excluded_system_prompt_sections_for_turn(
+        stable_session_prompt=True,
+    )
+    assert "SESSION_FILE_REFERENCES" not in chat_excluded
+
+    agent.mode_policy = policy(AgentMode.SUPERVISED_EVOLUTION)
+    evolution_excluded = agent._excluded_system_prompt_sections_for_turn(
+        stable_session_prompt=False,
+    )
+    assert "SESSION_FILE_REFERENCES" in evolution_excluded
+    # 排除去重：两次调用不产生重复项。
+    assert len(evolution_excluded) == len(set(evolution_excluded))
+
+
 def _canonical_agent_test_outcome(*, text="", reasoning_deltas=()):
     from core.llm.types import LLMProtocolEvent
 
