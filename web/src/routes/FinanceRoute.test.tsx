@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFinancialAssistant, listFinancialAssistants, type FinancialAssistant } from "../api/financialAssistant";
 import { FinanceRoute } from "./FinanceRoute";
 import { FinancialAssistantChatNote } from "./finance/FinancialAssistantChatNote";
-import { fetchSessionDetail, createChatSession, querySessions } from "../api/chat";
+import { deleteChatSession, fetchSessionDetail, createChatSession, querySessions } from "../api/chat";
 import { listKnowledgeItems } from "../api/knowledge";
 import { useFinancialResearchSessionBridge } from "./finance/FinancialResearchBridge";
 import type { SessionDetail, SessionQueryResponse } from "../api/types";
@@ -18,7 +18,7 @@ const nativeSubmit = vi.fn();
 let nativeMessages: SessionDetail["messages"] = [];
 
 vi.mock("../api/financialAssistant", () => ({ createFinancialAssistant: vi.fn(), listFinancialAssistants: vi.fn() }));
-vi.mock("../api/chat", () => ({ fetchSessionDetail: vi.fn(), createChatSession: vi.fn(), querySessions: vi.fn() }));
+vi.mock("../api/chat", () => ({ deleteChatSession: vi.fn(), fetchSessionDetail: vi.fn(), createChatSession: vi.fn(), querySessions: vi.fn() }));
 vi.mock("../api/financialMarket", async (original) => ({ ...await original<typeof import("../api/financialMarket")>(), fetchFinancialStock: vi.fn(), searchFinancialStocks: vi.fn() }));
 vi.mock("../api/knowledge", () => ({ listKnowledgeItems: vi.fn(), fetchKnowledgeTrace: vi.fn() }));
 vi.mock("../api/sessionArchive", () => ({ unarchiveChatSession: vi.fn(), archiveChatSession: vi.fn(), listArchivedChatSessions: vi.fn() }));
@@ -97,6 +97,24 @@ describe("financial assistant page", () => {
     await render();
     expect(createFinancialAssistant).toHaveBeenCalledTimes(1);
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
+    expect(container.textContent).toContain("finance-workspace");
+  });
+  it("keeps deletion mounted until the last direct session replacement is selected", async () => {
+    await render("/finance?session=native-session");
+    const repaired = { ...row, directSessionId: "replacement-direct" };
+    vi.mocked(listFinancialAssistants).mockResolvedValueOnce([{ ...row, setupStatus: "session_missing", directSessionId: "" }]).mockResolvedValue([repaired]);
+    vi.mocked(querySessions).mockResolvedValue({ items: [nativeSession("replacement-direct")], nextCursor: "" } as SessionQueryResponse);
+    vi.mocked(deleteChatSession).mockResolvedValue({ deleted: true, deletedSessionId: "native-session", nextActiveSessionId: "foreign-agent-session" });
+    let finish!: (value: Awaited<ReturnType<typeof createFinancialAssistant>>) => void;
+    vi.mocked(createFinancialAssistant).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    await act(async () => container.querySelector('[aria-label="管理研究：原生研究"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false })));
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "删除研究")!.click());
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((item) => item.textContent === "删除研究")!.click());
+    await settle();
+    expect(createFinancialAssistant).toHaveBeenCalledTimes(1);
+    await act(async () => finish({ created: false, assistant: repaired }));
+    await settle();
+    expect(container.querySelector("output")?.textContent).toBe("/finance?session=replacement-direct");
     expect(container.textContent).toContain("finance-workspace");
   });
   it("offers native recovery for an archived direct session while keeping the assistant active", async () => {

@@ -33,9 +33,9 @@ import { FinanceAnalystTeam } from "./FinanceAnalystTeam";
 import { FinancePortfolioResearch } from "./FinancePortfolioResearch";
 import { listArchivedChatSessions } from "../../api/sessionArchive";
 import { isSessionDeleteTombstoned } from "../sessionDeleteTombstone";
-import { useFinanceSessionLifecycle } from "./useFinanceSessionLifecycle";
+import type { FinanceSessionLifecycle } from "./useFinanceSessionLifecycle";
 
-export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assistant: FinancialAssistant; sessionId: string; zh: boolean }) {
+export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }: { assistant: FinancialAssistant; sessionId: string; zh: boolean; lifecycle: FinanceSessionLifecycle }) {
   const location = useLocation(), route = useChatRouteSelection();
   const routeRef = useRef(route); routeRef.current = route;
   const client = useQueryClient(), stocks = useFinanceWatchlist(assistant.agentId);
@@ -45,7 +45,6 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh }: { assista
   const [area, setArea] = useState("workspace"), [tab, setTab] = useState("overview"), [asideTab, setAsideTab] = useState("process");
   const [researchKind, setResearchKind] = useState<"stock" | "topic">("stock");
   const [reportCollection, setReportCollection] = useState("active");
-  const lifecycle = useFinanceSessionLifecycle(assistant.agentId, zh);
   const [config, setConfig] = useState<FinanceResearchConfigValue>({ period: "", date: localResearchDate(), scope: "comprehensive", depth: "brief" });
   const [citation, setCitation] = useState<ReportCitation | null>(null);
   const [creating, setCreating] = useState(false), [launching, setLaunching] = useState(false), [createError, setCreateError] = useState("");

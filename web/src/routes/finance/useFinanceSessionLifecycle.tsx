@@ -11,6 +11,8 @@ import { useChatRouteSelection } from "../chat/useChatRouteSelection";
 import { isFinancialSession } from "./financialResearchModel";
 import type { FinanceSessionAction } from "./FinanceSessionMenu";
 
+export type FinanceSessionLifecycle = ReturnType<typeof useFinanceSessionLifecycle>;
+
 export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
   const client = useQueryClient();
   const route = useChatRouteSelection();

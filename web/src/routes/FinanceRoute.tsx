@@ -14,6 +14,7 @@ import { FinanceResearchWorkspace } from "./finance/FinanceResearchWorkspace";
 import { planFinancialAssistantEntry } from "./finance/financialAssistantEntry";
 import { isFinancialSession } from "./finance/financialResearchModel";
 import { useFinancialAssistants } from "./finance/useFinancialAssistants";
+import { useFinanceSessionLifecycle } from "./finance/useFinanceSessionLifecycle";
 import styles from "./FinanceRoute.styles";
 
 export function FinanceRoute() {
@@ -36,6 +37,9 @@ export function FinanceRoute() {
   const plan = assistants.data ? planFinancialAssistantEntry(assistants.data, lang) : null;
   const assistant = assistants.data?.find((row) => row.status === "active" && row.setupStatus === "ready" && row.directSessionId === sessionId)
     ?? assistants.data?.find((row) => row.status === "active" && row.setupStatus === "ready");
+  // Keep native lifecycle reconciliation mounted while deleting or archiving
+  // the current direct binding temporarily replaces the workspace with a guard.
+  const lifecycle = useFinanceSessionLifecycle(assistant?.agentId ?? "", zh);
   const direct = Boolean(sessionId && assistant?.directSessionId === sessionId);
   const binding = useQuery({
     queryKey: ["finance", "session-binding", assistant?.agentId, sessionId],
@@ -120,7 +124,7 @@ export function FinanceRoute() {
     finally { recoveryGate.current = false; if (mounted.current) setRecovering(false); }
   }
   if (!error && sessionId && assistant && (direct || binding.isSuccess)) {
-    return <FinanceResearchWorkspace key={assistant.agentId} assistant={assistant} sessionId={sessionId} zh={zh} />;
+    return <FinanceResearchWorkspace key={assistant.agentId} assistant={assistant} sessionId={sessionId} zh={zh} lifecycle={lifecycle} />;
   }
   if (!error) return <FinanceResearchLoading zh={zh} />;
   return <FinanceResearchFrame zh={zh} loading={!error}>
