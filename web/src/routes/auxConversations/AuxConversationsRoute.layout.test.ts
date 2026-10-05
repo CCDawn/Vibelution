@@ -113,6 +113,23 @@ describe("AuxConversationsRoute layout contract", () => {
     expect(routeSource).not.toContain("useSessionDetailStream");
   });
 
+  it("embeds the canon read-only chat workspace fed by the session detail window", () => {
+    expect(routeSource).toContain("ChatReadOnlySessionWorkspace");
+    expect(routeSource).toContain("fetchSessionDetailWindow");
+    expect(routeSource).toContain('transcriptScope: "window"');
+    // Read-only poll skips the expensive secondary side lists (light poll path).
+    expect(routeSource).toContain("includeSecondary: false");
+    // Aux keeps its own cache key: the snapshot must never overwrite the
+    // /chat live-transcript cache entries.
+    expect(routeSource).toContain('queryKey: ["aux-session-detail", selectedChildSessionId]');
+    // Poll discipline mirrors the task list: live 4s beats only, background off,
+    // ended tasks take a single snapshot.
+    expect(routeSource).toContain("refetchInterval: selectedChildSessionId && selectedIsLive");
+    expect(routeSource).toContain("refetchIntervalInBackground: false");
+    // The synthetic timeline is the no-stream fallback only.
+    expect(routeSource).toContain("selectedChildSessionId ?");
+  });
+
   it("keeps the route local and shell-language only", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const COPY = {");
@@ -125,6 +142,16 @@ describe("AuxConversationsRoute layout contract", () => {
     expect(styles.detailContentClass).toContain("overflow-auto");
     expect(styles.taskRowClass).toContain("min-w-0");
     expect(styles.detailPaneClass).toContain("min-w-0");
+  });
+
+  it("gives the embedded stream its own scroll region inside the detail pane", () => {
+    expect(styles.detailStreamLayoutClass).toContain("min-h-0");
+    expect(styles.detailStreamLayoutClass).toContain("overflow-hidden");
+    expect(styles.detailStreamHeadClass).toContain("shrink-0");
+    // The stream body takes the remaining height; the panel scrolls inside it.
+    expect(styles.detailStreamBodyClass).toContain("flex-1");
+    expect(styles.detailStreamBodyClass).toContain("min-h-0");
+    expect(styles.detailStreamBodyClass).toContain("overflow-hidden");
   });
 
   it("keeps decorative workbench backgrounds on stable surface tokens", () => {

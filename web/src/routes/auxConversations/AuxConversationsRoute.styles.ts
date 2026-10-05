@@ -58,6 +58,12 @@ const timelineLabelClass = "min-w-0 break-words [overflow-wrap:anywhere] [font-s
 const emptyStateClass = "grid min-h-16 content-start gap-1 break-words rounded-[var(--radius-control)] !border-0 bg-vui-surface-row p-2.5 shadow-none";
 const loadingRegionClass = "min-h-0 min-w-0 [&_[aria-hidden=true]>div]:!border-0";
 const detailErrorClass = "min-w-0 max-w-full";
+// Embedded read-only child-session stream: the head cluster stays fixed while
+// the stream body takes the remaining height and scrolls inside itself
+// (ChatSessionWorkspacePanel owns the inner conversationBody scroll).
+const detailStreamLayoutClass = "flex min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden";
+const detailStreamHeadClass = "grid min-w-0 max-w-full shrink-0 content-start gap-2";
+const detailStreamBodyClass = "flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden overflow-x-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-vui-surface-panel";
 
 const styles = {
   routeClass,
@@ -111,6 +117,9 @@ const styles = {
   emptyStateClass,
   loadingRegionClass,
   detailErrorClass,
+  detailStreamLayoutClass,
+  detailStreamHeadClass,
+  detailStreamBodyClass,
   vuiWorkspaceFillClass,
 } as const;
 
