@@ -1,5 +1,6 @@
 """Validate a generated architecture document without importing product code."""
 import json
+from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 import re
@@ -44,6 +45,53 @@ def validate(path):
                 assert imp['target'] in files
     views = {v['id']: v for v in data['views']}
     assert len(views) == len(data['views'])
+    wiki = data['wiki']
+    assert wiki['schemaVersion'] == 1
+    domain_ids = {d['id'] for d in data['domains']}
+    pages = {p['id']: p for p in wiki['pages']}
+    assert len(pages) == len(wiki['pages']) and pages.keys() == domain_ids, 'Wiki page coverage'
+    grouped = [domain_id for group in wiki['groups'] for domain_id in group['domainIds']]
+    assert len(grouped) == len(set(grouped)) and set(grouped) == domain_ids, 'Wiki group coverage'
+    assert len({g['id'] for g in wiki['groups']}) == len(wiki['groups'])
+    for group in wiki['groups']:
+        assert group['role'] in {'runtime', 'support', 'reference'}
+        assert group['label'].strip() and group['description'].strip() and group['domainIds']
+    assert {'experiments', 'archive'} <= {
+        domain_id for group in wiki['groups'] if group['role'] == 'reference'
+        for domain_id in group['domainIds']
+    }, 'Historical and experimental content must be separate'
+    wiki_refs = []
+    for page in pages.values():
+        for field in ('title', 'summary'):
+            assert isinstance(page[field], str) and page[field].strip(), (page['id'], field)
+        for field in ('responsibilities', 'boundaries'):
+            assert page[field] and all(isinstance(s, str) and s.strip() for s in page[field])
+        assert page['entryPoints'], page['id']
+        assert len(page['scenarioIds']) == len(set(page['scenarioIds']))
+        assert set(page['scenarioIds']) <= views.keys(), page['id']
+        assert set(page['relatedDomainIds']) <= domain_ids - {page['id']}, page['id']
+        for entry in page['entryPoints']:
+            assert entry['label'].strip() and entry['note'].strip()
+            wiki_refs.append(entry['ref'])
+        assert page['status'] == 'source_verified', page['id']
+    assert len({r['id'] for r in wiki['relationships']}) == len(wiki['relationships'])
+    for relation in wiki['relationships']:
+        assert relation['from'] in domain_ids and relation['to'] in domain_ids
+        assert relation['from'] != relation['to'] and relation['label'].strip() and relation['detail'].strip()
+        assert relation['kind'] in {'lifecycle', 'request', 'execution', 'data', 'capability'}
+        assert relation['refs'] and all(not r.get('pathOnly') for r in relation['refs'])
+        assert relation['status'] == 'source_verified', relation['id']
+        wiki_refs.extend(relation['refs'])
+    for ref in wiki_refs:
+        assert ref['path'] in files
+        assert ref['blob'] == files[ref['path']]['blob']
+        if ref.get('pathOnly'):
+            assert ref['line'] == 0 and ref['symbol'] == ''
+        else:
+            assert ref['symbol'] and 1 <= ref['line'] <= files[ref['path']]['lines']
+    assert len(data['meta']['commit']) == 40
+    assert datetime.fromisoformat(data['meta']['sourceCommittedAt']).tzinfo is not None
+    assert datetime.fromisoformat(data['meta']['generatedAt']).tzinfo is not None
     refs = 0
     for view in data['views']:
         ids = {n['id'] for n in view['nodes']}
@@ -112,9 +160,17 @@ def validate(path):
     source_dir = Path(__file__).resolve().parent
     if source_dir == Path(path).resolve().parent and (source_dir / 'curated.py').exists():
         from curated import REVIEWED_COMMIT, make_views
+        from wiki_structure import make_wiki
         refs_by_anchor = {(r['path'], r['symbol']): r for v in data['views']
                           for item in v['nodes'] + v['edges'] for r in item['refs']}
+        refs_by_anchor.update({(r['path'], None if r.get('pathOnly') else r['symbol']): r for r in wiki_refs})
         expected_views = make_views(lambda p, a: dict(refs_by_anchor[(p, a)]))
+        expected_wiki = make_wiki(lambda p, a: dict(refs_by_anchor[(p, a)]))
+        for page in expected_wiki['pages']:
+            page['status'] = 'source_verified'
+        for relation in expected_wiki['relationships']:
+            relation['status'] = 'source_verified'
+        assert expected_wiki == wiki, 'Wiki sidecar differs from generated HTML'
         assert data['meta']['reviewedCommit'] == REVIEWED_COMMIT
         for expected in expected_views:
             actual = views[expected['id']]
@@ -140,6 +196,7 @@ def validate(path):
     assert '__ATLAS_DATA__' not in html
     print(json.dumps({'valid': True, 'files': len(files), 'modules': len(modules),
                       'views': len(data['views']), 'evidenceReferences': refs,
+                      'wikiPages': len(pages), 'wikiEvidenceReferences': len(wiki_refs),
                       'staleEvidence': data['meta'].get('staleEvidence', [])}, ensure_ascii=False))
 
 
