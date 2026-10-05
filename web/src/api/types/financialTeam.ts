@@ -43,6 +43,9 @@ export type FinancialTeamRun = {
   depth?: "brief" | "basic" | "standard" | "detailed" | "exhaustive";
   createdAt: string;
   stage: FinancialTeamRunStage;
+  /** Optional for saved runs created before server coordination was available. */
+  coordinationStatus?: "waiting" | "running" | "blocked" | "completed" | null;
+  coordinationError?: string | null;
   /** Partial only for compatible pre-v2 runs, which had no bull/bear analysts. */
   analysts: Partial<Record<FinancialTeamRole, FinancialTeamTurnRef>>;
   synthesis: FinancialTeamTurnRef;

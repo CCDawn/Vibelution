@@ -193,7 +193,7 @@ describe("Finance analyst team", () => {
     expect(container.textContent).toContain("乐观研究本轮回答");
     expect(container.textContent).toContain("审慎研究本轮回答");
     expect(container.textContent).toContain("综合结论");
-    await act(async () => button("原生会话").click());
+    await act(async () => button("查看对话").click());
     expect(openSession).toHaveBeenCalledWith(expect.stringMatching(/^session-/));
   });
 
@@ -252,7 +252,7 @@ describe("Finance analyst team", () => {
       return detail;
     });
     await render();
-    expect(container.textContent).toContain("提交已记录，等待原生 Turn");
+    expect(container.textContent).toContain("已提交，等待分析启动");
     expect(container.textContent).not.toContain("错误的相邻回答");
     expect(api.record).not.toHaveBeenCalled();
   });
@@ -268,6 +268,81 @@ describe("Finance analyst team", () => {
     expect(api.debate).not.toHaveBeenCalled();
     expect(container.querySelector('article[data-role="market"]')?.textContent).toContain("缺少最终回答");
     expect(container.textContent).toContain("重新开始研究");
+  });
+
+  it("shows a persisted coordination block without automatically resending a stage", async () => {
+    currentRun = makeRun();
+    for (const role of ["market", "fundamental", "news"] as const) currentRun.analysts[role]!.turnId = "turn-" + role;
+    currentRun.coordinationStatus = "blocked";
+    currentRun.coordinationError = "分析员配置已变化，请核对团队配置。";
+    await render();
+    expect(container.textContent).toContain("分析员配置已变化，请核对团队配置。");
+    expect(container.textContent).not.toContain("重试多空分析");
+    expect(api.debate).not.toHaveBeenCalled();
+    expect(api.synthesis).not.toHaveBeenCalled();
+  });
+
+  it.each(["waiting", "running", "completed"] as const)("leaves %s coordination with the server without submitting duplicate stages", async (coordinationStatus) => {
+    currentRun = makeRun();
+    currentRun.coordinationStatus = coordinationStatus;
+    for (const role of coordinationStatus === "completed" ? roleKeys : roleKeys.slice(0, 3)) currentRun.analysts[role]!.turnId = "turn-" + role;
+    if (coordinationStatus === "completed") currentRun.synthesis.turnId = "turn-synthesis";
+    await render();
+    expect(api.debate).not.toHaveBeenCalled();
+    expect(api.synthesis).not.toHaveBeenCalled();
+    if (coordinationStatus !== "completed") expect(container.textContent).not.toContain("重试多空分析");
+    else expect(container.textContent).toContain("主助手已汇总");
+  });
+
+  it("keeps accepted server-coordinated turns fresh after the legacy polling window", async () => {
+    currentRun = makeRun();
+    currentRun.createdAt = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    currentRun.coordinationStatus = "running";
+    currentRun.analysts.market!.turnId = "turn-market";
+    api.session.mockImplementation(async (sessionId: string) => sessionId === "session-market"
+      ? detailFor(sessionId, currentRun!.analysts.market, "分析中", "running")
+      : detailFor(sessionId, undefined, ""));
+    await render();
+    const before = api.session.mock.calls.filter(([sessionId]) => sessionId === "session-market").length;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1900)));
+    expect(api.session.mock.calls.filter(([sessionId]) => sessionId === "session-market").length).toBeGreaterThan(before);
+    expect(api.primary).not.toHaveBeenCalled();
+  });
+
+  it("reads the exact synthesis again when background coordination completes", async () => {
+    currentRun = makeRun();
+    currentRun.createdAt = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    currentRun.coordinationStatus = "running";
+    for (const role of roleKeys) currentRun.analysts[role]!.turnId = "turn-" + role;
+    currentRun.synthesis.turnId = "turn-synthesis";
+    const fetchDetail = api.session.getMockImplementation()!;
+    api.session.mockImplementation(async (sessionId: string) => sessionId === "session-assistant" && currentRun!.coordinationStatus !== "completed"
+      ? detailFor(sessionId, currentRun!.synthesis, "汇总分析中", "running")
+      : fetchDetail(sessionId));
+    await render();
+    expect(container.textContent).toContain("主助手汇总中");
+    currentRun = { ...currentRun, coordinationStatus: "completed" };
+    await act(async () => client.invalidateQueries({ queryKey: ["financial-team", assistant.agentId, "runs"] }));
+    await settle();
+    expect(container.textContent).toContain("主助手已汇总");
+    expect(api.synthesis).not.toHaveBeenCalled();
+  });
+
+  it.each([["failed", "失败"], ["stopped", "已停止"], ["incomplete", "缺少最终回答"]])("does not describe %s synthesis as running or waiting", async (state, label) => {
+    currentRun = makeRun();
+    currentRun.coordinationStatus = "blocked";
+    for (const role of roleKeys) currentRun.analysts[role]!.turnId = "turn-" + role;
+    currentRun.synthesis.turnId = "turn-synthesis";
+    const fetchDetail = api.session.getMockImplementation()!;
+    api.session.mockImplementation(async (sessionId: string) => {
+      if (sessionId !== "session-assistant") return fetchDetail(sessionId);
+      const detail = detailFor(sessionId, currentRun!.synthesis, "", state === "failed" ? "failed" : "completed");
+      return state === "stopped" ? { ...detail, terminalReason: "stopped", lastTurnTerminalTurnId: "turn-synthesis" } : detail;
+    });
+    await render();
+    expect(container.textContent).toContain(`汇总${label}`);
+    expect(container.textContent).not.toContain("主助手汇总中");
+    expect(container.textContent).not.toContain("等待主助手汇总");
   });
 
   it("reuses the same run-creation key after an ambiguous transport failure", async () => {

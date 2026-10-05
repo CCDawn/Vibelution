@@ -145,6 +145,17 @@ describe("FinancePortfolioResearch", () => {
     expect(node.textContent).toContain("估值缺失");
   });
 
+  it("does not report a budget cutoff when extra holdings are unvalued", async () => {
+    api.fetchResearch.mockResolvedValue({
+      ...research,
+      positions: [...research.positions, { ...research.positions[0], symbol: "sz000002", marketValueYuan: null, returnSeriesStatus: "not_valued" }],
+      coverage: { ...research.coverage, maxAnalyzedPositions: 2, unvaluedPositionCount: 1 },
+    });
+    await render();
+    expect(node.textContent).not.toContain("本次分析前");
+    expect(node.textContent).toContain("预算跳过 0 只");
+  });
+
   it("routes an unopened-account 404 to the paper account without opening it", async () => {
     api.fetchResearch.mockRejectedValue(new FetchJsonHttpError("尚未开设模拟账户", { status: 404 }));
     const onOpenAccount = vi.fn();

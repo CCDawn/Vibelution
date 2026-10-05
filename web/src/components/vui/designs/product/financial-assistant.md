@@ -60,7 +60,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ### 非职责与反冗余
 `FinanceResearchFrame`、`FinanceResearchWorkspace` 与 `FinanceReportLibrary` 共用 `FinanceRoute.styles`，保持加载、工作台与资料栏一致。`FinanceGeneralResearch` 复用知识中心的表单几何，`FinanceWatchlistTable` 与筛选页共用市场表格样式；所有共享消费者在 `vuiImportBoundary` 中逐项登记，不另建重复映射。
-不新增 VUI primitive、第二套身份/配置存储、聊天组件、transcript、SSE 或后台调度。
+不新增 VUI primitive、第二套身份/配置存储、聊天组件、transcript 或 SSE；金融阶段协调复用原生后台任务与生命周期，不另建调度系统。
 金融建议与工具沿原生 Agent 权限。股票查询、真实行情与 K 线通过独立只读域 API 校验；模拟账户另用 Agent-owned 账本与明确的虚拟资金接口，不能连接券商或真实资金。
 
 ## FinanceGeneralResearch / FinanceTaskCenter
@@ -94,6 +94,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ### 功能与使用
 分析员协作使用 `VSurface`、`VInput`、`VSelect`、`VChip`、`VButton` 和原生 Markdown renderer。行情、基本面、新闻在各自的原生 Agent/Session 执行，再由独立乐观与审慎分析员检查，最后由主助手汇总。页面只投影原生 Turn 的真实状态和完成答案；运行引用绑定 Session、Turn 和 submission，停止只停止该 Turn。配置漂移、会话归属变化与未知提交都给实际原因，不补造百分比或报告。原始分析员会话通过原生 chat 页面打开。
+明确提交基础分析并确认接受后，服务端通过原生持久后台任务继续推进；离开页面不暂停后续阶段。页面轮询等候和运行中的协调记录，阻断原因通过 `VStateSurface` 呈现，不自动重发。完成状态要求精确汇总 Turn 的最终回答；旧记录无协调状态时保留原有兼容路径。汇总失败、停止或缺回答不显示为仍在汇总。
 组合研究使用 `VSurface`、`VMetricStrip`、`VDenseTable` 与 `VButton`，复用当前助手的模拟账本。持仓权重、现金和集中度按实际账本与报价计算；收益相关性仅来自共同日期的真实 K 线，样本不足保留缺值。点击股票回到已有单股页，AI 研究只准备包含账本和来源的原生草稿。
 
 ## FinanceSessionMenu / useFinanceSessionLifecycle

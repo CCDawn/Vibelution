@@ -1,17 +1,45 @@
 """HTTP adapter for native financial analyst Agents and Session turns."""
 
+import time
+from contextlib import asynccontextmanager
 from datetime import date as date_type
-from typing import Literal
+from typing import AsyncIterator, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.web.services.financial_team import coordinator as financial_team_coordinator
 from core.web.services import financial_team_service as service
 from core.web.services import session_service
 from core.web.services.agent_directory_service import AgentDirectoryError
 from core.web.services.team_service import TeamServiceError
+from core.web.startup_jobs import StartupJobGroup
 
-router = APIRouter(tags=["financial-team"])
+
+_COORDINATOR_SHUTDOWN_SECONDS = 2.0
+
+
+@asynccontextmanager
+async def _financial_team_lifespan(app: object) -> AsyncIterator[None]:
+    """Own the Finance Team coordinator without coupling it to app lifecycle."""
+
+    startup_jobs = StartupJobGroup()
+    if app is not None:
+        setattr(app.state, "financial_team_startup_jobs", startup_jobs)
+    startup_jobs.start_thread(
+        "financial-team-coordinator",
+        financial_team_coordinator.run_forever,
+        stop_keyword="stop_requested",
+    )
+    try:
+        yield
+    finally:
+        await startup_jobs.shutdown(
+            deadline=time.monotonic() + _COORDINATOR_SHUTDOWN_SECONDS
+        )
+
+
+router = APIRouter(tags=["financial-team"], lifespan=_financial_team_lifespan)
 
 
 class FinancialTeamRoleResponse(BaseModel):
@@ -57,6 +85,8 @@ class FinancialTeamRunResponse(BaseModel):
     stage: Literal["research", "debate", "synthesis"]
     analysts: dict[str, FinancialTeamRunRefResponse]
     synthesis: FinancialTeamRunRefResponse
+    coordinationStatus: Literal["waiting", "running", "blocked", "completed"] | None = None
+    coordinationError: str | None = None
 
 
 class FinancialTeamRunListResponse(BaseModel):
@@ -132,6 +162,7 @@ def financial_team_provision(assistant_agent_id: str) -> dict:
 @router.get(
     "/financial-team/{assistant_agent_id}/runs",
     response_model=FinancialTeamRunListResponse,
+    response_model_exclude_unset=True,
 )
 def financial_team_runs_list(
     assistant_agent_id: str,
@@ -144,7 +175,9 @@ def financial_team_runs_list(
 
 
 @router.post(
-    "/financial-team/{assistant_agent_id}/runs", response_model=FinancialTeamRunResponse
+    "/financial-team/{assistant_agent_id}/runs",
+    response_model=FinancialTeamRunResponse,
+    response_model_exclude_unset=True,
 )
 def financial_team_run_create(
     assistant_agent_id: str,
@@ -169,6 +202,7 @@ def financial_team_run_create(
 @router.get(
     "/financial-team/{assistant_agent_id}/runs/{run_id}",
     response_model=FinancialTeamRunResponse,
+    response_model_exclude_unset=True,
 )
 def financial_team_run_get(assistant_agent_id: str, run_id: str) -> dict:
     try:
@@ -180,6 +214,7 @@ def financial_team_run_get(assistant_agent_id: str, run_id: str) -> dict:
 @router.post(
     "/financial-team/{assistant_agent_id}/runs/{run_id}/turns/{role}",
     response_model=FinancialTeamRunResponse,
+    response_model_exclude_unset=True,
 )
 def financial_team_turn_record(
     assistant_agent_id: str,
@@ -203,6 +238,7 @@ def financial_team_turn_record(
 @router.post(
     "/financial-team/{assistant_agent_id}/runs/{run_id}/analysts/{role}/submit",
     response_model=FinancialTeamRunResponse,
+    response_model_exclude_unset=True,
 )
 def financial_team_primary_submit(
     assistant_agent_id: str,
@@ -220,6 +256,7 @@ def financial_team_primary_submit(
 @router.post(
     "/financial-team/{assistant_agent_id}/runs/{run_id}/synthesis",
     response_model=FinancialTeamRunResponse,
+    response_model_exclude_unset=True,
 )
 def financial_team_synthesis_submit(assistant_agent_id: str, run_id: str) -> dict:
     try:
@@ -231,6 +268,7 @@ def financial_team_synthesis_submit(assistant_agent_id: str, run_id: str) -> dic
 @router.post(
     "/financial-team/{assistant_agent_id}/runs/{run_id}/debate",
     response_model=FinancialTeamRunResponse,
+    response_model_exclude_unset=True,
 )
 def financial_team_debate_submit(assistant_agent_id: str, run_id: str) -> dict:
     try:

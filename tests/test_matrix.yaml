@@ -85,9 +85,10 @@ rules:
       - "tests/test_financial_paper_service.py"
       - "tests/test_financial_preferences_service.py"
       - "tests/test_financial_team_service.py"
+      - "tests/test_financial_team_coordinator.py"
       - "tests/test_financial_portfolio_service.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_research_service.py tests/test_financial_paper_service.py tests/test_financial_preferences_service.py tests/test_financial_team_service.py tests/test_financial_portfolio_service.py -q -n 3 --dist loadfile"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_research_service.py tests/test_financial_paper_service.py tests/test_financial_preferences_service.py tests/test_financial_team_service.py tests/test_financial_team_coordinator.py tests/test_financial_portfolio_service.py -q -n 3 --dist loadfile"
     notes:
       - "Provider and model fixtures prove contracts only; final desktop acceptance uses an isolated Launcher instance and real native turns."
   - id: financial-report-knowledge-integration

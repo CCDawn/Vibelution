@@ -19,6 +19,8 @@ Report search uses native `querySessions(q)` over titles and bodies. Outcome fil
 
 `FinanceAnalystTeam` uses five separate native Agents: market, fundamentals, news, bull and bear. Three primary reports feed two opposing reviews, then the financial owner synthesizes. Runs store only Session/Turn/submission references and stage metadata; answers remain in native Sessions. Roles derive narrow authorized tools/model from the owner. Identity, permission and Session ownership drift fail closed. Stops target the exact Turn. Unknown acceptance is read back before retry. Analyst links explicitly use native chat rather than bypassing the financial binding guard.
 
+After explicit primary submissions are accepted, a finance-scoped coordinator reuses the native RuntimeTaskStore and managed web startup jobs to advance debate and synthesis while the page is closed. Startup recovers accepted runs without sending their known Turns again. Waiting/running status polls the persisted run projection; completed requires the exact synthesis final answer, and blocked surfaces the reason without automatic resubmission. Legacy runs without coordination status retain the existing client orchestration. GET does not create or start a run.
+
 ## Public market data
 
 The existing Tencent adapter owns A-share quotes and adjusted day/week/month candles. Provider, quote/fetch times, yuan/lot units and missing values stay explicit. MA5/20, BOLL(20,2), MACD(12,26,9) and Wilder RSI(14) calculate on all loaded candles before slicing; missing warm-up values are never generated.

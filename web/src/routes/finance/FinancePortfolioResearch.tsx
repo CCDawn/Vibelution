@@ -219,7 +219,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
           <span>{zh ? `预算跳过 ${data.coverage.budgetSkippedPositionCount} 只` : `${data.coverage.budgetSkippedPositionCount} holdings outside budget`}</span>
           <span>{zh ? `超时跳过 ${data.coverage.deadlineSkippedPositionCount} 只` : `${data.coverage.deadlineSkippedPositionCount} skipped at deadline`}</span>
         </div>
-        {data.positions.length > data.coverage.maxAnalyzedPositions ? <p className={styles.helper}>{zh ? `本次分析前 ${data.coverage.maxAnalyzedPositions} 只持仓。` : `This analysis covers the first ${data.coverage.maxAnalyzedPositions} holdings.`}</p> : null}
+        {data.coverage.budgetSkippedPositionCount > 0 ? <p className={styles.helper}>{zh ? `持仓超过分析上限，本次跳过 ${data.coverage.budgetSkippedPositionCount} 只。` : `${data.coverage.budgetSkippedPositionCount} holdings exceed the analysis limit and were skipped.`}</p> : null}
       </VSurface>
     </section>
 
