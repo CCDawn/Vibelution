@@ -13,10 +13,10 @@ export const PYTHON_JSON_BRIDGE_PROCESS_TREE_TIMEOUT_MS = 10_000;
 
 /**
  * Pick the bridge timeout tier for a launcher API request. The
- * cleanup-metadata GET spawns a fresh bridge process to run the git ancestry
- * scan; spawn plus scan exceeds the 5s query budget on real repos, which
- * dead-ends the cleanup confirm dialog, so this user-initiated read gets the
- * command budget instead.
+ * worktree inventory GET spawns a fresh bridge process and scans registered
+ * checkouts. Even without cleanup metadata this exceeds the 5s query budget
+ * on real repos and blocks project-slot lifecycle commands. Both inventory
+ * reads use the existing bounded command budget, like state-refresh.
  */
 export function launcherApiBridgeTimeoutMs(path: string, method: string): number {
   if (path === "maintenance/reset/apply") {
@@ -25,7 +25,7 @@ export function launcherApiBridgeTimeoutMs(path: string, method: string): number
   if (path === "branch-instances/cleanup") {
     return PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS;
   }
-  if (path === "branch-instances?cleanupMetadata=1") {
+  if (path === "branch-instances" || path === "branch-instances?cleanupMetadata=1") {
     return PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS;
   }
   return method === "GET"

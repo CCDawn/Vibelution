@@ -15,20 +15,21 @@ import {
   PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
 } from "../src/process/pythonJsonBridge.js";
 
-function fakeSpawnWithOutput(output: string, exitCode = 0) {
+function fakeSpawnWithOutput(output: string, exitCode = 0, delayMs = 0) {
+  const dispatch = (listener: () => void) => delayMs > 0 ? setTimeout(listener, delayMs) : queueMicrotask(listener);
   const kill = vi.fn();
   const spawnImpl = vi.fn().mockImplementation(() => ({
     pid: 42,
     kill,
     once: (event: string, listener: (...args: unknown[]) => void) => {
       if (event !== "error") {
-        queueMicrotask(() => listener(exitCode));
+        dispatch(() => listener(exitCode));
       }
       return undefined;
     },
     stdout: {
       on: (_event: string, listener: (chunk: Buffer) => void) => {
-        queueMicrotask(() => listener(Buffer.from(output, "utf8")));
+        dispatch(() => listener(Buffer.from(output, "utf8")));
         return undefined;
       },
     },
@@ -452,8 +453,54 @@ describe("runPythonJsonBridge", () => {
 
 describe("launcherApiBridgeTimeoutMs", () => {
   it("keeps ordinary reads on the query budget", () => {
-    expect(launcherApiBridgeTimeoutMs("branch-instances", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
     expect(launcherApiBridgeTimeoutMs("status", "GET")).toBe(PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS);
+  });
+
+  it("allows a cold worktree inventory to finish after the ordinary query deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const output = JSON.stringify({ ok: true, payload: { items: [{ id: "worktree:target" }] } });
+      const { kill, spawnImpl } = fakeSpawnWithOutput(output, 0, 6_000);
+      const result = runPythonJsonBridge({
+        pythonPath: "python",
+        args: ["--action", "launcher-api", "--launcher-api-path", "branch-instances"],
+        cwd: "C:/repo",
+        spawnImpl,
+        failureLabel: "launcher inventory bridge",
+        timeoutMs: launcherApiBridgeTimeoutMs("branch-instances", "GET"),
+        killPolicy: "child",
+      });
+      const outcome = result.then(value => value, error => error);
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(await outcome).toBe(output);
+      expect(kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still terminates an inventory bridge that exceeds the bounded command budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const { kill, spawnImpl } = hangingSpawn({ exitOnKill: true });
+      const result = runPythonJsonBridge({
+        pythonPath: "python",
+        args: ["--action", "launcher-api", "--launcher-api-path", "branch-instances"],
+        cwd: "C:/repo",
+        spawnImpl,
+        failureLabel: "launcher inventory bridge",
+        timeoutMs: launcherApiBridgeTimeoutMs("branch-instances", "GET"),
+        killPolicy: "child",
+      });
+      const outcome = result.then(value => value, error => error);
+      await vi.advanceTimersByTimeAsync(PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS - 1);
+      expect(kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await outcome).toMatchObject({ code: "timeout" });
+      expect(kill).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("gives the cleanup-metadata read the command budget", () => {
