@@ -4446,7 +4446,13 @@ async function orchestrateBranchInstanceLifecycle(
             instanceId,
             expectedGeneration: observedGeneration
           });
-          if (!observed.applied) {
+          const alreadyReady = Number(observed.entry.generation) === observedGeneration
+            && String(observed.entry.commandId || "") === lease.commandId
+            && observed.entry.status === "steady" && observed.entry.phase === "steady"
+            && observed.entry.desiredState === "open" && !observed.entry.cleanupInProgress;
+          // Reuse and the reconciler can observe READY before this callback.
+          // A matching settled command is success, never a reason to retire it.
+          if (!observed.applied && !alreadyReady) {
             throw new Error(`isolated observe-ready CAS missed for ${instanceId}`);
           }
         },

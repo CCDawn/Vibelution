@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
+import { applyObserve, type RegistryPayload } from "../src/lifecycle/instanceRegistryStore.js";
+import { LauncherLifecycleSupervisor } from "../src/lifecycle/launcherLifecycleSupervisor.js";
+import { superviseIsolatedInstanceStart } from "../src/process/isolatedInstanceSupervisor.js";
 
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 const preloadSource = readFileSync(fileURLToPath(new URL("../src/preload.ts", import.meta.url)), "utf8");
@@ -20,7 +23,60 @@ function isolatedMutationForTest(bindings: Record<string, unknown>) {
   return runInNewContext(`${compiled}\nrunIsolatedRegistryMutation`, bindings);
 }
 
+function isolatedMarkReadyForTest(bindings: Record<string, unknown>) {
+  const start = mainSource.indexOf("markReady: async (observedGeneration)") + "markReady: ".length;
+  const end = mainSource.indexOf(",\n        markError:", start);
+  const compiled = ts.transpileModule(`const markReady = ${mainSource.slice(start, end)};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  return runInNewContext(`${compiled}\nmarkReady`, bindings);
+}
+
 describe("Electron main Launcher IPC facade", () => {
+  it("keeps a healthy reused backend when READY was already observed for the same command", async () => {
+    const supervisor = new LauncherLifecycleSupervisor();
+    const intent = supervisor.beginIntent({ instanceId: "worktree:task", operation: "start", desiredState: "open" });
+    const lease = supervisor.bindCommand(intent, { commandId: "running-start", generation: 9 })!;
+    const payload: RegistryPayload = { schemaVersion: 3, instances: { "worktree:task": {
+      generation: 9, commandId: "running-start", status: "steady", phase: "steady", desiredState: "open"
+    } } };
+    const retireBackend = vi.fn();
+    const markError = vi.fn();
+    const closeWindowAfterReadyFailure = vi.fn();
+    const markReady = isolatedMarkReadyForTest({
+      instanceId: lease.instanceId, lease,
+      observeIsolatedReady: async (input: { instanceId: string; expectedGeneration: number }) =>
+        applyObserve(payload, { ...input, operation: "observe-ready" })
+    });
+    expect(await superviseIsolatedInstanceStart({
+      instanceId: lease.instanceId, url: "http://127.0.0.1:8003", lease,
+      isCurrent: candidate => supervisor.isCurrent(candidate),
+      claimReady: candidate => supervisor.claimReady(candidate),
+      completeReady: candidate => supervisor.completeReady(candidate),
+      releaseReadyClaim: candidate => supervisor.releaseReadyClaim(candidate),
+      waitForHttp: async () => undefined, openWindow: async () => undefined,
+      closeWindowIfSuperseded: async () => undefined,
+      closeWindowAfterReadyFailure, retireBackend, markReady, markError
+    })).toBe("opened");
+    expect(retireBackend).not.toHaveBeenCalled();
+    expect(markError).not.toHaveBeenCalled();
+    expect(closeWindowAfterReadyFailure).not.toHaveBeenCalled();
+    expect(payload.instances[lease.instanceId].generation).toBe(9);
+  });
+
+  it.each([
+    { generation: 10 }, { commandId: "replacement-start" }, { status: "stopping" },
+    { desiredState: "closed" }, { phase: "starting" }, { cleanupInProgress: true }
+  ])("rejects an incompatible READY observation: %j", async (changed) => {
+    const markReady = isolatedMarkReadyForTest({
+      instanceId: "worktree:task", lease: { commandId: "running-start", generation: 9 },
+      observeIsolatedReady: async () => ({ applied: false, entry: {
+        generation: 9, commandId: "running-start", status: "steady", phase: "steady", desiredState: "open", ...changed
+      } })
+    });
+    await expect(markReady(9)).rejects.toThrow("isolated observe-ready CAS missed");
+  });
+
   it("does not acknowledge stale cached alive truth after the registry has closed", async () => {
     // Execute the real main-process mutation with a stopped registry and a
     // deliberately stale state projection. Stop at the build boundary so this
