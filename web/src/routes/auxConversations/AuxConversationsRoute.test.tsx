@@ -263,7 +263,7 @@ describe("AuxConversationsRoute", () => {
     // The stream window rides the dedicated aux key, never the /chat cache.
     expect(streamApi.fetchSessionDetailWindow).toHaveBeenCalledWith(
       "child-session-1",
-      expect.objectContaining({ transcriptScope: "window" }),
+      expect.objectContaining({ transcriptScope: "window", includeSecondary: false }),
     );
     // Identity + live follow-along: the task title stands in as the assistant
     // name, the human side uses the generic 用户 label, autoscroll on while live.
@@ -316,7 +316,7 @@ describe("AuxConversationsRoute", () => {
     await flushUntil(() => Boolean(host?.querySelector('[data-bridge-probe="lazy-conversation"]')));
     expect(streamApi.fetchSessionDetailWindow).toHaveBeenCalledWith(
       "child-session-ended-1",
-      expect.objectContaining({ transcriptScope: "window" }),
+      expect.objectContaining({ transcriptScope: "window", includeSecondary: false }),
     );
     // Ended task: a settled transcript, no autoscroll follow.
     const streamProps = conversationView.views[conversationView.views.length - 1];

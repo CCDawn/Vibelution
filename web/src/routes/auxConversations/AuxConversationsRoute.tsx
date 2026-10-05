@@ -254,7 +254,14 @@ export function AuxConversationsRoute() {
   const streamQuery = useQuery({
     queryKey: ["aux-session-detail", selectedChildSessionId],
     queryFn: ({ signal }) =>
-      fetchSessionDetailWindow(selectedChildSessionId, { transcriptScope: "window", signal }),
+      fetchSessionDetailWindow(selectedChildSessionId, {
+        transcriptScope: "window",
+        // High-frequency read-only poll: skip the expensive inbox/governance/
+        // group side lists and let the backend light_running_poll fast path on
+        // (projection only touches them when includeSecondary is true).
+        includeSecondary: false,
+        signal,
+      }),
     enabled: Boolean(selectedChildSessionId),
     // Live tasks follow the same 4s foreground beat as the task list; ended
     // tasks take a single snapshot and never refetch.

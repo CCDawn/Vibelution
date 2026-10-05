@@ -117,6 +117,8 @@ describe("AuxConversationsRoute layout contract", () => {
     expect(routeSource).toContain("ChatReadOnlySessionWorkspace");
     expect(routeSource).toContain("fetchSessionDetailWindow");
     expect(routeSource).toContain('transcriptScope: "window"');
+    // Read-only poll skips the expensive secondary side lists (light poll path).
+    expect(routeSource).toContain("includeSecondary: false");
     // Aux keeps its own cache key: the snapshot must never overwrite the
     // /chat live-transcript cache entries.
     expect(routeSource).toContain('queryKey: ["aux-session-detail", selectedChildSessionId]');
