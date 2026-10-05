@@ -543,7 +543,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("create") === "1"');
     expect(routeSource).toContain("const createOpen = requestedCreate");
     expect(routeSource).toContain("setCreateWizardOpen(false)");
-    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(selectedAgentId || activePane === "config" || activePane === "activity" || requestedAgentId)');
+    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(selectedAgentId || activePane === "config" || activePane === "activity" || activePane === "perception" || requestedAgentId)');
     expect(routeSource).toContain("<AgentCreateWizardDialog");
     expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
     expect(agentCreateDialogSource).toContain('enabled: open');
