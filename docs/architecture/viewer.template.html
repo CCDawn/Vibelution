@@ -131,7 +131,7 @@
     .current-description { max-width: 900px; margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
     .canvas-toolbar { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .graph-caption { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
-    .wiki-map-caption { max-width: 680px; color: #43586b; font-size: 11px; line-height: 1.4; }
+    .wiki-map-caption { max-width: 680px; color: #43586b; font-size: 12px; line-height: 1.4; }
     .legend-mark { width: 12px; height: 9px; display: inline-block; border: 1px solid #aebdca; border-radius: 3px; background: white; vertical-align: -1px; }
     .toolbar-actions { display: flex; align-items: center; gap: 5px; }
     .zoom-readout { min-width: 48px; color: var(--muted); text-align: center; font: 10px/1 var(--mono); }
@@ -151,7 +151,7 @@
     .diagram-edge:hover .edge-line, .diagram-edge.is-selected .edge-line { stroke: var(--accent); stroke-width: 2.2; }
     .diagram-edge.is-dimmed { opacity: .62; }
     .edge-label-bg { fill: #fbfcfd; stroke: #e5eaf0; stroke-width: .8; }
-    .edge-label { fill: #506276; font: 13px var(--sans); text-anchor: middle; }
+    .edge-label { fill: #506276; font: 14px var(--sans); text-anchor: middle; }
     .edge-relation-label { fill: #52667a; font: 11px var(--mono); text-anchor: middle; }
     .diagram-node { cursor: pointer; }
     .node-card { fill: #fff; stroke: #cbd6e0; stroke-width: 1.25; }
@@ -164,9 +164,9 @@
     .node-file .node-accent-bar { fill: #9b7258; }
     .node-domain .node-accent-bar { fill: #496f89; }
     .node-label { fill: #1e2d3c; font: 650 18px var(--sans); }
-    .node-description { fill: #4e6275; font: 12px var(--sans); }
-    .node-kind { fill: #60758a; font: 11px var(--sans); }
-    .node-subtitle { fill: #46617a; font: 11px var(--mono); }
+    .node-description { fill: #4e6275; font: 15px var(--sans); }
+    .node-kind { fill: #60758a; font: 14px var(--sans); }
+    .node-subtitle { fill: #46617a; font: 14px var(--mono); }
     .diagram-node:hover .node-card, .diagram-node.is-selected .node-card { stroke: var(--accent); stroke-width: 2; }
     .diagram-node.is-dimmed { opacity: .76; }
     .diagram-node:focus-visible .node-card { stroke: var(--focus); stroke-width: 2.5; }
@@ -311,10 +311,24 @@
     .reading-strip[hidden] { display: none; }
     .reading-step { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; color: #496177; background: transparent; font-size: 12px; cursor: pointer; }
     .reading-step:hover, .reading-step[aria-current="step"] { border-color: #9fb6ca; background: #eaf2f8; color: #224d6a; }
-    .step-number { display: inline-grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #e4ebf2; color: #4f6478; font: 11px var(--mono); }
+    .step-marker { width: 6px; height: 6px; border-radius: 50%; background: #8aa3b9; }
+    .reading-order-note { color: #52677a; font-size: 12px; white-space: nowrap; }
     .diagram-zone { fill: #f3f6fa; stroke: #dbe4ee; stroke-width: 1; }
     .zone-label { fill: #405a72; font: 650 15px var(--sans); }
-    .zone-description { fill: #65788a; font: 11px var(--sans); }
+    .zone-description { fill: #65788a; font: 14px var(--sans); }
+    .home-reading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: #435b70; }
+    .home-reading[hidden] { display: none; }
+    .home-reading .button { min-height: 36px; }
+    .home-node-core .node-card { fill: #eef5fa; stroke: #6388a3; stroke-width: 1.8; }
+    .home-node-support .node-card, .home-node-reference .node-card { fill: #fafbfc; stroke: #cbd5df; }
+    .home-node-support .node-accent-bar, .home-node-reference .node-accent-bar { fill: #a9b7c4; }
+    .home-node-support .node-description, .home-node-reference .node-description { font-size: 14px; }
+    .home-node-core .node-description, .home-node-runtime .node-description { font-size: 16px; }
+    .home-zone-support, .home-zone-reference { fill: #f8fafb; stroke: #e1e7ed; }
+    .home-edge-primary .edge-line { stroke-width: 2; stroke: #466b87; }
+    .home-edge-related .edge-line { stroke: #688c84; stroke-dasharray: 7 4; }
+    .home-edge-primary.is-dimmed, .home-edge-related.is-dimmed { opacity: .28; }
+    .node-role-related .node-card { fill: #f0f5f9; stroke: #8aabbf; }
     .node-role-control .node-card { fill: #fffaf0; stroke: #b49b6b; }
     .node-role-store .node-card { fill: #eff8f4; stroke: #78a895; }
     .node-role-external .node-card { fill: #f6f2fb; stroke: #a08bbc; stroke-dasharray: 5 3; }
@@ -325,6 +339,7 @@
     .reading-legend .legend-store { border-color: #78a895; background: #eff8f4; }
     .reading-legend .legend-control { border-color: #b49b6b; background: #fffaf0; }
     .reading-legend .legend-external { border-color: #a08bbc; background: #f6f2fb; border-style: dashed; }
+    .reading-legend .legend-related { border-color: #8aabbf; background: #f0f5f9; }
     .reading-context { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; font-size: 12px; color: #53697e; }
     .reading-context[hidden] { display: none; }
     .reading-context p { margin: 0; line-height: 1.6; }
@@ -492,8 +507,9 @@
           <span class="reading-legend" data-diagram-legend><i></i>执行步骤</span>
           <span class="reading-legend" data-diagram-legend><i class="legend-control"></i>调度 / 权限</span>
           <span class="reading-legend" data-diagram-legend><i class="legend-store"></i>数据记录</span>
-          <span class="reading-legend" data-diagram-legend><i class="legend-external"></i>模型接口</span>
-          <span class="wiki-map-caption" id="wiki-map-caption" hidden>分区表示责任范围；箭头只标出已有源码锚点的关系。拖动画布可平移，“适配”查看全图。</span>
+          <span class="reading-legend" data-diagram-legend><i class="legend-related"></i>系统内关联</span>
+          <span class="reading-legend" data-diagram-legend><i class="legend-external"></i>外部服务 / 数据</span>
+          <span class="wiki-map-caption" id="wiki-map-caption" hidden>实线：核心执行链 · 虚线：业务接入/读取。跨线的弧形表示互不连接；点击关系可沿线追踪。</span>
           <span id="graph-count" hidden></span>
         </div>
         <div class="toolbar-actions">
@@ -509,10 +525,12 @@
           <button class="button button-small button-icon" id="zoom-out" type="button" aria-label="缩小">−</button>
           <span class="zoom-readout" id="zoom-readout">100%</span>
           <button class="button button-small button-icon" id="zoom-in" type="button" aria-label="放大">+</button>
+          <button class="button button-small" id="read-size" type="button" title="恢复可读字号，从图的左上方开始阅读">阅读大小</button>
           <button class="button button-small" id="fit-view" type="button" aria-label="适配画布">适配</button>
         </div>
       </div>
-      <div class="reading-strip" id="reading-strip" aria-label="节点阅读导航，序号不表示调用顺序" hidden></div>
+      <div class="home-reading" id="home-reading" hidden><span>建议从这里开始：</span><button class="button button-primary" id="home-start-session" type="button">一条消息如何执行 →</button><button class="button button-small" id="home-start-overview" type="button">查看运行主线</button><span>选模块看职责，选箭头看调用依据。</span></div>
+      <div class="reading-strip" id="reading-strip" aria-label="节点导航按讲解排列，执行关系看箭头" hidden></div>
       <div class="canvas-frame" id="canvas-frame">
         <svg id="diagram" role="group" aria-labelledby="diagram-title diagram-desc" xmlns="http://www.w3.org/2000/svg">
           <title id="diagram-title">项目架构图</title>
@@ -1020,16 +1038,12 @@
       };
     }
     function wikiHomeGraph() {
-      const rowGap = 50;
-      const twoRowZoneHeight = 62 + NODE_H * 2 + rowGap + 18;
-      const lowerRowY = 30 + twoRowZoneHeight + 30;
-      const referenceY = lowerRowY + 212 + 20;
       const layouts = {
-        "runtime-entry": { x: 32, y: 30, w: 560, h: twoRowZoneHeight, nodeOrder: ["desktop", "frontend", "gateway"] },
-        "agent-execution": { x: 612, y: 30, w: 560, h: twoRowZoneHeight, nodeOrder: ["session", "intelligence", "platform", "tools"] },
-        "runtime-capabilities": { x: 612, y: lowerRowY, w: 560, h: twoRowZoneHeight, nodeOrder: ["knowledge", "research", "evolution", "companions"] },
-        "engineering-support": { x: 32, y: lowerRowY, w: 560, h: 212, nodeOrder: ["engineering", "docs"] },
-        "reference-material": { x: 32, y: referenceY, w: 560, h: 212, nodeOrder: ["experiments", "archive"] }
+        "runtime-entry": { x: 32, y: 48, w: 560, h: 414, nodeOrder: ["desktop", "frontend", "gateway"], rowGap: 58 },
+        "agent-execution": { x: 672, y: 48, w: 594, h: 414, nodeOrder: ["session", "intelligence", "platform", "tools"], rowGap: 58, columnGap: 70 },
+        "runtime-capabilities": { x: 672, y: 550, w: 594, h: 418, nodeOrder: ["knowledge", "research", "evolution", "companions"], rowGap: 74, columnGap: 70 },
+        "engineering-support": { x: 32, y: 550, w: 560, h: 174, nodeOrder: ["engineering", "docs"], nodeHeight: 96 },
+        "reference-material": { x: 32, y: 772, w: 560, h: 174, nodeOrder: ["experiments", "archive"], nodeHeight: 96 }
       };
       const nodes = [], zones = [], placed = new Set();
       asArray(state.wiki && state.wiki.groups).forEach(function (group) {
@@ -1039,7 +1053,7 @@
           x: layout.x, y: layout.y, w: layout.w, h: layout.h,
           label: string(group.label, groupId),
           description: string(group.description, ""),
-          groupId: groupId
+          groupId: groupId, role: string(group.role, "runtime")
         });
         const groupIds = asArray(group.domainIds).map(cleanId).filter(function (id) {
           return id && !placed.has(id) && state.domainById.has(id);
@@ -1055,10 +1069,11 @@
             summary: string(page && page.summary, string(domain && domain.description, "")),
             description: string(domain && domain.description, ""),
             kind: "domain", domainId: id, groupId: groupId,
+            homeRole: ["session", "intelligence", "tools"].includes(id) ? "core" : string(group.role, "runtime"),
             moduleCount: modulesInDomain(id).length,
-            x: layout.x + 18 + column * (NODE_W + 24),
-            y: layout.y + 62 + row * (NODE_H + rowGap),
-            w: NODE_W, h: NODE_H
+            x: layout.x + 18 + column * (NODE_W + (layout.columnGap || 24)),
+            y: layout.y + (groupId === "runtime-entry" || groupId === "agent-execution" ? 74 : 62) + row * (NODE_H + (layout.rowGap || 0)),
+            w: NODE_W, h: layout.nodeHeight || NODE_H
           });
           placed.add(id);
         });
@@ -1072,12 +1087,31 @@
           to: "domain:" + cleanId(relationship.to),
           wikiRelationship: true
         });
-        if (cleanId(relationship.id) === "research-native-session") edge.homeLabelPlacement = "agent-row-gap";
+        // Reviewed home geometry: each relationship owns its ports and lane.
+        // Arc bridges at the two crossings mean no shared junction or bus.
+        const routes = {
+          "desktop-starts-gateway": {points:[[172,254],[172,312]], label:[112,285], text:"启动后台", primary:true},
+          "frontend-http-gateway": {points:[[440,254],[440,284],[232,284],[232,312]], label:[346,276], text:"HTTP 请求", primary:true},
+          "gateway-session-submit": {points:[[294,378],[640,378],[640,188],[690,188]], label:[478,370], text:"提交消息", primary:true},
+          "session-agent-turn": {points:[[934,188],[1004,188]], label:[969,180], text:"驱动回合", primary:true},
+          "agent-authorized-tools": {points:[[1126,254],[1126,312]], label:[1201,286], text:"受控工具", primary:true},
+          "tools-knowledge-retrieval": {points:[[1004,378],[976,378],[976,522],[646,522],[646,656],[690,656]], label:[864,514], text:"知识检索"},
+          "research-native-session": {points:[[1248,650],[1274,650],[1274,498],[660,498],[660,218],[690,218]], label:[788,490], text:"研究任务提交", bridge:{segment:2,x:976}},
+          "companion-native-session": {points:[[1248,884],[1328,884],[1328,280],[860,280],[860,254]], label:[1328,779], text:"mailbox 交付", bridge:{segment:2,x:1126}},
+          "market-tool-market-service": {points:[[1248,394],[1292,394],[1292,844],[1248,844]], label:[1292,484], text:"读取行情快照"}
+        };
+        const route = routes[cleanId(relationship.id)];
+        if (route) {
+          edge.homeRoute = route;
+          edge.fullLabel = edge.label;
+          edge.label = route.text;
+          edge.homeRelation = route.primary ? "primary" : "related";
+        }
         return edge;
       });
       return {
         id: "__wiki_home__", title: string(state.data.meta.title, "项目架构总览"),
-        description: "按五个责任区查看15个领域和有源码锚点的跨领域关系。选择节点看职责、边界、入口与场景，点击关系查看技术说明；分区只表示责任范围。",
+        description: "先看入口 → Session → Agent → 工具，再查看知识、科研与 Companion 如何接入。下方保留工程支撑和参考材料；分区表示职责，不代表独立服务。",
         nodes: nodes, edges: edges, zones: zones, mode: "wiki-home",
         itemCount: nodes.length, relationCount: edges.length
       };
@@ -1204,8 +1238,7 @@
       renderDiagram(!state.camera);
       renderDetails();
       if (state.selected) {
-        if (state.selected.type === "node") revealDetails();
-        else revealDetails();
+        if (!restoreSnapshot) revealDetails();
         renderReadingGuide();
       }
       if (restoreSnapshot) {
@@ -1221,6 +1254,12 @@
         if (graph.mode === "wiki-home" || graph.mode === "wiki-domain") {
           $("wiki-content").scrollTop = finite(restoreSnapshot.wikiScrollTop, 0);
         }
+        // Snapshot camera belongs to the restored pane state. Apply it after
+        // that state instead of resizing it for a temporary open detail pane.
+        if (restoreSnapshot.camera) {
+          state.camera = Object.assign({}, restoreSnapshot.camera);
+          applyCamera();
+        } else resizeCamera();
       }
       replaceCurrentHistorySnapshot(route);
     }
@@ -1599,6 +1638,7 @@
       const view = graph && graph.rawView;
       const strip = $("reading-strip"), related = $("related-reading");
       clear(strip); clear(related);
+      $("home-reading").hidden = !graph || graph.mode !== "wiki-home";
       strip.hidden = !view || view.id === "overview"; related.hidden = !view;
       $("reading-context").hidden = !view;
       $("view-layer").hidden = !view || !asArray(view.focusNodes).length;
@@ -1606,14 +1646,14 @@
       $("layer-full").setAttribute("aria-pressed", String(state.layer === "full"));
       if (!view) return;
       const order = asArray(graph.readingOrder);
-      if (view.id !== "overview") setText(el("span", "related-reading-label", strip), "阅读导航");
-      order.forEach(function (id, index) {
+      if (view.id !== "overview") setText(el("span", "reading-order-note", strip), "按讲解导航；执行关系看箭头");
+      order.forEach(function (id) {
         const node = asArray(graph.nodes).find(function (n) { return n.id === id; });
         if (!node) return;
         const button = makeButton(strip, "", "reading-step", function () { selectNode(node); });
         const current = state.selected && state.selected.type === "node" && state.selected.node.id === id;
         button.setAttribute("aria-current", current ? "step" : "false");
-        setText(el("span", "step-number", button), String(index + 1));
+        el("span", "step-marker", button).setAttribute("aria-hidden", "true");
         setText(el("span", "", button), node.label);
         button.title = string(node.summary, node.detail);
       });
@@ -1702,30 +1742,29 @@
         const from = graphNodesMap().get(cleanId(edge.from));
         const to = graphNodesMap().get(cleanId(edge.to));
         if (from && to) {
-          minX = Math.min(minX, from.x, to.x); maxX = Math.max(maxX, from.x + NODE_W, to.x + NODE_W);
-          minY = Math.min(minY, from.y); maxY = Math.max(maxY, from.y + NODE_H, to.y + NODE_H);
+          minX = Math.min(minX, from.x, to.x); maxX = Math.max(maxX, from.x + finite(from.w, NODE_W), to.x + finite(to.w, NODE_W));
+          minY = Math.min(minY, from.y); maxY = Math.max(maxY, from.y + finite(from.h, NODE_H), to.y + finite(to.h, NODE_H));
         }
       });
       if (!Number.isFinite(minX)) return { x: 0, y: 0, width: 960, height: 600 };
       const padding = 64;
       return { x: minX - padding, y: minY - padding, width: Math.max(320, maxX - minX + padding * 2), height: Math.max(240, maxY - minY + padding * 2) };
     }
-    function fitCamera(minimumHomeScale) {
+    function fitCamera(readable) {
       if (!state.graph) return;
       state.fitBox = boundsForGraph(state.graph);
       state.camera = Object.assign({}, state.fitBox);
-      if (minimumHomeScale === true && state.graph.mode === "wiki-home") {
+      if (readable === true && (state.graph.mode === "wiki-home" || state.graph.rawView)) {
         const svg = $("diagram"), rect = svg.getBoundingClientRect();
         const viewportWidth = finite(rect.width, 0) || finite(svg.clientWidth, 0);
         const viewportHeight = finite(rect.height, 0) || finite(svg.clientHeight, 0);
         if (viewportWidth > 0 && viewportHeight > 0) {
           const fitScale = Math.min(viewportWidth / state.fitBox.width, viewportHeight / state.fitBox.height);
-          const readableScale = 0.72;
+          const readableScale = 0.86;
           if (fitScale < readableScale) {
             const width = viewportWidth / readableScale, height = viewportHeight / readableScale;
-            const centerX = state.fitBox.x + state.fitBox.width / 2;
-            const centerY = state.fitBox.y + state.fitBox.height / 2;
-            state.camera = { x: centerX - width / 2, y: centerY - height / 2, width: width, height: height };
+            // Keep the entry visible instead of centering a cropped whole map.
+            state.camera = { x: state.fitBox.x, y: state.fitBox.y, width: width, height: height };
           }
         }
       }
@@ -1734,7 +1773,22 @@
     function applyCamera() {
       if (!state.camera) return;
       $("diagram").setAttribute("viewBox", [state.camera.x, state.camera.y, state.camera.width, state.camera.height].join(" "));
-      setText($("zoom-readout"), Math.round(state.fitBox.width / state.camera.width * 100) + "%");
+      const rect = $("diagram").getBoundingClientRect();
+      state.viewport = {width:rect.width, height:rect.height};
+      const scale = rect.width > 0 && rect.height > 0
+        ? Math.min(rect.width / state.camera.width, rect.height / state.camera.height)
+        : state.fitBox.width / state.camera.width;
+      setText($("zoom-readout"), Math.round(scale * 100) + "%");
+    }
+    function resizeCamera() {
+      if (!state.camera || !state.viewport) return;
+      const previous = state.viewport, rect = $("diagram").getBoundingClientRect();
+      if (previous.width <= 0 || previous.height <= 0 || rect.width <= 0 || rect.height <= 0) return;
+      if (Math.abs(rect.width - previous.width) < 1 && Math.abs(rect.height - previous.height) < 1) return;
+      state.camera.width *= rect.width / previous.width;
+      state.camera.height *= rect.height / previous.height;
+      applyCamera();
+      if (state.selected && state.selected.type === "node") focusReadingNode(state.selected.node);
     }
 
     function segmentHitsRect(a, b, rect, inset) {
@@ -1754,7 +1808,7 @@
         nodes.forEach(function (node) {
           const id = cleanId(node.id);
           if ((i === 0 && id === sourceId) || (i === points.length - 2 && id === targetId)) return;
-          if (segmentHitsRect(points[i], points[i + 1], { x: finite(node.x, 0), y: finite(node.y, 0), w: NODE_W, h: NODE_H }, 2)) {
+          if (segmentHitsRect(points[i], points[i + 1], { x: finite(node.x, 0), y: finite(node.y, 0), w: finite(node.w, NODE_W), h: finite(node.h, NODE_H) }, 2)) {
             points.blocked = true;
           }
         });
@@ -1762,9 +1816,22 @@
       return !points.blocked;
     }
     function routeEdge(edge, from, to, allNodes) {
+      if (edge.homeRoute) {
+        const geometry = edge.homeRoute;
+        const points = geometry.points.map(function (p) { return {x:p[0], y:p[1]}; });
+        let d = "M" + points[0].x + " " + points[0].y;
+        points.slice(1).forEach(function (p, index) {
+          if (geometry.bridge && geometry.bridge.segment === index) {
+            const crossX = geometry.bridge.x, y = p.y;
+            d += " L" + (crossX + 12) + " " + y + " Q" + crossX + " " + (y - 16) + " " + (crossX - 12) + " " + y;
+          }
+          d += " L" + p.x + " " + p.y;
+        });
+        return {d:d, points:points, labelPoint:{x:geometry.label[0], y:geometry.label[1]}};
+      }
       const sourceId = cleanId(from.id), targetId = cleanId(to.id);
-      const a = { x: finite(from.x, 0), y: finite(from.y, 0), w: NODE_W, h: NODE_H };
-      const b = { x: finite(to.x, 0), y: finite(to.y, 0), w: NODE_W, h: NODE_H };
+      const a = { x: finite(from.x, 0), y: finite(from.y, 0), w: finite(from.w, NODE_W), h: finite(from.h, NODE_H) };
+      const b = { x: finite(to.x, 0), y: finite(to.y, 0), w: finite(to.w, NODE_W), h: finite(to.h, NODE_H) };
       const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
       const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
       const dx = bc.x - ac.x, dy = bc.y - ac.y;
@@ -1854,6 +1921,10 @@
 
     function placeEdgeLabel(edge, route, nodes, occupied) {
       const width = Math.max(38, visualUnits(string(edge.label, "")) * 7 + 12);
+      if (edge.homeRoute) {
+        occupied.push({x:route.labelPoint.x-width/2-4, y:route.labelPoint.y-19, w:width+8, h:26});
+        return route;
+      }
       const candidates = [];
       const points = route.points || [];
       for (let i = points.length - 2; i >= 0; i -= 1) {
@@ -1872,41 +1943,13 @@
         });
       });
       candidates.push(route.labelPoint);
-      const boxes = nodes.map(function (n) { return {x:n.x-8,y:n.y-8,w:NODE_W+16,h:NODE_H+16}; }).concat(occupied);
+      const boxes = nodes.map(function (n) { return {x:n.x-8,y:n.y-8,w:finite(n.w,NODE_W)+16,h:finite(n.h,NODE_H)+16}; }).concat(occupied);
       const labelFits = function (p) {
         if (!p) return false;
         const r={x:p.x-width/2-4,y:p.y-19,w:width+8,h:26};
         return !boxes.some(function(b){return r.x<b.x+b.w && r.x+r.w>b.x && r.y<b.y+b.h && r.y+r.h>b.y;});
       };
-      let preferred = [];
-      if (edge.homeLabelPlacement === "agent-row-gap") {
-        const session = nodes.find(function (node) { return cleanId(node.domainId) === "session"; });
-        const toolsNode = nodes.find(function (node) { return cleanId(node.domainId) === "tools"; });
-        const gapTop = session && session.y + NODE_H + 8, gapBottom = toolsNode && toolsNode.y - 8;
-        if (Number.isFinite(gapTop) && Number.isFinite(gapBottom) && gapBottom - gapTop >= 26) {
-          let lane = null;
-          for (let i = 0; i < points.length - 1; i += 1) {
-            const a = points[i], b = points[i + 1];
-            const crossesGap = Math.min(a.y, b.y) <= gapTop && Math.max(a.y, b.y) >= gapBottom;
-            if (a.x === b.x && crossesGap && (!lane || Math.abs(b.y - a.y) > lane.length)) {
-              lane = { x: a.x, length: Math.abs(b.y - a.y) };
-            }
-          }
-          if (lane) {
-            const y = (gapTop + gapBottom) / 2 + 6;
-            const halfLabel = width / 2 + 4;
-            preferred.push({ x: lane.x, y: y });
-            occupied.forEach(function (box) {
-              if (y - 19 >= box.y + box.h || y + 7 <= box.y) return;
-              preferred.push({ x: box.x - halfLabel - 2, y: y });
-              preferred.push({ x: box.x + box.w + halfLabel + 2, y: y });
-            });
-            preferred.sort(function (a, b) { return Math.abs(a.x - lane.x) - Math.abs(b.x - lane.x); });
-          }
-        }
-      }
-      const chosen = preferred.find(labelFits)
-        || candidates.find(labelFits) || route.labelPoint;
+      const chosen = candidates.find(labelFits) || route.labelPoint;
       if (chosen) { route.labelPoint=chosen; route.labelLeader=chosen.origin; occupied.push({x:chosen.x-width/2-4,y:chosen.y-19,w:width+8,h:26}); }
       return route;
     }
@@ -1914,12 +1957,13 @@
     function edgeAccessibleName(edge, from, to) {
       const fromName = string(from && from.label, edge.from);
       const toName = string(to && to.label, edge.to);
-      return fromName + " → " + toName + "；" + string(edge.label, "关系") + "。按 Enter 查看关系说明。";
+      return fromName + " → " + toName + "；" + string(edge.fullLabel || edge.label, "关系") + "。按 Enter 查看关系说明。";
     }
     function addEdgeGroup(edge, from, to, route, parent, selected, dimmed) {
       const group = svgEl("g", {
-        class: "diagram-edge" + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
-        role: "button", tabindex: "0", "aria-label": edgeAccessibleName(edge, from, to)
+        class: "diagram-edge" + (edge.homeRelation ? " home-edge-" + edge.homeRelation : "") + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
+        role: "button", tabindex: "0", "aria-label": edgeAccessibleName(edge, from, to),
+        "data-edge-id": cleanId(edge.id), "data-edge-from": cleanId(edge.from), "data-edge-to": cleanId(edge.to)
       }, parent);
       const hit = svgEl("path", { d: route.d, class: "edge-hit" }, group);
       const line = svgEl("path", {
@@ -2010,7 +2054,7 @@
       const labelBoxes = [];
       const renderedPoints = [];
       asArray(graph.zones).forEach(function (zone) {
-        svgEl("rect", { x: zone.x, y: zone.y, width: zone.w, height: zone.h, rx: 12, class: "diagram-zone" }, root);
+        svgEl("rect", { x: zone.x, y: zone.y, width: zone.w, height: zone.h, rx: 12, class: "diagram-zone" + (isWikiHome ? " home-zone-" + zone.role : "") }, root);
         const text = svgEl("text", { x: zone.x + 16, y: zone.y + 28, class: "zone-label" }, root);
         text.textContent = zone.label;
         const hasDescription = !!string(zone.description, "");
@@ -2063,7 +2107,7 @@
         const dimmed = !!selected && !isSelected && !related.has(id);
         drawNode(node, root, isSelected, dimmed);
       });
-      if (fit || !state.camera) fitCamera(isWikiHome);
+      if (fit || !state.camera) fitCamera(true);
       else applyCamera();
       const itemCount = graph.itemCount !== undefined ? graph.itemCount : nodes.length;
       $("graph-count").hidden = !nodes.length;
@@ -2081,16 +2125,17 @@
         kind === "group" ? "node-group" :
         kind === "module" || kind === "module-header" ? "node-module" : "node-view";
       const group = svgEl("g", {
-        class: "diagram-node " + classKind + (node.role ? " node-role-" + node.role : "") + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
+        class: "diagram-node " + classKind + (node.homeRole ? " home-node-" + node.homeRole : "") + (node.role ? " node-role-" + node.role : "") + (selected ? " is-selected" : "") + (dimmed ? " is-dimmed" : ""),
         role: "button", tabindex: "0",
         "aria-label": string(node.label, node.id) + "；按 Enter 查看技术细节。",
         "data-node-id": cleanId(node.id)
       }, parent);
       const x = finite(node.x, 0), y = finite(node.y, 0);
-      svgEl("rect", { x: x, y: y, width: finite(node.w, NODE_W), height: finite(node.h, NODE_H), rx: 7, class: "node-card" }, group);
+      const width = finite(node.w, NODE_W), height = finite(node.h, NODE_H), compact = height < NODE_H;
+      svgEl("rect", { x: x, y: y, width: width, height: height, rx: 7, class: "node-card" }, group);
       const color = node.domainId ? domainColor(node.domainId) :
         node.module ? domainColor((moduleForDomain(node.module) || {}).id) : "#496f89";
-      svgEl("rect", { x: x, y: y + 7, width: 4, height: NODE_H - 14, rx: 2, fill: color, class: "node-accent-bar" }, group);
+      svgEl("rect", { x: x, y: y + 7, width: 4, height: height - 14, rx: 2, fill: color, class: "node-accent-bar" }, group);
       const lines = wrapLabel(string(node.label, node.id), 23, 2);
       const label = svgEl("text", { x: x + 16, y: y + 31, class: "node-label" }, group);
       lines.forEach(function (line, index) {
@@ -2100,12 +2145,12 @@
       const subtitleY = y + (lines.length > 1 ? 74 : 54);
       if (node.subtitle) {
         const subtitle = svgEl("text", { x: x + 16, y: subtitleY, class: "node-subtitle" }, group);
-        subtitle.textContent = wrapLabel(node.subtitle, 34, 1)[0];
+        subtitle.textContent = wrapLabel(node.subtitle, 30, 1)[0];
       }
       const description = string(node.summary, node.description || node.detail || "");
-      const descText = svgEl("text", { x: x + 16, y: node.subtitle ? subtitleY + 23 : y + 77, class: "node-description" }, group);
-      wrapLabel(description, 32, lines.length > 1 ? 1 : 2).forEach(function (line, index) {
-        const tspan = svgEl("tspan", { x: x + 16, dy: index ? 17 : 0 }, descText);
+      const descText = svgEl("text", { x: x + 16, y: compact ? y + 57 : node.subtitle ? subtitleY + 23 : y + 77, class: "node-description" }, group);
+      wrapLabel(description, node.homeRole && !compact ? 25 : 26, lines.length > 1 ? 1 : 2).forEach(function (line, index) {
+        const tspan = svgEl("tspan", { x: x + 16, dy: index ? 19 : 0 }, descText);
         tspan.textContent = line;
       });
       let kindLabel = kind === "domain" ? "领域" :
@@ -2113,12 +2158,9 @@
         kind === "module" || kind === "module-header" ? "源码单元" :
         kind === "group" ? "领域源码单元" : "架构节点";
       if (Number.isFinite(Number(node.moduleCount))) kindLabel += " · " + countLabel(Number(node.moduleCount)) + " 个源码单元";
-      const meta = svgEl("text", { x: x + 16, y: y + 118, class: "node-kind" }, group);
-      meta.textContent = node.role ? roleLabel(node.role) : kindLabel;
-      if (node.step) {
-        svgEl("circle", { cx: x + NODE_W - 19, cy: y + 19, r: 11, fill: "#e5edf4" }, group);
-        const step = svgEl("text", { x: x + NODE_W - 19, y: y + 23, "text-anchor": "middle", fill: "#466179", "font-size": 11 }, group);
-        step.textContent = node.step;
+      if (!compact) {
+        const meta = svgEl("text", { x: x + 16, y: y + 118, class: "node-kind" }, group);
+        meta.textContent = node.role ? roleLabel(node.role) : kindLabel;
       }
       function activate() { selectNode(node); }
       group.addEventListener("click", activate);
@@ -2167,16 +2209,16 @@
     }
 
     function roleLabel(role) {
-      return ({entry: "接收入口", process: "处理", control: "调度与控制", store: "持久记录", external: "外部服务接口"})[role] || "架构节点";
+      return ({entry: "接收入口", process: "处理", control: "调度与控制", store: "持久记录", related: "系统内关联模块", external: "外部服务 / 数据"})[role] || "架构节点";
     }
     function focusReadingNode(node) {
-      if (!state.graph || !state.graph.rawView || !state.camera) return;
+      if (!state.graph || (!state.graph.rawView && state.graph.mode !== "wiki-home") || !state.camera) return;
       const margin = 28, camera = state.camera;
       let x = camera.x, y = camera.y;
       if (node.x < x + margin) x = node.x - margin;
-      else if (node.x + NODE_W > x + camera.width - margin) x = node.x + NODE_W + margin - camera.width;
+      else if (node.x + finite(node.w, NODE_W) > x + camera.width - margin) x = node.x + finite(node.w, NODE_W) + margin - camera.width;
       if (node.y < y + margin) y = node.y - margin;
-      else if (node.y + NODE_H > y + camera.height - margin) y = node.y + NODE_H + margin - camera.height;
+      else if (node.y + finite(node.h, NODE_H) > y + camera.height - margin) y = node.y + finite(node.h, NODE_H) + margin - camera.height;
       if (x !== camera.x || y !== camera.y) {
         state.camera = Object.assign({}, camera, {x: x, y: y});
         applyCamera();
@@ -2329,7 +2371,7 @@
       if (!selected) return false;
       if (selected.type === "edge") {
         const edge = selected.edge;
-        detailIntro(parent, "关系 · " + string(edge.label, "未命名"), string(selected.from && selected.from.label, edge.from) + " → " + string(selected.to && selected.to.label, edge.to), string(edge.detail, ""));
+        detailIntro(parent, "关系 · " + string(edge.fullLabel || edge.label, "未命名"), string(selected.from && selected.from.label, edge.from) + " → " + string(selected.to && selected.to.label, edge.to), string(edge.detail, ""));
         const reviewNote = el("p", "detail-note", parent);
         const relationKind = string(edge.relationKind || edge.kind, "").toLowerCase();
         const isStaticImport = relationKind === "static_import" || relationKind === "static-import" ||
@@ -2340,7 +2382,7 @@
           ? "静态 import 关系，未表达动态运行时调用。"
           : edge.status === "source_verified" ? "此关系已按快照源码核实；未在本次文档工作中验证产品运行。" : edge.status === "unknown" ? "证据文件已变化，需要重新核对该关系。" : "目录包含关系，不表示调用。");
         detailGrid(parent, [
-          ["关系类型", string(edge.label, "未标注")],
+          ["关系类型", string(edge.fullLabel || edge.label, "未标注")],
           ["来源节点", string(selected.from && selected.from.label, edge.from)],
           ["目标节点", string(selected.to && selected.to.label, edge.to)]
         ]);
@@ -3068,6 +3110,14 @@
       $("zoom-in").addEventListener("click", function () { setZoom(.8); });
       $("zoom-out").addEventListener("click", function () { setZoom(1.25); });
       $("fit-view").addEventListener("click", fitCamera);
+      $("read-size").addEventListener("click", function () {
+        fitCamera(true);
+        if (state.selected && state.selected.type === "node") focusReadingNode(state.selected.node);
+        setStatus("已恢复阅读大小。拖动画布继续阅读，或点“适配”查看全图。");
+      });
+      $("home-start-session").addEventListener("click", function () { setRoute({kind:"view", value:"session"}, true); });
+      $("home-start-overview").addEventListener("click", function () { setRoute({kind:"view", value:"overview"}, true); });
+      if (typeof ResizeObserver === "function") new ResizeObserver(resizeCamera).observe($("canvas-frame"));
     }
 
     function openDrawer(which) {
@@ -3083,6 +3133,7 @@
       document.body.classList.remove("detail-collapsed", "sidebar-open");
       if (window.innerWidth <= 970) openDrawer("detail");
       else $("detail-toggle").setAttribute("aria-expanded", "true");
+      resizeCamera();
     }
     function closeDrawers() {
       document.body.classList.remove("sidebar-open", "detail-open");
@@ -3101,16 +3152,17 @@
         });
       });
       $("sidebar-toggle").addEventListener("click", function () {
-        if (window.innerWidth > 970) { document.body.classList.toggle("nav-collapsed"); return; }
+        if (window.innerWidth > 970) { document.body.classList.toggle("nav-collapsed"); resizeCamera(); return; }
         if (document.body.classList.contains("sidebar-open")) closeDrawers(); else openDrawer("sidebar");
       });
       $("detail-toggle").addEventListener("click", function () {
-        if (window.innerWidth > 970) { document.body.classList.toggle("detail-collapsed"); $("detail-toggle").setAttribute("aria-expanded", String(!document.body.classList.contains("detail-collapsed"))); return; }
+        if (window.innerWidth > 970) { document.body.classList.toggle("detail-collapsed"); $("detail-toggle").setAttribute("aria-expanded", String(!document.body.classList.contains("detail-collapsed"))); resizeCamera(); return; }
         if (document.body.classList.contains("detail-open")) closeDrawers(); else openDrawer("detail");
       });
       $("detail-close").addEventListener("click", function () {
         if (window.innerWidth > 970) document.body.classList.add("detail-collapsed");
         closeDrawers();
+        resizeCamera();
       });
       $("drawer-backdrop").addEventListener("click", closeDrawers);
       $("updates-open").addEventListener("click", openUpdates);
@@ -3219,7 +3271,7 @@
         if (asArray(state.data.coverage.unmappedFiles).length || asArray(state.data.coverage.parseErrors).length) {
           setStatus("此快照包含未映射文件或解析问题；可在“覆盖清单”查看明细。");
         } else {
-          setStatus("点击节点查看技术细节；箭头表示关系，序号用于阅读导航。");
+          setStatus("点击节点查看技术细节；执行关系看箭头。阅读大小便于看字，适配便于看全图。");
         }
       } catch (error) {
         showDataError(error);

@@ -65,7 +65,7 @@ DETAILS = {
                 'label': '启动工作台后端',
                 'subtitle': 'spawnWorkbenchBackend',
                 'summary': '按项目实例配置启动 Python Web 进程',
-                'role': 'external',
+                'role': 'related',
                 'ownerPath': 'desktop/electron/src/process/workbenchBackend.ts',
                 'inputs': ['workspaceRoot 与脚本根目录', 'Python 可执行文件、端口及实例 dataHome'],
                 'outputs': ['受 Electron 跟踪的后端子进程', 'health 探测所需的实例身份信息'],

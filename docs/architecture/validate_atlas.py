@@ -105,7 +105,7 @@ def validate(path):
         for edge in view['edges']:
             assert edge['from'] in ids and edge['to'] in ids
         for node in view['nodes']:
-            assert node['role'] in ('entry', 'process', 'control', 'store', 'external'), node['id']
+            assert node['role'] in ('entry', 'process', 'control', 'store', 'related', 'external'), node['id']
             for field in ('label', 'subtitle', 'summary', 'ownerPath'):
                 assert isinstance(node[field], str) and node[field].strip(), (view['id'], node['id'], field)
             for field in ('inputs', 'mechanism', 'outputs', 'boundaries'):
