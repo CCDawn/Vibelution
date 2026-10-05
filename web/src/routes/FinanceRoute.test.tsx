@@ -12,7 +12,7 @@ import { listKnowledgeItems } from "../api/knowledge";
 import { useFinancialResearchSessionBridge } from "./finance/FinancialResearchBridge";
 import type { SessionDetail, SessionQueryResponse } from "../api/types";
 import { fetchFinancialStock, searchFinancialStocks } from "../api/financialMarket";
-import { unarchiveChatSession } from "../api/sessionArchive";
+import { listArchivedChatSessions, unarchiveChatSession } from "../api/sessionArchive";
 
 const nativeSubmit = vi.fn();
 let nativeMessages: SessionDetail["messages"] = [];
@@ -325,6 +325,21 @@ describe("financial assistant page", () => {
     await settle();
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=history-session");
     expect(fetchSessionDetail).toHaveBeenCalledWith("history-session", expect.objectContaining({ transcriptScope: "none", includeSecondary: false }));
+  });
+
+  it("renders native archived research without a task summary", async () => {
+    const archived = { ...nativeSession("archived-topic"), title: "已归档复盘", updatedAt: "2026-10-05T11:10:06+00:00", archiveState: { status: "archived" } };
+    // The lightweight native archive projection omits taskSummary on a session
+    // that has not started a Turn; the active index normally supplies it.
+    delete (archived as Partial<SessionDetail>).taskSummary;
+    vi.mocked(listArchivedChatSessions).mockResolvedValue({ items: [archived], nextCursor: "", totalEstimate: 1 });
+    await render("/finance?session=native-session");
+    await act(async () => button("报告中心")!.click());
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "已归档")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await settle();
+    expect(listArchivedChatSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
+    expect(container.textContent).toContain("已归档复盘");
+    expect(container.querySelector('[aria-label="管理研究：已归档复盘"]')).not.toBeNull();
   });
 
   it("searches all native research bodies without changing the recent-history rail", async () => {
