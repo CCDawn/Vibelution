@@ -1476,6 +1476,68 @@ def test_await_launch_lifecycle_settlement_routes_worktrees_to_instance_registry
     assert captured["timeout_seconds"] == 7.0
 
 
+@pytest.mark.parametrize("build_done,ready_at", [(85, 110), (540, 700), (1, None)])
+def test_launch_settlement_allows_cold_preparation_before_ready_generation(monkeypatch, tmp_path, build_done, ready_at):
+    clock = [0.0]
+    wait = desktop_entry.wait_for_branch_instance_settlement
+
+    def snapshot(_root):
+        if clock[0] < build_done:
+            return {}
+        return {
+            "generation": 1,
+            "commandId": "cold_start",
+            "desiredState": "open",
+            "status": "steady" if ready_at is not None and clock[0] >= ready_at else "starting",
+            "spawnPid": 200,
+        }
+
+    def observe(workspace_root, operation, **kwargs):
+        return wait(
+            workspace_root, operation, **kwargs,
+            sleep=_advance_clock(clock), monotonic=lambda: clock[0],
+            health_probe=lambda: ready_at is not None and clock[0] >= ready_at,
+        )
+
+    monkeypatch.setattr(desktop_entry, "_read_branch_instance_snapshot", snapshot)
+    monkeypatch.setattr(desktop_entry, "wait_for_branch_instance_settlement", observe)
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+    args = desktop_entry.parse_args(["--workspace", str(tmp_path), "--action", "launch-desktop-shell"])
+    payload = desktop_entry._await_launch_lifecycle_settlement(
+        args, {"thenLifecycle": "start"}, baseline={"kind": "branch_instance", "generation": 0}
+    )
+    assert payload["ok"] is (ready_at is not None)
+    assert payload["lifecycleSettlement"]["commandId"] == "cold_start"
+    if ready_at is None:
+        assert payload["lifecycleSettlement"]["observed"] == "instance_registry_unsettled"
+        assert payload["lifecycleSettlement"]["settled"] is False
+        assert clock[0] == desktop_entry.DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
+    else:
+        assert clock[0] == ready_at
+
+
+@pytest.mark.parametrize("kind", ["main", "branch_instance"])
+@pytest.mark.parametrize("operation,budget", [
+    ("start", 810.0), ("restart", 810.0), ("rebuild-and-start", 810.0),
+    ("stop", 90.0), ("force-stop", 90.0),
+])
+def test_default_launch_settlement_budget_depends_on_operation(monkeypatch, tmp_path, kind, operation, budget):
+    captured = {}
+
+    def observe(_root, _operation, **kwargs):
+        captured.update(kwargs)
+        return {"accepted": True}
+
+    monkeypatch.setattr(desktop_entry, "wait_for_branch_instance_settlement", observe)
+    monkeypatch.setattr(desktop_entry, "wait_for_lifecycle_settlement", observe)
+    monkeypatch.setattr(desktop_entry, "_append_log", lambda *_args, **_kwargs: None)
+    args = desktop_entry.parse_args(["--workspace", str(tmp_path), "--action", "launch-desktop-shell"])
+    desktop_entry._await_launch_lifecycle_settlement(
+        args, {"thenLifecycle": operation}, baseline={"kind": kind, "generation": 0}
+    )
+    assert captured["timeout_seconds"] == budget
+
+
 def test_launch_desktop_shell_waits_for_settlement_and_reports_visible_failure(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         "core.launcher.desktop_shell.launch_desktop_shell",

@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,34 @@ NATIVE_ENTRY_BUILD_SCRIPT = PROJECT_ROOT / "scripts" / "windows_launcher_entry" 
 
 def _source() -> str:
     return NATIVE_ENTRY_SOURCE.read_text(encoding="utf-8")
+
+
+def test_native_launch_budget_covers_start_settlement_retry_and_spawn():
+    from scripts.vibelution_desktop_entry import (
+        DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS,
+        LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS,
+    )
+
+    block = _source().split("private static void LaunchCurrentElectronMain", 1)[1].split(
+        "private static bool HasArgument", 1
+    )[0]
+    budget = re.search(r'int bridgeTimeoutMs = startup \? (\d+) : (\d+);', block)
+    assert budget is not None
+    outer_seconds = int(budget.group(1)) / 1000
+    assert outer_seconds >= (
+        DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS + LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS + 60
+    )
+    assert int(budget.group(2)) == 240000
+    for operation in ("start", "restart", "rebuild-and-start"):
+        assert f'string.Equals(thenLifecycle, "{operation}", StringComparison.OrdinalIgnoreCase)' in block
+    bridge_source = (PROJECT_ROOT / "desktop/electron/src/process/pythonJsonBridge.ts").read_text(encoding="utf-8")
+    registry_source = (PROJECT_ROOT / "desktop/electron/src/lifecycle/instanceRegistryStore.ts").read_text(encoding="utf-8")
+    build_budget = re.search(r'PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS = ([\d_]+)', bridge_source)
+    ready_budget = re.search(r'ISOLATED_START_TIMEOUT_SECONDS = (\d+)', registry_source)
+    assert build_budget and ready_budget
+    assert DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS >= (
+        int(build_budget.group(1).replace("_", "")) / 1000 + int(ready_budget.group(1)) + 30
+    )
 
 
 def test_native_launcher_default_action_runs_as_tray_app():

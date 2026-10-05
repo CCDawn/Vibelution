@@ -1203,9 +1203,14 @@ internal static class VibelutionLauncher
 
     private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench, bool hiddenPresentation)
     {
-        // 90s first settlement window + one 30s retry window (dropped
-        // second-instance signal) plus spawn/overhead must fit the deadline.
-        RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, 240000, hiddenPresentation);
+        // Startup covers the 600s frontend bridge and 180s readiness stages.
+        // 810s settlement + 30s retry + 60s launch/exit margin stay bounded.
+        // Status/open and stop operations keep their existing outer budget.
+        bool startup = string.Equals(thenLifecycle, "start", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(thenLifecycle, "restart", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(thenLifecycle, "rebuild-and-start", StringComparison.OrdinalIgnoreCase);
+        int bridgeTimeoutMs = startup ? 900000 : 240000;
+        RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, bridgeTimeoutMs, hiddenPresentation);
     }
 
     private static bool HasArgument(List<string> args, params string[] accepted)

@@ -1423,6 +1423,11 @@ _LIFECYCLE_SETTLEMENT_OPERATION_VARIANTS = {
     "rebuild-and-start": ("rebuild-and-start", "restart"),
 }
 DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS = 90.0
+# Electron allows 600s for its frontend build bridge, then 180s for backend
+# readiness. Cover both stages plus 30s of command routing. The native entry
+# reserves a separate 30s retry and 60s launch/exit margin within 900s.
+# Stop operations retain the shorter wait.
+DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS = 810.0
 # A second-instance signal can be dropped while the primary shell is stalled;
 # one bounded re-forward keeps the total inside the native bridge deadline.
 LAUNCH_SETTLEMENT_RETRY_TIMEOUT_SECONDS = 30.0
@@ -1804,7 +1809,11 @@ def _await_launch_lifecycle_settlement(
     settle_timeout = float(
         timeout_seconds
         if timeout_seconds is not None
-        else getattr(args, "lifecycle_settle_timeout", 0.0) or DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
+        else getattr(args, "lifecycle_settle_timeout", 0.0) or (
+            DEFAULT_START_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
+            if lifecycle in {"start", "restart", "rebuild-and-start"}
+            else DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS
+        )
     )
     if str(captured.get("kind") or "") == "branch_instance":
         settlement = wait_for_branch_instance_settlement(
@@ -2280,12 +2289,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--lifecycle-settle-timeout",
         type=float,
-        default=DEFAULT_LIFECYCLE_SETTLE_TIMEOUT_SECONDS,
+        default=0.0,
         help=(
             "Seconds to wait for the Electron main-line queue to settle a "
             "--then-lifecycle start|stop|force-stop|restart|rebuild-and-start "
             "command before reporting a visible failure (0 falls back to the "
-            "default budget)."
+            "operation budget: 810s for startup, 90s for stop)."
         ),
     )
     parser.add_argument(
