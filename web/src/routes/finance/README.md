@@ -21,6 +21,8 @@ Report search uses native `querySessions(q)` over titles and bodies. Outcome fil
 
 After explicit primary submissions are accepted, a finance-scoped coordinator reuses the native RuntimeTaskStore and managed web startup jobs to advance debate and synthesis while the page is closed. Startup recovers accepted runs without sending their known Turns again. Waiting/running status polls the persisted run projection; completed requires the exact synthesis final answer, and blocked surfaces the reason without automatic resubmission. Legacy runs without coordination status retain the existing client orchestration. GET does not create or start a run.
 
+The team inspector follows the selected run rather than the assistant Session's historical title. It displays saved submission references and coordinator state; completion also requires all analyst and synthesis Turn references. Cards adapt to the actual desktop center-pane width with a single grid template, so later route utility chunks cannot override responsive column variants.
+
 ## Public market data
 
 The existing Tencent adapter owns A-share quotes and adjusted day/week/month candles. Provider, quote/fetch times, yuan/lot units and missing values stay explicit. MA5/20, BOLL(20,2), MACD(12,26,9) and Wilder RSI(14) calculate on all loaded candles before slicing; missing warm-up values are never generated.

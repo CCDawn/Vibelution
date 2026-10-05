@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FinanceAnalystTeam } from "./FinanceAnalystTeam";
+import { FinanceAnalystTeam, FinanceAnalystTeamInspector } from "./FinanceAnalystTeam";
 import type { FinancialTeamRun } from "../../api/financialTeam";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 
@@ -101,14 +101,45 @@ async function settle(rounds = 5) {
   }
 }
 
-async function render() {
-  await act(async () => root.render(<QueryClientProvider client={client}><FinanceAnalystTeam assistant={assistant} stock={stock} zh onOpenSession={openSession} /></QueryClientProvider>));
+async function render(onSelectedRunChange?: (run: FinancialTeamRun | null) => void) {
+  await act(async () => root.render(<QueryClientProvider client={client}><FinanceAnalystTeam assistant={assistant} stock={stock} zh onOpenSession={openSession} onSelectedRunChange={onSelectedRunChange} /></QueryClientProvider>));
   await settle();
 }
 
 function button(text: string) {
   return [...container.querySelectorAll("button")].find((node) => node.textContent?.includes(text))!;
 }
+
+it("keeps the inspector on the selected research when switching run history", async () => {
+  const recent = makeRun();
+  const earlier = { ...makeRun(), runId: "earlier-run", symbol: "sz000001" };
+  currentRun = recent;
+  api.runs.mockResolvedValue({ assistantAgentId: assistant.agentId, runs: [recent, earlier] });
+  const onSelectedRunChange = vi.fn();
+  await render(onSelectedRunChange);
+  expect(onSelectedRunChange).toHaveBeenLastCalledWith(recent);
+  await act(async () => button("sz000001").click());
+  await settle();
+  expect(onSelectedRunChange).toHaveBeenLastCalledWith(earlier);
+});
+
+it("opens the selected synthesis and requires completed coordination with all Turn references", async () => {
+  const run = makeRun();
+  run.symbol = "sz000001";
+  run.stage = "synthesis";
+  run.coordinationStatus = "completed";
+  run.synthesis.sessionId = "selected-synthesis";
+  await act(async () => root.render(<FinanceAnalystTeamInspector run={run} zh onOpenSession={openSession} />));
+  expect(container.textContent).toContain("sz000001");
+  expect(container.textContent).not.toContain("已完成汇总");
+  expect(button("查看汇总对话").disabled).toBe(true);
+  roleKeys.forEach((role) => { run.analysts[role]!.turnId = "turn-" + role; });
+  run.synthesis.turnId = "synthesis-turn";
+  await act(async () => root.render(<FinanceAnalystTeamInspector run={run} zh onOpenSession={openSession} />));
+  expect(container.textContent).toContain("已完成汇总");
+  await act(async () => button("查看汇总对话").click());
+  expect(openSession).toHaveBeenCalledWith("selected-synthesis");
+});
 
 beforeEach(() => {
   vi.resetAllMocks();

@@ -168,11 +168,12 @@ function compactError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
-export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession }: {
+export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSelectedRunChange }: {
   assistant: FinancialAssistant;
   stock: StockIdentity;
   zh: boolean;
   onOpenSession: (sessionId: string) => void;
+  onSelectedRunChange?: (run: FinancialTeamRun | null) => void;
 }) {
   const queryClient = useQueryClient();
   const [periodDays, setPeriodDays] = useState<7 | 30 | 90>(30);
@@ -210,6 +211,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession }: {
   });
   const runs = runsQuery.data?.runs ?? [];
   const selectedRun = runs.find((run) => run.runId === selectedRunId) ?? runs[0] ?? null;
+  useEffect(() => { onSelectedRunChange?.(selectedRun); }, [onSelectedRunChange, selectedRun]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     if (!selectedRunId && runs[0]) setSelectedRunId(runs[0].runId);
@@ -510,7 +512,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession }: {
       {runsQuery.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取研究记录" : "Loading runs"} /> : null}
       {runs.length ? <div className={styles.history} aria-label={zh ? "最近分析轮次" : "Recent analyst runs"}>
         {runs.slice(0, 8).map((run) => <VButton key={run.runId} variant="secondary" className={[styles.historyButton, run.runId === selectedRun?.runId ? styles.historySelected : ""].join(" ")} aria-pressed={run.runId === selectedRun?.runId} onPress={() => setSelectedRunId(run.runId)}>
-          <span><strong>{run.symbol}</strong><span>{run.researchDate || new Date(run.createdAt).toLocaleDateString()} · {run.periodDays}{zh ? "天" : "d"}</span></span>
+          <span className={styles.historyItem}><strong>{run.symbol}</strong><span>{run.researchDate || new Date(run.createdAt).toLocaleDateString()} · {run.periodDays}{zh ? "天" : "d"}</span></span>
           <VChip tone="neutral">{run.stage === "synthesis" ? (zh ? "汇总阶段" : "Synthesis stage") : run.stage === "debate" ? (zh ? "多空分析" : "Debate") : (zh ? "基础分析" : "Research")}</VChip>
         </VButton>)}
       </div> : !runsQuery.isPending && !runsQuery.isError ? <VStateSurface tone="empty" title={zh ? "还没有研究轮次" : "No analyst runs yet"} /> : null}
@@ -541,4 +543,21 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession }: {
       </> : null}
     </> : null}
   </div>;
+}
+
+export function FinanceAnalystTeamInspector({ run, zh, onOpenSession }: {
+  run: FinancialTeamRun | null;
+  zh: boolean;
+  onOpenSession: (sessionId: string) => void;
+}) {
+  if (!run) return <VStateSurface tone="empty" title={zh ? "选择或开始一轮研究" : "Select or start a research run"} />;
+  const completed = run.coordinationStatus === "completed" && Boolean(run.synthesis.turnId) && ALL_ROLES.every((role) => run.analysts[role]?.turnId);
+  const blocked = run.coordinationStatus === "blocked";
+  return <section className={styles.inspector} aria-label={zh ? "本轮协作进度" : "Selected run progress"}>
+    <div className={styles.inspectorMeta}><strong>{run.symbol}</strong><span>{run.researchDate || "—"} · {run.periodDays}{zh ? "天" : " days"}</span></div>
+    <VChip tone={completed ? "success" : blocked ? "warning" : "neutral"}>{completed ? (zh ? "已完成汇总" : "Synthesis completed") : blocked ? (zh ? "研究暂停" : "Research paused") : run.coordinationStatus === "waiting" || run.coordinationStatus === "running" ? (zh ? "研究进行中" : "Research running") : (zh ? "研究进度待核对" : "Review run progress")}</VChip>
+    {ALL_ROLES.filter((role) => run.analysts[role]).map((role) => <div key={role} className={styles.inspectorRow}><span>{ROLE_LABELS[role][zh ? 0 : 1]}</span><VChip tone={completed ? "success" : "neutral"}>{completed ? (zh ? "已完成" : "Completed") : run.analysts[role]?.turnId ? (zh ? "已提交" : "Submitted") : (zh ? "待提交" : "Not submitted")}</VChip></div>)}
+    {blocked && run.coordinationError ? <VStateSurface tone="error" title={zh ? "协作未完成" : "Coordination incomplete"}>{run.coordinationError}</VStateSurface> : null}
+    <VButton variant="secondary" icon={<ExternalLink size={14} />} isDisabled={!run.synthesis.turnId} onPress={() => onOpenSession(run.synthesis.sessionId)}>{zh ? "查看汇总对话" : "Open synthesis conversation"}</VButton>
+  </section>;
 }
