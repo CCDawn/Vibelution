@@ -126,6 +126,7 @@ function renderConversation(
     processDisplayMode?: ConversationProcessDisplayMode;
     useDefaultProcessDisplayMode?: boolean;
     activeTurnMessage?: ConversationMessage;
+    sessionWorkspacePath?: string;
     onSwitchMessageVersion?: (message: ConversationMessage, targetNodeId: string) => void;
     onForkSessionFromNode?: (
       message: ConversationMessage,
@@ -171,6 +172,7 @@ function renderConversation(
         phase="ready"
         messages={messages}
         activeTurnMessage={options.activeTurnMessage}
+        sessionWorkspacePath={options.sessionWorkspacePath}
         density={options.density}
         showHeader={false}
         showSessionOverview={false}
@@ -973,8 +975,10 @@ it("anchors the back-to-bottom control to the timeline area corner as a floating
     );
     // Both markdown surfaces (segment bodies + assistant transcript cell) must
     // forward the root and the chrome language together (two joined instances;
-    // tool detail surfaces already pass language={lang} separately).
-    expect(conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(2);
+    // tool detail surfaces already pass language={lang} separately). The third
+    // joined instance is the settled file-reference chip row helper, which
+    // shares the root with the markdown surfaces on purpose.
+    expect(conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}/g)?.length).toBe(3);
     expect(
       conversationViewSource.match(/workspaceRoot=\{sessionWorkspacePath\}\n        language=\{lang\}/g)?.length,
     ).toBe(2);
@@ -2935,5 +2939,72 @@ describe("user slash command echo chip", () => {
 
     expect(html).toContain('data-slash-command-tone="skill"');
     expect(html).toContain("/brt-alias");
+  });
+});
+
+describe("assistant file reference chips", () => {
+  const REFERENCE_BODY = [
+    "产物已生成：",
+    "```text",
+    "C:\\workspace\\sessions\\abc\\output\\report.html",
+    "C:\\workspace\\sessions\\abc\\output\\chart.png",
+    "```",
+  ].join("\n");
+
+  function assistantMessage(id: string, content: string, status: string): ConversationMessage {
+    return {
+      id,
+      role: "assistant",
+      content,
+      timestamp: "2026-09-20T05:00:00Z",
+      turnId: "turn-1",
+      status,
+      nodeId: `node-${id}`,
+      turnItems: [
+        {
+          id: `${id}-item-answer`,
+          itemId: `${id}-item-answer`,
+          sessionId: "session-1",
+          turnId: "turn-1",
+          version: 3,
+          revision: 1,
+          sequence: 1,
+          type: "agent_message",
+          phase: "final_answer",
+          text: content,
+          status: status === "running" ? "running" : "completed",
+          terminal: status !== "running",
+        },
+      ],
+    } as unknown as ConversationMessage;
+  }
+
+  it("renders the clickable chip row under a settled assistant answer", () => {
+    const html = renderConversation(
+      [assistantMessage("message-file-refs", REFERENCE_BODY, "completed")],
+      { sessionWorkspacePath: "C:\\workspace\\sessions\\abc" },
+    );
+    expect(html).toContain('data-conversation-file-references="true"');
+    expect((html.match(/data-conversation-file-reference-chip="true"/g) ?? []).length).toBe(2);
+    expect(html).toContain("report.html");
+    expect(html).toContain("chart.png");
+  });
+
+  it("stays chip-free while the assistant turn is streaming", () => {
+    const html = renderConversation(
+      [assistantMessage("message-file-refs-streaming", REFERENCE_BODY, "running")],
+      { sessionWorkspacePath: "C:\\workspace\\sessions\\abc" },
+    );
+    expect(html).not.toContain('data-conversation-file-references="true"');
+    // The body itself still renders; only the chip row waits for settle.
+    expect(html).toContain("产物已生成");
+  });
+
+  it("renders no chip row when the answer carries no whitelisted references", () => {
+    const html = renderConversation(
+      [assistantMessage("message-no-refs", "只有普通说明文本。", "completed")],
+      { sessionWorkspacePath: "C:\\workspace\\sessions\\abc" },
+    );
+    expect(html).not.toContain('data-conversation-file-references="true"');
   });
 });

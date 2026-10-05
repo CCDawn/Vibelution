@@ -2544,6 +2544,11 @@ class AgentRuntime:
             excluded.extend(["GIT_MEMORY", "RUNTIME_LOG_INDEX"])
         elif stable_session_prompt:
             excluded.append("RUNTIME_LOG_INDEX")
+        # Chat-scoped output convention (local file references as clickable
+        # Markdown links): only CHAT-mode sessions carry this section, so the
+        # research/evolution prefixes never absorb it.
+        if self._get_mode_policy().mode != AgentMode.CHAT:
+            excluded.append("SESSION_FILE_REFERENCES")
         if bool(getattr(self, "_core_prompt_snapshot_seeded_by_host", False)):
             excluded.extend(CORE_PROMPT_NAMES)
         if bool(getattr(self, "_supervised_judge_execution_profile", False)):

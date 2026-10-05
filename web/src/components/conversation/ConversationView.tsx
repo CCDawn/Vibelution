@@ -124,6 +124,7 @@ import {
   parseUserSlashCommandEcho,
   resolveUserSlashCommandTone,
 } from "./ConversationSlashCommandChip";
+import { ConversationFileReferenceChips } from "./ConversationFileReferenceChips";
 import {
   insertSlashCommandSuggestion,
   groupSlashCommandSuggestionsBySection,
@@ -4738,6 +4739,7 @@ export const ConversationView = React.memo(function ConversationView({
             assistantTurnIsStreaming(message),
             imageArtifactUrlsBeforeMessage.get(message.id),
           )}
+          {renderAssistantFileReferenceChips(message, text)}
         </section>
       );
     }
@@ -5631,6 +5633,7 @@ export const ConversationView = React.memo(function ConversationView({
         data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
       >
         {segments.map((segment) => renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)))}
+        {renderAssistantFileReferenceChips(message, item.text)}
       </section>
     );
   }
@@ -6481,6 +6484,25 @@ export const ConversationView = React.memo(function ConversationView({
         renderImage={renderMarkdownImage}
         workspaceRoot={sessionWorkspacePath}
         language={lang}
+      />
+    );
+  }
+
+  /**
+   * ZCode AssistantPreviewCards parity: a settled assistant answer surfaces
+   * the whitelisted local file references found in its final markdown as a
+   * clickable chip row (same open/reveal/copy semantics as the inline
+   * workspace-file links). Streaming turns stay chip-free; markdown-linked
+   * workspace files are already clickable inline, so the extractor suppresses
+   * them from the row instead of double-presenting.
+   */
+  function renderAssistantFileReferenceChips(message: ConversationMessage, text: string) {
+    if (assistantTurnIsStreaming(message)) {
+      return null;
+    }
+    return (
+      <ConversationFileReferenceChips
+        text={text} workspaceRoot={sessionWorkspacePath} language={lang}
       />
     );
   }

@@ -699,6 +699,46 @@ Settled 会话 markdown 里的工作区文件链接升级为可操作目标：�
 - 不新建第二套文件链接/路径菜单；动作行复用 `VDropdownMenu` item，不直连 shadcn renderer。
 - 分类与动作分层：分类器纯函数零副作用，桥探测只读同一 `vibelutionLauncher` 全局，禁止第二通道。
 
+## Assistant 文件引用 chip 行
+
+### 功能
+Settled assistant 回答正文里"以纯文本/代码块形态出现的本地文件引用"升级为可点击 chip 行（ZCode AssistantPreviewCards 对齐，v1 收紧四类形态）：纯路径 fenced 块（每行都是路径才整块生效）、正文裸盘符/UNC 绝对路径、双/单引号包裹路径（相对路径按会话工作区根解析）、markdown 链接 href 仅用于去重抑制（已可点的不重复成 chip）。提取走扩展名白名单（.md/.html/.htm/.docx/.xlsx/.pptx/.pdf + png/jpg/jpeg/gif/webp/svg + mp3/wav/mp4/webm），白名单外一律不提取。chip 点击经桌面桥 `openPath` 打开；桥不可用或 shell 失败降级复制路径 + 行内轻提示；右键「打开方式」菜单（`VDropdownMenu`）与行内文件链接同语义：打开（系统默认）/ 在文件夹中显示 / 复制路径。
+
+### 适用范围
+- **适用**：settled assistant 消息正文渲染之后的一行 chip（timeline assistant_text 单元与 codex assistant_markdown 终态单元两个挂载点，共用同一个 settled 门与 `sessionWorkspacePath`）。
+- **不适用**：流式进行中（`assistantTurnIsStreaming` 为真不渲染）；无白名单引用的消息；无工作区根时的相对路径引用（绝对路径引用不受影响）；用户消息/思考/工具单元。
+
+### 使用方式
+```tsx
+// ConversationView 内部 helper 挂载；正文单元渲染后追加，不直接对外。
+<ConversationFileReferenceChips text={item.text} workspaceRoot={sessionWorkspacePath} language={lang} />
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| text | settled assistant 最终 markdown 文本 | 提取器纯函数，含 fenced/inline code 原文 |
+| workspaceRoot | 会话工作区根 | 相对引用解析根；缺省仅绝对路径出 chip |
+| language | 菜单/提示文案语言 | 组件内双语，文案不经 dictionaryChat |
+
+### 非职责
+- 不做文件预览、不读文件内容；打开/显示/复制全部委托 `conversationMarkdownWorkspaceFileActions` 桌面桥封装。
+- 不重复呈现 markdown 链接目标（提取器把已链接文件从 chip 行排除，正文内联链接仍是唯一可点形态）。
+- 不承担 `ConversationFileDeliveries` 的职责：那是本轮工具改动文件卡（diff/回退），数据源是工具单元与 changedFiles 元数据，与正文文本引用无关。
+
+### 视觉与状态
+- 一行 `role="list"` 轻量 chip：文件族图标（FileText/Image/FileAudio/Film）+ 文件名（mono truncate）+ 扩展名徽标（uppercase 小徽标），中性 surface + subtle border，读作附件而非第二回答块。
+- 降级提示行内 `role="status"`、自动消退约 2.4s，与行内链接降级同一节奏。
+- 上下文菜单直接消费 `VDropdownMenu` 自带壳，本组件只出 items 与锚点坐标。
+
+### 实现落点
+- 提取器（纯）：`web/src/components/conversation/conversationFileReferences.ts`
+- 组件：`web/src/components/conversation/ConversationFileReferenceChips.tsx` + `.styles.ts`
+- 挂载：`web/src/components/conversation/ConversationView.tsx`（`renderAssistantFileReferenceChips` helper；timeline 文本单元 + codex 终态 markdown 单元）
+
+### 反冗余
+- 不新建第二套打开/显示/复制动作；桥动作与降级语义复用 `conversationMarkdownWorkspaceFileActions`。
+- chip 壳用 `VButton`（ghost compact）+ `VDropdownMenu`，不直连 shadcn renderer，不引第二套菜单。
+
 ## Mermaid 代码块
 
 ### 功能

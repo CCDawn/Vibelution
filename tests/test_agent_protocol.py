@@ -300,7 +300,13 @@ def test_supervised_system_prompt_excludes_global_git_and_runtime_diagnostics():
     prompt = agent._build_system_prompt_for_turn(stable_session_prompt=False)
 
     assert prompt == "supervised prompt"
-    assert captured["excluded_sections"] == ["GIT_MEMORY", "RUNTIME_LOG_INDEX"]
+    # Supervised evolution is non-CHAT, so the chat-scoped file-reference
+    # convention section rides the same exclusion list.
+    assert captured["excluded_sections"] == [
+        "GIT_MEMORY",
+        "RUNTIME_LOG_INDEX",
+        "SESSION_FILE_REFERENCES",
+    ]
 
 
 def test_system_prompt_reuse_follows_runtime_state_key_not_git():
@@ -382,9 +388,12 @@ def test_direct_chat_prompt_build_excludes_global_runtime_log_index():
     assert agent._build_system_prompt_for_turn(stable_session_prompt=True) == "session system prompt"
     assert agent._build_system_prompt_for_turn(stable_session_prompt=False) == "session system prompt"
 
+    # The bare runtime fixture resolves to the default (non-CHAT) mode, so the
+    # chat-scoped file-reference convention is excluded on both calls; a real
+    # web-chat runtime runs under AgentMode.CHAT and carries it.
     assert build_calls == [
-        {"exclude": ["RUNTIME_LOG_INDEX"]},
-        {},
+        {"exclude": ["RUNTIME_LOG_INDEX", "SESSION_FILE_REFERENCES"]},
+        {"exclude": ["SESSION_FILE_REFERENCES"]},
     ]
 
 
@@ -400,7 +409,13 @@ def test_session_core_snapshot_replaces_prompt_manager_core_without_duplicates()
 
     assert build_calls == [
         {
-            "exclude": ["RUNTIME_LOG_INDEX", "COMMON", "SOUL", "AGENTS"],
+            "exclude": [
+                "RUNTIME_LOG_INDEX",
+                "SESSION_FILE_REFERENCES",
+                "COMMON",
+                "SOUL",
+                "AGENTS",
+            ],
             "frozen_core_sections": ["COMMON", "SOUL", "AGENTS"],
         }
     ]
@@ -558,6 +573,40 @@ def test_numbered_task_list_without_confirmation_keeps_user_goal():
     )
 
     assert goal == prompt
+
+
+def test_session_file_references_section_scoped_to_chat_mode_turns():
+    # 聊天会话文件引用约定章节只在 CHAT 模式回合生效：非聊天模式（科研流水线、
+    # 进化等）一律排除，避免打进它们的前缀缓存；stable_session_prompt 仅影响
+    # RUNTIME_LOG_INDEX，与本章节无关。
+    def policy(mode: AgentMode) -> ModePolicy:
+        return ModePolicy(
+            mode=mode,
+            orchestrator_kind="test",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=True,
+            runtime_input_builder=lambda content: content,
+        )
+
+    agent = AgentRuntime.__new__(AgentRuntime)
+    agent.mode_policy = policy(AgentMode.CHAT)
+    chat_excluded = agent._excluded_system_prompt_sections_for_turn(
+        stable_session_prompt=True,
+    )
+    assert "SESSION_FILE_REFERENCES" not in chat_excluded
+
+    agent.mode_policy = policy(AgentMode.SUPERVISED_EVOLUTION)
+    evolution_excluded = agent._excluded_system_prompt_sections_for_turn(
+        stable_session_prompt=False,
+    )
+    assert "SESSION_FILE_REFERENCES" in evolution_excluded
+    # 排除去重：两次调用不产生重复项。
+    assert len(evolution_excluded) == len(set(evolution_excluded))
 
 
 def _canonical_agent_test_outcome(*, text="", reasoning_deltas=()):
@@ -2052,7 +2101,7 @@ class TestToolMessageFlow:
             update_current_goal=lambda goal: None,
             set_runtime_goal_packet=lambda packet: None,
             clear_state_memory=lambda persist=True: None,
-            build=lambda: "stable system prompt",
+            build=lambda **kwargs: "stable system prompt",
         )
         agent._active_turn_messages = []
         agent._active_turn_goal = None
@@ -2366,7 +2415,7 @@ class TestToolMessageFlow:
             update_current_goal=lambda goal: None,
             set_runtime_goal_packet=lambda packet: None,
             clear_state_memory=lambda persist=True: None,
-            build=lambda: "stable system prompt",
+            build=lambda **kwargs: "stable system prompt",
         )
         agent._active_turn_messages = []
         agent._active_turn_goal = None
@@ -2636,7 +2685,7 @@ class TestToolMessageFlow:
             update_current_goal=lambda goal: None,
             set_runtime_goal_packet=lambda packet: None,
             clear_state_memory=lambda persist=True: None,
-            build=lambda: "stable system prompt",
+            build=lambda **kwargs: "stable system prompt",
         )
         agent._active_turn_messages = []
         agent._active_turn_goal = None
@@ -5830,7 +5879,7 @@ class TestLocalProviderBootstrap:
             update_current_goal=lambda _goal: None,
             set_runtime_goal_packet=lambda _packet: None,
             clear_state_memory=lambda persist=True: None,
-            build=lambda: "stable system prompt",
+            build=lambda **kwargs: "stable system prompt",
         )
         agent.git_memory = SimpleNamespace(
             refresh_git_memory=lambda force=False: SimpleNamespace(
@@ -6226,7 +6275,7 @@ class TestLocalProviderBootstrap:
             def clear_state_memory(self, persist=False):
                 pass
 
-            def build(self):
+            def build(self, **_kwargs):
                 return "system"
 
         monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: DummyPromptManager())
@@ -7038,7 +7087,7 @@ class TestRuntimeStateMemoryFlow:
             def clear_state_memory(self, persist=True):
                 return None
 
-            def build(self):
+            def build(self, **_kwargs):
                 captured["goal_seen_during_build"] = self.current_goal
                 captured["packet_seen_during_build"] = self.runtime_goal_packet
                 raise RuntimeError("stop_after_build")
@@ -7156,7 +7205,7 @@ class TestRuntimeStateMemoryFlow:
             def clear_state_memory(self, persist=True):
                 return None
 
-            def build(self):
+            def build(self, **_kwargs):
                 captured["goal_seen_during_build"] = self.current_goal
                 captured["packet_seen_during_build"] = self.runtime_goal_packet
                 raise RuntimeError("stop_after_build")

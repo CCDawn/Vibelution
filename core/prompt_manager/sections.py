@@ -614,6 +614,33 @@ def make_session_child_routing_section() -> SystemPromptSection:
     )
 
 
+def make_session_file_references_section() -> SystemPromptSection:
+    """聊天会话文件引用输出约定 — 仅 CHAT 模式会话生效（ZCode desktop 对齐）。
+
+    措辞对齐 ZCode desktop 场景章节：本地文件引用输出为 Markdown 链接，
+    路径用绝对路径或含工作区目录段；本地 Web URL 同样走 Markdown 链接。
+    非聊天模式（科研流水线、进化等）的回合在 agent 侧按模式排除本章节，
+    不进它们的前缀缓存。
+    """
+
+    def compute() -> str:
+        return (
+            "## 文件与链接引用\n"
+            "- 除非用户另有说明，本地文件引用一律输出为 Markdown 链接，例如 [report.html](C:/workspace/output/report.html)。\n"
+            "- 文件路径使用绝对路径，或包含工作区目录段以便按工作区解析。\n"
+            "- 本地 Web URL（如本地服务地址）同样输出为 Markdown 链接，例如 [预览](http://127.0.0.1:8080)。\n"
+        )
+
+    return SystemPromptSection(
+        name="SESSION_FILE_REFERENCES",
+        compute=compute,
+        cache_break=False,
+        cache_prefix=True,
+        priority=37,
+        description="聊天会话的本地文件引用输出约定（Markdown 链接形态）",
+    )
+
+
 def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
     """SPEC 运行时摘要层 — 只保留当前模式最关键的硬纪律。"""
 
@@ -746,6 +773,7 @@ def create_default_sections(
     sections.append(make_config_awareness_section())
     sections.append(make_language_awareness_section())
     sections.append(make_session_child_routing_section())
+    sections.append(make_session_file_references_section())
     sections.append(make_reading_rules_section())
     sections.append(make_git_rules_section(project_root))
 
