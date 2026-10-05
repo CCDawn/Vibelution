@@ -29,9 +29,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**84**
+- Facade `*_service.py`：**89**
 - 有 pack README：**7**
-- 仅单文件 facade：**77**
+- 仅单文件 facade：**82**
 
 ## Domain 速查
 
@@ -40,7 +40,7 @@
 | Session / Chat hot path (`session`) | 2 |
 | Team workflow / SC / experiment (`team_workflow`) | 1 |
 | Team registry / canvas (`team`) | 3 |
-| Agent directory / config (`agent`) | 19 |
+| Agent directory / config (`agent`) | 24 |
 | Chat room / conversation index (`chat`) | 3 |
 | Knowledge / RAG (`knowledge`) | 5 |
 | Memory (`memory`) | 4 |
@@ -98,6 +98,11 @@
 | `agent_perception_service.py` | Operator-scoped perception configuration, bounded source reads and native background runs. | `agent_perception/` | `agents.py` | `test_agent_perception_policy.py`, `test_agent_perception_service.py`, `test_agent_perception_routes.py`, `test_agent_perception_runtime.py` |
 | `financial_assistant_service.py` | Financial specialist entry and explicit setup over native Agent/Session/knowledge lifecycle. | — | `financial_assistant.py` | `test_financial_assistant_service.py` |
 | `financial_market_service.py` | Read-only public A-share quotes, OHLC and search with source/time/unit validation. | — | `financial_assistant.py` | `test_financial_market_service.py` |
+| `financial_paper_service.py` | Simulation-only ledger for the financial Agent. | `financial_paper/` | `financial_paper.py` | `test_financial_paper_service.py` |
+| `financial_portfolio_service.py` | Read-only portfolio research derived from an Agent's paper ledger. | — | `financial_portfolio.py` | `test_financial_portfolio_service.py` |
+| `financial_preferences_service.py` | Explicit user preferences over canonical Agent personal memory. | — | `financial_preferences.py` | `test_financial_preferences_service.py` |
+| `financial_research_service.py` | Read-only market screening and cited stock research projections. | — | `financial_research.py` | `test_financial_research_service.py` |
+| `financial_team_service.py` | Native financial multi-analyst collaboration. | `financial_team/` | `financial_team.py` | `test_financial_team_service.py`, `test_financial_team_coordinator.py` |
 | `agent_plugin_service.py` | Trusted first-party Agent plugin catalog and binding facade. | — | `agent_plugins.py` | `test_virtual_human_life_api.py` |
 | `agent_role_tool_profile_service.py` | Single source of truth for fixed-role Agent tool profiles. | — | — | `test_tool_policy_evaluator.py`, `test_tool_authorization_contract.py`, `test_agent_role_tool_profile_service.py` |
 | `agent_tool_governance_service.py` | Controlled Agent tool-permission governance. | — | `agents.py` | `test_agent_support_route_contract.py`, `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py` |
