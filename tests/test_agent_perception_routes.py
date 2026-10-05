@@ -236,6 +236,8 @@ def test_real_service_runtime_http_projection_save_close_and_cancel(monkeypatch,
         "dailyRuns": {"2026-10-05": 1},
         "activeRun": {
             "runId": "run-1", "topicId": "topic-1", "status": "running",
+            # This scenario projects a same-process run, not a restored permit.
+            "bootEpoch": perception_runtime._BOOT_EPOCH,
             "sessionId": "session-1", "turnId": "turn-1", "startedAt": "2026-10-05T11:00:00Z",
             "finishedAt": None, "policyFingerprint": fingerprint, "toolCallsUsed": 2,
             "sourceReadCallsUsed": 3, "inputTokensUsed": 64, "outputCharsUsed": 120,
