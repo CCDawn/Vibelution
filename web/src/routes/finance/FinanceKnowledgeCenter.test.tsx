@@ -45,6 +45,7 @@ describe("Finance knowledge center", () => {
     api.preferences.mockResolvedValue({ agentId: assistant.agentId, memoryEnabled: true, items: [{ id: "preference-1", text: "现金流优先", createdAt: "" }], limit: 200 });
     await act(async () => resolve({ id: "preference-1" })); await settle();
     expect(container.textContent).toContain("已保存偏好"); expect(container.textContent).toContain("现金流优先");
+    expect(container.textContent).not.toContain("暂无已保存记忆");
     expect(draft).not.toHaveBeenCalled();
   });
   it("keeps unavailable or disabled memory visible without claiming a write", async () => {
@@ -59,11 +60,21 @@ describe("Finance knowledge center", () => {
     api.skills.mockResolvedValue({ skills: [skill] }); api.detail.mockResolvedValue(skill);
     await render("skills");
     await act(async () => button("Evidence review").click()); await settle();
+    expect(api.detail).toHaveBeenCalledWith("evidence-review");
     expect(container.textContent).toContain(skill.content);
     expect(draft).not.toHaveBeenCalled();
     await act(async () => button("用此技能研究").click());
     expect(draft).toHaveBeenCalledWith(expect.stringMatching(/^\/evidence-review\n/));
     expect(draft.mock.calls[0][0]).toContain(stock.ticker);
+  });
+  it("lists a native executable skill command once across mirrored sources", async () => {
+    const skill = { name: "Evidence review", command: "/evidence-review", description: "核对原始证据", source: "agents", content: "Native selected source body" };
+    api.skills.mockResolvedValue({ skills: [skill, { ...skill, source: "codex" }] }); api.detail.mockResolvedValue(skill);
+    await render("skills");
+    expect([...container.querySelectorAll("button")].filter((node) => node.textContent?.includes(skill.name))).toHaveLength(1);
+    await act(async () => button(skill.name).click()); await settle();
+    expect(api.detail).toHaveBeenCalledWith("evidence-review");
+    expect(container.textContent).toContain(skill.content);
   });
   it("offers five lessons and resets the quiz before starting a real research exercise", async () => {
     await render("learning");

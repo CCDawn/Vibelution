@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteChatSession, fetchSessionDetail, querySessions } from "../../api/chat";
 import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchive";
 import { createFinancialAssistant, listFinancialAssistants, type FinancialAssistant } from "../../api/financialAssistant";
-import { FetchJsonHttpError } from "../../api/client";
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 import { useFinanceSessionLifecycle } from "./useFinanceSessionLifecycle";
@@ -93,7 +92,7 @@ describe("native financial research lifecycle", () => {
     const confirmation = () => [...document.querySelectorAll("[role=dialog] button")].find((button) => button.textContent === "删除研究") as HTMLButtonElement;
     await act(async () => confirmation().click()); await settle();
     expect(indexedIds()).toContain("current");
-    vi.mocked(fetchSessionDetail).mockRejectedValueOnce(new FetchJsonHttpError("session not found", { status: 404 }));
+    vi.mocked(fetchSessionDetail).mockRejectedValueOnce(new Error("session not found"));
     await act(async () => confirmation().click()); await settle();
     expect(deleteChatSession).toHaveBeenCalledTimes(2);
     expect(indexedIds()).not.toContain("current");

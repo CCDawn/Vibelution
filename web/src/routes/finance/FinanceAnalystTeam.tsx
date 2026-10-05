@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Building2, Circle, ExternalLink, Loader2, Newspaper, Play, RefreshCw, ShieldAlert, StopCircle, TrendingUp } from "lucide-react";
 import { fetchSessionDetail, stopSessionTurn } from "../../api/chat";
-import { isFetchJsonHttpError } from "../../api/client";
 import {
   createFinancialTeamRun,
   fetchFinancialTeam,
   fetchFinancialTeamRuns,
   financialTeamKeys,
+  isFetchJsonHttpError,
   provisionFinancialTeam,
   recordFinancialTeamTurn,
   submitFinancialTeamPrimaryRole,

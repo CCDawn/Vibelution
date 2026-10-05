@@ -11,7 +11,8 @@ const api = vi.hoisted(() => ({
   team: vi.fn(), provision: vi.fn(), runs: vi.fn(), create: vi.fn(), session: vi.fn(), primary: vi.fn(),
   record: vi.fn(), debate: vi.fn(), synthesis: vi.fn(), stop: vi.fn(),
 }));
-vi.mock("../../api/financialTeam", () => ({
+vi.mock("../../api/financialTeam", async () => ({
+  ...await vi.importActual<typeof import("../../api/financialTeam")>("../../api/financialTeam"),
   createFinancialTeamRun: api.create,
   fetchFinancialTeam: api.team,
   fetchFinancialTeamRuns: api.runs,

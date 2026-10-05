@@ -1,4 +1,5 @@
 import { fetchJson } from "./client";
+export { isFetchJsonHttpError } from "./client";
 import type {
   FinancialTeam,
   FinancialTeamRun,
