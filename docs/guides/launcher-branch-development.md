@@ -14,7 +14,7 @@
 
    交互式 PowerShell 可以用调用运算符 `&` 等待原生 Launcher 并读取 `$LASTEXITCODE`。自动化程序应使用 `.NET System.Diagnostics.Process`，设置 `UseShellExecute = false`、`CreateNoWindow = true`，并只对返回的原生 Launcher 进程调用 `WaitForExit()`。禁止用 `Start-Process -Wait` 做退出码验收；它可能把后代 Electron/Python 生命周期也纳入等待，无法证明原生命令自身已经结算。
 3. 原生 Launcher 通过 Python bridge 启动或复用共享 Electron 壳。Electron 的 single-instance `additionalData` envelope 携带目标 `projectRoot`、`openWorkbench` 和 lifecycle command；共享壳据此把 `start`、`restart`、`stop` 路由到指定 worktree，而不是默认路由到 `main`。
-4. `%LOCALAPPDATA%\Vibelution\instances.json` 是隔离实例的运行权威，不依赖 worktree 内的 `state.json`。启动完成后核对目标项的 `desiredState == "open"`、`phase/status == "steady"`、generation 已前进、`spawnPid != 0`，并且 `portLeaseStatus == "held"`。启动 claim 必须原子持有端口租约；停止完成后应为 `closed/closed`、`spawnPid == 0`，租约转为 `reclaimable`。
+4. `%LOCALAPPDATA%\Vibelution\instances.json` 是隔离实例的运行权威，不依赖 worktree 内的 `state.json`。启动完成后核对目标项的 `desiredState == "open"`、`phase/status == "steady"`、generation 已前进、`spawnPid != 0`，并且 `portLeaseStatus == "held"`。启动 claim 必须原子持有端口租约；停止完成后 `desiredState/status` 应为 `closed/closed`、`spawnPid == 0`，租约转为 `reclaimable`。当前 registry 的 `phase == "steady"` 表示停止迁移已结算，不要求该字段变成 `closed`。
 5. 用 `scripts/desktop_debug.py --project "<integration-root>"` 发现当前 Launcher，再从目标实例记录取得端口和工作台 URL。不要默认使用 `8000`，不要用 `main` 工作台代替任务实例。Launcher 分支列表应显示目标 `alive == true`、`startable == false`；实际后端 PID 以目标健康响应和 registry 进程身份校验为准。
 6. 对目标实例请求 `/api/health`，核对：`routesReady == true`、`workspaceRoot` 精确等于任务目录、`serving.backend.head` 对应任务版本，以及 `serving.frontend.builtFromCommit` 和构建产物来自任务目录。`workspaceRoot` 是当前健康端口属于哪个 checkout 的直接代码归属证据。未提交开发态同时记录 `dirty`、`dirtyTreeDigest`；提交或修改后重新判断该证据是否仍对应被验收内容。
 7. 在这个 URL / 窗口完成任务行为验证。记录实例目录、端口、真实 PID、版本和实际操作结果；CLI 返回零或 registry 接收命令，只代表该层结果，不能替代健康、窗口和行为验证。

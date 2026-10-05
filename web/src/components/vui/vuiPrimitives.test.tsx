@@ -91,7 +91,13 @@ describe("VUI foundation primitives", () => {
     expect(tailwindEntry).toContain('@source "../routes/ChatCodingRoute.tsx";');
     expect(tailwindEntry).toContain('@source "../routes/chat/ChatCodingRouteWorkbench.tsx";');
     expect(tailwindEntry).toContain('@source "../routes/chat/**/*.{ts,tsx}";');
-    expect(tailwindEntry).not.toContain(".test");
+    const scannedSources = Array.from(
+      tailwindEntry.matchAll(/^\s*@source\s+"([^"]+)";/gm),
+      (match) => match[1],
+    );
+    expect(scannedSources.length).toBeGreaterThan(0);
+    expect(scannedSources.join("\n")).not.toContain(".test");
+    expect(tailwindEntry).toContain('@source not "../routes/finance/**/*.test.{ts,tsx}";');
   });
 
   it("wraps children in the VUI/shadcn provider boundary", () => {

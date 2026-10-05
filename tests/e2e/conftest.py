@@ -31,6 +31,19 @@ def e2e_enabled() -> bool:
     return os.environ.get("VIBELUTION_E2E") == "1"
 
 
+def pytest_collection_modifyitems(items) -> None:
+    """Keep the body watchdog; lifecycle fixtures have their own IO deadlines.
+
+    Windows' thread timeout exits pytest without teardown. It must not cut off
+    a legitimate frontend build or native startup before stop/cleanup can run.
+    """
+    if not e2e_enabled():
+        return
+    for item in items:
+        if Path(str(item.path)).is_relative_to(E2E_DIR) and item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(func_only=True))
+
+
 @dataclass
 class E2EInstance:
     """一次会话级分支实例的运行事实。"""

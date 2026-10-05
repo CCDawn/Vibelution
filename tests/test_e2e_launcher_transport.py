@@ -1,13 +1,59 @@
 """E2E 生命周期通道边界：保留 native、拒绝误操作、不重试或关闭共享壳。"""
 
-from contextlib import contextmanager
 import os
+from contextlib import contextmanager
 from subprocess import CompletedProcess, TimeoutExpired
 from types import SimpleNamespace
 
 import pytest
 
 from tests.e2e.helpers import launcher, launcher_ipc
+
+
+def test_native_e2e_deadline_outlives_product_startup_envelope():
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "scripts/windows_launcher_entry/VibelutionLauncher.cs").read_text(encoding="utf-8")
+    budget = re.search(r"bridgeTimeoutMs\s*=\s*startup\s*\?\s*(\d+)", source)
+    assert budget is not None, "Native Launcher deadline contract moved; review the E2E budget"
+    assert launcher.START_TIMEOUT_SECONDS > int(budget.group(1)) / 1000
+
+
+def test_e2e_fixture_lifecycle_keeps_test_body_watchdog(monkeypatch, pytestconfig):
+    import pytest_timeout
+
+    from tests.e2e import conftest
+
+    monkeypatch.setenv("VIBELUTION_E2E", "1")
+    markers = []
+    item = SimpleNamespace(
+        path=conftest.E2E_DIR / "test_team_bootstrap_journeys.py",
+        config=pytestconfig,
+        get_closest_marker=lambda name: markers[-1].mark if markers else None,
+        add_marker=markers.append,
+    )
+    before = pytest_timeout._get_item_settings(item)
+    conftest.pytest_collection_modifyitems([item])
+    after = pytest_timeout._get_item_settings(item)
+    assert after.func_only is True
+    assert after.timeout == before.timeout and after.timeout > 0
+
+
+@pytest.mark.parametrize("boundary", ["disabled", "explicit-timeout", "outside-e2e"])
+def test_e2e_watchdog_hook_preserves_other_timeout_contracts(monkeypatch, boundary):
+    from tests.e2e import conftest
+
+    monkeypatch.setenv("VIBELUTION_E2E", "0" if boundary == "disabled" else "1")
+    explicit = pytest.mark.timeout(17, func_only=False).mark if boundary == "explicit-timeout" else None
+    added = []
+    item = SimpleNamespace(
+        path=(conftest.E2E_DIR.parent if boundary == "outside-e2e" else conftest.E2E_DIR) / "test_boundary.py",
+        get_closest_marker=lambda name: explicit,
+        add_marker=added.append,
+    )
+    conftest.pytest_collection_modifyitems([item])
+    assert added == []
 
 
 def test_default_transport_preserves_native(monkeypatch, tmp_path):
@@ -17,7 +63,21 @@ def test_default_transport_preserves_native(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher, "run_launcher_command", lambda *args, **kwargs: calls.append((args, kwargs)) or CompletedProcess([], 0))
     launcher.start_instance(tmp_path)
     launcher.stop_instance(tmp_path)
-    assert calls == [((tmp_path, "start"), {"hidden_presentation": True}), ((tmp_path, "stop"), {"hidden_presentation": False})]
+    assert calls == [
+        ((tmp_path, "start"), {"hidden_presentation": True, "timeout_seconds": 915.0}),
+        ((tmp_path, "stop"), {"hidden_presentation": False, "timeout_seconds": 300.0}),
+    ]
+
+
+def test_native_stop_keeps_its_original_bounded_budget(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIBELUTION_E2E_LAUNCHER_TRANSPORT", "native")
+    executable = tmp_path / "Launcher.exe"
+    executable.touch()
+    monkeypatch.setattr(launcher, "LAUNCHER_EXE", executable)
+    calls = []
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: calls.append(kwargs) or CompletedProcess([], 0))
+    launcher.stop_instance(tmp_path)
+    assert calls[0]["timeout"] == 300.0
 
 
 @pytest.mark.parametrize("transport", ["", "unknown"])

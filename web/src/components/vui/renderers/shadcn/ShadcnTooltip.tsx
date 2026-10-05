@@ -286,32 +286,35 @@ export function ShadcnTooltip({
           {trigger}
         </TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
-          <TooltipPrimitive.Content
-            data-vui="tooltip-content"
-            data-renderer="radix"
-            sideOffset={6}
-            collisionPadding={8}
-            className={[
-              "z-[100] select-none whitespace-normal break-words rounded-[var(--vui-radius-soft)] border",
-              "bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,transparent)] px-3 py-2",
-              "[font-size:var(--vui-font-xs)] font-medium leading-[1.5]",
-              "shadow-[var(--vui-elevation-overlay)] backdrop-blur-xl [text-wrap:pretty]",
-              widthClassName[width],
-              toneClassName[tone],
-              className,
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          >
-            {content}
-            {showArrow ? (
-              <TooltipPrimitive.Arrow
-                className="fill-[color-mix(in_srgb,var(--vui-surface-panel)_96%,transparent)]"
-                width={11}
-                height={6}
-              />
-            ) : null}
-          </TooltipPrimitive.Content>
+          {/* Popper's positioning wrapper must inherit the same hit policy. */}
+          <div className="pointer-events-none contents">
+            <TooltipPrimitive.Content
+              data-vui="tooltip-content"
+              data-renderer="radix"
+              sideOffset={6}
+              collisionPadding={8}
+              className={[
+                "pointer-events-none z-[100] select-none whitespace-normal break-words rounded-[var(--vui-radius-soft)] border",
+                "bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,transparent)] px-3 py-2",
+                "[font-size:var(--vui-font-xs)] font-medium leading-[1.5]",
+                "shadow-[var(--vui-elevation-overlay)] backdrop-blur-xl [text-wrap:pretty]",
+                widthClassName[width],
+                toneClassName[tone],
+                className,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              {content}
+              {showArrow ? (
+                <TooltipPrimitive.Arrow
+                  className="fill-[color-mix(in_srgb,var(--vui-surface-panel)_96%,transparent)]"
+                  width={11}
+                  height={6}
+                />
+              ) : null}
+            </TooltipPrimitive.Content>
+          </div>
         </TooltipPrimitive.Portal>
       </TooltipPrimitive.Root>
     </TooltipPrimitive.Provider>

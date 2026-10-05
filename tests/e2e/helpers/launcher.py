@@ -16,6 +16,9 @@ from tests.e2e.helpers.instance_registry import launcher_log_dir_hint
 
 LAUNCHER_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Vibelution" / "Launcher" / "VibelutionLauncher.exe"
 
+# Native start owns a 900s bridge deadline (810s settlement + retry/margin).
+# Let it report its own failure before the test client cancels the command.
+START_TIMEOUT_SECONDS = 915.0
 LAUNCH_TIMEOUT_SECONDS = 300.0
 
 # 测试基础设施同样遵守产品无控制台红线：所有子进程隐藏窗口。
@@ -41,7 +44,10 @@ def _run_instance_command(
         return
     if transport != "native":
         raise LauncherCommandError(f"未知 E2E Launcher transport: {transport!r}（native|desktop_ipc）")
-    completed = run_launcher_command(project_root, command, hidden_presentation=hidden_presentation)
+    completed = run_launcher_command(
+        project_root, command, hidden_presentation=hidden_presentation,
+        timeout_seconds=START_TIMEOUT_SECONDS if command == "start" else LAUNCH_TIMEOUT_SECONDS,
+    )
     if completed.returncode != 0:
         raise LauncherCommandError(_failure(command, project_root, completed))
 
