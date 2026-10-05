@@ -175,7 +175,7 @@
 
 | 组件 | 设计说明 |
 | --- | --- |
-| `AgentPerceptionManagementPanel` | [product/agent-perception.md](./product/agent-perception.md#agentperceptionmanagementpanel) |
+| `AgentPerceptionPanel` | [product/agent-perception.md](./product/agent-perception.md#agentperceptionpanel) |
 
 ## Product — team-management
 

@@ -28,6 +28,10 @@ const previewExemptDesignSections = new Set([
   "SupervisedConversationWorkspace",
   "SelfEvolutionConversationWorkspace",
   "EvolutionSupervisedLiveSetupPanel",
+  // Route-owned composition of existing VUI APIs; AgentPerceptionPane supplies
+  // authorization, policy drafts and native Session facts. Covered by panel,
+  // Agent-selection/draft interaction tests and the formal runtime preview.
+  "AgentPerceptionPanel",
 ]);
 
 function collectPreviewSources(directory: string): string {
