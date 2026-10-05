@@ -9,13 +9,9 @@ const registryHostSource = readFileSync(
 );
 
 describe("isolated lifecycle recovery", () => {
-  it("returns a command id for already-alive starts so the window supervisor can open it", () => {
-    const marker = 'message: "已打开该分支工作台窗口。"';
-    const markerStart = mainSource.indexOf(marker);
-    expect(markerStart).toBeGreaterThan(0);
-    const resultBlock = mainSource.slice(Math.max(0, markerStart - 320), markerStart + marker.length);
-    expect(resultBlock).toContain("commandId: randomUUID()");
-  });
+  // Reuse command identity and READY CAS behavior are executed against the
+  // real main callbacks in desktopMainLauncherIpc.test.ts. A source assertion
+  // for randomUUID previously required the false-success behavior being fixed.
 
   it("uses health-identity reclaim and runtime cleanup before completing isolated stop", () => {
     const functionStart = mainSource.indexOf("async function runIsolatedRegistryMutation");
@@ -67,7 +63,7 @@ describe("isolated lifecycle recovery", () => {
     const orchestrationBody = mainSource.slice(orchestrationStart);
     expect(orchestrationBody).toContain("retireBackend: async (message)");
     expect(orchestrationBody).toContain("retireIsolatedBackendAfterStartFailure");
-    expect(orchestrationBody).toContain("if (!observed.applied)");
+    expect(orchestrationBody).toContain("expectedGeneration: observedGeneration");
   });
 
   it("claims the failed start generation before verified-tree retirement", () => {
