@@ -43,8 +43,8 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEna
   const error = view?.error || turn?.turnItems.find((item) => item.type === "error")?.text;
   const report = projectStockReport(view?.messages ?? [], view);
   const running = Boolean(view?.busy || view?.submitPending);
-  const approvalPending = Boolean(view?.approvalPending);
   const outcome = view ? researchRecordStatus(view, false) : "";
+  const approvalPending = Boolean(view?.approvalPending) && (running || !["Failed", "Stopped", "Needs continuation", "Completed"].includes(outcome));
   const stopped = outcome === "Stopped";
   const needsContinue = outcome === "Needs continuation";
   const failed = !stopped && !needsContinue && Boolean(error || outcome === "Failed" || turn?.status === "failed");
@@ -109,7 +109,7 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEna
       <VButton variant="secondary" onPress={onOpenChat}>
         {approvalPending ? (zh ? "查看并授权" : "Review and approve")
           : running ? (zh ? "查看研究 / 停止" : "View / stop research")
-          : error ? (zh ? "查看与重试" : "View and retry")
+          : error || failed ? (zh ? "查看与重试" : "View and retry")
           : (zh ? "打开研究对话" : "Open research chat")}
       </VButton>
     </div>

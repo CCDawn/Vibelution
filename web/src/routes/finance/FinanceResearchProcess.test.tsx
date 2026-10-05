@@ -19,6 +19,20 @@ const view: FinancialSessionView = { sessionId: "finance", title: "财报研究"
   { role: "assistant", id: "answer", turnId: "native-turn", timestamp: "", status: "completed", turnItems: [{ type: "agent_message", id: "final", itemId: "final", version: 3, sessionId: "finance", turnId: "native-turn", revision: 1, sequence: 1, phase: "final_answer", status: "completed", text: "## 结论\n原生研究答复。" }] },
 ] };
 describe("native financial process outcomes", () => {
+  it.each([
+    ["failed_runtime", "failed_provider", "研究未完成"],
+    ["ready", "stopped_by_user", "已停止"],
+    ["needs_continue", "needs_continue", "待继续"],
+  ])("does not show expired approvals after native %s", async (status, terminalReason, label) => {
+    const node = await render({ ...view, status, terminalReason, approvalPending: true, lastTurnTerminalTurnId: "native-turn" });
+    expect(node.querySelector('[role="status"]')?.textContent).toBe(label);
+    expect(node.textContent).not.toContain("查看并授权");
+  });
+  it("keeps current approvals visible while a new native Turn is running", async () => {
+    const node = await render({ ...view, status: "running", busy: true, approvalPending: true });
+    expect(node.querySelector('[role="status"]')?.textContent).toBe("等待授权");
+    expect(node.textContent).toContain("查看并授权");
+  });
   it.each([["partial", "部分结果"], ["fallback", "使用备用来源"], ["unavailable", "数据不可用"], ["degraded", "降级完成"]])("keeps completed %s tool outcomes visible", async (semanticStatus, label) => {
     const turn = view.messages[0];
     if (turn.role !== "assistant") throw new Error("Expected assistant fixture");

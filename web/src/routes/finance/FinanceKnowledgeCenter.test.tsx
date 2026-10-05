@@ -86,4 +86,15 @@ describe("Finance knowledge center", () => {
     await act(async () => button("用当前股票练习").click());
     expect(draft).toHaveBeenCalledWith(expect.stringContaining(stock.ticker));
   });
+  it("finds a mirrored command when the later source description matches", async () => {
+    const skill = { name: "Evidence review", command: "/evidence-review", description: "Original evidence", source: "agents" };
+    api.skills.mockResolvedValue({ skills: [skill, { ...skill, description: "Cash flow evidence", source: "codex" }] });
+    await render("skills");
+    const input = container.querySelector("input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Cash flow");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect([...container.querySelectorAll("button")].filter((node) => node.textContent?.includes(skill.name))).toHaveLength(1);
+  });
 });
