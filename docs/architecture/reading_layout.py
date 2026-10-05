@@ -85,7 +85,11 @@ GROUPS = {
     'supervised': [('基线与候选', ['start', 'baseline', 'candidate']), ('复测与同标准判断', ['rerun', 'judge']), ('审批与集成', ['decision', 'merge'])],
     'gym': [('评测与晋升门', ['eval', 'gate']), ('Gym 验证', ['episode']), ('独立的应用入口', ['promotion'])],
     'companion': [('人物专属入口', ['route', 'facade', 'plugin']), ('人物命令队列', ['mailbox', 'dispatch']), ('原生会话接入', ['submitter', 'native'])],
-    'finance': [('页面与 Setup', ['ui', 'route', 'setup']), ('建立专业工作区', ['agent', 'kb', 'session']), ('状态投影', ['projection'])],
+    'finance': [('页面与助手初始化', ['ui', 'route', 'setup']),
+                ('Agent 资源与原生会话', ['agent', 'kb', 'session', 'workspace']),
+                ('页面行情查询', ['marketClient', 'marketRoute', 'marketService', 'provider']),
+                ('Agent 行情工具执行', ['toolLifecycle', 'toolDefinition', 'marketAdapter']),
+                ('助手能力状态', ['projection'])],
     'storage': [('统一路径解析', ['paths', 'workspace', 'config']), ('会话事件与目录', ['journal', 'bridge', 'directory']), ('独立科研账本', ['ledger'])],
 }
 
@@ -101,6 +105,7 @@ FOCUS = {
     'self-evolution': ['start', 'observe', 'evolve', 'review', 'approve', 'integrate'],
     'supervised': ['baseline', 'candidate', 'rerun', 'decision', 'merge'],
     'companion': ['route', 'mailbox', 'dispatch', 'submitter', 'native'],
+    'finance': ['ui', 'setup', 'session', 'workspace', 'marketService', 'provider'],
 }
 
 FOCUS_LABELS = {
@@ -114,16 +119,18 @@ FOCUS_LABELS = {
     ('self-evolution', 'observe', 'evolve'): '计划后构建候选',
     ('supervised', 'rerun', 'decision'): 'Judge 复评',
     ('companion', 'route', 'mailbox'): '人物插件接收',
+    ('finance', 'ui', 'setup'): '初始化助手',
+    ('finance', 'workspace', 'marketService'): '页面行情查询',
 }
 
 LABELS = {
-    'overview': '系统如何运转', 'startup': '启动与桌面控制', 'http': '页面请求如何到达服务',
+    'overview': '运行主线：消息与回合', 'startup': '启动与桌面控制', 'http': '页面请求如何到达服务',
     'session': '一条消息的执行过程', 'stream': '实时输出与历史记录', 'llm': 'Agent 如何调用模型',
     'tools': '工具如何获得执行权限', 'teams': '团队如何投递消息', 'research': '科研工作流如何运行',
     'knowledge': '怎样检索知识与记忆', 'knowledge-write': '知识与记忆怎样写入',
     'self-evolution': '自主进化的审核与集成', 'supervised': '监督进化的评测与批准',
     'gym': 'Gym 的评测与晋升', 'companion': '人物消息如何进入 Session',
-    'finance': '金融助手如何建立工作区', 'storage': '数据在哪里，谁是权威',
+    'finance': '金融研究与公开行情', 'storage': '数据在哪里，谁是权威',
 }
 
 
@@ -216,6 +223,24 @@ def apply_reading(views):
                     column = columns - 1 - column
                 view['focusPositions'][nid] = dict(x=32 + column * 336, y=112 + row * 288)
             view['focusZones'] = []
+            if vid == 'finance':
+                # Setup assigns an Agent tool policy; it does not synchronously
+                # read market data. Keep that later execution branch in the
+                # full implementation instead of composing it into setup.
+                view['focusEdges'] = [
+                    edge for edge in view['focusEdges']
+                    if (edge['from'], edge['to']) != ('setup', 'marketService')
+                ]
+                # Parallel branches read left-to-right. A snake layout made
+                # shared routed segments look like market -> Session calls.
+                view['focusPositions'] = {
+                    nid: dict(x=32 + (index % 3) * 336, y=112 + (index // 3) * 288)
+                    for index, nid in enumerate(focus)
+                }
+                view['focusZones'] = [
+                    dict(label='助手初始化与原生会话', x=8, y=48, w=964, h=208),
+                    dict(label='研究工作台与公开行情', x=8, y=336, w=964, h=208),
+                ]
             hidden = ids - set(focus)
             view['hiddenImplementation'] = [n for n in info['readingOrder'] if n in hidden]
         else:

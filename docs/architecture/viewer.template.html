@@ -293,7 +293,6 @@
     /* Reading comes first; full source navigation stays one level deeper. */
     h2 { font-size: 23px; }
     .current-description { font-size: 13px; }
-    .top-meta #meta-commit, .top-meta #meta-generated { display: none; }
     .nav-heading { font: 650 12px/1.5 var(--sans); letter-spacing: 0; }
     .nav-item { min-height: 38px; font-size: 13px; }
     .reading-nav-group { margin: 14px 0 0; }
@@ -343,6 +342,93 @@
     .source-disclosure > summary { cursor: pointer; font-size: 12px; color: #4d657a; }
     .walk-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 15px 0; border-top: 1px solid var(--line); padding-top: 12px; }
     .walk-controls span { font-size: 11px; color: var(--muted); }
+    .source-snapshot {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px;
+      color: #52677a; font-size: 12px; line-height: 1.5;
+    }
+    .source-snapshot span { overflow-wrap: anywhere; }
+    .source-snapshot .snapshot-warning { color: #885538; font-weight: 650; }
+    .wiki-navigation[hidden], #wiki-content[hidden] { display: none; }
+    .wiki-navigation { margin-bottom: 18px; }
+    .wiki-nav-group { margin-top: 10px; }
+    .wiki-nav-group-title { margin: 5px 8px 3px; color: #5d6b7d; font-size: 12px; font-weight: 650; }
+    .wiki-domain-nav-item { min-height: 38px; font-size: 13px; }
+    .wiki-domain-nav-item[aria-current="page"] { background: #eaf2f8; color: #234d68; font-weight: 650; }
+    #wiki-content {
+      min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain;
+      border: 1px solid var(--line); border-radius: 9px; background: #fbfcfd;
+      padding: clamp(14px, 2.1vw, 28px);
+    }
+    .wiki-page { max-width: 1240px; margin: 0 auto; }
+    .wiki-page h3 { margin: 0 0 8px; font-size: 18px; line-height: 1.35; }
+    .wiki-page h4 { margin: 0 0 7px; font-size: 16px; line-height: 1.4; }
+    .wiki-page p, .wiki-page li { font-size: 14px; line-height: 1.65; }
+    .wiki-lead { max-width: 850px; margin: 0; color: #45596c; }
+    .wiki-kicker { margin: 0 0 5px; color: #52677a; font-size: 12px !important; font-weight: 700; letter-spacing: .04em; }
+    .wiki-section { margin-top: 24px; }
+    .wiki-section-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 18px; margin-bottom: 12px; }
+    .wiki-section-head p { margin: 0; color: var(--muted); }
+    .wiki-group-map { display: grid; gap: 14px; }
+    .wiki-group { border: 1px solid #d8e1e9; border-radius: 9px; background: #fff; overflow: hidden; }
+    .wiki-group-head { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid #e7edf2; }
+    .wiki-group-mark { flex: 0 0 auto; width: 12px; height: 12px; margin-top: 4px; border-radius: 3px; background: var(--group-color, #496f89); }
+    .wiki-group-head h4 { margin: 0; font-size: 16px; }
+    .wiki-group-head p { margin: 3px 0 0; color: var(--muted); font-size: 14px; }
+    .wiki-domain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 10px; padding: 12px; }
+    .wiki-domain-card {
+      min-width: 0; min-height: 132px; display: grid; align-content: start; gap: 7px;
+      border: 1px solid #d5dfe7; border-left: 4px solid var(--domain-color, #496f89);
+      border-radius: 7px; padding: 12px; background: #fff; color: var(--ink); text-align: left; cursor: pointer;
+    }
+    .wiki-domain-card:hover { border-color: #9eb3c4; background: #f7fafc; }
+    .wiki-domain-card h5 { margin: 0; font-size: 16px; line-height: 1.4; }
+    .wiki-domain-card p { margin: 0; color: #52677a; font-size: 14px; }
+    .wiki-domain-card small { color: #697b8d; font-size: 12px; }
+    .wiki-role { display: inline-flex; align-items: center; width: fit-content; border: 1px solid #d6e0e8; border-radius: 999px; padding: 2px 8px; color: #536a7d; background: #f6f9fb; font-size: 12px; }
+    .wiki-scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 9px; }
+    .wiki-scenario-card { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #d5dfe7; border-radius: 7px; padding: 9px 12px; background: #fff; color: #294d68; font-size: 14px; font-weight: 650; text-align: left; cursor: pointer; }
+    .wiki-scenario-card:hover, .wiki-related-domain:hover, .wiki-ref:hover { border-color: #9eb3c4; background: #f1f6fa; }
+    .wiki-map-note { margin: 10px 0 0; color: #5d6f81; font-size: 12px !important; }
+    .wiki-relationship-list { display: grid; gap: 8px; }
+    .wiki-relationship { min-width: 0; display: grid; grid-template-columns: minmax(115px, 1fr) auto minmax(150px, 1.4fr) auto minmax(115px, 1fr); align-items: center; gap: 8px; border: 1px solid #d8e1e9; border-radius: 7px; padding: 10px; background: #fff; }
+    .wiki-relationship-domain, .wiki-ref, .wiki-related-domain { min-width: 0; border: 1px solid #d7e1e8; border-radius: 5px; padding: 7px 9px; background: #fff; color: #315d7a; font-size: 14px; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    .wiki-relationship-label { color: #43586b; font-size: 14px; text-align: center; }
+    .wiki-arrow { color: #657b8e; font-size: 17px; text-align: center; }
+    .wiki-relation-detail { grid-column: 1 / -1; margin: 0; color: #596c7e; font-size: 13px !important; }
+    .wiki-relation-refs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+    .wiki-route-card { border: 1px solid #cddce7; border-radius: 9px; padding: 14px 16px; background: #f2f7fa; }
+    .wiki-route-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 10px; }
+    .wiki-route-step { min-height: 40px; border: 1px solid #b9cbd8; border-radius: 6px; padding: 7px 10px; background: #fff; color: #2d536f; font-size: 14px; font-weight: 650; cursor: pointer; }
+    .wiki-route-arrow { color: #647b8e; font-size: 18px; }
+    .wiki-domain-hero { border: 1px solid #d4dfe7; border-left: 5px solid var(--domain-color, #496f89); border-radius: 9px; padding: 18px; background: #fff; }
+    .wiki-domain-hero h3 { font-size: 23px; }
+    .wiki-domain-layout { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-top: 16px; }
+    .wiki-info-panel { min-width: 0; border: 1px solid #d8e1e9; border-radius: 8px; padding: 14px; background: #fff; }
+    .wiki-info-panel ul { margin: 0; padding-left: 20px; }
+    .wiki-info-panel li + li { margin-top: 5px; }
+    .wiki-entry-list { display: grid; gap: 9px; }
+    .wiki-entry { min-width: 0; border-left: 3px solid #9bb2c4; padding: 8px 10px; background: #f6f9fb; }
+    .wiki-entry strong { display: block; font-size: 14px; }
+    .wiki-entry p { margin: 3px 0 8px; color: #566a7d; }
+    .wiki-related-list, .wiki-source-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .wiki-related-domain { min-height: 40px; }
+    .wiki-ref { min-height: 36px; max-width: 100%; font-family: var(--mono); font-size: 12px; }
+    .wiki-empty { border: 1px dashed #bfccd7; border-radius: 7px; padding: 14px; color: #64778a; font-size: 14px; }
+    .wiki-domain-nav-item[aria-current="page"] .nav-dot { border-color: var(--blue); background: var(--blue); }
+    @media (max-width: 690px) {
+      #wiki-content { border-radius: 6px; padding: 13px 11px; }
+      .wiki-domain-layout { grid-template-columns: 1fr; }
+      .wiki-relationship { grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); }
+      .wiki-relationship-label { grid-column: 1 / -1; grid-row: 2; }
+      .wiki-relationship .wiki-arrow:last-of-type { display: none; }
+      .wiki-relationship-domain:last-of-type { grid-column: 3; grid-row: 1; }
+      .wiki-relationship-domain:first-of-type { grid-column: 1; grid-row: 1; }
+      .wiki-relation-detail, .wiki-relation-refs { grid-column: 1 / -1; }
+      .wiki-route-steps { align-items: stretch; }
+      .wiki-route-step { flex: 1 1 45%; }
+      .wiki-route-arrow { display: none; }
+      .source-snapshot { display: grid; gap: 2px; font-size: 12px; }
+    }
     @media (max-width: 1180px) { :root { --rail-width: 202px; --detail-width: 344px; } }
     @media (max-width: 690px) {
       :root { --rail-width: min(290px, 88vw); }
@@ -360,7 +446,7 @@
 </head>
 <body class="detail-collapsed">
   <header class="topbar">
-    <button class="button button-icon button-quiet" id="sidebar-toggle" type="button" aria-label="打开源码单元目录" aria-expanded="false" aria-controls="sidebar">☰</button>
+    <button class="button button-icon button-quiet" id="sidebar-toggle" type="button" aria-label="打开架构导航" aria-expanded="false" aria-controls="sidebar">☰</button>
     <div class="brand">
       <div class="brand-mark" aria-hidden="true">A/</div>
       <div class="brand-copy">
@@ -392,15 +478,19 @@
           </div>
           <div class="search-results" id="search-results" role="listbox" aria-label="搜索结果" hidden></div>
         </div>
+        <section class="nav-section wiki-navigation" id="wiki-navigation" aria-labelledby="wiki-navigation-heading" hidden>
+          <h2 class="nav-heading" id="wiki-navigation-heading">项目模块地图</h2>
+          <nav id="wiki-nav" aria-label="项目领域与模块"></nav>
+        </section>
         <section class="nav-section" aria-labelledby="views-heading">
-          <h2 class="nav-heading" id="views-heading"><span>从这里读起</span><span id="view-count" hidden></span></h2>
+          <h2 class="nav-heading" id="views-heading"><span>场景流程</span><span id="view-count" hidden></span></h2>
           <nav class="nav-list" id="views-nav" aria-label="架构视图"></nav>
         </section>
         <details id="source-index">
           <summary>源码索引 · 按需查阅</summary>
           <p class="source-index-note">目录归属与静态 import 用于定位实现。业务流程从上方的架构视图进入。</p>
           <section class="nav-section" aria-labelledby="domains-heading">
-            <h2 class="nav-heading" id="domains-heading"><span>领域与源码单元</span><span id="module-count"></span></h2>
+            <h2 class="nav-heading" id="domains-heading"><span>源码目录与源码单元</span><span id="module-count"></span></h2>
             <div id="domains-nav"></div>
           </section>
         </details>
@@ -418,8 +508,9 @@
           </div>
           <button class="button button-small button-quiet" id="back-button" type="button" aria-label="返回上一级">← 返回</button>
         </div>
+        <div class="source-snapshot" id="source-snapshot" aria-label="源码快照与复核状态"></div>
       </div>
-      <div class="canvas-toolbar">
+      <div class="canvas-toolbar" id="canvas-toolbar">
         <div class="graph-caption">
           <span class="reading-legend"><i></i>执行步骤</span>
           <span class="reading-legend"><i class="legend-control"></i>调度 / 权限</span>
@@ -465,6 +556,7 @@
           </div>
         </div>
       </div>
+      <section class="wiki-page" id="wiki-content" aria-label="项目架构模块地图" hidden></section>
       <div class="reading-context" id="reading-context" hidden><p id="reading-entry"></p><p id="reading-outcome"></p></div>
       <div class="related-reading" id="related-reading" aria-label="继续阅读" hidden></div>
       <div class="status-line" id="status-line" role="status" aria-live="polite"></div>
@@ -516,13 +608,14 @@
     const FILE_PAGE_SIZE = 40;
     const SYMBOL_PAGE_SIZE = 60;
     const MODAL_PAGE_SIZE = 50;
+    const HISTORY_KEY = "vibelutionArchitectureAtlas";
     const $ = function (id) { return document.getElementById(id); };
     const state = {
       data: null, route: null, graph: null, selected: null, camera: null, fitBox: null, layer: "story",
       searchPage: 0, searchTimer: 0, modalFocus: null, coveragePage: 0, coverageQuery: "",
       detailPages: Object.create(null), reverseImports: new Map(), fileByPath: new Map(),
       moduleById: new Map(), domainById: new Map(), viewById: new Map(),
-      childrenById: new Map(), modulesByDomain: new Map(), navBuilt: false
+      wiki: null, wikiPageById: new Map(), childrenById: new Map(), modulesByDomain: new Map(), navBuilt: false
     };
 
     function asArray(value) { return Array.isArray(value) ? value : []; }
@@ -667,6 +760,10 @@
       data.views = asArray(data.views);
       data.coverage = asObject(data.coverage);
       data.changes = asObject(data.changes);
+      data.wiki = asObject(data.wiki);
+      data.wiki.groups = asArray(data.wiki.groups);
+      data.wiki.pages = asArray(data.wiki.pages);
+      data.wiki.relationships = asArray(data.wiki.relationships);
       return data;
     }
 
@@ -674,6 +771,7 @@
       state.moduleById.clear();
       state.domainById.clear();
       state.viewById.clear();
+      state.wikiPageById.clear();
       state.fileByPath.clear();
       state.reverseImports.clear();
       state.childrenById.clear();
@@ -695,6 +793,11 @@
       state.data.views.forEach(function (view) {
         const id = cleanId(view.id);
         if (id) state.viewById.set(id, view);
+      });
+      state.wiki = state.data.wiki.schemaVersion === 1 ? state.data.wiki : null;
+      if (state.wiki) state.wiki.pages.forEach(function (page) {
+        const id = cleanId(page && page.id);
+        if (id) state.wikiPageById.set(id, page);
       });
       state.data.modules.forEach(function (module) {
         const parentId = cleanId(module.parent);
@@ -719,30 +822,90 @@
       });
     }
 
+    function hasWiki() {
+      return !!(state.wiki && state.wiki.schemaVersion === 1 && state.wiki.groups.length && state.wiki.pages.length);
+    }
+    function wikiPageFor(domainId) { return state.wikiPageById.get(cleanId(domainId)) || null; }
+    function currentHistoryRecord(source) {
+      const holder = asObject(source === undefined ? window.history.state : source);
+      return asObject(holder[HISTORY_KEY]);
+    }
+    function currentSelectionRef() {
+      if (!state.selected) return null;
+      if (state.selected.type === "node") return { type: "node", id: cleanId(state.selected.node && state.selected.node.id) };
+      if (state.selected.type === "edge") return { type: "edge", id: cleanId(state.selected.edge && state.selected.edge.id) };
+      return null;
+    }
+    function captureUiSnapshot(routeOverride) {
+      const route = Object.assign({}, routeOverride || state.route || {});
+      const selection = currentSelectionRef();
+      if (selection && !route.node && !route.edge) {
+        if (selection.type === "node") route.node = selection.id;
+        else route.edge = selection.id;
+      }
+      return {
+        route: route, layer: state.layer,
+        camera: state.camera ? Object.assign({}, state.camera) : null,
+        detailCollapsed: document.body.classList.contains("detail-collapsed"),
+        detailOpen: document.body.classList.contains("detail-open"),
+        sourceIndexOpen: !!$("source-index").open,
+        wikiScrollTop: $("wiki-content").scrollTop
+      };
+    }
+    function historyStateWithRecord(record) {
+      const next = Object.assign({}, asObject(window.history.state));
+      next[HISTORY_KEY] = record;
+      return next;
+    }
     function routeHash(route) {
       const params = new URLSearchParams();
-      if (route.kind === "overview") params.set("overview", "1");
+      if (route.kind === "home") params.set("home", "1");
+      else if (route.kind === "overview") params.set("overview", "1");
+      else if (route.kind === "source-domain") params.set("sourceDomain", string(route.value, ""));
       else {
         params.set(route.kind, string(route.value, ""));
         if (route.kind === "view" && route.layer === "full") params.set("layer", "full");
-        if (route.page) params.set("page", String(route.page));
         if (route.line) params.set("line", String(route.line));
         if (route.symbol) params.set("symbol", string(route.symbol, ""));
       }
+      if (route.page) params.set("page", String(route.page));
+      if (route.node) params.set("node", string(route.node, ""));
+      if (route.edge) params.set("edge", string(route.edge, ""));
       return "#" + params.toString();
+    }
+    function replaceCurrentHistorySnapshot(routeOverride) {
+      const route = Object.assign({}, routeOverride || state.route || {});
+      const previous = currentHistoryRecord();
+      const record = {
+        snapshot: captureUiSnapshot(route),
+        parentHash: string(previous.parentHash, "") || null
+      };
+      window.history.replaceState(historyStateWithRecord(record), "", routeHash(route));
     }
     function pushRoute(route) {
       const nextHash = routeHash(route);
-      if (window.location.hash !== nextHash) window.history.pushState(null, "", nextHash);
+      if (window.location.hash === nextHash) {
+        if (state.route) replaceCurrentHistorySnapshot(route);
+        return;
+      }
+      if (state.route) replaceCurrentHistorySnapshot(state.route);
+      const parentHash = window.location.hash || null;
+      const snapshot = { route: Object.assign({}, route), layer: route.layer === "full" ? "full" : "story", camera: null, detailCollapsed: true, detailOpen: false, sourceIndexOpen: !!$("source-index").open, wikiScrollTop: 0 };
+      window.history.pushState(historyStateWithRecord({ snapshot: snapshot, parentHash: parentHash }), "", nextHash);
     }
     function readRouteHash() {
       const params = new URLSearchParams(window.location.hash.slice(1));
-      if (params.has("view")) return { kind: "view", value: params.get("view"), layer: params.get("layer"), page: finite(params.get("page"), 0) };
-      if (params.has("domain")) return { kind: "domain", value: params.get("domain"), page: finite(params.get("page"), 0) };
-      if (params.has("module")) return { kind: "module", value: params.get("module"), page: finite(params.get("page"), 0) };
-      if (params.has("file")) return { kind: "file", value: params.get("file"), page: finite(params.get("page"), 0), line: finite(params.get("line"), 0), symbol: params.get("symbol") || "" };
-      if (params.has("overview")) return { kind: "overview" };
-      return null;
+      let route = null;
+      if (params.has("home")) route = { kind: "home" };
+      else if (params.has("view")) route = { kind: "view", value: params.get("view"), layer: params.get("layer"), page: finite(params.get("page"), 0) };
+      else if (params.has("sourceDomain")) route = { kind: "source-domain", value: params.get("sourceDomain"), page: finite(params.get("page"), 0) };
+      else if (params.has("domain")) route = { kind: "domain", value: params.get("domain"), page: finite(params.get("page"), 0) };
+      else if (params.has("module")) route = { kind: "module", value: params.get("module"), page: finite(params.get("page"), 0) };
+      else if (params.has("file")) route = { kind: "file", value: params.get("file"), page: finite(params.get("page"), 0), line: finite(params.get("line"), 0), symbol: params.get("symbol") || "" };
+      else if (params.has("overview")) route = { kind: "overview" };
+      if (route && params.has("node")) route.node = params.get("node");
+      if (route && params.has("edge")) route.edge = params.get("edge");
+      return route;
     }
 
     function fileForPath(path) { return state.fileByPath.get(normalizedPath(path)) || null; }
@@ -878,6 +1041,24 @@
         itemCount: domains.length, mode: "overview"
       };
     }
+    function wikiHomeGraph() {
+      return {
+        id: "__wiki_home__", title: string(state.data.meta.title, "项目架构总览"),
+        description: "按项目领域与责任分组阅读当前源码架构。场景流程和实现源码均可从模块说明继续打开。",
+        nodes: [], edges: [], mode: "wiki-home"
+      };
+    }
+    function wikiDomainGraph(domainId) {
+      const page = wikiPageFor(domainId);
+      const domain = state.domainById.get(cleanId(domainId));
+      if (!page || !domain) return null;
+      return {
+        id: "wiki-domain:" + cleanId(domainId),
+        title: string(page.title, string(domain.label, domainId)),
+        description: string(page.summary, string(domain.description, "查看此领域的职责、边界、流程和源码入口。")),
+        nodes: [], edges: [], mode: "wiki-domain", domainId: cleanId(domainId), wikiPage: page
+      };
+    }
 
     function staticGraph(view) {
       const primary = asArray(view.focusNodes);
@@ -930,32 +1111,52 @@
       return {id:"file:"+path,title:basename(path)+" · 静态依赖",description:"左侧：谁导入当前文件 · 中央：当前文件 · 右侧：当前文件导入谁。只显示已解析仓内路径；其余 import 在详情中可查。",nodes:nodes,edges:edges,page:current,pageCount:pageCount,itemCount:incoming.length+outgoing.length,mode:"file"};
     }
 
-    function setRoute(route, updateHash) {
-      state.route = route;
-      state.layer = route.layer === "full" ? "full" : "story";
+    function setRoute(route, updateHash, restoreSnapshot) {
+      route = Object.assign({}, route || {});
       if (updateHash) pushRoute(route);
-      state.selected = null;
+      if (restoreSnapshot && restoreSnapshot.route && routeHash(restoreSnapshot.route) === routeHash(route)) {
+        route = Object.assign({}, restoreSnapshot.route);
+      }
+      state.layer = route.layer === "full" ? "full" : "story";
+      if (route.kind === "view" && route.node && state.layer !== "full") {
+        const requestedView = state.viewById.get(cleanId(route.value));
+        const focus = asArray(requestedView && requestedView.focusNodes);
+        if (focus.length && !focus.includes(cleanId(route.node))) {
+          state.layer = "full";
+          route.layer = "full";
+        }
+      }
       state.detailPages = Object.create(null);
       let graph = null;
-      if (route.kind === "overview") graph = overviewGraph(route.page || 0);
-      else if (route.kind === "domain") graph = autoGroupGraph("domain", route.value, route.page || 0);
+      if (route.kind === "home" && hasWiki()) graph = wikiHomeGraph();
+      else if (route.kind === "overview") graph = overviewGraph(route.page || 0);
+      else if (route.kind === "domain") graph = hasWiki() ? wikiDomainGraph(route.value) : autoGroupGraph("domain", route.value, route.page || 0);
+      else if (route.kind === "source-domain") graph = autoGroupGraph("domain", route.value, route.page || 0);
       else if (route.kind === "module") graph = autoGroupGraph("module", route.value, route.page || 0);
-      else if (route.kind === "file") {
-        graph = fileDependencyGraph(route.value, route.page || 0);
-      } else if (route.kind === "view") {
+      else if (route.kind === "file") graph = fileDependencyGraph(route.value, route.page || 0);
+      else if (route.kind === "view") {
         const view = state.viewById.get(cleanId(route.value));
         if (view) graph = staticGraph(view);
       }
       if (!graph) {
-        route = { kind: "overview" };
-        state.route = route;
-        if (updateHash) pushRoute(route);
-        graph = overviewGraph(0);
+        route = defaultRoute();
+        state.layer = route.layer === "full" ? "full" : "story";
+        graph = route.kind === "home" ? wikiHomeGraph() : route.kind === "view" ? staticGraph(state.viewById.get(cleanId(route.value))) : overviewGraph(0);
       }
+      state.route = route;
       state.graph = graph;
-      state.camera = null;
+      state.camera = restoreSnapshot && restoreSnapshot.camera ? Object.assign({}, restoreSnapshot.camera) : null;
+      state.fitBox = graph && graph.nodes && graph.nodes.length ? boundsForGraph(graph) : null;
+      state.selected = null;
+      const graphNodes = new Map(asArray(graph.nodes).map(function (node) { return [cleanId(node.id), node]; }));
+      if (route.node && graphNodes.has(cleanId(route.node))) {
+        state.selected = { type: "node", node: graphNodes.get(cleanId(route.node)) };
+      } else if (route.edge) {
+        const edge = asArray(graph.edges).find(function (item) { return cleanId(item.id) === cleanId(route.edge); });
+        if (edge) state.selected = { type: "edge", edge: edge, from: graphNodes.get(cleanId(edge.from)), to: graphNodes.get(cleanId(edge.to)) };
+      }
       closeDrawers();
-      if (route.kind === "view") {
+      if (route.kind === "view" || route.kind === "home" || route.kind === "domain") {
         document.body.classList.add("detail-collapsed");
         $("detail-toggle").setAttribute("aria-expanded", "false");
       } else {
@@ -966,13 +1167,66 @@
       renderNavigation();
       renderHeading();
       renderPager();
-      renderDiagram(true);
+      renderDiagram(!state.camera);
       renderDetails();
-      closeDrawers();
+      if (state.selected) {
+        if (state.selected.type === "node") revealDetails();
+        else revealDetails();
+        renderReadingGuide();
+      }
+      if (restoreSnapshot) {
+        if (restoreSnapshot.sourceIndexOpen !== undefined) $("source-index").open = !!restoreSnapshot.sourceIndexOpen;
+        if (window.innerWidth > 970 && restoreSnapshot.detailCollapsed !== undefined) {
+          document.body.classList.toggle("detail-collapsed", !!restoreSnapshot.detailCollapsed);
+          $("detail-toggle").setAttribute("aria-expanded", String(!restoreSnapshot.detailCollapsed));
+        }
+        if (window.innerWidth <= 970 && restoreSnapshot.detailOpen) openDrawer("detail");
+        if (graph.mode === "wiki-home" || graph.mode === "wiki-domain") {
+          $("wiki-content").scrollTop = finite(restoreSnapshot.wikiScrollTop, 0);
+        }
+      }
+      replaceCurrentHistorySnapshot(route);
     }
 
     function renderNavigation() {
       if (state.navBuilt) { updateNavigationActive(); return; }
+      const wikiSection = $("wiki-navigation");
+      const wikiNav = $("wiki-nav");
+      wikiSection.hidden = !hasWiki();
+      clear(wikiNav);
+      if (hasWiki()) {
+        const homeButton = el("button", "nav-item wiki-home-nav-item", wikiNav);
+        homeButton.type = "button";
+        homeButton.id = "home-nav";
+        homeButton.setAttribute("data-route-kind", "home");
+        homeButton.setAttribute("aria-current", "false");
+        el("span", "nav-dot", homeButton);
+        setText(el("span", "nav-item-text", homeButton), "项目总览 · 模块地图");
+        homeButton.addEventListener("click", function () { setRoute({ kind: "home" }, true); });
+        const placed = new Set();
+        function addDomainNav(domainId, parent) {
+          const id = cleanId(domainId), domain = state.domainById.get(id);
+          if (!id || !domain || placed.has(id)) return;
+          placed.add(id);
+          const button = el("button", "nav-item wiki-domain-nav-item", parent);
+          button.type = "button";
+          button.setAttribute("data-route-kind", "domain");
+          button.setAttribute("data-route-id", id);
+          button.setAttribute("data-wiki-domain-id", id);
+          button.setAttribute("aria-current", "false");
+          el("span", "nav-dot", button);
+          setText(el("span", "nav-item-text", button), string((wikiPageFor(id) || {}).title, domain.label));
+          button.title = string((wikiPageFor(id) || {}).summary, domain.description);
+          button.addEventListener("click", function () { setRoute({ kind: "domain", value: id }, true); });
+        }
+        state.wiki.groups.forEach(function (group) {
+          const groupBox = el("div", "wiki-nav-group", wikiNav);
+          setText(el("h3", "wiki-nav-group-title", groupBox), string(group.label, group.id));
+          const list = el("div", "nav-list", groupBox);
+          asArray(group.domainIds).forEach(function (id) { addDomainNav(id, list); });
+        });
+        state.data.domains.forEach(function (domain) { addDomainNav(domain.id, wikiNav); });
+      }
       const viewsNav = $("views-nav");
       clear(viewsNav);
       const primaryIds = ["overview", "session", "llm", "storage"];
@@ -1006,7 +1260,7 @@
       clear(domainsNav);
       state.data.domains.forEach(function (domain) {
         const group = el("details", "domain-group", domainsNav);
-        const isCurrent = state.route && state.route.kind === "domain" && cleanId(state.route.value) === cleanId(domain.id);
+        const isCurrent = state.route && state.route.kind === "source-domain" && cleanId(state.route.value) === cleanId(domain.id);
         group.open = !!isCurrent;
         const summary = el("summary", "domain-summary", group);
         summary.setAttribute("data-domain-id", cleanId(domain.id));
@@ -1014,7 +1268,7 @@
         setText(el("span", "nav-count", summary), countLabel(modulesInDomain(domain.id).length));
         summary.addEventListener("click", function (event) {
           if (event.target === summary || summary.contains(event.target)) {
-            if (!group.open) setRoute({ kind: "domain", value: cleanId(domain.id) }, true);
+            if (!group.open) setRoute({ kind: "source-domain", value: cleanId(domain.id) }, true);
           }
         });
         const tree = el("div", "module-tree", group);
@@ -1058,12 +1312,14 @@
     }
 
     function updateNavigationActive() {
-      document.querySelectorAll("#views-nav .nav-item, #domains-nav .nav-item").forEach(function (button) {
+      document.querySelectorAll("#views-nav .nav-item, #domains-nav .nav-item, #wiki-nav .nav-item").forEach(function (button) {
         const kind = button.getAttribute("data-route-kind");
         const id = button.getAttribute("data-route-id");
         let active = false;
+        if (kind === "home") active = state.route && state.route.kind === "home";
         if (kind === "overview") active = state.route && state.route.kind === "overview";
         else if (kind === "view") active = state.route && state.route.kind === "view" && cleanId(state.route.value) === id;
+        else if (kind === "domain") active = state.route && state.route.kind === "domain" && cleanId(state.route.value) === id;
         else if (kind === "module") {
           const file = state.route && state.route.kind === "file" ? fileForPath(state.route.value) : null;
           active = state.route && state.route.kind === "module" && cleanId(state.route.value) === id ||
@@ -1074,7 +1330,7 @@
       document.querySelectorAll("#domains-nav .domain-group").forEach(function (group) {
         const summary = group.querySelector(".domain-summary");
         const domainId = summary && summary.getAttribute("data-domain-id");
-        let routeDomain = state.route && state.route.kind === "domain" ? cleanId(state.route.value) : "";
+        let routeDomain = state.route && state.route.kind === "source-domain" ? cleanId(state.route.value) : "";
         if (state.route && (state.route.kind === "module" || state.route.kind === "file")) {
           const file = state.route.kind === "file" ? fileForPath(state.route.value) : null;
           const module = state.moduleById.get(cleanId(state.route.kind === "module" ? state.route.value : file && file.module));
@@ -1084,6 +1340,240 @@
       });
     }
 
+    function wikiDomainLabel(domainId) {
+      const id = cleanId(domainId), page = wikiPageFor(id), domain = state.domainById.get(id);
+      return string(page && page.title, string(domain && domain.label, id || "未知领域"));
+    }
+    function wikiRoleLabel(role) {
+      return ({runtime: "运行链路", support: "支撑能力", reference: "工程与参考"})[role] || "项目领域";
+    }
+    function wikiGroupFor(domainId) {
+      return asArray(state.wiki && state.wiki.groups).find(function (group) {
+        return asArray(group.domainIds).map(cleanId).includes(cleanId(domainId));
+      }) || null;
+    }
+    function addWikiAction(parent, label, className, action, ariaLabel) {
+      return makeButton(parent, label, className || "wiki-related-domain", action, ariaLabel);
+    }
+    function addWikiRef(parent, ref, label) {
+      const source = asObject(ref), path = string(source.path, "");
+      if (!path) return null;
+      const line = finite(source.line, 0), symbol = string(source.symbol, "");
+      const display = string(label, path + (line ? ":" + line : "") + (symbol ? " · " + symbol : ""));
+      return addWikiAction(parent, display, "wiki-ref", function () { openFile(path, line, symbol); }, "打开源码入口：" + display);
+    }
+    function addWikiStringList(parent, values, emptyCopy) {
+      const items = asArray(values).filter(function (value) { return typeof value === "string" && value.trim(); });
+      if (!items.length) {
+        setText(el("p", "wiki-empty", parent), emptyCopy || "当前快照未提供此项。");
+        return;
+      }
+      const list = el("ul", "", parent);
+      items.forEach(function (item) { setText(el("li", "", list), item); });
+    }
+    function wikiRelationshipRows(domainId) {
+      return asArray(state.wiki && state.wiki.relationships).filter(function (item) {
+        return cleanId(item.from) === cleanId(domainId) || cleanId(item.to) === cleanId(domainId);
+      });
+    }
+    function renderWikiRelationshipList(parent, relationships) {
+      const list = el("div", "wiki-relationship-list", parent);
+      const visible = asArray(relationships).filter(function (item) {
+        return state.domainById.has(cleanId(item.from)) && state.domainById.has(cleanId(item.to));
+      });
+      if (!visible.length) {
+        setText(el("p", "wiki-empty", list), "当前快照没有列出跨领域关系。");
+        return list;
+      }
+      visible.forEach(function (relationship) {
+        const row = el("article", "wiki-relationship", list);
+        addWikiAction(row, wikiDomainLabel(relationship.from), "wiki-relationship-domain", function () {
+          setRoute({kind: "domain", value: cleanId(relationship.from)}, true);
+        });
+        setText(el("span", "wiki-arrow", row), "→");
+        setText(el("span", "wiki-relationship-label", row), string(relationship.label, relationship.kind || "关系"));
+        setText(el("span", "wiki-arrow", row), "→");
+        addWikiAction(row, wikiDomainLabel(relationship.to), "wiki-relationship-domain", function () {
+          setRoute({kind: "domain", value: cleanId(relationship.to)}, true);
+        });
+        if (relationship.detail) setText(el("p", "wiki-relation-detail", row), relationship.detail);
+        const refs = asArray(relationship.refs);
+        if (refs.length) {
+          const refList = el("div", "wiki-relation-refs", row);
+          refs.forEach(function (ref) { addWikiRef(refList, ref); });
+        }
+      });
+      return list;
+    }
+    function viewButton(parent, viewId, className) {
+      const id = cleanId(viewId), view = state.viewById.get(id);
+      if (!view) return null;
+      const button = addWikiAction(parent, string(view.label, id), className || "wiki-scenario-card", function () {
+        setRoute({kind: "view", value: id}, true);
+      });
+      button.setAttribute("data-wiki-scenario-id", id);
+      return button;
+    }
+    function wikiPopularScenarios() {
+      const counts = new Map();
+      asArray(state.wiki && state.wiki.pages).forEach(function (page) {
+        asArray(page.scenarioIds).forEach(function (id) {
+          const value = cleanId(id);
+          if (state.viewById.has(value)) counts.set(value, (counts.get(value) || 0) + 1);
+        });
+      });
+      const order = new Map(state.data.views.map(function (view, index) { return [cleanId(view.id), index]; }));
+      return Array.from(counts.keys()).sort(function (a, b) {
+        return counts.get(b) - counts.get(a) || (order.get(a) || 0) - (order.get(b) || 0);
+      }).slice(0, 5);
+    }
+    function renderWikiHome(parent) {
+      clear(parent);
+      setText(el("p", "wiki-kicker", parent), "项目架构 · 固定源码快照");
+      setText(el("h3", "", parent), "项目模块地图");
+      setText(el("p", "wiki-lead", parent), "先沿场景流程理解运行方式，再进入领域页查看职责边界、主要入口和源码。源码单元只用于目录定位，不代表独立业务模块。");
+
+      const route = el("section", "wiki-section wiki-route-card", parent);
+      setText(el("h3", "", route), "建议阅读路线");
+      setText(el("p", "wiki-lead", route), "从一条消息的执行开始，继续看模型、工具权限和数据记录；每步都可跳到对应流程图。");
+      const steps = el("div", "wiki-route-steps", route);
+      [["Session 消息执行", "session"], ["Agent 调用模型", "llm"], ["工具授权与执行", "tools"], ["数据归属", "storage"]].forEach(function (step, index) {
+        if (index) setText(el("span", "wiki-route-arrow", steps), "→");
+        viewButton(steps, step[1], "wiki-route-step");
+      });
+
+      const popular = wikiPopularScenarios();
+      if (popular.length) {
+        const scenarioSection = el("section", "wiki-section", parent);
+        const head = el("div", "wiki-section-head", scenarioSection);
+        setText(el("h3", "", head), "常用场景入口");
+        setText(el("p", "", head), "根据领域页登记的场景流程生成。");
+        const grid = el("div", "wiki-scenario-grid", scenarioSection);
+        popular.forEach(function (id) { viewButton(grid, id); });
+      }
+
+      const mapSection = el("section", "wiki-section", parent);
+      const mapHead = el("div", "wiki-section-head", mapSection);
+      setText(el("h3", "", mapHead), "按责任分组的领域地图");
+      setText(el("p", "", mapHead), countLabel(state.data.domains.length) + " 个项目领域 · 点击模块进入说明页");
+      const groupMap = el("div", "wiki-group-map", mapSection), placed = new Set();
+      function renderGroup(group) {
+        const panel = el("section", "wiki-group", groupMap), color = classColor(group.color, "#496f89");
+        panel.style.setProperty("--group-color", color);
+        const head = el("div", "wiki-group-head", panel);
+        el("span", "wiki-group-mark", head);
+        const headCopy = el("div", "", head);
+        setText(el("h4", "", headCopy), string(group.label, group.id));
+        setText(el("p", "", headCopy), string(group.description, "") + " · " + wikiRoleLabel(group.role));
+        const cards = el("div", "wiki-domain-grid", panel);
+        asArray(group.domainIds).forEach(function (domainId) {
+          const id = cleanId(domainId), domain = state.domainById.get(id);
+          if (!id || !domain || placed.has(id)) return;
+          placed.add(id);
+          const page = wikiPageFor(id), card = el("button", "wiki-domain-card", cards);
+          card.type = "button";
+          card.setAttribute("data-wiki-domain-id", id);
+          card.setAttribute("aria-label", "打开领域说明：" + wikiDomainLabel(id));
+          card.style.setProperty("--domain-color", classColor(domain.color, color));
+          setText(el("span", "wiki-role", card), wikiRoleLabel(group.role));
+          setText(el("h5", "", card), wikiDomainLabel(id));
+          setText(el("p", "", card), string(page && page.summary, domain.description));
+          setText(el("small", "", card), countLabel(modulesInDomain(id).length) + " 个源码单元" + (page && asArray(page.scenarioIds).length ? " · " + countLabel(page.scenarioIds.length) + " 个场景" : ""));
+          card.addEventListener("click", function () { setRoute({kind: "domain", value: id}, true); });
+        });
+      }
+      state.wiki.groups.forEach(renderGroup);
+      const unplaced = state.data.domains.filter(function (domain) { return !placed.has(cleanId(domain.id)); });
+      if (unplaced.length) renderGroup({id: "other", label: "其他领域", description: "未归入上方分类的项目领域。", role: "support", domainIds: unplaced.map(function (domain) { return domain.id; })});
+      setText(el("p", "wiki-map-note", mapSection), "模块之间的关系在下方单独列出；分组用于理解责任范围，不额外表示调用顺序。");
+
+      const relationSection = el("section", "wiki-section", parent);
+      const relationHead = el("div", "wiki-section-head", relationSection);
+      setText(el("h3", "", relationHead), "跨领域关系");
+      setText(el("p", "", relationHead), "连接表示架构边界或数据关系；需要时打开来源查看证据位置。");
+      renderWikiRelationshipList(relationSection, state.wiki.relationships);
+      if (asArray(state.data.meta.limitations).length) {
+        setText(el("p", "wiki-map-note", parent), "边界：" + asArray(state.data.meta.limitations).join(" "));
+      }
+    }
+    function renderWikiDomain(parent, domainId) {
+      clear(parent);
+      const id = cleanId(domainId), domain = state.domainById.get(id), page = wikiPageFor(id), group = wikiGroupFor(id);
+      if (!domain || !page) {
+        setText(el("div", "wiki-empty", parent), "此领域没有对应的 wiki 说明页；可以继续查看源码目录索引。");
+        addWikiAction(parent, "查看源码单元目录图", "button button-primary", function () {
+          setRoute({kind: "source-domain", value: id}, true);
+        });
+        return;
+      }
+      const hero = el("section", "wiki-domain-hero", parent);
+      hero.style.setProperty("--domain-color", classColor(domain.color, "#496f89"));
+      setText(el("p", "wiki-kicker", hero), wikiRoleLabel(group && group.role) + (group ? " · " + string(group.label, group.id) : ""));
+      setText(el("h3", "", hero), string(page.title, domain.label));
+      setText(el("p", "wiki-lead", hero), string(page.summary, domain.description));
+      const actions = el("div", "wiki-source-actions", hero);
+      addWikiAction(actions, "查看该领域的源码单元图", "button button-primary", function () {
+        setRoute({kind: "source-domain", value: id}, true);
+      });
+
+      const scenarioIds = asArray(page.scenarioIds).filter(function (scenarioId) { return state.viewById.has(cleanId(scenarioId)); });
+      if (scenarioIds.length) {
+        const section = el("section", "wiki-section", parent), head = el("div", "wiki-section-head", section);
+        setText(el("h3", "", head), "相关场景流程");
+        setText(el("p", "", head), "进入流程图后，可继续查看节点技术细节和源码锚点。");
+        const cards = el("div", "wiki-scenario-grid", section);
+        scenarioIds.forEach(function (scenarioId) { viewButton(cards, scenarioId); });
+      }
+
+      const layout = el("div", "wiki-domain-layout", parent);
+      const responsibilities = el("section", "wiki-info-panel", layout);
+      setText(el("h4", "", responsibilities), "职责范围");
+      addWikiStringList(responsibilities, page.responsibilities, "当前快照未列出职责说明。");
+      const boundaries = el("section", "wiki-info-panel", layout);
+      setText(el("h4", "", boundaries), "边界与不负责事项");
+      addWikiStringList(boundaries, page.boundaries, "当前快照未列出边界说明。");
+
+      const entrySection = el("section", "wiki-section", parent), entryHead = el("div", "wiki-section-head", entrySection);
+      setText(el("h3", "", entryHead), "主要入口与源码");
+      setText(el("p", "", entryHead), "引用来自固定源码快照；打开后查看索引行、符号和静态依赖。");
+      const entries = el("div", "wiki-entry-list", entrySection), entryPoints = asArray(page.entryPoints);
+      if (!entryPoints.length) setText(el("p", "wiki-empty", entries), "当前快照没有列出主要源码入口。");
+      entryPoints.forEach(function (entry) {
+        const row = el("article", "wiki-entry", entries);
+        setText(el("strong", "", row), string(entry.label, "源码入口"));
+        if (entry.note) setText(el("p", "", row), entry.note);
+        if (!addWikiRef(row, entry.ref)) setText(el("span", "detail-note", row), "来源路径未标注。");
+      });
+
+      const relatedIds = asArray(page.relatedDomainIds).map(cleanId).filter(function (relatedId) {
+        return relatedId !== id && state.domainById.has(relatedId);
+      });
+      if (relatedIds.length) {
+        const relatedSection = el("section", "wiki-section", parent), relatedHead = el("div", "wiki-section-head", relatedSection);
+        setText(el("h3", "", relatedHead), "关联领域");
+        setText(el("p", "", relatedHead), "这些领域与当前模块存在显式关系，可继续阅读其说明页。");
+        const related = el("div", "wiki-related-list", relatedSection);
+        relatedIds.forEach(function (relatedId) {
+          addWikiAction(related, wikiDomainLabel(relatedId), "wiki-related-domain", function () {
+            setRoute({kind: "domain", value: relatedId}, true);
+          });
+        });
+      }
+      const relationships = wikiRelationshipRows(id);
+      if (relationships.length) {
+        const relationSection = el("section", "wiki-section", parent), relationHead = el("div", "wiki-section-head", relationSection);
+        setText(el("h3", "", relationHead), "关联关系与证据");
+        renderWikiRelationshipList(relationSection, relationships);
+      }
+    }
+    function renderWikiContent(graph) {
+      $("canvas-frame").hidden = true;
+      $("canvas-toolbar").hidden = true;
+      $("wiki-content").hidden = false;
+      hideMessage();
+      if (graph.mode === "wiki-home") renderWikiHome($("wiki-content"));
+      else renderWikiDomain($("wiki-content"), graph.domainId);
+    }
     function renderHeading() {
       const graph = state.graph;
       if (!graph) return;
@@ -1092,20 +1582,27 @@
       renderReadingGuide();
       const breadcrumbs = $("breadcrumbs");
       clear(breadcrumbs);
-      const overviewCrumb = makeButton(breadcrumbs, "项目总览", "crumb", function () {
+      const overviewCrumb = makeButton(breadcrumbs, "项目首页", "crumb", function () {
         setRoute(defaultRoute(), true);
       });
-      overviewCrumb.setAttribute("aria-label", "返回项目总览");
-      const separator = el("span", "crumb-separator", breadcrumbs);
-      setText(separator, "›");
-      if (state.route.kind === "view") {
+      overviewCrumb.setAttribute("aria-label", "返回项目首页");
+      if (state.route.kind !== "home") {
+        const separator = el("span", "crumb-separator", breadcrumbs);
+        setText(separator, "›");
+      }
+      if (state.route.kind === "home") {
+        overviewCrumb.disabled = true;
+      } else if (state.route.kind === "view") {
         makeButton(breadcrumbs, graph.title, "crumb", function () {
           setRoute({ kind: "view", value: state.route.value }, true);
         });
       } else if (state.route.kind === "domain") {
-        const domain = state.domainById.get(cleanId(state.route.value));
-        makeButton(breadcrumbs, string(domain && domain.label, state.route.value), "crumb", function () {
-          setRoute({ kind: "domain", value: state.route.value, page: state.route.page }, true);
+        makeButton(breadcrumbs, wikiDomainLabel(state.route.value), "crumb", function () {
+          setRoute({ kind: "domain", value: state.route.value }, true);
+        });
+      } else if (state.route.kind === "source-domain") {
+        makeButton(breadcrumbs, wikiDomainLabel(state.route.value) + " · 源码目录", "crumb", function () {
+          setRoute(hasWiki() ? {kind: "domain", value: state.route.value} : {kind: "source-domain", value: state.route.value}, true);
         });
       } else if (state.route.kind === "module" || state.route.kind === "file") {
         const file = state.route.kind === "file" ? fileForPath(state.route.value) : null;
@@ -1138,8 +1635,9 @@
       } else {
         makeButton(breadcrumbs, graph.title, "crumb", function () { setRoute({ kind: "overview" }, true); });
       }
-      $("back-button").disabled = state.route.kind === "overview" || (state.route.kind === "view" && state.route.value === "overview");
-      setText($("back-button"), state.route.kind === "view" ? "← 总览" : "← 返回");
+      const hasParent = !!string(currentHistoryRecord().parentHash, "");
+      $("back-button").disabled = state.route.kind === "home" && !hasParent;
+      setText($("back-button"), "← 返回");
     }
 
     function renderReadingGuide() {
@@ -1194,22 +1692,28 @@
     }
     function showImplementationStep(id) {
       const viewId = state.route.value;
-      setRoute({ kind: "view", value: viewId, layer: "full" }, true);
-      const node = asArray(state.graph.nodes).find(function (n) { return n.id === id; });
-      if (node) selectNode(node);
+      setRoute({ kind: "view", value: viewId, layer: "full", node: cleanId(id) }, true);
     }
 
     function backRoute() {
       if (!state.route) return;
-      if (state.route.kind === "overview") return;
-      if (state.route.kind === "view") { setRoute(defaultRoute(), true); return; }
+      if (string(currentHistoryRecord().parentHash, "")) {
+        window.history.back();
+        return;
+      }
+      if (state.route.kind === "home") return;
+      if (state.route.kind === "overview" || state.route.kind === "view") { setRoute(defaultRoute(), true); return; }
       if (state.route.kind === "file") {
         const file = fileForPath(state.route.value);
         if (file && file.module) setRoute({ kind: "module", value: cleanId(file.module) }, true);
         else setRoute({ kind: "overview" }, true);
         return;
       }
-      if (state.route.kind === "domain") { setRoute({ kind: "overview" }, true); return; }
+      if (state.route.kind === "domain") { setRoute(hasWiki() ? {kind: "home"} : {kind: "overview"}, true); return; }
+      if (state.route.kind === "source-domain") {
+        setRoute(hasWiki() ? {kind: "domain", value: state.route.value} : {kind: "overview"}, true);
+        return;
+      }
       const module = state.moduleById.get(cleanId(state.route.value));
       const parent = state.moduleById.get(cleanId(module && module.parent));
       if (parent) setRoute({ kind: "module", value: cleanId(parent.id) }, true);
@@ -1475,6 +1979,13 @@
 
     function renderDiagram(fit) {
       const graph = state.graph;
+      if (graph && (graph.mode === "wiki-home" || graph.mode === "wiki-domain")) {
+        renderWikiContent(graph);
+        return;
+      }
+      $("wiki-content").hidden = true;
+      $("canvas-frame").hidden = false;
+      $("canvas-toolbar").hidden = false;
       const root = $("diagram-root");
       clear(root);
       if (!graph) { showMessage("没有可显示的图", "当前视图没有对应的架构数据。"); return; }
@@ -1607,6 +2118,24 @@
       });
     }
 
+    function syncRouteSelection() {
+      const route = Object.assign({}, state.route || {});
+      delete route.node;
+      delete route.edge;
+      const selected = currentSelectionRef();
+      if (selected && selected.type === "node") route.node = selected.id;
+      if (selected && selected.type === "edge") route.edge = selected.id;
+      state.route = route;
+      replaceCurrentHistorySnapshot(route);
+    }
+    function clearSelection() {
+      if (!state.selected) return;
+      state.selected = null;
+      syncRouteSelection();
+      renderDiagram(false);
+      renderDetails();
+      renderReadingGuide();
+    }
     function selectNode(node) {
       if (node.kind === "file" && node.filePath) { openFile(node.filePath); return; }
       state.selected = { type: "node", node: node };
@@ -1615,6 +2144,7 @@
       revealDetails();
       renderReadingGuide();
       focusReadingNode(node);
+      syncRouteSelection();
       setStatus("已选择：" + string(node.label, node.id));
     }
     function selectEdge(edge, from, to) {
@@ -1623,6 +2153,7 @@
       renderDetails();
       revealDetails();
       renderReadingGuide();
+      syncRouteSelection();
       setStatus("已选择关系：" + string(edge.label, "未命名关系"));
     }
 
@@ -1630,13 +2161,17 @@
       return ({entry: "接收入口", process: "处理", control: "调度与控制", store: "持久记录", external: "外部服务接口"})[role] || "架构节点";
     }
     function focusReadingNode(node) {
-      if (!state.graph.rawView || window.innerWidth <= 970) return;
-      const rect = $("diagram").getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const scale = Math.max(.85, Math.min(rect.width / state.camera.width, rect.height / state.camera.height));
-      const width = rect.width / scale, height = rect.height / scale;
-      state.camera = { x: node.x + NODE_W / 2 - width / 2, y: node.y + NODE_H / 2 - height / 2, width: width, height: height };
-      applyCamera();
+      if (!state.graph || !state.graph.rawView || !state.camera) return;
+      const margin = 28, camera = state.camera;
+      let x = camera.x, y = camera.y;
+      if (node.x < x + margin) x = node.x - margin;
+      else if (node.x + NODE_W > x + camera.width - margin) x = node.x + NODE_W + margin - camera.width;
+      if (node.y < y + margin) y = node.y - margin;
+      else if (node.y + NODE_H > y + camera.height - margin) y = node.y + NODE_H + margin - camera.height;
+      if (x !== camera.x || y !== camera.y) {
+        state.camera = Object.assign({}, camera, {x: x, y: y});
+        applyCamera();
+      }
     }
 
     function renderPager() {
@@ -1816,7 +2351,7 @@
       }
       if (selected.type !== "node") return false;
       const node = selected.node;
-      if (node.kind === "domain" || node.domainId) {
+      if (node.kind === "domain" || (node.domainId && node.kind !== "group")) {
         const domainId = cleanId(node.domainId || node.id);
         const domain = state.domainById.get(domainId);
         detailIntro(parent, "领域", string(domain && domain.label, node.label), string(domain && domain.description, node.description));
@@ -1830,9 +2365,10 @@
       if (node.kind === "group") {
         const domainId = cleanId(node.domainId);
         const domain = state.domainById.get(domainId);
-        detailIntro(parent, "领域分组", string(domain && domain.label, node.label), string(node.description, ""));
-        makeButton(parent, "打开领域源码单元图", "button button-primary", function () {
-          setRoute({ kind: "domain", value: domainId }, true);
+        const sourceMode = state.route && state.route.kind === "source-domain";
+        detailIntro(parent, sourceMode ? "源码目录分组" : "领域分组", string(domain && domain.label, node.label), string(node.description, ""));
+        makeButton(parent, sourceMode ? "重新打开源码单元图" : "打开领域说明页", "button button-primary", function () {
+          setRoute(sourceMode ? { kind: "source-domain", value: domainId } : { kind: "domain", value: domainId }, true);
         });
         return true;
       }
@@ -1884,8 +2420,11 @@
         renderModuleDetail(parent, state.moduleById.get(cleanId(route.value)), cleanId(route.value));
         return;
       }
+      if (route.kind === "domain" && hasWiki()) { renderWikiDomainDetail(parent, route.value); return; }
       if (route.kind === "domain") { renderDomainDetail(parent, state.domainById.get(cleanId(route.value))); return; }
+      if (route.kind === "source-domain") { renderDomainDetail(parent, state.domainById.get(cleanId(route.value)), true); return; }
       if (route.kind === "view") { renderViewDetail(parent, state.viewById.get(cleanId(route.value))); return; }
+      if (route.kind === "home") { renderWikiHomeDetail(parent); return; }
       renderOverviewDetail(parent);
     }
 
@@ -1906,16 +2445,70 @@
         });
       }
     }
-    function renderDomainDetail(parent, domain) {
+    function renderWikiHomeDetail(parent) {
+      const domainCount = asArray(state.data.domains).length;
+      const moduleCount = asArray(state.data.modules).length;
+      const fileCount = asArray(state.data.files).length;
+      const scenarioCount = asArray(state.data.views).filter(function (view) { return cleanId(view.id) !== "overview"; }).length;
+      detailIntro(parent, "项目模块地图", string(state.data.meta.title, "Vibelution 开发架构地图"),
+        "按责任分组查看当前源码领域；进入领域说明后可继续打开场景流程、源码入口和静态依赖。分组表示责任范围，不表示运行时调用。");
+      detailGrid(parent, [
+        ["项目领域", countLabel(domainCount)],
+        ["源码单元", countLabel(moduleCount)],
+        ["索引文件", countLabel(fileCount)],
+        ["场景流程", countLabel(scenarioCount)]
+      ]);
+      setText(el("p", "detail-note", parent), "这是固定源码快照的静态阅读入口；源码索引和人工整理的流程说明不代表本次已验证产品运行。");
+      const firstView = state.viewById.get("session") || state.data.views.find(function (view) { return cleanId(view.id) !== "overview"; });
+      if (firstView) makeButton(parent, "打开建议阅读流程：" + string(firstView.label, firstView.id), "button button-primary", function () {
+        setRoute({ kind: "view", value: cleanId(firstView.id) }, true);
+      });
+    }
+    function renderWikiDomainDetail(parent, domainId) {
+      const id = cleanId(domainId), domain = state.domainById.get(id), page = wikiPageFor(id), group = wikiGroupFor(id);
+      if (!domain || !page) { renderDomainDetail(parent, domain, false); return; }
+      const scenarios = asArray(page.scenarioIds).map(cleanId).filter(function (scenarioId) { return state.viewById.has(scenarioId); });
+      const modules = modulesInDomain(id);
+      detailIntro(parent, "项目领域", string(page.title, string(domain.label, id)), string(page.summary, domain.description));
+      detailGrid(parent, [
+        ["责任分组", string(group && group.label, "未分组")],
+        ["领域角色", wikiRoleLabel(group && group.role)],
+        ["源码单元", countLabel(modules.length)],
+        ["相关场景", countLabel(scenarios.length)]
+      ]);
+      learningBlock(parent, "职责范围", page.responsibilities);
+      learningBlock(parent, "边界与不负责事项", page.boundaries);
+      if (scenarios.length) {
+        const actions = el("div", "detail-flow-actions", parent);
+        scenarios.forEach(function (scenarioId) {
+          const view = state.viewById.get(scenarioId);
+          makeButton(actions, string(view && view.label, scenarioId), "button button-primary button-small", function () {
+            setRoute({ kind: "view", value: scenarioId }, true);
+          });
+        });
+      }
+      const entryPoints = asArray(page.entryPoints);
+      if (entryPoints.length) detailSection(parent, "主要源码入口", entryPoints.length, "wiki-entries:" + id, entryPoints, function (row, entry) {
+        const ref = asObject(entry.ref), path = string(ref.path, "");
+        const label = string(entry.label, path || "源码入口");
+        detailRow(row, label, string(entry.note, path), path ? function () { openFile(path, finite(ref.line, 0), string(ref.symbol, "")); } : null, path ? "打开" : "");
+      }, FILE_PAGE_SIZE);
+      setText(el("p", "detail-note", parent), "来源锚点对应固定源码快照；当前页面不执行产品运行验证。");
+      makeButton(parent, "打开该领域源码单元图", "button button-small", function () {
+        setRoute({ kind: "source-domain", value: id }, true);
+      });
+    }
+    function renderDomainDetail(parent, domain, sourceMode) {
       if (!domain) { setText(parent, "找不到此领域的数据。"); return; }
       const domainId = cleanId(domain.id);
       const modules = modulesInDomain(domainId).slice().sort(function (a, b) {
         return string(a.label, a.id).localeCompare(string(b.label, b.id), "zh-CN");
       });
-      detailIntro(parent, "领域", string(domain.label, domainId), string(domain.description, ""));
+      detailIntro(parent, sourceMode ? "源码目录快照" : "领域", string(domain.label, domainId), string(domain.description, ""));
       detailGrid(parent, [["领域标识", domainId], ["源码单元数量", countLabel(modules.length)]]);
-      makeButton(parent, "查看领域源码单元图", "button button-primary", function () {
-        setRoute({ kind: "domain", value: domainId }, true);
+      if (sourceMode) setText(el("p", "detail-note", parent), "图中连线只表示源码目录或源码单元的包含关系，不表示运行时调用。");
+      makeButton(parent, sourceMode ? "重新打开源码单元图" : "查看领域源码单元图", "button button-primary", function () {
+        setRoute(sourceMode ? { kind: "source-domain", value: domainId } : { kind: "domain", value: domainId }, true);
       });
       detailSection(parent, "领域源码单元", modules.length, "domain-modules", modules, function (row, module) {
         const id = cleanId(module.id);
@@ -2135,9 +2728,7 @@
           if (haystack.includes(needle)) {
             const viewId = cleanId(view.id), nodeId = cleanId(node.id);
             add("node", string(node.label, nodeId), "节点 · " + label, function () {
-              setRoute({ kind: "view", value: viewId }, true);
-              const found = asArray(state.graph && state.graph.nodes).find(function (entry) { return cleanId(entry.id) === nodeId; });
-              if (found) selectNode(found);
+              setRoute({ kind: "view", value: viewId, node: nodeId }, true);
             });
           }
         });
@@ -2375,7 +2966,13 @@
       });
     }
     function exportCurrentSvg() {
-      if (!state.graph || !state.graph.nodes.length) { setStatus("当前图没有可导出的节点。"); return; }
+      if (state.graph && (state.graph.mode === "wiki-home" || state.graph.mode === "wiki-domain")) {
+        setStatus(state.graph.mode === "wiki-home"
+          ? "模块地图由 HTML 卡片呈现，当前导出仅支持场景流程或源码关系图；请先打开一张图再导出。"
+          : "领域说明以 HTML 页面呈现，当前导出仅支持场景流程或源码关系图；请先打开一张图再导出。");
+        return;
+      }
+      if (!state.graph || !state.graph.nodes.length) { setStatus("当前图没有可导出的节点；请打开一张场景流程或源码关系图。"); return; }
       const source = $("diagram");
       const clone = source.cloneNode(true);
       clone.setAttribute("xmlns", SVG_NS);
@@ -2526,7 +3123,7 @@
           if (visibleModal) closeModal(visibleModal);
           else if (document.body.classList.contains("sidebar-open") || document.body.classList.contains("detail-open")) closeDrawers();
           else if ($("atlas-search").value) { $("atlas-search").value = ""; renderSearch(); }
-          else if (state.selected) { state.selected=null; renderDiagram(false); renderDetails(); renderReadingGuide(); }
+          else if (state.selected) clearSelection();
           return;
         }
         if ((event.key === "/" || (event.ctrlKey && event.key === "/")) &&
@@ -2537,25 +3134,50 @@
       });
       window.addEventListener("popstate", function () {
         const route = readRouteHash();
-        if (route) setRoute(route, false);
+        if (route) setRoute(route, false, currentHistoryRecord().snapshot);
         else setRoute(defaultRoute(), false);
       });
     }
 
     function defaultRoute() {
+      if (hasWiki()) return { kind: "home" };
       const overview = state.data.views.find(function (view) { return cleanId(view.id) === "overview"; });
       return overview ? { kind: "view", value: "overview" } : { kind: "overview" };
     }
     function applyMetadata() {
       const meta = state.data.meta;
+      function shortRevision(value) {
+        const revision = string(value, "版本未标注");
+        return /^[a-f0-9]{12,40}$/i.test(revision) ? revision.slice(0, 12) + "…" : revision;
+      }
+      function compactDate(value) {
+        const date = string(value, "");
+        return date.replace(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2})?(.*)$/, "$1 $2$3");
+      }
       const title = string(meta.title, "项目架构地图");
       document.title = title;
       setText($("atlas-title"), title);
       setText($("meta-branch"), string(meta.sourceBranch, "main"));
-      setText($("meta-commit"), string(meta.commit, "版本未标注"));
+      setText($("meta-commit"), shortRevision(meta.commit));
       $("meta-commit").title = string(meta.commit, "");
-      setText($("meta-generated"), string(meta.generatedAt, "生成时间未标注"));
+      setText($("meta-generated"), compactDate(meta.generatedAt) || "生成时间未标注");
       $("meta-generated").title = string(meta.sourceRoot, "");
+      const snapshot = $("source-snapshot");
+      clear(snapshot);
+      function snapshotItem(label, value, fullValue, warning) {
+        const item = el("span", warning ? "snapshot-warning" : "", snapshot);
+        if (fullValue) item.title = fullValue;
+        const heading = el("strong", "", item);
+        setText(heading, label + "：");
+        setText(el("span", "", item), string(value, "未标注"));
+      }
+      const stale = staleEvidenceItems(meta.staleEvidence);
+      snapshotItem("固定源码快照", compactDate(meta.sourceCommittedAt) || "日期未标注", string(meta.sourceCommittedAt, ""));
+      snapshotItem("生成时间", compactDate(meta.generatedAt) || "时间未标注", string(meta.generatedAt, ""));
+      snapshotItem("复核版本", shortRevision(meta.reviewedCommit), string(meta.reviewedCommit, ""));
+      snapshotItem("待复核状态", stale.length ? countLabel(stale.length) + " 个证据文件" : meta.reviewedCommit ? "无；引用文件与复核版本一致" : "复核状态未标注", "", stale.length > 0 || !meta.reviewedCommit);
+      const scope = el("span", "", snapshot);
+      setText(scope, "固定源码索引；不代表产品运行验证。");
     }
     function showDataError(error) {
       setText($("current-title"), "架构数据尚未载入");

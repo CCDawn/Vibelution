@@ -15,6 +15,7 @@ import re
 import subprocess
 
 from curated import DOMAINS, REVIEWED_COMMIT, describe_module, domain_for, make_views
+from wiki_structure import make_wiki
 
 HERE = Path(__file__).resolve().parent
 TEXT_CODE = {'.py', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.cs', '.rs'}
@@ -108,8 +109,13 @@ def module_path(path: str):
     return str(p.parent) if str(p.parent) != '.' else '(root)'
 
 
-def build(root: Path, ref: str, previous: Path | None):
+def build(root: Path, ref: str, previous: Path | None, source_label: str | None = None):
     commit = git(root, 'rev-parse', '--verify', ref + '^{commit}').decode().strip()
+    if source_label:
+        # A friendly branch label must contain the immutable source revision.
+        # Never label an unrelated worktree snapshot as current main.
+        git(root, 'merge-base', '--is-ancestor', commit, source_label)
+    committed_at = git(root, 'show', '-s', '--format=%cI', commit).decode().strip()
     entries, sources = read_tree(root, commit)
     modules, files, errors = {}, [], []
     for entry in entries:
@@ -166,6 +172,8 @@ def build(root: Path, ref: str, previous: Path | None):
             if target:
                 imp['target'] = target
     def evidence(path, anchor):
+        if anchor is None and path in by_path:
+            return {'path': path, 'line': 0, 'symbol': '', 'blob': by_path[path]['blob'], 'pathOnly': True}
         if path not in sources:
             raise ValueError('Evidence source missing: ' + path)
         matches = [i for i, line in enumerate(sources[path].splitlines(), 1) if anchor in line]
@@ -173,12 +181,23 @@ def build(root: Path, ref: str, previous: Path | None):
             raise ValueError(f'Evidence anchor missing: {path}: {anchor}')
         return {'path': path, 'line': matches[0], 'symbol': anchor, 'blob': by_path[path]['blob']}
     views = make_views(evidence)
+    wiki = make_wiki(evidence)
     reviewed_blobs = {}
     for entry in git(root, 'ls-tree', '-rz', '--full-tree', REVIEWED_COMMIT).split(b'\0'):
         if entry:
             metadata, pathname = entry.split(b'\t', 1)
             reviewed_blobs[pathname.decode('utf-8')] = metadata.decode().split()[2]
     stale_evidence = []
+    def review_status(item, refs):
+        changed = sorted({r['path'] for r in refs if reviewed_blobs.get(r['path']) != r['blob']})
+        item['status'] = 'unknown' if changed else 'source_verified'
+        stale_evidence.extend(changed)
+        return changed
+
+    for page in wiki['pages']:
+        review_status(page, [entry['ref'] for entry in page['entryPoints']])
+    for relationship in wiki['relationships']:
+        review_status(relationship, relationship['refs'])
     for view in views:
         ids = {n['id'] for n in view['nodes']}
         assert len(ids) == len(view['nodes']), view['id']
@@ -199,10 +218,8 @@ def build(root: Path, ref: str, previous: Path | None):
         for edge in view['edges']:
             assert edge['from'] in ids and edge['to'] in ids and edge['refs'], edge
         for item in view['nodes'] + view['edges'] + view.get('focusEdges', []):
-            changed = [r['path'] for r in item['refs'] if reviewed_blobs.get(r['path']) != r['blob']]
-            item['status'] = 'unknown' if changed else 'source_verified'
+            changed = review_status(item, item['refs'])
             if changed:
-                stale_evidence.extend(changed)
                 item['detail'] = '【源码已变化，流程语义待复核】' + item['detail']
     changes = {'added': [], 'removed': [], 'changed': []}
     if previous and previous.exists():
@@ -213,18 +230,21 @@ def build(root: Path, ref: str, previous: Path | None):
         now = {f['path']: f['blob'] for f in files}
         changes = {'added': sorted(now.keys() - old.keys()), 'removed': sorted(old.keys() - now.keys()),
                    'changed': sorted(p for p in now.keys() & old.keys() if old[p] != now[p])}
-    return {'meta': {'title': 'Vibelution 开发架构地图', 'commit': commit, 'sourceBranch': ref,
+    return {'meta': {'title': 'Vibelution 开发架构地图', 'commit': commit,
+                     'sourceBranch': source_label or ref, 'sourceRef': ref,
+                     'sourceCommittedAt': committed_at,
                      'sourceRoot': str(root), 'reviewedCommit': REVIEWED_COMMIT,
                      'staleEvidence': sorted(set(stale_evidence)),
                      'generatedAt': datetime.now(timezone(timedelta(hours=8))).isoformat(timespec='seconds'),
                      'limitations': ['源码快照，未以本次文档工作验证产品运行。',
                      '覆盖指 Git 跟踪文件全部归类；不等于每个函数的调用语义均已审阅。',
-                     '流程图为人工核实的关键路径；模块导航是目录归属关系。',
+                     '项目总览关系与关键场景人工核实；源码单元导航是目录归属关系。',
                      'Python 使用 AST；TS/JS 声明和 import 为启发式索引，不是完整调用图。',
                      'API 展示装饰器中的局部路径；完整 URL 还需叠加 router prefix 与 /api。',
                      '未读取活跃配置值、用户对话、密钥、完整提示词或运行数据库。',
                      '更新需重新核实变化的流程证据；锚点存在不代表语义未变。']},
             'domains': DOMAINS, 'modules': list(modules.values()), 'files': files, 'views': views,
+            'wiki': wiki,
             'coverage': {'trackedFiles': len(entries), 'indexedFiles': len(files), 'moduleCount': len(modules),
                          'unmappedFiles': [], 'parseErrors': errors,
                          'notes': [('流程证据发生变化，需重新审阅：' + ', '.join(sorted(set(stale_evidence)))) if stale_evidence else '关键流程证据与人工审阅版本一致。',
@@ -238,10 +258,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=HERE.parents[1])
     parser.add_argument('--ref', default='main')
+    parser.add_argument('--source-label', help='Readable source branch containing the fixed --ref commit')
     parser.add_argument('--output', type=Path, default=HERE / 'index.html')
     parser.add_argument('--previous', type=Path)
     args = parser.parse_args()
-    data = build(args.source.resolve(), args.ref, args.previous)
+    data = build(args.source.resolve(), args.ref, args.previous, args.source_label)
     template = (HERE / 'viewer.template.html').read_text(encoding='utf-8')
     assert template.count('__ATLAS_DATA__') == 1
     payload = json.dumps(data, ensure_ascii=False, separators=(',', ':')).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
@@ -250,6 +271,7 @@ def main():
     print(json.dumps({'output': str(args.output), 'commit': data['meta']['commit'],
                       'files': len(data['files']), 'modules': len(data['modules']),
                       'views': len(data['views']), 'parseErrors': data['coverage']['parseErrors'],
+                      'wikiPages': len(data['wiki']['pages']),
                       'bytes': args.output.stat().st_size}, ensure_ascii=False))
 
 
