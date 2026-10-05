@@ -236,18 +236,23 @@ async function releaseOwnedLockdir(
   ownerPid: number,
   startedAt: string
 ): Promise<void> {
-  const holder = await readLockHolder(lockdir);
-  if (!holder || holder.pid !== ownerPid || holder.startedAt !== startedAt) {
-    return;
-  }
   const quarantinedPath = quarantinePath(lockdir, "release");
-  try {
-    await rename(lockdir, quarantinedPath);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
+  for (let attempt = 0; attempt < REMOVE_ATTEMPTS; attempt += 1) {
+    const holder = await readLockHolder(lockdir);
+    if (!holder || holder.pid !== ownerPid || holder.startedAt !== startedAt) {
       return;
     }
-    throw error;
+    try {
+      await rename(lockdir, quarantinedPath);
+      break;
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") return;
+      // Windows can deny directory rename while a contender reads holder.json.
+      // Recheck ownership on every retry; never delete the live lock in place.
+      if (!isNodeError(error) || !["EPERM", "EACCES", "EBUSY"].includes(error.code || "")
+        || attempt >= REMOVE_ATTEMPTS - 1) throw error;
+      await sleepMs(REMOVE_RETRY_MS);
+    }
   }
   await removeLockdir(quarantinedPath);
 }
