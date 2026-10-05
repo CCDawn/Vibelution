@@ -37,6 +37,11 @@
 | `evolution.ts` | `/api/evolution/*` supervised/review JSON |
 | `financialAssistant.ts` | `/api/financial-assistants`, projection/setup over native Agent Directory |
 | `financialMarket.ts` | `/api/financial-market/*`, read-only public A-share quotes/search/OHLC; domain query keys |
+| `financialResearch.ts` | `/api/financial-market/*`, batch quotes, bounded all-stock screening, news/announcements and reported financial metrics |
+| `financialPaper.ts` | `/api/financial-paper/*`, Agent-owned simulated account, holdings, orders and review; no broker access |
+| `financialPreferences.ts` | `/api/financial-preferences/*`, explicit user preferences in canonical Agent personal memory; no second memory store |
+| `financialTeam.ts` | `/api/financial-teams/*`, native analyst Agents and Session/Turn orchestration references |
+| `financialPortfolio.ts` | `/api/financial-portfolios/*`, read-only research over the owned paper ledger and actual public price samples |
 | `files.ts` | `/api/files/content` |
 | `git.ts` | `/api/git/*` |
 | `hypothesisFirst.ts` | `/api/teams/.../workflow-orchestration/hypothesis-first/*`, `meeting-rounds`, `hypothesis-rounds` (HF-5) |

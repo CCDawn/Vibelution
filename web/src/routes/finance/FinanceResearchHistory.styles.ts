@@ -1,5 +1,6 @@
 export default {
   list: "grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2",
+  actionRow: "flex min-w-0 items-center gap-1 [&>button:first-child]:min-w-0 [&>button:first-child]:flex-1 [&>button:last-child]:shrink-0",
   filters: "flex min-w-0 flex-wrap gap-3 mb-3 [&>input]:min-w-0 [&>input]:flex-1",
   statusSelect: "max-w-[210px]",
   recordContent: "flex min-w-0 w-full items-center justify-between gap-3",

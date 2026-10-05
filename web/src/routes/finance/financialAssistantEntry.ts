@@ -14,7 +14,7 @@ export function planFinancialAssistantEntry(
   if (ready) {
     return { kind: "open", sessionId: ready.directSessionId };
   }
-  if (rows.length === 0 || rows.some((row) => row.status === "active" && row.setupStatus === "pending")) {
+  if (rows.length === 0 || rows.some((row) => row.status === "active" && ["pending", "session_missing"].includes(row.setupStatus))) {
     return { kind: "create" };
   }
   if (rows.some((row) => row.setupStatus === "profile_changed")) {
@@ -24,6 +24,9 @@ export function planFinancialAssistantEntry(
         ? "金融助手身份配置已更改，请在 Agent 管理中核对。"
         : "The assistant identity was changed. Check it in Agent management.",
     };
+  }
+  if (rows.some((row) => row.status === "active" && row.setupStatus === "ready")) {
+    return { kind: "blocked", message: lang === "zh" ? "金融助手的会话绑定无效，请在 Agent 管理中核对。" : "The assistant session binding is invalid. Check it in Agent management." };
   }
   return {
     kind: "blocked",

@@ -1,23 +1,50 @@
-# Desktop stock research
+# Desktop stock agent
 
-The approved reference is TradingAgents-CN v3.0 at `51060a7682cf51810b4bc3a704829438d18cd8dc`, specifically its stock detail, single-analysis, reports and favorites surfaces. Its frontend is restricted Source Available: this implementation borrows information architecture only, and uses existing VUI APIs throughout. The user explicitly requested desktop only; there is no mobile layout or mobile acceptance scope.
+The approved reference is TradingAgents-CN v3.0 community at `51060a7682cf51810b4bc3a704829438d18cd8dc`. Its application source has restricted Source Available terms. This implementation independently adapts capabilities and information architecture; it does not copy application code. Desktop acceptance covers 1280px and 1920px windows.
 
-- `FinanceResearchFrame` owns the desktop three-column shell without a duplicate product header; settings remain beside the new-research button. Pane roots stay bounded by the available desktop width and long report/process content can shrink; `WORKBENCH_LAYOUT_IDS.finance` owns persisted widths and VSplitWorkspace provides resizing/collapse.
-- Stock, chart, configuration, history, process and report components keep visual classes in their own `.styles.ts` modules; the frame, workspace and library share the existing route-owned style map.
-- `FinanceResearchWorkspace` composes stock search, selected-stock overview, watchlist preferences, native research and report history. Preferences store only validated stock identities, never market data or transcripts.
-- `financialMarket` API → `financial_assistant` route → `financial_market_service` reads Tencent public A-share quotes and OHLC. It preserves quote time, provider, yuan and lot units, and fails visibly. There are no account or order endpoints.
-- `FinancialResearchBridge` prepares a native composer draft and optionally requests native submission after that exact draft commits. Native Session, Journal, worker and SSE remain all conversation authorities. The live projection subscribes to the existing active-turn store at the presentation edge.
-- `stockResearchModel` derives the full research report from completed canonical final-answer items and their original research requests. Ordinary follow-ups do not replace it; an explicit new full report may. Native stop/incomplete outcomes and stop notices are excluded. Report chapters reflect actual answer headings, and each cited PDF page stays addressable.
-- Report previews skip Markdown tables and provenance when extracting prose. Table-only reports show an exact bounded table excerpt in the overview; the full report and Markdown export remain canonical and do not repeat an extra flattened summary.
-- Report-center keyword search uses native `querySessions(q)` across all owned research, including transcript bodies. Its cache, cancellation, cursor and input are independent of the unfiltered recent-history rail. A native unpersisted direct-session stub is excluded from keyword results when its empty body and title do not match, without dropping indexed body-only hits. Terminal-outcome filtering explicitly covers loaded records because the native `state` filter is a lifecycle phase, not a financial report outcome.
-- `financeChartIndicators` derives BOLL(20,2), close-seeded MACD(12,26,9), Wilder RSI(14), and MA5/20 from the complete loaded adjusted candle series. Warm-up values remain missing. Viewport ranges (30/60/all loaded bars), arrow controls and pointer panning slice after calculation; keyboard candle navigation announces actual OHLC. Stock/period changes reset the chart viewport. These are display calculations, not trading signals or additional market data.
-- The process panel preserves native completed-call `semanticStatus` warnings (partial, degraded, fallback, recovered, unavailable); a completed research with such results remains visibly marked for review.
-- `FinanceReportLibrary` links a selected citation to active, owned source metadata and the original PDF page. Library text remains plain untrusted data.
+## Workspace and native authority
 
-Research configuration changes the actual native request: stock, as-of date, report period, research scope and answer depth. It does not claim unsupported analyst orchestration, screening, trading, portfolio simulation or Pro-only automation.
+- `FinanceResearchFrame` owns the existing three-column VUI shell without a duplicate header. `WORKBENCH_LAYOUT_IDS.finance` and shared pane persistence own resizing, collapse and widths. Each pane shrinks within the desktop container; collection pages scroll in the center pane.
+- `FinanceResearchWorkspace` composes stock/topic research, analyst collaboration, screening, watchlist quotes, reports, tasks, paper trading, portfolio research, review, memory, skills and learning. Watchlist preferences store validated identities only, never quotes or transcripts.
+- `FinancialResearchBridge` commits the exact draft to the native composer before requesting native submission. Journal, native worker, SSE, message projection, stop and HTML export remain authoritative. Finance writes no second transcript and simulates no execution progress.
+- `FinanceSessionMenu` and `useFinanceSessionLifecycle` reuse native archive, unarchive, deletion, cache invalidation and deletion tombstones. Running records fail closed. Delete uses standard VUI confirmation. Removing the viewed research selects only a verified surviving Session of the same Agent; late results do not override navigation.
+- The archive collection reads the native paginated index and filters by Agent. Archived records open in native read-only chat. `FinanceRoute` preserves an archived direct binding with `directSessionArchived` and offers native restore or a new research without cloning the Agent.
+- Native deletion can empty the direct pointer. The pure projection reports `session_missing`; the explicit serialized financial setup POST reuses `ensure_agent_direct_session` for that same existing Agent. Existing archived or foreign pointers are never silently repaired. The lifecycle reads back the owner before repairing, so deleting the final direct research leaves an accessible workspace.
 
-Session summaries carry native terminal metadata through a bounded SQLite read of the returned page. `ready` remains an idle phase; it does not imply success. The process panel and report center distinguish success, user stop, failure and continuation. Analysis dates use the local calendar and future/invalid dates cannot start research.
+## Research and evidence
 
-Connection boundaries: the page and the native `financial_market_snapshot_tool` share the existing public quote and daily/weekly/monthly candle service. `marketDataStatus=public_quotes` describes the adapter, not provider health; `marketToolStatus` projects assignment or eligibility for an explicit default-policy upgrade. Older untouched assistants get an activation button in the native process panel; its POST writes once, and list/page reads remain pure. The Agent can query again on a follow-up; bounded JSON preserves provider/data time, units and omitted candle counts. Report ingestion and review use the shared knowledge workspace; finance has no dedicated PDF ingestion form or automatic intake. Financial multi-analyst workflows, batch screening and minute quotes are not wired. RAGFlow configuration alone does not prove upstream connectivity. Accounts, holdings and broker orders remain outside this read-only surface.
+Stock and topic requests carry an actual date, period, scope and five depth levels. New full research uses a separate native Session. Reports derive only from completed canonical `final_answer` items; thinking, stopped turns and unrelated follow-ups do not replace a full report. Topic reports are independent of stock selection. Citations preserve PDF identity/page and match active sources in the same Agent-owned library.
 
-Verification includes market parser/HTTP tests, finance entry/bridge/library/report projections, VUI and layout contracts, TypeScript/build and isolated desktop browser acceptance. A public provider read does not prove exchange-grade real-time data.
+Report search uses native `querySessions(q)` over titles and bodies. Outcome filters and task counts apply to loaded records, not an invented global count. Native `ready` is idle, not proof of success. Terminal metadata distinguishes completion, stop, failure and continuation. Empty unpersisted placeholders and deletion tombstones are excluded.
+
+`FinanceAnalystTeam` uses five separate native Agents: market, fundamentals, news, bull and bear. Three primary reports feed two opposing reviews, then the financial owner synthesizes. Runs store only Session/Turn/submission references and stage metadata; answers remain in native Sessions. Roles derive narrow authorized tools/model from the owner. Identity, permission and Session ownership drift fail closed. Stops target the exact Turn. Unknown acceptance is read back before retry. Analyst links explicitly use native chat rather than bypassing the financial binding guard.
+
+## Public market data
+
+The existing Tencent adapter owns A-share quotes and adjusted day/week/month candles. Provider, quote/fetch times, yuan/lot units and missing values stay explicit. MA5/20, BOLL(20,2), MACD(12,26,9) and Wilder RSI(14) calculate on all loaded candles before slicing; missing warm-up values are never generated.
+
+`financialResearch` owns bounded batch quotes, provider screening, news, announcements and fundamentals. The Sina universe is provider coverage, not complete exchange coverage. Partial pages/deadlines stay visible. Unknown market-cap units remain null; unavailable filters are omitted. A source time without a date is not a fabricated data date. Cache hits preserve source fetch time. Natural-language screening prepares real native research, not an AI result before model execution.
+
+Public fundamentals are source snapshots, not verified PDF evidence. `FinanceReportLibrary` uses shared knowledge APIs with exact Agent/library identity and active owned sources. Intake/deletion stay in the existing knowledge workspace. Untrusted source text is plain data; external links use validated HTTP/HTTPS URLs.
+
+## Paper account and portfolio
+
+`financialPaper` owns a private Agent-scoped virtual ledger. GET never opens an account; explicit creation seeds RMB 1,000,000. Server-read public quotes, integer A-share lots, cash/holding checks, declared fees and Beijing calendar-day T+1 govern simulated orders. Client idempotency keys and synchronous UI gates prevent duplicate writes. These declared simulation rules do not provide an exchange calendar or broker connection.
+
+Holdings use one bounded quote batch instead of candles per position. Unavailable quotes may retain the actual prior transaction quote with a visible stale/partial mark. Reviews use recorded trades/monthly aggregates, not invented historical NAV. AI review prepares a draft containing the actual ledger in a separate native topic Session, retaining existing stock reports.
+
+`financialPortfolio` reuses the ledger and public data for holdings weights, cash allocation, concentration and bounded return correlations. Missing prices and insufficient overlapping candles remain missing. Portfolio research prepares a source-bearing draft in a separate native topic Session; it adds no account, backtest or portfolio writer. An unopened account has an explicit link to the existing paper-account setup instead of a retry dead end.
+
+## Memory, skills and learning
+
+`financialPreferences` stores validated preferences in the same Agent's native episodic personal memory with UUID references and bounded input. The runtime owns its loading window; saving does not guarantee inclusion in every Turn. Disabled memory rejects writes. Private data uses the same Agent/actor ACL.
+
+Skills come from the installed native library and use slash commands. Native submission loads actual local skill body/version. Learning provides independently written five lessons, eight guides and checks; exercises prepare the real composer. No reference course prose is copied.
+
+## Scope and verification
+
+The surface targets desktop A-share community research. Broker trading, Pro strategy automation, scheduled/batch analysis and Word/PDF export are outside the implementation. Markdown/native HTML export remains. ETF, Hong Kong and US support is not implied by the reference name.
+
+Verification uses domain/native lifecycle tests, VUI/API contracts, TypeScript/production build and isolated Launcher/browser acceptance with confirmed instance/code identity. Provider HTTP success does not prove exchange-grade realtime data; model configuration does not prove successful research.
+
+Runtime diagnostics reuse native archive/delete, Turn and episodic-memory events. Finance adds bounded direct-binding repair and paper-account/order events, with stable IDs and outcomes; prompts, preference text, transaction reasons and report bodies are excluded. Public read-only data and visual projections add no persistence events.

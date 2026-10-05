@@ -13,6 +13,8 @@ import threading
 from core.web.services import agent_directory_service as directory
 from core.web.services import session_service
 from core.web.services import team_knowledge_service as knowledge
+from core.web.services.runtime_scene_service import record_runtime_scene_event_quietly
+from core.web.services.session_archive_service import conversation_is_archived
 from tools.financial_report_tools import financial_report_availability
 
 PROFILE = "financial_assistant_v1"
@@ -65,9 +67,11 @@ PERSONA = {
 TASK = {
     **_NEWS_TASK,
     "mission": "基于公开行情和可核验财报证据，为用户提供只读投资研究与风险建议。",
-    "responsibilities": _NEWS_TASK["responsibilities"] + "需要最新报价或日、周、月K线时，主动调用已授权行情工具；标明行情时间、来源、复权和单位，查询失败或数据不足时明确说明。",
+    "responsibilities": _NEWS_TASK["responsibilities"]
+    + "需要最新报价或日、周、月K线时，主动调用已授权行情工具；标明行情时间、来源、复权和单位，查询失败或数据不足时明确说明。",
     "preferredTasks": "公开行情与K线查询、财报检索、来源对照、公开新闻参考、风险因素梳理和投资需求澄清。",
-    "constraints": _NEWS_TASK["constraints"] + "公开行情可能延迟或来自缓存；查询时间不等于行情时间，追问不能沿用首次快照冒充最新数据。行情工具只发送股票代码、周期和数量。",
+    "constraints": _NEWS_TASK["constraints"]
+    + "公开行情可能延迟或来自缓存；查询时间不等于行情时间，追问不能沿用首次快照冒充最新数据。行情工具只发送股票代码、周期和数量。",
 }
 # Empty-composer cards for this profile only. Ordinary chats keep the shared
 # code starters from composer_example_commands.
@@ -95,7 +99,7 @@ def composer_starters_for_agent(agent_id: str) -> list[dict[str, str]] | None:
         return None
     try:
         agent = directory.get_agent(normalized)
-    except Exception:
+    except (directory.AgentDirectoryError, OSError, RuntimeError):
         return None
     if not isinstance(agent, dict):
         return None
@@ -120,8 +124,9 @@ def _project(agent: dict) -> dict:
         agent.get("roleKey") == ROLE and agent.get("primaryMode") == "general"
     )
     setup = (agent.get("metadata") or {}).get("financialAssistantSetup", "pending")
-    session_id = str(agent.get("directSessionId") or "")
+    session_id = str(agent.get("directSessionId") or "").strip()
     verified_session = False
+    session_archived = False
     if active and session_id and valid_profile:
         # Existence-only check (same fast path as the message-curation read):
         # one session runtime row from the chat-state store instead of the full
@@ -138,6 +143,7 @@ def _project(agent: dict) -> dict:
             or ""
         ).strip()
         verified_session = bool(session_row) and row_agent_id == agent_id
+        session_archived = verified_session and conversation_is_archived(session_row)
     base = None
     if active and valid_profile:
         try:
@@ -161,8 +167,15 @@ def _project(agent: dict) -> dict:
         "displayName": agent["displayName"],
         "agentCode": agent.get("agentCode", ""),
         "status": agent.get("status", ""),
-        "setupStatus": setup if valid_profile else "profile_changed",
+        "setupStatus": (
+            "session_missing"
+            if active and valid_profile and setup == "ready" and not session_id
+            else setup
+            if valid_profile
+            else "profile_changed"
+        ),
         "directSessionId": session_id if verified_session and setup == "ready" else "",
+        "directSessionArchived": session_archived,
         "knowledgeBaseId": base_id,
         "knowledgeReadable": can_read,
         "modelStatus": "configured_unverified" if configured else "not_configured",
@@ -171,7 +184,7 @@ def _project(agent: dict) -> dict:
         "marketDataStatus": "public_quotes",
         "marketToolStatus": _market_tool_status(agent),
         "newsDelegationStatus": "disabled",
-        "privateLedgerStatus": "not_implemented",
+        "privateLedgerStatus": "paper_simulation_available",
         "tradingEnabled": False,
     }
 
@@ -234,7 +247,9 @@ def _grant_default_references(agent: dict) -> bool:
         return False
     if metadata.get("financialAssistantSetup") != "ready":
         return False
-    policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
+    policy = (
+        agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
+    )
     updates: dict = {}
     grant_news = (
         news_pending
@@ -249,8 +264,12 @@ def _grant_default_references(agent: dict) -> bool:
             "allowedTools": list(tools),
             "preferredTools": list(tools),
         }
-        updates["expected_tool_policy_fingerprint"] = directory.tool_policy_fingerprint(policy)
-    task = agent.get("taskProfile") if isinstance(agent.get("taskProfile"), dict) else {}
+        updates["expected_tool_policy_fingerprint"] = directory.tool_policy_fingerprint(
+            policy
+        )
+    task = (
+        agent.get("taskProfile") if isinstance(agent.get("taskProfile"), dict) else {}
+    )
     target_task = TASK if grant_market else _NEWS_TASK
     previous_tasks = [_PREVIOUS_TASK_TEXT] if news_pending else []
     if grant_market:
@@ -264,7 +283,9 @@ def _grant_default_references(agent: dict) -> bool:
     if task_changes:
         updates["task_profile"] = {**task, **task_changes}
     persona = (
-        agent.get("personaProfile") if isinstance(agent.get("personaProfile"), dict) else {}
+        agent.get("personaProfile")
+        if isinstance(agent.get("personaProfile"), dict)
+        else {}
     )
     previous_expertise = [_PREVIOUS_EXPERTISE] if news_pending else []
     if grant_market:
@@ -272,7 +293,9 @@ def _grant_default_references(agent: dict) -> bool:
     if list(persona.get("expertise") or []) in previous_expertise:
         updates["persona_profile"] = {
             **persona,
-            "expertise": list((PERSONA if grant_market else _NEWS_PERSONA)["expertise"]),
+            "expertise": list(
+                (PERSONA if grant_market else _NEWS_PERSONA)["expertise"]
+            ),
         }
     migrated = bool(updates)
     updates["metadata"] = {
@@ -373,6 +396,27 @@ def create_financial_assistant(display_name: str = "炒股智能体") -> dict:
                 },
             )
         else:
+            # Native deletion unbinds a direct Session. This explicit, serialized
+            # write repairs only an empty pointer, without recreating the Agent
+            # or touching archived or foreign existing Session bindings.
+            if not str(agent.get("directSessionId") or "").strip():
+                repaired = session_service.ensure_agent_direct_session(
+                    agent_id=agent["agentId"],
+                    title=agent["displayName"],
+                    created_by="financial_assistant",
+                )
+                record_runtime_scene_event_quietly(
+                    "finance",
+                    "session_binding",
+                    "finance.direct_session.repaired",
+                    outcome="repaired",
+                    lifecycle=True,
+                    fields={
+                        "agentId": agent["agentId"],
+                        "sessionId": repaired["id"],
+                        "reason": "empty_direct_pointer",
+                    },
+                )
             _grant_default_references(agent)
         agent = directory.get_agent(agent["agentId"], include_archived=True)
         return {"created": created, "assistant": _project(agent)}

@@ -27,6 +27,8 @@ import {
   serializeChatRouteSelection,
 } from "./chatSelectionProjection";
 import { useChatRouteSelection } from "./useChatRouteSelection";
+vi.mock("../../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let hostResults: ReturnType<typeof useChatRouteSelection>[] = [];
 let observedNavigationTypes: string[] = [];
@@ -43,7 +45,7 @@ let container: HTMLElement;
 
 function mount(initialEntries: string[]) {
   router = createMemoryRouter(
-    [{ path: "/chat", element: React.createElement(Host) }],
+    [{ path: "/chat", element: React.createElement(Host) }, { path: "/finance", element: React.createElement(Host) }],
     { initialEntries },
   );
   observedNavigationTypes = [];
@@ -131,6 +133,16 @@ describe("chat route selection model", () => {
 });
 
 describe("useChatRouteSelection committed-location contract", () => {
+  it("keeps financial research on its own page and opens analysts on ordinary chat only explicitly", () => {
+    mount(["/finance?session=finance-main"]);
+    act(() => latest().openSession("finance-new"));
+    expect(router.state.location.pathname).toBe("/finance");
+    expect(committedSearch()).toBe("?session=finance-new");
+    act(() => latest().openSession("analyst-session", { surface: "chat", replace: false }));
+    expect(router.state.location.pathname).toBe("/chat");
+    expect(committedSearch()).toBe("?session=analyst-session");
+    expect(observedNavigationTypes).toContain("PUSH");
+  });
   it("derives the current selection only from the committed URL", () => {
     mount(["/chat?session=session-a"]);
     expect(latest().selection).toEqual({ kind: "session", sessionId: "session-a" });

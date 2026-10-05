@@ -56,7 +56,7 @@ def test_explicit_setup_uses_native_identity_session_and_private_read_policy(ent
         assert agent["memoryPolicy"][field] == []
     assert agent["metadata"]["delegationPolicy"]["allowSubagents"] is False
     assert row["newsDelegationStatus"] == "disabled"
-    assert row["privateLedgerStatus"] == "not_implemented"
+    assert row["privateLedgerStatus"] == "paper_simulation_available"
     assert row["marketDataStatus"] == "public_quotes" and not row["tradingEnabled"]
     assert not (agent.get("metadata") or {}).get("virtualHumanCompanion")
     detail = session_service.get_session_detail(row["directSessionId"], message_limit=0)
@@ -121,11 +121,67 @@ def test_archived_identity_is_not_restored_or_recreated(entry_env):
     assert len(service.list_financial_assistants()) == 1
 
 
+def test_deleted_direct_session_repairs_only_on_explicit_write(entry_env, monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        service,
+        "record_runtime_scene_event_quietly",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+    before = service.create_financial_assistant()["assistant"]
+    session_service.delete_chat_session_lightweight(before["directSessionId"])
+    listed = service.list_financial_assistants()[0]
+    assert listed["setupStatus"] == "session_missing"
+    assert listed["directSessionId"] == ""
+    assert directory.get_agent(before["agentId"])["directSessionId"] == ""
+    repaired = service.create_financial_assistant()
+    assert repaired["created"] is False
+    assert repaired["assistant"]["agentId"] == before["agentId"]
+    assert repaired["assistant"]["setupStatus"] == "ready"
+    assert repaired["assistant"]["directSessionId"] != before["directSessionId"]
+    detail = session_service.get_session_detail(
+        repaired["assistant"]["directSessionId"]
+    )
+    assert detail["agentId"] == before["agentId"]
+    assert len(service.list_financial_assistants()) == 1
+    assert (
+        service.create_financial_assistant()["assistant"]["directSessionId"]
+        == repaired["assistant"]["directSessionId"]
+    )
+    assert len(events) == 1
+    assert events[0][0][2] == "finance.direct_session.repaired"
+    assert events[0][1]["fields"] == {
+        "agentId": before["agentId"],
+        "sessionId": repaired["assistant"]["directSessionId"],
+        "reason": "empty_direct_pointer",
+    }
+
+
+def test_active_assistant_projects_archived_direct_session_without_restoring_it(
+    entry_env,
+):
+    from core.web.services.session_archive_service import (
+        archive_session,
+        unarchive_session,
+    )
+
+    row = service.create_financial_assistant()["assistant"]
+    archive_session(row["directSessionId"])
+    listed = service.list_financial_assistants()[0]
+    assert listed["status"] == "active" and listed["setupStatus"] == "ready"
+    assert listed["directSessionId"] == row["directSessionId"]
+    assert listed["directSessionArchived"] is True
+    assert (
+        service.create_financial_assistant()["assistant"]["directSessionArchived"]
+        is True
+    )
+    unarchive_session(row["directSessionId"])
+    assert service.list_financial_assistants()[0]["directSessionArchived"] is False
+
+
 def test_foreign_session_binding_never_opens(entry_env):
     row = service.create_financial_assistant()["assistant"]
-    foreign = session_service.create_chat_session(
-        title="外部会话", lightweight=True
-    )
+    foreign = session_service.create_chat_session(title="外部会话", lightweight=True)
     # create_chat_session 会把新会话绑到某个活动 Agent 的 directSessionId；
     # 借这个真实存在、归属他人的运行时行，把助手的绑定污染成它（直接改
     # state 绕过 update API 的占用保护——这里模拟的正是被污染的绑定）。
@@ -229,7 +285,11 @@ def test_composer_starters_follow_the_financial_profile_only(monkeypatch):
     monkeypatch.setattr(directory, "get_agent", fake_get)
     starters = service.composer_starters_for_agent("finance")
     assert starters is not None
-    assert [item["heading"] for item in starters] == ["新闻参考", "财报证据", "风险边界"]
+    assert [item["heading"] for item in starters] == [
+        "新闻参考",
+        "财报证据",
+        "风险边界",
+    ]
     assert service.composer_starters_for_agent("plain") is None
     assert service.composer_starters_for_agent("") is None
 
@@ -399,7 +459,9 @@ def test_stage_one_migration_happens_on_write_path_not_listing(entry_env):
     # 持久标记已落：后续写路径与读取都不再改写（只跑一次）。
     service.create_financial_assistant("名字不影响迁移")
     service.list_financial_assistants()
-    assert directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before + 1
+    assert (
+        directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before + 1
+    )
 
 
 def test_create_upgrades_untouched_ready_assistant_without_renaming(entry_env):
@@ -448,9 +510,7 @@ def test_cleared_or_custom_policies_do_not_gain_news_search(entry_env):
     # GET 是纯读：即使内容长得像 stage-1，只要迁移标记已落，
     # listing 也不改写用户留下的策略与文本（迁移只发生在写路径）。
     assert refreshed["toolPolicy"]["allowedTools"] == ["financial_report_query_tool"]
-    assert (
-        refreshed["taskProfile"]["constraints"] == _STAGE_ONE_TASK["constraints"]
-    )
+    assert refreshed["taskProfile"]["constraints"] == _STAGE_ONE_TASK["constraints"]
 
 
 def _rewind_news_default(agent_id: str, **policy_changes) -> None:
@@ -471,10 +531,13 @@ def _rewind_news_default(agent_id: str, **policy_changes) -> None:
     )
 
 
-def test_market_upgrade_is_explicit_single_write_and_preserves_limits(entry_env, monkeypatch):
+def test_market_upgrade_is_explicit_single_write_and_preserves_limits(
+    entry_env, monkeypatch
+):
     row = service.create_financial_assistant()["assistant"]
     _rewind_news_default(
-        row["agentId"], maxCallsPerTurn=3,
+        row["agentId"],
+        maxCallsPerTurn=3,
         maxCallsPerTurnByModelFamily={"openai": 2},
         blockedTools=["financial_evidence_stage_tool"],
         approvalOverrides={"news_search_tool": "always"},
@@ -489,11 +552,14 @@ def test_market_upgrade_is_explicit_single_write_and_preserves_limits(entry_env,
         return real_update(*args, **kwargs)
 
     monkeypatch.setattr(directory, "update_agent_instance", count_update)
-    client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+    client = TestClient(
+        create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()}
+    )
     listed = client.get("/api/financial-assistants").json()[0]
     assert listed["marketToolStatus"] == "upgrade_available" and writes == []
     response = client.post(
-        "/api/financial-assistants", json={"displayName": "不要重命名"},
+        "/api/financial-assistants",
+        json={"displayName": "不要重命名"},
         headers={CONTROL_TOKEN_HEADER: get_control_token()},
     )
     assert response.status_code == 200
@@ -502,9 +568,20 @@ def test_market_upgrade_is_explicit_single_write_and_preserves_limits(entry_env,
     assert len(writes) == 1
     assert after["displayName"] == before["displayName"]
     assert after["directSessionId"] == before["directSessionId"]
-    assert after["toolPolicy"]["policyVersion"] == before["toolPolicy"]["policyVersion"] + 1
+    assert (
+        after["toolPolicy"]["policyVersion"]
+        == before["toolPolicy"]["policyVersion"] + 1
+    )
     assert set(after["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
-    for key in ("maxCallsPerTurn", "maxCallsPerTurnByModelFamily", "blockedTools", "readScopes", "perToolRules", "approvalOverrides", "delegationAccess"):
+    for key in (
+        "maxCallsPerTurn",
+        "maxCallsPerTurnByModelFamily",
+        "blockedTools",
+        "readScopes",
+        "perToolRules",
+        "approvalOverrides",
+        "delegationAccess",
+    ):
         assert after["toolPolicy"][key] == before["toolPolicy"][key]
     assert after["taskProfile"] == service.TASK
     assert after["personaProfile"]["expertise"] == service.PERSONA["expertise"]
@@ -513,17 +590,22 @@ def test_market_upgrade_is_explicit_single_write_and_preserves_limits(entry_env,
     assert len(writes) == 1
 
 
-@pytest.mark.parametrize("policy_changes", [
-    {"allowedTools": [], "preferredTools": []},
-    {"allowedTools": ["financial_report_query_tool"]},
-    {"preferredTools": ["financial_report_query_tool"]},
-    {"allowedTools": [*service._NEWS_READ_TOOLS, "web_search_tool"]},
-    {"networkAccess": "none"},
-    {"networkAccess": "unrestricted"},
-    {"mutationAccess": "controlled"},
-    {"blockedTools": [service.MARKET_TOOL]},
-])
-def test_market_upgrade_does_not_expand_custom_or_denied_policies(entry_env, policy_changes):
+@pytest.mark.parametrize(
+    "policy_changes",
+    [
+        {"allowedTools": [], "preferredTools": []},
+        {"allowedTools": ["financial_report_query_tool"]},
+        {"preferredTools": ["financial_report_query_tool"]},
+        {"allowedTools": [*service._NEWS_READ_TOOLS, "web_search_tool"]},
+        {"networkAccess": "none"},
+        {"networkAccess": "unrestricted"},
+        {"mutationAccess": "controlled"},
+        {"blockedTools": [service.MARKET_TOOL]},
+    ],
+)
+def test_market_upgrade_does_not_expand_custom_or_denied_policies(
+    entry_env, policy_changes
+):
     row = service.create_financial_assistant()["assistant"]
     _rewind_news_default(row["agentId"], **policy_changes)
     before = directory.get_agent(row["agentId"])
@@ -535,19 +617,32 @@ def test_market_upgrade_does_not_expand_custom_or_denied_policies(entry_env, pol
     assert after["personaProfile"] == before["personaProfile"]
     assert after["metadata"]["financialAssistantMarketReferenceGranted"] is True
     # A later default-looking edit cannot silently retry a previously declined upgrade.
-    directory.update_agent_instance(row["agentId"], tool_policy={
-        **service.READ_POLICY, "allowedTools": list(service._NEWS_READ_TOOLS),
-        "preferredTools": list(service._NEWS_READ_TOOLS), "blockedTools": [],
-    })
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={
+            **service.READ_POLICY,
+            "allowedTools": list(service._NEWS_READ_TOOLS),
+            "preferredTools": list(service._NEWS_READ_TOOLS),
+            "blockedTools": [],
+        },
+    )
     service.create_financial_assistant()
-    assert service.MARKET_TOOL not in directory.get_agent(row["agentId"])["toolPolicy"]["allowedTools"]
+    assert (
+        service.MARKET_TOOL
+        not in directory.get_agent(row["agentId"])["toolPolicy"]["allowedTools"]
+    )
 
 
 def test_market_upgrade_keeps_custom_task_and_persona_text(entry_env):
     row = service.create_financial_assistant()["assistant"]
     _rewind_news_default(row["agentId"])
-    directory.update_agent_instance(row["agentId"],
-        task_profile={**service._NEWS_TASK, "constraints": "用户自己的约束", "mission": "用户自己的任务"},
+    directory.update_agent_instance(
+        row["agentId"],
+        task_profile={
+            **service._NEWS_TASK,
+            "constraints": "用户自己的约束",
+            "mission": "用户自己的任务",
+        },
         persona_profile={**service._NEWS_PERSONA, "expertise": ["用户专长"]},
     )
     service.create_financial_assistant()
@@ -562,9 +657,13 @@ def test_stage_one_can_gain_news_without_overriding_market_blacklist(entry_env):
     row = service.create_financial_assistant()["assistant"]
     _rewind_stage_one(row["agentId"])
     agent = directory.get_agent(row["agentId"])
-    directory.update_agent_instance(row["agentId"], tool_policy={
-        **agent["toolPolicy"], "blockedTools": [service.MARKET_TOOL],
-    })
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={
+            **agent["toolPolicy"],
+            "blockedTools": [service.MARKET_TOOL],
+        },
+    )
     service.create_financial_assistant()
     after = directory.get_agent(row["agentId"])
     assert set(after["toolPolicy"]["allowedTools"]) == set(service._NEWS_READ_TOOLS)
@@ -574,24 +673,32 @@ def test_stage_one_can_gain_news_without_overriding_market_blacklist(entry_env):
 
 def test_removed_market_permission_is_never_regranted(entry_env):
     row = service.create_financial_assistant()["assistant"]
-    directory.update_agent_instance(row["agentId"], tool_policy={
-        **service.READ_POLICY, "allowedTools": list(service._NEWS_READ_TOOLS),
-        "preferredTools": list(service._NEWS_READ_TOOLS),
-    })
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={
+            **service.READ_POLICY,
+            "allowedTools": list(service._NEWS_READ_TOOLS),
+            "preferredTools": list(service._NEWS_READ_TOOLS),
+        },
+    )
     before = directory.get_agent(row["agentId"])["toolPolicy"]
     assert service.list_financial_assistants()[0]["marketToolStatus"] == "not_assigned"
     service.create_financial_assistant()
     assert directory.get_agent(row["agentId"])["toolPolicy"] == before
 
 
-def test_default_upgrade_cannot_overwrite_a_concurrent_policy_edit(entry_env, monkeypatch):
+def test_default_upgrade_cannot_overwrite_a_concurrent_policy_edit(
+    entry_env, monkeypatch
+):
     row = service.create_financial_assistant()["assistant"]
     _rewind_news_default(row["agentId"])
     real_update = directory.update_agent_instance
 
     def change_before_upgrade(agent_id, **kwargs):
         if kwargs.get("expected_tool_policy_fingerprint"):
-            real_update(agent_id, tool_policy={"allowedTools": [], "networkAccess": "none"})
+            real_update(
+                agent_id, tool_policy={"allowedTools": [], "networkAccess": "none"}
+            )
         return real_update(agent_id, **kwargs)
 
     monkeypatch.setattr(directory, "update_agent_instance", change_before_upgrade)

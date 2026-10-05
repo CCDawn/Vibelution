@@ -1,5 +1,6 @@
 import type { KnowledgeItem, KnowledgeSourceArtifact } from "../../api/types/knowledge";
 import type { SessionSummary } from "../../api/types";
+import { isSessionDeleteTombstoned } from "../sessionDeleteTombstone";
 
 export type FinancialResearchKind = "financial" | "events" | "risk";
 
@@ -16,7 +17,7 @@ export function financialResearchPrompt(company: string, period: string, kind: F
 }
 
 export function isFinancialSession(row: SessionSummary, agentId: string) {
-  return row.agentId === agentId && !row.hiddenFromIndex && row.archiveState?.status !== "archived";
+  return row.agentId === agentId && !row.hiddenFromIndex && row.archiveState?.status !== "archived" && !isSessionDeleteTombstoned(row.id);
 }
 
 export function activeFinancialItems(items: KnowledgeItem[], knowledgeBaseId: string) {

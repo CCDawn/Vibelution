@@ -8,16 +8,19 @@ export type ResearchScope = "financial" | "events" | "risk" | "comprehensive";
 export type ResearchTerminalState = Pick<SessionSummary, "terminalReason" | "lastTurnStatus" | "lastTurnTerminalTurnId">;
 export const EMPTY_FINANCIAL_MESSAGES: ConversationMessage[] = [];
 
-export function isResearchSearchResult(row: SessionSummary, query: string) {
-  const needle = query.trim().toLocaleLowerCase();
+export function isBlankResearchPlaceholder(row: SessionSummary) {
   // The native Agent query also appends an unpersisted direct-session stub.
   // Such a blank stub has no searchable body; indexed body-only hits must stay.
   // Native lists populate ready/idle even when the stub has never had a turn.
-  const blankStub = !row.updatedAt && !row.lastActive && !row.taskSummary
+  return !row.updatedAt && !row.lastActive && !row.taskSummary
     && !row.lastTurnTerminalTurnId
     && ["", "ready", "idle"].includes(row.lastTurnStatus ?? "")
     && ["", "ready", "idle"].includes(row.terminalReason ?? "");
-  return !needle || !blankStub || row.title.toLocaleLowerCase().includes(needle);
+}
+
+export function isResearchSearchResult(row: SessionSummary, query: string) {
+  const needle = query.trim().toLocaleLowerCase();
+  return !needle || !isBlankResearchPlaceholder(row) || row.title.toLocaleLowerCase().includes(needle);
 }
 
 export function cleanResearchPreview(text: string, limit = 100) {
@@ -134,11 +137,20 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
   }
   return { turnId: turn.turnId, timestamp: turn.timestamp, text, summary: cleanResearchPreview(conclusions || conclusion.replace(/^\s{0,3}#{1,3}\s+.+\n/, ""), 240), sections, citations: citations.slice(0, 12) };
 }
-export function stockResearchPrompt(stock: StockIdentity, period: string, date: string, scope: ResearchScope, depth: "brief" | "detailed", snapshot?: StockSnapshot) {
+export type ResearchDepth = "brief" | "basic" | "standard" | "detailed" | "exhaustive";
+export const RESEARCH_DEPTH_INSTRUCTIONS: Record<ResearchDepth, string> = {
+  brief: "简明回答，优先核实最重要的事实",
+  basic: "基础研究，交叉核对关键行情、财务与事件",
+  standard: "标准研究，覆盖市场、基本面、新闻、行业和主要风险，列出多空依据",
+  detailed: "详细核对，比较多个来源，讨论估值、催化剂、反例与多种情景",
+  exhaustive: "全面研究，逐项核对原始证据、行业对照、多空论点、情景与风险，明确证据不足之处",
+};
+
+export function stockResearchPrompt(stock: StockIdentity, period: string, date: string, scope: ResearchScope, depth: ResearchDepth, snapshot?: StockSnapshot) {
   const subject = `${stock.name}（${stock.ticker}，${stock.market}）`;
   const task = { financial: "财报、盈利质量与现金流", events: "重大事件及新闻来源", risk: "财务、经营和估值风险", comprehensive: "财报、盈利质量、事件与主要风险" }[scope];
   const quote = snapshot?.stock.symbol === stock.symbol ? `\n行情快照（腾讯财经公开行情，可能延迟）：${snapshot.stock.timestamp}，价格 ${snapshot.stock.price} 元，涨跌 ${snapshot.stock.changePercent}%。这是带时点的报价，不是已审核财报证据。` : "";
-  return `请研究 ${subject}，分析日期 ${date}${period.trim() ? `，报告期 ${period.trim()}` : ""}，重点检查${task}。${depth === "brief" ? "简明回答" : "详细核对"}，使用 Markdown 二级标题“结论、关键事实、风险、证据来源”组织结果。财报数值只用已审核原始 PDF 证据，注明报告期、页码和官方链接；新闻注明来源与日期。区分事实、推论和缺失数据，不编造行情、指标或买卖建议。${quote}`;
+  return `请研究 ${subject}，分析日期 ${date}${period.trim() ? `，报告期 ${period.trim()}` : ""}，重点检查${task}。${RESEARCH_DEPTH_INSTRUCTIONS[depth]}，使用 Markdown 二级标题“结论、市场与技术、基本面、新闻与催化剂、行业与大盘、多空论证、情景分析、风险、证据来源”组织结果；不适用的章节简要说明缺失证据。财报数值只用已审核原始 PDF 证据，注明报告期、页码和官方链接；新闻注明来源与日期。区分事实、推论和缺失数据，不编造行情、指标或买卖建议。${quote}`;
 }
 export function movingAverage(candles: readonly StockCandle[], length: number): (number | null)[] {
   let sum = 0;

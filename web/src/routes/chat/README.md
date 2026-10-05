@@ -27,6 +27,9 @@ Chat surface. Rules:
   union (`session` / `room` / `project_bus` / `bare` / `invalid`) and the pure
   serialize/compare helpers; `activeSessionId` / `activeGroupRoomId` are
   derived locally from the route only.
+- Finance navigation stays on `/finance` by default. Analyst-session links use
+  `openSession(id, { surface: "chat" })` to enter ordinary Chat without relaxing
+  the financial assistant's Agent/Session binding guard.
 - Async lifecycle results (create temp→real, delete, archive, clear history,
   group create/delete, late `/select`) must compare-and-swap via
   `replaceIfStillViewing`; a user who already navigated away keeps their page

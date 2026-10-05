@@ -63,6 +63,33 @@ rules:
       - "core/web/services/team_workflow/research_runtime/hypothesis_command_attempts.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_research_workflow_meeting_runtime.py tests/test_research_workflow_meeting_driver_recovery.py tests/test_research_workflow_hypothesis_command_attempts.py -q -n 3 --dist loadfile"
+  - id: finance-stock-research-domain
+    description: "Public screening and research sources, private paper ledger and portfolio, native preferences and analyst-turn orchestration."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/financial_research_service.py"
+      - "core/web/services/financial_paper_service.py"
+      - "core/web/services/financial_paper/**"
+      - "core/web/services/financial_preferences_service.py"
+      - "core/web/services/financial_team_service.py"
+      - "core/web/services/financial_team/**"
+      - "core/web/services/financial_portfolio_service.py"
+      - "core/web/routes/financial_research.py"
+      - "core/web/routes/financial_paper.py"
+      - "core/web/routes/financial_preferences.py"
+      - "core/web/routes/financial_team.py"
+      - "core/web/routes/financial_portfolio.py"
+      - "tests/test_financial_research_service.py"
+      - "tests/test_financial_paper_service.py"
+      - "tests/test_financial_preferences_service.py"
+      - "tests/test_financial_team_service.py"
+      - "tests/test_financial_portfolio_service.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_research_service.py tests/test_financial_paper_service.py tests/test_financial_preferences_service.py tests/test_financial_team_service.py tests/test_financial_portfolio_service.py -q -n 3 --dist loadfile"
+    notes:
+      - "Provider and model fixtures prove contracts only; final desktop acceptance uses an isolated Launcher instance and real native turns."
   - id: financial-report-knowledge-integration
     description: "Financial report transport, owner-scoped evidence profile, native RAG provenance, and schema-aware tool arguments."
     executionLayers:

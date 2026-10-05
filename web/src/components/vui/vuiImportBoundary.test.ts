@@ -28,6 +28,10 @@ const productSharedParentStyleConsumers = [
   "routes/finance/FinanceReportLibrary.tsx",
   "routes/finance/FinanceResearchFrame.tsx",
   "routes/finance/FinanceResearchWorkspace.tsx",
+  // Topic forms share the knowledge-center form geometry; watchlist quotes and
+  // screening share one market table map rather than duplicate visual classes.
+  "routes/finance/FinanceGeneralResearch.tsx",
+  "routes/finance/FinanceWatchlistTable.tsx",
   "components/layout/PersistedHeightListShell.tsx",
   "components/conversation/ConversationFollowupQueueBar.tsx",
   "components/conversation/ConversationToolActivityPills.tsx",

@@ -1,7 +1,8 @@
 """Typed financial entry routes; native services remain lifecycle authorities."""
 
-from fastapi import APIRouter, HTTPException, Query
 from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services import financial_assistant_service as service
@@ -22,12 +23,15 @@ class FinancialAssistantResponse(BaseModel):
     status: str
     setupStatus: str
     directSessionId: str
+    directSessionArchived: bool = False
     knowledgeBaseId: str
     knowledgeReadable: bool
     modelStatus: str
     reportStatus: str
     marketDataStatus: str
-    marketToolStatus: Literal["assigned", "upgrade_available", "not_assigned"] = "not_assigned"
+    marketToolStatus: Literal["assigned", "upgrade_available", "not_assigned"] = (
+        "not_assigned"
+    )
     newsDelegationStatus: str
     privateLedgerStatus: str
     tradingEnabled: bool
@@ -103,7 +107,9 @@ class StockSnapshotResponse(BaseModel):
 
 
 @router.get("/financial-market/search", response_model=list[StockIdentityResponse])
-def financial_market_search(query: str = Query(default="", max_length=40, pattern=r"^[\w\s.*\-]*$")) -> list[dict]:
+def financial_market_search(
+    query: str = Query(default="", max_length=40, pattern=r"^[\w\s.*\-]*$"),
+) -> list[dict]:
     try:
         return market.search_stocks(query)
     except market.StockNotFound as exc:
@@ -113,7 +119,9 @@ def financial_market_search(query: str = Query(default="", max_length=40, patter
 
 
 @router.get("/financial-market/stocks/{symbol}", response_model=StockSnapshotResponse)
-def financial_market_stock(symbol: str, period: Literal["day", "week", "month"] = "day") -> dict:
+def financial_market_stock(
+    symbol: str, period: Literal["day", "week", "month"] = "day"
+) -> dict:
     try:
         market.normalize_symbol(symbol)
     except market.MarketDataError as exc:

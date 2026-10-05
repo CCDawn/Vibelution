@@ -20,6 +20,8 @@ export type ChatRouteNavigateOptions = {
   replace?: boolean;
   /** Optional UI entry point for user-action telemetry. */
   telemetrySource?: string;
+  /** Open an analyst's ordinary session from the finance workspace. */
+  surface?: "chat";
 };
 
 export type ChatCompanionNavigateOptions = ChatRouteNavigateOptions & {
@@ -91,7 +93,7 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       }
       const encoded = params.toString();
       const search = encoded ? `?${encoded}` : "";
-      navigate({ pathname: chatSelectionPathname(location.pathname), search }, { replace: options?.replace ?? false });
+      navigate({ pathname: options?.surface === "chat" ? "/chat" : chatSelectionPathname(location.pathname), search }, { replace: options?.replace ?? false });
     },
     [location.pathname, location.search, navigate],
   );
@@ -113,7 +115,7 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       }
       navigateToSelection(
         { kind: "session", sessionId: normalizedSessionId },
-        { replace: options?.replace ?? true },
+        { replace: options?.replace ?? true, surface: options?.surface },
       );
     },
     [location.search, navigateToSelection],

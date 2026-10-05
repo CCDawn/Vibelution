@@ -60,6 +60,7 @@ export default {
   workspaceViewTabs: "shrink-0 px-6 py-3 border-b border-[var(--vui-border-subtle)]",
   workspaceOverview: "min-h-0 flex-1 overflow-y-auto p-6 grid content-start gap-5",
   workspaceChatHeading: "px-5 pt-3 shrink-0 flex items-center justify-between gap-3 text-xs text-[var(--fg-tertiary)]",
+  workspaceTopicHeader: "flex min-w-0 shrink-0 items-center justify-between gap-3 border-b border-[var(--vui-border-subtle)] px-6 py-4 text-sm [&>strong]:min-w-0 [&>strong]:truncate",
   workspaceCollection: "min-h-0 min-w-0 w-full flex-1 overflow-auto p-6",
   workspaceCollectionTitle: "text-lg font-semibold mt-0 mb-5",
   workspaceWatchlistCard: "flex items-center justify-between gap-4 border border-[var(--vui-border-subtle)]",

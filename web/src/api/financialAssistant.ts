@@ -3,6 +3,7 @@ import { fetchJson } from "./client";
 export type FinancialAssistant = {
   agentId: string; agentCode: string; displayName: string; status: string;
   setupStatus: string; directSessionId: string; knowledgeBaseId: string;
+  directSessionArchived?: boolean;
   knowledgeReadable: boolean; modelStatus: string; reportStatus: string;
   marketDataStatus: string; newsDelegationStatus: string; privateLedgerStatus: string;
   marketToolStatus?: "assigned" | "upgrade_available" | "not_assigned";
