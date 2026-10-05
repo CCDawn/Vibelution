@@ -283,7 +283,7 @@ describe("financial assistant page", () => {
 
   it("searches all native research bodies without changing the recent-history rail", async () => {
     vi.mocked(querySessions).mockImplementation(async (params) => ({
-      items: params?.q ? [{ ...nativeSession("body-match"), title: "经营质量", taskSummary: "现金流正常" }, nativeSession("native-session")] : [{ ...nativeSession("recent"), title: "年度研究" }], nextCursor: "",
+      items: params?.q ? [{ ...nativeSession("body-match"), title: "经营质量", updatedAt: "2026-10-05T13:49:11" }, { ...nativeSession("native-session"), lastTurnStatus: "ready", terminalReason: "ready" }] : [{ ...nativeSession("recent"), title: "年度研究" }], nextCursor: "",
     } as SessionQueryResponse));
     await render("/finance?session=native-session");
     await act(async () => button("报告中心")!.click());

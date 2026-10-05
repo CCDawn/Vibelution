@@ -12,8 +12,11 @@ export function isResearchSearchResult(row: SessionSummary, query: string) {
   const needle = query.trim().toLocaleLowerCase();
   // The native Agent query also appends an unpersisted direct-session stub.
   // Such a blank stub has no searchable body; indexed body-only hits must stay.
+  // Native lists populate ready/idle even when the stub has never had a turn.
   const blankStub = !row.updatedAt && !row.lastActive && !row.taskSummary
-    && !row.lastTurnStatus && !row.terminalReason;
+    && !row.lastTurnTerminalTurnId
+    && ["", "ready", "idle"].includes(row.lastTurnStatus ?? "")
+    && ["", "ready", "idle"].includes(row.terminalReason ?? "");
   return !needle || !blankStub || row.title.toLocaleLowerCase().includes(needle);
 }
 
