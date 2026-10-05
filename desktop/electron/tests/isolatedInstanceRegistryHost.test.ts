@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AdmissionDeniedError } from "../src/lifecycle/instanceAdmissionControl.js";
@@ -108,6 +109,45 @@ describe("isolatedInstanceRegistryHost", () => {
     expect(dependencies.captureIdentity).toHaveBeenCalledWith({
       pythonPath: "python", workspaceRoot: "C:/wt/task", pid: 4242
     });
+  });
+
+  it("reads the real launcher state path before starting with a missing registry row", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "vibelution-reuse-state-"));
+    vi.stubEnv("VIBELUTION_PROJECTS_HOME", join(fixture, "projects"));
+    try {
+      const projectRoot = join(fixture, "workspace");
+      await mkdir(projectRoot);
+      const statePath = backendState.launcherStatePath(projectRoot);
+      await mkdir(dirname(statePath), { recursive: true });
+      await writeFile(statePath, JSON.stringify({ backendPid: liveIdentity.pid,
+        backendCreateTime: liveIdentity.createTime, backendExecutable: liveIdentity.executable }));
+      const captureIdentity = vi.fn(async () => liveIdentity);
+      expect(await inspectIsolatedStartReuse({
+        target: { ...resolveIsolatedClaimTarget(payload, "worktree:task")!, projectRoot, alive: false },
+        pythonPath: "python", registryPath: join(fixture, "missing-registry.json"),
+        dependencies: { captureIdentity }
+      })).toEqual({ kind: "pending", generation: 0 });
+      expect(captureIdentity).toHaveBeenCalledWith({ pythonPath: "python", workspaceRoot: projectRoot, pid: 4242 });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("checks a real listener when registry and backend identity are missing and cached alive is false", async () => {
+    const listener = createServer(socket => socket.end());
+    await new Promise<void>(resolve => listener.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (listener.address() as { port: number }).port;
+      expect(await inspectIsolatedStartReuse({
+        target: { ...resolveIsolatedClaimTarget(payload, "worktree:task")!, alive: false, preferredBackend: port },
+        pythonPath: "python", dependencies: {
+          readRegistry: async () => ({ schemaVersion: 3, instances: {} }), readBackendIdentity: () => null
+        }
+      })).toEqual({ kind: "pending", generation: 0 });
+    } finally {
+      await new Promise<void>((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
+    }
   });
 
   it("does not mistake a live Runtime Manager daemon for a backend", async () => {

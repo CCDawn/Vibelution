@@ -5,6 +5,7 @@ import {
   clearWorkbenchLauncherRuntimeState,
   readDaemonIdentity,
   readDaemonPid,
+  launcherStatePath,
   readLauncherStateFile,
   sameProjectRoot,
   reclaimStaleWorkbenchBackend,
@@ -187,7 +188,7 @@ export type IsolatedStartReuseInspection =
   | { kind: "pending"; generation: number };
 
 function readLauncherBackendIdentity(workspaceRoot: string): PythonProcessIdentity | null {
-  const state = readLauncherStateFile(workspaceRoot);
+  const state = readLauncherStateFile(launcherStatePath(workspaceRoot));
   const pid = positiveInt(state.backendPid);
   const createTime = Number(state.backendCreateTime);
   const executable = String(state.backendExecutable || "").trim();
@@ -235,8 +236,7 @@ export async function inspectIsolatedStartReuse(input: {
   const expected = registered || backendIdentity;
   const livePortPending = async (): Promise<boolean> => {
     const port = positiveInt(entry?.port || input.target.preferredBackend);
-    return port > 0 && (Boolean(registered) || input.target.alive)
-      && await dependencies.connect(port, String(entry?.host || "127.0.0.1"));
+    return port > 0 && await dependencies.connect(port, String(entry?.host || "127.0.0.1"));
   };
   if (!expected) {
     return await livePortPending() ? pending() : { kind: "start" };
