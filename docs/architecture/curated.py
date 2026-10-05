@@ -4,7 +4,7 @@ Inventory grouping is navigational. Only make_views describes reviewed execution
 relationships. Update these descriptions after reviewing changed source evidence.
 """
 
-REVIEWED_COMMIT = 'd0fa8febe0ece9600b261bfad6dd5ada0f0a68b3'
+REVIEWED_COMMIT = '2b8175647d21de3caacb5c351f3e30324500dccc'
 
 DOMAIN_ROWS = [
  ('desktop','桌面与生命周期','Electron 主进程、Launcher、Runtime Manager、实例与进程管理。','#5b67c7'),

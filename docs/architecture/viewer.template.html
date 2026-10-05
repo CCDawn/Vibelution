@@ -131,6 +131,7 @@
     .current-description { max-width: 900px; margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
     .canvas-toolbar { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .graph-caption { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+    .wiki-map-caption { max-width: 680px; color: #43586b; font-size: 11px; line-height: 1.4; }
     .legend-mark { width: 12px; height: 9px; display: inline-block; border: 1px solid #aebdca; border-radius: 3px; background: white; vertical-align: -1px; }
     .toolbar-actions { display: flex; align-items: center; gap: 5px; }
     .zoom-readout { min-width: 48px; color: var(--muted); text-align: center; font: 10px/1 var(--mono); }
@@ -313,6 +314,7 @@
     .step-number { display: inline-grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #e4ebf2; color: #4f6478; font: 11px var(--mono); }
     .diagram-zone { fill: #f3f6fa; stroke: #dbe4ee; stroke-width: 1; }
     .zone-label { fill: #405a72; font: 650 15px var(--sans); }
+    .zone-description { fill: #65788a; font: 11px var(--sans); }
     .node-role-control .node-card { fill: #fffaf0; stroke: #b49b6b; }
     .node-role-store .node-card { fill: #eff8f4; stroke: #78a895; }
     .node-role-external .node-card { fill: #f6f2fb; stroke: #a08bbc; stroke-dasharray: 5 3; }
@@ -368,27 +370,9 @@
     .wiki-section { margin-top: 24px; }
     .wiki-section-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 18px; margin-bottom: 12px; }
     .wiki-section-head p { margin: 0; color: var(--muted); }
-    .wiki-group-map { display: grid; gap: 14px; }
-    .wiki-group { border: 1px solid #d8e1e9; border-radius: 9px; background: #fff; overflow: hidden; }
-    .wiki-group-head { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid #e7edf2; }
-    .wiki-group-mark { flex: 0 0 auto; width: 12px; height: 12px; margin-top: 4px; border-radius: 3px; background: var(--group-color, #496f89); }
-    .wiki-group-head h4 { margin: 0; font-size: 16px; }
-    .wiki-group-head p { margin: 3px 0 0; color: var(--muted); font-size: 14px; }
-    .wiki-domain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 10px; padding: 12px; }
-    .wiki-domain-card {
-      min-width: 0; min-height: 132px; display: grid; align-content: start; gap: 7px;
-      border: 1px solid #d5dfe7; border-left: 4px solid var(--domain-color, #496f89);
-      border-radius: 7px; padding: 12px; background: #fff; color: var(--ink); text-align: left; cursor: pointer;
-    }
-    .wiki-domain-card:hover { border-color: #9eb3c4; background: #f7fafc; }
-    .wiki-domain-card h5 { margin: 0; font-size: 16px; line-height: 1.4; }
-    .wiki-domain-card p { margin: 0; color: #52677a; font-size: 14px; }
-    .wiki-domain-card small { color: #697b8d; font-size: 12px; }
-    .wiki-role { display: inline-flex; align-items: center; width: fit-content; border: 1px solid #d6e0e8; border-radius: 999px; padding: 2px 8px; color: #536a7d; background: #f6f9fb; font-size: 12px; }
     .wiki-scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 9px; }
     .wiki-scenario-card { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid #d5dfe7; border-radius: 7px; padding: 9px 12px; background: #fff; color: #294d68; font-size: 14px; font-weight: 650; text-align: left; cursor: pointer; }
     .wiki-scenario-card:hover, .wiki-related-domain:hover, .wiki-ref:hover { border-color: #9eb3c4; background: #f1f6fa; }
-    .wiki-map-note { margin: 10px 0 0; color: #5d6f81; font-size: 12px !important; }
     .wiki-relationship-list { display: grid; gap: 8px; }
     .wiki-relationship { min-width: 0; display: grid; grid-template-columns: minmax(115px, 1fr) auto minmax(150px, 1.4fr) auto minmax(115px, 1fr); align-items: center; gap: 8px; border: 1px solid #d8e1e9; border-radius: 7px; padding: 10px; background: #fff; }
     .wiki-relationship-domain, .wiki-ref, .wiki-related-domain { min-width: 0; border: 1px solid #d7e1e8; border-radius: 5px; padding: 7px 9px; background: #fff; color: #315d7a; font-size: 14px; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
@@ -396,10 +380,6 @@
     .wiki-arrow { color: #657b8e; font-size: 17px; text-align: center; }
     .wiki-relation-detail { grid-column: 1 / -1; margin: 0; color: #596c7e; font-size: 13px !important; }
     .wiki-relation-refs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
-    .wiki-route-card { border: 1px solid #cddce7; border-radius: 9px; padding: 14px 16px; background: #f2f7fa; }
-    .wiki-route-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 10px; }
-    .wiki-route-step { min-height: 40px; border: 1px solid #b9cbd8; border-radius: 6px; padding: 7px 10px; background: #fff; color: #2d536f; font-size: 14px; font-weight: 650; cursor: pointer; }
-    .wiki-route-arrow { color: #647b8e; font-size: 18px; }
     .wiki-domain-hero { border: 1px solid #d4dfe7; border-left: 5px solid var(--domain-color, #496f89); border-radius: 9px; padding: 18px; background: #fff; }
     .wiki-domain-hero h3 { font-size: 23px; }
     .wiki-domain-layout { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; margin-top: 16px; }
@@ -424,9 +404,6 @@
       .wiki-relationship-domain:last-of-type { grid-column: 3; grid-row: 1; }
       .wiki-relationship-domain:first-of-type { grid-column: 1; grid-row: 1; }
       .wiki-relation-detail, .wiki-relation-refs { grid-column: 1 / -1; }
-      .wiki-route-steps { align-items: stretch; }
-      .wiki-route-step { flex: 1 1 45%; }
-      .wiki-route-arrow { display: none; }
       .source-snapshot { display: grid; gap: 2px; font-size: 12px; }
     }
     @media (max-width: 1180px) { :root { --rail-width: 202px; --detail-width: 344px; } }
@@ -512,10 +489,11 @@
       </div>
       <div class="canvas-toolbar" id="canvas-toolbar">
         <div class="graph-caption">
-          <span class="reading-legend"><i></i>执行步骤</span>
-          <span class="reading-legend"><i class="legend-control"></i>调度 / 权限</span>
-          <span class="reading-legend"><i class="legend-store"></i>数据记录</span>
-          <span class="reading-legend"><i class="legend-external"></i>模型接口</span>
+          <span class="reading-legend" data-diagram-legend><i></i>执行步骤</span>
+          <span class="reading-legend" data-diagram-legend><i class="legend-control"></i>调度 / 权限</span>
+          <span class="reading-legend" data-diagram-legend><i class="legend-store"></i>数据记录</span>
+          <span class="reading-legend" data-diagram-legend><i class="legend-external"></i>模型接口</span>
+          <span class="wiki-map-caption" id="wiki-map-caption" hidden>分区表示责任范围；箭头只标出已有源码锚点的关系。拖动画布可平移，“适配”查看全图。</span>
           <span id="graph-count" hidden></span>
         </div>
         <div class="toolbar-actions">
@@ -538,7 +516,7 @@
       <div class="canvas-frame" id="canvas-frame">
         <svg id="diagram" role="group" aria-labelledby="diagram-title diagram-desc" xmlns="http://www.w3.org/2000/svg">
           <title id="diagram-title">项目架构图</title>
-          <desc id="diagram-desc">可缩放的交互式架构图。使用 Tab 选择节点或连线，按 Enter 查看技术细节。</desc>
+          <desc id="diagram-desc">可缩放并拖动平移的交互式架构图。使用 Tab 选择节点或连线，按 Enter 查看技术细节。</desc>
           <defs>
             <marker id="atlas-arrow" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
               <path d="M0,0 L8,4 L0,8 z" fill="#63778a"></path>
@@ -1042,10 +1020,66 @@
       };
     }
     function wikiHomeGraph() {
+      const rowGap = 50;
+      const twoRowZoneHeight = 62 + NODE_H * 2 + rowGap + 18;
+      const lowerRowY = 30 + twoRowZoneHeight + 30;
+      const referenceY = lowerRowY + 212 + 20;
+      const layouts = {
+        "runtime-entry": { x: 32, y: 30, w: 560, h: twoRowZoneHeight, nodeOrder: ["desktop", "frontend", "gateway"] },
+        "agent-execution": { x: 612, y: 30, w: 560, h: twoRowZoneHeight, nodeOrder: ["session", "intelligence", "platform", "tools"] },
+        "runtime-capabilities": { x: 612, y: lowerRowY, w: 560, h: twoRowZoneHeight, nodeOrder: ["knowledge", "research", "evolution", "companions"] },
+        "engineering-support": { x: 32, y: lowerRowY, w: 560, h: 212, nodeOrder: ["engineering", "docs"] },
+        "reference-material": { x: 32, y: referenceY, w: 560, h: 212, nodeOrder: ["experiments", "archive"] }
+      };
+      const nodes = [], zones = [], placed = new Set();
+      asArray(state.wiki && state.wiki.groups).forEach(function (group) {
+        const groupId = cleanId(group && group.id), layout = layouts[groupId];
+        if (!layout) return;
+        zones.push({
+          x: layout.x, y: layout.y, w: layout.w, h: layout.h,
+          label: string(group.label, groupId),
+          description: string(group.description, ""),
+          groupId: groupId
+        });
+        const groupIds = asArray(group.domainIds).map(cleanId).filter(function (id) {
+          return id && !placed.has(id) && state.domainById.has(id);
+        });
+        const order = layout.nodeOrder.filter(function (id) { return groupIds.includes(id); })
+          .concat(groupIds.filter(function (id) { return !layout.nodeOrder.includes(id); }));
+        order.forEach(function (id, index) {
+          const domain = state.domainById.get(id), page = wikiPageFor(id);
+          const column = index % 2, row = Math.floor(index / 2);
+          nodes.push({
+            id: "domain:" + id,
+            label: string(page && page.title, string(domain && domain.label, id)),
+            summary: string(page && page.summary, string(domain && domain.description, "")),
+            description: string(domain && domain.description, ""),
+            kind: "domain", domainId: id, groupId: groupId,
+            moduleCount: modulesInDomain(id).length,
+            x: layout.x + 18 + column * (NODE_W + 24),
+            y: layout.y + 62 + row * (NODE_H + rowGap),
+            w: NODE_W, h: NODE_H
+          });
+          placed.add(id);
+        });
+      });
+      const nodeIds = new Set(nodes.map(function (node) { return cleanId(node.domainId); }));
+      const edges = asArray(state.wiki && state.wiki.relationships).filter(function (relationship) {
+        return nodeIds.has(cleanId(relationship.from)) && nodeIds.has(cleanId(relationship.to));
+      }).map(function (relationship) {
+        const edge = Object.assign({}, relationship, {
+          from: "domain:" + cleanId(relationship.from),
+          to: "domain:" + cleanId(relationship.to),
+          wikiRelationship: true
+        });
+        if (cleanId(relationship.id) === "research-native-session") edge.homeLabelPlacement = "agent-row-gap";
+        return edge;
+      });
       return {
         id: "__wiki_home__", title: string(state.data.meta.title, "项目架构总览"),
-        description: "按项目领域与责任分组阅读当前源码架构。场景流程和实现源码均可从模块说明继续打开。",
-        nodes: [], edges: [], mode: "wiki-home"
+        description: "按五个责任区查看15个领域和有源码锚点的跨领域关系。选择节点看职责、边界、入口与场景，点击关系查看技术说明；分区只表示责任范围。",
+        nodes: nodes, edges: edges, zones: zones, mode: "wiki-home",
+        itemCount: nodes.length, relationCount: edges.length
       };
     }
     function wikiDomainGraph(domainId) {
@@ -1180,7 +1214,10 @@
           document.body.classList.toggle("detail-collapsed", !!restoreSnapshot.detailCollapsed);
           $("detail-toggle").setAttribute("aria-expanded", String(!restoreSnapshot.detailCollapsed));
         }
-        if (window.innerWidth <= 970 && restoreSnapshot.detailOpen) openDrawer("detail");
+        if (window.innerWidth <= 970 && restoreSnapshot.detailOpen !== undefined) {
+          if (restoreSnapshot.detailOpen) openDrawer("detail");
+          else closeDrawers();
+        }
         if (graph.mode === "wiki-home" || graph.mode === "wiki-domain") {
           $("wiki-content").scrollTop = finite(restoreSnapshot.wikiScrollTop, 0);
         }
@@ -1414,88 +1451,6 @@
       button.setAttribute("data-wiki-scenario-id", id);
       return button;
     }
-    function wikiPopularScenarios() {
-      const counts = new Map();
-      asArray(state.wiki && state.wiki.pages).forEach(function (page) {
-        asArray(page.scenarioIds).forEach(function (id) {
-          const value = cleanId(id);
-          if (state.viewById.has(value)) counts.set(value, (counts.get(value) || 0) + 1);
-        });
-      });
-      const order = new Map(state.data.views.map(function (view, index) { return [cleanId(view.id), index]; }));
-      return Array.from(counts.keys()).sort(function (a, b) {
-        return counts.get(b) - counts.get(a) || (order.get(a) || 0) - (order.get(b) || 0);
-      }).slice(0, 5);
-    }
-    function renderWikiHome(parent) {
-      clear(parent);
-      setText(el("p", "wiki-kicker", parent), "项目架构 · 固定源码快照");
-      setText(el("h3", "", parent), "项目模块地图");
-      setText(el("p", "wiki-lead", parent), "先沿场景流程理解运行方式，再进入领域页查看职责边界、主要入口和源码。源码单元只用于目录定位，不代表独立业务模块。");
-
-      const route = el("section", "wiki-section wiki-route-card", parent);
-      setText(el("h3", "", route), "建议阅读路线");
-      setText(el("p", "wiki-lead", route), "从一条消息的执行开始，继续看模型、工具权限和数据记录；每步都可跳到对应流程图。");
-      const steps = el("div", "wiki-route-steps", route);
-      [["Session 消息执行", "session"], ["Agent 调用模型", "llm"], ["工具授权与执行", "tools"], ["数据归属", "storage"]].forEach(function (step, index) {
-        if (index) setText(el("span", "wiki-route-arrow", steps), "→");
-        viewButton(steps, step[1], "wiki-route-step");
-      });
-
-      const popular = wikiPopularScenarios();
-      if (popular.length) {
-        const scenarioSection = el("section", "wiki-section", parent);
-        const head = el("div", "wiki-section-head", scenarioSection);
-        setText(el("h3", "", head), "常用场景入口");
-        setText(el("p", "", head), "根据领域页登记的场景流程生成。");
-        const grid = el("div", "wiki-scenario-grid", scenarioSection);
-        popular.forEach(function (id) { viewButton(grid, id); });
-      }
-
-      const mapSection = el("section", "wiki-section", parent);
-      const mapHead = el("div", "wiki-section-head", mapSection);
-      setText(el("h3", "", mapHead), "按责任分组的领域地图");
-      setText(el("p", "", mapHead), countLabel(state.data.domains.length) + " 个项目领域 · 点击模块进入说明页");
-      const groupMap = el("div", "wiki-group-map", mapSection), placed = new Set();
-      function renderGroup(group) {
-        const panel = el("section", "wiki-group", groupMap), color = classColor(group.color, "#496f89");
-        panel.style.setProperty("--group-color", color);
-        const head = el("div", "wiki-group-head", panel);
-        el("span", "wiki-group-mark", head);
-        const headCopy = el("div", "", head);
-        setText(el("h4", "", headCopy), string(group.label, group.id));
-        setText(el("p", "", headCopy), string(group.description, "") + " · " + wikiRoleLabel(group.role));
-        const cards = el("div", "wiki-domain-grid", panel);
-        asArray(group.domainIds).forEach(function (domainId) {
-          const id = cleanId(domainId), domain = state.domainById.get(id);
-          if (!id || !domain || placed.has(id)) return;
-          placed.add(id);
-          const page = wikiPageFor(id), card = el("button", "wiki-domain-card", cards);
-          card.type = "button";
-          card.setAttribute("data-wiki-domain-id", id);
-          card.setAttribute("aria-label", "打开领域说明：" + wikiDomainLabel(id));
-          card.style.setProperty("--domain-color", classColor(domain.color, color));
-          setText(el("span", "wiki-role", card), wikiRoleLabel(group.role));
-          setText(el("h5", "", card), wikiDomainLabel(id));
-          setText(el("p", "", card), string(page && page.summary, domain.description));
-          setText(el("small", "", card), countLabel(modulesInDomain(id).length) + " 个源码单元" + (page && asArray(page.scenarioIds).length ? " · " + countLabel(page.scenarioIds.length) + " 个场景" : ""));
-          card.addEventListener("click", function () { setRoute({kind: "domain", value: id}, true); });
-        });
-      }
-      state.wiki.groups.forEach(renderGroup);
-      const unplaced = state.data.domains.filter(function (domain) { return !placed.has(cleanId(domain.id)); });
-      if (unplaced.length) renderGroup({id: "other", label: "其他领域", description: "未归入上方分类的项目领域。", role: "support", domainIds: unplaced.map(function (domain) { return domain.id; })});
-      setText(el("p", "wiki-map-note", mapSection), "模块之间的关系在下方单独列出；分组用于理解责任范围，不额外表示调用顺序。");
-
-      const relationSection = el("section", "wiki-section", parent);
-      const relationHead = el("div", "wiki-section-head", relationSection);
-      setText(el("h3", "", relationHead), "跨领域关系");
-      setText(el("p", "", relationHead), "连接表示架构边界或数据关系；需要时打开来源查看证据位置。");
-      renderWikiRelationshipList(relationSection, state.wiki.relationships);
-      if (asArray(state.data.meta.limitations).length) {
-        setText(el("p", "wiki-map-note", parent), "边界：" + asArray(state.data.meta.limitations).join(" "));
-      }
-    }
     function renderWikiDomain(parent, domainId) {
       clear(parent);
       const id = cleanId(domainId), domain = state.domainById.get(id), page = wikiPageFor(id), group = wikiGroupFor(id);
@@ -1571,8 +1526,7 @@
       $("canvas-toolbar").hidden = true;
       $("wiki-content").hidden = false;
       hideMessage();
-      if (graph.mode === "wiki-home") renderWikiHome($("wiki-content"));
-      else renderWikiDomain($("wiki-content"), graph.domainId);
+      renderWikiDomain($("wiki-content"), graph.domainId);
     }
     function renderHeading() {
       const graph = state.graph;
@@ -1756,10 +1710,25 @@
       const padding = 64;
       return { x: minX - padding, y: minY - padding, width: Math.max(320, maxX - minX + padding * 2), height: Math.max(240, maxY - minY + padding * 2) };
     }
-    function fitCamera() {
+    function fitCamera(minimumHomeScale) {
       if (!state.graph) return;
       state.fitBox = boundsForGraph(state.graph);
       state.camera = Object.assign({}, state.fitBox);
+      if (minimumHomeScale === true && state.graph.mode === "wiki-home") {
+        const svg = $("diagram"), rect = svg.getBoundingClientRect();
+        const viewportWidth = finite(rect.width, 0) || finite(svg.clientWidth, 0);
+        const viewportHeight = finite(rect.height, 0) || finite(svg.clientHeight, 0);
+        if (viewportWidth > 0 && viewportHeight > 0) {
+          const fitScale = Math.min(viewportWidth / state.fitBox.width, viewportHeight / state.fitBox.height);
+          const readableScale = 0.72;
+          if (fitScale < readableScale) {
+            const width = viewportWidth / readableScale, height = viewportHeight / readableScale;
+            const centerX = state.fitBox.x + state.fitBox.width / 2;
+            const centerY = state.fitBox.y + state.fitBox.height / 2;
+            state.camera = { x: centerX - width / 2, y: centerY - height / 2, width: width, height: height };
+          }
+        }
+      }
       applyCamera();
     }
     function applyCamera() {
@@ -1904,11 +1873,40 @@
       });
       candidates.push(route.labelPoint);
       const boxes = nodes.map(function (n) { return {x:n.x-8,y:n.y-8,w:NODE_W+16,h:NODE_H+16}; }).concat(occupied);
-      const chosen = candidates.find(function (p) {
+      const labelFits = function (p) {
         if (!p) return false;
         const r={x:p.x-width/2-4,y:p.y-19,w:width+8,h:26};
         return !boxes.some(function(b){return r.x<b.x+b.w && r.x+r.w>b.x && r.y<b.y+b.h && r.y+r.h>b.y;});
-      }) || route.labelPoint;
+      };
+      let preferred = [];
+      if (edge.homeLabelPlacement === "agent-row-gap") {
+        const session = nodes.find(function (node) { return cleanId(node.domainId) === "session"; });
+        const toolsNode = nodes.find(function (node) { return cleanId(node.domainId) === "tools"; });
+        const gapTop = session && session.y + NODE_H + 8, gapBottom = toolsNode && toolsNode.y - 8;
+        if (Number.isFinite(gapTop) && Number.isFinite(gapBottom) && gapBottom - gapTop >= 26) {
+          let lane = null;
+          for (let i = 0; i < points.length - 1; i += 1) {
+            const a = points[i], b = points[i + 1];
+            const crossesGap = Math.min(a.y, b.y) <= gapTop && Math.max(a.y, b.y) >= gapBottom;
+            if (a.x === b.x && crossesGap && (!lane || Math.abs(b.y - a.y) > lane.length)) {
+              lane = { x: a.x, length: Math.abs(b.y - a.y) };
+            }
+          }
+          if (lane) {
+            const y = (gapTop + gapBottom) / 2 + 6;
+            const halfLabel = width / 2 + 4;
+            preferred.push({ x: lane.x, y: y });
+            occupied.forEach(function (box) {
+              if (y - 19 >= box.y + box.h || y + 7 <= box.y) return;
+              preferred.push({ x: box.x - halfLabel - 2, y: y });
+              preferred.push({ x: box.x + box.w + halfLabel + 2, y: y });
+            });
+            preferred.sort(function (a, b) { return Math.abs(a.x - lane.x) - Math.abs(b.x - lane.x); });
+          }
+        }
+      }
+      const chosen = preferred.find(labelFits)
+        || candidates.find(labelFits) || route.labelPoint;
       if (chosen) { route.labelPoint=chosen; route.labelLeader=chosen.origin; occupied.push({x:chosen.x-width/2-4,y:chosen.y-19,w:width+8,h:26}); }
       return route;
     }
@@ -1979,10 +1977,13 @@
 
     function renderDiagram(fit) {
       const graph = state.graph;
-      if (graph && (graph.mode === "wiki-home" || graph.mode === "wiki-domain")) {
+      if (graph && graph.mode === "wiki-domain") {
         renderWikiContent(graph);
         return;
       }
+      const isWikiHome = !!(graph && graph.mode === "wiki-home");
+      document.querySelectorAll("[data-diagram-legend]").forEach(function (legend) { legend.hidden = isWikiHome; });
+      $("wiki-map-caption").hidden = !isWikiHome;
       $("wiki-content").hidden = true;
       $("canvas-frame").hidden = false;
       $("canvas-toolbar").hidden = false;
@@ -2012,7 +2013,12 @@
         svgEl("rect", { x: zone.x, y: zone.y, width: zone.w, height: zone.h, rx: 12, class: "diagram-zone" }, root);
         const text = svgEl("text", { x: zone.x + 16, y: zone.y + 28, class: "zone-label" }, root);
         text.textContent = zone.label;
-        labelBoxes.push({ x: zone.x + 8, y: zone.y + 8, w: zone.w - 16, h: 30 });
+        const hasDescription = !!string(zone.description, "");
+        if (hasDescription) {
+          const description = svgEl("text", { x: zone.x + 16, y: zone.y + 48, class: "zone-description" }, root);
+          description.textContent = string(zone.description, "");
+        }
+        labelBoxes.push({ x: zone.x + 8, y: zone.y + 8, w: zone.w - 16, h: hasDescription ? 54 : 30 });
       });
       if (graph.autoContainment) {
         drawContainment(edges, graph.headerNode, asArray(graph.nodes), root);
@@ -2057,10 +2063,13 @@
         const dimmed = !!selected && !isSelected && !related.has(id);
         drawNode(node, root, isSelected, dimmed);
       });
-      if (fit || !state.camera) fitCamera();
+      if (fit || !state.camera) fitCamera(isWikiHome);
       else applyCamera();
       const itemCount = graph.itemCount !== undefined ? graph.itemCount : nodes.length;
-      setText($("graph-count"), "· " + countLabel(itemCount) + " 项");
+      $("graph-count").hidden = !nodes.length;
+      setText($("graph-count"), isWikiHome
+        ? "· " + countLabel(itemCount) + " 个领域 · " + countLabel(graph.relationCount) + " 条关系"
+        : "· " + countLabel(itemCount) + " 项");
       if (!nodes.length) showMessage("此视图暂无图节点", "架构数据中没有为当前视图提供节点。可以从左侧选择其他视图或搜索源码单元。");
       else hideMessage();
     }
@@ -2354,6 +2363,10 @@
       if (node.kind === "domain" || (node.domainId && node.kind !== "group")) {
         const domainId = cleanId(node.domainId || node.id);
         const domain = state.domainById.get(domainId);
+        if (state.graph && state.graph.mode === "wiki-home" && wikiPageFor(domainId)) {
+          renderWikiDomainDetail(parent, domainId, true);
+          return true;
+        }
         detailIntro(parent, "领域", string(domain && domain.label, node.label), string(domain && domain.description, node.description));
         const modules = modulesInDomain(domainId);
         detailGrid(parent, [["源码单元数", countLabel(modules.length)], ["领域标识", domainId]]);
@@ -2449,22 +2462,23 @@
       const domainCount = asArray(state.data.domains).length;
       const moduleCount = asArray(state.data.modules).length;
       const fileCount = asArray(state.data.files).length;
-      const scenarioCount = asArray(state.data.views).filter(function (view) { return cleanId(view.id) !== "overview"; }).length;
+      const scenarioCount = asArray(state.data.views).length;
       detailIntro(parent, "项目模块地图", string(state.data.meta.title, "Vibelution 开发架构地图"),
-        "按责任分组查看当前源码领域；进入领域说明后可继续打开场景流程、源码入口和静态依赖。分组表示责任范围，不表示运行时调用。");
+        "图中按五个责任区展示领域和有源码锚点的关系。选择节点查看职责、边界、源码入口与场景；选择连线查看关系说明。分区只表示责任范围。");
       detailGrid(parent, [
         ["项目领域", countLabel(domainCount)],
-        ["源码单元", countLabel(moduleCount)],
-        ["索引文件", countLabel(fileCount)],
+        ["责任分组", countLabel(asArray(state.wiki && state.wiki.groups).length)],
+        ["跨领域关系", countLabel(asArray(state.wiki && state.wiki.relationships).length)],
         ["场景流程", countLabel(scenarioCount)]
       ]);
       setText(el("p", "detail-note", parent), "这是固定源码快照的静态阅读入口；源码索引和人工整理的流程说明不代表本次已验证产品运行。");
+      setText(el("p", "detail-note", parent), countLabel(moduleCount) + " 个源码单元、" + countLabel(fileCount) + " 个索引文件仍可从左侧“源码索引”单独展开。");
       const firstView = state.viewById.get("session") || state.data.views.find(function (view) { return cleanId(view.id) !== "overview"; });
       if (firstView) makeButton(parent, "打开建议阅读流程：" + string(firstView.label, firstView.id), "button button-primary", function () {
         setRoute({ kind: "view", value: cleanId(firstView.id) }, true);
       });
     }
-    function renderWikiDomainDetail(parent, domainId) {
+    function renderWikiDomainDetail(parent, domainId, showModulePageAction) {
       const id = cleanId(domainId), domain = state.domainById.get(id), page = wikiPageFor(id), group = wikiGroupFor(id);
       if (!domain || !page) { renderDomainDetail(parent, domain, false); return; }
       const scenarios = asArray(page.scenarioIds).map(cleanId).filter(function (scenarioId) { return state.viewById.has(scenarioId); });
@@ -2489,11 +2503,16 @@
       }
       const entryPoints = asArray(page.entryPoints);
       if (entryPoints.length) detailSection(parent, "主要源码入口", entryPoints.length, "wiki-entries:" + id, entryPoints, function (row, entry) {
-        const ref = asObject(entry.ref), path = string(ref.path, "");
+        const ref = asObject(entry.ref), path = string(ref.path, ""), line = finite(ref.line, 0), symbol = string(ref.symbol, "");
         const label = string(entry.label, path || "源码入口");
-        detailRow(row, label, string(entry.note, path), path ? function () { openFile(path, finite(ref.line, 0), string(ref.symbol, "")); } : null, path ? "打开" : "");
+        const meta = [string(entry.note, ""), path + (line ? ":" + line : ""), ref.status ? translateStatus(ref.status) : ""]
+          .filter(Boolean).join(" · ");
+        detailRow(row, label, meta, path ? function () { openFile(path, line, symbol); } : null, path ? "打开" : "");
       }, FILE_PAGE_SIZE);
       setText(el("p", "detail-note", parent), "来源锚点对应固定源码快照；当前页面不执行产品运行验证。");
+      if (showModulePageAction) makeButton(parent, "打开模块说明页", "button button-primary", function () {
+        setRoute({ kind: "domain", value: id }, true);
+      });
       makeButton(parent, "打开该领域源码单元图", "button button-small", function () {
         setRoute({ kind: "source-domain", value: id }, true);
       });
@@ -2966,10 +2985,8 @@
       });
     }
     function exportCurrentSvg() {
-      if (state.graph && (state.graph.mode === "wiki-home" || state.graph.mode === "wiki-domain")) {
-        setStatus(state.graph.mode === "wiki-home"
-          ? "模块地图由 HTML 卡片呈现，当前导出仅支持场景流程或源码关系图；请先打开一张图再导出。"
-          : "领域说明以 HTML 页面呈现，当前导出仅支持场景流程或源码关系图；请先打开一张图再导出。");
+      if (state.graph && state.graph.mode === "wiki-domain") {
+        setStatus("领域说明以 HTML 页面呈现；请先返回项目模块图或打开一张场景流程图再导出。");
         return;
       }
       if (!state.graph || !state.graph.nodes.length) { setStatus("当前图没有可导出的节点；请打开一张场景流程或源码关系图。"); return; }
