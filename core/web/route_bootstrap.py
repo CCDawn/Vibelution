@@ -121,6 +121,57 @@ def _log_routes_bootstrap_summary(payload: dict[str, Any]) -> None:
     )
 
 
+async def _run_financial_team_coordinator_managed(
+    run_sync: Callable[..., Awaitable[Any]],
+) -> None:
+    """Run the Finance Team coordinator through the workbench owner group."""
+
+    from .services.financial_team.coordinator import run_forever
+
+    await run_sync(
+        "financial-team-coordinator",
+        run_forever,
+        stop_keyword="stop_requested",
+    )
+
+
+def _start_financial_team_coordinator(
+    app: FastAPI,
+    *,
+    run_sync: Callable[..., Awaitable[Any]] | None,
+) -> None:
+    """Start one lifespan-managed coordinator after routes are ready."""
+
+    if (
+        run_sync is None
+        or not bool(getattr(app.state, "web_routes_registered", False))
+        or str(getattr(app.state, "web_routes_error", "") or "").strip()
+    ):
+        return
+    current = getattr(app.state, "financial_team_coordinator_task", None)
+    if isinstance(current, asyncio.Task) and not current.done():
+        return
+
+    task = asyncio.create_task(
+        _run_financial_team_coordinator_managed(run_sync),
+        name="financial-team-coordinator-owner",
+    )
+    app.state.financial_team_coordinator_task = task
+
+    def consume_result(completed: asyncio.Task[Any]) -> None:
+        if completed.cancelled():
+            return
+        try:
+            completed.result()
+        except Exception as exc:  # noqa: BLE001 - surface owner failures without an unhandled task
+            logger.warning(
+                "Financial Team coordinator owner failed (%s).",
+                type(exc).__name__,
+            )
+
+    task.add_done_callback(consume_result)
+
+
 def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) -> dict[str, Any]:
     """Idempotently import+mount API routers and SPA. Safe on the main thread."""
 
@@ -176,6 +227,7 @@ async def warm_web_routes_in_background(
     """Import route modules off-thread, mount on the event-loop thread."""
 
     if bool(getattr(app.state, "web_routes_registered", False)):
+        _start_financial_team_coordinator(app, run_sync=run_sync)
         return {
             "registered": True,
             "alreadyReady": True,
@@ -200,6 +252,7 @@ async def warm_web_routes_in_background(
         # include_router must stay on the main thread / event loop.
         with _REGISTER_LOCK:
             if bool(getattr(app.state, "web_routes_registered", False)):
+                _start_financial_team_coordinator(app, run_sync=run_sync)
                 return {
                     "registered": True,
                     "alreadyReady": True,
@@ -222,6 +275,7 @@ async def warm_web_routes_in_background(
             app.state.web_routes_bootstrap = payload
             _log_routes_bootstrap_summary(payload)
             _mark_routes_ready(app)
+            _start_financial_team_coordinator(app, run_sync=run_sync)
             return payload
     except Exception as exc:
         app.state.web_routes_error = f"{type(exc).__name__}: {exc}"

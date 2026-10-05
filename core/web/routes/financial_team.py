@@ -1,45 +1,16 @@
 """HTTP adapter for native financial analyst Agents and Session turns."""
 
-import time
-from contextlib import asynccontextmanager
 from datetime import date as date_type
-from typing import AsyncIterator, Literal
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.web.services.financial_team import coordinator as financial_team_coordinator
 from core.web.services import financial_team_service as service
 from core.web.services import session_service
 from core.web.services.agent_directory_service import AgentDirectoryError
 from core.web.services.team_service import TeamServiceError
-from core.web.startup_jobs import StartupJobGroup
-
-
-_COORDINATOR_SHUTDOWN_SECONDS = 2.0
-
-
-@asynccontextmanager
-async def _financial_team_lifespan(app: object) -> AsyncIterator[None]:
-    """Own the Finance Team coordinator without coupling it to app lifecycle."""
-
-    startup_jobs = StartupJobGroup()
-    if app is not None:
-        setattr(app.state, "financial_team_startup_jobs", startup_jobs)
-    startup_jobs.start_thread(
-        "financial-team-coordinator",
-        financial_team_coordinator.run_forever,
-        stop_keyword="stop_requested",
-    )
-    try:
-        yield
-    finally:
-        await startup_jobs.shutdown(
-            deadline=time.monotonic() + _COORDINATOR_SHUTDOWN_SECONDS
-        )
-
-
-router = APIRouter(tags=["financial-team"], lifespan=_financial_team_lifespan)
+router = APIRouter(tags=["financial-team"])
 
 
 class FinancialTeamRoleResponse(BaseModel):

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Any
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -966,6 +967,97 @@ def test_runtime_scene_retention_waits_for_routes_and_is_reaped_on_shutdown(monk
         )
 
     asyncio.run(exercise())
+
+
+def test_create_app_starts_financial_coordinator_after_cold_route_mount(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from core.web import route_bootstrap
+    from core.web.app import create_app
+    from core.web.routes import financial_team as financial_team_route
+    from core.web.services.financial_team import coordinator as coordinator_module
+    from core.web.services.session import directory_runtime
+
+    coordinator_started = threading.Event()
+    coordinator_stopped = threading.Event()
+    coordinator_observation: dict[str, Any] = {}
+    app = create_app()
+
+    def fake_run_forever(*, stop_requested):
+        coordinator_observation["routes_registered"] = bool(
+            getattr(app.state, "web_routes_registered", False)
+        )
+        coordinator_started.set()
+        while not stop_requested():
+            time.sleep(0.005)
+        coordinator_stopped.set()
+
+    class IsolatedStartupJobGroup(StartupJobGroup):
+        async def _no_op_owner(self):
+            return None
+
+        def start_thread(self, name, callback, *args, **kwargs):
+            if name in {"web-route-import", "financial-team-coordinator"}:
+                return super().start_thread(name, callback, *args, **kwargs)
+            return super().start_async(name, self._no_op_owner())
+
+        def start_async(self, name, awaitable):
+            if name == "web-routes-bootstrap":
+                return super().start_async(name, awaitable)
+            close = getattr(awaitable, "close", None)
+            if callable(close):
+                close()
+            return super().start_async(name, self._no_op_owner())
+
+    monkeypatch.setattr(lifecycle, "StartupJobGroup", IsolatedStartupJobGroup)
+    monkeypatch.setattr(lifecycle, "_begin_owned_runtime_lifecycle", lambda: None)
+    monkeypatch.setattr(lifecycle, "_startup_cache_prewarm_gate_enabled", lambda: False)
+    monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", lambda **_kwargs: asyncio.sleep(0))
+    monkeypatch.setattr(lifecycle, "initialize_session_directory_on_startup", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "initialize_session_catalog_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "shutdown_session_catalog_on_shutdown", lambda **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_write_running_code_fingerprint_on_startup", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_record_backend_ready_scene_event", lambda **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_start_research_workflow_runtime", lambda: "")
+    monkeypatch.setattr(lifecycle, "_stop_research_workflow_runtime", lambda: None)
+    monkeypatch.setattr(lifecycle, "_stop_virtual_human_life_runtime", lambda: None)
+    monkeypatch.setattr(
+        lifecycle,
+        "_shutdown_owned_runtime_resources",
+        lambda **_kwargs: asyncio.sleep(0, result={"closed": True}),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_shutdown_transcript_writer",
+        lambda **_kwargs: {"closed": True, "drained": True},
+    )
+    monkeypatch.setattr(lifecycle, "mark_server_shutdown_clean", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_challenge_meeting_drivers_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_orphaned_chat_room_rounds_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_hypothesis_command_attempts_on_startup", lambda: None)
+    monkeypatch.setattr(lifecycle, "_recover_interrupted_session_turns_on_startup", lambda **_kwargs: None)
+    monkeypatch.setattr(lifecycle, "_validate_challenge_fence_config_on_startup", lambda: None)
+    monkeypatch.setattr(
+        lifecycle,
+        "reconcile_external_agent_tasks_forever",
+        lambda **_kwargs: asyncio.sleep(3600),
+    )
+    monkeypatch.setattr(coordinator_module, "run_forever", fake_run_forever)
+    monkeypatch.setattr(
+        route_bootstrap,
+        "import_web_route_modules",
+        lambda **_kwargs: [financial_team_route],
+    )
+    monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: True)
+    monkeypatch.delenv("VIBELUTION_DEFER_RUNTIME_SCENE_RETENTION", raising=False)
+
+    with TestClient(app):
+        assert coordinator_started.wait(timeout=2)
+
+    assert coordinator_observation["routes_registered"] is True
+    assert "/api/financial-team/{assistant_agent_id}/runs" in app.openapi()["paths"]
+    assert coordinator_stopped.wait(timeout=1)
 
 
 def test_router_registry_imports_all_route_modules_in_stable_order(monkeypatch):

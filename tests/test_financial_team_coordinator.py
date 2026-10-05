@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import copy
 import threading
 import time
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
 
 from core.web.routes.financial_team import FinancialTeamRunResponse
 from core.web.services.financial_team.coordinator import (
@@ -444,29 +442,6 @@ def test_coordinator_stop_signal_terminates_its_worker(tmp_path):
     stop.set()
     thread.join(timeout=1)
     assert not thread.is_alive()
-
-
-def test_financial_team_router_lifespan_stops_managed_worker(monkeypatch):
-    from core.web.routes import financial_team as route
-    from core.web.services.financial_team import coordinator as coordinator_module
-
-    started = threading.Event()
-    stopped = threading.Event()
-
-    def fake_run_forever(*, stop_requested, **_kwargs: Any) -> None:
-        started.set()
-        while not stop_requested():
-            time.sleep(0.005)
-        stopped.set()
-
-    monkeypatch.setattr(coordinator_module, "run_forever", fake_run_forever)
-
-    async def exercise_lifespan() -> None:
-        async with route.router.lifespan_context(FastAPI()):
-            assert await asyncio.to_thread(started.wait, 1)
-
-    asyncio.run(exercise_lifespan())
-    assert stopped.wait(timeout=1)
 
 
 def test_financial_team_response_model_accepts_optional_coordination_projection():
