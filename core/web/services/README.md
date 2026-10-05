@@ -20,6 +20,7 @@
 | Pack | Facade | README |
 | --- | --- | --- |
 | `session/` | `session_service.py` | [session/README.md](session/README.md) |
+| `financial_report/` | `financial_report_service.py` | [financial_report/README.md](financial_report/README.md) |
 | `team_workflow/` | `team_workflow_orchestration_service.py` | [team_workflow/README.md](team_workflow/README.md) |
 | `team/` | `team_service.py` | [team/README.md](team/README.md) |
 | `team_knowledge/` | `team_knowledge_service.py` | [team_knowledge/README.md](team_knowledge/README.md) |
@@ -101,8 +102,11 @@
 | `financial_paper_service.py` | Simulation-only ledger for the financial Agent. | `financial_paper/` | `financial_paper.py` | `test_financial_paper_service.py` |
 | `financial_portfolio_service.py` | Read-only portfolio research derived from an Agent's paper ledger. | — | `financial_portfolio.py` | `test_financial_portfolio_service.py` |
 | `financial_preferences_service.py` | Explicit user preferences over canonical Agent personal memory. | — | `financial_preferences.py` | `test_financial_preferences_service.py` |
+| `financial_report_service.py` | Bounded exports from an owned financial Agent's canonical completed research Turn. | `financial_report/` | `financial_reports.py` | `test_financial_report_service.py` |
 | `financial_research_service.py` | Read-only market screening and cited stock research projections. | — | `financial_research.py` | `test_financial_research_service.py` |
 | `financial_team_service.py` | Native financial multi-analyst collaboration. | `financial_team/` | `financial_team.py` | `test_financial_team_service.py`, `test_financial_team_coordinator.py` |
+| `financial_job_service.py` | Owned batch occurrences and Beijing-time research schedules over native financial runs. | `financial_jobs/` | `financial_jobs.py` | `test_financial_job_service.py`, `test_financial_job_routes.py` |
+| `financial_report_service.py` | Owner-checked exact completed Turn export without a second report store. | `financial_report/` | `financial_reports.py` | `test_financial_report_service.py`, `test_financial_report_routes.py` |
 | `agent_plugin_service.py` | Trusted first-party Agent plugin catalog and binding facade. | — | `agent_plugins.py` | `test_virtual_human_life_api.py` |
 | `agent_role_tool_profile_service.py` | Single source of truth for fixed-role Agent tool profiles. | — | — | `test_tool_policy_evaluator.py`, `test_tool_authorization_contract.py`, `test_agent_role_tool_profile_service.py` |
 | `agent_tool_governance_service.py` | Controlled Agent tool-permission governance. | — | `agents.py` | `test_agent_support_route_contract.py`, `test_agent_config_workspace_service.py`, `test_agent_lifecycle_create_delete.py` |

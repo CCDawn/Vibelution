@@ -99,6 +99,22 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 已接受的 Turn 在对话读取中或读取失败时显示对应读取状态，进度计数暂留空，不回退为未提交或 0/5。刷新同时重新读取该轮次的精确对话，不能因此重新发送分析。
 组合研究使用 `VSurface`、`VMetricStrip`、`VDenseTable` 与 `VButton`，复用当前助手的模拟账本。持仓权重、现金和集中度按实际账本与报价计算；收益相关性仅来自共同日期的真实 K 线，样本不足保留缺值。点击股票回到已有单股页，AI 研究只准备包含账本和来源的原生草稿。
 
+## FinanceTaskCenter / FinanceResearchJobs
+
+### 功能与使用
+桌面研究任务使用 `VTabs` 区分原生记录、批量研究与定时计划；批量/计划沿用 `VSurface`、`VTextarea`、`VInput`、`VSelect`、`VButton`、`VChip` 与 `VStateSurface`，不增加第二套控件。一次最多 10 只沪深 A 股，显示每股状态、完成数量和真实失败原因。查看结果/过程必须指向该股的精确研究轮次；查找失败保持错误态，不能显示最新轮次。
+计划明确北京时间、一次/每天/周一至周五，显示下次时间和暂停/恢复；节假日与应用需运行的约束只保留一行。运行中提供停止批次，确定失败或停止提供重试未完成，已完成股票保留。同步请求门和幂等键防重复创建；切换助手隔离旧响应与提示。
+
+## FinanceResearchApprovals
+
+### 功能与使用
+团队协作和批量任务复用原生 Session tool-approvals API、`ChatToolApprovalDialog` 与其 `VButton`；错误使用 `VStateSurface`。页面显示具体股票、分析员和调用预览，按创建顺序逐项提供本次批准或拒绝。只展示当前研究精确 Session/Turn 的 pending 请求，团队引用同时核对 Agent；旧轮次、过期请求和其他会话不混入。不修改权限预设，不自动批准，不提供持久授权；同步门防双击，切换身份隔离晚到的错误。定时任务沿用同一审批要求，应用需保持运行。
+
+## FinanceResearchReport / FinanceReportExport / financialReports
+
+### 报告交付
+沿用报告标题区域的 `VButton`/`VDropdownMenu` 导出操作，支持 Markdown、JSON、Word 以及“打印 / PDF”。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印文档隔离展示，另存 PDF 由系统打印面完成；不把 HTML 下载称为 PDF。
+
 ## FinanceSessionMenu / useFinanceSessionLifecycle
 
 ### 功能与使用

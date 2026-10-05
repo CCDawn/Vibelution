@@ -71,7 +71,7 @@ export function ChatToolApprovalDialog({
   const descriptionIds = `${descriptionId} ${riskId} ${scopeId} ${toolListId} ${previewId} ${grantId}`;
   const buttons = toolApprovalCodexButtonLabels(lang);
   const primaryToolName = toolName || toolLabels[0]?.id || "";
-  const displayName = toolApprovalDisplayName(primaryToolName, lang);
+  const displayName = toolLabels.find((item) => item.id === primaryToolName)?.label || toolApprovalDisplayName(primaryToolName, lang);
   const preview = String(actionPreview || toolApprovalActionPreview(undefined, primaryToolName) || rawTitle || "").trim();
   const grantText = toolApprovalSessionGrantDescription(sessionGrantScope, lang).trim();
   const showGrant = Boolean(grantText) && onApproveForSession;
@@ -138,8 +138,8 @@ export function ChatToolApprovalDialog({
           </div>
           <p id={descriptionId} className={styles.lead}>
             {lang === "zh"
-              ? "是=本次 · 始终=下列范围 · 否=拒绝"
-              : "Yes=once · Always=scope · No=decline"}
+              ? onApproveForSession ? "是=本次 · 始终=下列范围 · 否=拒绝" : "是=本次 · 否=拒绝"
+              : onApproveForSession ? "Yes=once · Always=scope · No=decline" : "Yes=once · No=decline"}
           </p>
           <pre id={previewId} className={styles.commandPreview} title={preview}>
             {preview || (lang === "zh" ? "（无命令预览）" : "(no command preview)")}
@@ -165,7 +165,9 @@ export function ChatToolApprovalDialog({
             ) : null}
           </div>
           <p className={styles.hotkeys}>
-            {lang === "zh" ? "Y 是 · A 始终 · N 否" : "Y Yes · A Always · N No"}
+            {lang === "zh"
+              ? onApproveForSession ? "Y 是 · A 始终 · N 否" : "Y 是 · N 否"
+              : onApproveForSession ? "Y Yes · A Always · N No" : "Y Yes · N No"}
           </p>
         </div>
         <div className={styles.actions}>

@@ -49,6 +49,7 @@ def test_ready_routes_start_financial_coordinator_only_once(monkeypatch) -> None
             app, run_sync=fake_run_sync
         )
         owner_task = app.state.financial_team_coordinator_task
+        scheduler_task = app.state.financial_job_scheduler_task
         assert first_result["alreadyReady"] is True
         await asyncio.wait_for(started.wait(), timeout=1)
 
@@ -57,10 +58,12 @@ def test_ready_routes_start_financial_coordinator_only_once(monkeypatch) -> None
         )
         assert second_result["alreadyReady"] is True
         assert app.state.financial_team_coordinator_task is owner_task
-        assert calls == ["financial-team-coordinator"]
+        assert app.state.financial_job_scheduler_task is scheduler_task
+        assert sorted(calls) == ["financial-job-scheduler", "financial-team-coordinator"]
 
         release.set()
         await owner_task
+        await scheduler_task
 
     asyncio.run(exercise())
 
@@ -88,6 +91,7 @@ def test_failed_or_error_marked_routes_do_not_start_financial_coordinator(monkey
     assert app.state.web_routes_registered is False
     assert "route import failed" in app.state.web_routes_error
     assert not hasattr(app.state, "financial_team_coordinator_task")
+    assert not hasattr(app.state, "financial_job_scheduler_task")
     assert coordinator_calls == []
 
     app.state.web_routes_registered = True
@@ -101,4 +105,5 @@ def test_failed_or_error_marked_routes_do_not_start_financial_coordinator(monkey
 
     asyncio.run(exercise_error_ready_state())
     assert not hasattr(app.state, "financial_team_coordinator_task")
+    assert not hasattr(app.state, "financial_job_scheduler_task")
     assert coordinator_calls == []

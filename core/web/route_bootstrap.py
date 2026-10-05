@@ -172,6 +172,42 @@ def _start_financial_team_coordinator(
     task.add_done_callback(consume_result)
 
 
+async def _run_financial_job_scheduler_managed(
+    run_sync: Callable[..., Awaitable[Any]],
+) -> None:
+    from .services.financial_job_service import run_forever
+
+    await run_sync("financial-job-scheduler", run_forever, stop_keyword="stop_requested")
+
+
+def _start_financial_job_scheduler(
+    app: FastAPI, *, run_sync: Callable[..., Awaitable[Any]] | None,
+) -> None:
+    if (
+        run_sync is None
+        or not bool(getattr(app.state, "web_routes_registered", False))
+        or str(getattr(app.state, "web_routes_error", "") or "").strip()
+    ):
+        return
+    current = getattr(app.state, "financial_job_scheduler_task", None)
+    if isinstance(current, asyncio.Task) and not current.done():
+        return
+    task = asyncio.create_task(
+        _run_financial_job_scheduler_managed(run_sync), name="financial-job-scheduler-owner",
+    )
+    app.state.financial_job_scheduler_task = task
+
+    def consume_result(completed: asyncio.Task[Any]) -> None:
+        if completed.cancelled():
+            return
+        try:
+            completed.result()
+        except Exception as exc:  # noqa: BLE001 - surface bounded owner failure
+            logger.warning("Financial job scheduler owner failed (%s).", type(exc).__name__)
+
+    task.add_done_callback(consume_result)
+
+
 def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) -> dict[str, Any]:
     """Idempotently import+mount API routers and SPA. Safe on the main thread."""
 
@@ -228,6 +264,7 @@ async def warm_web_routes_in_background(
 
     if bool(getattr(app.state, "web_routes_registered", False)):
         _start_financial_team_coordinator(app, run_sync=run_sync)
+        _start_financial_job_scheduler(app, run_sync=run_sync)
         return {
             "registered": True,
             "alreadyReady": True,
@@ -253,6 +290,7 @@ async def warm_web_routes_in_background(
         with _REGISTER_LOCK:
             if bool(getattr(app.state, "web_routes_registered", False)):
                 _start_financial_team_coordinator(app, run_sync=run_sync)
+                _start_financial_job_scheduler(app, run_sync=run_sync)
                 return {
                     "registered": True,
                     "alreadyReady": True,
@@ -276,6 +314,7 @@ async def warm_web_routes_in_background(
             _log_routes_bootstrap_summary(payload)
             _mark_routes_ready(app)
             _start_financial_team_coordinator(app, run_sync=run_sync)
+            _start_financial_job_scheduler(app, run_sync=run_sync)
             return payload
     except Exception as exc:
         app.state.web_routes_error = f"{type(exc).__name__}: {exc}"

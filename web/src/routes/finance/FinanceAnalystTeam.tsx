@@ -5,6 +5,7 @@ import { fetchSessionDetail, stopSessionTurn } from "../../api/chat";
 import {
   createFinancialTeamRun,
   fetchFinancialTeam,
+  fetchFinancialTeamRun,
   fetchFinancialTeamRuns,
   financialTeamKeys,
   isFetchJsonHttpError,
@@ -24,6 +25,8 @@ import { LazyConversationMarkdownRenderer } from "../../components/conversation/
 import { projectTimelineProcessMessages } from "../../components/conversation/timelineMessageProcessProjection";
 import { VButton, VChip, VInput, VSelect, VStateSurface, VSurface } from "../../components/vui";
 import styles from "./FinanceAnalystTeam.styles";
+import { FinanceReportExport } from "./FinanceReportExport";
+import { FinanceResearchApprovals } from "./FinanceResearchApprovals";
 import { isNativeResearchStopNotice, localResearchDate } from "./stockResearchModel";
 
 type FinancialTeamPrimaryRole = Extract<FinancialTeamRole, "market" | "fundamental" | "news">;
@@ -170,18 +173,20 @@ function compactError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
-export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSelectedRunChange }: {
+export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSelectedRunChange, requestedRunId = "", onBackToBatch }: {
   assistant: FinancialAssistant;
   stock: StockIdentity;
   zh: boolean;
   onOpenSession: (sessionId: string) => void;
   onSelectedRunChange?: (run: FinancialTeamRun | null) => void;
+  requestedRunId?: string;
+  onBackToBatch?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [periodDays, setPeriodDays] = useState<7 | 30 | 90>(30);
   const [researchDate, setResearchDate] = useState(() => localResearchDate());
   const [depth, setDepth] = useState<(typeof DEPTH_OPTIONS)[number]["id"]>("standard");
-  const [selectedRunId, setSelectedRunId] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState(requestedRunId);
   const [setupPending, setSetupPending] = useState(false);
   const [startPending, setStartPending] = useState(false);
   const [stoppingRole, setStoppingRole] = useState<FinancialTeamRole | "synthesis" | "">("");
@@ -206,18 +211,34 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
   });
   const runsQuery = useQuery({
     queryKey: runsKey,
-    queryFn: ({ signal }) => fetchFinancialTeamRuns(assistant.agentId, { signal, limit: 20 }),
+    queryFn: async ({ signal }) => {
+      const result = await fetchFinancialTeamRuns(assistant.agentId, { signal, limit: 20 });
+      if (result.assistantAgentId !== assistant.agentId || result.runs.some((run) => run.assistantAgentId !== assistant.agentId)) throw new Error(zh ? "研究记录归属不匹配" : "Research owner mismatch");
+      return result;
+    },
     staleTime: 5_000,
     retry: false,
     refetchInterval: (query) => query.state.data?.runs.some((run) => run.coordinationStatus === "waiting" || run.coordinationStatus === "running") ? TEAM_POLL_MS : false,
   });
   const runs = runsQuery.data?.runs ?? [];
-  const selectedRun = runs.find((run) => run.runId === selectedRunId) ?? runs[0] ?? null;
+  const listedRun = runs.find((run) => run.runId === selectedRunId);
+  const exactRunQuery = useQuery({
+    queryKey: financialTeamKeys.run(assistant.agentId, selectedRunId),
+    queryFn: async ({ signal }) => {
+      const result = await fetchFinancialTeamRun(assistant.agentId, selectedRunId, { signal });
+      if (result.assistantAgentId !== assistant.agentId || result.runId !== selectedRunId) throw new Error(zh ? "研究记录归属不匹配" : "Research owner mismatch");
+      return result;
+    },
+    enabled: Boolean(selectedRunId && !listedRun),
+    staleTime: 3_000,
+    retry: false,
+    refetchInterval: (query) => query.state.data?.coordinationStatus === "waiting" || query.state.data?.coordinationStatus === "running" ? TEAM_POLL_MS : false,
+  });
+  const selectedRun = selectedRunId ? listedRun ?? exactRunQuery.data ?? null : runs[0] ?? null;
   useEffect(() => { onSelectedRunChange?.(selectedRun); }, [onSelectedRunChange, selectedRun]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     if (!selectedRunId && runs[0]) setSelectedRunId(runs[0].runId);
-    else if (selectedRunId && runs.length && !runs.some((run) => run.runId === selectedRunId)) setSelectedRunId(runs[0].runId);
   }, [runs, selectedRunId]);
 
   const detailSpecs = useMemo(() => selectedRun ? [
@@ -491,12 +512,15 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
         <p>{zh ? "行情、基本面、新闻与多空研判" : "Market, fundamentals, news and opposing reviews"}</p>
       </div>
       <div className={styles.headerActions}>
+        {onBackToBatch ? <VButton variant="ghost" onPress={onBackToBatch}>{zh ? "返回批次" : "Back to batch"}</VButton> : null}
         <VChip tone={teamQuery.isPending ? "neutral" : teamReady ? "success" : teamQuery.data?.status === "needs_attention" ? "warning" : "neutral"}>{teamQuery.isPending ? (zh ? "检查中" : "Checking") : teamReady ? readyCount + "/5 " + (zh ? "就绪" : "ready") : teamQuery.data?.status === "needs_attention" ? (zh ? "需检查配置" : "Needs attention") : (zh ? "未初始化" : "Not set up")}</VChip>
-        <VButton variant="ghost" icon={<RefreshCw size={14} />} isPending={teamQuery.isFetching || runsQuery.isFetching} onPress={() => { void teamQuery.refetch(); void runsQuery.refetch(); detailQueries.forEach((query) => { void query.refetch(); }); }}>{zh ? "刷新" : "Refresh"}</VButton>
+        <VButton variant="ghost" icon={<RefreshCw size={14} />} isPending={teamQuery.isFetching || runsQuery.isFetching || exactRunQuery.isFetching} onPress={() => { void teamQuery.refetch(); void runsQuery.refetch(); if (selectedRunId && !listedRun) void exactRunQuery.refetch(); detailQueries.forEach((query) => { void query.refetch(); }); }}>{zh ? "刷新" : "Refresh"}</VButton>
       </div>
     </div>
 
     {operationError ? <VStateSurface tone="error" title={zh ? "操作未完成" : "Action incomplete"}><span className={styles.errorText}>{operationError}</span></VStateSurface> : null}
+    {selectedRunId && !listedRun && exactRunQuery.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取所选研究" : "Loading selected research"} /> : null}
+    {selectedRunId && !listedRun && exactRunQuery.isError ? <VStateSurface tone="error" title={zh ? "所选研究无法读取" : "Selected research unavailable"} actions={<VButton onPress={() => void exactRunQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : null}
     {selectedRun?.coordinationStatus === "blocked" ? <VStateSurface tone="error" title={zh ? "研究暂停" : "Research paused"}><span className={styles.errorText}>{selectedRun.coordinationError || (zh ? "查看分析对话核对本轮状态。" : "Review the analysis conversation for this run.")}</span></VStateSurface> : null}
     {teamQuery.isError ? <VStateSurface tone="error" title={zh ? "团队状态不可用" : "Team unavailable"} actions={<VButton onPress={() => void teamQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{compactError(teamQuery.error, zh ? "无法读取团队配置" : "Could not load team")}</VStateSurface> : null}
     {teamQuery.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取分析团队" : "Loading analyst team"} /> : null}
@@ -523,9 +547,12 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
           <span className={styles.historyItem}><strong>{run.symbol}</strong><span>{run.researchDate || new Date(run.createdAt).toLocaleDateString()} · {run.periodDays}{zh ? "天" : "d"}</span></span>
           <VChip tone="neutral">{run.stage === "synthesis" ? (zh ? "汇总阶段" : "Synthesis stage") : run.stage === "debate" ? (zh ? "多空分析" : "Debate") : (zh ? "基础分析" : "Research")}</VChip>
         </VButton>)}
-      </div> : !runsQuery.isPending && !runsQuery.isError ? <VStateSurface tone="empty" title={zh ? "还没有研究轮次" : "No analyst runs yet"} /> : null}
+      </div> : !selectedRunId && !runsQuery.isPending && !runsQuery.isError ? <VStateSurface tone="empty" title={zh ? "还没有研究轮次" : "No analyst runs yet"} /> : null}
 
       {selectedRun ? <>
+        <FinanceResearchApprovals assistantAgentId={assistant.agentId} zh={zh} turns={detailSpecs.flatMap((spec) =>
+          projections.get(spec.key)?.state === "running" && spec.ref.turnId
+            ? [{ role: spec.key, ...spec.ref, symbol: selectedRun.symbol }] : [])} />
         <div className={styles.runHeader}>
           <div><span className={styles.eyebrow}>{zh ? "本轮任务" : "Selected run"}</span><h2>{selectedRun.symbol} · {selectedRun.researchDate || "—"}</h2></div>
           <div className={styles.runMeta}><VChip tone="neutral">{selectedRun.periodDays}{zh ? "天" : " days"}</VChip><VChip tone="neutral">{DEPTH_OPTIONS.find((item) => item.id === selectedRun.depth)?.label || (zh ? "旧版深度" : "Legacy depth")}</VChip></div>
@@ -546,7 +573,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
         <VSurface as="section" tone="panel" padding="normal" className={styles.synthesis} data-financial-team-synthesis>
           <div className={styles.cardHeading}><div className={styles.roleTitle}><Activity size={16} /><h3>{zh ? "主助手综合结论" : "Assistant synthesis"}</h3></div><VChip tone={statusTone(synthesisProjection?.state ?? "missing")}>{statusText(synthesisProjection?.state ?? "missing", zh)}</VChip></div>
           {synthesisProjection?.answer ? <div className={styles.answer}><LazyConversationMarkdownRenderer content={synthesisProjection.answer} language={zh ? "zh" : "en"} /></div> : <p className={styles.placeholder}>{synthesisProjection && ["failed", "stopped", "incomplete"].includes(synthesisProjection.state) ? (zh ? `汇总${statusText(synthesisProjection.state, zh)}，可重新开始研究。` : `Synthesis: ${statusText(synthesisProjection.state, zh)}. Start a new research run.`) : allAnalystsComplete ? (zh ? "分析员已完成，等待主助手汇总" : "Analysts completed; waiting for synthesis") : (zh ? "分析员完成后自动汇总" : "Synthesis starts when all analysts finish")}</p>}
-          <div className={styles.cardActions}><VButton variant="ghost" icon={<ExternalLink size={14} />} onPress={() => onOpenSession(selectedRun.synthesis.sessionId)}>{zh ? "打开主助手会话" : "Assistant Session"}</VButton>{synthesisProjection?.state === "running" && selectedRun.synthesis.turnId ? <VButton variant="secondary" icon={<StopCircle size={14} />} isPending={stoppingRole === "synthesis"} isDisabled={Boolean(stoppingRole)} onPress={() => void stopExactTurn("synthesis", selectedRun.synthesis)}>{zh ? "停止汇总" : "Stop synthesis"}</VButton> : null}</div>
+          <div className={styles.cardActions}>{synthesisProjection?.state === "completed" && selectedRun.synthesis.turnId ? <FinanceReportExport assistantAgentId={assistant.agentId} sessionId={selectedRun.synthesis.sessionId} turnId={selectedRun.synthesis.turnId} zh={zh} /> : null}<VButton variant="ghost" icon={<ExternalLink size={14} />} onPress={() => onOpenSession(selectedRun.synthesis.sessionId)}>{zh ? "打开主助手会话" : "Assistant Session"}</VButton>{synthesisProjection?.state === "running" && selectedRun.synthesis.turnId ? <VButton variant="secondary" icon={<StopCircle size={14} />} isPending={stoppingRole === "synthesis"} isDisabled={Boolean(stoppingRole)} onPress={() => void stopExactTurn("synthesis", selectedRun.synthesis)}>{zh ? "停止汇总" : "Stop synthesis"}</VButton> : null}</div>
         </VSurface>
       </> : null}
     </> : null}

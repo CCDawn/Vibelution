@@ -975,11 +975,16 @@ def test_create_app_starts_financial_coordinator_after_cold_route_mount(monkeypa
     from core.web import route_bootstrap
     from core.web.app import create_app
     from core.web.routes import financial_team as financial_team_route
+    from core.web.routes import financial_jobs as financial_jobs_route
+    from core.web.routes import financial_reports as financial_reports_route
+    from core.web.services import financial_job_service
     from core.web.services.financial_team import coordinator as coordinator_module
     from core.web.services.session import directory_runtime
 
     coordinator_started = threading.Event()
     coordinator_stopped = threading.Event()
+    scheduler_started = threading.Event()
+    scheduler_stopped = threading.Event()
     coordinator_observation: dict[str, Any] = {}
     app = create_app()
 
@@ -992,12 +997,19 @@ def test_create_app_starts_financial_coordinator_after_cold_route_mount(monkeypa
             time.sleep(0.005)
         coordinator_stopped.set()
 
+    def fake_scheduler(*, stop_requested):
+        assert app.state.web_routes_registered is True
+        scheduler_started.set()
+        while not stop_requested():
+            time.sleep(0.005)
+        scheduler_stopped.set()
+
     class IsolatedStartupJobGroup(StartupJobGroup):
         async def _no_op_owner(self):
             return None
 
         def start_thread(self, name, callback, *args, **kwargs):
-            if name in {"web-route-import", "financial-team-coordinator"}:
+            if name in {"web-route-import", "financial-team-coordinator", "financial-job-scheduler"}:
                 return super().start_thread(name, callback, *args, **kwargs)
             return super().start_async(name, self._no_op_owner())
 
@@ -1043,10 +1055,11 @@ def test_create_app_starts_financial_coordinator_after_cold_route_mount(monkeypa
         lambda **_kwargs: asyncio.sleep(3600),
     )
     monkeypatch.setattr(coordinator_module, "run_forever", fake_run_forever)
+    monkeypatch.setattr(financial_job_service, "run_forever", fake_scheduler)
     monkeypatch.setattr(
         route_bootstrap,
         "import_web_route_modules",
-        lambda **_kwargs: [financial_team_route],
+        lambda **_kwargs: [financial_team_route, financial_jobs_route, financial_reports_route],
     )
     monkeypatch.setattr(route_bootstrap, "register_spa_routes", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(directory_runtime, "should_skip_directory_runtime_for_pytest", lambda: True)
@@ -1054,10 +1067,14 @@ def test_create_app_starts_financial_coordinator_after_cold_route_mount(monkeypa
 
     with TestClient(app):
         assert coordinator_started.wait(timeout=2)
+        assert scheduler_started.wait(timeout=2)
 
     assert coordinator_observation["routes_registered"] is True
     assert "/api/financial-team/{assistant_agent_id}/runs" in app.openapi()["paths"]
+    assert "/api/financial-jobs/{assistant_agent_id}/schedules" in app.openapi()["paths"]
+    assert "/api/financial-reports/{assistant_agent_id}/export" in app.openapi()["paths"]
     assert coordinator_stopped.wait(timeout=1)
+    assert scheduler_stopped.wait(timeout=1)
 
 
 def test_router_registry_imports_all_route_modules_in_stable_order(monkeypatch):

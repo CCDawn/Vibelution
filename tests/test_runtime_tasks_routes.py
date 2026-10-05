@@ -23,7 +23,7 @@ def _store(tmp_path):
     )
 
 
-def _register(store, *, task_id, kind, status, started_at="", completed_at="",
+def _register(store, *, task_id, kind, status, created_at="", started_at="", completed_at="",
               parent_session_id="", label="", output="", terminal_reason=""):
     snapshot = registry.new_snapshot(
         kind=kind,
@@ -33,6 +33,8 @@ def _register(store, *, task_id, kind, status, started_at="", completed_at="",
         label=label,
         output=output,
     )
+    if created_at:
+        snapshot["createdAt"] = created_at
     if started_at:
         snapshot["startedAt"] = started_at
     if completed_at:
@@ -173,7 +175,8 @@ def test_ended_pagination_follows_cursor_without_duplicates(client):
 def test_detail_returns_card_and_timeline(client):
     http, store = client
     _register(store, task_id="child-9", kind=registry.KIND_CHILD_SESSION,
-              status="running", started_at="2026-10-01T01:00:00+00:00",
+              status="running", created_at="2026-10-01T00:59:00+00:00",
+              started_at="2026-10-01T01:00:00+00:00",
               parent_session_id="parent-9", label="调研任务")
 
     response = http.get("/api/runtime-tasks/child-9")

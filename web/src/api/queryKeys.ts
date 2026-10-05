@@ -24,6 +24,8 @@ export const queryKeys = {
   gitCommits: () => ["git", "commits"] as const,
   gitDiff: (path: string) => ["git", "diff", path] as const,
   financialAssistants: () => ["financial-assistants"] as const,
+  financialResearchSchedules: (agentId: string) => ["financial-jobs", agentId, "schedules"] as const,
+  financialResearchBatches: (agentId: string) => ["financial-jobs", agentId, "batches"] as const,
   agents: () => ["agents"] as const,
   agentSummary: (includeArchived = false) => ["agents", "summary", includeArchived] as const,
   agentConfigWorkspace: () => ["agents", "config-workspace"] as const,

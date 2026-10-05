@@ -346,6 +346,41 @@ class RuntimeTaskStore:
             state["startedAt"] = str(state.get("createdAt") or "").strip() or _now_iso()
         state["updatedAt"] = _now_iso()
         self.save_state(state)
+        self._ensure_auto_background_sweeper()
+        return state
+
+    def register_task_if_absent(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        branch_generation: Any = UNSET_BRANCH_GENERATION,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically create a task only when its task ID is still unused.
+
+        The lock order matches :meth:`update_task`: in-process store lock,
+        then the cross-process task lock, matching :meth:`update_task`.
+        The single task transaction lock covers both the missing check and
+        save, so concurrent creates and stop/update requests share one order.
+        """
+
+        state = normalize_snapshot(snapshot)
+        task_id = str(state.get("taskId") or "").strip()
+        if not task_id:
+            raise ValueError("Runtime task snapshot requires a non-empty taskId.")
+        target = self.task_state_path(task_id)
+        with self._lock, cross_process_file_lock(target):
+            current = self._load_state_unlocked(task_id)
+            if current:
+                return current, False
+            self._stamp_branch_generation(state, branch_generation)
+            if not str(state.get("startedAt") or "").strip():
+                state["startedAt"] = str(state.get("createdAt") or "").strip() or _now_iso()
+            state["updatedAt"] = _now_iso()
+            registered = self.save_state(state)
+        self._ensure_auto_background_sweeper()
+        return registered, True
+
+    def _ensure_auto_background_sweeper(self) -> None:
         # Lazy hook: when the auto-background threshold is configured, make
         # sure the sweeper daemon is running. A disabled threshold turns this
         # into a strict no-op (no thread, no poke); failures never block
@@ -357,7 +392,6 @@ class RuntimeTaskStore:
                 runtime_task_auto_background.ensure_auto_background_sweeper()
         except Exception:
             pass
-        return state
 
     def save_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """Persist one snapshot and sync active-index membership."""

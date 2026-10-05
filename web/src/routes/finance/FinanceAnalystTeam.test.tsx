@@ -8,14 +8,15 @@ import type { FinancialTeamRun } from "../../api/financialTeam";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 
 const api = vi.hoisted(() => ({
-  team: vi.fn(), provision: vi.fn(), runs: vi.fn(), create: vi.fn(), session: vi.fn(), primary: vi.fn(),
-  record: vi.fn(), debate: vi.fn(), synthesis: vi.fn(), stop: vi.fn(),
+  team: vi.fn(), provision: vi.fn(), runs: vi.fn(), exact: vi.fn(), create: vi.fn(), session: vi.fn(), primary: vi.fn(),
+  record: vi.fn(), debate: vi.fn(), synthesis: vi.fn(), stop: vi.fn(), approvals: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../../api/financialTeam", async () => ({
   ...await vi.importActual<typeof import("../../api/financialTeam")>("../../api/financialTeam"),
   createFinancialTeamRun: api.create,
   fetchFinancialTeam: api.team,
   fetchFinancialTeamRuns: api.runs,
+  fetchFinancialTeamRun: api.exact,
   financialTeamKeys: {
     detail: (id: string) => ["financial-team", id],
     runs: (id: string) => ["financial-team", id, "runs"],
@@ -30,6 +31,8 @@ vi.mock("../../api/financialTeam", async () => ({
 vi.mock("../../api/chat", () => ({
   fetchSessionDetail: api.session,
   stopSessionTurn: api.stop,
+  listPendingSessionToolApprovals: (...args: unknown[]) => api.approvals(...args) ?? Promise.resolve([]),
+  resolveSessionToolApprovalDecision: vi.fn(),
 }));
 vi.mock("../../components/conversation/LazyConversationMarkdownRenderer", () => ({
   LazyConversationMarkdownRenderer: ({ content }: { content: string }) => <div data-markdown>{content}</div>,
@@ -101,8 +104,8 @@ async function settle(rounds = 5) {
   }
 }
 
-async function render(onSelectedRunChange?: (run: FinancialTeamRun | null) => void) {
-  await act(async () => root.render(<QueryClientProvider client={client}><FinanceAnalystTeam assistant={assistant} stock={stock} zh onOpenSession={openSession} onSelectedRunChange={onSelectedRunChange} /></QueryClientProvider>));
+async function render(onSelectedRunChange?: (run: FinancialTeamRun | null) => void, requestedRunId = "") {
+  await act(async () => root.render(<QueryClientProvider client={client}><FinanceAnalystTeam assistant={assistant} stock={stock} zh requestedRunId={requestedRunId} onOpenSession={openSession} onSelectedRunChange={onSelectedRunChange} /></QueryClientProvider>));
   await settle();
 }
 
@@ -121,6 +124,35 @@ it("keeps the inspector on the selected research when switching run history", as
   await act(async () => button("sz000001").click());
   await settle();
   expect(onSelectedRunChange).toHaveBeenLastCalledWith(earlier);
+});
+
+it("loads an exact batch run outside recent history instead of substituting the newest run", async () => {
+  currentRun = makeRun();
+  currentRun.coordinationStatus = "completed";
+  const earlier = { ...makeRun(), runId: "older-batch-run", symbol: "sz000001", coordinationStatus: "completed" as const };
+  let resolve!: (run: FinancialTeamRun) => void;
+  api.exact.mockReturnValue(new Promise((done) => { resolve = done; }));
+  const onSelectedRunChange = vi.fn();
+  await render(onSelectedRunChange, earlier.runId);
+  expect(container.textContent).toContain("读取所选研究");
+  expect(onSelectedRunChange).toHaveBeenLastCalledWith(null);
+  expect(api.exact).toHaveBeenCalledWith(assistant.agentId, earlier.runId, expect.any(Object));
+  await act(async () => resolve(earlier)); await settle();
+  expect(onSelectedRunChange).toHaveBeenLastCalledWith(earlier);
+  expect(api.primary).not.toHaveBeenCalled();
+});
+
+it("keeps unavailable or cross-owner exact runs out of the latest-run result", async () => {
+  currentRun = makeRun();
+  api.exact.mockRejectedValueOnce(new Error("missing run"));
+  const onSelectedRunChange = vi.fn();
+  await render(onSelectedRunChange, "older-batch-run");
+  expect(container.textContent).toContain("所选研究无法读取");
+  expect(onSelectedRunChange).toHaveBeenLastCalledWith(null);
+  api.exact.mockResolvedValue({ ...makeRun(), runId: "older-batch-run", assistantAgentId: "other" });
+  await act(async () => { await client.refetchQueries({ queryKey: ["financial-team", assistant.agentId, "run", "older-batch-run"] }); });
+  expect(onSelectedRunChange).toHaveBeenLastCalledWith(null);
+  expect(api.primary).not.toHaveBeenCalled();
 });
 
 it("opens the selected synthesis and requires completed coordination with all Turn references", async () => {

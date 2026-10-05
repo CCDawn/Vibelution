@@ -38,9 +38,12 @@
 | `financialAssistant.ts` | `/api/financial-assistants`, projection/setup over native Agent Directory |
 | `financialMarket.ts` | `/api/financial-market/*`, read-only public A-share quotes/search/OHLC; domain query keys |
 | `financialResearch.ts` | `/api/financial-market/*`, batch quotes, bounded all-stock screening, news/announcements and reported financial metrics |
+| `financialReports.ts` | `/api/financial-reports/*`, bounded downloads and browser-assisted printing of canonical completed research Turns |
 | `financialPaper.ts` | `/api/financial-paper/*`, Agent-owned simulated account, holdings, orders and review; no broker access |
 | `financialPreferences.ts` | `/api/financial-preferences/*`, explicit user preferences in canonical Agent personal memory; no second memory store |
 | `financialTeam.ts` | `/api/financial-teams/*`, native analyst Agents and Session/Turn orchestration references |
+| `financialJobs.ts` | `/api/financial-jobs/*`, owned batch queue and Beijing-time schedules; precise stop and unfinished retry |
+| `financialReports.ts` | `/api/financial-reports/*`, export an exact completed native Turn to Markdown, JSON, DOCX or isolated print HTML |
 | `financialPortfolio.ts` | `/api/financial-portfolios/*`, read-only research over the owned paper ledger and actual public price samples |
 | `files.ts` | `/api/files/content` |
 | `git.ts` | `/api/git/*` |

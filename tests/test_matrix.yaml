@@ -91,6 +91,27 @@ rules:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_research_service.py tests/test_financial_paper_service.py tests/test_financial_preferences_service.py tests/test_financial_team_service.py tests/test_financial_team_coordinator.py tests/test_financial_portfolio_service.py -q -n 3 --dist loadfile"
     notes:
       - "Provider and model fixtures prove contracts only; final desktop acceptance uses an isolated Launcher instance and real native turns."
+  - id: finance-job-report-delivery
+    description: "Native financial batch/schedule ownership, exact completed Turn export and managed cold startup."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/financial_job_service.py"
+      - "core/web/services/financial_jobs/**"
+      - "core/web/services/financial_report_service.py"
+      - "core/web/services/financial_report/**"
+      - "core/web/routes/financial_jobs.py"
+      - "core/web/routes/financial_reports.py"
+      - "core/web/route_bootstrap.py"
+      - "tests/test_financial_job_service.py"
+      - "tests/test_financial_job_routes.py"
+      - "tests/test_financial_report_service.py"
+      - "tests/test_financial_report_routes.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_job_service.py tests/test_financial_job_routes.py tests/test_financial_report_service.py tests/test_financial_report_routes.py tests/test_route_bootstrap.py tests/test_web_lifecycle.py::test_create_app_starts_financial_coordinator_after_cold_route_mount -q -n 3 --dist loadfile"
+    notes:
+      - "Controlled native snapshots prove idempotency, stop and export contracts; real model and print UX require isolated Launcher/browser acceptance."
   - id: financial-report-knowledge-integration
     description: "Financial report transport, owner-scoped evidence profile, native RAG provenance, and schema-aware tool arguments."
     executionLayers:

@@ -23,6 +23,8 @@ After explicit primary submissions are accepted, a finance-scoped coordinator re
 
 The team inspector follows the selected run rather than the assistant Session's historical title. It displays saved submission references and coordinator state; completion also requires all analyst and synthesis Turn references. Cards adapt to the actual desktop center-pane width with a single grid template, so later route utility chunks cannot override responsive column variants.
 
+`FinanceResearchApprovals` exposes native pending tool requests in team and batch views. It reuses the chat approval dialog and transport, filters by the exact Session/Turn (and Agent for team refs), and handles one request at a time with single-call accept or decline. Expired or other-run requests never appear; it does not change permission presets or create persistent grants. Scheduled research has the same approval policy and requires the app to stay running.
+
 ## Public market data
 
 The existing Tencent adapter owns A-share quotes and adjusted day/week/month candles. Provider, quote/fetch times, yuan/lot units and missing values stay explicit. MA5/20, BOLL(20,2), MACD(12,26,9) and Wilder RSI(14) calculate on all loaded candles before slicing; missing warm-up values are never generated.
@@ -47,7 +49,13 @@ Skills come from the installed native library and use slash commands. Native sub
 
 ## Scope and verification
 
-The surface targets desktop A-share community research. Broker trading, Pro strategy automation, scheduled/batch analysis and Word/PDF export are outside the implementation. Markdown/native HTML export remains. ETF, Hong Kong and US support is not implied by the reference name.
+The surface targets desktop A-share community research. Broker trading and Pro strategy automation remain outside the implementation. ETF, Hong Kong and US support is not implied by the reference name.
+
+`FinanceTaskCenter` keeps native research records and adds batch research and schedules. A batch accepts at most ten unique Shanghai/Shenzhen stock codes, uses the existing five-analyst team and queues stocks in sequence. Each item opens its exact run even outside recent history; loading or failed reads never substitute a newer result. Stops target only the batch's accepted native Turns and prevent later items; retries preserve completed items. Unknown submission acceptance and ownership drift require attention rather than an automatic repeat.
+
+`financialJobs` stores bounded schedule configuration and occurrence references; native RuntimeTaskStore holds batch execution, and native Session Journal remains the only answer authority. The lifespan-owned scheduler resumes on startup after route mounting. Read endpoints never provision teams or dispatch work. Explicit creation may set up the existing team. Schedules use Asia/Shanghai and support once, daily and Monday-Friday, including market holidays. The app must be running. Pausing affects future occurrences, while stopping is a separate batch action.
+
+`financialReports` exports a selected completed native Turn after checking Agent/Session ownership and its exact terminal evidence. Markdown, JSON and DOCX are downloaded; print/PDF opens bounded isolated print HTML and the user chooses Save as PDF. It creates no second transcript or report body store, and never promotes stopped, thinking or unknown results to a report. DOCX uses stdlib OOXML; print content has no scripts or remote resources.
 
 Verification uses domain/native lifecycle tests, VUI/API contracts, TypeScript/production build and isolated Launcher/browser acceptance with confirmed instance/code identity. Provider HTTP success does not prove exchange-grade realtime data; model configuration does not prove successful research.
 
