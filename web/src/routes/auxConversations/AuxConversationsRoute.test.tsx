@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUX_TASKS_POLL_MS, AuxConversationsRoute } from "./AuxConversationsRoute";
 import { queryKeys } from "../../api/queryKeys";
 import type { RuntimeTaskCard, RuntimeTaskListPayload } from "../../api/runtimeTasks";
+import type { SessionDetail } from "../../api/types";
 
 const runtimeApi = vi.hoisted(() => ({
   listRuntimeTasksRevisionAware: vi.fn(),
@@ -20,6 +21,30 @@ vi.mock("../../api/runtimeTasks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api/runtimeTasks")>();
   return { ...actual, ...runtimeApi };
 });
+
+const streamApi = vi.hoisted(() => ({
+  fetchSessionDetailWindow: vi.fn(),
+}));
+
+vi.mock("../chat/chatSessionDetailHelpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../chat/chatSessionDetailHelpers")>();
+  return { ...actual, ...streamApi };
+});
+
+// The embedded read-only stream reuses the canon chat transcript renderer; the
+// probe stub captures the projected props (identity, autoscroll, messages)
+// without mounting the full ConversationView tree.
+const conversationView = vi.hoisted(() => ({
+  views: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock("../../components/conversation/LazyConversationView", () => ({
+  LazyConversationView: (props: Record<string, unknown>) => {
+    conversationView.views.push(props);
+    return <div data-bridge-probe="lazy-conversation" />;
+  },
+  prefetchConversationView: () => undefined,
+}));
 
 vi.mock("../../i18n/useShellI18n", () => ({
   useShellI18n: () => ({ lang: "zh" as const }),
@@ -80,6 +105,18 @@ const endedTask = task({
   startedAt: new Date(NOW - 3 * 3_600_000).toISOString(),
   endedAt: new Date(NOW - 2 * 3_600_000).toISOString(),
   summary: "已修复 tsc 报错",
+  outputPath: "C:\\tmp\\cli-out.log",
+});
+
+const endedChildTask = task({
+  taskId: "task-ended-child-1",
+  kind: "child_session",
+  status: "succeeded",
+  title: "子任务：已归档",
+  childSessionId: "child-session-ended-1",
+  startedAt: new Date(NOW - 3 * 3_600_000).toISOString(),
+  endedAt: new Date(NOW - 2 * 3_600_000).toISOString(),
+  summary: "已完成并归档",
 });
 
 function listPayload(overrides: Partial<RuntimeTaskListPayload> = {}): RuntimeTaskListPayload {
@@ -162,6 +199,19 @@ describe("AuxConversationsRoute", () => {
       ],
     });
     runtimeApi.stopRuntimeTask.mockReset().mockResolvedValue({ accepted: true, taskId: "task-running-1", status: "stopping" });
+    streamApi.fetchSessionDetailWindow.mockReset().mockImplementation(async (sessionId: string) => ({
+      id: sessionId,
+      title: "子会话",
+      status: "running",
+      taskSummary: "",
+      defaultFileContext: "",
+      runtimeNotices: [],
+      messages: [
+        { id: "m1", role: "user", timestamp: new Date(NOW - 20_000).toISOString(), content: "帮我调研候选资料" },
+        { id: "m2", role: "assistant", timestamp: new Date(NOW - 10_000).toISOString(), status: "completed", turnItems: [] },
+      ],
+    } as unknown as SessionDetail));
+    conversationView.views.length = 0;
   });
 
   afterEach(async () => {
@@ -204,25 +254,135 @@ describe("AuxConversationsRoute", () => {
     );
   });
 
-  it("selects a task and shows meta strip, stop button, session link, summary and detail extras", async () => {
+  it("selects a child task and embeds the read-only conversation stream with the session link", async () => {
     await mountRoute();
     await act(async () => {
       button("子任务：调研资料").click();
     });
-    await flushUntil(() => Boolean(host?.textContent?.includes("待处理消息")));
+    await flushUntil(() => Boolean(host?.querySelector('[data-bridge-probe="lazy-conversation"]')));
+    // The stream window rides the dedicated aux key, never the /chat cache.
+    expect(streamApi.fetchSessionDetailWindow).toHaveBeenCalledWith(
+      "child-session-1",
+      expect.objectContaining({ transcriptScope: "window" }),
+    );
+    // Identity + live follow-along: the task title stands in as the assistant
+    // name, the human side uses the generic 用户 label, autoscroll on while live.
+    const streamProps = conversationView.views[conversationView.views.length - 1];
+    expect(streamProps.sessionId).toBe("child-session-1");
+    expect(streamProps.assistantDisplayName).toBe("子任务：调研资料");
+    expect(streamProps.userDisplayName).toBe("用户");
+    expect(streamProps.autoScrollToLatest).toBe(true);
+    expect((streamProps.messages as unknown[]).length).toBe(2);
+    // Detail extras still ride the task endpoint even when the stream renders.
+    await vi.waitFor(() => expect(runtimeApi.getRuntimeTask).toHaveBeenCalledWith("task-running-1"));
     expect(host!.textContent).toContain("父会话");
     expect(host!.textContent).toContain("正在汇总候选资料");
-    expect(host!.textContent).toContain("输出文件");
-    expect(host!.textContent).toContain("待处理消息");
-    expect(host!.querySelector('section[aria-label="时间线"]')?.textContent).toContain("任务已创建");
-    expect(host!.querySelector('section[aria-label="时间线"]')?.textContent).toContain("running");
-    // Detail extras always ride the detail endpoint; the card stays list-fresh.
-    await vi.waitFor(() => expect(runtimeApi.getRuntimeTask).toHaveBeenCalledWith("task-running-1"));
+    // The stream replaces the synthetic timeline for child-session tasks.
+    expect(host!.querySelector('section[aria-label="对话流"]')).toBeTruthy();
+    expect(host!.querySelector('section[aria-label="时间线"]')).toBeNull();
+    // Full interactive session stays one click away.
     const openLink = host!.querySelector<HTMLAnchorElement>('a[href="/chat?session=child-session-1"]');
     expect(openLink, "child session link should exist").toBeTruthy();
     expect(openLink!.textContent).toContain("在会话中打开");
     // Running task exposes the stop affordance.
     expect(button("停止任务")).toBeTruthy();
+  });
+
+  it("keeps summary, output, pending messages and timeline for non-child tasks without a stream", async () => {
+    await mountRoute();
+    await act(async () => {
+      button("CLI 修复构建").click();
+    });
+    await flushUntil(() => Boolean(host?.textContent?.includes("待处理消息")));
+    expect(host!.textContent).toContain("输出文件");
+    expect(host!.querySelector('section[aria-label="时间线"]')?.textContent).toContain("任务已创建");
+    // No child session: no embedded stream and no snapshot fetch.
+    expect(host!.querySelector('section[aria-label="对话流"]')).toBeNull();
+    expect(streamApi.fetchSessionDetailWindow).not.toHaveBeenCalled();
+  });
+
+  it("fetches one snapshot for an ended child task with follow-along off", async () => {
+    // Pin the list payload for the mount-time refetch too: the default mock
+    // would drop the ended child task from the directory after the first poll.
+    const endedPayload = listPayload({
+      running: [],
+      ended: { items: [endedChildTask, endedTask], total: 2, nextCursor: "" },
+    });
+    runtimeApi.listRuntimeTasksRevisionAware.mockResolvedValue(endedPayload);
+    await mountRoute("/aux", endedPayload);
+    await act(async () => {
+      button("子任务：已归档").click();
+    });
+    await flushUntil(() => Boolean(host?.querySelector('[data-bridge-probe="lazy-conversation"]')));
+    expect(streamApi.fetchSessionDetailWindow).toHaveBeenCalledWith(
+      "child-session-ended-1",
+      expect.objectContaining({ transcriptScope: "window" }),
+    );
+    // Ended task: a settled transcript, no autoscroll follow.
+    const streamProps = conversationView.views[conversationView.views.length - 1];
+    expect(streamProps.autoScrollToLatest).toBe(false);
+  });
+
+  it("polls the live child stream on the 4s beat and never refetches the ended one", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(NOW);
+      const endedPayload = listPayload({
+        ended: { items: [endedChildTask, endedTask], total: 2, nextCursor: "" },
+      });
+      runtimeApi.listRuntimeTasksRevisionAware.mockResolvedValue(endedPayload);
+      await mountRoute("/aux", endedPayload);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      streamApi.fetchSessionDetailWindow.mockClear();
+      await act(async () => {
+        button("子任务：调研资料").click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const liveCallsAfterSelect = streamApi.fetchSessionDetailWindow.mock.calls.length;
+      expect(liveCallsAfterSelect).toBeGreaterThanOrEqual(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUX_TASKS_POLL_MS + 200);
+      });
+      expect(streamApi.fetchSessionDetailWindow.mock.calls.length).toBeGreaterThan(liveCallsAfterSelect);
+
+      // Switching to the ended child task: a single snapshot, no interval.
+      await act(async () => {
+        button("子任务：已归档").click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const callsAfterEndedSelect = streamApi.fetchSessionDetailWindow.mock.calls.length;
+      expect(streamApi.fetchSessionDetailWindow).toHaveBeenCalledWith(
+        "child-session-ended-1",
+        expect.anything(),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUX_TASKS_POLL_MS * 3);
+      });
+      expect(streamApi.fetchSessionDetailWindow.mock.calls.length).toBe(callsAfterEndedSelect);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows an error surface inside the stream area while the detail head stays intact", async () => {
+    streamApi.fetchSessionDetailWindow.mockRejectedValue(new Error("快照接口 500"));
+    await mountRoute();
+    await act(async () => {
+      button("子任务：调研资料").click();
+    });
+    await flushUntil(() => Boolean(host?.textContent?.includes("读取会话失败")));
+    const streamSection = host!.querySelector('section[aria-label="对话流"]');
+    expect(streamSection?.textContent).toContain("读取会话失败");
+    expect(streamSection?.textContent).toContain("快照接口 500");
+    // Only the stream area fails: title, actions and the session link survive.
+    expect(host!.textContent).toContain("子任务：调研资料");
+    expect(host!.querySelector('a[href="/chat?session=child-session-1"]')).toBeTruthy();
   });
 
   it("falls back to the task detail endpoint when the card is outside the list", async () => {

@@ -30,6 +30,8 @@ import {
   VSurface,
 } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
+import { ChatReadOnlySessionWorkspace } from "../chat/ChatReadOnlySessionWorkspace";
+import { fetchSessionDetailWindow } from "../chat/chatSessionDetailHelpers";
 import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./AuxConversationsRoute.styles";
 import {
@@ -81,6 +83,10 @@ const COPY = {
     noSummary: "暂无摘要",
     pendingMessages: "待处理消息",
     timeline: "时间线",
+    conversationStream: "对话流",
+    streamEmpty: "会话暂无消息",
+    loadStreamFailed: "读取会话失败",
+    userLabel: "用户",
   },
   en: {
     title: "Aux conversations",
@@ -113,6 +119,10 @@ const COPY = {
     noSummary: "No summary yet",
     pendingMessages: "Pending messages",
     timeline: "Timeline",
+    conversationStream: "Conversation stream",
+    streamEmpty: "No messages yet",
+    loadStreamFailed: "Failed to load conversation",
+    userLabel: "User",
   },
 } as const;
 
@@ -238,6 +248,22 @@ export function AuxConversationsRoute() {
     : false;
   const stopRequestedForSelection = Boolean(selectedTask && stopRequestedIds.includes(selectedTask.taskId));
 
+  // Embedded read-only child-session transcript. Aux keeps its own query key:
+  // this window snapshot must never overwrite the /chat live-transcript cache.
+  const selectedChildSessionId = String(selectedTask?.childSessionId || "").trim();
+  const streamQuery = useQuery({
+    queryKey: ["aux-session-detail", selectedChildSessionId],
+    queryFn: ({ signal }) =>
+      fetchSessionDetailWindow(selectedChildSessionId, { transcriptScope: "window", signal }),
+    enabled: Boolean(selectedChildSessionId),
+    // Live tasks follow the same 4s foreground beat as the task list; ended
+    // tasks take a single snapshot and never refetch.
+    refetchInterval: selectedChildSessionId && selectedIsLive
+      ? resolvePollingInterval(pageVisible, AUX_TASKS_POLL_MS)
+      : false,
+    refetchIntervalInBackground: false,
+  });
+
   const stopMutation = useMutation({
     mutationFn: (taskId: string) => stopRuntimeTask(taskId),
     onSuccess: (result) => {
@@ -360,18 +386,9 @@ export function AuxConversationsRoute() {
 
   const stopTargetTask = listedTasks.find((task) => task.taskId === stopTargetId) ?? null;
 
-  const detailPaneContent = initialLoad ? (
-    <ProgressiveRegionSkeleton variant="detail" label={copy.loading} className={styles.loadingRegionClass} />
-  ) : !selectedTask ? (
-    <VStateSurface
-      fill
-      className={styles.emptyStateClass}
-      title={requestedTaskId && detailQuery.isError ? copy.loadFailed : copy.selectTask}
-      tone={requestedTaskId && detailQuery.isError ? "error" : "empty"}
-    >
-      {requestedTaskId && detailQuery.isError ? describeError(detailQuery.error, copy.loadFailed) : null}
-    </VStateSurface>
-  ) : (
+  // Compact detail head shared by both panel shapes: with the embedded stream
+  // it stays fixed on top while only the stream body scrolls.
+  const detailHead = selectedTask ? (
     <>
       <div className={styles.detailHeaderClass}>
         <div className={styles.detailTitleWrapClass}>
@@ -419,6 +436,59 @@ export function AuxConversationsRoute() {
       </div>
 
       <p className={styles.summaryTextClass}>{selectedTask.summary?.trim() || copy.noSummary}</p>
+    </>
+  ) : null;
+
+  const detailStreamBody = streamQuery.isLoading ? (
+    <ProgressiveRegionSkeleton variant="detail" label={copy.loading} className={styles.loadingRegionClass} />
+  ) : streamQuery.isError ? (
+    <VStateSurface
+      fill
+      className={styles.emptyStateClass}
+      title={copy.loadStreamFailed}
+      tone="error"
+    >
+      {describeError(streamQuery.error, copy.loadStreamFailed)}
+    </VStateSurface>
+  ) : selectedTask ? (
+    <ChatReadOnlySessionWorkspace
+      assistant={{ displayName: selectedTask.title || shortId(selectedTask.taskId) }}
+      defaultFileContext=""
+      detail={streamQuery.data}
+      emptyLabel={copy.streamEmpty}
+      lang={lang}
+      live={selectedIsLive}
+      loading={streamQuery.isLoading}
+      loadingLabel={copy.loading}
+      sessionId={selectedChildSessionId}
+      user={{ displayName: copy.userLabel }}
+    />
+  ) : null;
+
+  const detailPaneContent = initialLoad ? (
+    <ProgressiveRegionSkeleton variant="detail" label={copy.loading} className={styles.loadingRegionClass} />
+  ) : !selectedTask ? (
+    <VStateSurface
+      fill
+      className={styles.emptyStateClass}
+      title={requestedTaskId && detailQuery.isError ? copy.loadFailed : copy.selectTask}
+      tone={requestedTaskId && detailQuery.isError ? "error" : "empty"}
+    >
+      {requestedTaskId && detailQuery.isError ? describeError(detailQuery.error, copy.loadFailed) : null}
+    </VStateSurface>
+  ) : selectedChildSessionId ? (
+    // Child-session tasks embed the real transcript (ZCode subagent-session
+    // shape: main transcript renderer + readOnly); the stream area owns the
+    // remaining height and scrolls itself so the head never moves.
+    <div className={styles.detailStreamLayoutClass}>
+      <div className={styles.detailStreamHeadClass}>{detailHead}</div>
+      <section className={styles.detailStreamBodyClass} aria-label={copy.conversationStream}>
+        {detailStreamBody}
+      </section>
+    </div>
+  ) : (
+    <>
+      {detailHead}
 
       {selectedTask.outputPath ? (
         <code className={styles.monoCodeClass}>{copy.outputPath}: {selectedTask.outputPath}</code>
