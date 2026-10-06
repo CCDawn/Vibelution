@@ -62,7 +62,9 @@ def _save(page, sid, editor):
 
 
 @pytest.mark.parametrize("first_succeeds", [True, False], ids=["old-success", "old-failure"])
-def test_old_rename_response_cannot_replace_a_newer_confirmed_title(page, e2e_instance, first_succeeds):
+@pytest.mark.parametrize("latest_succeeds", [True, False], ids=["latest-success", "latest-failure"])
+@pytest.mark.parametrize("old_response_first", [True, False], ids=["old-response-first", "latest-response-first"])
+def test_rename_response_order_preserves_latest_intent(page, e2e_instance, first_succeeds, latest_succeeds, old_response_first):
     from playwright.sync_api import expect
 
     suffix = uuid.uuid4().hex[:8]
@@ -71,42 +73,54 @@ def test_old_rename_response_cannot_replace_a_newer_confirmed_title(page, e2e_in
     draft = f"连续改名期间保留的草稿 {suffix}"
     composer = _ready_composer(page, e2e_instance, sid)
     composer.press_sequentially(draft, delay=2)
-    pending = []
+    pending = {}
     pattern = f"**/api/sessions/{sid}"
 
-    def delay_first(route):
-        if route.request.method == "PATCH" and route.request.post_data_json == {"title": first}:
-            body = patch_json(e2e_instance.port, f"/api/sessions/{sid}", {"title": first}) if first_succeeds else {"detail": "superseded rename failure"}
-            pending.append((route, body))
+    def delay_ack(route):
+        title = (route.request.post_data_json or {}).get("title") if route.request.method == "PATCH" else None
+        if title in (first, latest):
+            succeeds = first_succeeds if title == first else latest_succeeds
+            marker = "superseded rename failure" if title == first else "latest rename failure"
+            body = patch_json(e2e_instance.port, f"/api/sessions/{sid}", {"title": title}) if succeeds else {"detail": marker}
+            pending[title] = (route, body, succeeds)
         else:
             route.continue_()
 
-    page.route(pattern, delay_first)
+    page.route(pattern, delay_ack)
     try:
         with page.expect_request(lambda request: _is_patch(request, sid)):
             _edit(page, original, first).press("Enter")
         expect(page.get_by_role("tab").filter(has_text=first)).to_be_visible()
-        assert _save(page, sid, _edit(page, first, latest))["title"] == latest
+        with page.expect_request(lambda request: _is_patch(request, sid)):
+            _edit(page, first, latest).press("Enter")
         expect(page.get_by_role("tab").filter(has_text=latest)).to_be_visible()
-        assert len(pending) == 1
-        route, body = pending.pop()
-        with page.expect_request(_terminal(sid, "succeeded" if first_succeeds else "failed")):
-            route.fulfill(status=200 if first_succeeds else 503, content_type="application/json", body=json.dumps(body))
+        assert len(pending) == 2
+        for title in ((first, latest) if old_response_first else (latest, first)):
+            route, body, succeeds = pending.pop(title)
+            with page.expect_request(_terminal(sid, "succeeded" if succeeds else "failed")):
+                route.fulfill(status=200 if succeeds else 503, content_type="application/json", body=json.dumps(body))
         # Inspect before navigation/reload can repair stale client state.
-        expect(page.get_by_role("textbox", name="重命名会话", exact=True)).not_to_be_visible()
-        expect(page.get_by_role("tab").filter(has_text=latest)).to_be_visible()
+        editor = page.get_by_role("textbox", name="重命名会话", exact=True)
+        if latest_succeeds:
+            expect(editor).not_to_be_visible()
+        else:
+            expect(editor).to_have_value(latest)
+            expect(page.get_by_text("latest rename failure", exact=False).first).to_be_visible()
+            editor.press("Escape")
+        expected = latest if latest_succeeds else first if first_succeeds else original
+        expect(page.get_by_role("tab").filter(has_text=expected)).to_be_visible()
         expect(page.get_by_text("superseded rename failure", exact=False)).not_to_be_visible()
         expect(composer).to_have_value(draft)
-        assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["title"] == latest
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["title"] == expected
         page.reload(wait_until="domcontentloaded")
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sid, timeout=30000)
-        expect(page.get_by_role("tab").filter(has_text=latest)).to_be_visible()
+        expect(page.get_by_role("tab").filter(has_text=expected)).to_be_visible()
         expect(page.locator(COMPOSER).first).to_have_value(draft)
         _assert_no_turns(e2e_instance, [sid], [draft])
     finally:
-        for route, _ in pending:
+        for route, _, _ in pending.values():
             route.abort()
-        page.unroute(pattern, delay_first)
+        page.unroute(pattern, delay_ack)
 
 
 def test_failed_save_preserves_a_newer_unsaved_title_edit(page, e2e_instance):
