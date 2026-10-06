@@ -1249,6 +1249,10 @@ export function ChatCodingRouteWorkbench() {
     },
     onSuccess: (_result, variables, context) => {
       context?.telemetry?.succeeded({ sessionId: variables.sessionId });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { sessionId: variables.sessionId });

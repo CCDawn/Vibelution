@@ -155,8 +155,10 @@ def test_late_archive_command_does_not_steal_another_session_or_its_draft(page, 
     pending = []
 
     def delay_ack(route):
-        response = route.fetch()
-        assert response.ok
+        # Apply the real backend command through the existing protected helper,
+        # then withhold the browser acknowledgement. No in-flight route.fetch
+        # outlives the test's request context.
+        response = post_json(e2e_instance.port, f"/api/sessions/{sessions[0]}/{endpoint}")
         pending.append((route, response))
 
     pattern = f"**/api/sessions/{sessions[0]}/{endpoint}"
@@ -169,7 +171,7 @@ def test_late_archive_command_does_not_steal_another_session_or_its_draft(page, 
         assert len(pending) == 1
         with page.expect_response(lambda response: response.url.endswith(f"/api/sessions/{sessions[0]}/{endpoint}")):
             route, response = pending.pop()
-            route.fulfill(response=response)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(response))
         expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={sessions[1]}")
         expect(composer_b).to_be_enabled()
         expect(composer_b).to_have_value(drafts[1])
@@ -182,7 +184,7 @@ def test_late_archive_command_does_not_steal_another_session_or_its_draft(page, 
         _assert_no_turns(e2e_instance, sessions, drafts)
     finally:
         for route, response in pending:
-            route.fulfill(response=response)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(response))
         page.unroute(pattern, delay_ack)
         post_json(e2e_instance.port, f"/api/sessions/{sessions[0]}/unarchive")
 
@@ -205,8 +207,9 @@ def test_unarchive_cancels_old_detail_get_and_late_body_cannot_restore_readonly(
             route.fallback()
             return
         held_once = True
-        response = route.fetch()
-        assert response.ok and response.json()["readOnly"] is True
+        parts = urlsplit(request.url)
+        response = fetch_json(e2e_instance.port, f"{parts.path}?{parts.query}")
+        assert response["readOnly"] is True
         pending.append((route, response))
 
     pattern = f"**/api/sessions/{sid}?*"
@@ -218,19 +221,19 @@ def test_unarchive_cancels_old_detail_get_and_late_body_cannot_restore_readonly(
         action = _open_action(page, title, "取消归档")
         assert len(pending) == 1
         old_request = detail_requests[0]
-        with page.expect_request_failed(lambda request: request == old_request, timeout=15000):
+        with page.expect_event("requestfailed", predicate=lambda request: request == old_request, timeout=15000):
             action.click()
-        expect(page.locator(COMPOSER).first).to_be_enabled(timeout=15000)
-        expect(page.locator(COMPOSER).first).to_have_value(draft)
-        assert len(detail_requests) >= 2, "Canonical detail must be fetched after cancelling the old request"
-        route, response = pending.pop()
-        route.fulfill(response=response)
+            expect(page.locator(COMPOSER).first).to_be_enabled(timeout=15000)
+            expect(page.locator(COMPOSER).first).to_have_value(draft)
+            assert len(detail_requests) >= 2, "Canonical detail must be fetched after cancelling the old request"
+            route, response = pending.pop()
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(response))
         page.wait_for_timeout(250)
         expect(page.locator(COMPOSER).first).to_be_enabled()
         expect(page.locator(COMPOSER).first).to_have_value(draft)
         _assert_no_turns(e2e_instance, [sid], [draft])
     finally:
         for route, response in pending:
-            route.fulfill(response=response)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(response))
         page.unroute(pattern, delay_old_detail)
         post_json(e2e_instance.port, f"/api/sessions/{sid}/unarchive")
