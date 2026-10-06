@@ -62,6 +62,10 @@ def finance_env(tmp_path, monkeypatch):
     config_path.write_text("[launcher]\ncontrol_port = 8765\n")
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "CONFIG_PATH", config_path)
+    # These tests exercise financial identity and knowledge policies. Start
+    # with an existing shared root so successive Windows resolves cannot
+    # disagree on the extended-length prefix of a missing directory.
+    (tmp_path / "workspace" / "shared").mkdir(parents=True, exist_ok=True)
     owner = agent_directory_service.create_agent_instance(
         display_name="Finance owner", direct_session_id="finance-owner-test"
     )
