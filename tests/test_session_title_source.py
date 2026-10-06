@@ -84,6 +84,17 @@ def test_manual_rename_records_manual_source_and_locks_out_generation(tmp_path, 
     assert session_service.apply_generated_session_title("session-a", "自动标题") is False
 
 
+@pytest.mark.parametrize("session_kind", ["main", "child"])
+def test_manual_rename_response_uses_current_title_despite_legacy_task_title(tmp_path, monkeypatch, session_kind):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed(tmp_path, title="旧会话标题", task_title="旧任务标题", session_kind=session_kind)
+    _patch_writes(monkeypatch)
+
+    response = session_service.update_chat_session_title("session-a", "新的会话标题")
+    assert response["title"] == "新的会话标题"
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "新的会话标题"
+
+
 def _patch_creation(monkeypatch):
     _patch_writes(monkeypatch)
     monkeypatch.setattr(
@@ -128,7 +139,7 @@ def test_create_session_agent_display_name_fallback_starts_as_placeholder(tmp_pa
     created = session_service.create_chat_session(title="", agent_id=agent_id)
     session_id = _created_session_id(created)
     row = load_session_chat_state(tmp_path, session_id)
-    assert row["title"] == "科研协调"
+    assert row["title"] == "新会话"
     assert row["title_source"] == "placeholder"
     assert session_service.apply_generated_session_title(session_id, "量子计算综述") is True
 

@@ -900,7 +900,7 @@ def _build_session_summary(
     display_agent_name = agent_display_name or raw_title
     # A new session keeps the placeholder label until the first turn generates a
     # title. Agent identity stays on agentDisplayName / icon, not the tab title.
-    display_title = task_title
+    display_title = task_title if session_kind == "child" else raw_title
     session_id = str(conversation["id"]).strip()
     session_source_ref = s._source_authority_ref("session", session_id)
     session_projection_edit = s._projection_edit_contract("session", session_id)
