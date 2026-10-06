@@ -383,17 +383,15 @@ def test_clear_marker_lets_goal_reenter_circuit(
     monkeypatch.setattr(team_service, "assert_team_exists", lambda team_id: team_id)
     marker = _seed_marker(_TEAM, _ENVELOPE)
 
-    result = chain.clear_evidence_gap_marker(
-        _TEAM, marker["markerId"], reason="quote-anchor remediation shipped"
-    )
+    result = search_circuit.clear_evidence_gap_marker(_TEAM, marker["markerId"])
     assert result["cleared"] is True
-    assert result["markerId"] == marker["markerId"]
-    assert result["reason"] == "quote-anchor remediation shipped"
+    assert result["marker"]["markerId"] == marker["markerId"]
+    assert result["retryHint"]
     # The cleared goal no longer matches any live marker.
     assert search_circuit.live_evidence_gap_marker_for_goal(_TEAM, _ENVELOPE) == {}
 
     # Clearing again reports not-cleared instead of failing.
-    repeat = chain.clear_evidence_gap_marker(_TEAM, marker["markerId"])
+    repeat = search_circuit.clear_evidence_gap_marker(_TEAM, marker["markerId"])
     assert repeat["cleared"] is False
 
     # With the marker gone, the close path re-enters the circuit: the facade

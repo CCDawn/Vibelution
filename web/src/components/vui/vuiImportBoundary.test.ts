@@ -127,21 +127,18 @@ const legacyInlineTailwindFiles = new Set<string>([
   "routes/TeamResearchStageLauncherPanel.tsx",
   "routes/teams/renderTeamsShellFrame.tsx",
   "routes/teams/research-workflow/ResearchProcessWorkspace.tsx",
-  "routes/teams/ResearchBoardKanban.tsx",
   "routes/teams/ResearchOverviewSurface.tsx",
   "routes/teams/ResearchPrimaryActionBar.tsx",
   "routes/teams/ResearchStageNav.tsx",
   "routes/teams/ResearchWorkflowErrorSurface.tsx",
   "routes/teams/TeamResearchBoardPrimarySurface.tsx",
   "routes/teams/TeamsCanvasComposer.tsx",
-  "routes/teams/TeamShellModeSwitch.tsx",
   "routes/teams/TeamShellRail.tsx",
   "routes/teams/useTeamsWorkbenchShellPhase.tsx",
 ]);
 
 const legacyLocalClassConstFiles = new Set<string>([
   "routes/TeamResearchStageLauncherPanel.tsx",
-  "routes/teams/ResearchBoardKanban.tsx",
   "routes/teams/ResearchPrimaryActionBar.tsx",
 ]);
 
@@ -215,7 +212,6 @@ const legacyStyleMapFiles = new Set<string>([
   "routes/teams/renderTeamsWorkbenchBoardPage.tsx",
   "routes/teams/renderTeamsWorkbenchCanvasPage.tsx",
   "routes/teams/research-workflow/ResearchProcessWorkspace.tsx",
-  "routes/teams/ResearchBoardKanban.tsx",
   "routes/teams/ResearchOverviewSurface.tsx",
   "routes/teams/ResearchPrimaryActionBar.tsx",
   "routes/teams/ResearchStageNav.tsx",
@@ -237,7 +233,6 @@ const legacyStyleMapFiles = new Set<string>([
   "routes/teams/teamResearchPrimarySurfaceRenderers.tsx",
   "routes/teams/TeamResearchWorkflowPanelHost.tsx",
   "routes/teams/TeamsCanvasComposer.tsx",
-  "routes/teams/TeamShellModeSwitch.tsx",
   "routes/teams/TeamShellRail.tsx",
   "routes/teams/TeamShellToolbar.tsx",
   "routes/teams/TeamsOverviewComposer.tsx",

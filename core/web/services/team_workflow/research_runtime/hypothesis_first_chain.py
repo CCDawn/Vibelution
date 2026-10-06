@@ -12945,60 +12945,6 @@ def recover_collection_request(
         )
 
 
-def clear_evidence_gap_marker(
-    team_id: str,
-    marker_id: str,
-    *,
-    reason: str = "",
-) -> dict[str, Any]:
-    """Operator action: clear one evidence-gap marker by id.
-
-    Clearing lets the same retrieval goal re-enter the search circuit as a
-    brand-new request (fresh original run plus rewrite budget) on its next
-    evidence request — the sanctioned path after remediations that change
-    what is retrievable (for example the quote-anchor abstract-level
-    degradation).  There is deliberately no TTL: reopening a dead goal is an
-    explicit operator decision, never a silent background restart.  The
-    result carries an operator-facing ``retryHint``; markers whose attempts
-    retrieved results that never became new records note that the
-    quote-anchor remediation may make a retry succeed.
-    """
-    from core.web.services import team_service
-    from core.web.services.team_workflow.source_collection import search_circuit
-
-    normalized_team_id = team_service.assert_team_exists(team_id)
-    normalized_marker_id = str(marker_id or "").strip()
-    if not normalized_marker_id:
-        raise HypothesisFirstChainError("Evidence gap marker id is required.")
-    result = search_circuit.clear_evidence_gap_marker(
-        normalized_team_id, normalized_marker_id
-    )
-    error = str(result.get("error") or "").strip()
-    if error:
-        raise HypothesisFirstChainError(
-            f"clearing evidence gap marker {normalized_marker_id} failed: {error}"
-        )
-    cleared = bool(result.get("cleared"))
-    _record_scene_event(
-        "evidence_gap_marker.clear",
-        outcome="cleared" if cleared else "not_found",
-        fields={
-            "teamId": normalized_team_id,
-            "markerId": normalized_marker_id[:80],
-            "reason": str(reason or "")[:200],
-        },
-    )
-    return {
-        "schemaVersion": SCHEMA_VERSION,
-        "teamId": normalized_team_id,
-        "markerId": normalized_marker_id,
-        "cleared": cleared,
-        "retryHint": str(result.get("retryHint") or ""),
-        "marker": dict(result.get("marker") or {}),
-        "reason": str(reason or "")[:300],
-    }
-
-
 def stop_collection_request(team_id: str, request_id: str) -> dict[str, Any]:
     """Stop one running child collection and make the request retry/reset safe."""
 

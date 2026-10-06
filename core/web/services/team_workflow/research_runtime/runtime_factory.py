@@ -468,7 +468,16 @@ class WorkflowRuntime:
         formal run), so replays converge instead of duplicating.  Hosted on
         the dedicated serial hypothesis recovery tick with the same peek + self-throttle
         discipline as the digest watchdog; never raises, never re-drives.
+
+        Gated by the auto-advance kill switch (``VIBELUTION_AUTO_ADVANCE_DISABLED``,
+        which also covers challenge archive mode 封存模式): this sweep
+        adjudicates chains and auto-starts formal runs, i.e. it advances
+        state, so it must stay dormant whenever auto-advance is disabled.
         """
+        from .automation_policy_executor import kill_switch_enabled
+
+        if kill_switch_enabled():
+            return
         now_ms = int(time.time() * 1000)
         if not _auto_advance_sweep_due(now_ms):
             return
@@ -768,7 +777,21 @@ def start_production_workflow_runtime() -> str:
     that races an in-flight start/stop fails closed with
     ``ProductionRuntimeBusyError`` instead of blocking; a start against an
     already-ready runtime stays idempotent and returns ``"ready"``.
+
+    Challenge archive mode (封存模式, see ``archive_mode``) skips the start
+    entirely and returns ``"archive_mode"``: an archived batch is read-only,
+    so no outbox pump workers / maintenance / receipt-persistence /
+    hypothesis-recovery threads may exist. Nothing else is touched, and a
+    later start with the switch off still works (no state was created).
     """
+    from .archive_mode import challenge_archive_mode_enabled
+
+    if challenge_archive_mode_enabled():
+        logger.info(
+            "challenge archive mode: research workflow runtime not started "
+            "(read-only archive; no resident workflow threads)"
+        )
+        return "archive_mode"
     global _PRODUCTION, _PUMP
     from core.research.workflow.migration.manifest import is_activated
 

@@ -117,6 +117,30 @@ def _recover_challenge_meeting_drivers_on_startup() -> object:
     return recover_challenge_meeting_drivers()
 
 
+def _start_meeting_driver_recovery_job(startup_jobs: StartupJobGroup):
+    """Schedule the startup meeting-driver recovery scan unless archived.
+
+    挑战杯封存模式（archive_mode，只读可看）下跳过这次扫描：它会遍历
+    全部 open 会议并补写 fence 记录（改写状态），封存语义要求启动期不再
+    改写任何 workflow 状态。返回 None 表示任务未创建；其余启动逻辑不受
+    影响。开关读取集中在 research_runtime.archive_mode。
+    """
+
+    from .services.team_workflow.research_runtime.archive_mode import (
+        challenge_archive_mode_enabled,
+    )
+
+    if challenge_archive_mode_enabled():
+        logger.info(
+            "challenge archive mode: skipping startup meeting-driver "
+            "recovery scan (read-only archive)"
+        )
+        return None
+    return startup_jobs.start_thread(
+        "startup-meeting-driver-recovery", _recover_challenge_meeting_drivers_on_startup
+    )
+
+
 def _recover_orphaned_chat_room_rounds_on_startup() -> object:
     from .services.chat_room_startup_recovery import recover_chat_room_rounds_on_startup
 
@@ -536,8 +560,8 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task = startup_jobs.start_thread(
         "startup-agent-inbox-recovery", _recover_wakeable_agent_inbox_messages_on_startup
     )
-    startup_meeting_driver_recovery_task = startup_jobs.start_thread(
-        "startup-meeting-driver-recovery", _recover_challenge_meeting_drivers_on_startup
+    startup_meeting_driver_recovery_task = _start_meeting_driver_recovery_job(
+        startup_jobs
     )
     startup_chat_room_round_recovery_task = startup_jobs.start_thread(
         "startup-chat-room-round-recovery", _recover_orphaned_chat_room_rounds_on_startup
@@ -560,9 +584,7 @@ async def web_workbench_lifespan(app: FastAPI | None):
         "startup-external-agent-reconcile",
         reconcile_external_agent_tasks_forever(startup_jobs=startup_jobs),
     )
-    startup_workflow_runtime_task = startup_jobs.start_thread(
-        "startup-workflow-runtime", _start_research_workflow_runtime
-    )
+    startup_workflow_runtime_task = _start_workflow_runtime_job(startup_jobs)
     from .services.virtual_human_life_service import run_virtual_human_life_runtime
 
     startup_virtual_human_life_task = startup_jobs.start_async(
@@ -625,11 +647,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
-    startup_meeting_driver_recovery_task.add_done_callback(
-        lambda task: consume_startup_task_result(
-            task, message="Challenge meeting driver recovery failed during startup."
+    if startup_meeting_driver_recovery_task is not None:
+        startup_meeting_driver_recovery_task.add_done_callback(
+            lambda task: consume_startup_task_result(
+                task, message="Challenge meeting driver recovery failed during startup."
+            )
         )
-    )
     startup_chat_room_round_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="Chat room round startup recovery failed during startup."
@@ -668,11 +691,12 @@ async def web_workbench_lifespan(app: FastAPI | None):
             task, message="Running-code fingerprint snapshot failed during startup."
         )
     )
-    startup_workflow_runtime_task.add_done_callback(
-        lambda task: consume_startup_task_result(
-            task, message="Research workflow Ledger runtime failed during startup."
+    if startup_workflow_runtime_task is not None:
+        startup_workflow_runtime_task.add_done_callback(
+            lambda task: consume_startup_task_result(
+                task, message="Research workflow Ledger runtime failed during startup."
+            )
         )
-    )
     startup_virtual_human_life_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="Virtual human life runtime stopped unexpectedly."
@@ -993,6 +1017,31 @@ def _start_research_workflow_runtime() -> str:
     )
 
     return start_production_workflow_runtime()
+
+
+def _start_workflow_runtime_job(startup_jobs: StartupJobGroup):
+    """Schedule the research workflow resident runtime unless archived.
+
+    挑战杯封存模式（archive_mode，只读可看）下不启动 runtime：驻留线程
+    （outbox pump workers / maintenance / receipt-persistence /
+    hypothesis-recovery）全部不存在，运行时不轮询、不推进、不改写状态。
+    返回 None 表示任务未创建；shutdown 侧 stop 对未启动 runtime 是幂等
+    no-op。开关读取集中在 research_runtime.archive_mode。
+    """
+
+    from .services.team_workflow.research_runtime.archive_mode import (
+        challenge_archive_mode_enabled,
+    )
+
+    if challenge_archive_mode_enabled():
+        logger.info(
+            "challenge archive mode: research workflow runtime not scheduled "
+            "(read-only archive)"
+        )
+        return None
+    return startup_jobs.start_thread(
+        "startup-workflow-runtime", _start_research_workflow_runtime
+    )
 
 
 def _stop_research_workflow_runtime() -> None:

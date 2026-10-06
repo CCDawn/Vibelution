@@ -1,9 +1,8 @@
-"""HTTP surface for the knowledge-collection command facade.
+"""HTTP surface for the knowledge-collection command route.
 
-The dedicated ensure route (typed payload) and the generic command route
-(inspect) both reach the same single write entry; team-authorized sessions
-may ensure/inspect regardless of operator role, while operator-only
-commands keep their role gate.
+The generic command route reaches the single knowledge-collection write
+entry; team-authorized sessions may ensure/inspect regardless of operator
+role, while operator-only commands keep their role gate.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ def _isolated_registry(monkeypatch):
     reset_registry_for_tests()
 
 
-def test_knowledge_collection_route_ensures_replays_and_inspects(
+def test_knowledge_command_ensures_replays_and_inspects(
     tmp_path: Path, monkeypatch
 ) -> None:
     from core.web.services.team_workflow.research_runtime.run_creation import create_run
@@ -54,25 +53,28 @@ def test_knowledge_collection_route_ensures_replays_and_inspects(
             idempotency_key="kc-route-create-1",
         )
         run_id = str(run["runId"])
-        body = {
+        ensure_body = {
             "teamId": _TEAM_ID,
             "idempotencyKey": "kc-route-ensure-1",
             "expectedRunVersion": int(run.get("runVersion") or 1),
-            "questionId": _QUESTION_ID,
+            "command": "ensure_knowledge_collection",
             "nodeId": "hypothesis_design",
-            "searchEnvelope": {
-                "keywords": ["evaporation"],
-                "evidenceTypes": ["dataset"],
-                "timeWindow": {"from": "2024-01-01"},
+            "payload": {
+                "questionId": _QUESTION_ID,
+                "searchEnvelope": {
+                    "keywords": ["evaporation"],
+                    "evidenceTypes": ["dataset"],
+                    "timeWindow": {"from": "2024-01-01"},
+                },
+                "requirements": {"minSources": 2},
+                "sourcePolicyVersion": "1",
+                "managedSourceRootIds": ["Root-A"],
             },
-            "requirements": {"minSources": 2},
-            "sourcePolicyVersion": "1",
-            "managedSourceRootIds": ["Root-A"],
         }
         first = client.post(
-            f"/api/research/workflow-runs/{run_id}/knowledge-collection",
+            f"/api/research/workflow-runs/{run_id}/commands",
             headers=_headers(),
-            json=body,
+            json=ensure_body,
         )
         assert first.status_code == 202, first.text
         result = first.json()["result"]
@@ -81,9 +83,9 @@ def test_knowledge_collection_route_ensures_replays_and_inspects(
         assert result["managedSourceRootIds"] == ["root-a"]
 
         second = client.post(
-            f"/api/research/workflow-runs/{run_id}/knowledge-collection",
+            f"/api/research/workflow-runs/{run_id}/commands",
             headers=_headers(),
-            json=body,
+            json=ensure_body,
         )
         assert second.status_code == 202, second.text
         assert second.json()["result"]["replayed"] is True
@@ -123,14 +125,15 @@ def test_knowledge_commands_authorized_without_privileged_roles(
         )
         run_id = str(run["runId"])
         ensured = client.post(
-            f"/api/research/workflow-runs/{run_id}/knowledge-collection",
+            f"/api/research/workflow-runs/{run_id}/commands",
             headers=_headers(),
             json={
                 "teamId": _TEAM_ID,
                 "idempotencyKey": "kc-route-ensure-viewer",
                 "expectedRunVersion": int(run.get("runVersion") or 1),
-                "questionId": _QUESTION_ID,
+                "command": "ensure_knowledge_collection",
                 "nodeId": "hypothesis_design",
+                "payload": {"questionId": _QUESTION_ID},
             },
         )
         assert ensured.status_code == 202, ensured.text
@@ -150,16 +153,17 @@ def test_knowledge_commands_authorized_without_privileged_roles(
         assert cancelled.json()["detail"]["code"] == "command_forbidden"
 
 
-def test_knowledge_collection_route_rejects_unknown_run(tmp_path: Path, monkeypatch) -> None:
+def test_knowledge_command_rejects_unknown_run(tmp_path: Path, monkeypatch) -> None:
     with ledger_http_client(tmp_path, monkeypatch) as (client, _runtime):
         missing = client.post(
-            "/api/research/workflow-runs/run-missing/knowledge-collection",
+            "/api/research/workflow-runs/run-missing/commands",
             headers=_headers(),
             json={
                 "teamId": _TEAM_ID,
                 "idempotencyKey": "kc-route-missing",
                 "expectedRunVersion": 1,
-                "questionId": _QUESTION_ID,
+                "command": "ensure_knowledge_collection",
+                "payload": {"questionId": _QUESTION_ID},
             },
         )
         assert missing.status_code == 404

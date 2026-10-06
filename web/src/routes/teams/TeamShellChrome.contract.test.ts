@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 const toolbarSource = readFileSync(new URL("./TeamShellToolbar.tsx", import.meta.url), "utf8");
 const railSource = readFileSync(new URL("./TeamShellRail.tsx", import.meta.url), "utf8");
-const kanbanSource = readFileSync(new URL("./ResearchBoardKanban.tsx", import.meta.url), "utf8");
 
 describe("Team shell chrome selection + board layout", () => {
   it("toolbar switches teams with VSelect and exposes the optional refresh action", () => {
@@ -31,14 +30,5 @@ describe("Team shell chrome selection + board layout", () => {
     expect(railSource).not.toContain("!bg-[var(--fg-primary)]");
     expect(railSource).not.toContain("[&_*]:!text-white");
     expect(railSource).not.toContain("!text-white");
-  });
-
-  it("legacy stage board (if mounted) stays three columns with horizontal scroll", () => {
-    // End-user home no longer mounts this kanban; keep geometry contract if reused.
-    expect(kanbanSource).toContain("grid-cols-[repeat(3,minmax(0,1fr))]");
-    expect(kanbanSource).toContain("overflow-x-auto");
-    expect(kanbanSource).toContain('data-testid="research-board-columns"');
-    expect(kanbanSource).not.toContain("grid-cols-1");
-    expect(kanbanSource).not.toContain("md:grid-cols-3");
   });
 });

@@ -108,3 +108,33 @@ Command transaction (WorkflowCommandService)
 `tests/test_research_workflow_*` 覆盖 T1–T5 全链路；集成链测试：
 `tests/test_research_workflow_integration_chain.py`（无 Fake：Command→Graph→Adapter→
 read-back→Receipt→Handoff→下一节点 Readiness）。
+
+## 封存模式（挑战杯批次归档）
+
+批次封存 = 停掉空转活性、只读可看：不再自动推进/改写任何 research workflow
+状态，投影与 UI 查看不受影响。总开关读取集中在 `archive_mode.py`
+（单一事实源，禁止各处散读 env），解析优先级：
+
+1. env `VIBELUTION_CHALLENGE_ARCHIVE_MODE` 显式取值（truthy 开 / `0|false|off|no`
+   显式关，操作员紧急退出与复活复核的逃逸口）；
+2. operator config `[research] challenge_archive_mode`（默认 `false`，行为不变）。
+
+开关打开时的落点：
+
+| 落点 | 语义 |
+| --- | --- |
+| `core/web/lifecycle.py` `_start_workflow_runtime_job` | 启动不创建 research workflow 驻留 runtime（outbox pump 4 worker + maintenance + receipt-persistence + hypothesis-recovery 线程全部不存在） |
+| `core/web/lifecycle.py` `_start_meeting_driver_recovery_job` | 启动跳过 meeting-driver 恢复扫描（否则会为全部 open 会议补写 fence 记录） |
+| `runtime_factory.start_production_workflow_runtime` | 返回 `"archive_mode"`，不建 ledger runtime |
+| `outbox_pump._hypothesis_recovery_loop` | 循环直接不跑（纵深防御；封存下 pump 本不会被 attach） |
+| `automation_policy_executor.kill_switch_enabled` | 封存 ⇒ auto-advance 全链路 kill（executor 决策点不执行，audit 仍记 `killSwitch`） |
+| `runtime_factory._sweep_auto_advance_closure_best_effort` | 归 auto-advance kill switch 管（`VIBELUTION_AUTO_ADVANCE_DISABLED` 或封存任一命中即停） |
+| `reaper.reaper_enabled` | 封存下恒关：48h 升级与 7 天自动拒绝都不发生 |
+
+pytest 下开关只认 env、不回落 operator config（测试进程可能落在已开启封存的
+操作员真机上，回落读取会污染测试行为）；与
+`_compact_hypothesis_round_failures_best_effort` 的 pytest 先例同一纪律。
+
+复活路径一句话：关掉封存开关（config 或 env）→ `run-reset` 重置运行 →
+readiness 复验 → operator `authorize` 重新授权后，重启后端即恢复常驻 runtime。
+测试：`tests/test_challenge_archive_mode.py`。
