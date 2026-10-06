@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -49,7 +50,7 @@ def runtime_identity(e2e_instance):
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _snapshot(page, instance, label):
+def _snapshot(page, instance, label, trace=None):
     name = f"{label}-{uuid.uuid4().hex[:8]}"
     target = _evidence(instance.project_root)
     (target / f"{name}.json").write_text(json.dumps({
@@ -57,6 +58,7 @@ def _snapshot(page, instance, label):
         "tabs": page.get_by_role("tab").all_text_contents(),
         "tabLabels": page.get_by_role("tab").evaluate_all("els => els.map(el => el.getAttribute('aria-label'))"),
         "threadSessionId": page.locator(THREAD).first.get_attribute("data-agent-thread-id") if page.locator(THREAD).count() else None,
+        "network": trace or [],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     page.screenshot(path=str(target / f"{name}.png"))
 
@@ -72,6 +74,18 @@ def test_cold_direct_session_entry_has_correct_tab_and_draft(page, e2e_instance,
     context = page.context.browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
     cold = context.new_page()
     pending, submissions = [], []
+    trace = []
+    started = time.monotonic()
+
+    def record(kind, request, status=None):
+        path = urlsplit(request.url).path
+        if len(trace) < 100 and path.startswith("/api/") and "telemetry" not in path:
+            trace.append({"kind": kind, "path": path, "method": request.method,
+                          "status": status, "elapsedMs": round((time.monotonic() - started) * 1000)})
+
+    cold.on("request", lambda request: record("request", request))
+    cold.on("response", lambda response: record("response", response.request, response.status))
+    cold.on("requestfailed", lambda request: record("failed", request))
 
     def transport(route):
         path = urlsplit(route.request.url).path
@@ -105,7 +119,7 @@ def test_cold_direct_session_entry_has_correct_tab_and_draft(page, e2e_instance,
         _assert_no_turns(e2e_instance, [sid], [draft])
         assert submissions == []
     except Exception:
-        _snapshot(cold, e2e_instance, "cold-entry-failure")
+        _snapshot(cold, e2e_instance, "cold-entry-failure", trace)
         raise
     finally:
         for route, _ in pending:
