@@ -6316,6 +6316,37 @@ def test_self_built_httpx_client_bakes_call_scoped_proxy_and_ignores_ambient_env
     outside.close()
 
 
+def test_self_built_httpx_client_pins_keepalive_expiry_above_default(monkeypatch):
+    """Self-built clients must keep pooled connections alive across tool gaps.
+
+    Regression guard for the per-call DNS+TLS overhead: httpx's default
+    ``keepalive_expiry`` (5s) is shorter than a typical intra-turn gap (tool
+    execution), so pooled connections were recycled between two provider
+    calls. The factory must pin an explicit ``Limits`` with a long expiry;
+    connection-count knobs stay at httpx defaults.
+    """
+    import httpx
+
+    from core.llm.client import _LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS, _llm_new_httpx_client
+
+    captured: dict = {}
+    real_client = httpx.Client
+
+    class RecordingClient(real_client):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(httpx, "Client", RecordingClient)
+
+    client = _llm_new_httpx_client(timeout=5, verify=True)
+    pool = client._transport._pool
+    # httpcore 1.x 把 Limits 拆到 pool 属性；keepalive_expiry 是本修复的语义点。
+    assert pool._keepalive_expiry == _LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS == 300.0
+    assert pool._max_keepalive_connections == 20
+    client.close()
+
+
 def test_duplicate_tool_call_error_classified_as_tool_protocol_error():
     error = Exception("invalid params, duplicate tool_call id: call_function_8euvktt1r7y4_1")
 

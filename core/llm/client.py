@@ -2192,6 +2192,67 @@ def _named_unsupported_params_present_in_payload(
     return tuple(name for name in named if name in payload)
 
 
+# ---------------------------------------------------------------------------
+# C 的 per-route「不支持参数」负缓存（2026-10-06 固定开销治理）：
+# 聚合池节点拒 reasoning_effort 时，原本每通调用都要重付一次 400 探测 +
+# 剥参重发（秒级）。route 的这条能力事实在成功剥参重发后是稳定的，因此按
+# route_key（与 _llm_route_concurrency_key 同键，先例
+# _LLM_ROUTE_CONCURRENCY_GATES）记住已确认被拒的顶层参数，下次发送前预剥。
+# 写入只在剥参重发成功之后（invoke 拿到响应 / stream 走到成功收尾，挂在既有
+# _record_protocol_degrade_recovery 信号位），瞬时 400 与中途失败的流不会污染
+# 能力事实。上限 _LLM_ROUTE_UNSUPPORTED_PARAMS_MAX_ENTRIES 条，超出丢最旧。
+# ---------------------------------------------------------------------------
+_LLM_ROUTE_UNSUPPORTED_PARAMS_MAX_ENTRIES = 512
+_LLM_ROUTE_UNSUPPORTED_PARAMS_LOCK = threading.Lock()
+_LLM_ROUTE_UNSUPPORTED_PARAMS: Dict[str, frozenset] = {}
+
+
+def _reset_llm_route_unsupported_params_cache() -> None:
+    """进程级复位通道（测试/热切换用）：清空 per-route 不支持参数负缓存。"""
+    with _LLM_ROUTE_UNSUPPORTED_PARAMS_LOCK:
+        _LLM_ROUTE_UNSUPPORTED_PARAMS.clear()
+
+
+def _cached_route_unsupported_params(route_key: str) -> Tuple[str, ...]:
+    """读取某 route 已确认被拒的参数名（排序返回，保证事件字段稳定）。"""
+    with _LLM_ROUTE_UNSUPPORTED_PARAMS_LOCK:
+        cached = _LLM_ROUTE_UNSUPPORTED_PARAMS.get(route_key)
+    return tuple(sorted(cached)) if cached else ()
+
+
+def _remember_route_unsupported_params(route_key: str, params: Tuple[str, ...]) -> None:
+    """把剥参重发成功所验证过的被拒参数并入 route 缓存（FIFO 上限淘汰）。"""
+    known = frozenset(name for name in params if str(name or "").strip())
+    if not known:
+        return
+    with _LLM_ROUTE_UNSUPPORTED_PARAMS_LOCK:
+        merged = _LLM_ROUTE_UNSUPPORTED_PARAMS.get(route_key, frozenset()) | known
+        # 重新插入刷新新旧序：更新过的 route 视为最新，淘汰从最旧开始。
+        _LLM_ROUTE_UNSUPPORTED_PARAMS.pop(route_key, None)
+        _LLM_ROUTE_UNSUPPORTED_PARAMS[route_key] = merged
+        while len(_LLM_ROUTE_UNSUPPORTED_PARAMS) > _LLM_ROUTE_UNSUPPORTED_PARAMS_MAX_ENTRIES:
+            oldest = next(iter(_LLM_ROUTE_UNSUPPORTED_PARAMS))
+            _LLM_ROUTE_UNSUPPORTED_PARAMS.pop(oldest, None)
+
+
+def _pre_strip_cached_unsupported_params(
+    payload: Dict[str, Any], route_key: str
+) -> Tuple[Dict[str, Any], Tuple[str, ...]]:
+    """负缓存命中即在发送前预剥被点名的顶层参数。
+
+    返回 (payload, 实际剥除的参数名)；缓存未命中或被缓存的参数不在当前
+    payload 顶层时原样返回，不产生任何副作用。预剥发生在 reasoning_effort
+    等参数注入（payload 组装）之后、首次发送之前，语义与探测降级一致。
+    """
+    cached = _cached_route_unsupported_params(route_key)
+    if not cached:
+        return payload, ()
+    present = tuple(name for name in cached if name in payload)
+    if not present:
+        return payload, ()
+    return _strip_unsupported_params(payload, present), present
+
+
 def _llm_cancelled_error(reason: str) -> LLMError:
     return LLMError(
         "cancelled",
@@ -2280,6 +2341,13 @@ def _llm_provider_proxy_env(config: Any, base_url: Any) -> Iterator[None]:
                     _PROXY_ENV_CONDITION.notify_all()
 
 
+#: _llm_new_httpx_client 的连接保活上限（秒）。httpx 默认 keepalive_expiry=5s
+#: 会在回合内工具执行的间隙回收连接，导致每通重付 DNS+TLS；客户端按
+#: (api_key, base_url, timeout, ssl) 缓存且随 LLMClient 长持，300s 足够覆盖
+#: 回合内复用又有界。语义见 _llm_new_httpx_client docstring。
+_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS = 300.0
+
+
 def _llm_new_httpx_client(
     *,
     timeout: Any,
@@ -2296,6 +2364,14 @@ def _llm_new_httpx_client(
     from the call-scoped ``_LLM_EFFECTIVE_PROXY`` ContextVar set by the
     lease scope; outside a lease the client is a direct connection, which
     matches the lease semantics (it pops ambient proxy env while active).
+
+    ``keepalive_expiry`` is pinned well above httpx's 5s default: these
+    clients are cached per (api_key, base_url, timeout, ssl) and long-held
+    by each LLMClient, but an intra-turn gap (tool execution between two
+    provider calls) routinely exceeds 5s, after which the pooled connection
+    was recycled and every call re-paid DNS+TLS. 300s comfortably covers
+    turn-internal reuse while staying bounded. Connection-count knobs are
+    pinned to httpx's own defaults so only the expiry semantics change.
     """
 
     import httpx
@@ -2306,6 +2382,11 @@ def _llm_new_httpx_client(
         follow_redirects=follow_redirects,
         trust_env=False,
         proxy=_LLM_EFFECTIVE_PROXY.get(),
+        limits=httpx.Limits(
+            max_connections=100,
+            max_keepalive_connections=20,
+            keepalive_expiry=_LLM_HTTPX_KEEPALIVE_EXPIRY_SECONDS,
+        ),
     )
 
 
@@ -4801,6 +4882,36 @@ class LLMClient:
             return False
         return "litellm." in str(llm_error or "").lower()
 
+    def _record_route_unsupported_params_cache_hit(
+        self, phase: str, pre_stripped: Tuple[str, ...]
+    ) -> None:
+        """负缓存命中、发送前预剥的轻量观测（2026-10-06 固定开销治理）。
+
+        只标记「本通免掉了 400 探测」，不改变既有
+        ``llm.*.unsupported_params_degraded`` / ``protocol_degrade_recovered``
+        事件语义：本轮没有发生降级，成功事件里的 stripped 标注保持原样。
+        """
+        _record_llm_scene_event(
+            phase,
+            f"llm.{phase}.unsupported_params_cache_hit",
+            message=(
+                "route previously rejected these parameters; "
+                "pre-stripping them before send (no probe needed)."
+            ),
+            level="info",
+            outcome="succeeded",
+            fields={
+                "role": self.role,
+                "profileId": self.profile_id,
+                "provider": self.provider.kind,
+                "model": self.profile.model,
+                "serviceClass": self._route_service_class(),
+                "cacheHit": True,
+                "strippedParams": list(pre_stripped),
+            },
+            lifecycle=False,
+        )
+
     def _record_protocol_degrade_recovery(
         self,
         *,
@@ -4873,6 +4984,11 @@ class LLMClient:
         param_degrade_rounds = 0
         stripped_params_log: List[str] = []
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
+        # per-route 负缓存命中即预剥：注入后、首发前剥掉已确认被拒的参数，
+        # 免去每通一次的 400 探测 + 重发固定开销（2026-10-06）。
+        payload, pre_stripped_params = _pre_strip_cached_unsupported_params(payload, route_key)
+        if pre_stripped_params:
+            self._record_route_unsupported_params_cache_hit(phase, pre_stripped_params)
         for attempt in range(1, max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET + 1):
             attempt_scope = self._attempt_invocation_scope(invocation_scope, attempt)
             attempt_started_at_ms = int(time.time() * 1000)
@@ -4909,6 +5025,12 @@ class LLMClient:
                         _raise_if_llm_cancelled()
                         _LLM_BACKEND_ATTEMPT_CONTEXT.set((attempt, max(0, attempt - 1)))
                         if param_degrade_rounds or protocol_retries_used:
+                            if stripped_params_log:
+                                # 剥参重发已拿到响应：这条「route 拒绝这些参数」
+                                # 的事实成立，写入 per-route 负缓存（2026-10-06）。
+                                _remember_route_unsupported_params(
+                                    route_key, tuple(stripped_params_log)
+                                )
                             self._record_protocol_degrade_recovery(
                                 phase=phase,
                                 stripped_params=sorted(set(stripped_params_log)),
@@ -5742,6 +5864,10 @@ class LLMClient:
         param_degrade_rounds = 0
         stripped_params_log: List[str] = []
         route_key = _llm_route_concurrency_key(self.provider, self.profile, profile_id=self.profile_id)
+        # per-route 负缓存命中即预剥（与 invoke 路径同语义）：注入后、首发前。
+        payload, pre_stripped_params = _pre_strip_cached_unsupported_params(payload, route_key)
+        if pre_stripped_params:
+            self._record_route_unsupported_params_cache_hit("stream", pre_stripped_params)
         for attempt in range(1, max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET + 1):
             attempt_scope = self._attempt_invocation_scope(invocation_scope, attempt)
             try:
@@ -6097,6 +6223,11 @@ class LLMClient:
                     lifecycle=False,
                 )
                 if param_degrade_rounds or protocol_retries_used:
+                    if stripped_params_log:
+                        # 流已成功收尾：剥参重发的事实成立，写入 per-route 负缓存。
+                        _remember_route_unsupported_params(
+                            route_key, tuple(stripped_params_log)
+                        )
                     self._record_protocol_degrade_recovery(
                         phase="stream",
                         stripped_params=sorted(set(stripped_params_log)),
