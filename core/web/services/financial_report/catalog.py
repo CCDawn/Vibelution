@@ -8,6 +8,7 @@ from datetime import date as calendar_date
 
 from core.chat.turn_journal import EVENT_TURN_COMPLETED, EVENT_USER_MESSAGE
 from core.chat.conversation_store.repository import parse_directory_cursor_entry
+from core.web.services import financial_market_service as market
 from core.web.services import financial_report_service as reports
 
 MAX_SESSIONS_PER_PAGE = 20
@@ -36,13 +37,29 @@ def _subject(request: str, fallback: str) -> tuple[str, str | None, str]:
     header = request[:500].split("\n", 1)[0]
     stock = re.search(r"(?:请研究\s*|综合股票\s+)(.{1,90}?)(?:，?\s*分析日期|的多分析师研究|研究日期)", header)
     title = stock.group(1).strip(" ，。") if stock else fallback
-    market_code = "HK" if re.search(r"港交所|港股|香港|\bhk\d{5}\b", header, re.I) else "US" if re.search(r"美股|NASDAQ|NYSE|纳斯达克|纽交所|\bus[A-Za-z]", header, re.I) else "CN" if re.search(r"上交所|深交所|北交所|\b[036489]\d{5}\b", header) else ""
+    market_code = "HK" if re.search(r"港交所|港股|香港", header, re.I) else "US" if re.search(r"美股|NASDAQ|NYSE|纳斯达克|纽交所", header, re.I) else "CN" if re.search(r"上交所|深交所|北交所", header) else _market_from_canonical_symbol(header)
     # Only extract a code adjacent to a stock marker, not dates or Markdown.
     code = re.search(r"[（(]\s*((?:[036489]\d{5}|\d{5}|[A-Z][A-Z0-9.-]{0,9}))\s*[,，）)]", header)
     if not code:
         code = re.search(r"\b(?:sh|sz|bj)([036489]\d{5})\b|\bhk(\d{5})\b|\bus([A-Z][A-Z0-9.-]{0,9})\b", header, re.I)
     ticker = next((value for value in code.groups() if value), None) if code else None
     return title[:120] or "研究报告", ticker, market_code
+
+
+def _market_from_canonical_symbol(header: str) -> str:
+    """Resolve only explicitly prefixed symbols; bare numeric tickers are ambiguous."""
+    symbol = re.search(
+        r"(?<![A-Za-z0-9_])((?:sh|sz|bj)\d{6}|hk\d{1,5}|us[A-Z][A-Z0-9.\-]{0,9})(?![A-Za-z0-9_])",
+        header,
+        re.I,
+    )
+    if not symbol:
+        return ""
+    try:
+        normalized = market.normalize_symbol(symbol.group(1))
+        return market.market_code_for_symbol(normalized)
+    except (market.MarketDataError, TypeError, ValueError):
+        return ""
 
 
 def _session_rows(agent_id: str, row: dict) -> list[dict]:

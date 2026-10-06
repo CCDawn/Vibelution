@@ -94,6 +94,16 @@ def test_subject_does_not_extract_date_or_prompt_heading_as_stock_code():
     assert catalog._subject("请研究 腾讯（00700，港交所），分析日期 2026-10-06。", "研究")[1:] == ("00700", "HK")
 
 
+@pytest.mark.parametrize("symbol,ticker,market_code", [("sh600519", "600519", "CN"), ("sz000001", "000001", "CN"), ("hk00700", "00700", "HK"), ("usNVDA", "NVDA", "US")])
+def test_subject_resolves_prefixed_market_identity(symbol, ticker, market_code):
+    request = f"你是主助手的股票研究汇总角色。请综合股票 {symbol} 的多分析师研究。研究日期：2026-10-06。"
+    assert catalog._subject(request, "研究")[1:] == (ticker, market_code)
+
+
+def test_subject_does_not_guess_market_from_bare_ticker():
+    assert catalog._subject("请研究 贵州茅台（600519），分析日期 2026-10-06。", "研究")[1:] == ("600519", "")
+
+
 def test_batch_zip_contains_distinct_exact_native_turns_and_rejects_duplicates(env):
     targets = [{"sessionId": "session-new", "turnId": "turn-hk"}, {"sessionId": "session-new", "turnId": "turn-us"}]
     result = reports.export_financial_reports("agent-1", targets=targets, format="markdown")
