@@ -92,8 +92,8 @@ def test_cold_direct_session_entry_has_correct_tab_and_draft(page, e2e_instance,
         if route.request.method == "POST" and any(path.endswith(ending) for ending in ("/messages", "/messages/edit-resubmit", "/guidance")):
             submissions.append(path)
             route.abort()
-        elif slow_catalog and route.request.method == "GET" and path in {"/api/sessions/query", "/api/agents"}:
-            pending.append((route, route.fetch()))
+        elif slow_catalog and route.request.method == "GET" and path in {"/api/sessions/bootstrap", "/api/sessions/query", "/api/agents"}:
+            pending.append(route)
         else:
             route.continue_()
 
@@ -106,10 +106,10 @@ def test_cold_direct_session_entry_has_correct_tab_and_draft(page, e2e_instance,
         if slow_catalog:
             assert pending, "The catalog delay must actually intercept requests"
         composer.press_sequentially(draft, delay=2)
-        for route, response in pending:
-            route.fulfill(response=response)
-        pending.clear()
         slow_catalog = False
+        for route in pending:
+            route.fulfill(response=_fetch_route(route))
+        pending.clear()
         expect(composer).to_have_value(draft)
         expect(cold.get_by_role("tab", selected=True)).to_contain_text(title)
         cold.reload(wait_until="domcontentloaded")
@@ -122,7 +122,7 @@ def test_cold_direct_session_entry_has_correct_tab_and_draft(page, e2e_instance,
         _snapshot(cold, e2e_instance, "cold-entry-failure", trace)
         raise
     finally:
-        for route, _ in pending:
+        for route in pending:
             route.abort()
         context.close()
 
@@ -132,6 +132,15 @@ def _create_settled(request):
         return False
     payload = request.post_data_json or {}
     return payload.get("eventCode") == "browser.user_action.session_create_succeeded"
+
+
+def _fetch_route(route):
+    try:
+        return route.fetch()
+    except Exception:
+        # Playwright transport errors include request headers. Never persist
+        # the control token when the injected delay or context is interrupted.
+        raise AssertionError("Delayed request could not be fetched") from None
 
 
 @pytest.mark.parametrize("leave_before_ack", [False, True], ids=["stay-on-temp", "switch-agent-before-ack"])
@@ -146,9 +155,7 @@ def test_delayed_create_preserves_typed_draft_and_current_route(page, e2e_instan
 
     def hold_create(route):
         if route.request.method == "POST":
-            response = route.fetch()
-            assert response.ok
-            pending.append((route, response, response.json()))
+            pending.append(route)
         else:
             route.continue_()
 
@@ -165,7 +172,10 @@ def test_delayed_create_preserves_typed_draft_and_current_route(page, e2e_instan
         if leave_before_ack:
             _switch(page, title_b, b).press_sequentially(other_draft, delay=2)
         assert len(pending) == 1
-        route, response, body = pending.pop()
+        route = pending.pop()
+        response = _fetch_route(route)
+        assert response.ok
+        body = response.json()
         real_id = body["id"]
         with page.expect_request(_create_settled):
             route.fulfill(response=response)
@@ -191,6 +201,6 @@ def test_delayed_create_preserves_typed_draft_and_current_route(page, e2e_instan
         _snapshot(page, e2e_instance, "create-ack-failure")
         raise
     finally:
-        for route, _, _ in pending:
+        for route in pending:
             route.abort()
         page.unroute("**/api/sessions", hold_create)
