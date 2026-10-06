@@ -31,6 +31,44 @@ from core.prompt_manager.types import (
 from core.prompt_manager.section_cache import SystemPromptCache
 
 
+# 动态章节短 TTL 注册表 — 只收录"世界状态描述"类只读章节。
+#
+# 收录原则（陈旧安全性分级，见 turn-prepare-cost 任务定案）：
+# - 章节内容是对外部世界状态的描述性快照，模型不会依据它做唯一事实裁决；
+# - 数据源本身已是缓存/低频更新（地图缓存文件、scene 包目录、平台信息），
+#   短 TTL 只把"每轮强制重读"放宽为"窗口内复用"；
+# - 会话/任务状态类章节（RUNTIME_GOAL、TASK_CHECKLIST、DELEGATION_STATE、
+#   SPEC_DIGEST、MEMORY、CONFIG_AWARENESS、GIT_MEMORY）不收录：它们的
+#   compute 是内存态读取，TTL 只会引入陈旧而不省 IO。
+# 固定 TTL 用 60s；ENV_INFO 走 5 分钟取整网格（对齐其时间戳桶），窗口恰好在
+# 下一个取整边界到期，语义与每轮现算完全一致。
+_DYNAMIC_SECTION_TTL_SECONDS: Dict[str, float] = {
+    "CODEBASE_MAP": 60.0,
+    "RUNTIME_LOG_INDEX": 60.0,
+}
+_DYNAMIC_SECTION_BUCKET_SECONDS: Dict[str, float] = {
+    "ENV_INFO": 300.0,
+}
+
+
+def dynamic_section_ttl_seconds(section_name: str) -> Optional[float]:
+    """返回该动态章节的缓存 TTL 秒数；None 表示每轮照常重算。
+
+    网格型（ENV_INFO）：TTL 设置为距下一个取整边界的剩余秒数——时间戳
+    本身按 5 分钟向下取整，桶内文本字节稳定，边界处精确换新。
+    """
+
+    bucket = _DYNAMIC_SECTION_BUCKET_SECONDS.get(section_name)
+    if bucket:
+        now_wall = time.time()
+        next_boundary = (int(now_wall // bucket) + 1) * bucket
+        return max(0.05, next_boundary - now_wall)
+    fixed = _DYNAMIC_SECTION_TTL_SECONDS.get(section_name)
+    if fixed:
+        return float(fixed)
+    return None
+
+
 def get_system_prompt(
     sections: List[SystemPromptSection],
     cache: SystemPromptCache,
@@ -60,8 +98,18 @@ def get_system_prompt(
         started = time.perf_counter()
         source = "computed"
         if section.cache_break:
-            # 动态章节：每轮重算，不读缓存
-            content = section.compute()
+            # 动态章节：默认每轮重算；注册了 TTL 的描述性章节在窗口内复用。
+            ttl_seconds = dynamic_section_ttl_seconds(section.name)
+            if ttl_seconds is not None:
+                ttl_hit, cached_content = cache.get_with_ttl(section.name)
+                if ttl_hit:
+                    content = cached_content
+                    source = "ttl_cache"
+                else:
+                    content = section.compute()
+                    cache.set_with_ttl(section.name, content, ttl_seconds)
+            else:
+                content = section.compute()
         else:
             # 静态章节：优先从缓存读取
             if cache.has(section.name):
@@ -313,5 +361,5 @@ def _segment_from_render_result(result: SectionRenderResult) -> PromptSegment:
         capability_requirements=result.capability_requirements,
         decision=decision,
         decision_reason="rendered" if result.content else "empty",
-        cache_hit=result.source == "cache",
+        cache_hit=result.source in {"cache", "ttl_cache"},
     )

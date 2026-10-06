@@ -3,11 +3,60 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
 from .models import PROVIDER_API_KEY_ENV_ALIASES, get_provider_api_key_env
 from .public_config import load_public_config, read_persisted_user_env_var
+
+
+# Every chat turn re-syncs configured LLM key env vars. The config side is
+# already signature-cached in ``public_config.load_public_config``; the
+# remaining per-turn cost is the persisted-env reader (Windows registry lookups
+# for each configured name that is absent from ``os.environ``). Registry values
+# change rarely, so successful reads are memoized for a short TTL. Cache
+# entries are keyed by the reader object identity: only the real default
+# registry reader shares entries (production path), while injected/monkeypatched
+# readers never reuse another reader's values. Staleness window: an external
+# registry edit for a name that is absent from the process env may take up to
+# the TTL to be observed; names already present in ``os.environ`` short-circuit
+# before any read and are unaffected.
+_PERSISTED_READ_CACHE_LOCK = threading.Lock()
+_PERSISTED_READ_CACHE: dict[str, tuple[float, str, Callable[[str], str]]] = {}
+DEFAULT_PERSISTED_READ_TTL_SECONDS = 60.0
+
+
+def reset_llm_key_env_read_cache() -> None:
+    """Clear the persisted-env read cache (test and diagnostic hook)."""
+
+    with _PERSISTED_READ_CACHE_LOCK:
+        _PERSISTED_READ_CACHE.clear()
+
+
+def _read_persisted_with_cache(
+    env_name: str,
+    reader: Callable[[str], str],
+    ttl_seconds: float,
+) -> str:
+    if ttl_seconds <= 0:
+        return reader(env_name)
+    now = time.monotonic()
+    with _PERSISTED_READ_CACHE_LOCK:
+        entry = _PERSISTED_READ_CACHE.get(env_name)
+        if (
+            entry is not None
+            and entry[2] is reader
+            and now - entry[0] < ttl_seconds
+        ):
+            return entry[1]
+    value = str(reader(env_name) or "")
+    with _PERSISTED_READ_CACHE_LOCK:
+        _PERSISTED_READ_CACHE[env_name] = (now, value, reader)
+        if len(_PERSISTED_READ_CACHE) > 64:
+            _PERSISTED_READ_CACHE.pop(next(iter(_PERSISTED_READ_CACHE)))
+    return value
 
 
 def _add_provider_key_env_names(env_names: set[str], provider: dict[str, Any]) -> None:
@@ -57,8 +106,15 @@ def sync_llm_key_env_from_persisted_user_env(
     context: str,
     public_config: dict[str, Any] | None = None,
     persisted_reader: Callable[[str], str] | None = None,
+    persisted_read_ttl_seconds: float | None = None,
 ) -> dict[str, Any]:
-    """Refresh this process from user-level LLM key env vars without exposing values."""
+    """Refresh this process from user-level LLM key env vars without exposing values.
+
+    ``persisted_read_ttl_seconds`` controls the memoization of successful
+    persisted-env reads (default: 60s, and only for the module-default
+    registry reader; injected readers are never cached unless a positive TTL
+    is passed explicitly). Pass ``0`` to disable caching entirely.
+    """
 
     try:
         resolved_public_config = public_config if isinstance(public_config, dict) else load_public_config()
@@ -75,11 +131,15 @@ def sync_llm_key_env_from_persisted_user_env(
     already_present = 0
     missing: list[str] = []
     read_persisted = persisted_reader if callable(persisted_reader) else read_persisted_user_env_var
+    if persisted_read_ttl_seconds is None:
+        read_ttl = DEFAULT_PERSISTED_READ_TTL_SECONDS if read_persisted is read_persisted_user_env_var else 0.0
+    else:
+        read_ttl = float(persisted_read_ttl_seconds)
     for env_name in env_names:
         if os.environ.get(env_name):
             already_present += 1
             continue
-        persisted_value = read_persisted(env_name)
+        persisted_value = _read_persisted_with_cache(env_name, read_persisted, read_ttl)
         if persisted_value:
             os.environ[env_name] = persisted_value
             synced.append(env_name)
@@ -101,5 +161,6 @@ def sync_llm_key_env_from_persisted_user_env(
 __all__ = [
     "configured_llm_key_env_names",
     "read_persisted_user_env_var",
+    "reset_llm_key_env_read_cache",
     "sync_llm_key_env_from_persisted_user_env",
 ]
