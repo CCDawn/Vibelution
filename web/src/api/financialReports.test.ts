@@ -20,25 +20,33 @@ const response = {
 };
 
 function stubPrintIframe() {
-  const url = "blob:http://localhost/stock-report";
+  const printHtmlUrl = "blob:http://localhost/stock-report-html";
   const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
   const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
-  const createObjectUrl = vi.fn(() => url);
+  const createObjectUrl = vi.fn(() => printHtmlUrl);
   const revokeObjectUrl = vi.fn();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
 
   const print = vi.fn();
   const focus = vi.fn();
+  const downloadClick = vi.fn();
+  const frameDocument = {
+    URL: "about:blank",
+    readyState: "complete",
+    documentElement: { tagName: "HTML" },
+    body: {},
+  };
   const frameWindow = Object.assign(new EventTarget(), {
     location: { href: "about:blank" },
-    document: { URL: "about:blank", readyState: "complete" },
+    document: frameDocument,
     print,
     focus,
   });
   const createElement = document.createElement.bind(document);
   const append = document.body.append.bind(document.body);
   let frame: HTMLIFrameElement | null = null;
+  let downloadLink: HTMLAnchorElement | null = null;
   const removeFrame = vi.fn();
   const appendFrame = vi.spyOn(document.body, "append").mockImplementation((...nodes) => {
     if (frame && nodes.some((node) => node === frame)) return;
@@ -48,10 +56,11 @@ function stubPrintIframe() {
     const element = createElement(tagName);
     if (tagName.toLowerCase() === "iframe") {
       frame = element as HTMLIFrameElement;
-      let src = "";
-      Object.defineProperty(frame, "src", { configurable: true, get: () => src, set: (value: string) => { src = String(value); } });
       Object.defineProperty(frame, "contentWindow", { configurable: true, value: frameWindow });
       vi.spyOn(frame, "remove").mockImplementation(removeFrame);
+    } else if (tagName.toLowerCase() === "a") {
+      downloadLink = element as HTMLAnchorElement;
+      Object.defineProperty(downloadLink, "click", { configurable: true, value: downloadClick });
     }
     return element;
   }) as typeof document.createElement);
@@ -63,18 +72,20 @@ function stubPrintIframe() {
     else Reflect.deleteProperty(URL, "revokeObjectURL");
   };
   return {
-    url,
     frameWindow,
     print,
     focus,
+    printHtmlUrl,
     createObjectUrl,
     revokeObjectUrl,
+    downloadClick,
+    get downloadLink() { return downloadLink; },
     appendFrame,
     removeFrame,
     get frame() { return frame; },
-    markLoaded() {
+    markLoaded(url = "about:srcdoc") {
       frameWindow.location.href = url;
-      frameWindow.document.URL = url;
+      frameDocument.URL = url;
     },
   };
 }
@@ -119,7 +130,9 @@ describe("financial report export transport", () => {
 
     expect(iframe.getAttribute("sandbox")).toBe("allow-same-origin allow-modals");
     expect(iframe.getAttribute("sandbox")).not.toContain("allow-scripts");
-    expect(iframe.src).toBe(printFrame.url);
+    expect(iframe.srcdoc).toBe(printResponse.content);
+    expect(iframe.getAttribute("src")).toBeNull();
+    expect(printFrame.createObjectUrl).not.toHaveBeenCalled();
     iframe.dispatchEvent(new Event("load"));
     expect(printFrame.print).not.toHaveBeenCalled();
 
@@ -133,9 +146,32 @@ describe("financial report export transport", () => {
     printFrame.frameWindow.dispatchEvent(new Event("afterprint"));
     await completed;
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
-    expect(printFrame.createObjectUrl).toHaveBeenCalledOnce();
-    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.url);
     expect(popup).not.toHaveBeenCalled();
+  });
+
+  it("does not print a different document that fires a load event", async () => {
+    seedControlTokenForTests("test-token");
+    const printResponse = {
+      ...response, format: "pdf" as const, fileName: "stock-research-2026-10-06.html",
+      mediaType: "text/html; charset=utf-8", content: "<!doctype html><html><body>research</body></html>",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(printResponse), { status: 200 })));
+    const printFrame = stubPrintIframe();
+    const controller = new AbortController();
+    const operation = printFinancialReportExport(
+      { assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" },
+      { signal: controller.signal },
+    );
+    const iframe = await waitForPrintFrame(printFrame);
+
+    printFrame.markLoaded("https://wrong.example/report.html");
+    iframe.dispatchEvent(new Event("load"));
+    expect(printFrame.print).not.toHaveBeenCalled();
+
+    const rejected = expect(operation).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await rejected;
+    expect(printFrame.removeFrame).toHaveBeenCalledOnce();
   });
 
   it("keeps the response-processing size limit explicit", () => {
@@ -149,7 +185,7 @@ describe("financial report export transport", () => {
     await expect(downloadFinancialReportExport({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "markdown" })).rejects.toThrow("超过大小限制");
   });
 
-  it("cleans up the iframe and blob URL when the frame reports a load error", async () => {
+  it("offers a standalone HTML download when the frame reports a load error", async () => {
     seedControlTokenForTests("test-token");
     const printResponse = {
       ...response, format: "pdf" as const, fileName: "stock-research-2026-10-06.html",
@@ -159,14 +195,15 @@ describe("financial report export transport", () => {
     const printFrame = stubPrintIframe();
     const operation = printFinancialReportExport({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" });
     const iframe = await waitForPrintFrame(printFrame);
-    const rejected = expect(operation).rejects.toThrow("打印报告加载失败");
+    const rejected = expect(operation).rejects.toThrow("已尝试下载单份报告 HTML");
     iframe.dispatchEvent(new Event("error"));
     await rejected;
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
-    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.url);
+    expect(printFrame.downloadClick).toHaveBeenCalledOnce();
+    expect(printFrame.downloadLink?.download).toBe(printResponse.fileName);
   });
 
-  it("cleans up the iframe and blob URL when the print is aborted", async () => {
+  it("cleans up the iframe when the print is aborted", async () => {
     seedControlTokenForTests("test-token");
     const printResponse = {
       ...response, format: "pdf" as const, fileName: "stock-research-2026-10-06.html",
@@ -181,10 +218,9 @@ describe("financial report export transport", () => {
     controller.abort();
     await rejected;
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
-    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.url);
   });
 
-  it("cleans up the iframe and blob URL when the owning document unloads", async () => {
+  it("cleans up the iframe when the owning document unloads", async () => {
     seedControlTokenForTests("test-token");
     const printResponse = {
       ...response, format: "pdf" as const, fileName: "stock-research-2026-10-06.html",
@@ -198,10 +234,9 @@ describe("financial report export transport", () => {
     window.dispatchEvent(new Event("beforeunload"));
     await rejected;
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
-    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.url);
   });
 
-  it("rejects a blank-only load after the load timeout and reclaims its URL", async () => {
+  it("downloads standalone HTML when srcdoc does not load before the timeout", async () => {
     vi.useFakeTimers();
     seedControlTokenForTests("test-token");
     const printResponse = {
@@ -214,14 +249,19 @@ describe("financial report export transport", () => {
     const iframe = await waitForPrintFrame(printFrame);
     iframe.dispatchEvent(new Event("load"));
     expect(printFrame.print).not.toHaveBeenCalled();
-    const rejected = expect(operation).rejects.toThrow("打印报告加载超时");
+    const rejected = expect(operation).rejects.toThrow("打印页加载超时，已尝试下载单份报告 HTML");
     await vi.advanceTimersByTimeAsync(15_000);
     await rejected;
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
-    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.url);
+    expect(printFrame.downloadClick).toHaveBeenCalledOnce();
+    expect(printFrame.downloadLink?.download).toBe(printResponse.fileName);
+    expect(printFrame.createObjectUrl).toHaveBeenCalledOnce();
+    expect(printFrame.revokeObjectUrl).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.printHtmlUrl);
   });
 
-  it("reclaims the iframe and URL if afterprint never arrives", async () => {
+  it("removes the iframe if afterprint never arrives", async () => {
     vi.useFakeTimers();
     seedControlTokenForTests("test-token");
     const printResponse = {
@@ -239,6 +279,5 @@ describe("financial report export transport", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     await rejected;
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
-    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.url);
   });
 });

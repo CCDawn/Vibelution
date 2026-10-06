@@ -424,11 +424,13 @@ def test_synthesis_busy_retry_exhaustion_blocks_after_three_retries(tmp_path):
     assert state["financialTeamSynthesisBusyRetryCount"] == 3
 
 
-def test_blocked_synthesis_can_be_recovered_after_live_validation(tmp_path, monkeypatch):
+def test_expired_blocked_synthesis_recovery_renews_coordination_deadline(
+    tmp_path, monkeypatch
+):
     native = FakeNativeFinancialService()
     _accept_all_analyst_finals(native)
     native.run["synthesis"]["submissionState"] = "reserved"
-    clock = [10.0]
+    clock = [time.time()]
     validation_calls: list[tuple[str, str, bool]] = []
 
     def validate(assistant_id: str, run_id: str, *, allow_waiting: bool = False) -> None:
@@ -452,11 +454,17 @@ def test_blocked_synthesis_can_be_recovered_after_live_validation(tmp_path, monk
     coordinator, store = _coordinator(
         tmp_path,
         native,
+        run_timeout_seconds=60,
         epoch_time=lambda: clock[0],
         synthesis_recovery_validator=validate,
         synthesis_recovery_starter=start_recovery,
     )
     assert coordinator.register_after_primary_acceptance("assistant-1", "run-1")
+    original_created_at = "2000-01-01T00:00:00+00:00"
+    store.update_task(
+        coordination_task_id("run-1"),
+        lambda state: {**state, "createdAt": original_created_at},
+    )
     native.run["coordinationStatus"] = "blocked"
     store.mark_task_terminal(coordination_task_id("run-1"), status="blocked")
 
@@ -470,6 +478,8 @@ def test_blocked_synthesis_can_be_recovered_after_live_validation(tmp_path, monk
     assert recovered["coordinationStatus"] == "waiting"
     assert state["status"] == "running"
     assert state["financialTeamSynthesisRecoveryPending"] is False
+    assert state["createdAt"] == original_created_at
+    assert state["financialTeamSynthesisRecoveryStartedAt"]
     assert validation_calls[-1] == ("assistant-1", "run-1", False)
 
     coordinator.process_pending_once()

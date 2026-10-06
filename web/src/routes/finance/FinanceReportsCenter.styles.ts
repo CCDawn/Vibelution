@@ -4,6 +4,7 @@ export default {
   field: "grid min-w-0 flex-1 gap-1 text-xs text-vui-fg-tertiary",
   date: "grid min-w-0 gap-1 text-xs text-vui-fg-tertiary",
   actions: "flex min-w-0 flex-wrap items-center gap-2",
+  actionCell: "whitespace-normal",
   table: "min-w-0 max-w-full overflow-x-auto",
   titleButton: "!h-auto !min-h-8 !max-w-full !justify-start !px-1 text-left",
   identity: "grid min-w-0 gap-1 text-left [&>strong]:truncate [&>small]:text-vui-fg-tertiary",

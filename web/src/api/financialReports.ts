@@ -102,6 +102,37 @@ function safeFileName(response: FinancialReportExportResponse) {
   return response.fileName.trim() || fallback;
 }
 
+function downloadStandalonePrintHtml(response: FinancialReportExportResponse, reason: "unsupported" | "timeout" | "load-error"): Error {
+  let message = "嵌入式打印不可用，已尝试下载单份报告 HTML；下载后可用浏览器打开并打印。";
+  if (reason === "unsupported") {
+    message = "当前窗口不支持嵌入式打印，已尝试下载单份报告 HTML；下载后可用浏览器打开并打印。";
+  } else if (reason === "timeout") {
+    message = "打印页加载超时，已尝试下载单份报告 HTML；下载后可用浏览器打开并打印。";
+  }
+
+  try {
+    const url = URL.createObjectURL(new Blob([response.content], { type: "text/html;charset=utf-8" }));
+    try {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = safeFileName(response);
+      link.rel = "noopener";
+      link.hidden = true;
+      try {
+        document.body.append(link);
+        link.click();
+      } finally {
+        link.remove();
+      }
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    }
+  } catch {
+    message = "此窗口无法打开打印页或下载报告，请用桌面浏览器打开报告中心后重试。";
+  }
+  return new Error(message);
+}
+
 export async function downloadFinancialReportExport(target: FinancialReportExportTarget, options?: { signal?: AbortSignal }) {
   if (target.format === "pdf") throw new Error("打印版报告必须通过浏览器打印打开");
   const response = await exportFinancialReport(target, options);
@@ -136,7 +167,6 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
     throw new Error("当前环境无法打开打印文档");
   }
 
-  const url = URL.createObjectURL(new Blob([response.content], { type: "text/html;charset=utf-8" }));
   await new Promise<void>((resolve, reject) => {
     let frame: HTMLIFrameElement | null = null;
     let frameWindow: Window | null = null;
@@ -154,7 +184,6 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
       frame?.removeEventListener("error", onLoadError);
       frameWindow?.removeEventListener("afterprint", onAfterPrint);
       frame?.remove();
-      URL.revokeObjectURL(url);
     };
     const finish = (error?: Error) => {
       if (settled) return;
@@ -170,18 +199,20 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
     };
     const onBeforeUnload = () => finish(new Error("打印已取消：页面即将关闭"));
     const onAfterPrint = () => finish();
-    const onLoadError = () => finish(new Error("打印报告加载失败，请重试。"));
+    const onLoadError = () => finish(downloadStandalonePrintHtml(response, "load-error"));
     const onLoad = () => {
       if (!frame) return;
       try {
         const candidate = frame.contentWindow;
         if (
           !candidate
-          || candidate.location.href !== url
-          || candidate.document.URL !== url
+          || candidate.location.href !== "about:srcdoc"
+          || candidate.document.URL !== "about:srcdoc"
           || candidate.document.readyState !== "complete"
+          || candidate.document.documentElement?.tagName.toLowerCase() !== "html"
+          || !candidate.document.body
         ) {
-          // An iframe's initial about:blank load is not the report document.
+          // Ignore the initial about:blank and any document other than our srcdoc.
           return;
         }
         if (printStarted) return;
@@ -207,8 +238,15 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
       frame.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;background:white;z-index:-1";
       frame.addEventListener("load", onLoad);
       frame.addEventListener("error", onLoadError);
-      loadTimer = window.setTimeout(() => finish(new Error("打印报告加载超时，请重试。")), PRINT_FRAME_LOAD_TIMEOUT_MS);
-      frame.src = url;
+      loadTimer = window.setTimeout(
+        () => finish(downloadStandalonePrintHtml(response, "timeout")),
+        PRINT_FRAME_LOAD_TIMEOUT_MS,
+      );
+      if (!("srcdoc" in frame)) {
+        finish(downloadStandalonePrintHtml(response, "unsupported"));
+        return;
+      }
+      frame.srcdoc = response.content;
       document.body.append(frame);
       if (options?.signal?.aborted) onAbort();
     } catch (cause) {

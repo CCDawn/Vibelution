@@ -28,6 +28,7 @@ SYNTHESIS_BUSY_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 _SYNTHESIS_RETRY_COUNT_KEY = "financialTeamSynthesisBusyRetryCount"
 _SYNTHESIS_RETRY_AT_KEY = "financialTeamSynthesisRetryAtEpoch"
 _SYNTHESIS_RECOVERY_PENDING_KEY = "financialTeamSynthesisRecoveryPending"
+_SYNTHESIS_RECOVERY_STARTED_AT_KEY = "financialTeamSynthesisRecoveryStartedAt"
 
 _PRIMARY_ROLES = ("market", "fundamental", "news")
 _DEBATE_ROLES = ("bull", "bear")
@@ -434,7 +435,12 @@ class FinancialTeamCoordinator:
         return False
 
     def _is_timed_out(self, state: dict[str, Any]) -> bool:
-        raw = str(state.get("createdAt") or state.get("startedAt") or "").strip()
+        raw = str(
+            state.get(_SYNTHESIS_RECOVERY_STARTED_AT_KEY)
+            or state.get("createdAt")
+            or state.get("startedAt")
+            or ""
+        ).strip()
         if not raw:
             return True
         try:
@@ -583,6 +589,12 @@ class FinancialTeamCoordinator:
                         "terminalReason": "",
                         "resultSummary": "",
                         "stopInitiator": None,
+                        # Keep the original createdAt for audit; only an
+                        # explicitly validated recovery receives a fresh run
+                        # timeout window.
+                        _SYNTHESIS_RECOVERY_STARTED_AT_KEY: datetime.fromtimestamp(
+                            self._epoch_time(), timezone.utc
+                        ).isoformat(),
                         _SYNTHESIS_RECOVERY_PENDING_KEY: False,
                         _SYNTHESIS_RETRY_COUNT_KEY: 0,
                         _SYNTHESIS_RETRY_AT_KEY: 0,

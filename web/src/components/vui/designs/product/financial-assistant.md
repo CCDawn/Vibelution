@@ -139,6 +139,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ### 报告交付
 沿用报告标题区域的 `VButton`/`VDropdownMenu` 导出操作，支持 Markdown、JSON、Word 以及“打印 / PDF”。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印文档在当前页面的无脚本 sandbox iframe 内隔离展示，不依赖桌面壳拦截的弹窗；另存 PDF 由系统打印面完成，不把 HTML 下载称为 PDF。
+打印内容使用有界 `srcdoc`，加载失败时尝试下载单份报告 HTML 并给出浏览器打印入口说明；不打印整个工作台。
 
 ## FinanceSessionMenu / useFinanceSessionLifecycle
 
@@ -184,6 +185,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ### 功能
 使用 `VSurface`、`VDenseTable`、`VCheckbox`、`VInput`、`VSelect`、`VDialog`、`VButton` 和 `VStateSurface` 查询精确成功 Turn 的报告，支持关键词、市场、类型、日期、分页和最多20份 ZIP 导出。正文与单份导出使用相同 Session/Turn；收藏只保存引用、标签和用户备注。归档后仍可读取；只有原生 tombstone 或明确404才标记「原报告已删除」，禁用原会话与导出，保留编辑备注和移除书签。网络及权限错误保持可重试，不误标删除，不静默删除案例。
 关键词范围为代码、标题与摘要；案例筛选无匹配时显示空态与清除搜索入口。历史续页保留原生目录游标，不把会话身份游标当数字页码。
+报告操作列允许换行，单份导出的错误限制在该列内，不能撑开表格或截断旁边的操作。
 
 ### 适用范围
 同一金融助手已完成的原生研究报告、已归档报告和复盘案例。
