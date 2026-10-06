@@ -53,9 +53,17 @@ def test_rename_long_session_title_survives_reload_without_losing_draft(page, e2
     editor = page.get_by_role("textbox", name="重命名会话", exact=True)
     expect(editor).to_be_focused()
     editor.fill(renamed)
-    editor.press("Enter")
+    with page.expect_response(
+        lambda response: response.request.method == "PATCH"
+        and response.url.endswith(f"/api/sessions/{sid}"),
+        timeout=15000,
+    ) as saved:
+        editor.press("Enter")
+    assert saved.value.ok, "Rename must be confirmed by the server before reloading"
+    assert saved.value.json()["title"] == renamed
     expect(page.get_by_role("tab").filter(has_text=renamed)).to_be_visible()
     expect(composer).to_have_value(draft)
+    assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["title"] == renamed
     page.reload(wait_until="domcontentloaded")
     expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sid, timeout=30000)
     expect(page.get_by_role("tab").filter(has_text=renamed)).to_be_visible()
