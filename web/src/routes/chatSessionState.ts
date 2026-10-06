@@ -2,6 +2,7 @@ import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionRefere
 import { isRunningPhase } from "./chat/chatCodingRouteViewModel";
 import { hasTerminalCanonicalTurnOutcome } from "./chatTurnProtocol";
 import { editMessageIndex, editMessageTurnId, mergeEditResubmitDetail } from "./chat/chatEditResubmitState";
+import { isSessionDeleteTombstoned } from "./sessionDeleteTombstone";
 
 export type OptimisticUserMessageInput = {
   sessionId: string;
@@ -912,6 +913,11 @@ export function deriveSessionDetailQueryErrorState(
     streamConnected?: boolean;
   } = {},
 ): SessionDetailLoadState {
+  // A definitive not-found response marks the existing deletion tombstone.
+  // Cached/placeholder detail must not turn that failure into a writable shell.
+  if (detail && isSessionDeleteTombstoned(detail.id) && isError) {
+    return { blockingError: true, transientError: false, backgroundError: false };
+  }
   const hasDetail = Boolean(detail);
   const dataUpdatedAt = Number(options.dataUpdatedAt ?? 0);
   const errorUpdatedAt = Number(options.errorUpdatedAt ?? 0);

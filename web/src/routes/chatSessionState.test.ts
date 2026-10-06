@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage, SessionDetail, SessionMessageWindow, SessionSummary } from "../api/types";
+import { markSessionDeleteTombstone, clearSessionDeleteTombstone } from "./sessionDeleteTombstone";
 import {
   appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
@@ -1335,6 +1336,20 @@ describe("chatSessionState", () => {
     });
 
     expect(nextDetail?.messages).toEqual(detail.messages);
+  });
+
+  it("blocks a confirmed deleted session even when its detail is cached", () => {
+    const detail = makeDetail({ id: "confirmed-deleted" });
+    markSessionDeleteTombstone(detail.id);
+    try {
+      expect(deriveSessionDetailQueryErrorState(detail, true, { streamConnected: true })).toEqual({
+        blockingError: true,
+        transientError: false,
+        backgroundError: false,
+      });
+    } finally {
+      clearSessionDeleteTombstone(detail.id);
+    }
   });
 
   it("keeps stale detail visible when a refetch fails", () => {
