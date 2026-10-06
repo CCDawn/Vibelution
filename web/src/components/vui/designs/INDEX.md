@@ -223,3 +223,4 @@
 | `FinanceResearchProfiles` | [product/financial-assistant.md](./product/financial-assistant.md#financeresearchprofiles) |
 | `FinanceManualPositions` | [product/financial-assistant.md](./product/financial-assistant.md#financemanualpositions) |
 | `FinanceReportsCenter` | [product/financial-assistant.md](./product/financial-assistant.md#financereportscenter) |
+| `FinanceReportExport` | [product/financial-assistant.md](./product/financial-assistant.md#financereportexport) |

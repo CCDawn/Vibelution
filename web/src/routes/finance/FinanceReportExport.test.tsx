@@ -44,28 +44,47 @@ async function openMenu(node: HTMLElement) {
 }
 
 describe("FinanceReportExport", () => {
-  it("offers report formats and a printable HTML download from the shared VUI menu", async () => {
+  it("offers a single PDF action and the existing formats from the shared VUI menu", async () => {
     const node = await render();
     await openMenu(node);
     const menu = document.querySelector('[role="menu"]');
     expect(menu?.textContent).toContain("Markdown (.md)");
     expect(menu?.textContent).toContain("JSON (.json)");
     expect(menu?.textContent).toContain("Word (.docx)");
-    expect(menu?.textContent).toContain("打印版 (.html)");
-    expect(menu?.textContent).toContain("打印 / PDF");
+    expect(menu?.textContent).not.toContain("打印版 (.html)");
+    expect(menu?.textContent).not.toContain("打印 / PDF");
+    expect(menu?.textContent).toContain("打印");
+    expect(menu?.textContent).toContain("PDF (.pdf)");
   });
 
-  it("downloads the exact report's printable HTML without opening a print window", async () => {
+  it("downloads a real PDF without relying on the browser print dialog", async () => {
     const node = await render();
     await openMenu(node);
-    const html = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => item.textContent?.includes("打印版 (.html)"));
-    await act(async () => { (html as HTMLElement).click(); });
+    const pdf = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => item.textContent === "PDF (.pdf)");
+    await act(async () => { (pdf as HTMLElement).click(); });
+    expect(downloadFinancialReportExport).toHaveBeenCalledWith(
+      { assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf-file" },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(printFinancialReportExport).not.toHaveBeenCalled();
+    expect(downloadFinancialReportPrintHtml).not.toHaveBeenCalled();
+  });
+
+  it("offers printable HTML as a fallback when direct PDF fails", async () => {
+    vi.mocked(downloadFinancialReportExport).mockRejectedValueOnce(new Error("PDF 字体不可用"));
+    const node = await render();
+    await openMenu(node);
+    const pdf = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => item.textContent === "PDF (.pdf)");
+    await act(async () => { (pdf as HTMLElement).click(); });
+    expect(node.querySelector('[role="alert"]')?.textContent).toContain("PDF 字体不可用");
+    const html = Array.from(node.querySelectorAll('button')).find((item) => item.textContent === "下载打印版");
+    await act(async () => { html!.click(); });
     expect(downloadFinancialReportPrintHtml).toHaveBeenCalledWith(
       { assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" },
       { signal: expect.any(AbortSignal) },
     );
     expect(printFinancialReportExport).not.toHaveBeenCalled();
-    expect(downloadFinancialReportExport).not.toHaveBeenCalled();
+    expect(downloadFinancialReportExport).toHaveBeenCalledTimes(1);
   });
 
   it("binds downloads and print to the exact Agent, Session, and Turn", async () => {
@@ -79,7 +98,7 @@ describe("FinanceReportExport", () => {
     );
 
     await openMenu(node);
-    const pdf = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => item.textContent?.includes("打印 / PDF"));
+    const pdf = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => item.textContent === "打印");
     await act(async () => { (pdf as HTMLElement).click(); });
     expect(printFinancialReportExport).toHaveBeenCalledWith(
       { assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" },

@@ -45,7 +45,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ### 财报资料
 资料栏使用已绑定的 Agent-owned 财报库，所有条目、trace、source body 请求携带同一 agentId 和 knowledgeBaseId。仅显示有效条目；原文来源另核对 sourceArtifactIds、库归属、PDF 类型、生命周期与过期时间。公司、代码、报告期、版本、页码及链接只来自 sourceRef.financialEvidence，不解析自由标题当事实。无元数据就不显示对应字段，无有效原文就不展示摘录。
-摘录使用 React 纯文本；外链只允许无认证信息的 HTTP/HTTPS，打开新窗口使用 noopener。点击报告引用时按有效 sourceRef URL 和 PDF 页码匹配本库来源，定位原文与 `#page=N` 链接；未匹配时明确告知，不把无关资料当引用。最多读取20条有效条目的 trace。
+摘录使用 React 纯文本；外链只允许无认证信息的 HTTP/HTTPS，打开新窗口使用 noopener。点击报告引用时按有效 sourceRef URL 和 PDF 页码匹配本库来源，定位原文与 `#page=N` 链接；每批最多读取20条有效条目的 trace，未命中再查下一批。读取失败暂停查找，可用现有刷新按钮重试；查完仍未匹配时明确告知，不把无关资料当引用。
 
 ## 对话说明与连接状态
 
@@ -179,6 +179,14 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ### 使用方式
 搜索股票并填写股数、成本和备注；编辑或移除记录后读取服务端保存状态。同一行被其他窗口修改或删除时保留旧表单并提示刷新；无关行的更新可以合并。表格、合计与研究草稿共用股票身份和币种校验，不使用错配报价。
+
+## FinanceReportExport
+
+### 功能与使用
+复用 `VDropdownMenu` 与 `VButton` 导出当前精确 Session/Turn 的报告。菜单只保留一个 `PDF (.pdf)`，直接下载本地生成的 PDF，保留中文、表格和分页；字体或生成失败显示当前操作的错误和「下载打印版」后备按钮。Markdown、JSON、Word 与独立打印入口继续可用。所有格式共用同步请求门、取消信号与身份重置，旧报告的延迟响应不得进入新报告。
+
+### 适用范围
+同一金融助手拥有的已完成研究报告；报告中心和个股研究报告共用该菜单。
 
 ## FinanceReportsCenter
 

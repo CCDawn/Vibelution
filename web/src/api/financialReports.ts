@@ -61,7 +61,16 @@ function assertBoundedExport(response: FinancialReportExportResponse, expected: 
   ) {
     throw new Error("研究报告导出响应无效或超过大小限制");
   }
-  if (expected.format === "docx") {
+  if (expected.format === "pdf-file") {
+    if (response.encoding !== "base64" || response.mediaType.toLowerCase() !== "application/pdf" || !response.fileName.endsWith(".pdf")) {
+      throw new Error("PDF 导出响应格式无效");
+    }
+    try {
+      if (!atob(response.content).startsWith("%PDF-")) throw new Error("Invalid PDF");
+    } catch {
+      throw new Error("PDF 导出文件无效");
+    }
+  } else if (expected.format === "docx") {
     if (response.encoding !== "base64" || !response.mediaType.startsWith("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) {
       throw new Error("DOCX 导出响应格式无效");
     }
@@ -73,6 +82,7 @@ function assertBoundedExport(response: FinancialReportExportResponse, expected: 
     json: "application/json",
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     pdf: "text/html",
+    "pdf-file": "application/pdf",
   };
   if (!response.mediaType.toLowerCase().startsWith(acceptedMediaTypes[expected.format])) {
     throw new Error("研究报告导出媒体类型无效");
@@ -98,7 +108,8 @@ function exportBlob(response: FinancialReportExportResponse): Blob {
 }
 
 function safeFileName(response: FinancialReportExportResponse) {
-  const fallback = `stock-research.${response.format === "markdown" ? "md" : response.format}`;
+  const extension = response.format === "markdown" ? "md" : response.format === "pdf-file" ? "pdf" : response.format;
+  const fallback = `stock-research.${extension}`;
   return response.fileName.trim() || fallback;
 }
 

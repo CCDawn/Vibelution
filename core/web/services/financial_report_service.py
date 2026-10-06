@@ -22,8 +22,13 @@ from core.web.services import agent_directory_service as directory
 from core.web.services import financial_assistant_service as assistant_service
 from core.web.services import session_service
 from core.web.services.financial_report.formats import render_docx, render_print_html
+from core.web.services.financial_report.pdf import (
+    FinancialPdfTooLarge,
+    FinancialPdfUnavailable,
+    render_pdf,
+)
 
-ExportFormat = Literal["markdown", "json", "docx", "pdf"]
+ExportFormat = Literal["markdown", "json", "docx", "pdf", "pdf-file"]
 MAX_REPORT_TEXT_CHARS = 250_000
 MAX_EXPORT_CONTENT_CHARS = 2_000_000
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
@@ -327,7 +332,7 @@ def export_financial_report(
     format: ExportFormat,
 ) -> dict[str, str]:
     """Return the canonical report in one of the bounded export formats."""
-    safe_format = format if format in {"markdown", "json", "docx", "pdf"} else "unknown"
+    safe_format = format if format in {"markdown", "json", "docx", "pdf", "pdf-file"} else "unknown"
     try:
         agent_id = _normalized_identifier(assistant_agent_id, "assistantAgentId")
         normalized_session_id = _normalized_identifier(session_id, "sessionId")
@@ -365,6 +370,20 @@ def export_financial_report(
             content = base64.b64encode(
                 render_docx(report, completed_at=completed_at)
             ).decode("ascii")
+        elif format == "pdf-file":
+            file_name = _file_name(completed_at, file_suffix, "pdf")
+            media_type = "application/pdf"
+            encoding = "base64"
+            try:
+                content = base64.b64encode(render_pdf(
+                    report,
+                    title=file_name.removesuffix(".pdf"),
+                    completed_at=completed_at or "—",
+                )).decode("ascii")
+            except FinancialPdfTooLarge as exc:
+                raise FinancialReportTooLarge(str(exc)) from None
+            except FinancialPdfUnavailable as exc:
+                raise FinancialReportUnavailable(str(exc)) from None
         else:
             file_name = _file_name(completed_at, file_suffix, "html")
             media_type = "text/html; charset=utf-8"

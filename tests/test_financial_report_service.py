@@ -138,6 +138,29 @@ def test_print_html_is_standalone_and_escapes_untrusted_answer_markup(report_env
     assert "http-equiv=\"Content-Security-Policy\"" in result["content"]
 
 
+def test_pdf_file_exports_real_chinese_pdf_for_the_exact_report(report_env):
+    from pypdf import PdfReader
+
+    result = _export("pdf-file")
+    content = base64.b64decode(result["content"], validate=True)
+    assert result["mediaType"] == "application/pdf"
+    assert result["fileName"] == "stock-research-2026-10-06-600000.pdf"
+    assert result["encoding"] == "base64"
+    assert content.startswith(b"%PDF-")
+    text = "".join(page.extract_text() for page in PdfReader(BytesIO(content)).pages)
+    assert "结论文字" in text and "营收" in text
+
+
+@pytest.mark.parametrize("pdf_error,expected", [
+    (service.FinancialPdfUnavailable, service.FinancialReportUnavailable),
+    (service.FinancialPdfTooLarge, service.FinancialReportTooLarge),
+])
+def test_pdf_failure_uses_existing_report_error_contract(report_env, monkeypatch, pdf_error, expected):
+    monkeypatch.setattr(service, "render_pdf", lambda *_args, **_kwargs: (_ for _ in ()).throw(pdf_error("PDF 无法生成")))
+    with pytest.raises(expected, match="PDF 无法生成"):
+        _export("pdf-file")
+
+
 def test_only_exact_owned_completed_research_turn_can_export(report_env, monkeypatch):
     report_env.extend(_turn(turn_id="older-good"))
     # The later interrupted Turn must not mask the successful historical report.

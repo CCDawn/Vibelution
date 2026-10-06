@@ -11,6 +11,8 @@ import styles from "../FinanceRoute.styles";
 import { activeFinancialItems, activeFinancialSources, financialSourceMetadata } from "./financialResearchModel";
 import type { ReportCitation } from "./stockResearchModel";
 
+const CITATION_TRACE_BATCH_SIZE = 20;
+
 export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null }: {
   assistant: FinancialAssistant; zh: boolean; returnTo: string; citation?: ReportCitation | null;
 }) {
@@ -25,7 +27,10 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
     enabled: readable, staleTime: 15_000, retry: false, refetchInterval: 60_000,
   });
   const canonicalItems = useMemo(() => activeFinancialItems(itemsQuery.data?.items ?? [], knowledgeBaseId), [itemsQuery.data?.items, knowledgeBaseId]);
-  const citationItems = canonicalItems.slice(0, 20);
+  const citationKey = citation ? `${agentId}\u0000${knowledgeBaseId}\u0000${citation.url}\u0000${citation.page}` : "";
+  const [citationScan, setCitationScan] = useState({ key: "", limit: CITATION_TRACE_BATCH_SIZE });
+  const citationLimit = citationScan.key === citationKey ? citationScan.limit : CITATION_TRACE_BATCH_SIZE;
+  const citationItems = canonicalItems.slice(0, citationLimit);
   const citationTraces = useQueries({ queries: citationItems.map((item) => ({
     queryKey: ["finance", "source-trace", agentId, knowledgeBaseId, item.knowledgeItemId],
     queryFn: ({ signal }: { signal: AbortSignal }) => fetchKnowledgeTrace<KnowledgeTracePayload>(knowledgeBaseId, item.knowledgeItemId, { agentId, signal }),
@@ -45,6 +50,18 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
   }
   const matchedItemId = citationMatch?.itemId;
   const matchedSourceId = citationMatch?.sourceId;
+  const citationScanComplete = Boolean(itemsQuery.data) && citationItems.length >= canonicalItems.length
+    && !citationTraces.some((trace) => trace.isPending);
+  const citationTraceReadFailed = citationTraces.some((trace) => trace.isError);
+  useEffect(() => {
+    if (!citationKey || citationScan.key === citationKey) return;
+    setCitationScan({ key: citationKey, limit: CITATION_TRACE_BATCH_SIZE });
+  }, [citationKey, citationScan.key]);
+  useEffect(() => {
+    if (!citationKey || citationScan.key !== citationKey || !itemsQuery.data || citationMatch || citationTraceReadFailed
+      || citationItems.length >= canonicalItems.length || citationTraces.some((trace) => trace.isPending)) return;
+    setCitationScan({ key: citationKey, limit: Math.min(citationLimit + CITATION_TRACE_BATCH_SIZE, canonicalItems.length) });
+  }, [citationKey, citationScan.key, itemsQuery.data, citationMatch, citationTraceReadFailed, citationItems.length, canonicalItems.length, citationTraces, citationLimit]);
   useEffect(() => {
     if (matchedItemId && matchedSourceId) { setSearch(""); setSelectedId(matchedItemId); setSourceId(matchedSourceId); }
   }, [matchedItemId, matchedSourceId]);
@@ -80,11 +97,12 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
         <span className={styles.libraryHeading}><BookOpen size={15} aria-hidden="true" />{zh ? "财报资料" : "Report library"}</span>
         <VButton variant="ghost" aria-label={zh ? "刷新财报资料" : "Refresh reports"} isDisabled={!readable || itemsQuery.isFetching} onPress={() => {
           void itemsQuery.refetch();
+          citationTraces.filter((trace) => trace.isError).forEach((trace) => { void trace.refetch(); });
           if (selected) void traceQuery.refetch();
           if (source) void bodyQuery.refetch();
         }}><RefreshCw size={14} /></VButton>
       </div>
-      {citation ? <div className={styles.libraryCitation}><strong className={styles.libraryCitationTitle}>{zh ? "当前引用" : "Selected citation"} · {citation.label}</strong><VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={styles.link}><ExternalLink size={14} />{zh ? "打开原文" : "Open source"}</VRouteLinkButton>{!matchedItemId && !citationTraces.some((trace) => trace.isPending) ? <span className={styles.small}>{zh ? "当前库未找到对应页原文" : "This source page is not in the current library"}</span> : null}</div> : null}
+      {citation ? <div className={styles.libraryCitation}><strong className={styles.libraryCitationTitle}>{zh ? "当前引用" : "Selected citation"} · {citation.label}</strong><VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={styles.link}><ExternalLink size={14} />{zh ? "打开原文" : "Open source"}</VRouteLinkButton>{(citationScanComplete || citationTraceReadFailed) && !matchedItemId ? <span className={styles.small}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}</div> : null}
       {knowledgeBaseId ? <VRouteLinkButton to={libraryUrl} className={styles.link}>{zh ? "管理财报库" : "Manage library"}</VRouteLinkButton> : null}
       {!readable ? <VStateSurface density="compact" tone="unavailable" title={zh ? "财报库不可读" : "Library unavailable"} /> :
         itemsQuery.isError ? <VStateSurface density="compact" tone="error" title={zh ? "资料加载失败" : "Could not load reports"} actions={<VButton onPress={() => void itemsQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> :

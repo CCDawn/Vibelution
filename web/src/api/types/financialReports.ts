@@ -1,4 +1,4 @@
-export type FinancialReportFormat = "markdown" | "json" | "docx" | "pdf";
+export type FinancialReportFormat = "markdown" | "json" | "docx" | "pdf" | "pdf-file";
 
 export type FinancialReportExportRequest = {
   sessionId: string;

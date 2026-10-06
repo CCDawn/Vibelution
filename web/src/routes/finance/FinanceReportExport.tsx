@@ -21,6 +21,7 @@ export function FinanceReportExport(props: FinanceReportExportProps) {
 function FinanceReportExportAction({ assistantAgentId, sessionId, turnId, zh }: FinanceReportExportProps) {
   const [exporting, setExporting] = useState<ReportExportAction | null>(null);
   const [exportError, setExportError] = useState("");
+  const [pdfFallbackAvailable, setPdfFallbackAvailable] = useState(false);
   const activeAttempt = useRef<symbol | null>(null);
   const activeController = useRef<AbortController | null>(null);
 
@@ -33,6 +34,7 @@ function FinanceReportExportAction({ assistantAgentId, sessionId, turnId, zh }: 
     activeAttempt.current = attempt;
     activeController.current = controller;
     setExportError("");
+    setPdfFallbackAvailable(false);
     setExporting(action);
     try {
       const format: FinancialReportFormat = action === "print-html" ? "pdf" : action;
@@ -43,6 +45,7 @@ function FinanceReportExportAction({ assistantAgentId, sessionId, turnId, zh }: 
       else await downloadFinancialReportExport(target, options);
     } catch (error) {
       if (activeAttempt.current === attempt && !controller.signal.aborted) {
+        setPdfFallbackAvailable(action === "pdf-file");
         setExportError(error instanceof Error && error.message
           ? error.message
           : (zh ? "导出失败，请稍后重试" : "Export failed. Try again."));
@@ -62,13 +65,14 @@ function FinanceReportExportAction({ assistantAgentId, sessionId, turnId, zh }: 
       aria-label={zh ? "导出研究报告" : "Export research report"}
       trigger={<VButton variant="ghost" isPending={exporting !== null} isDisabled={exporting !== null || !assistantAgentId || !sessionId || !turnId} icon={<Download size={14} />}>{zh ? "导出" : "Export"}</VButton>}
       items={[
+        { id: "pdf-file", icon: <FileText size={14} />, label: "PDF (.pdf)", disabled: exporting !== null, onSelect: () => void exportReport("pdf-file") },
         { id: "markdown", icon: <FileText size={14} />, label: "Markdown (.md)", disabled: exporting !== null, onSelect: () => void exportReport("markdown") },
         { id: "json", icon: <FileJson size={14} />, label: "JSON (.json)", disabled: exporting !== null, onSelect: () => void exportReport("json") },
         { id: "docx", icon: <FileText size={14} />, label: "Word (.docx)", disabled: exporting !== null, onSelect: () => void exportReport("docx") },
-        { id: "print-html", icon: <FileText size={14} />, label: zh ? "打印版 (.html)" : "Printable (.html)", title: zh ? "下载单份报告，用浏览器打开后打印或另存为 PDF" : "Download one report, then open it in a browser to print or save as PDF", disabled: exporting !== null, onSelect: () => void exportReport("print-html") },
-        { id: "pdf", icon: <Printer size={14} />, label: zh ? "打印 / PDF" : "Print / PDF", title: zh ? "通过浏览器打印并另存为 PDF" : "Print and save as PDF in the browser", disabled: exporting !== null, onSelect: () => void exportReport("pdf") },
+        { id: "pdf", icon: <Printer size={14} />, label: zh ? "打印" : "Print", disabled: exporting !== null, onSelect: () => void exportReport("pdf") },
       ]}
     />
     {exportError ? <p className={styles.error} role="alert">{exportError}</p> : null}
+    {pdfFallbackAvailable ? <VButton variant="ghost" isDisabled={exporting !== null} onPress={() => void exportReport("print-html")}>{zh ? "下载打印版" : "Download printable version"}</VButton> : null}
   </div>;
 }

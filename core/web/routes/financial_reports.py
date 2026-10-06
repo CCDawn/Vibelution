@@ -14,14 +14,14 @@ class FinancialReportExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sessionId: str = Field(min_length=1, max_length=160)
     turnId: str = Field(min_length=1, max_length=160)
-    format: Literal["markdown", "json", "docx", "pdf"]
+    format: Literal["markdown", "json", "docx", "pdf", "pdf-file"]
 
 
 class FinancialReportExportResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sessionId: str
     turnId: str
-    format: Literal["markdown", "json", "docx", "pdf"]
+    format: Literal["markdown", "json", "docx", "pdf", "pdf-file"]
     fileName: str
     mediaType: str
     encoding: Literal["utf8", "base64"]

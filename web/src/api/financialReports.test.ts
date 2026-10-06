@@ -4,6 +4,29 @@ import { FetchJsonHttpError, resetControlTokenForTests, seedControlTokenForTests
 import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, exportFinancialReport, isFinancialReportNotFoundError, MAX_FINANCIAL_REPORT_EXPORT_CHARS, printFinancialReportExport } from "./financialReports";
 
 let cleanupPrintMocks = () => {};
+
+describe("direct PDF download", () => {
+  it("downloads validated PDF bytes with the PDF extension", async () => {
+    seedControlTokenForTests("test-token");
+    const pdf = { ...response, format: "pdf-file", fileName: "stock-research.pdf", mediaType: "application/pdf", encoding: "base64", content: btoa("%PDF-1.7\nreport") };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(pdf), { status: 200 })));
+    const downloads = stubPrintIframe();
+    await downloadFinancialReportExport({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf-file" });
+    const blob = downloads.createObjectUrl.mock.calls[0]?.[0] as unknown as Blob;
+    expect(blob.type).toBe("application/pdf");
+    expect(await blob.text()).toBe("%PDF-1.7\nreport");
+    expect(downloads.print).not.toHaveBeenCalled();
+  });
+
+  it("rejects HTML renamed to PDF before creating a download", async () => {
+    seedControlTokenForTests("test-token");
+    const pdf = { ...response, format: "pdf-file", fileName: "stock-research.pdf", mediaType: "application/pdf", encoding: "base64", content: btoa("<html>report</html>") };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(pdf), { status: 200 })));
+    const downloads = stubPrintIframe();
+    await expect(downloadFinancialReportExport({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf-file" })).rejects.toThrow("PDF 导出文件无效");
+    expect(downloads.createObjectUrl).not.toHaveBeenCalled();
+  });
+});
 afterEach(() => {
   cleanupPrintMocks();
   cleanupPrintMocks = () => {};
@@ -25,7 +48,7 @@ function stubPrintIframe() {
   const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
   const originalActiveElement = Object.getOwnPropertyDescriptor(document, "activeElement");
   const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(window, "requestAnimationFrame");
-  const createObjectUrl = vi.fn(() => printHtmlUrl);
+  const createObjectUrl = vi.fn((_blob: Blob) => printHtmlUrl);
   const revokeObjectUrl = vi.fn();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });

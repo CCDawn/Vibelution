@@ -47,6 +47,23 @@ def test_export_route_maps_service_errors_and_rejects_unknown_formats(monkeypatc
     assert invalid.status_code == 422
 
 
+def test_direct_pdf_format_is_additive_to_the_print_html_contract(monkeypatch):
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    client = TestClient(app)
+    monkeypatch.setattr(service, "export_financial_report", lambda agent_id, **values: {
+        "sessionId": values["session_id"], "turnId": values["turn_id"],
+        "format": values["format"], "fileName": "stock-research.pdf",
+        "mediaType": "application/pdf", "encoding": "base64", "content": "JVBERi0xLjcK",
+    })
+    result = client.post("/api/financial-reports/agent-1/export", json={
+        "sessionId": "session-1", "turnId": "turn-1", "format": "pdf-file",
+    })
+    assert result.status_code == 200
+    assert result.json()["format"] == "pdf-file"
+    assert result.json()["mediaType"] == "application/pdf"
+
+
 def test_catalog_and_batch_http_contract_preserve_native_identity(monkeypatch):
     app = FastAPI()
     app.include_router(router, prefix="/api")
