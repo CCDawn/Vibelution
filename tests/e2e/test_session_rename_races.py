@@ -144,8 +144,9 @@ def test_blur_save_then_switch_keeps_response_bound_to_original_session(page, e2
         expect(composer_b).to_have_value(drafts[1])
         assert fetch_json(e2e_instance.port, f"/api/sessions/{sessions[1]}")["title"] == titles[1]
         if success:
-            expect(page.get_by_role("button").filter(has=page.get_by_text(renamed, exact=True)).first).to_be_visible(timeout=15000)
-            expect(_switch(page, renamed, sessions[0])).to_have_value(drafts[0])
+            # The sidebar labels the owning Agent, whose name stays unchanged.
+            expect(_switch(page, titles[0], sessions[0])).to_have_value(drafts[0])
+            expect(page.get_by_role("tab").filter(has_text=renamed)).to_be_visible()
         else:
             # A belongs to another Agent tab group and is hidden while B is selected.
             # Return through the sidebar before checking its restored editor.
@@ -196,11 +197,14 @@ def test_failed_rename_does_not_rollback_another_sessions_successful_title(page,
         route = pending.pop()
         with page.expect_response(lambda response: _is_patch(response.request, sessions[0])):
             route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "earlier rename failed"}))
-        # Wait for A's error handling, then inspect B's sidebar and active tab.
-        error = page.get_by_text("earlier rename failed", exact=False).first
-        expect(error).to_be_visible(timeout=15000)
+        # Return to A to observe its completed error handling; its tab/editor
+        # is hidden while B's Agent is selected.
+        _switch(page, titles[0], sessions[0])
+        editor_a = page.get_by_role("textbox", name="重命名会话", exact=True)
+        expect(editor_a).to_have_value(renamed[0])
+        editor_a.press("Escape")
+        _switch(page, titles[1], sessions[1])
         expect(page.get_by_role("tab").filter(has_text=renamed[1])).to_be_visible()
-        expect(page.get_by_role("button").filter(has=page.get_by_text(renamed[1], exact=True)).first).to_be_visible()
         expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={sessions[1]}")
         expect(page.locator(COMPOSER).first).to_have_value(drafts[1])
         assert fetch_json(e2e_instance.port, f"/api/sessions/{sessions[1]}")["title"] == renamed[1]

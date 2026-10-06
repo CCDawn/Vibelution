@@ -82,6 +82,7 @@ import {
   rememberAgentLastSession,
 } from "./chatAgentSessionMemory";
 import { defaultNewSessionTitle, isDefaultNewSessionTitle } from "./useChatSessionRenameMenu";
+import { rollbackSessionRename } from "./chatSessionRenameRollback";
 import type { ChatRouteSelection } from "./chatSelectionProjection";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -266,7 +267,9 @@ export type UseChatWorkspaceLifecycleResult = {
     {
       previousSessions: SessionSummary[] | undefined;
       previousSessionIndexCaches: ReturnType<typeof captureSessionIndexCacheSnapshots>;
+      previousAgentSessionCaches: ReturnType<typeof captureAgentSessionCacheSnapshots>;
       previousDetail: SessionDetail | undefined;
+      optimisticUpdatedAt: string;
     }
   >;
   addSessionToReviewMutation: UseMutationResult<
@@ -1457,6 +1460,7 @@ export function useChatWorkspaceLifecycle({
         previousSessionIndexCaches,
         previousAgentSessionCaches,
         previousDetail,
+        optimisticUpdatedAt: updatedAt,
         telemetry,
       };
     },
@@ -1485,13 +1489,8 @@ export function useChatWorkspaceLifecycle({
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { sessionId: variables.sessionId });
-      if (context?.previousSessions) {
-        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
-      }
-      restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
-      restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
-      if (context?.previousDetail) {
-        queryClient.setQueryData(queryKeys.session(variables.sessionId), context.previousDetail);
+      if (context) {
+        rollbackSessionRename(queryClient, variables, context);
       }
       if (!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId) {
         editingSessionIdRef.current = variables.sessionId;
