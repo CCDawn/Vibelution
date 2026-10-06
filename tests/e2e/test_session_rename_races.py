@@ -127,18 +127,25 @@ def test_blur_save_then_switch_keeps_response_bound_to_original_session(page, e2
         expect(composer_b).to_have_value(drafts[1])
         assert len(pending) == 1
         route, body = pending.pop()
+        assert route.request.post_data_json == {"title": renamed}
+        if success:
+            assert body["title"] == renamed
         with page.expect_response(lambda response: _is_patch(response.request, sessions[0])):
             route.fulfill(status=200 if success else 503, content_type="application/json", body=json.dumps(body))
         expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={sessions[1]}")
         expect(composer_b).to_have_value(drafts[1])
         assert fetch_json(e2e_instance.port, f"/api/sessions/{sessions[1]}")["title"] == titles[1]
         if success:
+            expect(page.get_by_role("button").filter(has=page.get_by_text(renamed, exact=True)).first).to_be_visible(timeout=15000)
             expect(_switch(page, renamed, sessions[0])).to_have_value(drafts[0])
         else:
+            # A belongs to another Agent tab group and is hidden while B is selected.
+            # Return through the sidebar before checking its restored editor.
+            _switch(page, titles[0], sessions[0])
             editor = page.get_by_role("textbox", name="重命名会话", exact=True)
             expect(editor).to_have_value(renamed)
             editor.press("Escape")
-            expect(_switch(page, titles[0], sessions[0])).to_have_value(drafts[0])
+            expect(page.locator(COMPOSER).first).to_have_value(drafts[0])
         assert fetch_json(e2e_instance.port, f"/api/sessions/{sessions[0]}")["title"] == (renamed if success else titles[0])
         _assert_no_turns(e2e_instance, sessions, drafts)
     finally:
