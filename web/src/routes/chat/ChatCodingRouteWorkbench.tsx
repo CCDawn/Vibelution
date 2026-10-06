@@ -320,10 +320,12 @@ import {
 } from "./cliAgentRunModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
+  moveStoredSessionDraft,
   readStoredSessionDraftState,
   removeStoredSessionDraft,
   scheduleSessionDraftMetaSave,
 } from "./chatDraftPersistence";
+import { rekeySessionComposerEntry } from "../chatComposerState";
 import {
   buildFileReferencePayload,
   buildKnowledgeBaseReferencePayload,
@@ -703,6 +705,13 @@ export function ChatCodingRouteWorkbench() {
   const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>(storedDraftState.turnModelSelections);
   const setTurnModelSelectionForSession = useCallback((sessionId: string, selection: SessionModelSelection | null) => {
     setTurnModelSelections((current) => ({ ...current, [sessionId]: selection }));
+  }, []);
+  const rebaseSessionComposerState = useCallback((fromId: string, toId: string) => {
+    moveStoredSessionDraft(fromId, toId);
+    setSessionDrafts((current) => rekeySessionComposerEntry(current, fromId, toId));
+    setSessionReferenceAttachments((current) => rekeySessionComposerEntry(current, fromId, toId));
+    setTurnModelSelections((current) => rekeySessionComposerEntry(current, fromId, toId));
+    setSessionImageAttachments((current) => rekeySessionComposerEntry(current, fromId, toId));
   }, []);
   // Rich draft persistence: per-turn model selection and reference chips ride
   // the same debounced store as the draft text (ZCode draft parity). The
@@ -1634,6 +1643,7 @@ export function ChatCodingRouteWorkbench() {
     syncChatRoomDetail,
     clearSessionTransientUiState,
     removeSessionWorkspace,
+    rebaseSessionComposerState,
     requestSessionComposerFocus,
     routeSelectionRef,
     chatRoute: {

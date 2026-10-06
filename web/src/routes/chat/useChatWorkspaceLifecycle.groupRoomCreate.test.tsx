@@ -101,6 +101,7 @@ function buildOptions(route: ReturnType<typeof buildRouteStub>) {
       syncChatRoomDetail: vi.fn(),
       clearSessionTransientUiState: vi.fn(),
       removeSessionWorkspace: vi.fn(),
+      rebaseSessionComposerState: vi.fn(),
       requestSessionComposerFocus: vi.fn(),
       routeSelectionRef: route.ref,
       chatRoute: {
@@ -505,6 +506,27 @@ describe("useChatWorkspaceLifecycle group room optimistic create", () => {
 });
 
 describe("useChatWorkspaceLifecycle session create idempotency", () => {
+  it.each([false, true])("rebases composer state but keeps a later Agent selection (left: %s)", async (left) => {
+    const deferred = createDeferred<SessionDetail>();
+    fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) =>
+      String(input) === "/api/sessions" && init?.method === "POST"
+        ? deferred.promise : Promise.resolve(serverSessionFor("session-real", "agent-a")));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session" ? hookOptions.route.ref.current.sessionId : "";
+    expect(tempId).toMatch(/^temp-session-/);
+    vi.mocked(hookOptions.options.setSelectedAgentId).mockClear();
+    if (left) hookOptions.route.ref.current = { kind: "session", sessionId: "session-b" };
+    deferred.resolve(serverSessionFor("session-real", "agent-a"));
+    await flushMutationQueue();
+    expect(hookOptions.options.rebaseSessionComposerState).toHaveBeenCalledExactlyOnceWith(tempId, "session-real");
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: left ? "session-b" : "session-real" });
+    if (left) expect(hookOptions.options.setSelectedAgentId).not.toHaveBeenCalled();
+    else expect(hookOptions.options.setSelectedAgentId).toHaveBeenCalledWith("agent-a");
+  });
+
   it("reuses the key after an ambiguous failure and changes it when the Agent intent changes", async () => {
     fetchJsonMock
       .mockRejectedValueOnce(new TypeError("network timeout"))
@@ -651,6 +673,7 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     expect(isSessionCreatePreserved("session-real")).toBe(false);
     expect(isSessionDeleteTombstoned("session-real")).toBe(true);
     expect(queryClient.getQueryData(queryKeys.session("session-real"))).toBeUndefined();
+    expect(hookOptions.options.rebaseSessionComposerState).not.toHaveBeenCalled();
     const deleteCalls = fetchJsonMock.mock.calls.filter(
       ([input, init]) =>
         String(input) === "/api/sessions/session-real"

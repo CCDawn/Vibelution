@@ -1,5 +1,12 @@
 import { isSteerGuidanceMessage } from "../components/conversation/conversationMessagePredicates";
 
+/** Move a local create shell's composer entry to its real identity once. */
+export function rekeySessionComposerEntry<T>(entries: Record<string, T>, fromId: string, toId: string): Record<string, T> {
+  if (!fromId || !toId || fromId === toId || !Object.hasOwn(entries, fromId)) return entries;
+  const { [fromId]: value, ...remaining } = entries;
+  return Object.hasOwn(remaining, toId) ? remaining : { ...remaining, [toId]: value };
+}
+
 export type ChatEditTarget = {
   messageId: string;
   /** Journal node id the edit should branch from; empty for legacy rows. */

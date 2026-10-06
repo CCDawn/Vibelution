@@ -43,9 +43,16 @@ export function useChatVisibleSessionCatalog({
 }: UseChatVisibleSessionCatalogInput): UseChatVisibleSessionCatalogResult {
   const [, setSessionActivitySeenEpoch] = useState(0);
 
+  // An explicit route can hydrate its detail before the directory arrives.
+  // Use that matching detail only while its row is missing from the catalog.
+  const activeDetailFallback = detail?.id === activeSessionId
+    && !sessions?.some((session) => session.id === activeSessionId)
+    && !childSessions?.some((session) => session.id === activeSessionId)
+    ? detail : undefined;
+
   const allVisibleSessions = useMemo(
-    () => mergeAllVisibleSessions(sessions, childSessions, pendingArchiveAgentIds, { includeArchivedSessions }),
-    [childSessions, includeArchivedSessions, pendingArchiveAgentIds, sessions],
+    () => mergeAllVisibleSessions(sessions, childSessions, pendingArchiveAgentIds, { includeArchivedSessions, activeSessionId, activeDetail: activeDetailFallback }),
+    [activeDetailFallback, activeSessionId, childSessions, includeArchivedSessions, pendingArchiveAgentIds, sessions],
   );
 
   const sessionsById = useMemo(

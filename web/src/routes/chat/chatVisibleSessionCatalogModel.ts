@@ -1,5 +1,7 @@
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import { isVisibleDirectSession } from "../conversationIndexModel";
+import { sessionSummaryFromDetail } from "../chatSessionState";
+import { filterOutTombstonedSessions } from "../sessionDeleteTombstone";
 
 /** Combine the ordinary and archived directory projections for the archive view. */
 export function mergeArchivedSessionSummaries(
@@ -19,10 +21,11 @@ export function mergeAllVisibleSessions(
   sessions: SessionSummary[] | undefined,
   childSessions: SessionSummary[] | undefined,
   pendingArchiveAgentIds: ReadonlySet<string>,
-  options?: { includeArchivedSessions?: boolean },
+  options?: { includeArchivedSessions?: boolean; activeSessionId?: string | null; activeDetail?: SessionDetail },
 ): SessionSummary[] {
-  const merged = [...(sessions ?? []), ...(childSessions ?? [])];
-  return merged
+  const activeDetail = options?.activeDetail && options.activeDetail.id === options.activeSessionId ? options.activeDetail : undefined;
+  const merged = [...(sessions ?? []), ...(childSessions ?? []), ...(activeDetail ? [sessionSummaryFromDetail(activeDetail)] : [])];
+  return (filterOutTombstonedSessions(merged) ?? [])
     .filter((session) => isVisibleDirectSession(session, options))
     .filter((session) => !pendingArchiveAgentIds.has(String(session.agentId || "").trim()))
     .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index);

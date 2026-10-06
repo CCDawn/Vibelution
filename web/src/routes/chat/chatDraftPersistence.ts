@@ -477,6 +477,23 @@ export function scheduleSessionDraftMetaSave(sessionId: string, meta: StoredSess
   }, CHAT_DRAFT_SAVE_DEBOUNCE_MS);
 }
 
+/** A successful create changes the draft's key without submitting its text. */
+export function moveStoredSessionDraft(fromId: string, toId: string) {
+  const source = String(fromId || "").trim();
+  const target = String(toId || "").trim();
+  if (!source || !target || source === target) return;
+  const targetHasPendingText = pendingDraftSaves.has(target);
+  // Include edits still within the debounce window, then commit the identity
+  // change before navigation/reload. Rich metadata follows the same entry.
+  flushPendingSessionDraftSaves();
+  const entries = readStoredSessionDraftEntries();
+  const entry = entries.find((item) => item.sessionId === source);
+  if (!entry) return;
+  const remaining = removeSessionDraftEntry(entries, source);
+  writeStoredSessionDraftEntries(targetHasPendingText || remaining.some((item) => item.sessionId === target)
+    ? remaining : [...remaining, { ...entry, sessionId: target }]);
+}
+
 /** Immediate removal: a submitted/closed session draft must never resurrect. */
 export function removeStoredSessionDraft(sessionId: string) {
   const normalizedSessionId = String(sessionId || "").trim();

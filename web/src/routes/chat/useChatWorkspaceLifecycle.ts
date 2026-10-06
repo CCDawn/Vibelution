@@ -153,6 +153,7 @@ export type UseChatWorkspaceLifecycleOptions = {
   syncChatRoomDetail: (room: ChatRoomDetail) => void;
   clearSessionTransientUiState: (sessionId: string) => void;
   removeSessionWorkspace: (sessionId: string) => void;
+  rebaseSessionComposerState: (fromId: string, toId: string) => void;
   requestSessionComposerFocus: (sessionId: string) => void;
   /** Always-current committed route selection (snapshot at request start). */
   routeSelectionRef: MutableRefObject<ChatRouteSelection>;
@@ -295,6 +296,7 @@ export function useChatWorkspaceLifecycle({
   syncChatRoomDetail,
   clearSessionTransientUiState,
   removeSessionWorkspace,
+  rebaseSessionComposerState,
   requestSessionComposerFocus,
   routeSelectionRef,
   chatRoute,
@@ -520,6 +522,9 @@ export function useChatWorkspaceLifecycle({
         agentId,
         messages: Array.isArray(nextDetail.messages) ? nextDetail.messages : [],
       };
+      if (tempSessionId && tempSessionId !== nextId) {
+        rebaseSessionComposerState(tempSessionId, nextId);
+      }
       // Seed real id cache BEFORE the route swaps so the UI never paints a hard loading shell.
       queryClient.setQueryData(queryKeys.session(nextId), seededDetail);
       updateSessionSummaryCaches(queryClient, (sessions) =>
@@ -564,7 +569,7 @@ export function useChatWorkspaceLifecycle({
         queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
         removeSessionWorkspace(tempSessionId);
       }
-      setSelectedAgentId(agentId);
+      if (keepFocusOnCreated) setSelectedAgentId(agentId);
       if (agentId && keepFocusOnCreated) {
         rememberAgentLastSession(agentId, nextId, chatAgentSessionStorage());
       }
@@ -650,6 +655,7 @@ export function useChatWorkspaceLifecycle({
         agentId,
         routeReplacedFromTemp: stillOnTemp,
         keepFocusOnCreated,
+        composerStateRebased: Boolean(tempSessionId && tempSessionId !== nextId),
         keepDraft,
       });
     },

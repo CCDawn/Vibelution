@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  rekeySessionComposerEntry,
   latestUserMessageId,
   resolveActiveEditTarget,
   resolveComposerDraftValue,
@@ -8,6 +9,16 @@ import {
 } from "./chatComposerState";
 
 describe("chat composer state", () => {
+  it("moves the latest temp draft without changing another session", () => {
+    expect(rekeySessionComposerEntry({ temp: "latest", b: "other" }, "temp", "real")).toEqual({ real: "latest", b: "other" });
+  });
+
+  it("preserves an existing destination, including an intentionally empty draft", () => {
+    expect(rekeySessionComposerEntry({ temp: "old", real: "", b: "other" }, "temp", "real")).toEqual({ real: "", b: "other" });
+    const entries = { real: "new" };
+    expect(rekeySessionComposerEntry(entries, "temp", "real")).toBe(entries);
+    expect(rekeySessionComposerEntry(entries, "real", "real")).toBe(entries);
+  });
   it("keeps normal draft text visible when the user is not editing", () => {
     expect(resolveComposerDraftValue("normal message", null, null)).toBe("normal message");
   });

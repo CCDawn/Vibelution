@@ -5,6 +5,7 @@ import {
   CHAT_DRAFTS_MAX_SESSIONS,
   CHAT_DRAFTS_STORAGE_KEY,
   CHAT_DRAFT_MAX_CHARS,
+  moveStoredSessionDraft,
   capStoredSessionDrafts,
   beginSessionDraftRecoveryGuard,
   clampStoredSessionDraft,
@@ -45,6 +46,40 @@ describe("chatDraftPersistence", () => {
   });
   afterEach(() => {
     resetChatDraftPersistenceForTests();
+  });
+
+  it.each([false, true])("moves a create draft and metadata before reload (already flushed: %s)", (flushed) => {
+    scheduleSessionDraftSave("temp", "original");
+    scheduleSessionDraftMetaSave("temp", { turnModelSelection: { modelId: "chosen" }, referenceAttachments: [{ kind: "session", sessionId: "source" }] });
+    scheduleSessionDraftSave("other", "independent");
+    if (flushed) flushPendingSessionDraftWrites();
+    scheduleSessionDraftSave("temp", "latest");
+    moveStoredSessionDraft("temp", "real");
+    expect(readStoredSessionDraftState()).toMatchObject({
+      drafts: { real: "latest", other: "independent" },
+      turnModelSelections: { real: { modelId: "chosen" } },
+      referenceAttachments: { real: [{ kind: "session", sessionId: "source" }] },
+    });
+    expect(readStoredSessionDrafts().temp).toBeUndefined();
+    window.dispatchEvent(new Event("pagehide"));
+    expect(readStoredSessionDrafts()).toEqual({ real: "latest", other: "independent" });
+  });
+
+  it("does not overwrite a newer draft already stored under the real id", () => {
+    scheduleSessionDraftSave("temp", "old");
+    scheduleSessionDraftSave("real", "new");
+    moveStoredSessionDraft("temp", "real");
+    expect(readStoredSessionDrafts()).toEqual({ real: "new" });
+    moveStoredSessionDraft("temp", "real");
+    expect(readStoredSessionDrafts()).toEqual({ real: "new" });
+  });
+
+  it("keeps a newer explicit clear under the real id", () => {
+    scheduleSessionDraftSave("temp", "old");
+    scheduleSessionDraftSave("real", "");
+    moveStoredSessionDraft("temp", "real");
+    window.dispatchEvent(new Event("pagehide"));
+    expect(readStoredSessionDrafts()).toEqual({});
   });
 
   it("persists drafts under the vibelution.chat.drafts.v1 key on a debounce", () => {

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { SessionSummary } from "../../api/types";
+import { markSessionDeleteTombstone, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 import {
   buildSessionsById,
   mergeAllVisibleSessions,
@@ -24,6 +25,23 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
 }
 
 describe("chatVisibleSessionCatalogModel", () => {
+  afterEach(resetSessionDeleteTombstonesForTests);
+
+  it("projects a matching active detail while the catalog is missing", () => {
+    const detail = session({ id: "active", title: "Cold entry" }) as never;
+    expect(mergeAllVisibleSessions(undefined, undefined, new Set(), { activeSessionId: "active", activeDetail: detail })).toMatchObject([{ id: "active", title: "Cold entry" }]);
+    expect(mergeAllVisibleSessions(undefined, undefined, new Set(), { activeSessionId: "other", activeDetail: detail })).toEqual([]);
+    expect(mergeAllVisibleSessions([session({ id: "active", title: "Directory" })], [], new Set(), { activeSessionId: "active", activeDetail: detail })[0].title).toBe("Directory");
+  });
+
+  it("does not project deleted, archived, hidden or pending-archive fallback details", () => {
+    const options = (overrides: Partial<SessionSummary> = {}) => ({ activeSessionId: "active", activeDetail: session({ id: "active", ...overrides }) as never });
+    expect(mergeAllVisibleSessions(undefined, undefined, new Set(), options({ archiveState: { status: "archived" }, readOnly: true }))).toEqual([]);
+    expect(mergeAllVisibleSessions(undefined, undefined, new Set(), options({ hiddenFromIndex: true }))).toEqual([]);
+    expect(mergeAllVisibleSessions(undefined, undefined, new Set(["agent-1"]), options())).toEqual([]);
+    markSessionDeleteTombstone("active", { confirmed: true });
+    expect(mergeAllVisibleSessions(undefined, undefined, new Set(), options())).toEqual([]);
+  });
   it("uses the archived directory metadata when an ordinary cached row has the same id", () => {
     const ordinary = session({ id: "other" });
     const stale = session({ id: "archived", readOnly: false, archiveState: {} });
