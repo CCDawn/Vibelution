@@ -247,6 +247,17 @@ class WorkflowOutboxPump:
 
     def _hypothesis_recovery_loop(self) -> None:
         """One recovery lane replays the existing durable meeting authority."""
+        from .archive_mode import challenge_archive_mode_enabled
+
+        if challenge_archive_mode_enabled():
+            # 封存模式：hypothesis recovery 会重放 durable meeting authority
+            # 并在 tick 内触发 auto-advance closure sweep / reaper / 账本整理
+            # ——全部是改写状态的动作。封存下只读可看，这一驻留线程直接不
+            # 跑（正常封存时 pump 根本不会被 attach，这里是纵深防御）。
+            logger.info(
+                "challenge archive mode: hypothesis recovery loop not running"
+            )
+            return
         while not self._stop.is_set() and not self._fatal.is_set():
             recover = getattr(self._runtime, "run_hypothesis_recovery_once", None)
             if recover is not None:
