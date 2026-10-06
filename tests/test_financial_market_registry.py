@@ -16,7 +16,7 @@ from core.infrastructure.event_bus import EventNames, get_event_bus
 from tests.helpers.tool_authorization import authorized_agent_tool_executor
 from tests.test_financial_knowledge_service import finance_env as _finance_env
 from tests.test_financial_report_registry import definition
-from tests.test_financial_market_tools import snapshot
+from tests.test_financial_market_tools import overseas_snapshot, snapshot
 from tools import financial_market_tools as market_tools
 
 finance_env = _finance_env
@@ -167,17 +167,24 @@ def test_market_uses_existing_deny_first_authorization(assigned, network, blocke
         assert result.executable_tools == (NAME,)
 
 
-def test_actual_native_executor_returns_complete_json_and_blocks_unassigned_network(finance_env, monkeypatch):
+@pytest.mark.parametrize("ticker", ["sh600519", "hk00700", "usNVDA"])
+def test_actual_native_executor_returns_complete_json_and_blocks_unassigned_network(finance_env, monkeypatch, ticker):
     calls = []
-    monkeypatch.setattr(market_tools.market, "get_stock_snapshot", lambda *args: calls.append(args) or snapshot("sh600519"))
+    provider_snapshot = snapshot(ticker) if ticker == "sh600519" else overseas_snapshot(ticker)
+    monkeypatch.setattr(market_tools.market, "get_stock_snapshot", lambda *args: calls.append(args) or provider_snapshot)
     with authorized_agent_tool_executor(finance_env["owner"], executable_tools=(NAME,)) as execute:
-        raw, _ = execute(NAME, {"ticker": "sh600519", "period": "day", "limit": 2})
+        raw, _ = execute(NAME, {"ticker": ticker, "period": "day", "limit": 2})
     result = json.loads(raw)
+    assert result["ticker"] == ticker and result["ok"] is True
     assert result["quote"]["timestamp"] and result["sourceUrl"]
+    assert result["quote"] == provider_snapshot["stock"]
+    if ticker != "sh600519":
+        assert result["adjustment"] == "raw" and result["volumeUnit"] == "shares"
+        assert result["candles"]["rows"][0][-1] == 7654321
     assert len(raw) <= market_tools.MAX_RESULT_CHARS
     assert len(calls) == 1
     with authorized_agent_tool_executor(finance_env["owner"], executable_tools=()) as execute:
-        raw, _ = execute(NAME, {"ticker": "sh600519"})
+        raw, _ = execute(NAME, {"ticker": ticker})
     assert len(calls) == 1
     assert "未被本回合授权" in str(raw) or "未授权" in str(raw) or "blocked" in str(raw).lower()
 

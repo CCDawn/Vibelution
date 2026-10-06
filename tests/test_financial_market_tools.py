@@ -3,7 +3,11 @@ from datetime import date, timedelta
 
 import pytest
 
-from core.infrastructure.tool_result import DEFAULT_MAX_CHARS, infer_tool_business_success
+from core.infrastructure.tool_result import (
+    DEFAULT_MAX_CHARS,
+    infer_tool_business_success,
+    package_tool_result,
+)
 from core.web.services import financial_market_service as market
 from core.web.services import financial_research_service as research
 from tools.financial_market_tools import (
@@ -57,6 +61,30 @@ def snapshot(symbol="sz000001", candles=None, candle_error=""):
     }
 
 
+def overseas_snapshot(symbol):
+    is_hk = symbol.startswith("hk")
+    return {
+        **snapshot(symbol),
+        "stock": {
+            **quote(symbol),
+            "name": "腾讯控股" if is_hk else "NVIDIA",
+            "market": "港交所" if is_hk else "NASDAQ",
+            "marketCode": "HK" if is_hk else "US",
+            "currency": "HKD" if is_hk else "USD",
+            "priceUnit": "HKD/share" if is_hk else "USD/share",
+            "marketTimeZone": "Asia/Hong_Kong" if is_hk else "America/New_York",
+            "timestamp": "2026-10-05T16:00:00+08:00" if is_hk else "2026-10-05T16:00:00-04:00",
+            "volumeLots": None,
+            "volume": 7654321,
+            "volumeUnit": "shares",
+            "turnoverYuan": None,
+            "turnover": 94444321.14,
+        },
+        "adjustment": "raw",
+        "candles": [{**candle("2026-10-05"), "volumeLots": None, "volume": 7654321, "volumeUnit": "shares"}],
+    }
+
+
 def result_json(*args, **kwargs):
     raw = financial_market_snapshot_tool(*args, **kwargs)
     assert len(raw) <= MAX_RESULT_CHARS
@@ -96,6 +124,54 @@ def test_valid_request_delegates_explicit_ticker_and_preserves_provenance_and_un
 
 
 @pytest.mark.parametrize(
+    ("ticker", "symbol", "market_code", "currency"),
+    [("HK00700", "hk00700", "HK", "HKD"), ("usnvda", "usNVDA", "US", "USD"), ("usD", "usD", "US", "USD")],
+)
+def test_overseas_market_retains_currency_shares_raw_candles_and_provenance(
+    monkeypatch, ticker, symbol, market_code, currency
+):
+    calls = []
+    provider_snapshot = overseas_snapshot(symbol)
+    monkeypatch.setattr(market, "get_stock_snapshot", lambda *args: calls.append(args) or provider_snapshot)
+
+    raw = financial_market_snapshot_tool(ticker)
+    envelope = package_tool_result(raw, tool_name="financial_market_snapshot_tool")
+
+    assert calls == [(symbol, "day")]
+    assert envelope.truncated is False and envelope.content == raw
+    result = json.loads(envelope.content)
+    assert result["ok"] is True and result["status"] == "ok"
+    assert result["ticker"] == symbol
+    assert result["marketCode"] == market_code and result["currency"] == currency
+    assert result["priceUnit"] == f"{currency}/share"
+    assert result["volumeUnit"] == "shares"
+    assert result["adjustment"] == "raw"
+    assert result["quote"] == provider_snapshot["stock"]
+    assert result["sourceUrl"] == provider_snapshot["sourceUrl"]
+    assert result["fetchedAt"] == provider_snapshot["fetchedAt"]
+    assert result["candles"]["columns"] == ["date", "open", "close", "high", "low", "volume"]
+    assert result["candles"]["rows"] == [["2026-10-05", 12.1, 12.34, 12.5, 12.0, 7654321]]
+    assert "未复权" in result["notice"]
+    assert "前复权" not in result["notice"]
+
+
+@pytest.mark.parametrize(("ticker", "currency"), [("hk00700", "HKD"), ("usNVDA", "USD")])
+def test_unavailable_overseas_market_does_not_report_a_share_units(monkeypatch, ticker, currency):
+    def fail(*args):
+        raise market.MarketDataError("provider unavailable")
+
+    monkeypatch.setattr(market, "get_stock_snapshot", fail)
+
+    result = result_json(ticker)
+
+    assert result["status"] == "unavailable" and result["quote"] is None
+    assert result["currency"] == currency
+    assert result["priceUnit"] == f"{currency}/share"
+    assert result["volumeUnit"] == "shares" and result["adjustment"] == "raw"
+    assert result["candles"]["columns"][-1] == "volume"
+
+
+@pytest.mark.parametrize(
     ("ticker", "expected"),
     [("600519", "sh600519"), ("000001", "sz000001"), ("430047", "bj430047")],
 )
@@ -125,6 +201,11 @@ def test_six_digit_ticker_is_normalized_by_market_service(monkeypatch, ticker, e
         ("sh000001", "day", 20),
         ("sz600519", "day", 20),
         ("bj600519", "day", 20),
+        ("00700", "day", 20),
+        ("NVDA", "day", 20),
+        ("USD", "day", 20),
+        ("hk700001", "day", 20),
+        ("usNVDA?token=secret", "day", 20),
         ("sz000001", "minute", 20),
         ("sz000001", "DAY", 20),
         ("sz000001", "day", True),
@@ -349,6 +430,44 @@ def test_market_screen_tool_passes_filters_and_preserves_source_coverage(monkeyp
     assert result["items"][0]["symbol"] == "sh600519"
     assert "totalMarketCapYuan" not in result["items"][0]
     assert "交易日期" in result["notice"]
+
+
+def test_screen_budget_preserves_complete_json_and_reports_omitted_candidates(monkeypatch):
+    candidates = [
+        {
+            **quote(f"sz{index:06d}"),
+            "name": f"筛选样本公司{index}",
+            "peRatio": 25.0,
+            "pbRatio": 8.0,
+            "timeOfDay": "15:00:00",
+        }
+        for index in range(1, 21)
+    ]
+    monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: {
+        "source": "新浪财经",
+        "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
+        "fetchedAt": "2026-10-05T07:00:00+00:00",
+        "dataDate": None,
+        "dataTime": "15:00:00",
+        "coverage": {"providerTotal": 20, "loaded": 20, "complete": True, "totalFiltered": 20},
+        "items": candidates,
+    })
+
+    raw = financial_market_screen_tool(limit=20)
+    envelope = package_tool_result(raw, tool_name="financial_market_screen_tool")
+    assert envelope.truncated is False
+    assert envelope.content == raw
+    result = json.loads(envelope.content)
+    assert 0 < result["returnedCount"] < 20
+    assert result["returnedCount"] == len(result["items"])
+    assert result["omittedCount"] + result["returnedCount"] == 20
+    assert result["outputTruncated"] is True and result["status"] == "partial"
+    assert result["coverage"]["complete"] is True
+    assert result["resultScope"] == "provider_universe"
+    assert result["items"][0]["symbol"] == "sz000001"
+    assert result["source"] == "新浪财经"
+    assert result["fetchedAt"] == "2026-10-05T07:00:00+00:00"
+    assert result["dataDate"] is None
 
 
 @pytest.mark.parametrize(

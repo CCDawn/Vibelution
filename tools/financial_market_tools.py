@@ -1,8 +1,9 @@
-"""Bounded, read-only A-share quote and candle access for finance Agents.
+"""Bounded, read-only CN/HK/US quote and candle access for finance Agents.
 
 This adapter delegates market access and caching to the existing financial
 market service. Public quotes may be delayed and cached. The tool returns
-daily, weekly, or monthly forward-adjusted candles, never minute data. Treat
+daily, weekly, or monthly candles, never minute data. A-share candles are
+forward-adjusted; HK/US candles are unadjusted. Treat
 ``fetchedAt`` as this query's time; ``quote.timestamp`` and candle dates are
 the provider's market-data times and may be historical.
 """
@@ -18,9 +19,8 @@ from core.web.services import financial_market_service as market
 from core.web.services import financial_research_service as research
 
 MAX_RESULT_CHARS = 3_200
-MAX_SCREEN_RESULT_CHARS = 6_000
-_TICKER = re.compile(r"(?:\d{6}|sh6\d{5}|sz[03]\d{5}|bj[489]\d{5})\Z", re.IGNORECASE)
-_CANDLE_COLUMNS = ["date", "open", "close", "high", "low", "volumeLots"]
+MAX_SCREEN_RESULT_CHARS = MAX_RESULT_CHARS
+_CANDLE_PRICE_COLUMNS = ["date", "open", "close", "high", "low"]
 _PROVIDER = "腾讯财经"
 _SAFE_CANDLE_ERRORS = {
     "行情源暂时不可用，请重试",
@@ -48,6 +48,22 @@ def _safe_text(value, fallback: str, limit: int) -> str:
     return fallback
 
 
+def _market_metadata(symbol: str | None) -> dict:
+    code = market.market_code_for_symbol(symbol) if symbol else None
+    currency = {"CN": "CNY", "HK": "HKD", "US": "USD"}.get(code)
+    return {
+        "marketCode": code,
+        "currency": currency,
+        "adjustment": market.adjustment_for_market(code) if code else None,
+        "priceUnit": "元" if code == "CN" else f"{currency}/share" if currency else None,
+        "volumeUnit": "手（1手=100股）" if code == "CN" else "shares" if code else None,
+    }
+
+
+def _candle_columns(market_code: str | None) -> list[str]:
+    return [*_CANDLE_PRICE_COLUMNS, "volumeLots" if market_code == "CN" else "volume"]
+
+
 def _unavailable(
     message: str,
     *,
@@ -56,6 +72,7 @@ def _unavailable(
     period: str | None = None,
     limit: int | None = None,
 ) -> str:
+    metadata = _market_metadata(ticker)
     payload = {
         "ok": False,
         "status": "unavailable",
@@ -73,10 +90,8 @@ def _unavailable(
         "fetchedAt": _query_time(),
         "quote": None,
         "period": period,
-        "adjustment": "qfq",
-        "priceUnit": "元",
-        "volumeUnit": "手（1手=100股）",
-        "candles": {"columns": _CANDLE_COLUMNS, "rows": []},
+        **metadata,
+        "candles": {"columns": _candle_columns(metadata["marketCode"]), "rows": []},
         "candleError": "",
     }
     try:
@@ -116,14 +131,14 @@ def _invalid_request(
     )
 
 
-def _candle_row(value) -> list:
+def _candle_row(value, volume_column: str) -> list:
     if not isinstance(value, dict):
         raise ValueError("invalid candle")
     date = value.get("date")
     if not isinstance(date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
         raise ValueError("invalid candle date")
     row = [date]
-    for key in ("open", "close", "high", "low", "volumeLots"):
+    for key in ("open", "close", "high", "low", volume_column):
         number = value.get(key)
         if isinstance(number, bool) or not isinstance(number, (int, float)):
             raise ValueError("invalid candle value")
@@ -136,33 +151,36 @@ def _candle_row(value) -> list:
 def financial_market_snapshot_tool(
     ticker: str, period: str = "day", limit: int = 20
 ) -> str:
-    """Return a bounded public A-share quote and its latest forward-adjusted K lines.
+    """Return a bounded public CN/HK/US quote and its latest K lines.
 
     ``ticker`` must be a six-digit code or an exchange-prefixed code such as
-    ``600519``, ``sh600519``, ``sz000001``, or ``bj430047``. ``period`` is ``day``, ``week``, or
+    ``600519``, ``sh600519``, ``sz000001``, or ``bj430047``; use an explicit
+    ``hk`` prefix for HK stocks (``hk00700``) and ``us`` for US (``usNVDA``).
+    ``period`` is ``day``, ``week``, or
     ``month``; ``limit`` is an integer from 1 through 120. This tool does not
     accept company names or search text. Quotes are public and may be delayed;
     service-level quote and candle caches may return earlier observations.
     Minute candles are not available. ``fetchedAt`` records query time, while
     ``quote.timestamp`` and candle dates retain the provider's data times.
-    Prices are yuan; volume is lots (one lot is 100 shares). No account,
-    portfolio, or order data is accessed.
+    A-share prices are CNY and volume is lots (one lot is 100 shares), with
+    forward-adjusted candles. HK/US prices are HKD/USD per share and volume
+    is shares, with unadjusted candles. No account, portfolio, or order data
+    is accessed.
     """
-    if not isinstance(ticker, str):
+    # "USD" is a bare currency code, not an explicit US stock request. The
+    # actual one-letter stock D remains addressable as canonical "usD".
+    if not isinstance(ticker, str) or ticker.strip() == "USD":
         return _invalid_request(
-            "ticker 必须为六位 A 股代码或带交易所前缀的代码。",
-            error_code="invalid_ticker",
-        )
-    candidate = ticker.strip().lower()
-    if not _TICKER.fullmatch(candidate):
-        return _invalid_request(
-            "ticker 必须为六位 A 股代码或带交易所前缀的代码。",
+            "ticker 须为 A 股代码，或带 hk/us 前缀的港股/美股代码。",
             error_code="invalid_ticker",
         )
     try:
-        symbol = market.normalize_symbol(candidate)
+        symbol = market.normalize_symbol(ticker)
     except Exception:
-        return _invalid_request("ticker 不是有效的 A 股代码。", error_code="invalid_ticker")
+        return _invalid_request(
+            "ticker 须为有效 A 股代码，或带 hk/us 前缀的港股/美股代码。",
+            error_code="invalid_ticker",
+        )
 
     if not isinstance(period, str) or period not in {"day", "week", "month"}:
         return _invalid_request(
@@ -217,10 +235,12 @@ def financial_market_snapshot_tool(
         )
 
     stock = snapshot["stock"]
+    metadata = _market_metadata(symbol)
+    columns = _candle_columns(metadata["marketCode"])
     raw_candles = snapshot.get("candles")
     candle_error = bool(snapshot.get("candleError")) or not isinstance(raw_candles, list)
     try:
-        candles = [_candle_row(candle) for candle in raw_candles] if isinstance(raw_candles, list) else []
+        candles = [_candle_row(candle, columns[-1]) for candle in raw_candles] if isinstance(raw_candles, list) else []
     except (TypeError, ValueError, OverflowError):
         candles = []
         candle_error = True
@@ -240,8 +260,9 @@ def financial_market_snapshot_tool(
             if isinstance(raw_candle_error, str) and raw_candle_error in _SAFE_CANDLE_ERRORS
             else "K 线数据暂不可用，报价仍可供参考。"
         )
+    adjustment_label = "前复权" if metadata["adjustment"] == "qfq" else "未复权"
     notice = (
-        "公开报价可能延迟；仅提供日/周/月前复权 K 线，不含分钟数据。"
+        f"公开报价可能延迟；仅提供日/周/月{adjustment_label} K 线，不含分钟数据。"
         "fetchedAt 为本次查询时间，quote.timestamp 与 K 线日期为数据源时间。"
     )
 
@@ -270,10 +291,8 @@ def financial_market_snapshot_tool(
             "fetchedAt": fetched_at,
             "quote": stock,
             "period": period,
-            "adjustment": "qfq",
-            "priceUnit": "元",
-            "volumeUnit": "手（1手=100股）",
-            "candles": {"columns": _CANDLE_COLUMNS, "rows": rows},
+            **metadata,
+            "candles": {"columns": columns, "rows": rows},
             "candleError": reported_candle_error,
             "notice": notice,
         }
@@ -381,6 +400,7 @@ def financial_market_screen_tool(
     The provider does not guarantee a transaction date or market-cap unit. Its
     fetch time is kept separate from the provider's intraday time. Returned
     candidates and coverage always come from the fixed public-data service.
+    Output-budget omissions are reported separately from provider coverage.
     """
     for key, (minimum, maximum) in _SCREEN_VALUE_BOUNDS.items():
         value = locals()[key]
@@ -433,6 +453,7 @@ def financial_market_screen_tool(
     coverage = result["coverage"]
     raw_items = result["items"][:limit]
     items = [candidate for raw in raw_items if (candidate := _screen_candidate(raw)) is not None]
+    candidate_count = len(items)
     complete = coverage.get("complete") is True
     payload = {
         "ok": True,
@@ -458,6 +479,8 @@ def financial_market_screen_tool(
         "direction": direction,
         "requestedLimit": limit,
         "returnedCount": len(items),
+        "omittedCount": 0,
+        "outputTruncated": False,
         "priceUnit": "元",
         "volumeUnit": "手（1手=100股）",
         "turnoverUnit": "元",
@@ -469,6 +492,9 @@ def financial_market_screen_tool(
         while len(encoded) > MAX_SCREEN_RESULT_CHARS and payload["items"]:
             payload["items"].pop()
             payload["returnedCount"] = len(payload["items"])
+            payload["omittedCount"] = candidate_count - payload["returnedCount"]
+            payload["outputTruncated"] = True
+            payload["status"] = "partial"
             encoded = _encode(payload)
         if len(encoded) <= MAX_SCREEN_RESULT_CHARS:
             return encoded
