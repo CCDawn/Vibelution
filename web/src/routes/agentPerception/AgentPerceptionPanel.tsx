@@ -10,15 +10,16 @@ import {
   VInput,
   VNativeSelect,
   VSection,
+  VSettingsFormPage,
   VSettingsGroupCard,
   VSettingsRow,
   VStateSurface,
   VSwitch,
   VSurface,
-  VSplitWorkspace,
   VTabs,
 } from "../../components/vui";
 import panelStyles from "./AgentPerceptionPanel.styles";
+import { perceptionPolicyChanges } from "./agentPerceptionChanges";
 import {
   setKnowledgeBaseScope,
   setPerceptionSourceMode,
@@ -100,7 +101,7 @@ function copyFor(lang: "zh" | "en"): Copy {
         notConfigured: "尚未保存策略",
         legacyHint: "首次保存前继续采用 Agent 现有行为；保存后才开始执行这里的感知边界。",
         disabledHint: "当前策略关闭。保存后会显式阻止新的感知读取。",
-        save: "保存策略", discard: "放弃未保存修改", saved: "策略已保存", dirty: "有未保存修改",
+        save: "保存策略", discard: "放弃修改", saved: "策略已保存", dirty: "有未保存修改",
         revisionConflictTitle: "策略已在其他位置更新",
         revisionConflictMessage: "当前草稿基于旧版本；为避免覆盖最新设置，保存已暂停。重新加载会丢弃本地未保存修改。",
         reloadLatest: "加载最新策略",
@@ -118,7 +119,7 @@ function copyFor(lang: "zh" | "en"): Copy {
         triggerTask: "任务触发时", triggerUpdate: "知识更新时", triggerBackground: "后台计划时",
         manualRule: "仅当用户在本轮明确要求查询时才读取；Agent 自称获得授权不算用户请求。",
         aclHint: "策略限定 Agent 的自动读取范围，不会授予团队、知识库或工具权限。",
-        backgroundTitle: "后台调研与通知",
+        backgroundTitle: "后台调研",
         backgroundHint: "后台调研仅按你定义的主题和用量上限运行；每个 Agent 最多并发一个任务。",
         backgroundEnabled: "启用后台调研", interval: "检查间隔（分钟）", intervalHint: "15–10,080 分钟",
         dailyMaxRuns: "每日最多运行次数", maxCalls: "每次最多工具调用", maxInputTokens: "每次最多输入 token",
@@ -176,7 +177,7 @@ function copyFor(lang: "zh" | "en"): Copy {
         triggerTask: "When a task starts", triggerUpdate: "When knowledge changes", triggerBackground: "On the background schedule",
         manualRule: "Read only when the user explicitly asks in this turn. An Agent claiming authorization does not count as a user request.",
         aclHint: "This policy limits automatic reads; it does not grant read access to teams or knowledge bases, or tool permissions.",
-        backgroundTitle: "Background research and notifications",
+        backgroundTitle: "Background research",
         backgroundHint: "Background research follows your topics and usage caps. Each Agent is limited to one concurrent run.",
         backgroundEnabled: "Enable background research", interval: "Check interval (minutes)", intervalHint: "15–10,080 minutes",
         dailyMaxRuns: "Maximum runs per day", maxCalls: "Maximum tool calls per run",
@@ -301,6 +302,11 @@ function SourceCard({
       : source === "knowledge" ? langText(lang, "当前可读的共享知识库", "Currently readable shared knowledge bases")
         : langText(lang, "项目治理与开发参考索引", "Project governance and development references");
   const scoped = source === "team" || source === "knowledge";
+  const availableIds = new Set((options ?? []).map(option => option.id));
+  const selectedIds = source === "team" ? policy.sources.team.teamIds : source === "knowledge"
+    ? policy.sources.knowledge.scope === "all_authorized" ? (options ?? []).map(option => option.id).filter(id => !policy.sources.knowledge.excludedKnowledgeBaseIds.includes(id)) : policy.sources.knowledge.knowledgeBaseIds : [];
+  const scopeWarning = scoped && sourcePolicy.mode !== "off" && !selectedIds.some(id => availableIds.has(id))
+    ? langText(lang, availableIds.size ? "尚未选择可读范围" : "当前无可读范围；配置不会授予权限", availableIds.size ? "No readable scope selected" : "No readable scope available; this setting does not grant access") : null;
   const scopeSummary = source === "team" ? langText(lang, `已选 ${policy.sources.team.teamIds.length} 个团队`, `${policy.sources.team.teamIds.length} teams selected`)
     : source === "knowledge" ? policy.sources.knowledge.scope === "all_authorized"
       ? langText(lang, `全部当前可读 · 排除 ${policy.sources.knowledge.excludedKnowledgeBaseIds.length} 个`, `All readable · ${policy.sources.knowledge.excludedKnowledgeBaseIds.length} excluded`)
@@ -315,16 +321,29 @@ function SourceCard({
         <div className={panelStyles.sourceHeading}>
           <span className={panelStyles.sourceIcon}>{sourceIcon(source)}</span>
           <div className={panelStyles.minWidthZero}>
-            <div className={panelStyles.sourceTitleLine}><h3 className={panelStyles.sourceTitle}>{label}</h3><VContextualHint label={label} content={hint} className={panelStyles.helpTarget} /></div>
+            <div className={panelStyles.sourceTitleLine}><h3 className={panelStyles.sourceTitle}>{source === "personal" ? langText(lang, "个人记忆", "Personal memory") : source === "projects" ? langText(lang, "成熟项目索引", "Project index") : label}</h3><VContextualHint label={label} content={hint} className={panelStyles.helpTarget} /></div>
             <p className={panelStyles.sourceHint}>{shortHint}</p>
           </div>
         </div>
-        <VNativeSelect aria-label={label + " · " + copy.mode} value={sourcePolicy.mode} onChange={(event) => {
+        <div role="group" aria-label={label + " · " + copy.mode} className={panelStyles.modeButtons}>
+          {(["off", "manual", "auto"] as const).map(mode => <VButton key={mode} type="button" variant={sourcePolicy.mode === mode ? "primary" : "ghost"}
+            aria-label={label + " · " + (mode === "off" ? copy.modeOff : mode === "manual" ? copy.modeManual : copy.modeAuto)} aria-pressed={sourcePolicy.mode === mode}
+            onPress={() => updatePolicy(current => setPerceptionSourceMode(current, source, mode))}>
+            {mode === "off" ? copy.modeOff : mode === "manual" ? langText(lang, "按需", "On demand") : langText(lang, "自动", "Auto")}
+          </VButton>)}
+        </div>
+        <VNativeSelect className={panelStyles.modeSelect} aria-label={label + " · " + copy.mode} value={sourcePolicy.mode} onChange={(event) => {
           const mode = event.currentTarget.value as AgentPerceptionMode;
           updatePolicy((current) => setPerceptionSourceMode(current, source, mode));
         }}>
           <option value="off">{copy.modeOff}</option><option value="manual">{copy.modeManual}</option><option value="auto">{copy.modeAuto}</option>
         </VNativeSelect>
+        <div className={panelStyles.scopeSummary}>
+          {scoped ? <VButton type="button" density="compact" variant="ghost" className={panelStyles.scopeToggle} aria-expanded={expanded} aria-controls={scopeId}
+            aria-label={label + " · " + langText(lang, expanded ? "收起范围" : "编辑范围", expanded ? "Collapse scope" : "Edit scope")}
+            trailingIcon={expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setExpanded(!expanded)}>{scopeSummary}</VButton>
+            : <span className={panelStyles.detailText}>{scopeSummary}</span>}
+        </div>
         <div className={panelStyles.triggerList}>
           {sourcePolicy.mode === "auto" ? TRIGGER_IDS.map((trigger) => (
             <VCheckbox key={trigger} className={panelStyles.touchControl} aria-label={label + " · " + (trigger === "task" ? copy.triggerTask : trigger === "update" ? copy.triggerUpdate : copy.triggerBackground)}
@@ -333,14 +352,8 @@ function SourceCard({
             </VCheckbox>
           )) : sourcePolicy.mode === "manual" ? <><span className={panelStyles.mutedText}>{copy.requiresUserRequest}</span><VContextualHint label={copy.modeManual} content={copy.manualRule} className={panelStyles.helpTarget} /></>
             : <span className={panelStyles.mutedText}>{langText(lang, "暂不读取 · 保留已有配置", "No reads · configuration preserved")}</span>}
-        </div>
-        <div className={panelStyles.scopeSummary}>
-          <span className={panelStyles.detailText}>{scopeSummary}</span>
-          {scoped ? <VButton type="button" density="compact" variant="ghost" className={panelStyles.touchControl} aria-expanded={expanded} aria-controls={scopeId}
-            aria-label={label + " · " + langText(lang, expanded ? "收起范围" : "编辑范围", expanded ? "Collapse scope" : "Edit scope")}
-            trailingIcon={expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setExpanded(!expanded)}>
-            {langText(lang, expanded ? "收起" : "编辑", expanded ? "Collapse" : "Edit")}
-          </VButton> : null}
+          {sourcePolicy.mode === "auto" && !TRIGGER_IDS.some(trigger => sourcePolicy.triggers[trigger]) ? <span className={panelStyles.warningText}>{langText(lang, "未选触发条件，暂不会自动读取", "No trigger selected; automatic reads will not start")}</span> : null}
+          {scopeWarning ? <span className={panelStyles.warningText}>{scopeWarning}</span> : null}
         </div>
       </div>
       {scoped && expanded ? <div className={panelStyles.scopeEditor} id={scopeId}>
@@ -376,64 +389,26 @@ function NumberSetting({ id, label, description, value, min, max, onChange }: {
 }
 
 function TopicEditor({ topics, copy, lang, onChange }: { topics: string[]; copy: Copy; lang: "zh" | "en"; onChange: (next: string[]) => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const editorId = useId();
   const [topic, setTopic] = useState("");
   const normalizedTopic = topic.trim().replace(/\s+/g, " ");
   const canAdd = Boolean(normalizedTopic) && normalizedTopic.length <= 200 && !topics.includes(normalizedTopic) && topics.length < 8;
-  return (
-    <div className={panelStyles.topicsSection}>
-      <div className={panelStyles.topicsHeading}>
-        <div className={panelStyles.minWidthZero}><strong className={panelStyles.smallText}>{copy.topics} · {topics.length}/8</strong><p className={panelStyles.topicSummary}>{topics.join(" · ") || langText(lang, "尚未设置主题", "No topics configured")}</p></div>
-        <VButton type="button" density="compact" variant="ghost" className={panelStyles.touchControl} aria-expanded={expanded} aria-controls={editorId} aria-label={langText(lang, expanded ? "收起调研主题" : "编辑调研主题", expanded ? "Collapse research topics" : "Edit research topics")} trailingIcon={expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setExpanded(!expanded)}>{langText(lang, expanded ? "收起主题" : "编辑主题", expanded ? "Collapse topics" : "Edit topics")}</VButton>
-      </div>
-      {expanded ? <div className={panelStyles.topicEditor} id={editorId}>
-          <p className={panelStyles.hintText}>{copy.topicsHint}</p>
-          <div className={panelStyles.inlineControls}>
-            <VInput
-              aria-label={copy.topicPlaceholder}
-              value={topic}
-              maxLength={200}
-              placeholder={copy.topicPlaceholder}
-              onChange={(event) => setTopic(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && canAdd) {
-                  event.preventDefault();
-                  onChange([...topics, normalizedTopic]);
-                  setTopic("");
-                }
-              }}
-              className={panelStyles.topicInput}
-            />
-            <VButton type="button" isDisabled={!canAdd} onPress={() => { onChange([...topics, normalizedTopic]); setTopic(""); }}>
-              {copy.addTopic}
-            </VButton>
-          </div>
-          {topics.length >= 8 ? <p className={panelStyles.hintText}>{copy.topicLimit}</p> : null}
-          {topics.length ? (
-            <ul className={panelStyles.topicList} aria-label={copy.topics}>
-              {topics.map((value) => (
-                <li key={value} className={panelStyles.listItem}>
-                  <VChip className={panelStyles.topicChip}>
-                    <span className={panelStyles.topicText}>{value}</span>
-                    <VButton
-                      type="button"
-                      variant="ghost"
-                      density="compact"
-                      isIconOnly
-                      aria-label={value + " · " + copy.remove}
-                      onPress={() => onChange(topics.filter((item) => item !== value))}
-                    >
-                      <X size={12} aria-hidden="true" />
-                    </VButton>
-                  </VChip>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div> : null}
+  const addTopic = () => { if (canAdd) { onChange([...topics, normalizedTopic]); setTopic(""); } };
+  return <div className={panelStyles.topicsSection}>
+    <div className={panelStyles.topicsHeading}><strong className={panelStyles.smallText}>{copy.topics}</strong><span className={panelStyles.mutedText}>{topics.length}/8 · {langText(lang, "每个最多 200 字", "Up to 200 characters each")}</span></div>
+    {topics.length ? <ul className={panelStyles.topicList} aria-label={copy.topics}>
+      {topics.map(value => <li key={value} className={panelStyles.listItem}><VChip className={panelStyles.topicChip}>
+        <span className={panelStyles.topicText}>{value}</span><VButton type="button" variant="ghost" density="compact" isIconOnly aria-label={value + " · " + copy.remove} onPress={() => onChange(topics.filter(item => item !== value))}><X size={12} aria-hidden="true" /></VButton>
+      </VChip></li>)}
+    </ul> : null}
+    <div className={panelStyles.inlineControls}>
+      <VInput aria-label={copy.topicPlaceholder} value={topic} maxLength={200} placeholder={copy.topicPlaceholder} onChange={event => setTopic(event.currentTarget.value)}
+        onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addTopic(); } }} className={panelStyles.topicInput} />
+      <VButton type="button" isDisabled={!canAdd} onPress={addTopic}>{copy.addTopic}</VButton>
     </div>
-  );
+    {topics.length === 0 ? <p className={panelStyles.warningText}>{langText(lang, "请先添加调研主题，才能保存开启设置。", "Add a research topic before saving an enabled schedule.")}</p> : null}
+    {topics.includes(normalizedTopic) ? <p className={panelStyles.warningText}>{langText(lang, "这个主题已添加。", "This topic is already added.")}</p> : null}
+    {topics.length >= 8 ? <p className={panelStyles.hintText}>{copy.topicLimit}</p> : null}
+  </div>;
 }
 
 function RunUsage({
@@ -535,23 +510,29 @@ function RuntimeSummary({ copy, lang, runtime, pending, error, onRetry, cancelPe
   copy: Copy; lang: "zh" | "en"; runtime: AgentPerceptionRuntime | null; pending: boolean; error?: string | null;
   onRetry: () => void; cancelPending: boolean; onCancelRun: (runId: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(Boolean(runtime?.activeRun || error));
+  const detailsId = useId();
+  useEffect(() => { if (runtime?.activeRun || error) setExpanded(true); }, [runtime?.activeRun?.runId, error]);
   if (pending && !runtime) return <VStateSurface tone="loading" density="compact" title={copy.runtimeTitle} skeletonLines={1} />;
   if (error && !runtime) return <VStateSurface tone="error" density="compact" title={copy.loadFailed} actions={<VButton type="button" onPress={onRetry}>{copy.retry}</VButton>}>{error}</VStateSurface>;
   if (!runtime) return <VStateSurface tone="empty" density="compact" title={copy.noRun}>{copy.runtimeHint}</VStateSurface>;
   const names: Record<AgentPerceptionSourceId, string> = { personal: copy.personal, team: copy.team, knowledge: copy.knowledge, projects: copy.projects };
   return <VSurface tone="inset" padding="none" className={panelStyles.runtimeSummary} data-testid="perception-runtime-summary">
     <div className={panelStyles.runtimeStrip}>
+      <VButton type="button" variant="ghost" className={panelStyles.touchControl} aria-expanded={expanded} aria-controls={detailsId}
+        aria-label={langText(lang, expanded ? "收起运行事实" : "查看运行事实", expanded ? "Collapse runtime facts" : "Show runtime facts")}
+        icon={expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setExpanded(!expanded)}>{copy.runtimeTitle}</VButton>
       <VChip>{statusLabel(runtime.status, lang)}</VChip>
       <span className={panelStyles.detailText}>{copy.dailyBudget}: {runtime.dailyBudget.used}/{runtime.dailyBudget.limit} · {copy.budgetRemaining} {runtime.dailyBudget.remaining}</span>
       {runtime.nextRunAt ? <span className={panelStyles.mutedText}>{copy.nextRun}: {readableTime(runtime.nextRunAt, lang)}</span> : null}
       <VContextualHint label={copy.runtimeTitle} content={copy.runtimeHint} className={panelStyles.helpTarget} />
       {runtime.cancelAvailable && runtime.activeRun ? <VButton type="button" density="compact" isPending={cancelPending} onPress={() => onCancelRun(runtime.activeRun!.runId)}>{copy.cancel}</VButton> : null}
     </div>
-    <div className={panelStyles.runtimeFacts}>
+    {expanded ? <div className={panelStyles.runtimeFacts} id={detailsId} data-testid="perception-runtime-details">
       <div><strong>{copy.readableSources}</strong><span>{runtime.readableSources.length ? runtime.readableSources.map((source) => `${names[source.source]} (${source.readableCount})`).join("、") : copy.noReadableSources}</span></div>
       <div><strong>{copy.actualSources}</strong><span>{runtime.lastActivity ? `${readableTime(runtime.lastActivity.completedAt, lang)} · ${runtime.lastActivity.sources.map((source) => names[source]).join("、") || copy.noSourcesRead} · ${copy.readCount} ${runtime.lastActivity.readCount} · ${copy.resultCount} ${runtime.lastActivity.resultCount}` : copy.noRun}</span></div>
       {runtime.activeRun ? <div><strong>{copy.activeRun}</strong><span>{statusLabel(runtime.activeRun.status, lang)} · {runtime.activeRun.sources.length ? runtime.activeRun.sources.map((source) => names[source]).join("、") : copy.noSourcesRead}</span></div> : null}
-    </div>
+    </div> : null}
     {error ? <VStateSurface tone="error" density="compact" title={copy.loadFailed} actions={<VButton type="button" onPress={onRetry}>{copy.retry}</VButton>}>{error}</VStateSurface> : null}
   </VSurface>;
 }
@@ -725,91 +706,108 @@ export function AgentPerceptionPanel({
   onOpenSession, draftStore, cancelPending, cancelError, onCancelRun,
 }: AgentPerceptionPanelProps) {
   const [activeTab, setActiveTab] = useState<"settings" | "history">("settings");
+  const [advanced, setAdvanced] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
+  const advancedId = useId();
+  const changesId = useId();
   const copy = useMemo(() => copyFor(lang), [lang]);
   const currentConfiguration = configuration?.agentId === agentId ? configuration : null;
   const draft = useAgentPerceptionDraft(agentId, currentConfiguration, draftStore);
   const validationError = validateAgentPerceptionPolicy(draft.policy);
-  const canSave = Boolean(currentConfiguration && currentConfiguration.agentUpdatedAt && draft.isReady && draft.isDirty && !draft.hasConflict && !configurationError && !savePending && !validationError);
-  const updatePolicy = draft.update;
-  const updateNumber = (
-    field: "intervalMinutes" | "dailyMaxRuns" | "maxCallsPerRun" | "maxInputTokensPerRun" | "maxResultChars",
-    value: number,
-  ) => updatePolicy((current) => ({ ...current, background: { ...current.background, [field]: value } }));
+  const changes = currentConfiguration ? perceptionPolicyChanges(draft.policy, currentConfiguration.policy, lang) : [];
+  const canSave = Boolean(currentConfiguration && currentConfiguration.agentUpdatedAt && draft.isReady && (draft.isDirty || !currentConfiguration.configured) && !draft.hasConflict && !configurationError && !savePending && !validationError);
+  const updatePolicy = (updater: (current: AgentPerceptionPolicy) => AgentPerceptionPolicy) => {
+    if (!savePending) draft.update(updater);
+  };
+  const updateNumber = (field: "intervalMinutes" | "dailyMaxRuns" | "maxCallsPerRun" | "maxInputTokensPerRun" | "maxResultChars", value: number) =>
+    updatePolicy(current => ({ ...current, background: { ...current.background, [field]: value } }));
+  useEffect(() => { setActiveTab("settings"); setAdvanced(false); setShowChanges(false); }, [agentId]);
+  useEffect(() => { if (!draft.isDirty) setShowChanges(false); }, [draft.isDirty]);
 
-  useEffect(() => {
-    setActiveTab("settings");
-  }, [agentId]);
-
-  return (
-    <div className={panelStyles.panel} data-vui-region="agent-perception-panel" data-testid="agent-perception-panel">
-      <div className={panelStyles.panelHeader} data-testid="agent-perception-tabs">
-        <VTabs aria-label={copy.title} value={activeTab} onValueChange={(value) => { if (value === "settings" || value === "history") setActiveTab(value); }}
-          items={[{ id: "settings", label: copy.settingsTab }, { id: "history", label: copy.historyTab }]} />
-        <VChip>{currentConfiguration?.configured ? copy.configured : copy.notConfigured}</VChip>
-      </div>
-      {currentConfiguration?.configured === false ? <VStateSurface tone="info" density="compact" title={copy.notConfigured}>{copy.legacyHint}</VStateSurface> : null}
-      {configurationError ? <VStateSurface tone="error" density="compact" title={copy.loadFailed} actions={<VButton type="button" onPress={onRetryConfiguration}>{copy.retry}</VButton>}>{configurationError}</VStateSurface> : null}
-      {currentConfiguration && draft.hasConflict ? <VStateSurface data-testid="agent-perception-policy-conflict" tone="info" density="compact" title={copy.revisionConflictTitle} actions={<VButton type="button" onPress={draft.reset}>{copy.reloadLatest}</VButton>}>{copy.revisionConflictMessage}</VStateSurface> : null}
-      {saveError ? <VStateSurface tone="error" density="compact" title={copy.loadFailed}>{saveError}</VStateSurface> : null}
-      <VSplitWorkspace className={panelStyles.workspace} data-testid="agent-perception-workspace" main={(
-        <div className={panelStyles.mainContent} data-testid={`agent-perception-tab-${activeTab}`}>
-          {activeTab === "settings" ? !currentConfiguration || configurationPending ? (
-            <VStateSurface tone="loading" title={copy.title} skeletonLines={2} />
-          ) : <>
-            <VSurface padding="none">
-              <div className={panelStyles.enableLine}>
-                <div className={panelStyles.minWidthZero}><strong className={panelStyles.sourceTitle}>{copy.enabled}</strong><p className={panelStyles.description}>{copy.enabledHint}</p></div>
-                <VSwitch aria-label={copy.enabled} isSelected={draft.policy.enabled} onChange={(enabled) => updatePolicy((current) => ({ ...current, enabled }))} />
-              </div>
-              <p className={panelStyles.boundary}>{copy.notGranted}</p>
-            </VSurface>
-            <VSection title={copy.sourceTitle}>
-              <p className={panelStyles.ruleText}>{copy.sourceHint}</p>
-              <VSurface padding="none" className={panelStyles.sources}>
-                <div className={panelStyles.sourceColumnHead} aria-hidden="true"><span>{langText(lang, "来源", "Source")}</span><span>{copy.mode}</span><span>{langText(lang, "自动触发", "Automatic triggers")}</span><span>{langText(lang, "读取范围", "Read scope")}</span></div>
-                {SOURCE_IDS.map((source) => <SourceCard key={agentId + source} copy={copy} lang={lang} source={source} policy={draft.policy}
-                  options={source === "team" ? currentConfiguration.availableScopes.teams : source === "knowledge" ? currentConfiguration.availableScopes.knowledgeBases : undefined} updatePolicy={updatePolicy} />)}
-              </VSurface>
-            </VSection>
-            <VSection title={copy.backgroundTitle} actions={<VSwitch aria-label={copy.backgroundEnabled} isSelected={draft.policy.background.enabled} onChange={(enabled) => updatePolicy((current) => ({ ...current, background: { ...current.background, enabled } }))} />}>
-              <p className={panelStyles.ruleText}>{copy.backgroundHint}</p>
-              <VSurface padding="none">
-                <div className={panelStyles.budgetGrid}>
-                  <NumberSetting id="perception-background-interval" label={copy.interval} description={copy.intervalHint} value={draft.policy.background.intervalMinutes} min={15} max={10_080} onChange={(value) => updateNumber("intervalMinutes", value)} />
-                  <NumberSetting id="perception-background-daily-runs" label={copy.dailyMaxRuns} value={draft.policy.background.dailyMaxRuns} min={0} max={96} onChange={(value) => updateNumber("dailyMaxRuns", value)} />
-                  <NumberSetting id="perception-background-calls" label={copy.maxCalls} value={draft.policy.background.maxCallsPerRun} min={1} max={32} onChange={(value) => updateNumber("maxCallsPerRun", value)} />
-                  <NumberSetting id="perception-background-input-tokens" label={copy.maxInputTokens} value={draft.policy.background.maxInputTokensPerRun} min={1} max={131_072} onChange={(value) => updateNumber("maxInputTokensPerRun", value)} />
-                  <NumberSetting id="perception-background-result-chars" label={copy.maxResultChars} value={draft.policy.background.maxResultChars} min={1} max={50_000} onChange={(value) => updateNumber("maxResultChars", value)} />
-                  <div className={panelStyles.compactStack}><span className={panelStyles.mutedText}>{copy.concurrent}</span><strong className={panelStyles.sourceTitle}>{draft.policy.background.maxConcurrent}</strong></div>
-                </div>
-                <TopicEditor key={agentId} topics={draft.policy.background.topics} copy={copy} lang={lang} onChange={(topics) => updatePolicy((current) => ({ ...current, background: { ...current.background, topics } }))} />
-                <div className={panelStyles.notificationRow}>
-                  <div className={panelStyles.inlineControls}><strong className={panelStyles.smallText}>{copy.notificationMode}</strong><VContextualHint label={copy.notificationMode} content={copy.notificationHint} className={panelStyles.helpTarget} /></div>
-                  <VNativeSelect aria-label={copy.notificationMode} value={draft.policy.notifications.mode} onChange={(event) => {
-                    const mode = event.currentTarget.value as AgentPerceptionPolicy["notifications"]["mode"];
-                    updatePolicy((current) => ({ ...current, notifications: { mode } }));
-                  }}><option value="important">{copy.notificationsImportant}</option><option value="all">{copy.notificationsAll}</option><option value="quiet">{copy.notificationsQuiet}</option></VNativeSelect>
-                </div>
-              </VSurface>
-            </VSection>
-            <RuntimeSummary copy={copy} lang={lang} runtime={runtime} pending={runtimePending} error={runtimeError} onRetry={onRetryRuntime} cancelPending={cancelPending} onCancelRun={onCancelRun} />
-            {validationError ? <VStateSurface tone="error" density="compact" title={copy.invalidPolicy}>{validationError}</VStateSurface> : null}
-          </> : <VSection title={copy.historyTab} meta={runtime?.updatedAt ? readableTime(runtime.updatedAt, lang) : undefined}>
-            <p className={panelStyles.paragraph}>{copy.historyHint}</p>
-            <RuntimePanel copy={copy} lang={lang} runtime={runtime} configuration={currentConfiguration} pending={runtimePending} error={runtimeError} onRetry={onRetryRuntime} cancelPending={cancelPending} onCancelRun={onCancelRun} onOpenSession={onOpenSession} />
-          </VSection>}
-          {cancelError ? <VStateSurface tone="error" density="compact" title={copy.loadFailed}>{cancelError}</VStateSurface> : null}
-        </div>
-      )} />
-      {activeTab === "settings" && currentConfiguration ? <VSurface as="div" tone="panel" padding="none" className={panelStyles.saveBar}>
-        <div className={panelStyles.compactStack}><span className={panelStyles.saveState}>{draft.isDirty ? copy.dirty : currentConfiguration.configured ? copy.saved : copy.notConfigured}</span><span className={panelStyles.mutedText}>{copy.savedHint}</span></div>
-        <div className={panelStyles.actions}>
-          <VButton type="button" isDisabled={!draft.isDirty || savePending} onPress={draft.reset}>{copy.discard}</VButton>
-          <VButton type="button" data-testid="agent-perception-save" variant="primary" isPending={savePending} isDisabled={!canSave} onPress={() => {
-            if (canSave && currentConfiguration.agentUpdatedAt) onSave(draft.policy, currentConfiguration.agentUpdatedAt);
-          }}>{copy.save}</VButton>
-        </div>
-      </VSurface> : null}
+  const footer = activeTab === "settings" && currentConfiguration ? <>
+    <div className={panelStyles.saveMeta} role="status" aria-live="polite">
+      <strong className={panelStyles.saveState}>{savePending ? langText(lang, "正在保存…", "Saving…") : draft.isDirty ? langText(lang, `${changes.length} 项待保存`, `${changes.length} changes to save`) : currentConfiguration.configured ? copy.saved : langText(lang, "草稿尚未生效", "Draft not yet applied")}</strong>
+      <span className={panelStyles.mutedText}>{draft.isDirty || !currentConfiguration.configured ? langText(lang, "保存后才应用下方设置", "Save to apply these settings") : copy.savedHint}</span>
     </div>
-  );
+    {draft.isDirty ? <VButton type="button" variant="ghost" className={panelStyles.touchControl} aria-label={langText(lang, "查看变更", "Review changes")} aria-expanded={showChanges} aria-controls={changesId} onPress={() => setShowChanges(!showChanges)}>{langText(lang, "查看变更", "Review changes")}</VButton> : null}
+    <div className={panelStyles.actions}>
+      <VButton type="button" isDisabled={!draft.isDirty || savePending} onPress={() => { draft.reset(); setShowChanges(false); }}>{copy.discard}</VButton>
+      <VButton type="button" data-testid="agent-perception-save" variant="primary" isPending={savePending} isDisabled={!canSave} onPress={() => {
+        if (canSave && currentConfiguration.agentUpdatedAt) onSave(draft.policy, currentConfiguration.agentUpdatedAt);
+      }}>{saveError && !draft.hasConflict ? langText(lang, "重试保存", "Retry save") : copy.save}</VButton>
+    </div>
+  </> : undefined;
+
+  return <VSettingsFormPage className={panelStyles.panel} data-vui-region="agent-perception-panel" data-testid="agent-perception-panel" ariaLabel={copy.title}
+    title={copy.title} headerClassName={panelStyles.formHeader} bodyClassName={panelStyles.formBody} footerClassName={panelStyles.saveBar} footer={footer}
+    actions={currentConfiguration ? <VChip tone={currentConfiguration.configured ? "neutral" : "warning"}>
+      {currentConfiguration.configured ? langText(lang, `当前已保存 · ${currentConfiguration.policy.enabled ? "开启" : "关闭"}`, `Saved policy · ${currentConfiguration.policy.enabled ? "on" : "off"}`) : langText(lang, "当前沿用原行为", "Existing behavior in effect")}
+    </VChip> : undefined}
+    toolbar={<div className={panelStyles.panelHeader} data-testid="agent-perception-tabs"><VTabs aria-label={copy.title} value={activeTab}
+      onValueChange={value => { if (value === "settings" || value === "history") setActiveTab(value); }}
+      items={[{ id: "settings", label: copy.settingsTab }, { id: "history", label: copy.historyTab }]} /></div>}>
+    <div className={panelStyles.mainContent} data-testid={`agent-perception-tab-${activeTab}`}>
+      {configurationError ? <VStateSurface tone="error" density="compact" title={copy.loadFailed} actions={<VButton type="button" onPress={onRetryConfiguration}>{copy.retry}</VButton>}>{configurationError}</VStateSurface> : null}
+      {activeTab === "settings" ? !currentConfiguration || configurationPending ? <VStateSurface tone="loading" title={copy.title} skeletonLines={2} /> : <>
+        {currentConfiguration.configured === false ? <VStateSurface tone="info" density="compact" title={langText(lang, "首次配置 · 草稿尚未生效", "First configuration · draft not applied")}>{copy.legacyHint}</VStateSurface> : null}
+        {draft.hasConflict ? <VStateSurface data-testid="agent-perception-policy-conflict" tone="info" density="compact" title={copy.revisionConflictTitle}
+          actions={<VButton type="button" isDisabled={savePending} onPress={() => { draft.reset(); setShowChanges(false); }}>{copy.reloadLatest}</VButton>}>{copy.revisionConflictMessage}</VStateSurface> : null}
+        {saveError ? <VStateSurface tone="error" density="compact" title={langText(lang, "保存失败，草稿已保留", "Save failed; draft retained")}>{saveError}</VStateSurface> : null}
+        {showChanges && draft.isDirty ? <VSurface tone="inset" className={panelStyles.changeSummary} id={changesId} data-testid="agent-perception-change-summary">
+          <strong className={panelStyles.smallText}>{langText(lang, "本次待保存", "Changes to save")}</strong><ul className={panelStyles.changeList}>{changes.map(change => <li key={change}>{change}</li>)}</ul>
+          <span className={panelStyles.mutedText}>{langText(lang, "当前生效策略在保存前保持不变。", "The active policy stays unchanged until saved.")}</span>
+        </VSurface> : null}
+        <fieldset disabled={savePending} className={panelStyles.settingsFields}>
+          <VSurface padding="none"><div className={panelStyles.enableLine}>
+            <div className={panelStyles.minWidthZero}><strong className={panelStyles.sourceTitle}>{copy.enabled}</strong><p className={panelStyles.description}>{langText(lang, "你设定来源边界，Agent 在允许范围内按任务选择读取。", "You set source boundaries; the Agent chooses reads within them for each task.")}</p></div>
+            <VSwitch aria-label={copy.enabled} isSelected={draft.policy.enabled} onChange={enabled => updatePolicy(current => ({ ...current, enabled }))} />
+          </div></VSurface>
+          {!draft.policy.enabled ? <p className={panelStyles.warningText}>{langText(lang, "保存后停止新的感知读取，已有来源配置和会话内容会保留。", "Saving stops new perception reads; source settings and existing conversation content are retained.")}</p> : null}
+          <VSection title={copy.sourceTitle} meta={langText(lang, "关闭不清空配置", "Off preserves settings")}>
+            <p className={panelStyles.ruleText}>{langText(lang, "按需：仅在本轮用户明确要求时读取。自动：按勾选条件触发，每次读取仍复核权限。", "On demand requires the user's explicit request in this turn. Automatic reads use the selected triggers and recheck access each time.")}</p>
+            <VSurface padding="none" className={panelStyles.sources}>
+              <div className={panelStyles.sourceColumnHead} aria-hidden="true"><span>{langText(lang, "来源", "Source")}</span><span>{copy.mode}</span><span>{langText(lang, "读取范围", "Read scope")}</span></div>
+              {SOURCE_IDS.map(source => <SourceCard key={agentId + source} copy={copy} lang={lang} source={source} policy={draft.policy}
+                options={source === "team" ? currentConfiguration.availableScopes.teams : source === "knowledge" ? currentConfiguration.availableScopes.knowledgeBases : undefined} updatePolicy={updatePolicy} />)}
+            </VSurface><p className={panelStyles.boundary}>{copy.notGranted}</p>
+          </VSection>
+          <VSection title={copy.backgroundTitle} actions={<VSwitch aria-label={copy.backgroundEnabled} isSelected={draft.policy.background.enabled} onChange={enabled => updatePolicy(current => ({ ...current, background: { ...current.background, enabled } }))} />}>
+            <p className={panelStyles.ruleText}>{copy.backgroundHint}</p>
+            {draft.policy.background.enabled ? <div className={panelStyles.backgroundFields}>
+              {!draft.policy.enabled ? <p className={panelStyles.warningText}>{langText(lang, "总开关关闭时，后台调研不会执行。", "Background research does not run while the main control is off.")}</p> : null}
+              {draft.policy.background.dailyMaxRuns === 0 ? <p className={panelStyles.warningText}>{langText(lang, "每日次数为 0，后台调研不会执行。", "A daily limit of 0 prevents background runs.")}</p> : null}
+              <div data-testid="perception-background-topics"><TopicEditor key={agentId} topics={draft.policy.background.topics} copy={copy} lang={lang} onChange={topics => updatePolicy(current => ({ ...current, background: { ...current.background, topics } }))} /></div>
+              <div className={panelStyles.budgetGrid}>
+                <NumberSetting id="perception-background-interval" label={copy.interval} description={copy.intervalHint} value={draft.policy.background.intervalMinutes} min={15} max={10_080} onChange={value => updateNumber("intervalMinutes", value)} />
+                <NumberSetting id="perception-background-daily-runs" label={copy.dailyMaxRuns} value={draft.policy.background.dailyMaxRuns} min={0} max={96} onChange={value => updateNumber("dailyMaxRuns", value)} />
+              </div>
+              <VButton type="button" variant="ghost" contentLayout="plain" className={panelStyles.advancedToggle} aria-label={langText(lang, "高级用量限制", "Advanced usage limits")} aria-expanded={advanced} aria-controls={advancedId}
+                icon={advanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setAdvanced(!advanced)}>
+                {langText(lang, "高级用量限制", "Advanced usage limits")}<span className={panelStyles.mutedText}>{langText(lang, `调用 ${draft.policy.background.maxCallsPerRun} 次 · 输入 ${draft.policy.background.maxInputTokensPerRun.toLocaleString()} token`, `${draft.policy.background.maxCallsPerRun} calls · ${draft.policy.background.maxInputTokensPerRun.toLocaleString()} input tokens`)}</span>
+              </VButton>
+              {advanced ? <div className={panelStyles.advancedGrid} id={advancedId}>
+                <NumberSetting id="perception-background-calls" label={copy.maxCalls} value={draft.policy.background.maxCallsPerRun} min={1} max={32} onChange={value => updateNumber("maxCallsPerRun", value)} />
+                <NumberSetting id="perception-background-input-tokens" label={copy.maxInputTokens} value={draft.policy.background.maxInputTokensPerRun} min={1} max={131_072} onChange={value => updateNumber("maxInputTokensPerRun", value)} />
+                <NumberSetting id="perception-background-result-chars" label={copy.maxResultChars} value={draft.policy.background.maxResultChars} min={1} max={50_000} onChange={value => updateNumber("maxResultChars", value)} />
+                <span className={panelStyles.mutedText}>{copy.concurrent}: {draft.policy.background.maxConcurrent}</span>
+              </div> : null}
+            </div> : <p className={panelStyles.retainedSummary}>{langText(lang, `已关闭 · 保留 ${draft.policy.background.topics.length} 个主题，每 ${draft.policy.background.intervalMinutes} 分钟检查，每日最多 ${draft.policy.background.dailyMaxRuns} 次。打开后可编辑。`, `Off · ${draft.policy.background.topics.length} topics retained, every ${draft.policy.background.intervalMinutes} minutes, up to ${draft.policy.background.dailyMaxRuns} runs/day. Turn on to edit.`)}</p>}
+          </VSection>
+          <VSection title={langText(lang, "更新通知", "Update notifications")}>
+            <div className={panelStyles.notificationRow}><div className={panelStyles.minWidthZero}>
+              <p className={panelStyles.ruleText}>{langText(lang, "独立于后台调研；静音只停止通知，不停止更新扫描。", "Independent of background research. Quiet mode stops notifications, not update scans.")}</p>
+              {draft.policy.notifications.mode === "important" && !draft.policy.background.topics.length ? <p className={panelStyles.warningText}>{langText(lang, "重要更新按调研主题筛选，尚无主题时可选择“全部更新”。", "Important updates are filtered by research topics; without topics, you can choose all updates.")}</p> : null}
+            </div><VNativeSelect aria-label={copy.notificationMode} value={draft.policy.notifications.mode} onChange={event => { const mode = event.currentTarget.value as AgentPerceptionPolicy["notifications"]["mode"]; updatePolicy(current => ({ ...current, notifications: { mode } })); }}>
+              <option value="important">{copy.notificationsImportant}</option><option value="all">{copy.notificationsAll}</option><option value="quiet">{copy.notificationsQuiet}</option>
+            </VNativeSelect></div>
+          </VSection>
+          {validationError ? <VStateSurface tone="error" density="compact" title={copy.invalidPolicy}>{validationError === "background.topics.required" ? langText(lang, "开启后台调研前请添加主题。", "Add topics before enabling background research.") : langText(lang, "请检查调研频率和高级用量限制。", "Check the research schedule and advanced usage limits.")}</VStateSurface> : null}
+        </fieldset>
+        <RuntimeSummary key={agentId} copy={copy} lang={lang} runtime={runtime} pending={runtimePending} error={runtimeError} onRetry={onRetryRuntime} cancelPending={cancelPending} onCancelRun={onCancelRun} />
+      </> : <VSection title={copy.historyTab} meta={runtime?.updatedAt ? readableTime(runtime.updatedAt, lang) : undefined}>
+        <p className={panelStyles.paragraph}>{copy.historyHint}</p><RuntimePanel copy={copy} lang={lang} runtime={runtime} configuration={currentConfiguration} pending={runtimePending} error={runtimeError} onRetry={onRetryRuntime} cancelPending={cancelPending} onCancelRun={onCancelRun} onOpenSession={onOpenSession} />
+      </VSection>}
+      {cancelError ? <VStateSurface tone="error" density="compact" title={copy.loadFailed}>{cancelError}</VStateSurface> : null}
+    </div>
+  </VSettingsFormPage>;
 }
