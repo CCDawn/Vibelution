@@ -1,4 +1,4 @@
-import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Search } from "lucide-react";
 import {
@@ -6,6 +6,7 @@ import {
   fetchFinancialStockResearch,
   financialResearchKeys,
   type FinancialMarketScreenFilters,
+  type FinancialMarketScreenSort,
   type FinancialMarketScreenStock,
   type FinancialResearchAnnouncement,
   type FinancialResearchNewsItem,
@@ -13,33 +14,81 @@ import {
 } from "../../api/financialResearch";
 import type { StockIdentity } from "../../api/financialMarket";
 import { VButton, VDenseTable, VInput, VSelect, VStateSurface, VSkeleton, VSurface, type VDenseTableColumn } from "../../components/vui";
+import {
+  EMPTY_FINANCE_SCREEN_PRESET_FILTERS,
+  MAX_FINANCE_SCREEN_PRESETS,
+  readFinanceScreenPresets,
+  writeFinanceScreenPresets,
+  type FinanceScreenPreset,
+  type FinanceScreenPresetFilters,
+} from "./financeScreenPresets";
 import styles from "./FinanceMarketExplorer.styles";
 
 type ExplorerMode = "screen" | "news" | "fundamentals";
-type ScreenFilters = Omit<FinancialMarketScreenFilters, "page" | "pageSize">;
+type ScreenCriteria = Omit<FinancialMarketScreenFilters, "page" | "pageSize">;
+const NO_PRESET_ID = "__none__";
 
-const EMPTY_FILTERS = {
-  minPrice: "",
-  maxPrice: "",
-  minChangePercent: "",
-  maxChangePercent: "",
-  minPe: "",
-  maxPe: "",
-  minVolumeLots: "",
-};
-
-const SORT_OPTIONS = [
+const SORT_OPTIONS: Array<{ id: FinancialMarketScreenSort; label: string }> = [
   { id: "changePercent", label: "涨跌幅" },
   { id: "turnoverYuan", label: "成交额" },
   { id: "volumeLots", label: "成交量" },
   { id: "price", label: "股价" },
   { id: "peRatio", label: "市盈率" },
+  { id: "pbRatio", label: "市净率" },
+];
+
+const DIRECTION_OPTIONS = [
+  { id: "desc", label: "从高到低" },
+  { id: "asc", label: "从低到高" },
 ] as const;
 
 function numberFilter(value: string): number | undefined {
   if (!value.trim()) return undefined;
   const result = Number(value);
   return Number.isFinite(result) ? result : undefined;
+}
+
+function parseAdvancedFilters(draft: FinanceScreenPresetFilters): { filters?: ScreenCriteria; error?: string } {
+  const filters: ScreenCriteria = { sortBy: draft.sortBy, direction: draft.direction };
+  const fields: Array<[keyof FinanceScreenPresetFilters, keyof ScreenCriteria, number]> = [
+    ["minPrice", "minPrice", 1], ["maxPrice", "maxPrice", 1],
+    ["minChangePercent", "minChangePercent", 1], ["maxChangePercent", "maxChangePercent", 1],
+    ["minPe", "minPe", 1], ["maxPe", "maxPe", 1],
+    ["minPb", "minPb", 1], ["maxPb", "maxPb", 1],
+    ["minVolumeLots", "minVolumeLots", 1],
+    ["minTurnoverYi", "minTurnoverYuan", 100_000_000],
+    ["maxTurnoverYi", "maxTurnoverYuan", 100_000_000],
+  ];
+  for (const [draftKey, filterKey, multiplier] of fields) {
+    const raw = draft[draftKey];
+    if (!raw.trim()) continue;
+    const value = numberFilter(raw);
+    if (value === undefined || !Number.isFinite(value * multiplier)) return { error: "请检查筛选条件中的数字" };
+    if (["minPrice", "maxPrice", "minVolumeLots", "minTurnoverYi", "maxTurnoverYi"].includes(draftKey) && value < 0) {
+      return { error: "股价、成交量和成交额不能小于 0" };
+    }
+    if (["minChangePercent", "maxChangePercent"].includes(draftKey) && (value < -100 || value > 10_000)) {
+      return { error: "涨跌幅范围应在 -100% 到 10000% 之间" };
+    }
+    (filters as Record<string, number | string>)[filterKey] = value * multiplier;
+  }
+  const ranges: Array<[keyof FinanceScreenPresetFilters, keyof FinanceScreenPresetFilters, string]> = [
+    ["minPrice", "maxPrice", "股价"], ["minChangePercent", "maxChangePercent", "涨跌幅"],
+    ["minPe", "maxPe", "PE"], ["minPb", "maxPb", "PB"],
+    ["minTurnoverYi", "maxTurnoverYi", "成交额"],
+  ];
+  for (const [minimum, maximum, label] of ranges) {
+    const minValue = numberFilter(draft[minimum]);
+    const maxValue = numberFilter(draft[maximum]);
+    if (minValue !== undefined && maxValue !== undefined && minValue > maxValue) return { error: `${label}下限不能大于上限` };
+  }
+  return { filters };
+}
+
+function newPresetId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `preset-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function quoteNumber(value: number | null | undefined, fractionDigits = 2): string {
@@ -75,11 +124,13 @@ function ScreenTable({
   rows,
   onSelectStock,
   onResearchPrompt,
+  researchDisabled,
   zh,
 }: {
   rows: FinancialMarketScreenStock[];
   onSelectStock: (stock: StockIdentity) => void;
   onResearchPrompt: (prompt: string) => void;
+  researchDisabled: boolean;
   zh: boolean;
 }) {
   const columns = useMemo<VDenseTableColumn<FinancialMarketScreenStock>[]>(() => [
@@ -97,26 +148,49 @@ function ScreenTable({
     { id: "volume", header: zh ? "成交量" : "Volume", width: 92, align: "right", render: (row) => <span className={styles.number}>{quoteNumber(row.volumeLots, 0)} 手</span> },
     { id: "turnover", header: zh ? "成交额" : "Turnover", width: 106, align: "right", render: (row) => <span className={styles.number}>{row.turnoverYuan === null ? "—" : `${quoteNumber(row.turnoverYuan / 100_000_000)} 亿`}</span> },
     { id: "pe", header: "PE", width: 70, align: "right", render: (row) => <span className={styles.number}>{quoteNumber(row.peRatio)}</span> },
+    { id: "pb", header: "PB", width: 70, align: "right", render: (row) => <span className={styles.number}>{quoteNumber(row.pbRatio)}</span> },
     {
       id: "research", header: zh ? "操作" : "Action", width: 78,
-      render: (row) => <VButton density="compact" variant="ghost" onPress={() => onResearchPrompt(marketScreenPrompt(row))}>{zh ? "AI研读" : "Research"}</VButton>,
+      render: (row) => <VButton
+        density="compact"
+        variant="ghost"
+        isDisabled={researchDisabled}
+        disabledReason={researchDisabled ? (zh ? "研究会话忙碌或模型未就绪，请稍后重试。" : "The research session is busy or its model is unavailable. Try again shortly.") : undefined}
+        onPress={() => onResearchPrompt(marketScreenPrompt(row))}
+      >{zh ? "AI研读" : "Research"}</VButton>,
     },
-  ], [onResearchPrompt, onSelectStock, zh]);
+  ], [onResearchPrompt, onSelectStock, researchDisabled, zh]);
 
   return <VDenseTable ariaLabel={zh ? "A股行情筛选结果" : "A-share screen results"} columns={columns} rows={rows} getRowKey={(row) => row.symbol} resizable emptyText={zh ? "没有符合条件的股票" : "No matching stocks"} />;
 }
 
 function ScreenExplorer({
+  agentId,
   onSelectStock,
   onResearchPrompt,
+  researchDisabled,
   zh,
 }: {
+  agentId?: string;
   onSelectStock: (stock: StockIdentity) => void;
   onResearchPrompt: (prompt: string) => void;
+  researchDisabled: boolean;
   zh: boolean;
 }) {
-  const [draft, setDraft] = useState(EMPTY_FILTERS);
+  const [draft, setDraft] = useState<FinanceScreenPresetFilters>(EMPTY_FINANCE_SCREEN_PRESET_FILTERS);
   const [filters, setFilters] = useState<FinancialMarketScreenFilters>({ page: 1, pageSize: 50, sortBy: "changePercent", direction: "desc" });
+  const [presets, setPresets] = useState<FinanceScreenPreset[]>(() => readFinanceScreenPresets(agentId ?? ""));
+  const [presetName, setPresetName] = useState("");
+  const [selectedPresetId, setSelectedPresetId] = useState(NO_PRESET_ID);
+  const [presetMessage, setPresetMessage] = useState("");
+  const [presetStorageError, setPresetStorageError] = useState(false);
+  const [filterError, setFilterError] = useState("");
+  useEffect(() => {
+    setPresets(readFinanceScreenPresets(agentId ?? ""));
+    setSelectedPresetId(NO_PRESET_ID);
+    setPresetMessage("");
+    setPresetStorageError(false);
+  }, [agentId]);
   const query = useQuery({
     queryKey: financialResearchKeys.screen(filters),
     queryFn: ({ signal }) => fetchFinancialMarketScreen(filters, { signal }),
@@ -124,23 +198,68 @@ function ScreenExplorer({
     retry: false,
   });
 
-  function updateFilter(name: keyof typeof EMPTY_FILTERS) {
+  function updateFilter(name: keyof FinanceScreenPresetFilters) {
     return (event: ChangeEvent<HTMLInputElement>) => setDraft((current) => ({ ...current, [name]: event.target.value }));
   }
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const next: ScreenFilters = {};
-    for (const key of Object.keys(EMPTY_FILTERS) as Array<keyof typeof EMPTY_FILTERS>) {
-      const value = numberFilter(draft[key]);
-      if (value !== undefined) next[key] = value;
-    }
-    setFilters((current) => ({ ...current, ...next, page: 1 }));
+    const result = parseAdvancedFilters(draft);
+    setFilterError(result.error ?? "");
+    if (result.filters) setFilters({ ...result.filters, page: 1, pageSize: 50 });
   }
 
   function clearFilters() {
-    setDraft(EMPTY_FILTERS);
+    setDraft(EMPTY_FINANCE_SCREEN_PRESET_FILTERS);
+    setFilterError("");
     setFilters({ page: 1, pageSize: 50, sortBy: "changePercent", direction: "desc" });
+  }
+
+  function savePreset() {
+    const name = presetName.trim().slice(0, 40);
+    if (!name) { setPresetMessage(zh ? "请先填写预设名称" : "Enter a preset name"); return; }
+    const parsed = parseAdvancedFilters(draft);
+    if (!parsed.filters) { setFilterError(parsed.error ?? ""); return; }
+    setFilterError("");
+    if (!agentId) { setPresetStorageError(true); return; }
+    const existing = presets.find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (!existing && presets.length >= MAX_FINANCE_SCREEN_PRESETS) {
+      setPresetMessage(zh ? `最多保存 ${MAX_FINANCE_SCREEN_PRESETS} 组，请先删除一组` : `Keep up to ${MAX_FINANCE_SCREEN_PRESETS} presets; delete one first`);
+      return;
+    }
+    const nextPreset: FinanceScreenPreset = { id: existing?.id ?? newPresetId(), name, filters: { ...draft } };
+    const next = existing ? presets.map((item) => item.id === existing.id ? nextPreset : item) : [...presets, nextPreset];
+    const persisted = writeFinanceScreenPresets(agentId, next);
+    setPresetStorageError(!persisted);
+    if (persisted) {
+      setPresets(next);
+      setSelectedPresetId(nextPreset.id);
+      setPresetName(name);
+      setPresetMessage(zh ? "预设已保存" : "Preset saved");
+    }
+  }
+
+  function loadPreset() {
+    if (selectedPresetId === NO_PRESET_ID) return;
+    const preset = presets.find((item) => item.id === selectedPresetId);
+    if (!preset) return;
+    setDraft({ ...EMPTY_FINANCE_SCREEN_PRESET_FILTERS, ...preset.filters });
+    setPresetName(preset.name);
+    setPresetMessage(zh ? "已载入条件；点击筛选读取行情" : "Conditions loaded; run the screen to query quotes");
+    setFilterError("");
+  }
+
+  function deletePreset() {
+    if (!agentId || selectedPresetId === NO_PRESET_ID) return;
+    const next = presets.filter((item) => item.id !== selectedPresetId);
+    const persisted = writeFinanceScreenPresets(agentId, next);
+    setPresetStorageError(!persisted);
+    if (persisted) {
+      setPresets(next);
+      setSelectedPresetId(NO_PRESET_ID);
+      setPresetName("");
+      setPresetMessage(zh ? "预设已删除" : "Preset deleted");
+    }
   }
 
   return <div className={styles.root}>
@@ -153,16 +272,31 @@ function ScreenExplorer({
         {([
           ["minPrice", zh ? "最低价" : "Min price"], ["maxPrice", zh ? "最高价" : "Max price"],
           ["minChangePercent", zh ? "最低涨幅 %" : "Min change %"], ["maxChangePercent", zh ? "最高涨幅 %" : "Max change %"],
-          ["minPe", zh ? "最低 PE" : "Min PE"], ["maxPe", zh ? "最高 PE" : "Max PE"], ["minVolumeLots", zh ? "最少成交量（手）" : "Min volume (lots)"],
+          ["minPe", zh ? "最低 PE" : "Min PE"], ["maxPe", zh ? "最高 PE" : "Max PE"],
+          ["minPb", zh ? "最低 PB" : "Min PB"], ["maxPb", zh ? "最高 PB" : "Max PB"],
+          ["minVolumeLots", zh ? "最少成交量（手）" : "Min volume (lots)"],
+          ["minTurnoverYi", zh ? "最低成交额（亿元）" : "Min turnover (100m CNY)"],
+          ["maxTurnoverYi", zh ? "最高成交额（亿元）" : "Max turnover (100m CNY)"],
         ] as const).map(([key, label]) => {
           const min = key.includes("Change") ? -100 : key.toLowerCase().includes("pe") ? -10_000 : 0;
           const max = key.includes("Change") ? 10_000 : key.toLowerCase().includes("pe") ? 100_000 : undefined;
           return <label className={styles.field} key={key}>{label}<VInput type="number" min={min} max={max} step="any" inputMode="decimal" value={draft[key]} onChange={updateFilter(key)} aria-label={label} className={styles.input} /></label>;
         })}
-        <label className={styles.field}>{zh ? "排序" : "Sort by"}<VSelect className={styles.sort} aria-label={zh ? "排序字段" : "Sort field"} selectedKey={filters.sortBy ?? "changePercent"} options={SORT_OPTIONS.map((option) => ({ ...option, label: zh ? option.label : option.id }))} onSelectionChange={(key) => setFilters((current) => ({ ...current, sortBy: String(key) as FinancialMarketScreenFilters["sortBy"], page: 1 }))} /></label>
+        <label className={styles.field}>{zh ? "排序" : "Sort by"}<VSelect className={styles.sort} aria-label={zh ? "排序字段" : "Sort field"} selectedKey={draft.sortBy} options={SORT_OPTIONS.map((option) => ({ ...option, label: zh ? option.label : option.id }))} onSelectionChange={(key) => setDraft((current) => ({ ...current, sortBy: String(key) as FinancialMarketScreenSort }))} /></label>
+        <label className={styles.field}>{zh ? "顺序" : "Order"}<VSelect className={styles.sort} aria-label={zh ? "排序顺序" : "Sort order"} selectedKey={draft.direction} options={DIRECTION_OPTIONS.map((option) => ({ ...option, label: zh ? option.label : option.id }))} onSelectionChange={(key) => setDraft((current) => ({ ...current, direction: String(key) as FinanceScreenPresetFilters["direction"] }))} /></label>
       </div>
+      {agentId ? <div className={styles.presetPanel} aria-label={zh ? "筛选预设" : "Screen presets"}>
+        <label className={styles.presetName}>{zh ? "预设名称" : "Preset name"}<VInput value={presetName} maxLength={40} aria-label={zh ? "预设名称" : "Preset name"} placeholder={zh ? "例如：低估值高成交" : "e.g. Value and liquidity"} onChange={(event) => setPresetName(event.target.value)} className={styles.input} /></label>
+        <VButton variant="secondary" isDisabled={!presetName.trim() || (presets.length >= MAX_FINANCE_SCREEN_PRESETS && !presets.some((item) => item.name.toLocaleLowerCase() === presetName.trim().toLocaleLowerCase()))} onPress={savePreset}>{zh ? "保存预设" : "Save preset"}</VButton>
+        <label className={styles.presetSelect}>{zh ? "已保存" : "Saved"}<VSelect selectedKey={selectedPresetId} aria-label={zh ? "已保存筛选预设" : "Saved screen preset"} options={[{ id: NO_PRESET_ID, label: zh ? "选择预设" : "Choose preset" }, ...presets.map((item) => ({ id: item.id, label: item.name }))]} onSelectionChange={(key) => { if (typeof key === "string") setSelectedPresetId(key); }} /></label>
+        <VButton variant="ghost" isDisabled={selectedPresetId === NO_PRESET_ID} onPress={loadPreset}>{zh ? "载入" : "Load"}</VButton>
+        <VButton variant="ghost" isDisabled={selectedPresetId === NO_PRESET_ID} onPress={deletePreset}>{zh ? "删除" : "Delete"}</VButton>
+        <span className={styles.presetCount}>{presets.length}/{MAX_FINANCE_SCREEN_PRESETS}</span>
+      </div> : null}
+      {presetStorageError ? <p className={styles.warning} role="alert">{zh ? "筛选预设无法保存在此浏览器" : "Presets could not be saved in this browser"}</p> : null}
+      {presetMessage ? <p className={styles.presetMessage} role="status">{presetMessage}</p> : null}
+      {filterError ? <p className={styles.warning} role="alert">{filterError}</p> : null}
       <div className={styles.actions}>
-        <span className={styles.meta}>{zh ? "按已加载行情筛选；市值单位尚未核实" : "Filters loaded quotes; market-cap unit is unverified"}</span>
         <div className={styles.actionGroup}>
           <VButton type="button" variant="ghost" onPress={clearFilters}>{zh ? "清除" : "Clear"}</VButton>
           <VButton type="submit" variant="primary" icon={<Search size={14} />} isPending={query.isFetching}>{zh ? "筛选" : "Screen"}</VButton>
@@ -187,7 +321,7 @@ function ScreenExplorer({
               {query.data.coverage.failedPages.length ? ` ${zh ? "失败页" : "Failed pages"}: ${query.data.coverage.failedPages.join(", ")}` : ""}
             </VStateSurface> : null}
           </div>
-          <div className={styles.tableWrap}><ScreenTable rows={query.data.items} onSelectStock={onSelectStock} onResearchPrompt={onResearchPrompt} zh={zh} /></div>
+          <div className={styles.tableWrap}><ScreenTable rows={query.data.items} onSelectStock={onSelectStock} onResearchPrompt={onResearchPrompt} researchDisabled={researchDisabled} zh={zh} /></div>
           <div className={styles.source}>
             <a href={query.data.sourceUrl} target="_blank" rel="noreferrer" className={styles.itemLink}>{zh ? "行情来源" : "Quote source"}</a>
             <div className={styles.paging}>
@@ -217,6 +351,7 @@ function ResearchList<T extends FinancialResearchNewsItem | FinancialResearchAnn
 }) {
   return <section className={styles.section}>
     <div className={styles.sectionHeader}><h3 className={styles.sectionTitle}>{title}</h3><FacetMeta data={facet} zh={zh} /></div>
+    {facet.status === "available" && facet.error ? <VStateSurface tone="unavailable" density="compact" title={zh ? "来源限制" : "Source limitations"}>{facet.error}</VStateSurface> : null}
     {facet.status === "unavailable" ? <VStateSurface tone="error" density="compact" title={zh ? "此数据源暂不可用" : "Source unavailable"}>{facet.error}</VStateSurface>
       : items.length ? <ul className={styles.list}>{items.map((item, index) => <li className={styles.listItem} key={`${item.url ?? item.title}:${index}`}>
         {item.url ? <a className={styles.itemTitleLink} href={item.url} target="_blank" rel="noreferrer">{item.title}</a> : <strong className={styles.itemTitle}>{item.title}</strong>}
@@ -241,7 +376,10 @@ function StockResearch({ stock, mode, onResearchPrompt, zh }: { stock: StockIden
   return <div className={styles.root}>
     <div className={styles.heading}>
       <div><h2 className={styles.title}>{stock.name} <span className={styles.ticker}>{stock.ticker} · {stock.market}</span></h2><p className={styles.meta}>{zh ? "公开资料 · 以来源披露时间为准" : "Public data · use provider publication dates"}</p></div>
-      <VButton variant="primary" onPress={() => onResearchPrompt(prompt)}>{zh ? "AI交叉研判" : "Ask AI to review"}</VButton>
+      <div className={styles.actions}>
+        <VButton variant="secondary" icon={<RefreshCw size={14} />} isDisabled={query.isFetching} onPress={() => void query.refetch()}>{zh ? "刷新资料" : "Refresh sources"}</VButton>
+        <VButton variant="primary" onPress={() => onResearchPrompt(prompt)}>{zh ? "AI交叉研判" : "Ask AI to review"}</VButton>
+      </div>
     </div>
     {mode === "news" ? <>
       <ResearchList title={zh ? "相关新闻" : "News"} items={query.data.news.items} facet={query.data.news} zh={zh} />
@@ -250,6 +388,7 @@ function StockResearch({ stock, mode, onResearchPrompt, zh }: { stock: StockIden
       <div className={styles.sectionHeader}><h3 className={styles.sectionTitle}>{zh ? "财务指标" : "Fundamentals"}</h3><FacetMeta data={report} zh={zh} /></div>
       {report.status === "unavailable" ? <VStateSurface tone="error" density="compact" title={zh ? "财务数据源暂不可用" : "Fundamentals unavailable"}>{report.error}</VStateSurface>
         : <>
+          {report.error ? <VStateSurface tone="unavailable" density="compact" title={zh ? "来源限制" : "Source limitations"}>{report.error}</VStateSurface> : null}
           <div className={styles.metrics}>{report.items.map((item) => <VSurface key={item.key} tone="row" className={styles.metric}>
             <span className={styles.metricLabel}>{item.label}</span>
             <strong className={styles.metricValue}>{displayMetric(item.value, item.unit)}</strong>
@@ -262,19 +401,23 @@ function StockResearch({ stock, mode, onResearchPrompt, zh }: { stock: StockIden
 }
 
 export function FinanceMarketExplorer({
+  agentId,
   mode,
   stock,
   onSelectStock,
   onResearchPrompt,
+  researchDisabled = false,
   zh,
 }: {
+  agentId?: string;
   mode: ExplorerMode;
   stock: StockIdentity;
   onSelectStock: (stock: StockIdentity) => void;
   onResearchPrompt: (prompt: string) => void;
+  researchDisabled?: boolean;
   zh: boolean;
 }) {
   return mode === "screen"
-    ? <ScreenExplorer onSelectStock={onSelectStock} onResearchPrompt={onResearchPrompt} zh={zh} />
+    ? <ScreenExplorer agentId={agentId} onSelectStock={onSelectStock} onResearchPrompt={onResearchPrompt} researchDisabled={researchDisabled} zh={zh} />
     : <StockResearch stock={stock} mode={mode} onResearchPrompt={onResearchPrompt} zh={zh} />;
 }

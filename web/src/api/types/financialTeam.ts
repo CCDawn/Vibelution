@@ -29,6 +29,18 @@ export type FinancialTeamTurnRef = {
 };
 
 export type FinancialTeamRunStage = "research" | "debate" | "synthesis";
+export type FinancialTeamExecutionStatus = "applied" | "adjusted" | "default" | "unknown";
+export type FinancialTeamRoleExecution = {
+  requestedReasoningEffort: string | null;
+  resolvedReasoningEffort: string | null;
+  status: FinancialTeamExecutionStatus;
+};
+export type FinancialTeamExecutionPolicy = {
+  requestedDepth: "brief" | "basic" | "standard" | "detailed" | "exhaustive" | null;
+  requestedReasoningEffort: string | null;
+  roles: Partial<Record<FinancialTeamRole, FinancialTeamRoleExecution>>;
+  synthesis: FinancialTeamRoleExecution | null;
+};
 
 export type FinancialTeamRun = {
   schemaVersion: number;
@@ -36,11 +48,14 @@ export type FinancialTeamRun = {
   assistantAgentId: string;
   teamId: string;
   symbol: string;
+  marketCode?: "CN" | "HK" | "US" | null;
   periodDays: 7 | 30 | 90;
   /** Absent only on pre-v2 saved runs. */
   researchDate?: string;
   /** Absent only on pre-v2 saved runs. */
   depth?: "brief" | "basic" | "standard" | "detailed" | "exhaustive";
+  /** Absent on runs created before per-session effort resolution was saved. */
+  executionPolicy?: FinancialTeamExecutionPolicy;
   createdAt: string;
   stage: FinancialTeamRunStage;
   /** Optional for saved runs created before server coordination was available. */
@@ -54,6 +69,11 @@ export type FinancialTeamRun = {
 export type FinancialTeamRunList = {
   assistantAgentId: string;
   runs: FinancialTeamRun[];
+};
+
+export type FinancialTeamSynthesisRecoveryStatus = {
+  available: boolean;
+  reason: string;
 };
 
 export type FinancialTeamRunCreateRequest = {

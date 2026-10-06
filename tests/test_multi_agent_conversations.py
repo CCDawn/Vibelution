@@ -282,6 +282,82 @@ def test_create_chat_session_lightweight_skips_full_detail_projection(tmp_path, 
     assert detail["id"] in listed_ids
 
 
+def test_create_inactive_personal_agent_session_is_queryable_without_switching_owner(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    direct = session_service.create_chat_session(title="Owner direct session")
+    owner_before = agent_directory_service.get_agent(direct["agentId"])
+    active_before = load_chat_state(tmp_path)["active_conversation_id"]
+
+    summary = session_service.create_chat_session(
+        title="Owner summary session",
+        agent_id=direct["agentId"],
+        created_by="test_summary",
+        conversation_index_kind=(
+            agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+        ),
+        session_metadata={"source": "owner_summary_test"},
+        lightweight=True,
+        activate=False,
+    )
+
+    owner_after = agent_directory_service.get_agent(direct["agentId"])
+    assert summary["id"] != direct["id"]
+    assert summary["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+    assert summary["hiddenFromIndex"] is False
+    assert (
+        owner_after["directSessionId"]
+        == owner_before["directSessionId"]
+        == direct["id"]
+    )
+    assert (
+        load_chat_state(tmp_path)["active_conversation_id"]
+        == active_before
+        == direct["id"]
+    )
+    query = session_service.query_sessions(agent_id=direct["agentId"])
+    assert summary["id"] in {item["id"] for item in query["items"]}
+
+
+def test_create_inactive_user_chat_session_is_rejected(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    direct = session_service.create_chat_session(title="Owner direct session")
+
+    with pytest.raises(
+        session_service.SessionValidationError,
+        match="Non-activating sessions must use the hidden index kind",
+    ):
+        session_service.create_chat_session(
+            title="Inactive ordinary conversation",
+            agent_id=direct["agentId"],
+            conversation_index_kind=(
+                agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT
+            ),
+            activate=False,
+        )
+
+
+def test_create_inactive_personal_agent_session_requires_explicit_owner(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    with pytest.raises(
+        session_service.SessionValidationError,
+        match="explicit Agent-owned personal Agent kind",
+    ):
+        session_service.create_chat_session(
+            title="Unbound inactive personal session",
+            conversation_index_kind=(
+                agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+            ),
+            activate=False,
+        )
+
+
 def test_select_chat_session_lightweight_skips_full_detail_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="选中轻量")

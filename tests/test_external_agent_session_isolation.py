@@ -13,6 +13,11 @@ def test_external_task_session_is_hidden_and_does_not_change_active_conversation
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(developer_sandbox, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda _conversation: {"limit": 128000, "source": "test"},
+    )
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda _context: None)
     monkeypatch.setattr(
         session_service,

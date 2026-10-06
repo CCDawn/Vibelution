@@ -2,6 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SessionLlmModelOption, SessionLlmOptions, SessionModelSelection } from "../../api/types";
 import { FinancialResearchBridgeContext, useFinancialResearchSessionBridge } from "./FinancialResearchBridge";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -9,6 +10,7 @@ const change = vi.fn();
 const focus = vi.fn();
 const publish = vi.fn();
 const submit = vi.fn();
+const submitSelection = vi.fn();
 const submitted = vi.fn();
 let cleanup = async () => {};
 afterEach(async () => { await cleanup(); vi.clearAllMocks(); });
@@ -21,6 +23,40 @@ function Consumer({ sessionId = "research", agentId = "finance", composerValue, 
 }
 function value(sessionId = "research") {
   return { agentId: "finance", draftRequest: { id: 1, sessionId, text: "请核对财报证据" }, onSessionView: publish };
+}
+
+type NativeReadiness = { contextWindow: number; runtimeSelectable: boolean; providerHealthy: boolean };
+function modelOption(modelId: string, modelRef: string, reasoningEffortValues: string[], readiness: Partial<NativeReadiness> = {}): SessionLlmModelOption & NativeReadiness {
+  return {
+    modelId, modelRef, label: modelId, model: modelId, providerId: "provider", providerLabel: "Provider", providerKind: "openai",
+    apiKeyConfigured: true, missingApiKey: false, supportsReasoningEffort: true, reasoningEffortValues, reasoningEffortOptions: [],
+    defaultReasoningEffort: reasoningEffortValues[0] ?? "", isDefault: modelRef === "provider/default",
+    contextWindow: 1_000_000, runtimeSelectable: true, providerHealthy: true, ...readiness,
+  };
+}
+
+function ModelConsumer({ initialSelection, options, optionsLoading = false, optionsError = false, sessionId = "research", agentId = "finance" }: {
+  initialSelection: SessionModelSelection | null;
+  options?: SessionLlmOptions;
+  optionsLoading?: boolean;
+  optionsError?: boolean;
+  sessionId?: string;
+  agentId?: string;
+}) {
+  const [selection, setSelection] = React.useState(initialSelection);
+  const updateSelection = React.useCallback((_sessionId: string, next: SessionModelSelection | null) => setSelection(next), []);
+  const onSubmit = React.useCallback(() => submitSelection(selection), [selection]);
+  useFinancialResearchSessionBridge({
+    sessionId, agentId, title: "研究", status: "ready", busy: false, stopping: false,
+    onComposerChange: change, onFocusComposer: focus, composerValue: "请核对财报证据", onSubmit,
+    sessionLlmOptions: options, sessionLlmOptionsLoading: optionsLoading, sessionLlmOptionsError: optionsError,
+    turnModelSelection: selection, onTurnModelSelectionChange: updateSelection,
+  });
+  return <output data-testid="turn-model-selection">{JSON.stringify(selection)}</output>;
+}
+
+function financialLlmOptions(model: SessionLlmModelOption, alternate: SessionLlmModelOption): SessionLlmOptions {
+  return { sessionId: "research", currentModelId: model.modelRef, currentReasoningEffort: model.defaultReasoningEffort, model, choices: [model, alternate] };
 }
 function setup() {
   const node = document.createElement("div"); document.body.appendChild(node);
@@ -72,6 +108,164 @@ describe("financial native composer bridge", () => {
     await render(bridge.draftRequest.text);
     expect(submit).toHaveBeenCalledTimes(1);
     expect(submitted).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it("submits with the requested model effort for this turn, then restores the prior pin", async () => {
+    const root = setup();
+    const previous = { modelId: "provider/alternate", reasoningEffort: "xhigh" };
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium", "high", "xhigh"]),
+      modelOption("alternate", "provider/alternate", ["minimal", "low", "medium"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "basic" as const } };
+    await act(async () => root.render(
+      <React.StrictMode><FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={previous} options={options} />
+      </FinancialResearchBridgeContext.Provider></React.StrictMode>,
+    ));
+    expect(submitSelection).toHaveBeenCalledExactlyOnceWith({ modelId: "provider/alternate", reasoningEffort: "low" });
+    expect(document.querySelector('[data-testid="turn-model-selection"]')?.textContent).toBe(JSON.stringify(previous));
+  });
+
+  it("carries an explicit research model from the source view onto the target session", async () => {
+    const root = setup();
+    const requested = { modelId: "provider/alternate", reasoningEffort: "xhigh" };
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium", "high", "xhigh"]),
+      modelOption("alternate", "provider/alternate", ["minimal", "low", "medium"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "basic" as const, modelSelection: requested } };
+    await act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={null} options={options} />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    expect(submitSelection).toHaveBeenCalledExactlyOnceWith({ modelId: "provider/alternate", reasoningEffort: "low" });
+    expect(document.querySelector('[data-testid="turn-model-selection"]')?.textContent).toBe("null");
+  });
+
+  it("rejects an explicit research model that the target session cannot execute", async () => {
+    const root = setup();
+    const requested = { modelId: "provider/alternate" };
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium"]),
+      modelOption("alternate", "provider/alternate", ["low", "medium"], { contextWindow: 0 }),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "standard" as const, modelSelection: requested } };
+    await act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={null} options={options} />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    expect(submitSelection).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="turn-model-selection"]')?.textContent).toBe("null");
+  });
+
+  it("uses the selected model lowest effort when none is at or below the requested depth", async () => {
+    const root = setup();
+    const previous = { modelId: "provider/alternate", reasoningEffort: "high" };
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium", "high", "xhigh"]),
+      modelOption("alternate", "provider/alternate", ["low", "medium"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "brief" as const } };
+    await act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={previous} options={options} />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    expect(submitSelection).toHaveBeenCalledExactlyOnceWith({ modelId: "provider/alternate", reasoningEffort: "low" });
+    expect(document.querySelector('[data-testid="turn-model-selection"]')?.textContent).toBe(JSON.stringify(previous));
+  });
+
+  it("waits for model choices before submitting the requested effort", async () => {
+    const root = setup();
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium", "high", "xhigh"]),
+      modelOption("alternate", "provider/alternate", ["minimal", "low", "medium", "high"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "detailed" as const } };
+    const render = (optionsLoading: boolean) => act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={{ modelId: "provider/alternate" }} options={options} optionsLoading={optionsLoading} />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    await render(true);
+    expect(submitSelection).not.toHaveBeenCalled();
+    await render(false);
+    expect(submitSelection).toHaveBeenCalledExactlyOnceWith({ modelId: "provider/alternate", reasoningEffort: "high" });
+  });
+
+  it("does not submit when native model capabilities cannot load", async () => {
+    const root = setup();
+    const previous = { modelId: "provider/alternate", reasoningEffort: "high" };
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "brief" as const } };
+    await act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={previous} optionsError />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    expect(submitSelection).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="turn-model-selection"]')?.textContent).toBe(JSON.stringify(previous));
+  });
+
+  it("does not let a ready per-turn model bypass an invalid assistant default", async () => {
+    const root = setup();
+    const previous = { modelId: "provider/alternate", reasoningEffort: "medium" };
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium"], { contextWindow: 0 }),
+      modelOption("alternate", "provider/alternate", ["low", "medium"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "standard" as const } };
+    await act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={previous} options={options} />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    expect(submitSelection).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="turn-model-selection"]')?.textContent).toBe(JSON.stringify(previous));
+  });
+
+  it("waits for options belonging to the requested session and publishes native turn controls", async () => {
+    const root = setup();
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium"]),
+      modelOption("alternate", "provider/alternate", ["low", "medium"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "standard" as const } };
+    const render = (sessionOptions: SessionLlmOptions) => act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={null} options={sessionOptions} />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    await render({ ...options, sessionId: "stale-session" });
+    expect(submitSelection).not.toHaveBeenCalled();
+    await render(options);
+    expect(submitSelection).toHaveBeenCalledExactlyOnceWith({ modelId: "provider/default", reasoningEffort: "medium" });
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "research",
+      agentId: "finance",
+      sessionLlmOptions: options,
+      turnModelSelection: null,
+      onTurnModelSelectionChange: expect.any(Function),
+    }));
+  });
+
+  it("does not publish or submit model controls for another agent", async () => {
+    const root = setup();
+    const options = financialLlmOptions(
+      modelOption("default", "provider/default", ["minimal", "low", "medium"]),
+      modelOption("alternate", "provider/alternate", ["low", "medium"]),
+    );
+    const bridge = { ...value(), draftRequest: { ...value().draftRequest, submit: true, depth: "standard" as const } };
+    await act(async () => root.render(
+      <FinancialResearchBridgeContext.Provider value={bridge}>
+        <ModelConsumer initialSelection={null} options={options} agentId="ordinary" />
+      </FinancialResearchBridgeContext.Provider>,
+    ));
+    expect(submitSelection).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    expect(change).not.toHaveBeenCalled();
   });
 
   it("waits while native submission is busy, stopping or pending", async () => {

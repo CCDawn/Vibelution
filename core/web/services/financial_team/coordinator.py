@@ -23,6 +23,11 @@ MAX_RUNS_PER_TICK = 4
 MAX_TASK_IDS_SCANNED_PER_TICK = 64
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_RUN_TIMEOUT_SECONDS = 60 * 60
+MAX_SYNTHESIS_BUSY_RETRIES = 3
+SYNTHESIS_BUSY_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
+_SYNTHESIS_RETRY_COUNT_KEY = "financialTeamSynthesisBusyRetryCount"
+_SYNTHESIS_RETRY_AT_KEY = "financialTeamSynthesisRetryAtEpoch"
+_SYNTHESIS_RECOVERY_PENDING_KEY = "financialTeamSynthesisRecoveryPending"
 
 _PRIMARY_ROLES = ("market", "fundamental", "news")
 _DEBATE_ROLES = ("bull", "bear")
@@ -68,6 +73,10 @@ class FinancialTeamCoordinator:
         max_runs_per_tick: int = MAX_RUNS_PER_TICK,
         max_task_ids_scanned_per_tick: int = MAX_TASK_IDS_SCANNED_PER_TICK,
         monotonic: Callable[[], float] = time.monotonic,
+        epoch_time: Callable[[], float] = time.time,
+        synthesis_busy_retry_is_safe: Callable[[str, str], bool] | None = None,
+        synthesis_recovery_validator: Callable[..., None] | None = None,
+        synthesis_recovery_starter: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self._store = store or runtime_task_registry.default_store()
         self._run_loader = run_loader or runs.get_financial_team_run
@@ -90,6 +99,19 @@ class FinancialTeamCoordinator:
             min(int(max_task_ids_scanned_per_tick), 256),
         )
         self._monotonic = monotonic
+        self._epoch_time = epoch_time
+        self._synthesis_busy_retry_is_safe = (
+            synthesis_busy_retry_is_safe
+            or runs.financial_team_synthesis_busy_retry_is_safe
+        )
+        self._synthesis_recovery_validator = (
+            synthesis_recovery_validator
+            or runs.require_financial_team_synthesis_recovery_ready
+        )
+        self._synthesis_recovery_starter = (
+            synthesis_recovery_starter
+            or runs.begin_financial_team_synthesis_recovery
+        )
         self._scan_cursor = 0
         self._lock = threading.Lock()
 
@@ -126,6 +148,8 @@ class FinancialTeamCoordinator:
             if existing and runtime_task_registry.is_terminal_status(
                 str(existing.get("status") or "")
             ):
+                if existing.get(_SYNTHESIS_RECOVERY_PENDING_KEY):
+                    return False
                 task_status = str(existing.get("status") or "")
                 terminal = "completed" if task_status == "completed" else "blocked"
                 error = (
@@ -228,6 +252,8 @@ class FinancialTeamCoordinator:
         if str(state.get("stopInitiator") or "") in runtime_task_registry.STOP_INITIATORS:
             self._block(state, "后台协作已停止；系统不会自动重新提交。")
             return
+        if self._synthesis_retry_is_deferred(state):
+            return
         if self._is_timed_out(state):
             self._block(state, "等待原生分析 Turn 超时，已停止自动推进；不会自动重发。")
             return
@@ -320,6 +346,15 @@ class FinancialTeamCoordinator:
                 return
             try:
                 self._submit_synthesis(assistant_agent_id, run_id)
+            except runs.session_service.SessionBusyError:
+                if not self._synthesis_busy_retry_is_safe(assistant_agent_id, run_id):
+                    self._block(
+                        state,
+                        "汇总提交状态无法确认，已停止自动推进；系统不会自动重发。",
+                    )
+                    return
+                self._defer_synthesis_after_busy(state)
+                return
             except Exception:  # noqa: BLE001 - accepted/unknown never auto-retried
                 self._block(
                     state,
@@ -416,6 +451,164 @@ class FinancialTeamCoordinator:
         if str(latest.get("stopInitiator") or "") in runtime_task_registry.STOP_INITIATORS:
             self._block(latest, "后台协作已停止；系统不会自动重新提交。")
             return True
+        return False
+
+    def _synthesis_retry_is_deferred(self, state: dict[str, Any]) -> bool:
+        try:
+            retry_at = float(state.get(_SYNTHESIS_RETRY_AT_KEY) or 0)
+        except (TypeError, ValueError):
+            return False
+        return retry_at > self._epoch_time()
+
+    def _defer_synthesis_after_busy(self, state: dict[str, Any]) -> None:
+        task_id = str(state.get("taskId") or "").strip()
+        try:
+            retry_count = max(0, int(state.get(_SYNTHESIS_RETRY_COUNT_KEY) or 0))
+        except (TypeError, ValueError):
+            retry_count = MAX_SYNTHESIS_BUSY_RETRIES
+        if retry_count >= MAX_SYNTHESIS_BUSY_RETRIES:
+            self._block(
+                state,
+                "汇总会话持续繁忙，有限自动重试已结束；可核验后恢复本轮汇总。",
+            )
+            return
+        delay = SYNTHESIS_BUSY_RETRY_BACKOFF_SECONDS[retry_count]
+        if not task_id:
+            self._block(state, "无法保留汇总重试状态，已停止自动重发。")
+            return
+        updated = self._store.update_task(
+            task_id,
+            lambda snapshot: {
+                **snapshot,
+                _SYNTHESIS_RETRY_COUNT_KEY: retry_count + 1,
+                _SYNTHESIS_RETRY_AT_KEY: self._epoch_time() + delay,
+                "resultSummary": "汇总会话繁忙，等待后进行有限重试。",
+            },
+        )
+        if not updated:
+            self._block(state, "无法保留汇总重试状态，已停止自动重发。")
+
+    def synthesis_recovery_status(
+        self, assistant_agent_id: str, run_id: str
+    ) -> dict[str, Any]:
+        """Expose recovery only when every safety precondition is currently true."""
+
+        task_id = coordination_task_id(run_id)
+        try:
+            run = self._run_loader(assistant_agent_id, run_id)
+            state = self._store.load_state(task_id)
+            if (
+                not state
+                or str(state.get("coordinationOwner") or "") != TASK_OWNER
+                or str(state.get("financialTeamAssistantAgentId") or "")
+                != assistant_agent_id
+                or str(state.get("financialTeamRunId") or "") != run_id
+                or str(state.get("status") or "") != "blocked"
+            ):
+                return {"available": False, "reason": "本轮后台协作没有可恢复的阻断记录。"}
+            if str(state.get("stopInitiator") or "") in runtime_task_registry.STOP_INITIATORS:
+                return {"available": False, "reason": "本轮已按停止请求结束，不能恢复。"}
+            if self._has_active_task_for_run(assistant_agent_id, run_id):
+                return {"available": False, "reason": "本轮后台协作仍在运行。"}
+
+            run_status = str(run.get("coordinationStatus") or "")
+            pending = bool(state.get(_SYNTHESIS_RECOVERY_PENDING_KEY))
+            if run_status == "blocked":
+                allow_waiting = False
+            elif run_status == "waiting" and pending:
+                allow_waiting = True
+            else:
+                return {"available": False, "reason": "本轮协作状态不支持恢复汇总。"}
+            self._synthesis_recovery_validator(
+                assistant_agent_id,
+                run_id,
+                allow_waiting=allow_waiting,
+            )
+            return {"available": True, "reason": ""}
+        except Exception as exc:  # noqa: BLE001 - status checks must fail closed
+            return {"available": False, "reason": str(exc)[:MAX_COORDINATION_ERROR_CHARS]}
+
+    def recover_blocked_synthesis(
+        self, assistant_agent_id: str, run_id: str
+    ) -> dict[str, Any]:
+        """Explicitly re-arm a blocked coordinator after the run passes live checks."""
+
+        task_id = coordination_task_id(run_id)
+        run_path = runs._run_path(assistant_agent_id, run_id)
+        with runs._LOCK, runs._run_lock(run_path):
+            status = self.synthesis_recovery_status(assistant_agent_id, run_id)
+            if not status.get("available"):
+                raise runs.FinancialTeamRunNotReadyError(
+                    str(status.get("reason") or "本轮汇总暂不可恢复")
+                )
+            state = self._store.load_state(task_id)
+            if not state or str(state.get("status") or "") != "blocked":
+                raise runs.FinancialTeamRunNotReadyError("本轮后台协作状态已变化，请刷新后重试")
+
+            pending = bool(state.get(_SYNTHESIS_RECOVERY_PENDING_KEY))
+            if not pending:
+                marked = self._store.update_task(
+                    task_id,
+                    lambda snapshot: {
+                        **snapshot,
+                        _SYNTHESIS_RECOVERY_PENDING_KEY: True,
+                    },
+                )
+                if not marked:
+                    raise runs.FinancialTeamRunNotReadyError("无法安全登记本轮汇总恢复")
+
+            run = self._run_loader(assistant_agent_id, run_id)
+            allow_waiting = (
+                pending
+                and str(run.get("coordinationStatus") or "") == "waiting"
+            )
+            recovered = self._synthesis_recovery_starter(
+                assistant_agent_id,
+                run_id,
+                allow_waiting=allow_waiting,
+            )
+
+            def _reactivate(snapshot: dict[str, Any]) -> dict[str, Any]:
+                if (
+                    str(snapshot.get("status") or "") != "blocked"
+                    or not snapshot.get(_SYNTHESIS_RECOVERY_PENDING_KEY)
+                    or str(snapshot.get("stopInitiator") or "")
+                    in runtime_task_registry.STOP_INITIATORS
+                ):
+                    return snapshot
+                snapshot.update(
+                    {
+                        "status": "running",
+                        "completedAt": "",
+                        "terminalReason": "",
+                        "resultSummary": "",
+                        "stopInitiator": None,
+                        _SYNTHESIS_RECOVERY_PENDING_KEY: False,
+                        _SYNTHESIS_RETRY_COUNT_KEY: 0,
+                        _SYNTHESIS_RETRY_AT_KEY: 0,
+                    }
+                )
+                return snapshot
+
+            reactivated = self._store.update_task(task_id, _reactivate)
+            if (
+                not reactivated
+                or str(reactivated.get("status") or "") != "running"
+                or bool(reactivated.get(_SYNTHESIS_RECOVERY_PENDING_KEY))
+            ):
+                raise runs.FinancialTeamRunNotReadyError("无法安全恢复本轮后台协作")
+            return recovered
+
+    def _has_active_task_for_run(self, assistant_agent_id: str, run_id: str) -> bool:
+        for active_task_id in self._store.active_task_ids():
+            active = self._store.load_state(active_task_id)
+            if (
+                str(active.get("coordinationOwner") or "") == TASK_OWNER
+                and str(active.get("financialTeamAssistantAgentId") or "")
+                == assistant_agent_id
+                and str(active.get("financialTeamRunId") or "") == run_id
+            ):
+                return True
         return False
 
     def _block(self, state: dict[str, Any], error: str) -> None:

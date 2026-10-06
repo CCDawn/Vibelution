@@ -5,7 +5,13 @@ import pytest
 
 from core.infrastructure.tool_result import DEFAULT_MAX_CHARS, infer_tool_business_success
 from core.web.services import financial_market_service as market
-from tools.financial_market_tools import MAX_RESULT_CHARS, financial_market_snapshot_tool
+from core.web.services import financial_research_service as research
+from tools.financial_market_tools import (
+    MAX_RESULT_CHARS,
+    MAX_SCREEN_RESULT_CHARS,
+    financial_market_screen_tool,
+    financial_market_snapshot_tool,
+)
 
 
 def quote(symbol="sz000001"):
@@ -255,3 +261,113 @@ def test_result_budget_trims_oldest_candles_and_keeps_newest_with_valid_json(mon
 
 def test_adapter_budget_is_below_native_tool_result_limit():
     assert MAX_RESULT_CHARS <= DEFAULT_MAX_CHARS
+    assert MAX_SCREEN_RESULT_CHARS <= DEFAULT_MAX_CHARS
+
+
+def test_market_screen_tool_passes_filters_and_preserves_source_coverage(monkeypatch):
+    calls = []
+    screen = {
+        "source": "新浪财经",
+        "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
+        "fetchedAt": "2026-10-05T07:00:00+00:00",
+        "dataDate": None,
+        "dataTime": "15:00:00",
+        "resultScope": "loaded_subset",
+        "coverage": {
+            "providerTotal": 6000,
+            "loaded": 5920,
+            "complete": False,
+            "failedPages": [2],
+            "invalidRows": 0,
+            "duplicateRows": 0,
+            "totalFiltered": 1,
+        },
+        "items": [{
+            "symbol": "sh600519",
+            "ticker": "600519",
+            "name": "贵州茅台",
+            "market": "上交所",
+            "price": 1600.0,
+            "changePercent": 1.2,
+            "peRatio": 25.0,
+            "pbRatio": 8.0,
+            "volumeLots": 1234,
+            "turnoverYuan": 1900000000.0,
+            "timeOfDay": "15:00:00",
+            "totalMarketCapYuan": None,
+        }],
+    }
+
+    def screen_stocks(**kwargs):
+        calls.append(kwargs)
+        return screen
+
+    monkeypatch.setattr(research, "screen_stocks", screen_stocks)
+    raw = financial_market_screen_tool(
+        min_price=100,
+        max_change_percent=8,
+        min_pe=5,
+        max_pb=10,
+        min_turnover_yuan=1_000_000,
+        sort_by="turnoverYuan",
+        direction="asc",
+        limit=2,
+    )
+    result = json.loads(raw)
+
+    assert calls == [{
+        "min_price": 100,
+        "max_price": None,
+        "min_change_percent": None,
+        "max_change_percent": 8,
+        "min_pe": 5,
+        "max_pe": None,
+        "min_volume_lots": None,
+        "min_pb": None,
+        "max_pb": 10,
+        "min_turnover_yuan": 1_000_000,
+        "max_turnover_yuan": None,
+        "sort_by": "turnoverYuan",
+        "direction": "asc",
+        "page": 1,
+        "page_size": 2,
+    }]
+    assert len(raw) <= MAX_SCREEN_RESULT_CHARS
+    assert result["ok"] is True and result["status"] == "partial"
+    assert result["resultScope"] == "loaded_subset"
+    assert result["coverage"]["failedPages"] == [2]
+    assert result["requestedFilters"] == {
+        "min_price": 100,
+        "max_change_percent": 8,
+        "min_pe": 5,
+        "max_pb": 10,
+        "min_turnover_yuan": 1_000_000,
+    }
+    assert result["source"] == "新浪财经"
+    assert result["fetchedAt"] != result["dataTime"]
+    assert result["dataDate"] is None
+    assert result["items"][0]["symbol"] == "sh600519"
+    assert "totalMarketCapYuan" not in result["items"][0]
+    assert "交易日期" in result["notice"]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"min_price": float("nan")},
+        {"min_volume_lots": True},
+        {"min_turnover_yuan": -1},
+        {"min_price": 20, "max_price": 10},
+        {"limit": 21},
+        {"sort_by": "marketCap"},
+    ],
+)
+def test_market_screen_tool_rejects_invalid_criteria_before_provider_call(kwargs, monkeypatch):
+    calls = []
+    monkeypatch.setattr(research, "screen_stocks", lambda **values: calls.append(values) or {})
+
+    result = json.loads(financial_market_screen_tool(**kwargs))
+
+    assert result["ok"] is False
+    assert result["status"] == "invalid_request"
+    assert calls == []

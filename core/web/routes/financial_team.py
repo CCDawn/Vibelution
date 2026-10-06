@@ -42,6 +42,21 @@ class FinancialTeamRunRefResponse(BaseModel):
     turnId: str
 
 
+class FinancialTeamRoleExecutionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requestedReasoningEffort: str | None = None
+    resolvedReasoningEffort: str | None = None
+    status: Literal["applied", "adjusted", "default", "unknown"]
+
+
+class FinancialTeamExecutionPolicyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requestedDepth: Literal["brief", "basic", "standard", "detailed", "exhaustive"] | None = None
+    requestedReasoningEffort: str | None = None
+    roles: dict[str, FinancialTeamRoleExecutionResponse] = Field(default_factory=dict)
+    synthesis: FinancialTeamRoleExecutionResponse | None = None
+
+
 class FinancialTeamRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schemaVersion: int
@@ -49,9 +64,11 @@ class FinancialTeamRunResponse(BaseModel):
     assistantAgentId: str
     teamId: str
     symbol: str
+    marketCode: Literal["CN", "HK", "US"] | None = None
     periodDays: int
     researchDate: str | None = None
     depth: Literal["brief", "basic", "standard", "detailed", "exhaustive"] | None = None
+    executionPolicy: FinancialTeamExecutionPolicyResponse | None = None
     createdAt: str
     stage: Literal["research", "debate", "synthesis"]
     analysts: dict[str, FinancialTeamRunRefResponse]
@@ -64,6 +81,12 @@ class FinancialTeamRunListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     assistantAgentId: str
     runs: list[FinancialTeamRunResponse]
+
+
+class FinancialTeamSynthesisRecoveryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    available: bool
+    reason: str = ""
 
 
 class FinancialTeamRunCreateRequest(BaseModel):
@@ -98,6 +121,7 @@ def _http_error(exc: Exception) -> HTTPException:
             service.FinancialTeamRunConflictError,
             service.FinancialTeamRunNotReadyError,
             session_service.SessionValidationError,
+            session_service.SessionModelSelectionError,
             session_service.SessionBusyError,
         ),
     ):
@@ -178,6 +202,26 @@ def financial_team_run_create(
 def financial_team_run_get(assistant_agent_id: str, run_id: str) -> dict:
     try:
         return service.get_financial_team_run(assistant_agent_id, run_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get(
+    "/financial-team/{assistant_agent_id}/runs/{run_id}/synthesis/recovery",
+    response_model=FinancialTeamSynthesisRecoveryResponse,
+)
+def financial_team_synthesis_recovery_status(assistant_agent_id: str, run_id: str) -> dict:
+    return service.financial_team_synthesis_recovery_status(assistant_agent_id, run_id)
+
+
+@router.post(
+    "/financial-team/{assistant_agent_id}/runs/{run_id}/synthesis/recovery",
+    response_model=FinancialTeamRunResponse,
+    response_model_exclude_unset=True,
+)
+def financial_team_synthesis_recovery(assistant_agent_id: str, run_id: str) -> dict:
+    try:
+        return service.recover_financial_team_synthesis(assistant_agent_id, run_id)
     except Exception as exc:
         raise _http_error(exc) from exc
 

@@ -19,6 +19,8 @@ Report search uses native `querySessions(q)` over titles and bodies. Outcome fil
 
 `FinanceAnalystTeam` uses five separate native Agents: market, fundamentals, news, bull and bear. Three primary reports feed two opposing reviews, then the financial owner synthesizes. Runs store only Session/Turn/submission references and stage metadata; answers remain in native Sessions. Roles derive narrow authorized tools/model from the owner. Identity, permission and Session ownership drift fail closed. Stops target the exact Turn. Unknown acceptance is read back before retry. Analyst links explicitly use native chat rather than bypassing the financial binding guard.
 
+Each new run has an independent Native synthesis Session owned by the financial assistant. Nonactivating personal-Agent creation preserves both the active conversation and the owner's direct pointer while exposing the result through native history and report catalogs. Legacy direct-session runs remain readable. Explicit recovery resumes only a confirmed unsubmitted synthesis request after all five analyst results are complete; unknown acceptance and user stops never auto-resubmit.
+
 After explicit primary submissions are accepted, a finance-scoped coordinator reuses the native RuntimeTaskStore and managed web startup jobs to advance debate and synthesis while the page is closed. Startup recovers accepted runs without sending their known Turns again. Waiting/running status polls the persisted run projection; completed requires the exact synthesis final answer, and blocked surfaces the reason without automatic resubmission. Legacy runs without coordination status retain the existing client orchestration. GET does not create or start a run.
 
 The team inspector follows the selected run rather than the assistant Session's historical title. It displays saved submission references and coordinator state; completion also requires all analyst and synthesis Turn references. Cards adapt to the actual desktop center-pane width with a single grid template, so later route utility chunks cannot override responsive column variants.
@@ -27,11 +29,23 @@ The team inspector follows the selected run rather than the assistant Session's 
 
 ## Public market data
 
-The existing Tencent adapter owns A-share quotes and adjusted day/week/month candles. Provider, quote/fetch times, yuan/lot units and missing values stay explicit. MA5/20, BOLL(20,2), MACD(12,26,9) and Wilder RSI(14) calculate on all loaded candles before slicing; missing warm-up values are never generated.
+The existing Tencent adapter owns CN/HK/US identities, quotes and day/week/month candles. A-share candles are adjusted; international candles stay raw. Provider, quote/fetch times, market currency, share/lot units and missing values stay explicit. Mixed-currency lists never sort prices or amounts as comparable values. MA5/20, BOLL(20,2), MACD(12,26,9) and Wilder RSI(14) calculate on all loaded candles before slicing; missing warm-up values are never generated.
 
 `financialResearch` owns bounded batch quotes, provider screening, news, announcements and fundamentals. The Sina universe is provider coverage, not complete exchange coverage. Partial pages/deadlines stay visible. Unknown market-cap units remain null; unavailable filters are omitted. A source time without a date is not a fabricated data date. Cache hits preserve source fetch time. Natural-language screening prepares real native research, not an AI result before model execution.
 
-Public fundamentals are source snapshots, not verified PDF evidence. `FinanceReportLibrary` uses shared knowledge APIs with exact Agent/library identity and active owned sources. Intake/deletion stay in the existing knowledge workspace. Untrusted source text is plain data; external links use validated HTTP/HTTPS URLs.
+Public fundamentals are source snapshots, not verified PDF evidence. Each news, disclosure and fundamentals facet reports its own source, period, currency and failure state. `FinanceReportLibrary` uses shared knowledge APIs with exact Agent/library identity and active owned sources. Intake/deletion stay in the existing knowledge workspace. Untrusted source text is plain data; external links use validated HTTP/HTTPS URLs.
+
+## Desktop collections
+
+Research model options are published only for the matching finance Agent and Session. The current assistant default and any selected per-turn model must have a positive context window, healthy provider, credentials and runtime availability. A new research Session revalidates the selected model and maps depth onto its supported reasoning levels; unknown capability blocks automatic submission with an assistant-settings link. Screening requests state the filters directly instead of using an industry-topic template.
+
+The overview reuses watch quotes, native research records, batches and schedules. Screening combines native natural-language research with bounded A-share price, change, PE, PB, volume and turnover filters; provider coverage is explicit. Screen presets remain local to the Agent/browser.
+
+`financialPreferences/workspace.py` owns private revision-checked workspace settings: stock identities, watch tags/notes, research profiles, manual holdings and review-case references. Browser settings are migrated once. Local writes serialize and rebase one revision conflict; unrelated sections survive concurrent updates. Saved profiles supply scope, depth, report period and stock/industry instructions. Manual holdings use explicit recorded cost and market currency, with per-currency totals and missing-quote coverage; they do not submit orders.
+
+`FinanceReportsCenter` reads exact successful research Turns from the native journal. Catalog paging retains Native directory cursors with a bounded session scan and orders by session activity. Filters include ticker/title/preview, market, date and report kind. Single exports and bounded ZIP exports validate every target independently. Review cases store only owned Session/Turn references and user notes. Deleted sessions invalidate cached reports; archived cases remain readable through the existing native archive service.
+
+Confirmed native tombstones or exact-report 404 responses disable missing-case exports and original-session actions while preserving editable notes. Network and permission failures remain retryable errors. Public facets provide an explicit refresh action. Known US provider exchange suffixes are normalized against the canonical symbol before persisting identities; class-share tickers such as `BRK.B` remain intact.
 
 ## Paper account and portfolio
 
@@ -49,13 +63,13 @@ Skills come from the installed native library and use slash commands. Native sub
 
 ## Scope and verification
 
-The surface targets desktop A-share community research. Broker trading and Pro strategy automation remain outside the implementation. ETF, Hong Kong and US support is not implied by the reference name.
+The surface targets desktop CN/HK/US community research. Provider-wide screening and the virtual trading ledger remain A-share only. Broker trading and Pro strategy automation remain outside the implementation. ETF support is not implied by the reference name.
 
-`FinanceTaskCenter` keeps native research records and adds batch research and schedules. A batch accepts at most ten unique Shanghai/Shenzhen stock codes, uses the existing five-analyst team and queues stocks in sequence. Each item opens its exact run even outside recent history; loading or failed reads never substitute a newer result. Stops target only the batch's accepted native Turns and prevent later items; retries preserve completed items. Unknown submission acceptance and ownership drift require attention rather than an automatic repeat.
+`FinanceTaskCenter` keeps native research records and adds batch research and schedules. A batch accepts at most ten unique canonical CN/HK/US stock symbols, uses the existing five-analyst team and queues stocks in sequence. Each item opens its exact run even outside recent history; loading or failed reads never substitute a newer result. Stops target only the batch's accepted native Turns and prevent later items; retries preserve completed items. Unknown submission acceptance and ownership drift require attention rather than an automatic repeat.
 
 `financialJobs` stores bounded schedule configuration and occurrence references; native RuntimeTaskStore holds batch execution, and native Session Journal remains the only answer authority. The lifespan-owned scheduler resumes on startup after route mounting. Read endpoints never provision teams or dispatch work. Explicit creation may set up the existing team. Schedules use Asia/Shanghai and support once, daily and Monday-Friday, including market holidays. The app must be running. Pausing affects future occurrences, while stopping is a separate batch action.
 
-`financialReports` exports a selected completed native Turn after checking Agent/Session ownership and its exact terminal evidence. Markdown, JSON and DOCX are downloaded; print/PDF opens bounded isolated print HTML and the user chooses Save as PDF. It creates no second transcript or report body store, and never promotes stopped, thinking or unknown results to a report. DOCX uses stdlib OOXML; print content has no scripts or remote resources.
+`financialReports` exports a selected completed native Turn after checking Agent/Session ownership and its exact terminal evidence. Markdown, JSON and DOCX are downloaded; print/PDF renders bounded script-free HTML in a sandboxed iframe inside the current document without a popup, then lets the user choose Save as PDF from the browser or desktop print UI. It creates no second transcript or report body store, and never promotes stopped, thinking or unknown results to a report. DOCX uses stdlib OOXML; print content has no scripts or remote resources.
 
 Verification uses domain/native lifecycle tests, VUI/API contracts, TypeScript/production build and isolated Launcher/browser acceptance with confirmed instance/code identity. Provider HTTP success does not prove exchange-grade realtime data; model configuration does not prove successful research.
 

@@ -176,6 +176,41 @@ def test_only_exact_owned_completed_research_turn_can_export(report_env, monkeyp
     assert synthesis_export["fileName"] == "stock-research-2026-10-06-600000.md"
 
 
+def test_finance_screen_prompt_exports_the_requested_completed_turn(report_env):
+    request = (
+        "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-10-06。"
+        "按条件筛选股票，列出候选、筛选依据和数据限制。\n\n"
+        "用户选股条件：PE低于20，PB低于3，成交额高于10亿元\n\n"
+        "请调用 financial_market_screen_tool 获取真实候选，不得虚构或补齐股票数据。\n\n"
+        "回答需列出行情来源、抓取时间、已加载数量/行情池总数、覆盖是否完整和符合条件数量；"
+        "覆盖不完整时明确结果仅基于已加载范围。\n\n"
+        "若工具不支持某项条件或调用失败，说明具体缺项，不要用猜测替代。"
+    )
+    older_turn = _turn(request=request, answer="较早筛选结论", turn_id="older-screen")
+    requested_turn = _turn(request=request, answer="目标Turn筛选结论", turn_id="turn-1")
+    report_env[:] = older_turn + requested_turn
+
+    assert _export("markdown")["content"] == "目标Turn筛选结论"
+
+
+@pytest.mark.parametrize("prompt_text", [
+    "请筛选 PE 低于20、PB低于3、成交额高于10亿元的股票",
+    "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-02-30。按条件筛选股票，列出候选、筛选依据和数据限制。\n\n用户选股条件：PE低于20",
+])
+def test_noncanonical_screening_requests_are_not_classified_as_research_reports(report_env, prompt_text):
+    report_env[:] = _turn(request=prompt_text)
+
+    with pytest.raises(service.FinancialReportUnavailable, match="不是研究报告"):
+        _export("markdown")
+
+
+@pytest.mark.parametrize("symbol,suffix", [("hk00700", "00700"), ("usAAPL", "AAPL"), ("usBRK.B", "BRK.B")])
+def test_international_synthesis_exports_keep_the_canonical_stock_code(report_env, symbol, suffix):
+    request = f"你是主助手的股票研究汇总角色。请综合股票 {symbol} 的多分析师研究。研究日期：2026-10-06；观察周期：近30天；研究深度：标准。"
+    report_env[:] = _turn(request=request)
+    assert _export("markdown")["fileName"] == f"stock-research-2026-10-06-{suffix}.md"
+
+
 def test_topic_exports_use_distinct_hash_suffixes_for_shared_turn_prefix(report_env):
     request = "请对以下主题开展投资研究：银行股估值；分析截至2026-10-06。"
     turn_ids = ("session2-turn-a", "session2-turn-b")

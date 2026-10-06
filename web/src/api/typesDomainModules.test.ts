@@ -26,6 +26,14 @@ const expectedBarrel = [
   'export * from "./types/hypothesisFirst";',
   'export * from "./types/virtualHumanLife";',
   'export * from "./types/teamBundles";',
+  'export * from "./types/financialMarket";',
+  'export * from "./types/financialResearch";',
+  'export * from "./types/financialPaper";',
+  'export * from "./types/financialPreferences";',
+  'export * from "./types/financialTeam";',
+  'export * from "./types/financialPortfolio";',
+  'export * from "./types/financialJobs";',
+  'export * from "./types/financialReports";',
 ].join("\n");
 
 const domainSources = [

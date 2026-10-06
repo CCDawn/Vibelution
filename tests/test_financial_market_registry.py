@@ -21,6 +21,7 @@ from tools import financial_market_tools as market_tools
 
 finance_env = _finance_env
 NAME = "financial_market_snapshot_tool"
+SCREEN_NAME = "financial_market_screen_tool"
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -29,6 +30,14 @@ def registered_tool():
         "tool": tool,
         "Annotated": Annotated, "Literal": Literal, "Field": Field,
         "_financial_market_snapshot_impl": market_tools.financial_market_snapshot_tool,
+    })
+
+
+def registered_screen_tool():
+    return definition("tools/Key_Tools.py", SCREEN_NAME, {
+        "tool": tool,
+        "Annotated": Annotated, "Literal": Literal, "Field": Field,
+        "_financial_market_screen_impl": market_tools.financial_market_screen_tool,
     })
 
 
@@ -63,6 +72,73 @@ def test_market_tool_is_explicit_read_only_network_access_without_model_cost():
     assert NAME in tool_catalog.explicit_allow_tool_names()
     assert "read_only" in descriptor.capabilities
     assert "model_cost" not in tool_catalog.risk_tags_for_tool(NAME)
+
+
+def test_market_screen_wrapper_schema_dispatch_and_unique_registration(monkeypatch):
+    wrapper = registered_screen_tool()
+    schema = wrapper.args_schema.model_json_schema()
+    assert set(schema["properties"]) == {
+        "min_price", "max_price", "min_change_percent", "max_change_percent",
+        "min_pe", "max_pe", "min_volume_lots", "min_pb", "max_pb",
+        "min_turnover_yuan", "max_turnover_yuan", "sort_by", "direction", "limit",
+    }
+    assert schema.get("required", []) == []
+    assert schema["properties"]["limit"]["default"] == 15
+    assert schema["properties"]["limit"]["minimum"] == 1
+    assert schema["properties"]["limit"]["maximum"] == 20
+    calls = []
+    monkeypatch.setattr(market_tools.research, "screen_stocks", lambda **kwargs: calls.append(kwargs) or {
+        "source": "新浪财经", "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
+        "fetchedAt": "2026-10-05T07:00:00+00:00", "dataDate": None, "dataTime": "15:00:00",
+        "coverage": {"providerTotal": 10, "loaded": 10, "complete": True, "failedPages": [],
+                     "invalidRows": 0, "duplicateRows": 0, "totalFiltered": 1},
+        "items": [{"symbol": "sh600519", "ticker": "600519", "name": "贵州茅台", "market": "上交所",
+                   "price": 1600.0, "changePercent": 1.0, "peRatio": 20.0, "pbRatio": 8.0,
+                   "volumeLots": 1000, "turnoverYuan": 1_000_000.0, "timeOfDay": "15:00:00"}],
+    })
+
+    result = json.loads(wrapper.invoke({
+        "min_price": 100,
+        "max_change_percent": 5,
+        "min_turnover_yuan": 1000000,
+        "sort_by": "turnoverYuan",
+        "direction": "asc",
+        "limit": 5,
+    }))
+
+    assert calls == [{
+        "min_price": 100, "max_price": None, "min_change_percent": None,
+        "max_change_percent": 5, "min_pe": None, "max_pe": None,
+        "min_volume_lots": None, "min_pb": None, "max_pb": None,
+        "min_turnover_yuan": 1000000, "max_turnover_yuan": None,
+        "sort_by": "turnoverYuan", "direction": "asc", "page": 1, "page_size": 5,
+    }]
+    assert result["items"][0]["symbol"] == "sh600519"
+    assert result["coverage"]["complete"] is True
+    for invalid in ({"limit": 21}, {"min_price": -1}, {"max_pe": 100001}):
+        with pytest.raises(ValidationError):
+            wrapper.invoke(invalid)
+    source = ast.parse((ROOT / "tools/Key_Tools.py").read_text(encoding="utf-8-sig"))
+    builder = next(item for item in source.body if isinstance(item, ast.FunctionDef) and item.name == "_build_key_tools")
+    assert sum(isinstance(item, ast.Name) and item.id == SCREEN_NAME for item in builder.body[-1].value.elts) == 1
+
+
+def test_market_screen_tool_is_explicit_read_only_network_access_without_model_cost():
+    descriptor = tool_catalog.build_tool_descriptor(
+        SCREEN_NAME, args_schema=registered_screen_tool().args_schema.model_json_schema()
+    )
+    assert descriptor.risk == "network" and descriptor.scopes == ("network",)
+    assert descriptor.approval == "on_request"
+    assert SCREEN_NAME in tool_catalog.explicit_allow_tool_names()
+    assert "read_only" in descriptor.capabilities
+    assert "stock_screening" in descriptor.capabilities
+    assert "model_cost" not in tool_catalog.risk_tags_for_tool(SCREEN_NAME)
+    financial_bundle = next(
+        bundle for bundle in tool_catalog.list_tool_bundles()
+        if bundle["bundleId"] == "financial_reports"
+    )
+    assert SCREEN_NAME in financial_bundle["toolNames"]
+    assert SCREEN_NAME in financial_bundle["preferredToolNames"]
 
 
 @pytest.mark.parametrize("assigned,network,blocked,grant,expected", [
@@ -126,3 +202,23 @@ def test_actual_executor_emits_failure_for_unavailable_quotes(finance_env, monke
     assert json.loads(raw)["ok"] is False
     assert events[-1][0] == EventNames.TOOL_ERROR
     assert events[-1][1]["semanticStatus"] == "failed"
+
+
+def test_actual_native_executor_runs_screen_only_after_finance_tool_authorization(finance_env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(market_tools.research, "screen_stocks", lambda **kwargs: calls.append(kwargs) or {
+        "source": "新浪财经", "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
+        "fetchedAt": "2026-10-05T07:00:00+00:00", "dataDate": None, "dataTime": None,
+        "coverage": {"providerTotal": 10, "loaded": 10, "complete": True, "failedPages": [],
+                     "invalidRows": 0, "duplicateRows": 0, "totalFiltered": 0},
+        "items": [],
+    })
+    with authorized_agent_tool_executor(finance_env["owner"], executable_tools=(SCREEN_NAME,)) as execute:
+        raw, _ = execute(SCREEN_NAME, {"min_price": 1, "limit": 3})
+    result = json.loads(raw)
+    assert result["ok"] is True and result["status"] == "complete"
+    assert calls and calls[0]["min_price"] == 1 and calls[0]["page_size"] == 3
+    with authorized_agent_tool_executor(finance_env["owner"], executable_tools=()) as execute:
+        blocked, _ = execute(SCREEN_NAME, {"min_price": 1})
+    assert len(calls) == 1
+    assert "未被本回合授权" in str(blocked) or "未授权" in str(blocked) or "blocked" in str(blocked).lower()

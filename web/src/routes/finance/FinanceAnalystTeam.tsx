@@ -6,15 +6,18 @@ import {
   createFinancialTeamRun,
   fetchFinancialTeam,
   fetchFinancialTeamRun,
+  fetchFinancialTeamSynthesisRecoveryStatus,
   fetchFinancialTeamRuns,
   financialTeamKeys,
   isFetchJsonHttpError,
   provisionFinancialTeam,
   recordFinancialTeamTurn,
+  recoverFinancialTeamSynthesis,
   submitFinancialTeamPrimaryRole,
   submitFinancialTeamDebate,
   submitFinancialTeamSynthesis,
   type FinancialTeamRole,
+  type FinancialTeamRoleExecution,
   type FinancialTeamRun,
   type FinancialTeamRunList,
 } from "../../api/financialTeam";
@@ -165,6 +168,45 @@ function statusTone(state: RoleState): "neutral" | "success" | "warning" | "acce
   return "neutral";
 }
 
+function executionPolicySummary(run: FinancialTeamRun, zh: boolean): { compact: string; detail: string } | null {
+  const policy = run.executionPolicy;
+  if (!policy) return null;
+  const roleRows: { role: FinancialTeamRole | "synthesis"; execution: FinancialTeamRoleExecution }[] = [
+    ...ALL_ROLES.flatMap((role) => policy.roles[role] ? [{ role, execution: policy.roles[role]! }] : []),
+    ...(policy.synthesis ? [{ role: "synthesis" as const, execution: policy.synthesis }] : []),
+  ];
+  if (!roleRows.length) return null;
+  const shortLabels: Record<FinancialTeamRole | "synthesis", readonly [string, string]> = {
+    market: ["行情", "Market"], fundamental: ["基本", "Fund."], news: ["新闻", "News"],
+    bull: ["多头", "Bull"], bear: ["空头", "Bear"], synthesis: ["汇总", "Final"],
+  };
+  const effortLabels: Record<string, readonly [string, string]> = {
+    none: ["无", "none"], minimal: ["最少", "minimal"], low: ["低", "low"],
+    medium: ["中", "medium"], high: ["高", "high"], xhigh: ["超高", "xhigh"],
+    ultra: ["极高", "ultra"], max: ["最高", "max"],
+  };
+  const effortText = (value: string | null) => value ? (effortLabels[value]?.[zh ? 0 : 1] ?? value) : (zh ? "默认" : "default");
+  const compact = roleRows.map(({ role, execution }) => {
+    const resolved = effortText(execution.resolvedReasoningEffort);
+    return `${shortLabels[role][zh ? 0 : 1]} ${execution.status === "default" ? (zh ? "默认" : "default") + (execution.resolvedReasoningEffort ? ` ${resolved}` : "") : resolved}${execution.status === "adjusted" ? "*" : ""}`;
+  }).join(" · ");
+  const requestedDepth = DEPTH_OPTIONS.find((option) => option.id === policy.requestedDepth)?.label ?? (zh ? "旧版" : "legacy");
+  const requestedEffort = effortText(policy.requestedReasoningEffort);
+  const detail = [
+    zh ? `请求${requestedDepth}（${requestedEffort}）` : `Requested ${requestedDepth} (${requestedEffort})`,
+    ...roleRows.map(({ role, execution }) => {
+      const actual = effortText(execution.resolvedReasoningEffort);
+      const status = execution.status === "applied" ? (zh ? "已应用" : "applied")
+        : execution.status === "adjusted" ? (zh ? "受模型能力限制" : "limited by model")
+          : execution.status === "default" ? (zh ? "沿用默认" : "using default")
+            : (zh ? "能力未报告" : "capability unknown");
+      return `${shortLabels[role][zh ? 0 : 1]}：${actual}（${status}）`;
+    }),
+    zh ? "* 表示实际档位与请求档位不一致。" : "* means the applied effort differs from the request.",
+  ].join("；");
+  return { compact: `${zh ? "模型档位" : "Model effort"}：${compact}`, detail };
+}
+
 function isTerminal(state: RoleState): boolean {
   return state === "completed" || state === "failed" || state === "stopped" || state === "incomplete";
 }
@@ -194,6 +236,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
   const [operationError, setOperationError] = useState("");
   const [debatingRunId, setDebatingRunId] = useState("");
   const [synthesisRunId, setSynthesisRunId] = useState("");
+  const [recoveringSynthesisRunId, setRecoveringSynthesisRunId] = useState("");
   const submitGates = useRef(new Set<string>());
   const debateGates = useRef(new Set<string>());
   const synthesisGates = useRef(new Set<string>());
@@ -235,6 +278,14 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
     refetchInterval: (query) => query.state.data?.coordinationStatus === "waiting" || query.state.data?.coordinationStatus === "running" ? TEAM_POLL_MS : false,
   });
   const selectedRun = selectedRunId ? listedRun ?? exactRunQuery.data ?? null : runs[0] ?? null;
+  const synthesisRecoveryKey = ["financial-team-synthesis-recovery", assistant.agentId, selectedRun?.runId ?? ""] as const;
+  const synthesisRecoveryQuery = useQuery({
+    queryKey: synthesisRecoveryKey,
+    queryFn: ({ signal }) => fetchFinancialTeamSynthesisRecoveryStatus(assistant.agentId, selectedRun!.runId, { signal }),
+    enabled: Boolean(selectedRun && (selectedRun.coordinationStatus === "blocked" || selectedRun.coordinationStatus === "waiting")),
+    staleTime: 0,
+    retry: false,
+  });
   useEffect(() => { onSelectedRunChange?.(selectedRun); }, [onSelectedRunChange, selectedRun]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
@@ -350,6 +401,22 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
       if (mounted.current) setSynthesisRunId("");
     }
   }, [assistant.agentId, queryClient, runsKey, updateRun, zh]);
+
+  const recoverSynthesis = useCallback(async (run: FinancialTeamRun) => {
+    if (recoveringSynthesisRunId) return;
+    setRecoveringSynthesisRunId(run.runId);
+    setOperationError("");
+    try {
+      const updated = await recoverFinancialTeamSynthesis(assistant.agentId, run.runId);
+      updateRun(updated);
+      void queryClient.invalidateQueries({ queryKey: runsKey });
+      void queryClient.invalidateQueries({ queryKey: synthesisRecoveryKey });
+    } catch (error) {
+      setOperationError(compactError(error, zh ? "本轮汇总暂不可恢复" : "Synthesis recovery is unavailable"));
+    } finally {
+      if (mounted.current) setRecoveringSynthesisRunId("");
+    }
+  }, [assistant.agentId, queryClient, recoveringSynthesisRunId, runsKey, synthesisRecoveryKey, updateRun, zh]);
 
   const allPrimaryComplete = Boolean(selectedRun && PRIMARY_ROLES.every((role) => projections.get(role)?.state === "completed"));
   const synthesisRoles = selectedRun?.schemaVersion === 1 ? PRIMARY_ROLES : ALL_ROLES;
@@ -472,6 +539,7 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
   const hasMissingPrimary = Boolean(selectedRun && PRIMARY_ROLES.some((role) => !selectedRun.analysts[role]?.turnId));
   const serverCoordinated = Boolean(selectedRun?.coordinationStatus);
   const synthesisProjection = projections.get("synthesis");
+  const selectedExecutionSummary = selectedRun ? executionPolicySummary(selectedRun, zh) : null;
   const detailsLoading = [...projections.values()].some((projection) => projection.state === "loading");
   const detailsUnavailable = [...projections.values()].some((projection) => projection.state === "unavailable");
   const hasRestartableTurn = Boolean(selectedRun && (
@@ -555,12 +623,13 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
             ? [{ role: spec.key, ...spec.ref, symbol: selectedRun.symbol }] : [])} />
         <div className={styles.runHeader}>
           <div><span className={styles.eyebrow}>{zh ? "本轮任务" : "Selected run"}</span><h2>{selectedRun.symbol} · {selectedRun.researchDate || "—"}</h2></div>
-          <div className={styles.runMeta}><VChip tone="neutral">{selectedRun.periodDays}{zh ? "天" : " days"}</VChip><VChip tone="neutral">{DEPTH_OPTIONS.find((item) => item.id === selectedRun.depth)?.label || (zh ? "旧版深度" : "Legacy depth")}</VChip></div>
+          <div className={styles.runMeta}><VChip tone="neutral">{selectedRun.periodDays}{zh ? "天" : " days"}</VChip><VChip tone="neutral">{DEPTH_OPTIONS.find((item) => item.id === selectedRun.depth)?.label || (zh ? "旧版深度" : "Legacy depth")}</VChip>{selectedExecutionSummary ? <span className={styles.executionSummary} data-depth-execution title={selectedExecutionSummary.detail} aria-label={selectedExecutionSummary.detail}>{selectedExecutionSummary.compact}</span> : null}</div>
           <div className={styles.runActions}>
             {hasMissingPrimary ? <VButton variant="secondary" icon={<RefreshCw size={14} />} isDisabled={startPending} onPress={() => void resumeRun()}>{zh ? "恢复本轮" : "Resume run"}</VButton> : null}
             {hasRestartableTurn ? <VButton variant="secondary" icon={<RefreshCw size={14} />} isPending={startPending} isDisabled={startPending} onPress={() => void startResearch(selectedRun)}>{zh ? "重新开始研究" : "Start new research"}</VButton> : null}
             {!serverCoordinated && selectedRun.schemaVersion >= 2 && allPrimaryComplete && (!selectedRun.analysts.bull?.turnId || !selectedRun.analysts.bear?.turnId) ? <VButton variant="secondary" isPending={debatingRunId === selectedRun.runId} onPress={() => void startDebate(selectedRun, true)}>{zh ? "重试多空分析" : "Retry debate"}</VButton> : null}
             {!serverCoordinated && allAnalystsComplete && !selectedRun.synthesis.turnId ? <VButton variant="secondary" isPending={synthesisRunId === selectedRun.runId} onPress={() => void startSynthesis(selectedRun, true)}>{zh ? "重试汇总" : "Retry synthesis"}</VButton> : null}
+            {synthesisRecoveryQuery.data?.available ? <VButton variant="secondary" icon={<RefreshCw size={14} />} isPending={recoveringSynthesisRunId === selectedRun.runId} isDisabled={Boolean(recoveringSynthesisRunId)} onPress={() => void recoverSynthesis(selectedRun)}>{zh ? "恢复本轮汇总" : "Resume synthesis"}</VButton> : null}
           </div>
         </div>
         {selectedRun.schemaVersion < 2 ? <p className={styles.warning}>{zh ? "旧版三方研究；五方研究需新建一轮。" : "Legacy three-analyst research. Start a new run for five analysts."}</p> : null}

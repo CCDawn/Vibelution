@@ -5,6 +5,7 @@ import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchi
 import { queryKeys } from "../../api/queryKeys";
 import { createFinancialAssistant, listFinancialAssistants, type FinancialAssistant } from "../../api/financialAssistant";
 import type { SessionQueryResponse, SessionSummary } from "../../api/types";
+import type { FinancialReportPage } from "../../api/types/financialReports";
 import { VConfirmDialog } from "../../components/vui";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { useChatRouteSelection } from "../chat/useChatRouteSelection";
@@ -50,8 +51,14 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         if (result.sessionId !== record.id) throw new Error(zh ? "会话操作返回了其他研究" : "Session operation identity mismatch");
       }
       changed = true; setDeleting(null);
-      await client.cancelQueries({ queryKey: ["sessions", "finance", agentId] });
+      await Promise.all([
+        client.cancelQueries({ queryKey: ["sessions", "finance", agentId] }),
+        client.cancelQueries({ queryKey: ["finance", "report-catalog", agentId] }),
+        ...(action === "delete" ? [client.cancelQueries({ queryKey: ["finance", "exact-report", agentId, record.id] })] : []),
+      ]);
       client.setQueriesData<InfiniteData<SessionQueryResponse>>({ queryKey: ["sessions", "finance", agentId] }, (data) => data ? ({ ...data, pages: data.pages.map((page) => ({ ...page, items: page.items.filter((row) => row.id !== record.id) })) }) : data);
+      if (action !== "restore") client.setQueriesData<InfiniteData<FinancialReportPage>>({ queryKey: ["finance", "report-catalog", agentId] }, (data) => data ? ({ ...data, pages: data.pages.map((page) => ({ ...page, items: page.items.filter((row) => row.sessionId !== record.id) })) }) : data);
+      if (action === "delete") client.removeQueries({ queryKey: ["finance", "exact-report", agentId, record.id] });
       client.removeQueries({ queryKey: ["finance", "session-binding", agentId, record.id], exact: true });
       const cache = createChatWorkspaceCache(client);
       if (action === "delete") void cache.afterSessionDeleted({ deletedSessionId: record.id });
@@ -85,7 +92,10 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
       if (mounted.current) setError(changed ? (zh ? `研究记录已更新；页面刷新失败：${message}` : `Research updated; refresh failed: ${message}`) : message);
       if (mounted.current && changed && expected.kind === "session" && expected.sessionId === record.id) routeRef.current.replaceIfStillViewing(expected, { kind: "bare" });
     } finally {
-      if (changed) void client.invalidateQueries({ queryKey: queryKeys.financialAssistants() });
+      if (changed) {
+        void client.invalidateQueries({ queryKey: queryKeys.financialAssistants() });
+        void client.invalidateQueries({ queryKey: ["finance", "report-catalog", agentId] });
+      }
       gate.current = false;
       if (mounted.current) setPending(false);
     }

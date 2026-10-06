@@ -103,6 +103,129 @@ def _native_direct_session_matches_agent(agent_id: str, session_id: str) -> bool
     )
 
 
+def _native_owner_scoped_synthesis_session_matches_agent(
+    agent_id: str, session_id: str, binding_key: str
+) -> bool:
+    """Require a live Native Session created for this owner's exact financial run."""
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_binding_key = str(binding_key or "").strip()
+    if (
+        not normalized_agent_id
+        or not normalized_session_id
+        or not normalized_binding_key
+        or not _native_direct_session_matches_agent(
+            normalized_agent_id, normalized_session_id
+        )
+    ):
+        return False
+    try:
+        conversation = session_service.load_session_chat_state(
+            session_service.PROJECT_ROOT,
+            normalized_session_id,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    if not isinstance(conversation, dict):
+        return False
+    metadata = conversation.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    conversation_kind = str(
+        conversation.get("conversation_index_kind")
+        or conversation.get("conversationIndexKind")
+        or ""
+    ).strip().lower()
+    session_role = str(
+        conversation.get("session_role") or conversation.get("sessionRole") or ""
+    ).strip().lower()
+    return bool(
+        str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        == normalized_agent_id
+        and session_role == "workspace"
+        # Existing runs may still point at hidden sessions created before the
+        # owner-scoped visible summary was introduced. Keep those bindings
+        # recoverable while new runs use the personal Agent index kind.
+        and conversation_kind
+        in {
+            directory.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+            directory.CONVERSATION_INDEX_KIND_HIDDEN,
+        }
+        and str(metadata.get("source") or "").strip()
+        == "financial_team_synthesis"
+        and str(metadata.get("externalTaskId") or "").strip()
+        == normalized_binding_key
+    )
+
+
+def _native_session_model_is_executable(agent_id: str, session_id: str) -> bool:
+    """Require the session's bound model and context window to pass Native gates."""
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_agent_id or not normalized_session_id:
+        return False
+    if not _native_direct_session_matches_agent(
+        normalized_agent_id, normalized_session_id
+    ):
+        return False
+    try:
+        options = session_service.get_session_llm_options(normalized_session_id)
+        if (
+            not isinstance(options, dict)
+            or str(options.get("sessionId") or "").strip()
+            != normalized_session_id
+        ):
+            return False
+        model_ref = str(options.get("currentModelId") or "").strip()
+        if not model_ref:
+            return False
+        choices = (
+            options.get("choices")
+            if isinstance(options.get("choices"), list)
+            else []
+        )
+        candidate = next(
+            (
+                item
+                for item in choices
+                if isinstance(item, dict)
+                and model_ref
+                in {
+                    str(item.get("modelRef") or "").strip(),
+                    str(item.get("modelId") or "").strip(),
+                }
+            ),
+            None,
+        )
+        if not isinstance(candidate, dict):
+            return False
+        if (
+            candidate.get("runtimeSelectable") is not True
+            or candidate.get("providerHealthy") is not True
+            or candidate.get("missingApiKey") is not False
+        ):
+            return False
+        try:
+            candidate_context_window = int(candidate.get("contextWindow") or 0)
+        except (TypeError, ValueError):
+            return False
+        if candidate_context_window <= 0:
+            return False
+
+        conversation = session_service.load_session_chat_state(
+            session_service.PROJECT_ROOT,
+            normalized_session_id,
+        )
+        if not isinstance(conversation, dict):
+            return False
+        context_limit = session_service._session_context_limit_payload(conversation)
+        return (
+            isinstance(context_limit, dict)
+            and int(context_limit.get("limit") or 0) > 0
+        )
+    except Exception:  # noqa: BLE001 - readiness is fail-closed on Native lookup errors
+        return False
+
+
 def _role_memory_policy_is_restricted(agent: dict[str, Any]) -> bool:
     policy = agent.get("memoryPolicy")
     if not isinstance(policy, dict):
@@ -473,14 +596,24 @@ def _project_team(
         if isinstance(member, dict)
     }
     roles = []
-    attention = False
+    assistant_session_id = str(owner.get("directSessionId") or "").strip()
+    assistant_model_ready = _native_session_model_is_executable(
+        owner_id, assistant_session_id
+    )
+    attention = not assistant_model_ready
     for role, spec in ROLE_SPECS.items():
         agent = agents.get(role)
+        session_id = str((agent or {}).get("directSessionId") or "").strip()
         ready = bool(
             agent
-            and _role_agent_is_current(owner, role, agent, expected_team_id=team_id)
+            and _role_agent_configuration_is_current(
+                owner, role, agent, expected_team_id=team_id
+            )
             and agent.get("agentId") in team_members
-            and str(agent.get("directSessionId") or "").strip()
+            and session_id
+            and _native_session_model_is_executable(
+                str(agent.get("agentId") or ""), session_id
+            )
         )
         attention = attention or bool(agent and not ready)
         roles.append(
@@ -500,6 +633,7 @@ def _project_team(
     is_team_active = bool(team and str(team.get("status") or "active") == "active")
     complete = (
         len(agents) == len(ROLE_SPECS)
+        and assistant_model_ready
         and all(role["status"] == "ready" for role in roles)
         and is_team_active
     )

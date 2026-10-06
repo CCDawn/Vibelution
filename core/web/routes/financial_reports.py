@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services import financial_report_service as service
@@ -26,6 +26,70 @@ class FinancialReportExportResponse(BaseModel):
     mediaType: str
     encoding: Literal["utf8", "base64"]
     content: str
+
+
+class FinancialReportSummary(BaseModel):
+    sessionId: str
+    turnId: str
+    title: str
+    sessionTitle: str
+    ticker: str | None
+    marketCode: Literal["CN", "HK", "US"] | None
+    completedAt: str
+    preview: str
+    chars: int
+    kind: Literal["research", "review"]
+
+
+class FinancialReportPage(BaseModel):
+    items: list[FinancialReportSummary]
+    nextCursor: str | None
+    scannedSessions: int
+    order: Literal["session_recency"]
+
+
+class FinancialReportTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sessionId: str = Field(min_length=1, max_length=160)
+    turnId: str = Field(min_length=1, max_length=160)
+
+
+class FinancialReportsExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    targets: list[FinancialReportTarget] = Field(min_length=1, max_length=20)
+    format: Literal["markdown", "json", "docx"]
+
+
+class FinancialReportsExportResponse(BaseModel):
+    fileName: str
+    mediaType: Literal["application/zip"]
+    encoding: Literal["base64"]
+    content: str
+    count: int
+
+
+@router.get("/financial-reports/{assistant_agent_id}", response_model=FinancialReportPage)
+def financial_report_list(assistant_agent_id: str, cursor: str = Query(default="", max_length=512), limit: int = Query(default=30, ge=1, le=50), q: str = Query(default="", max_length=120), marketCode: Literal["CN", "HK", "US", ""] = "", dateFrom: str = Query(default="", max_length=10), dateTo: str = Query(default="", max_length=10), kind: Literal["research", "review", ""] = "") -> dict:
+    try:
+        return service.list_financial_reports(assistant_agent_id, cursor=cursor, limit=limit, q=q, market_code=marketCode, date_from=dateFrom, date_to=dateTo, kind=kind)
+    except service.FinancialReportNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except service.FinancialReportInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/financial-reports/{assistant_agent_id}/export-batch", response_model=FinancialReportsExportResponse)
+def financial_reports_export(assistant_agent_id: str, payload: FinancialReportsExportRequest) -> dict:
+    try:
+        return service.export_financial_reports(assistant_agent_id, targets=[target.model_dump() for target in payload.targets], format=payload.format)
+    except service.FinancialReportNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except service.FinancialReportTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except service.FinancialReportUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except service.FinancialReportInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post(

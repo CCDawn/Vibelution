@@ -700,6 +700,9 @@ export function ChatCodingRouteWorkbench() {
   // the session default until the user pins a model, then stays pinned across
   // sends until changed or restored. Keyed per session.
   const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>(storedDraftState.turnModelSelections);
+  const setTurnModelSelectionForSession = useCallback((sessionId: string, selection: SessionModelSelection | null) => {
+    setTurnModelSelections((current) => ({ ...current, [sessionId]: selection }));
+  }, []);
   // Rich draft persistence: per-turn model selection and reference chips ride
   // the same debounced store as the draft text (ZCode draft parity). The
   // composer-change text save stays in useChatComposerSubmit; only this effect
@@ -3792,6 +3795,11 @@ export function ChatCodingRouteWorkbench() {
     onFocusComposer: requestSessionComposerFocus,
     composerValue: companionConversationComposer.value,
     onSubmit: handleSubmitTurn,
+    sessionLlmOptions,
+    sessionLlmOptionsLoading: sessionLlmOptionsQuery.isLoading,
+    sessionLlmOptionsError: sessionLlmOptionsQuery.isError,
+    turnModelSelection,
+    onTurnModelSelectionChange: setTurnModelSelectionForSession,
   });
 
   return (

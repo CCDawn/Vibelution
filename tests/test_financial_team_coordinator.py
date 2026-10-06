@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from core.web.routes.financial_team import FinancialTeamRunResponse
+from core.web.services import session_service
 from core.web.services.financial_team.coordinator import (
     FinancialTeamCoordinator,
     coordination_task_id,
@@ -364,6 +365,142 @@ def test_unknown_native_submission_is_never_reissued_after_restart(tmp_path):
     assert store.load_state(first_task_id)["status"] == "blocked"
 
 
+def test_synthesis_busy_retries_use_bounded_persisted_backoff(tmp_path):
+    native = FakeNativeFinancialService()
+    _accept_all_analyst_finals(native)
+    native.synthesis_error = session_service.SessionBusyError("assistant session busy")
+    clock = [100.0]
+    coordinator, store = _coordinator(
+        tmp_path,
+        native,
+        epoch_time=lambda: clock[0],
+        synthesis_busy_retry_is_safe=lambda _assistant_id, _run_id: True,
+    )
+    assert coordinator.register_after_primary_acceptance("assistant-1", "run-1")
+
+    coordinator.process_pending_once()
+    state = store.load_state(coordination_task_id("run-1"))
+    assert native.synthesis_calls == 1
+    assert native.run["coordinationStatus"] == "running"
+    assert state["status"] == "running"
+    assert state["financialTeamSynthesisBusyRetryCount"] == 1
+    assert state["financialTeamSynthesisRetryAtEpoch"] == 101.0
+
+    clock[0] = 100.9
+    coordinator.process_pending_once()
+    assert native.synthesis_calls == 1
+
+    native.synthesis_error = None
+    clock[0] = 101.0
+    coordinator.process_pending_once()
+    assert native.synthesis_calls == 2
+    assert native.run["synthesis"]["turnId"] == "turn-synthesis"
+    assert native.run["coordinationStatus"] == "running"
+
+
+def test_synthesis_busy_retry_exhaustion_blocks_after_three_retries(tmp_path):
+    native = FakeNativeFinancialService()
+    _accept_all_analyst_finals(native)
+    native.synthesis_error = session_service.SessionBusyError("assistant session busy")
+    clock = [200.0]
+    coordinator, store = _coordinator(
+        tmp_path,
+        native,
+        epoch_time=lambda: clock[0],
+        synthesis_busy_retry_is_safe=lambda _assistant_id, _run_id: True,
+    )
+    assert coordinator.register_after_primary_acceptance("assistant-1", "run-1")
+
+    for retry_number, delay in enumerate((0, 1, 2, 4), start=1):
+        if delay:
+            clock[0] += delay
+        coordinator.process_pending_once()
+        assert native.synthesis_calls == retry_number
+
+    state = store.load_state(coordination_task_id("run-1"))
+    assert native.run["coordinationStatus"] == "blocked"
+    assert "有限自动重试已结束" in native.run["coordinationError"]
+    assert state["status"] == "blocked"
+    assert state["financialTeamSynthesisBusyRetryCount"] == 3
+
+
+def test_blocked_synthesis_can_be_recovered_after_live_validation(tmp_path, monkeypatch):
+    native = FakeNativeFinancialService()
+    _accept_all_analyst_finals(native)
+    native.run["synthesis"]["submissionState"] = "reserved"
+    clock = [10.0]
+    validation_calls: list[tuple[str, str, bool]] = []
+
+    def validate(assistant_id: str, run_id: str, *, allow_waiting: bool = False) -> None:
+        validation_calls.append((assistant_id, run_id, allow_waiting))
+
+    def start_recovery(
+        assistant_id: str, run_id: str, *, allow_waiting: bool = False
+    ) -> dict[str, Any]:
+        assert assistant_id == "assistant-1"
+        assert run_id == "run-1"
+        assert allow_waiting is False
+        assert native.run["coordinationStatus"] == "blocked"
+        native.run["coordinationStatus"] = "waiting"
+        native.run["coordinationError"] = ""
+        return copy.deepcopy(native.run)
+
+    monkeypatch.setattr(
+        "core.web.services.financial_team.coordinator.runs._run_path",
+        lambda *_args: tmp_path / "run.json",
+    )
+    coordinator, store = _coordinator(
+        tmp_path,
+        native,
+        epoch_time=lambda: clock[0],
+        synthesis_recovery_validator=validate,
+        synthesis_recovery_starter=start_recovery,
+    )
+    assert coordinator.register_after_primary_acceptance("assistant-1", "run-1")
+    native.run["coordinationStatus"] = "blocked"
+    store.mark_task_terminal(coordination_task_id("run-1"), status="blocked")
+
+    assert coordinator.synthesis_recovery_status("assistant-1", "run-1") == {
+        "available": True,
+        "reason": "",
+    }
+    recovered = coordinator.recover_blocked_synthesis("assistant-1", "run-1")
+
+    state = store.load_state(coordination_task_id("run-1"))
+    assert recovered["coordinationStatus"] == "waiting"
+    assert state["status"] == "running"
+    assert state["financialTeamSynthesisRecoveryPending"] is False
+    assert validation_calls[-1] == ("assistant-1", "run-1", False)
+
+    coordinator.process_pending_once()
+    assert native.debate_calls == 0
+    assert native.synthesis_calls == 1
+    assert native.run["synthesis"]["clientSubmissionId"] == "submission-synthesis"
+
+
+def test_blocked_synthesis_recovery_refuses_user_stopped_task(tmp_path):
+    native = FakeNativeFinancialService()
+    _accept_all_analyst_finals(native)
+    coordinator, store = _coordinator(
+        tmp_path,
+        native,
+        synthesis_recovery_validator=lambda *_args, **_kwargs: None,
+    )
+    assert coordinator.register_after_primary_acceptance("assistant-1", "run-1")
+    native.run["coordinationStatus"] = "blocked"
+    store.update_task(
+        coordination_task_id("run-1"),
+        lambda state: {**state, "stopInitiator": "user"},
+    )
+    store.mark_task_terminal(coordination_task_id("run-1"), status="blocked")
+
+    status = coordinator.synthesis_recovery_status("assistant-1", "run-1")
+
+    assert status["available"] is False
+    assert "停止请求" in status["reason"]
+    assert native.synthesis_calls == 0
+
+
 def test_startup_recovers_active_coordination_task_and_continues_next_phase(tmp_path):
     native = FakeNativeFinancialService()
     native.accept_primary_turns()
@@ -477,4 +614,4 @@ def test_financial_team_response_model_accepts_optional_coordination_projection(
 
     response = FinancialTeamRunResponse.model_validate(payload)
 
-    assert response.model_dump() == payload
+    assert response.model_dump(exclude_none=True) == payload

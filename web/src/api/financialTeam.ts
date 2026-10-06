@@ -2,15 +2,22 @@ import { fetchJson } from "./client";
 export { isFetchJsonHttpError } from "./client";
 import type {
   FinancialTeam,
+  FinancialTeamExecutionPolicy,
+  FinancialTeamExecutionStatus,
+  FinancialTeamRoleExecution,
   FinancialTeamRun,
   FinancialTeamRunCreateRequest,
   FinancialTeamRunList,
+  FinancialTeamSynthesisRecoveryStatus,
   FinancialTeamTurnAttachRequest,
   FinancialTeamRole,
 } from "./types/financialTeam";
 
 export type {
   FinancialTeam,
+  FinancialTeamExecutionPolicy,
+  FinancialTeamExecutionStatus,
+  FinancialTeamRoleExecution,
   FinancialTeamRole,
   FinancialTeamRoleMember,
   FinancialTeamRoleStatus,
@@ -18,6 +25,7 @@ export type {
   FinancialTeamRunCreateRequest,
   FinancialTeamRunList,
   FinancialTeamRunStage,
+  FinancialTeamSynthesisRecoveryStatus,
   FinancialTeamTurnAttachRequest,
   FinancialTeamTurnRef,
   FinancialTeamStatus,
@@ -100,6 +108,29 @@ export function submitFinancialTeamSynthesis(assistantAgentId: string, runId: st
   return fetchJson<FinancialTeamRun>(`${rootPath(assistantAgentId)}/runs/${encodeURIComponent(runId)}/synthesis`, {
     method: "POST",
   });
+}
+
+/** Checks the live transcript, saved reservation and team bindings before showing recovery. */
+export function fetchFinancialTeamSynthesisRecoveryStatus(
+  assistantAgentId: string,
+  runId: string,
+  options?: { signal?: AbortSignal },
+): Promise<FinancialTeamSynthesisRecoveryStatus> {
+  return fetchJson<FinancialTeamSynthesisRecoveryStatus>(
+    `${rootPath(assistantAgentId)}/runs/${encodeURIComponent(runId)}/synthesis/recovery`,
+    { signal: options?.signal },
+  );
+}
+
+/** Resumes only the synthesis stage on an existing, re-validated run. */
+export function recoverFinancialTeamSynthesis(
+  assistantAgentId: string,
+  runId: string,
+): Promise<FinancialTeamRun> {
+  return fetchJson<FinancialTeamRun>(
+    `${rootPath(assistantAgentId)}/runs/${encodeURIComponent(runId)}/synthesis/recovery`,
+    { method: "POST" },
+  );
 }
 
 /** Starts two separate native bull/bear Sessions from the same verified analyst evidence. */

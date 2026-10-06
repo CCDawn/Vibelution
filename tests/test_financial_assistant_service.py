@@ -14,6 +14,7 @@ from core.web.services import session_service
 from core.web.services import team_knowledge_service as knowledge
 from tests.helpers.tool_authorization import authorized_agent_tool_executor
 from tests.test_financial_knowledge_service import finance_env as _finance_env
+from tools import financial_market_tools as market_tools
 
 finance_env = _finance_env
 
@@ -42,6 +43,9 @@ def test_explicit_setup_uses_native_identity_session_and_private_read_policy(ent
     assert set(agent["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
     assert "news_search_tool" in agent["toolPolicy"]["allowedTools"]
     assert service.MARKET_TOOL in agent["toolPolicy"]["allowedTools"]
+    assert service.MARKET_SCREEN_TOOL in agent["toolPolicy"]["allowedTools"]
+    assert service.MARKET_SCREEN_TOOL in agent["toolPolicy"]["preferredTools"]
+    assert agent["metadata"][service._MARKET_SCREEN_REFERENCE_MARKER] is True
     assert row["marketToolStatus"] == "assigned"
     assert "financial_evidence_stage_tool" not in agent["toolPolicy"]["allowedTools"]
     assert "自行判断真伪" in agent["taskProfile"]["constraints"]
@@ -80,6 +84,27 @@ def test_setup_is_idempotent_and_preserves_user_edits(entry_env):
     assert second["assistant"]["directSessionId"] == first["directSessionId"]
     assert directory.get_agent(first["agentId"])["toolPolicy"]["allowedTools"] == []
     assert len(service.list_financial_assistants()) == 1
+
+
+def test_revoked_library_read_access_is_reported_and_not_regranted(entry_env):
+    row = service.create_financial_assistant()["assistant"]
+    assert row["knowledgeReadable"] is True
+    directory.update_agent_instance(
+        row["agentId"], memory_policy={"readKnowledgeBaseIds": []}
+    )
+    listed = service.list_financial_assistants()[0]
+    assert listed["knowledgeBaseId"] == row["knowledgeBaseId"]
+    assert listed["knowledgeReadable"] is False
+    assert service.create_financial_assistant()["assistant"]["knowledgeReadable"] is False
+    assert directory.get_agent(row["agentId"])["memoryPolicy"]["readKnowledgeBaseIds"] == []
+
+
+@pytest.mark.parametrize("read_values", [None, [], [" "], [1], "all", ["foreign-base"]])
+def test_library_readiness_rejects_invalid_or_unbound_policy(entry_env, read_values):
+    row = service.create_financial_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    agent["memoryPolicy"]["readKnowledgeBaseIds"] = read_values
+    assert service._project(agent)["knowledgeReadable"] is False
 
 
 def test_concurrent_setup_creates_one_agent(entry_env):
@@ -230,6 +255,54 @@ def test_native_executor_reads_new_own_library_and_denies_stage(entry_env):
             {"evidence_json": "{}", "excerpt": "unreviewed"},
         )
         assert any(word in str(raw) for word in ("blocked", "拒绝", "权限", "授权"))
+
+
+def test_created_assistant_policy_executes_authorized_market_screen(
+    entry_env, monkeypatch
+):
+    row = service.create_financial_assistant()["assistant"]
+    agent = directory.get_agent(row["agentId"])
+    allowed_tools = tuple(agent["toolPolicy"]["allowedTools"])
+    assert service.MARKET_SCREEN_TOOL in allowed_tools
+
+    calls = []
+    monkeypatch.setattr(
+        market_tools.research,
+        "screen_stocks",
+        lambda **kwargs: calls.append(kwargs)
+        or {
+            "source": "新浪财经",
+            "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
+            "fetchedAt": "2026-10-05T07:00:00+00:00",
+            "dataDate": None,
+            "dataTime": None,
+            "coverage": {
+                "providerTotal": 10,
+                "loaded": 10,
+                "complete": True,
+                "failedPages": [],
+                "invalidRows": 0,
+                "duplicateRows": 0,
+                "totalFiltered": 1,
+            },
+            "items": [],
+        },
+    )
+
+    with authorized_agent_tool_executor(
+        row["agentId"],
+        session_id=row["directSessionId"],
+        executable_tools=allowed_tools,
+    ) as execute:
+        raw, _ = execute(
+            service.MARKET_SCREEN_TOOL, {"min_price": 100, "limit": 3}
+        )
+
+    result = json.loads(raw)
+    assert result["ok"] is True and result["status"] == "complete"
+    assert result["coverage"]["complete"] is True
+    assert len(calls) == 1
+    assert calls[0]["min_price"] == 100 and calls[0]["page_size"] == 3
 
 
 def test_http_contract_rejects_unknown_fields_and_requires_control_token(entry_env):
@@ -529,6 +602,49 @@ def _rewind_news_default(agent_id: str, **policy_changes) -> None:
             "financialAssistantMarketReferenceGranted": False,
         },
     )
+
+
+def test_legacy_market_default_gains_screen_tool_only_on_explicit_write(entry_env, monkeypatch):
+    row = service.create_financial_assistant()["assistant"]
+    directory.update_agent_instance(
+        row["agentId"],
+        tool_policy={
+            **service.READ_POLICY,
+            "allowedTools": list(service._LEGACY_MARKET_READ_TOOLS),
+            "preferredTools": list(service._LEGACY_MARKET_READ_TOOLS),
+        },
+        metadata={
+            service._NEWS_REFERENCE_MARKER: True,
+            service._MARKET_REFERENCE_MARKER: True,
+            service._MARKET_SCREEN_REFERENCE_MARKER: False,
+        },
+    )
+    before = directory.get_agent(row["agentId"])
+    writes = []
+    real_update = directory.update_agent_instance
+
+    def count_update(*args, **kwargs):
+        writes.append(kwargs)
+        return real_update(*args, **kwargs)
+
+    monkeypatch.setattr(directory, "update_agent_instance", count_update)
+    listed = service.list_financial_assistants()
+    assert listed[0]["marketToolStatus"] == "upgrade_available"
+    assert writes == []
+
+    result = service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert result["assistant"]["marketToolStatus"] == "assigned"
+    assert len(writes) == 1
+    assert set(after["toolPolicy"]["allowedTools"]) == set(service.READ_TOOLS)
+    assert set(after["toolPolicy"]["preferredTools"]) == set(service.READ_TOOLS)
+    assert service.MARKET_SCREEN_TOOL in after["toolPolicy"]["allowedTools"]
+    assert service.MARKET_SCREEN_TOOL in after["toolPolicy"]["preferredTools"]
+    assert after["toolPolicy"]["policyVersion"] == before["toolPolicy"]["policyVersion"] + 1
+    assert after["metadata"][service._MARKET_SCREEN_REFERENCE_MARKER] is True
+    service.create_financial_assistant()
+    service.list_financial_assistants()
+    assert len(writes) == 1
 
 
 def test_market_upgrade_is_explicit_single_write_and_preserves_limits(

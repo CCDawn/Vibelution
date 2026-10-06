@@ -43,6 +43,7 @@ _SCREEN_SORT_FIELDS = {
     "price": "price",
     "volumeLots": "volumeLots",
     "peRatio": "peRatio",
+    "pbRatio": "pbRatio",
 }
 _FUNDAMENTAL_FIELDS = (
     ("EPSJB", "每股收益", "元/股"),
@@ -341,14 +342,24 @@ def _screen_bounds(
     min_pe: float | None,
     max_pe: float | None,
     min_volume_lots: float | None,
+    min_pb: float | None = None,
+    max_pb: float | None = None,
+    min_turnover_yuan: float | None = None,
+    max_turnover_yuan: float | None = None,
 ) -> tuple[tuple[str, float | None, float | None], ...]:
     bounds: tuple[tuple[str, float | None, float | None], ...] = (
         ("price", min_price, max_price),
         ("changePercent", min_change_percent, max_change_percent),
         ("peRatio", min_pe, max_pe),
         ("volumeLots", min_volume_lots, None),
+        ("pbRatio", min_pb, max_pb),
+        ("turnoverYuan", min_turnover_yuan, max_turnover_yuan),
     )
     for field, lower, upper in bounds:
+        if any(value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)) for value in (lower, upper)):
+            raise FinancialResearchInputError(f"{field} 条件必须为有限数值")
+        if field in {"price", "volumeLots", "turnoverYuan"} and any(value is not None and value < 0 for value in (lower, upper)):
+            raise FinancialResearchInputError(f"{field} 条件不能为负数")
         if lower is not None and upper is not None and lower > upper:
             raise FinancialResearchInputError(f"{field} 最小值不能大于最大值")
     return bounds
@@ -362,7 +373,7 @@ def _screen_values(
     for stock in stocks:
         accepted = True
         for field, lower, upper in bounds:
-            value = stock[field]
+            value = stock.get(field)
             if lower is not None and (value is None or value < lower):
                 accepted = False
                 break
@@ -383,6 +394,10 @@ def screen_stocks(
     min_pe: float | None = None,
     max_pe: float | None = None,
     min_volume_lots: float | None = None,
+    min_pb: float | None = None,
+    max_pb: float | None = None,
+    min_turnover_yuan: float | None = None,
+    max_turnover_yuan: float | None = None,
     sort_by: str = "changePercent",
     direction: str = "desc",
     page: int = 1,
@@ -400,12 +415,16 @@ def screen_stocks(
         min_pe=min_pe,
         max_pe=max_pe,
         min_volume_lots=min_volume_lots,
+        min_pb=min_pb,
+        max_pb=max_pb,
+        min_turnover_yuan=min_turnover_yuan,
+        max_turnover_yuan=max_turnover_yuan,
     )
     snapshot = _screen_universe()
     matches = _screen_values(snapshot["stocks"], bounds)
     field = _SCREEN_SORT_FIELDS[sort_by]
-    present = [stock for stock in matches if stock[field] is not None]
-    missing = [stock for stock in matches if stock[field] is None]
+    present = [stock for stock in matches if stock.get(field) is not None]
+    missing = [stock for stock in matches if stock.get(field) is None]
     present.sort(
         key=lambda stock: (stock[field], stock["symbol"]), reverse=direction == "desc"
     )
@@ -501,6 +520,16 @@ def batch_quotes(values: list[str]) -> dict[str, Any]:
 
 def _eastmoney_stock(symbol: str) -> dict[str, str]:
     normalized = market.normalize_symbol(symbol)
+    if normalized.startswith(("hk", "us")):
+        code = "HK" if normalized.startswith("hk") else "US"
+        try:
+            matches = market.search_stocks(normalized[2:], market=code)
+            candidate = next((row for row in matches if row.get("symbol") == normalized), None)
+            if candidate:
+                return candidate
+        except market.MarketDataError:
+            pass
+        return {"symbol": normalized, "ticker": normalized[2:], "name": normalized[2:], "market": "港交所" if code == "HK" else "美股", "marketCode": code}
     try:
         result = market.search_stocks(normalized[-6:])
         candidate = next(
@@ -736,6 +765,16 @@ def stock_research(symbol: str) -> dict[str, Any]:
     except market.MarketDataError as exc:
         raise FinancialResearchInputError(str(exc)) from exc
     stock = _eastmoney_stock(normalized)
+    if normalized.startswith(("hk", "us")):
+        # News search is keyword based; mainland security identifiers are
+        # never reused for international announcements or financial metrics.
+        try:
+            news = market._cached(("finance-research-v1", "news", normalized), RESEARCH_NEWS_CACHE_SECONDS, lambda: _load_news(stock))
+        except (FinancialResearchDataError, market.MarketDataError, OSError, ValueError, TypeError, KeyError):
+            news = _unavailable("https://so.eastmoney.com/news/", FinancialResearchDataError("股票新闻源暂不可用，可让研究助手继续查证"))
+        from core.web.services.financial_research import fetch_international_facets
+
+        return {"stock": stock, "news": news, **fetch_international_facets(stock)}
     readers = (
         (
             "news",

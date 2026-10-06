@@ -9,7 +9,7 @@ export function generalResearchPrompt(topic: string, date: string, depth: Resear
 }
 
 export function FinanceGeneralResearch({ disabled, pending, zh, onStart }: {
-  disabled: boolean; pending: boolean; zh: boolean; onStart: (prompt: string, title: string) => void;
+  disabled: boolean; pending: boolean; zh: boolean; onStart: (prompt: string, title: string, depth: ResearchDepth) => void;
 }) {
   const [topic, setTopic] = useState("");
   const [date, setDate] = useState(localResearchDate());
@@ -19,7 +19,7 @@ export function FinanceGeneralResearch({ disabled, pending, zh, onStart }: {
     <h1 className={styles.heading}>{zh ? "通用研究" : "Topic research"}</h1>
     <VSurface tone="panel" className={styles.card}>
       <label className={styles.field}>{zh ? "研究主题" : "Research topic"}<VTextarea value={topic} maxLength={2000} minRows={5} aria-label={zh ? "研究主题" : "Research topic"} placeholder={zh ? "输入行业、政策、投资主题，或需要核实的问题" : "An industry, policy, investment theme or question"} onChange={(event) => setTopic(event.target.value)} /></label>
-      <div className={styles.actions}><label className={styles.field}>{zh ? "分析日期" : "As of"}<VInput type="date" value={date} max={localResearchDate()} aria-invalid={!isValidResearchDate(date)} onChange={(event) => setDate(event.target.value)} /></label><label className={styles.field}>{zh ? "研究深度" : "Depth"}<VSelect selectedKey={depth} aria-label={zh ? "通用研究深度" : "Topic research depth"} onSelectionChange={(key) => setDepth(key as ResearchDepth)} options={[{ id: "brief", label: "1 · 快速" }, { id: "basic", label: "2 · 基础" }, { id: "standard", label: "3 · 标准" }, { id: "detailed", label: "4 · 深入" }, { id: "exhaustive", label: "5 · 全面" }]} /></label><VButton variant="primary" icon={<Play size={14} />} isPending={pending} isDisabled={disabled || !topic.trim() || !isValidResearchDate(date)} onPress={() => onStart(generalResearchPrompt(topic, date, depth), topic.trim().slice(0, 70))}>{zh ? "开始研究" : "Start research"}</VButton></div>
+      <div className={styles.actions}><label className={styles.field}>{zh ? "分析日期" : "As of"}<VInput type="date" value={date} max={localResearchDate()} aria-invalid={!isValidResearchDate(date)} onChange={(event) => setDate(event.target.value)} /></label><label className={styles.field}>{zh ? "研究深度" : "Depth"}<VSelect selectedKey={depth} aria-label={zh ? "通用研究深度" : "Topic research depth"} onSelectionChange={(key) => setDepth(key as ResearchDepth)} options={[{ id: "brief", label: "1 · 快速" }, { id: "basic", label: "2 · 基础" }, { id: "standard", label: "3 · 标准" }, { id: "detailed", label: "4 · 深入" }, { id: "exhaustive", label: "5 · 全面" }]} /></label><VButton variant="primary" icon={<Play size={14} />} isPending={pending} isDisabled={disabled || !topic.trim() || !isValidResearchDate(date)} onPress={() => onStart(generalResearchPrompt(topic, date, depth), topic.trim().slice(0, 70), depth)}>{zh ? "开始研究" : "Start research"}</VButton></div>
     </VSurface>
     <div className={styles.examples}>{examples.map((example) => <VButton key={example} variant="secondary" icon={<Search size={14} />} className={styles.example} onPress={() => setTopic(example)}>{example}</VButton>)}</div>
   </div>;

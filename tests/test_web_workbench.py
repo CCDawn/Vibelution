@@ -343,6 +343,30 @@ def test_entrypoint_non_reload_owns_the_product_server(monkeypatch: pytest.Monke
     ]
 
 
+def test_entrypoint_removes_inherited_test_markers_before_product_startup(monkeypatch):
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/e2e/test_session_menu.py::test_flow (setup)")
+    monkeypatch.setenv("PYTEST_VERSION", "9.1.1")
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", "isolated-instance-data")
+    args = argparse.Namespace(host="127.0.0.1", port=8003, open_browser=False, reload=True)
+    monkeypatch.setattr(workbench_entrypoint, "parse_args", lambda: args)
+    monkeypatch.setattr(workbench_entrypoint, "enable_user_env_fallback_for_workbench", lambda: None)
+    monkeypatch.setattr(workbench_entrypoint, "install_access_log_filters", lambda: None)
+
+    def verify_environment():
+        assert "PYTEST_CURRENT_TEST" not in os.environ
+        assert "PYTEST_VERSION" not in os.environ
+        assert os.environ["VIBELUTION_DATA_HOME"] == "isolated-instance-data"
+        # Embedded unit tests retain their skip guard; only the standalone
+        # server loses a stale parent-process marker.
+        from core.web.services.session.directory_runtime import should_skip_directory_runtime_for_pytest
+        assert should_skip_directory_runtime_for_pytest()
+        return False
+
+    monkeypatch.setattr(workbench_entrypoint, "bootstrap_runtime_scene_for_workbench", verify_environment)
+    monkeypatch.setattr(workbench_entrypoint.uvicorn, "run", lambda *args, **kwargs: None)
+    workbench_entrypoint.main()
+
+
 def test_schedule_shutdown_runs_lifespan_finally_and_unregisters_server(tmp_path: Path) -> None:
     owner, port, log_path = _spawn_fixture_server(tmp_path, mode="clean")
     try:

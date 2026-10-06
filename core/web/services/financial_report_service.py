@@ -6,6 +6,9 @@ import base64
 import hashlib
 import json
 import re
+import zipfile
+from datetime import date
+from io import BytesIO
 from typing import Literal
 
 from core.chat.turn_journal import (
@@ -35,6 +38,11 @@ _TEAM_SYNTHESIS_PROMPT = re.compile(
     r"^\s*你是主助手的股票研究汇总角色。请综合股票\s+[^；。\n]{1,50}的多分析师研究。"
     r"研究日期：(?:\d{4}-\d{2}-\d{2}|未指定)；观察周期：近\d+天",
     re.DOTALL,
+)
+_SCREENING_REPORT_PROMPT = re.compile(
+    r"^请研究以下股票筛选条件，生成筛选报告。分析截至 "
+    r"(?P<analysis_date>\d{4}-\d{2}-\d{2})。按条件筛选股票，列出候选、筛选依据和数据限制。"
+    r"(?:\r?\n|$)"
 )
 _EXPLICIT_REPORT_PROMPT = re.compile(
     r"(?:重新生成|生成|撰写|更新|重写)(?:完整)?(?:一份)?(?:股票|投资|研究)?(?:研究报告|研报)"
@@ -70,6 +78,17 @@ def _normalized_identifier(value: str, label: str) -> str:
     return normalized
 
 
+def _is_screening_report_prompt(text: str) -> bool:
+    match = _SCREENING_REPORT_PROMPT.match(text)
+    if match is None:
+        return False
+    try:
+        date.fromisoformat(match.group("analysis_date"))
+    except ValueError:
+        return False
+    return True
+
+
 def _research_request(text: str) -> bool:
     candidate = str(text or "").strip()
     return bool(
@@ -79,6 +98,7 @@ def _research_request(text: str) -> bool:
             _STOCK_RESEARCH_PROMPT.search(candidate)
             or _TOPIC_RESEARCH_PROMPT.search(candidate)
             or _TEAM_SYNTHESIS_PROMPT.search(candidate)
+            or _is_screening_report_prompt(candidate)
             or _EXPLICIT_REPORT_PROMPT.search(candidate)
         )
     )
@@ -101,6 +121,12 @@ def _report_file_suffix(request_text: str, turn_id: str) -> str:
     )
     if len(tickers) == 1:
         return next(iter(tickers))
+    international = re.findall(r"[（(]\s*([A-Z][A-Z0-9.-]{0,9}|\d{5})\s*[,，）)]", header)
+    if len(international) == 1:
+        return international[0]
+    canonical = {next(value for value in match if value).upper() for match in re.findall(r"\bhk(\d{5})\b|\bus([A-Z][A-Z0-9.-]{0,9})\b", header, flags=re.IGNORECASE)}
+    if len(canonical) == 1:
+        return next(iter(canonical))
     return hashlib.sha256(str(turn_id or "").encode("utf-8")).hexdigest()[-8:]
 
 
@@ -132,6 +158,11 @@ def _completed_report(agent_id: str, session_id: str, turn_id: str) -> tuple[str
         )
     except (OSError, RuntimeError, TypeError, ValueError):
         raise FinancialReportNotFound("未找到研究会话") from None
+    return _completed_report_from_events(all_events, session_id, turn_id)
+
+
+def _completed_report_from_events(all_events: list, session_id: str, turn_id: str) -> tuple[str, str, str]:
+    """Read an already-authorized snapshot, sharing export validation with catalog."""
     turn_events = [
         event
         for event in all_events
@@ -216,10 +247,36 @@ def _completed_report(agent_id: str, session_id: str, turn_id: str) -> tuple[str
     return report_text, completed_at, _report_file_suffix(request_text, turn_id)
 
 
+def list_financial_reports(assistant_agent_id: str, **filters) -> dict:
+    from .financial_report.catalog import list_reports
+
+    return list_reports(assistant_agent_id, **filters)
+
+
+def export_financial_reports(assistant_agent_id: str, *, targets: list[dict], format: str) -> dict:
+    """Bounded ZIP from exact native identities, with no archive/report storage."""
+    if format not in {"markdown", "json", "docx"} or not isinstance(targets, list) or not 1 <= len(targets) <= 20:
+        raise FinancialReportInvalid("批量导出最多20份，支持Markdown、JSON或Word")
+    identities = [(str(item.get("sessionId") or ""), str(item.get("turnId") or "")) for item in targets if isinstance(item, dict)]
+    if len(identities) != len(targets) or len(set(identities)) != len(identities):
+        raise FinancialReportInvalid("批量导出身份无效或重复")
+    output, total = BytesIO(), 0
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for index, (session_id, turn_id) in enumerate(identities, start=1):
+            result = export_financial_report(assistant_agent_id, session_id=session_id, turn_id=turn_id, format=format)
+            data = base64.b64decode(result["content"], validate=True) if result["encoding"] == "base64" else result["content"].encode("utf-8")
+            total += len(data)
+            if total > 8_000_000:
+                raise FinancialReportTooLarge("批量导出超过8MB，请减少报告数量")
+            # Distinct native Turns can share the same date/ticker filename.
+            bundle.writestr(f"{index:02d}-{result['fileName']}", data)
+    return {"fileName": "stock-research-bundle.zip", "mediaType": "application/zip", "encoding": "base64", "content": base64.b64encode(output.getvalue()).decode("ascii"), "count": len(identities)}
+
+
 def _file_name(completed_at: str, suffix: str, extension: str) -> str:
     match = re.match(r"^(\d{4}-\d{2}-\d{2})", completed_at)
     date = match.group(1) if match else "report"
-    safe_suffix = re.sub(r"[^A-Za-z0-9]", "", str(suffix or ""))[:8] or "report"
+    safe_suffix = re.sub(r"[^A-Za-z0-9.-]", "", str(suffix or ""))[:10].strip(".-") or "report"
     return f"stock-research-{date}-{safe_suffix}.{extension}"
 
 

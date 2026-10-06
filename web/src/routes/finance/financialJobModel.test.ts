@@ -2,9 +2,16 @@ import { describe, expect, it } from "vitest";
 import { beijingScheduledTime, financialBatchStatusLabel, parseFinancialBatchSymbols } from "./financialJobModel";
 
 describe("financial job input and outcomes", () => {
-  it("deduplicates explicit and bare A-share codes while rejecting funds and exchange mismatches", () => {
+  it("deduplicates canonical A/HK/US symbols and infers only unambiguous A-share codes", () => {
     expect(parseFinancialBatchSymbols("600519，SH600519;000001 sz000001\n300750")).toEqual({ symbols: ["sh600519", "sz000001", "sz300750"], invalid: [] });
-    expect(parseFinancialBatchSymbols("510300 sz600519 sh000001 830799 159915 AAPL").symbols).toEqual([]);
+    expect(parseFinancialBatchSymbols("430047, hk700, HK00700, usaapl, usBRK.B, usABC-1, usAAPL.OQ")).toEqual({
+      symbols: ["bj430047", "hk00700", "usAAPL", "usBRK.B", "usABC-1"],
+      invalid: [],
+    });
+    expect(parseFinancialBatchSymbols("510300 sz600519 sh000001 830799 159915 AAPL 00700 us0ABC")).toEqual({
+      symbols: ["bj830799"],
+      invalid: ["510300", "sz600519", "sh000001", "159915", "AAPL", "00700", "us0ABC"],
+    });
   });
   it("interprets the labelled time in Beijing regardless of the browser zone", () => {
     const time = beijingScheduledTime("2026-10-06T18:05");

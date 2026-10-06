@@ -97,6 +97,7 @@ from tools.financial_memory_tools import (
     financial_evidence_withdraw_tool as _financial_evidence_withdraw_impl,
 )
 from tools.financial_report_tools import financial_report_query_tool as _financial_report_query_impl
+from tools.financial_market_tools import financial_market_screen_tool as _financial_market_screen_impl
 from tools.financial_market_tools import financial_market_snapshot_tool as _financial_market_snapshot_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.research_knowledge_request_tools import (
@@ -2688,6 +2689,48 @@ def _build_key_tools() -> List[BaseTool]:
         return _financial_market_snapshot_impl(ticker=ticker, period=period, limit=limit)
 
     @tool
+    def financial_market_screen_tool(
+        min_price: Annotated[float | None, Field(strict=True, ge=0, le=100_000_000)] = None,
+        max_price: Annotated[float | None, Field(strict=True, ge=0, le=100_000_000)] = None,
+        min_change_percent: Annotated[float | None, Field(strict=True, ge=-100, le=10_000)] = None,
+        max_change_percent: Annotated[float | None, Field(strict=True, ge=-100, le=10_000)] = None,
+        min_pe: Annotated[float | None, Field(strict=True, ge=-10_000, le=100_000)] = None,
+        max_pe: Annotated[float | None, Field(strict=True, ge=-10_000, le=100_000)] = None,
+        min_volume_lots: Annotated[float | None, Field(strict=True, ge=0, le=1_000_000_000_000_000)] = None,
+        min_pb: Annotated[float | None, Field(strict=True, ge=-10_000, le=100_000)] = None,
+        max_pb: Annotated[float | None, Field(strict=True, ge=-10_000, le=100_000)] = None,
+        min_turnover_yuan: Annotated[float | None, Field(strict=True, ge=0, le=1_000_000_000_000_000)] = None,
+        max_turnover_yuan: Annotated[float | None, Field(strict=True, ge=0, le=1_000_000_000_000_000)] = None,
+        sort_by: Literal["changePercent", "turnoverYuan", "price", "volumeLots", "peRatio", "pbRatio"] = "changePercent",
+        direction: Literal["asc", "desc"] = "desc",
+        limit: Annotated[int, Field(strict=True, ge=1, le=20)] = 15,
+    ) -> str:
+        """【A股只读筛选】在公开沪深京 A 股股票池中按支持条件筛选并排序。
+
+        支持价格、涨跌幅、PE、PB、成交量（手）和成交额（元）上下限；排序字段为
+        changePercent、turnoverYuan、price、volumeLots、peRatio 或 pbRatio。最多返回20只。
+        返回来源、抓取时间、行情时分与股票池覆盖完整性。来源未给出交易日期，抓取时间
+        不是行情日期；市值单位未核实，因此不提供市值筛选。只读公开数据，不下单。
+        数据可能延迟或缓存，调用仍须原生工具授权；结果不是投资建议。
+        """
+        return _financial_market_screen_impl(
+            min_price=min_price,
+            max_price=max_price,
+            min_change_percent=min_change_percent,
+            max_change_percent=max_change_percent,
+            min_pe=min_pe,
+            max_pe=max_pe,
+            min_volume_lots=min_volume_lots,
+            min_pb=min_pb,
+            max_pb=max_pb,
+            min_turnover_yuan=min_turnover_yuan,
+            max_turnover_yuan=max_turnover_yuan,
+            sort_by=sort_by,
+            direction=direction,
+            limit=limit,
+        )
+
+    @tool
     def financial_report_query_tool(question: str, ticker: str, report_period: str) -> str:
         """
         【财报证据问答】调用已配置的 RAGFlow 财报助手，按公司及报告期检索并回答。
@@ -3484,6 +3527,7 @@ def _build_key_tools() -> List[BaseTool]:
         computer_use_session_tool,
         financial_report_query_tool,
         financial_market_snapshot_tool,
+        financial_market_screen_tool,
         financial_evidence_search_tool,
         financial_evidence_stage_tool,
         financial_evidence_withdraw_tool,

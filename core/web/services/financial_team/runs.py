@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.file_lock import cross_process_file_lock
+from core.llm.reasoning_effort import normalize_reasoning_effort
 from core.web.services import agent_directory_service as directory
 from core.web.services import financial_market_service as market
 from core.web.services import financial_research_service as public_research
@@ -30,6 +31,8 @@ from .provisioning import (
     FinancialTeamNotFoundError,
     _agent_config,
     _financial_assistant,
+    _native_session_model_is_executable,
+    _native_owner_scoped_synthesis_session_matches_agent,
     _role_agents,
     get_financial_team,
 )
@@ -48,12 +51,38 @@ _ROLE_KEYS = (*ROLE_SPECS.keys(), "synthesis")
 _COORDINATION_STATUSES = frozenset({"waiting", "running", "blocked", "completed"})
 _COORDINATION_TERMINAL_STATUSES = frozenset({"blocked", "completed"})
 _MAX_COORDINATION_ERROR_CHARS = 500
+_SYNTHESIS_OWNER_SCOPED_BINDING = "owner_scoped_v1"
+_SYNTHESIS_SESSION_SOURCE = "financial_team_synthesis"
 _DEPTH_LABELS = {
     "brief": "快速",
     "basic": "基础",
     "standard": "标准",
     "detailed": "深入",
     "exhaustive": "全面",
+}
+_DEPTH_REASONING_TARGETS = {
+    "brief": "minimal",
+    "basic": "low",
+    "standard": "medium",
+    "detailed": "high",
+    "exhaustive": "xhigh",
+}
+_REASONING_EFFORT_ORDER = {
+    "none": 0,
+    "minimal": 1,
+    "low": 2,
+    "medium": 3,
+    "high": 4,
+    "xhigh": 5,
+    "ultra": 6,
+    "max": 7,
+}
+_DEPTH_INSTRUCTIONS = {
+    "brief": "优先给出结论、最关键证据和主要风险；只覆盖本角色必须核对的内容。",
+    "basic": "覆盖本角色核心数据、主要依据、主要风险和明显缺口，保持简洁。",
+    "standard": "完整覆盖本角色关键数据、来源、时间、主要反证与不确定性。",
+    "detailed": "逐项核验来源与时间，区分事实、判断和假设，补充重要反证、变化和影响。",
+    "exhaustive": "在已授权工具与可核验资料范围内尽可能完整地覆盖相关数据、来源、跨期变化、反证和证据缺口；无法核验的部分明确标为不可用。",
 }
 _LOCK = threading.RLock()
 
@@ -223,6 +252,68 @@ def _run_create_input_hash(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _create_run_synthesis_session(
+    assistant_agent_id: str,
+    *,
+    run_id: str,
+    symbol: str,
+    period_days: int,
+    research_date: str,
+    depth: str,
+    create_idempotency: dict[str, str] | None,
+) -> tuple[str, str]:
+    """Create or recover one visible Native Session bound to this run's owner."""
+    stable_request = str(
+        (create_idempotency or {}).get("keyHash") or run_id
+    ).strip()
+    binding_key = "financial-team-synthesis-v1:" + hashlib.sha256(
+        f"{assistant_agent_id}\0{stable_request}".encode("utf-8")
+    ).hexdigest()
+    session_create_key = "financial-team-synthesis-session-v1:" + hashlib.sha256(
+        f"{assistant_agent_id}\0{stable_request}".encode("utf-8")
+    ).hexdigest()
+    title = (
+        f"股票研究汇总 · {str(symbol or '').upper()} · {research_date} · "
+        f"{period_days}天 · {_DEPTH_LABELS.get(depth, '标准')}"
+    )
+    try:
+        created = session_service.create_chat_session(
+            title=title,
+            title_source="manual",
+            agent_id=assistant_agent_id,
+            created_by="financial_analysis_team",
+            conversation_index_kind=directory.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+            session_metadata={
+                "source": _SYNTHESIS_SESSION_SOURCE,
+                "externalTaskId": binding_key,
+            },
+            lightweight=True,
+            activate=False,
+            idempotency_key=session_create_key,
+        )
+    except session_service.SessionIdempotencyConflictError as exc:
+        raise FinancialTeamRunConflictError(
+            "同一创建请求键不能用于不同的研究参数"
+        ) from exc
+    except session_service.SessionIdempotencyReplayGoneError as exc:
+        raise FinancialTeamRunNotReadyError(
+            "本轮汇总会话已被删除，不能安全复用，请使用新的研究创建请求"
+        ) from exc
+
+    session_id = str(
+        created.get("id") or created.get("sessionId") or ""
+    ).strip() if isinstance(created, dict) else ""
+    if not session_id:
+        raise FinancialTeamRunNotReadyError("主助手汇总原生会话创建未确认")
+    if not _native_owner_scoped_synthesis_session_matches_agent(
+        assistant_agent_id, session_id, binding_key
+    ) or not _native_session_model_is_executable(assistant_agent_id, session_id):
+        raise FinancialTeamRunNotReadyError(
+            "主助手汇总原生会话归属或模型绑定未通过核验"
+        )
+    return session_id, binding_key
+
+
 def _find_run_by_create_key(
     root: Path, assistant_agent_id: str, key_hash: str, input_hash: str
 ) -> dict[str, Any] | None:
@@ -248,6 +339,7 @@ def _project_run(run: dict[str, Any]) -> dict[str, Any]:
         "periodDays": run["periodDays"],
         "researchDate": run.get("researchDate"),
         "depth": run.get("depth"),
+        "marketCode": _market_code(str(run.get("symbol") or "")) or None,
         "createdAt": run["createdAt"],
         "stage": run["stage"],
         "analysts": {
@@ -266,6 +358,9 @@ def _project_run(run: dict[str, Any]) -> dict[str, Any]:
             "turnId": run["synthesis"].get("turnId", ""),
         },
     }
+    execution_policy = run.get("executionPolicy")
+    if isinstance(execution_policy, dict):
+        projected["executionPolicy"] = _project_execution_policy(execution_policy)
     coordination_status = str(run.get("coordinationStatus") or "").strip()
     if coordination_status in _COORDINATION_STATUSES:
         projected["coordinationStatus"] = coordination_status
@@ -273,6 +368,199 @@ def _project_run(run: dict[str, Any]) -> dict[str, Any]:
             run.get("coordinationError") or ""
         )[:_MAX_COORDINATION_ERROR_CHARS]
     return projected
+
+
+def _market_code(symbol: str) -> str:
+    normalized = str(symbol or "").strip().lower()
+    if normalized.startswith("hk"):
+        return "HK"
+    if normalized.startswith("us"):
+        return "US"
+    return "CN" if normalized.startswith(("sh", "sz", "bj")) else ""
+
+
+def _project_execution_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    """Expose requested and resolved effort, never the private model binding."""
+
+    def role_projection(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        status = str(value.get("status") or "unknown")
+        if status not in {"applied", "adjusted", "default", "unknown"}:
+            status = "unknown"
+        requested = normalize_reasoning_effort(value.get("requestedReasoningEffort"))
+        resolved = normalize_reasoning_effort(value.get("resolvedReasoningEffort"))
+        return {
+            "requestedReasoningEffort": requested or None,
+            "resolvedReasoningEffort": resolved or None,
+            "status": status,
+        }
+
+    raw_roles = policy.get("roles") if isinstance(policy.get("roles"), dict) else {}
+    roles = {
+        str(role): projected
+        for role, raw in raw_roles.items()
+        if role in ROLE_SPECS and (projected := role_projection(raw)) is not None
+    }
+    synthesis = role_projection(policy.get("synthesis"))
+    requested_depth = str(policy.get("requestedDepth") or "").strip().lower()
+    requested_effort = normalize_reasoning_effort(policy.get("requestedReasoningEffort"))
+    return {
+        "requestedDepth": requested_depth if requested_depth in _ALLOWED_DEPTHS else None,
+        "requestedReasoningEffort": requested_effort or None,
+        "roles": roles,
+        "synthesis": synthesis,
+    }
+
+
+def _resolve_session_execution(session_id: str, requested_effort: str) -> dict[str, Any]:
+    """Resolve one run's depth against the session's current selectable model contract."""
+
+    result: dict[str, Any] = {
+        "requestedReasoningEffort": requested_effort,
+        "resolvedReasoningEffort": "",
+        "status": "unknown",
+        "modelSelection": None,
+    }
+    try:
+        options = session_service.get_session_llm_options(str(session_id or ""))
+    except Exception:  # noqa: BLE001 - capability lookup must not block a bounded research run
+        return result
+    if not isinstance(options, dict):
+        return result
+    model_ref = str(options.get("currentModelId") or "").strip()
+    choices = options.get("choices") if isinstance(options.get("choices"), list) else []
+    choice = next(
+        (
+            item
+            for item in choices
+            if isinstance(item, dict)
+            and model_ref
+            in {
+                str(item.get("modelRef") or "").strip(),
+                str(item.get("modelId") or "").strip(),
+            }
+        ),
+        None,
+    )
+    if not model_ref or choice is None:
+        result["resolvedReasoningEffort"] = normalize_reasoning_effort(
+            options.get("currentReasoningEffort")
+        )
+        return result
+
+    selection: dict[str, str] = {"modelId": model_ref}
+    supported: list[str] = []
+    for raw in choice.get("reasoningEffortValues") or []:
+        effort = normalize_reasoning_effort(raw)
+        if effort and effort not in supported:
+            supported.append(effort)
+    current_effort = normalize_reasoning_effort(options.get("currentReasoningEffort"))
+    if not supported:
+        result.update(
+            {
+                "resolvedReasoningEffort": current_effort,
+                "status": "unknown",
+                "modelSelection": selection,
+            }
+        )
+        return result
+
+    target_rank = _REASONING_EFFORT_ORDER.get(requested_effort, 0)
+    eligible = [
+        value
+        for value in supported
+        if _REASONING_EFFORT_ORDER.get(value, 0) <= target_rank
+    ]
+    if eligible:
+        resolved = max(eligible, key=lambda value: _REASONING_EFFORT_ORDER.get(value, 0))
+        selection["reasoningEffort"] = resolved
+        result.update(
+            {
+                "resolvedReasoningEffort": resolved,
+                "status": "applied" if resolved == requested_effort else "adjusted",
+                "modelSelection": selection,
+            }
+        )
+        return result
+
+    # When all declared choices are above the requested level, use the nearest
+    # available setting and expose that downgrade in the execution policy.
+    resolved = min(supported, key=lambda value: _REASONING_EFFORT_ORDER.get(value, 0))
+    selection["reasoningEffort"] = resolved
+    result.update(
+        {
+            "resolvedReasoningEffort": resolved,
+            "status": "adjusted",
+            "modelSelection": selection,
+        }
+    )
+    return result
+
+
+def _build_execution_policy(
+    roles: dict[str, dict[str, Any]], *, synthesis_session_id: str, depth: str
+) -> dict[str, Any]:
+    requested_effort = _DEPTH_REASONING_TARGETS[depth]
+    return {
+        "requestedDepth": depth,
+        "requestedReasoningEffort": requested_effort,
+        "roles": {
+            role: _resolve_session_execution(
+                str(roles[role].get("directSessionId") or ""), requested_effort
+            )
+            for role in ROLE_SPECS
+        },
+        "synthesis": _resolve_session_execution(
+            synthesis_session_id, requested_effort
+        ),
+    }
+
+
+def _model_selection_for_role(run: dict[str, Any], role: str) -> dict[str, str] | None:
+    policy = run.get("executionPolicy")
+    if not isinstance(policy, dict):
+        return None
+    value = (
+        (policy.get("roles") or {}).get(role)
+        if role != "synthesis"
+        else policy.get("synthesis")
+    )
+    selection = value.get("modelSelection") if isinstance(value, dict) else None
+    if not isinstance(selection, dict):
+        return None
+    model_id = str(selection.get("modelId") or "").strip()
+    if not model_id:
+        return None
+    result = {"modelId": model_id}
+    effort = normalize_reasoning_effort(selection.get("reasoningEffort"))
+    if effort:
+        result["reasoningEffort"] = effort
+    return result
+
+
+def _depth_instruction(run: dict[str, Any], role: str) -> str:
+    depth = str(run.get("depth") or "standard").strip().lower()
+    instruction = _DEPTH_INSTRUCTIONS.get(depth, _DEPTH_INSTRUCTIONS["standard"])
+    policy = run.get("executionPolicy")
+    role_policy = None
+    if isinstance(policy, dict):
+        role_policy = (
+            (policy.get("roles") or {}).get(role)
+            if role != "synthesis"
+            else policy.get("synthesis")
+        )
+    resolved = (
+        normalize_reasoning_effort(role_policy.get("resolvedReasoningEffort"))
+        if isinstance(role_policy, dict)
+        else ""
+    )
+    status = str(role_policy.get("status") or "") if isinstance(role_policy, dict) else ""
+    if resolved and status in {"applied", "adjusted"}:
+        instruction += f" 本轮模型实际推理强度为 {resolved}。"
+    elif status in {"default", "unknown"}:
+        instruction += " 当前模型无法按请求确认推理强度；沿用原生会话默认设置，不能声称已应用更高档位。"
+    return instruction
 
 
 def update_financial_team_coordination_status(
@@ -313,6 +601,144 @@ def update_financial_team_coordination_status(
     return _project_run(run)
 
 
+def require_financial_team_synthesis_recovery_ready(
+    assistant_agent_id: str,
+    run_id: str,
+    *,
+    allow_waiting: bool = False,
+) -> None:
+    """Prove that a blocked run can safely submit its reserved synthesis ID."""
+
+    normalized_assistant_id = str(assistant_agent_id or "").strip()
+    normalized_run_id = str(run_id or "").strip()
+    path = _run_path(normalized_assistant_id, normalized_run_id)
+    with _LOCK, _run_lock(path):
+        run = _load_run(path, normalized_assistant_id)
+        allowed_statuses = {"blocked"}
+        if allow_waiting:
+            allowed_statuses.add("waiting")
+        if str(run.get("coordinationStatus") or "") not in allowed_statuses:
+            raise FinancialTeamRunNotReadyError("本轮协作状态不支持恢复汇总")
+        if int(run.get("schemaVersion") or 0) != _SCHEMA_VERSION:
+            raise FinancialTeamRunNotReadyError("旧版研究记录不能恢复五方汇总")
+
+        analysts = run.get("analysts") if isinstance(run.get("analysts"), dict) else {}
+        if set(analysts) != set(ROLE_SPECS):
+            raise FinancialTeamRunNotReadyError("五个分析员的研究记录不完整，不能恢复汇总")
+
+        require_current_financial_team_run_bindings(normalized_assistant_id, normalized_run_id)
+        for role in ROLE_SPECS:
+            ref = analysts.get(role)
+            if not isinstance(ref, dict):
+                raise FinancialTeamRunNotReadyError("五个分析员的研究记录不完整，不能恢复汇总")
+            session_id = str(ref.get("sessionId") or "").strip()
+            turn_id = str(ref.get("turnId") or "").strip()
+            if not session_id or not turn_id:
+                raise FinancialTeamRunNotReadyError("五个分析员尚未全部完成，不能恢复汇总")
+            if not _final_answer_for_turn(session_id, turn_id):
+                raise FinancialTeamRunNotReadyError("五个分析员尚未全部返回最终回答，不能恢复汇总")
+
+        synthesis_ref = run.get("synthesis")
+        if not isinstance(synthesis_ref, dict):
+            raise FinancialTeamRunNotReadyError("主助手汇总记录不完整，不能恢复本轮")
+        if str(synthesis_ref.get("turnId") or "").strip():
+            raise FinancialTeamRunNotReadyError("主助手已存在汇总 Turn，请先核对原生会话")
+        if str(synthesis_ref.get("submissionState") or "") != "reserved":
+            raise FinancialTeamRunNotReadyError("本次汇总提交状态无法确认，系统不会重复发送")
+        session_id = str(synthesis_ref.get("sessionId") or "").strip()
+        submission_id = str(synthesis_ref.get("clientSubmissionId") or "").strip()
+        if not session_id or not submission_id or len(submission_id) > 200:
+            raise FinancialTeamRunNotReadyError("本次汇总提交标识不完整，不能恢复本轮")
+
+        try:
+            detail = session_service.get_session_detail(
+                session_id,
+                transcript_scope="all",
+                include_secondary=False,
+            )
+            submission_seen, associated_turn = _submission_association(
+                detail or {}, submission_id
+            )
+        except Exception as exc:  # noqa: BLE001 - uncertain transcript state fails closed
+            raise FinancialTeamRunNotReadyError(
+                "无法核验主助手原生会话，系统不会重复发送"
+            ) from exc
+        if submission_seen or associated_turn:
+            raise FinancialTeamRunNotReadyError(
+                "本次汇总提交已出现在主助手会话中，系统不会重复发送"
+            )
+
+
+def begin_financial_team_synthesis_recovery(
+    assistant_agent_id: str,
+    run_id: str,
+    *,
+    allow_waiting: bool = False,
+) -> dict[str, Any]:
+    """Move a verified blocked run back to waiting without changing its IDs."""
+
+    normalized_assistant_id = str(assistant_agent_id or "").strip()
+    normalized_run_id = str(run_id or "").strip()
+    path = _run_path(normalized_assistant_id, normalized_run_id)
+    with _LOCK, _run_lock(path):
+        require_financial_team_synthesis_recovery_ready(
+            normalized_assistant_id,
+            normalized_run_id,
+            allow_waiting=allow_waiting,
+        )
+        run = _load_run(path, normalized_assistant_id)
+        if str(run.get("coordinationStatus") or "") == "blocked":
+            run["coordinationStatus"] = "waiting"
+            run["coordinationError"] = ""
+            run["coordinationUpdatedAt"] = _utc_now()
+            _write_run(path, run)
+            _record_financial_team_event(
+                "financial_team.synthesis.recovery_started",
+                assistant_agent_id=normalized_assistant_id,
+                run_id=normalized_run_id,
+                role="synthesis",
+                agent_id=str((run.get("synthesis") or {}).get("agentId") or ""),
+                session_id=str((run.get("synthesis") or {}).get("sessionId") or ""),
+                submission_id=str((run.get("synthesis") or {}).get("clientSubmissionId") or ""),
+                outcome="recovery_started",
+            )
+        return _project_run(run)
+
+
+def financial_team_synthesis_busy_retry_is_safe(
+    assistant_agent_id: str, run_id: str
+) -> bool:
+    """Return true only after a rejected busy submit left no native submission."""
+
+    try:
+        path = _run_path(assistant_agent_id, run_id)
+        with _LOCK, _run_lock(path):
+            run = _load_run(path, assistant_agent_id)
+            synthesis_ref = run.get("synthesis")
+            if not isinstance(synthesis_ref, dict):
+                return False
+            if (
+                str(synthesis_ref.get("turnId") or "").strip()
+                or str(synthesis_ref.get("submissionState") or "") != "reserved"
+            ):
+                return False
+            session_id = str(synthesis_ref.get("sessionId") or "").strip()
+            submission_id = str(synthesis_ref.get("clientSubmissionId") or "").strip()
+            if not session_id or not submission_id:
+                return False
+            detail = session_service.get_session_detail(
+                session_id,
+                transcript_scope="all",
+                include_secondary=False,
+            )
+            submission_seen, associated_turn = _submission_association(
+                detail or {}, submission_id
+            )
+            return not submission_seen and not associated_turn
+    except Exception:  # noqa: BLE001 - retry permission is fail closed
+        return False
+
+
 def create_financial_team_run(
     assistant_agent_id: str,
     *,
@@ -335,7 +761,7 @@ def create_financial_team_run(
     try:
         normalized_symbol = market.normalize_symbol(symbol)
     except (market.MarketDataError, TypeError, ValueError) as exc:
-        raise FinancialTeamRunError("请输入有效的 A 股证券代码") from exc
+        raise FinancialTeamRunError("请输入有效的股票代码") from exc
     try:
         normalized_period = int(period_days)
     except (TypeError, ValueError) as exc:
@@ -359,6 +785,31 @@ def create_financial_team_run(
     roles = _role_agents(assistant_agent_id)
     if set(roles) != set(ROLE_SPECS):
         raise FinancialTeamRunNotReadyError("分析团队成员不完整，请重新检查团队初始化")
+    model_sessions = [
+        (
+            str(owner.get("agentId") or ""),
+            str(owner.get("directSessionId") or ""),
+        ),
+        *[
+            (
+                str(roles[role].get("agentId") or ""),
+                str(roles[role].get("directSessionId") or ""),
+            )
+            for role in ROLE_SPECS
+        ],
+    ]
+    if not all(
+        _native_session_model_is_executable(agent_id, session_id)
+        for agent_id, session_id in model_sessions
+    ):
+        _record_financial_team_event(
+            "financial_team.run.create_rejected",
+            assistant_agent_id=assistant_agent_id,
+            outcome="model_not_ready",
+        )
+        raise FinancialTeamRunNotReadyError(
+            "团队默认模型当前不可执行，请检查模型绑定、供应商密钥和上下文窗口"
+        )
     normalized_request_key = str(idempotency_key or "").strip()
     if normalized_request_key and not 16 <= len(normalized_request_key) <= 200:
         raise FinancialTeamRunError("研究创建请求键长度无效")
@@ -443,6 +894,15 @@ def _create_financial_team_run_record(
 ) -> dict[str, Any]:
     now = _utc_now()
     run_id = str(uuid4())
+    synthesis_session_id, synthesis_binding_key = _create_run_synthesis_session(
+        assistant_agent_id,
+        run_id=run_id,
+        symbol=symbol,
+        period_days=period_days,
+        research_date=research_date,
+        depth=depth,
+        create_idempotency=create_idempotency,
+    )
     run = {
         "schemaVersion": _SCHEMA_VERSION,
         "runId": run_id,
@@ -452,6 +912,11 @@ def _create_financial_team_run_record(
         "periodDays": period_days,
         "researchDate": research_date,
         "depth": depth,
+        "executionPolicy": _build_execution_policy(
+            roles,
+            synthesis_session_id=synthesis_session_id,
+            depth=depth,
+        ),
         "assistantConfigRevision": int(owner.get("configRevision") or 0),
         "createdAt": now,
         "stage": "research",
@@ -466,7 +931,9 @@ def _create_financial_team_run_record(
         },
         "synthesis": {
             "agentId": assistant_agent_id,
-            "sessionId": str(owner["directSessionId"]),
+            "sessionId": synthesis_session_id,
+            "sessionBindingKind": _SYNTHESIS_OWNER_SCOPED_BINDING,
+            "sessionBindingKey": synthesis_binding_key,
             "clientSubmissionId": str(uuid4()),
             "turnId": "",
         },
@@ -757,6 +1224,7 @@ def _primary_role_prompt(
     lines = [
         f"你是股票研究团队中的独立原生{spec['teamRole']}，只处理本轮角色任务，不代表持牌机构。",
         f"研究对象：{run['symbol']}；研究日期：{run.get('researchDate') or '未指定'}；观察周期：近{run['periodDays']}天；研究深度：{depth}。",
+        f"本轮执行要求：{_depth_instruction(run, role)}",
         f"任务目标：{task.get('mission') or task.get('responsibilities') or ROLE_SPECS[role]['teamRole']}。",
         f"职责：{task.get('responsibilities') or ''}",
         f"优先任务：{task.get('preferredTasks') or ''}",
@@ -886,8 +1354,10 @@ def submit_financial_team_primary_role(
                 attachment_ids=[],
                 references=[],
                 queue_if_busy=False,
+                model_selection=_model_selection_for_role(run, role),
             )
         except (
+            session_service.SessionModelSelectionError,
             session_service.SessionBusyError,
             session_service.SessionNotFoundError,
             session_service.SessionValidationError,
@@ -1220,12 +1690,53 @@ def require_current_financial_team_run_bindings(
             )
 
     synthesis_ref = run.get("synthesis")
+    synthesis_agent_id = (
+        str(synthesis_ref.get("agentId") or "")
+        if isinstance(synthesis_ref, dict)
+        else ""
+    )
+    synthesis_session_id = (
+        str(synthesis_ref.get("sessionId") or "")
+        if isinstance(synthesis_ref, dict)
+        else ""
+    )
+    synthesis_binding_kind = (
+        str(synthesis_ref.get("sessionBindingKind") or "").strip()
+        if isinstance(synthesis_ref, dict)
+        else ""
+    )
+    direct_session_id = str(team.get("assistantSessionId") or "")
+    synthesis_binding_valid = False
     if (
-        not isinstance(synthesis_ref, dict)
-        or str(synthesis_ref.get("agentId") or "") != normalized_assistant_id
-        or str(synthesis_ref.get("sessionId") or "")
-        != str(team.get("assistantSessionId") or "")
+        synthesis_agent_id == normalized_assistant_id
+        and synthesis_binding_kind == _SYNTHESIS_OWNER_SCOPED_BINDING
     ):
+        synthesis_binding_key = str(
+            synthesis_ref.get("sessionBindingKey") or ""
+        ).strip()
+        synthesis_binding_valid = bool(
+            synthesis_session_id
+            and synthesis_session_id != direct_session_id
+            and _native_owner_scoped_synthesis_session_matches_agent(
+                normalized_assistant_id,
+                synthesis_session_id,
+                synthesis_binding_key,
+            )
+            and _native_session_model_is_executable(
+                normalized_assistant_id,
+                synthesis_session_id,
+            )
+        )
+    elif (
+        synthesis_agent_id == normalized_assistant_id
+        and not synthesis_binding_kind
+        and synthesis_session_id == direct_session_id
+    ):
+        # Runs written before owner-scoped synthesis Sessions retain their exact
+        # direct-session binding and remain eligible for explicit guarded recovery.
+        synthesis_binding_valid = True
+
+    if not synthesis_binding_valid:
         reject(
             "synthesis",
             "主助手原生会话或身份已变化，本轮后台协作已停止",
@@ -1275,6 +1786,7 @@ def _debate_prompt(
         [
             f"你是股票研究团队中的独立{ROLE_SPECS[role]['teamRole']}，只负责形成自己的情景分析，不替代主助手，也不代表持牌机构。",
             f"研究对象：{run['symbol']}；研究日期：{run.get('researchDate') or '未指定'}；观察周期：近{run['periodDays']}天；研究深度：{period}。",
+            f"本轮执行要求：{_depth_instruction(run, role)}",
             perspective,
             "本次证据集包括三个独立原生 Agent 的目标 Turn 和公共基本面数据。引用时标明原来源和日期；区分事实、推断与假设；数据缺失要明确写出。不得虚构新闻、财报、价格、工具调用、目标价或收益承诺。",
             _REFERENCE_MATERIAL_SECURITY_BOUNDARY,
@@ -1404,8 +1916,10 @@ def submit_financial_team_debate(
                     attachment_ids=[],
                     references=[],
                     queue_if_busy=False,
+                    model_selection=_model_selection_for_role(run, role),
                 )
             except (
+                session_service.SessionModelSelectionError,
                 session_service.SessionBusyError,
                 session_service.SessionNotFoundError,
                 session_service.SessionValidationError,
@@ -1518,6 +2032,7 @@ def _synthesis_prompt(run: dict[str, Any], answers: dict[str, str]) -> str:
     return "\n\n".join(
         [
             f"你是主助手的股票研究汇总角色。请综合股票 {run['symbol']} 的多分析师研究。研究日期：{run.get('researchDate') or '未指定'}；观察周期：近{run['periodDays']}天；研究深度：{_DEPTH_LABELS.get(str(run.get('depth') or 'standard'), '标准')}。以下引用观点不自动等同事实，只依据其中可核验的数据和来源，明确时间、单位、数据空缺与意见分歧。",
+            f"本轮执行要求：{_depth_instruction(run, 'synthesis')}",
             "先归纳行情、基本面和新闻证据，再比较乐观研究员与审慎研究员各自的论据、反证和成立条件，最后列主要风险与综合结论。不得把主助手自己的分析冒称为独立 Agent。不得给出确定收益承诺或代替用户下单。",
             _REFERENCE_MATERIAL_SECURITY_BOUNDARY,
             _untrusted_reference_materials(payloads),
@@ -1642,8 +2157,10 @@ def submit_financial_team_synthesis(
                 attachment_ids=[],
                 references=[],
                 queue_if_busy=False,
+                model_selection=_model_selection_for_role(run, "synthesis"),
             )
         except (
+            session_service.SessionModelSelectionError,
             session_service.SessionBusyError,
             session_service.SessionNotFoundError,
             session_service.SessionValidationError,

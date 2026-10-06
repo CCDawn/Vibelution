@@ -22,6 +22,7 @@ export default {
   historyItem: "grid min-w-0 gap-1",
   runHeader: "flex min-w-0 flex-wrap items-end gap-3 border-b " + border + " pb-3 [&>div:first-child]:mr-auto [&>div:first-child]:grid [&>div:first-child]:gap-1 [&_h2]:m-0 [&_h2]:break-words [&_h2]:text-base [&_h2]:font-semibold",
   runMeta: "flex items-center gap-1.5",
+  executionSummary: "max-w-full text-xs text-[var(--fg-tertiary)]",
   runActions: "flex flex-wrap items-center gap-2",
   progress: "flex min-w-0 flex-wrap items-center gap-2 text-xs " + muted + " [&>strong]:text-sm [&>strong]:text-[var(--fg-primary)]",
   analystGrid: "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,22rem),1fr))] gap-3",

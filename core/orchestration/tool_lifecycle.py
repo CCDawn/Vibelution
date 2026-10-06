@@ -180,6 +180,7 @@ class ToolLifecycleBridge:
         "list_files_tool",
         "web_search_tool",
         "financial_market_snapshot_tool",
+        "financial_market_screen_tool",
         "web_fetch_tool",
         "fetch_url_tool",
         "get_git_status_summary_tool",

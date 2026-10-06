@@ -213,6 +213,12 @@ def bootstrap_runtime_scene_for_workbench() -> bool:
 
 def main() -> None:
     args = parse_args()
+    # A reused Launcher shell may have been opened by an end-to-end test.
+    # This is a new product server, so inherited test markers must not cause
+    # its native session-directory startup to be skipped. In-process unit
+    # tests still detect pytest through sys.modules.
+    for name in ("PYTEST_CURRENT_TEST", "PYTEST_VERSION"):
+        os.environ.pop(name, None)
     url = f"http://{args.host}:{args.port}"
     if args.open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

@@ -1,7 +1,30 @@
-import { fetchJson } from "./client";
+import { fetchJson, isFetchJsonHttpError } from "./client";
 import type { FinancialReportExportRequest, FinancialReportExportResponse } from "./types/financialReports";
+import type { FinancialReportFilters, FinancialReportPage, FinancialReportsExportResponse } from "./types/financialReports";
 
 export type { FinancialReportExportRequest, FinancialReportExportResponse, FinancialReportFormat } from "./types/financialReports";
+export type { FinancialReportFilters, FinancialReportPage, FinancialReportSummary } from "./types/financialReports";
+
+export function isFinancialReportNotFoundError(error: unknown): boolean {
+  return isFetchJsonHttpError(error) && error.status === 404;
+}
+
+export const financialReportKeys = { catalog: (agentId: string, filters: FinancialReportFilters) => ["finance", "report-catalog", agentId, filters] as const };
+export function fetchFinancialReports(agentId: string, filters: FinancialReportFilters = {}, options?: { signal?: AbortSignal }): Promise<FinancialReportPage> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return fetchJson(`/api/financial-reports/${encodeURIComponent(agentId)}?${params}`, { signal: options?.signal });
+}
+
+export async function downloadFinancialReportsExport(agentId: string, targets: Array<Pick<FinancialReportExportRequest, "sessionId" | "turnId">>, format: "markdown" | "json" | "docx") {
+  if (!targets.length || targets.length > 20) throw new Error("一次最多导出20份报告");
+  const result = await fetchJson<FinancialReportsExportResponse>(`/api/financial-reports/${encodeURIComponent(agentId)}/export-batch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets, format }) });
+  if (result.encoding !== "base64" || result.mediaType !== "application/zip" || result.count !== targets.length || typeof result.content !== "string" || result.content.length > 12_000_000 || result.fileName !== "stock-research-bundle.zip") throw new Error("批量导出响应无效");
+  const binary = atob(result.content), bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+  const link = document.createElement("a"); link.href = url; link.download = result.fileName; link.hidden = true;
+  document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
 
 export type FinancialReportExportTarget = FinancialReportExportRequest & {
   assistantAgentId: string;
@@ -96,54 +119,100 @@ export async function downloadFinancialReportExport(target: FinancialReportExpor
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export function printFinancialReportExport(target: FinancialReportExportTarget, options?: { signal?: AbortSignal }) {
-  // Open synchronously in the menu click handler so popup protection does not
-  // discard the print window after the asynchronous API response arrives.
-  if (target.format !== "pdf") return Promise.reject(new Error("仅打印版报告可以打开打印窗口"));
-  const printWindow = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
-  if (!printWindow) return Promise.reject(new Error("浏览器阻止了打印窗口，请允许弹窗后重试。"));
-  printWindow.opener = null;
-  return exportFinancialReport(target, options).then((response) => {
-    throwIfAborted(options?.signal);
-    assertBoundedExport(response, target);
-    if (response.format !== "pdf" || response.encoding !== "utf8" || !response.mediaType.startsWith("text/html")) {
-      throw new Error("打印版导出响应格式无效");
-    }
-    if (printWindow.closed) throw new Error("打印窗口已关闭，请重新导出");
-    const url = URL.createObjectURL(new Blob([response.content], { type: "text/html;charset=utf-8" }));
-    let released = false;
-    const releaseUrl = () => {
-      if (!released) {
-        released = true;
-        URL.revokeObjectURL(url);
+const PRINT_FRAME_LOAD_TIMEOUT_MS = 15_000;
+const PRINT_AFTERPRINT_TIMEOUT_MS = 60_000;
+
+export async function printFinancialReportExport(target: FinancialReportExportTarget, options?: { signal?: AbortSignal }): Promise<void> {
+  if (target.format !== "pdf") throw new Error("仅打印版报告可以打开打印窗口");
+  throwIfAborted(options?.signal);
+  const response = await exportFinancialReport(target, options);
+  throwIfAborted(options?.signal);
+  assertBoundedExport(response, target);
+  if (response.format !== "pdf" || response.encoding !== "utf8" || !response.mediaType.startsWith("text/html")) {
+    throw new Error("打印版导出响应格式无效");
+  }
+  if (!response.content.trim()) throw new Error("打印版报告内容为空");
+  if (typeof window === "undefined" || typeof document === "undefined" || !document.body) {
+    throw new Error("当前环境无法打开打印文档");
+  }
+
+  const url = URL.createObjectURL(new Blob([response.content], { type: "text/html;charset=utf-8" }));
+  await new Promise<void>((resolve, reject) => {
+    let frame: HTMLIFrameElement | null = null;
+    let frameWindow: Window | null = null;
+    let loadTimer: number | null = null;
+    let afterPrintTimer: number | null = null;
+    let settled = false;
+    let printStarted = false;
+
+    const cleanup = () => {
+      if (loadTimer !== null) window.clearTimeout(loadTimer);
+      if (afterPrintTimer !== null) window.clearTimeout(afterPrintTimer);
+      options?.signal?.removeEventListener("abort", onAbort);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      frame?.removeEventListener("load", onLoad);
+      frame?.removeEventListener("error", onLoadError);
+      frameWindow?.removeEventListener("afterprint", onAfterPrint);
+      frame?.remove();
+      URL.revokeObjectURL(url);
+    };
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => {
+      const error = new Error("The operation was aborted");
+      error.name = "AbortError";
+      finish(error);
+    };
+    const onBeforeUnload = () => finish(new Error("打印已取消：页面即将关闭"));
+    const onAfterPrint = () => finish();
+    const onLoadError = () => finish(new Error("打印报告加载失败，请重试。"));
+    const onLoad = () => {
+      if (!frame) return;
+      try {
+        const candidate = frame.contentWindow;
+        if (
+          !candidate
+          || candidate.location.href !== url
+          || candidate.document.URL !== url
+          || candidate.document.readyState !== "complete"
+        ) {
+          // An iframe's initial about:blank load is not the report document.
+          return;
+        }
+        if (printStarted) return;
+        printStarted = true;
+        frameWindow = candidate;
+        if (loadTimer !== null) window.clearTimeout(loadTimer);
+        frameWindow.addEventListener("afterprint", onAfterPrint, { once: true });
+        frameWindow.focus();
+        afterPrintTimer = window.setTimeout(() => finish(new Error("打印等待超时，请重试。")), PRINT_AFTERPRINT_TIMEOUT_MS);
+        frameWindow.print();
+      } catch (cause) {
+        finish(cause instanceof Error ? cause : new Error("打印报告失败，请重试。"));
       }
     };
-    const frame = printWindow.document.createElement("iframe");
-    frame.setAttribute("sandbox", "allow-same-origin allow-modals");
-    frame.title = response.fileName;
-    frame.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;background:white";
-    frame.addEventListener("load", () => {
-      const printDocument = frame.contentWindow;
-      if (!printDocument) {
-        releaseUrl();
-        printWindow.close();
-        return;
-      }
-      printDocument.addEventListener("afterprint", releaseUrl, { once: true });
-      printDocument.focus();
-      printDocument.print();
-      printWindow.setTimeout(releaseUrl, 60_000);
-    }, { once: true });
-    frame.addEventListener("error", () => {
-      releaseUrl();
-      printWindow.close();
-    }, { once: true });
-    printWindow.addEventListener("beforeunload", releaseUrl, { once: true });
-    printWindow.document.title = response.fileName.replace(/\.html$/i, "");
-    frame.src = url;
-    printWindow.document.body.replaceChildren(frame);
-  }).catch((error: unknown) => {
-    printWindow.close();
-    throw error;
+
+    try {
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      window.addEventListener("beforeunload", onBeforeUnload, { once: true });
+      frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", "allow-same-origin allow-modals");
+      frame.title = response.fileName;
+      frame.setAttribute("aria-hidden", "true");
+      frame.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;background:white;z-index:-1";
+      frame.addEventListener("load", onLoad);
+      frame.addEventListener("error", onLoadError);
+      loadTimer = window.setTimeout(() => finish(new Error("打印报告加载超时，请重试。")), PRINT_FRAME_LOAD_TIMEOUT_MS);
+      frame.src = url;
+      document.body.append(frame);
+      if (options?.signal?.aborted) onAbort();
+    } catch (cause) {
+      finish(cause instanceof Error ? cause : new Error("无法创建打印文档，请重试。"));
+    }
   });
 }

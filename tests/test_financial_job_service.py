@@ -191,16 +191,16 @@ def test_expired_one_time_schedule_cannot_be_restored():
     assert contract.schedule_next_run(schedule, now=now) is None
 
 
-def test_only_shenzhen_and_shanghai_symbols_are_accepted():
+def test_create_request_canonicalizes_a_hk_and_us_symbols():
     normalized = contract.normalize_create_request(
-        {**_request(), "symbols": ["600000", "000001"]},
+        {**_request(), "symbols": ["600000", "000001", "830001", "hk700", "usbrk.b"]},
         now=datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc),
     )
-    assert normalized["symbols"] == ["sh600000", "sz000001"]
+    assert normalized["symbols"] == ["sh600000", "sz000001", "bj830001", "hk00700", "usBRK.B"]
 
-    with pytest.raises(FinancialJobValidationError, match="沪深 A 股"):
+    with pytest.raises(FinancialJobValidationError, match="港股或美股"):
         contract.normalize_create_request(
-            {**_request(), "symbols": ["830001"]},
+            {**_request(), "symbols": ["AAPL"]},
             now=datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc),
         )
 

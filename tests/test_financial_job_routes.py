@@ -133,7 +133,7 @@ def test_http_create_get_and_patch_use_private_schedule_service_without_get_prov
 @pytest.mark.parametrize(
     "payload,headers",
     [
-        (_daily_request(symbols=["830001"]), {"Idempotency-Key": "http-invalid-stock-01"}),
+        (_daily_request(symbols=["510300"]), {"Idempotency-Key": "http-invalid-stock-01"}),
         ({**_daily_request(), "prompt": "forbidden field"}, {"Idempotency-Key": "http-extra-field-01"}),
         (_daily_request(), {}),
     ],

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.ui.chat_state import load_chat_state
 from core.web.routes import financial_team as route
 from core.web.services import (
     agent_directory_service,
@@ -24,6 +25,31 @@ finance_env = _finance_env
 def financial_team_env(finance_env, monkeypatch):
     directory_runtime.shutdown_session_directory_runtime()
     monkeypatch.setattr(session_service, "PROJECT_ROOT", finance_env["root"])
+    model_candidate = {
+        "modelRef": "provider/test-model",
+        "modelId": "provider/test-model",
+        "runtimeSelectable": True,
+        "providerHealthy": True,
+        "missingApiKey": False,
+        "contextWindow": 8192,
+    }
+
+    def get_session_llm_options(session_id):
+        return {
+            "sessionId": str(session_id),
+            "currentModelId": model_candidate["modelRef"],
+            "currentReasoningEffort": "medium",
+            "choices": [model_candidate],
+        }
+
+    monkeypatch.setattr(
+        session_service, "get_session_llm_options", get_session_llm_options
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda _conversation: {"limit": 8192, "source": "test"},
+    )
     monkeypatch.setattr(
         financial_assistant_service,
         "financial_report_availability",
@@ -36,7 +62,11 @@ def financial_team_env(finance_env, monkeypatch):
     assert status.status == "ready"
     created = financial_assistant_service.create_financial_assistant()
     try:
-        yield {**finance_env, "assistant": created["assistant"]}
+        yield {
+            **finance_env,
+            "assistant": created["assistant"],
+            "modelCandidate": model_candidate,
+        }
     finally:
         directory_runtime.shutdown_session_directory_runtime()
 
@@ -75,6 +105,25 @@ def test_financial_team_primary_submit_route_uses_guarded_service(monkeypatch):
     monkeypatch.setattr(route.service, "submit_financial_team_primary_role", submit)
     assert route.financial_team_primary_submit("owner-1", "run-1", "market") is expected
     assert calls == [("owner-1", "run-1", "market")]
+
+
+def test_financial_team_synthesis_recovery_routes_delegate_to_guarded_service(monkeypatch):
+    status = {"available": True, "reason": ""}
+    recovered = {"runId": "run-1", "coordinationStatus": "waiting"}
+    monkeypatch.setattr(
+        route.service,
+        "financial_team_synthesis_recovery_status",
+        lambda assistant_agent_id, run_id: status,
+    )
+    monkeypatch.setattr(
+        route.service,
+        "recover_financial_team_synthesis",
+        lambda assistant_agent_id, run_id: recovered,
+    )
+
+    assert route.financial_team_synthesis_recovery_status("owner-1", "run-1") is status
+    assert route.financial_team_synthesis_recovery("owner-1", "run-1") is recovered
+    assert route.FinancialTeamSynthesisRecoveryResponse.model_validate(status).available
 
 
 def test_role_memory_policy_fails_closed_on_cross_agent_or_shared_memory():
@@ -135,6 +184,7 @@ def test_direct_session_must_exist_belong_to_agent_and_be_active(monkeypatch, tm
 
 def test_financial_team_provision_is_ready_and_idempotent(financial_team_env):
     assistant_id = financial_team_env["assistant"]["agentId"]
+    owner = agent_directory_service.get_agent(assistant_id)
     first = provisioning.provision_financial_team(assistant_id)
     assert first["status"] == "ready"
     assert first["teamId"]
@@ -144,6 +194,7 @@ def test_financial_team_provision_is_ready_and_idempotent(financial_team_env):
         assert member["agentId"] and member["sessionId"]
         agent = agent_directory_service.get_agent(member["agentId"])
         assert agent["directSessionId"] == member["sessionId"]
+        assert agent["llmBindings"] == owner["llmBindings"]
         assert agent["memoryPolicy"]["readSharedGroups"] == []
         assert agent["memoryPolicy"]["writeSharedGroups"] == []
         assert agent["memoryPolicy"]["readKnowledgeBaseIds"] == []
@@ -158,6 +209,69 @@ def test_financial_team_provision_is_ready_and_idempotent(financial_team_env):
     assert {
         row["role"]: (row["agentId"], row["sessionId"]) for row in second["roles"]
     } == {row["role"]: (row["agentId"], row["sessionId"]) for row in first["roles"]}
+
+
+@pytest.mark.parametrize("unavailable_session", ["synthesis", "analyst"])
+def test_unexecutable_default_model_blocks_team_and_run_creation(
+    financial_team_env, monkeypatch, tmp_path, unavailable_session
+):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    team = provisioning.provision_financial_team(assistant_id)
+    assert team["status"] == "ready"
+
+    target_session_id = (
+        financial_team_env["assistant"]["directSessionId"]
+        if unavailable_session == "synthesis"
+        else next(role["sessionId"] for role in team["roles"])
+    )
+    original_options = session_service.get_session_llm_options
+
+    def get_session_llm_options(session_id):
+        payload = original_options(session_id)
+        if str(session_id) != target_session_id:
+            return payload
+        choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
+        return {
+            **payload,
+            "choices": [
+                {**choices[0], "providerHealthy": False}
+                if choices and isinstance(choices[0], dict)
+                else {"providerHealthy": False}
+            ],
+        }
+
+    monkeypatch.setattr(
+        session_service, "get_session_llm_options", get_session_llm_options
+    )
+    degraded = provisioning.get_financial_team(assistant_id)
+    assert degraded["status"] == "needs_attention"
+    if unavailable_session == "synthesis":
+        assert all(role["status"] == "ready" for role in degraded["roles"])
+    else:
+        assert any(role["status"] == "needs_attention" for role in degraded["roles"])
+
+    monkeypatch.setattr(
+        runs,
+        "get_financial_team",
+        lambda _agent_id: {"status": "ready", "teamId": team["teamId"]},
+    )
+    run_root_calls = []
+    monkeypatch.setattr(
+        runs,
+        "_run_root",
+        lambda *_args, **_kwargs: run_root_calls.append(tmp_path) or tmp_path,
+    )
+    with pytest.raises(
+        runs.FinancialTeamRunNotReadyError, match="默认模型当前不可执行"
+    ):
+        runs.create_financial_team_run(
+            assistant_id,
+            symbol="SH600519",
+            period_days=30,
+            research_date="2026-10-05",
+            depth="standard",
+        )
+    assert run_root_calls == []
 
 
 def test_financial_team_primary_submit_recovers_exact_native_turn_without_resubmitting(
@@ -459,6 +573,75 @@ def test_submission_lookup_uses_exact_submission_metadata_not_neighboring_turns(
     }
     with pytest.raises(runs.FinancialTeamRunConflictError, match="多个 Turn"):
         runs._submission_association(duplicated, "submission-A")
+
+
+def test_synthesis_recovery_requires_all_finals_reserved_id_and_empty_transcript(monkeypatch):
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    run = captured["run"]
+    assert isinstance(run, dict)
+    run["coordinationStatus"] = "blocked"
+    run["synthesis"]["submissionState"] = "reserved"
+    for role in runs.ROLE_SPECS:
+        run["analysts"][role]["turnId"] = f"turn-{role}"
+    monkeypatch.setattr(runs, "_final_answer_for_turn", lambda _session, _turn: "已完成分析")
+    monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+
+    runs.require_financial_team_synthesis_recovery_ready("owner-1", "run-1")
+    recovered = runs.begin_financial_team_synthesis_recovery("owner-1", "run-1")
+
+    assert recovered["coordinationStatus"] == "waiting"
+    assert run["synthesis"]["clientSubmissionId"] == "submission-synthesis"
+    assert run["synthesis"]["turnId"] == ""
+
+
+@pytest.mark.parametrize(
+    ("submission_state", "transcript", "missing_final"),
+    [
+        ("submitting", {"messages": []}, False),
+        ("reserved", {"messages": [{"role": "user", "metadata": {"clientSubmissionId": "submission-synthesis"}}]}, False),
+        ("reserved", {"messages": []}, True),
+    ],
+)
+def test_synthesis_recovery_fails_closed_when_reservation_or_evidence_is_uncertain(
+    monkeypatch, submission_state, transcript, missing_final
+):
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    run = captured["run"]
+    assert isinstance(run, dict)
+    run["coordinationStatus"] = "blocked"
+    run["synthesis"]["submissionState"] = submission_state
+    for role in runs.ROLE_SPECS:
+        run["analysts"][role]["turnId"] = f"turn-{role}"
+    monkeypatch.setattr(
+        runs,
+        "_final_answer_for_turn",
+        lambda _session, turn: "" if missing_final and turn == "turn-news" else "已完成分析",
+    )
+    monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+    monkeypatch.setattr(runs.session_service, "get_session_detail", lambda *_args, **_kwargs: transcript)
+
+    with pytest.raises(runs.FinancialTeamRunNotReadyError):
+        runs.require_financial_team_synthesis_recovery_ready("owner-1", "run-1")
+
+
+def test_busy_rejection_is_retryable_only_when_original_submission_is_absent(monkeypatch):
+    captured = _stub_primary_financial_team_submission(monkeypatch)
+    run = captured["run"]
+    assert isinstance(run, dict)
+    run["synthesis"]["submissionState"] = "reserved"
+
+    assert runs.financial_team_synthesis_busy_retry_is_safe("owner-1", "run-1")
+
+    monkeypatch.setattr(
+        runs.session_service,
+        "get_session_detail",
+        lambda *_args, **_kwargs: {
+            "messages": [
+                {"role": "user", "metadata": {"clientSubmissionId": "submission-synthesis"}}
+            ]
+        },
+    )
+    assert not runs.financial_team_synthesis_busy_retry_is_safe("owner-1", "run-1")
 
 
 def _native_final_answer_item(
@@ -812,7 +995,7 @@ def test_financial_team_final_answer_does_not_use_item_from_another_turn_or_sess
     assert runs._final_answer_for_turn("session-1", "turn-1") == ""
 
 
-def _stub_primary_financial_team_submission(monkeypatch):
+def _stub_primary_financial_team_submission(monkeypatch, *, execution_policy=None):
     run = {
         "schemaVersion": 2,
         "runId": "run-1",
@@ -822,6 +1005,7 @@ def _stub_primary_financial_team_submission(monkeypatch):
         "periodDays": 30,
         "researchDate": "2026-10-05",
         "depth": "standard",
+        "executionPolicy": execution_policy or {},
         "createdAt": "2026-10-05T00:00:00+00:00",
         "stage": "primary",
         "analysts": {
@@ -840,7 +1024,7 @@ def _stub_primary_financial_team_submission(monkeypatch):
             "turnId": "",
         },
     }
-    captured: dict[str, object] = {}
+    captured: dict[str, object] = {"run": run, "submissions": []}
     monkeypatch.setattr(runs, "_run_path", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(runs, "_run_lock", lambda _path: nullcontext())
     monkeypatch.setattr(runs, "_load_run", lambda _path, _owner: run)
@@ -857,6 +1041,9 @@ def _stub_primary_financial_team_submission(monkeypatch):
         captured["session_id"] = session_id
         captured["prompt"] = prompt
         captured["submission_id"] = kwargs["client_submission_id"]
+        submissions = captured["submissions"]
+        assert isinstance(submissions, list)
+        submissions.append({"session_id": session_id, "model_selection": kwargs.get("model_selection")})
         return {
             "sessionId": session_id,
             "clientSubmissionId": kwargs["client_submission_id"],
@@ -867,6 +1054,105 @@ def _stub_primary_financial_team_submission(monkeypatch):
         runs.session_service, "submit_session_message_lightweight", submit
     )
     return captured
+
+
+def test_team_primary_submission_passes_resolved_model_selection(monkeypatch):
+    options = {
+        "currentModelId": "provider/market-model",
+        "currentReasoningEffort": "xhigh",
+        "choices": [
+            {
+                "modelRef": "provider/market-model",
+                "modelId": "market-model",
+                "reasoningEffortValues": ["low", "medium"],
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        runs.session_service,
+        "get_session_llm_options",
+        lambda session_id: options if session_id == "session-market" else {},
+    )
+    resolved = runs._resolve_session_execution("session-market", "high")
+    assert resolved["status"] == "adjusted"
+    assert resolved["resolvedReasoningEffort"] == "medium"
+    assert resolved["modelSelection"] == {
+        "modelId": "provider/market-model",
+        "reasoningEffort": "medium",
+    }
+
+    brief = runs._resolve_session_execution("session-market", "minimal")
+    assert brief["status"] == "adjusted"
+    assert brief["resolvedReasoningEffort"] == "low"
+    assert brief["modelSelection"] == {
+        "modelId": "provider/market-model",
+        "reasoningEffort": "low",
+    }
+
+    options["choices"][0]["reasoningEffortValues"] = []
+    unsupported = runs._resolve_session_execution("session-market", "minimal")
+    assert unsupported["status"] == "unknown"
+    assert unsupported["resolvedReasoningEffort"] == "xhigh"
+    assert unsupported["modelSelection"] == {"modelId": "provider/market-model"}
+
+    captured = _stub_primary_financial_team_submission(
+        monkeypatch,
+        execution_policy={"roles": {"market": resolved}},
+    )
+    runs.submit_financial_team_primary_role("owner-1", "run-1", "market")
+
+    assert captured["submissions"] == [
+        {
+            "session_id": "session-market",
+            "model_selection": resolved["modelSelection"],
+        }
+    ]
+
+
+def test_team_debate_submissions_pass_each_role_model_selection(monkeypatch):
+    selections = {
+        role: {"modelId": f"provider/{role}", "reasoningEffort": "low"}
+        for role in ("bull", "bear")
+    }
+    captured = _stub_primary_financial_team_submission(
+        monkeypatch,
+        execution_policy={
+            "roles": {role: {"modelSelection": selection} for role, selection in selections.items()}
+        },
+    )
+    run = captured["run"]
+    assert isinstance(run, dict)
+    for role in runs._LEGACY_ROLE_KEYS:
+        run["analysts"][role]["turnId"] = f"turn-{role}"
+    run["publicFundamentalsSnapshot"] = {"status": "unavailable", "items": []}
+    monkeypatch.setattr(runs, "_final_answer_for_turn", lambda _session, _turn: "已完成分析")
+
+    runs.submit_financial_team_debate("owner-1", "run-1")
+
+    assert captured["submissions"] == [
+        {"session_id": "session-bull", "model_selection": selections["bull"]},
+        {"session_id": "session-bear", "model_selection": selections["bear"]},
+    ]
+
+
+def test_team_synthesis_submission_passes_its_model_selection(monkeypatch):
+    selection = {"modelId": "provider/synthesis", "reasoningEffort": "high"}
+    captured = _stub_primary_financial_team_submission(
+        monkeypatch,
+        execution_policy={"synthesis": {"modelSelection": selection}},
+    )
+    run = captured["run"]
+    assert isinstance(run, dict)
+    for role in runs.ROLE_SPECS:
+        run["analysts"][role]["turnId"] = f"turn-{role}"
+    monkeypatch.setattr(runs, "_final_answer_for_turn", lambda _session, _turn: "已完成分析")
+    monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+
+    runs.submit_financial_team_synthesis("owner-1", "run-1")
+
+    assert captured["submissions"] == [
+        {"session_id": "session-owner", "model_selection": selection}
+    ]
 
 
 def test_fundamental_primary_prompt_carries_sourced_public_metrics_as_untrusted_quotes(
@@ -1023,6 +1309,22 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
         lambda _agent_id: {"status": "ready", "teamId": "team-1"},
     )
     monkeypatch.setattr(runs, "_role_agents", lambda _agent_id: roles)
+    monkeypatch.setattr(runs, "_native_session_model_is_executable", lambda *_args: True)
+    created_sessions = []
+
+    def create_synthesis_session(**kwargs):
+        session_id = f"synthesis-session-{len(created_sessions) + 1}"
+        created_sessions.append((session_id, kwargs))
+        return {"id": session_id}
+
+    monkeypatch.setattr(
+        runs.session_service, "create_chat_session", create_synthesis_session
+    )
+    monkeypatch.setattr(
+        runs,
+        "_native_owner_scoped_synthesis_session_matches_agent",
+        lambda _agent_id, _session_id, binding_key: bool(binding_key),
+    )
     monkeypatch.setattr(runs, "_run_root", run_root)
     monkeypatch.setattr(
         runs.market, "normalize_symbol", lambda symbol: str(symbol).lower()
@@ -1044,7 +1346,12 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
     first = runs.create_financial_team_run("owner-1", **arguments)
     retry = runs.create_financial_team_run("owner-1", **arguments)
     assert retry["runId"] == first["runId"]
+    assert retry["synthesis"]["sessionId"] == first["synthesis"]["sessionId"]
     assert "createIdempotency" not in retry
+    assert len(created_sessions) == 1
+    assert created_sessions[0][1]["agent_id"] == "owner-1"
+    assert created_sessions[0][1]["activate"] is False
+    assert created_sessions[0][1]["session_metadata"]["source"] == "financial_team_synthesis"
 
     with pytest.raises(runs.FinancialTeamRunConflictError, match="不同的研究参数"):
         runs.create_financial_team_run("owner-1", **{**arguments, "symbol": "SZ000001"})
@@ -1054,6 +1361,8 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
         **{**arguments, "idempotency_key": "request-key-20261005-0002"},
     )
     assert fresh["runId"] != first["runId"]
+    assert fresh["synthesis"]["sessionId"] != first["synthesis"]["sessionId"]
+    assert len(created_sessions) == 2
     assert [args[2] for args, _kwargs in events] == [
         "financial_team.run.created",
         "financial_team.run.create_replayed",
@@ -1071,6 +1380,198 @@ def test_run_create_idempotency_replays_same_run_but_allows_new_intent(
     for _args, event in events:
         assert set(event["fields"]) == allowed_fields
         assert not {"prompt", "answer", "content", "text"}.intersection(event["fields"])
+
+
+def test_new_run_uses_one_visible_owner_scoped_synthesis_session(
+    financial_team_env, monkeypatch
+):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    owner = agent_directory_service.get_agent(assistant_id)
+    team = provisioning.provision_financial_team(assistant_id)
+    assert team["status"] == "ready"
+    direct_session_id = owner["directSessionId"]
+    active_session_id = load_chat_state(session_service.PROJECT_ROOT)[
+        "active_conversation_id"
+    ]
+
+    first = runs.create_financial_team_run(
+        assistant_id,
+        symbol="SH600519",
+        period_days=30,
+        research_date="2026-10-05",
+        depth="standard",
+        idempotency_key="owner-synthesis-session-20261005-01",
+    )
+    replay = runs.create_financial_team_run(
+        assistant_id,
+        symbol="SH600519",
+        period_days=30,
+        research_date="2026-10-05",
+        depth="standard",
+        idempotency_key="owner-synthesis-session-20261005-01",
+    )
+    second = runs.create_financial_team_run(
+        assistant_id,
+        symbol="SH600519",
+        period_days=30,
+        research_date="2026-10-05",
+        depth="standard",
+        idempotency_key="owner-synthesis-session-20261005-02",
+    )
+
+    first_session_id = first["synthesis"]["sessionId"]
+    assert first["synthesis"]["agentId"] == assistant_id
+    assert first_session_id != direct_session_id
+    assert replay["synthesis"]["sessionId"] == first_session_id
+    assert second["synthesis"]["sessionId"] != first_session_id
+    assert (
+        agent_directory_service.get_agent(assistant_id)["directSessionId"]
+        == direct_session_id
+    )
+
+    raw_session = session_service.load_session_chat_state(
+        session_service.PROJECT_ROOT, first_session_id
+    )
+    assert raw_session["agentId"] == assistant_id
+    assert raw_session["sessionRole"] == "workspace"
+    assert raw_session["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+    assert "SH600519" in raw_session["title"]
+    assert "2026-10-05" in raw_session["title"]
+    assert raw_session["metadata"]["source"] == "financial_team_synthesis"
+    run_record = runs._load_run(
+        runs._run_path(assistant_id, first["runId"]), assistant_id
+    )
+    assert raw_session["metadata"]["externalTaskId"] == run_record["synthesis"]["sessionBindingKey"]
+    assert run_record["synthesis"]["sessionBindingKind"] == runs._SYNTHESIS_OWNER_SCOPED_BINDING
+    assert runs._native_owner_scoped_synthesis_session_matches_agent(
+        assistant_id,
+        first_session_id,
+        run_record["synthesis"]["sessionBindingKey"],
+    )
+    runs.require_current_financial_team_run_bindings(assistant_id, first["runId"])
+    queried = session_service.query_sessions(agent_id=assistant_id)
+    queried_summary = next(
+        item for item in queried["items"] if item["id"] == first_session_id
+    )
+    assert queried_summary["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+    )
+    assert queried_summary["conversationIndexVisibility"] == (
+        agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
+    )
+    assert agent_directory_service.get_agent(assistant_id)["directSessionId"] == direct_session_id
+    assert (
+        load_chat_state(session_service.PROJECT_ROOT)["active_conversation_id"]
+        == active_session_id
+    )
+
+    # Runs created before this visibility change keep their owner-scoped hidden
+    # Native Session binding and remain recoverable.
+    legacy_hidden_session = {
+        **raw_session,
+        "conversation_index_kind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+    }
+    with monkeypatch.context() as legacy:
+        legacy.setattr(
+            session_service,
+            "load_session_chat_state",
+            lambda _root, session_id: (
+                legacy_hidden_session if session_id == first_session_id else None
+            ),
+        )
+        assert runs._native_owner_scoped_synthesis_session_matches_agent(
+            assistant_id,
+            first_session_id,
+            run_record["synthesis"]["sessionBindingKey"],
+        )
+
+    legacy_synthesis = dict(run_record["synthesis"])
+    legacy_synthesis["sessionId"] = direct_session_id
+    legacy_synthesis.pop("sessionBindingKind", None)
+    legacy_synthesis.pop("sessionBindingKey", None)
+    runs._write_run(
+        runs._run_path(assistant_id, first["runId"]),
+        {**run_record, "synthesis": legacy_synthesis},
+    )
+    runs.require_current_financial_team_run_bindings(assistant_id, first["runId"])
+
+    unrelated_session = session_service.create_chat_session(
+        title="个人会话 · 2026-10-05",
+        agent_id=assistant_id,
+        created_by="test",
+        conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+        session_metadata={"source": "unrelated_test_session"},
+        lightweight=True,
+        activate=False,
+        idempotency_key="unrelated-owner-session-20261005",
+    )
+    unrelated_synthesis = {
+        **run_record["synthesis"],
+        "sessionId": unrelated_session["id"],
+    }
+    runs._write_run(
+        runs._run_path(assistant_id, first["runId"]),
+        {**run_record, "synthesis": unrelated_synthesis},
+    )
+    with pytest.raises(runs.FinancialTeamRunConflictError, match="身份已变化"):
+        runs.require_current_financial_team_run_bindings(assistant_id, first["runId"])
+
+    archived_session = {**raw_session, "archive_state": {"status": "archived"}}
+    monkeypatch.setattr(
+        session_service,
+        "load_session_chat_state",
+        lambda _root, session_id: archived_session if session_id == first_session_id else None,
+    )
+    assert not runs._native_owner_scoped_synthesis_session_matches_agent(
+        assistant_id,
+        first_session_id,
+        run_record["synthesis"]["sessionBindingKey"],
+    )
+
+
+def test_create_retry_reuses_synthesis_session_after_run_record_write_failure(
+    financial_team_env, monkeypatch
+):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    provisioning.provision_financial_team(assistant_id)
+    arguments = {
+        "symbol": "SH600519",
+        "period_days": 30,
+        "research_date": "2026-10-05",
+        "depth": "standard",
+        "idempotency_key": "owner-synthesis-session-write-retry-01",
+    }
+    original_write = runs._write_run
+    original_create_session = session_service.create_chat_session
+    create_results = []
+    write_failed = False
+
+    def record_create(**kwargs):
+        result = original_create_session(**kwargs)
+        create_results.append(result)
+        return result
+
+    def fail_first_run_write(path, run):
+        nonlocal write_failed
+        if not write_failed:
+            write_failed = True
+            raise OSError("injected run record write failure")
+        original_write(path, run)
+
+    monkeypatch.setattr(session_service, "create_chat_session", record_create)
+    monkeypatch.setattr(runs, "_write_run", fail_first_run_write)
+    with pytest.raises(OSError, match="injected run record write failure"):
+        runs.create_financial_team_run(assistant_id, **arguments)
+
+    monkeypatch.setattr(runs, "_write_run", original_write)
+    recovered = runs.create_financial_team_run(assistant_id, **arguments)
+
+    assert len(create_results) == 2
+    assert create_results[0]["id"] == create_results[1]["id"]
+    assert recovered["synthesis"]["sessionId"] == create_results[0]["id"]
 
 
 def test_record_turn_requires_native_submission_turn_binding(monkeypatch, tmp_path):

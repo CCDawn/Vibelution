@@ -25,7 +25,9 @@ _PREVIOUS_READ_TOOLS = (
 )
 _NEWS_READ_TOOLS = (*_PREVIOUS_READ_TOOLS, "news_search_tool")
 MARKET_TOOL = "financial_market_snapshot_tool"
-READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL)
+MARKET_SCREEN_TOOL = "financial_market_screen_tool"
+_LEGACY_MARKET_READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL)
+READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL, MARKET_SCREEN_TOOL)
 READ_POLICY = {
     "allowedTools": list(READ_TOOLS),
     "preferredTools": list(READ_TOOLS),
@@ -68,8 +70,9 @@ TASK = {
     **_NEWS_TASK,
     "mission": "基于公开行情和可核验财报证据，为用户提供只读投资研究与风险建议。",
     "responsibilities": _NEWS_TASK["responsibilities"]
-    + "需要最新报价或日、周、月K线时，主动调用已授权行情工具；标明行情时间、来源、复权和单位，查询失败或数据不足时明确说明。",
-    "preferredTasks": "公开行情与K线查询、财报检索、来源对照、公开新闻参考、风险因素梳理和投资需求澄清。",
+    + "需要最新报价或日、周、月K线时，主动调用已授权行情工具；标明行情时间、来源、复权和单位，查询失败或数据不足时明确说明。"
+    + "用户提出 A 股条件选股时，调用已授权只读筛选工具；说明股票池覆盖完整性、数据来源与时点，不把抓取时间当成交日期。",
+    "preferredTasks": "A股条件筛选、公开行情与K线查询、财报检索、来源对照、公开新闻参考、风险因素梳理和投资需求澄清。",
     "constraints": _NEWS_TASK["constraints"]
     + "公开行情可能延迟或来自缓存；查询时间不等于行情时间，追问不能沿用首次快照冒充最新数据。行情工具只发送股票代码、周期和数量。",
 }
@@ -152,10 +155,19 @@ def _project(agent: dict) -> dict:
             ]
         except knowledge.TeamKnowledgeError:
             pass  # Archived/missing evidence must not break the entire entry projection.
-    read_ids = (agent.get("memoryPolicy") or {}).get("readKnowledgeBaseIds") or []
+    read_values = (agent.get("memoryPolicy") or {}).get("readKnowledgeBaseIds")
+    # Financial tools require an explicit, non-empty read policy. The generic
+    # knowledge helper treats an empty policy as unrestricted, so do not use
+    # that fallback for this profile's readiness projection.
+    read_ids = (
+        {value.strip() for value in read_values if value.strip()}
+        if isinstance(read_values, (list, tuple, set))
+        and all(isinstance(value, str) for value in read_values)
+        else set()
+    )
     base_id = str((base or {}).get("scopedKnowledgeBaseId") or "")
     can_read = bool(
-        base_id and knowledge.knowledge_base_policy_allows(base_id, read_ids)
+        base_id and read_ids and knowledge.knowledge_base_policy_allows(base_id, read_ids)
     )
     configured = any(
         bool((binding or {}).get("modelId"))
@@ -198,6 +210,7 @@ def _names(policy: dict, key: str) -> set[str]:
 
 _NEWS_REFERENCE_MARKER = "financialAssistantNewsReferenceGranted"
 _MARKET_REFERENCE_MARKER = "financialAssistantMarketReferenceGranted"
+_MARKET_SCREEN_REFERENCE_MARKER = "financialAssistantMarketScreenReferenceGranted"
 
 
 def _default_read_policy(policy: dict, tools: tuple[str, ...]) -> bool:
@@ -220,10 +233,20 @@ def _market_tool_status(agent: dict) -> str:
         or metadata.get("financialAssistantSetup") != "ready"
     ):
         return "not_assigned"
+    allowed = _names(policy, "allowedTools")
     blocked = _names(policy, "blockedTools")
-    if MARKET_TOOL in _names(policy, "allowedTools") and MARKET_TOOL not in blocked:
+    if MARKET_TOOL in allowed and MARKET_TOOL not in blocked:
+        if MARKET_SCREEN_TOOL in allowed and MARKET_SCREEN_TOOL not in blocked:
+            return "assigned" if policy.get("networkAccess") != "none" else "not_assigned"
+        if (
+            MARKET_SCREEN_TOOL not in blocked
+            and _default_read_policy(policy, _LEGACY_MARKET_READ_TOOLS)
+        ):
+            return "upgrade_available"
+        return "not_assigned"
+    if MARKET_SCREEN_TOOL in allowed and MARKET_SCREEN_TOOL not in blocked:
         return "assigned" if policy.get("networkAccess") != "none" else "not_assigned"
-    if metadata.get(_MARKET_REFERENCE_MARKER) or MARKET_TOOL in blocked:
+    if metadata.get(_MARKET_REFERENCE_MARKER) or MARKET_TOOL in blocked or MARKET_SCREEN_TOOL in blocked:
         return "not_assigned"
     if _default_read_policy(policy, _NEWS_READ_TOOLS) or (
         not metadata.get(_NEWS_REFERENCE_MARKER)
@@ -239,7 +262,8 @@ def _grant_default_references(agent: dict) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     news_pending = not metadata.get(_NEWS_REFERENCE_MARKER)
     market_pending = not metadata.get(_MARKET_REFERENCE_MARKER)
-    if not news_pending and not market_pending:
+    screen_pending = not metadata.get(_MARKET_SCREEN_REFERENCE_MARKER)
+    if not news_pending and not market_pending and not screen_pending:
         return False
     if agent.get("status") != "active":
         return False
@@ -257,8 +281,16 @@ def _grant_default_references(agent: dict) -> bool:
         and "news_search_tool" not in _names(policy, "blockedTools")
     )
     grant_market = market_pending and _market_tool_status(agent) == "upgrade_available"
-    if grant_news or grant_market:
+    grant_market_screen = (
+        screen_pending
+        and _market_tool_status(agent) == "upgrade_available"
+        and _default_read_policy(policy, _LEGACY_MARKET_READ_TOOLS)
+        and MARKET_SCREEN_TOOL not in _names(policy, "blockedTools")
+    )
+    if grant_news or grant_market or grant_market_screen:
         tools = READ_TOOLS if grant_market else _NEWS_READ_TOOLS
+        if grant_market_screen:
+            tools = READ_TOOLS
         updates["tool_policy"] = {
             **policy,
             "allowedTools": list(tools),
@@ -301,6 +333,7 @@ def _grant_default_references(agent: dict) -> bool:
     updates["metadata"] = {
         **({_NEWS_REFERENCE_MARKER: True} if news_pending else {}),
         **({_MARKET_REFERENCE_MARKER: True} if market_pending else {}),
+        **({_MARKET_SCREEN_REFERENCE_MARKER: True} if grant_market or grant_market_screen else {}),
     }
     directory.update_agent_instance(agent["agentId"], **updates)
     return migrated
@@ -393,6 +426,7 @@ def create_financial_assistant(display_name: str = "炒股智能体") -> dict:
                     # record both upgrades as done for this assistant.
                     _NEWS_REFERENCE_MARKER: True,
                     _MARKET_REFERENCE_MARKER: True,
+                    _MARKET_SCREEN_REFERENCE_MARKER: True,
                 },
             )
         else:

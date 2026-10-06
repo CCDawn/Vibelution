@@ -1,0 +1,17 @@
+export default {
+  root: "grid min-w-0 content-start gap-3",
+  toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-3",
+  actions: "flex min-w-0 flex-wrap items-center gap-2",
+  meta: "m-0 text-xs text-vui-fg-tertiary",
+  metrics: "grid min-w-0 grid-cols-3 gap-3",
+  summary: "grid min-w-0 gap-1 [&>strong]:text-sm [&>span]:font-mono [&>small]:text-vui-fg-tertiary",
+  table: "min-w-0 max-w-full overflow-x-auto",
+  number: "font-mono text-xs",
+  stock: "!h-auto !max-w-full !justify-start !px-1 text-left",
+  identity: "grid min-w-0 gap-1 [&>small]:font-mono [&>small]:text-vui-fg-tertiary",
+  form: "grid min-w-0 gap-3",
+  field: "grid min-w-0 gap-1 text-xs text-vui-fg-tertiary",
+  pair: "grid min-w-0 grid-cols-2 gap-3",
+  search: "grid min-w-0 gap-1",
+  result: "!h-auto !justify-start text-left",
+} as const;

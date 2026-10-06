@@ -111,3 +111,15 @@ def remove_preference(agent_id: str, preference_id: str) -> dict:
         except directory.AgentDirectoryError as exc:
             raise FinancialPreferenceError(str(exc), 409) from exc
         return {"id": preference_id, "removed": True}
+
+
+def get_workspace_settings(agent_id: str) -> dict:
+    from .financial_preferences.workspace import get_workspace
+
+    return get_workspace(agent_id)
+
+
+def update_workspace_settings(agent_id: str, expected_revision: int, patch: dict) -> dict:
+    from .financial_preferences.workspace import update_workspace
+
+    return update_workspace(agent_id, expected_revision, patch)

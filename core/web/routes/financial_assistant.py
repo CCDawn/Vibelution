@@ -67,20 +67,28 @@ class StockIdentityResponse(BaseModel):
     ticker: str
     name: str
     market: str
+    marketCode: Literal["CN", "HK", "US"] | None = None
+    currency: Literal["CNY", "HKD", "USD"] | None = None
+    marketTimeZone: Literal["Asia/Shanghai", "Asia/Hong_Kong", "America/New_York"] | None = None
 
 
 class StockQuoteResponse(StockIdentityResponse):
     price: float
+    priceUnit: Literal["CNY/share", "HKD/share", "USD/share"] | None = None
     previousClose: float
     open: float
     high: float
     low: float
     change: float
     changePercent: float
-    volumeLots: float
-    turnoverYuan: float
+    volume: float | None = None
+    volumeUnit: Literal["shares"] | None = None
+    volumeLots: float | None
+    turnover: float | None = None
+    turnoverYuan: float | None
     peRatio: float | None
     pbRatio: float | None
+    marketCap: float | None = None
     totalMarketCapYuan: float | None
     timestamp: str
 
@@ -91,14 +99,16 @@ class StockCandleResponse(BaseModel):
     close: float
     high: float
     low: float
-    volumeLots: float
+    volume: float | None = None
+    volumeUnit: Literal["shares"] | None = None
+    volumeLots: float | None
 
 
 class StockSnapshotResponse(BaseModel):
     stock: StockQuoteResponse
     candles: list[StockCandleResponse]
     period: Literal["day", "week", "month"]
-    adjustment: Literal["qfq"]
+    adjustment: Literal["qfq", "raw"]
     source: str
     sourceUrl: str
     fetchedAt: str
@@ -109,9 +119,10 @@ class StockSnapshotResponse(BaseModel):
 @router.get("/financial-market/search", response_model=list[StockIdentityResponse])
 def financial_market_search(
     query: str = Query(default="", max_length=40, pattern=r"^[\w\s.*\-]*$"),
+    market_code: Literal["CN", "HK", "US"] = Query(default="CN", alias="market"),
 ) -> list[dict]:
     try:
-        return market.search_stocks(query)
+        return market.search_stocks(query, market_code)
     except market.StockNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except market.MarketDataError as exc:

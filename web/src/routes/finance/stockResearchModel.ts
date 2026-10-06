@@ -77,11 +77,33 @@ export function isValidResearchDate(value: string, now = new Date()) {
 export function latestResearchTurn(messages: readonly ConversationMessage[]): AssistantConversationTurn | undefined {
   return [...messages].reverse().find((message): message is AssistantConversationTurn => message.role === "assistant");
 }
+
+const US_EXCHANGE_SUFFIX = /\.(?:OQ|N|AM|PK|PNK|NYSE|NASDAQ)$/i;
+function canonicalUsTicker(value: string): string | null {
+  const ticker = value.trim().replace(US_EXCHANGE_SUFFIX, "").toUpperCase();
+  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker) ? ticker : null;
+}
+
+export function stockFromResearchRequest(text: string): StockIdentity | null {
+  const match = /^\s*请研究\s+(.{1,60}?)（([A-Z][A-Z0-9.-]{0,9}|\d{5,6})，([^）\n]{1,30})）/.exec(text.slice(0, 250));
+  if (!match) return null;
+  const [, name, ticker, market] = match;
+  const symbol = /^\d{6}$/.test(ticker) ? (ticker.startsWith("6") ? "sh" : "03".includes(ticker[0]) ? "sz" : "bj") + ticker : /^\d{5}$/.test(ticker) ? `hk${ticker}` : `us${canonicalUsTicker(ticker) ?? ""}`;
+  return stockIdentityFromUnknown({ symbol, ticker, name, market });
+}
 export function reportMatchesStock(report: StockResearchReport | null, messages: readonly ConversationMessage[], stock: StockIdentity) {
   if (!report) return false;
   const index = messages.findIndex((message) => message.role === "assistant" && message.turnId === report.turnId);
   for (const message of messages.slice(0, index).reverse()) {
     if (message.role !== "user") continue;
+    const requestedStock = stockFromResearchRequest(message.content);
+    if (requestedStock) return requestedStock.symbol === stock.symbol;
+    const requestHeader = message.content.slice(0, 500).split("\n", 1)[0];
+    const internationalTicker = new RegExp(`(?:[（(]\\s*|\\b)${stock.ticker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s*[,，）)]|\\b)`, "i");
+    if (stock.symbol.startsWith("hk") || stock.symbol.startsWith("us")) {
+      if (/请研究|综合股票|research|study/i.test(requestHeader)) return internationalTicker.test(requestHeader);
+      continue;
+    }
     const tickers = [...new Set([...message.content.matchAll(/(?:^|[^\d])([036489]\d{5})(?!\d)/g)].map((match) => match[1]))];
     if (tickers.length) return tickers.length === 1 && tickers[0] === stock.ticker;
     if (message.content.includes(stock.name)) return true;
@@ -157,7 +179,9 @@ export const RESEARCH_DEPTH_INSTRUCTIONS: Record<ResearchDepth, string> = {
 export function stockResearchPrompt(stock: StockIdentity, period: string, date: string, scope: ResearchScope, depth: ResearchDepth, snapshot?: StockSnapshot) {
   const subject = `${stock.name}（${stock.ticker}，${stock.market}）`;
   const task = { financial: "财报、盈利质量与现金流", events: "重大事件及新闻来源", risk: "财务、经营和估值风险", comprehensive: "财报、盈利质量、事件与主要风险" }[scope];
-  const quote = snapshot?.stock.symbol === stock.symbol ? `\n行情快照（腾讯财经公开行情，可能延迟）：${snapshot.stock.timestamp}，价格 ${snapshot.stock.price} 元，涨跌 ${snapshot.stock.changePercent}%。这是带时点的报价，不是已审核财报证据。` : "";
+  const currency = snapshot?.stock.currency ?? (stock.symbol.startsWith("hk") ? "HKD" : stock.symbol.startsWith("us") ? "USD" : "CNY");
+  const unit = currency === "HKD" ? "港元" : currency === "USD" ? "美元" : "元";
+  const quote = snapshot?.stock.symbol === stock.symbol ? `\n行情快照（${snapshot.source}，可能延迟）：${snapshot.stock.timestamp}，价格 ${snapshot.stock.price} ${unit}，涨跌 ${snapshot.stock.changePercent}%。这是带时点的报价，不是已审核财报证据。` : "";
   return `请研究 ${subject}，分析日期 ${date}${period.trim() ? `，报告期 ${period.trim()}` : ""}，重点检查${task}。${RESEARCH_DEPTH_INSTRUCTIONS[depth]}，使用 Markdown 二级标题“结论、市场与技术、基本面、新闻与催化剂、行业与大盘、多空论证、情景分析、风险、证据来源”组织结果；不适用的章节简要说明缺失证据。财报数值只用已审核原始 PDF 证据，注明报告期、页码和官方链接；新闻注明来源与日期。区分事实、推论和缺失数据，不编造行情、指标或买卖建议。${quote}`;
 }
 export function movingAverage(candles: readonly StockCandle[], length: number): (number | null)[] {
@@ -171,10 +195,17 @@ export function movingAverage(candles: readonly StockCandle[], length: number): 
 export function stockIdentityFromUnknown(value: unknown): StockIdentity | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
-  return typeof item.symbol === "string" && /^(sh6\d{5}|sz[03]\d{5}|bj[489]\d{5})$/.test(item.symbol)
-    && typeof item.ticker === "string" && item.ticker === item.symbol.slice(2)
+  if (typeof item.symbol !== "string" || typeof item.ticker !== "string") return null;
+  const isCn = /^(sh6\d{5}|sz[03]\d{5}|bj[489]\d{5})$/.test(item.symbol);
+  const isHk = /^hk\d{5}$/.test(item.symbol);
+  const usTicker = item.symbol.startsWith("us") ? canonicalUsTicker(item.symbol.slice(2)) : null;
+  const canonicalUsSymbol = usTicker === item.symbol.slice(2) ? item.symbol : null;
+  const tickerMatches = isCn || isHk
+    ? item.ticker === item.symbol.slice(2)
+    : canonicalUsSymbol !== null && canonicalUsTicker(item.ticker) === canonicalUsSymbol.slice(2);
+  return (isCn || isHk || canonicalUsSymbol !== null) && tickerMatches
     && typeof item.name === "string" && item.name.length > 0 && item.name.length <= 60 && typeof item.market === "string"
-    ? { symbol: item.symbol, ticker: item.ticker, name: item.name, market: item.market.slice(0, 20) } : null;
+    ? { symbol: item.symbol, ticker: item.symbol.slice(2), name: item.name, market: item.market.slice(0, 20) } : null;
 }
 export function quoteNumber(value: number | null | undefined, digits = 2) { return value == null || !Number.isFinite(value) ? "—" : value.toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits }); }
 export function yuanAmount(value: number | null | undefined) { return value == null ? "—" : value >= 100_000_000 ? `${quoteNumber(value / 100_000_000)} 亿` : `${quoteNumber(value / 10_000)} 万`; }

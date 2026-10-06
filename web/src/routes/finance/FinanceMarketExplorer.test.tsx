@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FinancialMarketScreen, FinancialStockResearch } from "../../api/financialResearch";
+import { MAX_FINANCE_SCREEN_PRESETS, financeScreenPresetStorageKey, writeFinanceScreenPresets, type FinanceScreenPreset } from "./financeScreenPresets";
 
 const api = vi.hoisted(() => ({ fetchScreen: vi.fn(), fetchResearch: vi.fn(), fetchQuotes: vi.fn() }));
 vi.mock("../../api/financialResearch", () => ({
@@ -55,7 +56,37 @@ function buttonWithText(text: string): HTMLButtonElement {
   return button;
 }
 
+function setInputValue(label: string, value: string) {
+  const field = node.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
+  if (!field) throw new Error(`Input not found: ${label}`);
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, value);
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+async function chooseSelect(label: string, optionLabel: string) {
+  const trigger = node.querySelector<HTMLElement>(`[data-vui-select-trigger="true"][aria-label="${label}"]`);
+  if (!trigger) throw new Error(`Select not found: ${label}`);
+  await act(async () => trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  let option = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
+    .find((item) => item.textContent?.includes(optionLabel));
+  if (!option) {
+    await act(async () => trigger.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    option = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
+      .find((item) => item.textContent?.includes(optionLabel));
+  }
+  if (!option) throw new Error(`Option not found: ${optionLabel}`);
+  await act(async () => option.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
+
+const elementPrototype = Element.prototype as unknown as Record<string, unknown>;
+if (typeof elementPrototype.hasPointerCapture !== "function") {
+  elementPrototype.hasPointerCapture = () => false;
+  elementPrototype.setPointerCapture = () => undefined;
+  elementPrototype.releasePointerCapture = () => undefined;
+}
+
 beforeEach(() => {
+  localStorage.clear();
   api.fetchScreen.mockReset().mockResolvedValue(screen);
   api.fetchResearch.mockReset().mockResolvedValue(research);
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -63,9 +94,23 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root?.unmount()); root = null; node.remove(); client.clear();
+  localStorage.clear();
 });
 
 describe("FinanceMarketExplorer", () => {
+  it("shows available fallback metrics with their verification limitation", async () => {
+    api.fetchResearch.mockResolvedValue({
+      ...research,
+      fundamentals: { ...research.fundamentals, source: "东方财富 USF10", error: "SEC 财务核验暂不可用；以下为第三方备用数据，未经 SEC 核验。" },
+    });
+    await render("fundamentals");
+    expect(node.textContent).toContain("来源限制");
+    expect(node.textContent).toContain("未经 SEC 核验");
+    expect(node.textContent).toContain("每股收益");
+    expect(node.textContent).toContain("2.3元/股");
+    expect(node.textContent).not.toContain("财务数据源暂不可用");
+  });
+
   it("shows partial source coverage and supports stock selection and AI handoff", async () => {
     const onSelectStock = vi.fn(); const onResearchPrompt = vi.fn();
     await render("screen", { onSelectStock, onResearchPrompt });
@@ -74,11 +119,25 @@ describe("FinanceMarketExplorer", () => {
     expect(node.textContent).toContain("部分结果仅基于已加载项");
     expect(node.textContent).toContain("不等于全市场覆盖");
     expect(node.textContent).toContain("日期未提供");
+    expect(node.textContent).not.toContain("市值单位尚未核实");
     await act(async () => buttonWithText("贵州茅台").click());
     expect(onSelectStock).toHaveBeenCalledWith(expect.objectContaining({ symbol: "sh600519" }));
     await act(async () => buttonWithText("AI研读").click());
     expect(onResearchPrompt).toHaveBeenCalledWith(expect.stringContaining("贵州茅台"));
     expect(node.textContent).not.toContain("987654321");
+  });
+
+  it("disables only AI research when the native handoff is unavailable", async () => {
+    const onResearchPrompt = vi.fn();
+    await render("screen", { onResearchPrompt, researchDisabled: true });
+
+    expect(api.fetchScreen).toHaveBeenCalledTimes(1);
+    expect(buttonWithText("筛选").disabled).toBe(false);
+    expect(node.querySelector<HTMLInputElement>('input[aria-label="最低 PB"]')?.disabled).toBe(false);
+    expect(buttonWithText("AI研读").disabled).toBe(true);
+    expect(node.querySelector('[role="note"]')?.getAttribute("aria-label")).toContain("研究会话忙碌或模型未就绪");
+    await act(async () => buttonWithText("AI研读").click());
+    expect(onResearchPrompt).not.toHaveBeenCalled();
   });
 
   it("clarifies that a complete Sina pool read is not full-market coverage", async () => {
@@ -97,5 +156,85 @@ describe("FinanceMarketExplorer", () => {
     expect(node.textContent).toContain("每股收益");
     expect(node.textContent).toContain("2026-06-30");
     expect(node.textContent).toContain("披露");
+  });
+
+  it("converts PB and turnover criteria to the provider contract and saves, loads, and removes presets", async () => {
+    await render("screen", { agentId: "finance-agent-1" });
+    await act(async () => {
+      setInputValue("最低 PB", "1.25");
+      setInputValue("最低成交额（亿元）", "12.5");
+      setInputValue("预设名称", "低估值高成交");
+    });
+    await act(async () => buttonWithText("筛选").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(api.fetchScreen).toHaveBeenLastCalledWith(
+      expect.objectContaining({ minPb: 1.25, minTurnoverYuan: 1_250_000_000 }),
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+
+    await act(async () => buttonWithText("保存预设").click());
+    expect(node.textContent).toContain("预设已保存");
+    expect(buttonWithText("载入").disabled).toBe(false);
+    expect(localStorage.getItem(financeScreenPresetStorageKey("finance-agent-1"))).toContain('"minPb":"1.25"');
+    await act(async () => setInputValue("最低 PB", "2.5"));
+    await act(async () => buttonWithText("载入").click());
+    expect(node.textContent).toContain("已载入条件");
+    expect(node.querySelector<HTMLInputElement>('input[aria-label="最低 PB"]')?.value).toBe("1.25");
+    expect(node.querySelector<HTMLInputElement>('input[aria-label="最低成交额（亿元）"]')?.value).toBe("12.5");
+    await act(async () => buttonWithText("删除").click());
+    expect(localStorage.getItem(financeScreenPresetStorageKey("finance-agent-1"))).toBe("[]");
+    await act(async () => buttonWithText("清除").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const clearedFilters = api.fetchScreen.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(clearedFilters).not.toHaveProperty("minPb");
+    expect(clearedFilters).not.toHaveProperty("minTurnoverYuan");
+  });
+
+  it("rejects inverted ranges and prevents saving beyond the Agent preset limit", async () => {
+    await render("screen", { agentId: "finance-agent-1" });
+    const initialCalls = api.fetchScreen.mock.calls.length;
+    await act(async () => {
+      setInputValue("最低价", "20");
+      setInputValue("最高价", "10");
+    });
+    await act(async () => buttonWithText("筛选").click());
+    expect(node.textContent).toContain("股价下限不能大于上限");
+    expect(api.fetchScreen).toHaveBeenCalledTimes(initialCalls);
+
+    const presets: FinanceScreenPreset[] = Array.from({ length: MAX_FINANCE_SCREEN_PRESETS }, (_, index) => ({
+      id: `saved-${index}`, name: `方案${index + 1}`, filters: {
+        minPrice: "", maxPrice: "", minChangePercent: "", maxChangePercent: "", minPe: "", maxPe: "",
+        minPb: "", maxPb: "", minVolumeLots: "", minTurnoverYi: "", maxTurnoverYi: "", sortBy: "changePercent", direction: "desc",
+      },
+    }));
+    expect(writeFinanceScreenPresets("full-agent", presets)).toBe(true);
+    await render("screen", { agentId: "full-agent" });
+    await act(async () => setInputValue("预设名称", "第21组"));
+    expect(buttonWithText("保存预设").disabled).toBe(true);
+    expect(node.textContent).toContain(`${MAX_FINANCE_SCREEN_PRESETS}/${MAX_FINANCE_SCREEN_PRESETS}`);
+  });
+
+  it("retries a failed financial data source without leaving the stock", async () => {
+    api.fetchResearch.mockResolvedValueOnce({ ...research, fundamentals: { ...research.fundamentals, status: "unavailable", items: [], error: "来源暂不可用" } });
+    await render("fundamentals");
+    expect(node.textContent).toContain("财务数据源暂不可用");
+    await act(async () => buttonWithText("刷新资料").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(api.fetchResearch).toHaveBeenCalledTimes(2);
+    expect(api.fetchResearch).toHaveBeenLastCalledWith(stock.symbol, expect.objectContaining({ signal: expect.anything() }));
+    expect(node.textContent).toContain("每股收益");
+    expect(node.textContent).not.toContain("财务数据源暂不可用");
+  });
+
+  it("applies PB sorting in the selected direction", async () => {
+    await render("screen");
+    await chooseSelect("排序字段", "市净率");
+    await chooseSelect("排序顺序", "从低到高");
+    await act(async () => buttonWithText("筛选").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(api.fetchScreen).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: "pbRatio", direction: "asc" }),
+      expect.objectContaining({ signal: expect.anything() }),
+    );
   });
 });

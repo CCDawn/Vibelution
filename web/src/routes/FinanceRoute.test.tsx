@@ -10,26 +10,39 @@ import { FinancialAssistantChatNote } from "./finance/FinancialAssistantChatNote
 import { deleteChatSession, fetchSessionDetail, createChatSession, querySessions } from "../api/chat";
 import { listKnowledgeItems } from "../api/knowledge";
 import { useFinancialResearchSessionBridge } from "./finance/FinancialResearchBridge";
-import type { SessionDetail, SessionQueryResponse } from "../api/types";
+import type { SessionDetail, SessionLlmModelOption, SessionModelSelection, SessionQueryResponse } from "../api/types";
 import { fetchFinancialStock, searchFinancialStocks } from "../api/financialMarket";
 import { listArchivedChatSessions, unarchiveChatSession } from "../api/sessionArchive";
 
 const nativeSubmit = vi.fn();
 let nativeMessages: SessionDetail["messages"] = [];
+let modelContextWindow = 128_000;
+const researchModel: SessionLlmModelOption = { modelId: "research", modelRef: "provider/research", model: "research", label: "研究模型", providerId: "provider", providerLabel: "Provider", providerKind: "openai", apiKeyConfigured: true, missingApiKey: false, supportsReasoningEffort: true, reasoningEffortValues: ["low", "medium", "high"], reasoningEffortOptions: [], defaultReasoningEffort: "medium", isDefault: true };
 
 vi.mock("../api/financialAssistant", () => ({ createFinancialAssistant: vi.fn(), listFinancialAssistants: vi.fn() }));
 vi.mock("../api/chat", () => ({ deleteChatSession: vi.fn(), fetchSessionDetail: vi.fn(), createChatSession: vi.fn(), querySessions: vi.fn() }));
 vi.mock("../api/financialMarket", async (original) => ({ ...await original<typeof import("../api/financialMarket")>(), fetchFinancialStock: vi.fn(), searchFinancialStocks: vi.fn() }));
 vi.mock("../api/knowledge", () => ({ listKnowledgeItems: vi.fn(), fetchKnowledgeTrace: vi.fn() }));
+vi.mock("../api/financialPreferences", async (original) => ({
+  ...await original<typeof import("../api/financialPreferences")>(),
+  fetchFinancialWorkspace: vi.fn(async (agentId: string) => ({ schemaVersion: 1, agentId, revision: 0, updatedAt: "", selectedStock: null, watchlist: [], profiles: [], manualPositions: [], reviewCases: [] })),
+  updateFinancialWorkspace: vi.fn(async (agentId: string, revision: number, patch: object) => ({ schemaVersion: 1, agentId, revision: revision + 1, updatedAt: "", selectedStock: null, watchlist: [], profiles: [], manualPositions: [], reviewCases: [], ...patch })),
+}));
+vi.mock("../api/financialReports", async (original) => ({ ...await original<typeof import("../api/financialReports")>(), fetchFinancialReports: vi.fn(async () => ({ items: [], nextCursor: "", totalEstimate: 0 })) }));
+vi.mock("./finance/FinanceDashboard", () => ({ FinanceDashboard: () => <div>市场概览</div> }));
 vi.mock("../api/sessionArchive", () => ({ unarchiveChatSession: vi.fn(), archiveChatSession: vi.fn(), listArchivedChatSessions: vi.fn() }));
 vi.mock("../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
 vi.mock("./finance/FinancePortfolioResearch", () => ({ FinancePortfolioResearch: ({ onResearchPrompt }: { onResearchPrompt: (text: string) => void }) => <button onClick={() => onResearchPrompt("请对以下模拟持仓做组合诊断。")}>生成组合诊断草稿</button> }));
 vi.mock("./ChatCodingRoute", () => ({ ChatCodingRoute: () => {
   const id = new URLSearchParams(useLocation().search).get("session") || "";
   const [draft, setDraft] = React.useState("");
+  const [selection, setSelection] = React.useState<SessionModelSelection | null>(null);
+  const onSelectionChange = React.useCallback((_id: string, next: SessionModelSelection | null) => setSelection(next), []);
+  const options = React.useMemo(() => ({ sessionId: id, currentModelId: researchModel.modelRef, currentReasoningEffort: "medium", model: { ...researchModel, contextWindow: modelContextWindow, runtimeSelectable: true, providerHealthy: true }, choices: [{ ...researchModel, contextWindow: modelContextWindow, runtimeSelectable: true, providerHealthy: true }] }), [id]);
   useFinancialResearchSessionBridge({
     sessionId: id, agentId: "finance-a", title: "原生研究", status: "idle", busy: false, stopping: false,
     messages: nativeMessages,
+    sessionLlmOptions: options, turnModelSelection: selection, onTurnModelSelectionChange: onSelectionChange,
     onComposerChange: setDraft, onFocusComposer: () => {},
     composerValue: draft, onSubmit: () => nativeSubmit(draft),
   });
@@ -52,6 +65,7 @@ function LocationEcho() {
 beforeEach(() => {
   vi.resetAllMocks();
   nativeMessages = [];
+  modelContextWindow = 128_000;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -130,6 +144,17 @@ describe("financial assistant page", () => {
     await settle();
     expect(container.textContent).toContain("finance-workspace");
   });
+  it("blocks topic execution when the assistant model has no valid context window", async () => {
+    modelContextWindow = 0;
+    await render("/finance?session=native-session");
+    await act(async () => button("通用研究")!.click());
+    expect(container.textContent).toContain("研究模型暂不可用");
+    expect(button("开始研究")?.disabled).toBe(true);
+    await act(async () => button("开始研究")!.click());
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+  });
+
   it("starts a topic in its own native session without sending duplicate turns", async () => {
     await render("/finance?session=native-session");
     await act(async () => button("通用研究")!.click());
@@ -145,10 +170,13 @@ describe("financial assistant page", () => {
   it("prepares portfolio research in a separate topic session without auto-submission", async () => {
     await render("/finance?session=native-session");
     await act(async () => button("组合研究")!.click());
+    await act(async () => [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find((tab) => tab.textContent === "模拟持仓")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await act(async () => { button("生成组合诊断草稿")!.click(); button("生成组合诊断草稿")!.click(); }); await settle();
     expect(createChatSession).toHaveBeenCalledTimes(1);
     expect(createChatSession).toHaveBeenCalledWith({ agentId: row.agentId, title: "主题 · 模拟持仓研究" }, expect.any(String));
-    expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="native draft"]')?.value).toBe("请对以下模拟持仓做组合诊断。");
+    const draft = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="native draft"]')?.value;
+    expect(draft).toMatch(/^请对以下主题开展投资研究：模拟持仓研究/);
+    expect(draft).toContain("请对以下模拟持仓做组合诊断。");
     expect(nativeSubmit).not.toHaveBeenCalled();
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=new-session");
   });
@@ -195,7 +223,7 @@ describe("financial assistant page", () => {
     ));
     await settle();
     expect(listFinancialAssistants).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("不会自动下单");
+    expect(container.textContent).toContain("不会实盘下单");
   });
 
   it("creates the assistant once, then stays on this page", async () => {
@@ -212,7 +240,7 @@ describe("financial assistant page", () => {
     ));
     await settle();
     expect(listFinancialAssistants).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("不会自动下单");
+    expect(container.textContent).toContain("不会实盘下单");
   });
 
   it("verifies the financial identity on a direct deep link without creating another assistant", async () => {
@@ -298,6 +326,7 @@ describe("financial assistant page", () => {
 
   it("starts research through the committed native composer once on a double click", async () => {
     await render("/finance?session=native-session");
+    await act(async () => button("股票研究")!.click());
     await input("报告期", "2025FY");
     const start = button("开始研究")!;
     await act(async () => { start.click(); start.click(); });
@@ -311,6 +340,7 @@ describe("financial assistant page", () => {
   it("creates and starts one new native Session when researching after an existing turn", async () => {
     nativeMessages = [{ role: "user", id: "existing", content: "核对贵州茅台（600519）", timestamp: "" }];
     await render("/finance?session=native-session");
+    await act(async () => button("股票研究")!.click());
     await input("报告期", "2024FY");
     await act(async () => { button("开始研究")!.click(); button("开始研究")!.click(); });
     await settle();
@@ -323,6 +353,7 @@ describe("financial assistant page", () => {
 
   it("prevents future dates from creating or submitting a native research", async () => {
     await render("/finance?session=native-session");
+    await act(async () => button("股票研究")!.click());
     await input("分析日期", "2099-01-01");
     const start = button("开始研究")!;
     expect(start.disabled).toBe(true);
@@ -366,6 +397,7 @@ describe("financial assistant page", () => {
     } as SessionQueryResponse));
     await render("/finance?session=native-session");
     await act(async () => button("报告中心")!.click());
+    await act(async () => [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find((tab) => tab.textContent === "研究会话")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await settle();
     const input = container.querySelector('input[aria-label="搜索研究记录"]') as HTMLInputElement;
     await act(async () => {

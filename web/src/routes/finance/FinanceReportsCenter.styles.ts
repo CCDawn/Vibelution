@@ -1,0 +1,16 @@
+export default {
+  root: "grid min-w-0 content-start gap-4",
+  toolbar: "flex min-w-0 flex-wrap items-end gap-2",
+  field: "grid min-w-0 flex-1 gap-1 text-xs text-vui-fg-tertiary",
+  date: "grid min-w-0 gap-1 text-xs text-vui-fg-tertiary",
+  actions: "flex min-w-0 flex-wrap items-center gap-2",
+  table: "min-w-0 max-w-full overflow-x-auto",
+  titleButton: "!h-auto !min-h-8 !max-w-full !justify-start !px-1 text-left",
+  identity: "grid min-w-0 gap-1 text-left [&>strong]:truncate [&>small]:text-vui-fg-tertiary",
+  muted: "text-xs text-vui-fg-tertiary",
+  report: "grid min-w-0 content-start gap-3 border-t border-vui-border-hairline pt-3",
+  reportHeader: "flex min-w-0 flex-wrap items-center justify-between gap-2 [&>h2]:m-0 [&>h2]:text-sm",
+  form: "grid min-w-0 gap-3",
+  note: "m-0 whitespace-pre-wrap break-words text-xs text-vui-fg-secondary",
+  case: "grid min-w-0 gap-2",
+} as const;

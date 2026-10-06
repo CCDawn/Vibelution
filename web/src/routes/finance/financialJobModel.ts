@@ -7,13 +7,36 @@ export function parseFinancialBatchSymbols(value: string): { symbols: string[]; 
   const tokens = value.trim().split(/[\s,，;；]+/).filter(Boolean);
   const symbols = new Set<string>(), invalid: string[] = [];
   for (const token of tokens) {
-    const match = /^(?:(sh|sz))?(\d{6})$/i.exec(token);
-    if (!match) { invalid.push(token); continue; }
-    const code = match[2], exchange = /^6/.test(code) ? "sh" : /^(000|001|002|003|300|301)/.test(code) ? "sz" : "";
-    if (!exchange || (match[1] && match[1].toLowerCase() !== exchange)) { invalid.push(token); continue; }
-    symbols.add(`${exchange}${code}`);
+    const normalized = normalizeFinancialBatchSymbol(token);
+    if (normalized) symbols.add(normalized); else invalid.push(token);
   }
   return { symbols: [...symbols], invalid };
+}
+
+function normalizeFinancialBatchSymbol(value: string): string | null {
+  const token = String(value || "").trim();
+  const cn = /^(?:(sh|sz|bj))?(\d{6})$/i.exec(token);
+  if (cn) {
+    const code = cn[2];
+    const inferred = /^6/.test(code) ? "sh" : /^[03]/.test(code) ? "sz" : /^[489]/.test(code) ? "bj" : "";
+    const explicit = cn[1]?.toLowerCase();
+    if (!inferred || (explicit && explicit !== inferred)) return null;
+    return `${inferred}${code}`;
+  }
+
+  const hk = /^hk(\d{1,5})$/i.exec(token);
+  if (hk) return `hk${hk[1].padStart(5, "0")}`;
+
+  const us = /^us([a-z][a-z0-9.-]{0,9})$/i.exec(token);
+  if (!us) return null;
+  let ticker = us[1].toUpperCase();
+  for (const suffix of [".NASDAQ", ".NYSE", ".PNK", ".OQ", ".AM", ".PK", ".N"]) {
+    if (ticker.endsWith(suffix)) {
+      ticker = ticker.slice(0, -suffix.length);
+      break;
+    }
+  }
+  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker) ? `us${ticker}` : null;
 }
 
 export function financialBatchStatusLabel(status: FinancialResearchBatchStatus | FinancialResearchBatchItemStatus, zh: boolean): string {

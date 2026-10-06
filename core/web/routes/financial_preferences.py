@@ -1,5 +1,7 @@
 """Typed finance preference projection and explicit user commands."""
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +34,72 @@ class RemovedPreference(BaseModel):
     removed: bool
 
 
+class WorkspaceStock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    symbol: str = Field(min_length=1, max_length=24)
+    ticker: str = Field(min_length=1, max_length=24)
+    name: str = Field(min_length=1, max_length=60)
+    market: str = Field(min_length=1, max_length=30)
+
+
+class WorkspaceWatch(WorkspaceStock):
+    tags: list[str] = Field(default_factory=list, max_length=10)
+    note: str = Field(default="", max_length=500)
+
+
+class ResearchProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=60)
+    scope: Literal["financial", "events", "risk", "comprehensive"]
+    depth: Literal["brief", "basic", "standard", "detailed", "exhaustive"]
+    period: str = Field(default="", max_length=100)
+    instructions: str = Field(default="", max_length=1000)
+    isDefault: bool = False
+
+
+class ManualPosition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=160)
+    stock: WorkspaceStock
+    quantity: float = Field(gt=0, le=1e12, allow_inf_nan=False)
+    costPrice: float = Field(gt=0, le=1e8, allow_inf_nan=False)
+    currency: Literal["CNY", "HKD", "USD"]
+    note: str = Field(default="", max_length=500)
+
+
+class ReviewCase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=160)
+    sessionId: str = Field(min_length=1, max_length=160)
+    turnId: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=10)
+    note: str = Field(default="", max_length=500)
+
+
+class WorkspaceSections(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selectedStock: WorkspaceStock | None = None
+    watchlist: list[WorkspaceWatch] = Field(default_factory=list, max_length=50)
+    profiles: list[ResearchProfile] = Field(default_factory=list, max_length=20)
+    manualPositions: list[ManualPosition] = Field(default_factory=list, max_length=50)
+    reviewCases: list[ReviewCase] = Field(default_factory=list, max_length=100)
+
+
+class WorkspaceSettings(WorkspaceSections):
+    schemaVersion: Literal[1]
+    agentId: str
+    revision: int
+    updatedAt: str
+
+
+class WorkspaceUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expectedRevision: int = Field(ge=0)
+    patch: WorkspaceSections
+
+
 def _call(callback):
     try:
         return callback()
@@ -57,3 +125,13 @@ def preferences_save(agent_id: str, payload: SavePreference) -> dict:
 )
 def preferences_remove(agent_id: str, preference_id: str) -> dict:
     return _call(lambda: service.remove_preference(agent_id, preference_id))
+
+
+@router.get("/financial-preferences/{agent_id}/workspace", response_model=WorkspaceSettings)
+def workspace_settings_get(agent_id: str) -> dict:
+    return _call(lambda: service.get_workspace_settings(agent_id))
+
+
+@router.patch("/financial-preferences/{agent_id}/workspace", response_model=WorkspaceSettings)
+def workspace_settings_update(agent_id: str, payload: WorkspaceUpdate) -> dict:
+    return _call(lambda: service.update_workspace_settings(agent_id, payload.expectedRevision, payload.patch.model_dump(exclude_unset=True)))

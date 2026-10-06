@@ -120,6 +120,33 @@ def test_complete_screen_reports_provider_universe_scope(monkeypatch):
     assert result["resultScope"] == "provider_universe"
 
 
+def test_pb_and_turnover_screen_excludes_unknowns_and_keeps_missing_sort_values_last(monkeypatch):
+    stocks = [research._screen_identity(sina_row(f"60000{index}", pb=pb, amount=amount)) for index, (pb, amount) in enumerate([("2", "500000"), ("1", "2000000"), ("", "3000000")], start=1)]
+    stocks[2].pop("pbRatio")
+    monkeypatch.setattr(research, "_screen_universe", lambda: {
+        "stocks": stocks, "coverage": {"complete": True, "loaded": 3, "providerTotal": 3},
+        "fetchedAt": "2026-10-06T00:00:00Z", "dataDate": None, "dataTime": None,
+        "cacheKey": "test", "cacheSeconds": 60,
+    })
+    for direction, expected in [("asc", ["600002", "600001", "600003"]), ("desc", ["600001", "600002", "600003"])]:
+        assert [row["ticker"] for row in research.screen_stocks(sort_by="pbRatio", direction=direction)["items"]] == expected
+    result = research.screen_stocks(min_pb=0.5, max_pb=1.5, min_turnover_yuan=1_000_000, max_turnover_yuan=2_500_000)
+    assert [row["ticker"] for row in result["items"]] == ["600002"]
+
+
+@pytest.mark.parametrize("bounds", [
+    {"min_pb": 2, "max_pb": 1}, {"min_pb": float("nan")},
+    {"max_turnover_yuan": float("inf")}, {"min_turnover_yuan": -1},
+    {"min_turnover_yuan": 2, "max_turnover_yuan": 1},
+])
+def test_advanced_screen_rejects_invalid_bounds_before_reading_provider(monkeypatch, bounds):
+    def unavailable():
+        pytest.fail("Invalid conditions must not load the public stock pool")
+    monkeypatch.setattr(research, "_screen_universe", unavailable)
+    with pytest.raises(research.FinancialResearchInputError):
+        research.screen_stocks(**bounds)
+
+
 def test_screen_loader_deadline_bounds_slow_pages_and_reports_every_missing_page(
     monkeypatch,
 ):
@@ -386,6 +413,26 @@ def test_screen_and_quote_routes_are_read_only_typed_and_reject_invalid_ranges(
         for path, methods in app.openapi()["paths"].items()
         if "financial-market" in path
     )
+
+
+@pytest.mark.parametrize("symbol,ticker,market_name", [("hk00700", "00700", "港交所"), ("usNVDA", "NVDA", "NASDAQ")])
+def test_international_research_facade_uses_disclosure_adapter_without_hiding_facet_failures(monkeypatch, symbol, ticker, market_name):
+    from core.web.services import financial_research as international
+
+    stock = {"symbol": symbol, "ticker": ticker, "name": "研究股票", "market": market_name}
+    news = {"status": "available", "source": "新闻源", "sourceUrl": "https://example.com/news", "fetchedAt": "2026-10-06T00:00:00Z", "items": [], "error": None}
+    announcements = {**news, "status": "unavailable", "source": "官方披露源", "error": "源暂时不可达"}
+    fundamentals = {**news, "source": "财务源", "reportDate": "2026-06-30", "publishedAt": "2026-08-01", "items": [{"key": "revenue", "label": "营业收入", "value": 123, "unit": "USD", "reportDate": "2026-06-30", "publishedAt": "2026-08-01"}]}
+    called = []
+    monkeypatch.setattr(research, "_eastmoney_stock", lambda value: stock)
+    monkeypatch.setattr(research, "_load_news", lambda value: news)
+    monkeypatch.setattr(research.market, "_cached", lambda key, ttl, reader: reader())
+    monkeypatch.setattr(international, "fetch_international_facets", lambda value: called.append(value) or {"announcements": announcements, "fundamentals": fundamentals})
+    result = research.stock_research(symbol)
+    assert called == [stock]
+    assert result["news"] == news
+    assert result["announcements"] == announcements
+    assert result["fundamentals"] == fundamentals
 
 
 def test_research_route_preserves_independent_facets(monkeypatch):

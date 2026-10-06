@@ -227,6 +227,14 @@ def test_decimal_fees_t_plus_one_idempotency_and_full_ledger_review(
     assert review["summary"]["monthTradeCount"] == 2
     assert review["summary"]["monthRealizedPnlYuan"] == "91.95"
     assert len(review["days"]) == 2
+    assert [order["side"] for order in review["account"]["orders"]] == [
+        "sell",
+        "buy",
+    ]
+    assert review["account"]["orders"][0]["reason"] == "次日按北京时间自然日模拟卖出"
+    assert review["account"]["ordersLimit"] == 20
+    assert review["account"]["ordersTruncated"] is False
+    assert "requestFingerprint" not in review["account"]["orders"][0]
 
 
 def test_agents_cannot_read_or_spend_each_others_virtual_balance(paper_env):
@@ -287,6 +295,72 @@ def test_holdings_use_one_quote_batch_and_preserve_partial_quote_failures(
     assert positions["sz000001"]["markPriceYuan"] == "10.00"
     assert positions["sz000001"]["valuationStatus"] == "stale"
     assert snapshot["marketValueYuan"] == "2200.00"
+    assert snapshot["valuationStatus"] == "partial"
+
+
+def test_paper_orders_reject_hk_us_before_requesting_quotes(paper_env, monkeypatch):
+    agent_id = paper_env["agent"]["agentId"]
+    paper.open_account(agent_id)
+    calls = []
+    monkeypatch.setattr(research, "batch_quotes", lambda symbols: calls.append(symbols) or _batch(symbols))
+    for symbol in ("hk00700", "usAAPL"):
+        with pytest.raises(paper.InvalidPaperOrderError, match="仅支持 A 股"):
+            paper.submit_order(
+                agent_id,
+                client_order_id=str(uuid4()),
+                symbol=symbol,
+                side="buy",
+                quantity=100,
+                reason="多市场研究不能进入人民币A股模拟账本",
+            )
+    assert calls == []
+    account = paper.get_account_snapshot(agent_id)
+    assert account["ordersTotal"] == 0 and account["positions"] == []
+
+
+def test_legacy_foreign_holding_is_never_valued_as_yuan(paper_env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(research, "batch_quotes", lambda symbols: calls.append(symbols) or _batch(symbols))
+    source_ledger = {
+        "agentId": paper_env["agent"]["agentId"],
+        "account": {
+            "accountId": "legacy-account",
+            "openedAt": "2026-01-01T00:00:00+00:00",
+            "initialCashYuan": "1000000.00",
+            "cashYuan": "900000.00",
+        },
+        "positions": {
+            "hk00700": {
+                "ticker": "00700",
+                "name": "腾讯控股",
+                "market": "港交所",
+                "lots": [
+                    {
+                        "remainingQuantity": 100,
+                        "remainingCostYuan": "10000.00",
+                        "acquiredBeijingDate": "2026-01-01",
+                    }
+                ],
+                "lastQuote": {
+                    "priceYuan": "427.40",
+                    "timestamp": "2026-10-06T13:39:52+08:00",
+                    "source": "腾讯财经",
+                    "sourceUrl": "https://gu.qq.com/hk00700/gp",
+                },
+            }
+        },
+        "orders": [],
+    }
+
+    snapshot = ledger._account_snapshot_from_ledger(source_ledger, order_limit=50)
+    position = snapshot["positions"][0]
+    assert calls == []
+    assert position["valuationStatus"] == "unavailable"
+    assert position["markPriceYuan"] is None
+    assert position["marketValueYuan"] is None
+    assert position["unrealizedPnlYuan"] is None
+    assert position["quoteTimestamp"] == "" and position["sourceUrl"] == ""
+    assert snapshot["marketValueYuan"] == "0.00"
     assert snapshot["valuationStatus"] == "partial"
 
 
@@ -379,7 +453,8 @@ def test_financial_paper_routes_are_typed_read_only_until_explicit_open(
     review = client.get(f"/api/financial-paper/{agent_id}/review?month=2026-10")
     assert review.status_code == 200, review.text
     assert review.json()["summary"]["totalTradeCount"] == 1
-    assert review.json()["account"]["orders"] == []
+    assert review.json()["account"]["orders"] == body["orders"]
+    assert review.json()["account"]["ordersLimit"] == 20
     assert (
         client.get(f"/api/financial-paper/{agent_id}/review?month=2026-13").status_code
         == 422

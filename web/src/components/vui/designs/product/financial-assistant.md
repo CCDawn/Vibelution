@@ -19,10 +19,10 @@ pathname 决定当前项及按钮高亮。Radix 管理键盘、Esc、外点和�
 `/finance` 是炒股智能体的桌面投研工作台。菜单进入、加载、失败与正式页面共用 `financial-assistant-workspace` 框架。左栏放股票搜索、自选、真实研究记录和报告中心；中间展示股票概况、K 线、研究设置、原生对话和报告；右栏展示真实执行过程与财报引用。还没有助手时，入口创建身份、空财报库和会话；打不开时在原布局内给原因和重试。
 
 ### 适用范围
-本地金融专家的桌面 A 股研究与独立模拟账户。参考 TradingAgents-CN v3.0 社区版的研究、筛选、自选、报告、记忆、技能、学习与模拟交易信息架构；独立实现，不复制受限前后端源码。真实券商交易与 Pro 专属交易系统不属于这个页面。
+本地金融专家的桌面 A 股、港股和美股研究与独立 A 股模拟账户。参考 TradingAgents-CN v3.0 社区版的研究、筛选、自选、报告、记忆、技能、学习与模拟交易信息架构；独立实现，不复制受限前后端源码。真实券商交易与 Pro 专属交易系统不属于这个页面。
 
 ### 使用方式
-复用 `VSplitWorkspace`、`VStateSurface`、`VSkeleton`、`VInput`、`VSelect`、`VTabs`、`VButton`、`VChip`、`VIconButton`、`VSurface` 与 `VRouteLinkButton`。桌面三栏可拖动、折叠，宽度只经 `WORKBENCH_LAYOUT_IDS.finance` 与共享 pane persistence 保存。不做手机版和手机弹窗；1280px 与 1920px 桌面窗口均需验收。Finance 样式来源显式登记在 shell Tailwind 入口；路由代码分块加载与入口初始化均使用同一 frame，避免冷启动闪过通用壳。金融页面隐藏泛化聊天 starter 与模型、权限等技术设置，配置入口保留在左栏新研究按钮旁；原生工具授权入口仍完整保留。
+复用 `VSplitWorkspace`、`VStateSurface`、`VSkeleton`、`VInput`、`VSelect`、`VTabs`、`VButton`、`VChip`、`VIconButton`、`VSurface` 与 `VRouteLinkButton`。桌面三栏可拖动、折叠，宽度只经 `WORKBENCH_LAYOUT_IDS.finance` 与共享 pane persistence 保存。不做手机版和手机弹窗；1280px 与 1920px 桌面窗口均需验收。Finance 样式来源显式登记在 shell Tailwind 入口；路由代码分块加载与入口初始化均使用同一 frame，避免冷启动闪过通用壳。金融页面隐藏泛化聊天 starter，研究设置提供当前会话的模型选择，助手配置入口保留在左栏新研究按钮旁；原生工具授权入口仍完整保留。
 GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且并发串行。
 只打开服务端验证 Agent/Session 绑定后返回的 sessionId，经 `useChatRouteSelection.openSession`。
 离开入口后，晚到的结果不导航。已归档或身份已改不另建。
@@ -34,7 +34,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 股票身份来自行情搜索或用户选中的有效自选，历史研究通过原始用户问题恢复股票上下文，不从资料标题推断。分析日期、报告期、研究范围和深度写入实际请求。“开始研究”先写入原生 composer，只有相同草稿已提交到 React 状态且身份一致时才触发原生提交；已有消息时新建原生 Session。不直接调用消息写入 API。Session Journal、SSE、消息流、停止和 HTML 导出仍归原生会话；侧栏投影真实 busy/stopping、工具调用和待授权状态，不模拟多 Agent、阶段或百分比。
 
 ### 行情与报告
-`FinanceStockOverview` 展示 Tencent 公共报价、来源与时间，保留元、手单位和延迟提示；数值不可用显示缺值，不估算。`FinanceStockChart` 使用真实前复权 OHLC、成交量和 MA5/20，支持日/周/月、悬停与方向键；前复权缺失时保留报价并显示 K 线错误，不把未复权数据错标为前复权。
+`FinanceStockOverview` 展示 Tencent 公共报价、来源与时间，保留市场币种、股或手单位和延迟提示；数值不可用显示缺值，不估算。`FinanceStockChart` 使用真实 OHLC、成交量和 MA5/20，支持日/周/月、悬停与方向键；A 股使用前复权，港美股明确未复权；前复权缺失时保留报价并显示 K 线错误，不把未复权数据错标为前复权。
 `FinanceResearchReport` 只投影已完成原生 Turn 的 `final_answer`，不把思考、工具返回或未完成内容变成报告。摘要、章节和引用都来自实际回答，Markdown 导出仅导出该回答。报告章节使用 `VTabs`，正文复用原生 Markdown renderer；股票上下文不匹配时显示空态。相同 PDF 的不同页分别保留。`FinanceResearchHistory` 只读原生研究记录，提供关键词、状态筛选与分页。
 自选只保存金融 Agent 范围内的有效股票身份，不保存行情、报告、transcript 或第二套会话状态。
 
@@ -74,8 +74,33 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ### 功能与使用
 股票筛选使用 `VInput`、`VSelect`、`VButton`、`VDenseTable` 和 `VStateSurface`。结构化条件只作用于已取得的真实股票池，结果明确给来源覆盖数、抓取时点和完整性。自然语言选股只生成原生研究草稿；未运行模型时不显示 AI 选股结果。来源不提供行情日期或市值单位时保留空值并说明，不能把抓取日期当成交日期。
 新闻、公告和财务指标使用 `VSurface` 与原文外链，逐项保留来源、发布日或报告期，三块分别呈现错误、缺值与重试。公开数据不冒充已审核 PDF 财报证据。
+资料页提供「刷新资料」重新读取三个独立 facet；港股报价 HKD 与财务披露 CNY 不互换，美股 SEC 核验失败或备用财务来源单独标记。已知 US 供应商交易所后缀经严格身份校验后正规化，`BRK.B` 等类别股代码保留。
 自选组合既有身份偏好与批量 Tencent 报价，按实际数值排序。单只查询失败保留该行和错误；数字保留元、手和百分比单位，不从股票名称生成数值。
 表格只在自身容器横向滚动，各页在中栏纵向滚动；左、右栏继续受共享桌面 pane 约束。
+
+## FinanceDashboard
+
+### 功能
+桌面概览把自选实时公开行情、最近研究和批次/计划状态集中呈现。沿用 `VSurface`、`VDenseTable`、`VMetricStrip`、`VChip`、`VButton` 与 `VStateSurface`；加载、空结果与失败分别处理，行情保留来源和读取时间。
+
+### 适用范围
+只用于金融助手桌面首页；数据分别来自现有行情、自选、原生研究记录和任务 API。禁止把缺失行情或任务状态补成成功值。
+
+### 使用方式
+打开股票进入原生研究，最近研究打开对应 Session，快捷入口导航到选股、报告、任务、模拟账户、组合研究和交易复盘。保持容器可收缩，不增加重复产品顶栏。
+
+## FinanceScreenWorkspace
+
+### 功能
+默认提供自然语言选股，示例只使用已支持的价格、涨跌幅、PE、PB、成交量和成交额条件；高级筛选复用 `FinanceMarketExplorer`。提交后创建并运行原生“智能选股”主题 Session，明确要求调用 `financial_market_screen_tool`；候选、来源、抓取时间和覆盖范围只能来自工具实际响应，完成答案进入现有报告与导出流程。
+选股请求直接描述筛选条件与报告要求，不套用行业主题研究模板，避免把「智能选股」误解为 AI 产业研究。
+智能选股与高级筛选的 AI 研读共用研究可用状态；模型或会话不可用时禁用研究动作，仍允许查看公开筛选结果。
+
+### 适用范围
+金融助手桌面选股页。Agent 级预设仅在本机保存筛选条件，最多20组，不存行情或研究内容；不创建第二套对话、结果缓存或执行进度。
+
+### 使用方式
+填写或选取条件后点击开始，结果由原生 Agent 运行并写入其 Session。高级条件需要用户点击筛选后读取行情；PB 与成交额范围按 API 的比率和元字段传递，界面成交额输入单位为亿元。
 
 ## FinancePaperTrading
 
@@ -102,7 +127,7 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ## FinanceTaskCenter / FinanceResearchJobs
 
 ### 功能与使用
-桌面研究任务使用 `VTabs` 区分原生记录、批量研究与定时计划；批量/计划沿用 `VSurface`、`VTextarea`、`VInput`、`VSelect`、`VButton`、`VChip` 与 `VStateSurface`，不增加第二套控件。一次最多 10 只沪深 A 股，显示每股状态、完成数量和真实失败原因。查看结果/过程必须指向该股的精确研究轮次；查找失败保持错误态，不能显示最新轮次。
+桌面研究任务使用 `VTabs` 区分原生记录、批量研究与定时计划；批量/计划沿用 `VSurface`、`VTextarea`、`VInput`、`VSelect`、`VButton`、`VChip` 与 `VStateSurface`，不增加第二套控件。一次最多 10 只有效 A 股、港股或美股，显示每股状态、完成数量和真实失败原因。查看结果/过程必须指向该股的精确研究轮次；查找失败保持错误态，不能显示最新轮次。
 计划明确北京时间、一次/每天/周一至周五，显示下次时间和暂停/恢复；节假日与应用需运行的约束只保留一行。运行中提供停止批次，确定失败或停止提供重试未完成，已完成股票保留。同步请求门和幂等键防重复创建；切换助手隔离旧响应与提示。
 
 ## FinanceResearchApprovals
@@ -113,10 +138,55 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ## FinanceResearchReport / FinanceReportExport / financialReports
 
 ### 报告交付
-沿用报告标题区域的 `VButton`/`VDropdownMenu` 导出操作，支持 Markdown、JSON、Word 以及“打印 / PDF”。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印文档隔离展示，另存 PDF 由系统打印面完成；不把 HTML 下载称为 PDF。
+沿用报告标题区域的 `VButton`/`VDropdownMenu` 导出操作，支持 Markdown、JSON、Word 以及“打印 / PDF”。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印文档在当前页面的无脚本 sandbox iframe 内隔离展示，不依赖桌面壳拦截的弹窗；另存 PDF 由系统打印面完成，不把 HTML 下载称为 PDF。
 
 ## FinanceSessionMenu / useFinanceSessionLifecycle
 
 ### 功能与使用
 最近研究、报告和任务列表复用 `VDropdownMenu`、`VIconButton` 与 `VConfirmDialog`，提供原生归档、恢复和删除。运行中记录提示先停止；删除使用标准确认，成功才更新缓存与原生 tombstone。当前记录移除后只选择已验证的同助手存活研究，异步响应不能抢夺用户后续导航。
 报告中心以 `VTabs` 切换活动记录与原生归档列表，后者核对同一 Agent 并保留分页、空态、失败重试。已归档直达研究显示恢复或新建操作，保留金融助手身份，不另建归档或删除存储。
+
+## FinanceResearchConfig
+
+### 功能
+研究表单复用 `VSurface`、`VInput`、`VSelect`、`VButton`、`VStateSurface` 和 `VRouteLinkButton`。模型选项来自身份匹配的当前会话；默认模型和本轮选项的上下文容量、供应商健康、凭据与可执行状态须可确认，失败时禁用开始并提供助手配置入口。新建研究传递已选本轮模型，由目标会话再次校验；五级深度优先映射到不高于请求的最高支持档位，没有更低档位时使用模型最低档位，表单显示实际推理强度，不静默回到更强的默认档位、换模型或扩权。
+
+### 适用范围
+金融助手的个股和主题研究设置，使用当前原生 Session 的模型能力。
+
+### 使用方式
+选择分析日期、报告期、范围、深度及本轮模型，再开始研究。配置未就绪时按提示进入现有助手配置页。
+
+## FinanceResearchProfiles
+
+### 功能
+使用 `VSurface`、`VInput`、`VSelect`、`VTextarea`、`VButton` 和 `VStateSurface` 保存研究范围、深度、报告期与个股/行业要点，最多20份档案并允许指定默认。档案只存同一助手的工作区偏好，不存模型凭据、行情或报告。保存失败保留输入，成功后选择服务端保存的档案。
+
+### 适用范围
+同一金融助手的研究设置复用，不影响其他 Agent 的偏好。
+
+### 使用方式
+选择档案载入设置，编辑后保存，或新建档案、设为默认和删除。并发编辑或删除当前档案时拒绝旧表单保存并保留输入，不覆盖新内容或恢复已删除档案。
+
+## FinanceManualPositions
+
+### 功能
+使用 `VSurface`、`VDenseTable`、`VDialog`、`VInput`、`VSelect`、`VButton` 和 `VStateSurface` 管理最多50条手工持仓；CN/HK/US 搜索、股数、平均成本、币种与备注均核对后保存。行情批量读取，成本、市值与浮动盈亏按 CNY/HKD/USD 分组，缺失报价保留空值并显示估值覆盖。AI 组合研究仅准备实际持仓和来源的研究请求，不提交券商订单或修改模拟账本。
+
+### 适用范围
+金融助手的手工记录与研究分析，独立于模拟交易账本。
+
+### 使用方式
+搜索股票并填写股数、成本和备注；编辑或移除记录后读取服务端保存状态。同一行被其他窗口修改或删除时保留旧表单并提示刷新；无关行的更新可以合并。表格、合计与研究草稿共用股票身份和币种校验，不使用错配报价。
+
+## FinanceReportsCenter
+
+### 功能
+使用 `VSurface`、`VDenseTable`、`VCheckbox`、`VInput`、`VSelect`、`VDialog`、`VButton` 和 `VStateSurface` 查询精确成功 Turn 的报告，支持关键词、市场、类型、日期、分页和最多20份 ZIP 导出。正文与单份导出使用相同 Session/Turn；收藏只保存引用、标签和用户备注。归档后仍可读取；只有原生 tombstone 或明确404才标记「原报告已删除」，禁用原会话与导出，保留编辑备注和移除书签。网络及权限错误保持可重试，不误标删除，不静默删除案例。
+关键词范围为代码、标题与摘要；案例筛选无匹配时显示空态与清除搜索入口。历史续页保留原生目录游标，不把会话身份游标当数字页码。
+
+### 适用范围
+同一金融助手已完成的原生研究报告、已归档报告和复盘案例。
+
+### 使用方式
+筛选并打开精确报告，下载单份或勾选后导出 ZIP；收藏时填写标签和备注。归档、恢复与删除复用原生会话管理，失效案例保留可编辑备注。

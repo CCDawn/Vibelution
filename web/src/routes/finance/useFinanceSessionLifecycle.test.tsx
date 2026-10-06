@@ -20,6 +20,8 @@ vi.mock("../../app/userActionTelemetry", () => ({ postUserActionObservation: vi.
 const current = { id: "current", agentId: "finance-a", title: "待管理研究", status: "idle", taskSummary: "completed report", lastActive: "", updatedAt: "", currentPhase: "" } as SessionSummary;
 const next = { ...current, id: "next", title: "下一条研究" };
 const indexKey = ["sessions", "finance", "finance-a"];
+const catalogKey = ["finance", "report-catalog", "finance-a", {}];
+const exactKey = ["finance", "exact-report", "finance-a", "current", "report-turn"];
 let state: ReturnType<typeof useFinanceSessionLifecycle>;
 let client: QueryClient, router: Router, root: Root, container: HTMLElement;
 function Host() { state = useFinanceSessionLifecycle("finance-a", true); return <>{state.dialog}<output>{state.error}</output></>; }
@@ -34,6 +36,8 @@ beforeEach(async () => {
   vi.mocked(listFinancialAssistants).mockResolvedValue([{ agentId: "finance-a", status: "active", setupStatus: "ready", directSessionId: "direct" } as FinancialAssistant]);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(indexKey, { pages: [{ items: [current, next], nextCursor: "" }], pageParams: [""] });
+  client.setQueryData(catalogKey, { pages: [{ items: [{ sessionId: "current", turnId: "report-turn" }, { sessionId: "next", turnId: "next-turn" }], nextCursor: null }], pageParams: [""] });
+  client.setQueryData(exactKey, { content: "deleted research report" });
   router = createMemoryRouter([{ path: "*", element: <Host /> }], { initialEntries: ["/finance?session=current"] });
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
   await act(async () => root.render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>));
@@ -48,6 +52,8 @@ describe("native financial research lifecycle", () => {
     expect(indexedIds()).toEqual(["next"]);
     expect(router.state.location.search).toBe("?session=next");
     expect(fetchSessionDetail).toHaveBeenCalledWith("next", expect.objectContaining({ transcriptScope: "none" }));
+    expect(client.getQueryState(catalogKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryData(exactKey)).toBeDefined(); // Archived reports remain valid case references.
   });
   it("retains a rejected archive and its committed selection", async () => {
     vi.mocked(archiveChatSession).mockRejectedValue(new Error("研究正在运行，请先停止"));
@@ -66,6 +72,8 @@ describe("native financial research lifecycle", () => {
     expect(isSessionDeleteTombstoned("current")).toBe(true);
     expect(indexedIds()).toEqual(["next"]);
     expect(router.state.location.search).toBe("?session=next");
+    expect(client.getQueryData(exactKey)).toBeUndefined();
+    expect((client.getQueryData(catalogKey) as { pages: { items: { sessionId: string }[] }[] }).pages[0].items.map((row) => row.sessionId)).toEqual(["next"]);
   });
   it("restores an archive through the existing native endpoint", async () => {
     vi.mocked(fetchSessionDetail).mockResolvedValue({ ...current, messages: [], hiddenFromIndex: true, archiveState: { status: "archived" } } as SessionDetail);
@@ -74,6 +82,7 @@ describe("native financial research lifecycle", () => {
     expect(archiveChatSession).not.toHaveBeenCalled();
     expect(deleteChatSession).not.toHaveBeenCalled();
     expect(router.state.location.search).toBe("?session=current");
+    expect(client.getQueryState(catalogKey)?.isInvalidated).toBe(true);
   });
   it("repairs a deleted last direct session through the existing owner provisioning", async () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([{ agentId: "finance-a", status: "active", setupStatus: "session_missing", directSessionId: "" } as FinancialAssistant]);

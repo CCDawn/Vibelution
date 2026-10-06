@@ -18,7 +18,9 @@ export type FinancialMarketScreenSort =
   | "turnoverYuan"
   | "price"
   | "volumeLots"
-  | "peRatio";
+  | "peRatio"
+  | "pbRatio";
+// Advanced screening remains in the validated A-share universe.
 
 export type FinancialMarketScreenFilters = {
   minPrice?: number;
@@ -28,6 +30,10 @@ export type FinancialMarketScreenFilters = {
   minPe?: number;
   maxPe?: number;
   minVolumeLots?: number;
+  minPb?: number;
+  maxPb?: number;
+  minTurnoverYuan?: number;
+  maxTurnoverYuan?: number;
   sortBy?: FinancialMarketScreenSort;
   direction?: "asc" | "desc";
   page?: number;

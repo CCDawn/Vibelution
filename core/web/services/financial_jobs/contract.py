@@ -25,15 +25,15 @@ def normalize_create_request(
         raise FinancialJobValidationError("研究计划内容无效")
     raw_symbols = payload.get("symbols")
     if not isinstance(raw_symbols, list) or not raw_symbols:
-        raise FinancialJobValidationError("至少选择一只 A 股")
+        raise FinancialJobValidationError("至少选择一只股票")
     symbols: list[str] = []
     for raw in raw_symbols:
         try:
             normalized = market.normalize_symbol(str(raw or ""))
         except (market.MarketDataError, TypeError, ValueError) as exc:
-            raise FinancialJobValidationError("股票代码无效，请使用沪深 A 股代码") from exc
-        if not normalized.startswith(("sh", "sz")):
-            raise FinancialJobValidationError("股票代码无效，请使用沪深 A 股代码")
+            raise FinancialJobValidationError(
+                "股票代码无效，请使用沪深 A 股、港股或美股代码"
+            ) from exc
         if normalized not in symbols:
             symbols.append(normalized)
     if len(symbols) > MAX_SYMBOLS:

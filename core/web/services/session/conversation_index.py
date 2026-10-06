@@ -1697,9 +1697,10 @@ def create_chat_session(
     shell can switch tabs without waiting on ledger/agent hydration.
 
     ``activate=False`` is the narrow managed-background seam. Such callers must
-    use a hidden conversation index kind; the current workbench conversation is
-    preserved byte-for-byte. ``session_metadata`` is allowlisted and bounded so
-    task pointers can be audited without storing prompts or arbitrary payloads.
+    use a hidden index kind, or bind an explicit Agent owner with the personal
+    Agent kind; the current workbench conversation is preserved byte-for-byte.
+    ``session_metadata`` is allowlisted and bounded so task pointers can be
+    audited without storing prompts or arbitrary payloads.
     """
     s = _service()
     create_started_at = time.perf_counter()
@@ -1710,8 +1711,19 @@ def create_chat_session(
     requested_agent_id = str(agent_id or "").strip()
     normalized_agent_id = requested_agent_id
     normalized_index_kind = str(conversation_index_kind or "").strip()
-    if not activate and normalized_index_kind != agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
-        raise s.SessionValidationError("Non-activating sessions must use the hidden conversation index kind.")
+    inactive_personal_agent = (
+        normalized_index_kind
+        == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
+        and bool(requested_agent_id)
+    )
+    if not activate and (
+        normalized_index_kind != agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+        and not inactive_personal_agent
+    ):
+        raise s.SessionValidationError(
+            "Non-activating sessions must use the hidden index kind or an "
+            "explicit Agent-owned personal Agent kind."
+        )
     raw_session_metadata = session_metadata if isinstance(session_metadata, dict) else {}
     normalized_session_metadata = {
         key: str(raw_session_metadata.get(key) or "").strip()[:240]

@@ -270,6 +270,13 @@ def get_account_snapshot(agent_id: str, *, order_limit: int = 50) -> dict[str, A
     return _account_snapshot_from_ledger(ledger, order_limit=bounded_limit)
 
 
+def _canonical_paper_symbol(symbol: str) -> bool:
+    try:
+        return market.normalize_a_share_symbol(symbol) == symbol
+    except market.MarketDataError:
+        return False
+
+
 def _account_snapshot_from_ledger(
     ledger: dict[str, Any], *, order_limit: int
 ) -> dict[str, Any]:
@@ -281,7 +288,8 @@ def _account_snapshot_from_ledger(
     open_symbols = [
         symbol
         for symbol, row in ledger["positions"].items()
-        if any(
+        if _canonical_paper_symbol(symbol)
+        and any(
             int(lot.get("remainingQuantity") or 0) > 0 for lot in row.get("lots", [])
         )
     ]
@@ -300,51 +308,70 @@ def _account_snapshot_from_ledger(
         cost = sum(
             (_money(lot.get("remainingCostYuan", "0")) for lot in lots), Decimal("0.00")
         )
-        try:
-            quote = _quote_from_batch(symbol, quote_batch)
-            price = _money(quote["priceYuan"])
-            quote_timestamp = str(quote.get("timestamp") or "")
-            quote_fetched_at = str(quote.get("fetchedAt") or "")
-            source = str(quote.get("source") or "腾讯财经")
-            source_url = str(quote.get("sourceUrl") or "")
-            quote_status = "fresh"
-            row["lastQuote"] = {
-                "priceYuan": _money_text(price),
-                "timestamp": quote_timestamp,
-                "fetchedAt": quote_fetched_at,
-                "source": source,
-                "sourceUrl": source_url,
-            }
-            identity = {
-                "ticker": str(quote.get("ticker") or row.get("ticker") or ""),
-                "name": str(quote.get("name") or row.get("name") or ""),
-                "market": str(quote.get("market") or row.get("market") or ""),
-            }
-        except (market.MarketDataError, KeyError, TypeError, ValueError):
-            quote = (
-                row.get("lastQuote") if isinstance(row.get("lastQuote"), dict) else {}
-            )
-            try:
-                price = _money(quote["priceYuan"])
-            except (KeyError, FinancialPaperError):
-                price = Decimal("0.00")
-                fresh_all = False
-                quote_status = "unavailable"
-            else:
-                fresh_all = False
-                quote_status = "stale"
-            quote_timestamp = str(quote.get("timestamp") or "")
-            quote_fetched_at = str(quote.get("fetchedAt") or "")
-            source = str(quote.get("source") or "腾讯财经")
-            source_url = str(quote.get("sourceUrl") or "")
+        supported_symbol = _canonical_paper_symbol(symbol)
+        if not supported_symbol:
+            # A malformed/legacy foreign holding must never be priced in Yuan.
+            # Preserve the ledger row, but leave the mark unavailable and omit
+            # its unknown value/cost from the aggregate CNY valuation.
+            fresh_all = False
+            price = Decimal("0.00")
+            quote_timestamp = ""
+            quote_fetched_at = ""
+            source = ""
+            source_url = ""
             identity = {
                 key: str(row.get(key) or "") for key in ("ticker", "name", "market")
             }
+            quote_status = "unavailable"
+        else:
+            try:
+                quote = _quote_from_batch(symbol, quote_batch)
+                price = _money(quote["priceYuan"])
+                quote_timestamp = str(quote.get("timestamp") or "")
+                quote_fetched_at = str(quote.get("fetchedAt") or "")
+                source = str(quote.get("source") or "腾讯财经")
+                source_url = str(quote.get("sourceUrl") or "")
+                quote_status = "fresh"
+                row["lastQuote"] = {
+                    "priceYuan": _money_text(price),
+                    "timestamp": quote_timestamp,
+                    "fetchedAt": quote_fetched_at,
+                    "source": source,
+                    "sourceUrl": source_url,
+                }
+                identity = {
+                    "ticker": str(quote.get("ticker") or row.get("ticker") or ""),
+                    "name": str(quote.get("name") or row.get("name") or ""),
+                    "market": str(quote.get("market") or row.get("market") or ""),
+                }
+            except (market.MarketDataError, KeyError, TypeError, ValueError):
+                quote = (
+                    row.get("lastQuote")
+                    if isinstance(row.get("lastQuote"), dict)
+                    else {}
+                )
+                try:
+                    price = _money(quote["priceYuan"])
+                except (KeyError, FinancialPaperError):
+                    price = Decimal("0.00")
+                    fresh_all = False
+                    quote_status = "unavailable"
+                else:
+                    fresh_all = False
+                    quote_status = "stale"
+                quote_timestamp = str(quote.get("timestamp") or "")
+                quote_fetched_at = str(quote.get("fetchedAt") or "")
+                source = str(quote.get("source") or "腾讯财经")
+                source_url = str(quote.get("sourceUrl") or "")
+                identity = {
+                    key: str(row.get(key) or "") for key in ("ticker", "name", "market")
+                }
 
         market_value = _money(price * quantity) if price > 0 else Decimal("0.00")
         unrealized = _money(market_value - cost) if price > 0 else Decimal("0.00")
-        total_market_value += market_value
-        total_cost += cost
+        if supported_symbol:
+            total_market_value += market_value
+            total_cost += cost
         positions.append(
             {
                 "symbol": symbol,
@@ -355,8 +382,12 @@ def _account_snapshot_from_ledger(
                 "averageCostYuan": _money_text(cost / quantity),
                 "costBasisYuan": _money_text(cost),
                 "markPriceYuan": _money_text(price) if price > 0 else None,
-                "marketValueYuan": _money_text(market_value) if price > 0 else None,
-                "unrealizedPnlYuan": _money_text(unrealized) if price > 0 else None,
+                "marketValueYuan": _money_text(market_value)
+                if supported_symbol and price > 0
+                else None,
+                "unrealizedPnlYuan": _money_text(unrealized)
+                if supported_symbol and price > 0
+                else None,
                 "valuationStatus": quote_status,
                 "quoteTimestamp": quote_timestamp,
                 "quoteDate": quote_timestamp[:10] if len(quote_timestamp) >= 10 else "",
@@ -453,7 +484,7 @@ def _normalize_order(
     except ValueError as exc:
         raise InvalidPaperOrderError("clientOrderId 必须是有效 UUID") from exc
     try:
-        normalized_symbol = market.normalize_symbol(symbol)
+        normalized_symbol = market.normalize_a_share_symbol(symbol)
     except market.MarketDataError as exc:
         raise InvalidPaperOrderError(str(exc)) from exc
     normalized_side = str(side or "").strip().lower()
@@ -783,10 +814,9 @@ def get_review_snapshot(agent_id: str, *, month: str) -> dict[str, Any]:
             row["sellCount"] += 1
             row["sellAmountYuan"] += _money(order.get("grossAmountYuan", "0"))
 
-    account_snapshot = _account_snapshot_from_ledger(ledger, order_limit=1)
-    account_snapshot["orders"] = []
-    account_snapshot["ordersLimit"] = 0
-    account_snapshot["ordersTruncated"] = bool(ledger["orders"])
+    # AI review needs actual recorded order reasons and execution prices, not
+    # just monthly totals. Keep this read bounded like the account view.
+    account_snapshot = _account_snapshot_from_ledger(ledger, order_limit=20)
     days = [
         {
             key: (_money_text(value) if isinstance(value, Decimal) else value)

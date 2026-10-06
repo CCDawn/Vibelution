@@ -10,6 +10,7 @@ import type { FinancialAssistant } from "../../api/financialAssistant";
 const api = vi.hoisted(() => ({
   team: vi.fn(), provision: vi.fn(), runs: vi.fn(), exact: vi.fn(), create: vi.fn(), session: vi.fn(), primary: vi.fn(),
   record: vi.fn(), debate: vi.fn(), synthesis: vi.fn(), stop: vi.fn(), approvals: vi.fn().mockResolvedValue([]),
+  recoveryStatus: vi.fn(), recoverSynthesis: vi.fn(),
 }));
 vi.mock("../../api/financialTeam", async () => ({
   ...await vi.importActual<typeof import("../../api/financialTeam")>("../../api/financialTeam"),
@@ -27,6 +28,8 @@ vi.mock("../../api/financialTeam", async () => ({
   submitFinancialTeamPrimaryRole: api.primary,
   submitFinancialTeamDebate: api.debate,
   submitFinancialTeamSynthesis: api.synthesis,
+  fetchFinancialTeamSynthesisRecoveryStatus: api.recoveryStatus,
+  recoverFinancialTeamSynthesis: api.recoverSynthesis,
 }));
 vi.mock("../../api/chat", () => ({
   fetchSessionDetail: api.session,
@@ -173,6 +176,32 @@ it("opens the selected synthesis and requires completed coordination with all Tu
   expect(openSession).toHaveBeenCalledWith("selected-synthesis");
 });
 
+it("shows the resolved per-role model effort and explains capability adjustment", async () => {
+  currentRun = makeRun();
+  currentRun.executionPolicy = {
+    requestedDepth: "detailed",
+    requestedReasoningEffort: "high",
+    roles: {
+      market: { requestedReasoningEffort: "high", resolvedReasoningEffort: "medium", status: "adjusted" },
+      fundamental: { requestedReasoningEffort: "high", resolvedReasoningEffort: "high", status: "applied" },
+      news: { requestedReasoningEffort: "high", resolvedReasoningEffort: "high", status: "applied" },
+      bull: { requestedReasoningEffort: "high", resolvedReasoningEffort: "high", status: "applied" },
+      bear: { requestedReasoningEffort: "high", resolvedReasoningEffort: "medium", status: "adjusted" },
+    },
+    synthesis: { requestedReasoningEffort: "high", resolvedReasoningEffort: null, status: "unknown" },
+  };
+  api.runs.mockResolvedValue({ assistantAgentId: assistant.agentId, runs: [currentRun] });
+  await render();
+  const summary = container.querySelector<HTMLElement>("[data-depth-execution]");
+  expect(summary?.textContent).toContain("模型档位");
+  expect(summary?.textContent).toContain("行情 中*");
+  expect(summary?.textContent).toContain("基本 高");
+  expect(summary?.textContent).toContain("汇总 默认");
+  expect(summary?.title).toContain("请求4 · 深入");
+  expect(summary?.title).toContain("受模型能力限制");
+  expect(summary?.getAttribute("aria-label")).toBe(summary?.title);
+});
+
 it("keeps accepted Turns out of not-submitted state when reads fail and refreshes their details", async () => {
   currentRun = makeRun();
   currentRun.coordinationStatus = "completed";
@@ -237,6 +266,7 @@ beforeEach(() => {
     return structuredClone(currentRun);
   });
   api.stop.mockResolvedValue({});
+  api.recoveryStatus.mockResolvedValue({ available: false, reason: "" });
 });
 
 afterEach(async () => {
@@ -364,6 +394,31 @@ describe("Finance analyst team", () => {
     expect(container.textContent).not.toContain("重试多空分析");
     expect(api.debate).not.toHaveBeenCalled();
     expect(api.synthesis).not.toHaveBeenCalled();
+  });
+
+  it("shows explicit synthesis recovery only after the backend validates the blocked run", async () => {
+    currentRun = makeRun();
+    for (const role of roleKeys) currentRun.analysts[role]!.turnId = "turn-" + role;
+    currentRun.coordinationStatus = "blocked";
+    currentRun.coordinationError = "汇总阶段提交失败或结果未知。";
+    api.recoveryStatus.mockResolvedValue({ available: false, reason: "本轮后台协作仍在运行。" });
+    api.recoveryStatus.mockResolvedValueOnce({ available: true, reason: "" });
+    api.recoverSynthesis.mockImplementation(async () => {
+      currentRun = { ...currentRun!, coordinationStatus: "waiting", coordinationError: "" };
+      return structuredClone(currentRun);
+    });
+
+    await render();
+
+    expect(container.textContent).toContain("恢复本轮汇总");
+    expect(api.recoveryStatus).toHaveBeenCalledWith(assistant.agentId, currentRun.runId, expect.any(Object));
+    expect(api.recoverSynthesis).not.toHaveBeenCalled();
+    await act(async () => button("恢复本轮汇总").click());
+    await settle();
+    expect(api.recoverSynthesis).toHaveBeenCalledWith(assistant.agentId, currentRun.runId);
+    expect(api.primary).not.toHaveBeenCalled();
+    expect(api.debate).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("恢复本轮汇总");
   });
 
   it.each(["waiting", "running", "completed"] as const)("leaves %s coordination with the server without submitting duplicate stages", async (coordinationStatus) => {

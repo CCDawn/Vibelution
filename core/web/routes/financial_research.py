@@ -16,20 +16,28 @@ class StockIdentityResponse(BaseModel):
     ticker: str
     name: str
     market: str
+    marketCode: Literal["CN", "HK", "US"] | None = None
+    currency: Literal["CNY", "HKD", "USD"] | None = None
+    marketTimeZone: Literal["Asia/Shanghai", "Asia/Hong_Kong", "America/New_York"] | None = None
 
 
 class MarketQuoteResponse(StockIdentityResponse):
     price: float
+    priceUnit: Literal["CNY/share", "HKD/share", "USD/share"] | None = None
     previousClose: float
     open: float
     high: float
     low: float
     change: float
     changePercent: float
-    volumeLots: float
-    turnoverYuan: float
+    volume: float | None = None
+    volumeUnit: Literal["shares"] | None = None
+    volumeLots: float | None
+    turnover: float | None = None
+    turnoverYuan: float | None
     peRatio: float | None
     pbRatio: float | None
+    marketCap: float | None = None
     totalMarketCapYuan: float | None
     timestamp: str
 
@@ -88,7 +96,7 @@ class MarketScreenResponse(BaseModel):
     cacheSeconds: int
     coverage: MarketScreenCoverageResponse
     resultScope: Literal["provider_universe", "loaded_subset"]
-    sortBy: Literal["changePercent", "turnoverYuan", "price", "volumeLots", "peRatio"]
+    sortBy: Literal["changePercent", "turnoverYuan", "price", "volumeLots", "peRatio", "pbRatio"]
     direction: Literal["asc", "desc"]
     page: int
     pageSize: int
@@ -186,8 +194,12 @@ def financial_market_screen(
     minPe: float | None = Query(default=None, ge=-10_000, le=100_000),
     maxPe: float | None = Query(default=None, ge=-10_000, le=100_000),
     minVolumeLots: float | None = Query(default=None, ge=0, le=1_000_000_000_000_000),
+    minPb: float | None = Query(default=None, ge=-10_000, le=100_000),
+    maxPb: float | None = Query(default=None, ge=-10_000, le=100_000),
+    minTurnoverYuan: float | None = Query(default=None, ge=0, le=1e15),
+    maxTurnoverYuan: float | None = Query(default=None, ge=0, le=1e15),
     sortBy: Literal[
-        "changePercent", "turnoverYuan", "price", "volumeLots", "peRatio"
+        "changePercent", "turnoverYuan", "price", "volumeLots", "peRatio", "pbRatio"
     ] = "changePercent",
     direction: Literal["asc", "desc"] = "desc",
     page: int = Query(default=1, ge=1, le=100_000),
@@ -202,6 +214,10 @@ def financial_market_screen(
             min_pe=minPe,
             max_pe=maxPe,
             min_volume_lots=minVolumeLots,
+            min_pb=minPb,
+            max_pb=maxPb,
+            min_turnover_yuan=minTurnoverYuan,
+            max_turnover_yuan=maxTurnoverYuan,
             sort_by=sortBy,
             direction=direction,
             page=page,

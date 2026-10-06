@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantConversationTurn, ConversationMessage, SessionSummary, SessionTurnItem } from "../../api/types";
-import { cleanResearchPreview, isResearchSearchResult, isValidResearchDate, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, researchTablePreview, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
+import { cleanResearchPreview, isResearchSearchResult, isValidResearchDate, localResearchDate, movingAverage, projectStockReport, reportMatchesStock, researchRecordStatus, researchTablePreview, stockFromResearchRequest, stockIdentityFromUnknown, stockResearchPrompt } from "./stockResearchModel";
 
 const stock = { symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" };
 function turn(status = "completed", items: unknown[] = []): AssistantConversationTurn { return { role: "assistant", id: "a", turnId: "t", status: status as AssistantConversationTurn["status"], timestamp: "2026-10-04T12:00:00Z", turnItems: items as SessionTurnItem[] }; }
@@ -118,5 +118,34 @@ describe("stock research projections", () => {
     expect(stockIdentityFromUnknown({ ...stock, symbol: "https://example.com" })).toBeNull();
     expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("贵州茅台（600519，上交所）");
     expect(stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief")).toContain("分析日期 2026-10-04，报告期 2024FY");
+  });
+  it("canonicalizes known US exchange suffixes from search and quotes without stripping share classes", () => {
+    const searchResult = { symbol: "usNVDA", ticker: "NVDA.OQ", name: "英伟达", market: "NASDAQ", marketCode: "US", currency: "USD" };
+    const quote = { symbol: "usAAPL", ticker: "AAPL.OQ", name: "苹果", market: "NASDAQ", marketCode: "US", currency: "USD", price: 200 };
+    expect(stockIdentityFromUnknown(searchResult)).toEqual({ symbol: "usNVDA", ticker: "NVDA", name: "英伟达", market: "NASDAQ" });
+    expect(stockIdentityFromUnknown(quote)).toEqual({ symbol: "usAAPL", ticker: "AAPL", name: "苹果", market: "NASDAQ" });
+    expect(stockIdentityFromUnknown({ symbol: "usBRK.B", ticker: "BRK.B", name: "伯克希尔", market: "NYSE" }))
+      .toMatchObject({ symbol: "usBRK.B", ticker: "BRK.B" });
+    expect(stockIdentityFromUnknown({ symbol: "usAAPL", ticker: "MSFT.OQ", name: "微软", market: "NASDAQ" })).toBeNull();
+    expect(stockIdentityFromUnknown({ symbol: "usAAPL", ticker: "AAPL.X", name: "苹果", market: "NASDAQ" })).toBeNull();
+    expect(stockIdentityFromUnknown({ ...stock, ticker: "600519.OQ" })).toBeNull();
+    expect(stockIdentityFromUnknown({ symbol: "hk00700", ticker: "00700.OQ", name: "腾讯控股", market: "港交所" })).toBeNull();
+    expect(stockFromResearchRequest("请研究 英伟达（NVDA.OQ，NASDAQ）")?.ticker).toBe("NVDA");
+  });
+  it("restores canonical CN, HK and US stock identities from research headers rather than follow-up numbers", () => {
+    for (const identity of [stock, { symbol: "hk00700", ticker: "00700", name: "腾讯控股", market: "港股" }, { symbol: "usBRK.B", ticker: "BRK.B", name: "Berkshire", market: "NYSE" }]) {
+      expect(stockFromResearchRequest(stockResearchPrompt(identity, "2024FY", "2026-10-06", "comprehensive", "standard"))).toEqual(identity);
+    }
+    expect(stockFromResearchRequest("请研究2024年现金流，利润600519元")).toBeNull();
+    expect(stockFromResearchRequest("用五句话讲讲00700")).toBeNull();
+  });
+  it("retains international research identity through ordinary follow-ups and rejects another ticker", () => {
+    for (const identity of [{ symbol: "hk00700", ticker: "00700", name: "腾讯控股", market: "港股" }, { symbol: "usAAPL", ticker: "AAPL", name: "Apple", market: "NASDAQ" }]) {
+      const messages: ConversationMessage[] = [{ role: "user", id: "request", timestamp: "", content: stockResearchPrompt(identity, "2024FY", "2026-10-06", "comprehensive", "standard") }, turn("completed", [final]), { role: "user", id: "follow", timestamp: "", content: "现金流如何？" }];
+      const report = projectStockReport(messages)!;
+      expect(reportMatchesStock(report, messages, identity)).toBe(true);
+      expect(reportMatchesStock(report, messages, stock)).toBe(false);
+      expect(reportMatchesStock(report, messages, { symbol: "usMSFT", ticker: "MSFT", name: "Microsoft", market: "NASDAQ" })).toBe(false);
+    }
   });
 });

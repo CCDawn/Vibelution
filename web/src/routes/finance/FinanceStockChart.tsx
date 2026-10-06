@@ -5,10 +5,11 @@ import type { StockCandle, StockPeriod } from "../../api/financialMarket";
 import { VIconButton, VStateSurface, VSurface, VTabs } from "../../components/vui";
 import { quoteNumber } from "./stockResearchModel";
 import { financeChartIndicators } from "./financeChartIndicators";
+import { candleVolume, currencyName } from "./financeMarketDisplay";
 
 type Indicator = "ma" | "boll" | "macd" | "rsi";
 
-export function FinanceStockChart({ candles, period, onPeriodChange, zh }: { candles: StockCandle[]; period: StockPeriod; onPeriodChange: (period: StockPeriod) => void; zh: boolean }) {
+export function FinanceStockChart({ candles, period, onPeriodChange, zh, currency, adjustment = "qfq" }: { candles: StockCandle[]; period: StockPeriod; onPeriodChange: (period: StockPeriod) => void; zh: boolean; currency?: string | null; adjustment?: string }) {
   const [hover, setHover] = useState<number | null>(null);
   const [indicator, setIndicator] = useState<Indicator>("ma"), [range, setRange] = useState("all");
   const [offset, setOffset] = useState(0), [announcement, setAnnouncement] = useState("");
@@ -29,7 +30,7 @@ export function FinanceStockChart({ candles, period, onPeriodChange, zh }: { can
   const spacing = (W - left - right) / Math.max(1, visible.length);
   const x = (index: number) => left + (index + .5) * spacing;
   const width = Math.max(1.5, spacing * .65);
-  const volumeMax = Math.max(1, ...visible.map((item) => item.volumeLots));
+  const volumeMax = Math.max(1, ...visible.map(candleVolume));
   const active = start + (hover === null ? visible.length - 1 : Math.min(hover, visible.length - 1));
   const candle = candles[active];
   const path = (values: (number | null)[], scale = y) => {
@@ -48,7 +49,7 @@ export function FinanceStockChart({ candles, period, onPeriodChange, zh }: { can
   if (!visible.length) return <VStateSurface tone="empty" title={zh ? "暂无 K 线数据" : "No candle data"} />;
   return <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "股价与成交量" : "Price and volume"}>
     <div className={styles.heading}>
-      <div className={styles.titleRow}><strong className={styles.title}>{zh ? "价格走势" : "Price chart"}</strong><span className={styles.adjustment}>{zh ? "前复权" : "Forward adjusted"}</span></div>
+      <div className={styles.titleRow}><strong className={styles.title}>{zh ? "价格走势" : "Price chart"}{currency ? ` · ${currencyName(currency, zh)}` : ""}</strong><span className={styles.adjustment}>{adjustment === "qfq" ? zh ? "前复权" : "Forward adjusted" : zh ? "未复权" : "Unadjusted"}</span></div>
       <VTabs value={period} onValueChange={(value) => onPeriodChange(value as StockPeriod)} aria-label={zh ? "K 线周期" : "Chart period"} items={[{ id: "day", label: zh ? "日 K" : "Daily" }, { id: "week", label: zh ? "周 K" : "Weekly" }, { id: "month", label: zh ? "月 K" : "Monthly" }]} />
     </div>
     <div className={styles.controls}>
@@ -77,7 +78,7 @@ export function FinanceStockChart({ candles, period, onPeriodChange, zh }: { can
       }}>
       <title>{zh ? "历史价格与成交量" : "Historical price and volume"}</title>
       {[0, 1, 2, 3, 4].map((tick) => { const price = high - (high - low) * tick / 4; return <g key={tick}><line x1={left} x2={W - right} y1={y(price)} y2={y(price)} stroke="var(--vui-border-subtle)" strokeDasharray="3 5" /><text x={W - right + 8} y={y(price) + 4} fill="var(--fg-tertiary)" fontSize="11">{price.toFixed(2)}</text></g>; })}
-      {visible.map((item, index) => { const color = item.close >= item.open ? "var(--state-error)" : "var(--state-success)"; return <g key={item.date}><line x1={x(index)} x2={x(index)} y1={y(item.high)} y2={y(item.low)} stroke={color} /><rect x={x(index) - width / 2} y={Math.min(y(item.open), y(item.close))} width={width} height={Math.max(1, Math.abs(y(item.open) - y(item.close)))} fill={color} /><rect x={x(index) - width / 2} y={286 - item.volumeLots / volumeMax * 35} width={width} height={Math.max(1, item.volumeLots / volumeMax * 35)} fill={color} opacity=".55" /></g>; })}
+      {visible.map((item, index) => { const color = item.close >= item.open ? "var(--state-error)" : "var(--state-success)"; const volume = candleVolume(item); return <g key={item.date}><line x1={x(index)} x2={x(index)} y1={y(item.high)} y2={y(item.low)} stroke={color} /><rect x={x(index) - width / 2} y={Math.min(y(item.open), y(item.close))} width={width} height={Math.max(1, Math.abs(y(item.open) - y(item.close)))} fill={color} /><rect x={x(index) - width / 2} y={286 - volume / volumeMax * 35} width={width} height={Math.max(0, volume / volumeMax * 35)} fill={color} opacity=".55" /></g>; })}
       {overlay.map((values, index) => <path key={index} d={path(values)} stroke={index === 1 ? "var(--accent-cool)" : "var(--state-warning)"} strokeWidth="1.5" fill="none" />)}
       {auxiliary ? <>
         <line x1={left} x2={W - right} y1={oscY(indicator === "rsi" ? 50 : 0)} y2={oscY(indicator === "rsi" ? 50 : 0)} stroke="var(--vui-border-subtle)" strokeDasharray="3 5" />
@@ -89,6 +90,6 @@ export function FinanceStockChart({ candles, period, onPeriodChange, zh }: { can
       <text x={left} y={H - 5} fontSize="11" fill="var(--fg-tertiary)">{visible[0].date}</text><text x={W - right} y={H - 5} fontSize="11" textAnchor="end" fill="var(--fg-tertiary)">{visible.at(-1)?.date}</text>
     </svg>
     <p id={readoutId} className={styles.readout} role="status" aria-live="polite">{announcement}</p>
-    <div className={styles.footer}><span>{zh ? "成交量" : "Volume"} {quoteNumber(candle?.volumeLots, 0)} {zh ? "手" : "lots"}</span><span>{zh ? "已加载" : "Loaded"} {candles.length} {zh ? "根 · 1 手 = 100 股" : "bars · 1 lot = 100 shares"}</span></div>
+    <div className={styles.footer}><span>{zh ? "成交量" : "Volume"} {quoteNumber(candle ? candleVolume(candle) : null, 0)} {candle?.volumeUnit === "shares" ? zh ? "股" : "shares" : zh ? "手" : "lots"}</span><span>{zh ? "已加载" : "Loaded"} {candles.length} {zh ? "根" : "bars"}{candle?.volumeUnit !== "shares" ? zh ? " · 1 手 = 100 股" : " · 1 lot = 100 shares" : ""}</span></div>
   </VSurface>;
 }
