@@ -134,6 +134,9 @@ export function VSessionSearchDialog({
       event.preventDefault();
       setActiveIndex((current) => Math.max(current - 1, 0));
     } else if (event.key === "Enter") {
+      // Tab-focused results and pagination retain their native button action.
+      // Only Enter from the search field opens the highlighted result.
+      if (event.target instanceof Element && event.target.closest("button")) return;
       event.preventDefault();
       const item = items[activeIndex];
       if (item) openItem(item);

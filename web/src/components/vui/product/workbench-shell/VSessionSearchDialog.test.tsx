@@ -152,4 +152,41 @@ describe("VSessionSearchDialog", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it.each(["result", "load-more"])("Enter activates the focused %s button without opening the highlighted row", async (targetKind) => {
+    const firstOpen = vi.fn();
+    const secondOpen = vi.fn();
+    const onLoadMore = vi.fn();
+    act(() => {
+      root.render(
+        <VSessionSearchDialog
+          open
+          onOpenChange={() => {}}
+          query=""
+          onQueryChange={() => {}}
+          items={[item({ onOpen: firstOpen }), item({ id: "session-2", title: "第二条", onOpen: secondOpen })]}
+          hasMore
+          onLoadMore={onLoadMore}
+          labels={labels}
+        />,
+      );
+    });
+    const target = await vi.waitFor(() => {
+      const found = targetKind === "result"
+        ? document.querySelector<HTMLButtonElement>('[data-index="1"]')
+        : Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "加载更多");
+      expect(found).toBeTruthy();
+      return found as HTMLButtonElement;
+    });
+    await act(async () => {
+      target.focus();
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      // happy-dom does not synthesize the browser's default Enter click.
+      if (!event.defaultPrevented) target.click();
+    });
+    expect(firstOpen).not.toHaveBeenCalled();
+    expect(secondOpen).toHaveBeenCalledTimes(targetKind === "result" ? 1 : 0);
+    expect(onLoadMore).toHaveBeenCalledTimes(targetKind === "load-more" ? 1 : 0);
+  });
 });

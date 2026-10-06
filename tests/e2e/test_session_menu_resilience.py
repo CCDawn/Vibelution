@@ -107,7 +107,7 @@ def test_failed_rename_can_retry_without_losing_name_or_draft(page, e2e_instance
     editor.fill(renamed)
     editor.press("Enter")
     expect(editor).to_have_value(renamed, timeout=15000)
-    expect(page.get_by_text("测试保存失败，请重试", exact=True)).to_be_visible()
+    expect(page.get_by_role("alert")).to_contain_text("测试保存失败，请重试")
     expect(composer).to_have_value(draft)
     assert failed == [f"{e2e_instance.base_url}/api/sessions/{sid}"]
     assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["title"] == title
@@ -175,7 +175,8 @@ def test_search_empty_clear_and_tab_enter_open_the_focused_result(page, e2e_inst
     suffix = uuid.uuid4().hex[:8]
     titles = [f"键盘搜索同组 {suffix} {label}" for label in "AB"]
     sessions = [create_session(e2e_instance.port, title=title) for title in titles]
-    composer = _ready_composer(page, e2e_instance, sessions[0])
+    initial = create_session(e2e_instance.port, title=f"搜索前独立草稿会话 {suffix}")
+    composer = _ready_composer(page, e2e_instance, initial)
     draft = "搜索键盘切换保留草稿"
     composer.press_sequentially(draft, delay=3)
     page.get_by_role("button", name="全部会话", exact=True).click()
@@ -201,6 +202,9 @@ def test_search_empty_clear_and_tab_enter_open_the_focused_result(page, e2e_inst
     expect(target).to_be_focused()
     page.keyboard.press("Enter")
     expect(dialog).not_to_be_visible()
+    expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={sessions[target_index]}", timeout=15000)
     expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", sessions[target_index], timeout=15000)
-    expect(composer).to_have_value(draft if target_index == 0 else "")
-    _assert_no_turns(e2e_instance, sessions, [draft])
+    expect(composer).to_have_value("")
+    composer = _ready_composer(page, e2e_instance, initial)
+    expect(composer).to_have_value(draft)
+    _assert_no_turns(e2e_instance, [initial, *sessions], [draft])

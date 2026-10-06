@@ -80,7 +80,7 @@ import { VSessionSearchDialog, type VSessionSearchDialogItem } from "@/component
 ### 视觉与状态
 
 - 行三段：标题（高亮）+ 摘要预览（截断、高亮）+ meta（Agent · 状态 · 时间）。
-- 键盘：↑/↓ 移动高亮，Enter 打开；hover 同步高亮行。
+- 键盘：搜索框中 ↑/↓ 移动高亮、Enter 打开；hover 同步高亮行。Tab 聚焦结果或「加载更多」后，Enter 执行该按钮动作，不被高亮行拦截。
 - 空态 `VStateSurface tone="empty"`，加载态 `tone="loading"`；总数与已加载数
   常驻底部摘要行。
 
