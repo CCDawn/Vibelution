@@ -184,7 +184,7 @@
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `launcher_service.py` | Compatibility facade for the standalone Launcher service. | — | `launcher.py` | `test_launcher_status_live_observe.py`, `test_launcher_scene_control_log.py`, `test_vibelution_desktop_entry.py` |
-| `reset_service.py` | Compatibility alias for Launcher-owned reset maintenance. | — | — | `test_reset_service.py`, `test_challenge_cup_reset_live_adapter.py`, `test_challenge_cup_reset_service.py` |
+| `reset_service.py` | Compatibility alias for Launcher-owned reset maintenance. | — | — | `test_reset_service.py`, `test_challenge_cup_reset_service.py` |
 
 ## Config / Provider / Model / Theme
 

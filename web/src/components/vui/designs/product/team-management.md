@@ -11,7 +11,7 @@
 
 ### 适用范围
 - **适用**：阶段 pipeline 中的阶段语义卡。
-- **不适用**：总览看板列 → `ResearchBoardKanban` / Board recipe。
+- **不适用**：总览看板列 → Board recipe。
 
 | 场景 | 选择 |
 | --- | --- |

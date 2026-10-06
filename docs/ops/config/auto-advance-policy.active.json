@@ -93,7 +93,7 @@
       "approval"
     ]
   },
-  "activationRequires": "explicit approval recorded against policyId + version + contentHash; a hash change starts a new checkpoint generation; the G12 calibration gate requires persisted decision-#13 judgement records (g12-calibration REST entry) and stays fail-closed without them",
+  "activationRequires": "explicit approval recorded against policyId + version + contentHash; a hash change starts a new checkpoint generation; the G12 calibration gate requires persisted decision-#13 judgement records (g12_calibration_store records) and stays fail-closed without them",
   "approval": {
     "requiredApprovers": [
       "competition_owner"

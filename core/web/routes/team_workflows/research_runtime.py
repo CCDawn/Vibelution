@@ -160,38 +160,6 @@ class CommandPayload(VersionedCommandPayload):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class KnowledgeSearchEnvelopePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    keywords: list[str] = Field(default_factory=list, max_length=32)
-    evidenceTypes: list[str] = Field(default_factory=list, max_length=32)
-    timeWindow: dict[str, Any] = Field(default_factory=dict)
-
-
-class KnowledgeCollectionPayload(VersionedCommandPayload):
-    """ensure_knowledge_collection payload (knowledge sideflow facade).
-
-    ``searchEnvelope`` (keywords / evidenceTypes / timeWindow) and
-    ``requirements`` map into the invocation envelope fingerprints, so a
-    changed request is a NEW invocation while an identical request replays
-    the same one.  ``managedSourceRootIds`` joins the scope fingerprint and
-    is passed through to the collection chain.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    questionId: str = Field(..., min_length=1)
-    nodeId: str | None = None
-    searchEnvelope: KnowledgeSearchEnvelopePayload = Field(
-        default_factory=KnowledgeSearchEnvelopePayload
-    )
-    requirements: dict[str, Any] = Field(default_factory=dict)
-    sourcePolicyVersion: str = "1"
-    managedSourceRootIds: list[str] = Field(default_factory=list, max_length=32)
-    parentNodeRunId: str = ""
-    parentAttempt: int = Field(default=1, ge=1)
-
-
 class AgentBindingConfigPayload(TeamScopedPayload):
     stageOverrides: dict[str, dict[str, str]] = Field(default_factory=dict)
     nodeOverrides: dict[str, str] = Field(default_factory=dict)
@@ -736,43 +704,6 @@ def research_workflow_command(
         expected_run_version=payload.expectedRunVersion,
         idempotency_key=payload.idempotencyKey,
         payload=dict(payload.payload or {}),
-        request=request,
-    )
-
-
-@router.post(
-    "/research/workflow-runs/{run_id}/knowledge-collection",
-    status_code=202,
-    response_model=ResearchWorkflowCommandReceiptResponse,
-    response_model_exclude_unset=True,
-)
-def research_workflow_ensure_knowledge_collection(
-    run_id: str,
-    payload: KnowledgeCollectionPayload,
-    request: Request,
-) -> dict:
-    """ensure_knowledge_collection facade: idempotent knowledge request.
-
-    A repeated identical request returns the SAME invocation (and never a
-    second child run); the receipt carries the invocation facts in
-    ``result``.
-    """
-    return _submit_workflow_command(
-        run_id=run_id,
-        team_id=payload.teamId,
-        kind=WorkflowCommandKind.ENSURE_KNOWLEDGE_COLLECTION,
-        node_id=payload.nodeId,
-        expected_run_version=payload.expectedRunVersion,
-        idempotency_key=payload.idempotencyKey,
-        payload={
-            "questionId": payload.questionId,
-            "searchEnvelope": payload.searchEnvelope.model_dump(),
-            "requirements": dict(payload.requirements or {}),
-            "sourcePolicyVersion": payload.sourcePolicyVersion,
-            "managedSourceRootIds": list(payload.managedSourceRootIds),
-            "parentNodeRunId": payload.parentNodeRunId,
-            "parentAttempt": payload.parentAttempt,
-        },
         request=request,
     )
 

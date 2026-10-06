@@ -43,10 +43,6 @@ const RETIRED_SYNONYMS: Array<{ file: string; banned: string[] }> = [
     banned: ["知识搜集"],
   },
   {
-    file: "../ResearchBoardKanban.tsx",
-    banned: ["知识搜集"],
-  },
-  {
     file: "../researchBoardModel.ts",
     banned: ["知识搜集"],
   },

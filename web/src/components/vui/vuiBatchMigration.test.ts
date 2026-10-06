@@ -251,11 +251,6 @@ const routeShellTargets = [
     forbidden: ["styles.segmentedTabs", "styles.tabButtonActive", "styles.modeTabActive", "styles.modeSwitch"],
   },
   {
-    path: "routes/teams/TeamShellModeSwitch.tsx",
-    expected: ["VTabs", "team-shell-mode-switch"],
-    forbidden: ["VNativeButton", "data-active={active"],
-  },
-  {
     path: "routes/TeamResearchLoopPanel.tsx",
     expected: ["VTabs", "researchLoopChoiceTabs"],
     forbidden: ["researchLoopChoiceActive", "aria-pressed={currentEvidenceType", "aria-pressed={researchLoopEvidenceDraft.status", "aria-pressed={researchLoopDecisionDraft.decision"],
