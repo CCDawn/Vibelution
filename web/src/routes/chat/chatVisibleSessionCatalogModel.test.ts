@@ -4,6 +4,7 @@ import type { SessionSummary } from "../../api/types";
 import {
   buildSessionsById,
   mergeAllVisibleSessions,
+  mergeArchivedSessionSummaries,
   resolveActiveSessionAgentId,
   resolveActivitySeenSessionSources,
 } from "./chatVisibleSessionCatalogModel";
@@ -23,6 +24,17 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
 }
 
 describe("chatVisibleSessionCatalogModel", () => {
+  it("uses the archived directory metadata when an ordinary cached row has the same id", () => {
+    const ordinary = session({ id: "other" });
+    const stale = session({ id: "archived", readOnly: false, archiveState: {} });
+    const archived = session({ id: "archived", readOnly: true, archiveState: { status: "archived" } });
+    const archivedOnly = session({ id: "archived-only", archiveState: { status: "archived" } });
+    expect(mergeArchivedSessionSummaries([ordinary, stale], [archived, archivedOnly])).toEqual([
+      ordinary, archived, archivedOnly,
+    ]);
+    const sessions = [ordinary];
+    expect(mergeArchivedSessionSummaries(sessions, [])).toBe(sessions);
+  });
   it("mergeAllVisibleSessions dedupes, filters archived agents, and merges child sessions", () => {
     const pendingArchiveAgentIds = new Set(["agent-archived"]);
     const merged = mergeAllVisibleSessions(

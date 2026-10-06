@@ -1,6 +1,20 @@
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import { isVisibleDirectSession } from "../conversationIndexModel";
 
+/** Combine the ordinary and archived directory projections for the archive view. */
+export function mergeArchivedSessionSummaries(
+  sessions: SessionSummary[] | undefined,
+  archivedSessions: SessionSummary[],
+): SessionSummary[] | undefined {
+  if (!archivedSessions.length) return sessions;
+  const known = new Set((sessions ?? []).map((session) => session.id));
+  const archivedById = new Map(archivedSessions.map((session) => [session.id, session]));
+  return [
+    ...(sessions ?? []).map((session) => archivedById.get(session.id) ?? session),
+    ...archivedSessions.filter((session) => !known.has(session.id)),
+  ];
+}
+
 export function mergeAllVisibleSessions(
   sessions: SessionSummary[] | undefined,
   childSessions: SessionSummary[] | undefined,

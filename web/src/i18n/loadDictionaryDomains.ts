@@ -26,7 +26,16 @@ type DomainModule = {
 
 const domainLoaders: Record<DictionaryDomainId, () => Promise<DomainModule>> = {
   core: () => import("./domains/dictionaryCore"),
-  chat: () => import("./domains/dictionaryChat"),
+  chat: async () => {
+    const [{ dictionaryChat }, { dictionarySessionArchive }] = await Promise.all([
+      import("./domains/dictionaryChat"),
+      import("./domains/dictionarySessionArchive"),
+    ]);
+    return { dictionaryChat: {
+      zh: { ...dictionaryChat.zh, ...dictionarySessionArchive.zh },
+      en: { ...dictionaryChat.en, ...dictionarySessionArchive.en },
+    } };
+  },
   agents: () => import("./domains/dictionaryAgents"),
   teams: () => import("./domains/dictionaryTeams"),
   evolution: () => import("./domains/dictionaryEvolution"),

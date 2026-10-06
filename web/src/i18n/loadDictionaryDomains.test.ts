@@ -24,6 +24,14 @@ describe("loadDictionaryDomains (D1)", () => {
     expect(chat.zh.navEvolution).toBeUndefined();
   });
 
+  it("loads archive menu labels with the lazy chat pack in both languages", async () => {
+    const chat = await loadDictionaryDomains(["chat"]);
+    expect(chat.zh.archiveSession).toBe("归档会话");
+    expect(chat.zh.unarchiveSession).toBe("取消归档");
+    expect(chat.en.archiveSession).toBe("Archive session");
+    expect(chat.en.unarchiveSession).toBe("Unarchive");
+  });
+
   it("keeps useAppI18n free of static full dictionary imports", () => {
     expect(useAppI18nSource).toContain("loadDictionaryDomains");
     expect(useAppI18nSource).not.toContain('from "./dictionary"');

@@ -251,6 +251,7 @@ import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
 import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
 import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
 import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
+import { mergeArchivedSessionSummaries } from "./chatVisibleSessionCatalogModel";
 import { useChatAgentSessionTabs } from "./useChatAgentSessionTabs";
 import { useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
 import { useChatGroupRoomChromeModel } from "./useChatGroupRoomChromeModel";
@@ -2766,11 +2767,7 @@ export function ChatCodingRouteWorkbench() {
     if (!showArchivedSessions || archivedSessions.length === 0) {
       return rawSessionsQuery.data;
     }
-    const known = new Set((rawSessionsQuery.data ?? []).map((session) => session.id));
-    return [
-      ...(rawSessionsQuery.data ?? []),
-      ...archivedSessions.filter((session) => !known.has(session.id)),
-    ];
+    return mergeArchivedSessionSummaries(rawSessionsQuery.data, archivedSessions);
   }, [archivedSessions, rawSessionsQuery.data, showArchivedSessions]);
   const routeVisibleSessions = useMemo(() => {
     const base = sessionsForChatRoute({
@@ -2781,11 +2778,7 @@ export function ChatCodingRouteWorkbench() {
     if (!showArchivedSessions || archivedSessions.length === 0) {
       return base;
     }
-    const known = new Set((base ?? []).map((session) => session.id));
-    return [
-      ...(base ?? []),
-      ...archivedSessions.filter((session) => !known.has(session.id)),
-    ];
+    return mergeArchivedSessionSummaries(base, archivedSessions);
   }, [agentsQuery.data, archivedSessions, sessionsQuery.data, showArchivedSessions, verifiedCompanionMode]);
 
   const requestedCompanionAgentId = useMemo(() => (
