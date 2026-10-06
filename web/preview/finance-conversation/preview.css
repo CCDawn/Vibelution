@@ -12,12 +12,19 @@
   display: none;
 }
 
-/* Compact navigation typography; full report paragraphs keep VUI's readable rhythm. */
-.finance-preview [data-preview-session-scroll] [data-finance-report-history] {
-  gap: 4px;
+/* Labels, metadata and icons share a baseline. Report paragraphs stay readable. */
+.finance-preview [data-preview-inline] {
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
-.finance-preview [data-preview-session-scroll] [data-finance-report-history] strong,
-.finance-preview [data-preview-session-scroll] [data-finance-report-history] span {
+.finance-preview [data-preview-inline] svg {
+  flex-shrink: 0;
+}
+.finance-preview [data-preview-session-row] {
+  min-height: 32px;
+}
+.finance-preview [data-preview-session-row] strong,
+.finance-preview [data-preview-session-row] span {
   line-height: 20px;
 }
 
