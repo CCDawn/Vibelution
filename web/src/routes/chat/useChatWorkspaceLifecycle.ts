@@ -1495,7 +1495,7 @@ export function useChatWorkspaceLifecycle({
         titleLength: String(nextDetail.title || variables.title).trim().length,
         superseded: !isLatest,
       });
-      if (!isLatest) return;
+      if (!isLatest || isSessionDeleteTombstoned(variables.sessionId)) return;
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
@@ -1507,16 +1507,14 @@ export function useChatWorkspaceLifecycle({
       updateSessionSummaryCaches(queryClient, renameSummaries);
       updateAgentSessionSummaryCaches(queryClient, renameSummaries);
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
-        renameSessionDetail(detail, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
+        // Rename owns title fields, not a later archive, pin or live transcript.
+        renameSessionDetail(detail ?? nextDetail, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
       );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) => ({
-        ...(detail ?? nextDetail),
-        ...nextDetail,
-      }));
     },
     onError: (error, variables, context) => {
       const { attempts, isLatest } = settleRenameAttempt(variables.sessionId, context?.attemptId, "failed");
       context?.telemetry?.failed(error, { sessionId: variables.sessionId, superseded: !isLatest });
+      if (isSessionDeleteTombstoned(variables.sessionId)) return;
       // A later confirmed rename owns its fields, including when its title is
       // identical to an earlier failed attempt. Replay only failures after it.
       for (let index = attempts.length - 1; index >= 0; index -= 1) {

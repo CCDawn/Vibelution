@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail, SessionSummary } from "../../api/types";
+import { markSessionDeleteTombstone, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 import { useChatWorkspaceLifecycle, type UseChatWorkspaceLifecycleOptions, type UseChatWorkspaceLifecycleResult } from "./useChatWorkspaceLifecycle";
 
 // Exercise the real mutation callbacks and QueryClient, while replacing only
@@ -23,14 +24,17 @@ type Variables = { sessionId: string; title: string };
 type Context = NonNullable<UseChatWorkspaceLifecycleResult["renameSessionMutation"]["context"]>;
 type RenameOptions = MutationOptions<SessionDetail, Error, Variables, Context>;
 const clients: QueryClient[] = [];
-afterEach(() => { clients.splice(0).forEach((client) => client.clear()); });
+afterEach(() => {
+  clients.splice(0).forEach((client) => client.clear());
+  resetSessionDeleteTombstonesForTests();
+});
 
 function summary(id: string, title: string): SessionSummary {
   return { id, title, status: "ready", currentPhase: "ready", taskSummary: "", lastActive: "", updatedAt: "2026-10-07T00:00:00Z" };
 }
 
 function detail(title: string): SessionDetail {
-  return { ...summary("a", title), messages: [], defaultFileContext: "", previewTabs: [], activePreviewPath: "", changedFiles: [], readFiles: [] } as SessionDetail;
+  return { ...summary("a", title), readOnly: false, archiveState: {}, hiddenFromIndex: false, messages: [], defaultFileContext: "", previewTabs: [], activePreviewPath: "", changedFiles: [], readFiles: [] } as SessionDetail;
 }
 
 function arrange() {
@@ -64,6 +68,47 @@ function arrange() {
 }
 
 describe("session rename callback ordering", () => {
+  it("confirms only rename fields and keeps a later archive and live messages", async () => {
+    const fixture = arrange();
+    const attempt = await fixture.start("Renamed");
+    const liveMessages = [{ id: "live-message", role: "assistant", content: "Arrived after rename" }] as SessionDetail["messages"];
+    const archived = {
+      ...detail("Renamed"),
+      readOnly: true,
+      hiddenFromIndex: true,
+      archiveState: { status: "archived", source: "session_archive" },
+      messages: liveMessages,
+    };
+    fixture.client.setQueryData(queryKeys.session("a"), archived);
+    await fixture.succeed(attempt);
+    expect(fixture.client.getQueryData(queryKeys.session("a"))).toMatchObject({
+      title: "Renamed", readOnly: true, hiddenFromIndex: true,
+      archiveState: { status: "archived" }, messages: liveMessages,
+    });
+  });
+
+  it.each(["success", "failure"])("ignores rename %s after deletion", async (outcome) => {
+    const fixture = arrange();
+    const attempt = await fixture.start("Renamed");
+    markSessionDeleteTombstone("a", { confirmed: true });
+    fixture.client.removeQueries({ queryKey: queryKeys.session("a"), exact: true });
+    fixture.client.setQueryData(queryKeys.sessions(), [summary("b", "Other session")]);
+    if (outcome === "success") await fixture.succeed(attempt);
+    else await fixture.fail(attempt, "late failure after deletion");
+    expect(fixture.client.getQueryData(queryKeys.session("a"))).toBeUndefined();
+    expect(fixture.editingId.current).toBeNull();
+    expect(fixture.errors().a).toBe("");
+    expect(fixture.client.getQueryData<SessionSummary[]>(queryKeys.sessions())).toEqual([summary("b", "Other session")]);
+  });
+
+  it("can seed a missing valid detail from its successful response", async () => {
+    const fixture = arrange();
+    const attempt = await fixture.start("Renamed");
+    fixture.client.removeQueries({ queryKey: queryKeys.session("a"), exact: true });
+    await fixture.succeed(attempt);
+    expect(fixture.client.getQueryData<SessionDetail>(queryKeys.session("a"))?.title).toBe("Renamed");
+  });
+
   it("ignores an older success after a newer success", async () => {
     const fixture = arrange();
     const old = await fixture.start("First");
