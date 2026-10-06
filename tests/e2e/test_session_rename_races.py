@@ -195,8 +195,19 @@ def test_failed_rename_does_not_rollback_another_sessions_successful_title(page,
         expect(page.get_by_role("tab").filter(has_text=renamed[1])).to_be_visible()
         assert len(pending) == 1
         route = pending.pop()
-        with page.expect_response(lambda response: _is_patch(response.request, sessions[0])):
+        def failed_telemetry(request):
+            if not request.url.endswith("/api/runtime/browser-telemetry") or request.method != "POST":
+                return False
+            body = request.post_data_json or {}
+            return body.get("eventCode") == "browser.user_action.session_rename_failed" and (body.get("fields") or {}).get("sessionId") == sessions[0]
+
+        # Observe the mutation callback, not just the transport response. Check
+        # B before navigating: a fresh detail read could otherwise mask rollback.
+        with page.expect_request(failed_telemetry):
             route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "earlier rename failed"}))
+        expect(page.get_by_role("tab").filter(has_text=renamed[1])).to_be_visible()
+        expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={sessions[1]}")
+        expect(page.locator(COMPOSER).first).to_have_value(drafts[1])
         # Return to A to observe its completed error handling; its tab/editor
         # is hidden while B's Agent is selected.
         _switch(page, titles[0], sessions[0])
