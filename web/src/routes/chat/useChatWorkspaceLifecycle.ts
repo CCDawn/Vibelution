@@ -663,6 +663,18 @@ export function useChatWorkspaceLifecycle({
       });
     },
     onError: (error, _variables, context) => {
+      const tempSessionId = String(context?.tempSessionId || "").trim();
+      if (tempSessionId && isSessionDeleteTombstoned(tempSessionId)) {
+        // A closed create shell no longer owns a failure surface. Keep the
+        // transport failure observable without writing errors onto later views.
+        forgetCreateSessionIntent(tempSessionId, String(context?.idempotencyKey || ""));
+        context?.telemetry?.failed(error, {
+          tempSessionId,
+          agentId: String(context?.agentId || "").trim(),
+          discardedAfterTempDelete: true,
+        });
+        return;
+      }
       const status = error instanceof Error
         ? (error as Error & { status?: unknown }).status
         : undefined;
@@ -679,7 +691,6 @@ export function useChatWorkspaceLifecycle({
         tempSessionId: String(context?.tempSessionId || "").trim(),
         agentId: String(context?.agentId || "").trim(),
       });
-      const tempSessionId = String(context?.tempSessionId || "").trim();
       const failureMessage = describeError(error, t("createSessionFailed"));
       if (tempSessionId) {
         // Keep the temp failure surface on its route. Never auto-restore a

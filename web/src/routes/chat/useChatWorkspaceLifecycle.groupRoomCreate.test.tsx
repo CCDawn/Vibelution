@@ -507,6 +507,34 @@ describe("useChatWorkspaceLifecycle group room optimistic create", () => {
 });
 
 describe("useChatWorkspaceLifecycle session create idempotency", () => {
+  it("does not surface a late create failure after its temp session was closed", async () => {
+    resetSessionCreatePreservesForTests();
+    resetSessionDeleteTombstonesForTests();
+    const deferred = createDeferred<SessionDetail>();
+    fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/sessions" && init?.method === "POST") return deferred.promise;
+      return Promise.resolve({ deleted: true, deletedSessionId: path.split("/").at(-1), nextActiveSessionId: "" });
+    });
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session" ? hookOptions.route.ref.current.sessionId : "";
+    act(() => resultRef!.deleteSessionMutation.mutate({ sessionId: tempId }));
+    await flushMutationQueue();
+    expect(isSessionDeleteTombstoned(tempId)).toBe(true);
+    hookOptions.route.ref.current = { kind: "session", sessionId: "later-session" };
+    vi.mocked(hookOptions.options.setSessionComposerErrors).mockClear();
+    deferred.reject(new Error("late create failure"));
+    await flushMutationQueue();
+    expect(hookOptions.options.setSessionComposerErrors).not.toHaveBeenCalled();
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: "later-session" });
+    expect(telemetryEvents.find((event) => event.name === "session_create")?.failed).toHaveBeenCalled();
+    resetSessionCreatePreservesForTests();
+    resetSessionDeleteTombstonesForTests();
+  });
+
   it.each(["stay", "other-agent", "later-same-agent"])("rebases composer state and remembered identity without taking a later selection (%s)", async (destination) => {
     localStorage.clear();
     const left = destination !== "stay";
