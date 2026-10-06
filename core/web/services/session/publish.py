@@ -17,6 +17,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
+from .stream_projection_delta import WITNESS_FIELD, drop_turn_delta_projector, turn_delta_projector
 from .stream_transport_delta import SessionStreamItemDelta
 
 # Last-Event-ID resume replay window (aligns with ZCode eventRetentionPerSession:
@@ -714,18 +715,21 @@ def _publish_session_assistant_delta(
         subscribers = list(s._SESSION_STREAM_SUBSCRIBERS.get(session_id) or [])
     if not subscribers:
         return
+    turn_id = str(state.turn_id or "").strip()
     delta_seq = s._next_session_delta_seq(session_id)
+    ledger_sequence = s._session_ledger_sequence(session_id)
+    message_id = s._live_assistant_message_id(session_id, state.turn_id)
     event = {
         "type": "assistant_delta",
         "sessionId": session_id,
-        "turnId": str(state.turn_id or "").strip(),
+        "turnId": turn_id,
         # `ledgerSeq` is the journal watermark at publish time. It is NOT a
         # transport continuity sequence: mid-turn journal boundary appends
         # (reasoning segment commits, tool events) advance it between frames,
         # which made the client continuity gate misread dense streams as gaps.
         # It stays on the frame as the journal cursor for the SSE ``id:`` line
         # (Last-Event-ID resume) and edit-resubmit staleness guards.
-        "ledgerSeq": s._session_ledger_sequence(session_id),
+        "ledgerSeq": ledger_sequence,
         # `deltaSeq` is this frame's own transport-continuity sequence: one
         # increment per publish, shared by every subscriber of the session.
         # `deltaSeqFrom` equals it until server-side queue coalescing widens
@@ -739,26 +743,53 @@ def _publish_session_assistant_delta(
     }
     # `include_feedback_events` is retained only as a caller compatibility
     # parameter. Feedback is represented by status/tool/retry TurnItems now.
-    codex_transcript = s._build_codex_transcript_projection(
-        message_id=s._live_assistant_message_id(session_id, state.turn_id),
-        content=state.content,
-        feedback_events=state.feedback_events,
-        tool_calls=state.tool_calls,
-        streaming=not done,
-    )
-    turn_items = s._build_session_turn_items_projection(
-        session_id=session_id,
-        turn_id=state.turn_id,
-        message_id=s._live_assistant_message_id(session_id, state.turn_id),
-        content=state.content,
-        thought=state.thought,
-        mental_snapshot=state.mental_snapshot,
-        codex_transcript=codex_transcript,
-        done=done,
-        source="assistant_delta",
-        stage=state.stage,
-    )
-    event["turnItems"] = turn_items
+    # Dense frames go through the per-turn incremental projector: only the
+    # changed rows are patched and their witnesses refreshed; boundary frames
+    # and any cache doubt fall back to the authority full rebuild below.
+    projection_mode = "legacy"
+    projector = turn_delta_projector(session_id, turn_id)
+    if projector is not None:
+        turn_items, witness = projector.frame_items(
+            message_id=message_id,
+            content=state.content,
+            thought=state.thought,
+            feedback_events=state.feedback_events,
+            tool_calls=state.tool_calls,
+            mental_snapshot=state.mental_snapshot,
+            stage=state.stage,
+            done=done,
+            ledger_sequence=ledger_sequence,
+            service=s,
+        )
+        projection_mode = projector.mode
+        event["turnItems"] = turn_items
+        # In-process only: the SSE write edge consumes it per connection and
+        # strips the field before encoding.
+        event[WITNESS_FIELD] = witness
+    else:
+        codex_transcript = s._build_codex_transcript_projection(
+            message_id=message_id,
+            content=state.content,
+            feedback_events=state.feedback_events,
+            tool_calls=state.tool_calls,
+            streaming=not done,
+        )
+        event["turnItems"] = s._build_session_turn_items_projection(
+            session_id=session_id,
+            turn_id=turn_id,
+            message_id=message_id,
+            content=state.content,
+            thought=state.thought,
+            mental_snapshot=state.mental_snapshot,
+            codex_transcript=codex_transcript,
+            done=done,
+            source="assistant_delta",
+            stage=state.stage,
+        )
+    if done and projector is not None:
+        # Terminal frame: the incremental cache must not leak into the next
+        # turn; the next publish re-baselines through a full rebuild.
+        drop_turn_delta_projector(session_id, turn_id)
     recovery_event = s._assistant_delta_recovery_stream_event(event)
     delivered_count = 0
     dropped_count = 0
@@ -774,9 +805,10 @@ def _publish_session_assistant_delta(
         dropped_count += dropped
         if delivered:
             delivered_count += 1
+    turn_items = event.get("turnItems") or []
     s._record_session_assistant_delta_published_event(
         session_id=session_id,
-        turn_id=str(state.turn_id or "").strip(),
+        turn_id=turn_id,
         stage=str(state.stage or "").strip(),
         elapsed_ms=s._elapsed_ms(started_at),
         subscriber_count=len(subscribers),
@@ -785,7 +817,8 @@ def _publish_session_assistant_delta(
         content_chars=0,
         thought_chars=0,
         item_id=str((turn_items[0] or {}).get("itemId") or "") if turn_items else "",
-        turn_item_count=len(event.get("turnItems") or []),
+        turn_item_count=len(turn_items),
+        projection_mode=projection_mode,
         done=done,
     )
 
@@ -1231,6 +1264,7 @@ def _record_session_assistant_delta_published_event(
     thought_chars: int,
     item_id: str,
     turn_item_count: int,
+    projection_mode: str,
     done: bool,
 ) -> None:
     s = _service()
@@ -1256,6 +1290,10 @@ def _record_session_assistant_delta_published_event(
                 "thoughtChars": max(0, int(thought_chars)),
                 "itemId": str(item_id or "").strip(),
                 "turnItemCount": max(0, int(turn_item_count)),
+                # "incremental" frames patch only changed rows (O(delta));
+                # "rebuild" frames ran the authority full projection; "legacy"
+                # frames had no turn identity to cache against.
+                "projectionMode": str(projection_mode or "legacy"),
                 "done": bool(done),
             },
             lifecycle=False,
