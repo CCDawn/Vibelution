@@ -77,6 +77,7 @@ import {
 import {
   chatAgentSessionStorage,
   forgetAgentLastSession,
+  forgetAgentLastSessionBySessionId,
   lastSessionForAgent,
   readAgentLastSessionMap,
   rememberAgentLastSession,
@@ -131,10 +132,16 @@ function dropDiscardedCreatedSession(queryClient: QueryClient, sessionId: string
 function forgetAgentLastSessionForDeletedSession(sessionId: string, agentId: string): void {
   const deletedSessionId = String(sessionId || "").trim();
   const deletedAgentId = String(agentId || "").trim();
-  if (!deletedSessionId || !deletedAgentId) {
+  if (!deletedSessionId) {
     return;
   }
   const storage = chatAgentSessionStorage();
+  if (!deletedAgentId) {
+    // A sparse catalog may not identify the owner. A completed delete still
+    // proves this exact session pointer is stale; retain all other selections.
+    forgetAgentLastSessionBySessionId(deletedSessionId, storage);
+    return;
+  }
   if (lastSessionForAgent(deletedAgentId, readAgentLastSessionMap(storage)) !== deletedSessionId) {
     return;
   }

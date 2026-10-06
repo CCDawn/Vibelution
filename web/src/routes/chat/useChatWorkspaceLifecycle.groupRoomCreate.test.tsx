@@ -507,6 +507,30 @@ describe("useChatWorkspaceLifecycle group room optimistic create", () => {
 });
 
 describe("useChatWorkspaceLifecycle session create idempotency", () => {
+  it.each([false, true])("cleans only the closed temp pointer with no catalog owner (later selection: %s)", async (laterSelection) => {
+    localStorage.clear();
+    const deferred = createDeferred<SessionDetail>();
+    fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/sessions" && init?.method === "POST") return deferred.promise;
+      return Promise.resolve({ deleted: true, deletedSessionId: path.split("/").at(-1), nextActiveSessionId: "" });
+    });
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session" ? hookOptions.route.ref.current.sessionId : "";
+    queryClient.removeQueries({ queryKey: queryKeys.sessions(), exact: true });
+    if (laterSelection) rememberAgentLastSession("agent-a", "later-session-a", localStorage);
+    rememberAgentLastSession("agent-b", "later-session-b", localStorage);
+    act(() => resultRef!.deleteSessionMutation.mutate({ sessionId: tempId }));
+    await flushMutationQueue();
+    expect(lastSessionForAgent("agent-a", readAgentLastSessionMap(localStorage))).toBe(laterSelection ? "later-session-a" : "");
+    expect(lastSessionForAgent("agent-b", readAgentLastSessionMap(localStorage))).toBe("later-session-b");
+    deferred.reject(new Error("closed create failed"));
+    await flushMutationQueue();
+  });
+
   it("does not surface a late create failure after its temp session was closed", async () => {
     resetSessionCreatePreservesForTests();
     resetSessionDeleteTombstonesForTests();

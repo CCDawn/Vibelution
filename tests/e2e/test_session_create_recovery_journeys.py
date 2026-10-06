@@ -146,7 +146,10 @@ def test_closed_temp_does_not_restore_session_or_error_after_late_ack(page, e2e_
         temp_id = _start_create(page, pending)
         container = page.get_by_role("tab", selected=True).locator("..")
         container.get_by_role("button", name=re.compile("^移除会话记录")).click()
-        container.get_by_role("button", name=re.compile("^再次点击确认移除会话记录")).click()
+        with page.expect_request(lambda request: request.method == "POST"
+                                 and request.url.endswith("/api/runtime/browser-telemetry")
+                                 and (request.post_data_json or {}).get("eventCode") == "browser.user_action.session_delete_succeeded"):
+            container.get_by_role("button", name=re.compile("^再次点击确认移除会话记录")).click()
         expect(page).not_to_have_url(re.compile(re.escape(temp_id)))
         _switch(page, title_b, b).press_sequentially("关闭后的目标草稿", delay=2)
         route = pending.pop()
