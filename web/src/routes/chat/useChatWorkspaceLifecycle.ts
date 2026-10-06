@@ -270,6 +270,7 @@ export type UseChatWorkspaceLifecycleResult = {
       previousAgentSessionCaches: ReturnType<typeof captureAgentSessionCacheSnapshots>;
       previousDetail: SessionDetail | undefined;
       optimisticUpdatedAt: string;
+      attemptId: symbol;
     }
   >;
   addSessionToReviewMutation: UseMutationResult<
@@ -320,6 +321,24 @@ export function useChatWorkspaceLifecycle({
   suppressRenameBlurUntilRef,
 }: UseChatWorkspaceLifecycleOptions): UseChatWorkspaceLifecycleResult {
   const createSessionIntentsRef = useRef(new Map<string, SessionCreateIntent>());
+  type RenameContext = NonNullable<UseChatWorkspaceLifecycleResult["renameSessionMutation"]["context"]>;
+  // Keep only overlapping attempts. Failed snapshots must unwind in submission
+  // order even when the failures arrive in the opposite order.
+  const renameAttemptsRef = useRef(new Map<string, Array<{
+    variables: { sessionId: string; title: string };
+    context: RenameContext;
+    outcome: "pending" | "succeeded" | "failed";
+  }>>());
+  const settleRenameAttempt = (sessionId: string, attemptId: symbol | undefined, outcome: "succeeded" | "failed") => {
+    const attempts = renameAttemptsRef.current.get(sessionId) ?? [];
+    const attempt = attempts.find((entry) => entry.context.attemptId === attemptId);
+    if (attempt) attempt.outcome = outcome;
+    const isLatest = Boolean(attempt && attempts.at(-1) === attempt);
+    if (attempts.every((entry) => entry.outcome !== "pending")) {
+      renameAttemptsRef.current.delete(sessionId);
+    }
+    return { attempts, isLatest };
+  };
   const newCreateSessionIdempotencyKey = (): string => {
     const randomUuid = globalThis.crypto?.randomUUID?.();
     return randomUuid
@@ -1455,20 +1474,28 @@ export function useChatWorkspaceLifecycle({
         renameSessionDetail(detail, variables.sessionId, variables.title, updatedAt),
       );
       // Session tab rename must not rewrite Agent displayName (multi-session Agents).
-      return {
+      const context = {
         previousSessions,
         previousSessionIndexCaches,
         previousAgentSessionCaches,
         previousDetail,
         optimisticUpdatedAt: updatedAt,
+        attemptId: Symbol("session-rename"),
         telemetry,
       };
+      const attempts = renameAttemptsRef.current.get(variables.sessionId) ?? [];
+      attempts.push({ variables, context, outcome: "pending" });
+      renameAttemptsRef.current.set(variables.sessionId, attempts);
+      return context;
     },
     onSuccess: (nextDetail, variables, context) => {
+      const { isLatest } = settleRenameAttempt(variables.sessionId, context?.attemptId, "succeeded");
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         titleLength: String(nextDetail.title || variables.title).trim().length,
+        superseded: !isLatest,
       });
+      if (!isLatest) return;
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
@@ -1488,11 +1515,17 @@ export function useChatWorkspaceLifecycle({
       }));
     },
     onError: (error, variables, context) => {
-      context?.telemetry?.failed(error, { sessionId: variables.sessionId });
-      if (context) {
-        rollbackSessionRename(queryClient, variables, context);
+      const { attempts, isLatest } = settleRenameAttempt(variables.sessionId, context?.attemptId, "failed");
+      context?.telemetry?.failed(error, { sessionId: variables.sessionId, superseded: !isLatest });
+      // A later confirmed rename owns its fields, including when its title is
+      // identical to an earlier failed attempt. Replay only failures after it.
+      for (let index = attempts.length - 1; index >= 0; index -= 1) {
+        const attempt = attempts[index];
+        if (attempt.outcome !== "failed") break;
+        rollbackSessionRename(queryClient, attempt.variables, attempt.context);
       }
-      if (!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId) {
+      if (!isLatest) return;
+      if (!editingSessionIdRef.current) {
         editingSessionIdRef.current = variables.sessionId;
         setEditingSessionId(variables.sessionId);
         setEditingSessionTitle(variables.title);

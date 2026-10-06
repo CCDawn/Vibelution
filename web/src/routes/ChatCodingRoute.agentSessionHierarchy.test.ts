@@ -37,7 +37,10 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(routeSource).toContain("onCreateSession={handleCreateSession}");
     expect(routeSource).not.toContain("<span>{lang === \"zh\" ? \"新建会话\" : \"New session\"}</span>");
     expect(lifecycleSource).toContain("setEditingSessionTitle(");
-    expect(lifecycleSource).toContain("editingSessionIdRef.current === variables.sessionId");
+    // Failure recovery opens a retry editor only when none is already active.
+    // The callback behavior suite covers preserving newer same-session input.
+    expect(lifecycleSource).toContain("if (!editingSessionIdRef.current) {");
+    expect(lifecycleSource).not.toContain("!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId");
     // Create shows the new session directly: the create flow never opens the
     // rename editor, so no temp-id editor is entered and no draft is trusted.
     expect(lifecycleSource).not.toContain("setEditingSessionId(tempSessionId)");
