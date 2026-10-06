@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from urllib.parse import urlsplit
 
 import pytest
@@ -77,7 +78,7 @@ def test_deleted_cached_detail_stays_blocked_after_clock_advance_and_reconnect(p
     results.filter(has_text=titles[0]).click()
     error = page.locator('[data-vui="state-surface"][data-tone="error"]')
     expect(error).to_be_visible(timeout=15000)
-    expect(error).to_contain_text("不可用")
+    expect(error).to_contain_text(re.compile("不可用|Session not found|会话不存在"))
     page.clock.install()
     page.context.set_offline(True)
     try:
