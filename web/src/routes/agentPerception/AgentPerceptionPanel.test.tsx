@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { defaultAgentPerceptionPolicy } from "./agentPerceptionDraft";
 import { AgentPerceptionPanel } from "./AgentPerceptionPanel";
@@ -96,41 +96,52 @@ function runtime(): AgentPerceptionRuntime {
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+type PanelProps = React.ComponentProps<typeof AgentPerceptionPanel>;
+
+const defaultPanelProps: PanelProps = {
+  agentId: "agent-a",
+  lang: "zh",
+  configuration: configuration(),
+  configurationPending: false,
+  onRetryConfiguration: () => undefined,
+  runtime: runtime(),
+  runtimePending: false,
+  onRetryRuntime: () => undefined,
+  savePending: false,
+  onSave: () => undefined,
+  onOpenSession: () => undefined,
+  cancelPending: false,
+  onCancelRun: () => undefined,
+};
+let currentPanelProps = defaultPanelProps;
 
 function renderPanel({
-  config = configuration(),
-  runtimeValue = runtime(),
-  onSave = () => undefined,
-  onCancelRun = () => undefined,
+  config,
+  runtimeValue,
+  ...props
 }: {
   config?: AgentPerceptionConfiguration;
   runtimeValue?: AgentPerceptionRuntime;
-  onSave?: (policy: AgentPerceptionConfiguration["policy"], expectedAgentUpdatedAt: string) => void;
-  onCancelRun?: (runId: string) => void;
-} = {}) {
+} & Partial<Omit<PanelProps, "configuration" | "runtime">> = {}) {
+  currentPanelProps = {
+    ...defaultPanelProps,
+    ...props,
+    configuration: config ?? defaultPanelProps.configuration,
+    runtime: runtimeValue ?? defaultPanelProps.runtime,
+  };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root?.render(
-      <AgentPerceptionPanel
-        agentId="agent-a"
-        lang="zh"
-        configuration={config}
-        configurationPending={false}
-        onRetryConfiguration={() => undefined}
-        runtime={runtimeValue}
-        runtimePending={false}
-        onRetryRuntime={() => undefined}
-        savePending={false}
-        onSave={onSave}
-        onOpenSession={() => undefined}
-        cancelPending={false}
-        onCancelRun={onCancelRun}
-      />,
-    );
+    root?.render(<AgentPerceptionPanel {...currentPanelProps} />);
   });
   return container;
+}
+
+function rerenderPanel(overrides: Partial<PanelProps>) {
+  currentPanelProps = { ...currentPanelProps, ...overrides };
+  act(() => root?.render(<AgentPerceptionPanel {...currentPanelProps} />));
+  return container!;
 }
 
 function clickTab(label: string) {
@@ -145,6 +156,16 @@ function clickButton(button: HTMLButtonElement | null) {
   act(() => button.click());
 }
 
+function clickControl(control: HTMLElement | null) {
+  if (!control) throw new Error("Missing control");
+  act(() => control.click());
+}
+
+function findButton(panel: HTMLElement, label: string) {
+  return Array.from(panel.querySelectorAll<HTMLButtonElement>("button"))
+    .find((button) => button.getAttribute("aria-label") === label || button.textContent?.includes(label)) ?? null;
+}
+
 function setSelectValue(select: HTMLSelectElement | null, value: string) {
   if (!select) throw new Error("Missing select");
   act(() => {
@@ -153,15 +174,33 @@ function setSelectValue(select: HTMLSelectElement | null, value: string) {
   });
 }
 
+function setInputValue(input: HTMLInputElement | null, value: string) {
+  if (!input) throw new Error("Missing input");
+  const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  act(() => {
+    valueSetter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function clickRuntimeDetails(panel: HTMLElement) {
+  clickButton(panel.querySelector<HTMLButtonElement>('[aria-label="查看运行事实"]'));
+}
+
+function clickSourceMode(panel: HTMLElement, sourceTitle: string, modeLabel: string) {
+  clickButton(panel.querySelector<HTMLButtonElement>(`[aria-label="${sourceTitle} · ${modeLabel}"]`));
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   root = null;
   container?.remove();
   container = null;
+  currentPanelProps = defaultPanelProps;
 });
 
 describe("AgentPerceptionPanel", () => {
-  it("defaults to settings, keeps navigation and the concise runtime summary visible", () => {
+  it("defaults to settings, keeps navigation visible, and folds idle runtime facts until requested", () => {
     const policy = defaultAgentPerceptionPolicy();
     policy.sources.personal.mode = "manual";
     const panel = renderPanel({ config: configuration(policy) });
@@ -172,18 +211,206 @@ describe("AgentPerceptionPanel", () => {
 
     expect(settingsTab?.getAttribute("data-state")).toBe("active");
     expect(historyTab).not.toBeNull();
-    const summary = panel.querySelector('[data-testid="perception-runtime-summary"]');
     expect(panel.querySelector('[data-vui-layout-id="agent-perception"]')).toBeNull();
-    expect(summary?.textContent).toContain("授权知识库");
-    expect(summary?.textContent).toContain("最近实际读取");
     expect(panel.querySelector('[data-testid="perception-source-personal"]')?.textContent)
       .toContain("需本轮用户明确请求");
     expect(panel.querySelector('[data-testid="agent-perception-tab-settings"]')).not.toBeNull();
     expect(panel.querySelector('[data-testid="perception-runtime"]')).toBeNull();
     expect(panel.querySelector('[data-testid="agent-perception-save"]')).not.toBeNull();
+    const runtimeToggle = panel.querySelector<HTMLButtonElement>('[aria-label="查看运行事实"]');
+    expect(runtimeToggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(panel.querySelector('[data-testid="perception-runtime-details"]')).toBeNull();
 
-    clickButton(panel.querySelector<HTMLButtonElement>('[aria-label="编辑调研主题"]'));
-    expect(panel.querySelector('[aria-label="收起调研主题"]')).not.toBeNull();
+    clickRuntimeDetails(panel);
+    expect(panel.querySelector('[aria-label="收起运行事实"]')?.getAttribute("aria-expanded")).toBe("true");
+    expect(panel.querySelector('[data-testid="perception-runtime-details"]')?.textContent).toContain("授权知识库");
+    expect(panel.querySelector('[data-testid="perception-runtime-details"]')?.textContent).toContain("最近实际读取");
+  });
+
+  it("keeps the complete source modes keyboard-readable in the wide control and native select", () => {
+    const panel = renderPanel();
+    const sourceTitle = "指定团队";
+    const modeNames = ["关闭", "按需查询", "自动感知"];
+    for (const modeName of modeNames) {
+      expect(panel.querySelector(`[aria-label="${sourceTitle} · ${modeName}"]`)).not.toBeNull();
+    }
+    const offButton = panel.querySelector<HTMLButtonElement>(`[aria-label="${sourceTitle} · 关闭"]`);
+    expect(offButton?.getAttribute("aria-pressed")).toBe("true");
+
+    const compactSelect = panel.querySelector<HTMLSelectElement>(`select[aria-label="${sourceTitle} · 感知方式"]`);
+    expect(compactSelect).not.toBeNull();
+    expect(compactSelect?.value).toBe("off");
+
+    clickSourceMode(panel, sourceTitle, "自动感知");
+    expect(panel.querySelector<HTMLButtonElement>(`[aria-label="${sourceTitle} · 自动感知"]`)?.getAttribute("aria-pressed")).toBe("true");
+    expect(panel.querySelector<HTMLSelectElement>(`select[aria-label="${sourceTitle} · 感知方式"]`)?.value).toBe("auto");
+  });
+
+  it("keeps the header status tied to the saved policy while the global switch is only a draft", () => {
+    const panel = renderPanel();
+    const header = panel.querySelector('[data-vui="settings-form-header"] [data-vui="route-header"]');
+    expect(header?.textContent).toContain("当前已保存 · 关闭");
+
+    const enabledSwitch = panel.querySelector<HTMLInputElement>('[role="switch"][aria-label="启用感知控制"]');
+    clickControl(enabledSwitch);
+
+    expect(enabledSwitch?.checked).toBe(true);
+    const updatedHeader = panel.querySelector('[data-vui="settings-form-header"] [data-vui="route-header"]');
+    expect(updatedHeader?.textContent).toContain("当前已保存 · 关闭");
+    expect(updatedHeader?.textContent).not.toContain("当前已保存 · 开启");
+  });
+
+  it("hides background topics and budgets while off, edits topics inline when enabled, and preserves values on close", () => {
+    const policy = defaultAgentPerceptionPolicy();
+    policy.background.topics = ["部署安全"];
+    policy.background.intervalMinutes = 90;
+    const panel = renderPanel({ config: configuration(policy) });
+    const backgroundSwitch = panel.querySelector<HTMLElement>('[role="switch"][aria-label="启用后台调研"]');
+    expect(backgroundSwitch).not.toBeNull();
+    expect(panel.querySelector('[aria-label="添加一个调研主题"]')).toBeNull();
+    expect(panel.querySelector('ul[aria-label="调研主题"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="检查间隔（分钟）"]')).toBeNull();
+    expect(panel.querySelector('[aria-label="通知策略"]')).not.toBeNull();
+
+    clickControl(backgroundSwitch);
+    const topicInput = panel.querySelector<HTMLInputElement>('[aria-label="添加一个调研主题"]');
+    expect(topicInput).not.toBeNull();
+    expect(panel.querySelector('[aria-label="编辑调研主题"]')).toBeNull();
+    expect(panel.querySelector('ul[aria-label="调研主题"]')?.textContent).toContain("部署安全");
+    expect(panel.querySelector<HTMLInputElement>('[aria-label="检查间隔（分钟）"]')?.value).toBe("90");
+    expect(panel.querySelector('[aria-label="每次最多工具调用"]')).toBeNull();
+
+    const advanced = findButton(panel, "高级用量限制");
+    expect(advanced?.getAttribute("aria-expanded")).toBe("false");
+    clickButton(advanced);
+    expect(advanced?.getAttribute("aria-expanded")).toBe("true");
+    const interval = panel.querySelector<HTMLInputElement>('[aria-label="检查间隔（分钟）"]');
+    expect(interval?.value).toBe("90");
+    expect(panel.querySelector<HTMLInputElement>('[aria-label="每次最多工具调用"]')).not.toBeNull();
+    clickButton(advanced);
+    expect(panel.querySelector<HTMLInputElement>('[aria-label="每次最多工具调用"]')).toBeNull();
+    clickButton(advanced);
+
+    setInputValue(topicInput, "依赖漏洞");
+    clickButton(findButton(panel, "添加主题"));
+    const switchAfterTopic = panel.querySelector<HTMLElement>('[role="switch"][aria-label="启用后台调研"]');
+    clickControl(switchAfterTopic);
+    expect(panel.querySelector('[aria-label="添加一个调研主题"]')).toBeNull();
+    clickControl(panel.querySelector<HTMLElement>('[role="switch"][aria-label="启用后台调研"]'));
+    expect(panel.querySelector('ul[aria-label="调研主题"]')?.textContent).toContain("部署安全");
+    expect(panel.querySelector('ul[aria-label="调研主题"]')?.textContent).toContain("依赖漏洞");
+    expect(panel.querySelector<HTMLInputElement>('[aria-label="检查间隔（分钟）"]')?.value).toBe("90");
+  });
+
+  it("keeps notification policy independently editable when background research is off", () => {
+    const saved: AgentPerceptionConfiguration["policy"][] = [];
+    const panel = renderPanel({ onSave: (next) => saved.push(next) });
+    const notificationPolicy = panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]');
+    expect(notificationPolicy?.disabled).toBe(false);
+    setSelectValue(notificationPolicy, "quiet");
+    clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].background.enabled).toBe(false);
+    expect(saved[0].notifications.mode).toBe("quiet");
+  });
+
+  it("shows the canonical pending-change summary and discard restores the saved policy", () => {
+    const panel = renderPanel();
+    clickSourceMode(panel, "指定团队", "按需查询");
+    clickButton(panel.querySelector<HTMLButtonElement>('[aria-label="查看变更"]'));
+    const changes = panel.querySelector('[data-testid="agent-perception-change-summary"]');
+    expect(changes?.textContent).toContain("指定团队");
+    expect(changes?.textContent).toContain("按需查询");
+
+    clickButton(findButton(panel, "放弃修改"));
+    expect(panel.querySelector<HTMLButtonElement>('[aria-label="指定团队 · 关闭"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(panel.querySelector('[data-testid="agent-perception-change-summary"]')).toBeNull();
+  });
+
+  it("blocks editing and repeated saves while a save is pending", () => {
+    const policy = defaultAgentPerceptionPolicy();
+    policy.background.enabled = true;
+    policy.background.topics = ["部署安全"];
+    const onSave = vi.fn();
+    const panel = renderPanel({ config: configuration(policy), onSave });
+    setSelectValue(panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]'), "quiet");
+    clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    rerenderPanel({ savePending: true });
+
+    const teamMode = panel.querySelector<HTMLButtonElement>('[aria-label="指定团队 · 自动感知"]');
+    const topic = panel.querySelector<HTMLInputElement>('[aria-label="添加一个调研主题"]');
+    const notification = panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]');
+    const save = panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]');
+
+    expect(panel.querySelector("fieldset[disabled]")?.getAttribute("disabled")).not.toBeNull();
+    expect(teamMode?.closest("fieldset")?.disabled).toBe(true);
+    expect(topic?.closest("fieldset")?.disabled).toBe(true);
+    expect(notification?.closest("fieldset")?.disabled).toBe(true);
+    expect(save?.disabled).toBe(true);
+    clickButton(save);
+    clickButton(save);
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains a failed draft and allows an explicit retry", () => {
+    const saved: AgentPerceptionConfiguration["policy"][] = [];
+    const panel = renderPanel({ onSave: (next) => saved.push(next) });
+    setSelectValue(panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]'), "quiet");
+    rerenderPanel({ saveError: "保存失败，请重试" });
+
+    expect(panel.textContent).toContain("保存失败，请重试");
+    expect(panel.querySelector<HTMLSelectElement>('[aria-label="通知策略"]')?.value).toBe("quiet");
+    clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
+    expect(saved).toHaveLength(1);
+    expect(saved[0].notifications.mode).toBe("quiet");
+  });
+
+  it("lets a first-time unconfigured Agent explicitly save the unchanged off policy", () => {
+    const config = configuration();
+    config.configured = false;
+    const saved: Array<{ policy: AgentPerceptionConfiguration["policy"]; revision: string }> = [];
+    const panel = renderPanel({
+      config,
+      onSave: (policy, revision) => saved.push({ policy, revision }),
+    });
+
+    const save = panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]');
+    expect(save?.disabled).toBe(false);
+    clickButton(save);
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0].policy.enabled).toBe(false);
+    expect(saved[0].policy.sources.personal.mode).toBe("off");
+    expect(saved[0].revision).toBe(config.agentUpdatedAt);
+  });
+
+  it("preserves the draft on server revision conflict and reloads only on explicit request", async () => {
+    const initial = configuration();
+    const onSave = vi.fn();
+    const panel = renderPanel({ config: initial, onSave });
+    clickSourceMode(panel, "指定团队", "按需查询");
+
+    const latest = configuration();
+    latest.agentUpdatedAt = "2026-10-06T00:00:00Z";
+    latest.configurationRevision = 2;
+    latest.policyFingerprint = "policy-b";
+    latest.policy.enabled = true;
+    await act(async () => {
+      currentPanelProps = { ...currentPanelProps, configuration: latest };
+      root?.render(<AgentPerceptionPanel {...currentPanelProps} />);
+      await Promise.resolve();
+    });
+
+    expect(panel.querySelector('[data-testid="agent-perception-policy-conflict"]')).not.toBeNull();
+    expect(panel.querySelector<HTMLButtonElement>('[aria-label="指定团队 · 按需查询"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]')?.disabled).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
+
+    clickButton(findButton(panel, "加载最新策略"));
+    expect(panel.querySelector('[data-testid="agent-perception-policy-conflict"]')).toBeNull();
+    expect(panel.querySelector<HTMLInputElement>('[role="switch"][aria-label="启用感知控制"]')?.checked).toBe(true);
   });
 
   it("shows server-recorded run and update details in the history tab, including project-index notifications", () => {
@@ -238,7 +465,7 @@ describe("AgentPerceptionPanel", () => {
     expect(panel.querySelector<HTMLInputElement>('[aria-label="研究知识库"]')?.checked).toBe(true);
     clickButton(panel.querySelector<HTMLButtonElement>('[aria-label="授权知识库 · 收起范围"]'));
 
-    setSelectValue(panel.querySelector<HTMLSelectElement>('[aria-label="指定团队 · 感知方式"]'), "off");
+    clickSourceMode(panel, "指定团队", "关闭");
     clickButton(panel.querySelector<HTMLButtonElement>('[data-testid="agent-perception-save"]'));
 
     expect(savedPolicy?.sources.team.mode).toBe("off");
@@ -305,7 +532,8 @@ describe("AgentPerceptionPanel", () => {
       sources: ["projects"],
     };
     const panel = renderPanel({ config: configuration(policy), runtimeValue });
-    const summary = panel.querySelector('[data-testid="perception-runtime-summary"]');
+    clickRuntimeDetails(panel);
+    const summary = panel.querySelector('[data-testid="perception-runtime-details"]');
 
     expect(summary?.textContent).toContain("当前可用");
     expect(summary?.textContent).toContain("授权知识库");
@@ -339,11 +567,21 @@ describe("AgentPerceptionPanel", () => {
       runtimeValue,
       onCancelRun: (runId) => { cancelledRunIds.push(runId); },
     });
+    expect(panel.querySelector('[data-testid="perception-runtime-details"]')).not.toBeNull();
     const stopButton = Array.from(panel.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent?.includes("停止后台调研"));
 
     clickButton(stopButton ?? null);
 
     expect(cancelledRunIds).toEqual(["server-run-47"]);
+  });
+
+  it("auto-opens runtime facts when a runtime refresh fails", () => {
+    const panel = renderPanel({ runtimeError: "runtime refresh failed" });
+
+    const details = panel.querySelector('[data-testid="perception-runtime-details"]');
+    expect(details).not.toBeNull();
+    expect(panel.textContent).toContain("runtime refresh failed");
+    expect(Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).some((button) => button.textContent?.includes("重试"))).toBe(true);
   });
 });
