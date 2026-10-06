@@ -1,5 +1,6 @@
 import type { AssistantConversationTurn, ConversationMessage, SessionSummary } from "../../api/types";
 import type { StockCandle, StockIdentity, StockSnapshot } from "../../api/financialMarket";
+import { filingExcerptsFromTurnItems, groundResearchConclusion } from "./conclusionFigures";
 import { safeFinancialSourceUrl } from "./financialResearchModel";
 
 export type ReportCitation = { url: string; page: string; label: string };
@@ -134,7 +135,10 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
     || /(?:重新生成|更新|重写)(?:完整)?(?:研究报告|研报)|(?:regenerate|update|rewrite) (?:the )?(?:full )?(?:research )?report/i.test(text);
   const selected = candidates.filter((candidate) => isResearchRequest(candidate.request)).at(-1) ?? candidates[0];
   if (!selected) return null;
-  const { turn, text } = selected;
+  const { turn, text: answer } = selected;
+  // The stored answer stays exact. This report hides a conclusion amount that
+  // is not on a cited filing page and not a program-checked calculation.
+  const text = groundResearchConclusion(answer, filingExcerptsFromTurnItems(turn.turnItems));
   const sections: StockResearchReport["sections"] = [];
   const headings = [...text.matchAll(/^\s{0,3}#{1,3}\s+(.+)$/gm)];
   headings.forEach((heading, index) => sections.push({ id: `section-${index}`, title: cleanResearchPreview(heading[1], 25), text: text.slice(heading.index, headings[index + 1]?.index ?? text.length).trim() }));

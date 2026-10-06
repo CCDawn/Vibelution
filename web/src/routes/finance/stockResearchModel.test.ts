@@ -15,11 +15,36 @@ describe("stock research projections", () => {
   it("keeps financial tables intact rather than manufacturing prose from columns", () => {
     const table = "| 指标 | 2024FY（元） | 同比 |\n| --- | ---: | ---: |\n| 净利润 | 86228146421.62 | +15.38% |\n| 经营现金流 | 92463692168.43 | +38.85% |";
     const text = `${table}\n来源：原 PDF 第 5 页，https://example.com/report.pdf`;
-    const report = projectStockReport([turn("completed", [{ ...final, text }])])!;
+    const evidence = JSON.stringify({
+      results: [{ knowledgeItemId: "k1", excerpt: "净利润 86228146421.62 同比 15.38 经营现金流 92463692168.43 同比 38.85" }],
+      citations: [{ knowledgeItemId: "k1", financialEvidence: [{ page: 5 }] }],
+    });
+    const report = projectStockReport([turn("completed", [
+      { type: "tool_call", toolName: "financial_evidence_search_tool", output: evidence, status: "completed" },
+      { ...final, text },
+    ])])!;
     expect(report.summary).toBe("");
     expect(researchTablePreview(report.text)).toBe(table);
     expect(report.text).toBe(text);
     expect(cleanResearchPreview(`## 结论\n现金流覆盖利润。\n${table}\nPDF：https://example.com/report.pdf`)).toBe("现金流覆盖利润。");
+  });
+  it("hides an uncited conclusion ratio while keeping a cited amount and a risk amount", () => {
+    const text = "## 结论\n营业收入 200.00 元，见第5页。毛利率约为 91.93%。\n## 风险\n跌幅 9.99%。";
+    const evidence = JSON.stringify({
+      results: [{ knowledgeItemId: "k1", excerpt: "营业收入 200.00 元" }],
+      citations: [{ knowledgeItemId: "k1", financialEvidence: [{ page: 5 }] }],
+    });
+    const report = projectStockReport([turn("completed", [
+      { type: "tool_call", toolName: "financial_evidence_search_tool", output: evidence, status: "completed" },
+      { ...final, text },
+    ])])!;
+    expect(report.text).toContain("200.00 元");
+    expect(report.text).toContain("9.99%");
+    expect(report.text).not.toContain("91.93");
+    expect(report.text).toContain("没有这一项");
+    const uncited = projectStockReport([turn("completed", [{ ...final, text: "| 指标 | 数值 |\n| --- | --- |\n| 营收 | 12 亿元 |" }])])!;
+    expect(uncited.text).toContain("| 营收 | 没有这一项 |");
+    expect(uncited.text).not.toContain("亿元");
   });
   it("never promotes reasoning, tools, commentary or unfinished turns into reports", () => {
     for (const message of [turn("running", [final]), turn("failed", [final]), turn("completed", [{ ...final, phase: "commentary" }]), turn("completed", [{ type: "tool_call", output: "买入", status: "completed" }])]) expect(projectStockReport([message])).toBeNull();

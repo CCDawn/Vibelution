@@ -13,7 +13,7 @@ The approved reference is TradingAgents-CN v3.0 community at `51060a7682cf51810b
 
 ## Research and evidence
 
-Stock and topic requests carry an actual date, period, scope and five depth levels. New full research uses a separate native Session. Reports derive only from completed canonical `final_answer` items; thinking, stopped turns and unrelated follow-ups do not replace a full report. Topic reports are independent of stock selection. Citations preserve PDF identity/page and match active sources in the same Agent-owned library.
+Stock and topic requests carry an actual date, period, scope and five depth levels. New full research uses a separate native Session. Reports derive only from completed canonical `final_answer` items; thinking, stopped turns and unrelated follow-ups do not replace a full report. Topic reports are independent of stock selection. Citations preserve PDF identity/page and match active sources in the same Agent-owned library. The stored answer is not rewritten. On screen, in the catalog, and in an export, a conclusion amount stays only when that number is on a filing page cited in the report, or when the conclusion shows an arithmetic expression whose operands are those page numbers and the program evaluates to the written result. Every other conclusion amount is shown as 没有这一项.
 
 Report search uses native `querySessions(q)` over titles and bodies. Outcome filters and task counts apply to loaded records, not an invented global count. Native `ready` is idle, not proof of success. Terminal metadata distinguishes completion, stop, failure and continuation. Empty unpersisted placeholders and deletion tombstones are excluded.
 

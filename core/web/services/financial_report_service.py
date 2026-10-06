@@ -22,6 +22,7 @@ from core.web.services import agent_directory_service as directory
 from core.web.services import financial_assistant_service as assistant_service
 from core.web.services import session_service
 from core.web.services.financial_report.formats import render_docx, render_print_html
+from core.web.services.financial_report.conclusion_figures import ground_completed_report
 from core.web.services.financial_report.pdf import (
     FinancialPdfTooLarge,
     FinancialPdfUnavailable,
@@ -246,6 +247,7 @@ def _completed_report_from_events(all_events: list, session_id: str, turn_id: st
         flags=re.IGNORECASE,
     ):
         raise FinancialReportUnavailable("已停止的研究不能导出")
+    report_text = ground_completed_report(report_text, items, turn_events)
     if len(report_text) > MAX_REPORT_TEXT_CHARS:
         raise FinancialReportTooLarge("研究报告超过导出大小限制")
     completed_at = str(getattr(terminal, "timestamp", "") or "").strip()

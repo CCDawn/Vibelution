@@ -112,11 +112,12 @@ rules:
       - "tests/test_financial_job_service.py"
       - "tests/test_financial_job_routes.py"
       - "tests/test_financial_report_service.py"
+      - "tests/test_financial_conclusion_figures.py"
       - "tests/test_financial_report_pdf.py"
       - "tests/test_financial_report_catalog.py"
       - "tests/test_financial_report_routes.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_job_service.py tests/test_financial_job_routes.py tests/test_financial_report_service.py tests/test_financial_report_pdf.py tests/test_financial_report_catalog.py tests/test_financial_report_routes.py tests/test_route_bootstrap.py tests/test_web_lifecycle.py::test_create_app_starts_financial_coordinator_after_cold_route_mount -q -n 3 --dist loadfile"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_job_service.py tests/test_financial_job_routes.py tests/test_financial_report_service.py tests/test_financial_conclusion_figures.py tests/test_financial_report_pdf.py tests/test_financial_report_catalog.py tests/test_financial_report_routes.py tests/test_route_bootstrap.py tests/test_web_lifecycle.py::test_create_app_starts_financial_coordinator_after_cold_route_mount -q -n 3 --dist loadfile"
     notes:
       - "Controlled native snapshots prove idempotency, stop and export contracts; real model and print UX require isolated Launcher/browser acceptance."
   - id: financial-report-knowledge-integration

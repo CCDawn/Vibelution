@@ -20,6 +20,7 @@ from core.web.services import financial_report_service as service
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 REPORT = "## 结论\n\n结论文字 **可信**。\n\n| 项目 | 数值 |\n| --- | --- |\n| 营收 | 12 亿元 |\n\n来源：<script>alert(1)</script>"
+GATED_REPORT = REPORT.replace("| 营收 | 12 亿元 |", "| 营收 | 没有这一项 |")
 RESEARCH_REQUEST = "请研究 示例公司（600000，上海证券交易所），分析日期 2026-10-06，使用 Markdown 二级标题整理研究报告。"
 
 
@@ -69,14 +70,15 @@ def _export(format: str = "markdown"):
     )
 
 
-def test_markdown_and_json_export_exact_canonical_answer(report_env):
+def test_markdown_and_json_export_hide_uncited_conclusion_amounts(report_env):
     markdown = _export("markdown")
-    assert markdown["content"] == REPORT
+    assert markdown["content"] == GATED_REPORT
+    assert "亿元" not in markdown["content"]
     assert markdown["fileName"] == "stock-research-2026-10-06-600000.md"
     parsed = json.loads(_export("json")["content"])
     assert parsed["assistantAgentId"] == "agent-1"
     assert parsed["sessionId"] == "session-1" and parsed["turnId"] == "turn-1"
-    assert parsed["content"] == REPORT
+    assert parsed["content"] == GATED_REPORT
 
 
 def test_export_runtime_scene_events_keep_only_bounded_metadata(report_env, monkeypatch):
@@ -97,7 +99,7 @@ def test_export_runtime_scene_events_keep_only_bounded_metadata(report_env, monk
         "sessionId": "session-1",
         "turnId": "turn-1",
         "format": "markdown",
-        "reportChars": len(REPORT),
+        "reportChars": len(GATED_REPORT),
     }
     assert REPORT not in repr(success)
 
@@ -165,7 +167,7 @@ def test_only_exact_owned_completed_research_turn_can_export(report_env, monkeyp
     report_env.extend(_turn(turn_id="older-good"))
     # The later interrupted Turn must not mask the successful historical report.
     report_env.extend(_turn(turn_id="later-stop", terminal=EVENT_TURN_INTERRUPTED, status="stopped_by_user"))
-    assert _export("markdown")["content"] == REPORT
+    assert _export("markdown")["content"] == GATED_REPORT
 
     report_env[:] = _turn(request="帮我介绍一下公司", turn_id="turn-1")
     with pytest.raises(service.FinancialReportUnavailable, match="不是研究报告"):
@@ -195,7 +197,7 @@ def test_only_exact_owned_completed_research_turn_can_export(report_env, monkeyp
     )
     report_env[:] = _turn(request=synthesis_request)
     synthesis_export = _export("markdown")
-    assert synthesis_export["content"] == REPORT
+    assert synthesis_export["content"] == GATED_REPORT
     assert synthesis_export["fileName"] == "stock-research-2026-10-06-600000.md"
 
 
