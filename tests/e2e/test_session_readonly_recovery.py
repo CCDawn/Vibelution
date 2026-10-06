@@ -77,6 +77,7 @@ def test_deleted_cached_detail_stays_blocked_after_clock_advance_and_reconnect(p
     results.filter(has_text=titles[0]).click()
     error = page.locator('[data-vui="state-surface"][data-tone="error"]')
     expect(error).to_be_visible(timeout=15000)
+    expect(error).to_contain_text("不可用")
     page.clock.install()
     page.context.set_offline(True)
     try:
@@ -115,6 +116,7 @@ def test_unarchive_and_reload_restore_input_without_losing_draft(page, e2e_insta
         page.reload(wait_until="domcontentloaded")
         expect(composer).to_be_enabled(timeout=15000)
         expect(composer).to_have_value(draft)
+        composer.press("Control+End")
         composer.press_sequentially("，恢复正常", delay=2)
         expect(composer).to_have_value(draft + "，恢复正常")
         _assert_no_turns(e2e_instance, [sid], [draft])
@@ -149,7 +151,7 @@ def test_archived_history_edit_action_is_disabled(page, e2e_instance):
         message = page.get_by_text("历史消息只供查看", exact=True).first
         expect(message).to_be_visible(timeout=15000)
         message.hover()
-        expect(page.get_by_role("button", name="编辑消息", exact=True).first).to_be_disabled()
+        expect(page.get_by_role("button", name="编辑并重新发送", exact=True).first).to_be_disabled()
         expect(page.locator('[data-conversation-inline-edit="1"]')).to_have_count(0)
         _assert_no_turns(e2e_instance, [sid], ["历史消息只供查看"])
     finally:

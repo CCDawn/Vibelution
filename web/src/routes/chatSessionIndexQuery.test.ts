@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
 import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
@@ -244,6 +244,13 @@ describe("chatSessionIndexQuery cache helpers", () => {
       .toEqual(["session-keep"]);
     expect(queryClient.getQueryData(queryKeys.session("session-ghost"))).toEqual(detail({ id: "session-ghost" }));
     expect(isSessionDeleteTombstoned("session-ghost")).toBe(true);
+    const future = Date.now() + 125_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(future);
+    try {
+      expect(isSessionDeleteTombstoned("session-ghost")).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
     expect(isSessionCreatePreserved("session-ghost")).toBe(false);
     resetSessionDeleteTombstonesForTests();
     resetSessionCreatePreservesForTests();

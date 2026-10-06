@@ -147,7 +147,7 @@ export function ChatSessionWorkspacePanel({
   }
 
   if (hasBlockingError) {
-    return <VStateSurface className={styles.emptySurface} tone="error" title={blockingErrorMessage} />;
+    return <VStateSurface className={styles.emptySurface} tone="error" title={blockingErrorMessage || (lang === "zh" ? "此会话已不可用" : "This session is unavailable")} />;
   }
 
   if (invalidChildSessionLinkMessage) {

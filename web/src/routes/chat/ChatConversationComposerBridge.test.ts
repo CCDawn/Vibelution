@@ -30,6 +30,7 @@ describe("ChatConversationComposerBridge", () => {
     expect(state.disabled).toBe(true);
     expect(state.actionDisabled).toBe(true);
     expect(state.attachmentInputDisabled).toBe(true);
+    expect(state.editUserMessageDisabled).toBe(true);
   });
 
   it("keeps send disabled until text, image attachments, or references exist", () => {

@@ -43,6 +43,17 @@ describe("sessionDeleteTombstone", () => {
     expect(isSessionDeleteTombstoned("session-old", { nowMs: now + 6000, ttlMs: 5000 })).toBe(false);
   });
 
+  it("retains a confirmed missing session beyond optimistic ttl and list pruning", () => {
+    markSessionDeleteTombstone("confirmed-missing", { nowMs: 1000, confirmed: true });
+    expect(filterOutTombstonedSessions([{ id: "confirmed-missing" }], { nowMs: 126000 })).toEqual([]);
+    expect(isSessionDeleteTombstoned("confirmed-missing", { nowMs: 126000 })).toBe(true);
+    // A later optimistic marker cannot downgrade an authoritative not-found.
+    markSessionDeleteTombstone("confirmed-missing", { nowMs: 126000 });
+    expect(isSessionDeleteTombstoned("confirmed-missing", { nowMs: 252000 })).toBe(true);
+    clearSessionDeleteTombstone("confirmed-missing");
+    expect(isSessionDeleteTombstoned("confirmed-missing", { nowMs: 252000 })).toBe(false);
+  });
+
   it("clears tombstones on failed delete recovery", () => {
     markSessionDeleteTombstone("session-a");
     clearSessionDeleteTombstone("session-a");
