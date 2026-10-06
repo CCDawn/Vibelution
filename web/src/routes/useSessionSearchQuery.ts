@@ -33,6 +33,7 @@ export function useSessionSearchQuery({
   }, [queryText]);
 
   const normalizedQueryText = debouncedQueryText.trim();
+  const isDebouncing = queryText.trim() !== normalizedQueryText;
   const agentId = filters.agentId.trim();
   const teamId = filters.teamId.trim();
 
@@ -65,9 +66,12 @@ export function useSessionSearchQuery({
 
   return {
     ...query,
-    sessions: sessions ?? [],
-    totalEstimate,
-    hasMore: Boolean(query.hasNextPage),
+    // The cached key still represents the previous text during the debounce.
+    // Withdraw its actions immediately so fast Enter cannot open an old hit.
+    isLoading: isDebouncing || query.isLoading,
+    sessions: isDebouncing ? [] : sessions ?? [],
+    totalEstimate: isDebouncing ? undefined : totalEstimate,
+    hasMore: !isDebouncing && Boolean(query.hasNextPage),
     loadMore: query.fetchNextPage,
     isLoadingMore: query.isFetchingNextPage,
     debouncedQueryText: normalizedQueryText,

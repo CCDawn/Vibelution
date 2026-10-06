@@ -34,6 +34,7 @@ type Probe = {
   totalEstimate?: number;
   loadMore: () => void;
   isLoadingMore: boolean;
+  isLoading: boolean;
 };
 
 function renderProbe(initial: { queryText: string; filters?: { agentId: string; teamId: string } }) {
@@ -43,6 +44,7 @@ function renderProbe(initial: { queryText: string; filters?: { agentId: string; 
     totalEstimate: undefined,
     loadMore: () => {},
     isLoadingMore: false,
+    isLoading: false,
   };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Probe({ queryText, filters }: { queryText: string; filters: { agentId: string; teamId: string } }) {
@@ -52,6 +54,7 @@ function renderProbe(initial: { queryText: string; filters?: { agentId: string; 
     probe.totalEstimate = result.totalEstimate;
     probe.loadMore = () => void result.loadMore();
     probe.isLoadingMore = result.isLoadingMore;
+    probe.isLoading = result.isLoading;
     return null;
   }
   act(() => {
@@ -124,6 +127,19 @@ describe("useSessionSearchQuery", () => {
       expect(probe.sessions.map((session) => session.id)).toEqual(["session-1", "session-2", "session-3"]);
       expect(probe.hasMore).toBe(false);
     });
+  });
+
+  it("withdraws old hits and pagination immediately while a new query is debouncing", async () => {
+    querySessionsMock.mockResolvedValue(page([{ id: "old-hit" }], "next", 2));
+    const { probe, setQuery } = renderProbe({ queryText: "old" });
+    await vi.waitFor(() => expect(probe.sessions.map((session) => session.id)).toEqual(["old-hit"]));
+    expect(probe.hasMore).toBe(true);
+    setQuery("new");
+    expect(probe.sessions).toEqual([]);
+    expect(probe.hasMore).toBe(false);
+    expect(probe.totalEstimate).toBeUndefined();
+    expect(probe.isLoading).toBe(true);
+    expect(querySessionsMock).toHaveBeenCalledTimes(1);
   });
 
   it("forwards agent and team scope filters to the session query", async () => {
