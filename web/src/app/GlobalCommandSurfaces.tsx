@@ -263,6 +263,9 @@ export function GlobalCommandSurfaces() {
         onQueryChange={setSearchQuery}
         items={sessionItems}
         loading={catalogSearch.isLoading}
+        error={catalogSearch.searchError}
+        onRetry={() => void catalogSearch.retrySearch()}
+        retrying={catalogSearch.isFetching}
         hasMore={catalogSearch.hasMore}
         loadingMore={catalogSearch.isLoadingMore}
         onLoadMore={() => void catalogSearch.loadMore()}
@@ -273,6 +276,8 @@ export function GlobalCommandSurfaces() {
           emptyHint: lang === "en" ? "Try another keyword" : "换个关键词试试",
           loadMore: lang === "en" ? "Load more" : "加载更多",
           loadingMore: lang === "en" ? "Loading…" : "加载中…",
+          errorTitle: lang === "en" ? "Search request failed" : "搜索请求失败",
+          retry: lang === "en" ? "Retry" : "重试",
           hint: lang === "en" ? "↑↓ select · Enter open · Esc close" : "↑↓ 选择 · Enter 打开 · Esc 关闭",
           resultSummary: (loaded: number, total: number) =>
             lang === "en" ? `Loaded ${loaded} of about ${total}` : `已加载 ${loaded} / 共约 ${total} 条`,

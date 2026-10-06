@@ -39,13 +39,27 @@ def runtime_identity(e2e_instance):
 
 
 @pytest.mark.parametrize("failure_stage", ["initial", "next-page"])
-def test_search_failure_is_visible_and_retry_preserves_results_and_draft(page, e2e_instance, failure_stage):
+@pytest.mark.parametrize("entry_point", ["catalog", "global"])
+def test_search_failure_is_visible_and_retry_preserves_results_and_draft(page, e2e_instance, failure_stage, entry_point):
     from playwright.sync_api import expect
 
     suffix, _, sessions, initial, composer, dialog, search = _arrange(page, e2e_instance)
+    if entry_point == "global":
+        search.press("Escape")
+        page.keyboard.press("Control+p")
+        dialog = page.get_by_role("dialog", name="搜索全部会话…", exact=True)
+        search = dialog.get_by_role("searchbox")
     payload = fetch_json(e2e_instance.port, f"/api/sessions/query?q={quote(suffix)}&limit=50")
     failed = []
+    calls = []
+    pending = []
     recovered = False
+
+    def success(cursor):
+        return json.dumps({
+            **payload, "items": payload["items"][1:] if cursor else payload["items"][:1],
+            "nextCursor": "" if cursor else "next-page", "totalEstimate": 2,
+        })
 
     def respond(route):
         params = parse_qs(urlsplit(route.request.url).query)
@@ -53,14 +67,15 @@ def test_search_failure_is_visible_and_retry_preserves_results_and_draft(page, e
             route.continue_()
             return
         cursor = params.get("cursor", [""])[0]
+        calls.append(cursor)
         if not recovered and (failure_stage == "initial" or cursor):
             failed.append(cursor)
             route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "测试搜索请求失败"}))
             return
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({
-            **payload, "items": payload["items"][1:] if cursor else payload["items"][:1],
-            "nextCursor": "" if cursor else "next-page", "totalEstimate": 2,
-        }))
+        if recovered:
+            pending.append((route, cursor))
+            return
+        route.fulfill(status=200, content_type="application/json", body=success(cursor))
 
     page.route("**/api/sessions/query?*", respond)
     search.fill(suffix)
@@ -73,10 +88,20 @@ def test_search_failure_is_visible_and_retry_preserves_results_and_draft(page, e
     expect(results).to_have_count(0 if failure_stage == "initial" else 1)
     assert failed and set(failed) == ({""} if failure_stage == "initial" else {"next-page"})
     recovered = True
-    dialog.get_by_role("button", name="重试", exact=True).click()
+    retry = dialog.get_by_role("button", name="重试", exact=True)
+    with page.expect_request(lambda request: parse_qs(urlsplit(request.url).query).get("q") == [suffix]):
+        retry.click()
+    expect(retry).to_be_disabled()
+    expect(results).to_have_count(0 if failure_stage == "initial" else 1)
+    assert len(pending) == 1
+    route, cursor = pending[0]
+    route.fulfill(status=200, content_type="application/json", body=success(cursor))
     expect(results).to_have_count(1 if failure_stage == "initial" else 2, timeout=15000)
     expect(dialog.get_by_role("alert")).not_to_be_visible()
     expect(search).to_have_value(suffix)
+    assert calls[-1] == ("" if failure_stage == "initial" else "next-page")
+    if failure_stage == "next-page":
+        assert calls.count("") == 1, "Pagination retry must not refetch the loaded first page"
     expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={initial}")
     search.press("Escape")
     expect(composer).to_have_value("搜索过程中保留草稿")

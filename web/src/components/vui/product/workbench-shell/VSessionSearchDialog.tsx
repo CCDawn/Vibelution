@@ -4,6 +4,7 @@ import { cn } from "../../lib/cn";
 import { VInput } from "../../forms/VInput";
 import { VDialog } from "../../primitives/VDialog";
 import { VNativeButton } from "../../primitives/VNativeButton";
+import { VButton } from "../../primitives/VButton";
 import { VStateSurface } from "../../layout/VStateSurface";
 
 export type VSessionSearchDialogItem = {
@@ -26,6 +27,8 @@ export type VSessionSearchDialogLabels = {
   emptyHint?: string;
   loadMore: string;
   loadingMore: string;
+  errorTitle?: string;
+  retry?: string;
   resultSummary?: (loaded: number, total: number) => string;
   hint: string;
 };
@@ -40,6 +43,10 @@ export type VSessionSearchDialogProps = {
   filters?: React.ReactNode;
   items: VSessionSearchDialogItem[];
   loading?: boolean;
+  /** Request failure; loaded results remain available for pagination errors. */
+  error?: string;
+  onRetry?: () => void;
+  retrying?: boolean;
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
@@ -100,6 +107,9 @@ export function VSessionSearchDialog({
   filters,
   items,
   loading = false,
+  error,
+  onRetry,
+  retrying = false,
   hasMore = false,
   loadingMore = false,
   onLoadMore,
@@ -182,7 +192,7 @@ export function VSessionSearchDialog({
           {items.length === 0 ? (
             loading ? (
               <VStateSurface tone="loading" title={labels.loadingMore} />
-            ) : (
+            ) : error ? null : (
               <VStateSurface tone="empty" title={labels.emptyTitle}>
                 {labels.emptyHint}
               </VStateSurface>
@@ -223,11 +233,27 @@ export function VSessionSearchDialog({
             })
           )}
         </div>
+        {error && !loading ? (
+          <VStateSurface
+            tone="error"
+            density="compact"
+            role="alert"
+            title={labels.errorTitle ?? "Search failed"}
+            className="mt-2"
+            actions={onRetry ? (
+              <VButton onClick={onRetry} isPending={retrying}>
+                {labels.retry ?? "Retry"}
+              </VButton>
+            ) : undefined}
+          >
+            {error}
+          </VStateSurface>
+        ) : null}
         <div className="mt-2 flex items-center justify-between gap-2 border-t border-[var(--vui-border-subtle)] pt-2">
           <span className="[font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]">
             {summary || labels.hint}
           </span>
-          {hasMore ? (
+          {hasMore && !error ? (
             <VNativeButton
               type="button"
               className="rounded-[var(--vui-radius-control)] px-2 py-1 [font-size:var(--vui-font-2xs)] hover:bg-[var(--vui-surface-inset)]"

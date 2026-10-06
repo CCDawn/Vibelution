@@ -83,6 +83,7 @@ import { VSessionSearchDialog, type VSessionSearchDialogItem } from "@/component
 - 键盘：搜索框中 ↑/↓ 移动高亮、Enter 打开；hover 同步高亮行。Tab 聚焦结果或「加载更多」后，Enter 执行该按钮动作，不被高亮行拦截。
 - Tab 聚焦结果时同步高亮；结果行内 ↑/↓ 同时移动焦点和高亮，Enter 打开该行。过滤控件与分页按钮保留自己的按键行为，输入法组合输入期间不执行搜索打开动作。
 - 关键词变化后，挂载面的 `useSessionSearchQuery` 立即撤下旧结果、总数和分页入口，并显示加载态；防抖等待期间的 Enter 不得打开旧查询结果。
+- 请求失败使用 `VStateSurface tone="error"` + `role="alert"` 显示错误和 `VButton` 重试动作，不显示“没有匹配的会话”。分页失败保留已加载结果，重试只请求失败 cursor；首屏失败重试当前查询。重试中禁用重试按钮并显示 pending 状态，新的关键词不得继承旧查询错误。
 - 空态 `VStateSurface tone="empty"`，加载态 `tone="loading"`；总数与已加载数
   常驻底部摘要行。
 
@@ -92,7 +93,7 @@ import { VSessionSearchDialog, type VSessionSearchDialogItem } from "@/component
 - 挂载面：`web/src/routes/chat/ChatConversationIndexRail.tsx`（头部图标 + 弹窗宿主 +
   `useSessionSearchQuery` 防抖/分页）
 - Renderer：无自有 renderer；组合 `VDialog` + `VInput` + `VNativeButton` +
-  `VStateSurface`。
+  `VStateSurface`；错误恢复动作复用 `VButton`。
 
 ### 反冗余
 

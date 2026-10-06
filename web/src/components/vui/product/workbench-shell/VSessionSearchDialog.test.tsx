@@ -24,6 +24,8 @@ const labels = {
   emptyHint: "换个关键词",
   loadMore: "加载更多",
   loadingMore: "加载中…",
+  errorTitle: "搜索请求失败",
+  retry: "重试",
   resultSummary: (loaded: number, total: number) => `已加载 ${loaded} / ${total} 个会话`,
   hint: "↑↓ 选择 · Enter 打开 · Esc 关闭",
 };
@@ -216,6 +218,63 @@ describe("VSessionSearchDialog", () => {
     });
     expect(firstOpen).toHaveBeenCalledTimes(1);
     expect(secondOpen).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("shows request failures and preserves loaded rows (paged=%s)", async (paged) => {
+    const onRetry = vi.fn();
+    const items = paged ? [item()] : [];
+    const render = (retrying = false) => act(() => root.render(
+      <VSessionSearchDialog open onOpenChange={() => {}} query="中文" onQueryChange={() => {}}
+        items={items} hasMore={paged} error="请求暂时失败" onRetry={onRetry} retrying={retrying} labels={labels} />,
+    ));
+    render();
+    const retry = await vi.waitFor(() => {
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain("请求暂时失败");
+      const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent === "重试");
+      expect(button).toBeTruthy();
+      return button!;
+    });
+    expect(document.body.textContent).not.toContain("没有匹配的会话");
+    expect(document.querySelectorAll("button[data-index]")).toHaveLength(paged ? 1 : 0);
+    expect(Array.from(document.querySelectorAll("button")).some((button) => button.textContent === "加载更多")).toBe(false);
+    await act(async () => { retry.click(); });
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    render(true);
+    expect(retry.disabled).toBe(true);
+    expect(retry.getAttribute("aria-busy")).toBe("true");
+    await act(async () => { retry.click(); });
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows loading without an old query error or empty state", async () => {
+    act(() => root.render(
+      <VSessionSearchDialog open onOpenChange={() => {}} query="新查询" onQueryChange={() => {}}
+        items={[]} loading error="旧查询失败" labels={labels} />,
+    ));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("加载中…"));
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("没有匹配的会话");
+  });
+
+  it("does not activate a result for the Enter that confirms composition", async () => {
+    const onOpen = vi.fn();
+    act(() => root.render(
+      <VSessionSearchDialog open onOpenChange={() => {}} query="中文" onQueryChange={() => {}}
+        items={[item({ onOpen })]} labels={labels} />,
+    ));
+    const search = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLInputElement>('input[type="search"]');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    await act(async () => {
+      search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true }));
+    });
+    expect(onOpen).not.toHaveBeenCalled();
+    await act(async () => {
+      search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
   it("leaves filter controls' arrow and Enter keys to their own action", async () => {
