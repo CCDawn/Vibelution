@@ -91,7 +91,11 @@ def test_search_failure_is_visible_and_retry_preserves_results_and_draft(page, e
     retry = dialog.get_by_role("button", name="重试", exact=True)
     with page.expect_request(lambda request: parse_qs(urlsplit(request.url).query).get("q") == [suffix]):
         retry.click()
-    expect(retry).to_be_disabled()
+    if failure_stage == "initial":
+        expect(retry).not_to_be_visible()
+        expect(dialog.get_by_text("加载中…", exact=True)).to_be_visible()
+    else:
+        expect(retry).to_be_disabled()
     expect(results).to_have_count(0 if failure_stage == "initial" else 1)
     assert len(pending) == 1
     route, cursor = pending[0]
