@@ -714,11 +714,25 @@ def _publish_session_assistant_delta(
         subscribers = list(s._SESSION_STREAM_SUBSCRIBERS.get(session_id) or [])
     if not subscribers:
         return
+    delta_seq = s._next_session_delta_seq(session_id)
     event = {
         "type": "assistant_delta",
         "sessionId": session_id,
         "turnId": str(state.turn_id or "").strip(),
+        # `ledgerSeq` is the journal watermark at publish time. It is NOT a
+        # transport continuity sequence: mid-turn journal boundary appends
+        # (reasoning segment commits, tool events) advance it between frames,
+        # which made the client continuity gate misread dense streams as gaps.
+        # It stays on the frame as the journal cursor for the SSE ``id:`` line
+        # (Last-Event-ID resume) and edit-resubmit staleness guards.
         "ledgerSeq": s._session_ledger_sequence(session_id),
+        # `deltaSeq` is this frame's own transport-continuity sequence: one
+        # increment per publish, shared by every subscriber of the session.
+        # `deltaSeqFrom` equals it until server-side queue coalescing widens
+        # the covered range to the oldest merged frame, so a client can tell
+        # "frames merged by design" apart from "frames lost in transport".
+        "deltaSeq": delta_seq,
+        "deltaSeqFrom": delta_seq,
         "stage": str(state.stage or "").strip(),
         "updatedAt": str(state.updated_at or "").strip() or s._now_timestamp(),
         "done": bool(done),
@@ -776,6 +790,33 @@ def _publish_session_assistant_delta(
     )
 
 
+def _next_session_delta_seq(session_id: str) -> int:
+    """Advance and return the per-session assistant-delta stream counter.
+
+    ``deltaSeq`` is the assistant_delta frame's own transport-continuity
+    sequence: one increment per publish that has at least one subscriber,
+    shared by every subscriber of the session. It is deliberately independent
+    of the journal ledger watermark, whose mid-turn boundary appends made the
+    client continuity gate misread dense streams as transport gaps. The
+    counter is process-local: after a restart the reconnecting subscriber
+    re-baselines through the initial snapshot / stream-open gate reset, and
+    the counter resets when a session's last subscriber leaves.
+    """
+
+    s = _service()
+    normalized_session_id = str(session_id or "")
+    with s._SESSION_STREAM_SUBSCRIBERS_LOCK:
+        next_seq = int(s._SESSION_STREAM_DELTA_SEQ.get(normalized_session_id) or 0) + 1
+        s._SESSION_STREAM_DELTA_SEQ[normalized_session_id] = next_seq
+        return next_seq
+
+
+def _assistant_delta_seq_from(event: dict[str, Any]) -> int:
+    """Oldest delta sequence covered by one assistant_delta frame (0 = legacy)."""
+
+    return max(0, int(event.get("deltaSeqFrom") or event.get("deltaSeq") or 0))
+
+
 def _merge_session_assistant_delta_events(
     previous: dict[str, Any],
     current: dict[str, Any],
@@ -805,6 +846,9 @@ def _coalesce_session_assistant_delta_queue(
     s = _service()
     queued_events: list[dict[str, Any]] = []
     merged_event = dict(event)
+    # Widen the covered delta range to every frame this merge absorbs, so the
+    # client continuity gate sees "coalesced by design" instead of a gap.
+    merged_from = _assistant_delta_seq_from(merged_event)
     dropped_count = 0
     session_id = str(event.get("sessionId") or "")
     turn_id = str(event.get("turnId") or "")
@@ -818,7 +862,13 @@ def _coalesce_session_assistant_delta_queue(
             and str(existing.get("sessionId") or "") == session_id
             and str(existing.get("turnId") or "") == turn_id
         ):
+            existing_from = _assistant_delta_seq_from(existing)
+            if existing_from > 0:
+                merged_from = min(merged_from, existing_from) if merged_from > 0 else existing_from
             merged_event = s._merge_session_assistant_delta_events(existing, merged_event)
+            if merged_from > 0:
+                # Legacy frames without delta bookkeeping stay field-clean.
+                merged_event["deltaSeqFrom"] = merged_from
             dropped_count += 1
             continue
         queued_events.append(existing)
@@ -939,6 +989,10 @@ def _unregister_session_stream_subscriber(session_id: str, subscriber: queue.Que
         bucket.discard(subscriber)
         if not bucket:
             s._SESSION_STREAM_SUBSCRIBERS.pop(session_id, None)
+            # The delta counter restarts at 1 for the next subscriber; every
+            # reconnect re-baselines the client gate, so a fresh sequence is
+            # expected, never a gap.
+            s._SESSION_STREAM_DELTA_SEQ.pop(session_id, None)
             # Lock order is always subscribers -> snapshot state. A publisher
             # that already copied the old bucket must revalidate before it can
             # repopulate these per-session throttle maps.
