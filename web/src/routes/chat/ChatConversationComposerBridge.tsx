@@ -22,6 +22,7 @@ export type ChatConversationComposerBridgeLabels = {
   editMessagePlaceholder: string;
   loadingSession: string;
   messageInputPlaceholder: string;
+  readOnlySession?: string;
   saveAndRerunMessage: string;
   /** ZCode followUpQueue state: empty queue, the draft will queue behind the running turn. */
   sessionBusyQueuePlaceholder: string;
@@ -39,6 +40,7 @@ export type ChatConversationComposerBridgeInput = {
   interruptGuidancePending: boolean;
   labels: ChatConversationComposerBridgeLabels;
   references: readonly SessionReferenceAttachment[];
+  readOnly?: boolean;
   followupQueue?: ComposerQueueItem[];
   safeGuidancePending: boolean;
   sessionBusy: boolean;
@@ -152,12 +154,12 @@ export function buildConversationComposerBridgeState(
   const pending = actionMode === "stop"
     ? input.stopPending || input.sessionStopping
     : input.submitPending;
-  const disabled = !hasSession
+  const disabled = Boolean(input.readOnly) || !hasSession
     || (input.submitPending && (input.sessionBusy || input.sessionStopping));
   const hasDraftContent = Boolean(input.value.trim());
   const hasAttachments = input.imageAttachments.length > 0;
   const hasReferences = input.references.length > 0;
-  const actionDisabled = !hasSession || (
+  const actionDisabled = Boolean(input.readOnly) || !hasSession || (
     actionMode === "stop"
       ? input.sessionStopping || input.stopPending
       : input.submitPending || (!hasDraftContent && !hasAttachments && !hasReferences)
@@ -166,7 +168,9 @@ export function buildConversationComposerBridgeState(
   // always names the queueing semantics instead of going blank — the empty
   // queue shows the plain "queues and sends after this turn" hint, and once
   // items are queued the placeholder flips to the append hint.
-  const placeholder = !hasSession
+  const placeholder = input.readOnly
+    ? input.labels.readOnlySession ?? input.labels.loadingSession
+    : !hasSession
     ? input.labels.loadingSession
     : input.sessionBusy && !input.sessionStopping
       ? (input.followupQueue?.length

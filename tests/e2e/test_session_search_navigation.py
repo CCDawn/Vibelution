@@ -10,7 +10,7 @@ import pytest
 from tests.e2e.conftest import e2e_enabled
 from tests.e2e.helpers.api_write import _http_write_json, post_json
 from tests.e2e.helpers.instance_registry import fetch_json
-from tests.e2e.test_composer_drafts import COMPOSER, THREAD
+from tests.e2e.test_composer_drafts import COMPOSER, THREAD, _ready_composer
 from tests.e2e.test_composer_navigation_journeys import _assert_no_turns
 from tests.e2e.test_session_menu_journeys import no_model_submission  # noqa: F401
 from tests.e2e.test_session_search_keyboard import _arrange
@@ -77,7 +77,8 @@ def test_stale_result_cannot_offer_a_writable_session(page, e2e_instance, mutati
                 expect(composer.first).to_be_disabled()
             else:
                 expect(page.get_by_text("只读", exact=False).first).to_be_visible()
-        _back_to_draft(page, e2e_instance, initial)
+        _ready_composer(page, e2e_instance, initial)
+        expect(page.locator(COMPOSER).first).to_have_value("搜索过程中保留草稿")
         _assert_no_turns(e2e_instance, [initial, *[sid for sid in sessions if mutation != "delete" or sid != target]],
                          ["搜索过程中保留草稿"])
     finally:
@@ -89,11 +90,16 @@ def test_search_navigation_back_forward_keeps_each_draft(page, e2e_instance):
     from playwright.sync_api import expect
 
     suffix, titles, sessions, initial, _, dialog, search = _arrange(page, e2e_instance)
+    search.press("Escape")
+    # Thread switches replace the current history entry by contract. Keep the
+    # original draft in an earlier browser entry before opening the search hit.
+    _ready_composer(page, e2e_instance, sessions[1])
+    page.get_by_role("button", name="全部会话", exact=True).click()
     search.fill(suffix)
     results = dialog.locator("button[data-index]")
     expect(results).to_have_count(2, timeout=15000)
-    target = sessions[next(i for i, title in enumerate(titles) if title in results.first.inner_text())]
-    results.first.click()
+    target = sessions[0]
+    results.filter(has_text=titles[0]).click()
     expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", target, timeout=15000)
     composer = page.locator(COMPOSER).first
     expect(composer).to_have_value("")
@@ -136,9 +142,10 @@ def test_pending_page_cannot_mix_into_changed_search(page, e2e_instance, change)
     more = dialog.get_by_role("button", name="加载更多", exact=True)
     with page.expect_request(lambda request: parse_qs(urlsplit(request.url).query).get("cursor") == ["held-next-page"]):
         more.click()
-    expect(more).to_be_disabled()
-    # A second real click cannot issue another pending page request.
-    more.evaluate("element => element.click()")
+    loading = dialog.get_by_role("button", name="加载中…", exact=True)
+    expect(loading).to_be_disabled()
+    # Native disabled-button semantics reject a second activation.
+    loading.evaluate("element => element.click()")
     if change == "query":
         search.fill(new_query)
     else:

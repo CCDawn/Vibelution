@@ -20,6 +20,18 @@ const labels: ChatConversationComposerBridgeLabels = {
 };
 
 describe("ChatConversationComposerBridge", () => {
+  it("keeps a read-only session draft visible without allowing input or submission", () => {
+    const state = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      readOnly: true,
+      value: "preserved draft",
+    });
+    expect(state.value).toBe("preserved draft");
+    expect(state.disabled).toBe(true);
+    expect(state.actionDisabled).toBe(true);
+    expect(state.attachmentInputDisabled).toBe(true);
+  });
+
   it("keeps send disabled until text, image attachments, or references exist", () => {
     const emptyState = buildConversationComposerBridgeState({
       imageAttachments: [],
