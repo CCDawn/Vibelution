@@ -416,17 +416,17 @@ def test_builder_unttlled_section_recomputes_every_build(tmp_path, monkeypatch, 
     assert counter["n"] == 2
 
 
-def test_env_info_ttl_aligns_to_five_minute_bucket_boundary():
+def test_env_info_ttl_aligns_to_five_minute_bucket_boundary(monkeypatch):
     bucket = 300.0
-    for _ in range(20):
+    for offset in (0.0, 61.5, 149.999, 299.5, 299.9997):
+        # 受控时钟：ttl 必须恰好等于“到下一个 5 分钟网格边界”的剩余秒数
+        t0 = 1_000_000.0 + offset
+        monkeypatch.setattr(prompt_builder.time, "time", lambda: t0)
         ttl = prompt_builder.dynamic_section_ttl_seconds("ENV_INFO")
         assert ttl is not None
+        next_boundary = (int(t0 // bucket) + 1) * bucket
+        assert ttl == pytest.approx(next_boundary - t0, abs=1e-6)
         assert 0.05 <= ttl <= bucket
-        boundary = time.time() + ttl
-        # 到期点落在 5 分钟取整网格上（浮点余量 <1ms）
-        phase = boundary - int(boundary // bucket) * bucket
-        assert min(phase, bucket - phase) < 0.001
-        time.sleep(0.002)
 
 
 def test_codebase_map_section_ttl_skips_map_io_within_window(tmp_path, monkeypatch, fake_monotonic):
