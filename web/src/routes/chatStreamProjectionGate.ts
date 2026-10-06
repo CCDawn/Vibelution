@@ -6,25 +6,37 @@ import type { SessionStreamEvent } from "../api/types";
  * Invariant pattern attribution (Apache-2.0): zai-org/ZCode
  * `conversationProjectionStore` — seq continuity gate, watermark resubscribe,
  * and optimistic-overlay reconciliation. This is a local adaptation for the
- * Vibelution SSE protocol, whose `assistant_delta.ledgerSeq` is the session
- * conversation ledger's watermark at publish time and whose server coalesces
- * stale queued frames by design (a later frame always carries the full turn
- * projection, never a fragment).
+ * Vibelution SSE protocol, whose `assistant_delta.deltaSeq` is the frame's own
+ * transport-continuity sequence and whose server coalesces stale queued frames
+ * by design (a later frame always carries the full turn projection, never a
+ * fragment).
+ *
+ * `deltaSeq` is deliberately independent of `assistant_delta.ledgerSeq` (the
+ * journal watermark): mid-turn journal boundary appends (reasoning segment
+ * commits, tool events) advance the ledger between applied frames, which made
+ * a ledger-based gate misread dense streams as transport gaps. Coalesced
+ * frames widen `deltaSeqFrom` to the oldest merged sequence, so a covered
+ * range that starts beyond `lastAppliedSeq + 1` is the only true
+ * transport-loss signature.
  *
  * Gate rules (deterministic, pure w.r.t. the tracked state):
- * - frames without a usable ledgerSeq are applied unchanged (legacy payloads);
+ * - frames without a usable deltaSeq are applied unchanged (legacy payloads —
+ *   prefer a slow ungated apply over stalling the stream);
  * - a new turnId re-baselines the gate (first frame of a turn always applies);
- * - `seq < lastAppliedSeq` is a stale/out-of-order regression → DROP;
- * - `seq === lastAppliedSeq` is a newer coalesced frame of the same ledger
- *   epoch (full turn projection) → APPLY;
- * - `seq === lastAppliedSeq + 1` is a dense ledger advance → APPLY;
- * - `seq > lastAppliedSeq + 1` is a sparse jump — the only client-visible
- *   signature of missed transport frames → HOLD and recover from
- *   `watermark = lastAppliedSeq + 1` (single-flight, exponential backoff);
- * - an authoritative snapshot (session_initial / session_detail ledgerSeq)
- *   that reaches the watermark re-baselines the gate and resumes the stream;
+ * - `deltaSeq < lastAppliedSeq` is a stale/out-of-order regression → DROP;
+ * - the covered range `[deltaSeqFrom, deltaSeq]` starting at or before
+ *   `lastAppliedSeq + 1` is continuous (dense advance or designed coalescing)
+ *   → APPLY and advance to `deltaSeq`;
+ * - `deltaSeqFrom > lastAppliedSeq + 1` is a genuine transport gap → HOLD and
+ *   recover from `watermark = lastAppliedSeq + 1` (single-flight, exponential
+ *   backoff);
+ * - an authoritative snapshot (session_initial / session_detail) rewrites the
+ *   whole projection, so it re-baselines the gate (its ledgerSeq lives in a
+ *   different sequence space and is informational here);
  * - a stream (re)open re-baselines the gate so the first post-reconnect frame
- *   applies unconditionally instead of staying stuck behind a pre-drop gap.
+ *   applies unconditionally instead of staying stuck behind a pre-drop gap —
+ *   this also covers a server restart, which resets the process-local
+ *   deltaSeq counter.
  */
 
 export type AssistantDeltaPayload = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
@@ -36,12 +48,24 @@ export type AssistantDeltaGateDecision =
 
 export type AssistantDeltaSeqGateInput = {
   turnId?: string;
+  deltaSeq?: number;
+  deltaSeqFrom?: number;
+  /**
+   * Present on real payloads (journal watermark) but intentionally ignored:
+   * the ledger advances between frames by design and is not a continuity
+   * signal. Kept in the input type so full frames can be passed verbatim.
+   */
   ledgerSeq?: number;
 };
 
 export type SessionProjectionGate = {
   decide(payload: AssistantDeltaSeqGateInput): AssistantDeltaGateDecision;
-  /** Re-baseline from an authoritative snapshot; completes recovery at the watermark. */
+  /**
+   * An authoritative snapshot was applied: re-baseline the gate so the next
+   * frame applies unconditionally. The journal seq argument is informational
+   * only — authoritative snapshots live in the ledger sequence space, not the
+   * delta sequence space.
+   */
   noteAuthoritative(seq: number): void;
   /** A stream (re)open: next frame re-baselines instead of holding on a pre-drop gap. */
   noteStreamReopened(): void;
@@ -65,9 +89,10 @@ export function createAssistantDeltaSeqGate(): SessionProjectionGate {
     },
     decide(payload) {
       const incomingTurnId = String(payload.turnId ?? "").trim();
-      const seq = normalizedSeq(payload.ledgerSeq);
+      const seq = normalizedSeq(payload.deltaSeq);
       if (seq <= 0) {
-        // Legacy frames without ledger bookkeeping keep today's ungated apply.
+        // Legacy frames without delta bookkeeping keep the ungated apply:
+        // prefer a slow ungated apply over stalling the stream.
         return { action: "apply", seq: 0, firstFrameOfTurn: incomingTurnId !== turnId };
       }
       if (incomingTurnId !== turnId || requireFreshTurnBaseline) {
@@ -79,21 +104,20 @@ export function createAssistantDeltaSeqGate(): SessionProjectionGate {
       if (seq < lastAppliedSeq) {
         return { action: "drop-stale", seq, lastAppliedSeq };
       }
-      if (seq === lastAppliedSeq || seq === lastAppliedSeq + 1) {
-        lastAppliedSeq = seq;
-        return { action: "apply", seq, firstFrameOfTurn: false };
+      const coveredFrom = normalizedSeq(payload.deltaSeqFrom) || seq;
+      if (coveredFrom > lastAppliedSeq + 1) {
+        // The covered range starts beyond what was applied: sequences before
+        // it were neither delivered nor coalesced — a genuine transport gap.
+        // Hold (do not corrupt) and recover from the watermark.
+        return { action: "hold-gap", seq, lastAppliedSeq, watermark: lastAppliedSeq + 1 };
       }
-      // Sparse jump: hold (do not corrupt) and recover from the watermark.
-      return { action: "hold-gap", seq, lastAppliedSeq, watermark: lastAppliedSeq + 1 };
+      lastAppliedSeq = seq;
+      return { action: "apply", seq, firstFrameOfTurn: false };
     },
-    noteAuthoritative(seq) {
-      const authoritativeSeq = normalizedSeq(seq);
-      if (authoritativeSeq <= 0) {
-        return;
-      }
-      if (authoritativeSeq >= lastAppliedSeq) {
-        lastAppliedSeq = authoritativeSeq;
-      }
+    noteAuthoritative(_seq) {
+      // An authoritative snapshot rewrote the whole projection; the next
+      // frame re-baselines. The journal seq is not comparable to deltaSeq.
+      requireFreshTurnBaseline = true;
     },
     noteStreamReopened() {
       requireFreshTurnBaseline = true;
@@ -142,7 +166,11 @@ export type SessionStreamRecoveryState = {
 export type SessionStreamRecoveryController = {
   /** Request recovery from a watermark; single-flight while an attempt is pending. */
   request(watermark: number): void;
-  /** Authoritative progress at/above the watermark completes the recovery loop. */
+  /**
+   * An authoritative snapshot was applied: the projection was rewritten from
+   * the authority, so the episode retires. The journal seq argument is
+   * informational only (recovery watermarks live in the delta sequence space).
+   */
   noteAuthoritative(seq: number): void;
   /** A stream reopen re-baselines the gate; a pending recovery loop is retired. */
   noteStreamReopened(): void;
@@ -164,8 +192,8 @@ function defaultSchedule(delayMs: number, callback: () => void): () => void {
 /**
  * Single-flight watermark recovery with exponential backoff. Recovery requests
  * that arrive while an attempt is pending are absorbed (they only raise the
- * watermark); completion requires an authoritative seq at/above the watermark
- * or a stream reopen, which re-baselines the gate.
+ * watermark); completion requires an authoritative snapshot application or a
+ * stream reopen, which re-baselines the gate.
  */
 export function createSessionStreamRecoveryController(
   options: SessionStreamRecoveryControllerOptions,
@@ -208,7 +236,10 @@ export function createSessionStreamRecoveryController(
       if (!inFlight) {
         return;
       }
-      if (normalizedSeq(seq) >= watermark) {
+      // Any authoritative snapshot application rewrites the projection from
+      // the authority, which heals whatever the gap hid; the numeric
+      // watermark comparison is meaningless across sequence spaces.
+      if (normalizedSeq(seq) > 0) {
         retireEpisode();
       }
     },

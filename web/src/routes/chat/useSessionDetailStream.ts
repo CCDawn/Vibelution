@@ -461,8 +461,9 @@ export function useSessionDetailStream({
         sessionProjectionGate.noteTurnBoundary();
         return;
       }
-      // Authoritative watermark advance: re-baselines the continuity gate and
-      // completes a pending watermark recovery once the snapshot reaches it.
+      // Authoritative snapshot application: rewrites the projection from the
+      // authority, which re-baselines the continuity gate and retires a
+      // pending watermark recovery episode.
       const authoritativeLedgerSeq = Number(detail.ledgerSeq ?? 0);
       if (Number.isFinite(authoritativeLedgerSeq) && authoritativeLedgerSeq > 0) {
         sessionProjectionGate.noteAuthoritative(authoritativeLedgerSeq);
@@ -569,7 +570,7 @@ export function useSessionDetailStream({
           level: "warning",
           fields: {
             sessionId: streamSessionId,
-            heldLedgerSeq: drainHold.heldLedgerSeq,
+            heldDeltaSeq: drainHold.heldDeltaSeq,
             watermark: drainHold.watermark,
             heldCount: drainHold.heldCount,
           },
@@ -778,8 +779,9 @@ export function useSessionDetailStream({
         return;
       }
       markStreamConnected();
-      // session_initial carries the authoritative ledger watermark on every
-      // (re)connect; advance the gate so post-reconnect frames cannot lag it.
+      // session_initial is authoritative on every (re)connect; applying it
+      // re-baselines the continuity gate (its ledgerSeq is journal-space and
+      // informational for the delta gate) so post-reconnect frames apply.
       const initialLedgerSeq = Number(routed.payload.ledgerSeq ?? 0);
       if (Number.isFinite(initialLedgerSeq) && initialLedgerSeq > 0) {
         sessionProjectionGate.noteAuthoritative(initialLedgerSeq);

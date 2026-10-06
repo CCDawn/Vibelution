@@ -178,13 +178,20 @@ function assistantTurnItem(patch: Record<string, unknown> = {}) {
   };
 }
 
-function assistantDeltaEvent(overrides: { done?: boolean; ledgerSeq?: number } = {}) {
+function assistantDeltaEvent(
+  overrides: { done?: boolean; ledgerSeq?: number; deltaSeq?: number } = {},
+) {
   const done = overrides.done ?? false;
   return JSON.stringify({
     type: "assistant_delta",
     sessionId: "s1",
     turnId: "turn-1",
     ledgerSeq: overrides.ledgerSeq ?? 1,
+    // deltaSeq is the frame's transport-continuity sequence; omit it for
+    // legacy ungated frames.
+    ...(overrides.deltaSeq === undefined
+      ? {}
+      : { deltaSeq: overrides.deltaSeq, deltaSeqFrom: overrides.deltaSeq }),
     stage: "responding",
     updatedAt: "2026-08-09T00:00:00Z",
     done,
@@ -732,19 +739,26 @@ describe("useSessionDetailStream stop intent freeze", () => {
       FakeEventSource.instances[0].open();
     });
 
-    // Applied frame stamps activity, keyed by session.
+    // Applied frame stamps activity, keyed by session. The journal watermark
+    // jumps between frames by design; only deltaSeq gates continuity.
     act(() => {
-      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 1 }));
+      FakeEventSource.instances[0].emit(
+        "assistant_delta",
+        assistantDeltaEvent({ deltaSeq: 1, ledgerSeq: 30 }),
+      );
       vi.advanceTimersByTime(64);
     });
     const appliedStamp = activityRef.current.s1;
     expect(appliedStamp).toBeTypeOf("number");
 
-    // Seq-gap frame is held by the continuity gate: received is not applied,
-    // so the no-output baseline must not reset.
+    // deltaSeq-gap frame is held by the continuity gate: received is not
+    // applied, so the no-output baseline must not reset.
     act(() => {
       vi.advanceTimersByTime(1_000);
-      FakeEventSource.instances[0].emit("assistant_delta", assistantDeltaEvent({ ledgerSeq: 9 }));
+      FakeEventSource.instances[0].emit(
+        "assistant_delta",
+        assistantDeltaEvent({ deltaSeq: 9, ledgerSeq: 31 }),
+      );
       vi.advanceTimersByTime(64);
     });
     expect(activityRef.current.s1).toBe(appliedStamp);
