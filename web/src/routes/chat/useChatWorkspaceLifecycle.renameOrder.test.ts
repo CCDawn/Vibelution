@@ -62,12 +62,29 @@ function arrange() {
     if (!context) throw new Error("Missing rename snapshot");
     return { variables, context };
   };
-  const succeed = (attempt: Awaited<ReturnType<typeof start>>) => options.onSuccess!(detail(attempt.variables.title), attempt.variables, attempt.context);
+  const succeed = (attempt: Awaited<ReturnType<typeof start>>, response = detail(attempt.variables.title)) => options.onSuccess!(response, attempt.variables, attempt.context);
   const fail = (attempt: Awaited<ReturnType<typeof start>>, message: string) => options.onError!(new Error(message), attempt.variables, attempt.context);
   return { client, editingId, editingTitle, errors: () => errors, start, succeed, fail };
 }
 
 describe("session rename callback ordering", () => {
+  it.each([false, true])("keeps the Agent identity separate from its session title (later Agent update: %s)", async (laterUpdate) => {
+    const fixture = arrange();
+    fixture.client.setQueryData(queryKeys.session("a"), {
+      ...detail("Original"), agentId: "agent-a", agentDisplayName: "Operator Agent",
+    });
+    const attempt = await fixture.start("Renamed");
+    if (laterUpdate) {
+      fixture.client.setQueryData<SessionDetail>(queryKeys.session("a"), (current) => ({
+        ...current!, agentDisplayName: "New operator label",
+      }));
+    }
+    await fixture.succeed(attempt, { ...detail("Renamed"), agentId: "agent-a", agentDisplayName: "Operator Agent" });
+    expect(fixture.client.getQueryData<SessionDetail>(queryKeys.session("a"))).toMatchObject({
+      title: "Renamed", agentDisplayName: laterUpdate ? "New operator label" : "Operator Agent",
+    });
+  });
+
   it("confirms only rename fields and keeps a later archive and live messages", async () => {
     const fixture = arrange();
     const attempt = await fixture.start("Renamed");

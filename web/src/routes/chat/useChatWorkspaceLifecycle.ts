@@ -1506,10 +1506,20 @@ export function useChatWorkspaceLifecycle({
         renameSessionInSummaries(sessions, variables.sessionId, confirmedTitle, confirmedUpdatedAt);
       updateSessionSummaryCaches(queryClient, renameSummaries);
       updateAgentSessionSummaryCaches(queryClient, renameSummaries);
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) => {
         // Rename owns title fields, not a later archive, pin or live transcript.
-        renameSessionDetail(detail ?? nextDetail, variables.sessionId, confirmedTitle, confirmedUpdatedAt),
-      );
+        const current = detail ?? nextDetail;
+        const renamed = renameSessionDetail(current, variables.sessionId, confirmedTitle, confirmedUpdatedAt);
+        if (!renamed) return renamed;
+        return {
+          ...renamed,
+          // Root-tab optimism uses the title as a temporary display label.
+          // Confirm the Agent label without replacing a newer identity update.
+          agentDisplayName: current.agentDisplayName === variables.title
+            ? nextDetail.agentDisplayName ?? current.agentDisplayName
+            : current.agentDisplayName,
+        };
+      });
     },
     onError: (error, variables, context) => {
       const { attempts, isLatest } = settleRenameAttempt(variables.sessionId, context?.attemptId, "failed");
