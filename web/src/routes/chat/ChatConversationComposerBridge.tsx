@@ -186,7 +186,7 @@ export function buildConversationComposerBridgeState(
     attachmentInputDisabled: disabled || Boolean(input.editTargetMessageId) || input.imageInputUnsupported,
     attachments: mapChatComposerImageAttachments(input.imageAttachments),
     disabled,
-    editUserMessageDisabled: input.submitPending,
+    editUserMessageDisabled: Boolean(input.readOnly) || input.submitPending,
     editingMessageId: input.editTargetMessageId,
     error: input.error ?? "",
     followupQueue: [...(input.followupQueue ?? [])],
@@ -244,6 +244,8 @@ export const ChatConversationComposerBridge = memo(function ChatConversationComp
       composerValue={composer.value}
       composerPlaceholder={composer.placeholder}
       composerDisabled={composer.disabled}
+      regenerateDisabled={composer.disabled || props.regenerateDisabled}
+      branchVersionSwitchDisabled={composer.disabled || props.branchVersionSwitchDisabled}
       composerActionDisabled={composer.actionDisabled}
       composerActionMode={composer.actionMode}
       composerPending={composer.pending}

@@ -915,7 +915,7 @@ export function deriveSessionDetailQueryErrorState(
 ): SessionDetailLoadState {
   // A definitive not-found response marks the existing deletion tombstone.
   // Cached/placeholder detail must not turn that failure into a writable shell.
-  if (detail && isSessionDeleteTombstoned(detail.id) && isError) {
+  if (detail && isSessionDeleteTombstoned(detail.id)) {
     return { blockingError: true, transientError: false, backgroundError: false };
   }
   const hasDetail = Boolean(detail);

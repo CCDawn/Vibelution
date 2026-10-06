@@ -192,7 +192,7 @@ export function evictUnopenableSessionFromCaches(queryClient: QueryClient, sessi
   if (!normalizedSessionId) {
     return;
   }
-  markSessionDeleteTombstone(normalizedSessionId);
+  markSessionDeleteTombstone(normalizedSessionId, { confirmed: true });
   // A 404 proves the session is gone: stale per-Agent last-viewed pointers must
   // not keep reopening it on the next Agent-directory click.
   forgetAgentLastSessionBySessionId(normalizedSessionId, chatAgentSessionStorage());

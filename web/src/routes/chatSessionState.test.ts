@@ -1342,6 +1342,11 @@ describe("chatSessionState", () => {
     const detail = makeDetail({ id: "confirmed-deleted" });
     markSessionDeleteTombstone(detail.id);
     try {
+      expect(deriveSessionDetailQueryErrorState(detail, false)).toEqual({
+        blockingError: true,
+        transientError: false,
+        backgroundError: false,
+      });
       expect(deriveSessionDetailQueryErrorState(detail, true, { streamConnected: true })).toEqual({
         blockingError: true,
         transientError: false,

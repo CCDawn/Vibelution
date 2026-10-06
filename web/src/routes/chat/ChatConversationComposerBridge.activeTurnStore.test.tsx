@@ -132,6 +132,17 @@ afterEach(() => {
 });
 
 describe("ChatConversationComposerBridge active-turn store isolation", () => {
+  it("blocks regeneration and version changes when the composer is disabled", () => {
+    const props = baseProps();
+    renderTree(<ChatConversationComposerBridge {...baseProps({
+      composer: { ...props.composer, disabled: true },
+      regenerateDisabled: false,
+      branchVersionSwitchDisabled: false,
+    })} />);
+    expect(lazyViewProps[0].regenerateDisabled).toBe(true);
+    expect(lazyViewProps[0].branchVersionSwitchDisabled).toBe(true);
+  });
+
   it("passes the activeTurnMessage prop through outside the provider", () => {
     const propMessage = { id: "prop-message", role: "assistant" } as unknown as ConversationMessage;
     renderTree(<ChatConversationComposerBridge {...baseProps({ activeTurnMessage: propMessage })} />);
