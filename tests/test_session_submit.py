@@ -284,6 +284,11 @@ def test_initial_source_stage_submit_carries_only_ephemeral_challenge_deadline(
 
     session_id = "session-source-stage-deadline"
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_session_context_limit_payload",
+        lambda _conversation: {"limit": 128000, "source": "test"},
+    )
     _seed_chat_state(tmp_path)
     _bind_seeded_submittable_agent(tmp_path, session_id=session_id)
     scheduled_contexts: list[dict] = []
