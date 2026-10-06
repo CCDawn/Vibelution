@@ -121,6 +121,10 @@ class TeamNotFoundError(TeamServiceError):
     """Raised when a team does not exist."""
 
 
+class TeamLockedError(TeamServiceError):
+    """Raised when a team is read-only (archived or workflow-managed system Team)."""
+
+
 utc_now_iso = _team_store.utc_now_iso
 _perf_counter = _team_store._perf_counter
 _elapsed_ms = _team_store._elapsed_ms
@@ -191,6 +195,7 @@ _normalize_members = _canvas_normalize._normalize_members
 _ensure_members_can_join_team = _canvas_normalize._ensure_members_can_join_team
 _members_without_cross_team_conflicts = _canvas_normalize._members_without_cross_team_conflicts
 _remove_agent_from_team_canvas = _canvas_normalize._remove_agent_from_team_canvas
+_sync_team_canvas_membership = _canvas_normalize._sync_team_canvas_membership
 _default_canvas_for_team = _canvas_normalize._default_canvas_for_team
 _challenge_cup_canvas_storage_projection = _canvas_normalize._challenge_cup_canvas_storage_projection
 _ai_search_canvas_for_team = _canvas_normalize._ai_search_canvas_for_team

@@ -278,6 +278,7 @@ def update_team(
         team = s._find_team(state, normalized_team_id)
         if team is None:
             raise s.TeamNotFoundError("Team not found.")
+        _reject_locked_team_update(team)
         if name is not None:
             normalized_name = trim_lines(name or "", max_lines=1).strip()
             if not normalized_name:
@@ -318,8 +319,22 @@ def update_team(
                 state["updatedAt"] = stored["updatedAt"]
                 s._save_index(state)
                 team = stored
+        # Members are the sole ownership authority: refresh the canvas projection
+        # (members -> canvas) so node bindings match the new roster.
+        s._sync_team_canvas_membership(team)
     s._record_team_event("team.updated", team, fields={"memberCount": len(team.get("members") or [])})
     return s.get_team(normalized_team_id)
+
+
+def _reject_locked_team_update(team: dict[str, Any]) -> None:
+    """Refuse edits to archived Teams and workflow-managed system Teams."""
+
+    s = _service()
+    team_id = str(team.get("teamId") or "").strip()
+    if str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() == "archived":
+        raise s.TeamLockedError(f"Archived Team is read-only and cannot be edited: {team_id}")
+    if s._infer_team_kind(team) in s.DERIVED_TEAM_KINDS:
+        raise s.TeamLockedError(f"System Team is maintained by workflows and is read-only here: {team_id}")
 
 
 def remove_agent_from_teams(agent_id: str, *, include_restore_token: bool = False) -> dict[str, Any]:

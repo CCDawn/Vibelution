@@ -11,6 +11,11 @@ export type TeamMember = {
   purpose: string;
   responsibilities?: string[];
   agentStatus: "active" | "stale" | string;
+  /** Lightweight dialogue-model projection from agents.json (full team detail only). */
+  model?: {
+    dialogueModelId: string;
+    configured: boolean;
+  };
 };
 
 export type TeamCanvasNode = {

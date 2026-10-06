@@ -45,6 +45,7 @@ import {
 } from "./teamShellStatusModel";
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
+import { TeamSettingsToolbarAction } from "./TeamSettingsToolbarAction";
 import {
   canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   isChallengeCupWorkspaceCanonicalizationEligible,
@@ -674,6 +675,15 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     visibleTeams,
     effectiveTeamId,
     onSelectTeam: selectTeamRecord,
+    settingsAction: (
+      <TeamSettingsToolbarAction
+        lang={lang}
+        team={selectedTeam}
+        agents={activeAgents}
+        teams={visibleTeams}
+        agentsById={d.activeAgentsById as Map<string, (typeof activeAgents)[number]>}
+      />
+    ),
   });
 
   const shellGate = renderTeamsShellGate({

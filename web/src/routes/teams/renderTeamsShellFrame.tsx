@@ -105,7 +105,7 @@ export function renderTeamsShellToolbar(args: Pick<
   | "visibleTeams"
   | "effectiveTeamId"
   | "onSelectTeam"
->): ReactNode {
+> & { settingsAction?: ReactNode }): ReactNode {
   return (
     <div className="flex w-full min-w-0 items-center justify-between gap-3">
       <TeamShellToolbar
@@ -122,6 +122,7 @@ export function renderTeamsShellToolbar(args: Pick<
         refreshButtonClassName={args.styles.teamRefreshButton}
         actions={
           <>
+            {args.settingsAction}
             <TeamBundleToolbarActions lang={args.lang} selectedTeamId={args.effectiveTeamId} />
             <TeamCreateToolbarActions lang={args.lang} onTeamCreated={args.onSelectTeam} />
           </>

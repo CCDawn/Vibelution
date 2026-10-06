@@ -448,6 +448,133 @@ def _remove_agent_from_team_canvas(team: dict[str, Any], agent_id: str) -> None:
     s._write_json(canvas_path, stored_canvas)
 
 
+def _sync_team_canvas_membership(team: dict[str, Any], *, agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None) -> bool:
+    """Project canonical ``members`` onto the team canvas (members -> canvas only).
+
+    Sole-owner direction: membership is the authority; canvas nodes adopt it.
+    Existing node layout (x/y, id, custom label) is preserved for members that
+    stay, nodes bound to removed members (and their edges) are dropped, and
+    members missing from the canvas gain a default-layout node. Unbound
+    placeholder nodes (``agentId == ""``) are kept. Saving never changes
+    ``Team.members`` or any Agent configuration.
+    """
+
+    s = _service()
+    team_id = str(team.get("teamId") or "").strip()
+    if not team_id:
+        return False
+    canvas_path = s._team_canvas_path(team_id)
+    raw = s._read_json(canvas_path) if canvas_path.exists() else s._default_canvas_for_team(team)
+    if not isinstance(raw, dict):
+        raw = s._default_canvas_for_team(team)
+    members = [
+        dict(item)
+        for item in list(team.get("members") or [])
+        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+    ]
+    member_by_agent_id = {
+        str(item.get("agentId") or "").strip(): item
+        for item in members
+    }
+    raw_nodes = [dict(item) for item in list(raw.get("nodes") or []) if isinstance(item, dict)]
+    kept_nodes: list[dict[str, Any]] = []
+    pending_members = dict(member_by_agent_id)
+    for node in raw_nodes:
+        node_agent_id = str(node.get("agentId") or "").strip()
+        if node_agent_id and node_agent_id in pending_members:
+            member = pending_members.pop(node_agent_id)
+            # Keep node id/layout; refresh the binding copy from the member row.
+            kept_nodes.append(
+                {
+                    **node,
+                    "agentId": node_agent_id,
+                    "agentCode": str(member.get("agentCode") or node.get("agentCode") or "").strip(),
+                    "agentName": str(member.get("agentName") or node.get("agentName") or "").strip(),
+                    "role": str(member.get("role") or node.get("role") or "").strip(),
+                    "purpose": str(member.get("purpose") or node.get("purpose") or "").strip(),
+                    "responsibilities": list(member.get("responsibilities") or node.get("responsibilities") or [])[:8],
+                }
+            )
+            continue
+        if node_agent_id:
+            # Bound to an agent that is no longer a member: drop (edges filtered below).
+            continue
+        kept_nodes.append(node)
+    added_count = 0
+    existing_ids = {str(node.get("id") or "").strip() for node in kept_nodes}
+    next_index = len(kept_nodes)
+    for member in list(pending_members.values()):
+        agent_id = str(member.get("agentId") or "").strip()
+        candidate_id = s._safe_token(f"member-{agent_id}", default="", max_length=96)
+        node_id = candidate_id if candidate_id and candidate_id not in existing_ids else ""
+        while not node_id:
+            node_id = f"node-{next_index + 1}"
+            next_index += 1
+            if node_id not in existing_ids:
+                break
+            node_id = ""
+        existing_ids.add(node_id)
+        kept_nodes.append(
+            {
+                "id": node_id,
+                "label": str(member.get("agentName") or agent_id).strip(),
+                "type": "agent",
+                "status": "bound",
+                "x": 120 + next_index * 220,
+                "y": 120,
+                "agentId": agent_id,
+                "agentCode": str(member.get("agentCode") or "").strip(),
+                "agentName": str(member.get("agentName") or "").strip(),
+                "role": str(member.get("role") or "").strip(),
+                "purpose": str(member.get("purpose") or "").strip(),
+                "responsibilities": list(member.get("responsibilities") or [])[:8],
+            }
+        )
+        next_index += 1
+        added_count += 1
+    node_ids = {str(node.get("id") or "").strip() for node in kept_nodes}
+    edges = [
+        dict(edge)
+        for edge in list(raw.get("edges") or [])
+        if isinstance(edge, dict)
+        and str(edge.get("source") or "").strip() in node_ids
+        and str(edge.get("target") or "").strip() in node_ids
+    ]
+    canvas = s._normalize_canvas(
+        {
+            **raw,
+            "schemaVersion": s.SCHEMA_VERSION,
+            "canvasKind": s.CANVAS_KIND,
+            "teamId": team_id,
+            "updatedAt": str(team.get("updatedAt") or s.utc_now_iso()),
+            "path": s._relative_path(canvas_path),
+            "nodes": kept_nodes,
+            "edges": edges,
+        },
+        team,
+        agents_by_id=(agent_refs or {}).get("by_id"),
+        active_agents_by_id=(agent_refs or {}).get("active_by_id"),
+    )
+    stored_canvas = (
+        s._challenge_cup_canvas_storage_projection(canvas)
+        if team_id == s.CHALLENGE_CUP_RESEARCH_TEAM_ID
+        else canvas
+    )
+    if raw == stored_canvas:
+        return False
+    s._write_json(canvas_path, stored_canvas)
+    s._record_team_event(
+        "team.canvas.membership_synced",
+        team,
+        fields={
+            "memberCount": len(members),
+            "nodeCount": len(list(canvas.get("nodes") or [])),
+            "addedNodeCount": added_count,
+        },
+    )
+    return True
+
+
 def _default_canvas_for_team(team: dict[str, Any]) -> dict[str, Any]:
     s = _service()
     nodes = s._default_nodes_for_members(team.get("members") or [])

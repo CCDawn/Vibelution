@@ -193,6 +193,7 @@
 | `TeamSourceEmptyState` | [product/team-management.md](./product/team-management.md#teamsourceemptystate) |
 | `TeamCandidateCard` | [product/team-management.md](./product/team-management.md#teamcandidatecard) |
 | `TeamCanvasNodeCard` | [product/team-management.md](./product/team-management.md#teamcanvasnodecard) |
+| `TeamSettingsDialog` | [product/team-management.md](./product/team-management.md#teamsettingsdialog) |
 
 ## 会话用量
 

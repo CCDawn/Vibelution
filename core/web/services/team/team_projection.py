@@ -33,7 +33,7 @@ def _team_to_api(
     s = _service()
     repaired = dict(team)
     s._repair_team(repaired, agent_refs=agent_refs)
-    repaired["members"] = s._members_to_api(repaired.get("members"))
+    repaired["members"] = s._members_to_api(repaired.get("members"), agent_refs=agent_refs)
     canvas_summary = s._canvas_summary_for_team(repaired, agent_refs=agent_refs)
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
     s._sync_chat_room_root()
@@ -143,7 +143,7 @@ def _team_to_api_without_canvas_summary(
     repaired = dict(team)
     if not already_repaired:
         s._repair_team(repaired, agent_refs=agent_refs)
-    repaired["members"] = s._members_to_api(repaired.get("members"))
+    repaired["members"] = s._members_to_api(repaired.get("members"), agent_refs=agent_refs)
     team_id = str(repaired.get("teamId") or "").strip()
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
     s._sync_chat_room_root()
@@ -163,7 +163,11 @@ def _team_to_api_without_canvas_summary(
     }
 
 
-def _members_to_api(members: Any) -> list[dict[str, Any]]:
+def _members_to_api(
+    members: Any,
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
     s = _service()
     result: list[dict[str, Any]] = []
     for index, member in enumerate(list(members or [])):
@@ -185,8 +189,30 @@ def _members_to_api(members: Any) -> list[dict[str, Any]]:
         ]
         if responsibilities:
             payload["responsibilities"] = responsibilities
+        if agent_refs is not None:
+            payload["model"] = _member_model_summary(payload["agentId"], agent_refs=agent_refs)
         result.append(payload)
     return result
+
+
+def _member_model_summary(
+    agent_id: str,
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, Any]:
+    """Lightweight dialogue-model projection for one member row.
+
+    Reads the same agents.json identity snapshot the team projection already
+    holds (``_agent_reference_maps``); the Agent directory stays the sole
+    configuration authority and nothing here writes Agent state.
+    """
+
+    agent = (agent_refs.get("active_by_id") or {}).get(agent_id)
+    dialogue_model_id = agent_directory_service.agent_dialogue_model_id(agent) if agent else ""
+    return {
+        "dialogueModelId": dialogue_model_id,
+        "configured": bool(str(dialogue_model_id or "").strip()),
+    }
 
 
 def _get_team_record(
@@ -257,6 +283,7 @@ def _load_lightweight_agent_references() -> list[dict[str, Any]]:
                 "displayName": str(item.get("displayName") or "").strip(),
                 "directSessionId": str(item.get("directSessionId") or "").strip(),
                 "status": str(item.get("status") or "active").strip() or "active",
+                "llmBindings": dict(item.get("llmBindings") or {}),
                 "metadata": dict(metadata),
                 "createdAt": str(item.get("createdAt") or "").strip(),
                 "updatedAt": str(item.get("updatedAt") or "").strip(),

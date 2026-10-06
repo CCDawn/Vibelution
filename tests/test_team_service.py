@@ -2426,3 +2426,110 @@ def test_send_team_message_requires_active_members(tmp_path, monkeypatch):
 
     with pytest.raises(team_service.TeamServiceError, match="no active Agent members"):
         team_service.send_team_message(team["teamId"], content="没人会收到")
+
+
+def test_update_team_members_syncs_chat_room_and_canvas_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team = team_service.create_team(name="Aggregate Team", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    canvas_before = team_service.get_team_canvas(team["teamId"])
+    alpha_node_before = canvas_before["nodes"][0]
+
+    updated = team_service.update_team(
+        team["teamId"],
+        members=[
+            {"agentId": alpha["agentId"], "role": "lead"},
+            {"agentId": beta["agentId"], "role": "reviewer"},
+        ],
+    )
+
+    # Room participants follow the new roster.
+    room = chat_room_service.get_chat_room_detail(updated["linkedChatRoomId"])
+    assert sorted(p["agentId"] for p in room["participants"]) == sorted([alpha["agentId"], beta["agentId"]])
+    # Canvas projection follows members (members -> canvas).
+    canvas_after = team_service.get_team_canvas(team["teamId"])
+    canvas_agent_ids = {node["agentId"] for node in canvas_after["nodes"] if node["agentId"]}
+    assert canvas_agent_ids == {alpha["agentId"], beta["agentId"]}
+    kept_node = next(node for node in canvas_after["nodes"] if node["agentId"] == alpha["agentId"])
+    assert kept_node["id"] == alpha_node_before["id"]
+    assert (kept_node["x"], kept_node["y"]) == (alpha_node_before["x"], alpha_node_before["y"])
+
+    # Removing a member drops the node binding and its edges.
+    shrunk = team_service.update_team(team["teamId"], members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    canvas_shrunk = team_service.get_team_canvas(shrunk["teamId"])
+    assert {node["agentId"] for node in canvas_shrunk["nodes"] if node["agentId"]} == {alpha["agentId"]}
+    room_after = chat_room_service.get_chat_room_detail(shrunk["linkedChatRoomId"])
+    assert [p["agentId"] for p in room_after["participants"]] == [alpha["agentId"]]
+
+
+def test_update_team_rejects_system_team_edit(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(
+        name="System Like",
+        team_kind="research",
+        team_source="research_organization",
+    )
+    assert team["teamKind"] == "research"
+
+    with pytest.raises(team_service.TeamLockedError, match="System Team"):
+        team_service.update_team(team["teamId"], name="renamed")
+
+    with pytest.raises(team_service.TeamLockedError, match="System Team"):
+        team_service.update_team(team["teamId"], members=[])
+
+    with pytest.raises(team_service.TeamLockedError, match="System Team"):
+        team_service.update_team(team["teamId"], status="archived")
+
+
+def test_update_team_rejects_archived_team_edit(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Archived Edit Target", members=[{"agentId": alpha["agentId"]}])
+    team_service.archive_team(team["teamId"])
+
+    with pytest.raises(team_service.TeamLockedError, match="Archived Team"):
+        team_service.update_team(team["teamId"], name="after archive")
+
+    with pytest.raises(team_service.TeamLockedError, match="Archived Team"):
+        team_service.update_team(team["teamId"], members=[{"agentId": alpha["agentId"]}])
+
+
+def test_update_team_members_rejects_unknown_agent_with_readable_error(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="Unknown Agent Team")
+
+    with pytest.raises(team_service.TeamServiceError, match="Team member Agent is not active: agent-missing"):
+        team_service.update_team(team["teamId"], members=[{"agentId": "agent-missing"}])
+
+
+def test_team_detail_members_include_model_summary(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(
+        display_name="Alpha",
+        direct_session_id="session-alpha",
+        llm_bindings={"dialogue": {"modelId": "test-provider/test-model"}},
+    )
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team = team_service.create_team(
+        name="Model Summary Team",
+        members=[{"agentId": alpha["agentId"]}, {"agentId": beta["agentId"]}],
+    )
+
+    detail = team_service.get_team(team["teamId"])
+    models_by_agent = {member["agentId"]: member.get("model") for member in detail["members"]}
+
+    assert models_by_agent[alpha["agentId"]] == {
+        "dialogueModelId": "test-provider/test-model",
+        "configured": True,
+    }
+    assert models_by_agent[beta["agentId"]] == {"dialogueModelId": "", "configured": False}
+
+    agent_directory_service.update_agent_instance(
+        beta["agentId"],
+        llm_bindings={"dialogue": {"modelId": "test-provider/other-model"}},
+    )
+    refreshed = team_service.get_team(team["teamId"])
+    refreshed_models = {member["agentId"]: member.get("model") for member in refreshed["members"]}
+    assert refreshed_models[beta["agentId"]]["configured"] is True
+    assert refreshed_models[beta["agentId"]]["dialogueModelId"] == "test-provider/other-model"

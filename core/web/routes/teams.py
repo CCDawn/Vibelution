@@ -20,6 +20,7 @@ from core.web.routes.teams_write_models import (
     TeamRepairResponse,
 )
 from core.web.services.team_service import (
+    TeamLockedError,
     TeamNotFoundError,
     TeamServiceError,
     archive_team,
@@ -172,6 +173,8 @@ def team_update(team_id: str, payload: TeamUpdatePayload) -> dict:
         )
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamLockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TeamServiceError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
