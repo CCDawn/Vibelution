@@ -175,7 +175,7 @@ def test_search_empty_clear_and_tab_enter_open_the_focused_result(page, e2e_inst
     suffix = uuid.uuid4().hex[:8]
     titles = [f"键盘搜索同组 {suffix} {label}" for label in "AB"]
     sessions = [create_session(e2e_instance.port, title=title) for title in titles]
-    initial = create_session(e2e_instance.port, title=f"搜索前独立草稿会话 {suffix}")
+    initial = create_session(e2e_instance.port, title=f"搜索前独立草稿会话 {uuid.uuid4().hex[:8]}")
     composer = _ready_composer(page, e2e_instance, initial)
     draft = "搜索键盘切换保留草稿"
     composer.press_sequentially(draft, delay=3)

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setWorkbenchJobNativeForTests,
   captureTrackedWorkbenchJobRetirement,
+  closeTrackedWorkbenchJob,
   hasTrackedWorkbenchJob,
   spawnTrackedWorkbenchProcess,
   terminateTrackedWorkbenchJob,
@@ -37,6 +38,70 @@ describe("workbench job registry", () => {
     expect(close).toHaveBeenCalledOnce();
     expect(hasTrackedWorkbenchJob("C:/natural-exit")).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits for the remaining log drains after a graceful process exit", async () => {
+    vi.useFakeTimers();
+    let drained = false;
+    const close = vi.fn();
+    const terminate = vi.fn(() => true);
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate,
+      activeCount: () => 0, drainStatus: () => ({ complete: drained, channels: [] }), close
+    });
+    spawnTrackedWorkbenchProcess("C:/graceful-drain", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    const closing = closeTrackedWorkbenchJob("C:/graceful-drain");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(close).not.toHaveBeenCalled();
+    expect(hasTrackedWorkbenchJob("C:/graceful-drain")).toBe(true);
+    drained = true;
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(closing).resolves.toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+    expect(terminate).not.toHaveBeenCalled();
+    expect(hasTrackedWorkbenchJob("C:/graceful-drain")).toBe(false);
+  });
+
+  it("accepts the same job already released by the reaper during graceful close", async () => {
+    vi.useFakeTimers();
+    let drained = false;
+    let closed = false;
+    const close = vi.fn(() => { closed = true; });
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+      activeCount: () => { if (closed) throw new Error("released native handle"); return 0; },
+      drainStatus: () => { if (closed) throw new Error("released native handle"); return { complete: drained, channels: [] }; },
+      close
+    });
+    spawnTrackedWorkbenchProcess("C:/graceful-reaper", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    const closing = closeTrackedWorkbenchJob("C:/graceful-reaper");
+    await vi.advanceTimersByTimeAsync(900);
+    drained = true;
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(closing).resolves.toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps ownership when graceful log draining exceeds its bounded deadline", async () => {
+    vi.useFakeTimers();
+    const close = vi.fn();
+    __setWorkbenchJobNativeForTests({
+      spawn: () => ({ pid: process.pid, job: {} }), terminate: () => true,
+      activeCount: () => 0, drainStatus: () => ({ complete: false, channels: [] }), close
+    });
+    spawnTrackedWorkbenchProcess("C:/graceful-timeout", {
+      executable: "pythonw.exe", arguments: [], cwd: "C:/", env: {}, stdoutPath: "out", stderrPath: "err"
+    });
+    const closing = closeTrackedWorkbenchJob("C:/graceful-timeout");
+    await vi.advanceTimersByTimeAsync(8_000);
+    await expect(closing).resolves.toBe(false);
+    expect(hasTrackedWorkbenchJob("C:/graceful-timeout")).toBe(true);
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("keeps the old job registered until both output drains finish before replacement", async () => {
@@ -156,6 +221,39 @@ const nativeAddon = process.platform === "win32"
   : describe.skip;
 
 nativeAddon("windows workbench job", () => {
+  it("gracefully closes real output pipes after delayed drain completion", async () => {
+    __setWorkbenchJobNativeForTests(undefined);
+    const { loadWorkbenchJobNative } = await import("../src/process/workbenchJob.js");
+    const native = loadWorkbenchJobNative();
+    const directory = mkdtempSync(join(tmpdir(), "vibelution-graceful-drain-"));
+    const stdoutPath = join(directory, "stdout.log");
+    const stderrPath = join(directory, "stderr.log");
+    const releaseAt = Date.now() + 1_200;
+    __setWorkbenchJobNativeForTests({
+      ...native,
+      drainStatus: (job) => {
+        const status = native.drainStatus(job);
+        return { ...status, complete: status.complete && Date.now() >= releaseAt };
+      }
+    });
+    const spawned = spawnTrackedWorkbenchProcess(directory, {
+      executable: process.execPath,
+      arguments: ["-e", "process.stdout.write('x'.repeat(65536));process.stderr.write('y'.repeat(65536));"],
+      cwd: directory, env: { ...process.env }, stdoutPath, stderrPath
+    });
+    try {
+      await expect(closeTrackedWorkbenchJob(directory)).resolves.toBe(true);
+      expect(pidAlive(spawned.pid)).toBe(false);
+      expect(hasTrackedWorkbenchJob(directory)).toBe(false);
+      expect(readFileSync(stdoutPath, "utf8")).toBe("x".repeat(65536));
+      expect(readFileSync(stderrPath, "utf8")).toBe("y".repeat(65536));
+    } finally {
+      await terminateTrackedWorkbenchJob(directory);
+      __setWorkbenchJobNativeForTests(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   it("reclaims surviving children when their owned root exits naturally", async () => {
     __setWorkbenchJobNativeForTests(undefined);
     const directory = mkdtempSync(join(tmpdir(), "vibelution-orphan-job-"));
