@@ -155,13 +155,19 @@ _SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
 
 _SESSION_UI_CAPTURE_RESPONSE_BATCH_MIN_CHARS = 24
 
-_SESSION_UI_CAPTURE_RESPONSE_BATCH_MAX_LATENCY_SECONDS = 0.12
+# ZCode 协议合帧窗口是 30ms（continuous profile flushWindowMs=30，coalesce 保证
+# 合并后终态与逐条投递一致）；批量窗对齐 30ms 后最坏每帧只付一个窗口的固定延迟，
+# 不再叠加 120ms。字符阈值保留：快速流按下限即时冲刷（零附加延迟，冲刷更密只
+# 是帧更小，前端 rAF 调度器 smooth 每帧渲染一帧、积压≥8 或最老≥120ms 才追帧，
+# 天然合批不产生新抖动），窗口只兜慢速流的延迟上界；latency_min_chars=8 保持
+# 对 1-2 字符碎片冲刷的抑制。
+_SESSION_UI_CAPTURE_RESPONSE_BATCH_MAX_LATENCY_SECONDS = 0.03
 
 _SESSION_UI_CAPTURE_RESPONSE_BATCH_LATENCY_MIN_CHARS = 8
 
 _SESSION_UI_CAPTURE_THOUGHT_BATCH_MIN_CHARS = 24
 
-_SESSION_UI_CAPTURE_THOUGHT_BATCH_MAX_LATENCY_SECONDS = 0.12
+_SESSION_UI_CAPTURE_THOUGHT_BATCH_MAX_LATENCY_SECONDS = 0.03
 
 _SESSION_UI_CAPTURE_THOUGHT_BATCH_LATENCY_MIN_CHARS = 8
 

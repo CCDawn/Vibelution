@@ -620,3 +620,73 @@ def test_evicted_thought_events_survive_for_commit() -> None:
     assert uncommitted[0]["resultPreview"] == "early reasoning"
     capture.mark_thought_events_committed(uncommitted[0]["sequence"])
     assert capture.uncommitted_thought_events() == []
+
+
+# ---------------------------------------------------------------------------
+# 批量窗对齐 30ms：窗口兜延迟上界，字符阈值兜快速流即时冲刷（假时钟）
+# ---------------------------------------------------------------------------
+
+
+def test_text_batcher_window_aligned_to_protocol_coalesce_window() -> None:
+    assert stream_capture._SESSION_UI_CAPTURE_RESPONSE_BATCH_MAX_LATENCY_SECONDS == 0.03
+    assert stream_capture._SESSION_UI_CAPTURE_THOUGHT_BATCH_MAX_LATENCY_SECONDS == 0.03
+    # 帧尺寸下限与延迟字符下限保持不变：窗口只压缩延迟，不放大冲刷频率。
+    assert stream_capture._SESSION_UI_CAPTURE_RESPONSE_BATCH_MIN_CHARS == 24
+    assert stream_capture._SESSION_UI_CAPTURE_THOUGHT_BATCH_MIN_CHARS == 24
+    assert stream_capture._SESSION_UI_CAPTURE_RESPONSE_BATCH_LATENCY_MIN_CHARS == 8
+    assert stream_capture._SESSION_UI_CAPTURE_THOUGHT_BATCH_LATENCY_MIN_CHARS == 8
+
+
+def _window_batcher(monkeypatch, published: list[dict], clock: dict):
+    capture = stream_capture.SessionTurnCapture(session_id="cap-window", turn_id="turn-window")
+
+    def fake_set(session_id, **kwargs):
+        published.append({"session_id": session_id, **kwargs})
+
+    monkeypatch.setattr(session_service, "_set_session_live_output", fake_set)
+    monkeypatch.setattr(session_service, "_perf_counter", lambda: clock["now"])
+    return stream_capture._SessionUiCaptureTextBatcher(session_id="cap-window", capture=capture)
+
+
+def test_response_flush_waits_for_30ms_window_then_flushes_any_pending(monkeypatch) -> None:
+    published: list[dict] = []
+    clock = {"now": 100.0}
+    batcher = _window_batcher(monkeypatch, published, clock)
+
+    batcher.note_response("你好")
+    assert published == []  # 窗口未到、字符未到下限：不冲刷
+    clock["now"] += 0.02
+    batcher.note_response("你好世界")
+    assert published == []  # 距首帧 20ms < 30ms：继续等
+    clock["now"] += 0.02  # 累计 40ms >= 30ms
+    batcher.note_response("你好世界啊")
+    assert len(published) == 1  # 窗口到期后任意非空 pending 都冲刷
+    assert published[0].get("content")
+
+
+def test_thought_flush_after_window_requires_latency_min_chars(monkeypatch) -> None:
+    published: list[dict] = []
+    clock = {"now": 200.0}
+    batcher = _window_batcher(monkeypatch, published, clock)
+
+    batcher.note_thought("短想法")  # 3 chars < 8：窗口到期也不冲刷碎片
+    clock["now"] += 0.04
+    batcher.note_thought("短想法补")
+    assert published == []
+
+    clock["now"] += 0.04
+    batcher.note_thought("短想法补齐八个字符了")
+    assert published, "8+ pending chars after the 30ms window must flush"
+    assert published[-1].get("thought")
+
+
+def test_char_threshold_flushes_instantly_regardless_of_window(monkeypatch) -> None:
+    published: list[dict] = []
+    clock = {"now": 300.0}
+    batcher = _window_batcher(monkeypatch, published, clock)
+
+    batcher.note_response("一" * 24)  # 达到 24 字下限：同一时刻立即冲刷
+    assert len(published) == 1
+    clock["now"] += 0.001
+    batcher.note_response("一" * 48)
+    assert len(published) == 2  # 相对已发布前缀再有 24 字增量 → 再次即时冲刷
