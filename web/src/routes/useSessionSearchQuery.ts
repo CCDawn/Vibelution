@@ -69,6 +69,9 @@ export function useSessionSearchQuery({
     // The cached key still represents the previous text during the debounce.
     // Withdraw its actions immediately so fast Enter cannot open an old hit.
     isLoading: isDebouncing || query.isLoading,
+    searchError: !isDebouncing && query.isError ? String(query.error?.message || query.error) : undefined,
+    // A failed next page must retry its cursor instead of refetching all loaded pages.
+    retrySearch: () => query.isFetchNextPageError ? query.fetchNextPage() : query.refetch(),
     sessions: isDebouncing ? [] : sessions ?? [],
     totalEstimate: isDebouncing ? undefined : totalEstimate,
     hasMore: !isDebouncing && Boolean(query.hasNextPage),

@@ -35,6 +35,8 @@ type Probe = {
   loadMore: () => void;
   isLoadingMore: boolean;
   isLoading: boolean;
+  searchError?: string;
+  retrySearch: () => Promise<unknown>;
 };
 
 function renderProbe(initial: { queryText: string; filters?: { agentId: string; teamId: string } }) {
@@ -45,6 +47,7 @@ function renderProbe(initial: { queryText: string; filters?: { agentId: string; 
     loadMore: () => {},
     isLoadingMore: false,
     isLoading: false,
+    retrySearch: async () => {},
   };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Probe({ queryText, filters }: { queryText: string; filters: { agentId: string; teamId: string } }) {
@@ -55,6 +58,8 @@ function renderProbe(initial: { queryText: string; filters?: { agentId: string; 
     probe.loadMore = () => void result.loadMore();
     probe.isLoadingMore = result.isLoadingMore;
     probe.isLoading = result.isLoading;
+    probe.searchError = result.searchError;
+    probe.retrySearch = result.retrySearch;
     return null;
   }
   act(() => {
@@ -140,6 +145,42 @@ describe("useSessionSearchQuery", () => {
     expect(probe.totalEstimate).toBeUndefined();
     expect(probe.isLoading).toBe(true);
     expect(querySessionsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries the initial failed query and hides its error when text changes", async () => {
+    querySessionsMock.mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(page([{ id: "recovered" }], "", 1));
+    const { probe, setQuery } = renderProbe({ queryText: "first" });
+    await vi.waitFor(() => expect(probe.searchError).toBe("offline"));
+    expect(probe.sessions).toEqual([]);
+    setQuery("changed");
+    expect(probe.searchError).toBeUndefined();
+    expect(probe.isLoading).toBe(true);
+    setQuery("first");
+    expect(probe.searchError).toBe("offline");
+    await act(async () => { await probe.retrySearch(); });
+    await vi.waitFor(() => {
+      expect(probe.sessions.map((session) => session.id)).toEqual(["recovered"]);
+      expect(probe.searchError).toBeUndefined();
+    });
+    expect(querySessionsMock.mock.calls.map(([params]) => params?.q)).toEqual(["first", "first"]);
+  });
+
+  it("retries only the failed next-page cursor and keeps the loaded page", async () => {
+    querySessionsMock.mockResolvedValueOnce(page([{ id: "first-hit" }], "next", 2))
+      .mockRejectedValueOnce(new Error("page offline"))
+      .mockResolvedValueOnce(page([{ id: "second-hit" }], "", 2));
+    const { probe } = renderProbe({ queryText: "pages" });
+    await vi.waitFor(() => expect(probe.sessions.map((session) => session.id)).toEqual(["first-hit"]));
+    await act(async () => { probe.loadMore(); });
+    await vi.waitFor(() => expect(probe.searchError).toBe("page offline"));
+    expect(probe.sessions.map((session) => session.id)).toEqual(["first-hit"]);
+    await act(async () => { await probe.retrySearch(); });
+    await vi.waitFor(() => {
+      expect(probe.sessions.map((session) => session.id)).toEqual(["first-hit", "second-hit"]);
+      expect(probe.searchError).toBeUndefined();
+    });
+    expect(querySessionsMock.mock.calls.map(([params]) => params?.cursor)).toEqual(["", "next", "next"]);
   });
 
   it("forwards agent and team scope filters to the session query", async () => {

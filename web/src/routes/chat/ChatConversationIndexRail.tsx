@@ -807,6 +807,9 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               };
             })}
             loading={catalogSearch.isLoading}
+            error={catalogSearch.searchError}
+            onRetry={() => void catalogSearch.retrySearch()}
+            retrying={catalogSearch.isFetching}
             hasMore={catalogSearch.hasMore}
             loadingMore={catalogSearch.isLoadingMore}
             onLoadMore={() => void catalogSearch.loadMore()}
@@ -817,6 +820,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               emptyHint: lang === "zh" ? "换个关键词，或清空过滤条件" : "Try another keyword or clear the filters",
               loadMore: lang === "zh" ? "加载更多" : "Load more",
               loadingMore: lang === "zh" ? "加载中…" : "Loading…",
+              errorTitle: lang === "zh" ? "搜索请求失败" : "Search request failed",
+              retry: lang === "zh" ? "重试" : "Retry",
               resultSummary: (loaded, total) => (lang === "zh" ? `已加载 ${loaded} / ${total} 个会话` : `Loaded ${loaded} of ${total} sessions`),
               hint: lang === "zh" ? "↑↓ 选择 · Enter 打开 · Esc 关闭" : "↑↓ navigate · Enter open · Esc close",
             }}
