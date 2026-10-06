@@ -185,8 +185,9 @@ def test_delayed_create_preserves_typed_draft_and_current_route(page, e2e_instan
             expect(page.locator(COMPOSER).first).to_have_value(other_draft)
             # The current Agent's tabs must remain B's after A's response.
             expect(page.get_by_role("tab", selected=True)).to_contain_text(title_b)
-            _switch(page, title_a, a)
-            page.get_by_role("tab").filter(has_text=body["title"]).click()
+            # Clicking the Agent returns to its last-viewed create shell,
+            # whose remembered identity must now be the real session.
+            page.get_by_role("button").filter(has=page.get_by_text(title_a, exact=True)).first.click()
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", real_id)
         expect(page.locator(COMPOSER).first).to_have_value(created_draft)
         assert temp_id not in page.url

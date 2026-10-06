@@ -570,8 +570,11 @@ export function useChatWorkspaceLifecycle({
         removeSessionWorkspace(tempSessionId);
       }
       if (keepFocusOnCreated) setSelectedAgentId(agentId);
-      if (agentId && keepFocusOnCreated) {
-        rememberAgentLastSession(agentId, nextId, chatAgentSessionStorage());
+      const agentSessionStorage = chatAgentSessionStorage();
+      if (agentId && (keepFocusOnCreated || lastSessionForAgent(agentId, readAgentLastSessionMap(agentSessionStorage)) === tempSessionId)) {
+        // Rebase the remembered create shell even after switching Agents, but
+        // never replace a later last-viewed session chosen for this Agent.
+        rememberAgentLastSession(agentId, nextId, agentSessionStorage);
       }
       setSessionComposerErrors((current) => {
         const next = { ...current, [nextId]: "", __sessions__: "" };

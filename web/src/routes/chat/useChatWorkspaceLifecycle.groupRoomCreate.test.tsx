@@ -27,6 +27,7 @@ import { isSessionCreatePreserved, resetSessionCreatePreservesForTests } from ".
 import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { chatRouteSelectionsEqual, type ChatRouteSelection } from "./chatSelectionProjection";
+import { lastSessionForAgent, readAgentLastSessionMap, rememberAgentLastSession } from "./chatAgentSessionMemory";
 import {
   createTempRoomId,
   isTempRoomId,
@@ -506,7 +507,9 @@ describe("useChatWorkspaceLifecycle group room optimistic create", () => {
 });
 
 describe("useChatWorkspaceLifecycle session create idempotency", () => {
-  it.each([false, true])("rebases composer state but keeps a later Agent selection (left: %s)", async (left) => {
+  it.each(["stay", "other-agent", "later-same-agent"])("rebases composer state and remembered identity without taking a later selection (%s)", async (destination) => {
+    localStorage.clear();
+    const left = destination !== "stay";
     const deferred = createDeferred<SessionDetail>();
     fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) =>
       String(input) === "/api/sessions" && init?.method === "POST"
@@ -519,12 +522,14 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     expect(tempId).toMatch(/^temp-session-/);
     vi.mocked(hookOptions.options.setSelectedAgentId).mockClear();
     if (left) hookOptions.route.ref.current = { kind: "session", sessionId: "session-b" };
+    if (destination === "later-same-agent") rememberAgentLastSession("agent-a", "session-b", localStorage);
     deferred.resolve(serverSessionFor("session-real", "agent-a"));
     await flushMutationQueue();
     expect(hookOptions.options.rebaseSessionComposerState).toHaveBeenCalledExactlyOnceWith(tempId, "session-real");
     expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: left ? "session-b" : "session-real" });
     if (left) expect(hookOptions.options.setSelectedAgentId).not.toHaveBeenCalled();
     else expect(hookOptions.options.setSelectedAgentId).toHaveBeenCalledWith("agent-a");
+    expect(lastSessionForAgent("agent-a", readAgentLastSessionMap(localStorage))).toBe(destination === "later-same-agent" ? "session-b" : "session-real");
   });
 
   it("reuses the key after an ambiguous failure and changes it when the Agent intent changes", async () => {
