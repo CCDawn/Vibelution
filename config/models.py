@@ -1942,6 +1942,26 @@ class ResearchConfig(BaseModel):
         ),
     )
 
+    challenge_archive_mode: bool = Field(
+        default=False,
+        description=(
+            "挑战杯封存模式：true 时运行时只读可看——启动跳过 research workflow"
+            " 驻留 runtime 与 meeting-driver 恢复扫描，auto-advance（含"
+            " closure sweep）关闭、awaiting-approval reaper 停用，不再自动"
+            " 推进或改写状态。缺省 false，行为不变。env"
+            " VIBELUTION_CHALLENGE_ARCHIVE_MODE 可显式覆盖（紧急退出/"
+            " 复活复核口）。"
+        ),
+    )
+
+    @field_validator("challenge_archive_mode", mode="before")
+    @classmethod
+    def _fallback_invalid_challenge_archive_mode(cls, value: Any) -> bool:
+        # 非法值（None/字符串/数字）不阻断启动，统一回退缺省（不封存）。
+        if isinstance(value, bool):
+            return value
+        return False
+
 
 class SupervisedEvolutionFeatureConfig(BaseModel):
     """可信操作员配置控制的监督进化功能族。"""

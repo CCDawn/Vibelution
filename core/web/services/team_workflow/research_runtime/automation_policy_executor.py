@@ -131,11 +131,21 @@ def _stable_hash(payload: Any) -> str:
 
 
 def kill_switch_enabled() -> bool:
-    """True when ``VIBELUTION_AUTO_ADVANCE_DISABLED`` carries a truthy value."""
+    """True when auto-advance must not execute anywhere.
 
-    return os.environ.get(AUTO_ADVANCE_DISABLED_ENV, "").strip().lower() in (
+    Two sources: the ``VIBELUTION_AUTO_ADVANCE_DISABLED`` env truthy, or
+    challenge archive mode (封存模式) being on — archiving a batch means
+    read-only visibility, so every auto-advance executor decision stays
+    dormant while the audit path still records ``killSwitch``.
+    """
+
+    if os.environ.get(AUTO_ADVANCE_DISABLED_ENV, "").strip().lower() in (
         _KILL_SWITCH_TRUE_VALUES
-    )
+    ):
+        return True
+    from .archive_mode import challenge_archive_mode_enabled
+
+    return challenge_archive_mode_enabled()
 
 
 def system_actor_for(policy: AutoAdvancePolicyV2) -> str:
