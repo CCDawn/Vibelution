@@ -89,6 +89,23 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    # team_workflow stores take the identity-aware resolution branch
+    # (module PROJECT_ROOT -> _team_workspace_root ->
+    # seeded_sandbox_workspace_path -> resolve_project_workspace_home), which
+    # only consults VIBELUTION_DATA_HOME at call time; pin each module root
+    # explicitly so callers of this helper cannot reach the live operator
+    # workspace even before the env-based backstop applies.
+    from core.web.services.team_workflow import (
+        hypothesis_selection as _hypothesis_selection,
+    )
+    from core.web.services.team_workflow import meeting_rounds as _meeting_rounds
+    from core.web.services.team_workflow.research_runtime import (
+        hypothesis_first_chain as _hypothesis_first_chain,
+    )
+
+    monkeypatch.setattr(_meeting_rounds, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(_hypothesis_selection, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(_hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
     monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", _NoopBackgroundExecutor())
     # The official Challenge Cup dataset is operator-provided and intentionally

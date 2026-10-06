@@ -473,6 +473,14 @@ def isolate_closeout_post_merge_prebuild(monkeypatch):
 def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch, request):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
     path_value = str(getattr(request.node, "path", "") or getattr(request.node, "fspath", "") or "")
+    # Every data-root resolution funnels through `vibelution_storage`, whose
+    # identity branch reads VIBELUTION_DATA_HOME before any module-level
+    # PROJECT_ROOT patch can help, so pin it for ALL tests (not just the
+    # runtime-manager isolation set).  This is what keeps tests that never
+    # opt into `_use_tmp_project_root` from writing the live operator
+    # instance's workspace.  A test that deliberately needs the real data
+    # home must opt out with an explicit `monkeypatch.delenv` and say why.
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     if not _test_file_needs_runtime_manager_isolation(path_value):
         yield
         return

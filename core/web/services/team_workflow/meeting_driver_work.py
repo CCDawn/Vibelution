@@ -1228,6 +1228,13 @@ def sweep_stuck_digest_works(
     the LLM stays the startup sweep's job — and it never raises: one broken
     team or meeting is isolated into ``skipped``.  Self-throttled; pass
     ``force=True`` (tests) to bypass the throttle.
+
+    Like the periodic driver-recovery sweep, evidence is actionable-only:
+    ``scanned`` counts only intents that proved stuck (terminal intents fold
+    into ``skipped``), and the summary scene event fires only when the run
+    fenced something or wrote a summary draft error — a healthy no-op scan
+    records nothing, so the resident cadence cannot grow the event store
+    without bound.
     """
 
     summary: dict[str, Any] = {
@@ -1244,7 +1251,6 @@ def sweep_stuck_digest_works(
     try:
         team_ids = _team_ids_with_meeting_rounds()
     except Exception:  # noqa: BLE001 - the watchdog must never break its host
-        _record_digest_stuck_sweep_event(summary)
         return summary
     for team_id in team_ids:
         summary["teams"] += 1
@@ -1252,8 +1258,22 @@ def sweep_stuck_digest_works(
             _sweep_team_stuck_digest_works(team_id, summary, current_ms)
         except Exception:  # noqa: BLE001 - one broken team cannot stop the sweep
             summary["skipped"] += 1
-    _record_digest_stuck_sweep_event(summary)
+    if _digest_stuck_sweep_actionable(summary):
+        _record_digest_stuck_sweep_event(summary)
     return summary
+
+
+def _digest_stuck_sweep_actionable(summary: Mapping[str, Any]) -> bool:
+    """True when the watchdog fenced something; a healthy no-op stays silent.
+
+    Mirrors ``sweep_challenge_meeting_drivers``: the sweep runs on the
+    resident maintenance tick, so per-run evidence is only written when at
+    least one intent was fenced or one summary draft error written.
+    """
+
+    return bool(
+        int(summary.get("fenced") or 0) or int(summary.get("summaryErrors") or 0)
+    )
 
 
 def _sweep_team_stuck_digest_works(
@@ -1270,10 +1290,10 @@ def _sweep_team_stuck_digest_works(
             latest[meeting_round_id] = record
     meeting_rounds = _meeting_rounds()
     for meeting_round_id, work in latest.items():
-        summary["scanned"] += 1
         if not _digest_work_stuck(work, now_ms):
             summary["skipped"] += 1
             continue
+        summary["scanned"] += 1
         work_id = str(work.get("workId") or "")
         overdue_ms = _stuck_overdue_ms(work, now_ms)
         record_intent(

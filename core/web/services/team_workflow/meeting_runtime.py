@@ -3310,8 +3310,17 @@ def _meeting_missing_digest(
 
 
 def _record_digest_missing_sweep_event(summary: Mapping[str, Any]) -> None:
-    """Bounded sweep evidence, following the stuck-digest watchdog pattern."""
+    """Bounded sweep evidence, following the stuck-digest watchdog pattern.
 
+    Actionable-only like the stuck sweep and the periodic driver recovery: a
+    healthy no-op scan (nothing scheduled, nothing repaired) records nothing,
+    so the sweep cadence cannot grow the event store without bound.
+    """
+
+    if not (
+        int(summary.get("scheduled") or 0) or int(summary.get("repaired") or 0)
+    ):
+        return
     try:
         from core.web.services.runtime_scene_service import (
             record_runtime_scene_event_quietly,

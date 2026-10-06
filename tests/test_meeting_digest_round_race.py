@@ -270,6 +270,74 @@ def test_missing_digest_sweep_repairs_stale_awaiting_approval_draft(
     assert meeting["draftRejectedBy"] == "system:summary-repair"
 
 
+def _capture_missing_sweep_events(monkeypatch) -> list[dict]:
+    from core.web.services import runtime_scene_service
+
+    events: list[dict] = []
+
+    def _capture(*args, **kwargs):
+        events.append({"args": args, "kwargs": kwargs})
+        return {"accepted": True}
+
+    monkeypatch.setattr(
+        runtime_scene_service, "record_runtime_scene_event_quietly", _capture
+    )
+    return events
+
+
+def _missing_sweep_completed_events(events: list[dict]) -> list[dict]:
+    return [
+        event
+        for event in events
+        if event["args"][2] == "meeting_digest.missing_sweep_completed"
+    ]
+
+
+def test_missing_digest_sweep_without_actionable_records_no_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A healthy no-op sweep (nothing scheduled or repaired) stays silent."""
+
+    _sweep_isolate(tmp_path, monkeypatch)
+    _digest_sweep_env(tmp_path, monkeypatch)
+    _patch_terminal_rounds(monkeypatch)
+    events = _capture_missing_sweep_events(monkeypatch)
+
+    summary = meeting_runtime.sweep_meetings_missing_digest(
+        now_ms=1_000_000, force=True
+    )
+
+    assert summary["scheduled"] == 0
+    assert summary.get("repaired", 0) == 0
+    assert _missing_sweep_completed_events(events) == []
+
+
+def test_missing_digest_sweep_emits_event_when_actionable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An actionable sweep (repair + reschedule) still records its evidence."""
+
+    _sweep_isolate(tmp_path, monkeypatch)
+    _digest_sweep_env(tmp_path, monkeypatch)
+    _patch_terminal_rounds(monkeypatch)
+    events = _capture_missing_sweep_events(monkeypatch)
+    stale_hash = meetings.source_message_content_hash(_completed_messages()[:1])
+    meeting_id = "meeting-stale-event"
+    _seed_meeting(_stale_awaiting_meeting(meeting_id, stale_hash))
+
+    summary = meeting_runtime.sweep_meetings_missing_digest(
+        now_ms=1_000_000, force=True
+    )
+
+    assert summary["repaired"] == 1
+    assert summary["scheduled"] == 1
+    completed = _missing_sweep_completed_events(events)
+    assert len(completed) == 1
+    fields = completed[0]["kwargs"]["fields"]
+    assert fields["scheduled"] == 1
+    assert fields["repaired"] == 1
+
+
 def test_missing_digest_sweep_skips_stale_awaiting_draft_with_live_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

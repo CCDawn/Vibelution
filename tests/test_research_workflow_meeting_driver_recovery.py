@@ -85,6 +85,31 @@ def _isolate(tmp_path, monkeypatch):
         meeting_runtime._MEETING_DIGEST_JOBS.clear()
 
 
+def _capture_scene_events(monkeypatch) -> list[dict]:
+    """Capture quiet scene events emitted through the runtime scene service."""
+
+    from core.web.services import runtime_scene_service
+
+    events: list[dict] = []
+
+    def _capture(*args, **kwargs):
+        events.append({"args": args, "kwargs": kwargs})
+        return {"accepted": True}
+
+    monkeypatch.setattr(
+        runtime_scene_service, "record_runtime_scene_event_quietly", _capture
+    )
+    return events
+
+
+def _sweep_completed_events(events: list[dict]) -> list[dict]:
+    return [
+        event
+        for event in events
+        if event["args"][2] == "meeting_digest.stuck_sweep_completed"
+    ]
+
+
 def _team(tmp_path, monkeypatch) -> tuple[str, list[str]]:
     agents: dict[str, str] = {}
     for role in _TEAM_ROLES:
@@ -1465,11 +1490,18 @@ def test_stuck_digest_watchdog_fences_expired_lease_and_writes_retry_entry(
         meeting_runtime, "schedule_meeting_digest_redrive", _no_redrive
     )
 
+    events = _capture_scene_events(monkeypatch)
+
     summary = meeting_driver_work.sweep_stuck_digest_works(force=True)
 
-    assert summary["scanned"] == 2
+    # Actionable-only evidence: only the wedged intent counts as scanned; the
+    # fresh-lease intent is a healthy terminal scan folded into ``skipped``.
+    assert summary["scanned"] == 1
+    assert summary["skipped"] == 1
     assert summary["fenced"] == 1
     assert summary["summaryErrors"] == 1
+    assert len(_sweep_completed_events(events)) == 1
+    assert _sweep_completed_events(events)[0]["kwargs"]["fields"]["scanned"] == 1
     fenced = meeting_driver_work.latest_intent(
         team_id, stuck["meetingRoundId"], action_kind=meeting_driver_work.ACTION_RUN_DIGEST
     )
@@ -1489,6 +1521,37 @@ def test_stuck_digest_watchdog_fences_expired_lease_and_writes_retry_entry(
     second = meeting_driver_work.sweep_stuck_digest_works(force=True)
     assert second["fenced"] == 0
     assert second["summaryErrors"] == 0
+    # No actionable outcome on the idempotent pass -> no further sweep event.
+    assert len(_sweep_completed_events(events)) == 1
+
+
+def test_stuck_digest_watchdog_without_actionable_records_no_sweep_event(
+    tmp_path, monkeypatch
+):
+    """A terminal-only scan is a healthy no-op: skipped, and silent."""
+
+    _isolate(tmp_path, monkeypatch)
+    team_id, agent_ids = _team(tmp_path, monkeypatch)
+    meeting = _amend_meeting(
+        team_id,
+        _create_open_meeting(team_id, agent_ids, "meeting-digest-watchdog-terminal"),
+        status="summarizing",
+    )
+    _append_intent(
+        team_id,
+        meeting["meetingRoundId"],
+        actionKind=meeting_driver_work.ACTION_RUN_DIGEST,
+        status="failed",
+    )
+    events = _capture_scene_events(monkeypatch)
+
+    summary = meeting_driver_work.sweep_stuck_digest_works(force=True)
+
+    assert summary["scanned"] == 0
+    assert summary["skipped"] == 1
+    assert summary["fenced"] == 0
+    assert summary["summaryErrors"] == 0
+    assert _sweep_completed_events(events) == []
 
 
 def test_stuck_digest_watchdog_uses_deadline_and_skips_progressed_meetings(

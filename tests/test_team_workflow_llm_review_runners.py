@@ -261,6 +261,86 @@ def review_llm_scene_events(monkeypatch):
     return events
 
 
+@pytest.fixture(autouse=True)
+def _reset_review_llm_unavailable_throttle():
+    """Give every test a fresh per-reason 60s dedup window.
+
+    The unavailable diagnostics throttle themselves per reason over 60s of
+    module state; without a reset an earlier test's emission would silently
+    swallow a later test's expected warning/event inside the same window.
+    """
+
+    llm_review_runners.reset_review_llm_unavailable_throttle_for_tests()
+    yield
+    llm_review_runners.reset_review_llm_unavailable_throttle_for_tests()
+
+
+def test_review_llm_unavailable_throttles_same_reason_within_window(
+    caplog, review_llm_scene_events
+):
+    """A second call for the same reason inside 60s logs nothing extra."""
+
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        llm_review_runners._record_review_llm_unavailable(
+            "throttle_reason", detail="first"
+        )
+        llm_review_runners._record_review_llm_unavailable(
+            "throttle_reason", detail="second"
+        )
+        llm_review_runners._record_review_llm_unavailable("other_reason")
+
+    matching = [
+        event
+        for event in review_llm_scene_events
+        if event["args"][2:3] == ("review_llm.resolve.unavailable",)
+    ]
+    reasons = [event["kwargs"]["fields"]["reason"] for event in matching]
+    assert reasons.count("throttle_reason") == 1
+    assert reasons.count("other_reason") == 1
+    first = next(
+        event
+        for event in matching
+        if event["kwargs"]["fields"]["reason"] == "throttle_reason"
+    )
+    assert "suppressed" not in first["kwargs"]["fields"]
+    assert caplog.text.count("throttle_reason") == 1
+
+
+def test_review_llm_unavailable_folds_suppressed_count_after_window(
+    caplog, review_llm_scene_events
+):
+    """The next emission after the window carries the folded suppressed count."""
+
+    import logging
+    import time
+
+    llm_review_runners._record_review_llm_unavailable("spike_reason")
+    # Simulate a window that has passed while repeats were suppressed.
+    llm_review_runners._REVIEW_LLM_UNAVAILABLE_LAST_LOGGED_AT["spike_reason"] = (
+        time.monotonic() - 61.0
+    )
+    llm_review_runners._REVIEW_LLM_UNAVAILABLE_SUPPRESSED_COUNTS["spike_reason"] = 7
+
+    with caplog.at_level(logging.WARNING, logger=_REVIEW_LLM_LOGGER):
+        llm_review_runners._record_review_llm_unavailable("spike_reason")
+
+    matching = [
+        event
+        for event in review_llm_scene_events
+        if event["args"][2:3] == ("review_llm.resolve.unavailable",)
+        and event["kwargs"]["fields"].get("reason") == "spike_reason"
+    ]
+    # Two emissions total: the pre-window call plus the post-window one.
+    assert len(matching) == 2
+    assert "suppressed" not in matching[0]["kwargs"]["fields"]
+    assert matching[1]["kwargs"]["fields"]["suppressed"] == 7
+    # The window restarts from this emission: an immediate repeat is silent.
+    llm_review_runners._record_review_llm_unavailable("spike_reason")
+    assert len(matching) == 2
+
+
 def _assert_unavailable_scene_event(events, reason: str) -> dict[str, Any]:
     matching = [
         event

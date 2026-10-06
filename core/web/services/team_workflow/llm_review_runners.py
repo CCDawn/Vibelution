@@ -96,6 +96,16 @@ logger = logging.getLogger(__name__)
 
 _MAX_MESSAGES = 40
 
+# Per-reason 60s dedup for the DEV-fixture fallback diagnostics: the resident
+# sweep tick can re-enter the same unreachable resolution branch every
+# interval, so keep the first log + scene event per reason inside the window
+# and fold the rest into a ``suppressed`` count.  Keys are the bounded set of
+# literal reason strings at the call sites, so the dicts stay small.
+_REVIEW_LLM_UNAVAILABLE_WINDOW_S = 60.0
+_REVIEW_LLM_UNAVAILABLE_LAST_LOGGED_AT: dict[str, float] = {}
+_REVIEW_LLM_UNAVAILABLE_SUPPRESSED_COUNTS: dict[str, int] = {}
+_REVIEW_LLM_UNAVAILABLE_LOCK = threading.Lock()
+
 # Fallback wall-clock budget for one review-profile LLM call (digest draft and
 # the four hypothesis review runners).  Live budgets are receipt-derived:
 # ``review_llm_call_timeout_seconds`` resolves p95 latency from succeeded
@@ -1339,7 +1349,26 @@ def _record_review_llm_unavailable(reason: str, *, detail: str = "") -> None:
     silent: every unreachable branch emits one bounded warning log plus one
     quiet scene event naming the missing configuration.  Details are
     truncated and never include credentials or prompts.
+
+    Self-throttled per reason over a 60s window: the resident sweep tick can
+    re-enter the same unreachable branch every interval, so only the first
+    occurrence in the window logs and records; the rest fold into the
+    event's ``suppressed`` count on the next emitted entry.
     """
+
+    now_monotonic = time.monotonic()
+    with _REVIEW_LLM_UNAVAILABLE_LOCK:
+        last_logged_at = _REVIEW_LLM_UNAVAILABLE_LAST_LOGGED_AT.get(reason)
+        if (
+            last_logged_at is not None
+            and (now_monotonic - last_logged_at) < _REVIEW_LLM_UNAVAILABLE_WINDOW_S
+        ):
+            _REVIEW_LLM_UNAVAILABLE_SUPPRESSED_COUNTS[reason] = (
+                _REVIEW_LLM_UNAVAILABLE_SUPPRESSED_COUNTS.get(reason, 0) + 1
+            )
+            return
+        _REVIEW_LLM_UNAVAILABLE_LAST_LOGGED_AT[reason] = now_monotonic
+        suppressed = _REVIEW_LLM_UNAVAILABLE_SUPPRESSED_COUNTS.pop(reason, 0)
 
     safe_detail = str(detail or "").strip().replace("\n", " ")[:200]
     logger.warning(
@@ -1362,11 +1391,20 @@ def _record_review_llm_unavailable(reason: str, *, detail: str = "") -> None:
             fields={
                 "reason": str(reason),
                 **({"detail": safe_detail} if safe_detail else {}),
+                **({"suppressed": suppressed} if suppressed else {}),
             },
             lifecycle=False,
         )
     except Exception:  # noqa: BLE001 - diagnostics must never fail resolution
         return
+
+
+def reset_review_llm_unavailable_throttle_for_tests() -> None:
+    """Test seam: forget the throttle so the next call logs immediately."""
+
+    with _REVIEW_LLM_UNAVAILABLE_LOCK:
+        _REVIEW_LLM_UNAVAILABLE_LAST_LOGGED_AT.clear()
+        _REVIEW_LLM_UNAVAILABLE_SUPPRESSED_COUNTS.clear()
 
 
 def resolve_review_llm() -> dict[str, Any] | None:

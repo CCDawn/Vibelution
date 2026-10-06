@@ -152,7 +152,8 @@ class _DeferredExecutor:
             future.set_result(submitted["fn"](*submitted["args"], **submitted["kwargs"]))
 
 
-def test_generation_attempt_finishes_when_bound_meeting_is_fenced(monkeypatch):
+def test_generation_attempt_finishes_when_bound_meeting_is_fenced(monkeypatch, tmp_path: Path):
+    _isolate_stores(tmp_path, monkeypatch)
     attempt = {
         "recordKind": "generation_attempt",
         "attemptId": "attempt-terminal-bridge",
@@ -267,6 +268,27 @@ def test_user_stop_closes_every_active_review_for_the_same_selection(
     assert other_meeting["status"] == "open"
 
 
+def _isolate_stores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin every team-workflow store root this file can write into tmp_path.
+
+    Same isolation surface as the module pins inside ``_hf_env`` (data-home
+    env plus PROJECT_ROOT) minus its DEV research-config and receipt-authority
+    knobs: several tests here assert the real receipt/validation policy and
+    must not inherit those substitutions, while still never reaching the live
+    operator workspace.  The module-level ``PROJECT_ROOT`` constants resolve
+    through the identity-aware workspace branch at call time, so without the
+    pin a test that never opts into ``_hf_env`` writes the real instance.
+    """
+
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(meetings, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memories, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(selections, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(hrounds, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(templates, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+
+
 def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -320,7 +342,8 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return team_id, agents
 
 
-def test_hypothesis_participants_resolve_four_roles_in_contract_order(monkeypatch):
+def test_hypothesis_participants_resolve_four_roles_in_contract_order(monkeypatch, tmp_path: Path):
+    _isolate_stores(tmp_path, monkeypatch)
     room = {
         "participants": [
             {"agentId": "agent-evaluator", "teamRole": "experiment_ledger"},
@@ -403,7 +426,8 @@ def test_hypothesis_participants_resolve_four_roles_in_contract_order(monkeypatc
         ),
     ],
 )
-def test_hypothesis_participant_resolution_fails_closed(monkeypatch, participants, expected):
+def test_hypothesis_participant_resolution_fails_closed(monkeypatch, participants, expected, tmp_path: Path):
+    _isolate_stores(tmp_path, monkeypatch)
     monkeypatch.setattr(
         chat_room_service,
         "get_chat_room_detail",
@@ -497,7 +521,9 @@ def _selection_payload(agent_id: str, **overrides):
 
 def test_formal_selection_fans_out_one_scoped_meeting_per_candidate(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_runtime
     from core.web.services.team_workflow.research_runtime import (
@@ -591,8 +617,10 @@ def test_formal_selection_fans_out_one_scoped_meeting_per_candidate(
 
 def test_selection_fans_out_per_candidate_without_receipt_authority(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A temporarily unreadable Ledger cannot collapse candidate reviews."""
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_runtime
     from core.web.services.team_workflow.research_runtime import (
@@ -673,8 +701,10 @@ def test_selection_fans_out_per_candidate_without_receipt_authority(
 
 def test_selection_reuses_server_generation_scope_when_receipt_unavailable(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A run-created generation scope retains candidate room identity on retry."""
+    _isolate_stores(tmp_path, monkeypatch)
     from core.research.workflow.contracts.discussion_scope import (
         WorkflowDiscussionScopeV1,
     )
@@ -773,7 +803,9 @@ def test_selection_reuses_server_generation_scope_when_receipt_unavailable(
 
 def test_question_run_scopes_candidate_generation_before_receipt_resolution(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow.research_runtime import run_creation
 
     captured: dict[str, object] = {}
@@ -825,7 +857,9 @@ def test_question_run_scopes_candidate_generation_before_receipt_resolution(
 
 def test_stage_one_question_run_auto_opens_exploratory_generation(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow.research_runtime import run_creation
 
     captured: dict[str, object] = {}
@@ -858,7 +892,9 @@ def test_stage_one_question_run_auto_opens_exploratory_generation(
 
 def test_review_meeting_fan_in_waits_for_every_selected_candidate(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
 
     team_id = "team-fan-in"
@@ -923,6 +959,7 @@ def test_review_meeting_fan_in_waits_for_every_selected_candidate(
 
 def test_fan_in_skips_superseded_attempt_and_binds_latest_authority(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A superseded round-1 attempt with a reopened round 2 is not authority.
 
@@ -931,6 +968,7 @@ def test_fan_in_skips_superseded_attempt_and_binds_latest_authority(
     group binds each candidate's newest authoritative attempt across rounds
     (roundIndex = highest authoritative round for idempotent close replays).
     """
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
 
     team_id = "team-fan-in-superseded"
@@ -1022,6 +1060,7 @@ def test_fan_in_skips_superseded_attempt_and_binds_latest_authority(
 
 def test_fan_in_folds_retry_attempt_links_to_newest(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Retry attempts reuse (candidateId, roundIndex) with one link per attempt.
 
@@ -1030,6 +1069,7 @@ def test_fan_in_folds_retry_attempt_links_to_newest(
     review dispatch raises "duplicate candidate bindings" on every close and
     the HF-3 HypothesisRound can never converge.
     """
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
 
     team_id = "team-fan-in-retries"
@@ -1111,8 +1151,10 @@ def test_fan_in_folds_retry_attempt_links_to_newest(
 
 def test_fan_in_skips_execution_stopped_review_attempt(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A fenced partial review cannot become the candidate's authority."""
+    _isolate_stores(tmp_path, monkeypatch)
 
     from core.web.services import team_service
 
@@ -1173,10 +1215,12 @@ def test_fan_in_skips_execution_stopped_review_attempt(
 
 def test_fan_in_waits_when_superseded_candidate_has_no_successor(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A candidate whose newest attempt is superseded with no successor stays
     pending: the group must not go ready and must not treat the abandoned
     attempt as review evidence."""
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
 
     team_id = "team-fan-in-superseded-no-successor"
@@ -1235,7 +1279,9 @@ def test_fan_in_waits_when_superseded_candidate_has_no_successor(
 
 def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
     from core.web.services.team_workflow import (
         hypothesis_review_executor,
@@ -1378,7 +1424,9 @@ def test_hypothesis_round_fan_in_keeps_every_meeting_authority(
 
 def test_generate_round_writes_all_three_review_authorities(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow import hypothesis_rounds as hrounds
     from core.web.services.team_workflow import hypothesis_selection as selections
     from core.web.services.team_workflow.research_runtime import (
@@ -1490,6 +1538,7 @@ def test_generate_round_writes_all_three_review_authorities(
 
 def test_dimension_reviews_persistence_failure_keeps_run_identity_bound(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Regression: a failing dimension-reviews write must not unbind the run.
 
@@ -1499,6 +1548,7 @@ def test_dimension_reviews_persistence_failure_keeps_run_identity_bound(
     authority and must never leak a ``NameError`` into the downstream
     review-independence authority.
     """
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow import hypothesis_rounds as hrounds
     from core.web.services.team_workflow import hypothesis_selection as selections
     from core.web.services.team_workflow.research_runtime import (
@@ -1601,6 +1651,7 @@ def test_dimension_reviews_persistence_failure_keeps_run_identity_bound(
 
 def test_dimension_reviews_import_failure_carries_real_reason(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Regression: a missing dimension-reviews dependency fails truthfully.
 
@@ -1612,6 +1663,7 @@ def test_dimension_reviews_import_failure_carries_real_reason(
     as the real dependency error on the blocked dimension authority while the
     downstream authority still writes with the bound identity.
     """
+    _isolate_stores(tmp_path, monkeypatch)
     import sys
 
     from core.web.services.team_workflow.research_runtime import (
@@ -1761,7 +1813,9 @@ def _canonical_stage_one_question_detail() -> dict[str, Any]:
 
 def test_stage_one_plan_writer_projects_only_canonical_question_sections(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow.research_runtime import (
         stage_one_plan_artifact_writer as writer,
     )
@@ -1831,7 +1885,9 @@ def test_stage_one_plan_writer_projects_only_canonical_question_sections(
 
 def test_stage_one_plan_writer_clamps_oversized_competition_view_at_write_time(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow import challenge_question_runs
     from core.web.services.team_workflow.research_runtime import (
         stage_one_plan_artifact_writer as writer,
@@ -1924,7 +1980,9 @@ def test_stage_one_plan_writer_clamps_oversized_competition_view_at_write_time(
 
 def test_stage_one_plan_writer_blocks_before_store_when_canonical_sections_are_missing(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow.research_runtime import (
         stage_one_plan_artifact_writer as writer,
     )
@@ -1955,7 +2013,9 @@ def test_stage_one_plan_writer_blocks_before_store_when_canonical_sections_are_m
 
 def test_round_revision_authority_requires_explicit_hash_bound_envelope(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow.research_runtime import (
         feedback_iterations_artifact_writer as writer,
     )
@@ -2010,7 +2070,9 @@ def test_round_revision_authority_requires_explicit_hash_bound_envelope(
 
 def test_review_revision_requires_provider_receipt_and_continuous_grounded_parent(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow import hypothesis_review_executor
     from core.web.services.team_workflow.research_runtime import (
         feedback_iterations_artifact_writer as writer,
@@ -2206,7 +2268,9 @@ def test_review_revision_requires_provider_receipt_and_continuous_grounded_paren
 
 def test_formal_grounded_generation_materializes_real_r0_to_r1_authority(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow import hypothesis_review_executor
     from core.web.services.team_workflow.research_runtime import (
         feedback_iterations_artifact_writer as writer,
@@ -2300,7 +2364,9 @@ def test_formal_grounded_generation_materializes_real_r0_to_r1_authority(
 
 def test_accepted_round_materializes_stage_one_plan_from_approved_question_authority(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow.research_runtime import question_launch
     from core.web.services.team_workflow.research_runtime import (
         stage_one_plan_artifact_writer as writer,
@@ -2416,7 +2482,9 @@ def _patch_live_plan_projection_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_live_stage_one_question_detail_binds_revision_envelope_r2_claim(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     _patch_live_plan_projection_inputs(monkeypatch)
 
     detail = chain._project_live_stage_one_question_detail(
@@ -2446,7 +2514,9 @@ def test_live_stage_one_question_detail_binds_revision_envelope_r2_claim(
 
 def test_live_stage_one_question_detail_fails_closed_on_revision_hash_conflict(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     _patch_live_plan_projection_inputs(monkeypatch)
 
     detail = chain._project_live_stage_one_question_detail(
@@ -2466,7 +2536,9 @@ def test_live_stage_one_question_detail_fails_closed_on_revision_hash_conflict(
 
 def test_live_stage_one_question_detail_keeps_r1_without_revision_envelope(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     _patch_live_plan_projection_inputs(monkeypatch)
 
     detail = chain._project_live_stage_one_question_detail(
@@ -2487,7 +2559,9 @@ def test_live_stage_one_question_detail_keeps_r1_without_revision_envelope(
 
 def test_chain_state_projects_first_open_candidate_anchor(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
 
     team_id = "team-anchor"
@@ -2591,7 +2665,9 @@ def test_chain_state_projects_first_open_candidate_anchor(
 
 def test_chain_state_ignores_review_artifacts_from_other_workflow_runs(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services import team_service
 
     team_id = "team-run-scoped-state"
@@ -3110,8 +3186,10 @@ def test_collection_decisions_without_workflow_run_keep_legacy_binding(
 
 def test_recovery_binding_resolves_meeting_run_and_question_project(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Request recovery re-derives the run scope from the linked meeting."""
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow import research_projects
 
     monkeypatch.setattr(
@@ -3140,8 +3218,10 @@ def test_recovery_binding_resolves_meeting_run_and_question_project(
 
 def test_recovery_binding_survives_missing_meeting(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A missing legacy meeting keeps recovery on the unscoped legacy payload."""
+    _isolate_stores(tmp_path, monkeypatch)
     from core.web.services.team_workflow import meeting_rounds as meetings_module
 
     def missing_meeting(_team_id: str, _meeting_round_id: str) -> dict:
@@ -3187,7 +3267,8 @@ def test_collection_decision_marks_request_failed_when_background_start_rejects(
     }
 
 
-def test_collection_facade_accepts_nested_start_response(monkeypatch) -> None:
+def test_collection_facade_accepts_nested_start_response(monkeypatch, tmp_path: Path) -> None:
+    _isolate_stores(tmp_path, monkeypatch)
     scope_fields = _scope_fields("agent-nested")
     scope_hash = scope_hash_for(
         **{field: scope_fields[field] for field in chain._SCOPE_FIELDS},
