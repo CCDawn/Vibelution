@@ -1226,11 +1226,14 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         supplied_agent = None
     agent_instance = supplied_agent or (s.get_agent(agent_id, include_archived=False) if agent_id else None)
     historical_agent = None if agent_instance else (s.get_agent(agent_id, include_archived=True) if agent_id else None)
+    # archived 兼容视图（include_archived=True）在 agent 未归档时返回同一条
+    # 活跃记录，因此状态直接取已取到的 instance/historical，省掉一次每轮
+    # 重复的 agent 目录读取。
     current_agent_status = ""
     if agent_id:
         try:
             current_agent_status = str(
-                (s.get_agent(agent_id, include_archived=True) or {}).get("status") or ""
+                (agent_instance or historical_agent or {}).get("status") or ""
             ).strip().lower()
         except Exception:
             current_agent_status = ""

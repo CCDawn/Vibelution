@@ -25,10 +25,69 @@ increment), or ``anchor+estimate`` (provider base plus local increment).
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 from core.llm.usage_ledger import usage_ledger_path
+
+
+# Per-iteration gate metering used to pay a full read-only SQLite
+# connect+query per agent iteration for an anchor that can only change when
+# the ledger file changes (usage rows are append-only). The cache below keys
+# the anchor value by the ledger file signature (mtime_ns, size): a signature
+# hit is exactly as fresh as re-querying, because any committed write to the
+# ledger changes the file, and a stat() costs a fraction of a connect.
+# ``_MISSING`` caches the "no applicable row for this id" answer so repeated
+# gate calls with an empty result also skip the query.
+_ANCHOR_CACHE_LOCK = threading.Lock()
+_ANCHOR_CACHE: dict[tuple[str, str, str, int, int], dict[str, Any] | None] = {}
+_ANCHOR_CACHE_LIMIT = 8
+_MISSING = object()
+_LEDGER_PATH_CACHE: dict[str, tuple[float, Path]] = {}
+_LEDGER_PATH_CACHE_TTL_SECONDS = 60.0
+
+
+def reset_anchor_cache() -> None:
+    """Clear the anchor and ledger-path caches (test and diagnostic hook)."""
+
+    with _ANCHOR_CACHE_LOCK:
+        _ANCHOR_CACHE.clear()
+        _LEDGER_PATH_CACHE.clear()
+
+
+def _cached_usage_ledger_path(project_root: Path | None) -> Path:
+    """Resolve the ledger path with a short TTL memo.
+
+    ``usage_ledger_path`` walks the developer-sandbox/formal workspace routing
+    (config reads + state files) on every call; the routing decision cannot
+    change without a developer-mode/config change, so a 60s memo keeps the
+    per-iteration gate path down to one stat. Toggling developer mode may take
+    up to the TTL to be observed here, which only affects where this strictly
+    read-only lookup points, never what it returns for a given ledger.
+    """
+
+    key = str(project_root or "")
+    now = time.monotonic()
+    with _ANCHOR_CACHE_LOCK:
+        cached = _LEDGER_PATH_CACHE.get(key)
+        if cached is not None and now - cached[0] < _LEDGER_PATH_CACHE_TTL_SECONDS:
+            return cached[1]
+    path = usage_ledger_path(project_root)
+    with _ANCHOR_CACHE_LOCK:
+        _LEDGER_PATH_CACHE[key] = (now, path)
+        if len(_LEDGER_PATH_CACHE) > 8:
+            _LEDGER_PATH_CACHE.pop(next(iter(_LEDGER_PATH_CACHE)))
+    return path
+
+
+def _ledger_file_signature(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (int(stat.st_mtime_ns), int(stat.st_size))
 
 
 _EMPTY_AUDIT_KEYS: tuple[str, ...] = (
@@ -67,6 +126,11 @@ def load_provider_usage_anchor(
     columns from different metadata aliases. Any failure — missing ledger
     file, missing table, locked database — returns ``None`` so the gate can
     fall back to the pure estimate instead of breaking the turn.
+
+    The result is memoized per (scoped ids, ledger file signature); the memo
+    is keyed by ``(mtime_ns, size)`` of the ledger file, so it can never serve
+    an anchor older than the file itself. Only successful queries are cached —
+    transient SQLite failures (e.g. a locked database) stay uncached.
     """
 
     scoped_ids = [
@@ -77,11 +141,36 @@ def load_provider_usage_anchor(
     if not scoped_ids:
         return None
     try:
-        path = usage_ledger_path(project_root)
+        path = _cached_usage_ledger_path(project_root)
     except Exception:
         return None
-    if not path.exists():
+    signature = _ledger_file_signature(path)
+    if signature is None:
         return None
+    cache_key = (tuple(scoped_ids), str(path), signature[0], signature[1])
+    with _ANCHOR_CACHE_LOCK:
+        cached = _ANCHOR_CACHE.get(cache_key, _MISSING)
+    if cached is not _MISSING:
+        return dict(cached) if isinstance(cached, dict) else None
+    anchor, query_ok = _query_provider_usage_anchor(path, scoped_ids)
+    if query_ok:
+        with _ANCHOR_CACHE_LOCK:
+            _ANCHOR_CACHE[cache_key] = dict(anchor) if isinstance(anchor, dict) else anchor
+            while len(_ANCHOR_CACHE) > _ANCHOR_CACHE_LIMIT:
+                _ANCHOR_CACHE.pop(next(iter(_ANCHOR_CACHE)))
+    return anchor
+
+
+def _query_provider_usage_anchor(
+    path: Path,
+    scoped_ids: list[str],
+) -> tuple[dict[str, Any] | None, bool]:
+    """Run the read-only anchor query; ``(result, query_ok)``.
+
+    ``query_ok=False`` marks a transient failure (locked DB, missing table):
+    the caller must not cache it, so the next gate retries the query.
+    """
+
     connection: sqlite3.Connection | None = None
     try:
         try:
@@ -108,10 +197,10 @@ def load_provider_usage_anchor(
                     "inputTokens": _nonnegative_int(row["input_tokens"]),
                     "outputTokens": _nonnegative_int(row["output_tokens"]),
                     "totalTokens": _nonnegative_int(row["total_tokens"]),
-                }
-        return None
+                }, True
+        return None, True
     except Exception:
-        return None
+        return None, False
     finally:
         if connection is not None:
             try:
@@ -235,4 +324,5 @@ __all__ = [
     "empty_anchor_audit",
     "estimate_tokens_with_anchor",
     "load_provider_usage_anchor",
+    "reset_anchor_cache",
 ]
