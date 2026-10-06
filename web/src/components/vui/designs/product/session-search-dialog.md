@@ -80,7 +80,9 @@ import { VSessionSearchDialog, type VSessionSearchDialogItem } from "@/component
 ### 视觉与状态
 
 - 行三段：标题（高亮）+ 摘要预览（截断、高亮）+ meta（Agent · 状态 · 时间）。
-- 键盘：↑/↓ 移动高亮，Enter 打开；hover 同步高亮行。
+- 键盘：搜索框中 ↑/↓ 移动高亮、Enter 打开；hover 同步高亮行。Tab 聚焦结果或「加载更多」后，Enter 执行该按钮动作，不被高亮行拦截。
+- Tab 聚焦结果时同步高亮；结果行内 ↑/↓ 同时移动焦点和高亮，Enter 打开该行。过滤控件与分页按钮保留自己的按键行为，输入法组合输入期间不执行搜索打开动作。
+- 关键词变化后，挂载面的 `useSessionSearchQuery` 立即撤下旧结果、总数和分页入口，并显示加载态；防抖等待期间的 Enter 不得打开旧查询结果。
 - 空态 `VStateSurface tone="empty"`，加载态 `tone="loading"`；总数与已加载数
   常驻底部摘要行。
 

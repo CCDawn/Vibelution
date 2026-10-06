@@ -38,6 +38,8 @@ export type SessionStreamProtocolTrace = {
   payloadLength: number;
   sessionId: string;
   ledgerSeq: number;
+  /** assistant_delta transport-continuity sequence (0 on other event types). */
+  deltaSeq: number;
   /** Journal sequence from the SSE id: line (Last-Event-ID resume cursor). */
   sseEventId: number;
   turnId: string;
@@ -121,6 +123,7 @@ export function sessionStreamProtocolTelemetryFields(trace: SessionStreamProtoco
     streamRejectReason: trace.rejectReason ?? "",
     streamPayloadLength: trace.payloadLength,
     streamLedgerSeq: trace.ledgerSeq,
+    streamDeltaSeq: trace.deltaSeq,
     streamSseEventId: trace.sseEventId,
     streamTurnId: trace.turnId,
     streamItemId: trace.itemId,
@@ -177,6 +180,7 @@ function baseTrace<T extends SessionStreamEventType>(
     // assistant_delta carries ledgerSeq; journal replays carry seq; the resume
     // marker's watermark is toSeq. All three are the same journal counter.
     ledgerSeq: normalizedNumber(seqCarrier?.ledgerSeq ?? seqCarrier?.seq ?? seqCarrier?.toSeq),
+    deltaSeq: normalizedNumber(assistantPayload?.deltaSeq),
     sseEventId: normalizedNumber(input.eventId),
     turnId: String(assistantPayload?.turnId ?? ""),
     itemId: String(assistantPayload?.turnItems?.[0]?.itemId ?? ""),

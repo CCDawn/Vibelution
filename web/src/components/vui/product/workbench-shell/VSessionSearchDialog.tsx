@@ -127,13 +127,27 @@ export function VSessionSearchDialog({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || !(event.target instanceof Element)) return;
+    const result = event.target.closest<HTMLButtonElement>("button[data-index]");
+    const fromSearch = event.target.matches('input[type="search"]');
+    // Filters and pagination own their keyboard behavior.
+    if (!result && !fromSearch) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex((current) => Math.min(current + 1, items.length - 1));
+      const current = result ? Number(result.dataset.index) : activeIndex;
+      const next = Math.min(current + 1, Math.max(0, items.length - 1));
+      setActiveIndex(next);
+      if (result) listRef.current?.querySelector<HTMLButtonElement>(`[data-index="${next}"]`)?.focus();
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex((current) => Math.max(current - 1, 0));
+      const current = result ? Number(result.dataset.index) : activeIndex;
+      const next = Math.max(current - 1, 0);
+      setActiveIndex(next);
+      if (result) listRef.current?.querySelector<HTMLButtonElement>(`[data-index="${next}"]`)?.focus();
     } else if (event.key === "Enter") {
+      // Tab-focused results and pagination retain their native button action.
+      // Only Enter from the search field opens the highlighted result.
+      if (event.target instanceof Element && event.target.closest("button")) return;
       event.preventDefault();
       const item = items[activeIndex];
       if (item) openItem(item);
@@ -188,6 +202,7 @@ export function VSessionSearchDialog({
                     "data-[active=true]:border-[var(--vui-border)] data-[active=true]:bg-[var(--vui-surface-inset)]"
                   }
                   onMouseEnter={() => setActiveIndex(index)}
+                  onFocus={() => setActiveIndex(index)}
                   onClick={() => openItem(item)}
                 >
                   <span className="[font-size:var(--vui-font-xs)]">

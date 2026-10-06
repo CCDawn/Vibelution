@@ -95,6 +95,15 @@ def _quiet_llm_telemetry(monkeypatch):
     monkeypatch.setattr(client_mod, "_publish_llm_status_event", lambda *args, **kwargs: None)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_route_unsupported_params_cache():
+    """per-route 不支持参数负缓存是模块级状态，逐用例隔离保证既有断言
+    （剥参探测次数、事件序列）不因用例间缓存泄漏而漂移。"""
+    client_mod._reset_llm_route_unsupported_params_cache()
+    yield
+    client_mod._reset_llm_route_unsupported_params_cache()
+
+
 def _unsupported_params_error(param: str) -> Exception:
     return Exception(
         f"litellm.UnsupportedParamsError: openai does not support parameters: ['{param}']"
@@ -268,8 +277,13 @@ def test_two_degrade_rounds_exhaust_and_third_unknown_param_fails_normally():
     assert calls[2] == (False, False, True)
 
 
-def test_param_strip_budget_is_per_request():
-    """剥参预算按请求独立：上一请求剥过参不影响下一请求的完整预算。"""
+def test_param_strip_budget_is_per_request(monkeypatch):
+    """剥参预算按请求独立：上一请求剥过参不影响下一请求的完整预算。
+
+    2026-10-06 起 route 级负缓存会让下一请求直接预剥（免探测）；为继续
+    单测「预算按请求隔离」这一语义，这里在两通之间显式清空缓存，回到
+    无记忆形态。
+    """
     config = _make_config_with_service_class("aggregator")
     calls: list[bool] = []
 
@@ -281,6 +295,7 @@ def test_param_strip_budget_is_per_request():
 
     client = LLMClient(config=config, backend=backend)
     assert client.invoke([{"role": "user", "content": "ping"}]).content == "ok"
+    client_mod._reset_llm_route_unsupported_params_cache()
     assert client.invoke([{"role": "user", "content": "ping"}]).content == "ok"
     # 两个请求各自经历「带参被拒 → 剥参成功」，第二个请求预算未被上一请求吃掉。
     assert calls == [True, False, True, False]
@@ -549,3 +564,140 @@ def test_stream_direct_provider_protocol_error_fails_fast(monkeypatch):
 
     assert exc_info.value.category == "provider_protocol_error"
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# D: per-route 不支持参数负缓存（2026-10-06 固定开销治理）
+#
+# 聚合池节点拒 reasoning_effort 的 400 探测 + 剥参重发是每通重付的固定开销；
+# 剥参重发成功后 route 的能力事实稳定，按 route_key 负缓存、下次发送前预剥。
+# ---------------------------------------------------------------------------
+
+
+def test_second_invoke_same_route_pre_strips_without_probe(monkeypatch):
+    """同 route 第二通直接预剥：不再出现 400 探测，事件流标 cache hit。"""
+    config = _make_config_with_service_class("aggregator")
+    calls: list[bool] = []
+    scene: list[tuple[tuple, dict]] = []
+
+    def backend(payload):
+        calls.append("reasoning_effort" in payload)
+        if "reasoning_effort" in payload:
+            raise _unsupported_params_error("reasoning_effort")
+        return dict(_CHAT_OK)
+
+    monkeypatch.setattr(
+        client_mod, "_record_llm_scene_event", lambda *a, **k: scene.append((a, k))
+    )
+
+    LLMClient(config=config, backend=backend).invoke([{"role": "user", "content": "ping"}])
+    scene.clear()
+    LLMClient(config=config, backend=backend).invoke([{"role": "user", "content": "ping"}])
+
+    # 第一通：探测（带参）→ 剥参重发成功；第二通：首发即无参，只有一次后端调用。
+    assert calls == [True, False, False]
+    assert not any(a[1] == "llm.invoke.unsupported_params_degraded" for a, k in scene)
+    hits = [k for a, k in scene if a[1] == "llm.invoke.unsupported_params_cache_hit"]
+    assert hits and hits[0]["fields"]["cacheHit"] is True
+    assert hits[0]["fields"]["strippedParams"] == ["reasoning_effort"]
+
+
+def test_second_stream_same_route_pre_strips_without_probe(monkeypatch):
+    """流式路径同 route 第二通直接预剥：不探测，cache hit 事件带参名。"""
+    config = _make_stream_config("aggregator")
+    calls: list[object] = []
+    scene: list[tuple[tuple, dict]] = []
+
+    def default_responses_backend(payload):
+        calls.append(payload.get("reasoning"))
+        if payload.get("reasoning") is not None:
+            raise _unsupported_params_error("reasoning")
+        return _completed_response_events()
+
+    monkeypatch.setattr(client_mod, "_default_responses_backend", default_responses_backend)
+    monkeypatch.setattr(
+        client_mod, "_record_llm_scene_event", lambda *a, **k: scene.append((a, k))
+    )
+
+    list(LLMClient(config=config).stream_events([{"role": "user", "content": "ping"}]))
+    scene.clear()
+    events = list(LLMClient(config=config).stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    # 第一通：带 reasoning 探测 → 剥参重发成功；第二通：首发即无 reasoning。
+    assert calls[0] is not None and calls[1] is None and calls[2] is None
+    assert len(calls) == 3
+    assert not any(a[1] == "llm.stream.unsupported_params_degraded" for a, k in scene)
+    hits = [k for a, k in scene if a[1] == "llm.stream.unsupported_params_cache_hit"]
+    assert hits and hits[0]["fields"]["strippedParams"] == ["reasoning"]
+    succeeded = [k for a, k in scene if a[1] == "llm.stream.succeeded"]
+    assert succeeded
+    # 预剥不属于降级：成功事件语义保持原样。
+    assert succeeded[0]["fields"]["unsupportedParamsStripped"] is False
+
+
+def test_cache_isolated_across_provider_and_model(monkeypatch):
+    """不同 provider/model 组成不同 route：不吃别家缓存，仍需一次探测。"""
+    config_a = _make_config_with_service_class("aggregator")
+    config_b = _make_config_with_service_class(
+        "aggregator",
+        **{
+            "llm.providers.default.base_url": "https://other.example.test/v1",
+            "llm.profiles.primary.model": "other-model",
+        },
+    )
+    calls_a: list[bool] = []
+    calls_b: list[bool] = []
+
+    def backend_a(payload):
+        calls_a.append("reasoning_effort" in payload)
+        if len(calls_a) == 1:
+            raise _unsupported_params_error("reasoning_effort")
+        return dict(_CHAT_OK)
+
+    def backend_b(payload):
+        calls_b.append("reasoning_effort" in payload)
+        if "reasoning_effort" in payload:
+            raise _unsupported_params_error("reasoning_effort")
+        return dict(_CHAT_OK)
+
+    monkeypatch.setattr(client_mod, "_record_llm_scene_event", lambda *a, **k: None)
+
+    LLMClient(config=config_a, backend=backend_a).invoke([{"role": "user", "content": "ping"}])
+    LLMClient(config=config_b, backend=backend_b).invoke([{"role": "user", "content": "ping"}])
+    LLMClient(config=config_b, backend=backend_b).invoke([{"role": "user", "content": "ping"}])
+    # B 与 A 不同 route：首通仍完整探测，第二通才吃到 B 自己的缓存。
+    assert calls_a == [True, False]
+    assert calls_b == [True, False, False]
+
+
+def test_cache_written_only_after_degraded_resend_succeeds(monkeypatch):
+    """缓存写入条件 = 剥参重发成功：重发仍失败时不写，下一通照常探测。"""
+    config = _make_config_with_service_class("aggregator")
+    calls: list[bool] = []
+    strip_resend_fails = True
+
+    def backend(payload):
+        calls.append("reasoning_effort" in payload)
+        if "reasoning_effort" in payload:
+            raise _unsupported_params_error("reasoning_effort")
+        if strip_resend_fails:
+            raise Exception("upstream 500 exploded")
+        return dict(_CHAT_OK)
+
+    monkeypatch.setattr(client_mod, "_record_llm_scene_event", lambda *a, **k: None)
+
+    with pytest.raises(LLMError):
+        LLMClient(config=config, backend=backend).invoke([{"role": "user", "content": "ping"}])
+    assert calls.count(True) == 1  # 只有首发带参探测；剥参后的重试都未成功。
+
+    strip_resend_fails = False
+    LLMClient(config=config, backend=backend).invoke([{"role": "user", "content": "ping"}])
+    # 上一通失败未写缓存：这一通仍要重新探测一次，成功后才写入。
+    assert calls.count(True) == 2
+    assert calls[-1] is False
+
+    LLMClient(config=config, backend=backend).invoke([{"role": "user", "content": "ping"}])
+    # 这一通起缓存生效：首发即预剥。
+    assert calls[-1] is False
+    assert calls.count(True) == 2

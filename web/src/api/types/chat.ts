@@ -1299,7 +1299,22 @@ export type SessionAssistantDeltaStreamEvent = {
   type: "assistant_delta";
   sessionId: string;
   turnId: string;
+  /**
+   * Journal watermark at publish time. NOT a transport sequence: mid-turn
+   * journal boundary appends advance it between frames. Retained as the
+   * journal cursor (SSE id line / Last-Event-ID resume, edit-resubmit
+   * staleness guards); continuity gating must use `deltaSeq` instead.
+   */
   ledgerSeq?: number;
+  /**
+   * This frame's own transport-continuity sequence: monotonic per session,
+   * shared by every subscriber. Frames the server coalesced by design widen
+   * `deltaSeqFrom` to the oldest merged sequence, so a range that starts
+   * beyond `lastApplied + 1` is the only true transport-loss signature.
+   */
+  deltaSeq?: number;
+  /** Oldest delta sequence covered by this frame; equals `deltaSeq` unless coalesced. */
+  deltaSeqFrom?: number;
   stage: string;
   turnItems: SessionTurnItem[];
   /**

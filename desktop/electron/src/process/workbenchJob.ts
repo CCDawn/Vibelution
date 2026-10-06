@@ -202,14 +202,16 @@ export function captureTrackedWorkbenchJobRetirement(workspaceRoot: string, pid:
   };
 }
 
-async function waitUntilIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative): Promise<boolean> {
+async function waitUntilIdle(job: WorkbenchJobHandle, native: WorkbenchJobNative, isReleased?: () => boolean): Promise<boolean> {
   const deadline = Date.now() + JOB_TERMINATE_WAIT_MS;
   while (Date.now() < deadline) {
+    if (isReleased?.()) return true;
     if (native.activeCount(job) === 0 && native.drainStatus(job).complete) {
       return true;
     }
     await delay(JOB_TERMINATE_POLL_MS);
   }
+  if (isReleased?.()) return true;
   return native.activeCount(job) === 0 && native.drainStatus(job).complete;
 }
 
@@ -250,9 +252,13 @@ export async function closeTrackedWorkbenchJob(workspaceRoot: string): Promise<b
     return false;
   }
   try {
-    if (current.native.activeCount(current.job) !== 0 || !current.native.drainStatus(current.job).complete) {
+    // Process exit can precede pipe draining. Preserve ownership while waiting,
+    // and accept the reaper releasing this same handle during the wait.
+    if (!(await waitUntilIdle(current.job, current.native, () => Boolean(current.released)))) {
       return false;
     }
+    if (current.released) return true;
+    if (tracked.get(current.key) !== current) return false;
     reportDrainIssues(current.workspaceRoot, current.native.drainStatus(current.job));
     current.native.close(current.job);
   } catch {

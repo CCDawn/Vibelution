@@ -184,9 +184,9 @@ export function planAppliedSessionDetail(
 }
 
 export type AssistantDeltaDrainHoldInfo = {
-  /** Ledger sequence of the first gap-held frame. */
-  heldLedgerSeq: number;
-  /** Watermark the recovery resubscribes from (lastAppliedSeq + 1). */
+  /** Delta sequence of the first gap-held frame. */
+  heldDeltaSeq: number;
+  /** Watermark the recovery resubscribes from (lastAppliedSeq + 1, delta space). */
   watermark: number;
   /** Entries skipped by the hold (the held frame plus everything behind it). */
   heldCount: number;
@@ -209,7 +209,7 @@ export function planAppliedAssistantDeltaDrain(
         // instead of corrupting the projection; the watermark recovery brings
         // the authoritative state that closes the gap.
         holdInfo = {
-          heldLedgerSeq: gateDecision.seq,
+          heldDeltaSeq: gateDecision.seq,
           watermark: gateDecision.watermark,
           heldCount: entries.length - entryIndex,
         };

@@ -1,5 +1,5 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
-import { type ReactNode } from "react";
+import { type ReactNode, useMemo, useRef } from "react";
 
 import { cn } from "../../lib/cn";
 
@@ -88,7 +88,16 @@ export function ShadcnDropdownMenu({
   contentProps,
 }: ShadcnDropdownMenuProps) {
   const anchored = Boolean(position);
+  const returnFocusTarget = useRef<HTMLElement | null>(null);
+  const escapeDismissed = useRef(false);
   const controlledOpen = open ?? (anchored ? true : undefined);
+  // Capture before Radix mounts its focus scope; retain through the closing render.
+  const focusBeforeOpen = useMemo(() => (
+    anchored && controlledOpen && typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+  ), [anchored, controlledOpen]);
+  if (focusBeforeOpen) returnFocusTarget.current = focusBeforeOpen;
   const resolvedSide = side ?? "bottom";
   const resolvedAlign = align ?? (anchored ? "start" : "start");
   const resolvedSideOffset = sideOffset ?? (anchored ? 2 : 4);
@@ -119,10 +128,18 @@ export function ShadcnDropdownMenu({
           data-renderer="radix"
           data-anchored={anchored ? "true" : undefined}
           className={cn(contentBaseClass, contentClassName, className)}
+          onEscapeKeyDown={() => {
+            escapeDismissed.current = true;
+          }}
           onCloseAutoFocus={(event) => {
-            // Context menus are dismissed externally; avoid stealing focus back to a virtual anchor.
+            // A virtual anchor is not the user's trigger. Escape restores the
+            // original focus; selecting an action lets its destination own focus.
             if (anchored) {
               event.preventDefault();
+              if (escapeDismissed.current && returnFocusTarget.current?.isConnected) {
+                returnFocusTarget.current.focus({ preventScroll: true });
+              }
+              escapeDismissed.current = false;
             }
           }}
           {...contentProps}

@@ -1044,6 +1044,7 @@ from core.web.services.session.publish import (
     _session_stream_preview_message_components,
     _publish_session_detail_snapshot,
     _publish_session_assistant_delta,
+    _next_session_delta_seq,
     _merge_session_assistant_delta_events,
     _coalesce_session_assistant_delta_queue,
     _put_session_stream_event,
@@ -1167,6 +1168,9 @@ INTERNAL_AUTO_CONTINUE_MAX_TURNS = 3
 SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS = 4
 _SESSION_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
 _SESSION_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
+# Per-session assistant-delta transport sequence (publish.py
+# `_next_session_delta_seq`); guarded by _SESSION_STREAM_SUBSCRIBERS_LOCK.
+_SESSION_STREAM_DELTA_SEQ: dict[str, int] = {}
 _SESSION_STREAM_HEARTBEAT_SECONDS = 15.0
 _SESSION_STREAM_QUEUE_SIZE = 8
 _SESSION_STREAM_COALESCED_EVENT_TYPES = {"session_detail"}

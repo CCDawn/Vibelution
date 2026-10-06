@@ -152,4 +152,89 @@ describe("VSessionSearchDialog", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it.each(["result", "load-more"])("Enter activates the focused %s button without opening the highlighted row", async (targetKind) => {
+    const firstOpen = vi.fn();
+    const secondOpen = vi.fn();
+    const onLoadMore = vi.fn();
+    act(() => {
+      root.render(
+        <VSessionSearchDialog
+          open
+          onOpenChange={() => {}}
+          query=""
+          onQueryChange={() => {}}
+          items={[item({ onOpen: firstOpen }), item({ id: "session-2", title: "第二条", onOpen: secondOpen })]}
+          hasMore
+          onLoadMore={onLoadMore}
+          labels={labels}
+        />,
+      );
+    });
+    const target = await vi.waitFor(() => {
+      const found = targetKind === "result"
+        ? document.querySelector<HTMLButtonElement>('[data-index="1"]')
+        : Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "加载更多");
+      expect(found).toBeTruthy();
+      return found as HTMLButtonElement;
+    });
+    await act(async () => {
+      target.focus();
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      // happy-dom does not synthesize the browser's default Enter click.
+      if (!event.defaultPrevented) target.click();
+    });
+    expect(firstOpen).not.toHaveBeenCalled();
+    expect(secondOpen).toHaveBeenCalledTimes(targetKind === "result" ? 1 : 0);
+    expect(onLoadMore).toHaveBeenCalledTimes(targetKind === "load-more" ? 1 : 0);
+  });
+
+  it("keeps result focus and selection together when mixing Tab, arrows and Enter", async () => {
+    const firstOpen = vi.fn();
+    const secondOpen = vi.fn();
+    act(() => root.render(
+      <VSessionSearchDialog open onOpenChange={() => {}} query="" onQueryChange={() => {}}
+        items={[item({ onOpen: firstOpen }), item({ id: "second", onOpen: secondOpen })]} labels={labels} />,
+    ));
+    const second = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLButtonElement>('[data-index="1"]');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    await act(async () => {
+      second.focus();
+      second.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+    });
+    const first = document.querySelector<HTMLButtonElement>('[data-index="0"]')!;
+    expect(first.dataset.active).toBe("true");
+    expect(document.activeElement).toBe(first);
+    await act(async () => {
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      first.dispatchEvent(event);
+      if (!event.defaultPrevented) first.click();
+    });
+    expect(firstOpen).toHaveBeenCalledTimes(1);
+    expect(secondOpen).not.toHaveBeenCalled();
+  });
+
+  it("leaves filter controls' arrow and Enter keys to their own action", async () => {
+    const onOpen = vi.fn();
+    act(() => root.render(
+      <VSessionSearchDialog open onOpenChange={() => {}} query="" onQueryChange={() => {}}
+        filters={<select aria-label="filter"><option>全部</option><option>Agent A</option></select>}
+        items={[item({ onOpen })]} labels={labels} />,
+    ));
+    const filter = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLSelectElement>('select[aria-label="filter"]');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    for (const key of ["ArrowDown", "ArrowUp", "Enter"]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => { filter.dispatchEvent(event); });
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(onOpen).not.toHaveBeenCalled();
+  });
 });

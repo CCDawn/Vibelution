@@ -42,36 +42,54 @@ function delta(patch: Partial<AssistantDeltaPayload>): AssistantDeltaPayload {
 }
 
 describe("assistant delta seq continuity gate (projection invariant a)", () => {
-  it("applies a dense ledger advance", () => {
+  it("applies a dense deltaSeq advance and ignores ledger jumps", () => {
     const gate = createAssistantDeltaSeqGate();
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 4 })).toMatchObject({ action: "apply", seq: 4 });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 5 })).toMatchObject({ action: "apply", seq: 5 });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 6 })).toMatchObject({ action: "apply", seq: 6 });
+    // The journal watermark jumps wildly between frames (mid-turn journal
+    // boundary appends); only the frame's own deltaSeq gates continuity.
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 4, ledgerSeq: 10 })).toMatchObject({
+      action: "apply",
+      seq: 4,
+    });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 5, ledgerSeq: 97 })).toMatchObject({
+      action: "apply",
+      seq: 5,
+    });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 6, ledgerSeq: 98 })).toMatchObject({
+      action: "apply",
+      seq: 6,
+    });
   });
 
-  it("applies a same-epoch coalesced frame (full turn projection, same ledger seq)", () => {
+  it("applies coalesced frames whose covered range abuts the applied seq", () => {
     const gate = createAssistantDeltaSeqGate();
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 4 })).toMatchObject({ action: "apply" });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 4 })).toMatchObject({ action: "apply" });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 4 })).toMatchObject({ action: "apply" });
-    expect(gate.lastAppliedSeq).toBe(4);
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 4 })).toMatchObject({ action: "apply" });
+    // Frames 4..6 were merged by the server into one covered range.
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 6, deltaSeqFrom: 5 })).toMatchObject({
+      action: "apply",
+      seq: 6,
+    });
+    expect(gate.lastAppliedSeq).toBe(6);
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 9, deltaSeqFrom: 7 })).toMatchObject({
+      action: "apply",
+    });
+    expect(gate.lastAppliedSeq).toBe(9);
   });
 
   it("drops stale out-of-order regressions", () => {
     const gate = createAssistantDeltaSeqGate();
-    gate.decide({ turnId: "turn-1", ledgerSeq: 6 });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 5 })).toMatchObject({
+    gate.decide({ turnId: "turn-1", deltaSeq: 6 });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 5 })).toMatchObject({
       action: "drop-stale",
       seq: 5,
       lastAppliedSeq: 6,
     });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 6 })).toMatchObject({ action: "apply" });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 6 })).toMatchObject({ action: "apply" });
   });
 
-  it("holds a sparse ledger jump instead of applying it", () => {
+  it("holds an uncovered deltaSeq jump instead of applying it", () => {
     const gate = createAssistantDeltaSeqGate();
-    gate.decide({ turnId: "turn-1", ledgerSeq: 4 });
-    const decision = gate.decide({ turnId: "turn-1", ledgerSeq: 7 });
+    gate.decide({ turnId: "turn-1", deltaSeq: 4 });
+    const decision = gate.decide({ turnId: "turn-1", deltaSeq: 7, deltaSeqFrom: 7 });
     expect(decision).toMatchObject({
       action: "hold-gap",
       seq: 7,
@@ -82,52 +100,55 @@ describe("assistant delta seq continuity gate (projection invariant a)", () => {
     expect(gate.lastAppliedSeq).toBe(4);
   });
 
-  it("applies legacy frames without ledger bookkeeping ungated", () => {
+  it("applies legacy frames without deltaSeq ungated", () => {
     const gate = createAssistantDeltaSeqGate();
     expect(gate.decide({ turnId: "turn-1" })).toMatchObject({ action: "apply" });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 0 })).toMatchObject({ action: "apply" });
+    // A ledger watermark alone is not a continuity signal anymore.
+    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 12 })).toMatchObject({ action: "apply" });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 0 })).toMatchObject({ action: "apply" });
     expect(gate.lastAppliedSeq).toBe(0);
   });
 
   it("re-baselines on a new turn id", () => {
     const gate = createAssistantDeltaSeqGate();
-    gate.decide({ turnId: "turn-1", ledgerSeq: 9 });
-    expect(gate.decide({ turnId: "turn-2", ledgerSeq: 10 })).toMatchObject({
+    gate.decide({ turnId: "turn-1", deltaSeq: 9 });
+    expect(gate.decide({ turnId: "turn-2", deltaSeq: 10 })).toMatchObject({
       action: "apply",
       firstFrameOfTurn: true,
     });
     expect(gate.lastAppliedSeq).toBe(10);
   });
 
-  it("advances to an authoritative watermark without regressing behind applied deltas", () => {
+  it("re-baselines when an authoritative snapshot was applied", () => {
     const gate = createAssistantDeltaSeqGate();
-    gate.decide({ turnId: "turn-1", ledgerSeq: 6 });
+    gate.decide({ turnId: "turn-1", deltaSeq: 6 });
+    // The snapshot's journal seq is informational only; any application
+    // rewrites the whole projection, so the next frame re-baselines.
     gate.noteAuthoritative(9);
-    expect(gate.lastAppliedSeq).toBe(9);
-    gate.noteAuthoritative(4);
-    expect(gate.lastAppliedSeq).toBe(9);
-    // A frame at the authoritative watermark applies instead of holding.
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 9 })).toMatchObject({ action: "apply" });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 6 })).toMatchObject({
+      action: "apply",
+      firstFrameOfTurn: true,
+    });
+    expect(gate.lastAppliedSeq).toBe(6);
+  });
+
+  it("resumes a held stream once an authoritative snapshot was applied", () => {
+    const gate = createAssistantDeltaSeqGate();
+    gate.decide({ turnId: "turn-1", deltaSeq: 4 });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 8 })).toMatchObject({ action: "hold-gap" });
+    gate.noteAuthoritative(8);
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 8 })).toMatchObject({ action: "apply" });
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 9 })).toMatchObject({ action: "apply" });
   });
 
   it("re-baselines after a stream reopen so the first resumed frame applies", () => {
     const gate = createAssistantDeltaSeqGate();
-    gate.decide({ turnId: "turn-1", ledgerSeq: 4 });
+    gate.decide({ turnId: "turn-1", deltaSeq: 4 });
     gate.noteStreamReopened();
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 12 })).toMatchObject({
+    expect(gate.decide({ turnId: "turn-1", deltaSeq: 12 })).toMatchObject({
       action: "apply",
       firstFrameOfTurn: true,
     });
-  });
-
-  it("resumes a held stream once the authoritative snapshot reaches the watermark", () => {
-    const gate = createAssistantDeltaSeqGate();
-    gate.decide({ turnId: "turn-1", ledgerSeq: 4 });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 8 })).toMatchObject({ action: "hold-gap" });
-    // Authoritative snapshot closes the gap at seq 8.
-    gate.noteAuthoritative(8);
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 8 })).toMatchObject({ action: "apply" });
-    expect(gate.decide({ turnId: "turn-1", ledgerSeq: 9 })).toMatchObject({ action: "apply" });
   });
 });
 
@@ -185,12 +206,12 @@ describe("watermark recovery controller (projection invariant b)", () => {
     controller.dispose();
   });
 
-  it("completes when an authoritative seq reaches the watermark and resets attempts", () => {
+  it("retires the episode when an authoritative snapshot is applied", () => {
     const { scheduled, requests, controller } = harness();
     controller.request(5);
+    // Any authoritative application rewrites the projection and heals the
+    // gap, regardless of how the journal seq compares to the delta watermark.
     controller.noteAuthoritative(4);
-    expect(controller.state().inFlight).toBe(true);
-    controller.noteAuthoritative(5);
     expect(controller.state()).toMatchObject({ inFlight: false, attempt: 0, watermark: 5 });
     // The pending attempt timer is retired: firing it must not re-request.
     const stillScheduled = scheduled.filter((entry) => !entry.cancelled);
@@ -277,9 +298,9 @@ describe("drain gating through the projection gate", () => {
       streamSessionId: "session-1",
       reason: "frame",
       drain: drainOf([
-        delta({ ledgerSeq: 4 }),
-        delta({ ledgerSeq: 9, contentDelta: "later" }),
-        delta({ ledgerSeq: 9, contentDelta: "later" }),
+        delta({ deltaSeq: 4, ledgerSeq: 4 }),
+        delta({ deltaSeq: 9, deltaSeqFrom: 9, ledgerSeq: 40, contentDelta: "later" }),
+        delta({ deltaSeq: 9, deltaSeqFrom: 9, ledgerSeq: 40, contentDelta: "later" }),
       ]),
       committedLayer: undefined,
       stats,
@@ -291,9 +312,33 @@ describe("drain gating through the projection gate", () => {
       return;
     }
     expect(decision.appliedPayloadCount).toBe(1);
-    expect(decision.hold).toMatchObject({ heldLedgerSeq: 9, watermark: 5, heldCount: 2 });
+    expect(decision.hold).toMatchObject({ heldDeltaSeq: 9, watermark: 5, heldCount: 2 });
     expect(decision.stats).toMatchObject({ received: 4, applied: 3, dropped: 2 });
     expect(decision.nextCommittedLayer?.ledgerSeq).toBe(4);
+  });
+
+  it("keeps a dense deltaSeq stream flowing while the ledger jumps", () => {
+    const gate = createAssistantDeltaSeqGate();
+    const decision = planAppliedAssistantDeltaDrain({
+      streamSessionId: "session-1",
+      reason: "frame",
+      drain: drainOf([
+        delta({ deltaSeq: 6, deltaSeqFrom: 6, ledgerSeq: 20, contentDelta: "a" }),
+        delta({ deltaSeq: 7, deltaSeqFrom: 7, ledgerSeq: 55, contentDelta: "b" }),
+        delta({ deltaSeq: 8, deltaSeqFrom: 8, ledgerSeq: 96, contentDelta: "c" }),
+      ]),
+      committedLayer: undefined,
+      stats: { received: 3, applied: 0, dropped: 0 },
+      applyStartedAtMs: 100,
+      assistantDeltaSeqGate: (payload) => gate.decide(payload),
+    });
+    expect(decision.applied).toBe(true);
+    if (!decision.applied) {
+      return;
+    }
+    expect(decision.appliedPayloadCount).toBe(3);
+    expect(decision.hold).toBeUndefined();
+    expect(decision.stats.dropped).toBe(0);
   });
 
   it("drops stale frames before merge and applies the rest", () => {
@@ -302,9 +347,9 @@ describe("drain gating through the projection gate", () => {
       streamSessionId: "session-1",
       reason: "frame",
       drain: drainOf([
-        delta({ ledgerSeq: 6, contentDelta: "a" }),
-        delta({ ledgerSeq: 3, contentDelta: "stale" }),
-        delta({ ledgerSeq: 7, contentDelta: "b" }),
+        delta({ deltaSeq: 6, deltaSeqFrom: 6, ledgerSeq: 6, contentDelta: "a" }),
+        delta({ deltaSeq: 3, deltaSeqFrom: 3, ledgerSeq: 3, contentDelta: "stale" }),
+        delta({ deltaSeq: 7, deltaSeqFrom: 7, ledgerSeq: 7, contentDelta: "b" }),
       ]),
       committedLayer: undefined,
       stats: { received: 3, applied: 0, dropped: 0 },
@@ -322,12 +367,12 @@ describe("drain gating through the projection gate", () => {
 
   it("returns a pure hold decision when the first frame of the drain gaps", () => {
     const gate = createAssistantDeltaSeqGate();
-    gate.decide({ turnId: "turn-1", ledgerSeq: 4 });
+    gate.decide({ turnId: "turn-1", deltaSeq: 4 });
     const stats: SessionStreamApplyStats = { received: 2, applied: 1, dropped: 0 };
     const decision = planAppliedAssistantDeltaDrain({
       streamSessionId: "session-1",
       reason: "frame",
-      drain: drainOf([delta({ ledgerSeq: 12, contentDelta: "gap" })]),
+      drain: drainOf([delta({ deltaSeq: 12, deltaSeqFrom: 12, contentDelta: "gap" })]),
       committedLayer: undefined,
       stats,
       applyStartedAtMs: 100,
@@ -337,8 +382,27 @@ describe("drain gating through the projection gate", () => {
     if (decision.applied) {
       return;
     }
-    expect(decision.hold).toMatchObject({ heldLedgerSeq: 12, watermark: 5, heldCount: 1 });
+    expect(decision.hold).toMatchObject({ heldDeltaSeq: 12, watermark: 5, heldCount: 1 });
     expect(decision.stats.dropped).toBe(1);
+  });
+
+  it("applies legacy drains without deltaSeq ungated", () => {
+    const gate = createAssistantDeltaSeqGate();
+    const decision = planAppliedAssistantDeltaDrain({
+      streamSessionId: "session-1",
+      reason: "frame",
+      drain: drainOf([delta({ ledgerSeq: 12, contentDelta: "legacy" })]),
+      committedLayer: undefined,
+      stats: { received: 1, applied: 0, dropped: 0 },
+      applyStartedAtMs: 100,
+      assistantDeltaSeqGate: (payload) => gate.decide(payload),
+    });
+    expect(decision.applied).toBe(true);
+    if (!decision.applied) {
+      return;
+    }
+    expect(decision.appliedPayloadCount).toBe(1);
+    expect(decision.hold).toBeUndefined();
   });
 });
 

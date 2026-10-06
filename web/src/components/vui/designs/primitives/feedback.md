@@ -237,6 +237,8 @@ import { VDropdownMenu } from "@/components/vui";
 | `trigger` / `items` | 触发器与菜单项 | danger 项视觉区分 |
 | `position` + 受控 open | 右键锚定 | 虚拟 anchor |
 
+坐标锚定菜单按 Escape 关闭后，焦点返回打开菜单前的控件，不聚焦虚拟 anchor。选择菜单动作或点击外部控件时，由目标控件接管焦点，关闭菜单不抢回。
+
 ### 非职责
 - 不做路由级导航本体；不做多级树 Sub（未暴露）。
 

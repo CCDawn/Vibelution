@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,7 +31,7 @@ class _FakeSessionService:
     def _unregister_session_stream_subscriber(self, session_id: str, subscriber) -> None:
         return None
 
-    def _encode_sse_event(self, event_name: str, payload: dict) -> str:
+    def _encode_sse_event(self, event_name: str, payload: dict, *, event_seq: int = 0) -> str:
         return f"event: {event_name}\ndata: {json.dumps(payload)}\n\n"
 
     def record_runtime_scene_event(self, component: str, phase: str, event_code: str, **kwargs) -> None:
@@ -239,3 +241,186 @@ def test_sync_session_stream_preserves_transport_error_when_unregister_succeeds(
     ]
     closed = service.lifecycle[-1][1]
     assert closed["closeReason"] == "error"
+
+
+class _AssistantDeltaSeqService:
+    """Minimal service facade binding the real publish-layer delta helpers."""
+
+    _SESSION_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
+    _SESSION_STREAM_SUBSCRIBERS: dict = {}
+    _SESSION_STREAM_DELTA_SEQ: dict = {}
+    _SESSION_STREAM_LAST_SNAPSHOT_LOCK = threading.Lock()
+    _SESSION_STREAM_LAST_SNAPSHOT_AT: dict = {}
+    _SESSION_STREAM_THROTTLED_COUNTS: dict = {}
+
+    _next_session_delta_seq = staticmethod(publish._next_session_delta_seq)
+    _merge_session_assistant_delta_events = staticmethod(publish._merge_session_assistant_delta_events)
+    _assistant_delta_recovery_stream_event = staticmethod(publish._assistant_delta_recovery_stream_event)
+    _coalesce_session_assistant_delta_queue = staticmethod(publish._coalesce_session_assistant_delta_queue)
+    _put_session_stream_event = staticmethod(publish._put_session_stream_event)
+
+    def __init__(self, ledger_seq: int = 5) -> None:
+        self.ledger_seq = ledger_seq
+
+    def _perf_counter(self) -> float:
+        return 0.0
+
+    def _elapsed_ms(self, _started_at: float) -> int:
+        return 0
+
+    def _now_timestamp(self) -> str:
+        return "2026-10-06T00:00:00Z"
+
+    def _session_ledger_sequence(self, _session_id: str) -> int:
+        return self.ledger_seq
+
+    def _live_assistant_message_id(self, session_id: str, turn_id: str) -> str:
+        return f"{session_id}-message-{turn_id}"
+
+    def _build_codex_transcript_projection(self, **_kwargs) -> list:
+        return []
+
+    def _build_session_turn_items_projection(self, **kwargs) -> list:
+        return [{"itemId": "answer", "type": "agent_message", "text": str(kwargs.get("content") or "")}]
+
+    def _record_session_assistant_delta_published_event(self, **_kwargs) -> None:
+        return None
+
+
+def _delta_publish_state(content: str = "a"):
+    return SimpleNamespace(
+        turn_id="turn-1",
+        stage="responding",
+        updated_at="",
+        content=content,
+        thought="",
+        mental_snapshot=None,
+        feedback_events=[],
+        tool_calls=[],
+    )
+
+
+def test_assistant_delta_seq_stays_dense_across_journal_watermark_jumps(monkeypatch) -> None:
+    """Mid-turn journal appends (reasoning commits, tool events) advance the
+    ledger watermark between frames; the frame's own deltaSeq must stay dense."""
+
+    service = _AssistantDeltaSeqService()
+    subscriber = queue.Queue()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    publish._register_session_stream_subscriber("session-live", subscriber)
+    try:
+        publish._publish_session_assistant_delta("session-live", _delta_publish_state("a"))
+        first = subscriber.get_nowait()
+        service.ledger_seq = 12  # journal boundary append between two deltas
+        publish._publish_session_assistant_delta("session-live", _delta_publish_state("ab"))
+        second = subscriber.get_nowait()
+        # Slow consumer: the third frame is still queued when the fourth is
+        # published, so the queue coalesces them into one covered range.
+        publish._publish_session_assistant_delta("session-live", _delta_publish_state("abc"))
+        service.ledger_seq = 20  # another journal boundary append
+        publish._publish_session_assistant_delta("session-live", _delta_publish_state("abcd"))
+        merged = subscriber.get_nowait()
+    finally:
+        publish._unregister_session_stream_subscriber("session-live", subscriber)
+
+    assert (first["deltaSeq"], first["deltaSeqFrom"]) == (1, 1)
+    assert (second["deltaSeq"], second["deltaSeqFrom"]) == (2, 2)
+    assert first["ledgerSeq"] == 5
+    assert second["ledgerSeq"] == 12
+    assert (merged["deltaSeq"], merged["deltaSeqFrom"]) == (4, 3)
+    assert merged["ledgerSeq"] == 20
+
+
+def test_assistant_delta_seq_is_shared_across_subscribers(monkeypatch) -> None:
+    service = _AssistantDeltaSeqService()
+    first_subscriber = queue.Queue()
+    second_subscriber = queue.Queue()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    publish._register_session_stream_subscriber("session-live", first_subscriber)
+    publish._register_session_stream_subscriber("session-live", second_subscriber)
+    try:
+        publish._publish_session_assistant_delta("session-live", _delta_publish_state("a"))
+    finally:
+        publish._unregister_session_stream_subscriber("session-live", first_subscriber)
+        publish._unregister_session_stream_subscriber("session-live", second_subscriber)
+
+    assert first_subscriber.get_nowait()["deltaSeq"] == 1
+    assert second_subscriber.get_nowait()["deltaSeq"] == 1
+
+
+def test_assistant_delta_coalesce_widens_delta_seq_coverage(monkeypatch) -> None:
+    service = _AssistantDeltaSeqService()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    subscriber = queue.Queue()
+    subscriber.put_nowait(
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "deltaSeq": 1,
+            "deltaSeqFrom": 1,
+            "turnItems": [{"itemId": "answer", "type": "agent_message", "text": "你"}],
+        }
+    )
+
+    merged, dropped = publish._coalesce_session_assistant_delta_queue(
+        subscriber,
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "deltaSeq": 4,
+            "deltaSeqFrom": 4,
+            "turnItems": [{"itemId": "answer", "type": "agent_message", "text": "你好"}],
+        },
+    )
+
+    assert dropped == 1
+    assert merged["deltaSeq"] == 4
+    assert merged["deltaSeqFrom"] == 1
+
+
+def test_assistant_delta_seq_restarts_after_last_subscriber_leaves(monkeypatch) -> None:
+    service = _AssistantDeltaSeqService()
+    subscriber = queue.Queue()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+
+    publish._register_session_stream_subscriber("session-live", subscriber)
+    publish._publish_session_assistant_delta("session-live", _delta_publish_state("a"))
+    publish._unregister_session_stream_subscriber("session-live", subscriber)
+
+    publish._register_session_stream_subscriber("session-live", subscriber)
+    try:
+        publish._publish_session_assistant_delta("session-live", _delta_publish_state("ab"))
+    finally:
+        publish._unregister_session_stream_subscriber("session-live", subscriber)
+
+    assert subscriber.get_nowait()["deltaSeq"] == 1
+
+
+def test_assistant_delta_coalesce_keeps_legacy_frames_field_clean(monkeypatch) -> None:
+    service = _AssistantDeltaSeqService()
+    monkeypatch.setattr(publish, "_service", lambda: service)
+    subscriber = queue.Queue()
+    subscriber.put_nowait(
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "turnItems": [{"itemId": "answer", "type": "agent_message", "text": "你"}],
+        }
+    )
+
+    merged, dropped = publish._coalesce_session_assistant_delta_queue(
+        subscriber,
+        {
+            "type": "assistant_delta",
+            "sessionId": "session-live",
+            "turnId": "turn-1",
+            "turnItems": [{"itemId": "answer", "type": "agent_message", "text": "你好"}],
+        },
+    )
+
+    assert dropped == 1
+    assert "deltaSeq" not in merged
+    assert "deltaSeqFrom" not in merged
