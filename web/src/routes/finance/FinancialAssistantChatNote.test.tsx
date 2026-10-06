@@ -40,7 +40,9 @@ describe("financial assistant chat note", () => {
     expect(container.textContent).toContain("日、周、月 K 线已接入");
     expect(container.textContent).toContain("公开行情可能延迟");
     expect(container.textContent).toContain("暂无分钟行情");
-    expect(container.textContent).toContain("不会自动下单");
+    expect(container.textContent).toContain("支持手工持仓和独立模拟账户");
+    expect(container.textContent).toContain("未连接券商");
+    expect(container.textContent).toContain("不会实盘下单");
     const hrefs = [...container.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href") || "");
     const decoded = hrefs.map((href) => decodeURIComponent(href));
     expect(decoded.some((href) => href.includes("/agents?") && href.includes("finance-a") && href.includes("/finance?session=native-session"))).toBe(true);
@@ -68,7 +70,7 @@ describe("financial assistant chat note", () => {
     await settle();
     expect(container.textContent).toContain("已填写，还没验证能不能连上");
     expect(container.textContent).toContain("还没配好");
-    expect(container.textContent).toContain("已绑定，可以读取");
+    expect(container.textContent).toContain("可读取");
     expect(container.querySelectorAll("[data-financial-assistant-note='status']").length).toBe(1);
   });
 });
