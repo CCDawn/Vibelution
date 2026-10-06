@@ -28,7 +28,14 @@ def runtime_identity(e2e_instance):
     backend = e2e_instance.health.get("backendCodeFingerprint") or {}
     serving = e2e_instance.health.get("serving") or {}
     assert backend.get("head") == head and backend.get("dirty") is False
-    assert (serving.get("frontend") or {}).get("builtFromCommit") == head
+    frontend_head = (serving.get("frontend") or {}).get("builtFromCommit")
+    assert frontend_head
+    # Launcher may reuse identical frontend sources after a tests-only commit.
+    # Verify actual source equivalence instead of relabelling its provenance.
+    def web_tree(commit):
+        return subprocess.check_output(["git", "rev-parse", f"{commit}:web"], cwd=root, text=True).strip()
+    frontend_tree, tested_tree = web_tree(frontend_head), web_tree(head)
+    assert frontend_tree == tested_tree
     common = Path(subprocess.check_output(
         ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=root, text=True,
     ).strip())
@@ -37,6 +44,7 @@ def runtime_identity(e2e_instance):
     (evidence / "runtime-proof.json").write_text(json.dumps({
         "workspaceRoot": str(root), "instanceId": e2e_instance.instance_id,
         "port": e2e_instance.port, "head": head, "backend": backend, "serving": serving,
+        "frontendSourceTree": frontend_tree, "testedWebTree": tested_tree,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -152,6 +160,56 @@ def test_blur_save_then_switch_keeps_response_bound_to_original_session(page, e2
         for route, _body in pending:
             route.abort()
         page.unroute(pattern, delay_ack)
+
+
+def test_failed_rename_does_not_rollback_another_sessions_successful_title(page, e2e_instance):
+    from playwright.sync_api import expect
+
+    suffix = uuid.uuid4().hex[:8]
+    titles = [f"并行重命名 {label} {suffix}" for label in "AB"]
+    renamed = [f"新标题 {label} {suffix}" for label in "AB"]
+    sessions = [create_session(e2e_instance.port, title=title) for title in titles]
+    drafts = [f"并行操作保留草稿 {label} {suffix}" for label in "AB"]
+    _ready_composer(page, e2e_instance, sessions[0]).press_sequentially(drafts[0], delay=2)
+    _switch(page, titles[1], sessions[1]).press_sequentially(drafts[1], delay=2)
+    _switch(page, titles[0], sessions[0])
+    pending = []
+    pattern = f"**/api/sessions/{sessions[0]}"
+
+    def delay_failure(route):
+        if route.request.method == "PATCH":
+            pending.append(route)
+        else:
+            route.continue_()
+
+    page.route(pattern, delay_failure)
+    try:
+        with page.expect_request(lambda request: _is_patch(request, sessions[0])):
+            _edit(page, titles[0], renamed[0]).press("Enter")
+        _switch(page, titles[1], sessions[1])
+        editor_b = _edit(page, titles[1], renamed[1])
+        with page.expect_response(lambda response: _is_patch(response.request, sessions[1])) as saved:
+            editor_b.press("Enter")
+        assert saved.value.ok
+        expect(page.get_by_role("tab").filter(has_text=renamed[1])).to_be_visible()
+        assert len(pending) == 1
+        route = pending.pop()
+        with page.expect_response(lambda response: _is_patch(response.request, sessions[0])):
+            route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "earlier rename failed"}))
+        # Wait for A's error handling, then inspect B's sidebar and active tab.
+        error = page.get_by_text("earlier rename failed", exact=False).first
+        expect(error).to_be_visible(timeout=15000)
+        expect(page.get_by_role("tab").filter(has_text=renamed[1])).to_be_visible()
+        expect(page.get_by_role("button").filter(has=page.get_by_text(renamed[1], exact=True)).first).to_be_visible()
+        expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={sessions[1]}")
+        expect(page.locator(COMPOSER).first).to_have_value(drafts[1])
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{sessions[1]}")["title"] == renamed[1]
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{sessions[0]}")["title"] == titles[0]
+        _assert_no_turns(e2e_instance, sessions, drafts)
+    finally:
+        for route in pending:
+            route.abort()
+        page.unroute(pattern, delay_failure)
 
 
 def test_escape_cancels_rename_without_patch_and_composer_remains_editable(page, e2e_instance):
