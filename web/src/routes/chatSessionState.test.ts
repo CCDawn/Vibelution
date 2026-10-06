@@ -38,6 +38,28 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   };
 }
 
+describe("archive metadata projection", () => {
+  it("carries archived detail metadata into a newly inserted directory summary", () => {
+    const metadata = {
+      archiveState: { status: "archived", source: "session_archive", archivedAt: "2026-10-07T00:00:00Z" },
+      readOnly: true,
+      hiddenFromIndex: true,
+    };
+    expect(mergeSessionDetailIntoSummaries([], makeDetail(metadata))[0]).toMatchObject(metadata);
+  });
+
+  it("clears previous archive flags when canonical detail confirms unarchive", () => {
+    const previous = makeSummary({ archiveState: { status: "archived" }, readOnly: true, hiddenFromIndex: true });
+    const metadata = { archiveState: {}, readOnly: false, hiddenFromIndex: false };
+    expect(mergeSessionDetailIntoSummaries([previous], makeDetail(metadata))[0]).toMatchObject(metadata);
+  });
+
+  it("preserves known metadata when a partial control acknowledgement omits it", () => {
+    const metadata = { archiveState: { status: "archived" }, readOnly: true, hiddenFromIndex: true };
+    expect(mergeSessionDetailIntoSummaries([makeSummary(metadata)], makeDetail())[0]).toMatchObject(metadata);
+  });
+});
+
 function makeDetail(overrides: Partial<SessionDetail> = {}): SessionDetail {
   return {
     ...makeSummary({

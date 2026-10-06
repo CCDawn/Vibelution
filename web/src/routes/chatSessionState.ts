@@ -690,6 +690,15 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
   if (detail.conversationIndexErrors !== undefined) {
     summary.conversationIndexErrors = detail.conversationIndexErrors;
   }
+  if (detail.archiveState !== undefined) {
+    summary.archiveState = detail.archiveState;
+  }
+  if (detail.readOnly !== undefined) {
+    summary.readOnly = detail.readOnly;
+  }
+  if (detail.hiddenFromIndex !== undefined) {
+    summary.hiddenFromIndex = detail.hiddenFromIndex;
+  }
   return summary;
 }
 

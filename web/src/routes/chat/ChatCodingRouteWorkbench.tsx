@@ -1221,7 +1221,12 @@ export function ChatCodingRouteWorkbench() {
         variables.archive ? "session_archive" : "session_unarchive",
         { sessionId: variables.sessionId },
       );
-      void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
+      // A select captured before this metadata write must not restore the old
+      // read-only flags after the archive command has completed.
+      if (latestDirectSessionSelectionRef.current === variables.sessionId) {
+        directSessionSelectionGenerationRef.current += 1;
+      }
+      await queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
       const nextArchiveState = variables.archive
         ? {
             status: "archived",
@@ -1239,7 +1244,6 @@ export function ChatCodingRouteWorkbench() {
             }
           : session),
       );
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionArchive() });
       return { telemetry };
     },
     onSuccess: (_result, variables, context) => {
@@ -1256,6 +1260,14 @@ export function ChatCodingRouteWorkbench() {
             : lang === "zh" ? "取消归档失败" : "Failed to unarchive session",
         ),
       }));
+    },
+    onSettled: async (_result, _error, variables) => {
+      // Read back canonical detail and both directories after success or
+      // failure; optimistic summaries cannot own composer admission flags.
+      await Promise.all([
+        chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessionArchive() }),
+      ]);
     },
   });
   const pinSessionMutation = useMutation({

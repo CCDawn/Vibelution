@@ -59,19 +59,21 @@ def test_unarchive_menu_restores_input_without_reload(page, e2e_instance, delay_
     if delay_select:
         page.route(f"**/api/sessions/{sid}/select", hold_select)
     try:
-        page.reload(wait_until="domcontentloaded")
+        if delay_select:
+            with page.expect_request(lambda request: request.url.endswith(f"/api/sessions/{sid}/select")):
+                page.reload(wait_until="domcontentloaded")
+        else:
+            page.reload(wait_until="domcontentloaded")
         composer = page.locator(COMPOSER).first
         expect(composer).to_be_disabled(timeout=15000)
         expect(composer).to_have_value(draft)
         if delay_select:
-            page.wait_for_function("() => document.readyState === 'complete'")
-            # Drive the event loop until the route callback has captured select.
-            page.wait_for_timeout(200)
             assert len(pending) == 1
         page.get_by_role("button", name="显示已归档会话", exact=True).click()
         row = page.get_by_role("tab").filter(has_text=title)
         expect(row).to_be_visible(timeout=15000)
         row.click(button="right")
+        expect(page.get_by_role("menu", name="会话操作", exact=True)).to_contain_text("取消归档")
         with page.expect_response(lambda response: response.url.endswith(f"/api/sessions/{sid}/unarchive")) as saved:
             page.get_by_role("menuitem", name="取消归档", exact=True).click()
         assert saved.value.ok
@@ -94,6 +96,41 @@ def test_unarchive_menu_restores_input_without_reload(page, e2e_instance, delay_
             route.fulfill(status=200, content_type="application/json", body=json.dumps(old_detail))
         if delay_select:
             page.unroute(f"**/api/sessions/{sid}/select", hold_select)
+        post_json(e2e_instance.port, f"/api/sessions/{sid}/unarchive")
+
+
+def test_failed_unarchive_keeps_readonly_and_restores_menu_state(page, e2e_instance):
+    from playwright.sync_api import expect
+
+    title = f"取消归档失败恢复 {uuid.uuid4().hex[:8]}"
+    sid = create_session(e2e_instance.port, title=title)
+    draft = "失败后仍应保留这份草稿"
+    _ready_composer(page, e2e_instance, sid).press_sequentially(draft, delay=2)
+    post_json(e2e_instance.port, f"/api/sessions/{sid}/archive")
+    page.reload(wait_until="domcontentloaded")
+    composer = page.locator(COMPOSER).first
+    expect(composer).to_be_disabled(timeout=15000)
+    page.get_by_role("button", name="显示已归档会话", exact=True).click()
+    row = page.get_by_role("tab").filter(has_text=title)
+    expect(row).to_be_visible(timeout=15000)
+
+    def fail_command(route):
+        route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "controlled unarchive failure"}))
+
+    page.route(f"**/api/sessions/{sid}/unarchive", fail_command)
+    try:
+        row.click(button="right")
+        page.get_by_role("menuitem", name="取消归档", exact=True).click()
+        expect(page.get_by_text("controlled unarchive failure", exact=False).first).to_be_visible(timeout=15000)
+        expect(composer).to_be_disabled()
+        expect(composer).to_have_value(draft)
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["readOnly"] is True
+        row.click(button="right")
+        expect(page.get_by_role("menuitem", name="取消归档", exact=True)).to_be_enabled(timeout=15000)
+        page.keyboard.press("Escape")
+        _assert_no_turns(e2e_instance, [sid], [draft])
+    finally:
+        page.unroute(f"**/api/sessions/{sid}/unarchive", fail_command)
         post_json(e2e_instance.port, f"/api/sessions/{sid}/unarchive")
 
 
