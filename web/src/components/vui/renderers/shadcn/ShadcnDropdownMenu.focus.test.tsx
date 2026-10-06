@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { VDropdownMenu } from "../../index";
 
@@ -48,19 +48,22 @@ describe("anchored dropdown focus", () => {
     expect(menu).not.toBeNull();
     await act(async () => {
       menu?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-    expect(document.activeElement).toBe(original);
+    // Radix restores focus in a timer after the unmount commit.
+    await vi.waitFor(() => {
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(document.activeElement).toBe(original);
+    });
   });
 
   it("keeps focus on the destination when a menu action opens an editor", async () => {
     mount();
     await act(async () => {
       document.querySelector('[role="menuitem"]')?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(document.querySelector('[role="menu"]')).toBeNull();
-    expect(document.activeElement).toBe(destination);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(document.activeElement).toBe(destination);
+    });
   });
 });
