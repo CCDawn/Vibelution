@@ -17,7 +17,7 @@ from tests.e2e.test_composer_navigation_journeys import _assert_no_turns, _switc
 from tests.e2e.test_session_archive_races import _command, _show_archived
 from tests.e2e.test_session_readonly_recovery import no_model_submission  # noqa: F401
 from tests.e2e.test_session_rename_order import _save, _terminal
-from tests.e2e.test_session_rename_races import _edit, _is_patch
+from tests.e2e.test_session_rename_races import _edit as _base_edit, _is_patch
 
 pytestmark = [pytest.mark.serial, pytest.mark.skipif(
     not e2e_enabled(), reason="Set VIBELUTION_E2E=1 for isolated browser acceptance",
@@ -45,6 +45,24 @@ def runtime_identity(e2e_instance):
         "port": e2e_instance.port, "head": head, "backend": backend, "serving": serving,
         "testedWebTree": trees[0], "frontendSourceTree": trees[1],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _edit(page, title, replacement):
+    try:
+        return _base_edit(page, title, replacement)
+    except Exception:
+        common = Path(subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True,
+        ).strip())
+        evidence = common / "task-evidence" / "rename-lifecycle-round15-oct07"
+        name = f"rename-surface-{uuid.uuid4().hex[:8]}"
+        (evidence / f"{name}.json").write_text(json.dumps({
+            "url": page.url, "expectedTitle": title,
+            "tabs": page.get_by_role("tab").all_text_contents(),
+            "threadSessionId": page.locator(THREAD).first.get_attribute("data-agent-thread-id"),
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        page.screenshot(path=str(evidence / f"{name}.png"))
+        raise
 
 
 def _hold_rename(page, instance, sid, succeeds):
