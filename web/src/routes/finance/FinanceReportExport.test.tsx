@@ -3,10 +3,11 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FinanceReportExport } from "./FinanceReportExport";
-import { downloadFinancialReportExport, printFinancialReportExport } from "../../api/financialReports";
+import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, printFinancialReportExport } from "../../api/financialReports";
 
 vi.mock("../../api/financialReports", () => ({
   downloadFinancialReportExport: vi.fn().mockResolvedValue(undefined),
+  downloadFinancialReportPrintHtml: vi.fn().mockResolvedValue(undefined),
   printFinancialReportExport: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -43,14 +44,28 @@ async function openMenu(node: HTMLElement) {
 }
 
 describe("FinanceReportExport", () => {
-  it("offers all four report formats from the shared VUI menu", async () => {
+  it("offers report formats and a printable HTML download from the shared VUI menu", async () => {
     const node = await render();
     await openMenu(node);
     const menu = document.querySelector('[role="menu"]');
     expect(menu?.textContent).toContain("Markdown (.md)");
     expect(menu?.textContent).toContain("JSON (.json)");
     expect(menu?.textContent).toContain("Word (.docx)");
+    expect(menu?.textContent).toContain("打印版 (.html)");
     expect(menu?.textContent).toContain("打印 / PDF");
+  });
+
+  it("downloads the exact report's printable HTML without opening a print window", async () => {
+    const node = await render();
+    await openMenu(node);
+    const html = Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => item.textContent?.includes("打印版 (.html)"));
+    await act(async () => { (html as HTMLElement).click(); });
+    expect(downloadFinancialReportPrintHtml).toHaveBeenCalledWith(
+      { assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(printFinancialReportExport).not.toHaveBeenCalled();
+    expect(downloadFinancialReportExport).not.toHaveBeenCalled();
   });
 
   it("binds downloads and print to the exact Agent, Session, and Turn", async () => {

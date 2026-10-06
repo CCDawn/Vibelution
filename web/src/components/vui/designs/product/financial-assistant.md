@@ -138,8 +138,8 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ## FinanceResearchReport / FinanceReportExport / financialReports
 
 ### 报告交付
-沿用报告标题区域的 `VButton`/`VDropdownMenu` 导出操作，支持 Markdown、JSON、Word 以及“打印 / PDF”。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印文档在当前页面的无脚本 sandbox iframe 内隔离展示，不依赖桌面壳拦截的弹窗；另存 PDF 由系统打印面完成，不把 HTML 下载称为 PDF。
-打印内容使用有界 `srcdoc`，加载失败时尝试下载单份报告 HTML 并给出浏览器打印入口说明；不打印整个工作台。
+沿用报告标题区域的 `VButton`/`VDropdownMenu` 导出操作，支持 Markdown、JSON、Word、“打印版 (.html)”和“打印 / PDF”。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。“打印 / PDF”在当前页面的无脚本 sandbox iframe 内隔离展示，并由系统打印面另存 PDF；“打印版 (.html)”直接下载该报告的独立 HTML，用户可在桌面浏览器中打开后打印或另存 PDF。HTML 下载仍是 HTML，不标记为已生成 PDF。
+打印内容使用有界 `srcdoc`，加载失败或未收到打印完成确认时尝试下载单份报告 HTML，并说明需要在浏览器打开后打印；不打印整个工作台。
 
 ## FinanceSessionMenu / useFinanceSessionLifecycle
 

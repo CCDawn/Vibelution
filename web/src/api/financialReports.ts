@@ -102,12 +102,44 @@ function safeFileName(response: FinancialReportExportResponse) {
   return response.fileName.trim() || fallback;
 }
 
-function downloadStandalonePrintHtml(response: FinancialReportExportResponse, reason: "unsupported" | "timeout" | "load-error"): Error {
+function safePrintHtmlFileName(response: FinancialReportExportResponse) {
+  const stem = safeFileName(response).replace(/\.[^.]*$/, "");
+  return `${stem || "stock-research"}.html`;
+}
+
+export async function downloadFinancialReportPrintHtml(target: FinancialReportExportTarget, options?: { signal?: AbortSignal }) {
+  if (target.format !== "pdf") throw new Error("仅打印版报告可以下载 HTML");
+  const response = await exportFinancialReport(target, options);
+  throwIfAborted(options?.signal);
+  assertBoundedExport(response, target);
+  if (response.format !== "pdf" || response.encoding !== "utf8" || !response.mediaType.toLowerCase().startsWith("text/html")) {
+    throw new Error("打印版导出响应格式无效");
+  }
+  if (!response.content.trim()) throw new Error("打印版报告内容为空");
+
+  const url = URL.createObjectURL(new Blob([response.content], { type: response.mediaType }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = safePrintHtmlFileName(response);
+  link.rel = "noopener";
+  link.hidden = true;
+  try {
+    document.body.append(link);
+    link.click();
+  } finally {
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
+}
+
+function downloadStandalonePrintHtml(response: FinancialReportExportResponse, reason: "unsupported" | "timeout" | "load-error" | "afterprint-timeout"): Error {
   let message = "嵌入式打印不可用，已尝试下载单份报告 HTML；下载后可用浏览器打开并打印。";
   if (reason === "unsupported") {
     message = "当前窗口不支持嵌入式打印，已尝试下载单份报告 HTML；下载后可用浏览器打开并打印。";
   } else if (reason === "timeout") {
     message = "打印页加载超时，已尝试下载单份报告 HTML；下载后可用浏览器打开并打印。";
+  } else if (reason === "afterprint-timeout") {
+    message = "未收到打印完成确认，已尝试下载单份报告 HTML；请在浏览器打开该 HTML 后打印，本次没有生成 PDF。";
   }
 
   try {
@@ -115,7 +147,7 @@ function downloadStandalonePrintHtml(response: FinancialReportExportResponse, re
     try {
       const link = document.createElement("a");
       link.href = url;
-      link.download = safeFileName(response);
+      link.download = safePrintHtmlFileName(response);
       link.rel = "noopener";
       link.hidden = true;
       try {
@@ -166,6 +198,9 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
   if (typeof window === "undefined" || typeof document === "undefined" || !document.body) {
     throw new Error("当前环境无法打开打印文档");
   }
+  const restoreFocusTarget = document.activeElement instanceof HTMLButtonElement
+    ? document.activeElement
+    : null;
 
   await new Promise<void>((resolve, reject) => {
     let frame: HTMLIFrameElement | null = null;
@@ -185,12 +220,28 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
       frameWindow?.removeEventListener("afterprint", onAfterPrint);
       frame?.remove();
     };
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, frameHadFocus = Boolean(frame && document.activeElement === frame)) => {
       if (settled) return;
       settled = true;
+      const shouldRestoreFocus = frameHadFocus && Boolean(restoreFocusTarget?.isConnected);
       cleanup();
+      if (shouldRestoreFocus) {
+        window.requestAnimationFrame(() => {
+          if (
+            restoreFocusTarget?.isConnected
+            && !restoreFocusTarget.disabled
+            && document.activeElement === document.body
+          ) {
+            restoreFocusTarget.focus();
+          }
+        });
+      }
       if (error) reject(error);
       else resolve();
+    };
+    const finishWithHtmlFallback = (reason: "unsupported" | "timeout" | "load-error" | "afterprint-timeout") => {
+      const frameHadFocus = Boolean(frame && document.activeElement === frame);
+      finish(downloadStandalonePrintHtml(response, reason), frameHadFocus);
     };
     const onAbort = () => {
       const error = new Error("The operation was aborted");
@@ -199,7 +250,7 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
     };
     const onBeforeUnload = () => finish(new Error("打印已取消：页面即将关闭"));
     const onAfterPrint = () => finish();
-    const onLoadError = () => finish(downloadStandalonePrintHtml(response, "load-error"));
+    const onLoadError = () => finishWithHtmlFallback("load-error");
     const onLoad = () => {
       if (!frame) return;
       try {
@@ -221,7 +272,10 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
         if (loadTimer !== null) window.clearTimeout(loadTimer);
         frameWindow.addEventListener("afterprint", onAfterPrint, { once: true });
         frameWindow.focus();
-        afterPrintTimer = window.setTimeout(() => finish(new Error("打印等待超时，请重试。")), PRINT_AFTERPRINT_TIMEOUT_MS);
+        afterPrintTimer = window.setTimeout(
+          () => finishWithHtmlFallback("afterprint-timeout"),
+          PRINT_AFTERPRINT_TIMEOUT_MS,
+        );
         frameWindow.print();
       } catch (cause) {
         finish(cause instanceof Error ? cause : new Error("打印报告失败，请重试。"));
@@ -239,11 +293,11 @@ export async function printFinancialReportExport(target: FinancialReportExportTa
       frame.addEventListener("load", onLoad);
       frame.addEventListener("error", onLoadError);
       loadTimer = window.setTimeout(
-        () => finish(downloadStandalonePrintHtml(response, "timeout")),
+        () => finishWithHtmlFallback("timeout"),
         PRINT_FRAME_LOAD_TIMEOUT_MS,
       );
       if (!("srcdoc" in frame)) {
-        finish(downloadStandalonePrintHtml(response, "unsupported"));
+        finishWithHtmlFallback("unsupported");
         return;
       }
       frame.srcdoc = response.content;

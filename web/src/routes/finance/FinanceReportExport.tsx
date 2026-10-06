@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, FileJson, FileText, Printer } from "lucide-react";
-import { downloadFinancialReportExport, printFinancialReportExport, type FinancialReportFormat } from "../../api/financialReports";
+import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, printFinancialReportExport, type FinancialReportFormat } from "../../api/financialReports";
 import { VButton, VDropdownMenu } from "../../components/vui";
 import styles from "./FinanceReportExport.styles";
 
@@ -11,31 +11,35 @@ type FinanceReportExportProps = {
   zh: boolean;
 };
 
+type ReportExportAction = FinancialReportFormat | "print-html";
+
 export function FinanceReportExport(props: FinanceReportExportProps) {
   const identityKey = JSON.stringify([props.assistantAgentId, props.sessionId, props.turnId]);
   return <FinanceReportExportAction key={identityKey} {...props} />;
 }
 
 function FinanceReportExportAction({ assistantAgentId, sessionId, turnId, zh }: FinanceReportExportProps) {
-  const [exporting, setExporting] = useState<FinancialReportFormat | null>(null);
+  const [exporting, setExporting] = useState<ReportExportAction | null>(null);
   const [exportError, setExportError] = useState("");
   const activeAttempt = useRef<symbol | null>(null);
   const activeController = useRef<AbortController | null>(null);
 
   useEffect(() => () => activeController.current?.abort(), []);
 
-  async function exportReport(format: FinancialReportFormat) {
+  async function exportReport(action: ReportExportAction) {
     if (activeAttempt.current) return;
     const attempt = Symbol("financial-report-export");
     const controller = new AbortController();
     activeAttempt.current = attempt;
     activeController.current = controller;
     setExportError("");
-    setExporting(format);
+    setExporting(action);
     try {
+      const format: FinancialReportFormat = action === "print-html" ? "pdf" : action;
       const target = { assistantAgentId, sessionId, turnId, format };
       const options = { signal: controller.signal };
-      if (format === "pdf") await printFinancialReportExport(target, options);
+      if (action === "print-html") await downloadFinancialReportPrintHtml(target, options);
+      else if (format === "pdf") await printFinancialReportExport(target, options);
       else await downloadFinancialReportExport(target, options);
     } catch (error) {
       if (activeAttempt.current === attempt && !controller.signal.aborted) {
@@ -61,6 +65,7 @@ function FinanceReportExportAction({ assistantAgentId, sessionId, turnId, zh }: 
         { id: "markdown", icon: <FileText size={14} />, label: "Markdown (.md)", disabled: exporting !== null, onSelect: () => void exportReport("markdown") },
         { id: "json", icon: <FileJson size={14} />, label: "JSON (.json)", disabled: exporting !== null, onSelect: () => void exportReport("json") },
         { id: "docx", icon: <FileText size={14} />, label: "Word (.docx)", disabled: exporting !== null, onSelect: () => void exportReport("docx") },
+        { id: "print-html", icon: <FileText size={14} />, label: zh ? "打印版 (.html)" : "Printable (.html)", title: zh ? "下载单份报告，用浏览器打开后打印或另存为 PDF" : "Download one report, then open it in a browser to print or save as PDF", disabled: exporting !== null, onSelect: () => void exportReport("print-html") },
         { id: "pdf", icon: <Printer size={14} />, label: zh ? "打印 / PDF" : "Print / PDF", title: zh ? "通过浏览器打印并另存为 PDF" : "Print and save as PDF in the browser", disabled: exporting !== null, onSelect: () => void exportReport("pdf") },
       ]}
     />

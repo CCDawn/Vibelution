@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FetchJsonHttpError, resetControlTokenForTests, seedControlTokenForTests } from "./client";
-import { downloadFinancialReportExport, exportFinancialReport, isFinancialReportNotFoundError, MAX_FINANCIAL_REPORT_EXPORT_CHARS, printFinancialReportExport } from "./financialReports";
+import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, exportFinancialReport, isFinancialReportNotFoundError, MAX_FINANCIAL_REPORT_EXPORT_CHARS, printFinancialReportExport } from "./financialReports";
 
 let cleanupPrintMocks = () => {};
 afterEach(() => {
@@ -23,13 +23,27 @@ function stubPrintIframe() {
   const printHtmlUrl = "blob:http://localhost/stock-report-html";
   const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
   const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+  const originalActiveElement = Object.getOwnPropertyDescriptor(document, "activeElement");
+  const originalRequestAnimationFrame = Object.getOwnPropertyDescriptor(window, "requestAnimationFrame");
   const createObjectUrl = vi.fn(() => printHtmlUrl);
   const revokeObjectUrl = vi.fn();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
 
   const print = vi.fn();
-  const focus = vi.fn();
+  let frame: HTMLIFrameElement | null = null;
+  let activeElement: Element | null = document.body;
+  Object.defineProperty(document, "activeElement", { configurable: true, get: () => activeElement });
+  const setActiveElement = (element: Element | null) => { activeElement = element; };
+  const animationFrameCallbacks: FrameRequestCallback[] = [];
+  Object.defineProperty(window, "requestAnimationFrame", {
+    configurable: true,
+    value: vi.fn((callback: FrameRequestCallback) => {
+      animationFrameCallbacks.push(callback);
+      return animationFrameCallbacks.length;
+    }),
+  });
+  const focus = vi.fn(() => { activeElement = frame; });
   const downloadClick = vi.fn();
   const frameDocument = {
     URL: "about:blank",
@@ -45,9 +59,9 @@ function stubPrintIframe() {
   });
   const createElement = document.createElement.bind(document);
   const append = document.body.append.bind(document.body);
-  let frame: HTMLIFrameElement | null = null;
   let downloadLink: HTMLAnchorElement | null = null;
   const removeFrame = vi.fn();
+  const testControls: HTMLButtonElement[] = [];
   const appendFrame = vi.spyOn(document.body, "append").mockImplementation((...nodes) => {
     if (frame && nodes.some((node) => node === frame)) return;
     append(...nodes);
@@ -57,7 +71,10 @@ function stubPrintIframe() {
     if (tagName.toLowerCase() === "iframe") {
       frame = element as HTMLIFrameElement;
       Object.defineProperty(frame, "contentWindow", { configurable: true, value: frameWindow });
-      vi.spyOn(frame, "remove").mockImplementation(removeFrame);
+      vi.spyOn(frame, "remove").mockImplementation(() => {
+        removeFrame();
+        if (activeElement === frame) activeElement = document.body;
+      });
     } else if (tagName.toLowerCase() === "a") {
       downloadLink = element as HTMLAnchorElement;
       Object.defineProperty(downloadLink, "click", { configurable: true, value: downloadClick });
@@ -66,10 +83,15 @@ function stubPrintIframe() {
   }) as typeof document.createElement);
 
   cleanupPrintMocks = () => {
+    testControls.forEach((control) => control.remove());
     if (originalCreate) Object.defineProperty(URL, "createObjectURL", originalCreate);
     else Reflect.deleteProperty(URL, "createObjectURL");
     if (originalRevoke) Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
     else Reflect.deleteProperty(URL, "revokeObjectURL");
+    if (originalActiveElement) Object.defineProperty(document, "activeElement", originalActiveElement);
+    else Reflect.deleteProperty(document, "activeElement");
+    if (originalRequestAnimationFrame) Object.defineProperty(window, "requestAnimationFrame", originalRequestAnimationFrame);
+    else Reflect.deleteProperty(window, "requestAnimationFrame");
   };
   return {
     frameWindow,
@@ -78,6 +100,18 @@ function stubPrintIframe() {
     printHtmlUrl,
     createObjectUrl,
     revokeObjectUrl,
+    setActiveElement,
+    flushAnimationFrames() {
+      animationFrameCallbacks.splice(0).forEach((callback) => callback(0));
+    },
+    createButton() {
+      const button = document.createElement("button");
+      const buttonFocus = vi.fn(() => setActiveElement(button));
+      Object.defineProperty(button, "focus", { configurable: true, value: buttonFocus });
+      document.body.append(button);
+      testControls.push(button);
+      return { button, focus: buttonFocus };
+    },
     downloadClick,
     get downloadLink() { return downloadLink; },
     appendFrame,
@@ -116,6 +150,41 @@ describe("financial report export transport", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ sessionId: "session-1", turnId: "turn-1", format: "markdown" });
   });
 
+  it("downloads the PDF report as standalone HTML for the exact report identity", async () => {
+    vi.useFakeTimers();
+    seedControlTokenForTests("test-token");
+    const printResponse = {
+      ...response, format: "pdf" as const, fileName: "stock-research-2026-10-06.pdf",
+      mediaType: "text/html; charset=utf-8", content: "<!doctype html><html><body>research</body></html>",
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(printResponse), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const printFrame = stubPrintIframe();
+
+    await downloadFinancialReportPrintHtml({ assistantAgentId: "agent/a", sessionId: "session-1", turnId: "turn-1", format: "pdf" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/financial-reports/agent%2Fa/export");
+    expect(JSON.parse(String(init?.body))).toEqual({ sessionId: "session-1", turnId: "turn-1", format: "pdf" });
+    expect(printFrame.downloadClick).toHaveBeenCalledOnce();
+    expect(printFrame.downloadLink?.download).toBe("stock-research-2026-10-06.html");
+    expect(printFrame.createObjectUrl).toHaveBeenCalledOnce();
+    expect(printFrame.removeFrame).not.toHaveBeenCalled();
+    expect(printFrame.print).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.printHtmlUrl);
+  });
+
+  it("rejects non-PDF input before requesting a print HTML export", async () => {
+    seedControlTokenForTests("test-token");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(downloadFinancialReportPrintHtml({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "markdown" })).rejects.toThrow("仅打印版报告可以下载 HTML");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not require a popup and prints only after the sandboxed report document loads", async () => {
     seedControlTokenForTests("test-token");
     const printResponse = {
@@ -124,6 +193,9 @@ describe("financial report export transport", () => {
     };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(printResponse), { status: 200 })));
     const printFrame = stubPrintIframe();
+    const { button: originalButton, focus: restoreFocus } = printFrame.createButton();
+    originalButton.disabled = true;
+    printFrame.setActiveElement(originalButton);
     const popup = vi.spyOn(window, "open").mockReturnValue(null);
     const operation = printFinancialReportExport({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" });
     const iframe = await waitForPrintFrame(printFrame);
@@ -145,8 +217,59 @@ describe("financial report export transport", () => {
     const completed = expect(operation).resolves.toBeUndefined();
     printFrame.frameWindow.dispatchEvent(new Event("afterprint"));
     await completed;
+    expect(restoreFocus).not.toHaveBeenCalled();
+    originalButton.disabled = false;
+    printFrame.flushAnimationFrames();
+    expect(restoreFocus).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(originalButton);
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
     expect(popup).not.toHaveBeenCalled();
+  });
+
+  it("does not steal focus if the user moves to another control before printing finishes", async () => {
+    seedControlTokenForTests("test-token");
+    const printResponse = {
+      ...response, format: "pdf" as const, fileName: "stock-research-2026-10-06.html",
+      mediaType: "text/html; charset=utf-8", content: "<!doctype html><html><body>research</body></html>",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(printResponse), { status: 200 })));
+    const printFrame = stubPrintIframe();
+    const { button: originalButton, focus: restoreFocus } = printFrame.createButton();
+    printFrame.setActiveElement(originalButton);
+    const operation = printFinancialReportExport({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" });
+    const iframe = await waitForPrintFrame(printFrame);
+    printFrame.markLoaded();
+    iframe.dispatchEvent(new Event("load"));
+    const { button: currentButton } = printFrame.createButton();
+    printFrame.setActiveElement(currentButton);
+
+    const completed = expect(operation).resolves.toBeUndefined();
+    printFrame.frameWindow.dispatchEvent(new Event("afterprint"));
+    await completed;
+    expect(restoreFocus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(currentButton);
+  });
+
+  it("does not restore focus to the original button after it is unmounted", async () => {
+    seedControlTokenForTests("test-token");
+    const printResponse = {
+      ...response, format: "pdf" as const, fileName: "stock-research-2026-10-06.html",
+      mediaType: "text/html; charset=utf-8", content: "<!doctype html><html><body>research</body></html>",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(printResponse), { status: 200 })));
+    const printFrame = stubPrintIframe();
+    const { button: originalButton, focus: restoreFocus } = printFrame.createButton();
+    printFrame.setActiveElement(originalButton);
+    const operation = printFinancialReportExport({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1", format: "pdf" });
+    const iframe = await waitForPrintFrame(printFrame);
+    printFrame.markLoaded();
+    iframe.dispatchEvent(new Event("load"));
+    originalButton.remove();
+
+    const completed = expect(operation).resolves.toBeUndefined();
+    printFrame.frameWindow.dispatchEvent(new Event("afterprint"));
+    await completed;
+    expect(restoreFocus).not.toHaveBeenCalled();
   });
 
   it("does not print a different document that fires a load event", async () => {
@@ -261,7 +384,7 @@ describe("financial report export transport", () => {
     expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.printHtmlUrl);
   });
 
-  it("removes the iframe if afterprint never arrives", async () => {
+  it("downloads standalone HTML and removes the iframe if afterprint never arrives", async () => {
     vi.useFakeTimers();
     seedControlTokenForTests("test-token");
     const printResponse = {
@@ -275,9 +398,14 @@ describe("financial report export transport", () => {
     printFrame.markLoaded();
     iframe.dispatchEvent(new Event("load"));
     expect(printFrame.print).toHaveBeenCalledOnce();
-    const rejected = expect(operation).rejects.toThrow("打印等待超时");
+    const rejected = expect(operation).rejects.toThrow("本次没有生成 PDF");
     await vi.advanceTimersByTimeAsync(60_000);
     await rejected;
     expect(printFrame.removeFrame).toHaveBeenCalledOnce();
+    expect(printFrame.downloadClick).toHaveBeenCalledOnce();
+    expect(printFrame.downloadLink?.download).toBe(printResponse.fileName);
+    expect(printFrame.createObjectUrl).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(printFrame.revokeObjectUrl).toHaveBeenCalledExactlyOnceWith(printFrame.printHtmlUrl);
   });
 });
