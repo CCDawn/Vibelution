@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Users } from "lucide-react";
 
 import {
@@ -7,7 +8,9 @@ import {
   TeamStagePipeline,
 } from "../../../components/vui/product/team-management";
 import { VButton } from "../../../components/vui";
+import type { AgentConfigWorkspaceAgent, Team } from "../../../api/types";
 import teamsRouteStyles from "../../../routes/TeamsRoute.styles";
+import { TeamSettingsDialog } from "../../../routes/teams/TeamSettingsDialog";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
 
@@ -88,6 +91,82 @@ export function TeamCatalog() {
           />
         </div>
       </VuiPreviewCard>
+      <VuiPreviewCard name="TeamSettingsDialog" className="col-span-2 min-h-0">
+        <TeamSettingsDialogPreview />
+      </VuiPreviewCard>
     </VuiPreviewSection>
+  );
+}
+
+const previewSettingsTeam = {
+  teamId: "preview-team",
+  name: "示例团队",
+  description: "统一团队配置面预览数据",
+  purpose: "一处配齐基本信息、成员、群聊与模型状态",
+  status: "active",
+  teamKind: "custom",
+  teamCategory: "自定义团队",
+  teamSource: "manual",
+  members: [
+    {
+      memberId: "member-1",
+      agentId: "preview-agent-1",
+      agentCode: "PA1",
+      agentName: "示例 Agent 甲",
+      role: "lead",
+      purpose: "",
+      agentStatus: "active",
+      model: { dialogueModelId: "preview-provider/model-a", configured: true },
+    },
+    {
+      memberId: "member-2",
+      agentId: "preview-agent-2",
+      agentCode: "PA2",
+      agentName: "示例 Agent 乙",
+      role: "reviewer",
+      purpose: "",
+      agentStatus: "active",
+      model: { dialogueModelId: "", configured: false },
+    },
+  ],
+  memberCount: 2,
+  updatedAt: "2026-10-06T00:00:00Z",
+  linkedChatRoom: {
+    roomId: "preview-room",
+    title: "示例团队群聊",
+    status: "idle",
+    mode: "round_robin",
+    purpose: "discussion",
+    participantCount: 2,
+    updatedAt: "2026-10-06T00:00:00Z",
+  },
+} as unknown as Team;
+
+const previewSettingsAgents = [
+  { agentId: "preview-agent-1", agentCode: "PA1", displayName: "示例 Agent 甲", status: "active", llmBindings: {} },
+  { agentId: "preview-agent-2", agentCode: "PA2", displayName: "示例 Agent 乙", status: "active", llmBindings: {} },
+  { agentId: "preview-agent-3", agentCode: "PA3", displayName: "示例 Agent 丙", status: "active", llmBindings: {} },
+] as unknown as AgentConfigWorkspaceAgent[];
+
+function TeamSettingsDialogPreview() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <VButton variant="secondary" onPress={() => setOpen(true)}>打开团队设置</VButton>
+      <TeamSettingsDialog
+        open={open}
+        lang="zh"
+        team={previewSettingsTeam}
+        agents={previewSettingsAgents}
+        teams={[previewSettingsTeam]}
+        agentsById={new Map(previewSettingsAgents.map((agent) => [agent.agentId, agent]))}
+        pending={false}
+        createRoomPending={false}
+        errorMessage=""
+        onSubmit={() => undefined}
+        onCreateRoom={() => undefined}
+        onClose={() => setOpen(false)}
+      />
+    </>
   );
 }
