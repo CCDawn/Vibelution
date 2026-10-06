@@ -135,10 +135,10 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ### 功能与使用
 团队协作和批量任务复用原生 Session tool-approvals API、`ChatToolApprovalDialog` 与其 `VButton`；错误使用 `VStateSurface`。页面显示具体股票、分析员和调用预览，按创建顺序逐项提供本次批准或拒绝。只展示当前研究精确 Session/Turn 的 pending 请求，团队引用同时核对 Agent；旧轮次、过期请求和其他会话不混入。不修改权限预设，不自动批准，不提供持久授权；同步门防双击，切换身份隔离晚到的错误。定时任务沿用同一审批要求，应用需保持运行。
 
-## FinanceResearchReport / FinanceReportExport / financialReports
+## FinanceResearchReport / financialReports
 
 ### 报告交付
-沿用报告标题区域的 `VButton`/`VDropdownMenu` 导出操作，支持 Markdown、JSON、Word、“打印版 (.html)”和“打印 / PDF”。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。“打印 / PDF”在当前页面的无脚本 sandbox iframe 内隔离展示，并由系统打印面另存 PDF；“打印版 (.html)”直接下载该报告的独立 HTML，用户可在桌面浏览器中打开后打印或另存 PDF。HTML 下载仍是 HTML，不标记为已生成 PDF。
+报告标题区使用下方 `FinanceReportExport` 的共用导出菜单，支持 PDF、Markdown、JSON、Word 和打印。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印在当前页面的无脚本 sandbox iframe 内隔离展示；PDF 生成失败后可下载独立打印版 HTML。HTML 下载仍是 HTML，不标记为已生成 PDF。
 打印内容使用有界 `srcdoc`，加载失败或未收到打印完成确认时尝试下载单份报告 HTML，并说明需要在浏览器打开后打印；不打印整个工作台。
 
 ## FinanceSessionMenu / useFinanceSessionLifecycle
@@ -182,11 +182,14 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ## FinanceReportExport
 
-### 功能与使用
+### 功能
 复用 `VDropdownMenu` 与 `VButton` 导出当前精确 Session/Turn 的报告。菜单只保留一个 `PDF (.pdf)`，直接下载本地生成的 PDF，保留中文、表格和分页；字体或生成失败显示当前操作的错误和「下载打印版」后备按钮。Markdown、JSON、Word 与独立打印入口继续可用。所有格式共用同步请求门、取消信号与身份重置，旧报告的延迟响应不得进入新报告。
 
 ### 适用范围
 同一金融助手拥有的已完成研究报告；报告中心和个股研究报告共用该菜单。
+
+### 使用方式
+打开报告的「导出」菜单并选择文件格式；需要系统打印时选择「打印」。PDF 生成失败后按错误提示选择「下载打印版」，再用桌面浏览器打开该文件打印。
 
 ## FinanceReportsCenter
 
