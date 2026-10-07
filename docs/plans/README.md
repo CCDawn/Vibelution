@@ -8,7 +8,6 @@
 | 文件 | Status | 说明 |
 | --- | --- | --- |
 | [2026-09-12-session-ledger-archival-constraints.md](2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施） | 账本归档设计约束（9 条必处理 + 8 风险点）+ 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
-| [2026-09-11-command-code-headless-transport-poc.md](2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED / PROPOSED FOR REVIEW（P0–P4b 与 G2/G3 已执行） | Command Code headless CLI 传输探针：调起路径、流式保真、会话连续性通过（附落盘缺陷）；**G2 未通过**（首字 2.18 倍）、G3 收益远小于原假设（CLI 自带 ~16k tokens/请求固定上下文）、G1 轮询未测出；无 GO/NO-GO 结论；未改产品路径 |
 | [research-flow-v2.md](research-flow-v2.md) | USER-APPROVED / STAGE 3 VERSIONED REPAIR IMPLEMENTED | 三阶段职责、决策 Agent 动态路由与现有账本权威；第三阶段 Seed、多动作路由、1.1.0 显式迁移和版本化基线修复已实现，真实 CUDA 迭代待验收 |
 | [2026-09-02-meeting-store-physical-sharding.md](2026-09-02-meeting-store-physical-sharding.md) | 设计阶段（调研进行中） | 会议轮次按 meetingRoundId 物理分片；是已归档 10 并发计划的写入层延伸，尚未实施 |
 | [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |
@@ -24,6 +23,7 @@
 
 历史快照（已迁出）：
 
+- `2026-09-11-command-code-headless-transport-poc.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-11-command-code-headless-transport-poc.md)（NO-GO / historical；G2 未通过，G1 未测出，不改产品传输路径）
 - `2026-08-26-challenge-workflow-recovery-closure.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-26-challenge-workflow-recovery-closure.md)（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main）
 - `2026-09-02-challenge-cup-10-parallel-concurrency-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md)（implemented；A/B/C 与 D2 已合入。D1 集中 marker、sideflow 混跑和 B5 上限 e2e 仍是后续增量）
 - `2026-09-05-independent-operator-experiment-flow-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-05-independent-operator-experiment-flow-plan.md)（superseded；产品流程见 [research-flow-v2.md](research-flow-v2.md)，本文只留调研和早期证据）

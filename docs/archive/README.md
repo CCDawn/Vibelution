@@ -11,7 +11,7 @@
 | [plans/2026-05/](plans/2026-05/) | 2026-05 早期实现计划 |
 | [plans/2026-06-07/](plans/2026-06-07/) | 原 `docs/plans/`（2026-06～07 计划与 service 优化阶段报告） |
 | [plans/2026-08/](plans/2026-08/) | 2026-08 控制面迁移 ledger（Closed）、Launcher 生命周期 TS 化（Closed → [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)）、便携分支工作区与多实例隔离草案（superseded → ADR 0009 / [worktree-collaboration](../agents/worktree-collaboration.md) / [instance-lifecycle](../../core/launcher/instance-lifecycle.md)）、Chat 路由单一权威（Implemented → [ADR 0010](../adr/0010-chat-route-is-window-local-authority.md)）、兼容层 SSOT 关闭账本（Implemented → [development-standard §25](../standards/development-standard.md)）、Pet 测试隔离与完整回归命令恢复（Implemented）、未映射 Python 改动的最近测试 import 前沿选择（Implemented）、会话 SQLite 迁移提案（superseded，见该文 §0） |
-| [plans/2026-09/](plans/2026-09/) | 2026-09 挑战杯与会话设计历史计划，含已 superseded 的假说质量方案、已 implemented 的 10 并发计划，以及被 research-flow-v2 替代的独立算子流程方案 |
+| [plans/2026-09/](plans/2026-09/) | 2026-09 挑战杯与会话设计历史计划，含已 superseded 的假说质量方案、已 implemented 的 10 并发计划、被 research-flow-v2 替代的独立算子流程方案，以及 Command Code headless 传输探针（NO-GO） |
 | [plans/2026-08-07/](plans/2026-08-07/) | Challenge Cup 工作流历史计划 |
 | [plans/2026-08-09/](plans/2026-08-09/) | MCP 受管 Agent 网关历史计划 |
 | [plans/2026-08-10/](plans/2026-08-10/) | Electron workbench 事务关闭历史计划 |
