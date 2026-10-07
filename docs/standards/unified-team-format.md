@@ -75,8 +75,8 @@ modelRef?        可选；llmBindings 槽位引用（见 §4）
 | 体系 | 现状 | 收敛动作 |
 | --- | --- | --- |
 | 通用（自定义/模板团队） | **已合规**：`team_crud` + `_normalize_members` 就是格式权威 | 保持；格式变更必须先改本文与门禁测试 |
-| 科研（挑战杯） | bootstrap `ensure` 物化的团队，成员行走同一 `_normalize_members` 出口 | 已按统一格式物化；新增系统团队必须复用同出口 |
-| 进化（Gym/自进化） | 待对齐 | 后续任务对齐成员行 8 字段与 agents.json 引用语义，不新设成员存储 |
+| 科研（挑战杯） | `bootstrap_challenge_cup_research_team` 仍直接写 3 字段成员行，未走 `_normalize_members`。组织同步已不再写成员 | 挑战杯收尾已停止，不沿这条启动路径补字段。新增系统团队必须复用 `_normalize_members` |
+| 进化（Gym/自进化） | `ensure_evolution_system_teams` 的成员行经 `_normalize_members` 落成 8 字段 | 保持；不另建成员存储。角色声明仍不在本行展开 |
 | 金融 | 阶段 3 迁移目标 | 迁移时以本文为格式基准：成员行 8 字段、角色 `_dev_role` 字段集、模型只留 agents.json 引用 |
 | 演示模板（medical/heletech） | 旧角色形状（缺 `responsibilities`/`toolPolicy`） | 仅演示用途保留现状；不得作为新格式的先例引用 |
 
