@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   SESSION_CREATE_RECOVERY_KEY, buildSessionCreateShell, forgetSessionCreateRecovery,
-  readSessionCreateRecovery, rememberSessionCreateRecovery, type SessionCreateRecovery,
+  forgetStoredCreateRecovery, readSessionCreateRecovery, recoveredSessionSummariesForAgent,
+  rememberSessionCreateRecovery,
+  type SessionCreateRecovery,
 } from "./chatSessionCreateRecovery";
 
 const intent: SessionCreateRecovery = {
@@ -50,6 +52,28 @@ describe("session create recovery identities", () => {
     JSON.stringify([{ ...intent, createdAt: "invalid" }]), " ".repeat(65537)])("rejects malformed or oversized storage", (raw) => {
     const store = storage();
     store.setItem(SESSION_CREATE_RECOVERY_KEY, raw);
+    expect(readSessionCreateRecovery(intent.tempSessionId, store)).toBeUndefined();
+  });
+
+  it("rebuilds only the selected agent's unfinished tab from the recovery record", () => {
+    const store = storage();
+    rememberSessionCreateRecovery({ ...intent, title: "探测乙a8eef9" }, store);
+    rememberSessionCreateRecovery({
+      ...intent, tempSessionId: "temp-session-other", agentId: "agent-b", title: "别人的",
+    }, store);
+    const rows = recoveredSessionSummariesForAgent("agent-a", store);
+    expect(rows).toEqual([expect.objectContaining({
+      id: "temp-session-a", title: "探测乙a8eef9", agentId: "agent-a", createdAt: intent.createdAt,
+    })]);
+    expect(JSON.stringify(rows)).not.toMatch(/idempotencyKey|别人的/);
+  });
+
+  it("forgets a stored shell by id when the document no longer has the create intent", () => {
+    const store = storage();
+    rememberSessionCreateRecovery({ ...intent, title: "探测乙a8eef9" }, store);
+    forgetStoredCreateRecovery("session-real", store);
+    expect(readSessionCreateRecovery(intent.tempSessionId, store)?.title).toBe("探测乙a8eef9");
+    forgetStoredCreateRecovery(intent.tempSessionId, store);
     expect(readSessionCreateRecovery(intent.tempSessionId, store)).toBeUndefined();
   });
 

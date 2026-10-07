@@ -92,6 +92,7 @@ import type { ChatRouteSelection } from "./chatSelectionProjection";
 import {
   buildSessionCreateShell,
   forgetSessionCreateRecovery,
+  forgetStoredCreateRecovery,
   readSessionCreateRecovery,
   rememberSessionCreateRecovery,
   type SessionCreateRecovery,
@@ -1240,6 +1241,7 @@ export function useChatWorkspaceLifecycle({
       );
       const deletedCreateIntent = createSessionIntentsRef.current.get(variables.sessionId);
       if (deletedCreateIntent) forgetCreateSessionIntent(variables.sessionId, deletedCreateIntent.idempotencyKey);
+      else forgetStoredCreateRecovery(variables.sessionId);
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         previousRouteSessionId: String(context?.previousRouteSessionId || "").trim(),
@@ -1405,6 +1407,7 @@ export function useChatWorkspaceLifecycle({
         forgetAgentLastSessionForDeletedSession(sessionId, deletedAgentIdBySessionId.get(sessionId) || "");
         const deletedCreateIntent = createSessionIntentsRef.current.get(sessionId);
         if (deletedCreateIntent) forgetCreateSessionIntent(sessionId, deletedCreateIntent.idempotencyKey);
+        else forgetStoredCreateRecovery(sessionId);
       });
 
       context?.telemetry?.succeeded({

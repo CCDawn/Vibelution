@@ -7,7 +7,20 @@ import { isRepresentedInAgentSessionTabs } from "../conversationIndexModel";
 import { mergePreservedCreatedSessions } from "../sessionCreatePreserve";
 import { filterOutTombstonedSessions } from "../sessionDeleteTombstone";
 import { markSessionActivitySnapshotsSeen } from "../sessionActivityIndicator";
+import { recoveredSessionSummariesForAgent } from "./chatSessionCreateRecovery";
 import { buildAgentSessionTabs } from "./chatSessionSurfaceModel";
+
+export function mergeAgentSessionTabSources(
+  agentItems: readonly SessionSummary[] | null | undefined,
+  visibleItems: readonly SessionSummary[],
+  recoveredItems: readonly SessionSummary[],
+): SessionSummary[] {
+  return filterOutTombstonedSessions([
+    ...recoveredItems,
+    ...(agentItems ?? []),
+    ...visibleItems,
+  ]) ?? [];
+}
 
 export type UseChatAgentSessionTabsInput = {
   queryClient: ReturnType<typeof useQueryClient>;
@@ -78,15 +91,19 @@ export function useChatAgentSessionTabs({
     [allVisibleSessions, selectedChatAgentId],
   );
 
+  const recoveredTempKey = recoveredSessionSummariesForAgent(selectedChatAgentId)
+    .map((session) => `${session.id}\n${session.title}`)
+    .join("\n");
   const agentSessionTabs = useMemo(
     () => buildAgentSessionTabs({
-      sessions: filterOutTombstonedSessions([
-        ...(selectedAgentSessionsQuery.data?.items ?? []),
-        ...selectedAgentVisibleSessions,
-      ]) ?? [],
+      sessions: mergeAgentSessionTabSources(
+        selectedAgentSessionsQuery.data?.items,
+        selectedAgentVisibleSessions,
+        recoveredSessionSummariesForAgent(selectedChatAgentId),
+      ),
       selectedChatAgentDirectSessionId: agentsById.get(selectedChatAgentId)?.directSessionId,
     }),
-    [agentsById, selectedAgentSessionsQuery.data?.items, selectedAgentVisibleSessions, selectedChatAgentId],
+    [agentsById, recoveredTempKey, selectedAgentSessionsQuery.data?.items, selectedAgentVisibleSessions, selectedChatAgentId],
   );
 
   useEffect(() => {

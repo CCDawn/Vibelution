@@ -1,4 +1,4 @@
-import type { SessionDetail } from "../../api/types";
+import type { SessionDetail, SessionSummary } from "../../api/types";
 import { isTempSessionId } from "../sessionOptimisticIds";
 
 export const SESSION_CREATE_RECOVERY_KEY = "vibelution.chat.create-recovery.v1";
@@ -78,6 +78,47 @@ export function rememberSessionCreateRecovery(intent: SessionCreateRecovery, sto
 
 export function forgetSessionCreateRecovery(tempId: string, expectedKey: string, storage = sessionCreateRecoveryStorage()): void {
   writeRecords(storage, readRecords(storage).filter((entry) => entry.tempSessionId !== tempId || entry.idempotencyKey !== expectedKey));
+}
+
+/** Drop a stored create shell when the tab is closed and this document has no in-memory intent. */
+export function forgetStoredCreateRecovery(sessionId: string, storage = sessionCreateRecoveryStorage()): void {
+  const recovery = readSessionCreateRecovery(sessionId, storage);
+  if (!recovery) {
+    return;
+  }
+  forgetSessionCreateRecovery(sessionId, recovery.idempotencyKey, storage);
+}
+
+export function listSessionCreateRecoveries(storage = sessionCreateRecoveryStorage()): SessionCreateRecovery[] {
+  return readRecords(storage);
+}
+
+/** Tab row for a create that has not reached the server. Title stays on the recovery record. */
+export function sessionSummaryFromCreateRecovery(intent: SessionCreateRecovery): SessionSummary {
+  return {
+    id: intent.tempSessionId,
+    title: String(intent.title || "").trim(),
+    agentId: intent.agentId,
+    status: "idle",
+    currentPhase: "ready",
+    taskSummary: "",
+    lastActive: intent.createdAt,
+    updatedAt: intent.createdAt,
+    createdAt: intent.createdAt,
+  };
+}
+
+export function recoveredSessionSummariesForAgent(
+  agentId: string,
+  storage = sessionCreateRecoveryStorage(),
+): SessionSummary[] {
+  const normalizedAgentId = String(agentId || "").trim();
+  if (!normalizedAgentId) {
+    return [];
+  }
+  return listSessionCreateRecoveries(storage)
+    .filter((entry) => entry.agentId === normalizedAgentId)
+    .map((entry) => sessionSummaryFromCreateRecovery(entry));
 }
 
 export function buildSessionCreateShell(intent: SessionCreateRecovery, title: string, agentDisplayName?: string): SessionDetail {
