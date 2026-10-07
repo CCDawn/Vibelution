@@ -1,8 +1,9 @@
 """Read-only market screening and cited stock research projections.
 
 Tencent remains the quote authority used by the Finance workspace. Sina public
-pages provide the broad A-share screen; Eastmoney provides company
-announcements, news search and reported financial indicators. Provider times
+pages provide the broad A-share screen. Eastmoney provides news, ordinary
+company notices, and reported financial indicators. The A-share annual report
+on the stock page is the cninfo original when one is found. Provider times
 and nulls are preserved instead of being inferred by the model.
 """
 
@@ -21,8 +22,19 @@ from urllib.parse import urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from core.web.services import financial_market_service as market
+from core.web.services.financial_research.official_filings import (
+    FILING_SOURCE,
+    accepted_annual_filing,
+    annual_filing_code,
+    lookup_annual_filings,
+    mentions_annual_report,
+)
 
 EASTMONEY_SOURCE = "东方财富"
+EASTMONEY_NOTICES_URL = "https://data.eastmoney.com/notices/"
+CNINFO_NOTICES_URL = "https://www.cninfo.com.cn/"
+_ANNUAL_ORIGINAL_MISSING = "没有核到巨潮资讯年报原文，未列出年报转载。"
+_OTHER_NOTICES_UNAVAILABLE = "其它公告暂时不可用。"
 SINA_SOURCE = "新浪财经"
 SINA_SCREEN_URL = "https://vip.stock.finance.sina.com.cn/mkt/#hs_a"
 SINA_LIST_ENDPOINT = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
@@ -636,6 +648,40 @@ def _load_news(stock: dict[str, str]) -> dict[str, Any]:
 
 
 def _load_announcements(stock: dict[str, str]) -> dict[str, Any]:
+    """A-share notices. The annual report is the cninfo PDF, not a reprint."""
+
+    notices, notice_error = _eastmoney_notice_items(stock)
+    filing = _official_annual_notice(stock["ticker"])
+    if filing is None and notice_error is not None and not notices:
+        raise FinancialResearchDataError(notice_error)
+    items: list[dict[str, Any]] = []
+    if filing is not None:
+        items.append(filing)
+    for item in notices:
+        if mentions_annual_report(item.get("title")):
+            continue
+        items.append({**item, "publisher": EASTMONEY_SOURCE})
+    if filing is not None:
+        source = FILING_SOURCE
+        source_url = CNINFO_NOTICES_URL
+        error = _OTHER_NOTICES_UNAVAILABLE if notice_error is not None else None
+    else:
+        source = EASTMONEY_SOURCE
+        source_url = EASTMONEY_NOTICES_URL
+        error = _ANNUAL_ORIGINAL_MISSING
+    return {
+        "status": "available",
+        "source": source,
+        "sourceUrl": source_url,
+        "fetchedAt": _utc_now(),
+        "error": error,
+        "items": items,
+    }
+
+
+def _eastmoney_notice_items(
+    stock: dict[str, str],
+) -> tuple[list[dict[str, Any]], str | None]:
     query = urlencode(
         {
             "page_size": 10,
@@ -645,14 +691,27 @@ def _load_announcements(stock: dict[str, str]) -> dict[str, Any]:
             "stock_list": stock["ticker"],
         }
     )
-    payload = _read_json(
-        "https://np-anotice-stock.eastmoney.com/api/security/ann?" + query
-    )
-    data = payload.get("data") if isinstance(payload, dict) else None
-    rows = data.get("list") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        raise FinancialResearchDataError("东方财富未返回公司公告")
-    items = []
+    try:
+        payload = _read_json(
+            "https://np-anotice-stock.eastmoney.com/api/security/ann?" + query
+        )
+        data = payload.get("data") if isinstance(payload, dict) else None
+        rows = data.get("list") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            raise FinancialResearchDataError("东方财富未返回公司公告")
+    except (
+        FinancialResearchDataError,
+        market.MarketDataError,
+        OSError,
+        UnicodeError,
+        ValueError,
+        TypeError,
+        KeyError,
+        IndexError,
+    ) as exc:
+        message = str(exc).strip() or "数据源暂时不可用，请重试"
+        return [], message[:160]
+    items: list[dict[str, Any]] = []
     for row in rows[:10]:
         if not isinstance(row, dict):
             continue
@@ -677,17 +736,34 @@ def _load_announcements(stock: dict[str, str]) -> dict[str, Any]:
                 ).strip()
                 or None,
                 "noticeDate": _date(row.get("notice_date")),
-                "url": f"https://data.eastmoney.com/notices/detail/{stock['ticker']}/{code}.html",
+                "url": (
+                    "https://data.eastmoney.com/notices/detail/"
+                    f"{stock['ticker']}/{code}.html"
+                ),
                 "articleCode": code,
             }
         )
+    return items, None
+
+
+def _official_annual_notice(ticker: str) -> dict[str, str] | None:
+    try:
+        found = lookup_annual_filings([ticker], cutoff=None)
+        code = annual_filing_code(ticker)
+        raw = found.get(code) if isinstance(found, dict) and code else None
+        accepted = accepted_annual_filing(raw, cutoff=None)
+    except Exception:
+        return None
+    if accepted is None:
+        return None
+    day = accepted["announcedOn"]
     return {
-        "status": "available",
-        "source": EASTMONEY_SOURCE,
-        "sourceUrl": "https://data.eastmoney.com/notices/",
-        "fetchedAt": _utc_now(),
-        "error": None,
-        "items": items,
+        "title": accepted["title"],
+        "publishedAt": day,
+        "noticeDate": day,
+        "url": accepted["url"],
+        "articleCode": f"cninfo-{day}",
+        "publisher": FILING_SOURCE,
     }
 
 

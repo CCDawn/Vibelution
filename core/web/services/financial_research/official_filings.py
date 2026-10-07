@@ -1,9 +1,10 @@
-"""Read one cninfo annual-report identity for a screened A-share.
+"""Read one cninfo annual-report identity for an A-share.
 
-The public query returns a title, announcement day, and PDF URL. It does not
-return an interior page. A missing day, a filing after the analysis date, a
-summary, or any URL outside the exchange document hosts is omitted. Lookup
-failures stay empty so the screen itself still returns.
+Screening and the stock announcement list both use this lookup. The public
+query returns a title, announcement day, and PDF URL. It does not return an
+interior page. A missing day, a filing after an explicit cutoff, a summary,
+or any URL outside the exchange document hosts is omitted. Lookup failures
+stay empty so the caller still returns.
 """
 
 from __future__ import annotations
@@ -67,6 +68,14 @@ def annual_filing_code(value: object) -> str:
         return ""
     match = _A_SHARE.search(value)
     return match.group(1) if match else ""
+
+
+def mentions_annual_report(value: object) -> bool:
+    """True when a notice title is an annual report, including a summary."""
+
+    if not isinstance(value, str):
+        return False
+    return "年度报告" in re.sub(r"\s+", "", value)
 
 
 def accepted_annual_filing(value: object, *, cutoff: date | None) -> dict[str, str] | None:

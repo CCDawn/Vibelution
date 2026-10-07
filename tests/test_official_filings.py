@@ -13,7 +13,18 @@ from core.web.services.financial_research.official_filings import (
     OfficialFilingLookupError,
     accepted_annual_filing,
     lookup_annual_filings,
+    mentions_annual_report,
 )
+
+
+def test_mentions_annual_report_includes_summaries_and_spaced_titles():
+    assert mentions_annual_report("贵州茅台2025年年度报告")
+    assert mentions_annual_report("贵州茅台2025年年度报告摘要")
+    assert mentions_annual_report("年 度 报 告")
+    assert mentions_annual_report("年度报告") is True
+    assert not mentions_annual_report("关于召开股东大会的通知")
+    assert not mentions_annual_report(None)
+
 
 PDF = "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF"
 LIVE_ANNOUNCED_MS = 1776355200000

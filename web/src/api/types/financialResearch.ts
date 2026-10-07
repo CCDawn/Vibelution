@@ -96,6 +96,7 @@ export type FinancialResearchAnnouncement = {
   noticeDate: string | null;
   url: string;
   articleCode: string;
+  publisher?: string | null;
 };
 
 export type FinancialResearchMetric = {
