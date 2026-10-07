@@ -119,6 +119,7 @@ class AnnouncementResponse(BaseModel):
     noticeDate: str | None
     url: str
     articleCode: str
+    publisher: str | None = None
 
 
 class ResearchMetricResponse(BaseModel):

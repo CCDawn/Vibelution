@@ -354,7 +354,7 @@ function ResearchList<T extends FinancialResearchNewsItem | FinancialResearchAnn
     {facet.status === "unavailable" ? <VStateSurface tone="error" density="compact" title={zh ? "此数据源暂不可用" : "Source unavailable"}>{facet.error}</VStateSurface>
       : items.length ? <ul className={styles.list}>{items.map((item, index) => <li className={styles.listItem} key={`${item.url ?? item.title}:${index}`}>
         {item.url ? <a className={styles.itemTitleLink} href={item.url} target="_blank" rel="noreferrer">{item.title}</a> : <strong className={styles.itemTitle}>{item.title}</strong>}
-        <div className={styles.itemMeta}><span>{"publisher" in item ? item.publisher : zh ? "公司公告" : "Filing"}</span><time dateTime={item.publishedAt ?? undefined}>{item.publishedAt ?? (zh ? "时间未提供" : "Date unavailable")}</time></div>
+        <div className={styles.itemMeta}><span>{"publisher" in item && item.publisher ? item.publisher : zh ? "公司公告" : "Filing"}</span><time dateTime={item.publishedAt ?? undefined}>{item.publishedAt ?? (zh ? "时间未提供" : "Date unavailable")}</time></div>
       </li>)}</ul> : <p className={styles.meta}>{zh ? "暂无相关内容" : "No related items"}</p>}
   </section>;
 }
