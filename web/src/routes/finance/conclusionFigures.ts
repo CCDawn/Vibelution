@@ -3,7 +3,7 @@ import type { SessionTurnItem } from "../../api/types";
 export const MISSING_FIGURE = "没有这一项";
 const MAX_DIGITS = 40;
 const FAILED = new Set(["failed", "error", "timeout", "timed_out", "blocked", "cancelled", "canceled", "interrupted"]);
-const HEADING = /^[ \t]{0,3}#{1,3}[ \t]+(.+?)[ \t]*$/gm;
+const HEADING = /^[ \t]{0,3}(?:#{1,3}[ \t]+(.+?)[ \t]*$|\*\*([^*\r\n]{1,60})\*\*[ \t]*[：:]?[ \t]*)/gm;
 const CONCLUSION = /结论|摘要|简报|summary|conclusion/i;
 const PAGE = /第\s*(\d{1,6})\s*页|PDF\s*(\d{1,6})\s*页|\b(?:p\.|page\s+)(\d{1,6})\b/gi;
 const FENCE = /```[\s\S]*?```/g;
@@ -16,7 +16,7 @@ export type FilingExcerpt = { page: number; text: string };
 type Amount = { start: number; end: number; sign: string; number: string; unit: string };
 type Dec = { neg: boolean; int: bigint; scale: number };
 
-export function groundResearchConclusion(reportText: string, excerpts: readonly FilingExcerpt[]): string {
+export function groundResearchConclusion(reportText: string, excerpts: readonly FilingExcerpt[], marketItems: readonly SessionTurnItem[] = []): string {
   const original = reportText || "";
   const text = asciiDigits(original);
   if (!text) return original;
@@ -32,7 +32,8 @@ export function groundResearchConclusion(reportText: string, excerpts: readonly 
   const fences = fenceSpans(text);
   const pageNumbers = new Set(allowed);
   let computed = new Set(pageNumbers);
-  const kept: Array<[number, number]> = [];
+  // These exact positions never enter the filing-number or calculation pool.
+  const kept = marketPriceSpans(text, spans, marketItems);
   for (const [start, end] of spans) {
     const known = new Set(computed);
     for (let pass = 0; pass < 4; pass += 1) {
@@ -45,6 +46,69 @@ export function groundResearchConclusion(reportText: string, excerpts: readonly 
     computed = known;
   }
   return replaceAmounts(original, text, spans, pageNumbers, kept, fences);
+}
+
+/** A quoted price is a market fact, not evidence for a financial statement. */
+function marketPriceSpans(text: string, spans: Array<[number, number]>, items: readonly SessionTurnItem[]): Array<[number, number]> {
+  const kept: Array<[number, number]> = [];
+  const pattern = /(?:最新公开报价|最新报价|股价|价格|收盘价|latest quote|stock price|share price)[ \t*]*(?:为|是|[:：])?[ \t*]*([+-]?\d+(?:\.\d+)?)([ \t]*(?:港元|美元|元|CNY|RMB|HKD|USD))/gi;
+  for (const item of items) {
+    if (item.type !== "tool_call" || item.toolName !== "financial_market_snapshot_tool" || !item.output || item.output.length > 8000 || !["completed", "success", "partial", "degraded"].includes(item.status.toLowerCase())) continue;
+    let payload: Record<string, unknown>;
+    try { payload = JSON.parse(item.output) as Record<string, unknown>; } catch { continue; }
+    if (!payload || payload.ok !== true || !["ok", "partial"].includes(String(payload.status))) continue;
+    const quote = payload.quote as Record<string, unknown> | null;
+    if (!quote || typeof quote !== "object" || typeof quote.price !== "number" || !Number.isFinite(quote.price) || quote.price <= 0) continue;
+    const symbol = typeof payload.ticker === "string" ? payload.ticker : "";
+    if (!/^(?:sh|sz|bj)\d{6}$|^hk\d{5}$|^us[A-Za-z][A-Za-z0-9.]{0,15}$/.test(symbol) || quote.symbol !== symbol || quote.ticker !== symbol.slice(2)) continue;
+    const currency = ({ sh: "CNY", sz: "CNY", bj: "CNY", hk: "HKD", us: "USD" } as Record<string, string>)[symbol.slice(0, 2)];
+    if (payload.currency !== currency || quote.currency !== currency || typeof quote.timestamp !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(quote.timestamp) || !Number.isFinite(Date.parse(quote.timestamp))) continue;
+    if (payload.priceUnit !== undefined && payload.priceUnit !== (currency === "CNY" ? "元" : `${currency}/share`)) continue;
+    if (quote.priceUnit !== undefined && quote.priceUnit !== `${currency}/share`) continue;
+    if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(quote.timestamp)) continue;
+    const quoteDate = quote.timestamp.slice(0, 10);
+    const url = typeof payload.sourceUrl === "string" ? payload.sourceUrl : "";
+    // The adapter's canonical quote identity is also encoded in this URL.
+    if (url !== `https://gu.qq.com/${symbol}/gp`) continue;
+    for (const [start, end] of spans) {
+      const chunk = text.slice(start, end);
+      for (const match of chunk.matchAll(pattern)) {
+        const at = match.index ?? 0;
+        const previousBreak = chunk.lastIndexOf("\n\n", at);
+        const paragraph = chunk.slice(previousBreak < 0 ? 0 : previousBreak + 2, chunk.indexOf("\n\n", at) < 0 ? chunk.length : chunk.indexOf("\n\n", at));
+        const visibleIdentity = paragraph.replace(/https?:\/\/\S+/g, "");
+        const explicitSymbols = [...visibleIdentity.matchAll(/\b(?:(?:sh|sz|bj)\d{6}|hk\d{5}|us[A-Za-z][A-Za-z0-9.]{0,15})\b/g)].map((entry) => entry[0]);
+        const escapedTicker = symbol.slice(2).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const hasTicker = new RegExp(`(?<![A-Za-z0-9])(?:${symbol.slice(0, 2)})?${escapedTicker}(?![A-Za-z0-9])`, "i").test(visibleIdentity);
+        const quotedDate = [...paragraph.matchAll(/(?:行情(?:日期|时点|时间)|报价(?:日期|时点|时间)|quote (?:date|time|timestamp))[ \t*]*(?:为|是|[:：])?[ \t*]*(\d{4}-\d{2}-\d{2})/gi)];
+        if (!paragraph.includes(url) || !quotedDate.some((date) => date[1] === quoteDate) || !hasTicker || explicitSymbols.some((identity) => identity !== symbol)) continue;
+        const number = match[1];
+        const unit = match[2].trim();
+        const sentenceStart = Math.max(...["。", "；", ";", "\n"].map((separator) => chunk.lastIndexOf(separator, at))) + 1;
+        const prefix = chunk.slice(sentenceStart, at);
+        const suffix = chunk.slice(at + match[0].length).replace(/^(?:\/(?:股|share))?[ \t*]*/i, "");
+        if (/营收|收入|利润|现金流|负债|分红|目标|预测|预计|profit|revenue|target|forecast/i.test(prefix) || /^[+×*/÷=＝-]/.test(suffix)) continue;
+        const units = currency === "CNY" ? ["元", "CNY", "RMB"] : currency === "HKD" ? ["港元", "HKD"] : ["美元", "USD"];
+        const stated = decimalOf({ start: 0, end: 0, sign: number.startsWith("-") ? "-" : "", number: number.replace(/^[+-]/, ""), unit: "" });
+        const quoted = decimalOf({ start: 0, end: 0, sign: "", number: String(quote.price), unit: "" });
+        if (!units.includes(unit.toUpperCase()) || !stated || !quoted || canonicalDecimal(stated) !== canonicalDecimal(quoted)) continue;
+        const offset = match[0].lastIndexOf(number + match[2]);
+        const amountStart = start + (match.index ?? 0) + offset;
+        const amountEnd = amountStart + number.length + (/[元]$/.test(unit) ? match[2].length : 0);
+        kept.push([amountStart, amountEnd]);
+      }
+    }
+  }
+  return kept;
+}
+
+/** Bound bare source URLs before Chinese punctuation for GFM autolinking. */
+export function normalizeFinancialReportLinks(text: string): string {
+  const fences = [...fenceSpans(text), ...[...text.matchAll(/`[^`\n]*`/g)].map((match): [number, number] => [match.index ?? 0, (match.index ?? 0) + match[0].length])];
+  return text.replace(/https?:\/\/[^\s<>"\])。，；、）]+(?=[。，；、）])/g, (url: string, offset: number) => {
+    if (inside(fences, offset) || ["<", "(", "\""].includes(text[offset - 1] ?? "")) return url;
+    return `<${url}>`;
+  });
 }
 
 export function filingExcerptsFromTurnItems(items: readonly SessionTurnItem[]): FilingExcerpt[] {
@@ -111,13 +175,13 @@ function conclusionSpans(text: string): Array<[number, number]> {
   const headings = [...text.matchAll(HEADING)];
   const spans: Array<[number, number]> = [];
   headings.forEach((heading, index) => {
-    if (!CONCLUSION.test(heading[1] ?? "")) return;
+    if (!CONCLUSION.test(heading[1] || heading[2] || "")) return;
     const start = (heading.index ?? 0) + heading[0].length;
     const end = headings[index + 1]?.index ?? text.length;
     spans.push([start, end]);
   });
   if (spans.length) return spans;
-  return headings.length ? [] : [[0, text.length]];
+  return headings.some((heading) => heading[1]) ? [] : [[0, text.length]];
 }
 
 function fenceSpans(text: string): Array<[number, number]> {

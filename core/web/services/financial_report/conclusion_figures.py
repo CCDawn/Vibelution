@@ -9,7 +9,9 @@ module evaluates to the written result.
 from __future__ import annotations
 
 import json
+import math
 import re
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 from core.chat.turn_journal import EVENT_TOOL_RESULT
@@ -28,7 +30,16 @@ _FAILED_TOOL_STATUSES = {
 }
 _FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
 _HEADING = re.compile(r"(?m)^[ \t]{0,3}#{1,3}[ \t]+(?P<title>.+?)[ \t]*$")
+_BOLD_HEADING = re.compile(
+    r"(?m)^[ \t]{0,3}\*\*(?P<title>[^*\r\n]{1,60}?)\*\*"
+    r"(?P<after>[ \t]*(?::|：)?[ \t]*(?P<body>.*))[ \t]*$"
+)
 _CONCLUSION_TITLE = re.compile(r"结论|摘要|简报|summary|conclusion", re.IGNORECASE)
+_BOLD_SECTION_TITLE = re.compile(
+    r"(?:结论|摘要|简报|关键事实|核心事实|风险|建议|summary|conclusions?|"
+    r"key facts|facts|risks?|recommendations?)",
+    re.IGNORECASE,
+)
 _PAGE = re.compile(
     r"第\s*(\d{1,6})\s*页|PDF\s*(\d{1,6})\s*页|\b(?:p\.|page\s+)(\d{1,6})\b",
     re.IGNORECASE,
@@ -36,6 +47,42 @@ _PAGE = re.compile(
 _FENCE = re.compile(r"```.*?```", re.DOTALL)
 _UNIT = r"(?:%|％|万亿|亿元|万元|港元|美元|元|股)"
 _NUMBER = r"(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?"
+_PRICE_LABEL = (
+    r"(?:最新公开报价|最新报价|股价|价格|收盘价|latest\s+quote|"
+    r"stock\s+price|share\s+price)"
+)
+_PRICE_CLAIM = re.compile(
+    rf"(?P<bold_open>\*\*)?(?P<label>{_PRICE_LABEL})(?(bold_open)\*\*)"
+    rf"\s*(?:为|是|[:：])?\s*(?:\*\*)?"
+    rf"(?P<number>{_NUMBER})\s*(?P<unit>"
+    r"(?:CNY\s*元|RMB\s*元?|HKD\s*港元|USD\s*美元|"
+    r"CNY|RMB|HKD|USD|港元|美元|元)"
+    r"(?:\s*/\s*(?:股|share))?)\s*(?:\*\*)?",
+    re.IGNORECASE,
+)
+_MARKET_TOOL_STATUSES = {"completed", "success", "partial", "degraded"}
+_MARKET_PAYLOAD_STATUSES = {"ok", "partial"}
+_HIGH_RISK_CLAIM = re.compile(
+    r"财报|财务报告|年报|季报|营收|营业收入|主营收入|收入|净利(?:润)?|利润|"
+    r"现金流|经营现金流|自由现金流|财务指标|财务数据|"
+    r"目标|预测|预期|forecast|revenue|net\s+income|"
+    r"profit|earnings|cash\s+flow|target\s+price",
+    re.IGNORECASE,
+)
+_STOCK_CODE = re.compile(
+    r"(?i)(?<![A-Z0-9])(?:sh6\d{5}|sz[03]\d{5}|bj[489]\d{5}|hk\d{5}|"
+    r"us[A-Z][A-Z0-9.\-]{0,9})(?![A-Z0-9])|(?<!\d)\d{6}(?!\d)"
+)
+_MARKDOWN_LINK = re.compile(r"!?\[[^\]\r\n]*\]\([^\)\r\n]*\)")
+_INLINE_CODE = re.compile(r"`+[^`\r\n]*`+")
+_URL = re.compile(r"https?://[^\s\]\[<>()}]+", re.IGNORECASE)
+_FINANCIAL_SOURCE_URL = re.compile(
+    r"https://gu\.qq\.com/(?:(?:sh6\d{5}|sz[03]\d{5}|bj[489]\d{5})|"
+    r"hk\d{5}|us[A-Z][A-Z0-9.\-]{0,9})/gp",
+    re.IGNORECASE,
+)
+_URL_CHINESE_PUNCTUATION = frozenset("，。；：！？、）】》」』")
+_SENTENCE_BOUNDARY = re.compile(r"[。！？!?；;]|\.(?!\d)")
 _AMOUNT = re.compile(
     rf"(?<![\d.])(?P<sign>[+-])?(?P<number>{_NUMBER})(?![\d.])(?P<unit>\s*{_UNIT})?"
 )
@@ -56,7 +103,11 @@ _OPERATORS = {
 }
 
 
-def ground_report_text(report_text: str, excerpts: list[tuple[int, str]]) -> str:
+def ground_report_text(
+    report_text: str,
+    excerpts: list[tuple[int, str]],
+    kept_spans: list[tuple[int, int]] | None = None,
+) -> str:
     """Return the report with ungrounded conclusion amounts replaced."""
 
     original = str(report_text or "")
@@ -84,18 +135,36 @@ def ground_report_text(report_text: str, excerpts: list[tuple[int, str]]) -> str
             known |= added
             kept.extend((start + left, start + right) for left, right in positions)
         computed = known
-    return _replace_amounts(original, text, spans, page_numbers, kept, fences)
+    return _replace_amounts(
+        original,
+        text,
+        spans,
+        page_numbers,
+        [*kept, *(kept_spans or [])],
+        fences,
+    )
 
 
 def ground_completed_report(report_text: str, items: list, events: list) -> str:
     """Ground one completed Turn without reading anything outside that Turn."""
 
-    return ground_report_text(report_text, excerpts_from_turn(items, events))
+    records = _tool_records(items, events)
+    market_kept = _market_quote_spans(str(report_text or ""), records)
+    grounded = ground_report_text(
+        report_text,
+        excerpts_from_records(records),
+        market_kept,
+    )
+    return _normalize_source_links(grounded)
 
 
 def excerpts_from_turn(items: list, events: list) -> list[tuple[int, str]]:
+    return excerpts_from_records(_tool_records(items, events))
+
+
+def excerpts_from_records(records: list[tuple[str, str, str]]) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
-    for name, output, status in _tool_records(items, events):
+    for name, output, status in records:
         if status.strip().lower() in _FAILED_TOOL_STATUSES:
             continue
         found.extend(filing_excerpts_from_tool_output(name, output))
@@ -182,6 +251,263 @@ def _tool_records(items: list, events: list) -> list[tuple[str, str, str]]:
     return records
 
 
+def _market_quote_spans(
+    report_text: str,
+    records: list[tuple[str, str, str]],
+) -> list[tuple[int, int]]:
+    conclusion_spans = _conclusion_spans(report_text)
+    if not conclusion_spans:
+        return []
+    quotes = [
+        quote
+        for name, output, status in records
+        if name == "financial_market_snapshot_tool"
+        and status.strip().lower() in _MARKET_TOOL_STATUSES
+        and len(output) <= 8_000
+        for quote in [_market_quote_payload(output)]
+        if quote is not None
+    ]
+    kept: list[tuple[int, int]] = []
+    for start, end in conclusion_spans:
+        chunk = report_text[start:end]
+        for paragraph_start, paragraph_end in _paragraph_spans(chunk):
+            paragraph = chunk[paragraph_start:paragraph_end]
+            visible = _visible_report_text(paragraph)
+            for quote in quotes:
+                if not _contains_source_url(paragraph, quote["sourceUrl"]):
+                    continue
+                if not _contains_quote_identity(visible, quote):
+                    continue
+                if not _contains_quote_date(paragraph, quote["date"]):
+                    continue
+                if _contains_other_stock(visible, quote):
+                    continue
+                for match in _PRICE_CLAIM.finditer(paragraph):
+                    currency = _currency_for_unit(match.group("unit"))
+                    if currency != quote["currency"]:
+                        continue
+                    if _amount_decimal(match.group("number")) != quote["price"]:
+                        continue
+                    if not _safe_quote_claim(paragraph, match):
+                        continue
+                    amount = _AMOUNT.match(paragraph, match.start("number"))
+                    if amount is None or amount.start("number") != match.start("number"):
+                        continue
+                    kept.append(
+                        (
+                            start + paragraph_start + amount.start(),
+                            start + paragraph_start + amount.end(),
+                        )
+                    )
+    return kept
+
+
+def _market_quote_payload(output: str) -> dict | None:
+    try:
+        payload = json.loads(output)
+    except (json.JSONDecodeError, TypeError, ValueError, UnicodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return None
+    if str(payload.get("status") or "").strip().lower() not in _MARKET_PAYLOAD_STATUSES:
+        return None
+    ticker = str(payload.get("ticker") or "").strip()
+    currency = str(payload.get("currency") or "").strip().upper()
+    source_url = str(payload.get("sourceUrl") or "").strip()
+    quote = payload.get("quote")
+    if not isinstance(quote, dict):
+        return None
+    symbol = str(quote.get("symbol") or "").strip()
+    quote_ticker = str(quote.get("ticker") or "").strip()
+    quote_currency = str(quote.get("currency") or "").strip().upper()
+    market = _market_for_symbol(symbol)
+    if (
+        market is None
+        or ticker.casefold() != symbol.casefold()
+        or quote_ticker.casefold() != symbol[2:].casefold()
+    ):
+        return None
+    expected_currency, root_price_unit, quote_price_unit = market
+    if currency != expected_currency or quote_currency != expected_currency:
+        return None
+    if payload.get("priceUnit") not in (None, "", root_price_unit):
+        return None
+    if quote.get("priceUnit") not in (None, "", quote_price_unit):
+        return None
+    if source_url != f"https://gu.qq.com/{symbol}/gp":
+        return None
+    timestamp = quote.get("timestamp")
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return None
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed_timestamp.tzinfo is None:
+        return None
+    raw_price = quote.get("price")
+    if isinstance(raw_price, bool) or not isinstance(raw_price, (int, float)):
+        return None
+    if not math.isfinite(float(raw_price)) or float(raw_price) <= 0:
+        return None
+    try:
+        price = Decimal(str(raw_price))
+    except (ArithmeticError, ValueError):
+        return None
+    if not price.is_finite() or price <= 0:
+        return None
+    return {
+        "symbol": symbol,
+        "ticker": quote_ticker,
+        "currency": expected_currency,
+        "sourceUrl": source_url,
+        "date": parsed_timestamp.date().isoformat(),
+        "price": price,
+    }
+
+
+def _market_for_symbol(symbol: str) -> tuple[str, str, str] | None:
+    if re.fullmatch(r"(?:sh6\d{5}|sz[03]\d{5}|bj[489]\d{5})", symbol):
+        return "CNY", "元", "CNY/share"
+    if re.fullmatch(r"hk\d{5}", symbol):
+        return "HKD", "HKD/share", "HKD/share"
+    if re.fullmatch(r"us[A-Z][A-Z0-9.\-]{0,9}", symbol, re.IGNORECASE):
+        return "USD", "USD/share", "USD/share"
+    return None
+
+
+def _paragraph_spans(text: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for separator in re.finditer(r"\r?\n[ \t]*\r?\n", text):
+        if separator.start() > cursor:
+            spans.append((cursor, separator.start()))
+        cursor = separator.end()
+    if cursor < len(text):
+        spans.append((cursor, len(text)))
+    return spans
+
+
+def _visible_report_text(text: str) -> str:
+    value = _without_code(text)
+    value = _MARKDOWN_LINK.sub(
+        lambda match: re.sub(r"https?://[^\s)]+", "", match.group(0), flags=re.IGNORECASE),
+        value,
+    )
+    return _URL.sub(" ", value)
+
+
+def _without_code(text: str) -> str:
+    value = _FENCE.sub(lambda match: " " * len(match.group(0)), text)
+    return _INLINE_CODE.sub(lambda match: " " * len(match.group(0)), value)
+
+
+def _contains_source_url(text: str, source_url: str) -> bool:
+    return source_url in _without_code(text)
+
+
+def _contains_quote_identity(text: str, quote: dict) -> bool:
+    for identity in {quote["symbol"], quote["ticker"]}:
+        if not identity:
+            continue
+        if identity.isdigit():
+            if re.search(rf"(?<!\d){re.escape(identity)}(?!\d)", text):
+                return True
+        elif re.search(
+            rf"(?<![A-Za-z0-9.\-]){re.escape(identity)}(?![A-Za-z0-9.\-])",
+            text,
+            re.IGNORECASE,
+        ):
+            return True
+    return False
+
+
+def _contains_quote_date(text: str, quote_date: str) -> bool:
+    year, month, day = (int(part) for part in quote_date.split("-"))
+    return re.search(
+        rf"(?:行情(?:日期|时点|时间)|报价(?:日期|时点|时间)|quote\s+(?:date|time|timestamp))"
+        rf"[ \t*]*(?:为|是|[:：])?[ \t*]*(?<!\d){year:04d}-{month:02d}-{day:02d}(?!\d)",
+        text,
+        re.IGNORECASE,
+    ) is not None
+
+
+def _contains_other_stock(text: str, quote: dict) -> bool:
+    visible = text
+    for match in _PRICE_CLAIM.finditer(visible):
+        visible = visible.replace(match.group(0), " " * len(match.group(0)))
+    expected = {quote["symbol"].casefold(), quote["ticker"].casefold()}
+    for match in _STOCK_CODE.finditer(visible):
+        code = match.group(0).lower()
+        if code not in expected and code.removeprefix("sh").removeprefix("sz").removeprefix("bj") not in expected:
+            return True
+    return False
+
+
+def _currency_for_unit(unit: str) -> str | None:
+    value = re.sub(r"\s+", "", str(unit or "")).lower()
+    if value.startswith(("cny", "rmb", "人民币", "元")):
+        return "CNY"
+    if value.startswith(("hkd", "港元")):
+        return "HKD"
+    if value.startswith(("usd", "美元")):
+        return "USD"
+    return None
+
+
+def _amount_decimal(value: str) -> Decimal | None:
+    try:
+        amount = Decimal(str(value).replace(",", "").replace("，", ""))
+    except (ArithmeticError, ValueError):
+        return None
+    return amount if amount.is_finite() else None
+
+
+def _safe_quote_claim(paragraph: str, match: re.Match[str]) -> bool:
+    start, end = match.span()
+    sentence_start = 0
+    sentence_end = len(paragraph)
+    for boundary in _SENTENCE_BOUNDARY.finditer(paragraph):
+        if boundary.end() <= start:
+            sentence_start = boundary.end()
+        elif boundary.start() >= end:
+            sentence_end = boundary.start()
+            break
+    prefix = _visible_report_text(paragraph[sentence_start:start])
+    if _HIGH_RISK_CLAIM.search(prefix):
+        return False
+    # A quoted share price is a raw quote. It cannot authorize arithmetic or
+    # another numeric claim attached to that price statement.
+    tail = _visible_report_text(paragraph[end:sentence_end])
+    tail = re.sub(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)", " ", tail)
+    if re.search(r"(?:[+\-−×*/÷=＝≈]\s*\d|\d\s*[+\-−×*/÷=＝≈])", tail):
+        return False
+    return True
+
+
+def _normalize_source_links(text: str) -> str:
+    """Protect bare Tencent quote URLs from adjacent Chinese punctuation."""
+
+    if not text:
+        return text
+    protected = [
+        (match.start(), match.end())
+        for pattern in (_FENCE, _INLINE_CODE, _MARKDOWN_LINK)
+        for match in pattern.finditer(text)
+    ]
+    patches: list[tuple[int, int]] = []
+    for match in _FINANCIAL_SOURCE_URL.finditer(text):
+        if _inside(protected, match.start()):
+            continue
+        if match.start() > 0 and text[match.start() - 1] == "<":
+            continue
+        if match.end() < len(text) and text[match.end()] in _URL_CHINESE_PUNCTUATION:
+            patches.append((match.start(), match.end()))
+    for start, end in reversed(patches):
+        text = text[:start] + "<" + text[start:end] + ">" + text[end:]
+    return text
+
+
 def _cited_pages(text: str) -> set[int]:
     pages: set[int] = set()
     for match in _PAGE.finditer(text):
@@ -193,17 +519,30 @@ def _cited_pages(text: str) -> set[int]:
 
 
 def _conclusion_spans(text: str) -> list[tuple[int, int]]:
-    headings = list(_HEADING.finditer(text))
+    headings: list[tuple[int, int, str, int]] = []
+    markdown_headings = list(_HEADING.finditer(text))
+    for heading in markdown_headings:
+        headings.append((heading.start(), heading.end(), heading.group("title"), heading.end()))
+    for heading in _BOLD_HEADING.finditer(text):
+        title = heading.group("title").strip().rstrip(":：").strip()
+        body = heading.group("body") or ""
+        after = heading.group("after") or ""
+        has_separator = ":" in heading.group("title") or "：" in after
+        if body.strip() and not (has_separator or _BOLD_SECTION_TITLE.search(title)):
+            continue
+        body_start = heading.start("body") if body.strip() else heading.end()
+        headings.append((heading.start(), heading.end(), title, body_start))
+    headings.sort(key=lambda heading: (heading[0], heading[1]))
     spans: list[tuple[int, int]] = []
     for index, heading in enumerate(headings):
-        if not _CONCLUSION_TITLE.search(heading.group("title")):
+        if not _CONCLUSION_TITLE.search(heading[2]):
             continue
-        start = heading.end()
-        end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+        start = heading[3]
+        end = headings[index + 1][0] if index + 1 < len(headings) else len(text)
         spans.append((start, end))
     if spans:
         return spans
-    if headings:
+    if markdown_headings:
         return []
     return [(0, len(text))]
 

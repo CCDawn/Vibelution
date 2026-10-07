@@ -1,6 +1,6 @@
 import type { AssistantConversationTurn, ConversationMessage, SessionSummary } from "../../api/types";
 import type { StockCandle, StockIdentity, StockSnapshot } from "../../api/financialMarket";
-import { filingExcerptsFromTurnItems, groundResearchConclusion } from "./conclusionFigures";
+import { filingExcerptsFromTurnItems, groundResearchConclusion, normalizeFinancialReportLinks } from "./conclusionFigures";
 import { isScreeningReportPrompt, projectScreeningComparison } from "./screenComparison";
 import { safeFinancialSourceUrl } from "./financialResearchModel";
 
@@ -178,7 +178,7 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
   // shows screening candidates from the screen tool with a filing page only
   // when the same turn's evidence search cites that ticker.
   const text = projectScreeningComparison(
-    groundResearchConclusion(answer, filingExcerptsFromTurnItems(turn.turnItems)),
+    normalizeFinancialReportLinks(groundResearchConclusion(answer, filingExcerptsFromTurnItems(turn.turnItems), turn.turnItems)),
     selectedRequest,
     turn.turnItems,
   );
