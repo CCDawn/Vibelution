@@ -34,6 +34,7 @@ import {
 } from "../groupRoomOptimisticIds";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { readSessionCreateRecovery } from "./chatSessionCreateRecovery";
+import { resetSessionCreateAttemptsForTests, sessionCreateAttemptState } from "./sessionCreateAttempt";
 
 const fetchJsonMock = vi.fn();
 vi.mock("../../api/client", () => ({
@@ -332,6 +333,7 @@ function groupCreateTelemetry(): TelemetryEvent {
 }
 
 beforeEach(() => {
+  resetSessionCreateAttemptsForTests();
   sessionStorage.clear();
   fetchJsonMock.mockReset();
   telemetryEvents.length = 0;
@@ -714,14 +716,25 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
 
     mutateSessionCreate("agent-a");
     await flushMutationQueue();
+    const rejectedTempSessionId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    const rejectedKey = sessionCreateIdempotencyKey(sessionCreateRequests()[0]);
+    const rotatedKey = readSessionCreateRecovery(rejectedTempSessionId)?.idempotencyKey;
+    expect(rotatedKey).toBeTruthy();
+    expect(rotatedKey).not.toBe(rejectedKey);
+    expect(sessionCreateAttemptState(rejectedTempSessionId)).toBe("failed");
     mutateSessionCreate("agent-a");
     await flushMutationQueue();
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: "session-after-conflict" });
+    const sessionIds = (queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? []).map((item) => item.id);
+    expect(sessionIds.filter((id) => id.startsWith("temp-session-"))).toEqual([]);
+    expect(sessionIds).toContain("session-after-conflict");
 
     const requests = sessionCreateRequests();
     expect(requests).toHaveLength(2);
-    expect(sessionCreateIdempotencyKey(requests[0])).toBeTruthy();
-    expect(sessionCreateIdempotencyKey(requests[1])).toBeTruthy();
-    expect(sessionCreateIdempotencyKey(requests[1])).not.toBe(sessionCreateIdempotencyKey(requests[0]));
+    expect(sessionCreateIdempotencyKey(requests[0])).toBe(rejectedKey);
+    expect(sessionCreateIdempotencyKey(requests[1])).toBe(rotatedKey);
   });
 
   it("rotates the key after success and preserves compatibility for callers without a key", async () => {
@@ -808,5 +821,63 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
 
     resetSessionCreatePreservesForTests();
     resetSessionDeleteTombstonesForTests();
+  });
+
+  it("saves a temp tab title that was committed before the session existed", async () => {
+    const deferred = createDeferred<SessionDetail>();
+    fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const path = String(input || "");
+      const method = String(init?.method || "GET").toUpperCase();
+      if (path === "/api/sessions" && method === "POST") return deferred.promise;
+      if (method === "PATCH") {
+        const payload = JSON.parse(String(init?.body || "{}")) as { title?: string };
+        return Promise.resolve({
+          ...serverSessionFor("session-real", "agent-a"),
+          title: String(payload.title || ""),
+        });
+      }
+      return Promise.resolve(serverSessionFor("session-real", "agent-a"));
+    });
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    expect(tempId).toMatch(/^temp-session-/);
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(tempId), (current) =>
+      current ? { ...current, title: "茅台临时改名" } : current,
+    );
+    deferred.resolve(serverSessionFor("session-real", "agent-a"));
+    await flushMutationQueue();
+    await flushMutationQueue();
+    const patches = fetchJsonMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input) === "/api/sessions/session-real"
+        && String((init as RequestInit | undefined)?.method || "").toUpperCase() === "PATCH",
+    );
+    expect(patches).toHaveLength(1);
+    expect(JSON.parse(String((patches[0][1] as RequestInit).body)).title).toBe("茅台临时改名");
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-real"))?.title).toBe("茅台临时改名");
+  });
+
+  it("does not reset a committed temp title when create is retried", async () => {
+    fetchJsonMock.mockRejectedValue(Object.assign(new Error("session create rejected"), { status: 409 }));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    expect(tempId).toMatch(/^temp-session-/);
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(tempId), (current) =>
+      current ? { ...current, title: "茅台临时改名" } : current,
+    );
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempId))?.title).toBe("茅台临时改名");
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: tempId });
   });
 });

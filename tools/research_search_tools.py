@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 from core.web.services import agent_directory_service
+from core.web.services.financial_research.as_of import active_cutoff, on_or_before
 from core.web.services.team_workflow.source_collection import search_execution
 from tools import research_search_backends
 from tools.web_search_tool import public_web_search
@@ -398,7 +399,14 @@ def news_search(topic: str, max_results: int = 8, date_hint: str = "") -> str:
     topic_text = str(topic or "").strip()
     if not topic_text:
         return "[错误] 新闻搜索主题不能为空"
-    date_part = f" {str(date_hint).strip()}" if str(date_hint or "").strip() else " 2026"
+    cutoff = active_cutoff(date_hint)
+    hint = str(date_hint or "").strip()
+    if cutoff is not None:
+        date_part = f" {cutoff.isoformat()}"
+    elif hint:
+        date_part = f" {hint}"
+    else:
+        date_part = " 2026"
     provider_query = f"{topic_text}{date_part}".strip()
     chinese = bool(_CJK_TOPIC_RE.search(topic_text))
     locale = "zh-CN" if chinese else "en-US"
@@ -412,6 +420,34 @@ def news_search(topic: str, max_results: int = 8, date_hint: str = "") -> str:
         ],
         max_results=max_results,
     )
+    if cutoff is not None:
+        results = [
+            item
+            for item in list(provider_payload.get("results") or [])
+            if isinstance(item, dict)
+        ]
+        kept = []
+        dropped = 0
+        for item in results:
+            if on_or_before(item.get("published"), cutoff):
+                kept.append(item)
+            else:
+                dropped += 1
+        if not kept:
+            return (
+                f"[分析日截断] 新闻公开搜索没有不晚于 {cutoff.isoformat()} 的可核验发布日期。"
+                f"更晚或缺少发布日期的 {dropped} 条未作为依据。"
+            )
+        rendered = _render_provider_payload(
+            "新闻公开搜索",
+            {**provider_payload, "results": kept},
+        )
+        if dropped:
+            rendered += (
+                f"\n[分析日截断] 分析日期 {cutoff.isoformat()}；"
+                f"已略过 {dropped} 条更晚或缺少发布日期的结果。"
+            )
+        return rendered
     if provider_payload.get("results"):
         return _render_provider_payload("新闻公开搜索", provider_payload)
     if chinese:

@@ -173,4 +173,66 @@ describe("stock research projections", () => {
       expect(reportMatchesStock(report, messages, { symbol: "usMSFT", ticker: "MSFT", name: "Microsoft", market: "NASDAQ" })).toBe(false);
     }
   });
+  it("shows each screened stock with a filing page from the same turn or 没有这一项", () => {
+    const request = "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-10-06。按条件筛选股票，列出候选、筛选依据和数据限制。\n\n用户选股条件：PE低于20";
+    const screen = JSON.stringify({
+      ok: true, status: "partial", source: "新浪财经", fetchedAt: "2026-10-06T10:00:00+08:00",
+      coverage: { providerTotal: 5000, loaded: 120, complete: false, totalFiltered: 2 }, returnedCount: 2,
+      items: [
+        { symbol: "sh600519", ticker: "600519", name: "贵州茅台", price: 1258.62, peRatio: 20.1 },
+        { symbol: "sz000001", ticker: "000001", name: "平安银行", price: 10 },
+      ],
+      notice: "来源只提供行情时分，未提供交易日期；抓取时间不代表行情日期。市值单位未核实，未用于筛选。",
+    });
+    const evidence = JSON.stringify({
+      results: [{ knowledgeItemId: "k1", excerpt: "营业收入 200.00 元" }],
+      citations: [{ knowledgeItemId: "k1", financialEvidence: [{ page: "42" }] }],
+    });
+    const report = projectStockReport([
+      { role: "user", id: "u", timestamp: "", content: request },
+      turn("completed", [
+        { type: "tool_call", toolName: "financial_market_screen_tool", status: "completed", output: screen },
+        { type: "tool_call", toolName: "financial_evidence_search_tool", status: "completed", input: JSON.stringify({ ticker: "sh600519", query: "营收", report_period: "2024FY" }), output: evidence },
+        { type: "tool_call", toolName: "financial_report_query_tool", status: "completed", output: "{\"page\":7}" },
+        { ...final, text: "模型说明工具不支持市值。毛利率 91.93%。" },
+      ]),
+    ])!;
+    expect(report.text).toContain("| 贵州茅台 | 600519 | 第 42 页 |");
+    expect(report.text).toContain("| 平安银行 | 000001 | 没有这一项 |");
+    expect(report.text).toContain("覆盖不完整，结果仅基于已加载范围。");
+    expect(report.text).toContain("候选和财报页码以上表为准");
+    expect(report.text).toContain("工具不支持市值");
+    expect(report.text).not.toContain("1258.62");
+    expect(report.text).not.toContain("91.93");
+    expect(report.text).not.toContain("第 7 页");
+    expect(researchTablePreview(report.text)).toContain("600519");
+    const cleared = JSON.stringify({
+      ok: true, status: "partial", source: "新浪财经", fetchedAt: "2026-10-06T10:00:00+08:00",
+      coverage: { providerTotal: 5000, loaded: 120, complete: false, totalFiltered: 0 }, returnedCount: 0, items: [],
+      message: "筛选快照没有不晚于分析日期 2024-12-31 的交易日期，未作为本次研究依据。",
+      notice: "筛选快照没有不晚于分析日期 2024-12-31 的交易日期，未作为本次研究依据。",
+    });
+    const empty = projectStockReport([
+      { role: "user", id: "u2", timestamp: "", content: request },
+      turn("completed", [
+        { type: "tool_call", toolName: "financial_market_screen_tool", status: "completed", output: cleared },
+        { ...final, text: "虚构股份 999999 见第1页" },
+      ]),
+    ])!;
+    expect(empty.text).toContain("未作为本次研究依据");
+    expect(empty.text).toContain("没有符合条件的候选");
+    expect(empty.text).not.toContain("虚构股份");
+    const unchanged = projectStockReport([
+      { role: "user", id: "u3", timestamp: "", content: request },
+      turn("completed", [{ ...final, text: "目标Turn筛选结论" }]),
+    ])!;
+    expect(unchanged.text).toBe("目标Turn筛选结论");
+    const laterScreen = projectStockReport([
+      { role: "user", id: "stock", timestamp: "", content: stockResearchPrompt(stock, "2024FY", "2026-10-04", "financial", "brief") },
+      { ...turn("completed", [final]), turnId: "stock-turn" },
+      { role: "user", id: "screen", timestamp: "", content: request },
+      { ...turn("completed", [{ ...final, text: "目标Turn筛选结论" }]), turnId: "screen-turn" },
+    ]);
+    expect(laterScreen?.turnId).toBe("screen-turn");
+  });
 });
