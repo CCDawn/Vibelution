@@ -123,13 +123,19 @@ def _windows_extended_length_path(path: Path) -> Path:
 
 @contextlib.contextmanager
 def _inter_process_lock(store_path: Path, *, timeout_s: float = 10.0) -> Iterator[None]:
-    """Cross-process lock keyed on ``<store>.lock`` (OS lock, crash-safe)."""
+    """Cross-process lock keyed on ``<store>.lock`` (OS lock, crash-safe).
 
-    lock_path = _windows_extended_length_path(
-        store_path.with_name(store_path.name + ".lock")
-    )
+    The extended-length prefix exists ONLY as a transient syscall argument at
+    the ``open()`` instant: bookkeeping (mkdir, lock identity, error messages)
+    stays in native path form, and the prefixed object never escapes this
+    function — it must not reach routing APIs, caches, or persistence, where
+    a ``\\\\?\\``-prefixed string can leak into strict path-form comparisons
+    (Python's ``Path.resolve`` can retain the prefix once it is on the input).
+    """
+
+    lock_path = store_path.with_name(store_path.name + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(lock_path, "a+b")
+    handle = open(_windows_extended_length_path(lock_path), "a+b")
     try:
         deadline = time.monotonic() + timeout_s
         while True:
