@@ -175,7 +175,7 @@ describe("ConversationView text selection quote menu", () => {
   }
 
   function selectionMenu(): HTMLElement | null {
-    return container?.querySelector('[data-conversation-selection-menu="1"]') ?? null;
+    return document.querySelector('[data-conversation-selection-menu="1"]');
   }
 
   it("opens over a timeline selection, quotes into the composer, and focuses the caret", async () => {
@@ -193,6 +193,12 @@ describe("ConversationView text selection quote menu", () => {
     expect(menu).not.toBeNull();
     expect(menu?.textContent).toContain("引用到输入框");
     expect(menu?.textContent).toContain("复制");
+    const menuLeft = Number.parseFloat(menu?.style.left || "");
+    const menuWidth = menu?.getBoundingClientRect().width || 208;
+    const selectionCenter = 10 + 80 / 2;
+    expect(menuLeft).toBeGreaterThanOrEqual(12);
+    expect(menuLeft).toBeLessThanOrEqual(selectionCenter);
+    expect(menuLeft + menuWidth).toBeGreaterThan(selectionCenter);
 
     const quoteButton = menu?.querySelector("button");
     if (!quoteButton) {
