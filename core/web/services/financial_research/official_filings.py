@@ -6,8 +6,9 @@ announcement list asks for the latest of those four reports and does not
 apply that date. The public query returns a title, announcement day, and
 PDF URL. It does not return an interior page. A missing day, a filing
 after an explicit cutoff, a summary, or any URL outside the exchange
-document hosts is omitted. Lookup failures stay empty so the caller still
-returns.
+document hosts is omitted. A research figure keeps its number and may
+cite only the original for that same report period. Lookup failures stay
+empty so the caller still returns.
 """
 
 from __future__ import annotations
@@ -147,6 +148,46 @@ def accepted_periodic_filing(value: object, *, cutoff: date | None) -> dict[str,
     if value.get("source") == FILING_SOURCE:
         record["source"] = FILING_SOURCE
     return record
+
+
+_REPORT_PERIOD_KINDS = {
+    (3, 31): "q1",
+    (6, 30): "semiannual",
+    (9, 30): "q3",
+    (12, 31): "annual",
+}
+
+
+def filing_for_report_period(
+    rows: object,
+    report_date: object,
+    *,
+    cutoff: date | None = None,
+) -> dict[str, str] | None:
+    """Return the cninfo original for one standard report period, or None."""
+
+    if not isinstance(report_date, str) or not isinstance(rows, list):
+        return None
+    period_end = _iso_day(report_date)
+    if period_end is None:
+        return None
+    kind = _REPORT_PERIOD_KINDS.get((period_end.month, period_end.day))
+    if kind is None:
+        return None
+    marker = f"{period_end.year}年"
+    best: dict[str, str] | None = None
+    for raw in rows:
+        record = accepted_periodic_filing(raw, cutoff=cutoff)
+        if record is None or record.get("kind") != kind:
+            continue
+        if marker not in re.sub(r"\s+", "", record["title"]):
+            continue
+        announced = _iso_day(record.get("announcedOn"))
+        if announced is None or announced < period_end:
+            continue
+        if best is None or record["announcedOn"] > best["announcedOn"]:
+            best = record
+    return best
 
 
 _SCREEN_CATEGORY = ";".join(category for _kind, category in _PERIODIC_CATEGORIES)
