@@ -201,15 +201,16 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
       data-vui-region="teams-canvas"
       data-testid="team-organization-canvas-surface"
     >
-      {hideToolbar || researchCanvasReadOnly ? null : (
+      {hideToolbar ? null : (
         <div className={styles.canvasToolbar} data-testid="team-canvas-toolbar">
-          {/* Editable teams: actions only — no path / edge / room status walls. */}
+          {/* View controls (edge layer, room link) stay reachable in read-only
+              canvas mode; the edit cluster renders only for authoring surfaces. */}
           <div className="min-w-0" />
           <VActionGroup
             className={styles.toolbarActions}
             ariaLabel={lang === "zh" ? "团队画布操作" : "Team canvas actions"}
           >
-            {saveLabel ? (
+            {!researchCanvasReadOnly && saveLabel ? (
               <span className={styles.saveState}>{saveLabel}</span>
             ) : null}
             <VTooltip content={communicationEdgeHint}>
@@ -234,70 +235,75 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
               >
                 {lang === "zh" ? "打开群聊" : "Open room"}
               </Link>
-            ) : (
-              <VNativeButton
-                type="button"
-                onClick={onSyncRoom}
-                disabled={!selectedTeam || activeTeamMemberCount === 0 || teamSyncPending}
-              >
-                <Link2 size={14} />
-                {teamSyncPending
-                  ? (lang === "zh" ? "同步中" : "Syncing")
-                  : (lang === "zh" ? "同步群聊" : "Sync room")}
-              </VNativeButton>
-            )}
-            <VNativeButton type="button" onClick={onAddNode} disabled={!hasWritableCanvas}>
-              <Plus size={14} />
-              {lang === "zh" ? "节点" : "Node"}
-            </VNativeButton>
-            {authoring ? (
+            ) : null}
+            {researchCanvasReadOnly ? null : (
               <>
-                <VTooltip
-                  content={
-                    connectSourceLabel
-                      ? (lang === "zh"
-                        ? `连线中：从「${connectSourceLabel}」点击目标节点完成，Esc 或再点源节点取消`
-                        : `Linking from "${connectSourceLabel}": click a target node, Esc or click the source to cancel`)
-                      : (lang === "zh" ? "从选中节点出发连接任意节点" : "Link the selected node to any node")
-                  }
-                >
+                {linkedChatRoomId ? null : (
                   <VNativeButton
                     type="button"
-                    className={authoring.connectSourceNodeId ? styles.layerButtonActive : ""}
-                    onClick={authoring.connectSourceNodeId ? authoring.onCancelConnect : authoring.onBeginConnect}
-                    disabled={!authoringEditable || !selectedNodeId || displayCanvasNodes.length < 2}
-                    data-testid="team-canvas-connect-toggle"
+                    onClick={onSyncRoom}
+                    disabled={!selectedTeam || activeTeamMemberCount === 0 || teamSyncPending}
                   >
-                    <Spline size={14} />
-                    {authoring.connectSourceNodeId
-                      ? (lang === "zh" ? "取消连线" : "Cancel link")
-                      : (lang === "zh" ? "连线" : "Link")}
+                    <Link2 size={14} />
+                    {teamSyncPending
+                      ? (lang === "zh" ? "同步中" : "Syncing")
+                      : (lang === "zh" ? "同步群聊" : "Sync room")}
                   </VNativeButton>
-                </VTooltip>
+                )}
+                <VNativeButton type="button" onClick={onAddNode} disabled={!hasWritableCanvas}>
+                  <Plus size={14} />
+                  {lang === "zh" ? "节点" : "Node"}
+                </VNativeButton>
+                {authoring ? (
+                  <>
+                    <VTooltip
+                      content={
+                        connectSourceLabel
+                          ? (lang === "zh"
+                            ? `连线中：从「${connectSourceLabel}」点击目标节点完成，Esc 或再点源节点取消`
+                            : `Linking from "${connectSourceLabel}": click a target node, Esc or click the source to cancel`)
+                          : (lang === "zh" ? "从选中节点出发连接任意节点" : "Link the selected node to any node")
+                      }
+                    >
+                      <VNativeButton
+                        type="button"
+                        className={authoring.connectSourceNodeId ? styles.layerButtonActive : ""}
+                        onClick={authoring.connectSourceNodeId ? authoring.onCancelConnect : authoring.onBeginConnect}
+                        disabled={!authoringEditable || !selectedNodeId || displayCanvasNodes.length < 2}
+                        data-testid="team-canvas-connect-toggle"
+                      >
+                        <Spline size={14} />
+                        {authoring.connectSourceNodeId
+                          ? (lang === "zh" ? "取消连线" : "Cancel link")
+                          : (lang === "zh" ? "连线" : "Link")}
+                      </VNativeButton>
+                    </VTooltip>
+                    <VNativeButton
+                      type="button"
+                      className={authoring.renamingNodeId ? styles.layerButtonActive : ""}
+                      onClick={authoring.onBeginNodeRename}
+                      disabled={!authoringEditable || !selectedNodeId}
+                      data-testid="team-canvas-rename-toggle"
+                    >
+                      <Pencil size={14} />
+                      {authoring.renamingNodeId
+                        ? (lang === "zh" ? "改名中" : "Renaming")
+                        : (lang === "zh" ? "改名" : "Rename")}
+                    </VNativeButton>
+                  </>
+                ) : null}
                 <VNativeButton
                   type="button"
-                  className={authoring.renamingNodeId ? styles.layerButtonActive : ""}
-                  onClick={authoring.onBeginNodeRename}
-                  disabled={!authoringEditable || !selectedNodeId}
-                  data-testid="team-canvas-rename-toggle"
+                  className={styles.dangerButton}
+                  onClick={onArchiveTeam}
+                  disabled={!selectedTeam || teamArchivePending || Boolean(teamArchiveDisabledReason)}
+                  title={teamArchiveDisabledReason || (lang === "zh" ? "归档当前团队" : "Archive this team")}
                 >
-                  <Pencil size={14} />
-                  {authoring.renamingNodeId
-                    ? (lang === "zh" ? "改名中" : "Renaming")
-                    : (lang === "zh" ? "改名" : "Rename")}
+                  <Archive size={14} />
+                  {lang === "zh" ? "归档" : "Archive"}
                 </VNativeButton>
               </>
-            ) : null}
-            <VNativeButton
-              type="button"
-              className={styles.dangerButton}
-              onClick={onArchiveTeam}
-              disabled={!selectedTeam || teamArchivePending || Boolean(teamArchiveDisabledReason)}
-              title={teamArchiveDisabledReason || (lang === "zh" ? "归档当前团队" : "Archive this team")}
-            >
-              <Archive size={14} />
-              {lang === "zh" ? "归档" : "Archive"}
-            </VNativeButton>
+            )}
           </VActionGroup>
         </div>
       )}

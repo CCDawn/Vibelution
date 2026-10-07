@@ -9,6 +9,7 @@ const researchSurfacesSource = readFileSync(
   "utf8",
 );
 const renderersSource = readFileSync(new URL("./teamsWorkspacePanelRenderers.tsx", import.meta.url), "utf8");
+const surfaceModelSource = readFileSync(new URL("./teamsShellSurfaceModel.ts", import.meta.url), "utf8");
 
 describe("teamsWorkspacePanelRenderers extraction", () => {
   it("TeamsRoute composes workspace panel renderers via R1-b research surfaces", () => {
@@ -33,5 +34,16 @@ describe("teamsWorkspacePanelRenderers extraction", () => {
     expect(renderersSource).toContain('from "./teamLazyPanels"');
     expect(renderersSource).not.toContain('from "../TeamMemoryIndexPanel"');
     expect(renderersSource).toContain("TeamExperimentPlanningLedgerPanel");
+  });
+
+  it("canvas inspector is the read-only overview for every team; node binding editing cannot mount on it", () => {
+    // Lane B: the org canvas is presentation-only, so the inspector panel is
+    // TeamCanvasReadOnlyInspector and the editable node-binding panel stays
+    // behind the (always-false on read-only canvas) showNodeBindingPanel gate.
+    expect(renderersSource).toContain("TeamCanvasReadOnlyInspector");
+    expect(renderersSource).toContain("if (!showNodeBindingPanel)");
+    expect(surfaceModelSource).toContain(
+      "const showNodeBindingPanel = researchCanvasVisible && !researchCanvasReadOnly;",
+    );
   });
 });

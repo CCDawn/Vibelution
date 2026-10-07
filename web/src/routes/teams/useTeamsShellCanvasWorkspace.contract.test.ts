@@ -13,6 +13,7 @@ import {
   useTeamsShellCanvasWorkspace,
   type TeamsShellCanvasWorkspaceApi,
 } from "./useTeamsShellCanvasWorkspace";
+import { resolveLinkedChatRoomQueryEnabled } from "./teamDetailLoadPolicy";
 
 const routeShellSource = readFileSync(resolve(import.meta.dirname, "TeamsRouteWorkbench.tsx"), "utf8");
 const routeModelSource = readFileSync(resolve(import.meta.dirname, "useTeamsWorkbenchModel.tsx"), "utf8") + "\n" + readFileSync(resolve(import.meta.dirname, "useTeamsWorkbenchFoundation.tsx"), "utf8") + "\n" + readFileSync(resolve(import.meta.dirname, "useTeamsWorkbenchShellPhase.tsx"), "utf8");
@@ -242,5 +243,49 @@ describe("useTeamsShellCanvasWorkspace research team behavior (regression)", () 
       requestedTeamShellMode: "canvas",
     }));
     expect(api.teamShellMode).toBe("board");
+  });
+});
+
+describe("useTeamsShellCanvasWorkspace read-only canvas overview (Lane B)", () => {
+  afterEach(() => {
+    if (root) {
+      act(() => root?.unmount());
+    }
+    host?.remove();
+    host = null;
+    root = null;
+    capturedApi = null;
+  });
+
+  it("gates canvas read-only on the canvas view itself, not the research workflow team", () => {
+    expect(hookSource).toContain('researchWorkspaceView === "canvas" || teamShellMode === "canvas"');
+    expect(hookSource).not.toContain('researchWorkflowTeamSelected\n    && (researchWorkspaceView === "canvas"');
+  });
+
+  it("defaults the canvas layout to source coordinates so saved drag positions render as-is", () => {
+    expect(hookSource).toContain('useState<ResearchCanvasLayoutMode>("source")');
+    expect(hookSource).not.toContain('useState<ResearchCanvasLayoutMode>("auto")');
+    // Auto layout stays opt-in: it must key on an explicit layout-mode switch.
+    expect(hookSource).toContain('researchCanvasLayoutMode === "auto"');
+    const api = mountHook(baseInput({ requestedVisibleTeamId: USER_TEAM_ID }));
+    expect(api.researchCanvasLayoutMode).toBe("source");
+    act(() => {
+      api.setResearchCanvasLayoutMode("auto");
+    });
+    expect(capturedApi?.researchCanvasLayoutMode).toBe("auto");
+  });
+
+  it("keeps the linked chat room query enabled for user teams on the read-only canvas", () => {
+    // The foundation feeds researchCanvasVisible from the read-only flag, which
+    // is now true for user-team canvas shells; room polling must not regress.
+    expect(
+      resolveLinkedChatRoomQueryEnabled({
+        linkedChatRoomId: "room-1",
+        teamDetailReady: true,
+        researchWorkflowTeamSelected: false,
+        researchCanvasVisible: true,
+        researchWorkspaceView: "workflow",
+      }),
+    ).toBe(true);
   });
 });
