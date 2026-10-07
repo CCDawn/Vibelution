@@ -159,6 +159,24 @@ describe("useTeamsShellCanvasWorkspace non-research shell ownership", () => {
     expect(next.teamShellMode).toBe("canvas");
   });
 
+  it("recovers an explicit canvas URL after catalog loading forced the board shell", () => {
+    const api = mountHook(baseInput({
+      requestedVisibleTeamId: USER_TEAM_ID,
+      requestedResearchWorkspaceView: "workflow",
+      requestedTeamShellMode: "canvas",
+      visibleTeamIds: new Set(),
+      visibleTeams: [],
+    }));
+    expect(api.teamShellMode).toBe("board");
+
+    const next = rerenderHook(baseInput({
+      requestedVisibleTeamId: USER_TEAM_ID,
+      requestedResearchWorkspaceView: "workflow",
+      requestedTeamShellMode: "canvas",
+    }));
+    expect(next.teamShellMode).toBe("canvas");
+  });
+
   it("keeps an explicit teamMode=board for a non-research team", () => {
     const api = mountHook(baseInput({
       requestedVisibleTeamId: USER_TEAM_ID,
