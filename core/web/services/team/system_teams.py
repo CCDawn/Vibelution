@@ -1439,7 +1439,8 @@ def _ensure_evolution_system_team_in_state(
 
 def _system_members_from_agents(agents: list[dict[str, Any]], *, source: str) -> list[dict[str, Any]]:
     s = _service()
-    members: list[dict[str, Any]] = []
+    drafts: list[dict[str, Any]] = []
+    agents_by_id: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
     for index, agent in enumerate(agents[:120]):
         if not isinstance(agent, dict):
@@ -1459,15 +1460,14 @@ def _system_members_from_agents(agents: list[dict[str, Any]], *, source: str) ->
             role = str(metadata.get("supervisedRole") or role).strip()
             role_label = str(metadata.get("supervisedRoleLabel") or "").strip()
         seen.add(agent_id)
-        members.append(
+        agents_by_id[agent_id] = agent
+        drafts.append(
             {
                 "memberId": s._safe_token(f"{source}-{role or index + 1}", default=f"member-{index + 1}", max_length=96),
                 "agentId": agent_id,
-                "agentCode": str(agent.get("agentCode") or "").strip(),
-                "agentName": str(agent.get("displayName") or role_label or agent_id).strip(),
                 "role": role,
                 "purpose": role_label,
-                "agentStatus": "active",
+                "responsibilities": [],
             }
         )
-    return members
+    return s._normalize_members(drafts, require_active=True, agents_by_id=agents_by_id)
