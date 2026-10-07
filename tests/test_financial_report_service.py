@@ -276,6 +276,12 @@ SCREEN_REQUEST = (
     "用户选股条件：PE低于20"
 )
 NOTICE = "来源只提供行情时分，未提供交易日期；抓取时间不代表行情日期。市值单位未核实，未用于筛选。"
+EMPTY_FILINGS = "年报：没有这一项；半年报：没有这一项；一季报：没有这一项；三季报：没有这一项"
+ANNUAL_LINK = "[贵州茅台2025年年度报告（2026-04-17）](https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF)"
+_SEMI_LINK = "[贵州茅台2026年半年度报告（2026-08-15）](https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF)"
+_Q1_LINK = "[贵州茅台2026年第一季度报告（2026-04-25）](https://static.cninfo.com.cn/finalpage/2026-04-25/1225187851.PDF)"
+ANNUAL_CELL = f"年报：{ANNUAL_LINK}；半年报：没有这一项；一季报：没有这一项；三季报：没有这一项"
+PERIODIC_CELL = f"年报：{ANNUAL_LINK}；半年报：{_SEMI_LINK}；一季报：{_Q1_LINK}；三季报：没有这一项"
 
 
 def _screen_output(items, **extra):
@@ -343,11 +349,11 @@ def test_screening_export_lists_tool_candidates_and_only_matching_filing_pages(r
     content = _export("markdown")["content"]
 
     assert content.startswith("## 筛选对照（本轮工具结果）\n")
-    assert "| 贵州茅台 | 600519 | 没有这一项 | 第 42 页 |" in content
-    assert "| 平安银行 | 000001 | 没有这一项 | 没有这一项 |" in content
+    assert f"| 贵州茅台 | 600519 | {EMPTY_FILINGS} | 第 42 页 |" in content
+    assert f"| 平安银行 | 000001 | {EMPTY_FILINGS} | 没有这一项 |" in content
     assert "覆盖不完整，结果仅基于已加载范围。" in content
     assert "候选、公告原文和财报页码以上表为准。" in content
-    assert "公告原文只列巨潮资讯或交易所年报链接。" in content
+    assert "公告原文只列巨潮资讯或交易所的年报、半年报、一季报和三季报链接。" in content
     assert "工具不支持市值" in content
     assert "1258.62" not in content
     assert "91.93" not in content
@@ -356,17 +362,24 @@ def test_screening_export_lists_tool_candidates_and_only_matching_filing_pages(r
     assert _export("markdown")["content"] == content
 
 
-def test_screening_export_cites_only_an_allowlisted_annual_filing(report_env):
+def test_screening_export_cites_allowlisted_periodic_filings(report_env):
     filing = {
         "title": "贵州茅台2025年年度报告",
         "url": "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF",
         "announcedOn": "2026-04-17",
         "source": "巨潮资讯",
     }
+    periodic = [
+        {"kind": "semiannual", "title": "贵州茅台2026年半年度报告", "url": "https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF", "announcedOn": "2026-08-15", "source": "巨潮资讯"},
+        {"kind": "q1", "title": "贵州茅台2026年第一季度报告", "url": "https://static.cninfo.com.cn/finalpage/2026-04-25/1225187851.PDF", "announcedOn": "2026-04-25", "source": "巨潮资讯"},
+        {"kind": "q3", "title": "贵州茅台2025年第三季度报告摘要", "url": "https://static.cninfo.com.cn/finalpage/2025-10-30/1.PDF", "announcedOn": "2025-10-30", "source": "巨潮资讯"},
+        {"kind": "q3", "title": "贵州茅台2025年第三季度报告", "url": "https://evil.example/q3.PDF", "announcedOn": "2025-10-30", "source": "巨潮资讯"},
+    ]
+    late = "https://static.cninfo.com.cn/finalpage/2026-10-07/1225000000.PDF"
     report_env[:] = _screen_turn("原文", [
         {"id": "screen", "name": "financial_market_screen_tool", "output": _screen_output([
-            {"ticker": "600519", "name": "贵州茅台", "officialFiling": filing},
-            {"ticker": "000001", "name": "平安银行", "officialFiling": {**filing, "title": "平安银行2025年年度报告摘要"}},
+            {"ticker": "600519", "name": "贵州茅台", "officialFiling": filing, "periodicFilings": periodic},
+            {"ticker": "000001", "name": "平安银行", "officialFiling": {**filing, "title": "平安银行2025年年度报告摘要"}, "periodicFilings": [{"kind": "semiannual", "title": "平安银行2026年半年度报告", "url": late, "announcedOn": "2026-10-07", "source": "巨潮资讯"}]},
             {"ticker": "000002", "name": "万科A", "officialFiling": {**filing, "url": "https://evil.example/a.PDF"}},
             {"ticker": "601318", "name": "中国平安", "officialFiling": {**filing, "announcedOn": "2026-10-07"}},
         ])},
@@ -374,12 +387,14 @@ def test_screening_export_cites_only_an_allowlisted_annual_filing(report_env):
 
     content = _export("markdown")["content"]
 
-    assert "| 贵州茅台 | 600519 | [贵州茅台2025年年度报告（2026-04-17）](https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF) | 没有这一项 |" in content
-    assert "| 平安银行 | 000001 | 没有这一项 | 没有这一项 |" in content
-    assert "| 万科A | 000002 | 没有这一项 | 没有这一项 |" in content
-    assert "| 中国平安 | 601318 | 没有这一项 | 没有这一项 |" in content
+    assert f"| 贵州茅台 | 600519 | {PERIODIC_CELL} | 没有这一项 |" in content
+    assert f"| 平安银行 | 000001 | {EMPTY_FILINGS} | 没有这一项 |" in content
+    assert f"| 万科A | 000002 | {EMPTY_FILINGS} | 没有这一项 |" in content
+    assert f"| 中国平安 | 601318 | {EMPTY_FILINGS} | 没有这一项 |" in content
     assert "evil.example" not in content
+    assert late not in content
     assert "年度报告摘要" not in content
+    assert "第三季度报告摘要" not in content
 
 
 def test_cleared_screen_export_does_not_keep_invented_candidates(report_env):
@@ -439,8 +454,8 @@ def test_screen_page_matches_symbol_prefix_and_not_a_longer_number():
     assert "已加载 10 / 行情池 10。覆盖完整。" in content
     assert "符合条件 8，本次返回 2。" in content
     assert "工具输出已截断，未列入被省略的候选。" in content
-    assert "| 贵州茅台 | 600519 | 没有这一项 | 第 12 页、第 40 页 |" in content
+    assert f"| 贵州茅台 | 600519 | {EMPTY_FILINGS} | 第 12 页、第 40 页 |" in content
     assert content == project_screening_comparison(content, SCREEN_REQUEST, items, [event])
     glued = [{"type": "tool_call", "toolName": "financial_evidence_search_tool", "status": "completed", "input": json.dumps({"ticker": "1600519"}), "output": evidence_output}]
     without_page = project_screening_comparison("原文", SCREEN_REQUEST, items + glued, [])
-    assert "| 贵州茅台 | 600519 | 没有这一项 | 没有这一项 |" in without_page
+    assert f"| 贵州茅台 | 600519 | {EMPTY_FILINGS} | 没有这一项 |" in without_page

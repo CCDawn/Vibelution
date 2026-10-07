@@ -136,7 +136,7 @@ def test_market_screen_without_a_trade_date_is_not_evidence_for_an_earlier_analy
     def unexpected_lookup(*_args, **_kwargs):
         raise AssertionError("cleared screen must not look up filings")
 
-    monkeypatch.setattr("tools.financial_market_tools.lookup_annual_filings", unexpected_lookup)
+    monkeypatch.setattr("tools.financial_market_tools.lookup_screen_filings", unexpected_lookup)
     monkeypatch.setattr(
         "core.web.services.financial_research_service.screen_stocks",
         lambda **kwargs: {

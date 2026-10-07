@@ -17,6 +17,7 @@ from core.web.services.financial_research.official_filings import (
     accepted_annual_filing,
     lookup_annual_filings,
     lookup_periodic_filings,
+    lookup_screen_filings,
     mentions_annual_report,
     periodic_reprint_kind,
 )
@@ -234,3 +235,48 @@ def test_lookup_periodic_filings_keeps_one_full_report_per_kind(monkeypatch):
     assert columns["830799"] == "bj"
     categories = {fields["category"] for path, fields in calls if path.endswith("hisAnnouncement/query")}
     assert categories == {ANNUAL_CATEGORY, SEMIANNUAL_CATEGORY, Q1_CATEGORY, Q3_CATEGORY}
+
+
+def test_lookup_screen_filings_uses_one_joined_query_per_code(monkeypatch):
+    calls = []
+    joined = ";".join((ANNUAL_CATEGORY, SEMIANNUAL_CATEGORY, Q1_CATEGORY, Q3_CATEGORY))
+
+    def fake(path, fields):
+        calls.append((path, dict(fields)))
+        if path.endswith("topSearch/query"):
+            if fields["keyWord"] == "000001":
+                raise OfficialFilingLookupError("down")
+            orgs = {"600519": "gssh0600519", "830799": "gfbj0830799"}
+            code = fields["keyWord"]
+            return [{"code": code, "category": "A股", "orgId": orgs[code], "delisted": "false"}]
+        code = fields["stock"].split(",", 1)[0]
+        return {"announcements": [
+            _announcement(f"{code}2025年年度报告摘要", "finalpage/2026-04-17/1.PDF", LIVE_ANNOUNCED_MS, code),
+            _announcement(f"{code}2026年半年度报告", "finalpage/2026-08-15/1225475868.PDF", _ms(date(2026, 8, 15)), code),
+            _announcement(f"{code}2025年年度报告", "finalpage/2026-04-17/1225114741.PDF", LIVE_ANNOUNCED_MS, code),
+            _announcement(f"{code}2024年年度报告", "finalpage/2025-04-03/9.PDF", _ms(date(2025, 4, 3)), code),
+            _announcement(f"{code}2026年第一季度报告", "finalpage/2026-04-25/1225187851.PDF", _ms(date(2026, 4, 25)), code),
+            _announcement(f"{code}2026年一季度报告", "finalpage/2026-10-08/8.PDF", _ms(date(2026, 10, 8)), code),
+            _announcement(f"{code}2025年第三季度报告", "finalpage/2025-10-30/1224764517.PDF", _ms(date(2025, 10, 30)), code),
+            _announcement(f"{code}2025年季度报告", "finalpage/2025-10-30/7.PDF", _ms(date(2025, 10, 30)), code),
+            _announcement("其他公司2025年年度报告", "finalpage/2026-04-17/6.PDF", LIVE_ANNOUNCED_MS, "000002"),
+        ]}
+
+    monkeypatch.setattr(official_filings, "_post_json", fake)
+    found = lookup_screen_filings(["sh600519", "000001", "830799", "1600519"], cutoff=date(2026, 10, 6))
+
+    assert set(found) == {"600519", "830799"}
+    maotai = {row["kind"]: row for row in found["600519"]}
+    assert set(maotai) == {"annual", "semiannual", "q1", "q3"}
+    assert [row["kind"] for row in found["600519"]] == ["annual", "semiannual", "q1", "q3"]
+    assert maotai["annual"]["title"] == "6005192025年年度报告"
+    assert maotai["annual"]["announcedOn"] == "2026-04-17"
+    assert maotai["semiannual"]["url"].endswith("/1225475868.PDF")
+    assert maotai["q1"]["title"] == "6005192026年第一季度报告"
+    assert maotai["q1"]["announcedOn"] == "2026-04-25"
+    assert maotai["q3"]["title"] == "6005192025年第三季度报告"
+    queries = [fields for path, fields in calls if path.endswith("hisAnnouncement/query")]
+    assert len(queries) == 2
+    assert {fields["category"] for fields in queries} == {joined}
+    assert {fields["column"] for fields in queries} == {"sse", "bj"}
+    assert all(fields["seDate"] == "1990-01-01~2026-10-06" for fields in queries)

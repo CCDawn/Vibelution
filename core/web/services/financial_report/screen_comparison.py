@@ -4,11 +4,11 @@ The stored answer stays unchanged. When the request is the canonical screening
 prompt and this Turn has a usable ``financial_market_screen_tool`` payload, the
 report and export show those candidates. A filing page is filled only when a
 same-turn ``financial_evidence_search_tool`` call names that ticker and its
-excerpt cites a page. The announcement cell comes only from that screen
-result's official annual-report filing when its URL is an allowlisted
-exchange document on or before the analysis date. Otherwise the cell is
-没有这一项. Quote fields are not filings. No usable screen payload leaves
-the answer unchanged.
+excerpt cites a page. The announcement cell names the annual report,
+semi-annual report, first-quarter report, and third-quarter report. Each
+kind is an allowlisted exchange document on or before the analysis date,
+or 没有这一项. Quote fields are not filings. No usable screen payload
+leaves the answer unchanged.
 """
 
 from __future__ import annotations
@@ -22,7 +22,10 @@ from core.web.services.financial_report.conclusion_figures import (
     MISSING_FIGURE,
     filing_excerpts_from_tool_output,
 )
-from core.web.services.financial_research.official_filings import accepted_annual_filing
+from core.web.services.financial_research.official_filings import (
+    accepted_annual_filing,
+    accepted_periodic_filing,
+)
 
 HEADING = "## 筛选对照（本轮工具结果）"
 _FAILED = {
@@ -184,11 +187,36 @@ def _rows(payload: dict, cutoff: date) -> list[tuple[str, str, str]]:
     return rows
 
 
+_FILING_LABELS = (
+    ("annual", "年报"),
+    ("semiannual", "半年报"),
+    ("q1", "一季报"),
+    ("q3", "三季报"),
+)
+
+
 def _filing_cell(row: dict, cutoff: date) -> str:
-    filing = accepted_annual_filing(row.get("officialFiling"), cutoff=cutoff)
-    if filing is None:
-        return MISSING_FIGURE
-    return f"[{filing['title']}（{filing['announcedOn']}）]({filing['url']})"
+    found: dict[str, dict[str, str]] = {}
+    raw_periodic = row.get("periodicFilings")
+    if isinstance(raw_periodic, list):
+        for raw in raw_periodic[:8]:
+            record = accepted_periodic_filing(raw, cutoff=cutoff)
+            if record is None:
+                continue
+            prior = found.get(record["kind"])
+            if prior is None or record["announcedOn"] > prior["announcedOn"]:
+                found[record["kind"]] = record
+    annual = accepted_annual_filing(row.get("officialFiling"), cutoff=cutoff)
+    if annual is not None:
+        found["annual"] = annual
+    parts: list[str] = []
+    for kind, label in _FILING_LABELS:
+        record = found.get(kind)
+        if record is None:
+            parts.append(f"{label}：{MISSING_FIGURE}")
+        else:
+            parts.append(f"{label}：[{record['title']}（{record['announcedOn']}）]({record['url']})")
+    return "；".join(parts)
 
 
 def _render(payload: dict, rows: list[tuple[str, str, str]], pages: dict[str, str]) -> str:
@@ -221,7 +249,7 @@ def _render(payload: dict, rows: list[tuple[str, str, str]], pages: dict[str, st
         lines.append(f"| {name} | {code} | {filing} | {pages.get(code) or MISSING_FIGURE} |")
     lines.append("")
     lines.append("行情价格、市盈率和市净率不是财报，不列入本表。")
-    lines.append("公告原文只列巨潮资讯或交易所年报链接。")
+    lines.append("公告原文只列巨潮资讯或交易所的年报、半年报、一季报和三季报链接。")
     return "\n".join(lines).rstrip() + "\n"
 
 
