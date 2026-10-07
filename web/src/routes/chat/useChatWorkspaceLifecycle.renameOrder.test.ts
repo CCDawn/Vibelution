@@ -11,6 +11,8 @@ import { useChatWorkspaceLifecycle, type UseChatWorkspaceLifecycleOptions, type 
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useRef: (current: unknown) => ({ current }),
+  // Callback-only fixture; mounted create recovery is exercised separately.
+  useEffect: () => undefined,
 }));
 vi.mock("@tanstack/react-query", async (original) => ({
   ...await original<typeof import("@tanstack/react-query")>(),
@@ -47,6 +49,7 @@ function arrange() {
   let errors: Record<string, string> = {};
   const result = useChatWorkspaceLifecycle({
     queryClient: client,
+    routeSelectionRef: { current: { kind: "bare" } },
     editingSessionIdRef: editingId,
     editingSessionTitleRef: editingTitle,
     setEditingSessionId: (next) => { editingId.current = typeof next === "function" ? next(editingId.current) : next; },
