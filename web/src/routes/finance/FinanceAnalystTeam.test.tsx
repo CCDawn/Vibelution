@@ -295,7 +295,9 @@ describe("Finance analyst team", () => {
     const synthesis = container.querySelector("[data-financial-team-synthesis]");
     expect(synthesis?.textContent).not.toContain("999亿元");
     expect(synthesis?.textContent).toContain("没有这一项");
-    expect(synthesis?.textContent).toContain("结论金额缺少证据");
+    expect(synthesis?.textContent).toContain("部分数字未通过核验");
+    const analysts = container.querySelector("[data-financial-team-analysts]");
+    expect(Boolean(synthesis!.compareDocumentPosition(analysts!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(api.reportText).toHaveBeenCalledWith({ assistantAgentId: assistant.agentId, sessionId: "session-assistant", turnId: "turn-synthesis" }, { signal: expect.any(AbortSignal) });
     expect(api.primary).not.toHaveBeenCalled();
   });
@@ -314,6 +316,9 @@ describe("Finance analyst team", () => {
     await render();
     expect(api.reportText).not.toHaveBeenCalled();
     expect(container.querySelector("[data-financial-team-synthesis]")?.textContent).toContain("已停止");
+    const analysts = container.querySelector("[data-financial-team-analysts]");
+    const synthesis = container.querySelector("[data-financial-team-synthesis]");
+    expect(Boolean(analysts!.compareDocumentPosition(synthesis!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it("requires an explicit setup action before provisioning the five native Agents", async () => {

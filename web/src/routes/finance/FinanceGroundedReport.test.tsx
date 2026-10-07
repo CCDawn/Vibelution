@@ -30,7 +30,7 @@ describe("grounded financial report reads", () => {
     expect(container.textContent).not.toContain("999亿元");
     await act(async () => resolve("## 结论\n利润没有这一项。"));
     expect(container.querySelector("[data-markdown]")?.textContent).toBe("## 结论\n利润没有这一项。");
-    expect(container.textContent).toContain("结论金额缺少证据");
+    expect(container.textContent).toContain("部分数字未通过核验");
   });
 
   it("aborts the previous exact Turn and refuses its late answer when the selected run changes", async () => {
@@ -62,6 +62,6 @@ describe("grounded financial report reads", () => {
     vi.mocked(fetchFinancialReportText).mockResolvedValue(discussion);
     await render(target, discussion);
     expect(container.querySelector("[data-markdown]")?.textContent).toBe(discussion);
-    expect(container.textContent).not.toContain("结论金额缺少证据");
+    expect(container.textContent).not.toContain("部分数字未通过核验");
   });
 });

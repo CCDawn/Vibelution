@@ -37,7 +37,7 @@ export function FinanceReportReadState({ read, zh }: { read: ReturnType<typeof u
 export function FinanceReportEvidenceNotice({ text, originalText, zh }: { text: string; originalText: string; zh: boolean }) {
   const missingCount = (value: string) => value.split("没有这一项").length - 1;
   if (missingCount(text) <= missingCount(originalText)) return null;
-  return <VStateSurface density="compact" tone="unavailable" title={zh ? "结论金额缺少证据" : "Conclusion amounts lack evidence"} />;
+  return <VStateSurface density="compact" tone="unavailable" title={zh ? "部分数字未通过核验" : "Some figures lack verified evidence"} />;
 }
 
 export function FinanceGroundedReportBody({ target, originalText, zh }: { target: ReportTarget; originalText: string; zh: boolean }) {

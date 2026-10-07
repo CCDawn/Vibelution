@@ -128,6 +128,8 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ## FinanceAnalystTeam / FinanceAnalystTeamInspector / FinancePortfolioResearch
 
+已完成的主助手综合结论排在研究进度之后、五位分析员卡片之前，页面与辅助技术使用相同阅读顺序；进行中、失败与停止的轮次保留分析过程优先。沿用原有卡片与单行操作，不新增页面壳或控件。
+
 ### 功能与使用
 分析员协作使用 `VSurface`、`VInput`、`VSelect`、`VChip`、`VButton` 和原生 Markdown renderer。行情、基本面、新闻在各自的原生 Agent/Session 执行，再由独立乐观与审慎分析员检查，最后由主助手汇总。页面只投影原生 Turn 的真实状态和完成答案；运行引用绑定 Session、Turn 和 submission，停止只停止该 Turn。配置漂移、会话归属变化与未知提交都给实际原因，不补造百分比或报告。原始分析员会话通过原生 chat 页面打开。
 明确提交基础分析并确认接受后，服务端通过原生持久后台任务继续推进；离开页面不暂停后续阶段。页面轮询等候和运行中的协调记录，阻断原因通过 `VStateSurface` 呈现，不自动重发。完成状态要求精确汇总 Turn 的最终回答；旧记录无协调状态时保留原有兼容路径。汇总失败、停止或缺回答不显示为仍在汇总。
@@ -153,6 +155,8 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 打印内容使用有界 `srcdoc`，加载失败或未收到打印完成确认时尝试下载单份报告 HTML，并说明需要在浏览器打开后打印；不打印整个工作台。
 
 ## FinanceGroundedReportBody / FinanceReportReadState / FinanceReportEvidenceNotice
+
+新增缺证据占位提示为“部分数字未通过核验”，同时适用于金额、股价、百分比及估值倍数；提示不宣称其他数字已全部核验。
 
 ### 功能
 股票报告与五方研究的主助手综合结论共用精确 Agent/Session/Turn 的 Markdown 导出读取。页面展示和文件导出保持相同的金额证据处理，核验只覆盖该报告 Turn 的原生证据，不宣称完成所有分析员的跨 Turn 审核。

@@ -574,6 +574,15 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
     </VSurface>;
   }
 
+  const analystCards = <div key="analysts" className={styles.analystGrid} data-financial-team-analysts>{ALL_ROLES.map((role) => renderTurnCard(role))}</div>;
+  const synthesisCard = selectedRun ? (
+  <VSurface key="synthesis" as="section" tone="panel" padding="normal" className={styles.synthesis} data-financial-team-synthesis>
+    <div className={styles.cardHeading}><div className={styles.roleTitle}><Activity size={16} /><h3>{zh ? "主助手综合结论" : "Assistant synthesis"}</h3></div><VChip tone={statusTone(synthesisProjection?.state ?? "missing")}>{statusText(synthesisProjection?.state ?? "missing", zh)}</VChip></div>
+    {synthesisProjection?.state === "completed" && synthesisProjection.answer && selectedRun.synthesis.turnId ? <div className={styles.answer}><FinanceGroundedReportBody target={{ assistantAgentId: assistant.agentId, sessionId: selectedRun.synthesis.sessionId, turnId: selectedRun.synthesis.turnId }} originalText={synthesisProjection.answer} zh={zh} /></div> : <p className={styles.placeholder}>{synthesisProjection && ["failed", "stopped", "incomplete"].includes(synthesisProjection.state) ? (zh ? `汇总${statusText(synthesisProjection.state, zh)}，可重新开始研究。` : `Synthesis: ${statusText(synthesisProjection.state, zh)}. Start a new research run.`) : allAnalystsComplete ? (zh ? "分析员已完成，等待主助手汇总" : "Analysts completed; waiting for synthesis") : (zh ? "分析员完成后自动汇总" : "Synthesis starts when all analysts finish")}</p>}
+    <div className={styles.cardActions}>{synthesisProjection?.state === "completed" && selectedRun.synthesis.turnId ? <FinanceReportExport assistantAgentId={assistant.agentId} sessionId={selectedRun.synthesis.sessionId} turnId={selectedRun.synthesis.turnId} zh={zh} /> : null}<VButton variant="ghost" icon={<ExternalLink size={14} />} onPress={() => onOpenSession(selectedRun.synthesis.sessionId)}>{zh ? "打开主助手会话" : "Assistant Session"}</VButton>{synthesisProjection?.state === "running" && selectedRun.synthesis.turnId ? <VButton variant="secondary" icon={<StopCircle size={14} />} isPending={stoppingRole === "synthesis"} isDisabled={Boolean(stoppingRole)} onPress={() => void stopExactTurn("synthesis", selectedRun.synthesis)}>{zh ? "停止汇总" : "Stop synthesis"}</VButton> : null}</div>
+  </VSurface>
+  ) : null;
+
   return <div className={styles.page} data-finance-analyst-team>
     <div className={styles.header}>
       <div className={styles.headingGroup}>
@@ -639,12 +648,8 @@ export function FinanceAnalystTeam({ assistant, stock, zh, onOpenSession, onSele
           <strong>{detailsLoading || detailsUnavailable ? "—" : ALL_ROLES.filter((role) => projections.get(role)?.state === "completed").length}/5</strong>
           <span>{detailsLoading ? (zh ? "读取本轮对话" : "Loading run conversations") : detailsUnavailable ? (zh ? "部分对话暂无法读取" : "Some conversations are unavailable") : selectedRun.synthesis.turnId ? (synthesisProjection?.state === "completed" ? (zh ? "主助手已汇总" : "Synthesis complete") : synthesisProjection?.state === "running" ? (zh ? "主助手汇总中" : "Synthesis running") : `${zh ? "主助手汇总" : "Synthesis"} · ${statusText(synthesisProjection?.state ?? "missing", zh)}`) : selectedRun.schemaVersion < 2 ? (zh ? "旧版轮次" : "Legacy run") : selectedRun.stage === "debate" ? (zh ? "多空分析阶段" : "Debate stage") : (zh ? "基础研究阶段" : "Research stage")}</span>
         </div>
-        <div className={styles.analystGrid}>{ALL_ROLES.map((role) => renderTurnCard(role))}</div>
-        <VSurface as="section" tone="panel" padding="normal" className={styles.synthesis} data-financial-team-synthesis>
-          <div className={styles.cardHeading}><div className={styles.roleTitle}><Activity size={16} /><h3>{zh ? "主助手综合结论" : "Assistant synthesis"}</h3></div><VChip tone={statusTone(synthesisProjection?.state ?? "missing")}>{statusText(synthesisProjection?.state ?? "missing", zh)}</VChip></div>
-          {synthesisProjection?.state === "completed" && synthesisProjection.answer && selectedRun.synthesis.turnId ? <div className={styles.answer}><FinanceGroundedReportBody target={{ assistantAgentId: assistant.agentId, sessionId: selectedRun.synthesis.sessionId, turnId: selectedRun.synthesis.turnId }} originalText={synthesisProjection.answer} zh={zh} /></div> : <p className={styles.placeholder}>{synthesisProjection && ["failed", "stopped", "incomplete"].includes(synthesisProjection.state) ? (zh ? `汇总${statusText(synthesisProjection.state, zh)}，可重新开始研究。` : `Synthesis: ${statusText(synthesisProjection.state, zh)}. Start a new research run.`) : allAnalystsComplete ? (zh ? "分析员已完成，等待主助手汇总" : "Analysts completed; waiting for synthesis") : (zh ? "分析员完成后自动汇总" : "Synthesis starts when all analysts finish")}</p>}
-          <div className={styles.cardActions}>{synthesisProjection?.state === "completed" && selectedRun.synthesis.turnId ? <FinanceReportExport assistantAgentId={assistant.agentId} sessionId={selectedRun.synthesis.sessionId} turnId={selectedRun.synthesis.turnId} zh={zh} /> : null}<VButton variant="ghost" icon={<ExternalLink size={14} />} onPress={() => onOpenSession(selectedRun.synthesis.sessionId)}>{zh ? "打开主助手会话" : "Assistant Session"}</VButton>{synthesisProjection?.state === "running" && selectedRun.synthesis.turnId ? <VButton variant="secondary" icon={<StopCircle size={14} />} isPending={stoppingRole === "synthesis"} isDisabled={Boolean(stoppingRole)} onPress={() => void stopExactTurn("synthesis", selectedRun.synthesis)}>{zh ? "停止汇总" : "Stop synthesis"}</VButton> : null}</div>
-        </VSurface>
+        {synthesisProjection?.state === "completed" ? [synthesisCard, analystCards] : [analystCards, synthesisCard]}
+
       </> : null}
     </> : null}
   </div>;
