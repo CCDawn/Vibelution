@@ -142,7 +142,7 @@ def test_persistent_cleanup_failure_allows_real_manual_removal(page, e2e_instanc
             route.fulfill(response=response)
         assert failures == [real_id] * 3
         assert _session_exists(e2e_instance, real_id)
-        expect(page.get_by_text("会话清理未完成，请再次移除会话记录。", exact=True)).to_be_visible()
+        expect(page.get_by_text(re.compile("会话清理未完成，请再次移除会话记录。"))).to_be_visible()
         expect(page.locator(f'[id="agent-session-tab-session-{temp}"]')).to_have_count(0)
         page.unroute("**/api/sessions/**", reject_cleanup)
         tab = page.locator(f'[id="agent-session-tab-session-{real_id}"]')
@@ -155,7 +155,7 @@ def test_persistent_cleanup_failure_allows_real_manual_removal(page, e2e_instanc
             container.get_by_role("button", name=re.compile("^再次点击确认移除会话记录")).click()
         assert not _session_exists(e2e_instance, real_id)
         expect(tab).to_have_count(0)
-        expect(page.get_by_text("会话清理未完成，请再次移除会话记录。", exact=True)).to_have_count(0)
+        expect(page.get_by_text(re.compile("会话清理未完成，请再次移除会话记录。"))).to_have_count(0)
         _assert_no_turns(e2e_instance, [source], [])
     finally:
         for route in pending:
