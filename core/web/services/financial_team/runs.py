@@ -23,6 +23,11 @@ from core.web.services import agent_directory_service as directory
 from core.web.services import financial_market_service as market
 from core.web.services import financial_research_service as public_research
 from core.web.services import session_service
+from core.web.services.financial_research.as_of import (
+    active_cutoff,
+    on_or_before,
+    research_analysis_date_context,
+)
 
 from .provisioning import (
     ROLE_SPECS,
@@ -1326,11 +1331,13 @@ def submit_financial_team_primary_role(
             run_id=run_id,
             submission_id=submission_id,
         )
-        public_fundamentals = (
-            _public_fundamentals_snapshot(str(run["symbol"]))
-            if role == "fundamental"
-            else None
-        )
+        if role == "fundamental":
+            with research_analysis_date_context(
+                f"研究日期：{run.get('researchDate') or ''}"
+            ):
+                public_fundamentals = _public_fundamentals_snapshot(str(run["symbol"]))
+        else:
+            public_fundamentals = None
         prompt = _primary_role_prompt(
             run, role, public_fundamentals=public_fundamentals
         )
@@ -1473,7 +1480,7 @@ def _public_fundamentals_snapshot(symbol: str) -> dict[str, Any]:
                 "publishedAt": str(item.get("publishedAt") or "")[:24],
             }
         )
-    return {
+    snapshot = {
         "status": "available"
         if str(raw.get("status") or "") == "available"
         else "unavailable",
@@ -1487,6 +1494,31 @@ def _public_fundamentals_snapshot(symbol: str) -> dict[str, Any]:
         "error": str(raw.get("error") or "")[:160],
         "items": items,
     }
+    cutoff = active_cutoff()
+    if cutoff is None or snapshot.get("status") != "available":
+        return snapshot
+    fresh = (
+        on_or_before(snapshot.get("reportDate"), cutoff)
+        and on_or_before(snapshot.get("publishedAt"), cutoff)
+    )
+    kept = [
+        item
+        for item in items
+        if fresh
+        and on_or_before(item.get("reportDate"), cutoff)
+        and on_or_before(item.get("publishedAt"), cutoff)
+    ]
+    if kept:
+        snapshot["items"] = kept
+        return snapshot
+    snapshot["status"] = "unavailable"
+    snapshot["reportDate"] = ""
+    snapshot["publishedAt"] = ""
+    snapshot["items"] = []
+    snapshot["error"] = (
+        f"公开基本面晚于研究日期 {cutoff.isoformat()} 或缺少披露日期，未作为依据。"
+    )
+    return snapshot
 
 
 def _format_public_fundamentals(snapshot: dict[str, Any]) -> str:
@@ -1501,6 +1533,8 @@ def _format_public_fundamentals(snapshot: dict[str, Any]) -> str:
     items = snapshot.get("items") if isinstance(snapshot.get("items"), list) else []
     if snapshot.get("status") != "available" or not items:
         lines.append("本次公共基本面指标不可用；不得推断为零或补造数值。")
+        if snapshot.get("error"):
+            lines.append(str(snapshot.get("error")))
     else:
         for item in items:
             if (
@@ -1825,7 +1859,10 @@ def submit_financial_team_debate(
 
         evidence = run.get("publicFundamentalsSnapshot")
         if not isinstance(evidence, dict):
-            evidence = _public_fundamentals_snapshot(str(run["symbol"]))
+            with research_analysis_date_context(
+                f"研究日期：{run.get('researchDate') or ''}"
+            ):
+                evidence = _public_fundamentals_snapshot(str(run["symbol"]))
             run["publicFundamentalsSnapshot"] = evidence
             _write_run(path, run)
         public_facts = _format_public_fundamentals(evidence)

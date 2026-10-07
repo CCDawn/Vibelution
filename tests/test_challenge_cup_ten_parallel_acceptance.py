@@ -10,7 +10,7 @@ faked — with realistic 50-200ms LLM-magnitude latency and a deterministic
 all-ten-arrived handshake, so genuine overlap is proven rather than raced
 (no sleep-based speed contests).
 
-Plan D2 (docs/plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md §D2)
+Plan D2 (docs/archive/plans/2026-09/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md §D2)
 assertions, all as repeatable asserts:
 1. no cross-run leakage: every outbox row / attempt / event carries only
    its own runId and node identity (zero cross-over across the 10 runs);

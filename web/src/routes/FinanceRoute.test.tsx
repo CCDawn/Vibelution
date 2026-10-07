@@ -30,6 +30,7 @@ vi.mock("../api/financialPreferences", async (original) => ({
 }));
 vi.mock("../api/financialReports", async (original) => ({ ...await original<typeof import("../api/financialReports")>(), fetchFinancialReports: vi.fn(async () => ({ items: [], nextCursor: "", totalEstimate: 0 })) }));
 vi.mock("./finance/FinanceDashboard", () => ({ FinanceDashboard: () => <div>市场概览</div> }));
+vi.mock("./finance/FinancePaperTrading", () => ({ FinancePaperTrading: () => <div>模拟账户</div> }));
 vi.mock("../api/sessionArchive", () => ({ unarchiveChatSession: vi.fn(), archiveChatSession: vi.fn(), listArchivedChatSessions: vi.fn() }));
 vi.mock("../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
 vi.mock("./finance/FinancePortfolioResearch", () => ({ FinancePortfolioResearch: ({ onResearchPrompt }: { onResearchPrompt: (text: string) => void }) => <button onClick={() => onResearchPrompt("请对以下模拟持仓做组合诊断。")}>生成组合诊断草稿</button> }));
@@ -93,6 +94,18 @@ async function render(path = "/finance") {
 }
 async function settle() { await act(async () => new Promise((resolve) => setTimeout(resolve, 20))); }
 function button(label: string) { return [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label)); }
+async function chooseTab(label: string) {
+  const tab = [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(item => item.textContent === label)!;
+  await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+}
+async function chooseGroup(label: string) {
+  const group = [...container.querySelectorAll<HTMLButtonElement>('nav[aria-label="工作台功能分组"] button')].find(item => item.textContent === label)!;
+  await act(async () => group.click());
+}
+async function openResearchSettings() {
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="股票资料与研究设置"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes("股票概览与研究设置"))!.click());
+}
 function nativeSession(id: string): SessionDetail {
   return { id, agentId: "finance-a", title: "原生研究", status: "idle", taskSummary: "", lastActive: "", updatedAt: "", currentPhase: "", messages: [], defaultFileContext: "", previewTabs: [], activePreviewPath: "", changedFiles: [], readFiles: [] };
 }
@@ -105,6 +118,44 @@ async function input(label: string, value: string) {
 }
 
 describe("financial assistant page", () => {
+  it("opens the native conversation first and retains all grouped workspace views", async () => {
+    await render("/finance?session=native-session");
+    const draft = container.querySelector('textarea[aria-label="native draft"]');
+    expect(draft?.closest('[aria-hidden]')?.getAttribute("aria-hidden")).toBe("false");
+    expect(container.querySelector('[aria-label="公司或股票代码"]')).toBeNull();
+    expect(container.querySelector('[data-finance-session-scroll]')).not.toBeNull();
+    const views = (label: string) => [...container.querySelectorAll(`[role="tablist"][aria-label="${label}功能"] [role="tab"]`)].map(tab => tab.textContent);
+    expect(views("研究")).toEqual(["股票研究", "主题研究", "分析员协作", "研究任务", "总览"]);
+    await chooseGroup("行情");
+    expect(views("行情")).toEqual(["自选行情", "股票筛选"]);
+    expect(container.querySelector('[aria-label="公司或股票代码"]')).not.toBeNull();
+    await chooseGroup("资产");
+    expect(views("资产")).toEqual(["模拟账户", "组合研究", "交易复盘"]);
+    await chooseGroup("资料");
+    expect(views("资料")).toEqual(["报告中心", "研究记忆", "技能中心", "学习中心"]);
+    await chooseGroup("研究");
+    expect(container.querySelector('textarea[aria-label="native draft"]')).toBe(draft);
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+  });
+
+  it("searches native session bodies and retains the keyword for sidebar pagination", async () => {
+    vi.mocked(querySessions).mockImplementation(async (params) => params?.q ? {
+      items: [{ ...nativeSession(params.cursor ? "next-match" : "body-match"), title: params.cursor ? "后续记录" : "经营质量", updatedAt: "2026-10-05T13:49:11" }], nextCursor: params.cursor ? "" : "next-page",
+    } as SessionQueryResponse : { items: [nativeSession("native-session")], nextCursor: "" } as SessionQueryResponse);
+    await render("/finance?session=native-session");
+    await input("搜索研究会话", "正文关键词");
+    await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
+    await settle();
+    const list = container.querySelector('[data-finance-session-scroll]')!;
+    expect(list.textContent).toContain("经营质量");
+    await act(async () => button("更多会话")!.click());
+    await settle();
+    expect(list.textContent).toContain("后续记录");
+    expect(querySessions).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance-a", q: "正文关键词", cursor: "next-page" }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
+  });
+
   it("reopens an empty direct binding on the same assistant after native deletion", async () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, setupStatus: "session_missing", directSessionId: "" }]);
     vi.mocked(createFinancialAssistant).mockResolvedValue({ created: false, assistant: row });
@@ -147,7 +198,7 @@ describe("financial assistant page", () => {
   it("blocks topic execution when the assistant model has no valid context window", async () => {
     modelContextWindow = 0;
     await render("/finance?session=native-session");
-    await act(async () => button("通用研究")!.click());
+    await chooseTab("主题研究");
     expect(container.textContent).toContain("研究模型暂不可用");
     expect(button("开始研究")?.disabled).toBe(true);
     await act(async () => button("开始研究")!.click());
@@ -157,7 +208,7 @@ describe("financial assistant page", () => {
 
   it("starts a topic in its own native session without sending duplicate turns", async () => {
     await render("/finance?session=native-session");
-    await act(async () => button("通用研究")!.click());
+    await chooseTab("主题研究");
     const field = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="研究主题"]')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "人工智能算力产业链"); field.dispatchEvent(new Event("input", { bubbles: true })); });
     await act(async () => { button("开始研究")!.click(); button("开始研究")!.click(); }); await settle();
@@ -169,7 +220,8 @@ describe("financial assistant page", () => {
   });
   it("prepares portfolio research in a separate topic session without auto-submission", async () => {
     await render("/finance?session=native-session");
-    await act(async () => button("组合研究")!.click());
+    await chooseGroup("资产");
+    await chooseTab("组合研究");
     await act(async () => [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find((tab) => tab.textContent === "模拟持仓")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await act(async () => { button("生成组合诊断草稿")!.click(); button("生成组合诊断草稿")!.click(); }); await settle();
     expect(createChatSession).toHaveBeenCalledTimes(1);
@@ -326,7 +378,7 @@ describe("financial assistant page", () => {
 
   it("starts research through the committed native composer once on a double click", async () => {
     await render("/finance?session=native-session");
-    await act(async () => button("股票研究")!.click());
+    await openResearchSettings();
     await input("报告期", "2025FY");
     const start = button("开始研究")!;
     await act(async () => { start.click(); start.click(); });
@@ -340,7 +392,7 @@ describe("financial assistant page", () => {
   it("creates and starts one new native Session when researching after an existing turn", async () => {
     nativeMessages = [{ role: "user", id: "existing", content: "核对贵州茅台（600519）", timestamp: "" }];
     await render("/finance?session=native-session");
-    await act(async () => button("股票研究")!.click());
+    await openResearchSettings();
     await input("报告期", "2024FY");
     await act(async () => { button("开始研究")!.click(); button("开始研究")!.click(); });
     await settle();
@@ -353,7 +405,7 @@ describe("financial assistant page", () => {
 
   it("prevents future dates from creating or submitting a native research", async () => {
     await render("/finance?session=native-session");
-    await act(async () => button("股票研究")!.click());
+    await openResearchSettings();
     await input("分析日期", "2099-01-01");
     const start = button("开始研究")!;
     expect(start.disabled).toBe(true);
@@ -383,7 +435,7 @@ describe("financial assistant page", () => {
     delete (archived as Partial<SessionDetail>).taskSummary;
     vi.mocked(listArchivedChatSessions).mockResolvedValue({ items: [archived], nextCursor: "", totalEstimate: 1 });
     await render("/finance?session=native-session");
-    await act(async () => button("报告中心")!.click());
+    await chooseGroup("资料");
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent === "已归档")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await settle();
     expect(listArchivedChatSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
@@ -396,7 +448,7 @@ describe("financial assistant page", () => {
       items: params?.q ? [{ ...nativeSession("body-match"), title: "经营质量", updatedAt: "2026-10-05T13:49:11" }, { ...nativeSession("native-session"), lastTurnStatus: "ready", terminalReason: "ready" }] : [{ ...nativeSession("recent"), title: "年度研究" }], nextCursor: "",
     } as SessionQueryResponse));
     await render("/finance?session=native-session");
-    await act(async () => button("报告中心")!.click());
+    await chooseGroup("资料");
     await act(async () => [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find((tab) => tab.textContent === "研究会话")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
     await settle();
     const input = container.querySelector('input[aria-label="搜索研究记录"]') as HTMLInputElement;

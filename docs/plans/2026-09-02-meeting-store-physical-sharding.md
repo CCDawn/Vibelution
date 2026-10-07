@@ -1,6 +1,6 @@
 # 会议存储物理分片计划（meeting-store-physical-sharding）
 
-> 状态：设计阶段（调研进行中）。本计划是 `2026-09-02-challenge-cup-10-parallel-concurrency-plan.md` 的写入层根治延伸，两条线并行推进、领地互斥（见 §5）。
+> 状态：设计阶段（调研进行中）。本计划是已归档的 [10 并发计划](../archive/plans/2026-09/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) 的写入层根治延伸，两条线领地互斥（见 §5）。
 
 ## 1. 背景与定案
 

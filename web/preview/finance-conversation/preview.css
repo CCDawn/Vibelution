@@ -1,0 +1,29 @@
+@import "../../src/design/tokens.css";
+@import "../../src/design/base.css";
+@import "../../src/design/tailwind.css";
+@import "../../src/design/vui-provider-theme.css";
+@import "../../src/design/vui-native-controls.css";
+@source "./main.tsx";
+
+/* Labels, metadata and icons share a baseline. Report paragraphs stay readable. */
+.finance-preview [data-preview-inline] {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.finance-preview [data-preview-inline] svg {
+  flex-shrink: 0;
+}
+.finance-preview [data-preview-session-row] {
+  min-height: 32px;
+}
+.finance-preview [data-preview-session-row] strong,
+.finance-preview [data-preview-session-row] span {
+  line-height: 20px;
+}
+
+html, body, #root { height: 100%; min-width: 1024px; }
+.finance-preview { color-scheme: light; }
+
+@media (prefers-reduced-motion: reduce) {
+  .finance-preview * { transition-duration: 0ms !important; }
+}

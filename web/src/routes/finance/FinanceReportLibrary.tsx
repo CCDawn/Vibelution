@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { BookOpen, ExternalLink, RefreshCw } from "lucide-react";
+import { BookOpen, ExternalLink, FileText, RefreshCw } from "lucide-react";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 import { fetchKnowledgeTrace, listKnowledgeItems } from "../../api/knowledge";
 import { fetchKnowledgeItemBody } from "../../api/knowledgeLifecycle";
@@ -102,7 +102,15 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
           if (source) void bodyQuery.refetch();
         }}><RefreshCw size={14} /></VButton>
       </div>
-      {citation ? <div className={styles.libraryCitation}><strong className={styles.libraryCitationTitle}>{zh ? "当前引用" : "Selected citation"} · {citation.label}</strong><VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={styles.link}><ExternalLink size={14} />{zh ? "打开原文" : "Open source"}</VRouteLinkButton>{(citationScanComplete || citationTraceReadFailed) && !matchedItemId ? <span className={styles.small}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}</div> : null}
+      {citation ? <div className={styles.libraryCitation}>
+        <div className={styles.libraryCitationRow}>
+          <strong className={styles.libraryCitationTitle} title={`${zh ? "当前引用" : "Selected citation"} · ${citation.label}`}>
+            <FileText size={14} aria-hidden="true" /><span className="min-w-0 truncate">{zh ? "当前引用" : "Selected citation"} · {citation.label}</span>
+          </strong>
+          <VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={`${styles.link} ${styles.libraryCitationAction}`}><ExternalLink size={14} aria-hidden="true" />{zh ? "打开原文" : "Open source"}</VRouteLinkButton>
+        </div>
+        {(citationScanComplete || citationTraceReadFailed) && !matchedItemId ? <span className={`${styles.small} basis-full`}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}
+      </div> : null}
       {knowledgeBaseId ? <VRouteLinkButton to={libraryUrl} className={styles.link}>{zh ? "管理财报库" : "Manage library"}</VRouteLinkButton> : null}
       {!readable ? <VStateSurface density="compact" tone="unavailable" title={zh ? "财报库不可读" : "Library unavailable"} /> :
         itemsQuery.isError ? <VStateSurface density="compact" tone="error" title={zh ? "资料加载失败" : "Could not load reports"} actions={<VButton onPress={() => void itemsQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> :
@@ -116,7 +124,16 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
             {traceQuery.isError ? <VStateSurface density="compact" tone="error" title={zh ? "来源加载失败" : "Could not load source"} actions={<VButton onPress={() => void traceQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> :
               traceQuery.isPending ? <VSkeleton /> :
               !source ? <p className={styles.small}>{zh ? "没有有效原文来源" : "No active source available"}</p> : <>
-                {sources.length > 1 ? <div className={styles.sourceList}>{sources.map((row) => <VButton key={row.sourceArtifactId} variant="ghost" className={styles.link} aria-pressed={row.sourceArtifactId === source.sourceArtifactId} onPress={() => setSourceId(row.sourceArtifactId)}>{row.title}</VButton>)}</div> : null}
+                {sources.length > 1 ? <div className={styles.sourceList}>{sources.map((row) => {
+                  const rowMetadata = financialSourceMetadata(row);
+                  return <VButton key={row.sourceArtifactId} variant="ghost" contentLayout="plain" className={styles.sourceArtifactButton} aria-pressed={row.sourceArtifactId === source.sourceArtifactId} onPress={() => setSourceId(row.sourceArtifactId)}>
+                    <span className={styles.sourceArtifactRow}>
+                      <FileText size={14} aria-hidden="true" />
+                      <strong title={row.title}>{row.title}</strong>
+                      {rowMetadata.page ? <span title={zh ? `第${rowMetadata.page}页` : `Page ${rowMetadata.page}`}>{zh ? `第${rowMetadata.page}页` : `p. ${rowMetadata.page}`}</span> : null}
+                    </span>
+                  </VButton>;
+                })}</div> : null}
                 {metadata ? <dl className={styles.facts}>
                   {metadata.company ? <><dt>{zh ? "公司" : "Company"}</dt><dd>{metadata.company}</dd></> : null}
                   {metadata.ticker ? <><dt>{zh ? "代码" : "Ticker"}</dt><dd>{metadata.ticker}</dd></> : null}

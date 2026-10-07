@@ -82,7 +82,11 @@ import {
   readAgentLastSessionMap,
   rememberAgentLastSession,
 } from "./chatAgentSessionMemory";
-import { defaultNewSessionTitle, isDefaultNewSessionTitle } from "./useChatSessionRenameMenu";
+import {
+  consumeTempSessionTitleCommit,
+  defaultNewSessionTitle,
+  isDefaultNewSessionTitle,
+} from "./useChatSessionRenameMenu";
 import { rollbackSessionRename } from "./chatSessionRenameRollback";
 import type { ChatRouteSelection } from "./chatSelectionProjection";
 import {
@@ -92,6 +96,7 @@ import {
   rememberSessionCreateRecovery,
   type SessionCreateRecovery,
 } from "./chatSessionCreateRecovery";
+import { clearSessionCreateAttempt, markSessionCreateAttempt } from "./sessionCreateAttempt";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -377,6 +382,7 @@ export function useChatWorkspaceLifecycle({
     const current = createSessionIntentsRef.current.get(tempSessionId);
     if (current?.idempotencyKey === expectedKey) {
       createSessionIntentsRef.current.delete(tempSessionId);
+      clearSessionCreateAttempt(tempSessionId);
     }
     forgetSessionCreateRecovery(tempSessionId, expectedKey);
   };
@@ -389,6 +395,7 @@ export function useChatWorkspaceLifecycle({
     if (!recovery) return;
     // Reload owns no in-flight POST. Let an explicit retry replay the same key.
     createSessionIntentsRef.current.set(recoveryRouteId, { ...recovery, state: "failed" });
+    markSessionCreateAttempt(recoveryRouteId, "failed");
     if (queryClient.getQueryData(queryKeys.session(recoveryRouteId))) return;
     const detail = buildSessionCreateShell(recovery, defaultNewSessionTitle(lang));
     queryClient.setQueryData(queryKeys.session(recoveryRouteId), detail);
@@ -430,6 +437,7 @@ export function useChatWorkspaceLifecycle({
       intent.state = "pending";
       variables.createIntent = intent;
       createSessionIntentsRef.current.set(intent.tempSessionId, intent);
+      markSessionCreateAttempt(intent.tempSessionId, "pending");
       rememberSessionCreateRecovery(intent);
       const idempotencyKey = intent.idempotencyKey;
       const telemetry = startUserAction("session_create", { agentId: normalizedAgentId });
@@ -440,9 +448,16 @@ export function useChatWorkspaceLifecycle({
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
       const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
       // Match backend: a new session starts from the placeholder label; the
-      // first user turn generates the real title.
+      // first user turn generates the real title. A title already committed on
+      // this temp shell survives a rejected-create retry.
       const title = defaultNewSessionTitle(lang);
-      const optimisticDetail = buildSessionCreateShell(intent, title, agentDisplayName || undefined);
+      const existingShellTitle = String(
+        queryClient.getQueryData<SessionDetail>(queryKeys.session(tempSessionId))?.title || "",
+      ).trim();
+      const shellTitle = existingShellTitle && !isDefaultNewSessionTitle(existingShellTitle)
+        ? existingShellTitle
+        : title;
+      const optimisticDetail = buildSessionCreateShell(intent, shellTitle, agentDisplayName || undefined);
       // Do not await cancelQueries — waiting freezes tab switching while list
       // queries are in flight, same as deleteSessionMutation.
       void queryClient.cancelQueries({ queryKey: ["sessions", "query"] });
@@ -485,6 +500,7 @@ export function useChatWorkspaceLifecycle({
       if (!nextId) {
         const intent = createSessionIntentsRef.current.get(tempSessionId);
         if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
+        markSessionCreateAttempt(tempSessionId, "failed");
         telemetry?.failed(undefined, { reason: "missing_session_id" });
         return;
       }
@@ -522,6 +538,7 @@ export function useChatWorkspaceLifecycle({
         return;
       }
       forgetCreateSessionIntent(tempSessionId, String(context?.idempotencyKey || ""));
+      clearSessionCreateAttempt(tempSessionId);
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
       // Prefer server title (now defaults to Agent name); fall back to local Agent label.
       const serverTitle = String(nextDetail.title || "").trim();
@@ -533,14 +550,20 @@ export function useChatWorkspaceLifecycle({
         || "",
       ).trim();
       const fallbackTitle = serverTitle || agentLabel || defaultNewSessionTitle(lang);
-      // Create no longer enters rename: the draft only counts when the operator
-      // opened the temp tab's editor while the POST was in flight.
-      const editingTempTitle = Boolean(
-        tempSessionId && editingSessionIdRef.current === tempSessionId,
+      // Create no longer enters rename. An open editor wins; once the operator
+      // confirms, the closed editor's title stays on the temp shell.
+      const titleCommitClosedEditor = Boolean(
+        tempSessionId && consumeTempSessionTitleCommit(tempSessionId),
       );
+      const editingTempTitle = Boolean(
+        tempSessionId && editingSessionIdRef.current === tempSessionId && !titleCommitClosedEditor,
+      );
+      const cachedTempTitle = tempSessionId && !editingTempTitle
+        ? String(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempSessionId))?.title || "").trim()
+        : "";
       const liveDraft = editingTempTitle
         ? String(editingSessionTitleRef.current || "").trim()
-        : "";
+        : cachedTempTitle;
       const keepDraft = Boolean(
         liveDraft
         && liveDraft !== fallbackTitle
@@ -711,14 +734,22 @@ export function useChatWorkspaceLifecycle({
         ? (error as Error & { status?: unknown }).status
         : undefined;
       if (status === 409 || status === 410) {
-        forgetCreateSessionIntent(
-          String(context?.tempSessionId || "").trim(),
-          String(context?.idempotencyKey || ""),
-        );
+        // The rejected key must not be replayed, but this temp shell still owns
+        // the draft. Rotate the key in place so the next click does not open a
+        // second empty tab.
+        const rejectedTempSessionId = String(context?.tempSessionId || "").trim();
+        const expectedKey = String(context?.idempotencyKey || "");
+        const rejectedIntent = createSessionIntentsRef.current.get(rejectedTempSessionId);
+        if (rejectedIntent && rejectedIntent.idempotencyKey === expectedKey) {
+          rejectedIntent.idempotencyKey = newCreateSessionIdempotencyKey();
+          rejectedIntent.state = "failed";
+          rememberSessionCreateRecovery(rejectedIntent);
+        }
       } else {
         const intent = createSessionIntentsRef.current.get(String(context?.tempSessionId || "").trim());
         if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
       }
+      markSessionCreateAttempt(tempSessionId, "failed");
       context?.telemetry?.failed(error, {
         tempSessionId: String(context?.tempSessionId || "").trim(),
         agentId: String(context?.agentId || "").trim(),

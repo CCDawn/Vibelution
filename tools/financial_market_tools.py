@@ -17,6 +17,11 @@ from datetime import datetime, timezone
 
 from core.web.services import financial_market_service as market
 from core.web.services import financial_research_service as research
+from core.web.services.financial_research.as_of import (
+    active_cutoff,
+    on_or_before,
+    screen_snapshot_usable,
+)
 
 MAX_RESULT_CHARS = 3_200
 MAX_SCREEN_RESULT_CHARS = MAX_RESULT_CHARS
@@ -246,6 +251,19 @@ def financial_market_snapshot_tool(
         candle_error = True
 
     available = len(raw_candles) if isinstance(raw_candles, list) else 0
+    cutoff = active_cutoff()
+    quote_for_result = stock
+    as_of_message = ""
+    if cutoff is not None:
+        kept = [row for row in candles if on_or_before(row[0], cutoff)]
+        omitted_by_date = len(candles) - len(kept)
+        candles = kept
+        available = len(candles)
+        if not on_or_before(stock.get("timestamp"), cutoff):
+            quote_for_result = None
+            as_of_message = f"报价时间晚于分析日期 {cutoff.isoformat()}，未返回该报价。"
+        if omitted_by_date:
+            as_of_message += f"已略过 {omitted_by_date} 根晚于分析日期的 K 线。"
     chosen = candles[-limit:]
     source = _safe_text(snapshot.get("source"), _PROVIDER, 100)
     source_url = _safe_text(
@@ -258,25 +276,33 @@ def financial_market_snapshot_tool(
         reported_candle_error = (
             raw_candle_error
             if isinstance(raw_candle_error, str) and raw_candle_error in _SAFE_CANDLE_ERRORS
-            else "K 线数据暂不可用，报价仍可供参考。"
+            else (
+                "K 线数据暂不可用。"
+                if quote_for_result is None
+                else "K 线数据暂不可用，报价仍可供参考。"
+            )
         )
     adjustment_label = "前复权" if metadata["adjustment"] == "qfq" else "未复权"
     notice = (
         f"公开报价可能延迟；仅提供日/周/月{adjustment_label} K 线，不含分钟数据。"
         "fetchedAt 为本次查询时间，quote.timestamp 与 K 线日期为数据源时间。"
     )
+    if as_of_message:
+        notice = f"{notice}{as_of_message}"
 
     def make_payload(rows: list[list]) -> dict:
         returned = len(rows)
         omitted = max(0, available - returned)
         clipped = omitted > 0
-        status = "partial" if candle_error or clipped else "ok"
+        status = "partial" if candle_error or clipped or as_of_message else "ok"
         if candle_error:
             message = reported_candle_error
         elif clipped:
             message = "已按请求数量或输出长度限制保留最新 K 线。"
         else:
             message = ""
+        if as_of_message:
+            message = f"{message}{as_of_message}" if message else as_of_message
         return {
             "ok": True,
             "status": status,
@@ -289,7 +315,7 @@ def financial_market_snapshot_tool(
             "source": source,
             "sourceUrl": source_url,
             "fetchedAt": fetched_at,
-            "quote": stock,
+            "quote": quote_for_result,
             "period": period,
             **metadata,
             "candles": {"columns": columns, "rows": rows},
@@ -487,6 +513,15 @@ def financial_market_screen_tool(
         "items": items,
         "notice": "来源只提供行情时分，未提供交易日期；抓取时间不代表行情日期。市值单位未核实，未用于筛选。",
     }
+    cutoff = active_cutoff()
+    if cutoff is not None and not screen_snapshot_usable(payload.get("dataDate"), cutoff):
+        payload["items"] = []
+        payload["returnedCount"] = 0
+        payload["status"] = "partial"
+        payload["message"] = (
+            f"筛选快照没有不晚于分析日期 {cutoff.isoformat()} 的交易日期，未作为本次研究依据。"
+        )
+        payload["notice"] = payload["message"]
     try:
         encoded = _encode(payload)
         while len(encoded) > MAX_SCREEN_RESULT_CHARS and payload["items"]:

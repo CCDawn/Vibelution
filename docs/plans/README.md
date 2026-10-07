@@ -1,18 +1,15 @@
 # 在研草案（非正式规范）
 
-本目录只放尚未关闭、且已在 [docs/README.md](../README.md) 白名单中的草案。
+本文件是在研草案的唯一清单。[docs/README.md](../README.md) 只指向这里，不复制状态。
 **不是**现行规则；权威顺序见 [ADR 0005](../adr/0005-docs-authority-and-archive-policy.md)。
 
-关闭条件达到后：改 Status 为 `implemented` / `superseded` / `historical`，然后 `git mv` 到 `docs/archive/plans/<yyyy-mm>/`，并更新本文件与 `docs/README.md`。
+关闭条件达到后：改 Status 为 `implemented` / `superseded` / `historical`，然后 `git mv` 到 `docs/archive/plans/<yyyy-mm>/`，并只更新本文件。
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
 | [2026-09-12-session-ledger-archival-constraints.md](2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施） | 账本归档设计约束（9 条必处理 + 8 风险点）+ 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
-| [2026-09-11-command-code-headless-transport-poc.md](2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED / PROPOSED FOR REVIEW（P0–P4b 与 G2/G3 已执行） | Command Code headless CLI 传输探针：调起路径、流式保真、会话连续性通过（附落盘缺陷）；**G2 未通过**（首字 2.18 倍）、G3 收益远小于原假设（CLI 自带 ~16k tokens/请求固定上下文）、G1 轮询未测出；无 GO/NO-GO 结论；未改产品路径 |
 | [research-flow-v2.md](research-flow-v2.md) | USER-APPROVED / STAGE 3 VERSIONED REPAIR IMPLEMENTED | 三阶段职责、决策 Agent 动态路由与现有账本权威；第三阶段 Seed、多动作路由、1.1.0 显式迁移和版本化基线修复已实现，真实 CUDA 迭代待验收 |
-| [2026-09-05-independent-operator-experiment-flow-plan.md](2026-09-05-independent-operator-experiment-flow-plan.md) | TECHNICAL REFERENCE / FLOW PARTIALLY SUPERSEDED | 保留独立算子实现、成熟项目调研及历史证据；后续产品流程以 research-flow-v2.md 为讨论入口，旧状态不代表当前完成情况 |
-| [2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED / ACTIVE PLAN | 10 并发链路改造与并发缺陷修复任务清单：搜索 circuit/fan-in 双花 P0、dispatch 并行化关键路径（B1–B5）、串线与丢写批次（C1–C7）、并发测试与 10 并发验收（D1–D2） |
-| [2026-09-02-meeting-store-physical-sharding.md](2026-09-02-meeting-store-physical-sharding.md) | 设计阶段（调研进行中） | 会议轮次按 meetingRoundId 物理分片；是 10 并发计划的写入层延伸，尚未实施 |
+| [2026-09-02-meeting-store-physical-sharding.md](2026-09-02-meeting-store-physical-sharding.md) | 设计阶段（调研进行中） | 会议轮次按 meetingRoundId 物理分片；是已归档 10 并发计划的写入层延伸，尚未实施 |
 | [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |
 | [2026-08-25-challenge-cup-canonical-workflow-state-plan.md](2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯从官方题目冷启动到正式运行、产出登记和 H1–H4 审核的规范化状态 V2、服务端动作与真实链路验收 |
 | [2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved / active-plan | 挑战杯按题目/假说隔离群聊与 Child Session、三类 checkpoint 绑定、旧数据清空及 SCI-096 初始化重建 |
@@ -26,6 +23,10 @@
 
 历史快照（已迁出）：
 
+- `2026-09-11-command-code-headless-transport-poc.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-11-command-code-headless-transport-poc.md)（NO-GO / historical；G2 未通过，G1 未测出，不改产品传输路径）
+- `2026-08-26-challenge-workflow-recovery-closure.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-26-challenge-workflow-recovery-closure.md)（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main）
+- `2026-09-02-challenge-cup-10-parallel-concurrency-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md)（implemented；A/B/C 与 D2 已合入。D1 集中 marker、sideflow 混跑和 B5 上限 e2e 仍是后续增量）
+- `2026-09-05-independent-operator-experiment-flow-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-05-independent-operator-experiment-flow-plan.md)（superseded；产品流程见 [research-flow-v2.md](research-flow-v2.md)，本文只留调研和早期证据）
 - `2026-08-13-portable-branch-workspace.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-13-portable-branch-workspace.md)（superseded；目录池与分支清单见 worktree-collaboration / instance-lifecycle，整树替换晋升未采用）
 - `2026-08-11-multi-instance-branch-isolation.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-11-multi-instance-branch-isolation.md)（superseded；实例身份与注册表见 ADR 0009 / instance-lifecycle）
 - `2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md)（superseded；实施已改走仓外 Stage1 方案）
