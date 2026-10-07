@@ -23,6 +23,7 @@ from core.web.services.chat_room_service import (
     get_chat_room_detail,
     list_chat_room_modes,
     list_chat_room_purposes,
+    list_chat_room_timeline,
     list_chat_rooms,
     reset_chat_room,
     start_chat_room_round,
@@ -131,6 +132,20 @@ def chat_room_events(room_id: str) -> StreamingResponse:
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/chat-rooms/{room_id}/timeline")
+def chat_room_timeline(
+    room_id: str,
+    cursor: int = 0,
+    limit: int | None = None,
+) -> dict:
+    """Read-only append-only room timeline page (cursor = last seen seq)."""
+
+    try:
+        return list_chat_room_timeline(room_id, cursor=cursor, limit=limit)
+    except ChatRoomNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.patch(

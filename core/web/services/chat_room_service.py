@@ -82,6 +82,7 @@ from core.chatroom.context_runtime import (
     last_chat_room_message_ref,
 )
 from core.chatroom.scheduler import get_scheduler_registry
+from core.chatroom import timeline as room_timeline
 from core.chatroom.store import ChatRoomStore, ChatRoomStoreReadError, utc_now_iso
 from core.infrastructure import developer_sandbox
 from core.infrastructure.owned_executor import OwnedThreadPoolExecutor
@@ -941,12 +942,18 @@ def update_chat_room(
             _resolve_participants(participant_session_ids),
             participant_contexts_by_agent_id=participant_contexts_by_agent_id,
         )
+    previous_participant_ids: list[str] = []
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         room = _find_room(state, normalized_room_id)
         if room is None:
             raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
         _raise_if_room_busy(room)
+        previous_participant_ids = [
+            str(item.get("participantId") or "").strip()
+            for item in list(room.get("participants") or [])
+            if isinstance(item, dict)
+        ]
 
         if title is not None:
             normalized_title = trim_lines(title or "", max_lines=1).strip()
@@ -980,6 +987,26 @@ def update_chat_room(
             "purpose": room.get("purpose") or DEFAULT_PURPOSE,
         },
     )
+    if resolved_participants_override is not None:
+        current_participant_ids = [
+            str(item.get("participantId") or "").strip()
+            for item in list(room.get("participants") or [])
+            if isinstance(item, dict)
+        ]
+        _append_room_timeline_event(
+            room,
+            type=room_timeline.EVENT_TYPE_MEMBER_CHANGE,
+            payload={
+                "participantCount": len(current_participant_ids),
+                "participantIds": current_participant_ids,
+                "addedParticipantIds": [
+                    item for item in current_participant_ids if item not in set(previous_participant_ids)
+                ],
+                "removedParticipantIds": [
+                    item for item in previous_participant_ids if item not in set(current_participant_ids)
+                ],
+            },
+        )
     return _room_to_api(room)
 
 
@@ -1057,6 +1084,21 @@ def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None)
                 "selected": str(room.get("roomId") or "").strip() in set(target_room_ids),
                 "participantCount": len(room.get("participants") or []),
             },
+        )
+        _append_room_timeline_event(
+            room,
+            type=room_timeline.EVENT_TYPE_MEMBER_CHANGE,
+            payload={
+                "agentId": normalized_agent_id,
+                "selected": str(room.get("roomId") or "").strip() in set(target_room_ids),
+                "participantCount": len(room.get("participants") or []),
+                "participantIds": [
+                    str(item.get("participantId") or "").strip()
+                    for item in list(room.get("participants") or [])
+                    if isinstance(item, dict)
+                ],
+            },
+            from_id=normalized_agent_id,
         )
     rooms_payload = list_chat_rooms()
     return {
@@ -1921,6 +1963,20 @@ def start_chat_room_round(
             outcome="running",
             lifecycle=True,
         )
+        _append_room_timeline_event(
+            room,
+            type=room_timeline.EVENT_TYPE_ROUND_STATE,
+            round_id=round_id,
+            payload={
+                "roundId": round_id,
+                "status": "running",
+                "topic": normalized_topic,
+                "mode": round_mode,
+                "purpose": round_purpose,
+                "speakerOrder": [str(item.get("participantId") or "") for item in speakers],
+                "participantCount": len(speakers),
+            },
+        )
         stage_started_at = _perf_counter()
         _publish_chat_room_detail_snapshot(normalized_room_id)
         submit_timings["initialSnapshotPublishMs"] = _elapsed_ms(stage_started_at)
@@ -2300,8 +2356,71 @@ def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
         outcome="stopping",
         lifecycle=True,
     )
+    _append_room_timeline_event(
+        room_payload,
+        type=room_timeline.EVENT_TYPE_ROUND_STATE,
+        round_id=active_round_id,
+        payload={
+            "roundId": active_round_id,
+            "status": "stopping",
+            "reason": trim_lines(stop_reason, max_lines=2),
+        },
+    )
     _publish_chat_room_detail_snapshot(normalized_room_id)
     return _room_to_api(room_payload)
+
+
+def list_chat_room_timeline(
+    room_id: str,
+    *,
+    cursor: int = 0,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    """Read-only page of the room's append-only timeline log.
+
+    ``cursor`` is the last ``seq`` the client has seen; events are returned
+    with ``seq > cursor`` together with ``nextCursor`` for the next page.
+    Message events carry the same public payload shape as the room detail
+    API (``_message_to_api``), because they are projected at write time.
+    """
+
+    lang = get_web_language()
+    normalized_room_id = str(room_id or "").strip()
+    if not normalized_room_id:
+        raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+    try:
+        cursor_value = max(0, int(cursor or 0))
+    except (TypeError, ValueError):
+        cursor_value = 0
+    try:
+        resolved_limit = (
+            room_timeline.DEFAULT_READ_LIMIT
+            if limit is None
+            else max(0, min(int(limit), room_timeline.MAX_READ_LIMIT))
+        )
+    except (TypeError, ValueError):
+        resolved_limit = room_timeline.DEFAULT_READ_LIMIT
+    state = _store().load()
+    room = _find_room(state, normalized_room_id)
+    if room is None:
+        raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+    events = room_timeline.read_events(
+        normalized_room_id,
+        after_seq=cursor_value,
+        limit=resolved_limit,
+        project_root=PROJECT_ROOT,
+    )
+    next_cursor = max(
+        [cursor_value, *([int(item.get("seq") or 0) for item in events])]
+    )
+    return {
+        "roomId": normalized_room_id,
+        "cursor": cursor_value,
+        "limit": resolved_limit,
+        "events": events,
+        "nextCursor": next_cursor,
+        "hasMore": bool(resolved_limit) and len(events) >= resolved_limit,
+    }
 
 
 def stream_chat_room_events(room_id: str, initial_detail: dict[str, Any] | None = None):
@@ -2776,6 +2895,22 @@ def _execute_chat_room_round(
                     outcome=message["status"],
                     level="info" if message["status"] == "completed" else "warning",
                 )
+                _append_room_timeline_event(
+                    room,
+                    type=room_timeline.EVENT_TYPE_MESSAGE,
+                    round_id=str(round_payload.get("roundId") or round_id),
+                    from_id=str(
+                        message.get("participantId") or participant.get("participantId") or ""
+                    ).strip(),
+                    payload=_message_to_api(
+                        message,
+                        _normalize_case_state_for_api(
+                            round_payload.get("caseState")
+                            if isinstance(round_payload.get("caseState"), dict)
+                            else {}
+                        ),
+                    ),
+                )
 
         if batch_is_parallel:
             _publish_chat_room_detail_snapshot(normalized_room_id)
@@ -2848,6 +2983,20 @@ def _execute_chat_room_round(
         outcome=final_status,
         level="info" if final_status == "completed" else ("warning" if final_status == "partial" else "error"),
         lifecycle=True,
+    )
+    _append_room_timeline_event(
+        room,
+        type=room_timeline.EVENT_TYPE_ROUND_STATE,
+        round_id=str(target_round.get("roundId") or round_id),
+        payload={
+            "roundId": str(target_round.get("roundId") or round_id),
+            "status": final_status,
+            "topic": str(target_round.get("topic") or ""),
+            "summary": summary,
+            "messageCount": len(messages),
+            "completedCount": completed_count,
+            "finishedAt": finished_at,
+        },
     )
     if completed_count > 0:
         _sync_group_context_events(room, target_round)
@@ -8770,6 +8919,19 @@ def _stopped_chat_room_round_detail(room_id: str, round_id: str) -> dict[str, An
             outcome="stopped",
             lifecycle=True,
         )
+        _append_room_timeline_event(
+            room,
+            type=room_timeline.EVENT_TYPE_ROUND_STATE,
+            round_id=str(target_round.get("roundId") or round_id),
+            payload={
+                "roundId": str(target_round.get("roundId") or round_id),
+                "status": "stopped",
+                "summary": str(target_round.get("summary") or ""),
+                "reason": trim_lines(stop_reason, max_lines=2),
+                "messageCount": len(list(target_round.get("messages") or [])),
+                "finishedAt": str(target_round.get("finishedAt") or stopped_at),
+            },
+        )
         _sync_stopped_round_to_sessions_if_needed(room, target_round)
         _publish_chat_room_detail_snapshot(room_id)
     if str(target_round.get("terminalReason") or "").strip():
@@ -9194,6 +9356,58 @@ def _record_room_event(
         return
 
 
+def _append_room_timeline_event(
+    room: Mapping[str, Any] | None,
+    *,
+    type: str,
+    payload: Mapping[str, Any] | None = None,
+    from_id: str = "",
+    to_id: str = "",
+    round_id: str = "",
+) -> dict[str, Any] | None:
+    """Append one durable room-timeline event; never raises into the caller.
+
+    The timeline is the room's append-only observable history (commit
+    chatroom-p2p-transport): observability must not be able to fail a round,
+    so write failures degrade to a warning scene event exactly like
+    ``_record_room_event``.  Must be called OUTSIDE ``_CHAT_ROOM_LOCK`` (the
+    timeline takes its own inter-process file lock).
+    """
+
+    room_id = str((room or {}).get("roomId") or "").strip()
+    if not room_id:
+        return None
+    try:
+        return room_timeline.append_room_event(
+            room_id,
+            type=type,
+            payload=payload,
+            from_id=from_id,
+            to_id=to_id,
+            round_id=round_id,
+            project_root=PROJECT_ROOT,
+        )
+    except Exception as exc:  # noqa: BLE001 - observability never blocks the room
+        try:
+            record_runtime_scene_event(
+                "chat_room",
+                "timeline",
+                "chat_room.timeline.append_failed",
+                message="Chat room timeline append failed.",
+                level="warning",
+                outcome="failed",
+                fields={
+                    "roomId": room_id,
+                    "eventType": str(type or "").strip(),
+                    "errorType": type(exc).__name__,
+                    "errorPreview": trim_lines(str(exc), max_lines=2),
+                },
+            )
+        except Exception:
+            return None
+        return None
+
+
 def _record_chat_room_detail_loaded(
     room_id: str,
     started_at: float,
@@ -9357,6 +9571,19 @@ def _fail_chat_room_round(
         outcome="failed",
         level="error",
         lifecycle=True,
+    )
+    _append_room_timeline_event(
+        live_room,
+        type=room_timeline.EVENT_TYPE_ROUND_STATE,
+        round_id=str(target_round.get("roundId") or round_id),
+        payload={
+            "roundId": str(target_round.get("roundId") or round_id),
+            "status": "failed",
+            "summary": summary,
+            "errorType": type(exc).__name__,
+            "messageCount": len(list(target_round.get("messages") or [])),
+            "finishedAt": failed_at,
+        },
     )
     _publish_chat_room_detail_snapshot(room_id)
 
