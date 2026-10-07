@@ -276,6 +276,47 @@ def test_chat_room_api_updates_and_deletes_room(tmp_path, monkeypatch):
     assert client.get(f"/api/chat-rooms/{room['roomId']}").status_code == 404
 
 
+def test_chat_room_api_rejects_participant_change_on_team_room(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+
+    create_response = client.post(
+        "/api/chat-rooms",
+        json={
+            "title": "团队绑定群聊",
+            "participantSessionIds": ["session-a"],
+            "config": {"source": "team", "teamId": "team-route", "teamName": "路由团队"},
+        },
+    )
+    assert create_response.status_code == 201
+    room = create_response.json()
+
+    roster_response = client.patch(
+        f"/api/chat-rooms/{room['roomId']}",
+        json={"participantSessionIds": ["session-b"]},
+    )
+    assert roster_response.status_code == 409
+    detail = roster_response.json()["detail"]
+    assert "团队设置" in detail
+    assert room["roomId"] in detail
+
+    # Title-only rename and an unchanged-roster PATCH still succeed.
+    rename_response = client.patch(
+        f"/api/chat-rooms/{room['roomId']}",
+        json={"title": "改名的团队群聊"},
+    )
+    assert rename_response.status_code == 200
+    assert rename_response.json()["title"] == "改名的团队群聊"
+
+    same_roster_response = client.patch(
+        f"/api/chat-rooms/{room['roomId']}",
+        json={"participantSessionIds": ["session-a"]},
+    )
+    assert same_roster_response.status_code == 200
+    assert [participant["sessionId"] for participant in same_roster_response.json()["participants"]] == ["session-a"]
+
+
 @pytest.mark.slow
 def test_chat_room_api_resets_room_messages(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)

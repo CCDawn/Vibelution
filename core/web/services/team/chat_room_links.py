@@ -171,6 +171,7 @@ def _ensure_team_chat_room_link(
                 mode=str(linked_room.get("mode") or "round_robin"),
                 purpose=s._team_chat_room_purpose_for_update(team, linked_room.get("purpose")),
                 config=room_config,
+                _team_roster_authority=True,
             )
     else:
         reusable_room_id = s._find_existing_team_chat_room_id(str(team.get("teamId") or "").strip())
@@ -189,6 +190,7 @@ def _ensure_team_chat_room_link(
                 mode=str(reusable_room.get("mode") or "round_robin"),
                 purpose=s._team_chat_room_purpose_for_update(team, reusable_room.get("purpose")),
                 config=room_config,
+                _team_roster_authority=True,
             )
         else:
             historical_room_id = s._find_historical_team_chat_room_id(str(team.get("teamId") or "").strip(), preferred_room_id=linked_room_id)
@@ -315,6 +317,7 @@ def _ensure_historical_team_chat_room_links(
                         **dict(existing_room.get("config") or {}),
                         **room_config,
                     },
+                    _team_roster_authority=True,
                 )
             except Exception:
                 continue

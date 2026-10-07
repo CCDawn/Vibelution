@@ -29,7 +29,9 @@ export function TeamSettingsToolbarAction({
 }: TeamSettingsToolbarActionProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const settings = useTeamSettingsActions();
+  const settings = useTeamSettingsActions({
+    onArchived: () => setOpen(false),
+  });
 
   const closeAndReset = () => {
     setOpen(false);
@@ -65,6 +67,8 @@ export function TeamSettingsToolbarAction({
         errorMessage={settings.errorMessage}
         onSubmit={(teamId, payload) => settings.submit(teamId, payload)}
         onCreateRoom={(teamId) => settings.createRoom(teamId)}
+        archivePending={settings.archivePending}
+        onArchive={(teamId) => settings.archive(teamId)}
         onClose={closeAndReset}
       />
     </>

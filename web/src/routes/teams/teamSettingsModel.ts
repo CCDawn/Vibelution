@@ -11,7 +11,8 @@ export type TeamSettingsMemberDraft = {
   agentId: string;
   role: string;
   purpose: string;
-  responsibilities: string[];
+  /** One responsibility per line; normalized (trim / drop empty / <= 8) on submit. */
+  responsibilitiesText: string;
   /** Rebind target; "" keeps the current agentId. */
   nextAgentId: string;
   /** Marks the row for removal in the next members payload. */
@@ -57,6 +58,56 @@ export type TeamMemberModelStatus = {
 
 const trimmed = (value: string) => String(value || "").trim();
 
+/** Mirrors the backend member normalization (canvas_normalize._normalize_members). */
+export const TEAM_MEMBER_ROLE_MAX_LENGTH = 96;
+export const TEAM_MEMBER_RESPONSIBILITIES_MAX = 8;
+
+const linesOf = (value: string) =>
+  String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+/** Single-line role, mirroring the backend trim_lines(max_lines=1). */
+export function teamMemberRoleFromInput(value: string): string {
+  return linesOf(value)[0] ?? "";
+}
+
+/** Member purpose collapses to at most 4 lines, mirroring the backend. */
+export function teamMemberPurposeFromInput(value: string): string {
+  return linesOf(value).slice(0, 4).join("\n");
+}
+
+/** Responsibilities: one per line, trimmed, empty lines dropped, capped at 8. */
+export function teamMemberResponsibilitiesFromInput(value: string): string[] {
+  return linesOf(value).slice(0, TEAM_MEMBER_RESPONSIBILITIES_MAX);
+}
+
+export function teamMemberResponsibilitiesToInput(responsibilities: string[] | undefined): string {
+  return (responsibilities ?? []).map((item) => String(item || "").trim()).filter(Boolean).join("\n");
+}
+
+const originalTeamMember = (team: Team | null | undefined, memberId: string): TeamMember | undefined =>
+  (team?.members ?? []).find((item) => (item.memberId || "") === memberId);
+
+/**
+ * Field-level dirty check for one member row (role / purpose /
+ * responsibilities) against the loaded team member. Mirrors the backend
+ * normalization before comparing so a no-op round trip stays clean.
+ */
+export function teamMemberRowDirty(member: TeamSettingsMemberDraft, original: TeamMember | undefined): boolean {
+  if (!original) {
+    return false;
+  }
+  if (teamMemberRoleFromInput(member.role) !== teamMemberRoleFromInput(original.role || "")) return true;
+  if (teamMemberPurposeFromInput(member.purpose) !== teamMemberPurposeFromInput(original.purpose || "")) return true;
+  const nextResponsibilities = teamMemberResponsibilitiesFromInput(member.responsibilitiesText).join("\n");
+  const currentResponsibilities = teamMemberResponsibilitiesFromInput(
+    teamMemberResponsibilitiesToInput(original.responsibilities),
+  ).join("\n");
+  return nextResponsibilities !== currentResponsibilities;
+}
+
 export function createTeamSettingsDraft(team: Team | null | undefined): TeamSettingsDraft {
   return {
     name: team?.name ?? "",
@@ -67,7 +118,7 @@ export function createTeamSettingsDraft(team: Team | null | undefined): TeamSett
       agentId: member.agentId || "",
       role: member.role || "",
       purpose: member.purpose || "",
-      responsibilities: [...(member.responsibilities ?? [])],
+      responsibilitiesText: teamMemberResponsibilitiesToInput(member.responsibilities),
       nextAgentId: "",
       remove: false,
     })),
@@ -83,15 +134,24 @@ export function teamSettingsDirty(draft: TeamSettingsDraft, team: Team | null | 
   if (trimmed(draft.name) !== trimmed(team.name)) return true;
   if (draft.description.trim() !== (team.description || "")) return true;
   if (draft.purpose.trim() !== (team.purpose || "")) return true;
-  if (draft.members.some((member) => member.remove || trimmed(member.nextAgentId))) return true;
+  if (
+    draft.members.some(
+      (member) =>
+        member.remove
+        || Boolean(trimmed(member.nextAgentId))
+        || teamMemberRowDirty(member, originalTeamMember(team, member.memberId)),
+    )
+  ) {
+    return true;
+  }
   if (trimmed(draft.addAgentId)) return true;
   return false;
 }
 
 /**
  * Build the PATCH payload: basic fields only when changed; the members array
- * is a full-roster replacement (kept rows + rebinds, minus removed, plus the
- * pending add row).
+ * is a full-roster replacement (kept rows + rebinds + role/purpose/
+ * responsibility edits, minus removed, plus the pending add row).
  */
 export function buildTeamSettingsPayload(
   draft: TeamSettingsDraft,
@@ -112,7 +172,12 @@ export function buildTeamSettingsPayload(
     payload.purpose = draft.purpose.trim();
   }
   const membersChanged =
-    draft.members.some((member) => member.remove || trimmed(member.nextAgentId)) || Boolean(trimmed(draft.addAgentId));
+    draft.members.some(
+      (member) =>
+        member.remove
+        || Boolean(trimmed(member.nextAgentId))
+        || teamMemberRowDirty(member, originalTeamMember(team, member.memberId)),
+    ) || Boolean(trimmed(draft.addAgentId));
   if (membersChanged) {
     const members: NonNullable<TeamSettingsPayload["members"]> = [];
     for (const member of draft.members) {
@@ -126,11 +191,12 @@ export function buildTeamSettingsPayload(
       const row: NonNullable<TeamSettingsPayload["members"]>[number] = {
         memberId: member.memberId,
         agentId,
-        role: member.role,
-        purpose: member.purpose,
+        role: teamMemberRoleFromInput(member.role),
+        purpose: teamMemberPurposeFromInput(member.purpose),
       };
-      if (member.responsibilities.length) {
-        row.responsibilities = [...member.responsibilities];
+      const responsibilities = teamMemberResponsibilitiesFromInput(member.responsibilitiesText);
+      if (responsibilities.length) {
+        row.responsibilities = responsibilities;
       }
       members.push(row);
     }
@@ -139,7 +205,7 @@ export function buildTeamSettingsPayload(
       members.push({
         memberId: "",
         agentId: addAgentId,
-        role: trimmed(draft.addRole),
+        role: teamMemberRoleFromInput(draft.addRole),
         purpose: "",
       });
     }
@@ -243,7 +309,11 @@ export type TeamSettingsCopy = {
   purposeLabel: string;
   membersHeading: string;
   membersHint: string;
+  memberRoleLabel: string;
   memberRoleFallback: string;
+  memberPurposeLabel: string;
+  memberResponsibilitiesLabel: string;
+  memberResponsibilitiesPlaceholder: string;
   rebindLabel: string;
   unbindLabel: string;
   addHeading: string;
@@ -258,6 +328,13 @@ export type TeamSettingsCopy = {
   roomParticipants: (count: number) => string;
   modelConfigHint: string;
   lockedNotice: string;
+  dangerHeading: string;
+  dangerHint: string;
+  archiveAction: string;
+  archiveConfirmHint: string;
+  archiveConfirmAction: string;
+  archiveCancelAction: string;
+  archivePendingLabel: string;
   save: string;
   saving: string;
   cancel: string;
@@ -275,7 +352,11 @@ export function teamSettingsCopy(lang: "zh" | "en"): TeamSettingsCopy {
       purposeLabel: "Purpose",
       membersHeading: "Members",
       membersHint: "Members are the roster authority; the canvas follows automatically.",
+      memberRoleLabel: "Role",
       memberRoleFallback: "Unnamed role",
+      memberPurposeLabel: "Purpose",
+      memberResponsibilitiesLabel: "Responsibilities",
+      memberResponsibilitiesPlaceholder: "One per line, up to 8",
       rebindLabel: "Change agent",
       unbindLabel: "Unbind member",
       addHeading: "Add member",
@@ -290,6 +371,13 @@ export function teamSettingsCopy(lang: "zh" | "en"): TeamSettingsCopy {
       roomParticipants: (count) => `${count} participant${count === 1 ? "" : "s"}`,
       modelConfigHint: "Configure model",
       lockedNotice: "System and archived teams are read-only here; workflows maintain them.",
+      dangerHeading: "Danger zone",
+      dangerHint: "Archiving locks this team as read-only and deletes its linked chat room.",
+      archiveAction: "Archive this team",
+      archiveConfirmHint: "Archive this team? It becomes read-only and its chat room is deleted.",
+      archiveConfirmAction: "Confirm archive",
+      archiveCancelAction: "Keep team",
+      archivePendingLabel: "Archiving…",
       save: "Save changes",
       saving: "Saving…",
       cancel: "Cancel",
@@ -305,7 +393,11 @@ export function teamSettingsCopy(lang: "zh" | "en"): TeamSettingsCopy {
     purposeLabel: "用途",
     membersHeading: "成员",
     membersHint: "成员名单是权威数据，画布会自动跟随投影。",
+    memberRoleLabel: "角色",
     memberRoleFallback: "未命名角色",
+    memberPurposeLabel: "职责目标",
+    memberResponsibilitiesLabel: "职责条目",
+    memberResponsibilitiesPlaceholder: "每行一条，最多 8 条",
     rebindLabel: "换绑 Agent",
     unbindLabel: "解绑成员",
     addHeading: "添加成员",
@@ -320,6 +412,13 @@ export function teamSettingsCopy(lang: "zh" | "en"): TeamSettingsCopy {
     roomParticipants: (count) => `${count} 名参与者`,
     modelConfigHint: "配置模型",
     lockedNotice: "系统团队与归档团队在这里只读，由工作流自动维护。",
+    dangerHeading: "危险操作",
+    dangerHint: "归档后团队转为只读，绑定的群聊房间会一并删除。",
+    archiveAction: "归档当前团队",
+    archiveConfirmHint: "确定归档该团队？归档后只读，群聊房间将被删除。",
+    archiveConfirmAction: "确认归档",
+    archiveCancelAction: "保留团队",
+    archivePendingLabel: "归档中…",
     save: "保存修改",
     saving: "保存中…",
     cancel: "取消",

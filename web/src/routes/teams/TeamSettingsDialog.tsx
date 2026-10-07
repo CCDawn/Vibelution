@@ -1,21 +1,22 @@
 /**
  * Unified team settings dialog (团队设置): basics + member management (rebind /
- * add / unbind without touching the canvas) + linked chat room state + per
- * member model status. VUI-only surface; mutations live in
- * useTeamSettingsActions (injected via props) and copy is an inline zh/en
- * table. Members are the roster authority — this surface never writes canvas
- * or Agent config.
+ * add / unbind / per-member role, purpose, responsibilities) + linked chat
+ * room state + per member model status + the archive danger zone. VUI-only
+ * surface; mutations live in useTeamSettingsActions (injected via props) and
+ * copy is an inline zh/en table. Members are the roster authority — this
+ * surface never writes canvas or Agent config.
  */
-import { UserMinus, Users } from "lucide-react";
+import { Archive, UserMinus, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
-import { VButton, VDialog, VNativeInput, VSelect, VStatusChip, VTextarea } from "../../components/vui";
+import { VButton, VConfirmDialog, VDialog, VNativeInput, VSelect, VStatusChip, VTextarea } from "../../components/vui";
 import { teamChatRoomRoute } from "./researchStageAgentPresentation";
 import {
   buildTeamSettingsPayload,
   createTeamSettingsDraft,
+  TEAM_MEMBER_ROLE_MAX_LENGTH,
   teamMemberModelStatus,
   teamSettingsAgentOptions,
   teamSettingsCopy,
@@ -39,6 +40,9 @@ export type TeamSettingsDialogProps = {
   errorMessage: string;
   onSubmit: (teamId: string, payload: TeamSettingsPayload) => void;
   onCreateRoom: (teamId: string) => void;
+  /** Archive danger zone; the section renders only when the host wires it. */
+  archivePending?: boolean;
+  onArchive?: (teamId: string) => void;
   onClose: () => void;
 };
 
@@ -54,11 +58,14 @@ export function TeamSettingsDialog({
   errorMessage,
   onSubmit,
   onCreateRoom,
+  archivePending = false,
+  onArchive,
   onClose,
 }: TeamSettingsDialogProps) {
   const copy = useMemo(() => teamSettingsCopy(lang), [lang]);
   const navigate = useNavigate();
   const [draft, setDraft] = useState(() => createTeamSettingsDraft(team));
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const teamId = team?.teamId || "";
   const teamUpdatedAt = team?.updatedAt || "";
 
@@ -67,6 +74,7 @@ export function TeamSettingsDialog({
       return;
     }
     setDraft(createTeamSettingsDraft(team));
+    setArchiveConfirmOpen(false);
     // Reset on open / team switch / post-save refresh; background refetches
     // with the same updatedAt must not wipe in-progress edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,7 +95,10 @@ export function TeamSettingsDialog({
   const room = team.linkedChatRoom ?? null;
   const roomRoute = room?.roomId ? teamChatRoomRoute(room.roomId, `/teams?teamId=${encodeURIComponent(team.teamId)}`, "teams") : "";
 
-  const patchMember = (memberId: string, patch: Partial<{ nextAgentId: string; remove: boolean }>) => {
+  const patchMember = (
+    memberId: string,
+    patch: Partial<{ nextAgentId: string; remove: boolean; role: string; purpose: string; responsibilitiesText: string }>,
+  ) => {
     setDraft((current) => ({
       ...current,
       members: current.members.map((member) => (member.memberId === memberId ? { ...member, ...patch } : member)),
@@ -169,7 +180,17 @@ export function TeamSettingsDialog({
                   className={[styles.memberRow, member.remove ? styles.memberRowMarkedRemove : ""].filter(Boolean).join(" ")}
                 >
                   <div className={styles.memberMeta}>
-                    <span className={styles.memberRole}>{member.role || copy.memberRoleFallback}</span>
+                    <label className={styles.memberRoleField}>
+                      <span className={styles.memberFieldLabel}>{copy.memberRoleLabel}</span>
+                      <VNativeInput
+                        value={member.role}
+                        maxLength={TEAM_MEMBER_ROLE_MAX_LENGTH}
+                        placeholder={copy.memberRoleFallback}
+                        disabled={locked || pending || member.remove}
+                        aria-label={`${copy.memberRoleLabel} · ${memberRef?.agentName || member.agentId}`}
+                        onChange={(event) => patchMember(member.memberId, { role: event.target.value })}
+                      />
+                    </label>
                     {modelStatus.configured ? (
                       <VStatusChip className={styles.modelChip} tone="success">
                         {modelStatus.label}
@@ -180,13 +201,36 @@ export function TeamSettingsDialog({
                       </VStatusChip>
                     )}
                   </div>
+                  <div className={styles.memberFields}>
+                    <label className={styles.memberField}>
+                      <span className={styles.memberFieldLabel}>{copy.memberPurposeLabel}</span>
+                      <VTextarea
+                        value={member.purpose}
+                        rows={2}
+                        isDisabled={locked || pending || member.remove}
+                        aria-label={`${copy.memberPurposeLabel} · ${memberRef?.agentName || member.agentId}`}
+                        onChange={(event) => patchMember(member.memberId, { purpose: event.target.value })}
+                      />
+                    </label>
+                    <label className={styles.memberField}>
+                      <span className={styles.memberFieldLabel}>{copy.memberResponsibilitiesLabel}</span>
+                      <VTextarea
+                        value={member.responsibilitiesText}
+                        rows={2}
+                        placeholder={copy.memberResponsibilitiesPlaceholder}
+                        isDisabled={locked || pending || member.remove}
+                        aria-label={`${copy.memberResponsibilitiesLabel} · ${memberRef?.agentName || member.agentId}`}
+                        onChange={(event) => patchMember(member.memberId, { responsibilitiesText: event.target.value })}
+                      />
+                    </label>
+                  </div>
                   <div className={styles.memberActions}>
                     <VSelect
                       className={styles.rebindSelect}
                       density="compact"
                       aria-label={`${copy.rebindLabel} · ${member.role || member.agentId}`}
                       placeholder={copy.addAgentPlaceholder}
-                      isDisabled={locked || pending}
+                      isDisabled={locked || pending || member.remove}
                       selectedKey={member.nextAgentId || member.agentId || null}
                       options={[
                         ...(member.agentId
@@ -314,6 +358,26 @@ export function TeamSettingsDialog({
           )}
         </section>
 
+        {!locked && onArchive ? (
+          <section className={styles.dangerZone} aria-label={copy.dangerHeading}>
+            <h4 className={styles.sectionHeading}>{copy.dangerHeading}</h4>
+            <p className={styles.sectionHint}>{copy.dangerHint}</p>
+            <div className={styles.dangerActions}>
+              <VButton
+                type="button"
+                variant="danger"
+                density="compact"
+                icon={<Archive size={14} aria-hidden="true" />}
+                isDisabled={pending || archivePending}
+                isPending={archivePending}
+                onPress={() => setArchiveConfirmOpen(true)}
+              >
+                {archivePending ? copy.archivePendingLabel : copy.archiveAction}
+              </VButton>
+            </div>
+          </section>
+        ) : null}
+
         {errorMessage ? <p className={styles.error}>{errorMessage}</p> : null}
 
         <div className={styles.actions}>
@@ -333,6 +397,27 @@ export function TeamSettingsDialog({
           ) : null}
         </div>
       </div>
+
+      {!locked && onArchive ? (
+        <VConfirmDialog
+          open={archiveConfirmOpen}
+          onOpenChange={(nextOpen: boolean) => {
+            if (!nextOpen && !archivePending) {
+              setArchiveConfirmOpen(false);
+            }
+          }}
+          title={copy.archiveAction}
+          description={copy.archiveConfirmHint}
+          tone="danger"
+          confirmLabel={copy.archiveConfirmAction}
+          cancelLabel={copy.archiveCancelAction}
+          confirmPending={archivePending}
+          onConfirm={() => {
+            setArchiveConfirmOpen(false);
+            onArchive(team.teamId);
+          }}
+        />
+      ) : null}
     </VDialog>
   );
 }
