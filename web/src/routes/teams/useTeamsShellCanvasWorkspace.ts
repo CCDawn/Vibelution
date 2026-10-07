@@ -192,15 +192,15 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
     }
   }, [researchWorkspaceView, shellTeamKind, teamShellMode]);
 
-  // A resolved non-research team must not stay stranded on the board shell when
-  // the URL carried no explicit teamMode (covers the async team-resolution timing
-  // right after team creation, before the catalog entry lands).
+  // Catalog loading can force the board shell before the team kind is known.
+  // Once a non-research team resolves, put it back on the organization canvas
+  // unless the URL explicitly asked for the board. An explicit canvas URL is
+  // the create-team landing path and must recover too.
   useEffect(() => {
-    if (
-      requestedTeamShellMode === null
-      && shellTeamKind === "user"
-      && teamShellMode === "board"
-    ) {
+    if (shellTeamKind !== "user" || teamShellMode !== "board") {
+      return;
+    }
+    if (requestedTeamShellMode === null || requestedTeamShellMode === "canvas") {
       setTeamShellMode("canvas");
     }
   }, [requestedTeamShellMode, shellTeamKind, teamShellMode]);
