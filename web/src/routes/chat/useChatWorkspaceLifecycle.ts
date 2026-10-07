@@ -397,7 +397,11 @@ export function useChatWorkspaceLifecycle({
     createSessionIntentsRef.current.set(recoveryRouteId, { ...recovery, state: "failed" });
     markSessionCreateAttempt(recoveryRouteId, "failed");
     if (queryClient.getQueryData(queryKeys.session(recoveryRouteId))) return;
-    const detail = buildSessionCreateShell(recovery, defaultNewSessionTitle(lang));
+    const recoveredTitle = String(recovery.title || "").trim();
+    const restoredTitle = recoveredTitle && !isDefaultNewSessionTitle(recoveredTitle)
+      ? recoveredTitle
+      : defaultNewSessionTitle(lang);
+    const detail = buildSessionCreateShell(recovery, restoredTitle);
     queryClient.setQueryData(queryKeys.session(recoveryRouteId), detail);
     updateSessionSummaryCaches(queryClient, (sessions) => mergeSessionDetailIntoSummaries(sessions, detail));
     updateAgentSessionSummaryCaches(queryClient, (sessions) => mergeSessionDetailIntoSummaries(sessions, detail));

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
-import { buildSessionCreateShell } from "./chatSessionCreateRecovery";
+import { buildSessionCreateShell, readSessionCreateRecovery, rememberSessionCreateRecovery } from "./chatSessionCreateRecovery";
 import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 
 const tempSession = {
@@ -46,6 +46,12 @@ beforeEach(() => {
   renameSession.mockReset();
   menu = null;
   queryClient = new QueryClient();
+  rememberSessionCreateRecovery({
+    tempSessionId: tempSession.id,
+    agentId: "agent-a",
+    idempotencyKey: "session-create:test",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
   queryClient.setQueryData(
     queryKeys.session(tempSession.id),
     buildSessionCreateShell({
@@ -80,5 +86,6 @@ describe("temporary session tab rename", () => {
     expect(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempSession.id))?.title).toBe("茅台临时改名");
     expect(setEditingSessionId).toHaveBeenCalledWith(null);
     expect(renameSession).not.toHaveBeenCalled();
+    expect(readSessionCreateRecovery(tempSession.id)?.title).toBe("茅台临时改名");
   });
 });

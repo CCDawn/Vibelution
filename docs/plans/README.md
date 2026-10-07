@@ -8,12 +8,8 @@
 | 文件 | Status | 说明 |
 | --- | --- | --- |
 | [2026-09-12-session-ledger-archival-constraints.md](2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施） | 账本归档设计约束（9 条必处理 + 8 风险点）+ 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
-| [research-flow-v2.md](research-flow-v2.md) | USER-APPROVED / STAGE 3 VERSIONED REPAIR IMPLEMENTED | 三阶段职责、决策 Agent 动态路由与现有账本权威；第三阶段 Seed、多动作路由、1.1.0 显式迁移和版本化基线修复已实现，真实 CUDA 迭代待验收 |
+| [research-flow-v2.md](research-flow-v2.md) | 通用科研流程在研入口 | 三阶段（方向与假说、基线实验、按证据迭代）与决策 Agent；CUDA 第三阶段验收不再作为关闭条件 |
 | [2026-09-02-meeting-store-physical-sharding.md](2026-09-02-meeting-store-physical-sharding.md) | 设计阶段（调研进行中） | 会议轮次按 meetingRoundId 物理分片；是已归档 10 并发计划的写入层延伸，尚未实施 |
-| [2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯群聊、摘要、LangGraph/Ledger 调度的 deadline、durable recovery、run 隔离、上下文与自动推进完整修复任务图 |
-| [2026-08-25-challenge-cup-canonical-workflow-state-plan.md](2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED / ACTIVE PLAN | 挑战杯从官方题目冷启动到正式运行、产出登记和 H1–H4 审核的规范化状态 V2、服务端动作与真实链路验收 |
-| [2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved / active-plan | 挑战杯按题目/假说隔离群聊与 Child Session、三类 checkpoint 绑定、旧数据清空及 SCI-096 初始化重建 |
-| [2026-08-21-research-workflow-three-pane-current-task-redesign.md](2026-08-21-research-workflow-three-pane-current-task-redesign.md) | user-approved | 科研流程统一 currentTask 投影、三栏信息架构、画布恢复、档案分层与一轮真实验收 |
 | [2026-08-20-physical-retirement-of-python-lifecycle.md](2026-08-20-physical-retirement-of-python-lifecycle.md) | ACTIVE | Python lifecycle 退役代码物理清理；批次 D 仍未完成 |
 | [2026-08-20-physical-retirement-of-python-lifecycle.prompt.md](2026-08-20-physical-retirement-of-python-lifecycle.prompt.md) | execution attachment | 随上述 Active 计划保留，主计划关闭后一起归档 |
 | [2026-08-15-deep-architecture-decoupling-plan.md](2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE PLAN | Agent / Chat / API 契约分 Gate；全部 Gate 关闭后归档 |
@@ -23,6 +19,10 @@
 
 历史快照（已迁出）：
 
+- `2026-08-30-challenge-cup-automatic-chain-reliability-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md)（historical；挑战杯结束，生产核对与 T8 不再收口）
+- `2026-08-25-challenge-cup-canonical-workflow-state-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-25-challenge-cup-canonical-workflow-state-plan.md)（historical；官方题库到 H1–H4 的验收停止）
+- `2026-08-22-challenge-cup-hypothesis-scoped-sessions.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md)（historical；不删公共房间，不按 SCI-096 清空重建）
+- `2026-08-21-research-workflow-three-pane-current-task-redesign.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-21-research-workflow-three-pane-current-task-redesign.md)（historical；赛题浏览器验收停止，currentTask 可另用于通用工作台）
 - `2026-09-11-command-code-headless-transport-poc.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-11-command-code-headless-transport-poc.md)（NO-GO / historical；G2 未通过，G1 未测出，不改产品传输路径）
 - `2026-08-26-challenge-workflow-recovery-closure.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-26-challenge-workflow-recovery-closure.md)（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main）
 - `2026-09-02-challenge-cup-10-parallel-concurrency-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md)（implemented；A/B/C 与 D2 已合入。D1 集中 marker、sideflow 混跑和 B5 上限 e2e 仍是后续增量）

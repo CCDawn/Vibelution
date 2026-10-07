@@ -22,6 +22,11 @@ from core.web.services.financial_research.as_of import (
     on_or_before,
     screen_snapshot_usable,
 )
+from core.web.services.financial_research.official_filings import (
+    accepted_annual_filing,
+    annual_filing_code,
+    lookup_annual_filings,
+)
 
 MAX_RESULT_CHARS = 3_200
 MAX_SCREEN_RESULT_CHARS = MAX_RESULT_CHARS
@@ -382,6 +387,31 @@ def _screen_error(message: str, error_code: str) -> str:
     })
 
 
+def _screen_code(item: dict) -> str:
+    ticker = item.get("ticker")
+    if isinstance(ticker, str) and re.fullmatch(r"[036489]\d{5}", ticker.strip()):
+        return ticker.strip()
+    return annual_filing_code(item.get("symbol")) or annual_filing_code(ticker)
+
+
+def _attach_official_filings(items: list[dict]) -> None:
+    codes = [code for item in items if (code := _screen_code(item))]
+    if not codes:
+        return
+    try:
+        filings = lookup_annual_filings(codes, cutoff=active_cutoff())
+    except Exception:
+        return
+    if not isinstance(filings, dict):
+        return
+    cutoff = active_cutoff()
+    for item in items:
+        code = _screen_code(item)
+        record = accepted_annual_filing(filings.get(code), cutoff=cutoff) if code else None
+        if record is not None:
+            item["officialFiling"] = record
+
+
 def _screen_candidate(raw: object) -> dict | None:
     if not isinstance(raw, dict):
         return None
@@ -427,6 +457,8 @@ def financial_market_screen_tool(
     fetch time is kept separate from the provider's intraday time. Returned
     candidates and coverage always come from the fixed public-data service.
     Output-budget omissions are reported separately from provider coverage.
+    A candidate may also carry the latest cninfo annual-report PDF on or before
+    the analysis date. A missing filing is omitted and is not a page number.
     """
     for key, (minimum, maximum) in _SCREEN_VALUE_BOUNDS.items():
         value = locals()[key]
@@ -522,6 +554,8 @@ def financial_market_screen_tool(
             f"筛选快照没有不晚于分析日期 {cutoff.isoformat()} 的交易日期，未作为本次研究依据。"
         )
         payload["notice"] = payload["message"]
+    elif payload["items"]:
+        _attach_official_filings(payload["items"])
     try:
         encoded = _encode(payload)
         while len(encoded) > MAX_SCREEN_RESULT_CHARS and payload["items"]:

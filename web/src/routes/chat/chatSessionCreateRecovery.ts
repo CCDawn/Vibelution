@@ -6,13 +6,23 @@ const MAX_INTENTS = 50;
 const MAX_STORAGE_CHARS = 64 * 1024;
 type RecoveryStorage = Pick<Storage, "getItem" | "setItem">;
 
-/** Identity only. Drafts stay in the existing composer store; no transcript. */
+/** Create identity plus an optional committed tab title. Drafts stay in the composer store. */
 export type SessionCreateRecovery = {
   tempSessionId: string;
   agentId: string;
   idempotencyKey: string;
   createdAt: string;
+  title?: string;
 };
+
+const MAX_RECOVERY_TITLE_CHARS = 120;
+
+function cleanRecoveryTitle(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const title = value.trim();
+  if (!title || title.length > MAX_RECOVERY_TITLE_CHARS) return undefined;
+  return title;
+}
 
 export function sessionCreateRecoveryStorage(): RecoveryStorage | undefined {
   try {
@@ -36,7 +46,8 @@ function readRecords(storage: RecoveryStorage | undefined): SessionCreateRecover
         || typeof agentId !== "string" || agentId.length > 200
         || typeof idempotencyKey !== "string" || !idempotencyKey.startsWith("session-create:") || idempotencyKey.length > 200
         || typeof createdAt !== "string" || createdAt.length > 40 || !Number.isFinite(Date.parse(createdAt))) return [];
-      return [{ tempSessionId, agentId, idempotencyKey, createdAt }];
+      const title = cleanRecoveryTitle(record.title);
+      return [{ tempSessionId, agentId, idempotencyKey, createdAt, ...(title ? { title } : {}) }];
     });
   } catch {
     return [];
@@ -58,8 +69,11 @@ export function readSessionCreateRecovery(tempId: string, storage = sessionCreat
 export function rememberSessionCreateRecovery(intent: SessionCreateRecovery, storage = sessionCreateRecoveryStorage()): void {
   // Allow-list on writes as well: callers may carry transient state or callbacks.
   const { tempSessionId, agentId, idempotencyKey, createdAt } = intent;
+  const previous = readRecords(storage).find((entry) => entry.tempSessionId === tempSessionId);
+  const explicitTitle = Object.prototype.hasOwnProperty.call(intent, "title");
+  const title = explicitTitle ? cleanRecoveryTitle(intent.title) : previous?.title;
   writeRecords(storage, [...readRecords(storage).filter((entry) => entry.tempSessionId !== tempSessionId),
-    { tempSessionId, agentId, idempotencyKey, createdAt }]);
+    { tempSessionId, agentId, idempotencyKey, createdAt, ...(title ? { title } : {}) }]);
 }
 
 export function forgetSessionCreateRecovery(tempId: string, expectedKey: string, storage = sessionCreateRecoveryStorage()): void {

@@ -82,6 +82,10 @@ def test_temp_session_rename_survives_rejected_create_and_is_saved(page, e2e_ins
         expect(page.get_by_role("textbox", name="重命名会话", exact=True)).to_have_count(0)
         expect(tab).to_contain_text(renamed)
         expect(page.locator(COMPOSER).first).to_have_value(draft)
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", temp, timeout=30000)
+        expect(page.locator(COMPOSER).first).to_have_value(draft, timeout=15000)
+        expect(tab).to_contain_text(renamed)
 
         assert _start_create(page, pending) == temp
         retry = pending.pop()

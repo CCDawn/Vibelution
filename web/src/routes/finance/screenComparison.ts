@@ -8,6 +8,17 @@ const A_SHARE = /(?<!\d)([036489]\d{5})(?!\d)/;
 const TICKER_FIELD = /"(?:ticker|symbol)"\s*:\s*"([^"\\]{1,40})"/;
 const MAX_ROWS = 20;
 const MAX_PAGES = 12;
+const FILING_HOSTS = new Set([
+  "static.cninfo.com.cn",
+  "www.cninfo.com.cn",
+  "www.sse.com.cn",
+  "static.sse.com.cn",
+  "query.sse.com.cn",
+  "www.szse.cn",
+  "disc.static.szse.cn",
+  "www.bse.cn",
+]);
+const BLOCKED_FILING_TITLE = ["摘要", "英文", "取消", "更正", "补充"];
 
 type ToolRecord = { name: string; input: string; output: string; status: string };
 type ScreenPayload = {
@@ -32,12 +43,17 @@ export function projectScreeningComparison(reportText: string, requestText: stri
   const records = toolRecords(items);
   const payload = lastScreenPayload(records);
   if (!payload) return original;
-  const rows = screenRows(payload);
+  const cutoff = analysisDate(requestText);
+  const rows = screenRows(payload, cutoff);
   const block = renderComparison(payload, rows, pagesByCode(records, new Set(rows.map((row) => row.code))));
   if (!rows.length) return block;
   const body = original.trim();
   if (!body) return block;
-  return `${block}\n## 模型原文\n\n候选和财报页码以上表为准。\n\n${body}\n`;
+  return `${block}\n## 模型原文\n\n候选、公告原文和财报页码以上表为准。\n\n${body}\n`;
+}
+
+function analysisDate(requestText: string): string {
+  return SCREENING_REPORT_PROMPT.exec((requestText || "").trim())?.[1] ?? "";
 }
 
 function isCalendarDate(value: string): boolean {
@@ -96,18 +112,62 @@ function pagesByCode(records: readonly ToolRecord[], codes: ReadonlySet<string>)
   return new Map([...found].map(([code, pages]) => [code, formatPages(pages)]));
 }
 
-function screenRows(payload: ScreenPayload): Array<{ name: string; code: string }> {
+function screenRows(payload: ScreenPayload, cutoff: string): Array<{ name: string; code: string; filing: string }> {
   const items = Array.isArray(payload.items) ? payload.items : [];
-  const rows: Array<{ name: string; code: string }> = [];
+  const rows: Array<{ name: string; code: string; filing: string }> = [];
   for (const raw of items.slice(0, MAX_ROWS)) {
     if (!raw || typeof raw !== "object") continue;
-    const row = identity(raw as Record<string, unknown>);
-    if (row) rows.push(row);
+    const record = raw as Record<string, unknown>;
+    const row = identity(record);
+    if (row) rows.push({ ...row, filing: filingCell(record, cutoff) });
   }
   return rows;
 }
 
-function renderComparison(payload: ScreenPayload, rows: readonly { name: string; code: string }[], pages: ReadonlyMap<string, string>): string {
+function filingCell(row: Record<string, unknown>, cutoff: string): string {
+  const filing = row.officialFiling;
+  if (!filing || typeof filing !== "object") return MISSING_FIGURE;
+  const record = filing as Record<string, unknown>;
+  const title = filingTitle(record.title);
+  if (!title) return MISSING_FIGURE;
+  const url = typeof record.url === "string" ? record.url : "";
+  const announced = typeof record.announcedOn === "string" ? record.announcedOn : "";
+  if (!allowedFilingUrl(url) || !isCalendarDate(announced) || !isCalendarDate(cutoff) || announced > cutoff) return MISSING_FIGURE;
+  return `[${title}（${announced}）](${url})`;
+}
+
+function filingTitle(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value
+    .replace(/<[^>]{0,80}>/g, "")
+    .replace(/[|\r\n[\]]/g, " ")
+    .replace(/[()]/g, (char) => (char === "(" ? "（" : "）"))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || text.length > 80 || !text.includes("年度报告") || BLOCKED_FILING_TITLE.some((word) => text.includes(word))) return "";
+  return text;
+}
+
+function allowedFilingUrl(value: string): boolean {
+  if (!value || value.length > 240 || /\s/.test(value) || value.includes("..") || value.includes("\\")) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  return url.protocol === "https:"
+    && !url.username
+    && !url.password
+    && (!url.port || url.port === "443")
+    && !url.search
+    && !url.hash
+    && FILING_HOSTS.has(host)
+    && url.pathname.toLowerCase().endsWith(".pdf");
+}
+
+function renderComparison(payload: ScreenPayload, rows: readonly { name: string; code: string; filing: string }[], pages: ReadonlyMap<string, string>): string {
   const lines = [SCREEN_COMPARISON_HEADING, ""];
   const source = plain(payload.source, 100);
   const fetched = plain(payload.fetchedAt, 64);
@@ -126,9 +186,9 @@ function renderComparison(payload: ScreenPayload, rows: readonly { name: string;
     lines.push("没有符合条件的候选。");
     return `${lines.join("\n").trimEnd()}\n`;
   }
-  lines.push("| 股票 | 代码 | 财报页码 |", "| --- | --- | --- |");
-  for (const row of rows) lines.push(`| ${row.name} | ${row.code} | ${pages.get(row.code) || MISSING_FIGURE} |`);
-  lines.push("", "行情价格、市盈率和市净率不是财报，不列入本表。");
+  lines.push("| 股票 | 代码 | 公告原文 | 财报页码 |", "| --- | --- | --- | --- |");
+  for (const row of rows) lines.push(`| ${row.name} | ${row.code} | ${row.filing} | ${pages.get(row.code) || MISSING_FIGURE} |`);
+  lines.push("", "行情价格、市盈率和市净率不是财报，不列入本表。", "公告原文只列巨潮资讯或交易所年报链接。");
   return `${lines.join("\n").trimEnd()}\n`;
 }
 

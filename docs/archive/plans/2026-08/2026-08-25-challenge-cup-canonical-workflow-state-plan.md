@@ -1,6 +1,6 @@
 # 挑战杯规范化流程状态 V2 实施计划
 
-> - **Status**：USER-REQUESTED / ACTIVE PLAN
+> - **Status**：`historical`（2026-10-07）。挑战杯已结束。官方题库到 H1–H4 的验收不再继续。通用科研流程见 [research-flow-v2.md](../../../plans/research-flow-v2.md)。本文不再是在研计划。
 > - **Plan mode**：TASK_GRAPH
 > - **日期**：2026-08-25
 > - **修订**：2026-08-25 二次审查修正——官方目录题号冷启动与结果登记归位（§5.1 / §5.8）、stateVersion/representationVersion 分离（§4.4）、commit 后缓存失效（Task 2）、formal lineage 保真（§5.7）、command/navigation 双 action 契约（§4.5）、跨 store CAS 保护（§9.1）、可复现延迟预算（Task 2）

@@ -4,8 +4,11 @@ The stored answer stays unchanged. When the request is the canonical screening
 prompt and this Turn has a usable ``financial_market_screen_tool`` payload, the
 report and export show those candidates. A filing page is filled only when a
 same-turn ``financial_evidence_search_tool`` call names that ticker and its
-excerpt cites a page. Otherwise the cell is 没有这一项. Quote fields are not
-filings. No usable screen payload leaves the answer unchanged.
+excerpt cites a page. The announcement cell comes only from that screen
+result's official annual-report filing when its URL is an allowlisted
+exchange document on or before the analysis date. Otherwise the cell is
+没有这一项. Quote fields are not filings. No usable screen payload leaves
+the answer unchanged.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from core.web.services.financial_report.conclusion_figures import (
     MISSING_FIGURE,
     filing_excerpts_from_tool_output,
 )
+from core.web.services.financial_research.official_filings import accepted_annual_filing
 
 HEADING = "## 筛选对照（本轮工具结果）"
 _FAILED = {
@@ -70,14 +74,14 @@ def project_screening_comparison(
     payload = _last_screen_payload(records)
     if payload is None:
         return original
-    rows = _rows(payload)
-    block = _render(payload, rows, _pages_by_code(records, {code for _name, code in rows}))
+    rows = _rows(payload, _analysis_day(request_text))
+    block = _render(payload, rows, _pages_by_code(records, {code for _name, code, _filing in rows}))
     if not rows:
         return block
     body = original.strip()
     if not body:
         return block
-    return f"{block}\n## 模型原文\n\n候选和财报页码以上表为准。\n\n{body}\n"
+    return f"{block}\n## 模型原文\n\n候选、公告原文和财报页码以上表为准。\n\n{body}\n"
 
 
 def _tool_records(items: list | None, events: list | None) -> list[tuple[str, str, str, str]]:
@@ -161,19 +165,33 @@ def _pages_by_code(records: list[tuple[str, str, str, str]], codes: set[str]) ->
     return {code: _format_pages(pages) for code, pages in found.items()}
 
 
-def _rows(payload: dict) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = []
+def _analysis_day(request_text: str) -> date:
+    match = _SCREENING_REPORT_PROMPT.match(str(request_text or "").strip())
+    if match is None:
+        raise ValueError("screening comparison requires the canonical analysis date")
+    return date.fromisoformat(match.group("analysis_date"))
+
+
+def _rows(payload: dict, cutoff: date) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
     for raw in items[:_MAX_ROWS]:
         if not isinstance(raw, dict):
             continue
         name, code = _identity(raw)
         if code:
-            rows.append((name, code))
+            rows.append((name, code, _filing_cell(raw, cutoff)))
     return rows
 
 
-def _render(payload: dict, rows: list[tuple[str, str]], pages: dict[str, str]) -> str:
+def _filing_cell(row: dict, cutoff: date) -> str:
+    filing = accepted_annual_filing(row.get("officialFiling"), cutoff=cutoff)
+    if filing is None:
+        return MISSING_FIGURE
+    return f"[{filing['title']}（{filing['announcedOn']}）]({filing['url']})"
+
+
+def _render(payload: dict, rows: list[tuple[str, str, str]], pages: dict[str, str]) -> str:
     lines = [HEADING, ""]
     source = _plain(payload.get("source"), 100)
     fetched = _plain(payload.get("fetchedAt"), 64)
@@ -197,12 +215,13 @@ def _render(payload: dict, rows: list[tuple[str, str]], pages: dict[str, str]) -
     if not rows:
         lines.append("没有符合条件的候选。")
         return "\n".join(lines).rstrip() + "\n"
-    lines.append("| 股票 | 代码 | 财报页码 |")
-    lines.append("| --- | --- | --- |")
-    for name, code in rows:
-        lines.append(f"| {name} | {code} | {pages.get(code) or MISSING_FIGURE} |")
+    lines.append("| 股票 | 代码 | 公告原文 | 财报页码 |")
+    lines.append("| --- | --- | --- | --- |")
+    for name, code, filing in rows:
+        lines.append(f"| {name} | {code} | {filing} | {pages.get(code) or MISSING_FIGURE} |")
     lines.append("")
     lines.append("行情价格、市盈率和市净率不是财报，不列入本表。")
+    lines.append("公告原文只列巨潮资讯或交易所年报链接。")
     return "\n".join(lines).rstrip() + "\n"
 
 

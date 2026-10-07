@@ -343,16 +343,43 @@ def test_screening_export_lists_tool_candidates_and_only_matching_filing_pages(r
     content = _export("markdown")["content"]
 
     assert content.startswith("## 筛选对照（本轮工具结果）\n")
-    assert "| 贵州茅台 | 600519 | 第 42 页 |" in content
-    assert "| 平安银行 | 000001 | 没有这一项 |" in content
+    assert "| 贵州茅台 | 600519 | 没有这一项 | 第 42 页 |" in content
+    assert "| 平安银行 | 000001 | 没有这一项 | 没有这一项 |" in content
     assert "覆盖不完整，结果仅基于已加载范围。" in content
-    assert "候选和财报页码以上表为准。" in content
+    assert "候选、公告原文和财报页码以上表为准。" in content
+    assert "公告原文只列巨潮资讯或交易所年报链接。" in content
     assert "工具不支持市值" in content
     assert "1258.62" not in content
     assert "91.93" not in content
     assert "第 7 页" not in content
     assert "第 99 页" not in content
     assert _export("markdown")["content"] == content
+
+
+def test_screening_export_cites_only_an_allowlisted_annual_filing(report_env):
+    filing = {
+        "title": "贵州茅台2025年年度报告",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF",
+        "announcedOn": "2026-04-17",
+        "source": "巨潮资讯",
+    }
+    report_env[:] = _screen_turn("原文", [
+        {"id": "screen", "name": "financial_market_screen_tool", "output": _screen_output([
+            {"ticker": "600519", "name": "贵州茅台", "officialFiling": filing},
+            {"ticker": "000001", "name": "平安银行", "officialFiling": {**filing, "title": "平安银行2025年年度报告摘要"}},
+            {"ticker": "000002", "name": "万科A", "officialFiling": {**filing, "url": "https://evil.example/a.PDF"}},
+            {"ticker": "601318", "name": "中国平安", "officialFiling": {**filing, "announcedOn": "2026-10-07"}},
+        ])},
+    ])
+
+    content = _export("markdown")["content"]
+
+    assert "| 贵州茅台 | 600519 | [贵州茅台2025年年度报告（2026-04-17）](https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF) | 没有这一项 |" in content
+    assert "| 平安银行 | 000001 | 没有这一项 | 没有这一项 |" in content
+    assert "| 万科A | 000002 | 没有这一项 | 没有这一项 |" in content
+    assert "| 中国平安 | 601318 | 没有这一项 | 没有这一项 |" in content
+    assert "evil.example" not in content
+    assert "年度报告摘要" not in content
 
 
 def test_cleared_screen_export_does_not_keep_invented_candidates(report_env):
@@ -412,8 +439,8 @@ def test_screen_page_matches_symbol_prefix_and_not_a_longer_number():
     assert "已加载 10 / 行情池 10。覆盖完整。" in content
     assert "符合条件 8，本次返回 2。" in content
     assert "工具输出已截断，未列入被省略的候选。" in content
-    assert "| 贵州茅台 | 600519 | 第 12 页、第 40 页 |" in content
+    assert "| 贵州茅台 | 600519 | 没有这一项 | 第 12 页、第 40 页 |" in content
     assert content == project_screening_comparison(content, SCREEN_REQUEST, items, [event])
     glued = [{"type": "tool_call", "toolName": "financial_evidence_search_tool", "status": "completed", "input": json.dumps({"ticker": "1600519"}), "output": evidence_output}]
     without_page = project_screening_comparison("原文", SCREEN_REQUEST, items + glued, [])
-    assert "| 贵州茅台 | 600519 | 没有这一项 |" in without_page
+    assert "| 贵州茅台 | 600519 | 没有这一项 | 没有这一项 |" in without_page

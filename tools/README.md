@@ -53,7 +53,7 @@ Model 可见性
 | `challenge_cup_operations_tools.py` | `challenge_cup_experiment_*` · `challenge_cup_iteration_*` · `challenge_cup_versioning_*`（context/writeback 各 3） | `test_challenge_cup_operations_tools.py` |
 | `financial_memory_tools.py` | `financial_evidence_search_tool` · `financial_evidence_stage_tool` · `financial_evidence_withdraw_tool`（复用原生RAG/来源待审/Agent私有知识库） | `test_financial_knowledge_service.py` · `test_financial_tool_runtime.py` |
 | `financial_report_tools.py` | `financial_report_query_tool`（需显式授权；按公司/报告期调用外部财报助手） | `test_financial_report_tools.py` · `test_financial_report_registry.py` |
-| `financial_market_tools.py` | `financial_market_snapshot_tool` · `financial_market_screen_tool`（显式授权；CN/HK/US 只读报价和 K 线，A 股前复权、港美股未复权；条件筛选仅 A 股，保留来源/行情时点/覆盖完整性/币种与单位） | `test_financial_market_tools.py` · `test_financial_market_registry.py` |
+| `financial_market_tools.py` | `financial_market_snapshot_tool` · `financial_market_screen_tool`（显式授权；CN/HK/US 只读报价和 K 线，A 股前复权、港美股未复权；条件筛选仅 A 股，保留来源/行情时点/覆盖完整性/币种与单位；候选可带不晚于分析日的巨潮年报链接） | `test_financial_market_tools.py` · `test_financial_market_registry.py` |
 | `research_knowledge_tools.py` | `research_knowledge_query_tool` | `test_research_knowledge_tools.py` |
 | `research_organization_tools.py` | `research_agent_creation_proposal_tool` · `research_communication_edge_proposal_tool` · `research_proposal_apply_tool` | `test_research_organization_tools.py` |
 | `agent_message_tools.py` | `agent_message_tool` | `test_agent_tool_contracts.py` |
