@@ -711,10 +711,17 @@ export function useChatWorkspaceLifecycle({
         ? (error as Error & { status?: unknown }).status
         : undefined;
       if (status === 409 || status === 410) {
-        forgetCreateSessionIntent(
-          String(context?.tempSessionId || "").trim(),
-          String(context?.idempotencyKey || ""),
-        );
+        // The rejected key must not be replayed, but this temp shell still owns
+        // the draft. Rotate the key in place so the next click does not open a
+        // second empty tab.
+        const rejectedTempSessionId = String(context?.tempSessionId || "").trim();
+        const expectedKey = String(context?.idempotencyKey || "");
+        const rejectedIntent = createSessionIntentsRef.current.get(rejectedTempSessionId);
+        if (rejectedIntent && rejectedIntent.idempotencyKey === expectedKey) {
+          rejectedIntent.idempotencyKey = newCreateSessionIdempotencyKey();
+          rejectedIntent.state = "failed";
+          rememberSessionCreateRecovery(rejectedIntent);
+        }
       } else {
         const intent = createSessionIntentsRef.current.get(String(context?.tempSessionId || "").trim());
         if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
