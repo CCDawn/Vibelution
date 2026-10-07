@@ -31,7 +31,7 @@ from core.web.services.financial_report.conclusion_figures import (
     _without_code,
 )
 
-_SUCCESSFUL_TOOL_STATUSES = {"completed", "success"}
+_SUCCESSFUL_TOOL_STATUSES = {"completed", "success", "degraded"}
 _MAX_TOOL_OUTPUT_CHARS = 8_000
 _MAX_CANDLES = 120
 _REQUEST_LIMIT_MESSAGE = "已按请求数量或输出长度限制保留最新 K 线。"
@@ -90,7 +90,7 @@ _MARKET_METADATA = {
     },
 }
 _TICKER_TOKEN = re.compile(
-    r"(?<![A-Za-z0-9])(?P<ticker>[A-Z][A-Z0-9]{1,4}(?:[.-][A-Z0-9]{1,4})?)(?![A-Za-z0-9])"
+    r"(?<![A-Za-z0-9])(?P<ticker>[A-Z][A-Z0-9]{0,4}(?:[.-][A-Z0-9]{1,4})?)(?![A-Za-z0-9])"
 )
 _NON_TICKER_TOKENS = {
     "ADR", "AI", "AMEX", "API", "BSE", "CAGR", "CAPEX", "CEO", "CN",

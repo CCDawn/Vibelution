@@ -7,9 +7,11 @@ import pytest
 
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_ITEM_COMMITTED,
+    EVENT_TOOL_RESULT,
     EVENT_TURN_COMPLETED,
     EVENT_USER_MESSAGE,
     TurnJournalEvent,
+    session_turn_items_from_events,
 )
 from core.web.services import financial_market_service as market_service
 from core.web.services import financial_report_service
@@ -539,6 +541,90 @@ def test_native_market_adapter_request_limited_partial_window_grounds_computed_a
     assert "MA20 20.95 元" in grounded
 
 
+def test_degraded_journal_market_result_grounds_a_complete_requested_window():
+    closes = [10.0 + index * 0.01 for index in range(115)] + [
+        11.35,
+        11.36,
+        11.37,
+        11.38,
+        11.39,
+    ]
+    payload = json.loads(_daily_payload(closes, end_date=QUOTE_DATE))
+    payload.update(
+        {
+            "status": "partial",
+            "message": "已按请求数量或输出长度限制保留最新 K 线。",
+            "requestedLimit": 25,
+            "availableCandleCount": 120,
+            "returnedCandleCount": 25,
+            "omittedCandleCount": 95,
+        }
+    )
+    payload["candles"]["rows"] = payload["candles"]["rows"][-25:]
+    output = json.dumps(payload, ensure_ascii=False)
+    report = _calculation_report("MA5 11.37 元。")
+    call_id = "market-snapshot-1"
+    events = [
+        _event(EVENT_USER_MESSAGE, 1, "recorded", {"content": "核对行情指标。"}),
+        _event(
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            2,
+            "ready",
+            {
+                "kind": "tool_call",
+                "toolName": "financial_market_snapshot_tool",
+                "status": "ready",
+                "callId": call_id,
+                "itemId": "tool-quote-degraded",
+                "revision": 0,
+            },
+        ),
+        _event(
+            EVENT_TOOL_RESULT,
+            3,
+            "completed",
+            {
+                "toolCall": {
+                    "id": call_id,
+                    "name": "financial_market_snapshot_tool",
+                    "result": output,
+                    "status": "degraded",
+                    "semanticStatus": "degraded",
+                }
+            },
+        ),
+        _event(
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            4,
+            "completed",
+            {
+                "kind": "assistant_message",
+                "channel": "answer",
+                "phase": "final_answer",
+                "status": "completed",
+                "text": report,
+                "itemId": "answer-quote-degraded",
+                "revision": 0,
+            },
+        ),
+        _event(EVENT_TURN_COMPLETED, 5, "completed"),
+    ]
+    items = session_turn_items_from_events(events, turn_id="turn-quote")
+
+    assert items[0]["status"] == "completed"
+    assert items[0]["semanticStatus"] == "degraded"
+    assert payload["status"] == "partial"
+    assert payload["requestedLimit"] == 25
+    assert payload["availableCandleCount"] == 120
+    assert payload["returnedCandleCount"] == 25
+    assert payload["omittedCandleCount"] == 95
+    assert payload["candles"]["rows"][-1][0] == QUOTE_DATE
+
+    grounded = ground_completed_report(report, items, events)
+
+    assert "MA5 11.37 元" in grounded
+
+
 def test_native_market_adapter_length_clipping_does_not_ground_an_incomplete_request_window(monkeypatch):
     closes = [10.0 + index * 0.1 for index in range(120)]
     output = _native_market_output(monkeypatch, closes, limit=120)
@@ -641,6 +727,38 @@ def test_current_us_ticker_is_allowed_but_another_bare_or_exchange_ticker_is_not
     )
 
 
+@pytest.mark.parametrize("other_ticker", ["F", "T", "D"])
+def test_other_single_character_us_ticker_cannot_authorize_a_calculation(other_ticker: str):
+    payload = _daily_payload(
+        [11.5, 11.6, 11.7, 11.8, 11.9],
+        symbol="usNVDA",
+    )
+    report = _calculation_report(
+        f"{other_ticker} MA5 11.70 USD/share。",
+        symbol="usNVDA",
+    )
+
+    grounded = ground_completed_report(report, _item(payload), [])
+
+    assert f"{other_ticker} MA5 {MISSING_FIGURE}" in grounded
+    assert "11.70 USD/share" not in grounded
+
+
+def test_current_single_character_us_ticker_is_allowed_for_its_own_calculation():
+    payload = _daily_payload(
+        [11.5, 11.6, 11.7, 11.8, 11.9],
+        symbol="usD",
+    )
+    report = _calculation_report(
+        "D MA5 11.70 USD/share。",
+        symbol="usD",
+    )
+
+    grounded = ground_completed_report(report, _item(payload), [])
+
+    assert "D MA5 11.70 USD/share" in grounded
+
+
 def test_us_quote_date_is_checked_in_the_declared_market_timezone():
     payload = json.loads(_daily_payload(
         [11.5, 11.6, 11.7, 11.8, 11.9],
@@ -688,6 +806,10 @@ def test_market_calculation_uses_decimal_half_up_rounding():
         ({}, {"marketTimeZone": "UTC"}, "completed"),
         ({}, {}, "partial"),
         ({}, {}, "failed"),
+        ({}, {}, "cancelled"),
+        ({}, {}, "timeout"),
+        ({"returnedCandleCount": 19}, {}, "degraded"),
+        ({"candleError": "K 线数据暂不可用"}, {}, "degraded"),
     ],
 )
 def test_market_calculation_rejects_unavailable_partial_or_mismatched_snapshot(
