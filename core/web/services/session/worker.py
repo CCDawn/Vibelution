@@ -23,6 +23,11 @@ from core.infrastructure.tool_execution_scope import (
     ToolExecutionScope,
     tool_execution_scope,
 )
+from core.web.services.financial_research.as_of import (
+    redact_research_history,
+    redact_research_prompt,
+    research_analysis_date_context,
+)
 from core.llm.error_classification import PERMANENT
 from core.orchestration.context_engine import AgentContextInterrupted
 from core.orchestration.turn_stop_signal import attach_stop_event
@@ -2311,6 +2316,8 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                     )
                     return
                 tool_scope = ToolExecutionScope(session_id=session_id, turn_id=turn_id)
+                model_prompt = redact_research_prompt(user_message)
+                model_history = redact_research_history(history_messages)
                 # TTFT 观测：把「受理/worker 开跑」锚点带给 LLM client，
                 # 首 chunk 时聚合成一条 llm.stream.ttft_breakdown 事件。
                 # 受理锚点缺失（continue 等旁路提交）时该段省略，不造 0。
@@ -2325,6 +2332,7 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                 with (
                     s.session_reference_context(context.get("session_references") or []),
                     tool_execution_scope(tool_scope),
+                    research_analysis_date_context(user_message, history_messages),
                     s.llm_ttft_chain_context(**ttft_chain_kwargs),
                 ):
                     try:
@@ -2333,8 +2341,8 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
                             context=context,
                             session_id=session_id,
                             turn_control=turn_control,
-                            initial_prompt=user_message,
-                            history_messages=history_messages,
+                            initial_prompt=model_prompt,
+                            history_messages=model_history,
                             attachments=llm_attachments,
                             turn_capture=turn_capture,
                             user_message_source=str(context.get("user_message_source") or "").strip(),
