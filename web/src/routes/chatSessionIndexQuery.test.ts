@@ -255,6 +255,27 @@ describe("chatSessionIndexQuery cache helpers", () => {
     resetSessionDeleteTombstonesForTests();
     resetSessionCreatePreservesForTests();
   });
+
+  it("keeps a temporary create shell when a not-found eviction is requested", () => {
+    resetSessionDeleteTombstonesForTests();
+    resetSessionCreatePreservesForTests();
+    const queryClient = new QueryClient();
+    const temp = session("temp-session-local", "Renamed shell");
+    queryClient.setQueryData(queryKeys.sessions(), [temp]);
+    queryClient.setQueryData(["sessions", "agent", "agent-a"], page([temp], "", 1));
+    pinSessionCreatePreserve(temp);
+
+    evictUnopenableSessionFromCaches(queryClient, "temp-session-local");
+
+    expect(queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions())?.map((item) => item.id))
+      .toEqual(["temp-session-local"]);
+    expect(queryClient.getQueryData<SessionQueryResponse>(["sessions", "agent", "agent-a"])?.items.map((item) => item.title))
+      .toEqual(["Renamed shell"]);
+    expect(isSessionDeleteTombstoned("temp-session-local")).toBe(false);
+    expect(isSessionCreatePreserved("temp-session-local")).toBe(true);
+    resetSessionDeleteTombstonesForTests();
+    resetSessionCreatePreservesForTests();
+  });
 });
 
 describe("chatSessionIndexQuery reference stabilization", () => {

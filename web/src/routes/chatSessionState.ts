@@ -920,12 +920,17 @@ export function deriveSessionDetailQueryErrorState(
     dataUpdatedAt?: number;
     errorUpdatedAt?: number;
     streamConnected?: boolean;
+    /** Optimistic create shells are local. A detail 404 must not replace them. */
+    localOnlySession?: boolean;
   } = {},
 ): SessionDetailLoadState {
   // A definitive not-found response marks the existing deletion tombstone.
   // Cached/placeholder detail must not turn that failure into a writable shell.
   if (detail && isSessionDeleteTombstoned(detail.id)) {
     return { blockingError: true, transientError: false, backgroundError: false };
+  }
+  if (options.localOnlySession) {
+    return { blockingError: false, transientError: false, backgroundError: false };
   }
   const hasDetail = Boolean(detail);
   const dataUpdatedAt = Number(options.dataUpdatedAt ?? 0);

@@ -1395,6 +1395,32 @@ describe("chatSessionState", () => {
     });
   });
 
+  it("does not replace a local temporary shell with a detail-query 404", () => {
+    expect(deriveSessionDetailQueryErrorState(undefined, true, { localOnlySession: true })).toEqual({
+      blockingError: false,
+      transientError: false,
+      backgroundError: false,
+    });
+    expect(deriveSessionDetailQueryErrorState(makeDetail({ id: "temp-session-local" }), true, {
+      localOnlySession: true,
+    })).toEqual({
+      blockingError: false,
+      transientError: false,
+      backgroundError: false,
+    });
+    const removed = makeDetail({ id: "temp-session-removed" });
+    markSessionDeleteTombstone(removed.id);
+    try {
+      expect(deriveSessionDetailQueryErrorState(removed, false, { localOnlySession: true })).toEqual({
+        blockingError: true,
+        transientError: false,
+        backgroundError: false,
+      });
+    } finally {
+      clearSessionDeleteTombstone(removed.id);
+    }
+  });
+
   it("keeps live stream detail authoritative when a background refetch fails", () => {
     expect(
       deriveSessionDetailQueryErrorState(makeDetail(), true, {
