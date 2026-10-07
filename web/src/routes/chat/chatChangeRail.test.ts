@@ -9,7 +9,9 @@ import { describe, expect, it } from "vitest";
 import type { GitFileDiff } from "../../api/types";
 import { ChatChangeRail } from "./ChatChangeRail";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
+import { ChatSidePane } from "./ChatSidePane";
 import { buildChatChangeRail } from "./chatChangeRailModel";
+import { selectGitRailPath } from "./useChatGitRail";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -153,6 +155,33 @@ describe("ChatChangeRail", () => {
     expect(html).toContain("这次对话还没有改动文件");
     expect(html).not.toContain("正在打开文件");
   });
+
+  it("shows a repository file status beside the path", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ChatChangeRail, {
+        className: "status-rail",
+        lang: "zh",
+        embedded: true,
+        title: "仓库 · main",
+        paths: ["web/src/a.ts"],
+        selectedPath: "web/src/a.ts",
+        changedPaths: new Set(["web/src/a.ts"]),
+        detailByPath: { "web/src/a.ts": "已修改" },
+        diff: emptyDiff,
+        diffLoading: false,
+        hasDiff: false,
+        file: null,
+        fileLoading: false,
+        fileError: "",
+        sourceLabel: "当前会话",
+        onSelect: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("仓库 · main");
+    expect(html).toContain("已修改");
+    expect(html).not.toContain('id="chat-status-pane"');
+  });
 });
 
 const emptyDiff: GitFileDiff = {
@@ -182,6 +211,32 @@ describe("chat change rail wiring", () => {
     expect(workbench).toContain("activeTab={workspace.activeTab}");
     expect(workbench).toContain("openPreviewTab(activeSessionId, path)");
     expect(workbench).toContain('rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "改动" : "Changes") : undefined}');
+    expect(workbench).toContain("ChatSidePane");
+    expect(workbench).toContain("useChatGitRail");
+  });
+});
+
+describe("repository tab", () => {
+  it("keeps the picked file when it is still in the list", () => {
+    expect(selectGitRailPath(["a.ts", "b.ts"], "b.ts")).toBe("b.ts");
+    expect(selectGitRailPath(["a.ts"], "missing.ts")).toBe("a.ts");
+    expect(selectGitRailPath([], "a.ts")).toBeNull();
+  });
+
+  it("offers changes and the repository in the right column", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ChatSidePane, {
+        className: "rail",
+        lang: "zh",
+        tab: "changes",
+        onTab: () => undefined,
+        children: "列表",
+      }),
+    );
+    expect(html).toContain('id="chat-status-pane"');
+    expect(html).toContain("改动");
+    expect(html).toContain("仓库");
+    expect(html).toContain("列表");
   });
 });
 
