@@ -182,6 +182,46 @@ describe("FinanceMarketExplorer", () => {
     expect(node.textContent).toContain("披露");
   });
 
+  it("links the stock annual report to the cninfo original", async () => {
+    api.fetchResearch.mockResolvedValue({
+      ...research,
+      announcements: {
+        ...research.announcements,
+        source: "巨潮资讯",
+        sourceUrl: "https://www.cninfo.com.cn/",
+        items: [
+          { title: "贵州茅台2025年年度报告", publishedAt: "2026-04-17", noticeDate: "2026-04-17", url: "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF", articleCode: "cninfo-2026-04-17", publisher: "巨潮资讯" },
+          { title: "关于召开股东大会的通知", publishedAt: "2026-05-01", noticeDate: "2026-05-01", url: "https://data.eastmoney.com/notices/detail/600519/AN202605010013.html", articleCode: "AN202605010013", publisher: "东方财富" },
+          { title: "无来源标记", publishedAt: null, noticeDate: null, url: "https://data.eastmoney.com/notices/detail/600519/AN202605010014.html", articleCode: "AN202605010014", publisher: null },
+        ],
+      },
+    });
+    await render("news");
+    const annual = node.querySelector('a[href="https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF"]');
+    expect(annual?.textContent).toContain("贵州茅台2025年年度报告");
+    expect(node.textContent).toContain("巨潮资讯");
+    expect(node.textContent).toContain("东方财富");
+    expect(node.textContent).toContain("公司公告");
+    expect(node.textContent).not.toContain("年度报告摘要");
+  });
+
+  it("says when the annual-report original was not found", async () => {
+    api.fetchResearch.mockResolvedValue({
+      ...research,
+      announcements: {
+        ...research.announcements,
+        error: "没有核到巨潮资讯年报原文，未列出年报转载。",
+        items: [
+          { title: "关于召开股东大会的通知", publishedAt: "2026-05-01", noticeDate: "2026-05-01", url: "https://data.eastmoney.com/notices/detail/600519/AN202605010013.html", articleCode: "AN202605010013", publisher: "东方财富" },
+        ],
+      },
+    });
+    await render("news");
+    expect(node.textContent).toContain("没有核到巨潮资讯年报原文，未列出年报转载。");
+    expect(node.textContent).toContain("关于召开股东大会的通知");
+    expect(node.textContent).not.toContain("年度报告");
+  });
+
   it("converts PB and turnover criteria to the provider contract and saves, loads, and removes presets", async () => {
     await render("screen", { agentId: "finance-agent-1" });
     await act(async () => {

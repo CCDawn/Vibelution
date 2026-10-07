@@ -357,6 +357,148 @@ def test_stock_research_keeps_each_source_status_and_missing_values(monkeypatch)
     assert result["fundamentals"]["reportDate"] is None
 
 
+def _notice_row(title: str, code: str, notice_date: str = "2026-04-17") -> dict:
+    return {
+        "art_code": code,
+        "title_ch": title,
+        "notice_date": notice_date,
+        "display_time": f"{notice_date} 08:00:00",
+        "codes": [{"stock_code": "600519"}],
+    }
+
+
+def _maotai_filing() -> dict[str, str]:
+    return {
+        "title": "贵州茅台2025年年度报告",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF",
+        "announcedOn": "2026-04-17",
+        "source": "巨潮资讯",
+    }
+
+
+def _announcement_stock() -> dict[str, str]:
+    return {
+        "symbol": "sh600519",
+        "ticker": "600519",
+        "name": "贵州茅台",
+        "market": "上交所",
+    }
+
+
+def _notice_payload() -> dict:
+    return {
+        "data": {
+            "list": [
+                _notice_row("贵州茅台2025年年度报告摘要", "AN202604170011"),
+                _notice_row("贵州茅台2025年年度报告", "AN202604170012"),
+                _notice_row("关于召开股东大会的通知", "AN202605010013", "2026-05-01"),
+            ]
+        }
+    }
+
+
+def test_stock_announcements_prefer_the_cninfo_annual_report(monkeypatch):
+    calls = []
+
+    def lookup(codes, cutoff=None):
+        calls.append((list(codes), cutoff))
+        return {"600519": _maotai_filing()}
+
+    monkeypatch.setattr(research, "_read_json", lambda url: _notice_payload())
+    monkeypatch.setattr(research, "_utc_now", lambda: "2026-10-07T00:00:00+00:00")
+    monkeypatch.setattr(research, "lookup_annual_filings", lookup)
+
+    result = research._load_announcements(_announcement_stock())
+
+    assert calls == [(["600519"], None)]
+    assert result["status"] == "available"
+    assert result["source"] == "巨潮资讯"
+    assert result["sourceUrl"] == "https://www.cninfo.com.cn/"
+    assert result["error"] is None
+    assert [item["title"] for item in result["items"]] == [
+        "贵州茅台2025年年度报告",
+        "关于召开股东大会的通知",
+    ]
+    official = result["items"][0]
+    assert official["url"] == _maotai_filing()["url"]
+    assert official["articleCode"] == "cninfo-2026-04-17"
+    assert official["publisher"] == "巨潮资讯"
+    assert official["publishedAt"] == "2026-04-17"
+    assert official["noticeDate"] == "2026-04-17"
+    assert "eastmoney.com" not in official["url"]
+    kept = result["items"][1]
+    assert kept["publisher"] == "东方财富"
+    assert kept["url"].startswith(
+        "https://data.eastmoney.com/notices/detail/600519/AN202605010013"
+    )
+
+
+def test_stock_announcements_omit_annual_reprints_without_a_cninfo_original(
+    monkeypatch,
+):
+    monkeypatch.setattr(research, "_read_json", lambda url: _notice_payload())
+    monkeypatch.setattr(research, "lookup_annual_filings", lambda codes, cutoff=None: {})
+
+    result = research._load_announcements(_announcement_stock())
+
+    assert result["source"] == "东方财富"
+    assert result["sourceUrl"] == "https://data.eastmoney.com/notices/"
+    assert result["error"] == "没有核到巨潮资讯年报原文，未列出年报转载。"
+    assert [item["title"] for item in result["items"]] == ["关于召开股东大会的通知"]
+    assert result["items"][0]["publisher"] == "东方财富"
+
+
+def test_stock_announcements_reject_an_untrusted_annual_report_url(monkeypatch):
+    filing = _maotai_filing()
+    filing["url"] = "https://evil.example/annual.pdf"
+    monkeypatch.setattr(research, "_read_json", lambda url: _notice_payload())
+    monkeypatch.setattr(
+        research,
+        "lookup_annual_filings",
+        lambda codes, cutoff=None: {"600519": filing},
+    )
+
+    result = research._load_announcements(_announcement_stock())
+
+    assert result["error"] == "没有核到巨潮资讯年报原文，未列出年报转载。"
+    assert all("年度报告" not in item["title"] for item in result["items"])
+    assert all("evil.example" not in item["url"] for item in result["items"])
+
+
+def test_stock_announcements_keep_the_cninfo_original_when_eastmoney_fails(
+    monkeypatch,
+):
+    def boom(url):
+        raise OSError("eastmoney down")
+
+    monkeypatch.setattr(research, "_read_json", boom)
+    monkeypatch.setattr(
+        research,
+        "lookup_annual_filings",
+        lambda codes, cutoff=None: {"600519": _maotai_filing()},
+    )
+
+    result = research._load_announcements(_announcement_stock())
+
+    assert [item["publisher"] for item in result["items"]] == ["巨潮资讯"]
+    assert result["source"] == "巨潮资讯"
+    assert result["error"] == "其它公告暂时不可用。"
+
+
+def test_stock_announcements_fail_when_both_notice_sources_fail(monkeypatch):
+    def boom(url):
+        raise OSError("eastmoney down")
+
+    def explode(codes, cutoff=None):
+        raise RuntimeError("cninfo down")
+
+    monkeypatch.setattr(research, "_read_json", boom)
+    monkeypatch.setattr(research, "lookup_annual_filings", explode)
+
+    with pytest.raises(research.FinancialResearchDataError, match="eastmoney down"):
+        research._load_announcements(_announcement_stock())
+
+
 def test_screen_and_quote_routes_are_read_only_typed_and_reject_invalid_ranges(
     monkeypatch,
 ):
@@ -477,3 +619,63 @@ def test_research_route_preserves_independent_facets(monkeypatch):
     assert response.status_code == 200
     assert response.json()["announcements"]["status"] == "unavailable"
     assert response.json()["fundamentals"]["reportDate"] is None
+
+
+def test_announcement_publisher_is_optional(monkeypatch):
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    official = {
+        "title": "贵州茅台2025年年度报告",
+        "publishedAt": "2026-04-17",
+        "noticeDate": "2026-04-17",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF",
+        "articleCode": "cninfo-2026-04-17",
+        "publisher": "巨潮资讯",
+    }
+    reprint = {
+        "title": "关于召开股东大会的通知",
+        "publishedAt": "2026-05-01",
+        "noticeDate": "2026-05-01",
+        "url": "https://data.eastmoney.com/notices/detail/600519/AN202605010013.html",
+        "articleCode": "AN202605010013",
+    }
+    payload = {
+        "stock": {
+            "symbol": "sh600519",
+            "ticker": "600519",
+            "name": "贵州茅台",
+            "market": "上交所",
+        },
+        "news": {
+            "status": "available",
+            "source": "东方财富",
+            "sourceUrl": "https://so.eastmoney.com/news/",
+            "fetchedAt": "2026-10-07T00:00:00+00:00",
+            "error": None,
+            "items": [],
+        },
+        "announcements": {
+            "status": "available",
+            "source": "巨潮资讯",
+            "sourceUrl": "https://www.cninfo.com.cn/",
+            "fetchedAt": "2026-10-07T00:00:00+00:00",
+            "error": None,
+            "items": [official, reprint],
+        },
+        "fundamentals": {
+            "status": "available",
+            "source": "东方财富",
+            "sourceUrl": "https://data.eastmoney.com/bbsj/",
+            "fetchedAt": "2026-10-07T00:00:00+00:00",
+            "reportDate": None,
+            "publishedAt": None,
+            "error": None,
+            "items": [],
+        },
+    }
+    monkeypatch.setattr(research, "stock_research", lambda symbol: payload)
+    response = TestClient(app).get("/api/financial-market/stocks/sh600519/research")
+    assert response.status_code == 200
+    items = response.json()["announcements"]["items"]
+    assert items[0]["publisher"] == "巨潮资讯"
+    assert items[1]["publisher"] is None
