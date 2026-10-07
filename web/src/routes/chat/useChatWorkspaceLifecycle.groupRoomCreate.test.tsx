@@ -714,14 +714,24 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
 
     mutateSessionCreate("agent-a");
     await flushMutationQueue();
+    const rejectedTempSessionId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    const rejectedKey = sessionCreateIdempotencyKey(sessionCreateRequests()[0]);
+    const rotatedKey = readSessionCreateRecovery(rejectedTempSessionId)?.idempotencyKey;
+    expect(rotatedKey).toBeTruthy();
+    expect(rotatedKey).not.toBe(rejectedKey);
     mutateSessionCreate("agent-a");
     await flushMutationQueue();
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: "session-after-conflict" });
+    const sessionIds = (queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? []).map((item) => item.id);
+    expect(sessionIds.filter((id) => id.startsWith("temp-session-"))).toEqual([]);
+    expect(sessionIds).toContain("session-after-conflict");
 
     const requests = sessionCreateRequests();
     expect(requests).toHaveLength(2);
-    expect(sessionCreateIdempotencyKey(requests[0])).toBeTruthy();
-    expect(sessionCreateIdempotencyKey(requests[1])).toBeTruthy();
-    expect(sessionCreateIdempotencyKey(requests[1])).not.toBe(sessionCreateIdempotencyKey(requests[0]));
+    expect(sessionCreateIdempotencyKey(requests[0])).toBe(rejectedKey);
+    expect(sessionCreateIdempotencyKey(requests[1])).toBe(rotatedKey);
   });
 
   it("rotates the key after success and preserves compatibility for callers without a key", async () => {
