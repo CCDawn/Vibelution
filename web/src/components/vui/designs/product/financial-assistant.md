@@ -168,6 +168,19 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ### 使用方式
 选择分析日期、报告期、范围、深度及本轮模型，再开始研究。配置未就绪时按提示进入现有助手配置页。
+侧栏“新研究”进入股票搜索与原有配置表单，不提前创建空 Session；点击开始后才创建并通过原生 bridge 提交。概览将配置放在 K 线前，1280px 桌面首屏可见开始操作。页面与子页以及精确报告的 Session/Turn 通过 finance 查询参数恢复，原生 session 查询参数继续由 Chat route writer 管理。
+
+## FinanceWorkspaceInspector
+
+### 功能
+复用 `VSurface` 和 `VStateSurface` 展示当前股票或精确报告摘要；标题和元数据单行截断。研究对话保留原生 `FinanceResearchProcess`，其他页面不显示已完成旧会话的过程。若原生研究仍在运行，另以明确“正在运行的研究”标题保留原生进度和停止入口；不生成新的 transcript 或进度权威。
+
+### 适用范围
+桌面股票研究与报告中心的右侧上下文辅助栏。
+
+### 使用方式
+报告详情使用独立阅读状态与返回列表操作，保留当前列表筛选；报告选择只携带真实 Session/Turn，目录使用已有 sessionTitle/preview 辨识同名报告。研究报告参数只从所选原始请求投影，缺失值不显示，不将当前模型配置冒充历史执行模型。
+行情刷新失败时保留上一份成功数据并提供重试，来源提供的 dataDate、报价 timestamp 与单股缺值原因如实显示，不使用抓取时间冒充市场数据日期。
 
 ## FinanceResearchProfiles
 

@@ -65,18 +65,64 @@ it("opens the selected historical Turn rather than the latest answer in the same
   vi.mocked(exportFinancialReport).mockImplementation(async (target) => ({ sessionId: target.sessionId, turnId: target.turnId, format: "markdown", fileName: "report.md", mediaType: "text/markdown", encoding: "utf8", content: `${target.turnId}原始报告正文` }));
   const node = document.createElement("div"), root = createRoot(node), client = new QueryClient(); document.body.append(node);
   cleanup = async () => { await act(async () => root.unmount()); client.clear(); node.remove(); };
-  const openSession = vi.fn();
-  await act(async () => root.render(<QueryClientProvider client={client}><FinanceReportsCenter agentId="agent-1" cases={[]} onSaveCases={vi.fn()} onOpenSession={openSession} pending={false} zh /></QueryClientProvider>));
+  const openSession = vi.fn(), selectionChange = vi.fn();
+  await act(async () => root.render(<QueryClientProvider client={client}><FinanceReportsCenter agentId="agent-1" cases={[]} onSaveCases={vi.fn()} onOpenSession={openSession} onSelectedReportChange={selectionChange} pending={false} zh /></QueryClientProvider>));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   const button = [...node.querySelectorAll("button")].find((item) => item.textContent?.includes("older研究"));
   expect(button).toBeDefined();
   await act(async () => button!.click());
+  expect(selectionChange).toHaveBeenCalledWith({ sessionId: "session-1", turnId: "older" });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   expect(vi.mocked(exportFinancialReport).mock.calls[0][0]).toMatchObject({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "older" });
   expect(node.querySelector("article")?.textContent).toBe("older原始报告正文");
   expect(node.querySelector("[data-export-turn=older]")).not.toBeNull();
   await act(async () => [...node.querySelectorAll("button")].find((item) => item.textContent === "打开原会话 / 追问")!.click());
   expect(openSession).toHaveBeenCalledWith("session-1");
+});
+
+it("opens a report immediately and returns to the same filtered catalog", async () => {
+  const reportRow = { sessionId: "session-1", turnId: "turn-1", title: "同名研究", sessionTitle: "第二季度现金流", ticker: "AAPL", marketCode: "US" as const, completedAt: "2026-10-06T12:00:00+08:00", preview: "现金流改善但库存仍偏高", chars: 20, kind: "research" as const };
+  vi.mocked(fetchFinancialReports).mockResolvedValue({ items: [reportRow], nextCursor: null, scannedSessions: 1, order: "session_recency" });
+  vi.mocked(exportFinancialReport).mockImplementation(async (target) => ({ sessionId: target.sessionId, turnId: target.turnId, format: "markdown", fileName: "report.md", mediaType: "text/markdown", encoding: "utf8", content: "报告正文" }));
+  const node = await mountCenter({ agentId: "agent-1", cases: [], onSaveCases: vi.fn(), onOpenSession: vi.fn(), pending: false, zh: true });
+  await waitForQuery();
+  const search = node.querySelector<HTMLInputElement>('[aria-label="报告搜索"]')!;
+  await act(async () => setInputValue(search, "现金流"));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 275)); });
+  await waitForQuery();
+
+  const reportButton = [...node.querySelectorAll("button")].find((button) => button.textContent?.includes("同名研究"));
+  expect(reportButton?.textContent).toContain("现金流改善但库存仍偏高");
+  await act(async () => reportButton!.click());
+  await waitForQuery();
+
+  expect(node.querySelector('[aria-label="历史报告正文"]')).not.toBeNull();
+  expect(node.querySelector("article")?.textContent).toBe("报告正文");
+  expect(node.querySelector('[aria-label="报告搜索"]')).toBeNull();
+  await act(async () => [...node.querySelectorAll("button")].find((button) => button.textContent === "返回报告列表")!.click());
+
+  expect(node.querySelector<HTMLInputElement>('[aria-label="报告搜索"]')?.value).toBe("现金流");
+  expect(node.querySelector('[aria-label="历史报告正文"]')).toBeNull();
+});
+
+it("fetches the exact controlled deep link when its report is outside the current catalog", async () => {
+  const selectedReport = { sessionId: "session-deep-link", turnId: "turn-exact" };
+  vi.mocked(fetchFinancialReports).mockResolvedValue({ items: [{ sessionId: "other-session", turnId: "other-turn", title: "当前目录报告", sessionTitle: "其他会话", ticker: "MSFT", marketCode: "US", completedAt: "2026-10-06T12:00:00+08:00", preview: "其他预览", chars: 20, kind: "research" }], nextCursor: null, scannedSessions: 1, order: "session_recency" });
+  vi.mocked(exportFinancialReport).mockImplementation(async (target) => ({ sessionId: target.sessionId, turnId: target.turnId, format: "markdown", fileName: "report.md", mediaType: "text/markdown", encoding: "utf8", content: "深链报告正文" }));
+  const node = document.createElement("div"), root = createRoot(node), client = new QueryClient(); document.body.append(node);
+  cleanup = async () => { await act(async () => root.unmount()); client.clear(); node.remove(); };
+  const selectionChange = vi.fn(), contextChange = vi.fn(), openSession = vi.fn();
+  await act(async () => root.render(<QueryClientProvider client={client}><FinanceReportsCenter agentId="agent-1" cases={[]} onSaveCases={vi.fn()} onOpenSession={openSession} pending={false} zh selectedReport={selectedReport} onSelectedReportChange={selectionChange} onReportContextChange={contextChange} /></QueryClientProvider>));
+  await waitForQuery();
+
+  expect(vi.mocked(exportFinancialReport).mock.calls[0][0]).toMatchObject({ assistantAgentId: "agent-1", sessionId: "session-deep-link", turnId: "turn-exact" });
+  expect(node.querySelector("article")?.textContent).toBe("深链报告正文");
+  expect(node.textContent).toContain("turn-exact");
+  expect(contextChange).toHaveBeenCalledWith(null);
+  await act(async () => [...node.querySelectorAll("button")].find((button) => button.textContent === "打开原会话 / 追问")!.click());
+  expect(openSession).toHaveBeenCalledWith("session-deep-link");
+  await act(async () => [...node.querySelectorAll("button")].find((button) => button.textContent === "返回报告列表")!.click());
+  expect(selectionChange).toHaveBeenCalledWith(null);
 });
 
 it("marks a tombstoned review case as deleted while keeping its edit and remove actions", async () => {
@@ -147,9 +193,12 @@ it("removes a report confirmed missing from selection and excludes it from batch
   const reportButton = [...node.querySelectorAll("button")].find((button) => button.textContent?.includes("缺失报告"));
   await act(async () => reportButton!.click());
   await waitForQuery();
-  expect(missingCheckbox!.checked).toBe(false);
-  expect(missingCheckbox!.disabled).toBe(true);
-  expect(validCheckbox!.checked).toBe(true);
+  await act(async () => [...node.querySelectorAll("button")].find((button) => button.textContent === "返回报告列表")!.click());
+  const listedMissingCheckbox = node.querySelector<HTMLInputElement>('input[aria-label="选择 缺失报告 turn-missing"]')!;
+  const listedValidCheckbox = node.querySelector<HTMLInputElement>('input[aria-label="选择 有效报告 turn-valid"]')!;
+  expect(listedMissingCheckbox.checked).toBe(false);
+  expect(listedMissingCheckbox.disabled).toBe(true);
+  expect(listedValidCheckbox.checked).toBe(true);
   const batchButton = [...node.querySelectorAll("button")].find((button) => button.textContent?.includes("导出选中 1/20"));
   await act(async () => batchButton!.click());
   expect(vi.mocked(downloadFinancialReportsExport)).toHaveBeenCalledWith("agent-1", [{ sessionId: "session-valid", turnId: "turn-valid" }], "markdown");

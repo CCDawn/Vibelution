@@ -103,9 +103,7 @@ function signedPercent(value: number | null): string {
 }
 
 function formatTimestamp(value: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("zh-CN", { hour12: false });
+  return value?.trim() || "—";
 }
 
 function displayMetric(value: number | null, unit: string): string {
@@ -306,14 +304,15 @@ function ScreenExplorer({
     </form>
 
     {query.isPending ? <VStateSurface tone="loading" busy title={zh ? "正在加载A股行情" : "Loading A-share quotes"}>{zh ? "首次读取需要拉取行情覆盖数据。" : "The first load reads the available quote universe."}</VStateSurface>
-      : query.isError ? <VStateSurface tone="error" title={zh ? "行情筛选失败" : "Market screen unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>
+      : query.isError && !query.data ? <VStateSurface tone="error" title={zh ? "行情筛选失败" : "Market screen unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>
         : query.data ? <>
+          {query.error ? <VStateSurface tone="error" density="compact" title={zh ? "刷新失败，当前显示上次成功获取的数据" : "Refresh failed; showing the last successfully fetched data"} actions={<VButton isDisabled={query.isFetching} onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface> : null}
           <div className={styles.coverage} aria-live="polite">
             <div className={styles.coverageFacts}>
               <span className={styles.coverageFact}>{zh ? "新浪 hs_a 行情池" : "Sina hs_a universe"} {query.data.coverage.loaded.toLocaleString()} / {query.data.coverage.providerTotal.toLocaleString()}</span>
               <span className={styles.coverageFact}>{zh ? "符合条件" : "Matches"} {query.data.coverage.totalFiltered.toLocaleString()}</span>
-              <span className={styles.coverageFact}>{zh ? "行情时点" : "Quote time"} {query.data.dataTime ?? "—"} · {zh ? "日期未提供" : "Date unavailable"}</span>
-              <span className={styles.coverageFact}>{zh ? "来源" : "Source"} {query.data.source} · {formatTimestamp(query.data.fetchedAt)}</span>
+              <span className={styles.coverageFact}>{zh ? "行情时点" : "Quote time"} {query.data.dataTime ?? "—"} · {query.data.dataDate?.trim() || (zh ? "日期未提供" : "Date unavailable")}</span>
+              <span className={styles.coverageFact}>{zh ? "来源" : "Source"} {query.data.source} · {zh ? "上次成功抓取" : "Last successful fetch"} {formatTimestamp(query.data.fetchedAt)}</span>
             </div>
             <p className={styles.meta}>{zh ? "完整读取仅代表新浪 hs_a 行情池，不等于全市场覆盖。" : "Complete means the Sina hs_a universe was loaded; it does not cover the entire market."}</p>
             {!query.data.coverage.complete ? <VStateSurface tone="unavailable" density="compact" title={zh ? "筛选结果只含已加载项" : "Results include loaded items only"}>
@@ -335,7 +334,7 @@ function ScreenExplorer({
 }
 
 function FacetMeta({ data, zh }: { data: { source: string; sourceUrl: string; fetchedAt: string }; zh: boolean }) {
-  return <div className={styles.itemMeta}><span>{data.source}</span><span>{zh ? "更新" : "Updated"} {formatTimestamp(data.fetchedAt)}</span><a className={styles.itemLink} href={data.sourceUrl} target="_blank" rel="noreferrer">{zh ? "来源" : "Source"}</a></div>;
+  return <div className={styles.itemMeta}><span>{data.source}</span><span>{zh ? "上次成功抓取" : "Last successful fetch"} {formatTimestamp(data.fetchedAt)}</span><a className={styles.itemLink} href={data.sourceUrl} target="_blank" rel="noreferrer">{zh ? "来源" : "Source"}</a></div>;
 }
 
 function ResearchList<T extends FinancialResearchNewsItem | FinancialResearchAnnouncement>({
@@ -368,12 +367,13 @@ function StockResearch({ stock, mode, onResearchPrompt, zh }: { stock: StockIden
     retry: false,
   });
   if (query.isPending) return <VStateSurface tone="loading" busy title={zh ? `正在查找${stock.name}资料` : `Loading ${stock.name} research`}><VSkeleton /></VStateSurface>;
-  if (query.isError) return <VStateSurface tone="error" title={zh ? "股票资料加载失败" : "Stock research unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>;
+  if (query.isError && !query.data) return <VStateSurface tone="error" title={zh ? "股票资料加载失败" : "Stock research unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>;
   if (!query.data) return null;
 
   const report = query.data.fundamentals;
   const prompt = marketScreenPrompt(stock);
   return <div className={styles.root}>
+    {query.error ? <VStateSurface tone="error" density="compact" title={zh ? "刷新失败，当前显示上次成功获取的数据" : "Refresh failed; showing the last successfully fetched data"} actions={<VButton isDisabled={query.isFetching} onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface> : null}
     <div className={styles.heading}>
       <div><h2 className={styles.title}>{stock.name} <span className={styles.ticker}>{stock.ticker} · {stock.market}</span></h2><p className={styles.meta}>{zh ? "公开资料 · 以来源披露时间为准" : "Public data · use provider publication dates"}</p></div>
       <div className={styles.actions}>

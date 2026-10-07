@@ -6,6 +6,7 @@ export default {
   ticker: "text-sm font-mono text-[var(--fg-tertiary)]",
   actions: "flex items-center gap-2",
   priceHeading: "flex items-end justify-between gap-5 mt-3",
+  refreshWarning: "mt-3",
   price: "text-3xl tracking-tight font-semibold",
   change: "flex items-center gap-1 pb-1 text-sm",
   changePercent: "ml-2",

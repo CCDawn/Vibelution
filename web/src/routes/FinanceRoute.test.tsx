@@ -118,6 +118,38 @@ async function input(label: string, value: string) {
 }
 
 describe("financial assistant page", () => {
+  it("prepares research without creating a blank session, then starts once through native submission", async () => {
+    await render("/finance?session=native-session");
+    const nativeDraft = container.querySelector('textarea[aria-label="native draft"]');
+    await act(async () => { button("新研究")!.click(); button("新研究")!.click(); });
+    await settle();
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-label="公司或股票代码"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="研究设置"]')).not.toBeNull();
+    expect(container.querySelector('textarea[aria-label="native draft"]')).toBe(nativeDraft);
+    const query = new URLSearchParams(container.querySelector("output")!.textContent!.split("?")[1]);
+    expect(query.get("session")).toBe("native-session");
+    expect(query.get("finance_prepare")).toBe("1");
+    await input("报告期", "2025FY");
+    await act(async () => { button("开始研究")!.click(); button("开始研究")!.click(); });
+    await settle(); await settle();
+    expect(createChatSession).toHaveBeenCalledTimes(1);
+    expect(nativeSubmit).toHaveBeenCalledTimes(1);
+    expect(nativeSubmit.mock.calls[0][0]).toContain("报告期 2025FY");
+    expect(container.querySelector("output")?.textContent).toBe("/finance?session=new-session");
+  });
+
+  it("loads report deep links and replaces old research progress with current context", async () => {
+    await render("/finance?session=native-session&finance_area=reports");
+    expect(container.querySelector('[aria-label="研究记录范围"] [aria-selected="true"]')?.textContent).toBe("已完成报告");
+    expect(container.textContent).toContain("选择报告");
+    expect(button("打开研究对话")).toBeUndefined();
+    await chooseGroup("行情");
+    expect(container.querySelector('[aria-label="当前股票"]')?.textContent).toContain("贵州茅台");
+    expect(button("打开研究对话")).toBeUndefined();
+    expect(container.querySelector("output")?.textContent).toContain("finance_area=watchlist");
+  });
   it("opens the native conversation first and retains all grouped workspace views", async () => {
     await render("/finance?session=native-session");
     const draft = container.querySelector('textarea[aria-label="native draft"]');
@@ -230,7 +262,10 @@ describe("financial assistant page", () => {
     expect(draft).toMatch(/^请对以下主题开展投资研究：模拟持仓研究/);
     expect(draft).toContain("请对以下模拟持仓做组合诊断。");
     expect(nativeSubmit).not.toHaveBeenCalled();
-    expect(container.querySelector("output")?.textContent).toBe("/finance?session=new-session");
+    const query = new URLSearchParams(container.querySelector("output")!.textContent!.split("?")[1]);
+    expect(query.get("session")).toBe("new-session");
+    expect(query.get("finance_area")).toBeNull();
+    expect(query.get("finance_portfolioSource")).toBe("paper");
   });
   it("keeps reads pure and upgrades market queries only on an explicit single click", async () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, marketToolStatus: "upgrade_available" }]);
@@ -468,7 +503,9 @@ describe("financial assistant page", () => {
     let resolve!: (value: SessionDetail) => void;
     vi.mocked(createChatSession).mockReturnValue(new Promise((done) => { resolve = done; }));
     await render("/finance?session=native-session");
-    const create = button("新研究")!;
+    await act(async () => button("新研究")!.click());
+    expect(createChatSession).not.toHaveBeenCalled();
+    const create = button("开始研究")!;
     await act(async () => { create.click(); create.click(); });
     expect(createChatSession).toHaveBeenCalledTimes(1);
     expect(createChatSession).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance-a" }), expect.any(String));
@@ -483,9 +520,10 @@ describe("financial assistant page", () => {
     vi.mocked(createChatSession).mockRejectedValueOnce(new Error("timeout")).mockResolvedValue(nativeSession("new-session"));
     await render("/finance?session=native-session");
     await act(async () => button("新研究")!.click());
+    await act(async () => button("开始研究")!.click());
     await settle();
     expect(container.textContent).toContain("timeout");
-    await act(async () => button("新研究")!.click());
+    await act(async () => button("开始研究")!.click());
     await settle();
     const calls = vi.mocked(createChatSession).mock.calls;
     expect(calls).toHaveLength(2);

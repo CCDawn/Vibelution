@@ -28,10 +28,8 @@ function quoteChange(row: WatchRow): string {
   return `${change > 0 ? "+" : ""}${valueText(change)}%`;
 }
 
-function fetchedTime(value?: string): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString("zh-CN", { hour12: false });
+function sourceTimestamp(value?: string): string {
+  return value?.trim() || "—";
 }
 
 export function FinanceWatchlistTable({
@@ -89,8 +87,13 @@ export function FinanceWatchlistTable({
   const columns = useMemo<VDenseTableColumn<WatchRow>[]>(() => [
     {
       id: "stock", header: zh ? "股票" : "Stock", fill: true, minWidth: 130,
-      render: ({ stock }) => <VButton variant="ghost" className={styles.stockButton} onPress={() => onSelectStock(stock)}>
-        <span className={styles.stockCell}><strong className={styles.stockName}>{stock.name}</strong><span className={styles.ticker}>{stock.ticker} · {stock.market}</span></span>
+      render: ({ stock, quote, error }) => <VButton variant="ghost" className={styles.stockButton} onPress={() => onSelectStock(stock)}>
+        <span className={styles.stockCell}>
+          <strong className={styles.stockName}>{stock.name}</strong>
+          <span className={styles.ticker}>{stock.ticker} · {stock.market}</span>
+          {quote?.timestamp ? <time className={editStyles.quoteTimestamp} dateTime={quote.timestamp}>{quote.timestamp}</time> : null}
+          {error ? <span className={editStyles.quoteError} role="status">{error}</span> : null}
+        </span>
       </VButton>,
     },
     { id: "price", header: zh ? "现价" : "Price", width: 108, align: "right", render: ({ quote }) => <span className={styles.number}>{quote ? `${valueText(quote.price, 3)} ${quoteCurrency(quote, zh)}` : "—"}</span> },
@@ -111,7 +114,7 @@ export function FinanceWatchlistTable({
 
   if (watchlist.length === 0) return <VStateSurface tone="empty" title={zh ? "暂无自选股票" : "No stocks in watchlist"}>{zh ? "从行情筛选或股票页添加关注。" : "Add stocks from the market screen or stock page."}</VStateSurface>;
   if (query.isPending) return <VStateSurface tone="loading" busy title={zh ? "正在更新自选行情" : "Loading watchlist quotes"} />;
-  if (query.isError) return <VStateSurface tone="error" title={zh ? "自选行情加载失败" : "Watchlist quotes unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>;
+  if (query.isError && !query.data) return <VStateSurface tone="error" title={zh ? "自选行情加载失败" : "Watchlist quotes unavailable"} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface>;
 
   const failed = rows.filter((row) => !row.quote).length;
   return <div className={styles.root}>
@@ -120,10 +123,11 @@ export function FinanceWatchlistTable({
         <label className={styles.field}>{zh ? "市场" : "Market"}<VSelect aria-label={zh ? "自选市场" : "Watchlist market"} selectedKey={marketFilter} options={[{ id: "all", label: zh ? "全部市场" : "All markets" }, { id: "CN", label: "A股" }, { id: "HK", label: "港股" }, { id: "US", label: "美股" }]} onSelectionChange={(key) => setMarketFilter(String(key))} /></label>
         <label className={styles.field}>{zh ? "标签" : "Tag"}<VSelect aria-label={zh ? "自选标签" : "Watchlist tag"} selectedKey={tagFilter} options={[{ id: "all", label: zh ? "全部标签" : "All tags" }, ...[...new Set(watchlist.flatMap((row) => row.tags ?? []))].map((tag) => ({ id: tag, label: tag }))]} onSelectionChange={(key) => setTagFilter(String(key))} /></label>
         <label className={styles.field}>{zh ? "排序" : "Sort"}<VSelect aria-label={zh ? "自选排序字段" : "Watchlist sort"} selectedKey={effectiveSort} options={WATCHLIST_SORTS.filter((item) => !mixedCurrencies || !["turnover", "marketCap", "price"].includes(item.id)).map((item) => ({ ...item, label: zh ? item.label : item.id }))} onSelectionChange={(key) => setSortBy(String(key) as SortField)} /></label>
-        <span className={styles.meta}>{query.data?.source ?? ""} · {zh ? `拉取 ${fetchedTime(query.data?.fetchedAt)} · 每分钟刷新` : `Fetched ${fetchedTime(query.data?.fetchedAt)} · Refreshes every minute`}</span>
+        <span className={styles.meta}>{query.data?.source ?? ""} · {zh ? `上次成功抓取 ${sourceTimestamp(query.data?.fetchedAt)} · 每分钟刷新` : `Last successful fetch ${sourceTimestamp(query.data?.fetchedAt)} · Refreshes every minute`}</span>
       </div>
       <VButton variant="secondary" icon={<RefreshCw size={14} />} isDisabled={query.isFetching} onPress={() => void query.refetch()}>{zh ? "刷新行情" : "Refresh quotes"}</VButton>
     </div>
+    {query.error ? <VStateSurface tone="error" density="compact" title={zh ? "刷新失败，当前显示上次成功获取的数据" : "Refresh failed; showing the last successfully fetched data"} actions={<VButton isDisabled={query.isFetching} onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{query.error.message}</VStateSurface> : null}
     {editing && onEditStock ? <VSurface tone="panel" padding="normal" className={editStyles.editor} ariaLabel={zh ? `编辑 ${editing.name}` : `Edit ${editing.name}`}><label className={editStyles.field}>{zh ? "标签（逗号分隔）" : "Tags (comma separated)"}<VInput aria-label={zh ? "股票标签" : "Stock tags"} value={tags} maxLength={309} onChange={(event) => setTags(event.target.value)} /></label><label className={editStyles.field}>{zh ? "备注" : "Note"}<VInput aria-label={zh ? "股票备注" : "Stock note"} value={note} maxLength={500} onChange={(event) => setNote(event.target.value)} /></label><span className={editStyles.buttons}><VButton isDisabled={pending} onPress={() => { const parsed = [...new Set(tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))]; if (parsed.length > 10 || parsed.some((tag) => tag.length > 30)) { setSaveError(zh ? "最多10个标签，每个30字" : "At most 10 tags, 30 characters each"); return; } void onEditStock(editing.symbol, parsed, note).then(() => setEditing(null)).catch((error: unknown) => setSaveError(error instanceof Error ? error.message : "保存失败")); }}>{zh ? "保存" : "Save"}</VButton><VButton variant="ghost" onPress={() => setEditing(null)}>{zh ? "取消" : "Cancel"}</VButton></span></VSurface> : null}
     {saveError ? <VStateSurface density="compact" tone="error" title={saveError} /> : null}
     {failed ? <VSurface tone="row" className={styles.meta} role="status">{zh ? `${failed} 只股票暂无有效行情，空值已保留。` : `${failed} stocks have no valid quote; values remain empty.`}</VSurface> : null}

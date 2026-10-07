@@ -9,20 +9,24 @@ import { isSessionDeleteTombstoned } from "../sessionDeleteTombstone";
 import { FinanceReportExport } from "./FinanceReportExport";
 import styles from "./FinanceReportsCenter.styles";
 
-type ReportTarget = Pick<FinancialReportSummary, "sessionId" | "turnId" | "title">;
-const keyOf = (item: ReportTarget) => JSON.stringify([item.sessionId, item.turnId]);
+export type FinanceReportSelection = Pick<FinancialReportSummary, "sessionId" | "turnId">;
+type ReportTarget = FinanceReportSelection & Pick<FinancialReportSummary, "title">;
+const keyOf = (item: FinanceReportSelection) => JSON.stringify([item.sessionId, item.turnId]);
 
-export function FinanceReportsCenter({ agentId, cases, onSaveCases, onOpenSession, pending, zh, casesOnly = false, initialKind = "" }: {
+export function FinanceReportsCenter({ agentId, cases, onSaveCases, onOpenSession, pending, zh, casesOnly = false, initialKind = "", selectedReport, onSelectedReportChange, onReportContextChange }: {
   agentId: string; cases: FinancialReviewCase[];
   onSaveCases: (change: (current: FinancialReviewCase[]) => FinancialReviewCase[]) => Promise<unknown>;
   onOpenSession: (id: string) => void; pending: boolean; zh: boolean; casesOnly?: boolean; initialKind?: "" | "research" | "review";
+  selectedReport?: FinanceReportSelection | null;
+  onSelectedReportChange?: (selection: FinanceReportSelection | null) => void;
+  onReportContextChange?: (report: FinancialReportSummary | null) => void;
 }) {
   const [q, setQ] = useState(""), [query, setQuery] = useState("");
   const [marketCode, setMarketCode] = useState<FinancialReportFilters["marketCode"]>("");
   const [dateFrom, setDateFrom] = useState(""), [dateTo, setDateTo] = useState(""), [kind, setKind] = useState<FinancialReportFilters["kind"]>(initialKind);
   const [selected, setSelected] = useState<Map<string, ReportTarget>>(new Map());
   const [missingReportKeys, setMissingReportKeys] = useState<Set<string>>(() => new Set());
-  const [viewing, setViewing] = useState<ReportTarget | null>(null);
+  const [localSelection, setLocalSelection] = useState<ReportTarget | null>(null);
   const [batchFormat, setBatchFormat] = useState<"markdown" | "json" | "docx">("markdown"), [exporting, setExporting] = useState(false);
   const [error, setError] = useState(""), [bookmark, setBookmark] = useState<(ReportTarget & { id?: string }) | null>(null);
   const [title, setTitle] = useState(""), [tags, setTags] = useState(""), [note, setNote] = useState("");
@@ -33,6 +37,27 @@ export function FinanceReportsCenter({ agentId, cases, onSaveCases, onOpenSessio
   const filters = useMemo(() => ({ q: query, marketCode, dateFrom, dateTo, kind, limit: 30 }), [query, marketCode, dateFrom, dateTo, kind]);
   const catalog = useInfiniteQuery({ queryKey: financialReportKeys.catalog(agentId, filters), queryFn: ({ signal, pageParam }) => fetchFinancialReports(agentId, { ...filters, cursor: pageParam }, { signal }), initialPageParam: "", getNextPageParam: (page) => page.nextCursor || undefined, enabled: !casesOnly, staleTime: 15_000, retry: false });
   const rows = catalog.data?.pages.flatMap((page) => page.items) ?? [];
+  const selectionControlled = selectedReport !== undefined;
+  const activeSelection = selectionControlled ? selectedReport : localSelection;
+  const activeSelectionKey = activeSelection ? keyOf(activeSelection) : "";
+  const selectedSummary = activeSelection ? rows.find((row) => keyOf(row) === activeSelectionKey) ?? null : null;
+  const selectedCase = activeSelection ? cases.find((item) => keyOf(item) === activeSelectionKey) ?? null : null;
+  const viewing: ReportTarget | null = activeSelection
+    ? selectedSummary ?? (selectedCase ? { sessionId: selectedCase.sessionId, turnId: selectedCase.turnId, title: selectedCase.title } : !selectionControlled && localSelection ? localSelection : { ...activeSelection, title: zh ? "历史报告" : "Historical report" })
+    : null;
+  function selectReport(target: FinanceReportSelection) {
+    if (!selectionControlled) {
+      const summary = rows.find((row) => keyOf(row) === keyOf(target));
+      const reviewCase = cases.find((item) => keyOf(item) === keyOf(target));
+      setLocalSelection(summary ? { sessionId: summary.sessionId, turnId: summary.turnId, title: summary.title } : reviewCase ? { sessionId: reviewCase.sessionId, turnId: reviewCase.turnId, title: reviewCase.title } : { ...target, title: zh ? "历史报告" : "Historical report" });
+    }
+    onSelectedReportChange?.({ sessionId: target.sessionId, turnId: target.turnId });
+  }
+  function returnToList() {
+    if (!selectionControlled) setLocalSelection(null);
+    onSelectedReportChange?.(null);
+  }
+  useEffect(() => { onReportContextChange?.(selectedSummary); }, [activeSelectionKey, onReportContextChange, selectedSummary]);
   const report = useQuery({ queryKey: ["finance", "exact-report", agentId, viewing?.sessionId, viewing?.turnId], queryFn: async ({ signal }) => {
     if (!viewing) throw new Error("未选择报告");
     const response = await exportFinancialReport({ assistantAgentId: agentId, sessionId: viewing.sessionId, turnId: viewing.turnId, format: "markdown" }, { signal });
@@ -74,6 +99,9 @@ export function FinanceReportsCenter({ agentId, cases, onSaveCases, onOpenSessio
     catch (cause) { setError(cause instanceof Error ? cause.message : "保存失败"); }
     finally { bookmarkSaveGate.current = false; }
   }
+  function removeCase(id: string) {
+    void onSaveCases((current) => current.filter((row) => row.id !== id)).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "删除失败"));
+  }
   async function batchExport() {
     if (exportGate.current || !exportableSelection.length) return;
     exportGate.current = true; setExporting(true); setError("");
@@ -85,23 +113,48 @@ export function FinanceReportsCenter({ agentId, cases, onSaveCases, onOpenSessio
     { id: "select", header: zh ? "选择" : "Select", width: 50, render: (row) => <VCheckbox aria-label={`${zh ? "选择" : "Select"} ${row.title} ${row.turnId}`} isSelected={!isReportMissing(row) && selected.has(keyOf(row))} isDisabled={exporting || isReportMissing(row) || (!selected.has(keyOf(row)) && exportableSelection.length >= 20)} onChange={(checked) => setSelected((current) => { if (isReportMissing(row)) return current; const next = new Map(current); if (checked) next.set(keyOf(row), row); else next.delete(keyOf(row)); return next; })} /> },
     { id: "title", header: zh ? "报告" : "Report", fill: true, minWidth: 190, render: (row) => {
       const missing = isReportMissing(row);
-      return <VButton variant="ghost" className={styles.titleButton} isDisabled={missing} onPress={() => setViewing(row)}><span className={styles.identity}><strong>{row.title}</strong><small>{row.ticker || (row.kind === "review" ? zh ? "复盘" : "Review" : zh ? "主题研究" : "Topic")} · {row.marketCode || "—"}{missing ? ` · ${zh ? "原报告已删除" : "Original report deleted"}` : ""}</small></span></VButton>;
+      return <VButton variant="ghost" className={styles.titleButton} isDisabled={missing} onPress={() => selectReport(row)}><span className={styles.identity}><strong>{row.title}</strong><small>{row.ticker || (row.kind === "review" ? zh ? "复盘" : "Review" : zh ? "主题研究" : "Topic")} · {row.marketCode || "—"}{missing ? ` · ${zh ? "原报告已删除" : "Original report deleted"}` : ""}</small><small className={styles.preview} title={row.preview || row.sessionTitle}>{row.preview || row.sessionTitle}</small></span></VButton>;
     } },
     { id: "date", header: zh ? "完成时间" : "Completed", width: 142, render: (row) => <span className={styles.muted}>{row.completedAt ? new Date(row.completedAt).toLocaleString(zh ? "zh-CN" : "en-US", { dateStyle: "short", timeStyle: "short" }) : "—"}</span> },
     { id: "actions", header: zh ? "操作" : "Actions", width: 126, truncate: false, className: styles.actionCell, render: (row) => <span className={styles.actions}>{!isReportMissing(row) ? <FinanceReportExport assistantAgentId={agentId} sessionId={row.sessionId} turnId={row.turnId} zh={zh} /> : null}<VButton density="compact" variant="ghost" isDisabled={pending || isReportMissing(row) || (cases.length >= 100 && !cases.some((item) => keyOf(item) === keyOf(row)))} onPress={() => editBookmark(row)}>{zh ? "收藏" : "Save case"}</VButton></span> },
   ];
   return <div className={styles.root}>
-    {casesOnly ? <><label className={styles.field}>{zh ? "查找案例" : "Find a case"}<VInput aria-label={zh ? "案例搜索" : "Case search"} value={q} maxLength={120} onChange={(event) => setQ(event.target.value)} placeholder={zh ? "标题 / 标签 / 备注" : "Title / tags / note"} /></label>{cases.length
+    {viewing ? (
+      <section className={styles.report} aria-label={zh ? "历史报告正文" : "Historical report"}>
+        <div className={styles.reportHeader}>
+          <div className={styles.detailHeading}>
+            <h2>{viewing.title}</h2>
+            <span className={styles.muted}>{selectedSummary?.sessionTitle ?? `${zh ? "轮次" : "Turn"} ${viewing.turnId}`}{selectedSummary?.ticker ? ` · ${selectedSummary.ticker}` : ""}</span>
+          </div>
+          <span className={styles.actions}>
+            <VButton variant="secondary" onPress={returnToList}>{zh ? "返回报告列表" : "Back to reports"}</VButton>
+            {!viewingReportMissing ? <>
+              <FinanceReportExport assistantAgentId={agentId} sessionId={viewing.sessionId} turnId={viewing.turnId} zh={zh} />
+              <VButton onPress={() => onOpenSession(viewing.sessionId)}>{zh ? "打开原会话 / 追问" : "Open session / follow up"}</VButton>
+            </> : null}
+            {casesOnly && selectedCase ? <>
+              <VButton variant="ghost" isDisabled={pending} onPress={() => editBookmark(selectedCase)}>{zh ? "编辑书签" : "Edit case"}</VButton>
+              <VButton variant="ghost" isDisabled={pending} onPress={() => removeCase(selectedCase.id)}>{zh ? "删除书签" : "Remove case"}</VButton>
+            </> : !casesOnly && selectedSummary ? <VButton variant="ghost" isDisabled={pending || viewingReportMissing || (cases.length >= 100 && !cases.some((item) => keyOf(item) === keyOf(selectedSummary)))} onPress={() => editBookmark(selectedSummary)}>{zh ? "收藏" : "Save case"}</VButton> : null}
+          </span>
+        </div>
+        {casesOnly && selectedCase ? <>
+          <span className={styles.muted}>{selectedCase.tags.join(" · ")}</span>
+          {selectedCase.note ? <p className={styles.note}>{selectedCase.note}</p> : null}
+        </> : null}
+        {viewingReportMissing ? <VStateSurface tone="error" title={zh ? "原报告已删除" : "Original report deleted"}>{zh ? "无法查看或导出报告，也无法从已删除的会话继续追问。你仍可保留或移除此复盘案例。" : "The report cannot be viewed or exported, and its deleted session cannot be reopened. You can keep or remove this review case."}</VStateSurface> : report.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取报告" : "Loading report"} /> : report.isError ? <VStateSurface tone="error" title={zh ? "报告不可用" : "Report unavailable"} actions={<VButton onPress={() => void report.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{report.error.message}</VStateSurface> : <LazyConversationMarkdownRenderer content={report.data ?? ""} language={zh ? "zh" : "en"} />}
+      </section>
+    ) : casesOnly ? <><label className={styles.field}>{zh ? "查找案例" : "Find a case"}<VInput aria-label={zh ? "案例搜索" : "Case search"} value={q} maxLength={120} onChange={(event) => setQ(event.target.value)} placeholder={zh ? "标题 / 标签 / 备注" : "Title / tags / note"} /></label>{cases.length
   ? matchingCases.length
     ? matchingCases.map((item) => {
         const missing = isReportMissing(item);
         return (
           <VSurface key={item.id} tone="panel" padding="normal" className={styles.case}>
             <div className={styles.reportHeader}>
-              <VButton variant="ghost" isDisabled={missing} onPress={() => setViewing(item)}>{item.title}</VButton>
+              <VButton variant="ghost" isDisabled={missing} onPress={() => selectReport(item)}>{item.title}</VButton>
               <span className={styles.actions}>
                 <VButton variant="ghost" isDisabled={pending} onPress={() => editBookmark(item)}>{zh ? "编辑书签" : "Edit case"}</VButton>
-                <VButton variant="ghost" isDisabled={pending} onPress={() => void onSaveCases((current) => current.filter((row) => row.id !== item.id)).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "删除失败"))}>{zh ? "删除书签" : "Remove case"}</VButton>
+                <VButton variant="ghost" isDisabled={pending} onPress={() => removeCase(item.id)}>{zh ? "删除书签" : "Remove case"}</VButton>
               </span>
             </div>
             {missing ? <span className={styles.muted} role="status">{zh ? "原报告已删除，仍可编辑备注或删除此案例。" : "Original report deleted. You can still edit notes or remove this case."}</span> : null}
@@ -118,7 +171,6 @@ export function FinanceReportsCenter({ agentId, cases, onSaveCases, onOpenSessio
       <div className={styles.actions}><span className={styles.muted}>{zh ? "按会话最近活动排列，只展示成功完成的报告。" : "Ordered by session activity; completed reports only."}</span>{catalog.hasNextPage ? <VButton isPending={catalog.isFetchingNextPage} onPress={() => void catalog.fetchNextPage()}>{zh ? "继续读取历史" : "Load older reports"}</VButton> : null}</div>
     </>}
     {error && !bookmark ? <VStateSurface density="compact" tone="error" title={error} /> : null}
-    {viewing ? <section className={styles.report} aria-label={zh ? "历史报告正文" : "Historical report"}><div className={styles.reportHeader}><h2>{viewing.title}</h2><span className={styles.actions}>{!viewingReportMissing ? <><FinanceReportExport assistantAgentId={agentId} sessionId={viewing.sessionId} turnId={viewing.turnId} zh={zh} /><VButton onPress={() => onOpenSession(viewing.sessionId)}>{zh ? "打开原会话 / 追问" : "Open session / follow up"}</VButton></> : null}<VButton variant="ghost" onPress={() => setViewing(null)}>{zh ? "关闭" : "Close"}</VButton></span></div>{viewingReportMissing ? <VStateSurface tone="error" title={zh ? "原报告已删除" : "Original report deleted"}>{zh ? "无法查看或导出报告，也无法从已删除的会话继续追问。你仍可保留或移除此复盘案例。" : "The report cannot be viewed or exported, and its deleted session cannot be reopened. You can keep or remove this review case."}</VStateSurface> : report.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取报告" : "Loading report"} /> : report.isError ? <VStateSurface tone="error" title={zh ? "报告不可用" : "Report unavailable"} actions={<VButton onPress={() => void report.refetch()}>{zh ? "重试" : "Retry"}</VButton>}>{report.error.message}</VStateSurface> : <LazyConversationMarkdownRenderer content={report.data ?? ""} language={zh ? "zh" : "en"} />}</section> : null}
     <VDialog open={Boolean(bookmark)} onOpenChange={(open) => { if (!open) setBookmark(null); }} title={zh ? "复盘案例书签" : "Review case"} footer={<VButton variant="primary" isDisabled={pending || !title.trim()} onPress={() => void saveBookmark()}>{zh ? "保存案例" : "Save case"}</VButton>}><div className={styles.form}><label className={styles.field}>{zh ? "标题" : "Title"}<VInput aria-label={zh ? "案例标题" : "Case title"} value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></label><label className={styles.field}>{zh ? "标签（逗号分隔）" : "Tags (comma separated)"}<VInput aria-label={zh ? "案例标签" : "Case tags"} value={tags} maxLength={309} onChange={(event) => setTags(event.target.value)} /></label><label className={styles.field}>{zh ? "复盘备注" : "Review note"}<VTextarea aria-label={zh ? "复盘备注" : "Review note"} value={note} maxLength={500} onChange={(event) => setNote(event.target.value)} /></label>{error ? <VStateSurface density="compact" tone="error" title={error} /> : null}</div></VDialog>
   </div>;
 }
