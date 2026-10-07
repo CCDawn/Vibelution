@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GitFileDiff } from "../../api/types";
 import { ChatChangeRail } from "./ChatChangeRail";
+import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { buildChatChangeRail } from "./chatChangeRailModel";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -128,6 +129,30 @@ describe("ChatChangeRail", () => {
     expect(html).toContain('role="alert"');
     expect(html).not.toContain("正在打开文件");
   });
+
+  it("explains an opened column that has no files yet", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ChatChangeRail, {
+        className: "status-rail",
+        lang: "zh",
+        paths: [],
+        selectedPath: null,
+        changedPaths: new Set<string>(),
+        diff: undefined,
+        diffLoading: false,
+        hasDiff: false,
+        file: null,
+        fileLoading: false,
+        fileError: "",
+        sourceLabel: "当前会话",
+        onSelect: () => undefined,
+      }),
+    );
+
+    expect(html).toContain("本轮改动");
+    expect(html).toContain("这次对话还没有改动文件");
+    expect(html).not.toContain("正在打开文件");
+  });
 });
 
 const emptyDiff: GitFileDiff = {
@@ -149,10 +174,61 @@ describe("chat change rail wiring", () => {
 
   it("keeps the center conversation open while the right column shows the file", () => {
     expect(workbench).toContain("buildChatChangeRail");
+    expect(workbench).toContain("changeRailOpened");
+    expect(workbench).toContain("ordinaryChangeRail");
     expect(workbench).toContain("conversationWorkspaceTab");
     expect(workbench).toContain('activeCliAgentRunId || !changeRail.show');
     expect(workbench).toContain("workspaceActiveTab={conversationWorkspaceTab}");
     expect(workbench).toContain("activeTab={workspace.activeTab}");
     expect(workbench).toContain("openPreviewTab(activeSessionId, path)");
+    expect(workbench).toContain('rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "改动" : "Changes") : undefined}');
+  });
+});
+
+describe("change rail tab-strip toggle", () => {
+  const styles = new Proxy({}, { get: () => "tab" }) as Record<string, string>;
+
+  function strip(overrides: Partial<React.ComponentProps<typeof ChatCenterTabStrip>>) {
+    return React.createElement(ChatCenterTabStrip, {
+      styles,
+      lang: "zh",
+      agentSessionLabel: "会话",
+      chatReturnTarget: null,
+      chatReturnLabel: "",
+      groupPanelActive: false,
+      projectBusActive: false,
+      showSessionTabs: false,
+      showAgentFallbackTab: false,
+      workspaceActiveTab: "agent",
+      sessionTabs: null,
+      fileTabs: null,
+      leftOverlayVisible: true,
+      rightOverlayVisible: true,
+      statusRailAvailable: false,
+      rightRailLabel: "改动",
+      rightRailOpen: false,
+      conversationIndexOverlayOpen: false,
+      statusRailOverlayOpen: false,
+      onActivateAgentFallbackTab: () => undefined,
+      onToggleLeftOverlay: () => undefined,
+      onToggleRightOverlay: () => undefined,
+      ...overrides,
+    });
+  }
+
+  it("keeps the changes button on a wide window even before any file exists", () => {
+    const html = renderToStaticMarkup(strip({}));
+    expect(html).toContain('id="chat-status-toggle"');
+    expect(html).toContain("改动");
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("leaves the wide companion window without a second right-rail button", () => {
+    const html = renderToStaticMarkup(strip({
+      rightRailLabel: undefined,
+      rightOverlayVisible: true,
+      statusRailAvailable: true,
+    }));
+    expect(html).not.toContain('id="chat-status-toggle"');
   });
 });

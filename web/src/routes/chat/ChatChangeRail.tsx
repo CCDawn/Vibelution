@@ -46,6 +46,7 @@ export function ChatChangeRail({
 }: ChatChangeRailProps) {
   const title = lang === "zh" ? "本轮改动" : "Changes";
   const loadingLabel = lang === "zh" ? "正在打开文件" : "Opening the file";
+  const emptyLabel = lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet";
   const preview = selectedPath && hasDiff && diff ? (
     <GitDiffView
       path={selectedPath}
@@ -68,9 +69,9 @@ export function ChatChangeRail({
     <aside id="chat-status-pane" className={`${styles.rail} ${className}`} aria-label={title}>
       <div className={styles.header}>
         <h2 className={styles.title}>{title}</h2>
-        <span className={styles.count}>{paths.length}</span>
+        {paths.length > 0 ? <span className={styles.count}>{paths.length}</span> : null}
       </div>
-      <ul className={styles.list}>
+      {paths.length > 0 ? <ul className={styles.list}>
         {paths.map((path) => {
           const selected = path === selectedPath;
           return (
@@ -90,9 +91,11 @@ export function ChatChangeRail({
             </li>
           );
         })}
-      </ul>
+      </ul> : null}
       <div className={styles.body}>
-        {diffLoading ? (
+        {paths.length === 0 ? (
+          <VStateSurface tone="empty" title={emptyLabel} fill role="status" />
+        ) : diffLoading ? (
           <VStateSurface tone="loading" title={loadingLabel} role="status" />
         ) : (
           <Suspense fallback={<VStateSurface tone="loading" title={loadingLabel} role="status" />}>

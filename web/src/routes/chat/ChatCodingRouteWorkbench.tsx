@@ -1971,6 +1971,8 @@ export function ChatCodingRouteWorkbench() {
   });
 
   const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
+  const [changeRailOpened, setChangeRailOpened] = useState(false);
+  const ordinaryChangeRail = !verifiedCompanionMode && !financeSurface && !groupPanelActive;
   const changeRail = useMemo(
     () => buildChatChangeRail({
       companion: verifiedCompanionMode,
@@ -2014,7 +2016,7 @@ export function ChatCodingRouteWorkbench() {
     setResponsiveOverlayPane,
   } = useChatWorkbenchLayout({
     standardGroupRoomActive,
-    statusRailEnabled: verifiedCompanionMode || changeRail.show,
+    statusRailEnabled: verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened)),
     indexRailEnabled: !financeSurface,
   });
   const changedFiles = new Set(changedFileList);
@@ -2024,6 +2026,27 @@ export function ChatCodingRouteWorkbench() {
   const conversationWorkspaceTab = activeCliAgentRunId || !changeRail.show
     ? workspace.activeTab
     : "agent";
+  const changeRailVisible = ordinaryChangeRail && (changeRail.show || changeRailOpened) && !statusRailCollapsed;
+  const toggleChangeRail = () => {
+    if (!ordinaryChangeRail) {
+      setResponsiveOverlayPane((current) => current === "right" ? null : "right");
+      return;
+    }
+    if (changeRailVisible) {
+      if (responsiveLayout.rightVisible) {
+        setRightPaneCollapsed(true);
+      } else {
+        setResponsiveOverlayPane(null);
+      }
+      return;
+    }
+    setChangeRailOpened(true);
+    if (responsiveLayout.rightVisible) {
+      setRightPaneCollapsed(false);
+    } else {
+      setResponsiveOverlayPane("right");
+    }
+  };
 
   const {
     locale,
@@ -3896,7 +3919,7 @@ export function ChatCodingRouteWorkbench() {
           });
         }}
       />
-      ) : changeRail.show && changeRail.selectedPath ? (
+      ) : ordinaryChangeRail && (changeRail.show || changeRailOpened) ? (
       <ChatChangeRail
         className={statusRailClassName}
         lang={lang}
@@ -3980,14 +4003,15 @@ export function ChatCodingRouteWorkbench() {
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
-            statusRailAvailable={verifiedCompanionMode || changeRail.show}
-            rightRailLabel={verifiedCompanionMode ? undefined : (lang === "zh" ? "改动" : "Changes")}
+            statusRailAvailable={verifiedCompanionMode}
+            rightRailLabel={ordinaryChangeRail ? (lang === "zh" ? "改动" : "Changes") : undefined}
+            rightRailOpen={ordinaryChangeRail ? changeRailVisible : statusRailOverlayOpen}
             statusRailOverlayOpen={statusRailOverlayOpen}
             onActivateAgentFallbackTab={() => {
               activeSessionId && setActiveTab(activeSessionId, "agent");
             }}
             onToggleLeftOverlay={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
-            onToggleRightOverlay={() => setResponsiveOverlayPane((current) => current === "right" ? null : "right")}
+            onToggleRightOverlay={toggleChangeRail}
             sessionTabs={(
               <AgentSessionTabStrip
                 activeSessionId={activeSessionId}
@@ -4191,7 +4215,7 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
       rightResizeHandle={
-      (verifiedCompanionMode || changeRail.show) && responsiveLayout.rightVisible ? <PaneCollapseHandle
+      (verifiedCompanionMode || (ordinaryChangeRail && (changeRail.show || changeRailOpened))) && responsiveLayout.rightVisible ? <PaneCollapseHandle
         side="right"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
