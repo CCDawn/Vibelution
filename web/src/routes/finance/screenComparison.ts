@@ -124,19 +124,54 @@ function screenRows(payload: ScreenPayload, cutoff: string): Array<{ name: strin
   return rows;
 }
 
+const FILING_LABELS = [
+  ["annual", "年报"],
+  ["semiannual", "半年报"],
+  ["q1", "一季报"],
+  ["q3", "三季报"],
+] as const;
+
 function filingCell(row: Record<string, unknown>, cutoff: string): string {
-  const filing = row.officialFiling;
-  if (!filing || typeof filing !== "object") return MISSING_FIGURE;
-  const record = filing as Record<string, unknown>;
-  const title = filingTitle(record.title);
-  if (!title) return MISSING_FIGURE;
-  const url = typeof record.url === "string" ? record.url : "";
-  const announced = typeof record.announcedOn === "string" ? record.announcedOn : "";
-  if (!allowedFilingUrl(url) || !isCalendarDate(announced) || !isCalendarDate(cutoff) || announced > cutoff) return MISSING_FIGURE;
-  return `[${title}（${announced}）](${url})`;
+  const found = new Map<string, { title: string; url: string; announced: string }>();
+  if (Array.isArray(row.periodicFilings)) {
+    for (const raw of row.periodicFilings.slice(0, 8)) {
+      const record = acceptedPeriodic(raw, cutoff);
+      if (!record) continue;
+      const prior = found.get(record.kind);
+      if (!prior || record.announced > prior.announced) found.set(record.kind, record);
+    }
+  }
+  const annual = acceptedAnnual(row.officialFiling, cutoff);
+  if (annual) found.set("annual", annual);
+  return FILING_LABELS.map(([kind, label]) => {
+    const record = found.get(kind);
+    return record ? `${label}：[${record.title}（${record.announced}）](${record.url})` : `${label}：${MISSING_FIGURE}`;
+  }).join("；");
 }
 
-function filingTitle(value: unknown): string {
+function acceptedAnnual(value: unknown, cutoff: string): { title: string; url: string; announced: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const title = periodicTitle(record.title, "annual");
+  const url = typeof record.url === "string" ? record.url : "";
+  const announced = typeof record.announcedOn === "string" ? record.announcedOn : "";
+  if (!title || !allowedFilingUrl(url) || !isCalendarDate(announced) || !isCalendarDate(cutoff) || announced > cutoff) return null;
+  return { title, url, announced };
+}
+
+function acceptedPeriodic(value: unknown, cutoff: string): { kind: string; title: string; url: string; announced: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const kind = typeof record.kind === "string" ? record.kind : "";
+  if (!FILING_LABELS.some(([item]) => item === kind)) return null;
+  const title = periodicTitle(record.title, kind);
+  const url = typeof record.url === "string" ? record.url : "";
+  const announced = typeof record.announcedOn === "string" ? record.announcedOn : "";
+  if (!title || !allowedFilingUrl(url) || !isCalendarDate(announced) || !isCalendarDate(cutoff) || announced > cutoff) return null;
+  return { kind, title, url, announced };
+}
+
+function periodicTitle(value: unknown, kind: string): string {
   if (typeof value !== "string") return "";
   const text = value
     .replace(/<[^>]{0,80}>/g, "")
@@ -144,8 +179,13 @@ function filingTitle(value: unknown): string {
     .replace(/[()]/g, (char) => (char === "(" ? "（" : "）"))
     .replace(/\s+/g, " ")
     .trim();
-  if (!text || text.length > 80 || !text.includes("年度报告") || BLOCKED_FILING_TITLE.some((word) => text.includes(word))) return "";
-  return text;
+  const compact = text.replace(/\s+/g, "");
+  if (!text || text.length > 80 || BLOCKED_FILING_TITLE.some((word) => compact.includes(word))) return "";
+  if (kind === "annual" && compact.includes("年度报告") && !compact.includes("半年度报告")) return text;
+  if (kind === "semiannual" && compact.includes("半年度报告")) return text;
+  if (kind === "q1" && compact.includes("一季度报告") && !compact.includes("三季度报告")) return text;
+  if (kind === "q3" && compact.includes("三季度报告")) return text;
+  return "";
 }
 
 function allowedFilingUrl(value: string): boolean {
@@ -188,7 +228,7 @@ function renderComparison(payload: ScreenPayload, rows: readonly { name: string;
   }
   lines.push("| 股票 | 代码 | 公告原文 | 财报页码 |", "| --- | --- | --- | --- |");
   for (const row of rows) lines.push(`| ${row.name} | ${row.code} | ${row.filing} | ${pages.get(row.code) || MISSING_FIGURE} |`);
-  lines.push("", "行情价格、市盈率和市净率不是财报，不列入本表。", "公告原文只列巨潮资讯或交易所年报链接。");
+  lines.push("", "行情价格、市盈率和市净率不是财报，不列入本表。", "公告原文只列巨潮资讯或交易所的年报、半年报、一季报和三季报链接。");
   return `${lines.join("\n").trimEnd()}\n`;
 }
 

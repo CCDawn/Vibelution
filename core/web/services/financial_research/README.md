@@ -18,11 +18,13 @@ filing dates, units and provider errors accompany every projection.
 The adapters require no provider credentials or new dependencies. Fixtures test
 normalization and failures; live provider availability is verified separately.
 
-## A-share annual reports
+## A-share periodic reports
 
 `official_filings.py` looks up cninfo periodic-report PDFs. Screening attaches
-one annual report when the announcement day is on or before the analysis date.
-The stock overview list, with no date cutoff, shows the latest annual report,
+the annual, semi-annual, first-quarter, and third-quarter reports whose
+announcement day is on or before the analysis date. A missing kind is omitted
+from the screen payload. The stock overview list, with no date cutoff, shows
+the latest annual report,
 semi-annual report, first-quarter report, and third-quarter report, and drops
 East Money rows for those reports. A missing original is named in the list and
 its reprint is omitted. Other notices stay on East Money. Each result is a

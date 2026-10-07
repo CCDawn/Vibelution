@@ -1,7 +1,7 @@
 /**
  * Chat center tab strip: return chip, session/file tabs, responsive overlay toggles.
  */
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Suspense } from "react";
@@ -26,10 +26,15 @@ export type ChatCenterTabStripProps = {
   conversationIndexControl?: ReactNode;
   leftOverlayVisible: boolean;
   rightOverlayVisible: boolean;
-  /** Companion status, or the change column, can be opened from a narrow window. */
+  /** Companion status can be opened from a narrow window. */
   statusRailAvailable: boolean;
-  /** Label for the narrow-window toggle. Companion keeps the status label. */
+  /**
+   * Ordinary chat keeps this labeled control in the tab strip on every width,
+   * including when the column is still empty. Companion omits it.
+   */
   rightRailLabel?: string;
+  /** Whether the right column is currently open (docked or overlay). */
+  rightRailOpen?: boolean;
   conversationIndexOverlayOpen: boolean;
   statusRailOverlayOpen: boolean;
   onActivateAgentFallbackTab: () => void;
@@ -56,12 +61,17 @@ export function ChatCenterTabStrip({
   rightOverlayVisible,
   statusRailAvailable,
   rightRailLabel,
+  rightRailOpen,
   conversationIndexOverlayOpen,
   statusRailOverlayOpen,
   onActivateAgentFallbackTab,
   onToggleLeftOverlay,
   onToggleRightOverlay,
 }: ChatCenterTabStripProps) {
+  const railOpen = rightRailOpen ?? statusRailOverlayOpen;
+  // Ordinary chat (rightRailLabel) keeps the control on wide windows too.
+  // Companion still uses the narrow-window status button only.
+  const showRightToggle = Boolean(rightRailLabel) || (statusRailAvailable && !rightOverlayVisible);
   return (
     <div className={styles.tabStrip}>
       {conversationIndexControl}
@@ -98,7 +108,7 @@ export function ChatCenterTabStrip({
         ) : null)}
         {companionHeader ? null : <Suspense fallback={null}>{fileTabs}</Suspense>}
       </div>
-      {!leftOverlayVisible || (statusRailAvailable && !rightOverlayVisible) ? (
+      {!leftOverlayVisible || showRightToggle ? (
         <div className={styles.overlayPaneControls}>
           {!leftOverlayVisible ? (
             <VButton
@@ -112,13 +122,16 @@ export function ChatCenterTabStrip({
               {lang === "zh" ? "会话" : "Chats"}
             </VButton>
           ) : null}
-          {statusRailAvailable && !rightOverlayVisible ? (
+          {showRightToggle ? (
             <VButton
               id="chat-status-toggle"
               type="button"
-              className={styles.overlayPaneToggle}
-              aria-expanded={statusRailOverlayOpen}
+              className={railOpen ? `${styles.overlayPaneToggle} ${styles.tabActive}` : styles.overlayPaneToggle}
+              aria-expanded={railOpen}
               aria-controls="chat-status-pane"
+              icon={rightRailLabel ? (railOpen
+                ? <PanelRightClose size={14} aria-hidden="true" />
+                : <PanelRightOpen size={14} aria-hidden="true" />) : undefined}
               onClick={onToggleRightOverlay}
             >
               {rightRailLabel ?? (lang === "zh" ? "状态" : "Status")}

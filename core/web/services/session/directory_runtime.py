@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -163,6 +165,139 @@ def wait_for_directory_startup(*, timeout: float | None = None) -> str:
     return status.status
 
 
+def _run_startup_stage(
+    stage: str,
+    generation: int,
+    operation: Callable[[], Any],
+    *,
+    skipped: bool = False,
+) -> Any:
+    """Run one startup stage and emit bounded, content-free timing events."""
+
+    started_at = perf_counter()
+    base_fields = {"stage": stage, "generation": generation}
+    _record(
+        f"session_directory.runtime.stage.{stage}.started",
+        outcome="started",
+        fields=base_fields,
+    )
+    if skipped:
+        _record(
+            f"session_directory.runtime.stage.{stage}.finished",
+            outcome="skipped",
+            fields={**base_fields, "durationMs": max(0, int((perf_counter() - started_at) * 1000))},
+        )
+        return None
+    try:
+        result = operation()
+    except Exception as exc:  # noqa: BLE001 - preserve the stage error for startup failure handling
+        _record(
+            f"session_directory.runtime.stage.{stage}.finished",
+            outcome="failed",
+            level="warning",
+            fields={
+                **base_fields,
+                "durationMs": max(0, int((perf_counter() - started_at) * 1000)),
+                "errorType": type(exc).__name__,
+            },
+        )
+        raise
+    _record(
+        f"session_directory.runtime.stage.{stage}.finished",
+        outcome="completed",
+        fields={
+            **base_fields,
+            "durationMs": max(0, int((perf_counter() - started_at) * 1000)),
+        },
+    )
+    return result
+
+
+def _fail_directory_startup(
+    generation: int,
+    exc: Exception,
+    *,
+    store: ConversationStore | None,
+) -> SessionDirectoryRuntimeStatus:
+    """Fail only the active generation and keep cleanup errors secondary."""
+
+    global _STORE, _PROJECT_ROOT, _STATUS
+    cleanup_store: ConversationStore | None = None
+    with _RUNTIME_LOCK:
+        current_generation = generation == _GENERATION
+        store_is_published = store is not None and _STORE is store
+        if current_generation:
+            cleanup_store = store if store is not None else _STORE
+            if cleanup_store is not None and _STORE is cleanup_store:
+                _STORE = None
+                _PROJECT_ROOT = None
+        elif store is not None and not store_is_published:
+            cleanup_store = store
+    cleanup_error_type = ""
+    if cleanup_store is not None:
+        try:
+            cleanup_store.close()
+        except Exception as cleanup_exc:  # noqa: BLE001 - cleanup must not replace the startup cause
+            cleanup_error_type = type(cleanup_exc).__name__
+
+    status = SessionDirectoryRuntimeStatus(
+        status="failed",
+        error_type=type(exc).__name__,
+    )
+    with _RUNTIME_LOCK:
+        if generation != _GENERATION:
+            current = False
+        else:
+            if _STORE is store:
+                _STORE = None
+                _PROJECT_ROOT = None
+            _STATUS = status
+            _READY.set()
+            current = True
+    if not current:
+        return SessionDirectoryRuntimeStatus(status="superseded")
+
+    if cleanup_error_type:
+        logger.warning(
+            "Session directory store failed to start (%s; cleanup %s).",
+            type(exc).__name__,
+            cleanup_error_type,
+        )
+    else:
+        logger.warning("Session directory store failed to start (%s).", type(exc).__name__)
+    fields = {"errorType": type(exc).__name__}
+    if cleanup_error_type:
+        fields["cleanupErrorType"] = cleanup_error_type
+    _record(
+        "session_directory.runtime.failed",
+        outcome="failed",
+        level="warning",
+        fields=fields,
+    )
+    return status
+
+
+def _publish_directory_store(
+    generation: int,
+    project_root: Path,
+    store: ConversationStore,
+) -> bool:
+    global _STORE, _PROJECT_ROOT
+    with _RUNTIME_LOCK:
+        if generation != _GENERATION:
+            return False
+        _STORE = store
+        _PROJECT_ROOT = project_root
+        return True
+
+
+def _close_startup_store_safely(store: ConversationStore) -> None:
+    try:
+        store.close(timeout=5)
+    except Exception as exc:  # noqa: BLE001 - superseded cleanup cannot fail the newer startup
+        logger.debug("Superseded session directory store cleanup failed (%s).", type(exc).__name__)
+
+
 def initialize_session_directory_runtime(
     *,
     project_root: Path,
@@ -176,73 +311,88 @@ def initialize_session_directory_runtime(
 
     Bootstrap order matters: the store is published as soon as ``open``
     succeeds, and the agent import / legacy migration / direct-session restore
-    steps run afterwards as bounded best effort. A slow or failing bootstrap
-    step degrades the runtime status instead of taking the directory read path
-    down with it.
+    steps run afterwards as best effort; their exceptions degrade the runtime
+    status instead of taking the directory read path down. Stage elapsed times
+    are diagnostic only, and the ready status is published after these hooks
+    finish.
     """
 
     global _STORE, _PROJECT_ROOT, _STATUS
-    from core.chat.conversation_store import ConversationStore
-
-    root = Path(project_root).resolve()
     if generation is None:
         generation = begin_directory_startup()
-    with _RUNTIME_LOCK:
-        if generation != _GENERATION:
-            return SessionDirectoryRuntimeStatus(status="superseded")
-        previous_store = _STORE
-        _STORE = None
-        _PROJECT_ROOT = None
-    if previous_store is not None:
-        previous_store.close(timeout=5)
-
-    if not _generation_is_current(generation):
-        return SessionDirectoryRuntimeStatus(status="superseded")
-    store = ConversationStore(
-        conversation_store_path(root),
-        busy_timeout_ms=DIRECTORY_BUSY_TIMEOUT_MS,
-    )
+    store: ConversationStore | None = None
     try:
-        metadata = store.open(writer_timeout=DIRECTORY_BOOTSTRAP_TIMEOUT_SECONDS)
-    except Exception as exc:  # noqa: BLE001 - startup failure becomes bounded runtime status
-        store.close()
-        status = SessionDirectoryRuntimeStatus(
-            status="failed",
-            error_type=type(exc).__name__,
+        def import_conversation_store():
+            from core.chat.conversation_store import ConversationStore
+
+            return ConversationStore
+
+        ConversationStoreClass = _run_startup_stage(
+            "conversation_store_import",
+            generation,
+            import_conversation_store,
         )
-        logger.warning(
-            "Session directory store failed to start (%s).",
-            type(exc).__name__,
-        )
-        _record(
-            "session_directory.runtime.failed",
-            outcome="failed",
-            level="warning",
-            fields={"errorType": type(exc).__name__},
+        root = _run_startup_stage(
+            "project_root_resolve",
+            generation,
+            lambda: Path(project_root).resolve(),
         )
         with _RUNTIME_LOCK:
-            if generation == _GENERATION:
-                _STORE = None
-                _PROJECT_ROOT = None
-                _STATUS = status
-                _READY.set()
-                current = True
-            else:
-                current = False
-        return status if current else SessionDirectoryRuntimeStatus(status="superseded")
-
-    # Publish the usable store before best-effort bootstrap steps so list and
-    # query reads never queue behind agent import or legacy migration.
-    with _RUNTIME_LOCK:
-        if generation == _GENERATION:
-            _STORE = store
-            _PROJECT_ROOT = root
-            published = True
+            if generation != _GENERATION:
+                return SessionDirectoryRuntimeStatus(status="superseded")
+            previous_store = _STORE
+            _STORE = None
+            _PROJECT_ROOT = None
+        if previous_store is None:
+            _run_startup_stage(
+                "previous_store_close",
+                generation,
+                lambda: None,
+                skipped=True,
+            )
         else:
-            published = False
-    if not published:
-        store.close(timeout=5)
-        return SessionDirectoryRuntimeStatus(status="superseded")
+            _run_startup_stage(
+                "previous_store_close",
+                generation,
+                lambda: previous_store.close(timeout=5),
+            )
+
+        if not _generation_is_current(generation):
+            return SessionDirectoryRuntimeStatus(status="superseded")
+        store_path = _run_startup_stage(
+            "store_path_resolve",
+            generation,
+            lambda: conversation_store_path(root),
+        )
+        store = _run_startup_stage(
+            "store_construction",
+            generation,
+            lambda: ConversationStoreClass(
+                store_path,
+                busy_timeout_ms=DIRECTORY_BUSY_TIMEOUT_MS,
+            ),
+        )
+        if not _generation_is_current(generation):
+            _close_startup_store_safely(store)
+            return SessionDirectoryRuntimeStatus(status="superseded")
+        metadata = _run_startup_stage(
+            "store_open",
+            generation,
+            lambda: store.open(writer_timeout=DIRECTORY_BOOTSTRAP_TIMEOUT_SECONDS),
+        )
+
+        # Publish the usable store before best-effort bootstrap steps so list and
+        # query reads never queue behind agent import or legacy migration.
+        published = _run_startup_stage(
+            "store_publish",
+            generation,
+            lambda: _publish_directory_store(generation, root, store),
+        )
+        if not published:
+            _close_startup_store_safely(store)
+            return SessionDirectoryRuntimeStatus(status="superseded")
+    except Exception as exc:  # noqa: BLE001 - every pre-open failure becomes a terminal state
+        return _fail_directory_startup(generation, exc, store=store)
 
     imported_agent_count = 0
     migrated_legacy = False
@@ -253,7 +403,11 @@ def initialize_session_directory_runtime(
         if not _generation_is_current(generation):
             _discard_published_store(store, timeout=5)
             return SessionDirectoryRuntimeStatus(status="superseded")
-        imported_agent_count = _import_agent_snapshots(store, root)
+        imported_agent_count = _run_startup_stage(
+            "agent_import",
+            generation,
+            lambda: _import_agent_snapshots(store, root),
+        )
     except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
         degraded_reasons.append(f"agent_import:{type(exc).__name__}")
         logger.warning(
@@ -269,18 +423,33 @@ def initialize_session_directory_runtime(
                 migrated_legacy,
                 migrated_session_count,
                 migration_backup_created,
-            ) = _migrate_legacy_chat_state_once(store, root)
+            ) = _run_startup_stage(
+                "legacy_migration",
+                generation,
+                lambda: _migrate_legacy_chat_state_once(store, root),
+            )
         except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
             degraded_reasons.append(f"legacy_migration:{type(exc).__name__}")
             logger.warning(
                 "Session directory legacy migration degraded (%s).",
                 type(exc).__name__,
             )
+    else:
+        _run_startup_stage(
+            "legacy_migration",
+            generation,
+            lambda: None,
+            skipped=True,
+        )
     try:
         if not _generation_is_current(generation):
             _discard_published_store(store, timeout=5)
             return SessionDirectoryRuntimeStatus(status="superseded")
-        _restore_missing_personal_direct_sessions(root)
+        _run_startup_stage(
+            "direct_session_restore",
+            generation,
+            lambda: _restore_missing_personal_direct_sessions(root),
+        )
     except Exception as exc:  # noqa: BLE001 - degrade, never fail the read path
         degraded_reasons.append(f"direct_restore:{type(exc).__name__}")
         logger.warning(

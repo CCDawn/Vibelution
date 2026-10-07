@@ -197,11 +197,12 @@ describe("stock research projections", () => {
         { ...final, text: "模型说明工具不支持市值。毛利率 91.93%。" },
       ]),
     ])!;
-    expect(report.text).toContain("| 贵州茅台 | 600519 | 没有这一项 | 第 42 页 |");
-    expect(report.text).toContain("| 平安银行 | 000001 | 没有这一项 | 没有这一项 |");
+    const emptyFilings = "年报：没有这一项；半年报：没有这一项；一季报：没有这一项；三季报：没有这一项";
+    expect(report.text).toContain(`| 贵州茅台 | 600519 | ${emptyFilings} | 第 42 页 |`);
+    expect(report.text).toContain(`| 平安银行 | 000001 | ${emptyFilings} | 没有这一项 |`);
     expect(report.text).toContain("覆盖不完整，结果仅基于已加载范围。");
     expect(report.text).toContain("候选、公告原文和财报页码以上表为准");
-    expect(report.text).toContain("公告原文只列巨潮资讯或交易所年报链接");
+    expect(report.text).toContain("公告原文只列巨潮资讯或交易所的年报、半年报、一季报和三季报链接");
     expect(report.text).toContain("工具不支持市值");
     expect(report.text).not.toContain("1258.62");
     expect(report.text).not.toContain("91.93");
@@ -237,7 +238,7 @@ describe("stock research projections", () => {
     expect(laterScreen?.turnId).toBe("screen-turn");
   });
 
-  it("cites an allowlisted annual-report original and leaves every other filing blank", () => {
+  it("cites allowlisted periodic originals and names each missing kind", () => {
     const request = "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-10-06。按条件筛选股票，列出候选、筛选依据和数据限制。";
     const filing = {
       title: "贵州茅台2025年年度报告",
@@ -245,12 +246,21 @@ describe("stock research projections", () => {
       announcedOn: "2026-04-17",
       source: "巨潮资讯",
     };
+    const periodic = [
+      { kind: "semiannual", title: "贵州茅台2026年半年度报告", url: "https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF", announcedOn: "2026-08-15", source: "巨潮资讯" },
+      { kind: "q1", title: "贵州茅台2026年第一季度报告", url: "https://static.cninfo.com.cn/finalpage/2026-04-25/1225187851.PDF", announcedOn: "2026-04-25", source: "巨潮资讯" },
+      { kind: "q3", title: "贵州茅台2025年第三季度报告摘要", url: "https://static.cninfo.com.cn/finalpage/2025-10-30/1.PDF", announcedOn: "2025-10-30", source: "巨潮资讯" },
+      { kind: "q3", title: "贵州茅台2025年第三季度报告", url: "https://evil.example/q3.PDF", announcedOn: "2025-10-30", source: "巨潮资讯" },
+    ];
+    const late = "https://static.cninfo.com.cn/finalpage/2026-10-07/1225000000.PDF";
+    const emptyFilings = "年报：没有这一项；半年报：没有这一项；一季报：没有这一项；三季报：没有这一项";
+    const cell = "年报：[贵州茅台2025年年度报告（2026-04-17）](https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF)；半年报：[贵州茅台2026年半年度报告（2026-08-15）](https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF)；一季报：[贵州茅台2026年第一季度报告（2026-04-25）](https://static.cninfo.com.cn/finalpage/2026-04-25/1225187851.PDF)；三季报：没有这一项";
     const screen = JSON.stringify({
       ok: true, status: "complete", source: "新浪财经", fetchedAt: "2026-10-06T10:00:00+08:00",
       coverage: { providerTotal: 10, loaded: 10, complete: true, totalFiltered: 4 }, returnedCount: 4,
       items: [
-        { ticker: "600519", name: "贵州茅台", officialFiling: filing },
-        { ticker: "000001", name: "平安银行", officialFiling: { ...filing, title: "平安银行2025年年度报告摘要" } },
+        { ticker: "600519", name: "贵州茅台", officialFiling: filing, periodicFilings: periodic },
+        { ticker: "000001", name: "平安银行", officialFiling: { ...filing, title: "平安银行2025年年度报告摘要" }, periodicFilings: [{ kind: "semiannual", title: "平安银行2026年半年度报告", url: late, announcedOn: "2026-10-07", source: "巨潮资讯" }] },
         { ticker: "000002", name: "万科A", officialFiling: { ...filing, url: "https://evil.example/a.PDF" } },
         { ticker: "601318", name: "中国平安", officialFiling: { ...filing, announcedOn: "2026-10-07" } },
       ],
@@ -262,11 +272,13 @@ describe("stock research projections", () => {
         { ...final, text: "原文" },
       ]),
     ])!;
-    expect(report.text).toContain("| 贵州茅台 | 600519 | [贵州茅台2025年年度报告（2026-04-17）](https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF) | 没有这一项 |");
-    expect(report.text).toContain("| 平安银行 | 000001 | 没有这一项 | 没有这一项 |");
-    expect(report.text).toContain("| 万科A | 000002 | 没有这一项 | 没有这一项 |");
-    expect(report.text).toContain("| 中国平安 | 601318 | 没有这一项 | 没有这一项 |");
+    expect(report.text).toContain(`| 贵州茅台 | 600519 | ${cell} | 没有这一项 |`);
+    expect(report.text).toContain(`| 平安银行 | 000001 | ${emptyFilings} | 没有这一项 |`);
+    expect(report.text).toContain(`| 万科A | 000002 | ${emptyFilings} | 没有这一项 |`);
+    expect(report.text).toContain(`| 中国平安 | 601318 | ${emptyFilings} | 没有这一项 |`);
     expect(report.text).not.toContain("evil.example");
+    expect(report.text).not.toContain(late);
     expect(report.text).not.toContain("年度报告摘要");
+    expect(report.text).not.toContain("第三季度报告摘要");
   });
 });
