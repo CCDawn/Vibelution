@@ -20,6 +20,15 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
   const [selectedId, setSelectedId] = useState("");
   const [sourceId, setSourceId] = useState("");
   const { agentId, knowledgeBaseId } = assistant;
+  const [selectionScope, setSelectionScope] = useState({ agentId, knowledgeBaseId, citation });
+  const [manualBrowse, setManualBrowse] = useState(false);
+  if (selectionScope.agentId !== agentId || selectionScope.knowledgeBaseId !== knowledgeBaseId || selectionScope.citation !== citation) {
+    setSelectionScope({ agentId, knowledgeBaseId, citation });
+    setSearch("");
+    setSelectedId("");
+    setSourceId("");
+    setManualBrowse(false);
+  }
   const readable = assistant.knowledgeReadable && Boolean(knowledgeBaseId);
   const itemsQuery = useQuery({
     queryKey: ["finance", "library", agentId, knowledgeBaseId],
@@ -58,23 +67,26 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
     setCitationScan({ key: citationKey, limit: CITATION_TRACE_BATCH_SIZE });
   }, [citationKey, citationScan.key]);
   useEffect(() => {
-    if (!citationKey || citationScan.key !== citationKey || !itemsQuery.data || citationMatch || citationTraceReadFailed
+    if (!citationKey || citationScan.key !== citationKey || !itemsQuery.data || citationMatch
       || citationItems.length >= canonicalItems.length || citationTraces.some((trace) => trace.isPending)) return;
     setCitationScan({ key: citationKey, limit: Math.min(citationLimit + CITATION_TRACE_BATCH_SIZE, canonicalItems.length) });
-  }, [citationKey, citationScan.key, itemsQuery.data, citationMatch, citationTraceReadFailed, citationItems.length, canonicalItems.length, citationTraces, citationLimit]);
-  useEffect(() => {
-    if (matchedItemId && matchedSourceId) { setSearch(""); setSelectedId(matchedItemId); setSourceId(matchedSourceId); }
-  }, [matchedItemId, matchedSourceId]);
+  }, [citationKey, citationScan.key, itemsQuery.data, citationMatch, citationItems.length, canonicalItems.length, citationTraces, citationLimit]);
   const items = canonicalItems.filter((item) =>
     `${item.title} ${item.summary}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  const selected = items.find((item) => item.knowledgeItemId === selectedId) ?? items[0];
+  const activeSelectionId = citation && !manualBrowse ? matchedItemId : selectedId;
+  const selected = activeSelectionId
+    ? items.find((item) => item.knowledgeItemId === activeSelectionId) ?? (manualBrowse || !citation ? items[0] : undefined)
+    : citation && !manualBrowse ? undefined : items[0];
   const traceQuery = useQuery({
     queryKey: ["finance", "source-trace", agentId, knowledgeBaseId, selected?.knowledgeItemId],
     queryFn: ({ signal }) => fetchKnowledgeTrace<KnowledgeTracePayload>(knowledgeBaseId, selected!.knowledgeItemId, { agentId, signal }),
     enabled: readable && Boolean(selected), staleTime: 15_000, retry: false, refetchInterval: 60_000,
   });
   const sources = selected ? activeFinancialSources(selected, traceQuery.data?.nodes.sourceArtifacts ?? []) : [];
-  const source = sources.find((item) => item.sourceArtifactId === sourceId) ?? sources[0];
+  const activeSourceId = citation && !manualBrowse ? matchedSourceId : sourceId;
+  const source = citation && !manualBrowse
+    ? sources.find((item) => item.sourceArtifactId === activeSourceId)
+    : sources.find((item) => item.sourceArtifactId === activeSourceId) ?? sources[0];
   const metadata = source ? financialSourceMetadata(source) : null;
   const bodyQuery = useQuery({
     queryKey: ["finance", "source-body", agentId, knowledgeBaseId, selected?.knowledgeItemId, source?.sourceArtifactId],
@@ -109,7 +121,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
           </strong>
           <VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={`${styles.link} ${styles.libraryCitationAction}`}><ExternalLink size={14} aria-hidden="true" />{zh ? "打开原文" : "Open source"}</VRouteLinkButton>
         </div>
-        {(citationScanComplete || citationTraceReadFailed) && !matchedItemId ? <span className={`${styles.small} basis-full`}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}
+        {citationScanComplete && !matchedItemId ? <span className={`${styles.small} basis-full`}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}
       </div> : null}
       {knowledgeBaseId ? <VRouteLinkButton to={libraryUrl} className={styles.link}>{zh ? "管理财报库" : "Manage library"}</VRouteLinkButton> : null}
       {!readable ? <VStateSurface density="compact" tone="unavailable" title={zh ? "财报库不可读" : "Library unavailable"} /> :
@@ -117,7 +129,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
         itemsQuery.isPending ? <div className={styles.skeleton} aria-label={zh ? "正在加载资料" : "Loading reports"}><VSkeleton /><VSkeleton /><VSkeleton /></div> : <>
           <VInput value={search} onChange={(event) => setSearch(event.target.value)} aria-label={zh ? "查找财报资料" : "Find reports"} placeholder={zh ? "查找资料" : "Find reports"} className={styles.input} />
           {items.length === 0 ? <VStateSurface density="compact" tone="empty" title={search ? (zh ? "没有匹配资料" : "No matches") : (zh ? "暂无有效财报" : "No active reports")} /> :
-            <div className={styles.sourceList}>{items.map((item) => <VButton key={item.knowledgeItemId} variant="ghost" contentLayout="plain" className={`${styles.sourceButton} ${selected?.knowledgeItemId === item.knowledgeItemId ? styles.selected : ""}`} aria-pressed={selected?.knowledgeItemId === item.knowledgeItemId} onPress={() => { setSelectedId(item.knowledgeItemId); setSourceId(""); }}>
+            <div className={styles.sourceList}>{items.map((item) => <VButton key={item.knowledgeItemId} variant="ghost" contentLayout="plain" className={`${styles.sourceButton} ${selected?.knowledgeItemId === item.knowledgeItemId ? styles.selected : ""}`} aria-pressed={selected?.knowledgeItemId === item.knowledgeItemId} onPress={() => { setManualBrowse(true); setSelectedId(item.knowledgeItemId); setSourceId(""); }}>
               <span className={styles.rowText}><strong>{item.title}</strong><span className={styles.small}>{item.summary.slice(0, 80)}</span></span>
             </VButton>)}</div>}
           {selected ? <section className={styles.detail} aria-label={zh ? "资料来源" : "Report source"}>
@@ -126,7 +138,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
               !source ? <p className={styles.small}>{zh ? "没有有效原文来源" : "No active source available"}</p> : <>
                 {sources.length > 1 ? <div className={styles.sourceList}>{sources.map((row) => {
                   const rowMetadata = financialSourceMetadata(row);
-                  return <VButton key={row.sourceArtifactId} variant="ghost" contentLayout="plain" className={styles.sourceArtifactButton} aria-pressed={row.sourceArtifactId === source.sourceArtifactId} onPress={() => setSourceId(row.sourceArtifactId)}>
+                  return <VButton key={row.sourceArtifactId} variant="ghost" contentLayout="plain" className={styles.sourceArtifactButton} aria-pressed={row.sourceArtifactId === source.sourceArtifactId} onPress={() => { setManualBrowse(true); setSelectedId(selected.knowledgeItemId); setSourceId(row.sourceArtifactId); }}>
                     <span className={styles.sourceArtifactRow}>
                       <FileText size={14} aria-hidden="true" />
                       <strong title={row.title}>{row.title}</strong>

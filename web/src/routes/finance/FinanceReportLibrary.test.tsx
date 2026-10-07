@@ -119,19 +119,33 @@ describe("financial report library", () => {
   });
 
   it("selects the owned source matching the cited PDF URL and page", async () => {
-    const targetItem = { ...item, knowledgeItemId: "cashflow", title: "现金流原文", sourceArtifactIds: ["page63"] };
+    const targetItem = { ...item, knowledgeItemId: "cashflow", title: "现金流原文", sourceArtifactIds: ["page42", "page63"] };
+    const page42Source = {
+      ...source,
+      sourceArtifactId: "page42",
+      title: "经营现金流补充披露",
+      sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, page: 42 } },
+    };
     const targetSource = { ...source, sourceArtifactId: "page63", sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, page: 63 } } };
     vi.mocked(listKnowledgeItems).mockResolvedValue({ items: [item, targetItem] });
-    vi.mocked(fetchKnowledgeTrace).mockImplementation(async (_kb, id) => ({ nodes: { sourceArtifacts: [id === "cashflow" ? targetSource : source] } }));
+    vi.mocked(fetchKnowledgeTrace).mockImplementation(async (_kb, id) => ({ nodes: { sourceArtifacts: id === "cashflow" ? [page42Source, targetSource] : [source] } }));
     vi.mocked(fetchKnowledgeItemBody).mockImplementation(async (request) => ({
       knowledgeBaseId: "financial-kb", knowledgeItemId: request.knowledgeItemId, sourceArtifactIds: [request.sourceArtifactId!],
-      sourceBodyStatus: "source_body_available", content: request.sourceArtifactId === "page63" ? "第63页经营现金流" : "第12页原文", hasMore: false,
+      sourceBodyStatus: "source_body_available", content: request.sourceArtifactId === "page63" ? "第63页经营现金流" : request.sourceArtifactId === "page42" ? "第42页补充披露" : "第12页原文", hasMore: false,
     } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>));
     await render(assistant, { url: "https://example.com/report.pdf", page: "63", label: "PDF · 第 63 页" });
     expect(node.querySelector("blockquote")?.textContent).toBe("第63页经营现金流");
     expect([...node.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual(["https://example.com/report.pdf#page=63", "https://example.com/report.pdf#page=63"]);
     expect(node.textContent).not.toContain("当前库未找到对应页原文");
     expect(fetchKnowledgeItemBody).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance", knowledgeItemId: "cashflow", sourceArtifactId: "page63", readMode: "source" }));
+
+    const alternateSource = [...node.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("经营现金流补充披露"));
+    await act(async () => alternateSource?.click());
+    for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(node.querySelector("blockquote")?.textContent).toBe("第42页补充披露");
+    expect(fetchKnowledgeItemBody).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance", knowledgeItemId: "cashflow", sourceArtifactId: "page42", readMode: "source" }));
+    expect([...node.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual(["https://example.com/report.pdf#page=63", "https://example.com/report.pdf#page=42"]);
   });
 
   it("continues citation lookup in bounded batches beyond the first 20 library items", async () => {
@@ -168,24 +182,41 @@ describe("financial report library", () => {
     expect(node.textContent).not.toContain("当前库未找到对应页原文");
   });
 
-  it("pauses after a source failure and resumes citation lookup when refreshed", async () => {
+  it("skips a failed source, finds a later citation, and retries the failed source on refresh", async () => {
     const items = Array.from({ length: 24 }, (_, index) => ({ ...item, knowledgeItemId: `item-${index + 1}`, sourceArtifactIds: [`source-${index + 1}`] }));
     const lateSource = { ...source, sourceArtifactId: "source-24", sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, page: 24, sourceUrl: "https://example.com/archive.pdf" } } };
     let unavailable = true;
+    let failedReads = 0;
     vi.mocked(listKnowledgeItems).mockResolvedValue({ items });
     vi.mocked(fetchKnowledgeTrace).mockImplementation(async (_baseId, id) => {
-      if (id === "item-20" && unavailable) throw new Error("temporary source failure");
+      if (id === "item-20") {
+        failedReads += 1;
+        if (unavailable) throw new Error("temporary source failure");
+      }
       return { nodes: { sourceArtifacts: id === "item-24" ? [lateSource] : [] } };
     });
+    vi.mocked(fetchKnowledgeItemBody).mockImplementation(async (request) => ({
+      knowledgeBaseId: request.knowledgeBaseId,
+      knowledgeItemId: request.knowledgeItemId,
+      sourceArtifactIds: [request.sourceArtifactId!],
+      sourceBodyStatus: "source_body_available",
+      content: "第24条资料摘录",
+      hasMore: false,
+    } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>));
     await render(assistant, { url: "https://example.com/archive.pdf", page: "24", label: "PDF · 第 24 页" });
-    expect(fetchKnowledgeTrace).toHaveBeenCalledTimes(20);
-    expect(node.textContent).toContain("部分资料来源读取失败");
+    for (let step = 0; step < 8; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+
+    expect(fetchKnowledgeTrace).toHaveBeenCalledTimes(24);
+    expect(failedReads).toBe(1);
+    expect(node.querySelector("blockquote")?.textContent).toBe("第24条资料摘录");
+    expect(node.textContent).not.toContain("部分资料来源读取失败");
     expect(node.textContent).not.toContain("当前库未找到对应页原文");
     unavailable = false;
     await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="刷新财报资料"]')!.click());
     for (let step = 0; step < 8; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(fetchKnowledgeTrace).toHaveBeenCalledWith("financial-kb", "item-24", expect.objectContaining({ agentId: "finance" }));
+    expect(failedReads).toBe(2);
     expect(node.textContent).not.toContain("部分资料来源读取失败");
+    expect(node.querySelector("blockquote")?.textContent).toBe("第24条资料摘录");
   });
 
   it("does not label an unrelated or expired source as the selected citation", async () => {
@@ -194,5 +225,81 @@ describe("financial report library", () => {
     expect(node.textContent).toContain("当前库未找到对应页原文");
     expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
     expect(node.querySelector("blockquote")).toBeNull();
+  });
+
+  it("keeps an unmatched external quote focused instead of showing the default Maotai report", async () => {
+    const maotaiItem = {
+      ...item,
+      knowledgeItemId: "maotai-report",
+      title: "贵州茅台年度报告",
+      summary: "茅台第5页营业收入与净利润",
+      sourceArtifactIds: ["maotai-page-5"],
+    };
+    const maotaiSource = {
+      ...source,
+      sourceArtifactId: "maotai-page-5",
+      title: "茅台第5页",
+      sourceRef: { financialEvidence: {
+        company: "贵州茅台", ticker: "600519", reportPeriod: "2024FY", reportVersion: "v1", page: 5,
+        sourceUrl: "https://example.com/maotai-2024.pdf",
+      } },
+    };
+    vi.mocked(listKnowledgeItems).mockResolvedValue({ items: [maotaiItem] });
+    vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [maotaiSource] } });
+    vi.mocked(fetchKnowledgeItemBody).mockResolvedValue({
+      knowledgeBaseId: "financial-kb", knowledgeItemId: "maotai-report", sourceArtifactIds: ["maotai-page-5"],
+      sourceBodyStatus: "source_body_available", content: "茅台第5页财报指标", hasMore: false,
+    } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>);
+
+    await render(assistant, { url: "https://gu.qq.com/sz000001/gp", page: "", label: "平安银行 · 000001" });
+
+    const quoteLink = [...node.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')]
+      .find((link) => link.textContent?.includes("打开原文"));
+    expect(quoteLink?.href).toBe("https://gu.qq.com/sz000001/gp");
+    expect(node.textContent).toContain("当前库未找到对应页原文");
+    expect(node.textContent).toContain("贵州茅台年度报告");
+    expect(node.querySelector('section[aria-label="资料来源"]')).toBeNull();
+    expect(node.querySelector("dl")).toBeNull();
+    expect(node.querySelector("blockquote")).toBeNull();
+    expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
+
+    const reportRow = [...node.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("贵州茅台年度报告"));
+    await act(async () => reportRow?.click());
+    for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(node.querySelector("blockquote")?.textContent).toBe("茅台第5页财报指标");
+
+    await render(assistant, { url: "https://gu.qq.com/sz000001/gp", page: "", label: "平安银行 · 000001" });
+    expect(node.querySelector('a[target="_blank"]')?.href).toBe("https://gu.qq.com/sz000001/gp");
+    expect(node.querySelector('section[aria-label="资料来源"]')).toBeNull();
+    expect(node.querySelector("blockquote")).toBeNull();
+  });
+
+  it("keeps default report details hidden while citation lookup is pending", async () => {
+    vi.mocked(fetchKnowledgeTrace).mockImplementation(() => new Promise(() => {}));
+    await render(assistant, { url: "https://gu.qq.com/sz000001/gp", page: "", label: "平安银行 · 000001" });
+    expect(node.textContent).toContain("平安银行 · 000001");
+    expect(node.querySelector('section[aria-label="资料来源"]')).toBeNull();
+    expect(node.querySelector("blockquote")).toBeNull();
+    expect(node.textContent).not.toContain("茅台第5页财报指标");
+  });
+
+  it("reports partial source-read uncertainty only after an unmatched citation scan completes", async () => {
+    const items = Array.from({ length: 21 }, (_, index) => ({ ...item, knowledgeItemId: `item-${index + 1}`, sourceArtifactIds: [`source-${index + 1}`] }));
+    vi.mocked(listKnowledgeItems).mockResolvedValue({ items });
+    vi.mocked(fetchKnowledgeTrace).mockImplementation(async (_baseId, id) => {
+      if (id === "item-20") throw new Error("temporary source failure");
+      return { nodes: { sourceArtifacts: [] } };
+    });
+
+    await render(assistant, { url: "https://example.com/unmatched.pdf", page: "1", label: "未入库报告 · 第1页" });
+    for (let step = 0; step < 6; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+
+    expect(fetchKnowledgeTrace).toHaveBeenCalledTimes(21);
+    expect(node.textContent).toContain("部分资料来源读取失败，无法确认库内原文");
+    expect(node.textContent).not.toContain("当前库未找到对应页原文");
+    expect(node.querySelector('section[aria-label="资料来源"]')).toBeNull();
+    expect(node.querySelector("blockquote")).toBeNull();
+    expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
   });
 });

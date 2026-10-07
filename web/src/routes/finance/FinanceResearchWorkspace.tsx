@@ -209,7 +209,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
     }
     void newResearch(false, { text, title }, true);
   }
-  function focusCitation(next: ReportCitation) { setCitation(next); setAsideTab("evidence"); }
+  function focusCitation(next: ReportCitation) { setCitation({ ...next }); setAsideTab("evidence"); }
   async function enableMarketQueries() {
     if (marketUpgradeGate.current || marketUpgradeDisabled || assistant.marketToolStatus !== "upgrade_available") return;
     marketUpgradeGate.current = true; setUpgradingMarket(true); setCreateError("");
