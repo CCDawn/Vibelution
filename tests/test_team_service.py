@@ -13,6 +13,7 @@ from core.web.services import (
     session_service,
     team_service,
 )
+from core.web.services.team.team_format import MEMBER_ROW_FIELDS
 from tests.helpers.system_agent_state import (
     _evolution_system_agent_payloads,
     _seed_ai_search_system_team_ready,
@@ -972,6 +973,19 @@ def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeyp
     assert teams["supervised-evolution-team"]["teamSource"] == "supervised_evolution"
     assert teams["self-evolution-team"]["memberCount"] == expected_counts["self_evolution"]
     assert teams["supervised-evolution-team"]["memberCount"] == expected_counts["supervised_evolution"]
+    stored = {
+        str(item.get("teamId") or ""): item
+        for item in team_service._load_index()["teams"]
+        if isinstance(item, dict)
+    }
+    for team_id in ("self-evolution-team", "supervised-evolution-team"):
+        members = stored[team_id]["members"]
+        assert len(members) == expected_counts[stored[team_id]["teamKind"]]
+        for member in members:
+            assert set(member) == set(MEMBER_ROW_FIELDS)
+            assert member["responsibilities"] == []
+            assert member["agentStatus"] == "active"
+            assert member["agentName"]
     assert teams["self-evolution-team"]["linkedChatRoomId"]
     assert teams["supervised-evolution-team"]["linkedChatRoomId"]
     assert len(chat_room_service.list_chat_rooms()) == 2

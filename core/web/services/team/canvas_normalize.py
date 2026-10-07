@@ -8,6 +8,7 @@ recording. Pure edge normalize remains in canvas_primitives.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -332,7 +333,12 @@ def _validate_canvas(
     }
 
 
-def _normalize_members(items: list[dict[str, Any]], *, require_active: bool) -> list[dict[str, Any]]:
+def _normalize_members(
+    items: list[dict[str, Any]],
+    *,
+    require_active: bool,
+    agents_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     s = _service()
     members: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -342,7 +348,11 @@ def _normalize_members(items: list[dict[str, Any]], *, require_active: bool) -> 
         agent_id = str(item.get("agentId") or "").strip()
         if not agent_id or agent_id in seen:
             continue
-        agent = agent_directory_service.get_agent(agent_id, include_archived=not require_active)
+        agent = _member_agent_for_normalize(
+            agent_id,
+            require_active=require_active,
+            agents_by_id=agents_by_id,
+        )
         if not agent:
             if require_active:
                 raise s.TeamServiceError(f"Team member Agent is not active: {agent_id}")
@@ -365,6 +375,28 @@ def _normalize_members(items: list[dict[str, Any]], *, require_active: bool) -> 
             }
         )
     return members
+
+
+def _member_agent_for_normalize(
+    agent_id: str,
+    *,
+    require_active: bool,
+    agents_by_id: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Resolve the Agent row that supplies member identity fields.
+
+    Callers that just materialized the Agent may pass that row. Archived rows
+    are ignored when active membership is required, then the directory is read.
+    """
+
+    if agents_by_id is not None:
+        candidate = agents_by_id.get(agent_id)
+        if isinstance(candidate, dict):
+            status = str(candidate.get("status") or "active").strip()
+            if not require_active or status != "archived":
+                return dict(candidate)
+    agent = agent_directory_service.get_agent(agent_id, include_archived=not require_active)
+    return dict(agent) if isinstance(agent, dict) else None
 
 
 def _ensure_members_can_join_team(members: list[dict[str, Any]], state: dict[str, Any], team_id: str) -> None:
