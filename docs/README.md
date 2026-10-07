@@ -54,50 +54,9 @@
 | [assets/](assets/) | 静态资源 | README 截图等 |
 | [archive/](archive/) | **归档** | 一切历史计划/规格/审计；见 [archive/README.md](archive/README.md) |
 
-`docs/plans/` **不是**规范权威（见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)）。仅下列在研草案可留在该目录；升格前不覆盖 `AGENTS.md` / `standards/`。清单真源：[plans/README.md](plans/README.md)。
+`docs/plans/` **不是**规范权威（见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)）。在研草案清单只维护在 [plans/README.md](plans/README.md)。本页不复制状态。已迁出的计划见 [archive/README.md](archive/README.md)，逐份说明见 plans/README 的历史段。
 
-| 草案 | 说明 |
-| --- | --- |
-| [plans/2026-09-12-session-ledger-archival-constraints.md](plans/2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施）：账本归档设计约束清单 + 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
-| [plans/2026-09-11-command-code-headless-transport-poc.md](plans/2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED：Command Code headless CLI 传输探针；已实测调起/流式/会话与 G2/G3（G2 未通过、收益远小于原假设），G1 未测出，无 GO/NO-GO 结论 |
-| [plans/research-flow-v2.md](plans/research-flow-v2.md) | 三阶段科研流权威方案：第二阶段基础实验已闭环；第三阶段已接通 Seed、v2 多动作决策、1.1.0 显式迁移及版本化基线修复，真实 CUDA 迭代待验收 |
-| [plans/2026-09-02-meeting-store-physical-sharding.md](plans/2026-09-02-meeting-store-physical-sharding.md) | 设计阶段：会议轮次按 meetingRoundId 物理分片，尚未实施 |
-| [plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED：挑战杯群聊、摘要、LangGraph/Ledger 自动运行链路的 deadline、durable recovery、run 隔离、上下文与自动推进修复计划 |
-| [plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md](plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED：挑战杯从官方题目冷启动到产出登记与 H1–H4 审核的规范化状态 V2、服务端动作和真实链路闭环验收 |
-| [plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved：挑战杯节点根会话、逐假说 Child Session 与结构化聚合 |
-| [plans/2026-08-21-research-workflow-three-pane-current-task-redesign.md](plans/2026-08-21-research-workflow-three-pane-current-task-redesign.md) | USER-APPROVED：科研流程统一 currentTask 投影、三栏信息架构、画布恢复、档案分层与一轮真实验收 |
-| [plans/2026-08-20-physical-retirement-of-python-lifecycle.md](plans/2026-08-20-physical-retirement-of-python-lifecycle.md) | ACTIVE：Python lifecycle 退役代码物理清理；批次 D 仍未完成 |
-| [plans/2026-08-20-physical-retirement-of-python-lifecycle.prompt.md](plans/2026-08-20-physical-retirement-of-python-lifecycle.prompt.md) | 上述 Active 计划的执行附件；随主计划关闭后归档 |
-| [plans/2026-08-15-research-graph-outcome-memory.md](plans/2026-08-15-research-graph-outcome-memory.md) | 三层记忆 + 公共结构策展/保鲜 + 研究成败图 v2.3（非正式规范） |
-| [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
-| [plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md](plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan：模型配置与协议路由 |
-| [plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md](plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md) | user-approved：多 Agent 协议配置设计 |
-
-### 本轮迁入 archive
-
-| 原路径 | 现路径 |
-| --- | --- |
-| `docs/plans/*` | `archive/plans/2026-06-07/`（及既有 `2026-05/`） |
-| `docs/plans/2026-08-11-vui-wave-migration-backlog.md` | `archive/plans/2026-08-11/` |
-| `docs/plans/2026-08-16-compat-ssot-closeout-plan.md` | `archive/plans/2026-08/`（Implemented；长期规则 [development-standard §25](standards/development-standard.md)） |
-| `docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md` | `archive/plans/2026-08/`（Closed；长期规则 [ADR 0009](adr/0009-launcher-control-plane-lives-in-electron-main.md)） |
-| `docs/plans/2026-08-26-test-regression-baseline-recovery.md` | `archive/plans/2026-08/`（Implemented；Pet 测试隔离与完整回归命令恢复） |
-| `docs/plans/2026-08-26-test-selector-import-closure.md` | `archive/plans/2026-08/`（Implemented；未映射 Python 改动按最近测试 import 前沿选择测试） |
-| `docs/plans/2026-08-31-challenge-cup-nodes-1-7-high-roi-repair-plan.md` | `archive/plans/2026-09/`（Implemented / DEV Closed；来源血缘、pinned definition、检索预算/质量与真实回执绑定） |
-| `docs/plans/2026-08-26-development-loop-throughput.md` | `archive/plans/2026-08/`（Implemented；测试去重、短时集成锁与 gate-definition 并行自测） |
-| `docs/plans/2026-08-13-portable-branch-workspace.md` | `archive/plans/2026-08/`（superseded；目录池与分支清单见协作规范，整树替换晋升未采用） |
-| `docs/plans/2026-08-11-multi-instance-branch-isolation.md` | `archive/plans/2026-08/`（superseded；现行见 ADR 0009 与 instance-lifecycle） |
-| `docs/plans/2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md` | `archive/plans/2026-09/`（superseded；实施改走仓外 Stage1 方案） |
-| `docs/plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md` | `archive/plans/2026-09/`（implemented；A/B/C 与 D2 已合入，D1 marker 与 sideflow/B5 e2e 仍是后续增量） |
-| `docs/plans/2026-09-05-independent-operator-experiment-flow-plan.md` | `archive/plans/2026-09/`（superseded；产品流程见 research-flow-v2，本文只留调研和早期证据） |
-| `docs/archive/plans/2026-08-26-challenge-workflow-recovery-closure.md` | `archive/plans/2026-08/`（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main） |
-| `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |
-| `docs/frontend/*` | `archive/frontend/` |
-| `docs/superpowers/*` | `archive/superpowers/` |
-| 一次性 testing 报告 / Electron 迁移 ledger | `archive/testing/` |
-| 根 `PRODUCT.md` / `DESIGN.md` 全文 | `archive/product/`（根文件改为入口桩） |
-
-新计划若需要：带 Status 元数据，**完成后尽快迁入 `docs/archive/`**，勿长期堆在现行树。权威策略见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)。
+新计划若需要：带 Status 元数据，**完成后尽快迁入 `docs/archive/`**，并只更新 `docs/plans/README.md`。权威策略见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)。
 
 ---
 
