@@ -37,6 +37,7 @@ import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 const fetchJsonMock = vi.fn();
 vi.mock("../../api/client", () => ({
   fetchJson: (...args: unknown[]) => fetchJsonMock(...args),
+  isFetchJsonHttpError: (error: unknown) => error instanceof Error && typeof (error as Error & { status?: unknown }).status === "number",
 }));
 
 type TelemetryEvent = {
@@ -507,6 +508,69 @@ describe("useChatWorkspaceLifecycle group room optimistic create", () => {
 });
 
 describe("useChatWorkspaceLifecycle session create idempotency", () => {
+  it.each([false, true])("recovers a discarded create's failed server cleanup (persistent failure: %s)", async (persistentFailure) => {
+    resetSessionCreatePreservesForTests();
+    resetSessionDeleteTombstonesForTests();
+    const deferred = createDeferred<SessionDetail>();
+    let realDeletes = 0;
+    fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/sessions" && init?.method === "POST") return deferred.promise;
+      if (path === "/api/sessions/session-cleanup-real" && init?.method === "DELETE") {
+        realDeletes++;
+        if (persistentFailure || realDeletes === 1) return Promise.reject(Object.assign(new Error("cleanup unavailable"), { status: 503 }));
+      }
+      return Promise.resolve({ deleted: true, deletedSessionId: path.split("/").at(-1), nextActiveSessionId: "" });
+    });
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session" ? hookOptions.route.ref.current.sessionId : "";
+    act(() => resultRef!.deleteSessionMutation.mutate({ sessionId: tempId }));
+    await flushMutationQueue();
+    deferred.resolve(serverSessionFor("session-cleanup-real", "agent-a"));
+    await flushMutationQueue();
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await flushMutationQueue();
+    expect(realDeletes).toBe(persistentFailure ? 3 : 2);
+    expect(hookOptions.route.ref.current).not.toEqual({ kind: "session", sessionId: "session-cleanup-real" });
+    if (persistentFailure) {
+      expect(isSessionDeleteTombstoned("session-cleanup-real")).toBe(false);
+      expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-cleanup-real"))?.id).toBe("session-cleanup-real");
+      expect(hookOptions.composerErrors.__sessions__).toContain("cleanup unavailable");
+    } else {
+      expect(isSessionDeleteTombstoned("session-cleanup-real")).toBe(true);
+      expect(queryClient.getQueryData(queryKeys.session("session-cleanup-real"))).toBeUndefined();
+    }
+    resetSessionCreatePreservesForTests();
+    resetSessionDeleteTombstonesForTests();
+  });
+
+  it("recovers the same create key and temp shell after a document reload", async () => {
+    sessionStorage.clear();
+    fetchJsonMock.mockRejectedValue(new TypeError("response lost"));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session" ? hookOptions.route.ref.current.sessionId : "";
+    const firstKey = sessionCreateIdempotencyKey(sessionCreateRequests()[0]);
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+    queryClient = new QueryClient();
+    hookOptions = buildOptions(buildRouteStub({ kind: "session", sessionId: tempId }));
+    mount();
+    await flushMutationQueue();
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempId))?.agentId).toBe("agent-a");
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    expect(sessionCreateIdempotencyKey(sessionCreateRequests()[1])).toBe(firstKey);
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: tempId });
+    sessionStorage.clear();
+  });
+
   it.each([false, true])("cleans only the closed temp pointer with no catalog owner (later selection: %s)", async (laterSelection) => {
     localStorage.clear();
     const deferred = createDeferred<SessionDetail>();

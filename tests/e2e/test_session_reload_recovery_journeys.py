@@ -12,7 +12,7 @@ import pytest
 
 from tests.e2e.conftest import e2e_enabled
 from tests.e2e.helpers.agent_factory import create_session
-from tests.e2e.helpers.instance_registry import fetch_json
+from tests.e2e.helpers.instance_registry import fetch_json, InstanceRegistryError
 from tests.e2e.test_composer_drafts import COMPOSER, THREAD, _ready_composer
 from tests.e2e.test_composer_navigation_journeys import _assert_no_turns
 from tests.e2e.test_session_cold_create_journeys import _create_settled, _fetch_route
@@ -136,17 +136,27 @@ def test_same_agent_later_tab_selection_survives_delayed_create_ack(page, e2e_in
     from playwright.sync_api import expect
 
     suffix = uuid.uuid4().hex[:8]
-    a = create_session(e2e_instance.port, title=f"同Agent来源 {suffix}")
+    title_a = f"同Agent来源 {suffix}"
+    a = create_session(e2e_instance.port, title=title_a)
     aid = fetch_json(e2e_instance.port, f"/api/sessions/{a}")["agentId"]
-    title_b = f"同Agent后选会话 {suffix}"
-    b = create_session(e2e_instance.port, agent_id=aid, title=title_b)
     _ready_composer(page, e2e_instance, a)
+    # Arrange the second tab through the actual creation flow, so it exists in
+    # this user's tab workspace independently of index pagination/freshness.
+    with page.expect_request(_create_settled), page.expect_response(
+        lambda response: response.request.method == "POST" and urlsplit(response.url).path == "/api/sessions"
+    ) as created_response:
+        page.get_by_role("button", name="在当前 Agent 下新建会话", exact=True).click()
+    b = created_response.value.json()["id"]
+    assert fetch_json(e2e_instance.port, f"/api/sessions/{b}")["agentId"] == aid
+    expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", b)
+    page.get_by_role("tab").filter(has_text=title_a).click()
+    expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", a)
     pending = []
     hold = _hold_creates(page, pending)
     try:
         _start_create(page, pending)
         page.locator(COMPOSER).first.press_sequentially("新建中的草稿", delay=2)
-        page.get_by_role("tab").filter(has_text=title_b).click()
+        page.locator(f'[id="agent-session-tab-session-{b}"]').click()
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", b)
         page.locator(COMPOSER).first.press_sequentially("后选会话草稿", delay=2)
         route = pending.pop()
@@ -157,10 +167,10 @@ def test_same_agent_later_tab_selection_survives_delayed_create_ack(page, e2e_in
             route.fulfill(response=response)
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", b)
         expect(page.locator(COMPOSER).first).to_have_value("后选会话草稿")
-        expect(page.get_by_role("tab", selected=True)).to_contain_text(title_b)
+        expect(page.locator(f'[id="agent-session-tab-session-{b}"]')).to_have_attribute("aria-selected", "true")
         last = page.evaluate("JSON.parse(localStorage.getItem('vibelution.chat-agent-last-session.v1:vibelution:operator') || '{}')")
         assert last[aid] == b
-        page.get_by_role("tab").filter(has_text=created["title"]).click()
+        page.locator(f'[id="agent-session-tab-session-{created["id"]}"]').click()
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", created["id"])
         expect(page.locator(COMPOSER).first).to_have_value("新建中的草稿")
         _assert_no_turns(e2e_instance, [a, b, created["id"]], ["新建中的草稿", "后选会话草稿"])
@@ -198,16 +208,18 @@ def test_closed_create_retries_transient_compensating_delete_failure(page, e2e_i
         response = _fetch_route(route)
         assert response.ok
         real_id = response.json()["id"]
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{real_id}")["id"] == real_id
         with page.expect_request(_create_settled):
             route.fulfill(response=response)
         for _ in range(50):
-            ids = {row["id"] for row in fetch_json(e2e_instance.port, "/api/sessions")}
-            if delete_failures and real_id not in ids:
+            exists = _session_exists(e2e_instance, real_id)
+            if delete_failures and not exists:
                 break
             page.wait_for_timeout(100)
         assert delete_failures == [real_id], "The transient cleanup failure must actually occur"
-        assert real_id not in ids, "Closed create must recover from transient cleanup failure"
+        assert not exists, "Closed create must recover from transient cleanup failure"
         page.reload(wait_until="domcontentloaded")
+        _ready_composer(page, e2e_instance, a)
         expect(page.get_by_role("tab")).to_have_count(1, timeout=15000)
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", a)
         assert temp_id not in page.url
@@ -217,3 +229,13 @@ def test_closed_create_retries_transient_compensating_delete_failure(page, e2e_i
             route.abort()
         page.unroute("**/api/sessions/**", fail_first_cleanup)
         page.unroute("**/api/sessions", hold)
+
+
+def _session_exists(instance, session_id):
+    try:
+        fetch_json(instance.port, f"/api/sessions/{session_id}")
+        return True
+    except InstanceRegistryError as error:
+        if "HTTP 404" in str(error):
+            return False
+        raise

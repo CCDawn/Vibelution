@@ -1,5 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import {
@@ -85,14 +85,18 @@ import {
 import { defaultNewSessionTitle, isDefaultNewSessionTitle } from "./useChatSessionRenameMenu";
 import { rollbackSessionRename } from "./chatSessionRenameRollback";
 import type { ChatRouteSelection } from "./chatSelectionProjection";
+import {
+  buildSessionCreateShell,
+  forgetSessionCreateRecovery,
+  readSessionCreateRecovery,
+  rememberSessionCreateRecovery,
+  type SessionCreateRecovery,
+} from "./chatSessionCreateRecovery";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
 type SessionCreateVariables = { agentId: string; createIntent?: SessionCreateIntent };
-type SessionCreateIntent = {
-  agentId: string;
-  idempotencyKey: string;
-  tempSessionId: string;
+type SessionCreateIntent = SessionCreateRecovery & {
   state: "pending" | "failed";
 };
 type SessionCreateMutationContext = {
@@ -123,6 +127,21 @@ function dropDiscardedCreatedSession(queryClient: QueryClient, sessionId: string
   );
   removeSessionFromAgentSessionCaches(queryClient, id);
   queryClient.removeQueries({ queryKey: queryKeys.session(id), exact: true });
+}
+
+async function deleteDiscardedCreatedSession(sessionId: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await deleteChatSession(sessionId);
+      return;
+    } catch (error) {
+      const status = error instanceof Error ? (error as Error & { status?: unknown }).status : undefined;
+      const transient = error instanceof TypeError || (typeof status === "number"
+        && (status === 408 || status === 429 || status >= 500));
+      if (!transient || attempt >= 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 200 : 600));
+    }
+  }
 }
 
 /**
@@ -359,7 +378,26 @@ export function useChatWorkspaceLifecycle({
     if (current?.idempotencyKey === expectedKey) {
       createSessionIntentsRef.current.delete(tempSessionId);
     }
+    forgetSessionCreateRecovery(tempSessionId, expectedKey);
   };
+
+  const recoveryRouteId = routeSelectionRef.current.kind === "session" ? routeSelectionRef.current.sessionId : "";
+  useEffect(() => {
+    if (!isTempSessionId(recoveryRouteId) || isSessionDeleteTombstoned(recoveryRouteId)
+      || queryClient.getQueryData(queryKeys.session(recoveryRouteId))) return;
+    const recovery = readSessionCreateRecovery(recoveryRouteId);
+    if (!recovery) return;
+    // Reload owns no in-flight POST. Let an explicit retry replay the same key.
+    createSessionIntentsRef.current.set(recoveryRouteId, { ...recovery, state: "failed" });
+    const detail = buildSessionCreateShell(recovery, defaultNewSessionTitle(lang));
+    queryClient.setQueryData(queryKeys.session(recoveryRouteId), detail);
+    updateSessionSummaryCaches(queryClient, (sessions) => mergeSessionDetailIntoSummaries(sessions, detail));
+    updateAgentSessionSummaryCaches(queryClient, (sessions) => mergeSessionDetailIntoSummaries(sessions, detail));
+    reconcileAgentSessionDetailCache(queryClient, detail);
+    pinSessionCreatePreserve(sessionSummaryFromDetail(detail));
+    setSelectedAgentId(recovery.agentId);
+    syncSessionDetail(detail);
+  }, [lang, queryClient, recoveryRouteId, setSelectedAgentId, syncSessionDetail]);
 
   const createSessionMutation = useMutation({
     mutationFn: async ({ agentId, createIntent }: SessionCreateVariables) => {
@@ -385,54 +423,25 @@ export function useChatWorkspaceLifecycle({
             agentId: normalizedAgentId,
             idempotencyKey: newCreateSessionIdempotencyKey(),
             tempSessionId: createTempSessionId(),
+            createdAt: new Date().toISOString(),
             state: "pending" as const,
           };
       intent.state = "pending";
       variables.createIntent = intent;
       createSessionIntentsRef.current.set(intent.tempSessionId, intent);
+      rememberSessionCreateRecovery(intent);
       const idempotencyKey = intent.idempotencyKey;
       const telemetry = startUserAction("session_create", { agentId: normalizedAgentId });
       // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
       // Real id arrives on success; UI must stay interactive while POST is in flight.
       const tempSessionId = intent.tempSessionId;
-      const nowIso = new Date().toISOString();
       const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
       const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
       // Match backend: a new session starts from the placeholder label; the
       // first user turn generates the real title.
       const title = defaultNewSessionTitle(lang);
-      const optimisticDetail: SessionDetail = {
-        id: tempSessionId,
-        title,
-        agentId: normalizedAgentId,
-        agentDisplayName: agentDisplayName || undefined,
-        status: "idle",
-        currentPhase: "ready",
-        taskSummary: "",
-        lastActive: nowIso,
-        updatedAt: nowIso,
-        createdAt: nowIso,
-        messages: [],
-        defaultFileContext: "",
-        previewTabs: [],
-        activePreviewPath: "",
-        changedFiles: [],
-        readFiles: [],
-        stopRequested: false,
-        stopRequestedAt: "",
-        stopReason: "",
-        messageWindow: {
-          mode: "window",
-          totalMessages: 0,
-          returnedMessages: 0,
-          oldestMessageIndex: 0,
-          newestMessageIndex: 0,
-          hasEarlier: false,
-          hasLater: false,
-          transcriptScope: "window",
-        },
-      };
+      const optimisticDetail = buildSessionCreateShell(intent, title, agentDisplayName || undefined);
       // Do not await cancelQueries — waiting freezes tab switching while list
       // queries are in flight, same as deleteSessionMutation.
       void queryClient.cancelQueries({ queryKey: ["sessions", "query"] });
@@ -486,7 +495,22 @@ export function useChatWorkspaceLifecycle({
         dropDiscardedCreatedSession(queryClient, tempSessionId);
         if (nextId !== tempSessionId) {
           dropDiscardedCreatedSession(queryClient, nextId);
-          void deleteChatSession(nextId).catch(() => undefined);
+          const cleanupTelemetry = startUserAction("session_discard_delete", { sessionId: nextId, tempSessionId }, { destructive: true });
+          void deleteDiscardedCreatedSession(nextId).then(() => {
+            cleanupTelemetry.succeeded({ sessionId: nextId });
+          }).catch((error: unknown) => {
+            // The server row still needs an operator action. Make it reachable
+            // again without navigating away from the user's later selection.
+            clearSessionDeleteTombstone(nextId);
+            queryClient.setQueryData(queryKeys.session(nextId), nextDetail);
+            updateSessionSummaryCaches(queryClient, (sessions) => mergeSessionDetailIntoSummaries(sessions, nextDetail));
+            updateAgentSessionSummaryCaches(queryClient, (sessions) => mergeSessionDetailIntoSummaries(sessions, nextDetail));
+            reconcileAgentSessionDetailCache(queryClient, nextDetail);
+            pinSessionCreatePreserve(sessionSummaryFromDetail(nextDetail));
+            const message = lang === "zh" ? "会话清理未完成，请再次移除会话记录。" : "Session cleanup failed. Remove the session record again.";
+            setSessionComposerErrors((current) => ({ ...current, __sessions__: `${message} ${describeError(error, t("deleteSessionFailed"))}` }));
+            cleanupTelemetry.failed(error, { sessionId: nextId, recoveryEntryRestored: true });
+          });
         }
         telemetry?.succeeded({
           sessionId: nextId,
@@ -1169,6 +1193,8 @@ export function useChatWorkspaceLifecycle({
         variables.sessionId,
         String(context?.deletedAgentId || "").trim(),
       );
+      const deletedCreateIntent = createSessionIntentsRef.current.get(variables.sessionId);
+      if (deletedCreateIntent) forgetCreateSessionIntent(variables.sessionId, deletedCreateIntent.idempotencyKey);
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
         previousRouteSessionId: String(context?.previousRouteSessionId || "").trim(),
@@ -1332,6 +1358,8 @@ export function useChatWorkspaceLifecycle({
       );
       deletedSessionIds.forEach((sessionId) => {
         forgetAgentLastSessionForDeletedSession(sessionId, deletedAgentIdBySessionId.get(sessionId) || "");
+        const deletedCreateIntent = createSessionIntentsRef.current.get(sessionId);
+        if (deletedCreateIntent) forgetCreateSessionIntent(sessionId, deletedCreateIntent.idempotencyKey);
       });
 
       context?.telemetry?.succeeded({
