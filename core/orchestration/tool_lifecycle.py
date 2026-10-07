@@ -583,6 +583,20 @@ class ToolLifecycleBridge:
         )
         if facts.truncated:
             _debug_logger.warning(f"[工具] {tool_name} 结果过长，已截断", tag="TOOL")
+        try:
+            from core.orchestration.verify_on_stop import note_tool_outcome
+
+            note_tool_outcome(
+                tool_name=tool_name,
+                args=_tool_call_args(call),
+                result=result,
+                skipped=action in {"skip", "tool_budget_exhausted"},
+            )
+        except Exception as exc:
+            _debug_logger.warning(
+                f"[工具生命周期] 记录收工证据失败: {type(exc).__name__}: {exc}",
+                tag="TOOL",
+            )
         return canonical_result
 
     @staticmethod
