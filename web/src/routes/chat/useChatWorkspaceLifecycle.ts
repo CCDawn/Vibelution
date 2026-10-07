@@ -384,11 +384,12 @@ export function useChatWorkspaceLifecycle({
   const recoveryRouteId = routeSelectionRef.current.kind === "session" ? routeSelectionRef.current.sessionId : "";
   useEffect(() => {
     if (!isTempSessionId(recoveryRouteId) || isSessionDeleteTombstoned(recoveryRouteId)
-      || queryClient.getQueryData(queryKeys.session(recoveryRouteId))) return;
+      || createSessionIntentsRef.current.has(recoveryRouteId)) return;
     const recovery = readSessionCreateRecovery(recoveryRouteId);
     if (!recovery) return;
     // Reload owns no in-flight POST. Let an explicit retry replay the same key.
     createSessionIntentsRef.current.set(recoveryRouteId, { ...recovery, state: "failed" });
+    if (queryClient.getQueryData(queryKeys.session(recoveryRouteId))) return;
     const detail = buildSessionCreateShell(recovery, defaultNewSessionTitle(lang));
     queryClient.setQueryData(queryKeys.session(recoveryRouteId), detail);
     updateSessionSummaryCaches(queryClient, (sessions) => mergeSessionDetailIntoSummaries(sessions, detail));

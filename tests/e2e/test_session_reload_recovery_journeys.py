@@ -89,7 +89,8 @@ def _hold_creates(page, pending):
     return hold
 
 
-def test_lost_response_then_reload_restores_create_intent_and_draft(page, e2e_instance):
+@pytest.mark.parametrize("recovery", ["reload", "route-remount"])
+def test_lost_response_then_reload_restores_create_intent_and_draft(page, e2e_instance, recovery):
     from playwright.sync_api import expect
 
     sid = create_session(e2e_instance.port, title=f"刷新恢复来源 {uuid.uuid4().hex[:8]}")
@@ -111,8 +112,15 @@ def test_lost_response_then_reload_restores_create_intent_and_draft(page, e2e_in
         with page.expect_request(lambda request: _create_event(request, "failed")):
             route.abort("failed")
         expect(page.locator(COMPOSER).first).to_have_value(draft)
-        # A genuine document reload loses all module maps and React refs.
-        page.reload(wait_until="domcontentloaded")
+        if recovery == "reload":
+            # A genuine document reload loses module maps, refs and caches.
+            page.reload(wait_until="domcontentloaded")
+        else:
+            # Navigate away and back: hook refs disappear while query cache may
+            # survive. A cached shell must not conceal a missing create key.
+            page.get_by_role("link", name="记忆库", exact=True).click()
+            expect(page).to_have_url(re.compile("/memory"))
+            page.go_back(wait_until="domcontentloaded")
         expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", temp_id, timeout=15000)
         expect(page.locator(COMPOSER).first).to_have_value(draft)
         assert _start_create(page, pending) == temp_id

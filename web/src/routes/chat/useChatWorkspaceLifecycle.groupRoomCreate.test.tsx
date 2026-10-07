@@ -33,6 +33,7 @@ import {
   isTempRoomId,
 } from "../groupRoomOptimisticIds";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
+import { readSessionCreateRecovery } from "./chatSessionCreateRecovery";
 
 const fetchJsonMock = vi.fn();
 vi.mock("../../api/client", () => ({
@@ -331,6 +332,7 @@ function groupCreateTelemetry(): TelemetryEvent {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   fetchJsonMock.mockReset();
   telemetryEvents.length = 0;
   queryClient = new QueryClient();
@@ -547,7 +549,7 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     resetSessionDeleteTombstonesForTests();
   });
 
-  it("recovers the same create key and temp shell after a document reload", async () => {
+  it.each([true, false])("recovers the same create key after remount (document caches cleared: %s)", async (clearDocumentCache) => {
     sessionStorage.clear();
     fetchJsonMock.mockRejectedValue(new TypeError("response lost"));
     hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
@@ -559,7 +561,7 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     act(() => root?.unmount());
     root = null;
     container.remove();
-    queryClient = new QueryClient();
+    if (clearDocumentCache) queryClient = new QueryClient();
     hookOptions = buildOptions(buildRouteStub({ kind: "session", sessionId: tempId }));
     mount();
     await flushMutationQueue();
@@ -783,6 +785,7 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     await flushMutationQueue();
     expect(isSessionDeleteTombstoned(tempSessionId)).toBe(true);
     expect(isSessionCreatePreserved(tempSessionId)).toBe(false);
+    expect(readSessionCreateRecovery(tempSessionId)).toBeUndefined();
 
     deferred.resolve(serverSessionFor("session-real", "agent-a"));
     await flushMutationQueue();
