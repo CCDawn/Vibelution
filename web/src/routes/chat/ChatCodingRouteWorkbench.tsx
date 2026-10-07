@@ -233,6 +233,7 @@ import {
 } from "./chatSessionStreamConnect";
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
+import { useGroupRoomTimeline } from "./useGroupRoomTimeline";
 import { useChatSessionSelection } from "./useChatSessionSelection";
 import { useChatRouteSelection } from "./useChatRouteSelection";
 import {
@@ -1016,7 +1017,12 @@ export function ChatCodingRouteWorkbench() {
   );
   const syncChatRoomDetail = useCallback(
     (room: ChatRoomDetail) => {
+      // Detail cache keeps metadata/participants/operation results only; the
+      // transcript authority is the timeline query, so a snapshot folds into a
+      // cursor-incremental timeline reconciliation instead of overwriting the
+      // rendered message list wholesale.
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatRoomTimeline(room.roomId) });
       if (String(room.status ?? "").trim().toLowerCase() !== "running") {
         void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
       }
@@ -1800,6 +1806,11 @@ export function ChatCodingRouteWorkbench() {
   const groupRoomInitialLoading = Boolean(
     standardGroupRoomActive && activeGroupRoomQuery.isPending && !activeGroupRoomQuery.data,
   );
+  const groupTimeline = useGroupRoomTimeline({
+    roomId: activeGroupRoomId,
+    enabled: Boolean(standardGroupRoomActive && activeGroupRoomId),
+    detail: activeGroupRoom,
+  });
   useSyncChatGroupManageDrafts({
     activeGroupRoom,
     sessions: sessionsQuery.data,
@@ -4148,6 +4159,7 @@ export function ChatCodingRouteWorkbench() {
               groupStreamConnected={groupStreamConnected}
               groupSpeakerStreams={groupSpeakerStreams}
               groupSpeakerProgress={groupSpeakerProgress}
+              groupTimeline={groupTimeline}
               startGroupRoundPending={startGroupRoundMutation.isPending}
               stopGroupRoundPending={stopGroupRoundMutation.isPending}
               formatTime={formatTime}

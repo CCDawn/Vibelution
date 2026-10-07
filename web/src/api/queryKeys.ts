@@ -66,6 +66,11 @@ export const queryKeys = {
   sessionChildSessions: (id: string) => ["sessions", id, "child-sessions"] as const,
   chatRooms: () => ["chat-rooms"] as const,
   chatRoom: (id: string) => ["chat-rooms", id] as const,
+  // Group-room transcript authority. The key nests under chatRoom(id) so
+  // existing room-scoped invalidations (mutations, catalog refreshes) reach it
+  // by prefix; the SSE snapshot path invalidates this key directly for a
+  // cursor-incremental reconciliation instead of overwriting the transcript.
+  chatRoomTimeline: (id: string) => ["chat-rooms", id, "timeline"] as const,
   chatRoomModes: () => ["chat-rooms", "modes"] as const,
   chatRoomPurposes: () => ["chat-rooms", "purposes"] as const,
   kernelTasks: (status = "", limit = 80) => ["kernel", "tasks", status, limit] as const,

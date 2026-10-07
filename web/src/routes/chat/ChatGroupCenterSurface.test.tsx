@@ -791,4 +791,100 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       expect(html).toContain("已完成，等待前序发言");
     });
   });
+
+  describe("timeline projection rendering", () => {
+    const projectedRound = (roundId: string, topic: string) => ({
+      roundId,
+      roomId: "room-1",
+      topic,
+      mode: "round_robin",
+      purpose: "discussion",
+      config: {},
+      status: "completed",
+      speakerOrder: [],
+      messages: [],
+      summary: "",
+      startedAt: "2026-09-04T09:00:00Z",
+      updatedAt: "2026-09-04T09:01:00Z",
+      finishedAt: "2026-09-04T09:01:00Z",
+    });
+    const projectionOf = (items: unknown, overrides: Record<string, unknown> = {}) => ({
+      items,
+      legacyFromDetail: false,
+      loading: false,
+      hasMore: false,
+      loadingMore: false,
+      loadMore: () => undefined,
+      ...overrides,
+    });
+
+    it("renders member_change system rows between round sections without shifting round numbering", () => {
+      const items = [
+        { kind: "round", round: projectedRound("r1", "议题一") },
+        {
+          kind: "member_change",
+          row: {
+            key: "tle-3",
+            seq: 3,
+            createdAt: "2026-09-04T09:02:00Z",
+            addedParticipantIds: ["p1"],
+            removedParticipantIds: ["p2"],
+            participantCount: 3,
+          },
+        },
+        { kind: "round", round: projectedRound("r2", "议题二") },
+      ];
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({ activeGroupRoom: undefined })}
+          {...({ groupTimeline: projectionOf(items) } as never)}
+        />,
+      );
+      expect(html).toContain("成员加入：Agent");
+      expect(html).toContain("成员退出：Agent");
+      expect(html).toContain("第 1 轮");
+      expect(html).toContain("第 2 轮");
+      expect(html).toContain("议题一");
+      expect(html).toContain("议题二");
+    });
+
+    it("offers the cursor load-more affordance only while the timeline has more pages", () => {
+      const loadMore = vi.fn();
+      const items = [{ kind: "round", round: projectedRound("r1", "议题") }];
+      const withMore = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({ activeGroupRoom: undefined })}
+          {...({ groupTimeline: projectionOf(items, { hasMore: true, loadMore }) } as never)}
+        />,
+      );
+      expect(withMore).toContain("加载更多记录");
+      const withoutMore = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({ activeGroupRoom: undefined })}
+          {...({ groupTimeline: projectionOf(items, { loadMore }) } as never)}
+        />,
+      );
+      expect(withoutMore).not.toContain("加载更多记录");
+    });
+
+    it("falls back to rendering detail rounds when no timeline projection is provided", () => {
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({
+            activeGroupRoom: {
+              roomId: "room-1",
+              title: "研究组",
+              mode: "round_robin",
+              purpose: "discussion",
+              status: "ready",
+              participants: [],
+              rounds: [projectedRound("r1", "旧议题")] as never,
+            } as never,
+          })}
+        />,
+      );
+      expect(html).toContain("第 1 轮");
+      expect(html).toContain("旧议题");
+    });
+  });
 });

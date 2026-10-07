@@ -1577,14 +1577,48 @@ export type ChatRoomStreamEvent = {
 };
 
 /**
+ * One append-only room timeline event (GET /api/chat-rooms/{id}/timeline).
+ * ``seq`` is monotonic per room and doubles as the read cursor unit. The wire
+ * keys ``from``/``to`` mirror the backend DTO, whose ``from`` field is
+ * keyword-aliased on the Python side. ``payload`` is type-specific: message
+ * events carry the same public shape as the room detail message projection,
+ * round_state events carry round lifecycle snapshots, member_change events
+ * carry membership deltas, and artifact events are schema-only today (no
+ * backend write path yet).
+ */
+export type ChatRoomTimelineEvent = {
+  eventId: string;
+  roomId: string;
+  seq: number;
+  type: "message" | "round_state" | "member_change" | "artifact" | string;
+  roundId?: string;
+  from?: string;
+  to?: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  schemaVersion?: number;
+};
+
+/** Cursor-paged read-only room timeline page (cursor = last seen seq). */
+export type ChatRoomTimelineResponse = {
+  roomId: string;
+  cursor: number;
+  limit: number;
+  events: ChatRoomTimelineEvent[];
+  nextCursor: number;
+  hasMore: boolean;
+};
+
+/**
  * Speaker streaming delta frame pushed on the group room SSE stream.
  * Field-level contract with the backend chat_room_stream_capture fan-out:
  * `content` is the CUMULATIVE answer text (a full snapshot per frame, not an
  * append-only chunk); `seq` is monotonically increasing per
  * (roundId, participantId), so frames that are not strictly newer are dropped
  * as late/reordered; a `done` frame with a terminal `status` ends the stream,
- * and the authoritative `chat_room_detail` snapshot always overrides whatever
- * the streaming buffer holds.
+ * and the finished message is retired from the streaming bubble once the
+ * timeline projection (or the legacy detail fallback) shows the delivered
+ * message — the room snapshot no longer blanks the buffer on arrival.
  */
 export type ChatRoomSpeakerDeltaEvent = {
   type: "chat_room_speaker_delta";
