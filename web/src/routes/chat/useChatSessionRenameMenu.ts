@@ -6,15 +6,65 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { NavigateFunction } from "react-router-dom";
 
-import type { SessionSummary } from "../../api/types";
+import { queryKeys } from "../../api/queryKeys";
+import type { SessionDetail, SessionSummary } from "../../api/types";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
 import {
+  reconcileAgentSessionDetailCache,
+  updateAgentSessionSummaryCaches,
+  updateSessionSummaryCaches,
+} from "../chatSessionIndexQuery";
+import {
+  renameSessionDetail,
+  renameSessionInSummaries,
+  sessionSummaryFromDetail,
+} from "../chatSessionState";
+import {
   isChildSession,
 } from "../DirectSessionIndexItem";
+import { pinSessionCreatePreserve } from "../sessionCreatePreserve";
 import { isTempSessionId } from "../sessionOptimisticIds";
+
+const committedTempSessionTitles = new Set<string>();
+
+function noteTempSessionTitleCommitted(sessionId: string): void {
+  const id = String(sessionId || "").trim();
+  if (isTempSessionId(id)) committedTempSessionTitles.add(id);
+}
+
+function clearTempSessionTitleCommit(sessionId: string): void {
+  committedTempSessionTitles.delete(String(sessionId || "").trim());
+}
+
+/** True when the operator already confirmed a title and closed the temp editor. */
+export function consumeTempSessionTitleCommit(sessionId: string): boolean {
+  const id = String(sessionId || "").trim();
+  return id ? committedTempSessionTitles.delete(id) : false;
+}
+
+function applyTempSessionShellTitle(queryClient: QueryClient, sessionId: string, title: string): void {
+  const id = String(sessionId || "").trim();
+  const nextTitle = String(title || "").trim();
+  if (!isTempSessionId(id) || !nextTitle) return;
+  const updatedAt = new Date().toISOString();
+  const renameSummaries = (sessions: SessionSummary[] | undefined) =>
+    renameSessionInSummaries(sessions, id, nextTitle, updatedAt);
+  updateSessionSummaryCaches(queryClient, renameSummaries);
+  updateAgentSessionSummaryCaches(queryClient, renameSummaries);
+  queryClient.setQueryData<SessionDetail>(queryKeys.session(id), (detail) =>
+    renameSessionDetail(detail, id, nextTitle, updatedAt) ?? detail,
+  );
+  const detail = queryClient.getQueryData<SessionDetail>(queryKeys.session(id));
+  if (detail) {
+    reconcileAgentSessionDetailCache(queryClient, detail);
+    pinSessionCreatePreserve(sessionSummaryFromDetail(detail));
+  }
+  noteTempSessionTitleCommitted(id);
+}
 
 /**
  * Placeholder titles for brand-new empty chats (create → optional rename UX).
@@ -92,7 +142,10 @@ export function useChatSessionRenameMenu({
   const localSuppressRenameBlurUntilRef = useRef(0);
   const suppressRenameBlurUntilRef = suppressRenameBlurUntilRefOption ?? localSuppressRenameBlurUntilRef;
 
+  const queryClient = useQueryClient();
+
   const beginRenameSession = useCallback((session: SessionSummary) => {
+    if (isTempSessionId(session.id)) clearTempSessionTitleCommit(session.id);
     setSessionContextMenu(null);
     setEditingSessionId(session.id);
     // Session tab rename always edits the session/task title — Agent rename is a separate action.
@@ -106,7 +159,7 @@ export function useChatSessionRenameMenu({
       [session.id]: "",
       __sessions__: "",
     }));
-  }, [setEditingSessionId, setEditingSessionTitle, setSessionComposerErrors, setSessionContextMenu, t]);
+  }, [setEditingSessionId, setEditingSessionTitle, setSessionComposerErrors, setSessionContextMenu]);
 
   const openSessionAgentConfig = useCallback((session: SessionSummary) => {
     const agentId = String(session.agentId || "").trim();
@@ -146,10 +199,6 @@ export function useChatSessionRenameMenu({
     if (reason === "blur" && Date.now() < suppressRenameBlurUntilRef.current) {
       return;
     }
-    // Temp shells are not server-addressable yet.
-    if (isTempSessionId(session.id)) {
-      return;
-    }
     const title = editingSessionTitle.trim();
     if (!title) {
       setSessionComposerErrors((current) => ({
@@ -175,8 +224,15 @@ export function useChatSessionRenameMenu({
       cancelRenameSession();
       return;
     }
+    // Temp shells are not server-addressable yet. Keep the title locally; create
+    // persists it once the real id exists.
+    if (isTempSessionId(session.id)) {
+      applyTempSessionShellTitle(queryClient, session.id, title);
+      cancelRenameSession();
+      return;
+    }
     renameSession({ sessionId: session.id, title });
-  }, [cancelRenameSession, editingSessionTitle, renameSession, setSessionComposerErrors, suppressRenameBlurUntilRef, t]);
+  }, [cancelRenameSession, editingSessionTitle, queryClient, renameSession, setSessionComposerErrors, suppressRenameBlurUntilRef, t]);
 
   return {
     beginRenameSession,

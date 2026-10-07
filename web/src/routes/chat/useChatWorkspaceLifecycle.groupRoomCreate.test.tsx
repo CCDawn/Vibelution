@@ -822,4 +822,62 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     resetSessionCreatePreservesForTests();
     resetSessionDeleteTombstonesForTests();
   });
+
+  it("saves a temp tab title that was committed before the session existed", async () => {
+    const deferred = createDeferred<SessionDetail>();
+    fetchJsonMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const path = String(input || "");
+      const method = String(init?.method || "GET").toUpperCase();
+      if (path === "/api/sessions" && method === "POST") return deferred.promise;
+      if (method === "PATCH") {
+        const payload = JSON.parse(String(init?.body || "{}")) as { title?: string };
+        return Promise.resolve({
+          ...serverSessionFor("session-real", "agent-a"),
+          title: String(payload.title || ""),
+        });
+      }
+      return Promise.resolve(serverSessionFor("session-real", "agent-a"));
+    });
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    expect(tempId).toMatch(/^temp-session-/);
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(tempId), (current) =>
+      current ? { ...current, title: "茅台临时改名" } : current,
+    );
+    deferred.resolve(serverSessionFor("session-real", "agent-a"));
+    await flushMutationQueue();
+    await flushMutationQueue();
+    const patches = fetchJsonMock.mock.calls.filter(
+      ([input, init]) =>
+        String(input) === "/api/sessions/session-real"
+        && String((init as RequestInit | undefined)?.method || "").toUpperCase() === "PATCH",
+    );
+    expect(patches).toHaveLength(1);
+    expect(JSON.parse(String((patches[0][1] as RequestInit).body)).title).toBe("茅台临时改名");
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session("session-real"))?.title).toBe("茅台临时改名");
+  });
+
+  it("does not reset a committed temp title when create is retried", async () => {
+    fetchJsonMock.mockRejectedValue(Object.assign(new Error("session create rejected"), { status: 409 }));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    expect(tempId).toMatch(/^temp-session-/);
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(tempId), (current) =>
+      current ? { ...current, title: "茅台临时改名" } : current,
+    );
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempId))?.title).toBe("茅台临时改名");
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: tempId });
+  });
 });

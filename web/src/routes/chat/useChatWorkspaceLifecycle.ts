@@ -82,7 +82,11 @@ import {
   readAgentLastSessionMap,
   rememberAgentLastSession,
 } from "./chatAgentSessionMemory";
-import { defaultNewSessionTitle, isDefaultNewSessionTitle } from "./useChatSessionRenameMenu";
+import {
+  consumeTempSessionTitleCommit,
+  defaultNewSessionTitle,
+  isDefaultNewSessionTitle,
+} from "./useChatSessionRenameMenu";
 import { rollbackSessionRename } from "./chatSessionRenameRollback";
 import type { ChatRouteSelection } from "./chatSelectionProjection";
 import {
@@ -444,9 +448,16 @@ export function useChatWorkspaceLifecycle({
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
       const agentDisplayName = String(agentRow?.displayName || agentRow?.agentCode || "").trim();
       // Match backend: a new session starts from the placeholder label; the
-      // first user turn generates the real title.
+      // first user turn generates the real title. A title already committed on
+      // this temp shell survives a rejected-create retry.
       const title = defaultNewSessionTitle(lang);
-      const optimisticDetail = buildSessionCreateShell(intent, title, agentDisplayName || undefined);
+      const existingShellTitle = String(
+        queryClient.getQueryData<SessionDetail>(queryKeys.session(tempSessionId))?.title || "",
+      ).trim();
+      const shellTitle = existingShellTitle && !isDefaultNewSessionTitle(existingShellTitle)
+        ? existingShellTitle
+        : title;
+      const optimisticDetail = buildSessionCreateShell(intent, shellTitle, agentDisplayName || undefined);
       // Do not await cancelQueries — waiting freezes tab switching while list
       // queries are in flight, same as deleteSessionMutation.
       void queryClient.cancelQueries({ queryKey: ["sessions", "query"] });
@@ -539,14 +550,20 @@ export function useChatWorkspaceLifecycle({
         || "",
       ).trim();
       const fallbackTitle = serverTitle || agentLabel || defaultNewSessionTitle(lang);
-      // Create no longer enters rename: the draft only counts when the operator
-      // opened the temp tab's editor while the POST was in flight.
-      const editingTempTitle = Boolean(
-        tempSessionId && editingSessionIdRef.current === tempSessionId,
+      // Create no longer enters rename. An open editor wins; once the operator
+      // confirms, the closed editor's title stays on the temp shell.
+      const titleCommitClosedEditor = Boolean(
+        tempSessionId && consumeTempSessionTitleCommit(tempSessionId),
       );
+      const editingTempTitle = Boolean(
+        tempSessionId && editingSessionIdRef.current === tempSessionId && !titleCommitClosedEditor,
+      );
+      const cachedTempTitle = tempSessionId && !editingTempTitle
+        ? String(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempSessionId))?.title || "").trim()
+        : "";
       const liveDraft = editingTempTitle
         ? String(editingSessionTitleRef.current || "").trim()
-        : "";
+        : cachedTempTitle;
       const keepDraft = Boolean(
         liveDraft
         && liveDraft !== fallbackTitle
