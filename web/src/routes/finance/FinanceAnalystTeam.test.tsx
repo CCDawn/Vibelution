@@ -11,7 +11,9 @@ const api = vi.hoisted(() => ({
   team: vi.fn(), provision: vi.fn(), runs: vi.fn(), exact: vi.fn(), create: vi.fn(), session: vi.fn(), primary: vi.fn(),
   record: vi.fn(), debate: vi.fn(), synthesis: vi.fn(), stop: vi.fn(), approvals: vi.fn().mockResolvedValue([]),
   recoveryStatus: vi.fn(), recoverSynthesis: vi.fn(),
+  reportText: vi.fn(),
 }));
+vi.mock("../../api/financialReports", async (original) => ({ ...await original<typeof import("../../api/financialReports")>(), fetchFinancialReportText: api.reportText }));
 vi.mock("../../api/financialTeam", async () => ({
   ...await vi.importActual<typeof import("../../api/financialTeam")>("../../api/financialTeam"),
   createFinancialTeamRun: api.create,
@@ -267,6 +269,7 @@ beforeEach(() => {
   });
   api.stop.mockResolvedValue({});
   api.recoveryStatus.mockResolvedValue({ available: false, reason: "" });
+  api.reportText.mockResolvedValue("综合结论");
 });
 
 afterEach(async () => {
@@ -276,6 +279,43 @@ afterEach(async () => {
 });
 
 describe("Finance analyst team", () => {
+  it("shows the exact exported synthesis instead of unsupported native conclusion amounts", async () => {
+    currentRun = makeRun();
+    currentRun.coordinationStatus = "completed";
+    currentRun.stage = "synthesis";
+    roleKeys.forEach((role) => { currentRun!.analysts[role]!.turnId = "turn-" + role; });
+    currentRun.synthesis.turnId = "turn-synthesis";
+    const raw = "## 结论\n利润999亿元。";
+    api.session.mockImplementation(async (sessionId: string) => {
+      const ref = sessionId === currentRun!.synthesis.sessionId ? currentRun!.synthesis : Object.values(currentRun!.analysts).find((item) => item?.sessionId === sessionId);
+      return detailFor(sessionId, ref, sessionId === currentRun!.synthesis.sessionId ? raw : "本轮分析");
+    });
+    api.reportText.mockResolvedValue("## 结论\n利润没有这一项。");
+    await render();
+    const synthesis = container.querySelector("[data-financial-team-synthesis]");
+    expect(synthesis?.textContent).not.toContain("999亿元");
+    expect(synthesis?.textContent).toContain("没有这一项");
+    expect(synthesis?.textContent).toContain("结论金额缺少证据");
+    expect(api.reportText).toHaveBeenCalledWith({ assistantAgentId: assistant.agentId, sessionId: "session-assistant", turnId: "turn-synthesis" }, { signal: expect.any(AbortSignal) });
+    expect(api.primary).not.toHaveBeenCalled();
+  });
+
+  it("does not request a formal report for a stopped synthesis even if its final item has text", async () => {
+    currentRun = makeRun();
+    currentRun.coordinationStatus = "blocked";
+    currentRun.stage = "synthesis";
+    roleKeys.forEach((role) => { currentRun!.analysts[role]!.turnId = "turn-" + role; });
+    currentRun.synthesis.turnId = "turn-synthesis";
+    api.session.mockImplementation(async (sessionId: string) => {
+      const ref = sessionId === currentRun!.synthesis.sessionId ? currentRun!.synthesis : Object.values(currentRun!.analysts).find((item) => item?.sessionId === sessionId);
+      const detail = detailFor(sessionId, ref, "终止前遗留内容");
+      return sessionId === currentRun!.synthesis.sessionId ? { ...detail, terminalReason: "stopped", lastTurnTerminalTurnId: "turn-synthesis" } : detail;
+    });
+    await render();
+    expect(api.reportText).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-financial-team-synthesis]")?.textContent).toContain("已停止");
+  });
+
   it("requires an explicit setup action before provisioning the five native Agents", async () => {
     api.team.mockImplementation(async () => team("needs_setup"));
     await render();

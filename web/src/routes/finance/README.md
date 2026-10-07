@@ -48,6 +48,8 @@ The overview reuses watch quotes, native research records, batches and schedules
 
 The report body and brief read the bounded Markdown export for the exact Agent/Session/Turn. That service grounds the body against full tool results in the native journal; the conversation's truncated tool preview cannot substitute for full evidence. Identity changes abort the read and hide old results; errors remain retryable. Native answer text stays unchanged.
 
+The team synthesis panel uses the same exact-Turn grounded body as the report export, never the ungrounded native answer as a fallback. A newly masked conclusion amount produces a compact missing-evidence notice. Analyst cards and native conversations remain original source material. This does not automatically bring other analysts' tool evidence into the synthesis Turn or claim a full cross-Agent fact check.
+
 Confirmed native tombstones or exact-report 404 responses disable missing-case exports and original-session actions while preserving editable notes. Network and permission failures remain retryable errors. Public facets provide an explicit refresh action. Known US provider exchange suffixes are normalized against the canonical symbol before persisting identities; class-share tickers such as `BRK.B` remain intact.
 
 ## Paper account and portfolio

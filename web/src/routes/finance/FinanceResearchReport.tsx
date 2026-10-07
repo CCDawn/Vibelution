@@ -5,7 +5,7 @@ import { LazyConversationMarkdownRenderer } from "../../components/conversation/
 import { VButton, VStateSurface, VSurface, VTabs } from "../../components/vui";
 import { researchTablePreview, stockResearchReportFromText, type ReportCitation, type ResearchDepth, type ResearchScope, type StockResearchReport } from "./stockResearchModel";
 import { FinanceReportExport } from "./FinanceReportExport";
-import { fetchFinancialReportText } from "../../api/financialReports";
+import { FinanceReportEvidenceNotice, FinanceReportReadState, useGroundedFinancialReport } from "./FinanceGroundedReport";
 
 const researchScopeLabels: Record<ResearchScope, { zh: string; en: string }> = {
   comprehensive: { zh: "综合研究", en: "Comprehensive" },
@@ -23,28 +23,14 @@ const researchDepthLabels: Record<ResearchDepth, { zh: string; en: string }> = {
 
 export function FinanceResearchReport({ report: projectedReport, assistantAgentId, sessionId, zh, onCitation, onResearch, busy = false, summaryOnly = false }: { report: StockResearchReport | null; assistantAgentId: string; sessionId: string; zh: boolean; onCitation: (citation: ReportCitation) => void; onResearch: () => void; busy?: boolean; summaryOnly?: boolean }) {
   const [tab, setTab] = useState("all");
-  const [verified, setVerified] = useState<{ key: string; text?: string; error?: string } | null>(null);
-  const [retry, setRetry] = useState(0);
   const turnId = projectedReport?.turnId ?? "";
-  const reportKey = JSON.stringify([assistantAgentId, sessionId, turnId]);
+  const verified = useGroundedFinancialReport({ assistantAgentId, sessionId, turnId });
+  const reportKey = verified.key;
   useEffect(() => setTab("all"), [reportKey]);
-  useEffect(() => {
-    if (!turnId) return;
-    const controller = new AbortController();
-    setVerified({ key: reportKey });
-    void fetchFinancialReportText({ assistantAgentId, sessionId, turnId }, { signal: controller.signal }).then(
-      (text) => { if (!controller.signal.aborted) setVerified({ key: reportKey, text }); },
-      (error: unknown) => { if (!controller.signal.aborted) setVerified({ key: reportKey, error: error instanceof Error ? error.message : "Report unavailable" }); },
-    );
-    return () => controller.abort();
-  }, [assistantAgentId, sessionId, turnId, reportKey, retry]);
-  const report = useMemo(() => projectedReport && verified?.key === reportKey && verified.text
-    ? stockResearchReportFromText(projectedReport, verified.text) : null, [projectedReport, reportKey, verified]);
+  const report = useMemo(() => projectedReport && verified.text
+    ? stockResearchReportFromText(projectedReport, verified.text) : null, [projectedReport, verified.text]);
   if (!projectedReport) return <VStateSurface density="compact" tone={busy ? "loading" : "empty"} busy={busy} title={busy ? (zh ? "研究进行中" : "Research running") : (zh ? "这只股票还没有研究报告" : "No report for this stock")} actions={!busy ? <VButton variant="secondary" onPress={onResearch}>{zh ? "发起研究" : "Start research"}</VButton> : undefined}>{busy ? (zh ? "研究过程见右侧，完成后显示报告。" : "Follow progress on the right. The report appears after completion.") : undefined}</VStateSurface>;
-  if (!report) {
-    const error = verified?.key === reportKey ? verified.error : undefined;
-    return <VStateSurface density="compact" tone={error ? "error" : "loading"} busy={!error} title={error ? (zh ? "报告读取失败" : "Report unavailable") : (zh ? "核验报告" : "Verifying report")} actions={error ? <VButton variant="secondary" onPress={() => setRetry((value) => value + 1)}>{zh ? "重试" : "Retry"}</VButton> : undefined}>{error}</VStateSurface>;
-  }
+  if (!report) return <FinanceReportReadState read={verified} zh={zh} />;
   const selected = report.sections.find((section) => section.id === tab);
   const parameters = report.researchParameters;
   const parameterText = (zhLabel: string, enLabel: string, value: string) => `${zh ? zhLabel : enLabel}${zh ? "：" : ": "}${value}`;
@@ -58,6 +44,7 @@ export function FinanceResearchReport({ report: projectedReport, assistantAgentI
   return <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "研究报告" : "Research report"} data-finance-research-report>
     <div className={styles.heading}><strong className={styles.title}><FileText size={15} />{zh ? (summaryOnly ? "研究简报" : "研究报告") : (summaryOnly ? "Research brief" : "Research report")}</strong><div className={styles.actions}><span className={styles.timestamp}>{report.timestamp ? new Date(report.timestamp).toLocaleDateString("zh-CN") : ""}{busy ? (zh ? " · 上次结果" : " · Previous result") : ""}</span><FinanceReportExport assistantAgentId={assistantAgentId} sessionId={sessionId} turnId={report.turnId} zh={zh} /></div></div>
     {parameterItems.length ? <div className={styles.parameters} role="group" aria-label={zh ? "本次研究参数" : "Research parameters"} data-finance-research-metadata>{parameterItems.map((item) => <span key={item.id} className={styles.parameter}>{item.text}</span>)}</div> : null}
+    <FinanceReportEvidenceNotice text={report.text} originalText={projectedReport.text} zh={zh} />
     {summaryOnly && report.summary ? <p className={styles.summary}>{report.summary}</p> : null}
     {summaryOnly && !report.summary && researchTablePreview(report.text) ? <div className={styles.body}><LazyConversationMarkdownRenderer content={researchTablePreview(report.text)} language={zh ? "zh" : "en"} /></div> : null}
     {!summaryOnly ? <>

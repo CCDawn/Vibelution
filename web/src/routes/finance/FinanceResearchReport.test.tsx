@@ -71,7 +71,7 @@ describe("FinanceResearchReport research metadata", () => {
     let resolveOld!: (text: string) => void;
     vi.mocked(fetchFinancialReportText).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
     const container = await render();
-    expect(container.textContent).toContain("核验报告");
+    expect(container.textContent).toContain("读取核验正文");
     vi.mocked(fetchFinancialReportText).mockRejectedValueOnce(new Error("Unavailable"));
     await act(async () => root?.render(<FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-2" zh onCitation={() => {}} onResearch={() => {}} />));
     await act(async () => resolveOld("Other session private result"));

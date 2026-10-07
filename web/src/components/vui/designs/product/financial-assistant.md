@@ -152,6 +152,17 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 报告标题区使用下方 `FinanceReportExport` 的共用导出菜单，支持 PDF、Markdown、JSON、Word 和打印。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印在当前页面的无脚本 sandbox iframe 内隔离展示；PDF 生成失败后可下载独立打印版 HTML。HTML 下载仍是 HTML，不标记为已生成 PDF。
 打印内容使用有界 `srcdoc`，加载失败或未收到打印完成确认时尝试下载单份报告 HTML，并说明需要在浏览器打开后打印；不打印整个工作台。
 
+## FinanceGroundedReportBody / FinanceReportReadState / FinanceReportEvidenceNotice
+
+### 功能
+股票报告与五方研究的主助手综合结论共用精确 Agent/Session/Turn 的 Markdown 导出读取。页面展示和文件导出保持相同的金额证据处理，核验只覆盖该报告 Turn 的原生证据，不宣称完成所有分析员的跨 Turn 审核。
+
+### 适用范围
+仅展示已经完成的正式报告或综合结论；分析员角色卡和原生对话保留真实原文。读取期间不展示原文替代品，失败保留重试，切换身份中止旧请求并拒收晚到响应。
+
+### 使用方式
+`FinanceGroundedReportBody` 接收精确报告 target、原始回答和语言。共享 hook 供 `FinanceResearchReport` 保留章节与研究参数。`FinanceReportReadState` 复用 compact `VStateSurface` 与 `VButton` 显示加载/失败重试；`FinanceReportEvidenceNotice` 仅在核验正文新增缺证据占位时显示一条 warning，不给全报告通过标记。正文继续使用原生 Markdown renderer，不新增设计 token、布局记忆或存储。
+
 ## FinanceSessionMenu / useFinanceSessionLifecycle
 
 ### 功能与使用

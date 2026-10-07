@@ -227,3 +227,4 @@
 | `FinanceManualPositions` | [product/financial-assistant.md](./product/financial-assistant.md#financemanualpositions) |
 | `FinanceReportsCenter` | [product/financial-assistant.md](./product/financial-assistant.md#financereportscenter) |
 | `FinanceReportExport` | [product/financial-assistant.md](./product/financial-assistant.md#financereportexport) |
+| `FinanceGroundedReportBody` / `FinanceReportReadState` / `FinanceReportEvidenceNotice` | [product/financial-assistant.md](./product/financial-assistant.md#financegroundedreportbody--financereportreadstate--financereportevidencenotice) |
