@@ -19,6 +19,24 @@ currencies, other stocks, forecasts, field collisions and arithmetic are not
 authorized by that quote. Price ranges and derived returns still require their
 own evidence; source-provided PE/PB values do not verify their calculation basis.
 
+The report projection can also recompute explicitly named MA5/MA10/MA20 values
+from daily `close` rows, plus a close-to-close return whose start and end dates
+are both named. It accepts only one successful same-Turn snapshot containing
+the full requested candle window, with a matching stock, Tencent source, quote
+date in the declared market time zone, currency, daily period and market
+adjustment (`qfq` for CN; `raw` for HK/US), and at most 120 valid candles. Older
+candles omitted by the tool's requested limit are allowed; output-length
+trimming, analysis-date filtering and candle errors are not.
+Moving averages use the latest N closes ending on the quote date. Date-range
+returns use `(end close / start close - 1) × 100`; displayed amounts are checked
+to at most two decimal places with `ROUND_HALF_UP`. Each matching conclusion
+occurrence is verified independently. Incomplete request windows, missing
+endpoint dates, ambiguous multi-stock context, forecasts, box ranges and fuzzy
+periods such as “近30天” do not authorize values. The provider's rows are
+checked for valid unique ascending dates and consistent tool counts; no
+exchange calendar is inferred, so this does not prove that a provider omitted
+no trading session.
+
 Batch export reuses the same exact-Turn authorization and validation for every
 member. It accepts at most 20 distinct reports, limits uncompressed content to
 8 MB, and returns a ZIP in memory. Reports and ZIP packages are not persisted.
