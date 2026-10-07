@@ -3,10 +3,11 @@ import type { FinancialReportSummary } from "../../api/types/financialReports";
 import { VSurface, VStateSurface } from "../../components/vui";
 import styles from "./FinanceWorkspaceInspector.styles";
 
-export function FinanceWorkspaceInspector({ area, title, stock, snapshot, report, selection, preparing, date, zh }: {
-  area: string; title: string; stock: StockIdentity; snapshot?: StockSnapshot;
+export function FinanceWorkspaceInspector({ area, title, topicTitle, stock, snapshot, report, selection, preparing, date, zh }: {
+  area: string; title: string; topicTitle?: string; stock: StockIdentity; snapshot?: StockSnapshot;
   report: FinancialReportSummary | null; selection: { sessionId: string; turnId: string } | null; preparing: boolean; date: string; zh: boolean;
 }) {
+  if (area === "workspace" && topicTitle) return <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "当前研究主题" : "Research topic"}><strong className={styles.title} title={topicTitle}>{topicTitle}</strong></VSurface>;
   if (area === "reports" || area === "review") return report ? <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "当前报告" : "Selected report"}>
     <strong className={styles.title} title={report.title}>{report.title}</strong>
     <p className={styles.line} title={report.sessionTitle}>{report.sessionTitle}</p>

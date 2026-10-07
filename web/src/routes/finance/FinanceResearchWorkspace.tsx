@@ -123,7 +123,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const returnTo = `${location.pathname}${location.search}`;
   useEffect(() => {
-    if (preparing || area !== "workspace" || tab !== "research" || !nativeReady || !messages.length || currentView?.transcriptPending || hydratedSession.current === sessionId) return;
+    if (preparing || area !== "workspace" || !["research", "report"].includes(tab) || !nativeReady || !messages.length || currentView?.transcriptPending || hydratedSession.current === sessionId) return;
     hydratedSession.current = sessionId;
     setResearchKind(currentView?.title.startsWith("主题 ·") ? "topic" : "stock");
     const identity = [...messages].reverse().flatMap((message) => message.role === "user" ? [stockFromResearchRequest(message.content)] : []).find((item) => item !== null);
@@ -250,7 +250,7 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const nativeProcess = <FinanceResearchProcess view={currentView} activeTurn={activeTurn?.sessionId === sessionId ? activeTurn.turn : null} zh={zh} onEnableMarket={assistant.marketToolStatus === "upgrade_available" ? () => void enableMarketQueries() : undefined} marketPending={upgradingMarket} marketDisabled={marketUpgradeDisabled} onOpenChat={onOpenResearchChat} />;
   const contextTitle = activeGroup.areas.find(item => item.id === area);
   const aside = <div className={styles.workspaceAsideBody}>{asideTab === "process" ? area === "team" ? <FinanceAnalystTeamInspector run={teamSelectedRun?.assistantAgentId === assistant.agentId ? teamSelectedRun : null} zh={zh} onOpenSession={(id) => routeRef.current.openSession(id, { surface: "chat", replace: false, telemetrySource: "finance_team_inspector" })} /> : area === "workspace" && tab === "research" ? nativeProcess : <>
-    <FinanceWorkspaceInspector area={area} title={zh ? contextTitle?.zh || activeGroup.zh : contextTitle?.en || activeGroup.en} stock={stocks.selected} snapshot={market.data} report={selectedReportContext} selection={selectedReport} preparing={preparing} date={config.date} zh={zh} />
+    <FinanceWorkspaceInspector area={area} title={zh ? contextTitle?.zh || activeGroup.zh : contextTitle?.en || activeGroup.en} topicTitle={researchKind === "topic" ? currentView?.title : undefined} stock={stocks.selected} snapshot={market.data} report={selectedReportContext} selection={selectedReport} preparing={preparing} date={config.date} zh={zh} />
     {busy || currentView?.stopping ? <><p className={inspectorStyles.running}>{zh ? "正在运行的研究" : "Running research"} · {currentView?.title}</p>{nativeProcess}</> : null}
   </> : <FinanceReportLibrary assistant={assistant} zh={zh} returnTo={returnTo} citation={citation} />}</div>;
   const stockLookup = <div className={styles.workspaceMarketSearch}>

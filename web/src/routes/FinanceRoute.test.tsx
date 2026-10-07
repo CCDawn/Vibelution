@@ -13,9 +13,11 @@ import { useFinancialResearchSessionBridge } from "./finance/FinancialResearchBr
 import type { SessionDetail, SessionLlmModelOption, SessionModelSelection, SessionQueryResponse } from "../api/types";
 import { fetchFinancialStock, searchFinancialStocks } from "../api/financialMarket";
 import { listArchivedChatSessions, unarchiveChatSession } from "../api/sessionArchive";
+import { fetchFinancialReportText } from "../api/financialReports";
 
 const nativeSubmit = vi.fn();
 let nativeMessages: SessionDetail["messages"] = [];
+let nativeTitle = "原生研究";
 let modelContextWindow = 128_000;
 const researchModel: SessionLlmModelOption = { modelId: "research", modelRef: "provider/research", model: "research", label: "研究模型", providerId: "provider", providerLabel: "Provider", providerKind: "openai", apiKeyConfigured: true, missingApiKey: false, supportsReasoningEffort: true, reasoningEffortValues: ["low", "medium", "high"], reasoningEffortOptions: [], defaultReasoningEffort: "medium", isDefault: true };
 
@@ -28,7 +30,7 @@ vi.mock("../api/financialPreferences", async (original) => ({
   fetchFinancialWorkspace: vi.fn(async (agentId: string) => ({ schemaVersion: 1, agentId, revision: 0, updatedAt: "", selectedStock: null, watchlist: [], profiles: [], manualPositions: [], reviewCases: [] })),
   updateFinancialWorkspace: vi.fn(async (agentId: string, revision: number, patch: object) => ({ schemaVersion: 1, agentId, revision: revision + 1, updatedAt: "", selectedStock: null, watchlist: [], profiles: [], manualPositions: [], reviewCases: [], ...patch })),
 }));
-vi.mock("../api/financialReports", async (original) => ({ ...await original<typeof import("../api/financialReports")>(), fetchFinancialReports: vi.fn(async () => ({ items: [], nextCursor: "", totalEstimate: 0 })) }));
+vi.mock("../api/financialReports", async (original) => ({ ...await original<typeof import("../api/financialReports")>(), fetchFinancialReportText: vi.fn(), fetchFinancialReports: vi.fn(async () => ({ items: [], nextCursor: "", totalEstimate: 0 })) }));
 vi.mock("./finance/FinanceDashboard", () => ({ FinanceDashboard: () => <div>市场概览</div> }));
 vi.mock("./finance/FinancePaperTrading", () => ({ FinancePaperTrading: () => <div>模拟账户</div> }));
 vi.mock("../api/sessionArchive", () => ({ unarchiveChatSession: vi.fn(), archiveChatSession: vi.fn(), listArchivedChatSessions: vi.fn() }));
@@ -41,7 +43,7 @@ vi.mock("./ChatCodingRoute", () => ({ ChatCodingRoute: () => {
   const onSelectionChange = React.useCallback((_id: string, next: SessionModelSelection | null) => setSelection(next), []);
   const options = React.useMemo(() => ({ sessionId: id, currentModelId: researchModel.modelRef, currentReasoningEffort: "medium", model: { ...researchModel, contextWindow: modelContextWindow, runtimeSelectable: true, providerHealthy: true }, choices: [{ ...researchModel, contextWindow: modelContextWindow, runtimeSelectable: true, providerHealthy: true }] }), [id]);
   useFinancialResearchSessionBridge({
-    sessionId: id, agentId: "finance-a", title: "原生研究", status: "idle", busy: false, stopping: false,
+    sessionId: id, agentId: "finance-a", title: nativeTitle, status: "idle", busy: false, stopping: false,
     messages: nativeMessages,
     sessionLlmOptions: options, turnModelSelection: selection, onTurnModelSelectionChange: onSelectionChange,
     onComposerChange: setDraft, onFocusComposer: () => {},
@@ -66,6 +68,7 @@ function LocationEcho() {
 beforeEach(() => {
   vi.resetAllMocks();
   nativeMessages = [];
+  nativeTitle = "原生研究";
   modelContextWindow = 128_000;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -157,6 +160,21 @@ describe("financial assistant page", () => {
     expect(container.querySelector('[aria-label="当前股票"]')?.textContent).toContain("贵州茅台");
     expect(container.querySelector('[aria-label="当前股票"]')?.textContent).not.toContain("腾讯控股");
     expect(createChatSession).not.toHaveBeenCalled();
+  });
+  it("restores a topic report deep link without showing an unrelated selected stock", async () => {
+    nativeTitle = "主题 · 平安银行公开行情验收";
+    nativeMessages = [
+      { role: "user", id: "u", timestamp: "", content: "请对以下主题开展投资研究：平安银行公开行情验收" },
+      { role: "assistant", id: "a", turnId: "topic-turn", timestamp: "2026-10-07T06:40:00Z", status: "completed", turnItems: [{ type: "agent_message", phase: "final_answer", status: "completed", text: "## 结论\n报价没有这一项/股" }] },
+    ] as never;
+    vi.mocked(fetchFinancialReportText).mockResolvedValue("## 结论\n平安银行（sz000001）最新公开报价11.57元/股");
+    await render("/finance?session=native-session&finance_tab=report");
+    await settle();
+    expect(container.querySelector("[data-finance-report-body]")?.textContent).toContain("11.57元/股");
+    expect(container.querySelector('[aria-label="当前研究主题"]')?.textContent).toContain(nativeTitle);
+    expect(container.querySelector('[aria-label="当前股票"]')).toBeNull();
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
   });
   it("opens the native conversation first and retains all grouped workspace views", async () => {
     await render("/finance?session=native-session");
