@@ -25,8 +25,24 @@ type CollapseControl = {
   collapseLabel: string;
   expandLabel: string;
 } & (
-  | { collapsed: boolean; onCollapsedChange: (collapsed: boolean) => void }
-  | { collapsed?: undefined; onCollapsedChange?: undefined }
+  | {
+      /** Default placement keeps the toggle in the separator rail. */
+      placement?: "rail";
+      collapsed: boolean;
+      onCollapsedChange: (collapsed: boolean) => void;
+    }
+  | {
+      /** Default placement keeps the toggle in the separator rail. */
+      placement?: "rail";
+      collapsed?: undefined;
+      onCollapsedChange?: undefined;
+    }
+  | {
+      /** Header placement leaves the toggle to the owning page, which must control this state. */
+      placement: "header";
+      collapsed: boolean;
+      onCollapsedChange: (collapsed: boolean) => void;
+    }
 );
 
 export type VSplitWorkspaceResizeConfig = {
@@ -34,7 +50,7 @@ export type VSplitWorkspaceResizeConfig = {
   layoutId: string;
   sidebar?: Partial<PaneSpec>;
   aside?: Partial<PaneSpec>;
-  /** Optional collapse controls. Width memory remains owned by layoutId. */
+  /** Optional collapse controls. Header placement requires owner-controlled state; width memory remains owned by layoutId. */
   collapse?: {
     sidebar?: CollapseControl;
     aside?: CollapseControl;
@@ -209,20 +225,34 @@ function ResizableSplitWorkspace({
             {sidebar}
           </aside>
           {resize.collapse?.sidebar ? (
-            <PaneCollapseHandle
-              side="left"
-              collapsed={sidebarCollapsed}
-              separatorLabel={resize.collapse.sidebar.separatorLabel}
-              collapseLabel={resize.collapse.sidebar.collapseLabel}
-              expandLabel={resize.collapse.sidebar.expandLabel}
-              valueNow={sidebarWidth}
-              valueMin={sidebarSpec.minWidth}
-              valueMax={sidebarSpec.maxWidth}
-              active={draggingPaneId === sidebarSpec.id}
-              onToggle={() => togglePane(sidebarSpec.id, resize.collapse?.sidebar, sidebarCollapsed)}
-              onPointerDown={sidebarCollapsed ? undefined : (event) => startResize(sidebarSpec.id, event, { direction: 1 })}
-              onKeyDown={sidebarCollapsed ? undefined : (event) => onResizeKeyDown(sidebarSpec.id, event, { direction: 1 })}
-            />
+            resize.collapse.sidebar.placement === "header" ? (
+              sidebarCollapsed ? null : (
+                <PaneResizeHandle
+                  label={resize.collapse.sidebar.separatorLabel}
+                  valueNow={sidebarWidth}
+                  valueMin={sidebarSpec.minWidth}
+                  valueMax={sidebarSpec.maxWidth}
+                  active={draggingPaneId === sidebarSpec.id}
+                  onPointerDown={(event) => startResize(sidebarSpec.id, event, { direction: 1 })}
+                  onKeyDown={(event) => onResizeKeyDown(sidebarSpec.id, event, { direction: 1 })}
+                />
+              )
+            ) : (
+              <PaneCollapseHandle
+                side="left"
+                collapsed={sidebarCollapsed}
+                separatorLabel={resize.collapse.sidebar.separatorLabel}
+                collapseLabel={resize.collapse.sidebar.collapseLabel}
+                expandLabel={resize.collapse.sidebar.expandLabel}
+                valueNow={sidebarWidth}
+                valueMin={sidebarSpec.minWidth}
+                valueMax={sidebarSpec.maxWidth}
+                active={draggingPaneId === sidebarSpec.id}
+                onToggle={() => togglePane(sidebarSpec.id, resize.collapse?.sidebar, sidebarCollapsed)}
+                onPointerDown={sidebarCollapsed ? undefined : (event) => startResize(sidebarSpec.id, event, { direction: 1 })}
+                onKeyDown={sidebarCollapsed ? undefined : (event) => onResizeKeyDown(sidebarSpec.id, event, { direction: 1 })}
+              />
+            )
           ) : (
             <PaneResizeHandle
               label="调整左侧栏宽度"
@@ -245,20 +275,34 @@ function ResizableSplitWorkspace({
       {aside && asideSpec ? (
         <>
           {resize.collapse?.aside ? (
-            <PaneCollapseHandle
-              side="right"
-              collapsed={asideCollapsed}
-              separatorLabel={resize.collapse.aside.separatorLabel}
-              collapseLabel={resize.collapse.aside.collapseLabel}
-              expandLabel={resize.collapse.aside.expandLabel}
-              valueNow={asideWidth}
-              valueMin={asideSpec.minWidth}
-              valueMax={asideSpec.maxWidth}
-              active={draggingPaneId === asideSpec.id}
-              onToggle={() => togglePane(asideSpec.id, resize.collapse?.aside, asideCollapsed)}
-              onPointerDown={asideCollapsed ? undefined : (event) => startResize(asideSpec.id, event, { direction: -1 })}
-              onKeyDown={asideCollapsed ? undefined : (event) => onResizeKeyDown(asideSpec.id, event, { direction: -1 })}
-            />
+            resize.collapse.aside.placement === "header" ? (
+              asideCollapsed ? null : (
+                <PaneResizeHandle
+                  label={resize.collapse.aside.separatorLabel}
+                  valueNow={asideWidth}
+                  valueMin={asideSpec.minWidth}
+                  valueMax={asideSpec.maxWidth}
+                  active={draggingPaneId === asideSpec.id}
+                  onPointerDown={(event) => startResize(asideSpec.id, event, { direction: -1 })}
+                  onKeyDown={(event) => onResizeKeyDown(asideSpec.id, event, { direction: -1 })}
+                />
+              )
+            ) : (
+              <PaneCollapseHandle
+                side="right"
+                collapsed={asideCollapsed}
+                separatorLabel={resize.collapse.aside.separatorLabel}
+                collapseLabel={resize.collapse.aside.collapseLabel}
+                expandLabel={resize.collapse.aside.expandLabel}
+                valueNow={asideWidth}
+                valueMin={asideSpec.minWidth}
+                valueMax={asideSpec.maxWidth}
+                active={draggingPaneId === asideSpec.id}
+                onToggle={() => togglePane(asideSpec.id, resize.collapse?.aside, asideCollapsed)}
+                onPointerDown={asideCollapsed ? undefined : (event) => startResize(asideSpec.id, event, { direction: -1 })}
+                onKeyDown={asideCollapsed ? undefined : (event) => onResizeKeyDown(asideSpec.id, event, { direction: -1 })}
+              />
+            )
           ) : (
             <PaneResizeHandle
               label="调整右侧栏宽度"

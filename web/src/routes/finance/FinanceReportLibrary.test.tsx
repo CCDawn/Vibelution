@@ -65,6 +65,23 @@ describe("financial report library", () => {
     expect(node.textContent).not.toContain("当前引用");
     expect(node.querySelector<HTMLAnchorElement>('a[target="_blank"]')?.href).toBe("https://example.com/report.pdf#page=12");
   });
+  it("renders alternate source citations as compact icon, title, and page rows", async () => {
+    const page63 = {
+      ...source,
+      sourceArtifactId: "page63",
+      title: "现金流量表原始披露",
+      sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, page: 63 } },
+    };
+    vi.mocked(listKnowledgeItems).mockResolvedValue({ items: [{ ...item, sourceArtifactIds: ["source", "page63"] }] });
+    vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [source, page63] } });
+    await render();
+    const row = [...node.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("现金流量表原始披露"));
+
+    expect(row?.className).toContain("!min-h-8");
+    expect(row?.querySelector("svg")).not.toBeNull();
+    expect(row?.querySelector("strong")?.title).toBe("现金流量表原始披露");
+    expect(row?.textContent).toContain("第63页");
+  });
   it("does not read or display expired source bodies", async () => {
     vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [{ ...source, expiresAt: "2020-01-01" }] } });
     await render();

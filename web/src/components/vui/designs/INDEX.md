@@ -218,6 +218,7 @@
 | 组件 | 设计说明 |
 | --- | --- |
 | `SpecialistAgentMenu` / `FinanceRoute` | [product/financial-assistant.md](./product/financial-assistant.md) |
+| `FinanceWorkspaceSidebar` | [product/financial-assistant.md](./product/financial-assistant.md#financeworkspacesidebar) |
 | `FinanceDashboard` | [product/financial-assistant.md](./product/financial-assistant.md#financedashboard) |
 | `FinanceScreenWorkspace` | [product/financial-assistant.md](./product/financial-assistant.md#financescreenworkspace) |
 | `FinanceResearchConfig` | [product/financial-assistant.md](./product/financial-assistant.md#financeresearchconfig) |

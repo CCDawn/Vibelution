@@ -16,13 +16,13 @@ pathname 决定当前项及按钮高亮。Radix 管理键盘、Esc、外点和�
 ## FinanceRoute
 
 ### 功能
-`/finance` 是炒股智能体的桌面投研工作台。菜单进入、加载、失败与正式页面共用 `financial-assistant-workspace` 框架。左栏放股票搜索、自选、真实研究记录和报告中心；中间展示股票概况、K 线、研究设置、原生对话和报告；右栏展示真实执行过程与财报引用。还没有助手时，入口创建身份、空财报库和会话；打不开时在原布局内给原因和重试。
+`/finance` 是炒股智能体的桌面投研工作台。菜单进入、加载、失败与正式页面共用 `financial-assistant-workspace` 框架。默认进入原生研究对话；左栏优先展示真实会话，底部只有研究、行情、资产、资料四组入口；股票搜索和自选放在行情。中间保留股票概况、K 线、研究设置与报告，右栏展示真实执行过程与财报引用。还没有助手时，入口创建身份、空财报库和会话；打不开时在原布局内给原因和重试。
 
 ### 适用范围
 本地金融专家的桌面 A 股、港股和美股研究与独立 A 股模拟账户。参考 TradingAgents-CN v3.0 社区版的研究、筛选、自选、报告、记忆、技能、学习与模拟交易信息架构；独立实现，不复制受限前后端源码。真实券商交易与 Pro 专属交易系统不属于这个页面。
 
 ### 使用方式
-复用 `VSplitWorkspace`、`VStateSurface`、`VSkeleton`、`VInput`、`VSelect`、`VTabs`、`VButton`、`VChip`、`VIconButton`、`VSurface` 与 `VRouteLinkButton`。桌面三栏可拖动、折叠，宽度只经 `WORKBENCH_LAYOUT_IDS.finance` 与共享 pane persistence 保存。不做手机版和手机弹窗；1280px 与 1920px 桌面窗口均需验收。Finance 样式来源显式登记在 shell Tailwind 入口；路由代码分块加载与入口初始化均使用同一 frame，避免冷启动闪过通用壳。金融页面隐藏泛化聊天 starter，研究设置提供当前会话的模型选择，助手配置入口保留在左栏新研究按钮旁；原生工具授权入口仍完整保留。
+复用 `VSplitWorkspace`、`VStateSurface`、`VSkeleton`、`VInput`、`VSelect`、`VTabs`、`VButton`、`VChip`、`VIconButton`、`VSurface` 与 `VRouteLinkButton`。桌面三栏可拖动、折叠，宽度只经 `WORKBENCH_LAYOUT_IDS.finance` 与共享 pane persistence 保存。收起按钮在各栏标题处，收起后在中间标题处恢复；展开时共享 separator 保留拖动与键盘调整。标题、图标、状态、股票代码和引用页码保持单行，长标题截断并提供完整 title，正文与错误正常换行。不做手机版和手机弹窗；1280px 与 1920px 桌面窗口均需验收。Finance 样式来源显式登记在 shell Tailwind 入口；路由代码分块加载与入口初始化均使用同一 frame，避免冷启动闪过通用壳。金融页面隐藏泛化聊天 starter，研究设置提供当前会话的模型选择，助手配置入口保留在左栏底部；原生工具授权入口仍完整保留。
 GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且并发串行。
 只打开服务端验证 Agent/Session 绑定后返回的 sessionId，经 `useChatRouteSelection.openSession`。
 离开入口后，晚到的结果不导航。已归档或身份已改不另建。
@@ -46,6 +46,17 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 ### 财报资料
 资料栏使用已绑定的 Agent-owned 财报库，所有条目、trace、source body 请求携带同一 agentId 和 knowledgeBaseId。仅显示有效条目；原文来源另核对 sourceArtifactIds、库归属、PDF 类型、生命周期与过期时间。公司、代码、报告期、版本、页码及链接只来自 sourceRef.financialEvidence，不解析自由标题当事实。无元数据就不显示对应字段，无有效原文就不展示摘录。
 摘录使用 React 纯文本；外链只允许无认证信息的 HTTP/HTTPS，打开新窗口使用 noopener。点击报告引用时按有效 sourceRef URL 和 PDF 页码匹配本库来源，定位原文与 `#page=N` 链接；每批最多读取20条有效条目的 trace，未命中再查下一批。读取失败暂停查找，可用现有刷新按钮重试；查完仍未匹配时明确告知，不把无关资料当引用。
+
+## FinanceWorkspaceSidebar
+
+### 功能
+会话占据左栏主要空间，独立滚动并按今天、昨天、更早分组。新研究、会话搜索与最近/已归档切换位于列表上方，四组功能入口和助手配置固定在底部；选中记录自动滚入视野，不反复拉动用户滚动位置。
+
+### 适用范围
+金融助手桌面三栏工作台；只呈现当前金融 Agent 的原生 Session 投影，不存第二份 transcript 或生命周期。
+
+### 使用方式
+组合 `VButton`、`VInput`、`VDropdownMenu`、`VStateSurface` 与既有 `FinanceResearchHistory compact`、`FinanceSessionMenu`。最近会话关键词调用原生 `querySessions(q)`，分页沿同一关键词；已归档关键词明确只筛已加载记录。菜单归档、恢复、删除继续交回 `useFinanceSessionLifecycle`。主区按当前功能派生分组并用 `VTabs` 展示组内页面，保留全部14项入口，不引入第二份导航状态。紧凑行只保留单行标题、原生结果状态及菜单，完整标题在 title 中显示。
 
 ## 对话说明与连接状态
 
