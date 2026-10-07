@@ -385,28 +385,52 @@ def _announcement_stock() -> dict[str, str]:
     }
 
 
+def _periodic_filing(kind: str, title: str, day: str, adjunct: str) -> dict[str, str]:
+    return {
+        "kind": kind,
+        "title": title,
+        "url": f"https://static.cninfo.com.cn/finalpage/{day}/{adjunct}.PDF",
+        "announcedOn": day,
+        "source": "巨潮资讯",
+    }
+
+
+def _all_periodic_filings() -> dict[str, list[dict[str, str]]]:
+    return {
+        "600519": [
+            {**_maotai_filing(), "kind": "annual"},
+            _periodic_filing("semiannual", "贵州茅台2026年半年度报告", "2026-08-15", "1225475868"),
+            _periodic_filing("q1", "贵州茅台2026年一季度报告", "2026-04-25", "1225188741"),
+            _periodic_filing("q3", "贵州茅台2025年第三季度报告", "2025-10-30", "1224764517"),
+        ]
+    }
+
+
 def _notice_payload() -> dict:
     return {
         "data": {
             "list": [
                 _notice_row("贵州茅台2025年年度报告摘要", "AN202604170011"),
                 _notice_row("贵州茅台2025年年度报告", "AN202604170012"),
+                _notice_row("贵州茅台2026年半年度报告", "AN202608150014", "2026-08-15"),
+                _notice_row("贵州茅台2026年一季度报告", "AN202604250015", "2026-04-25"),
+                _notice_row("贵州茅台2025年第三季度报告摘要", "AN202510300016", "2025-10-30"),
                 _notice_row("关于召开股东大会的通知", "AN202605010013", "2026-05-01"),
             ]
         }
     }
 
 
-def test_stock_announcements_prefer_the_cninfo_annual_report(monkeypatch):
+def test_stock_announcements_prefer_cninfo_periodic_reports(monkeypatch):
     calls = []
 
     def lookup(codes, cutoff=None):
         calls.append((list(codes), cutoff))
-        return {"600519": _maotai_filing()}
+        return _all_periodic_filings()
 
     monkeypatch.setattr(research, "_read_json", lambda url: _notice_payload())
     monkeypatch.setattr(research, "_utc_now", lambda: "2026-10-07T00:00:00+00:00")
-    monkeypatch.setattr(research, "lookup_annual_filings", lookup)
+    monkeypatch.setattr(research, "lookup_periodic_filings", lookup)
 
     result = research._load_announcements(_announcement_stock())
 
@@ -416,71 +440,92 @@ def test_stock_announcements_prefer_the_cninfo_annual_report(monkeypatch):
     assert result["sourceUrl"] == "https://www.cninfo.com.cn/"
     assert result["error"] is None
     assert [item["title"] for item in result["items"]] == [
+        "贵州茅台2026年半年度报告",
+        "贵州茅台2026年一季度报告",
         "贵州茅台2025年年度报告",
+        "贵州茅台2025年第三季度报告",
         "关于召开股东大会的通知",
     ]
-    official = result["items"][0]
-    assert official["url"] == _maotai_filing()["url"]
-    assert official["articleCode"] == "cninfo-2026-04-17"
-    assert official["publisher"] == "巨潮资讯"
-    assert official["publishedAt"] == "2026-04-17"
-    assert official["noticeDate"] == "2026-04-17"
-    assert "eastmoney.com" not in official["url"]
-    kept = result["items"][1]
+    by_title = {item["title"]: item for item in result["items"]}
+    annual = by_title["贵州茅台2025年年度报告"]
+    assert annual["url"] == _maotai_filing()["url"]
+    assert annual["articleCode"] == "cninfo-2026-04-17"
+    assert annual["publisher"] == "巨潮资讯"
+    assert by_title["贵州茅台2026年半年度报告"]["articleCode"] == "cninfo-semiannual-2026-08-15"
+    assert by_title["贵州茅台2026年一季度报告"]["articleCode"] == "cninfo-q1-2026-04-25"
+    assert by_title["贵州茅台2025年第三季度报告"]["articleCode"] == "cninfo-q3-2025-10-30"
+    assert all("eastmoney.com" not in item["url"] for item in result["items"][:4])
+    kept = result["items"][-1]
     assert kept["publisher"] == "东方财富"
     assert kept["url"].startswith(
         "https://data.eastmoney.com/notices/detail/600519/AN202605010013"
     )
 
 
-def test_stock_announcements_omit_annual_reprints_without_a_cninfo_original(
+def test_stock_announcements_omit_periodic_reprints_without_a_cninfo_original(
     monkeypatch,
 ):
     monkeypatch.setattr(research, "_read_json", lambda url: _notice_payload())
-    monkeypatch.setattr(research, "lookup_annual_filings", lambda codes, cutoff=None: {})
+    monkeypatch.setattr(research, "lookup_periodic_filings", lambda codes, cutoff=None: {})
 
     result = research._load_announcements(_announcement_stock())
 
     assert result["source"] == "东方财富"
     assert result["sourceUrl"] == "https://data.eastmoney.com/notices/"
-    assert result["error"] == "没有核到巨潮资讯年报原文，未列出年报转载。"
+    assert result["error"] == "没有核到巨潮资讯年报、半年报、一季报、三季报原文，未列出对应转载。"
     assert [item["title"] for item in result["items"]] == ["关于召开股东大会的通知"]
     assert result["items"][0]["publisher"] == "东方财富"
 
 
-def test_stock_announcements_reject_an_untrusted_annual_report_url(monkeypatch):
-    filing = _maotai_filing()
-    filing["url"] = "https://evil.example/annual.pdf"
+def test_stock_announcements_name_only_the_missing_periodic_reports(monkeypatch):
+    found = _all_periodic_filings()
+    found["600519"] = [
+        row for row in found["600519"] if row["kind"] in {"annual", "semiannual"}
+    ]
+    monkeypatch.setattr(research, "_read_json", lambda url: _notice_payload())
+    monkeypatch.setattr(research, "lookup_periodic_filings", lambda codes, cutoff=None: found)
+
+    result = research._load_announcements(_announcement_stock())
+
+    assert result["error"] == "没有核到巨潮资讯一季报、三季报原文，未列出对应转载。"
+    assert [item["title"] for item in result["items"]] == [
+        "贵州茅台2026年半年度报告",
+        "贵州茅台2025年年度报告",
+        "关于召开股东大会的通知",
+    ]
+
+
+def test_stock_announcements_reject_an_untrusted_periodic_report_url(monkeypatch):
+    filing = {**_maotai_filing(), "kind": "annual", "url": "https://evil.example/annual.pdf"}
     monkeypatch.setattr(research, "_read_json", lambda url: _notice_payload())
     monkeypatch.setattr(
         research,
-        "lookup_annual_filings",
-        lambda codes, cutoff=None: {"600519": filing},
+        "lookup_periodic_filings",
+        lambda codes, cutoff=None: {"600519": [filing]},
     )
 
     result = research._load_announcements(_announcement_stock())
 
-    assert result["error"] == "没有核到巨潮资讯年报原文，未列出年报转载。"
+    assert result["error"] == "没有核到巨潮资讯年报、半年报、一季报、三季报原文，未列出对应转载。"
+    assert all("季度报告" not in item["title"] for item in result["items"])
     assert all("年度报告" not in item["title"] for item in result["items"])
     assert all("evil.example" not in item["url"] for item in result["items"])
 
 
-def test_stock_announcements_keep_the_cninfo_original_when_eastmoney_fails(
-    monkeypatch,
-):
+def test_stock_announcements_keep_cninfo_reports_when_eastmoney_fails(monkeypatch):
     def boom(url):
         raise OSError("eastmoney down")
 
     monkeypatch.setattr(research, "_read_json", boom)
     monkeypatch.setattr(
         research,
-        "lookup_annual_filings",
-        lambda codes, cutoff=None: {"600519": _maotai_filing()},
+        "lookup_periodic_filings",
+        lambda codes, cutoff=None: _all_periodic_filings(),
     )
 
     result = research._load_announcements(_announcement_stock())
 
-    assert [item["publisher"] for item in result["items"]] == ["巨潮资讯"]
+    assert [item["publisher"] for item in result["items"]] == ["巨潮资讯"] * 4
     assert result["source"] == "巨潮资讯"
     assert result["error"] == "其它公告暂时不可用。"
 
@@ -493,7 +538,7 @@ def test_stock_announcements_fail_when_both_notice_sources_fail(monkeypatch):
         raise RuntimeError("cninfo down")
 
     monkeypatch.setattr(research, "_read_json", boom)
-    monkeypatch.setattr(research, "lookup_annual_filings", explode)
+    monkeypatch.setattr(research, "lookup_periodic_filings", explode)
 
     with pytest.raises(research.FinancialResearchDataError, match="eastmoney down"):
         research._load_announcements(_announcement_stock())

@@ -9,11 +9,16 @@ from core.web.services.financial_research import official_filings
 from core.web.services.financial_research.official_filings import (
     ANNUAL_CATEGORY,
     FILING_SOURCE,
+    Q1_CATEGORY,
+    Q3_CATEGORY,
     REQUEST_TIMEOUT_SECONDS,
+    SEMIANNUAL_CATEGORY,
     OfficialFilingLookupError,
     accepted_annual_filing,
     lookup_annual_filings,
+    lookup_periodic_filings,
     mentions_annual_report,
+    periodic_reprint_kind,
 )
 
 
@@ -22,8 +27,13 @@ def test_mentions_annual_report_includes_summaries_and_spaced_titles():
     assert mentions_annual_report("贵州茅台2025年年度报告摘要")
     assert mentions_annual_report("年 度 报 告")
     assert mentions_annual_report("年度报告") is True
+    assert not mentions_annual_report("贵州茅台2026年半年度报告")
     assert not mentions_annual_report("关于召开股东大会的通知")
     assert not mentions_annual_report(None)
+    assert periodic_reprint_kind("贵州茅台2026年半年度报告摘要") == "semiannual"
+    assert periodic_reprint_kind("2026年一季度报告") == "q1"
+    assert periodic_reprint_kind("贵州茅台2025年第三季度报告") == "q3"
+    assert periodic_reprint_kind("2025年三季度报告") == "q3"
 
 
 PDF = "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF"
@@ -164,6 +174,63 @@ def test_accepted_filing_rejects_undated_late_and_non_document_urls():
     assert accepted_annual_filing(good, cutoff=date(2026, 4, 16)) is None
     assert accepted_annual_filing({**good, "announcedOn": "2026-02-30"}, cutoff=None) is None
     assert accepted_annual_filing({**good, "title": "贵州茅台2025年年度报告（英文）"}, cutoff=None) is None
+    assert accepted_annual_filing({**good, "title": "贵州茅台2026年半年度报告"}, cutoff=None) is None
     assert accepted_annual_filing({**good, "url": "https://user@static.cninfo.com.cn/finalpage/2026-04-17/1.PDF"}, cutoff=None) is None
     assert accepted_annual_filing({**good, "url": "http://static.cninfo.com.cn/finalpage/2026-04-17/1.PDF"}, cutoff=None) is None
     assert accepted_annual_filing({**good, "url": PDF + "?download=1"}, cutoff=None) is None
+
+
+def test_lookup_periodic_filings_keeps_one_full_report_per_kind(monkeypatch):
+    calls = []
+
+    def fake(path, fields):
+        calls.append((path, dict(fields)))
+        if path.endswith("topSearch/query"):
+            orgs = {"600519": "gssh0600519", "830799": "gfbj0830799"}
+            code = fields["keyWord"]
+            return [{"code": code, "category": "A股", "orgId": orgs[code], "delisted": "false"}]
+        code = fields["stock"].split(",", 1)[0]
+        category = fields["category"]
+        if category == Q1_CATEGORY and code == "600519":
+            raise OfficialFilingLookupError("down")
+        titles = {
+            ANNUAL_CATEGORY: [
+                _announcement(f"{code}2025年年度报告摘要", "finalpage/2026-04-17/1.PDF", LIVE_ANNOUNCED_MS, code),
+                _announcement(f"{code}2026年半年度报告", "finalpage/2026-08-15/2.PDF", _ms(date(2026, 8, 15)), code),
+                _announcement(f"{code}2025年年度报告", "finalpage/2026-04-17/1225114741.PDF", LIVE_ANNOUNCED_MS, code),
+            ],
+            SEMIANNUAL_CATEGORY: [
+                _announcement(f"{code}2026年半年度报告摘要", "finalpage/2026-08-15/3.PDF", _ms(date(2026, 8, 15)), code),
+                _announcement(f"{code}2026年半年度报告", "finalpage/2026-08-15/1225475868.PDF", _ms(date(2026, 8, 15)), code),
+            ],
+            Q1_CATEGORY: [
+                _announcement(f"{code}2025年年度报告", "finalpage/2026-04-17/8.PDF", LIVE_ANNOUNCED_MS, code),
+                _announcement(f"{code}2026年一季度报告", "finalpage/2026-04-25/1225188741.PDF", _ms(date(2026, 4, 25)), code),
+            ],
+            Q3_CATEGORY: [
+                _announcement(f"{code}2025年第三季度报告", "finalpage/2025-10-30/1224764517.PDF", _ms(date(2025, 10, 30)), code),
+                _announcement(f"{code}2024年三季度报告", "finalpage/2024-10-30/9.PDF", _ms(date(2024, 10, 30)), code),
+            ],
+        }
+        return {"announcements": titles[category]}
+
+    monkeypatch.setattr(official_filings, "_post_json", fake)
+    found = lookup_periodic_filings(["600519", "830799"])
+
+    maotai = {row["kind"]: row for row in found["600519"]}
+    assert set(maotai) == {"annual", "semiannual", "q3"}
+    assert maotai["annual"]["title"] == "6005192025年年度报告"
+    assert maotai["annual"]["announcedOn"] == "2026-04-17"
+    assert maotai["semiannual"]["url"].endswith("/1225475868.PDF")
+    assert maotai["q3"]["title"] == "6005192025年第三季度报告"
+    assert [row["kind"] for row in found["600519"]] == ["semiannual", "annual", "q3"]
+    assert {row["kind"] for row in found["830799"]} == {"annual", "semiannual", "q1", "q3"}
+    columns = {
+        fields["stock"].split(",", 1)[0]: fields["column"]
+        for path, fields in calls
+        if path.endswith("hisAnnouncement/query")
+    }
+    assert columns["600519"] == "sse"
+    assert columns["830799"] == "bj"
+    categories = {fields["category"] for path, fields in calls if path.endswith("hisAnnouncement/query")}
+    assert categories == {ANNUAL_CATEGORY, SEMIANNUAL_CATEGORY, Q1_CATEGORY, Q3_CATEGORY}

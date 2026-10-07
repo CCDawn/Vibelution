@@ -2,9 +2,10 @@
 
 Tencent remains the quote authority used by the Finance workspace. Sina public
 pages provide the broad A-share screen. Eastmoney provides news, ordinary
-company notices, and reported financial indicators. The A-share annual report
-on the stock page is the cninfo original when one is found. Provider times
-and nulls are preserved instead of being inferred by the model.
+company notices, and reported financial indicators. On the stock page, the
+annual, semi-annual, and quarterly reports are the cninfo originals when
+found. Provider times and nulls are preserved instead of being inferred by
+the model.
 """
 
 from __future__ import annotations
@@ -24,17 +25,22 @@ from urllib.request import Request, urlopen
 from core.web.services import financial_market_service as market
 from core.web.services.financial_research.official_filings import (
     FILING_SOURCE,
-    accepted_annual_filing,
+    accepted_periodic_filing,
     annual_filing_code,
-    lookup_annual_filings,
-    mentions_annual_report,
+    lookup_periodic_filings,
+    periodic_reprint_kind,
 )
 
 EASTMONEY_SOURCE = "东方财富"
 EASTMONEY_NOTICES_URL = "https://data.eastmoney.com/notices/"
 CNINFO_NOTICES_URL = "https://www.cninfo.com.cn/"
-_ANNUAL_ORIGINAL_MISSING = "没有核到巨潮资讯年报原文，未列出年报转载。"
 _OTHER_NOTICES_UNAVAILABLE = "其它公告暂时不可用。"
+_PERIODIC_LABELS = (
+    ("annual", "年报"),
+    ("semiannual", "半年报"),
+    ("q1", "一季报"),
+    ("q3", "三季报"),
+)
 SINA_SOURCE = "新浪财经"
 SINA_SCREEN_URL = "https://vip.stock.finance.sina.com.cn/mkt/#hs_a"
 SINA_LIST_ENDPOINT = "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData"
@@ -648,27 +654,31 @@ def _load_news(stock: dict[str, str]) -> dict[str, Any]:
 
 
 def _load_announcements(stock: dict[str, str]) -> dict[str, Any]:
-    """A-share notices. The annual report is the cninfo PDF, not a reprint."""
+    """A-share notices. Periodic reports are cninfo PDFs, not reprints."""
 
     notices, notice_error = _eastmoney_notice_items(stock)
-    filing = _official_annual_notice(stock["ticker"])
-    if filing is None and notice_error is not None and not notices:
+    filings = _official_periodic_notices(stock["ticker"])
+    if not filings and notice_error is not None and not notices:
         raise FinancialResearchDataError(notice_error)
-    items: list[dict[str, Any]] = []
-    if filing is not None:
-        items.append(filing)
+    items: list[dict[str, Any]] = [item for _kind, item in filings]
     for item in notices:
-        if mentions_annual_report(item.get("title")):
+        if periodic_reprint_kind(item.get("title")):
             continue
         items.append({**item, "publisher": EASTMONEY_SOURCE})
-    if filing is not None:
+    missing = _missing_periodic_error({kind for kind, _item in filings})
+    if filings:
         source = FILING_SOURCE
         source_url = CNINFO_NOTICES_URL
-        error = _OTHER_NOTICES_UNAVAILABLE if notice_error is not None else None
+        parts = []
+        if notice_error is not None:
+            parts.append(_OTHER_NOTICES_UNAVAILABLE)
+        if missing:
+            parts.append(missing)
+        error = "".join(parts) or None
     else:
         source = EASTMONEY_SOURCE
         source_url = EASTMONEY_NOTICES_URL
-        error = _ANNUAL_ORIGINAL_MISSING
+        error = missing
     return {
         "status": "available",
         "source": source,
@@ -677,6 +687,13 @@ def _load_announcements(stock: dict[str, str]) -> dict[str, Any]:
         "error": error,
         "items": items,
     }
+
+
+def _missing_periodic_error(present: set[str]) -> str | None:
+    labels = [label for kind, label in _PERIODIC_LABELS if kind not in present]
+    if not labels:
+        return None
+    return f"没有核到巨潮资讯{'、'.join(labels)}原文，未列出对应转载。"
 
 
 def _eastmoney_notice_items(
@@ -746,25 +763,42 @@ def _eastmoney_notice_items(
     return items, None
 
 
-def _official_annual_notice(ticker: str) -> dict[str, str] | None:
+def _official_periodic_notices(ticker: str) -> list[tuple[str, dict[str, str]]]:
     try:
-        found = lookup_annual_filings([ticker], cutoff=None)
+        found = lookup_periodic_filings([ticker], cutoff=None)
         code = annual_filing_code(ticker)
-        raw = found.get(code) if isinstance(found, dict) and code else None
-        accepted = accepted_annual_filing(raw, cutoff=None)
+        rows = found.get(code) if isinstance(found, dict) and code else None
     except Exception:
-        return None
-    if accepted is None:
-        return None
-    day = accepted["announcedOn"]
-    return {
-        "title": accepted["title"],
-        "publishedAt": day,
-        "noticeDate": day,
-        "url": accepted["url"],
-        "articleCode": f"cninfo-{day}",
-        "publisher": FILING_SOURCE,
-    }
+        return []
+    if not isinstance(rows, list):
+        return []
+    notices: list[tuple[str, dict[str, str]]] = []
+    seen: set[str] = set()
+    for raw in rows:
+        accepted = accepted_periodic_filing(raw, cutoff=None)
+        if accepted is None:
+            continue
+        kind = accepted["kind"]
+        if kind in seen:
+            continue
+        seen.add(kind)
+        day = accepted["announcedOn"]
+        prefix = "cninfo" if kind == "annual" else f"cninfo-{kind}"
+        notices.append(
+            (
+                kind,
+                {
+                    "title": accepted["title"],
+                    "publishedAt": day,
+                    "noticeDate": day,
+                    "url": accepted["url"],
+                    "articleCode": f"{prefix}-{day}",
+                    "publisher": FILING_SOURCE,
+                },
+            )
+        )
+    notices.sort(key=lambda item: item[1]["publishedAt"], reverse=True)
+    return notices
 
 
 def _load_fundamentals(stock: dict[str, str]) -> dict[str, Any]:
