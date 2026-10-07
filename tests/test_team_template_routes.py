@@ -24,170 +24,17 @@ def _team_template_detail(client: TestClient, template_id: str) -> dict:
     return response.json()
 
 
-def test_team_template_routes_list_medical_demo_template(tmp_path, monkeypatch):
+def test_team_template_catalog_keeps_only_dev_team(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    medical_template = _team_template_detail(client, "medical-consultation-demo")
-    heletech_template = _team_template_detail(client, "heletech-maternal-digital-health-demo")
 
-    response = client.get("/api/team-templates")
+    response = client.get('/api/team-templates')
 
     assert response.status_code == 200, response.text
-    templates = response.json()["templates"]
-    medical = next(item for item in templates if item["templateId"] == "medical-consultation-demo")
-    assert medical["defaultTeamName"] == "医疗问诊 Demo 团队"
-    assert medical["roleCount"] == len(medical_template["roles"])
-    assert medical["chatRoom"]["mode"] == "medical_consultation_panel"
-    assert medical["chatRoom"]["purpose"] == "medical_triage"
-
-    heletech = next(item for item in templates if item["templateId"] == "heletech-maternal-digital-health-demo")
-    assert heletech["defaultTeamName"] == "和乐妇幼数字健康 Demo 团队"
-    assert heletech["roleCount"] == len(heletech_template["roles"])
-    assert heletech["chatRoom"]["mode"] == "round_robin"
-    assert heletech["chatRoom"]["purpose"] == "meeting"
-
-
-def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path, monkeypatch):
-    _use_tmp_project_root(tmp_path, monkeypatch)
-    _mark_config_agent_instances_present()
-    client = _client()
-    template = _team_template_detail(client, "medical-consultation-demo")
-    expected_count = len(template["roles"])
-    expected_edge_count = len(template.get("canvas", {}).get("edges") or [])
-
-    response = client.post(
-        "/api/team-templates/medical-consultation-demo/instantiate",
-        json={"name": "医疗问诊试运行"},
-    )
-
-    assert response.status_code == 201, response.text
-    payload = response.json()
-    team = payload["team"]
-    assert team["name"] == "医疗问诊试运行"
-    assert team["teamKind"] == "template_demo"
-    assert team["teamCategory"] == "演示业务团队"
-    assert team["teamSource"] == "team_template"
-    assert team["teamTemplateId"] == "medical-consultation-demo"
-    assert team["memberCount"] == expected_count
-    assert len(payload["createdAgents"]) == expected_count
-    assert team["linkedChatRoom"]["mode"] == "medical_consultation_panel"
-    assert team["linkedChatRoom"]["purpose"] == "medical_triage"
-    assert {member["role"] for member in team["members"]} == {
-        "问诊主持 / 结果整理",
-        "风险分诊 / 安全审查",
-        "症状采集员",
-        "全科/专科顾问",
-    }
-
-    room = client.get(f"/api/chat-rooms/{team['linkedChatRoomId']}").json()
-    assert room["mode"] == "medical_consultation_panel"
-    assert room["purpose"] == "medical_triage"
-    assert room["config"]["teamKind"] == "template_demo"
-    assert room["config"]["teamTemplateId"] == "medical-consultation-demo"
-    assert len(room["participants"]) == expected_count
-    assert {
-        "问诊主持 / 结果整理",
-        "风险分诊 / 安全审查",
-        "症状采集员",
-        "全科/专科顾问",
-    }.issubset({participant["teamRole"] for participant in room["participants"]})
-
-    canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
-    assert len(canvas["nodes"]) == expected_count
-    assert len(canvas["edges"]) == expected_edge_count
-    assert canvas["validation"]["valid"] is True
-
-    agents = client.get("/api/agents").json()
-    demo_agents = [
-        agent for agent in agents
-        if agent.get("metadata", {}).get("teamTemplateId") == "medical-consultation-demo"
-    ]
-    assert len(demo_agents) == expected_count
-    assert all("agent_message_tool" in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
-    assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
-
-
-def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypatch):
-    _use_tmp_project_root(tmp_path, monkeypatch)
-    _mark_config_agent_instances_present()
-    client = _client()
-    template = _team_template_detail(client, "heletech-maternal-digital-health-demo")
-    expected_count = len(template["roles"])
-    expected_edge_count = len(template.get("canvas", {}).get("edges") or [])
-
-    response = client.post(
-        "/api/team-templates/heletech-maternal-digital-health-demo/instantiate",
-        json={"name": "和乐演示试运行"},
-    )
-
-    assert response.status_code == 201, response.text
-    payload = response.json()
-    team = payload["team"]
-    assert team["name"] == "和乐演示试运行"
-    assert team["teamKind"] == "template_demo"
-    assert team["teamCategory"] == "演示业务团队"
-    assert team["teamSource"] == "team_template"
-    assert team["teamTemplateId"] == "heletech-maternal-digital-health-demo"
-    assert team["memberCount"] == expected_count
-    assert len(payload["createdAgents"]) == expected_count
-    assert team["linkedChatRoom"]["mode"] == "round_robin"
-    assert team["linkedChatRoom"]["purpose"] == "meeting"
-    assert {member["role"] for member in team["members"]} == {
-        "方案主持",
-        "妇幼业务顾问",
-        "病历集成顾问",
-        "数据科研顾问",
-        "合规交付顾问",
-    }
-    assert [member["purpose"] for member in team["members"]] == [
-        "方案编排",
-        "妇幼流程",
-        "病历集成",
-        "科研数据",
-        "合规交付",
-    ]
-    assert team["members"][1]["responsibilities"] == [
-        "负责孕前、孕产、儿童保健、免疫接种、高危孕产妇和新生儿救治等业务流程建议。"
-    ]
-
-    room = client.get(f"/api/chat-rooms/{team['linkedChatRoomId']}").json()
-    assert room["mode"] == "round_robin"
-    assert room["purpose"] == "meeting"
-    assert room["config"]["teamKind"] == "template_demo"
-    assert room["config"]["teamTemplateId"] == "heletech-maternal-digital-health-demo"
-    assert len(room["participants"]) == expected_count
-    assert {
-        "方案主持",
-        "妇幼业务顾问",
-        "病历集成顾问",
-        "数据科研顾问",
-        "合规交付顾问",
-    }.issubset({participant["teamRole"] for participant in room["participants"]})
-    assert room["config"]["heletechMaternalDigitalHealthDemo"] is True
-
-    canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
-    assert len(canvas["nodes"]) == expected_count
-    assert len(canvas["edges"]) == expected_edge_count
-    assert canvas["validation"]["valid"] is True
-    assert canvas["nodes"][0]["id"] == f"{template['canvas']['nodePrefix']}-1"
-    assert {node["purpose"] for node in canvas["nodes"]} == {
-        "方案编排",
-        "妇幼流程",
-        "病历集成",
-        "科研数据",
-        "合规交付",
-    }
-
-    agents = client.get("/api/agents").json()
-    demo_agents = [
-        agent for agent in agents
-        if agent.get("metadata", {}).get("teamTemplateId") == "heletech-maternal-digital-health-demo"
-    ]
-    assert len(demo_agents) == expected_count
-    assert all("agent_message_tool" in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
-    assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
-    assert all(agent.get("metadata", {}).get("heletechMaternalDigitalHealthDemo") is True for agent in demo_agents)
-    assert all("medicalTriageDemo" not in agent.get("metadata", {}) for agent in demo_agents)
+    templates = response.json()['templates']
+    assert [item['templateId'] for item in templates] == ['dev-team']
+    assert client.get('/api/team-templates/medical-consultation-demo').status_code == 404
+    assert client.get('/api/team-templates/heletech-maternal-digital-health-demo').status_code == 404
 
 
 def test_team_template_routes_list_includes_dev_team_template(tmp_path, monkeypatch):

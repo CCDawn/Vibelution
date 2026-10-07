@@ -51,6 +51,26 @@ export type TeamShellListItem = {
   kindLabel: string;
 };
 
+/**
+ * Research stage modules stay on research teams only.
+ * A newly created development team uses its planned chat room, not the challenge-cup panel.
+ */
+export function shouldShowResearchWorkflowPanel(input: {
+  aiSearchScopeTeamSelected: boolean;
+  researchWorkflowTeamSelected: boolean;
+  researchCanvasVisible: boolean;
+  researchWorkspaceView: string;
+  processWorkflowView: boolean;
+}): boolean {
+  return (
+    input.researchWorkflowTeamSelected
+    && !input.aiSearchScopeTeamSelected
+    && !input.researchCanvasVisible
+    && input.researchWorkspaceView !== "discussion"
+    && !input.processWorkflowView
+  );
+}
+
 export function teamShellStatusLabel(status: string, lang: "zh" | "en"): string {
   const value = String(status || "").toLowerCase();
   if (value === "active" || value === "operational") {

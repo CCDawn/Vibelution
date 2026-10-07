@@ -299,6 +299,9 @@ describe("Finance analyst team", () => {
     const analysts = container.querySelector("[data-financial-team-analysts]");
     expect(Boolean(synthesis!.compareDocumentPosition(analysts!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(api.reportText).toHaveBeenCalledWith({ assistantAgentId: assistant.agentId, sessionId: "session-assistant", turnId: "turn-synthesis" }, { signal: expect.any(AbortSignal) });
+    await act(async () => button("补充证据").click());
+    expect(openSession).toHaveBeenCalledWith("session-assistant");
+    expect(api.synthesis).not.toHaveBeenCalled();
     expect(api.primary).not.toHaveBeenCalled();
   });
 

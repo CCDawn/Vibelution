@@ -63,8 +63,6 @@ TEAM_ID_TO_KIND = {
 }
 
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
-    "medical-demo": "medical-consultation-demo",
-    "heletech-demo": "heletech-maternal-digital-health-demo",
     "dev-team": "dev-team",
 }
 
@@ -100,12 +98,6 @@ def infer_team_kind(team: dict[str, Any], *, fallback: str = "") -> str:
 
 def team_default_chat_room_purpose(team: dict[str, Any]) -> str:
     kind = infer_team_kind(team)
-    if kind == "template_demo":
-        template_id = str(team.get("teamTemplateId") or infer_team_template_id(team)).strip()
-        if template_id == "medical-consultation-demo":
-            return "medical_triage"
-        if template_id == "heletech-maternal-digital-health-demo":
-            return "meeting"
     return str(TEAM_KIND_DEFAULTS.get(kind, TEAM_KIND_DEFAULTS["custom"]).get("chatRoomPurpose") or "discussion")
 
 

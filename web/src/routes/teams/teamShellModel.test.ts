@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseTeamShellMode,
+  shouldShowResearchWorkflowPanel,
   teamShellModeFromResearchView,
   teamShellModeLabel,
 } from "./teamShellModel";
@@ -26,5 +27,32 @@ describe("teamShellModel", () => {
   it("labels modes in zh/en", () => {
     expect(teamShellModeLabel("board", "zh")).toContain("看板");
     expect(teamShellModeLabel("canvas", "en")).toBe("Canvas");
+  });
+
+  it("hides the research workflow panel for a development team", () => {
+    expect(shouldShowResearchWorkflowPanel({
+      aiSearchScopeTeamSelected: false,
+      researchWorkflowTeamSelected: false,
+      researchCanvasVisible: true,
+      researchWorkspaceView: "overview",
+      processWorkflowView: false,
+    })).toBe(false);
+  });
+
+  it("keeps research stage modules for a research team outside the process workspace", () => {
+    expect(shouldShowResearchWorkflowPanel({
+      aiSearchScopeTeamSelected: false,
+      researchWorkflowTeamSelected: true,
+      researchCanvasVisible: false,
+      researchWorkspaceView: "coordination",
+      processWorkflowView: false,
+    })).toBe(true);
+    expect(shouldShowResearchWorkflowPanel({
+      aiSearchScopeTeamSelected: false,
+      researchWorkflowTeamSelected: true,
+      researchCanvasVisible: false,
+      researchWorkspaceView: "workflow",
+      processWorkflowView: true,
+    })).toBe(false);
   });
 });
