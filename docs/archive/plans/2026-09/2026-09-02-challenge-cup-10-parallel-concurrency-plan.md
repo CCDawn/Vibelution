@@ -2,9 +2,9 @@
 
 > 文档 ID：`CC-PARALLEL-CONCURRENCY-10P-20260902`
 >
-> 状态：`USER-REQUESTED / IMPLEMENTED 2026-09-02（A/B/C 全批次 + D2 验收合入 main；D2 runtime-scene 10-run 并发五断言两遍全绿；sideflow 混跑与 B5 上限断言的 e2e 覆盖为后续增量）`
+> 状态：`implemented`（2026-09-02 A/B/C 全批次 + D2 验收已合入；2026-10-07 从在研目录归档。D1 集中 marker、sideflow 混跑和 B5 上限断言的 e2e 仍是后续增量，不因归档重新打开本计划）
 >
-> 权威路径：根 `main` 的 `docs/plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md`
+> 权威路径：`docs/archive/plans/2026-09/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md`。现行流程不读本文。
 >
 > 适用范围：挑战杯科研工作流（`challenge-cup-research@3.0.0`、knowledge sideflow、评审假说链、来源收集链、formal run）在 **10 条链路并发** 目标下的并发正确性改造与存量竞态修复
 >
@@ -262,7 +262,7 @@ Temporal worker performance / activity timeouts / sticky execution（docs.tempor
 
 ## 8. 写入层根治交叉引用（2026-09-02 协同新增）
 
-多候选并行评审的存储写入竞态（团队级单文件 `meeting_rounds.jsonl` + 模块级全局 `_LOCK` + 全量重写）已立项物理分片根治：见 [2026-09-02-meeting-store-physical-sharding.md](2026-09-02-meeting-store-physical-sharding.md)。要点：
+多候选并行评审的存储写入竞态（团队级单文件 `meeting_rounds.jsonl` + 模块级全局 `_LOCK` + 全量重写）已立项物理分片根治：见 [2026-09-02-meeting-store-physical-sharding.md](../../../plans/2026-09-02-meeting-store-physical-sharding.md)。要点：
 
 - `meeting_rounds.py` / `storage_durability.py` 归分片计划独占写入，本计划后续批次触碰前先登记协调。
 - D2（10 并发端到端验收）同时是分片改造的**前置基线**：D2 全绿 → 分片落地 → 复跑 D2 作为回归。

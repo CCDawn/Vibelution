@@ -61,8 +61,6 @@
 | [plans/2026-09-12-session-ledger-archival-constraints.md](plans/2026-09-12-session-ledger-archival-constraints.md) | PROPOSED（未实施）：账本归档设计约束清单 + 2026-09-12 体检基线（854 个 / 98.1MB）；配套只读工具 `scripts/report_session_ledgers.py` |
 | [plans/2026-09-11-command-code-headless-transport-poc.md](plans/2026-09-11-command-code-headless-transport-poc.md) | USER-REQUESTED：Command Code headless CLI 传输探针；已实测调起/流式/会话与 G2/G3（G2 未通过、收益远小于原假设），G1 未测出，无 GO/NO-GO 结论 |
 | [plans/research-flow-v2.md](plans/research-flow-v2.md) | 三阶段科研流权威方案：第二阶段基础实验已闭环；第三阶段已接通 Seed、v2 多动作决策、1.1.0 显式迁移及版本化基线修复，真实 CUDA 迭代待验收 |
-| [plans/2026-09-05-independent-operator-experiment-flow-plan.md](plans/2026-09-05-independent-operator-experiment-flow-plan.md) | 技术实施参考：成熟项目调研、独立算子实验基础与历史证据；流程部分由 research-flow-v2.md 替代，旧状态不作为当前完成情况 |
-| [plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md](plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md) | USER-REQUESTED：10 并发链路改造任务清单（搜索 circuit/fan-in P0、dispatch 并行化、串线丢写修复、并发验收） |
 | [plans/2026-09-02-meeting-store-physical-sharding.md](plans/2026-09-02-meeting-store-physical-sharding.md) | 设计阶段：会议轮次按 meetingRoundId 物理分片，尚未实施 |
 | [plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md](plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) | USER-REQUESTED：挑战杯群聊、摘要、LangGraph/Ledger 自动运行链路的 deadline、durable recovery、run 隔离、上下文与自动推进修复计划 |
 | [plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md](plans/2026-08-25-challenge-cup-canonical-workflow-state-plan.md) | USER-REQUESTED：挑战杯从官方题目冷启动到产出登记与 H1–H4 审核的规范化状态 V2、服务端动作和真实链路闭环验收 |
@@ -90,6 +88,8 @@
 | `docs/plans/2026-08-13-portable-branch-workspace.md` | `archive/plans/2026-08/`（superseded；目录池与分支清单见协作规范，整树替换晋升未采用） |
 | `docs/plans/2026-08-11-multi-instance-branch-isolation.md` | `archive/plans/2026-08/`（superseded；现行见 ADR 0009 与 instance-lifecycle） |
 | `docs/plans/2026-08-31-challenge-cup-hypothesis-quality-efficiency-plan.md` | `archive/plans/2026-09/`（superseded；实施改走仓外 Stage1 方案） |
+| `docs/plans/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md` | `archive/plans/2026-09/`（implemented；A/B/C 与 D2 已合入，D1 marker 与 sideflow/B5 e2e 仍是后续增量） |
+| `docs/plans/2026-09-05-independent-operator-experiment-flow-plan.md` | `archive/plans/2026-09/`（superseded；产品流程见 research-flow-v2，本文只留调研和早期证据） |
 | `docs/archive/plans/2026-08-26-challenge-workflow-recovery-closure.md` | `archive/plans/2026-08/`（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main） |
 | `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |
 | `docs/frontend/*` | `archive/frontend/` |

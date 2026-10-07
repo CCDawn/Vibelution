@@ -1,10 +1,10 @@
 # 独立算子优化实验流程搭建方案
 
-> **2026-09-14 流程修订入口：[三阶段科研流程与自主决策方案 V2](research-flow-v2.md)。** 三阶段职责、按需讨论/检索、普通资料自动保存和决策 Agent 跨阶段权限以 V2 中用户确认的决策为准。本文继续保留技术实施参考及历史调研；下述日期、完成范围、预算与默认环境是历史快照，不作为当前状态。固定六步串行流程不再作为后续产品开发要求；V2 改造尚未实施。
+> **状态：`superseded`（2026-10-07 归档）。** 产品流程以 [三阶段科研流程与自主决策方案 V2](../../../plans/research-flow-v2.md) 为准。本文只保留成熟项目调研、技术实施记录和早期证据；日期、完成范围、预算与默认环境是历史快照。固定六步串行流程不再作为产品要求。
 
 > 日期：2026-09-05
 >
-> 状态：开发中；2026-09-08 正在并行修复和集成审查，尚未通过完整真实实验验收。
+> 状态：`superseded`。原状态「开发中」（截至 2026-09-08）已过期；流程口径由 research-flow-v2 替代。
 >
 > 版本：V1.1（纳入接口、投影与执行链审查）
 >
@@ -96,15 +96,15 @@ NIST 对应依据：[实验目标](https://www.itl.nist.gov/div898/handbook/pri/
 
 | 能力 | 当前证据 | 需要做的工作 |
 | --- | --- | --- |
-| 实验与反馈模式 | [experiment_contract.py](../../core/research/experiment_contract.py) 已有 `experiment_feedback`，目的包括对照、证伪、消融、复现和稳健性 | 新算子优化配置复用这些语义，不另建相同实验合同 |
-| 单轮团队讨论 | [meeting_rounds.py](../../core/web/services/team_workflow/meeting_rounds.py) 有会议创建/闭合和探索草案身份；[chat_room_service.py](../../core/web/services/chat_room_service.py) 可启动一轮群聊 | 增加算子优化议程、上下文与结构化结论，复用现有执行链 |
-| 独立知识搜集 | [knowledge_sideflow_definition.py](../../core/research/workflow/knowledge_sideflow_definition.py) 已定义搜集、提炼、关系、入库与交接 | 接受本轮假设和证据缺口；允许复用已有知识快照 |
-| 现有自动搜集触发 | [knowledge_sideflow_trigger.py](../../core/web/services/team_workflow/research_runtime/knowledge_sideflow_trigger.py) 在问题理解完成后触发，面向后续假说设计 | 新流程从优化讨论输出触发，不能直接复用该硬编码顺序 |
-| 正式假说与规划交接 | [experiment_stage_bootstrap.py](../../core/web/services/team_workflow/research_runtime/experiment_stage_bootstrap.py) 在 `hypothesis_design` 建立实验轮次，要求知识包；[agent_task_artifact_builder.py](../../core/web/services/team_workflow/research_runtime/agent_task_artifact_builder.py) 要求原假说任务聚合产物 | 为优化假设增加合法的结构化交接，不伪造原有假说任务完成 |
-| 工作流定义与账本 | [definition_registry.py](../../core/research/workflow/definition_registry.py) 以工作流 ID、版本和结构哈希固定定义 | 复用版本固定与账本；创建入口、Agent 绑定、readiness 和分派目前含旧流限制，须按第 10.2 节贯通 |
-| 方向 A/B 阶段依赖 | [challenge_phase_boundary.py](../../core/web/services/team_workflow/challenge_phase_boundary.py)、[research_loop.py](../../core/web/services/team_workflow/research_loop.py)、[experiment_api/plan.py](../../core/web/services/team_workflow/experiment_api/plan.py) 检查方向 A 整包状态 | 新流按服务端保存的实验身份和运行策略进入，不靠遗漏字段或伪造题目 ID 绕过旧入口 |
-| 实验执行与结果登记 | [experiment_api/full_run.py](../../core/web/services/team_workflow/experiment_api/full_run.py) 有准备、执行、登记；[iteration_decisions.py](../../core/research/workflow/iteration_decisions.py) 有重跑、修订、晋升、回滚、停止 | 复用生命周期与决策语义；旧 full-run 的项目定位和适配器白名单不能直接服务新流，接入裁决见第 10.6 节 |
-| GPU 适配器 | [gpu_operator.py](../../core/research/experiment_adapters/gpu_operator.py) 当前为 CPU fixture，明确不产生真实性能结论 | 开发可核验的真实 GPU adapter；DEV fixture 保持明确身份，不能作为运行失败后的性能替代 |
+| 实验与反馈模式 | [experiment_contract.py](../../../../core/research/experiment_contract.py) 已有 `experiment_feedback`，目的包括对照、证伪、消融、复现和稳健性 | 新算子优化配置复用这些语义，不另建相同实验合同 |
+| 单轮团队讨论 | [meeting_rounds.py](../../../../core/web/services/team_workflow/meeting_rounds.py) 有会议创建/闭合和探索草案身份；[chat_room_service.py](../../../../core/web/services/chat_room_service.py) 可启动一轮群聊 | 增加算子优化议程、上下文与结构化结论，复用现有执行链 |
+| 独立知识搜集 | [knowledge_sideflow_definition.py](../../../../core/research/workflow/knowledge_sideflow_definition.py) 已定义搜集、提炼、关系、入库与交接 | 接受本轮假设和证据缺口；允许复用已有知识快照 |
+| 现有自动搜集触发 | [knowledge_sideflow_trigger.py](../../../../core/web/services/team_workflow/research_runtime/knowledge_sideflow_trigger.py) 在问题理解完成后触发，面向后续假说设计 | 新流程从优化讨论输出触发，不能直接复用该硬编码顺序 |
+| 正式假说与规划交接 | [experiment_stage_bootstrap.py](../../../../core/web/services/team_workflow/research_runtime/experiment_stage_bootstrap.py) 在 `hypothesis_design` 建立实验轮次，要求知识包；[agent_task_artifact_builder.py](../../../../core/web/services/team_workflow/research_runtime/agent_task_artifact_builder.py) 要求原假说任务聚合产物 | 为优化假设增加合法的结构化交接，不伪造原有假说任务完成 |
+| 工作流定义与账本 | [definition_registry.py](../../../../core/research/workflow/definition_registry.py) 以工作流 ID、版本和结构哈希固定定义 | 复用版本固定与账本；创建入口、Agent 绑定、readiness 和分派目前含旧流限制，须按第 10.2 节贯通 |
+| 方向 A/B 阶段依赖 | [challenge_phase_boundary.py](../../../../core/web/services/team_workflow/challenge_phase_boundary.py)、[research_loop.py](../../../../core/web/services/team_workflow/research_loop.py)、[experiment_api/plan.py](../../../../core/web/services/team_workflow/experiment_api/plan.py) 检查方向 A 整包状态 | 新流按服务端保存的实验身份和运行策略进入，不靠遗漏字段或伪造题目 ID 绕过旧入口 |
+| 实验执行与结果登记 | [experiment_api/full_run.py](../../../../core/web/services/team_workflow/experiment_api/full_run.py) 有准备、执行、登记；[iteration_decisions.py](../../../../core/research/workflow/iteration_decisions.py) 有重跑、修订、晋升、回滚、停止 | 复用生命周期与决策语义；旧 full-run 的项目定位和适配器白名单不能直接服务新流，接入裁决见第 10.6 节 |
+| GPU 适配器 | [gpu_operator.py](../../../../core/research/experiment_adapters/gpu_operator.py) 当前为 CPU fixture，明确不产生真实性能结论 | 开发可核验的真实 GPU adapter；DEV fixture 保持明确身份，不能作为运行失败后的性能替代 |
 
 主要缺口是独立入口、优化假设合同、讨论后知识交接、活动级循环和真实 GPU 执行。没有必要重写普通 Session、群聊引擎、知识检索引擎或全部科研框架。
 
@@ -114,12 +114,12 @@ F1 是已复现的现有接口缺陷；F2–F6 主要是新流程与既有合同
 
 | 编号 | 已核对事实与影响 | 必须落地的修订 | 完成判据与阶段 |
 | --- | --- | --- | --- |
-| F1 项目身份丢失 | 前端 [useTeamExperimentLoopMutations.ts](../../web/src/routes/teams/useTeamExperimentLoopMutations.ts) 发送 `researchProjectId`，但 [_models.py](../../core/web/routes/team_workflows/_models.py) 的创建/执行请求模型未声明该字段；Pydantic 将其丢弃。`full_run.py` 准备/执行时又按当前活动项目加载计划，切换项目后可找不到原计划 | 修正 HTTP DTO、服务参数、计划定位及结果回写的项目身份；既存计划按其保存的归属解析，禁止以当前页面选择代替 | P0：字段穿透实际请求模型；计划创建后切换项目仍能准备、执行、登记到原项目，伪造归属被拒绝 |
-| F2 新定义无法直接派发 | [run_creation.py](../../core/web/services/team_workflow/research_runtime/run_creation.py) 的公共入口拒绝新 workflow ID；[bindings.py](../../core/research/workflow/bindings.py) 仍按挑战杯定义生成绑定；[readiness/service.py](../../core/web/services/team_workflow/research_runtime/readiness/service.py) 默认只有旧流和知识侧流 | 独立创建入口使用服务端目标配置，绑定与执行能力检查消费 run 固定的定义；补齐新节点分派和产物写回 | P0–P1：没有 125 题结果也能创建、显示、派发新节点；绑定归属与节点集合正确，旧流回归通过 |
-| F3 前端工作区与缓存绑定旧流 | [ResearchProcessWorkspace.tsx](../../web/src/routes/teams/research-workflow/ResearchProcessWorkspace.tsx) 固定加载挑战杯目录并拼入原假说区域；[useTeamResearchSecondaryQueries.ts](../../web/src/routes/teams/useTeamResearchSecondaryQueries.ts) 的实验缓存按团队区分 | 独立活动控制器和汇总投影；复用基础画布、单 run 快照与事件订阅；活动/轮次身份进入 URL、查询键和失效处理 | P1/P6：刷新、切换活动、乱序回包和断线恢复不串数据；新流不渲染原批量假说区域 |
-| F4 活动对象语义冲突 | [ExperimentCampaign](../../core/research/workflow/contracts/experiment_campaign.py) 绑定一个 run、一项假说与一份协议；[run_domain_queries.py](../../core/web/services/team_workflow/research_runtime/run_domain_queries.py) 也是单 run 投影，不能直接承担跨轮次活动总账 | 明确外层 `OptimizationCampaign`、轮次、WorkflowRun、内层 ExperimentCampaign 和 trial 的映射；外层统一管理预算上限与最佳候选引用 | P0/P4：两轮不同 run/协议归于同一外层活动；费用去重累计，重复终态只创建一次下一轮 |
-| F5 讨论到规划缺少可消费交接 | [agent_task_artifact_builder.py](../../core/web/services/team_workflow/research_runtime/agent_task_artifact_builder.py) 要求原 TaskBundle 聚合；知识自动触发只消费问题理解产物；会议自动闭合仍经原 hypothesis-first 策略 | 增加有版本和 hash 的优化假设转换、讨论后知识调用及接受回执、规划输入转换；活动策略只接管本活动动作，不冒充原流程完成 | P3：一轮会议产生一个主优化假设，资料可复用或补齐，随后冻结计划；缺产物、反证和重复回调均有明确结果 |
-| F6 GPU 入口与评价不连通 | [gpu_operator.py](../../core/research/experiment_adapters/gpu_operator.py) 属 DEV dispatcher；[experiment_kernel.py](../../core/web/services/team_workflow/experiment_kernel.py) 的正式入口只接受两个既有适配器；[real_domain_ports.py](../../core/web/services/team_workflow/research_runtime/real_domain_ports.py) 的 bounded 评价含固定评分/覆盖率 | 采用第 10.6 节明确的新流执行口，接入真实 kernel runner 与数值评价；保留失败证据回流，不能只加一个 registry 条目便宣称可运行 | P2/P4：从冻结输入到真实设备、原始 timing、正确性及终态回执可追溯；错误 kernel 无加速结论，失败仍能进入下一轮讨论 |
+| F1 项目身份丢失 | 前端 [useTeamExperimentLoopMutations.ts](../../../../web/src/routes/teams/useTeamExperimentLoopMutations.ts) 发送 `researchProjectId`，但 [_models.py](../../../../core/web/routes/team_workflows/_models.py) 的创建/执行请求模型未声明该字段；Pydantic 将其丢弃。`full_run.py` 准备/执行时又按当前活动项目加载计划，切换项目后可找不到原计划 | 修正 HTTP DTO、服务参数、计划定位及结果回写的项目身份；既存计划按其保存的归属解析，禁止以当前页面选择代替 | P0：字段穿透实际请求模型；计划创建后切换项目仍能准备、执行、登记到原项目，伪造归属被拒绝 |
+| F2 新定义无法直接派发 | [run_creation.py](../../../../core/web/services/team_workflow/research_runtime/run_creation.py) 的公共入口拒绝新 workflow ID；[bindings.py](../../../../core/research/workflow/bindings.py) 仍按挑战杯定义生成绑定；[readiness/service.py](../../../../core/web/services/team_workflow/research_runtime/readiness/service.py) 默认只有旧流和知识侧流 | 独立创建入口使用服务端目标配置，绑定与执行能力检查消费 run 固定的定义；补齐新节点分派和产物写回 | P0–P1：没有 125 题结果也能创建、显示、派发新节点；绑定归属与节点集合正确，旧流回归通过 |
+| F3 前端工作区与缓存绑定旧流 | [ResearchProcessWorkspace.tsx](../../../../web/src/routes/teams/research-workflow/ResearchProcessWorkspace.tsx) 固定加载挑战杯目录并拼入原假说区域；[useTeamResearchSecondaryQueries.ts](../../../../web/src/routes/teams/useTeamResearchSecondaryQueries.ts) 的实验缓存按团队区分 | 独立活动控制器和汇总投影；复用基础画布、单 run 快照与事件订阅；活动/轮次身份进入 URL、查询键和失效处理 | P1/P6：刷新、切换活动、乱序回包和断线恢复不串数据；新流不渲染原批量假说区域 |
+| F4 活动对象语义冲突 | [ExperimentCampaign](../../../../core/research/workflow/contracts/experiment_campaign.py) 绑定一个 run、一项假说与一份协议；[run_domain_queries.py](../../../../core/web/services/team_workflow/research_runtime/run_domain_queries.py) 也是单 run 投影，不能直接承担跨轮次活动总账 | 明确外层 `OptimizationCampaign`、轮次、WorkflowRun、内层 ExperimentCampaign 和 trial 的映射；外层统一管理预算上限与最佳候选引用 | P0/P4：两轮不同 run/协议归于同一外层活动；费用去重累计，重复终态只创建一次下一轮 |
+| F5 讨论到规划缺少可消费交接 | [agent_task_artifact_builder.py](../../../../core/web/services/team_workflow/research_runtime/agent_task_artifact_builder.py) 要求原 TaskBundle 聚合；知识自动触发只消费问题理解产物；会议自动闭合仍经原 hypothesis-first 策略 | 增加有版本和 hash 的优化假设转换、讨论后知识调用及接受回执、规划输入转换；活动策略只接管本活动动作，不冒充原流程完成 | P3：一轮会议产生一个主优化假设，资料可复用或补齐，随后冻结计划；缺产物、反证和重复回调均有明确结果 |
+| F6 GPU 入口与评价不连通 | [gpu_operator.py](../../../../core/research/experiment_adapters/gpu_operator.py) 属 DEV dispatcher；[experiment_kernel.py](../../../../core/web/services/team_workflow/experiment_kernel.py) 的正式入口只接受两个既有适配器；[real_domain_ports.py](../../../../core/web/services/team_workflow/research_runtime/real_domain_ports.py) 的 bounded 评价含固定评分/覆盖率 | 采用第 10.6 节明确的新流执行口，接入真实 kernel runner 与数值评价；保留失败证据回流，不能只加一个 registry 条目便宣称可运行 | P2/P4：从冻结输入到真实设备、原始 timing、正确性及终态回执可追溯；错误 kernel 无加速结论，失败仍能进入下一轮讨论 |
 
 ### 4.3 审查证据与未验证范围
 
@@ -525,14 +525,14 @@ P2 提前解决真实执行不确定性，其环境、依赖安装和实际调�
 
 实施时在当前代码基线上选取相关测试，不机械重复全量套件。现有入口包括：
 
-- [test_experiment_route_contract.py](../../tests/test_experiment_route_contract.py)：F1 的 HTTP DTO、项目穿透与计划定位回归应从这里补齐。
-- [test_research_workflow_readiness_registry.py](../../tests/test_research_workflow_readiness_registry.py)：F2 的能力注册；另外补公共创建入口及固定定义绑定的联动检查，不能只测 registry。
-- [test_research_experiment_contract.py](../../tests/test_research_experiment_contract.py)：实验目的、方法和协议。
-- [test_research_workflow_meeting_rounds.py](../../tests/test_research_workflow_meeting_rounds.py)：会议来源与闭合。
-- [test_knowledge_sideflow_run.py](../../tests/test_knowledge_sideflow_run.py)、[test_research_workflow_experiment_stage_bootstrap.py](../../tests/test_research_workflow_experiment_stage_bootstrap.py)：知识与原规划交接；新优化产物需独立用例。
-- [test_experiment_adapter_dispatcher.py](../../tests/test_experiment_adapter_dispatcher.py)、[test_experiment_adapter_gpu_operator.py](../../tests/test_experiment_adapter_gpu_operator.py)：已有受控 dispatcher 和 GPU DEV fixture；不能替代新桥、真实设备及失败回流测试。
-- [test_challenge_phase_boundary.py](../../tests/test_challenge_phase_boundary.py)：旧阶段依赖回归。
-- [researchWorkflowSnapshotProjection.test.ts](../../web/src/routes/teams/research-workflow/researchWorkflowSnapshotProjection.test.ts)、[researchWorkflowUrlMatrix.test.ts](../../web/src/routes/teams/research-workflow/researchWorkflowUrlMatrix.test.ts)、[useResearchWorkflowRun.test.tsx](../../web/src/routes/teams/research-workflow/useResearchWorkflowRun.test.tsx) 与 [useTeamResearchSecondaryQueries.contract.test.ts](../../web/src/routes/teams/useTeamResearchSecondaryQueries.contract.test.ts)：复用基础投影；新增活动缓存、下一轮切换、乱序及重连用例。
+- [test_experiment_route_contract.py](../../../../tests/test_experiment_route_contract.py)：F1 的 HTTP DTO、项目穿透与计划定位回归应从这里补齐。
+- [test_research_workflow_readiness_registry.py](../../../../tests/test_research_workflow_readiness_registry.py)：F2 的能力注册；另外补公共创建入口及固定定义绑定的联动检查，不能只测 registry。
+- [test_research_experiment_contract.py](../../../../tests/test_research_experiment_contract.py)：实验目的、方法和协议。
+- [test_research_workflow_meeting_rounds.py](../../../../tests/test_research_workflow_meeting_rounds.py)：会议来源与闭合。
+- [test_knowledge_sideflow_run.py](../../../../tests/test_knowledge_sideflow_run.py)、[test_research_workflow_experiment_stage_bootstrap.py](../../../../tests/test_research_workflow_experiment_stage_bootstrap.py)：知识与原规划交接；新优化产物需独立用例。
+- [test_experiment_adapter_dispatcher.py](../../../../tests/test_experiment_adapter_dispatcher.py)、[test_experiment_adapter_gpu_operator.py](../../../../tests/test_experiment_adapter_gpu_operator.py)：已有受控 dispatcher 和 GPU DEV fixture；不能替代新桥、真实设备及失败回流测试。
+- [test_challenge_phase_boundary.py](../../../../tests/test_challenge_phase_boundary.py)：旧阶段依赖回归。
+- [researchWorkflowSnapshotProjection.test.ts](../../../../web/src/routes/teams/research-workflow/researchWorkflowSnapshotProjection.test.ts)、[researchWorkflowUrlMatrix.test.ts](../../../../web/src/routes/teams/research-workflow/researchWorkflowUrlMatrix.test.ts)、[useResearchWorkflowRun.test.tsx](../../../../web/src/routes/teams/research-workflow/useResearchWorkflowRun.test.tsx) 与 [useTeamResearchSecondaryQueries.contract.test.ts](../../../../web/src/routes/teams/useTeamResearchSecondaryQueries.contract.test.ts)：复用基础投影；新增活动缓存、下一轮切换、乱序及重连用例。
 - 新增外层活动/内层合同映射、版本/预算幂等、假设交接、真实 GPU 桥和数值评价的针对性测试；名称在实施时确定。前端至少覆盖 VUI 路由契约与新增设计契约，交付前运行 `npx tsc -b --pretty false` 或构建。
 
 本节是后续测试落点，不表示上述新增用例已经编写或执行。本次纯文档修订仅校验文件差异、链接、章节引用和发现项到实施/验收的对应关系；无需刷新产品运行时（refresh=`not needed`），无产品版本影响。
