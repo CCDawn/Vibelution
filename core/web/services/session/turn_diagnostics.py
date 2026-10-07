@@ -840,8 +840,11 @@ def _chat_turn_last_tool_error_timed_out(payload: dict[str, Any]) -> bool:
     if bool(last_tool_error.get("timedOut") or last_tool_error.get("timed_out")):
         return True
     failure_class = str(last_tool_error.get("failureClass") or last_tool_error.get("failure_class") or "").strip().lower()
-    if failure_class in {"timeout", "timed_out", "tool_timeout"}:
-        return True
+    if failure_class:
+        # Structured failure semantics outrank free-form summaries. In
+        # particular, an authorization denial may mention the expired wait
+        # that preceded it without being a timed-out tool execution.
+        return failure_class in {"timeout", "timed_out", "tool_timeout"}
     summary = str(last_tool_error.get("summary") or last_tool_error.get("errorPreview") or "").lower()
     return "timeout" in summary or "超时" in summary
 

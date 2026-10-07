@@ -120,6 +120,59 @@ def test_chat_turn_hang_reason_tool_timeout(monkeypatch):
     )
 
 
+def test_chat_turn_authorization_denial_summary_is_not_a_tool_timeout():
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
+    payload = {
+        "runId": "turn-authorization-denied",
+        "sessionId": "session-a",
+        "status": "running",
+        "updatedAt": _iso(now - timedelta(seconds=200)),
+        "startedAt": _iso(now - timedelta(minutes=5)),
+        "finishedAt": "",
+        "lastToolError": {
+            "toolName": "news_search",
+            "timedOut": False,
+            "failureClass": "authorization_denied",
+            "updatedAt": _iso(now - timedelta(seconds=200)),
+            "summary": "authorization denied after approval timeout",
+        },
+    }
+
+    assert (
+        turn_diagnostics._chat_turn_work_run_hang_reason(
+            payload,
+            now=now,
+            worker_owns_turn=True,
+        )
+        == ""
+    )
+
+
+def test_chat_turn_hang_reason_legacy_timeout_summary_remains_supported():
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
+    payload = {
+        "runId": "turn-legacy-timeout",
+        "sessionId": "session-a",
+        "status": "running",
+        "updatedAt": _iso(now - timedelta(seconds=200)),
+        "startedAt": _iso(now - timedelta(minutes=5)),
+        "finishedAt": "",
+        "lastToolError": {
+            "updatedAt": _iso(now - timedelta(seconds=200)),
+            "summary": "timeout",
+        },
+    }
+
+    assert (
+        turn_diagnostics._chat_turn_work_run_hang_reason(
+            payload,
+            now=now,
+            worker_owns_turn=True,
+        )
+        == "tool_timeout_hang"
+    )
+
+
 def test_reconcile_settles_tool_timeout_hang(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     store = session_service._WORK_RUN_STORE
@@ -167,6 +220,45 @@ def test_reconcile_settles_tool_timeout_hang(tmp_path, monkeypatch):
     assert str(latest.get("finishedAt") or "").strip()
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
     assert session_service._is_session_running("session-a") is False
+
+
+def test_reconcile_spares_authorization_denial_with_timeout_summary(tmp_path, monkeypatch):
+    _install_tmp_work_run_store(tmp_path, monkeypatch)
+
+    now = datetime.now(timezone.utc)
+    turn_id = "session-auth-denied-turn"
+    session_id = "session-auth-denied"
+    session_service._WORK_RUN_STORE.persist_snapshot(
+        "chat_turn",
+        {
+            "runId": turn_id,
+            "runKind": "chat_turn",
+            "sessionId": session_id,
+            "status": "running",
+            "currentPhase": "running",
+            "startedAt": _iso(now - timedelta(minutes=10)),
+            "updatedAt": _iso(now - timedelta(seconds=200)),
+            "finishedAt": "",
+            "lastToolError": {
+                "toolName": "news_search",
+                "timedOut": False,
+                "failureClass": "authorization_denied",
+                "summary": "authorization denied after approval timeout",
+                "updatedAt": _iso(now - timedelta(seconds=200)),
+            },
+        },
+        active_run_id=turn_id,
+    )
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+    try:
+        assert turn_diagnostics.reconcile_stale_chat_turn_work_runs(now=now) == []
+        latest = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", turn_id)
+        assert latest is not None
+        assert latest["status"] == "running"
+        assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is not None
+        assert session_service._is_session_running(session_id) is True
+    finally:
+        session_service._set_session_running(session_id, False)
 
 
 def test_reconcile_settles_worker_gone(tmp_path, monkeypatch):
