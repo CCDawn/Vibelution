@@ -3,6 +3,7 @@ import { FilePlus2 } from "lucide-react";
 import { fetchFinancialReportText, type FinancialReportExportTarget } from "../../api/financialReports";
 import { LazyConversationMarkdownRenderer } from "../../components/conversation/LazyConversationMarkdownRenderer";
 import { VButton, VStateSurface } from "../../components/vui";
+import styles from "./FinanceGroundedReport.styles";
 
 type ReportTarget = Omit<FinancialReportExportTarget, "format">;
 
@@ -38,9 +39,9 @@ export function FinanceReportReadState({ read, zh }: { read: ReturnType<typeof u
 export function FinanceReportEvidenceNotice({ text, originalText, zh, onSupplementEvidence }: { text: string; originalText: string; zh: boolean; onSupplementEvidence?: () => void }) {
   const missingCount = (value: string) => value.split("没有这一项").length - 1;
   if (missingCount(text) <= missingCount(originalText)) return null;
-  return <VStateSurface density="compact" tone="unavailable" title={<span className="flex min-w-0 items-center justify-between gap-2">
-    <span className="min-w-0 truncate">{zh ? "部分数字未通过核验" : "Some figures lack verified evidence"}</span>
-    {onSupplementEvidence ? <VButton density="compact" variant="ghost" className="shrink-0 whitespace-nowrap" icon={<FilePlus2 size={14} />} title={zh ? "在原会话添加来源或附件后追问" : "Add sources or attachments and follow up in the original session"} onPress={onSupplementEvidence}>{zh ? "补充证据" : "Add evidence"}</VButton> : null}
+  return <VStateSurface density="compact" tone="unavailable" title={<span className={styles.noticeTitle}>
+    <span className={styles.noticeText}>{zh ? "部分数字未通过核验" : "Some figures lack verified evidence"}</span>
+    {onSupplementEvidence ? <VButton density="compact" variant="ghost" className={styles.noticeAction} icon={<FilePlus2 size={14} />} title={zh ? "在原会话添加来源或附件后追问" : "Add sources or attachments and follow up in the original session"} onPress={onSupplementEvidence}>{zh ? "补充证据" : "Add evidence"}</VButton> : null}
   </span>} />;
 }
 
