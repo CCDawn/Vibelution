@@ -5,10 +5,24 @@ import { isScreeningReportPrompt, projectScreeningComparison } from "./screenCom
 import { safeFinancialSourceUrl } from "./financialResearchModel";
 
 export type ReportCitation = { url: string; page: string; label: string };
-export type StockResearchReport = { turnId: string; timestamp: string; text: string; summary: string; sections: { id: string; title: string; text: string }[]; citations: ReportCitation[] };
 export type ResearchScope = "financial" | "events" | "risk" | "comprehensive";
+export type StockResearchParameters = {
+  stock?: StockIdentity;
+  analysisDate?: string;
+  reportPeriod?: string;
+  scope?: ResearchScope;
+  depth?: ResearchDepth;
+};
+export type StockResearchReport = { turnId: string; timestamp: string; text: string; summary: string; sections: { id: string; title: string; text: string }[]; citations: ReportCitation[]; researchParameters?: StockResearchParameters };
 export type ResearchTerminalState = Pick<SessionSummary, "terminalReason" | "lastTurnStatus" | "lastTurnTerminalTurnId">;
 export const EMPTY_FINANCIAL_MESSAGES: ConversationMessage[] = [];
+
+const RESEARCH_SCOPE_TASKS: Record<ResearchScope, string> = {
+  financial: "财报、盈利质量与现金流",
+  events: "重大事件及新闻来源",
+  risk: "财务、经营和估值风险",
+  comprehensive: "财报、盈利质量、事件与主要风险",
+};
 
 export function isBlankResearchPlaceholder(row: SessionSummary) {
   // The native Agent query also appends an unpersisted direct-session stub.
@@ -92,6 +106,27 @@ export function stockFromResearchRequest(text: string): StockIdentity | null {
   const [, name, ticker, market] = match;
   const symbol = /^\d{6}$/.test(ticker) ? (ticker.startsWith("6") ? "sh" : "03".includes(ticker[0]) ? "sz" : "bj") + ticker : /^\d{5}$/.test(ticker) ? `hk${ticker}` : `us${canonicalUsTicker(ticker) ?? ""}`;
   return stockIdentityFromUnknown({ symbol, ticker, name, market });
+}
+function stockResearchParametersFromRequest(request: string): StockResearchParameters | undefined {
+  const parameters: StockResearchParameters = {};
+  const stock = stockFromResearchRequest(request);
+  if (stock) parameters.stock = stock;
+
+  const header = /^请研究 [^\r\n]+?，分析日期 (\d{4}-\d{2}-\d{2})(?:，报告期 ([^\r\n]*?))?，重点检查([^。\r\n]+)。/.exec(request);
+  if (header) {
+    const [, date, period, scopeTask] = header;
+    if (isValidResearchDate(date)) parameters.analysisDate = date;
+    const reportPeriod = period?.trim();
+    if (reportPeriod && reportPeriod.length <= 40) parameters.reportPeriod = reportPeriod;
+    const scope = (Object.entries(RESEARCH_SCOPE_TASKS) as [ResearchScope, string][])
+      .find(([, task]) => task === scopeTask)?.[0];
+    if (scope) parameters.scope = scope;
+    const depth = (Object.entries(RESEARCH_DEPTH_INSTRUCTIONS) as [ResearchDepth, string][])
+      .find(([, instruction]) => request.startsWith(`${header[0]}${instruction}，使用 Markdown 二级标题`))?.[0];
+    if (depth) parameters.depth = depth;
+  }
+
+  return Object.keys(parameters).length ? parameters : undefined;
 }
 export function reportMatchesStock(report: StockResearchReport | null, messages: readonly ConversationMessage[], stock: StockIdentity) {
   if (!report) return false;
@@ -177,7 +212,7 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
       citations.push({ url, page, label: page ? `PDF · 第 ${page} 页` : parsed.hostname });
     }
   }
-  return { turnId: turn.turnId, timestamp: turn.timestamp, text, summary: cleanResearchPreview(conclusions || conclusion.replace(/^\s{0,3}#{1,3}\s+.+\n/, ""), 240), sections, citations: citations.slice(0, 12) };
+  return { turnId: turn.turnId, timestamp: turn.timestamp, text, summary: cleanResearchPreview(conclusions || conclusion.replace(/^\s{0,3}#{1,3}\s+.+\n/, ""), 240), sections, citations: citations.slice(0, 12), researchParameters: stockResearchParametersFromRequest(selectedRequest) };
 }
 export type ResearchDepth = "brief" | "basic" | "standard" | "detailed" | "exhaustive";
 export const RESEARCH_DEPTH_INSTRUCTIONS: Record<ResearchDepth, string> = {
@@ -190,7 +225,7 @@ export const RESEARCH_DEPTH_INSTRUCTIONS: Record<ResearchDepth, string> = {
 
 export function stockResearchPrompt(stock: StockIdentity, period: string, date: string, scope: ResearchScope, depth: ResearchDepth, snapshot?: StockSnapshot) {
   const subject = `${stock.name}（${stock.ticker}，${stock.market}）`;
-  const task = { financial: "财报、盈利质量与现金流", events: "重大事件及新闻来源", risk: "财务、经营和估值风险", comprehensive: "财报、盈利质量、事件与主要风险" }[scope];
+  const task = RESEARCH_SCOPE_TASKS[scope];
   const currency = snapshot?.stock.currency ?? (stock.symbol.startsWith("hk") ? "HKD" : stock.symbol.startsWith("us") ? "USD" : "CNY");
   const unit = currency === "HKD" ? "港元" : currency === "USD" ? "美元" : "元";
   const quote = snapshot?.stock.symbol === stock.symbol ? `\n行情快照（${snapshot.source}，可能延迟）：${snapshot.stock.timestamp}，价格 ${snapshot.stock.price} ${unit}，涨跌 ${snapshot.stock.changePercent}%。这是带时点的报价，不是已审核财报证据。` : "";

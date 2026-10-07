@@ -10,7 +10,9 @@ instead of being filled with empty defaults.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRoomCatalogOption(BaseModel):
@@ -50,3 +52,39 @@ class ChatRoomRoundResponse(BaseModel):
     mode: str = ""
     purpose: str = ""
     acceptedAt: str = ""
+
+
+class ChatRoomTimelineEvent(BaseModel):
+    """One append-only room timeline event.
+
+    ``seq`` is monotonic within the room and doubles as the read cursor unit.
+    ``payload`` is type-specific; message events carry the same public shape
+    as the room detail message projection. The wire keys ``from``/``to`` are
+    keyword-aliased because ``from`` is a Python keyword.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    eventId: str
+    roomId: str
+    seq: int
+    type: str
+    roundId: str = ""
+    from_id: str = Field(default="", alias="from")
+    to: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    createdAt: str = ""
+    schemaVersion: int = 1
+
+
+class ChatRoomTimelineResponse(BaseModel):
+    """Cursor-paged read-only room timeline."""
+
+    model_config = ConfigDict(extra="allow")
+
+    roomId: str
+    cursor: int = 0
+    limit: int = 0
+    events: list[ChatRoomTimelineEvent] = Field(default_factory=list)
+    nextCursor: int = 0
+    hasMore: bool = False

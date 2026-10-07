@@ -4,6 +4,8 @@ export default {
   title: "flex items-center gap-2 text-sm",
   actions: "flex items-center gap-3",
   timestamp: "text-xs text-[var(--fg-tertiary)]",
+  parameters: "flex flex-wrap items-center gap-x-2 gap-y-1 mb-3 text-xs text-[var(--fg-secondary)]",
+  parameter: "inline-flex max-w-full items-center whitespace-nowrap rounded-md border border-[var(--vui-border-subtle)] px-2 py-1",
   summary: "text-sm leading-7 font-medium text-[var(--fg-primary)] mt-0 mb-4",
   chapters: "mb-4",
   body: "min-w-0 text-sm leading-7 break-words [&_table]:w-full [&_table]:text-xs [&_th]:text-left [&_td]:p-2 [&_th]:p-2 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_a]:text-[var(--accent-cool)]",

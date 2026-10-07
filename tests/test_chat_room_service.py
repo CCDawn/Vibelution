@@ -17,6 +17,7 @@ from core.chat.conversation_ledger import (
     load_conversation_events,
 )
 from core.chatroom import store as chat_room_store
+from core.chatroom import timeline as room_timeline
 from core.chatroom.scheduler import get_scheduler_registry
 from core.infrastructure import developer_sandbox
 from core.runtime_manager import work_run_store
@@ -1382,66 +1383,96 @@ def test_chat_room_refresh_rebinds_participant_to_current_agent_direct_session(t
     assert participants[first["agentId"]]["enabled"] is True
 
 
-def test_group_round_sync_materializes_agent_directory_only_sessions(tmp_path, monkeypatch):
+def test_group_round_digest_targets_mentioned_inbox_without_ledger_transcript(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    detail = session_service.create_chat_session(title="Alpha Agent")
-    state = load_chat_state(tmp_path)
-    state["conversations"] = [
-        item
-        for item in state.get("conversations") or []
-        if (item.get("conversation_id") or item.get("id")) != detail["id"]
-    ]
-    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
     room = {
         "roomId": "room-alpha",
-        "title": "同步群聊",
+        "title": "定向群聊",
+        "mode": "round_robin",
         "participants": [
             {
                 "participantId": "session-alpha",
-                "agentId": detail["agentId"],
-                "sessionId": detail["id"],
-                "directSessionId": detail["id"],
+                "agentId": alpha["agentId"],
+                "sessionId": alpha["id"],
+                "directSessionId": alpha["id"],
                 "title": "Alpha Agent",
                 "enabled": True,
-            }
+            },
+            {
+                "participantId": "session-beta",
+                "agentId": beta["agentId"],
+                "sessionId": beta["id"],
+                "directSessionId": beta["id"],
+                "title": "Beta Agent",
+                "enabled": True,
+            },
         ],
     }
     round_payload = {
         "roundId": "round-alpha",
         "roomId": "room-alpha",
-        "topic": "同步测试",
+        "topic": "进度同步 @session-beta 请给结论",
         "summary": "已经讨论完。",
+        "status": "completed",
         "finishedAt": "2026-05-29T08:30:00+00:00",
         "messages": [
             {
                 "participantId": "session-alpha",
                 "speakerTitle": "Alpha Agent",
                 "status": "completed",
-                "content": "我会把结论写回直聊。",
-            }
+                "content": "我先给结论：方案 A 可行。",
+            },
+            {
+                "participantId": "session-beta",
+                "speakerTitle": "Beta Agent",
+                "status": "completed",
+                "content": "收到，我补充数据。",
+            },
         ],
     }
 
-    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+    chat_room_service._deliver_round_digest_to_targeted_inboxes(room, round_payload)
 
-    synced_state = load_chat_state(tmp_path)
-    conversation = session_service._find_conversation_entry(synced_state, detail["id"])
-    assert conversation is not None
-    assert conversation.get("agent_id") == detail["agentId"]
-    messages = _session_ledger_messages(tmp_path, detail["id"])
-    assert messages[-1]["metadata"]["kind"] == "group_room_transcript"
-    assert messages[-1]["metadata"]["sourceRoundId"] == "round-alpha"
+    alpha_inbox = agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"])
+    beta_inbox = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"])
+    assert len(beta_inbox) == 1
+    digest = beta_inbox[0]
+    assert digest["kind"] == "chat_room_round_digest"
+    assert digest["sourceRoomId"] == "room-alpha"
+    assert digest["sourceRoundId"] == "round-alpha"
+    assert "进度同步" in digest["content"]
+    assert "/api/chat-rooms/room-alpha/timeline" in digest["content"]
+    assert digest["metadata"]["roundId"] == "round-alpha"
+    assert digest["metadata"]["timelineEndpoint"] == "/api/chat-rooms/room-alpha/timeline"
+    # Only the @mentioned participant is targeted; the manager (first
+    # participant) and unmentioned peers get no inbox copy.
+    assert all("chat_room_round_digest" != (item.get("kind") or "") for item in alpha_inbox)
+    # The broadcast ledger transcript is gone: sessions keep their own history.
+    assert not _has_room_transcript(tmp_path, alpha["id"], "room-alpha")
+    assert not _has_room_transcript(tmp_path, beta["id"], "room-alpha")
+
+    chat_room_service._deliver_round_digest_to_targeted_inboxes(room, round_payload)
+    assert len(agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"])) == 1
 
 
-def test_meeting_round_keeps_transcript_on_the_room(tmp_path, monkeypatch):
-    monkeypatch.delenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", raising=False)
+@pytest.mark.parametrize("structured_context_env", [None, "0"])
+def test_meeting_round_delivers_no_session_transcript_regardless_of_room_view(tmp_path, monkeypatch, structured_context_env):
+    if structured_context_env is None:
+        monkeypatch.delenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", structured_context_env)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     detail = session_service.create_chat_session(title="Alpha Agent")
     room = {
         "roomId": "room-meeting",
         "title": "候选评审",
+        "mode": "round_robin",
         "participants": [
             {
                 "participantId": "session-alpha",
@@ -1450,7 +1481,7 @@ def test_meeting_round_keeps_transcript_on_the_room(tmp_path, monkeypatch):
                 "directSessionId": detail["id"],
                 "title": "Alpha Agent",
                 "enabled": True,
-            }
+            },
         ],
     }
     round_payload = {
@@ -1458,6 +1489,7 @@ def test_meeting_round_keeps_transcript_on_the_room(tmp_path, monkeypatch):
         "roomId": "room-meeting",
         "topic": "候选评审",
         "summary": "纪要留在会议记录。",
+        "status": "completed",
         "finishedAt": "2026-05-29T08:30:00+00:00",
         "config": {
             "meetingRoundId": "meeting-round-1",
@@ -1473,59 +1505,58 @@ def test_meeting_round_keeps_transcript_on_the_room(tmp_path, monkeypatch):
         ],
     }
 
-    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+    chat_room_service._deliver_round_digest_to_targeted_inboxes(room, round_payload)
 
     messages = _session_ledger_messages(tmp_path, detail["id"])
     assert all(
         item.get("metadata", {}).get("kind") != "group_room_transcript"
         for item in messages
     )
+    # No mentions and a non-planned mode: nobody is targeted this round.
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(
+        detail["agentId"], status=""
+    ) == []
 
 
-def test_meeting_round_copies_transcript_when_room_view_is_off(tmp_path, monkeypatch):
-    monkeypatch.setenv("VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED", "0")
+def test_agent_membership_panel_rejects_team_bound_rooms(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
-    detail = session_service.create_chat_session(title="Alpha Agent")
-    room = {
-        "roomId": "room-meeting",
-        "title": "候选评审",
-        "participants": [
-            {
-                "participantId": "session-alpha",
-                "agentId": detail["agentId"],
-                "sessionId": detail["id"],
-                "directSessionId": detail["id"],
-                "title": "Alpha Agent",
-                "enabled": True,
-            }
-        ],
-    }
-    round_payload = {
-        "roundId": "round-meeting",
-        "roomId": "room-meeting",
-        "topic": "候选评审",
-        "summary": "旧路径仍抄回会话。",
-        "finishedAt": "2026-05-29T08:30:00+00:00",
-        "config": {
-            "meetingRoundId": "meeting-round-1",
-            "meetingType": "hypothesis_review",
-        },
-        "messages": [
-            {
-                "participantId": "session-alpha",
-                "speakerTitle": "Alpha Agent",
-                "status": "completed",
-                "content": "关掉会议室投影后仍写回会话。",
-            }
-        ],
-    }
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    gamma = session_service.create_chat_session(title="Gamma Agent")
 
-    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+    team_room = chat_room_service.create_chat_room(
+        title="团队绑定群聊",
+        participant_agent_ids=[alpha["agentId"], gamma["agentId"]],
+        config={"source": "team", "teamId": "team-1", "teamName": "一号团队"},
+    )
+    plain_room = chat_room_service.create_chat_room(
+        title="普通群聊",
+        participant_agent_ids=[alpha["agentId"], gamma["agentId"]],
+    )
 
-    messages = _session_ledger_messages(tmp_path, detail["id"])
-    assert messages[-1]["metadata"]["kind"] == "group_room_transcript"
-    assert messages[-1]["metadata"]["sourceRoundId"] == "round-meeting"
+    with pytest.raises(chat_room_service.ChatRoomValidationError) as team_error:
+        chat_room_service.update_agent_chat_room_membership(alpha["agentId"], [])
+    assert "团队设置" in str(team_error.value)
+
+    # The team room roster is untouched by the failed panel call (subset
+    # check: the room-detail repair may refresh participant metadata, so the
+    # exact agentId set is not stable across file-order pollution); ordinary
+    # rooms keep working.
+    team_participants = chat_room_service.get_chat_room_detail(team_room["roomId"])["participants"]
+    assert len(team_participants) == 2
+    assert any(
+        item.get("agentId") == alpha["agentId"] or item.get("sessionId") == alpha["id"]
+        for item in team_participants
+    )
+    changed = chat_room_service.update_agent_chat_room_membership(
+        beta["agentId"], [plain_room["roomId"]]
+    )
+    assert plain_room["roomId"] in changed["changedRoomIds"]
+    plain_participants = chat_room_service.get_chat_room_detail(plain_room["roomId"])["participants"]
+    assert len(plain_participants) == 3
 
 
 def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
@@ -2026,8 +2057,21 @@ def test_start_chat_room_round_projects_mixed_results_as_partial(tmp_path, monke
     assert partial_event[1]["fields"]["unsuccessfulCount"] == 1
     for session_id in ("session-alpha", "session-beta"):
         transcript = "\n".join(str(item.get("content") or "") for item in _session_ledger_messages(tmp_path, session_id))
-        assert "Alpha 提供了可用结论。" in transcript
+        assert "Alpha 提供了可用结论。" not in transcript
         assert "Beta provider failure must not enter group context." not in transcript
+    # Completed and failed messages both land on the room timeline as audit
+    # events (full room observability); the failed entry must keep its failed
+    # status so downstream consumers can filter it out of model-facing views.
+    timeline_messages = [
+        item
+        for item in room_timeline.read_events(room["roomId"], project_root=chat_room_service.PROJECT_ROOT)
+        if item.get("type") == "message"
+    ]
+    timeline_blob = json.dumps(timeline_messages, ensure_ascii=False)
+    assert "Alpha 提供了可用结论。" in timeline_blob
+    failed_entries = [item for item in timeline_messages if "Beta provider failure" in json.dumps(item, ensure_ascii=False)]
+    assert len(failed_entries) == 1
+    assert failed_entries[0]["payload"]["status"] == "failed"
 
 
 def test_start_chat_room_round_preserves_all_partial_results(tmp_path, monkeypatch):
@@ -2587,8 +2631,12 @@ def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, mo
         alpha["agentId"],
         prompt_eligible_only=True,
     )
-    assert _has_room_transcript(tmp_path, "session-alpha", room["roomId"])
-    assert _has_room_transcript(tmp_path, "session-beta", room["roomId"])
+    assert not _has_room_transcript(tmp_path, "session-alpha", room["roomId"])
+    assert not _has_room_transcript(tmp_path, "session-beta", room["roomId"])
+    assert any(
+        item.get("type") == "message"
+        for item in room_timeline.read_events(room["roomId"], project_root=chat_room_service.PROJECT_ROOT)
+    )
 
     reset = chat_room_service.reset_chat_room(room["roomId"])
 
@@ -2606,6 +2654,7 @@ def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, mo
         alpha["agentId"],
         prompt_eligible_only=True,
     )
+    assert room_timeline.read_events(room["roomId"], project_root=chat_room_service.PROJECT_ROOT) == []
     reset_events = [
         event
         for event in recorded_events
@@ -2615,8 +2664,11 @@ def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, mo
     reset_fields = reset_events[-1][1]["fields"]
     assert reset_fields["clearedRoundCount"] == 1
     assert reset_fields["clearedMessageCount"] == 2
-    assert reset_fields["clearedSessionTranscriptCount"] == 2
+    # Broadcast ledger transcripts no longer exist, so the reset's session
+    # transcript cleanup has nothing legacy to remove.
+    assert reset_fields["clearedSessionTranscriptCount"] == 0
     assert reset_fields["disabledGroupContextEventCount"] == 2
+    assert reset_fields["timelineCleared"] is True
 
     prompts.clear()
     next_detail = chat_room_service.start_chat_room_round(
@@ -5729,7 +5781,7 @@ def test_question_scoped_room_cleanup_targets_only_owned_rooms(tmp_path, monkeyp
     assert chat_room_service.get_chat_room_detail(foreign_team["roomId"]) is not None
 
 
-def test_stopped_round_still_syncs_completed_messages_to_participant_sessions(tmp_path, monkeypatch):
+def test_stopped_round_keeps_completed_messages_on_room_timeline(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -5767,7 +5819,8 @@ def test_stopped_round_still_syncs_completed_messages_to_participant_sessions(tm
         executor.shutdown(wait=True, cancel_futures=True)
 
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
-    assert detail["rounds"][-1]["status"] == "stopped"
+    stopped_round = detail["rounds"][-1]
+    assert stopped_round["status"] == "stopped"
     for session_id in ("session-alpha", "session-beta"):
         events = load_conversation_events(tmp_path, session_id)
         synced = [
@@ -5776,7 +5829,19 @@ def test_stopped_round_still_syncs_completed_messages_to_participant_sessions(tm
             if event.source == "chat_room_round_sync"
             and started["activeRoundId"] in event.event_id
         ]
-        assert synced, f"stopped round transcript missing in {session_id}"
+        assert not synced, "stopped rounds must not transcribe into session ledgers"
+    timeline = room_timeline.read_events(room["roomId"], project_root=chat_room_service.PROJECT_ROOT)
+    assert any(
+        item.get("type") == "round_state"
+        and item.get("payload", {}).get("status") == "stopped"
+        and item.get("roundId") == started["activeRoundId"]
+        for item in timeline
+    ), "stopped round must be observable on the room timeline"
+    assert any(
+        item.get("type") == "message" and item.get("roundId") == started["activeRoundId"]
+        for item in timeline
+    ), "completed messages before the stop stay on the room timeline"
+    assert stopped_round["messages"], "the pre-stop completed message stays on the round"
 
 
 def test_start_chat_room_round_rejects_when_inflight_cap_reached(tmp_path, monkeypatch):
@@ -5856,14 +5921,16 @@ def test_room_to_api_truncates_history_round_messages_only(tmp_path, monkeypatch
 
 
 def test_stop_chat_room_round_survives_contended_session_transaction(tmp_path, monkeypatch):
-    """Regression for the py-spy lock-order deadlock.
+    """Stop finalization stays responsive while the session lock is parked.
 
-    The stop finalizer (session sync via the chat-state transaction) used to
-    run while the round runner still held ``_CHAT_ROOM_LOCK``.  With the
-    session transaction contended, stop, room detail and round persistence all
-    froze.  The finalizer must release the room lock before touching the
-    session state lock, so stop stays responsive and room state stays readable
-    while the sync is parked.
+    Historical regression: the stop finalizer (session transcript sync via the
+    chat-state transaction) used to run while the round runner still held
+    ``_CHAT_ROOM_LOCK`` and froze stop, detail and persistence.  Since the p2p
+    transport switch the finalizer no longer syncs session transcripts at all
+    (digest delivery touches only agent inboxes and the room timeline), so the
+    stronger contract holds: with the chat-state lock held by another thread
+    for the whole closure, the round still finalizes, room reads stay
+    responsive, and no transcript lands in any session ledger.
     """
 
     _seed_chat_sessions(tmp_path)
@@ -5876,28 +5943,12 @@ def test_stop_chat_room_round_survives_contended_session_transaction(tmp_path, m
     )
     room_id = room["roomId"]
 
-    state_hold_seconds = 3.0
-    finalizer_entered_state_lock = threading.Event()
     release_state_lock = threading.Event()
+    state_lock_held = threading.Event()
     runner_can_return = threading.Event()
     runner_entered_speaker = threading.Event()
     real_state_lock = session_service._CHAT_STATE_LOCK
-
-    class ContendedStateLock:
-        def __enter__(self):
-            if finalizer_entered_state_lock.is_set():
-                return real_state_lock.__enter__()
-            # Lock order contract: the chat room lock must already be released
-            # when the stop finalizer enters the session state lock.
-            assert not chat_room_service._chat_room_lock_owned_by_current_thread()
-            finalizer_entered_state_lock.set()
-            assert release_state_lock.wait(timeout=state_hold_seconds)
-            return real_state_lock.__enter__()
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return real_state_lock.__exit__(exc_type, exc_value, traceback)
-
-    monkeypatch.setattr(session_service, "_CHAT_STATE_LOCK", ContendedStateLock())
+    lock_holder = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-state-holder")
 
     def runner_requests_stop_then_completes(participant, prompt, context):
         # Park inside the speaker call so the stop below lands mid-round, then
@@ -5926,7 +5977,7 @@ def test_stop_chat_room_round_survives_contended_session_transaction(tmp_path, m
     future = executor.submit(
         chat_room_service.start_chat_room_round,
         room_id,
-        "停止收尾必须放锁后再同步会话",
+        "停止收尾不依赖会话事务锁",
         agent_runner=runner_requests_stop_then_completes,
     )
     try:
@@ -5942,35 +5993,38 @@ def test_stop_chat_room_round_survives_contended_session_transaction(tmp_path, m
         assert stored_room["rounds"][-1]["status"] == "stopping"
 
         runner_can_return.set()
-        # The finalizer parks on the contended session transaction; room reads
-        # must stay responsive instead of freezing behind the room lock.  The
-        # bounded executor keeps the test failing fast (instead of hanging) if
-        # the room lock is ever held across the session sync again.
-        probe_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-lock-probe")
-        try:
-            assert finalizer_entered_state_lock.wait(timeout=5)
-            detail_future = probe_executor.submit(chat_room_service.get_chat_room_detail, room_id)
-            detail_while_parked = detail_future.result(timeout=2)
-            assert detail_while_parked is not None
-            busy_stop_future = probe_executor.submit(
-                chat_room_service.stop_chat_room_round, room_id, reason="pytest duplicate stop"
-            )
-            with pytest.raises(chat_room_service.ChatRoomBusyError):
-                busy_stop_future.result(timeout=2)
-        finally:
-            probe_executor.shutdown(wait=False)
+        # Park the chat-state transaction for the closure window: since the
+        # p2p transport switch the finalizer no longer syncs session
+        # transcripts, so it must complete without ever needing this lock
+        # (and must never take it under the room lock — the original deadlock).
+        def hold_state_lock():
+            with real_state_lock:
+                state_lock_held.set()
+                assert release_state_lock.wait(timeout=10)
+
+        lock_holder.submit(hold_state_lock)
+        assert state_lock_held.wait(timeout=5)
     finally:
         runner_can_return.set()
         release_state_lock.set()
         detail = future.result(timeout=10)
         executor.shutdown(wait=True)
+        lock_holder.shutdown(wait=False)
 
     assert detail["status"] == "ready"
     latest_round = detail["rounds"][-1]
     assert latest_round["status"] == "stopped"
-    # The stop finalization still syncs the completed speaker transcript into
-    # participant sessions; it just does so outside the room lock.
-    assert _has_room_transcript(tmp_path, "session-alpha", room_id)
+    # The closure converged while the session transaction was parked, and the
+    # room stays readable afterwards.
+    assert chat_room_service.get_chat_room_detail(room_id) is not None
+    # No session transcript lands anymore; the closure is observable on the
+    # room timeline instead.
+    assert not _has_room_transcript(tmp_path, "session-alpha", room_id)
+    assert any(
+        item.get("type") == "round_state"
+        and item.get("payload", {}).get("status") == "stopped"
+        for item in room_timeline.read_events(room_id, project_root=chat_room_service.PROJECT_ROOT)
+    )
 
 
 def test_stop_and_round_persist_stress_does_not_deadlock(tmp_path, monkeypatch):

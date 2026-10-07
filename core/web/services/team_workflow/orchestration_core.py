@@ -28,13 +28,18 @@ def ensure_team_workflow_orchestration(
     team_id: str,
     *,
     workflow_kind: str = "challenge_cup_research",
-    owner_agent_id: str = "Research Coordination Agent",
+    owner_agent_id: str = "",
 ) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_kind = s._normalize_workflow_kind(workflow_kind)
-    normalized_owner_agent_id = s._trim_text(owner_agent_id, max_length=160) or s.DEFAULT_OWNER_AGENT_ID
-    s.team_service.get_team(normalized_team_id)
+    # Owner derivation: explicit payload wins; otherwise resolve from
+    # Team.members role match (never from the canvas projection).
+    team = s.team_service.get_team(normalized_team_id)
+    normalized_owner_agent_id = (
+        s._trim_text(owner_agent_id, max_length=160)
+        or s._source_collection_owner_agent_id(team, {})
+    )
     with s._WORKFLOW_LOCK:
         path = s._workflow_path(normalized_team_id)
         existing = s._read_json(path) if path.exists() else {}

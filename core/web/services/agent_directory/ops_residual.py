@@ -1492,15 +1492,45 @@ def ensure_agent_for_session(
     return s._agent_to_api(agent)
 
 
+def _strip_windows_extended_prefix(path: Path) -> str:
+    """Normalize a Windows extended-length path to its native compare form.
+
+    ``Path.resolve`` (``ntpath.realpath``) retains the ``\\\\?\\`` prefix on
+    its return value whenever the post-strip re-verification loses a
+    transient filesystem race (see CPython ``Lib/ntpath.py`` ``realpath``:
+    the prefix is only stripped when the stripped path re-resolves to the
+    same final path), and any prefixed input survives ``resolve``
+    round-trips.  Two resolutions of the same location can therefore differ
+    in byte form while naming the same directory, so strict path-form
+    equality on resolve() output is not a safe equality predicate on
+    Windows.
+    """
+
+    text = str(path)
+    if text.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + text[len("\\\\?\\UNC\\"):]
+    if text.startswith("\\\\?\\"):
+        return text[len("\\\\?\\"):]
+    return text
+
+
 def ensure_agent_shared_workspace() -> Path:
     s = _service()
     path = s._resolve_project_path(s.AGENT_SHARED_WORKSPACE_PATH)
     shared_root = s._workspace_path("shared").resolve()
-    if path != shared_root:
+    # Both operands resolve the same location through the same routing chain;
+    # compare on prefix-stripped form so a transient ``\\?\`` retention in one
+    # resolution (Python realpath's post-strip verification can lose a race
+    # under filesystem churn) does not fail the strict equality.
+    if _strip_windows_extended_prefix(path) != _strip_windows_extended_prefix(shared_root):
         raise s.AgentDirectoryError(f"Invalid shared workspace path: {path}")
+    # Return (and materialize subdirs in) native path form: the extended
+    # prefix is a resolve()-form artifact and must not leak into callers or
+    # persistence.
+    native_path = Path(_strip_windows_extended_prefix(path))
     for subdir in ("memory", "artifacts", "notes", "logs", "research", "tmp"):
-        (path / subdir).mkdir(parents=True, exist_ok=True)
-    return path
+        (native_path / subdir).mkdir(parents=True, exist_ok=True)
+    return native_path
 
 
 def evaluate_agent_workspace_write(agent_id: str, path_value: str | Path, *, purpose: str = "") -> Any:

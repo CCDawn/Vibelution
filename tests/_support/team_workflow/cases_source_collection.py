@@ -818,23 +818,22 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
     assert response["assignmentCount"] == 4
     assert {item["agentRole"] for item in response["assignments"]} == expected_roles
 
-def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, monkeypatch):
+def test_start_source_collection_run_maps_roles_to_team_members(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    coordinator = session_service.create_chat_session(title="Coordinator")
-    other_research_agent = session_service.create_chat_session(title="Other Research Agent")
-    finder = session_service.create_chat_session(title="Source Finder")
-    extractor = session_service.create_chat_session(title="Source Extractor")
-    organization = {
-        "agents": [
-            {"nodeId": "coordinator", "agentId": coordinator["agentId"], "displayName": "Coordinator", "role": "ceo", "status": "active"},
-            {"nodeId": "other-research-agent", "agentId": other_research_agent["agentId"], "displayName": "Other Research Agent", "role": "other_research_role", "status": "active"},
-            {"nodeId": "finder", "agentId": finder["agentId"], "displayName": "Source Finder", "role": "source_finder", "status": "active"},
-            {"nodeId": "extractor", "agentId": extractor["agentId"], "displayName": "Source Extractor", "role": "source_extractor", "status": "active"},
+    coordinator = agent_directory_service.create_agent_instance(display_name="Coordinator", direct_session_id="session-coordinator-mapping")
+    other_research_agent = agent_directory_service.create_agent_instance(display_name="Other Research Agent", direct_session_id="session-other-research-mapping")
+    finder = agent_directory_service.create_agent_instance(display_name="Source Finder", direct_session_id="session-finder-mapping")
+    extractor = agent_directory_service.create_agent_instance(display_name="Source Extractor", direct_session_id="session-extractor-mapping")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {"agentId": coordinator["agentId"], "role": "ceo", "agentName": "Coordinator"},
+            {"agentId": other_research_agent["agentId"], "role": "other_research_role", "agentName": "Other Research Agent"},
+            {"agentId": finder["agentId"], "role": "source_finder", "agentName": "Source Finder"},
+            {"agentId": extractor["agentId"], "role": "source_extractor", "agentName": "Source Extractor"},
         ],
-        "edges": [],
-    }
-    team = team_service.ensure_research_team_from_organization(organization)
+    )
 
     response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
@@ -845,6 +844,8 @@ def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, 
     )
 
     role_to_agent_id = {item["agentRole"]: item["agentId"] for item in response["assignments"]}
+    # Owner and role assignments derive from Team.members facts, never from the
+    # canvas projection or the legacy organization graph.
     assert response["run"]["metadata"]["ownerAgentId"] == coordinator["agentId"]
     assert response["searchPlan"]["roleAssignmentInputs"][0]["agentId"] == finder["agentId"]
     assert role_to_agent_id == {

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from core.infrastructure.developer_sandbox import _filesystem_path
 from core.web.services import agent_directory_service
 from tests.test_agent_config_workspace_service import (
     _seed_agent_avatars,
@@ -322,3 +323,38 @@ def test_team_knowledge_access_lines_cache_hits_and_invalidates_on_agent_update(
     third_block = agent_directory_service.build_agent_runtime_context_block(agent_id)
     assert overview_calls == [agent_id, agent_id]
     assert "未配置可读知识库" in third_block
+
+
+def test_ensure_agent_shared_workspace_tolerates_extended_length_prefix_form(
+    tmp_path, monkeypatch
+):
+    """Regression: ``\\\\?\\``-prefixed resolve() output must not fail the compare.
+
+    ``Path.resolve`` (``ntpath.realpath``) can retain the ``\\\\?\\`` prefix
+    when its post-strip re-verification loses a transient filesystem race,
+    and prefixed inputs survive resolve round-trips.  The shared-workspace
+    guard compares two resolutions of the same location, so one prefixed
+    operand used to raise ``Invalid shared workspace path`` even though both
+    sides name the same directory.
+    """
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    real_resolve_project_path = agent_directory_service._resolve_project_path
+
+    def prefixed_resolve_project_path(path_value):
+        # _filesystem_path is the product's canonical extended-length prefix
+        # producer (developer_sandbox); used here so the fixture does not
+        # hand-roll backslash literals.
+        return _filesystem_path(real_resolve_project_path(path_value))
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "_resolve_project_path",
+        prefixed_resolve_project_path,
+    )
+
+    shared_root = agent_directory_service.ensure_agent_shared_workspace()
+
+    assert str(shared_root).startswith("\\\\?\\") is False
+    for subdir in ("memory", "artifacts", "notes", "logs", "research", "tmp"):
+        assert (shared_root / subdir).is_dir()

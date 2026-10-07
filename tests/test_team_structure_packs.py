@@ -206,9 +206,13 @@ def test_facade_reexports_team_crud() -> None:
 
 def test_facade_reexports_research_organization() -> None:
     assert facade.ensure_research_team_from_organization is research_organization.ensure_research_team_from_organization
-    assert facade._members_from_research_organization is research_organization._members_from_research_organization
-    assert facade._canvas_from_research_organization is research_organization._canvas_from_research_organization
-    assert facade._organization_reporting_edges is research_organization._organization_reporting_edges
+    # Org-initiated member materialization is retired: Team.members is written
+    # only through the PATCH team aggregation entrypoint.
+    assert not hasattr(facade, "_members_from_research_organization")
+    assert not hasattr(facade, "_canvas_from_research_organization")
+    assert not hasattr(facade, "_organization_reporting_edges")
+    assert not hasattr(facade, "_research_member_function_label")
+    assert not hasattr(facade, "_research_member_responsibilities")
     assert not hasattr(facade, "_sync_research_team_member_agent_roles")
 
 

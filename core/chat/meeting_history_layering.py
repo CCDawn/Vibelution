@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
 """会议参会者历史的确定性分层压缩投影。
 
-默认的会议室投影开启时，正式会议不再把整轮发言抄进参会者 session。
-只有关掉 ``VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED`` 时，
-``chat_room_service._sync_group_round_to_participant_sessions`` 仍会把本轮
-发言拼成一条「[群聊同步]」assistant 消息追加到每个参会者 session ledger。
-本模块只投影已经存在的这些同步消息：最近若干轮保留原文，更早的轮次收成
-固定回顾。
+点对点传输切换（chatroom-p2p-transport）后，``chat_room_service`` 不再向参会
+者 session ledger 广播整轮「[群聊同步]」转写；本模块因此有两个数据源路径：
 
-- 最近 M 轮「[群聊同步]」消息逐字保留（M 由环境变量
+- 遗留路径 ``apply_meeting_history_layering``：只投影历史上已经写入 ledger 的
+  同步消息（迁移期房间），最近若干轮保留原文，更早的轮次收成固定回顾；
+- 房间轮次路径 ``build_room_round_history``：直接从房间持久化 rounds 合成与
+  旧转写同形的轮次消息，再做同样的逐字/回顾分层——group 事件不再写入后，
+  会议房参会者的房间视图由房间 rounds 而非 session ledger 承担。
+
+- 最近 M 轮同步消息逐字保留（M 由环境变量
   ``VIBELUTION_MEETING_HISTORY_VERBATIM_ROUNDS`` 控制，默认 2，0=禁用）；
 - 更早的每一轮**原位**替换为一条冻结 recap assistant 消息（一轮一条）。
 
 闭轮冻结（稳定前缀契约）：
 
-- 一条冻结 recap 只依赖两样输入：该轮不可变的 ledger 原文，以及该轮在本房间
+- 一条冻结 recap 只依赖两样输入：该轮不可变的原文，以及该轮在本房间
   轮次序列中的绝对序号（1-based，出现顺序）。渲染是确定性纯函数（无 LLM、
   无时间戳、无随机），因此闭轮 recap 语义冻结：重复投影逐字节一致，不因后
   续轮次增加、窗口滑动或重算路径不同而漂移——无需持久化即保证「永不改字
@@ -26,9 +28,8 @@
 
 硬约束：
 
-- ledger 原文不动：本模块只作用于已投影的 history seed 消息序列，不写回
-  ConversationLedger，因此 ``_has_group_round_session_sync`` 的幂等重同步与
-  ledger fingerprint 均不受影响；
+- ledger 原文不动：本模块只作用于投影的 history seed 消息序列或房间 rounds
+  只读快照，不写回任何存储；
 - conversation invariant 安全：recap 是纯 assistant 文本消息（无 tool_calls、
   无 silent-repair metadata），插入/替换发生在 assembler 的
   ``conversation_layer_fingerprint`` 双向校验之后（校验对象是 ledger 投影视
@@ -204,6 +205,137 @@ def apply_meeting_history_layering(
     return layered, state
 
 
+TERMINAL_ROUND_STATUSES = frozenset(
+    {"completed", "partial", "stopped", "failed", "cancelled"}
+)
+
+
+def _round_completed_utterances(round_payload: Any) -> list[tuple[str, str]]:
+    """Extract ``(speaker, bounded content)`` for one terminal room round."""
+
+    utterances: list[tuple[str, str]] = []
+    messages = round_payload.get("messages") if isinstance(round_payload, dict) else None
+    for message in list(messages or []):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("status") or "").strip().lower() != "completed":
+            continue
+        speaker = str(message.get("speakerTitle") or message.get("participantId") or "").strip()
+        content = _trim_lines_bounded(
+            str(message.get("content") or message.get("summary") or ""),
+            max_lines=4,
+        )
+        if not content:
+            continue
+        utterances.append((speaker, content))
+    return utterances
+
+
+def _trim_lines_bounded(text: str, *, max_lines: int) -> str:
+    lines = [line.rstrip() for line in str(text or "").splitlines() if line.strip()]
+    return "\n".join(lines[:max_lines])
+
+
+def synthesize_room_round_message(
+    round_payload: Any,
+    *,
+    round_number: int,
+    room_id: str,
+    room_title: str = "",
+    participant_id: str = "",
+) -> dict[str, Any]:
+    """Project one terminal room round into the legacy sync-message shape.
+
+    Deterministic pure function of the round payload: same input produces the
+    same bytes, so the verbatim window and frozen recaps built on top keep
+    their stable-prefix contract.  The output carries the
+    ``group_room_transcript`` metadata so downstream consumers (recap parser,
+    token buckets) treat it exactly like the ledger transcripts it replaces.
+    """
+
+    room_id_normalized = str(room_id or "").strip()
+    topic = str(round_payload.get("topic") or "").strip() if isinstance(round_payload, dict) else ""
+    summary = str(round_payload.get("summary") or "").strip() if isinstance(round_payload, dict) else ""
+    own_lines: list[str] = []
+    peer_lines: list[str] = []
+    participant_normalized = str(participant_id or "").strip()
+    for speaker, content in _round_completed_utterances(round_payload):
+        line = f"- {speaker}: {content}" if speaker else f"- {content}"
+        if participant_normalized and speaker == participant_normalized:
+            own_lines.append(line)
+        else:
+            peer_lines.append(line)
+    content_lines = [
+        _SYNC_HEADER_LINE,
+        f"群聊: {room_title or room_id_normalized}",
+        f"{_TOPIC_PREFIX}{topic}",
+        f"{_SUMMARY_PREFIX}{summary}",
+        "",
+        _MY_SECTION_MARKER,
+        *(own_lines or ["- 本轮你没有发言。"]),
+        "",
+        _PEER_SECTION_MARKER,
+        *(peer_lines or ["- 本轮暂无其他 Agent 发言。"]),
+    ]
+    round_id = str(round_payload.get("roundId") or "").strip() if isinstance(round_payload, dict) else ""
+    return {
+        "role": "assistant",
+        "content": "\n".join(content_lines),
+        "metadata": {
+            "kind": GROUP_ROOM_TRANSCRIPT_KIND,
+            "sourceRoomId": room_id_normalized,
+            "sourceRoundId": round_id,
+            "sourceRoomTitle": str(room_title or "").strip(),
+            "participantId": participant_normalized,
+            "roundNumber": int(round_number),
+        },
+    }
+
+
+def build_room_round_history(
+    rounds: Iterable[Any],
+    *,
+    room_id: str,
+    room_title: str = "",
+    participant_id: str = "",
+    verbatim_rounds: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Build the meeting speaker's room view from persisted room rounds.
+
+    Terminal rounds only (the running round the speaker is currently
+    contributing to is not history).  Each round is synthesized into the
+    legacy sync-message shape and then run through the same verbatim/recap
+    layering as ledger transcripts, so a meeting speaker keeps cross-round
+    context after broadcast transcript fan-out stopped writing group events
+    into session ledgers.  Returns ``(messages, state)``.
+    """
+
+    terminal_rounds = [
+        round_payload
+        for round_payload in list(rounds or [])
+        if isinstance(round_payload, dict)
+        and str(round_payload.get("status") or "").strip().lower() in TERMINAL_ROUND_STATUSES
+    ]
+    synthesized = [
+        synthesize_room_round_message(
+            round_payload,
+            round_number=number,
+            room_id=room_id,
+            room_title=room_title,
+            participant_id=participant_id,
+        )
+        for number, round_payload in enumerate(terminal_rounds, start=1)
+    ]
+    layered, state = apply_meeting_history_layering(
+        synthesized,
+        room_id=room_id,
+        verbatim_rounds=verbatim_rounds,
+    )
+    state["dataSource"] = "room_rounds"
+    state["terminalRoundCount"] = len(terminal_rounds)
+    return layered, state
+
+
 def build_meeting_round_recap(message: Any, *, round_number: int) -> str:
     """把一条已关闭轮次的「[群聊同步]」消息渲染成该轮的冻结 recap 文本。
 
@@ -323,8 +455,11 @@ __all__ = [
     "MEETING_HISTORY_VERBATIM_ROUNDS_ENV",
     "MEETING_HISTORY_RECAP_KIND",
     "GROUP_ROOM_TRANSCRIPT_KIND",
+    "TERMINAL_ROUND_STATUSES",
     "apply_meeting_history_layering",
     "build_meeting_round_recap",
+    "build_room_round_history",
     "is_group_room_transcript_message",
     "resolve_meeting_history_verbatim_rounds",
+    "synthesize_room_round_message",
 ]
