@@ -36,6 +36,7 @@
 | 文档权威层与 archive | [../adr/0005-docs-authority-and-archive-policy.md](../adr/0005-docs-authority-and-archive-policy.md) |
 | 产品语境 / UI 注册表 | [../product/README.md](../product/README.md) · [../product/design-register.md](../product/design-register.md) |
 | Web services 全量 ownership | [../../core/web/services/README.md](../../core/web/services/README.md) |
+| 团队/角色统一格式契约（成员行 schema、角色 schema、模型引用语义、四体系收敛） | [unified-team-format.md](unified-team-format.md) + 门禁 `core/web/services/team/team_format.py` / `tests/test_team_format_contract.py` |
 
 ## 边界
 
