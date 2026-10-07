@@ -151,30 +151,68 @@ describe("conversationTextSelection", () => {
     expect(snapshot?.sourceMessageId).toBe("message-anchor-1");
   });
 
-  it("anchors the menu above the selection and clamps it horizontally", () => {
+  it("centers the menu on the selection instead of the pane's left edge", () => {
     const position = resolveSelectionQuoteMenuPosition(
       stubRect({ top: 160, left: 300, width: 50, height: 20, bottom: 180, right: 350 }),
-      { top: 40, left: 0, width: 600, height: 800 },
+      { width: 1200, height: 800 },
+      { width: 208, height: 40 },
     );
     expect(position.above).toBe(true);
-    expect(position.top).toBe(120 - SELECTION_QUOTE_MENU_GAP_PX);
-    expect(position.left).toBe(300);
+    expect(position.left).toBe(325 - 104);
+    expect(position.top).toBe(160 - SELECTION_QUOTE_MENU_GAP_PX);
 
-    const clamped = resolveSelectionQuoteMenuPosition(
-      stubRect({ top: 130, left: 580, width: 50, height: 20, bottom: 150, right: 630 }),
-      { top: 100, left: 0, width: 600, height: 800 },
+    const wideSelection = resolveSelectionQuoteMenuPosition(
+      stubRect({ top: 200, left: 80, width: 1040, height: 48, bottom: 248, right: 1120 }),
+      { width: 1200, height: 800 },
+      { width: 208, height: 40 },
     );
-    expect(clamped.left).toBe(600 - 208);
+    expect(wideSelection.left).toBe(600 - 104);
   });
 
-  it("flips below the selection when there is no headroom above", () => {
-    const position = resolveSelectionQuoteMenuPosition(
-      stubRect({ top: 100, left: 40, width: 50, height: 20, bottom: 120, right: 90 }),
-      { top: 100, left: 0, width: 600, height: 800 },
+  it("keeps the menu inside the viewport and flips below when the top is tight", () => {
+    const clamped = resolveSelectionQuoteMenuPosition(
+      stubRect({ top: 160, left: 1100, width: 80, height: 20, bottom: 180, right: 1180 }),
+      { width: 1200, height: 800 },
+      { width: 208, height: 40 },
     );
-    expect(position.above).toBe(false);
-    expect(position.top).toBe(20 + SELECTION_QUOTE_MENU_GAP_PX);
+    expect(clamped.left).toBe(1200 - 208 - 12);
+
+    const flipped = resolveSelectionQuoteMenuPosition(
+      stubRect({ top: 20, left: 40, width: 50, height: 20, bottom: 40, right: 90 }),
+      { width: 1200, height: 800 },
+      { width: 208, height: 40 },
+    );
+    expect(flipped.above).toBe(false);
+    expect(flipped.top).toBe(40 + SELECTION_QUOTE_MENU_GAP_PX);
     expect(SELECTION_QUOTE_MENU_HEIGHT_PX).toBeGreaterThan(0);
+  });
+
+  it("reads range geometry from prototype getters", () => {
+    const container = document.createElement("div");
+    const text = document.createTextNode("被划选的原文");
+    container.appendChild(text);
+    const rect = Object.create(null, {
+      top: { get: () => 160, enumerable: false },
+      left: { get: () => 300, enumerable: false },
+      width: { get: () => 50, enumerable: false },
+      height: { get: () => 20, enumerable: false },
+      bottom: { get: () => 180, enumerable: false },
+      right: { get: () => 350, enumerable: false },
+    }) as ConversationSelectionRect;
+
+    const snapshot = extractConversationSelectionSnapshot(
+      stubSelection([stubRange(text, text, rect)], "被划选的原文"),
+      container,
+    );
+    expect({ ...rect }).toEqual({});
+    expect(snapshot?.rect).toEqual({
+      top: 160,
+      left: 300,
+      width: 50,
+      height: 20,
+      bottom: 180,
+      right: 350,
+    });
   });
 
 
