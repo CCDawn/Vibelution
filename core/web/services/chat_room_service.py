@@ -56,9 +56,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.chat.conversation_ledger import (
-    EVENT_ASSISTANT_MESSAGE,
-    append_conversation_event,
-    conversation_visible_messages_from_events,
     load_conversation_events,
     rewrite_conversation_events,
 )
@@ -81,7 +78,11 @@ from core.chatroom.context_runtime import (
     commit_chat_room_context_checkpoint,
     last_chat_room_message_ref,
 )
-from core.chatroom.scheduler import get_scheduler_registry
+from core.chatroom.scheduler import (
+    _resolve_mentioned_participants,
+    _resolve_planned_manager,
+    get_scheduler_registry,
+)
 from core.chatroom import timeline as room_timeline
 from core.chatroom.store import ChatRoomStore, ChatRoomStoreReadError, utc_now_iso
 from core.infrastructure import developer_sandbox
@@ -119,6 +120,12 @@ from .team_workflow.meeting_message_payload import (
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUN_KIND = "chat_room_round"
 RUN_LEASES = [READONLY_CHAT_LEASE]
+# Speaker session replay window (chatroom-p2p-transport): the pre-switch
+# behavior replayed the participant's entire post-checkpoint ledger into every
+# turn. With broadcast transcript fan-out gone, room context is sourced from
+# the room-owned view, so a bounded tail of the speaker's own session history
+# is sufficient and keeps long-lived rooms from unbounded prompt growth.
+_CHAT_ROOM_SPEAKER_RECENT_MESSAGE_LIMIT = 24
 DEFAULT_MODE = "round_robin"
 DEFAULT_PURPOSE = "discussion"
 CHAT_ROOM_AGENT_LLM_SLOT = "dialogue"
@@ -1010,6 +1017,21 @@ def update_chat_room(
     return _room_to_api(room)
 
 
+def _is_team_bound_chat_room(room: Mapping[str, Any]) -> bool:
+    """A room owned by a team (the team's linked chat room) is team-managed.
+
+    Team rooms are created and maintained by the team domain; the /agents
+    membership panel must not reshape them directly. Detection mirrors the
+    room-event team fields: config ``source == "team"`` or a team id carried
+    on the room/config.
+    """
+
+    config = room.get("config") if isinstance(room.get("config"), Mapping) else {}
+    if str(config.get("source") or "").strip() == "team":
+        return True
+    return bool(_challenge_cup_room_team_id(room))
+
+
 def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None) -> dict[str, Any]:
     """Update the rooms a single persistent Agent belongs to without touching peers."""
 
@@ -1066,6 +1088,16 @@ def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None)
                 )
             if next_participants == participants:
                 continue
+            if _is_team_bound_chat_room(room):
+                # Team-bound rooms take their roster from the team domain; a
+                # direct membership write here would desync the team view.
+                raise ChatRoomValidationError(
+                    text_for(
+                        lang,
+                        zh="该群聊由团队管理，成员变更请到团队设置中调整。",
+                        en="This chat room is managed by a team; change its members in the team settings.",
+                    )
+                )
             _raise_if_room_busy(room)
             room["participants"] = next_participants
             room["updatedAt"] = now
@@ -1487,6 +1519,10 @@ def delete_chat_room(room_id: str) -> dict[str, Any]:
         _store().save(state)
 
     _record_room_event("room", "chat_room.deleted", room, fields={"roundCount": len(room.get("rounds") or [])})
+    try:
+        room_timeline.clear_room_timeline(normalized_room_id, project_root=PROJECT_ROOT)
+    except Exception:
+        pass
     return {"deleted": True, "roomId": normalized_room_id}
 
 
@@ -1521,6 +1557,17 @@ def reset_chat_room(room_id: str) -> dict[str, Any]:
     group_context_cleanup = _disable_group_context_for_room(
         normalized_room_id,
     )
+    # The reset keeps the same roomId, so the durable timeline must not
+    # outlive the cleared rounds (same hygiene as the session transcript
+    # cleanup above).
+    timeline_cleared = False
+    try:
+        timeline_cleared = room_timeline.clear_room_timeline(
+            normalized_room_id,
+            project_root=PROJECT_ROOT,
+        )
+    except Exception:
+        timeline_cleared = False
     _record_room_event(
         "room",
         "chat_room.reset",
@@ -1533,6 +1580,7 @@ def reset_chat_room(room_id: str) -> dict[str, Any]:
             "cleanedSessionCount": session_cleanup.get("changedSessionCount", 0),
             "disabledGroupContextEventCount": group_context_cleanup.get("disabledEventCount", 0),
             "disabledGroupContextAgentCount": group_context_cleanup.get("changedAgentCount", 0),
+            "timelineCleared": timeline_cleared,
         },
         outcome="reset",
         lifecycle=True,
@@ -3000,7 +3048,7 @@ def _execute_chat_room_round(
     )
     if completed_count > 0:
         _sync_group_context_events(room, target_round)
-        _sync_group_round_to_participant_sessions(room, target_round)
+        _deliver_round_digest_to_targeted_inboxes(room, target_round)
     _publish_chat_room_detail_snapshot(normalized_room_id)
     _clear_chat_room_round_control(round_id)
     try:
@@ -5035,12 +5083,19 @@ def _speaker_prompt_cache_partition(session_id: str, room_id: str) -> str:
 def _apply_meeting_history_layering_for_room(
     messages: list[dict[str, Any]],
     context: dict[str, Any],
+    *,
+    participant_id: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """会议房参会者历史 seed 的确定性分层压缩门控。
 
     仅会议房（``meetingType`` 非空）生效；非会议 session 一律原样返回，不
     触碰装配器全局默认行为。分层作用于 assembler 的 fingerprint 校验之后的
     history seed 视图，recap 属后处理，不参与 conversation_layer_fingerprint。
+
+    点对点传输切换后，group 事件不再写入参会者 ledger：会议房的房间视图数据
+    源从「ledger 里的 group 事件」改为房间持久化 rounds（``build_room_round_
+    history``）。遗留 ledger 转写消息仍会被原位分层（迁移期房间），而已在
+    ledger 中有转写的轮次不再重复合成，避免迁移期出现双份房间上下文。
     """
 
     room_snapshot = context.get("_roomContextSnapshot")
@@ -5050,10 +5105,58 @@ def _apply_meeting_history_layering_for_room(
     room_id = str(context.get("roomId") or "").strip()
     if not meeting_type or not room_id:
         return messages, None
-    from core.chat.meeting_history_layering import apply_meeting_history_layering
+    from core.chat.meeting_history_layering import (
+        apply_meeting_history_layering,
+        build_room_round_history,
+        is_group_room_transcript_message,
+    )
 
     layered, state = apply_meeting_history_layering(messages, room_id=room_id)
-    return layered, state
+    legacy_round_ids = {
+        str(
+            (message.get("metadata") if isinstance(message.get("metadata"), dict) else {}).get(
+                "sourceRoundId"
+            )
+            or ""
+        ).strip()
+        for message in messages
+        if isinstance(message, dict) and is_group_room_transcript_message(message, room_id=room_id)
+    }
+    room = None
+    try:
+        state_snapshot = _store().load()
+        room = _find_room(state_snapshot, room_id)
+    except Exception:
+        room = None
+    rounds = list((room or {}).get("rounds") or [])
+    pending_rounds = [
+        round_payload
+        for round_payload in rounds
+        if str(round_payload.get("roundId") or "").strip() not in legacy_round_ids
+    ] if legacy_round_ids else rounds
+    round_view, round_state = build_room_round_history(
+        pending_rounds,
+        room_id=room_id,
+        room_title=str((room or {}).get("title") or "").strip(),
+        participant_id=str(participant_id or "").strip(),
+    )
+    # Distinct key namespace: the legacy ledger-layering counts and the
+    # room-round view counts describe different data sources and must not
+    # clobber each other when both are present (migration-period rooms).
+    merged_state = {
+        **state,
+        "roomRoundDataSource": round_state.get("dataSource") or "",
+        "roomTerminalRoundCount": round_state.get("terminalRoundCount") or 0,
+        "roomVerbatimRoundCount": max(
+            0, int(round_state.get("terminalRoundCount") or 0)
+            - int(round_state.get("recapRoundCount") or 0)
+        ),
+        "roomRecapRoundCount": round_state.get("recapRoundCount") or 0,
+        "roomRecappedRoundIds": list(round_state.get("recappedRoundIds") or []),
+    }
+    if round_view:
+        return [*layered, *round_view], merged_state
+    return layered, merged_state
 
 
 def _estimate_chat_room_context_tokens(messages: list[Any]) -> int:
@@ -5450,7 +5553,12 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             session_id=session_id,
             current_turn_id=turn_identity,
             ledger_events=ledger_events or None,
-            recent_message_limit=None,
+            # Bounded tail instead of the legacy full replay: room-wide
+            # observability moved to the room timeline/round view, so a
+            # speaker's own session ledger no longer needs an unbounded
+            # window (and the unbounded window was the broadcast-era growth
+            # path). Assembler clamps the value to its own sane maximum.
+            recent_message_limit=_CHAT_ROOM_SPEAKER_RECENT_MESSAGE_LIMIT,
         )
         canonical_chat_history = list(history_assembly.history_messages or [])
         source_session_history = list(canonical_chat_history)
@@ -5458,7 +5566,11 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         # participant's direct Session replay. The kill switch retains the
         # legacy meeting recap projection and ordinary Session behavior.
         canonical_chat_history, _meeting_history_layering_state = (
-            _apply_meeting_history_layering_for_room(canonical_chat_history, context)
+            _apply_meeting_history_layering_for_room(
+                canonical_chat_history,
+                context,
+                participant_id=str(participant.get("participantId") or agent_id or "").strip(),
+            )
         )
         chat_history_ledger_fingerprint = ""
         if canonical_chat_history and context.get("_structuredChatRoomContext"):
@@ -6222,159 +6334,252 @@ def _sync_group_context_events(room: dict[str, Any], round_payload: dict[str, An
     )
 
 
-def _meeting_transcript_stays_on_room(
-    room: Mapping[str, Any],
-    round_payload: Mapping[str, Any],
-) -> bool:
-    """Formal meetings keep the transcript on the room.
+_ROUND_DIGEST_DELIVERED_LOCK = threading.Lock()
+# Per-process idempotence guard for digest delivery: stop/fail closure and the
+# happy-path finish can both reach the delivery for the same room+round.
+_ROUND_DIGEST_DELIVERED: set[tuple[str, str]] = set()
 
-    The confirmed digest stays on the meeting record for the next stage.
-    Participant sessions do not receive a copy of the round while the
-    room-owned model view is enabled. Turning
-    ``VIBELUTION_CHAT_ROOM_STRUCTURED_CONTEXT_ENABLED`` off restores the
-    legacy session copy so meeting history layering still has its source
-    messages. Ordinary group chats are unchanged.
+ROUND_DIGEST_INBOX_KIND = "chat_room_round_digest"
+_DIGEST_EXCERPT_CHAR_LIMIT = 120
+
+
+def _resolve_round_digest_recipients(
+    room: dict[str, Any],
+    round_payload: dict[str, Any],
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
+    """Resolve the targeted digest recipients for one finished round.
+
+    Recipients are the @mentioned participants (scheduler mention lexicon,
+    scanned over the round topic and every completed message) plus, for
+    planned-dispatch rooms only, the scheduler-determined next speakers —
+    round-robin/opportunistic rooms would "next speaker" into every member,
+    which would rebuild the broadcast this function replaces.  Returns
+    ``(recipients, mentioned_with_excerpt)`` where the excerpt is the first
+    bounded line of the content that carried the mention.
     """
 
-    from core.chatroom.context_runtime import chat_room_structured_context_enabled
-
-    if not chat_room_structured_context_enabled():
-        return False
+    participants = [
+        item for item in list(room.get("participants") or [])
+        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+    ]
+    if not participants:
+        return [], []
     round_config = (
         round_payload.get("config")
         if isinstance(round_payload.get("config"), Mapping)
-        else {}
+        else _safe_config(room.get("config"))
     )
-    if str(round_config.get("meetingRoundId") or "").strip():
-        return True
-    if str(round_config.get("meetingType") or "").strip():
-        return True
-    room_config = room.get("config") if isinstance(room.get("config"), Mapping) else {}
-    return bool(str(room_config.get("meetingRoundId") or "").strip())
+    manager = _resolve_planned_manager(participants, _safe_config(round_config))
+    mentioned: list[dict[str, Any]] = []
+    mentioned_excerpts: list[tuple[dict[str, Any], str]] = []
+    seen: set[str] = set()
+    mention_sources = [str(round_payload.get("topic") or "")]
+    mention_sources.extend(str(message.get("content") or "") for message in messages)
+    for content in mention_sources:
+        for candidate in _resolve_mentioned_participants(participants, manager, content):
+            participant_id = str(candidate.get("participantId") or "").strip()
+            if not participant_id or participant_id in seen:
+                continue
+            seen.add(participant_id)
+            mentioned.append(candidate)
+            excerpt = next(
+                (line.strip() for line in content.splitlines() if line.strip()),
+                "",
+            )
+            mentioned_excerpts.append(
+                (candidate, excerpt[:_DIGEST_EXCERPT_CHAR_LIMIT])
+            )
+    recipients = list(mentioned)
+    scheduler = get_scheduler_registry().get(
+        str(round_payload.get("mode") or room.get("mode") or DEFAULT_MODE)
+    )
+    if scheduler is not None and str(getattr(scheduler, "mode", "") or "").strip().lower() == "planned":
+        try:
+            next_speakers = scheduler.select_speakers(
+                participants,
+                topic=str(round_payload.get("topic") or ""),
+                history=list(room.get("rounds") or []),
+                config=_safe_config(round_config),
+            )
+        except Exception:
+            next_speakers = []
+        for candidate in next_speakers:
+            participant_id = str(candidate.get("participantId") or "").strip()
+            if not participant_id or participant_id in seen:
+                continue
+            seen.add(participant_id)
+            recipients.append(candidate)
+    return recipients, mentioned_excerpts
 
 
-def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payload: dict[str, Any]) -> None:
-    if _meeting_transcript_stays_on_room(room, round_payload):
-        _record_room_event(
-            "group_context",
-            "group_context.session_transcript_kept_on_room",
-            room,
-            round_payload,
-            fields={"syncedSessionCount": 0},
-            outcome="skipped",
-            lifecycle=True,
-        )
-        return
-    participants = [
-        item for item in list(room.get("participants") or [])
-        if isinstance(item, dict) and str(item.get("sessionId") or item.get("directSessionId") or "").strip()
+def _build_round_digest_content(
+    room: dict[str, Any],
+    round_payload: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    final_status: str,
+    mentioned_excerpts: list[tuple[dict[str, Any], str]],
+) -> str:
+    room_id = str(room.get("roomId") or round_payload.get("roomId") or "").strip()
+    round_id = str(round_payload.get("roundId") or "").strip()
+    speaker_titles: list[str] = []
+    for message in messages:
+        title = str(message.get("speakerTitle") or message.get("participantId") or "").strip()
+        if title and title not in speaker_titles:
+            speaker_titles.append(title)
+    lines = [
+        "[群聊动态]",
+        f"群聊: {room.get('title') or room_id}",
+        f"议题: {round_payload.get('topic') or ''}",
+        f"轮次状态: {final_status}",
+        f"发言人: {'、'.join(speaker_titles) or '（本轮无发言）'}",
     ]
+    summary = str(round_payload.get("summary") or "").strip()
+    if summary:
+        lines.append(f"摘要: {summary}")
+    if mentioned_excerpts:
+        lines.append("被提及摘录:")
+        lines.extend(f"- {excerpt}" for _, excerpt in mentioned_excerpts if excerpt)
+    lines.append(
+        f"完整时间线: /api/chat-rooms/{room_id}/timeline (roundId={round_id})"
+    )
+    return "\n".join(lines)
+
+
+def _deliver_round_digest_to_targeted_inboxes(
+    room: dict[str, Any],
+    round_payload: dict[str, Any],
+) -> None:
+    """Deliver one compact round digest to targeted agent inboxes.
+
+    Replaces the legacy broadcast that transcribed the whole round into every
+    participant's direct-session ledger.  Full-room observability now lives on
+    the append-only room timeline (``GET /api/chat-rooms/{id}/timeline``) and
+    the per-agent compact group-context events; only @mentioned participants
+    and planned-mode next speakers receive an inbox row, so a round can no
+    longer fan out unbounded transcript copies.
+    """
+
     messages = [
         item for item in list(round_payload.get("messages") or [])
         if isinstance(item, dict) and str(item.get("status") or "").strip().lower() == "completed"
     ]
     room_id = str(room.get("roomId") or round_payload.get("roomId") or "").strip()
     round_id = str(round_payload.get("roundId") or "").strip()
-    if not participants or not messages or not room_id or not round_id:
+    if not messages or not room_id or not round_id:
         return
-
-    timestamp = (
-        str(round_payload.get("finishedAt") or round_payload.get("updatedAt") or "").strip()
-        or utc_now_iso()
+    recipients, mentioned_excerpts = _resolve_round_digest_recipients(
+        room, round_payload, messages
     )
-    synced_count = 0
-    skipped_count = 0
-    missing_count = 0
-    materialized_count = 0
-    materialized_snapshots: list[dict[str, Any]] = []
-    with session_service._CHAT_STATE_LOCK:
-        payload = load_chat_state(PROJECT_ROOT)
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
+    if not recipients:
+        _record_room_event(
+            "group_context",
+            "group_context.round_digest_skipped",
+            room,
+            round_payload,
+            fields={"recipientCount": 0, "messageCount": len(messages)},
+            outcome="skipped",
+            lifecycle=True,
+        )
+        return
+    digest_key = (room_id, round_id)
+    with _ROUND_DIGEST_DELIVERED_LOCK:
+        if digest_key in _ROUND_DIGEST_DELIVERED:
             return
-        for participant in participants:
-            session_id = str(participant.get("sessionId") or participant.get("directSessionId") or "").strip()
-            if not session_id:
-                continue
-            conversation = session_service._find_conversation_entry(payload, session_id)
-            if conversation is None:
-                if session_service._materialize_agent_directory_conversation_locked(
-                    payload,
-                    session_id,
-                    source="chat_room_round_sync",
-                ):
-                    materialized_count += 1
-                    conversation = session_service._find_conversation_entry(payload, session_id)
-                    if isinstance(conversation, dict):
-                        materialized_snapshots.append(dict(conversation))
-                if conversation is None:
-                    missing_count += 1
-                    continue
-            session_messages = conversation_visible_messages_from_events(
-                load_conversation_events(PROJECT_ROOT, session_id)
+        _ROUND_DIGEST_DELIVERED.add(digest_key)
+    final_status = str(round_payload.get("status") or "").strip() or "finished"
+    content = _build_round_digest_content(
+        room,
+        round_payload,
+        messages,
+        final_status=final_status,
+        mentioned_excerpts=mentioned_excerpts,
+    )
+    speaker_ids = [
+        str(message.get("participantId") or "").strip()
+        for message in messages
+        if str(message.get("participantId") or "").strip()
+    ]
+    delivered_count = 0
+    failed_count = 0
+    for recipient in recipients:
+        agent_id = str(recipient.get("agentId") or "").strip()
+        participant_id = str(recipient.get("participantId") or agent_id).strip()
+        if not agent_id:
+            continue
+        try:
+            agent_directory_service.write_agent_inbox_message(
+                agent_id,
+                content=content,
+                summary=trim_lines(
+                    f"群聊动态: {round_payload.get('topic') or ''}（{final_status}）",
+                    max_lines=2,
+                ),
+                kind=ROUND_DIGEST_INBOX_KIND,
+                source_room_id=room_id,
+                source_round_id=round_id,
+                thread_id=f"chat-room-{room_id}",
+                prompt_eligible=False,
+                created_by="chat_room",
+                # Deterministic id: a cross-process double closure produces a
+                # detectable duplicate id instead of a second digest row set.
+                message_id=f"rounddigest-{room_id}-{round_id}-{participant_id}"[:200],
+                metadata={
+                    "roomId": room_id,
+                    "roundId": round_id,
+                    "finalStatus": final_status,
+                    "speakerIds": speaker_ids,
+                    "mentionedExcerpts": [excerpt for _, excerpt in mentioned_excerpts],
+                    # Inbox metadata keeps scalar values only (the inbox
+                    # writer stringifies nested shapes); the timeline pointer
+                    # is flattened so tools can read it without parsing.
+                    "timelineEndpoint": f"/api/chat-rooms/{room_id}/timeline",
+                    "timelineCursorHint": 0,
+                },
             )
-            if _has_group_round_session_sync(session_messages, room_id=room_id, round_id=round_id):
-                skipped_count += 1
-                continue
-            transcript_message = _build_group_round_session_message(
+            delivered_count += 1
+        except Exception as exc:
+            failed_count += 1
+            _record_room_event(
+                "group_context",
+                "group_context.round_digest_delivery_failed",
                 room,
                 round_payload,
-                participant,
-                messages,
-                timestamp=timestamp,
-            )
-            append_conversation_event(
-                PROJECT_ROOT,
-                session_id,
-                f"chat-room-{round_id or uuid.uuid4().hex}",
-                EVENT_ASSISTANT_MESSAGE,
-                status="completed",
-                payload={
-                    "content": str(transcript_message.get("content") or ""),
-                    "metadata": transcript_message.get("metadata") if isinstance(transcript_message.get("metadata"), dict) else {},
+                fields={
+                    "agentId": agent_id,
+                    "participantId": participant_id,
+                    "errorType": type(exc).__name__,
+                    "errorPreview": trim_lines(str(exc), max_lines=2),
                 },
-                source="chat_room_round_sync",
-                timestamp=timestamp,
+                outcome="failed",
+                level="warning",
+                lifecycle=True,
             )
-            conversation.pop("messages", None)
-            conversation["updated_at"] = timestamp
-            synced_count += 1
-        if synced_count:
-            payload["updated_at"] = timestamp
-            save_chat_state(PROJECT_ROOT, payload)
-
-    if materialized_snapshots:
-        from core.web.services.session import directory_bridge
-
-        directory_bridge.sync_conversation_records(materialized_snapshots, wait=False)
-
     _record_room_event(
         "group_context",
-        "group_context.session_transcript_synced",
+        "group_context.round_digest_delivered",
         room,
         round_payload,
         fields={
-            "syncedSessionCount": synced_count,
-            "skippedSessionCount": skipped_count,
-            "missingSessionCount": missing_count,
-            "materializedSessionCount": materialized_count,
-            "participantCount": len(participants),
+            "deliveredCount": delivered_count,
+            "failedCount": failed_count,
+            "recipientCount": len(recipients),
+            "mentionedCount": len(mentioned_excerpts),
+            "messageCount": len(messages),
         },
-        outcome="written" if synced_count else "skipped",
+        outcome="written" if delivered_count else "skipped",
         lifecycle=True,
     )
 
 
 def _sync_stopped_round_to_sessions_if_needed(room: dict[str, Any], round_payload: dict[str, Any]) -> None:
-    """Stop/fail closures must still sync completed speaker messages.
+    """Stop/fail closures must still deliver the targeted round digest.
 
-    The happy path syncs at round completion; without this the transcript and
-    group-context events for completed messages never reach participant
-    sessions when the round is stopped or fails midway. Formal meetings with
-    the room-owned view skip the session transcript inside
-    ``_sync_group_round_to_participant_sessions`` and keep it on the room.
-    Both sync helpers are idempotent per room+round, so double closure paths
-    stay safe.
+    The happy path delivers at round completion; without this the compact
+    digest and group-context events for completed messages never reach the
+    targeted inboxes when the round is stopped or fails midway.  Both
+    helpers are idempotent per room+round, so double closure paths stay safe.
     """
 
     has_completed = any(
@@ -6384,7 +6589,7 @@ def _sync_stopped_round_to_sessions_if_needed(room: dict[str, Any], round_payloa
     if not has_completed:
         return
     _sync_group_context_events(room, round_payload)
-    _sync_group_round_to_participant_sessions(room, round_payload)
+    _deliver_round_digest_to_targeted_inboxes(room, round_payload)
 
 
 def _remove_group_room_transcripts_from_participant_sessions(
@@ -6481,76 +6686,6 @@ def _disable_group_context_for_room(room_id: str, *, agent_ids: list[str] | None
     return {
         "changedAgentCount": int(result.get("changedAgentCount") or 0),
         "disabledEventCount": int(result.get("disabledEventCount") or 0),
-    }
-
-
-def _has_group_round_session_sync(messages: list[dict[str, Any]], *, room_id: str, round_id: str) -> bool:
-    marker = f"sourceRoundId: {round_id}"
-    for item in list(messages or []):
-        if not isinstance(item, dict):
-            continue
-        metadata = item.get("metadata")
-        if isinstance(metadata, dict):
-            if (
-                str(metadata.get("kind") or "").strip() == "group_room_transcript"
-                and str(metadata.get("sourceRoomId") or "").strip() == room_id
-                and str(metadata.get("sourceRoundId") or "").strip() == round_id
-            ):
-                return True
-        content = str(item.get("content") or "")
-        if room_id in content and marker in content:
-            return True
-    return False
-
-
-def _build_group_round_session_message(
-    room: dict[str, Any],
-    round_payload: dict[str, Any],
-    participant: dict[str, Any],
-    messages: list[dict[str, Any]],
-    *,
-    timestamp: str,
-) -> dict[str, Any]:
-    room_id = str(room.get("roomId") or round_payload.get("roomId") or "").strip()
-    round_id = str(round_payload.get("roundId") or "").strip()
-    participant_id = str(participant.get("participantId") or "").strip()
-    own_lines: list[str] = []
-    peer_lines: list[str] = []
-    for message in messages:
-        speaker = str(message.get("speakerTitle") or message.get("participantId") or "").strip()
-        content = trim_lines(str(message.get("content") or message.get("summary") or ""), max_lines=4)
-        if not content:
-            continue
-        line = f"- {speaker}: {content}" if speaker else f"- {content}"
-        if str(message.get("participantId") or "").strip() == participant_id:
-            own_lines.append(line)
-        else:
-            peer_lines.append(line)
-    content_lines = [
-        "[群聊同步]",
-        f"群聊: {room.get('title') or room_id}",
-        f"议题: {round_payload.get('topic') or ''}",
-        f"摘要: {round_payload.get('summary') or ''}",
-        "",
-        "你的发言:",
-        *(own_lines or ["- 本轮你没有发言。"]),
-        "",
-        "其他 Agent 发言:",
-        *(peer_lines or ["- 本轮暂无其他 Agent 发言。"]),
-    ]
-    return {
-        "role": "assistant",
-        "content": "\n".join(str(line) for line in content_lines if str(line).strip() or line == ""),
-        "timestamp": str(timestamp or utc_now_iso()).strip(),
-        "metadata": {
-            "kind": "group_room_transcript",
-            "sourceRoomId": room_id,
-            "sourceRoundId": round_id,
-            "sourceRoomTitle": str(room.get("title") or "").strip(),
-            "targetSessionId": str(participant.get("sessionId") or participant.get("directSessionId") or "").strip(),
-            "targetAgentId": str(participant.get("agentId") or "").strip(),
-            "participantId": participant_id,
-        },
     }
 
 

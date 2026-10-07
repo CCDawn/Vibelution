@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from core.agent_kernel import service as agent_kernel_service
 from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
 from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
+from core.chatroom import timeline as room_timeline
 from core.infrastructure import developer_sandbox
 from core.infrastructure.tool_executor import ToolExecutor
 from core.ui.chat_state import load_chat_state, save_chat_state
@@ -3458,7 +3459,7 @@ def test_agent_inbox_message_rejects_unknown_source_agent(tmp_path, monkeypatch)
     assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="") == []
 
 
-def test_chat_room_completion_appends_visible_group_transcript_to_participant_sessions(tmp_path, monkeypatch):
+def test_chat_room_completion_targets_digest_and_skips_ledger_transcript(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
     session_service.list_sessions()
@@ -3477,29 +3478,40 @@ def test_chat_room_completion_appends_visible_group_transcript_to_participant_se
         },
     )
 
-    alpha_messages = session_service.get_session_detail("session-alpha")["messages"]
-    beta_messages = session_service.get_session_detail("session-beta")["messages"]
     latest_round = detail["rounds"][-1]
+    for session_id in ("session-alpha", "session-beta"):
+        messages = session_service.get_session_detail(session_id)["messages"]
+        assert all(
+            (message.get("metadata") or {}).get("kind") != "group_room_transcript"
+            for message in messages
+        ), "broadcast transcript fan-out must be gone from participant sessions"
 
-    for messages, own_title, peer_title in (
-        (alpha_messages, "Alpha Agent", "Beta Agent"),
-        (beta_messages, "Beta Agent", "Alpha Agent"),
-    ):
-        synced = messages[-1]
-        assert synced["role"] == "assistant"
-        assert synced["metadata"]["kind"] == "group_room_transcript"
-        assert synced["metadata"]["sourceRoomId"] == room["roomId"]
-        assert synced["metadata"]["sourceRoundId"] == latest_round["roundId"]
-        assert "共通群聊" in _assistant_visible_text(synced)
-        assert "同步到各自会话" in _assistant_visible_text(synced)
-        assert own_title in _assistant_visible_text(synced)
-        assert peer_title in _assistant_visible_text(synced)
+    # Default round_robin mode with no @mentions targets nobody: full-room
+    # observability lives on the room timeline instead of session ledgers.
+    for session_id in ("session-alpha", "session-beta"):
+        summary = session_service.get_session_detail(session_id)
+        agent_id = str(summary.get("agentId") or "")
+        if agent_id:
+            assert agent_directory_service.list_agent_inbox_messages_for_agent(
+                agent_id, status=""
+            ) == []
+    timeline = room_timeline.read_events(
+        room["roomId"], project_root=chat_room_service.PROJECT_ROOT
+    )
+    finished_events = [
+        item for item in timeline if item.get("type") == "round_state"
+        and item.get("payload", {}).get("status") == "completed"
+    ]
+    assert finished_events, "round completion must be observable on the room timeline"
+    assert finished_events[-1]["roundId"] == latest_round["roundId"]
+    message_events = [item for item in timeline if item.get("type") == "message"]
+    assert len(message_events) == 2
 
-    chat_room_service._sync_group_round_to_participant_sessions(detail, latest_round)
-    alpha_messages_after_resync = session_service.get_session_detail("session-alpha")["messages"]
-    beta_messages_after_resync = session_service.get_session_detail("session-beta")["messages"]
-    assert len(alpha_messages_after_resync) == len(alpha_messages)
-    assert len(beta_messages_after_resync) == len(beta_messages)
+    chat_room_service._deliver_round_digest_to_targeted_inboxes(detail, latest_round)
+    timeline_after = room_timeline.read_events(
+        room["roomId"], project_root=chat_room_service.PROJECT_ROOT
+    )
+    assert len(timeline_after) == len(timeline), "digest delivery must not write the timeline"
 
 
 def test_tool_policy_blocks_before_tool_execution_and_returns_correctable_error(tmp_path, monkeypatch):

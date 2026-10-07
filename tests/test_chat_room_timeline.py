@@ -1,7 +1,5 @@
 """Chat room append-only timeline log: store, write points and endpoint."""
 
-import json
-
 import pytest
 
 from fastapi.testclient import TestClient

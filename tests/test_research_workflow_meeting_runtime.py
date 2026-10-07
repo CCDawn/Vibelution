@@ -31,6 +31,7 @@ from core.research.workflow.contracts import (
 from core.research.workflow.contracts.meeting_round import (
     ensure_meeting_status_transition,
 )
+from core.chatroom import timeline as room_timeline
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -709,10 +710,17 @@ def test_preformal_review_room_binds_participants_to_hidden_child_sessions(
         for message in room_round["messages"]
     )
     child_transcripts = [_session_transcript(session_id) for session_id in bound.values()]
-    if structured_context:
-        assert all(_PREFORMAL_FIXTURE_LINE not in content for content in child_transcripts)
-    else:
-        assert any(_PREFORMAL_FIXTURE_LINE in content for content in child_transcripts)
+    # p2p transport: neither branch transcribes the round into child sessions
+    # anymore — the kill-switch-off legacy path sources the speaker room view
+    # from the persisted room rounds (build_room_round_history) instead of
+    # session-ledger transcript copies, and observability lives on the room
+    # timeline for both branches.
+    assert all(_PREFORMAL_FIXTURE_LINE not in content for content in child_transcripts)
+    timeline_blob = json.dumps(
+        room_timeline.read_events(room_id, project_root=chat_room_service.PROJECT_ROOT),
+        ensure_ascii=False,
+    )
+    assert _PREFORMAL_FIXTURE_LINE in timeline_blob
     for agent_id in direct_ids:
         assert _PREFORMAL_FIXTURE_LINE not in _session_transcript(direct_ids[agent_id])
 

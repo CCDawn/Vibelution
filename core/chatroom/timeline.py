@@ -29,8 +29,8 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import tempfile
-import threading
 import time
 import uuid
 from collections.abc import Iterator, Mapping
@@ -287,6 +287,24 @@ def read_events(
     return events
 
 
+def clear_room_timeline(room_id: str, *, project_root: Path | None = None) -> bool:
+    """Drop the room's whole timeline directory (reset/delete hygiene).
+
+    A room reset keeps the same roomId; without this the next round would
+    inherit the previous discussion's timeline.  Returns True when a
+    directory was removed.
+    """
+
+    directory = timeline_path(room_id, project_root=project_root).parent
+    try:
+        if directory.exists():
+            shutil.rmtree(directory, ignore_errors=True)
+            return True
+    except OSError:
+        return False
+    return False
+
+
 def append_room_event(
     room_id: str,
     *,
@@ -347,6 +365,7 @@ __all__ = [
     "TimelineError",
     "append_room_event",
     "chat_rooms_root",
+    "clear_room_timeline",
     "read_events",
     "timeline_path",
     "utc_now_iso",

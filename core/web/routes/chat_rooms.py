@@ -13,6 +13,7 @@ from core.web.routes.chat_room_models import (
     ChatRoomDeleteResponse,
     ChatRoomDetailResponse,
     ChatRoomRoundResponse,
+    ChatRoomTimelineResponse,
 )
 from core.web.services.chat_room_service import (
     ChatRoomBusyError,
@@ -134,7 +135,10 @@ def chat_room_events(room_id: str) -> StreamingResponse:
     )
 
 
-@router.get("/chat-rooms/{room_id}/timeline")
+@router.get(
+    "/chat-rooms/{room_id}/timeline",
+    response_model=ChatRoomTimelineResponse,
+)
 def chat_room_timeline(
     room_id: str,
     cursor: int = 0,
