@@ -25,7 +25,7 @@ class GovernanceProfile:
     test_configuration: str
 
 
-REVIEWED_AT = "2026-10-03"
+REVIEWED_AT = "2026-10-07"
 PROFILES = (
     GovernanceProfile(
         "anomalyco__opencode", "b155b15694dbcc6768f11d2f25cc2bdd1f738ab4",
@@ -106,6 +106,54 @@ PROFILES = (
         ("tools", "core/orchestration"),
         "框架 SDK 参考；不默认新增依赖或替代现有工具授权链。",
         "pydantic_ai_slim/pydantic_ai/toolsets/approval_required.py", 15, ".github/workflows/ci.yml",
+    ),
+    GovernanceProfile(
+        "zai-org__ZCode", "872ad960de7ec172591f7e1952f7849229f94521",
+        ("backend",), ("后端治理", "多agent编排", "子agent派发", "会话邮箱", "backend governance"),
+        "子 agent 派发返回 agentId 并可 SendMessage 续聊，跨 agent 消息经 unread/read 目录邮箱 drain。",
+        ("core/orchestration", "core/chatroom"),
+        "参考派发-续聊契约与邮箱到达顺序；保留原生 Session/SSE 权威，mailbox 只做到达不建第二 transcript。",
+        "apps/zcode-cli/packages/adapters/src/mailbox/index.ts", 18, "architecture-policy.yaml",
+    ),
+    GovernanceProfile(
+        "microsoft__autogen", "027ecf0a379bcc1d09956d46d12d44a3ad9cee14",
+        ("backend",), ("后端治理", "点对点路由", "编排显式化", "多agent编排", "backend governance"),
+        "共享广播房式 GroupChat 迁移到显式 teams 编排，core 层用 recipient 定向 envelope 做点对点路由。",
+        ("core/orchestration",),
+        "架构演进参考；不引入 actor 运行时，登记许可 CC-BY-4.0，复制代码前另核包内 LICENSE。",
+        "python/packages/autogen-core/src/autogen_core/_single_threaded_agent_runtime.py", 71, ".github/workflows/checks.yml",
+    ),
+    GovernanceProfile(
+        "crewAIInc__crewAI", "19d4154b0b96a290e7eb17bbc28b1b2e9c5e8156",
+        ("backend",), ("后端治理", "事件驱动编排", "层级编排", "事件时间线", "backend governance"),
+        "以 @listen/@router 事件触发组装层级编排，Crew 降级为 Flow 内可组合步骤。",
+        ("core/orchestration", "core/chatroom"),
+        "DSL 形态参考；事件时间线权威仍在 chatroom，不引入框架运行时。",
+        "lib/crewai/src/crewai/flow/dsl/_listen.py", 18, ".github/workflows/tests.yml",
+    ),
+    GovernanceProfile(
+        "a2aproject__A2A", "7295b180ee91ee3a18fd1f1ee2c3e6ad8a441305",
+        ("backend",), ("后端治理", "任务生命周期", "交付产物", "agent-as-server", "backend governance"),
+        "Task 携唯一 ID 走定义生命周期，Artifact 是交付权威，生命周期流到终态必须闭合。",
+        ("core/orchestration", "core/chatroom"),
+        "协议契约参考；跨 agent 不共享内部上下文，身份、ACL 与存储仍由 Vibelution 持有。",
+        "docs/specification.md", 210, "specification/buf.yaml",
+    ),
+    GovernanceProfile(
+        "google-gemini__gemini-cli", "ef59c532f07fbb3a58dd68bac024ae217e9c73ce",
+        ("backend",), ("后端治理", "计划模式", "任务分解", "编排反面对照", "backend governance"),
+        "规划收敛为主 agent 的只读计划模式加计划到任务图的强制分解，不递归派生规划者 agent。",
+        ("core/orchestration",),
+        "反面对照参考；借鉴模式门控与任务拓扑约束，不据此否定或复制其子 agent 实现。",
+        "packages/core/src/prompts/snippets.ts", 590, ".github/workflows/ci.yml",
+    ),
+    GovernanceProfile(
+        "RooCodeInc__Roo-Code", "b867ec9145750d0ae1ff7f02d35406e9bf2a0b16",
+        ("backend",), ("后端治理", "子任务委派", "结果回传", "多agent编排", "backend governance"),
+        "new_task 以 parentTaskId 委派子任务，tool_result 携子任务回执，父任务免交互续跑。",
+        ("core/orchestration", "core/chatroom"),
+        "委派-回传契约参考；子任务证据写入事件时间线，不复制 VSCode 侧任务栈。",
+        "src/core/tools/NewTaskTool.ts", 113, ".github/workflows/code-qa.yml",
     ),
 )
 _BY_ID = {profile.project_id: profile for profile in PROFILES}
