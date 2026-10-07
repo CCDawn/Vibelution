@@ -78,6 +78,20 @@ function renderPanel(overrides: Partial<TeamCommunicationPanelProps> = {}) {
 }
 
 describe("TeamCommunicationPanel round controls", () => {
+  it("tells a development team how the planned round closes", () => {
+    const html = renderPanel({
+      selectedTeam: {
+        ...selectedTeam,
+        teamTemplateId: "dev-team",
+        name: "开发团队",
+      } as Team,
+      linkedRoomBusy: false,
+    });
+    expect(html).toContain("启动开发轮次");
+    expect(html).toContain("@评审员");
+    expect(html).not.toContain("启动团队讨论");
+  });
+
   let host: HTMLDivElement | null = null;
   let root: Root | null = null;
 

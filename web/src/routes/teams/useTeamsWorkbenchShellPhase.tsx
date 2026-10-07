@@ -39,6 +39,7 @@ import {
   resolveResearchStageHandoff,
   resolveResearchStageUnlock,
 } from "./researchPrimaryActionModel";
+import { shouldShowResearchWorkflowPanel } from "./teamShellModel";
 import {
   teamShellNodesFromCanvas,
   teamShellStagesFromBoardColumns,
@@ -512,12 +513,13 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   const isProcessWorkflowView =
     researchWorkspaceView === "workflow" || researchWorkspaceView === "overview";
   // Challenge Cup / research process: single canvas workspace owns the primary surface.
-  const showWorkflowPanel =
-    !aiSearchScopeTeamSelected
-    && (!researchWorkflowTeamSelected
-      || (!researchCanvasVisible
-        && researchWorkspaceView !== "discussion"
-        && !isProcessWorkflowView));
+  const showWorkflowPanel = shouldShowResearchWorkflowPanel({
+    aiSearchScopeTeamSelected,
+    researchWorkflowTeamSelected,
+    researchCanvasVisible,
+    researchWorkspaceView,
+    processWorkflowView: isProcessWorkflowView,
+  });
   const showAiSearchScopePanel = aiSearchScopeTeamSelected;
   const showTeamCommunicationPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView === "discussion");
   const showResearchOverview = researchWorkflowTeamSelected && isProcessWorkflowView;
@@ -634,14 +636,21 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   const statusNodes = researchCanvasVisible
     ? teamShellNodesFromCanvas(displayCanvasNodes ?? [], lang)
     : [];
+  const devTeamSelected = selectedTeam?.teamTemplateId === "dev-team";
   const statusNextTitle = researchWorkflowTeamSelected && researchPrimaryAction
     ? researchPrimaryActionLabel(researchPrimaryAction, lang)
-    : (selectedTeam?.purpose || (lang === "zh" ? "组织画布" : "Organization canvas"));
+    : devTeamSelected
+      ? (lang === "zh" ? "计划分派" : "Planned dispatch")
+      : (selectedTeam?.purpose || (lang === "zh" ? "组织画布" : "Organization canvas"));
   const statusNextBody = researchWorkflowTeamSelected && researchPrimaryAction
     ? researchPrimaryActionDetail(researchPrimaryAction, lang)
-    : (lang === "zh"
-      ? "点节点看执行者。切团队用顶栏，不要在左栏找名单。"
-      : "Select a node to inspect the assignee. Switch teams in the toolbar.");
+    : devTeamSelected
+      ? (lang === "zh"
+        ? "在右侧填写任务并启动一轮。规划师用 @角色名 派发，开发实现，评审员给出结论。"
+        : "Enter a task on the right and start a round. The planner assigns with @role, developers implement, and the reviewer concludes.")
+      : (lang === "zh"
+        ? "点节点看执行者。切团队用顶栏，不要在左栏找名单。"
+        : "Select a node to inspect the assignee. Switch teams in the toolbar.");
   const statusCta = researchWorkflowTeamSelected && researchPrimaryAction
     ? researchPrimaryActionLabel(researchPrimaryAction, lang)
     : undefined;
