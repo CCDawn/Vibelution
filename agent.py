@@ -62,6 +62,7 @@ from core.orchestration.turn_status_bar import (
     strip_turn_status_bar_messages,
     upsert_turn_status_bar_message,
 )
+from core.orchestration.verify_on_stop import reset_verify_on_stop_turn, take_verify_finish
 from core.runtime_status_flags import is_runtime_status_inject_enabled
 from core.infrastructure.cli_utils import create_config_from_args, parse_args, should_launch_workbench
 from core.infrastructure.boot_pipeline import (
@@ -3061,6 +3062,7 @@ class AgentRuntime:
         self._compression_count_this_turn = 0
         self._last_compression_iteration = 0
         self._context_compression_retry_used = False
+        reset_verify_on_stop_turn()
         round_state = self._create_round_state()
         lifecycle_action: Optional[str] = None
         turn_tool_names: List[str] = []
@@ -3539,10 +3541,21 @@ class AgentRuntime:
                 )
                 self._report_round_state_stall_signals(round_state)
                 turn_tool_names.extend(response_tool_names)
+                verify_finish = (
+                    take_verify_finish(can_continue=iteration < round_state.max_iterations)
+                    if iteration_decision.should_finish
+                    else None
+                )
+                verify_nudge = bool(verify_finish and verify_finish.action == "nudge")
                 if iteration_decision.should_execute_tools:
                     ui.update_status(
                         "ACTING",
                         **round_state.acting_status(len(tool_calls)),
+                    )
+                elif verify_nudge:
+                    ui.update_status(
+                        "WORKING",
+                        **round_state.current_status(),
                     )
                 elif iteration_decision.should_finish:
                     ui.update_status(
@@ -3561,7 +3574,17 @@ class AgentRuntime:
                     )
                 )
                 self._raise_if_turn_stop_requested()
+                if verify_nudge:
+                    messages.append(build_chat_guidance_message(verify_finish.text))
+                    ui.add_log("改动之后还没有新的通过记录，本轮先不收工。", "INFO")
+                    continue
                 if iteration_decision.should_finish:
+                    if verify_finish is not None and verify_finish.action == "allow_unverified":
+                        self._last_turn_metadata = {
+                            **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+                            "verifyOnStop": verify_finish.reason,
+                        }
+                        ui.add_log("没有新的通过记录，本轮仍按模型原文收工。", "WARN")
                     ui.add_log("模型已返回 canonical final_answer，本轮收束。", "INFO")
                     break
                 if iteration_decision.should_stop_unsuccessfully:
