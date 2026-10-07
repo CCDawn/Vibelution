@@ -38,11 +38,21 @@ describe("team canvas node editing extraction", () => {
   });
 
   it("edge and node relabel handlers stay behind the read-only gate", () => {
-    for (const handler of ["connectNodes(", "deleteSelectedEdge(", "relabelSelectedEdge(", "relabelSelectedNode("]) {
+    for (const handler of ["addNode(", "connectNodes(", "deleteSelectedEdge(", "relabelSelectedEdge(", "relabelSelectedNode("]) {
       const index = editingSource.indexOf(`function ${handler}`);
       expect(index).toBeGreaterThan(0);
       const body = editingSource.slice(index, editingSource.indexOf("}", index));
       expect(body).toContain("researchCanvasReadOnly");
     }
+  });
+
+  it("user-team canvas passes the read-only flag into the editing factory so every canvas is inert", () => {
+    // Lane B: the org canvas is a read-only overview for every team; the
+    // foundation must still hand the gate to the editing factory, whose
+    // handlers early-return whenever the flag is on.
+    const callIndex = routeModelSource.indexOf("createTeamCanvasNodeEditing({");
+    expect(callIndex).toBeGreaterThan(-1);
+    const callArgs = routeModelSource.slice(callIndex, callIndex + 400);
+    expect(callArgs).toContain("researchCanvasReadOnly,");
   });
 });

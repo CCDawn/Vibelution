@@ -71,8 +71,9 @@ export function useGroupRoomStream({
       setGroupStreamConnected(false);
       return;
     }
-    // Full room snapshots remain authoritative and are coalesced like the
-    // direct session stream. Per-speaker lifecycle events use this same
+    // Full room snapshots stay the metadata/lifecycle input and are coalesced
+    // like the direct session stream; the transcript itself is reconciled
+    // through the timeline query. Per-speaker lifecycle events use this same
     // connection but update their small projection immediately.
     const MIN_APPLY_INTERVAL_MS = 350;
     const RECONNECT_DELAY_MS = 1_000;
@@ -244,8 +245,8 @@ export function useGroupRoomStream({
       if (!hadEntry) {
         return;
       }
-      // Terminal frame: the authoritative snapshot message (or the failure
-      // bubble) replaces the streamed text, so drop the buffer instead of
+      // Terminal frame: the finished message replaces the streamed text once
+      // the timeline projection delivers it, so drop the buffer instead of
       // freezing half a turn on screen.
       flushSpeakerStreamsNow();
       postBrowserTelemetry({
@@ -375,9 +376,13 @@ export function useGroupRoomStream({
       if (payload.roomId !== streamRoomId || payload.detail?.roomId !== streamRoomId) {
         return;
       }
-      // The snapshot is authoritative: it overrides any streaming buffer on
-      // arrival, so delivered messages can never keep a stale streaming tail.
-      clearSpeakerStreams();
+      // The snapshot is no longer the transcript authority: it only refreshes
+      // the per-speaker lifecycle projection and triggers the cursor-based
+      // timeline reconciliation downstream. The streaming buffer is therefore
+      // NOT cleared here — the finished message retires the pending bubble
+      // once the timeline projection (or legacy detail fallback) shows it as
+      // delivered, so a snapshot arriving ahead of the timeline refetch can
+      // no longer blank the streamed text.
       replaceSpeakerProgressFromDetail(payload.detail);
       setGroupStreamConnected(true);
       scheduleChatRoomDetail(payload.detail);

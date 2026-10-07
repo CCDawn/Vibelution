@@ -3,6 +3,15 @@ import type { QueryKey } from "@tanstack/react-query";
 import { queryKeys } from "../api/queryKeys";
 import { markSessionDeleteTombstone } from "./sessionDeleteTombstone";
 
+// Cache role split (phase 2 timeline swap): the room detail cache
+// (queryKeys.chatRoom) carries metadata/participants/operation results only;
+// the group transcript authority is the timeline query
+// (queryKeys.chatRoomTimeline = ["chat-rooms", roomId, "timeline"]). The
+// timeline key nests under the chatRoom key, so the room-scoped invalidations
+// below reach it by prefix without dedicated entries. The live SSE path does
+// NOT go through this module: useGroupRoomStream's syncChatRoomDetail writes
+// the detail snapshot and invalidates the timeline key directly.
+
 type QueryClientLike = {
   invalidateQueries: (options: { queryKey: QueryKey }) => Promise<unknown> | unknown;
   removeQueries?: (options: { queryKey: QueryKey; exact?: boolean }) => void;

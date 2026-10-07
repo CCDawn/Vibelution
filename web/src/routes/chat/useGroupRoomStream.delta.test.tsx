@@ -2,9 +2,10 @@
 /**
  * Speaker streaming delta consumption for the group room SSE stream: delta
  * frames fill a per-(roundId, participantId) streaming buffer published on a
- * short trailing-edge schedule; late/reordered seq frames are dropped; the
- * authoritative chat_room_detail snapshot and done terminals clear the buffer;
- * reconnects clear every buffer while a disconnect freezes the display.
+ * short trailing-edge schedule; late/reordered seq frames are dropped; done
+ * terminals clear the buffer (the finished message retires the bubble via the
+ * timeline projection) while room snapshots no longer blank it; reconnects
+ * clear every buffer while a disconnect freezes the display.
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -281,7 +282,7 @@ describe("useGroupRoomStream speaker delta streaming", () => {
     unmount(root);
   });
 
-  it("clears streaming buffers as soon as an authoritative room snapshot arrives", async () => {
+  it("keeps the streaming buffer when a room snapshot arrives ahead of the timeline reconciliation", async () => {
     const root = mount(baseOptions());
     const first = openFirstConnection();
     act(() => {
@@ -290,17 +291,30 @@ describe("useGroupRoomStream speaker delta streaming", () => {
     await advance(50);
     expect(Object.keys(streamsAt()).length).toBeGreaterThan(0);
 
+    // The snapshot is no longer the transcript authority: blanking the buffer
+    // on arrival would leave a gap until the timeline refetch lands the
+    // finished message, so the buffer survives and the delivered message
+    // retires the pending bubble instead.
     act(() => {
       first.options.onFrame({ event: "chat_room_detail", data: detailFrame() });
     });
     await advance(50);
-    expect(streamsAt()).toEqual({});
-    // Deltas after the snapshot rebuild the text (cumulative semantics).
+    expect(streamsAt().r1?.p1?.content).toBe("流式内容");
+    // Deltas keep the cumulative replace semantics after a snapshot.
     act(() => {
       first.options.onFrame({ event: "chat_room_speaker_delta", data: deltaFrame({ seq: 2, content: "重建的文本" }) });
     });
     await advance(50);
     expect(streamsAt().r1?.p1?.content).toBe("重建的文本");
+    // done still ends the stream so the delivered message takes over.
+    act(() => {
+      first.options.onFrame({
+        event: "chat_room_speaker_delta",
+        data: deltaFrame({ seq: 3, content: "重建的文本", done: true, status: "completed" }),
+      });
+    });
+    await advance(50);
+    expect(streamsAt()).toEqual({});
     unmount(root);
   });
 

@@ -13,7 +13,7 @@ export type StockResearchParameters = {
   scope?: ResearchScope;
   depth?: ResearchDepth;
 };
-export type StockResearchReport = { turnId: string; timestamp: string; text: string; summary: string; sections: { id: string; title: string; text: string }[]; citations: ReportCitation[]; researchParameters?: StockResearchParameters };
+export type StockResearchReport = { turnId: string; timestamp: string; text: string; summary: string; sections: { id: string; title: string; text: string }[]; citations: ReportCitation[]; researchParameters?: StockResearchParameters; originalText?: string };
 export type ResearchTerminalState = Pick<SessionSummary, "terminalReason" | "lastTurnStatus" | "lastTurnTerminalTurnId">;
 export const EMPTY_FINANCIAL_MESSAGES: ConversationMessage[] = [];
 
@@ -182,10 +182,10 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
     selectedRequest,
     turn.turnItems,
   );
-  return stockResearchReportFromText({ turnId: turn.turnId, timestamp: turn.timestamp, researchParameters: stockResearchParametersFromRequest(selectedRequest) }, text);
+  return stockResearchReportFromText({ turnId: turn.turnId, timestamp: turn.timestamp, researchParameters: stockResearchParametersFromRequest(selectedRequest), originalText: answer }, text);
 }
 
-export function stockResearchReportFromText(identity: Pick<StockResearchReport, "turnId" | "timestamp" | "researchParameters">, text: string): StockResearchReport {
+export function stockResearchReportFromText(identity: Pick<StockResearchReport, "turnId" | "timestamp" | "researchParameters" | "originalText">, text: string): StockResearchReport {
   const sections: StockResearchReport["sections"] = [];
   const headings = [...text.matchAll(/^\s{0,3}#{1,3}\s+(.+)$/gm)];
   headings.forEach((heading, index) => sections.push({ id: `section-${index}`, title: cleanResearchPreview(heading[1], 25), text: text.slice(heading.index, headings[index + 1]?.index ?? text.length).trim() }));

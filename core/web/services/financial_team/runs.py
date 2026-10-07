@@ -28,6 +28,11 @@ from core.web.services.financial_research.as_of import (
     on_or_before,
     research_analysis_date_context,
 )
+from core.web.services.financial_research.official_filings import (
+    annual_filing_code,
+    filing_for_report_period,
+    lookup_screen_filings,
+)
 
 from .provisioning import (
     ROLE_SPECS,
@@ -1496,6 +1501,8 @@ def _public_fundamentals_snapshot(symbol: str) -> dict[str, Any]:
     }
     cutoff = active_cutoff()
     if cutoff is None or snapshot.get("status") != "available":
+        if snapshot.get("status") == "available":
+            _attach_period_filings(snapshot, symbol)
         return snapshot
     kept: list[dict[str, Any]] = []
     for item in items:
@@ -1518,6 +1525,7 @@ def _public_fundamentals_snapshot(symbol: str) -> dict[str, Any]:
             kept.append({**item, "reportDate": period, "publishedAt": published})
     if kept:
         snapshot["items"] = kept
+        _attach_period_filings(snapshot, symbol)
         return snapshot
     snapshot["status"] = "unavailable"
     snapshot["reportDate"] = ""
@@ -1533,12 +1541,73 @@ def _present_fundamental_date(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _fundamental_value_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return bool(value)
+
+
+def _attach_period_filings(snapshot: dict[str, Any], symbol: str) -> None:
+    """Attach one cninfo original per dated period. A lookup failure leaves the figures."""
+
+    if not annual_filing_code(symbol):
+        return
+    items = snapshot.get("items") if isinstance(snapshot.get("items"), list) else []
+    periods: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        period = _present_fundamental_date(item.get("reportDate")) or _present_fundamental_date(
+            snapshot.get("reportDate")
+        )
+        published = _present_fundamental_date(item.get("publishedAt")) or _present_fundamental_date(
+            snapshot.get("publishedAt")
+        )
+        if not period or not published or not _fundamental_value_present(item.get("value")):
+            continue
+        if period not in periods:
+            periods.append(period)
+    if not periods:
+        return
+    try:
+        found = lookup_screen_filings([symbol], cutoff=active_cutoff())
+    except Exception:
+        return
+    code = annual_filing_code(symbol)
+    rows = found.get(code) if isinstance(found, dict) else None
+    if not isinstance(rows, list):
+        return
+    matched: dict[str, dict[str, str]] = {}
+    cutoff = active_cutoff()
+    for period in periods:
+        record = filing_for_report_period(rows, period, cutoff=cutoff)
+        if record is not None:
+            matched[period] = record
+    if matched:
+        snapshot["periodFilings"] = matched
+
+
+def _fundamental_original(snapshot: dict[str, Any], period: str) -> str:
+    raw_map = snapshot.get("periodFilings")
+    raw = raw_map.get(period) if isinstance(raw_map, dict) else None
+    record = filing_for_report_period(
+        [raw] if isinstance(raw, dict) else [],
+        period,
+        cutoff=active_cutoff(),
+    )
+    if record is None:
+        return "没有这一项"
+    return f"[{record['title']}（{record['announcedOn']}）]({record['url']})"
+
+
 def _format_public_fundamentals(snapshot: dict[str, Any]) -> str:
     source_name = str(snapshot.get("source") or "东方财富").strip() or "东方财富"
     lines = [
         "公开基本面补充数据（由金融研究公共数据服务获取；不是其他 Agent 的私有财报读取）",
         f"来源：{source_name}；链接：{snapshot.get('sourceUrl') or 'https://data.eastmoney.com/bbsj/'}；抓取时间：{snapshot.get('fetchedAt') or '未返回'}",
-        f"这组数字是{source_name}快照，不是对照巨潮资讯原文核对过的数。没有报告期或披露日的指标写成「没有这一项」。",
+        f"这组数字是{source_name}快照，不是对照巨潮资讯原文核对过的数。没有报告期或披露日的指标写成「没有这一项」。有日期的指标旁边列出同一报告期的巨潮资讯原文，没核到则公告原文为「没有这一项」。",
     ]
     if _present_fundamental_date(snapshot.get("reportDate")):
         lines.append(
@@ -1566,14 +1635,10 @@ def _format_public_fundamentals(snapshot: dict[str, Any]) -> str:
                 lines.append(f"- {label}：没有这一项")
                 continue
             raw_value = item.get("value")
-            if (
-                raw_value is None
-                or (isinstance(raw_value, str) and not raw_value.strip())
-                or (not isinstance(raw_value, str) and not raw_value)
-            ):
+            if not _fundamental_value_present(raw_value):
                 continue
             lines.append(
-                f"- {label}：{raw_value} {item.get('unit') or ''}（报告期：{period}；披露：{published}）"
+                f"- {label}：{raw_value} {item.get('unit') or ''}（报告期：{period}；披露：{published}；公告原文：{_fundamental_original(snapshot, period)}）"
             )
     return "\n".join(lines)[:8_000]
 

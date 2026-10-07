@@ -1559,6 +1559,124 @@ def test_agent_membership_panel_rejects_team_bound_rooms(tmp_path, monkeypatch):
     assert len(plain_participants) == 3
 
 
+def test_update_chat_room_rejects_participant_change_on_team_room(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    gamma = session_service.create_chat_session(title="Gamma Agent")
+
+    team_room = chat_room_service.create_chat_room(
+        title="团队绑定群聊",
+        participant_agent_ids=[alpha["agentId"], gamma["agentId"]],
+        config={"source": "team", "teamId": "team-guard", "teamName": "守卫团队"},
+    )
+
+    with pytest.raises(chat_room_service.ChatRoomTeamManagedError) as team_error:
+        chat_room_service.update_chat_room(
+            team_room["roomId"],
+            participant_session_ids=[beta["id"]],
+        )
+    message = str(team_error.value)
+    assert "团队设置" in message
+    assert team_room["roomId"] in message
+    assert "team-guard" in message
+
+    # The rejected request must not reshape the persisted roster.
+    detail = chat_room_service.get_chat_room_detail(team_room["roomId"])
+    assert sorted(item.get("agentId") for item in detail["participants"]) == sorted(
+        [alpha["agentId"], gamma["agentId"]]
+    )
+
+
+def test_update_chat_room_team_room_allows_title_and_unchanged_roster(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+
+    team_room = chat_room_service.create_chat_room(
+        title="团队绑定群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+        config={"source": "team", "teamId": "team-guard"},
+    )
+
+    renamed = chat_room_service.update_chat_room(team_room["roomId"], title="改名的团队群聊")
+    assert renamed["title"] == "改名的团队群聊"
+    assert len(renamed["participants"]) == 2
+
+    # A PATCH that echoes the current roster is a no-op on membership, not a
+    # bypass attempt: it goes through unchanged.
+    same_roster = chat_room_service.update_chat_room(
+        team_room["roomId"],
+        purpose="meeting",
+        participant_session_ids=[alpha["id"], beta["id"]],
+    )
+    assert same_roster["purpose"] == "meeting"
+    assert sorted(item.get("sessionId") for item in same_roster["participants"]) == sorted(
+        [alpha["id"], beta["id"]]
+    )
+
+
+def test_update_chat_room_team_sync_bypass_allows_roster_update(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    gamma = session_service.create_chat_session(title="Gamma Agent")
+
+    team_room = chat_room_service.create_chat_room(
+        title="团队绑定群聊",
+        participant_agent_ids=[alpha["agentId"], gamma["agentId"]],
+        config={"source": "team", "teamId": "team-guard"},
+    )
+
+    synced = chat_room_service.update_chat_room(
+        team_room["roomId"],
+        title="团队绑定群聊",
+        participant_session_ids=[beta["id"]],
+        _team_roster_authority=True,
+    )
+    assert [item.get("sessionId") for item in synced["participants"]] == [beta["id"]]
+
+    # Non-team rooms keep taking roster edits through the plain path.
+    plain_room = chat_room_service.create_chat_room(
+        title="普通群聊",
+        participant_session_ids=[alpha["id"]],
+    )
+    edited = chat_room_service.update_chat_room(
+        plain_room["roomId"],
+        participant_session_ids=[beta["id"]],
+    )
+    assert [item.get("sessionId") for item in edited["participants"]] == [beta["id"]]
+
+
+def test_update_chat_room_question_scoped_team_rooms_stay_editable(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+
+    # Research workflow rooms carry config.teamId without source=team; the
+    # meeting runtime rebinds their rosters through update_chat_room and must
+    # not be caught by the team-roster guard.
+    question_room = chat_room_service.create_chat_room(
+        title="SCI-010 假说评审",
+        participant_session_ids=[alpha["id"]],
+        config={"teamId": "research-team", "questionId": "SCI-010"},
+    )
+    rebound = chat_room_service.update_chat_room(
+        question_room["roomId"],
+        participant_session_ids=[beta["id"]],
+    )
+    assert [item.get("sessionId") for item in rebound["participants"]] == [beta["id"]]
+
+
 def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_room_service, "get_web_language", lambda: "zh")
     _seed_chat_sessions(tmp_path)

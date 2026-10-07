@@ -364,7 +364,7 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 ## ChatGroupMessageStream
 
 ### 功能
-群聊房间的主阅读面：把多 Agent 发言排成可扫读的连续消息流。长文截断仍露出前几行，思考/工具收成一行，轮次纪要才用一张卡片。
+群聊房间的主阅读面：把多 Agent 发言排成可扫读的连续消息流。长文截断仍露出前几行，思考/工具收成一行，轮次纪要才用一张卡片。消息列表权威是后端事件时间线的只读投影（`GET /api/chat-rooms/{id}/timeline`），扁平事件在 `useGroupRoomTimeline` 折叠回同一视图模型：`round_state(start)` 开轮、message 事件按 roundId 归簇、`round_state(finish)` 收轮出纪要、`member_change` 渲染成员加入/退出的轻量系统行（复用轮次分割线样式，不占轮次编号）。
 
 ### 适用范围
 - **适用**：`/chat?room=` 群聊时间线、操作员观看的团队讨论。
@@ -375,11 +375,12 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 | 群聊发言、内部 discuss | `ChatGroupMessageStream` |
 | 思考/工具过程 | 挂在该条发言下的 disclosure，结束后收成一行 |
 | 一轮结束后的结论 | 轮次末一块 digest，不包每条发言 |
+| 成员加入/退出 | 时间线系统行（轻量分割线，不做成员管理操作） |
 | 1:1 最终回答 | 不折叠正文 |
 
 ### 使用方式
 ```tsx
-// 生产：ChatGroupCenterSurface 群聊时间线
+// 生产：ChatGroupCenterSurface 群聊时间线（投影 hook：web/src/routes/chat/useGroupRoomTimeline.ts）
 // 隔离对照仍在：web/src/design/team-conversation-stream-preview.tsx
 ```
 
@@ -390,9 +391,10 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 | 内部讨论 | 操作员时间线默认可读 | `collapsed_by_default` 不表示房间里看不见 |
 | 纪要 | 轮次发丝分割线 + 末尾一块玻璃面板 | 唯一允许的卡片 |
 | 并行发言进度 | 每个未落位成员各占一行 | 仅 `running` 显示“正在输入”；`settled` 显示“已完成，等待前序发言”且不提前展示正文 |
+| 历史翻页 | 时间线 cursor/nextCursor/hasMore 向前补页；页预算耗尽时尾部出「加载更多记录」 | 替代旧的 `messagesTruncated` 语义，不回退 detail 全量 |
 
 ### 非职责
-- 不改房间协议、SSE、visibility 字段写入。
+- 不改房间协议、SSE 通道结构、visibility 字段写入。
 - 不引入 Stream Chat / Discord 组件。
 - 不做左右气泡，不把群聊改成看板或节点图。
 
@@ -400,7 +402,7 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 - 组内紧、组间松；失败/待发送才保留描边。
 - 头像与名字同一行（flex 横排，正文缩进对齐名字）；过程默认收起。
 - 超长正文截断可展开。
-- 正式消息始终按 `speakerOrder` 落位；成员状态来自同一群聊 SSE 的 `speakerProgress` 投影，不另开连接、不充当第二套 transcript。
+- 正式消息始终按 `speakerOrder` 落位；成员状态来自同一群聊 SSE 的 `speakerProgress` 投影，不另开连接、不充当第二套 transcript。transcript 权威归 timeline 只读投影：SSE `chat_room_detail` 快照只触发 cursor 增量对账（失效/重拉 timeline），不再整块覆盖消息；时间线为空的老房间回退用 detail rounds 渲染（兼容模式，旧消息绝不消失），speaker_delta/state 通道原样驱动 typing/streaming 气泡。
 - 停滞只按该成员的状态更新时间与最近 delta 判断，不用整个轮次的更新时间替代成员活性。
 
 ### 实现落点

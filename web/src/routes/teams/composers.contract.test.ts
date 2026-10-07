@@ -11,6 +11,7 @@ const scComposerPath = new URL("./SourceCollectionComposer.tsx", import.meta.url
 const expComposerPath = new URL("./ExperimentStageComposer.tsx", import.meta.url);
 const overviewComposerPath = new URL("./TeamsOverviewComposer.tsx", import.meta.url);
 const canvasComposerPath = new URL("./TeamsCanvasComposer.tsx", import.meta.url);
+const canvasSurfaceSource = readFileSync(new URL("./TeamOrganizationCanvasSurface.tsx", import.meta.url), "utf8");
 const scController = readFileSync(
   new URL("./source-collection/createSourceCollectionController.tsx", import.meta.url),
   "utf8",
@@ -116,6 +117,27 @@ describe("Teams clarity composers (① shell + F1/F4 controllers)", () => {
     // R1-c: gate mounts via renderTeamsShellFrame → TeamsShellGateSurface
     expect(routeSource).toContain("renderTeamsShellGate");
     expect(routeSource).not.toContain("<VCanvasWorkbenchPage");
+  });
+
+  it("read-only canvas toolbar keeps view controls and hides the edit cluster (Lane B)", () => {
+    // The toolbar survives read-only mode: edge-layer toggle + open-room link
+    // stay reachable; sync/add/link/rename/archive render only when editable.
+    expect(canvasSurfaceSource).toContain("hideToolbar ? null :");
+    expect(canvasSurfaceSource).not.toContain("hideToolbar || researchCanvasReadOnly ? null :");
+    const editGate = canvasSurfaceSource.indexOf("{researchCanvasReadOnly ? null : (");
+    expect(editGate).toBeGreaterThan(-1);
+    const edgeToggle = canvasSurfaceSource.indexOf("onToggleCommunicationEdges}");
+    const roomLink = canvasSurfaceSource.indexOf('lang === "zh" ? "打开群聊" : "Open room"');
+    const syncRoom = canvasSurfaceSource.indexOf('lang === "zh" ? "同步群聊" : "Sync room"');
+    const addNode = canvasSurfaceSource.indexOf('lang === "zh" ? "节点" : "Node"');
+    const archive = canvasSurfaceSource.indexOf('lang === "zh" ? "归档" : "Archive"');
+    expect(edgeToggle).toBeGreaterThan(-1);
+    expect(edgeToggle).toBeLessThan(editGate);
+    expect(roomLink).toBeGreaterThan(-1);
+    expect(roomLink).toBeLessThan(editGate);
+    expect(syncRoom).toBeGreaterThan(editGate);
+    expect(addNode).toBeGreaterThan(editGate);
+    expect(archive).toBeGreaterThan(editGate);
   });
 
   it("F3 presentation metrics extracted from hook body", () => {

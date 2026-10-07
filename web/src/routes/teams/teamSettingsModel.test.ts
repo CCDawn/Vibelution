@@ -5,6 +5,9 @@ import {
   buildTeamSettingsPayload,
   createTeamSettingsDraft,
   teamMemberModelStatus,
+  teamMemberPurposeFromInput,
+  teamMemberResponsibilitiesFromInput,
+  teamMemberRoleFromInput,
   teamSettingsAgentOptions,
   teamSettingsCopy,
   teamSettingsDirty,
@@ -37,42 +40,39 @@ function makeTeam(patch: Partial<Team> = {}): Team {
   } as Team;
 }
 
+const memberWithRole = (role: string, extra: Record<string, unknown> = {}) => ({
+  memberId: "member-1",
+  agentId: "agent-1",
+  agentCode: "A1",
+  agentName: "Alpha",
+  role,
+  purpose: "",
+  agentStatus: "active",
+  ...extra,
+});
+
 describe("teamSettingsModel", () => {
   it("creates a draft from the team and reports clean state", () => {
     const team = makeTeam({
       members: [
-        {
-          memberId: "member-1",
-          agentId: "agent-1",
-          agentCode: "A1",
-          agentName: "Alpha",
-          role: "lead",
-          purpose: "协调",
-          agentStatus: "active",
-        },
+        memberWithRole("lead", { purpose: "协调", responsibilities: ["收集证据"] }),
       ],
     });
     const draft = createTeamSettingsDraft(team);
     expect(draft.name).toBe("Alpha Team");
     expect(draft.members).toHaveLength(1);
-    expect(draft.members[0]).toMatchObject({ memberId: "member-1", agentId: "agent-1", nextAgentId: "", remove: false });
+    expect(draft.members[0]).toMatchObject({
+      memberId: "member-1",
+      agentId: "agent-1",
+      nextAgentId: "",
+      remove: false,
+      responsibilitiesText: "收集证据",
+    });
     expect(teamSettingsDirty(draft, team)).toBe(false);
   });
 
   it("builds a basics-only payload until the roster changes", () => {
-    const team = makeTeam({
-      members: [
-        {
-          memberId: "member-1",
-          agentId: "agent-1",
-          agentCode: "A1",
-          agentName: "Alpha",
-          role: "lead",
-          purpose: "",
-          agentStatus: "active",
-        },
-      ],
-    });
+    const team = makeTeam({ members: [memberWithRole("lead")] });
     const draft = createTeamSettingsDraft(team);
     draft.name = "Renamed";
     const payload = buildTeamSettingsPayload(draft, team);
@@ -81,18 +81,7 @@ describe("teamSettingsModel", () => {
 
   it("rebinds a member to another agent and keeps responsibilities", () => {
     const team = makeTeam({
-      members: [
-        {
-          memberId: "member-1",
-          agentId: "agent-1",
-          agentCode: "A1",
-          agentName: "Alpha",
-          role: "lead",
-          purpose: "",
-          agentStatus: "active",
-          responsibilities: ["收集证据"],
-        },
-      ],
+      members: [memberWithRole("lead", { responsibilities: ["收集证据"] })],
     });
     const draft = createTeamSettingsDraft(team);
     draft.members[0].nextAgentId = "agent-2";
@@ -101,6 +90,55 @@ describe("teamSettingsModel", () => {
       { memberId: "member-1", agentId: "agent-2", role: "lead", purpose: "", responsibilities: ["收集证据"] },
     ]);
     expect(teamSettingsDirty(draft, team)).toBe(true);
+  });
+
+  it("treats member field edits as dirty and carries them in the payload", () => {
+    const team = makeTeam({ members: [memberWithRole("lead")] });
+    const draft = createTeamSettingsDraft(team);
+    expect(teamSettingsDirty(draft, team)).toBe(false);
+
+    draft.members[0].role = "  主负责  \n被丢弃的行";
+    draft.members[0].purpose = "统筹全队\n日常协调\n第三行\n第四行\n第五行应被裁掉";
+    draft.members[0].responsibilitiesText = "收集证据\n汇总结论";
+    expect(teamSettingsDirty(draft, team)).toBe(true);
+
+    const payload = buildTeamSettingsPayload(draft, team);
+    expect(payload.members).toEqual([
+      {
+        memberId: "member-1",
+        agentId: "agent-1",
+        role: "主负责",
+        purpose: "统筹全队\n日常协调\n第三行\n第四行",
+        responsibilities: ["收集证据", "汇总结论"],
+      },
+    ]);
+  });
+
+  it("stays clean when member field edits round-trip to the same normalized value", () => {
+    const team = makeTeam({
+      members: [memberWithRole("lead", { purpose: "统筹全队", responsibilities: ["收集证据", "汇总 结论"] })],
+    });
+    const draft = createTeamSettingsDraft(team);
+    draft.members[0].role = " lead ";
+    draft.members[0].purpose = " 统筹全队\n";
+    draft.members[0].responsibilitiesText = "收集证据\n汇总 结论\n\n";
+    expect(teamSettingsDirty(draft, team)).toBe(false);
+  });
+
+  it("mirrors backend prevalidation for role, purpose, and responsibilities", () => {
+    expect(teamMemberRoleFromInput(" 主负责 \n第二行\n第三行")).toBe("主负责");
+    expect(teamMemberRoleFromInput("")).toBe("");
+    expect(teamMemberPurposeFromInput("一\n二\n三\n四\n五\n六")).toBe("一\n二\n三\n四");
+    expect(teamMemberResponsibilitiesFromInput(" a \n\nb\nc\nd\ne\nf\ng\nh\ni\nj")).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g",
+      "h",
+    ]);
   });
 
   it("supports unbind and add for an empty team without a canvas", () => {
@@ -112,19 +150,7 @@ describe("teamSettingsModel", () => {
     const payload = buildTeamSettingsPayload(draft, team);
     expect(payload.members).toEqual([{ memberId: "", agentId: "agent-9", role: "reviewer", purpose: "" }]);
 
-    const withMember = makeTeam({
-      members: [
-        {
-          memberId: "member-1",
-          agentId: "agent-1",
-          agentCode: "A1",
-          agentName: "Alpha",
-          role: "lead",
-          purpose: "",
-          agentStatus: "active",
-        },
-      ],
-    });
+    const withMember = makeTeam({ members: [memberWithRole("lead")] });
     const removeDraft = createTeamSettingsDraft(withMember);
     removeDraft.members[0].remove = true;
     expect(buildTeamSettingsPayload(removeDraft, withMember).members).toEqual([]);
@@ -184,5 +210,7 @@ describe("teamSettingsModel", () => {
     expect(teamSettingsCopy("en").title).toBe("Team settings");
     expect(teamSettingsCopy("zh").roomCreate).toBe("创建群聊房间");
     expect(teamSettingsCopy("en").roomParticipants(2)).toBe("2 participants");
+    expect(teamSettingsCopy("zh").archiveConfirmAction).toBe("确认归档");
+    expect(teamSettingsCopy("en").archiveConfirmAction).toBe("Confirm archive");
   });
 });

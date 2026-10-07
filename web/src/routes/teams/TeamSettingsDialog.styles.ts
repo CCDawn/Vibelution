@@ -12,8 +12,11 @@ export default {
   memberRow:
     "flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2.5",
   memberRowMarkedRemove: "opacity-60",
-  memberMeta: "flex min-w-0 flex-wrap items-center gap-2",
-  memberRole: "[font-size:var(--vui-font-xs)] font-medium text-[var(--fg-primary)]",
+  memberMeta: "flex min-w-0 flex-wrap items-end gap-2",
+  memberRoleField: "flex min-w-[180px] flex-1 flex-col gap-1",
+  memberFields: "grid grid-cols-1 gap-2 sm:grid-cols-2",
+  memberField: "flex min-w-0 flex-col gap-1",
+  memberFieldLabel: "[font-size:var(--vui-font-2xs)] font-medium text-[var(--fg-secondary)]",
   memberAgent: "[font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   memberActions: "flex min-w-0 flex-wrap items-center gap-2",
   rebindSelect: "min-w-[180px] flex-1",
@@ -26,6 +29,9 @@ export default {
   roomRow: "flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2.5",
   roomTitle: "[font-size:var(--vui-font-xs)] font-medium text-[var(--fg-primary)]",
   roomMeta: "[font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
+  dangerZone:
+    "flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--fg-danger,crimson)]/40 bg-[var(--vui-surface-row)] p-3",
+  dangerActions: "flex min-w-0 flex-wrap items-center gap-2",
   error: "text-[var(--fg-danger,crimson)] [font-size:var(--vui-font-xs)]",
   actions: "mt-1 flex items-center justify-end gap-2",
 } as const;

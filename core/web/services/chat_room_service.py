@@ -441,6 +441,14 @@ class ChatRoomValidationError(ValueError):
     """Raised when a chat room request is invalid."""
 
 
+class ChatRoomTeamManagedError(ValueError):
+    """Raised when a team-managed room roster must be changed via the team domain.
+
+    Mirrors ``TeamLockedError`` semantics (HTTP 409): the team settings surface
+    (``PATCH /api/teams/{id}``) is the single writer for team room rosters.
+    """
+
+
 class ChatRoomBusyError(RuntimeError):
     """Raised when a chat room already has an active round."""
 
@@ -937,7 +945,19 @@ def update_chat_room(
     mode: str | None = None,
     purpose: str | None = None,
     config: dict[str, Any] | None = None,
+    _team_roster_authority: bool = False,
 ) -> dict[str, Any]:
+    """Update a chat room document.
+
+    Team-managed rooms (``config.source == "team"``, stamped by the team
+    linked-room sync) reject participant roster changes here: the team
+    settings surface (``PATCH /api/teams/{id}``) is the single writer and the
+    sync re-applies the roster afterwards. Only roster *changes* are rejected,
+    so a PATCH that carries the current roster (or no participants at all,
+    e.g. a title rename) still succeeds. ``_team_roster_authority`` is an
+    internal marker for the team domain sync itself (chat_room_links); it is
+    never set by the HTTP route.
+    """
     lang = get_web_language()
     normalized_room_id = str(room_id or "").strip()
     # Lock order contract: participant resolution reads the session directory
@@ -956,11 +976,7 @@ def update_chat_room(
         if room is None:
             raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
         _raise_if_room_busy(room)
-        previous_participant_ids = [
-            str(item.get("participantId") or "").strip()
-            for item in list(room.get("participants") or [])
-            if isinstance(item, dict)
-        ]
+        previous_participant_ids = _participant_ids(room.get("participants"))
 
         if title is not None:
             normalized_title = trim_lines(title or "", max_lines=1).strip()
@@ -975,6 +991,25 @@ def update_chat_room(
         if config is not None:
             room["config"] = _safe_config(config)
         if resolved_participants_override is not None:
+            if (
+                not _team_roster_authority
+                and _is_team_roster_managed_chat_room(room)
+                and _participant_ids(resolved_participants_override) != previous_participant_ids
+            ):
+                team_id = _challenge_cup_room_team_id(room)
+                raise ChatRoomTeamManagedError(
+                    text_for(
+                        lang,
+                        zh=(
+                            "该群聊由团队管理，成员变更请到团队设置中调整。"
+                            f"(roomId={normalized_room_id}, teamId={team_id})"
+                        ),
+                        en=(
+                            "This chat room is managed by a team; change its members in the team settings. "
+                            f"(roomId={normalized_room_id}, teamId={team_id})"
+                        ),
+                    )
+                )
             if not resolved_participants_override and not allow_empty_participants:
                 raise ChatRoomValidationError(
                     text_for(lang, zh="至少需要一个可用会话才能更新群聊。", en="At least one session is required.")
@@ -995,11 +1030,7 @@ def update_chat_room(
         },
     )
     if resolved_participants_override is not None:
-        current_participant_ids = [
-            str(item.get("participantId") or "").strip()
-            for item in list(room.get("participants") or [])
-            if isinstance(item, dict)
-        ]
+        current_participant_ids = _participant_ids(room.get("participants"))
         _append_room_timeline_event(
             room,
             type=room_timeline.EVENT_TYPE_MEMBER_CHANGE,
@@ -1030,6 +1061,29 @@ def _is_team_bound_chat_room(room: Mapping[str, Any]) -> bool:
     if str(config.get("source") or "").strip() == "team":
         return True
     return bool(_challenge_cup_room_team_id(room))
+
+
+def _is_team_roster_managed_chat_room(room: Mapping[str, Any]) -> bool:
+    """True when the room roster is owned by the team linked-room sync.
+
+    Narrower than :func:`_is_team_bound_chat_room` on purpose: the sync stamps
+    ``config.source == "team"`` on every room it owns, while research workflow
+    rooms (preformal generation / candidate review) carry only ``config.teamId``
+    and are legitimately rebound through :func:`update_chat_room`.
+    """
+
+    config = room.get("config") if isinstance(room.get("config"), Mapping) else {}
+    return str(config.get("source") or "").strip() == "team"
+
+
+def _participant_ids(participants: Any) -> list[str]:
+    """Stable roster identity: the participantId of every participant entry."""
+
+    return [
+        str(item.get("participantId") or "").strip()
+        for item in list(participants or [])
+        if isinstance(item, dict)
+    ]
 
 
 def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None) -> dict[str, Any]:

@@ -15,12 +15,53 @@ from core.web.services.financial_research.official_filings import (
     SEMIANNUAL_CATEGORY,
     OfficialFilingLookupError,
     accepted_annual_filing,
+    filing_for_report_period,
     lookup_annual_filings,
     lookup_periodic_filings,
     lookup_screen_filings,
     mentions_annual_report,
     periodic_reprint_kind,
 )
+
+
+def test_filing_for_report_period_keeps_only_the_same_period():
+    semi = {
+        "kind": "semiannual",
+        "title": "贵州茅台2026年半年度报告",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-08-28/1225000001.PDF",
+        "announcedOn": "2026-08-28",
+        "source": FILING_SOURCE,
+    }
+    old_semi = {
+        **semi,
+        "title": "贵州茅台2025年半年度报告",
+        "announcedOn": "2025-08-28",
+        "url": "https://static.cninfo.com.cn/finalpage/2025-08-28/1225000002.PDF",
+    }
+    early = {
+        **semi,
+        "announcedOn": "2026-06-01",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-06-01/1225000003.PDF",
+    }
+    annual = {
+        "kind": "annual",
+        "title": "贵州茅台2025年年度报告",
+        "url": PDF,
+        "announcedOn": "2026-04-17",
+        "source": FILING_SOURCE,
+    }
+    summary = {**semi, "title": "贵州茅台2026年半年度报告摘要"}
+    rows = [old_semi, annual, early, summary, semi]
+    found = filing_for_report_period(rows, "2026-06-30", cutoff=date(2026, 10, 5))
+    assert found is not None
+    assert found["url"] == semi["url"]
+    assert filing_for_report_period(rows, "2026-03-31", cutoff=date(2026, 10, 5)) is None
+    assert filing_for_report_period(rows, "2026-06-15", cutoff=date(2026, 10, 5)) is None
+    assert filing_for_report_period(rows, "2026-06-30", cutoff=date(2026, 7, 1)) is None
+    annual_match = filing_for_report_period(rows, "2025-12-31", cutoff=date(2026, 10, 5))
+    assert annual_match is not None
+    assert annual_match["url"] == PDF
+    assert filing_for_report_period([summary], "2026-06-30") is None
 
 
 def test_mentions_annual_report_includes_summaries_and_spaced_titles():

@@ -4,6 +4,7 @@ import type {
   ChatRoomMode,
   ChatRoomPurpose,
   ChatRoomRoundAcceptedResponse,
+  ChatRoomTimelineResponse,
   ChatWorkbenchBootstrap,
   ConversationAttachment,
   ConversationQueryResponse,
@@ -762,6 +763,27 @@ export function fetchChatRoomDetail(
   return fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(roomId)}`, {
     signal: options?.signal,
   });
+}
+
+/**
+ * Read-only cursor page of the room's append-only timeline log. ``cursor`` is
+ * the last seq the caller has seen; the response carries events with
+ * ``seq > cursor`` in ascending order plus ``nextCursor``/``hasMore`` for the
+ * next forward page. This endpoint — not the room detail snapshot — is the
+ * group transcript's read authority.
+ */
+export function fetchChatRoomTimeline(
+  roomId: string,
+  options?: { cursor?: number; limit?: number; signal?: AbortSignal },
+): Promise<ChatRoomTimelineResponse> {
+  const params = new URLSearchParams();
+  if (options?.cursor != null) params.set("cursor", String(Math.max(0, Math.trunc(options.cursor))));
+  if (options?.limit != null) params.set("limit", String(Math.max(0, Math.trunc(options.limit))));
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return fetchJson<ChatRoomTimelineResponse>(
+    `/api/chat-rooms/${encodeURIComponent(roomId)}/timeline${suffix}`,
+    { signal: options?.signal },
+  );
 }
 
 export function createChatRoom(payload: {

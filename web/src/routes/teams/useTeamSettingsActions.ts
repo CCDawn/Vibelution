@@ -1,13 +1,13 @@
 /**
- * Unified team settings mutations: PATCH aggregate config (basics + members)
- * and the create-and-link chat room action. Self-contained hook — owns cache
- * invalidation, telemetry, and error surfacing. Kept out of
- * useTeamShellMutations (8-mutation contract there).
+ * Unified team settings mutations: PATCH aggregate config (basics + members),
+ * the create-and-link chat room action, and the archive danger-zone action.
+ * Self-contained hook — owns cache invalidation, telemetry, and error
+ * surfacing. Kept out of useTeamShellMutations (8-mutation contract there).
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { syncTeamChatRoom, updateTeam } from "../../api/teams";
+import { archiveTeam, syncTeamChatRoom, updateTeam } from "../../api/teams";
 import { startUserAction } from "../../app/userActionTelemetry";
 import type { Team } from "../../api/types";
 import { queryKeys } from "../../api/queryKeys";
@@ -17,9 +17,11 @@ import type { TeamSettingsPayload } from "./teamSettingsModel";
 export type UseTeamSettingsActionsOptions = {
   /** Extra callback after a successful save (e.g. close the dialog). */
   onSaved?: (team: Team) => void;
+  /** Extra callback after a successful archive (e.g. close the dialog). */
+  onArchived?: (team: Team) => void;
 };
 
-export function useTeamSettingsActions({ onSaved }: UseTeamSettingsActionsOptions = {}) {
+export function useTeamSettingsActions({ onSaved, onArchived }: UseTeamSettingsActionsOptions = {}) {
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
 
@@ -68,11 +70,29 @@ export function useTeamSettingsActions({ onSaved }: UseTeamSettingsActionsOption
     },
   });
 
+  const archiveTeamMutation = useMutation({
+    mutationFn: (teamId: string) => archiveTeam(teamId),
+    onMutate: (teamId) => ({
+      telemetry: startUserAction("team_settings_archive", { teamId }, { destructive: true }),
+    }),
+    onSuccess: (team, teamId, context) => {
+      context?.telemetry?.succeeded({ teamId });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
+      void chatWorkspaceCache.afterTeamArchived(teamId, team.linkedChatRoomId || team.linkedChatRoom?.roomId);
+      onArchived?.(team);
+    },
+    onError: (error, teamId, context) => {
+      context?.telemetry?.failed(error, { teamId });
+    },
+  });
+
   return {
     submit: (teamId: string, payload: TeamSettingsPayload) => updateTeamMutation.mutate({ teamId, payload }),
     createRoom: (teamId: string) => createRoomMutation.mutate(teamId),
+    archive: (teamId: string) => archiveTeamMutation.mutate(teamId),
     pending: updateTeamMutation.isPending,
     createRoomPending: createRoomMutation.isPending,
+    archivePending: archiveTeamMutation.isPending,
     errorMessage:
       updateTeamMutation.error instanceof Error
         ? updateTeamMutation.error.message
@@ -82,10 +102,15 @@ export function useTeamSettingsActions({ onSaved }: UseTeamSettingsActionsOption
             ? createRoomMutation.error.message
             : createRoomMutation.error
               ? String(createRoomMutation.error)
-              : "",
+              : archiveTeamMutation.error instanceof Error
+                ? archiveTeamMutation.error.message
+                : archiveTeamMutation.error
+                  ? String(archiveTeamMutation.error)
+                  : "",
     reset: () => {
       updateTeamMutation.reset();
       createRoomMutation.reset();
+      archiveTeamMutation.reset();
     },
   };
 }

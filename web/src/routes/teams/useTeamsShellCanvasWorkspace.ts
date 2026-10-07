@@ -115,7 +115,9 @@ export function useTeamsShellCanvasWorkspace(input: UseTeamsShellCanvasWorkspace
   const [teamInterrupt, setTeamInterrupt] = useState(false);
   const [teamTaskTopic, setTeamTaskTopic] = useState("");
   const [showCommunicationEdges, setShowCommunicationEdges] = useState(false);
-  const [researchCanvasLayoutMode, setResearchCanvasLayoutMode] = useState<ResearchCanvasLayoutMode>("auto");
+  // Saved drag coordinates are the default presentation (source); auto layout
+  // applies only after an explicit layout-mode switch (view-only control).
+  const [researchCanvasLayoutMode, setResearchCanvasLayoutMode] = useState<ResearchCanvasLayoutMode>("source");
   const [researchWorkspaceView, setResearchWorkspaceView] = useState<ResearchWorkspaceView>(
     // ADR 0006: process workflow is the default research home (not overview/org canvas).
     // Non-research teams do not participate in the research workspace view system:
@@ -320,9 +322,12 @@ export function useTeamsCanvasProjection(input: UseTeamsCanvasProjectionInput) {
     dragFrameRef,
   } = input;
 
+  // Canvas is a read-only overview for every team: the organization graph is
+  // presentation-only, so the gate no longer depends on the research workflow
+  // selection. Structural edits (add/rename/link/archive/room sync) live in
+  // team settings, not on the canvas.
   const researchCanvasReadOnly =
-    researchWorkflowTeamSelected
-    && (researchWorkspaceView === "canvas" || teamShellMode === "canvas");
+    researchWorkspaceView === "canvas" || teamShellMode === "canvas";
 
   const teamCanvasQueryEnabled = resolveTeamCanvasQueryEnabled({
     effectiveTeamId,

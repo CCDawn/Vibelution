@@ -203,6 +203,7 @@ def test_public_fundamentals_after_the_research_date_are_omitted(monkeypatch):
             }
         },
     )
+    monkeypatch.setattr(runs, "lookup_screen_filings", lambda *_args, **_kwargs: {})
     with research_analysis_date_context("研究日期：2024-12-31"):
         late = runs._public_fundamentals_snapshot("sh600519")
     assert late["items"] == []

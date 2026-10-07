@@ -20,6 +20,12 @@ import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePrese
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
 import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy } from "./chatRoutePresentation";
 import type { GroupSpeakerProgressMap, GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
+import type {
+  GroupRoomTimelineProjection,
+  GroupTimelineItem,
+  GroupTimelineMemberChangeRow,
+} from "./useGroupRoomTimeline";
+import { roundsToTimelineItems } from "./useGroupRoomTimeline";
 
 // The backend only publishes a full snapshot when a speaker finishes, so the
 // derived "typing" bubble can outlive a hung round forever. After this long
@@ -84,6 +90,12 @@ export type ChatGroupCenterSurfaceProps = {
   groupSpeakerStreams?: GroupSpeakerStreamMap;
   /** Live per-speaker lifecycle projection carried by the same room stream. */
   groupSpeakerProgress?: GroupSpeakerProgressMap;
+  /**
+   * Timeline projection (message-list authority). When omitted the surface
+   * falls back to rendering the room detail rounds directly — the legacy
+   * hand-test/preview path and the pre-timeline behavior contract.
+   */
+  groupTimeline?: GroupRoomTimelineProjection;
   startGroupRoundPending: boolean;
   stopGroupRoundPending: boolean;
   formatTime: (value: string) => string;
@@ -107,8 +119,44 @@ export type ChatGroupCenterSurfaceProps = {
   onToggleExpandedGroupMessage: (messageId: string) => void;
 };
 
+function GroupMemberChangeRow({
+  row,
+  lang,
+  formatTime,
+  activeGroupParticipantById,
+  groupParticipantIdentity,
+}: {
+  row: GroupTimelineMemberChangeRow;
+  lang: "zh" | "en";
+  formatTime: (value: string) => string;
+  activeGroupParticipantById: Map<string, ChatRoomParticipant>;
+  groupParticipantIdentity: ChatGroupCenterSurfaceProps["groupParticipantIdentity"];
+}) {
+  const describe = (participantIds: string[]) =>
+    participantIds.map((participantId) => {
+      const participant = activeGroupParticipantById.get(participantId);
+      return groupParticipantIdentity(participant, { participantId }).identityLabel;
+    });
+  const addedNames = describe(row.addedParticipantIds);
+  const removedNames = describe(row.removedParticipantIds);
+  const parts: string[] = [];
+  if (addedNames.length) {
+    parts.push(lang === "zh" ? `成员加入：${addedNames.join("、")}` : `Joined: ${addedNames.join(", ")}`);
+  }
+  if (removedNames.length) {
+    parts.push(lang === "zh" ? `成员退出：${removedNames.join("、")}` : `Left: ${removedNames.join(", ")}`);
+  }
+  if (!parts.length) return null;
+  return (
+    <div className={styles.groupRoundDivider} data-group-member-change={row.key}>
+      <span>{parts.join(lang === "zh" ? "；" : "; ")}</span>
+      <time>{formatTime(row.createdAt)}</time>
+    </div>
+  );
+}
+
 function GroupRoundsTimeline({
-  rounds,
+  items,
   purposeFallback,
   userDisplayName,
   lang,
@@ -126,7 +174,7 @@ function GroupRoundsTimeline({
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
 }: {
-  rounds: ChatRoomDetail["rounds"];
+  items: GroupTimelineItem[];
   purposeFallback: string;
   userDisplayName: string;
   lang: "zh" | "en";
@@ -155,7 +203,8 @@ function GroupRoundsTimeline({
       message?.focus({ preventScroll: true });
     });
   };
-  const hasRunningSpeaker = rounds.some((round) => {
+  const viewRounds = items.flatMap((item) => (item.kind === "round" ? [item.round] : []));
+  const hasRunningSpeaker = viewRounds.some((round) => {
     if (String(round.status ?? "").trim().toLowerCase() !== "running") return false;
     const delivered = new Set(
       (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
@@ -172,9 +221,28 @@ function GroupRoundsTimeline({
   const stalenessNowMs = useStalenessNow(hasRunningSpeaker);
   return (
     <>
-      {rounds.map((round, roundIndex) => {
+      {items.map((item, itemIndex) => {
+        if (item.kind === "member_change") {
+          return (
+            <GroupMemberChangeRow
+              key={item.row.key}
+              row={item.row}
+              lang={lang}
+              formatTime={formatTime}
+              activeGroupParticipantById={activeGroupParticipantById}
+              groupParticipantIdentity={groupParticipantIdentity}
+            />
+          );
+        }
+        const round = item.round;
+        // Ordinal among round sections only, so member-change rows never
+        // shift the 「第 N 轮」 numbering.
+        const roundIndex = items
+          .slice(0, itemIndex)
+          .filter((previous) => previous.kind === "round")
+          .length;
         const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
-        const expanded = roundRunning || (expandedRounds[round.roundId] ?? roundIndex === rounds.length - 1);
+        const expanded = roundRunning || (expandedRounds[round.roundId] ?? roundIndex === viewRounds.length - 1);
         const transcriptId = `${transcriptPrefix}-${round.roundId}`;
         const challengeMessages = (round.messages ?? []).filter(
           (message) => message.messagePayload?.kind === "challenge_meeting_message",
@@ -476,6 +544,7 @@ export function ChatGroupCenterSurface({
   groupStreamConnected,
   groupSpeakerStreams,
   groupSpeakerProgress,
+  groupTimeline,
   startGroupRoundPending,
   stopGroupRoundPending,
   formatTime,
@@ -495,7 +564,13 @@ export function ChatGroupCenterSurface({
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
 }: ChatGroupCenterSurfaceProps) {
-  const rounds = activeGroupRoom?.rounds ?? [];
+  // Single render path: the timeline projection when present (message-list
+  // authority, member-change system rows, cursor paging), otherwise the room
+  // detail rounds rendered through the same view model (legacy hand-test path).
+  const timelineItems = groupTimeline
+    ? groupTimeline.items
+    : roundsToTimelineItems(activeGroupRoom?.rounds);
+  const rounds = timelineItems.flatMap((item) => (item.kind === "round" ? [item.round] : []));
   const groupRoomTitle = activeGroupRoom?.title
     ?? (groupRoomInitialLoading
       ? (lang === "zh" ? "群聊加载中" : "Loading group")
@@ -754,26 +829,42 @@ export function ChatGroupCenterSurface({
         </div>
       ) : null}
       <div ref={groupTimelineRef} className={styles.groupMessageTimeline} aria-live="polite">
-        {rounds.length ? (
-          <GroupRoundsTimeline
-            rounds={rounds}
-            purposeFallback={activeGroupRoom?.purpose ?? "discussion"}
-            userDisplayName={userDisplayName}
-            lang={lang}
-            formatTime={formatTime}
-            statusLabel={statusLabel}
-            activeGroupParticipantById={activeGroupParticipantById}
-            groupParticipantIdentity={groupParticipantIdentity}
-            renderAgentAvatar={renderAgentAvatar}
-            avatarInitials={avatarInitials}
-            expandedGroupMessageIds={expandedGroupMessageIds}
-            chatMentionTargets={chatMentionTargets}
-            groupStreamConnected={groupStreamConnected}
-            groupSpeakerStreams={groupSpeakerStreams}
-            groupSpeakerProgress={groupSpeakerProgress}
-            onOpenMentionTarget={onOpenMentionTarget}
-            onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
-          />
+        {timelineItems.length ? (
+          <>
+            <GroupRoundsTimeline
+              items={timelineItems}
+              purposeFallback={activeGroupRoom?.purpose ?? "discussion"}
+              userDisplayName={userDisplayName}
+              lang={lang}
+              formatTime={formatTime}
+              statusLabel={statusLabel}
+              activeGroupParticipantById={activeGroupParticipantById}
+              groupParticipantIdentity={groupParticipantIdentity}
+              renderAgentAvatar={renderAgentAvatar}
+              avatarInitials={avatarInitials}
+              expandedGroupMessageIds={expandedGroupMessageIds}
+              chatMentionTargets={chatMentionTargets}
+              groupStreamConnected={groupStreamConnected}
+              groupSpeakerStreams={groupSpeakerStreams}
+              groupSpeakerProgress={groupSpeakerProgress}
+              onOpenMentionTarget={onOpenMentionTarget}
+              onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
+            />
+            {groupTimeline?.hasMore ? (
+              <div className={styles.groupRoundActions}>
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  onClick={groupTimeline.loadMore}
+                  isDisabled={groupTimeline.loadingMore}
+                >
+                  {groupTimeline.loadingMore
+                    ? (lang === "zh" ? "加载中…" : "Loading…")
+                    : (lang === "zh" ? "加载更多记录" : "Load more records")}
+                </VButton>
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className={styles.groupEmptyState}>
             <UsersRound size={28} />

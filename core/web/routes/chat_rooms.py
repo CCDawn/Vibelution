@@ -18,6 +18,7 @@ from core.web.routes.chat_room_models import (
 from core.web.services.chat_room_service import (
     ChatRoomBusyError,
     ChatRoomNotFoundError,
+    ChatRoomTeamManagedError,
     ChatRoomValidationError,
     create_chat_room,
     delete_chat_room,
@@ -169,6 +170,10 @@ def chat_room_update(room_id: str, payload: ChatRoomUpdatePayload) -> dict:
         )
     except ChatRoomNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChatRoomTeamManagedError as exc:
+        # Team-bound room roster change: the team settings surface is the
+        # single writer (mirrors TeamLockedError -> 409 on the teams route).
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChatRoomValidationError as exc:
