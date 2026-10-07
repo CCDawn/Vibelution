@@ -119,7 +119,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
           <strong className={styles.libraryCitationTitle} title={`${zh ? "当前引用" : "Selected citation"} · ${citation.label}`}>
             <FileText size={14} aria-hidden="true" /><span className="min-w-0 truncate">{zh ? "当前引用" : "Selected citation"} · {citation.label}</span>
           </strong>
-          <VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={`${styles.link} ${styles.libraryCitationAction}`}><ExternalLink size={14} aria-hidden="true" />{zh ? "打开原文" : "Open source"}</VRouteLinkButton>
+          <VRouteLinkButton to={`${citation.url}${citation.page ? `#page=${citation.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument icon={<ExternalLink size={14} aria-hidden="true" />} className={`${styles.link} ${styles.libraryCitationAction}`}>{zh ? "打开原文" : "Open source"}</VRouteLinkButton>
         </div>
         {citationScanComplete && !matchedItemId ? <span className={`${styles.small} basis-full`}>{citationTraceReadFailed ? (zh ? "部分资料来源读取失败，无法确认库内原文" : "Some source records could not be read") : (zh ? "当前库未找到对应页原文" : "This source page is not in the current library")}</span> : null}
       </div> : null}
@@ -159,7 +159,7 @@ export function FinanceReportLibrary({ assistant, zh, returnTo, citation = null 
                   bodyQuery.isPending ? <VSkeleton /> :
                   sourceContent ? <><blockquote className={styles.excerpt}>{sourceContent}</blockquote>{body?.hasMore ? <span className={styles.small}>{zh ? "仅显示开头摘录" : "Opening excerpt only"}</span> : null}</> :
                   <p className={styles.small}>{zh ? "原文未提供" : "Source text unavailable"}</p>}
-                {metadata?.url ? <VRouteLinkButton to={`${metadata.url}${/^\d+$/.test(metadata.page) ? `#page=${metadata.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument className={styles.link}><ExternalLink size={14} aria-hidden="true" />{zh ? "查看原始财报" : "Open original report"}</VRouteLinkButton> : null}
+                {metadata?.url ? <VRouteLinkButton to={`${metadata.url}${/^\d+$/.test(metadata.page) ? `#page=${metadata.page}` : ""}`} target="_blank" rel="noopener noreferrer" reloadDocument icon={<ExternalLink size={14} aria-hidden="true" />} className={styles.link}>{zh ? "查看原始财报" : "Open original report"}</VRouteLinkButton> : null}
               </>}
           </section> : null}
         </>}
