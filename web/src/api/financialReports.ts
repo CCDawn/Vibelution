@@ -45,6 +45,16 @@ export function exportFinancialReport(target: FinancialReportExportTarget, optio
   );
 }
 
+/** Read the same exact-turn, server-grounded body used by every export format. */
+export async function fetchFinancialReportText(target: Omit<FinancialReportExportTarget, "format">, options?: { signal?: AbortSignal }): Promise<string> {
+  const request = { ...target, format: "markdown" as const };
+  const response = await exportFinancialReport(request, options);
+  throwIfAborted(options?.signal);
+  assertBoundedExport(response, request);
+  if (!response.content.trim()) throw new Error("研究报告内容为空");
+  return response.content;
+}
+
 function assertBoundedExport(response: FinancialReportExportResponse, expected: FinancialReportExportRequest) {
   if (
     !response

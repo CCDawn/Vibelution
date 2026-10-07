@@ -182,6 +182,10 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
     selectedRequest,
     turn.turnItems,
   );
+  return stockResearchReportFromText({ turnId: turn.turnId, timestamp: turn.timestamp, researchParameters: stockResearchParametersFromRequest(selectedRequest) }, text);
+}
+
+export function stockResearchReportFromText(identity: Pick<StockResearchReport, "turnId" | "timestamp" | "researchParameters">, text: string): StockResearchReport {
   const sections: StockResearchReport["sections"] = [];
   const headings = [...text.matchAll(/^\s{0,3}#{1,3}\s+(.+)$/gm)];
   headings.forEach((heading, index) => sections.push({ id: `section-${index}`, title: cleanResearchPreview(heading[1], 25), text: text.slice(heading.index, headings[index + 1]?.index ?? text.length).trim() }));
@@ -212,7 +216,7 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
       citations.push({ url, page, label: page ? `PDF · 第 ${page} 页` : parsed.hostname });
     }
   }
-  return { turnId: turn.turnId, timestamp: turn.timestamp, text, summary: cleanResearchPreview(conclusions || conclusion.replace(/^\s{0,3}#{1,3}\s+.+\n/, ""), 240), sections, citations: citations.slice(0, 12), researchParameters: stockResearchParametersFromRequest(selectedRequest) };
+  return { ...identity, text, summary: cleanResearchPreview(conclusions || conclusion.replace(/^\s{0,3}#{1,3}\s+.+\n/, ""), 240), sections, citations: citations.slice(0, 12) };
 }
 export type ResearchDepth = "brief" | "basic" | "standard" | "detailed" | "exhaustive";
 export const RESEARCH_DEPTH_INSTRUCTIONS: Record<ResearchDepth, string> = {

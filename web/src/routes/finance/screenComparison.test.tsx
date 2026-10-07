@@ -2,9 +2,12 @@
 
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FinanceResearchReport } from "./FinanceResearchReport";
 import { projectStockReport } from "./stockResearchModel";
+import { fetchFinancialReportText } from "../../api/financialReports";
+
+vi.mock("../../api/financialReports", async (original) => ({ ...await original<typeof import("../../api/financialReports")>(), fetchFinancialReportText: vi.fn() }));
 
 const request = "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-10-06。按条件筛选股票，列出候选、筛选依据和数据限制。\n\n用户选股条件：PE低于20";
 const screen = JSON.stringify({
@@ -42,6 +45,7 @@ describe("screening comparison report", () => {
         ],
       },
     ] as never)!;
+    vi.mocked(fetchFinancialReportText).mockResolvedValue(report.text);
     const container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);

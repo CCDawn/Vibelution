@@ -46,6 +46,8 @@ The overview reuses watch quotes, native research records, batches and schedules
 
 `FinanceReportsCenter` reads exact successful research Turns from the native journal. Catalog paging retains Native directory cursors with a bounded session scan and orders by session activity. Filters include ticker/title/preview, market, date and report kind. Single exports and bounded ZIP exports validate every target independently. Review cases store only owned Session/Turn references and user notes. Deleted sessions invalidate cached reports; archived cases remain readable through the existing native archive service.
 
+The report body and brief read the bounded Markdown export for the exact Agent/Session/Turn. That service grounds the body against full tool results in the native journal; the conversation's truncated tool preview cannot substitute for full evidence. Identity changes abort the read and hide old results; errors remain retryable. Native answer text stays unchanged.
+
 Confirmed native tombstones or exact-report 404 responses disable missing-case exports and original-session actions while preserving editable notes. Network and permission failures remain retryable errors. Public facets provide an explicit refresh action. Known US provider exchange suffixes are normalized against the canonical symbol before persisting identities; class-share tickers such as `BRK.B` remain intact.
 
 ## Paper account and portfolio

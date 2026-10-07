@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FetchJsonHttpError, resetControlTokenForTests, seedControlTokenForTests } from "./client";
-import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, exportFinancialReport, isFinancialReportNotFoundError, MAX_FINANCIAL_REPORT_EXPORT_CHARS, printFinancialReportExport } from "./financialReports";
+import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, exportFinancialReport, fetchFinancialReportText, isFinancialReportNotFoundError, MAX_FINANCIAL_REPORT_EXPORT_CHARS, printFinancialReportExport } from "./financialReports";
 
 let cleanupPrintMocks = () => {};
 
@@ -41,6 +41,27 @@ const response = {
   fileName: "stock-research-2026-10-06.md", mediaType: "text/markdown; charset=utf-8",
   encoding: "utf8" as const, content: "## 结论\n研究结果",
 };
+
+describe("canonical report preview", () => {
+  const target = { assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1" };
+  it("reads the bounded exact-turn export body without creating a download", async () => {
+    seedControlTokenForTests("test-token");
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify(response), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    expect(await fetchFinancialReportText(target)).toBe(response.content);
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({ sessionId: "session-1", turnId: "turn-1", format: "markdown" });
+  });
+  it.each([
+    { ...response, turnId: "other-turn" },
+    { ...response, sessionId: "other-session" },
+    { ...response, content: " " },
+    { ...response, content: "x".repeat(MAX_FINANCIAL_REPORT_EXPORT_CHARS + 1) },
+  ])("rejects mismatched, empty or unbounded previews", async (result) => {
+    seedControlTokenForTests("test-token");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(result), { status: 200 })));
+    await expect(fetchFinancialReportText(target)).rejects.toThrow();
+  });
+});
 
 function stubPrintIframe() {
   const printHtmlUrl = "blob:http://localhost/stock-report-html";

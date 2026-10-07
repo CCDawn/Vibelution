@@ -1,10 +1,11 @@
 import styles from "./FinanceResearchReport.styles";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileText } from "lucide-react";
 import { LazyConversationMarkdownRenderer } from "../../components/conversation/LazyConversationMarkdownRenderer";
 import { VButton, VStateSurface, VSurface, VTabs } from "../../components/vui";
-import { researchTablePreview, type ReportCitation, type ResearchDepth, type ResearchScope, type StockResearchReport } from "./stockResearchModel";
+import { researchTablePreview, stockResearchReportFromText, type ReportCitation, type ResearchDepth, type ResearchScope, type StockResearchReport } from "./stockResearchModel";
 import { FinanceReportExport } from "./FinanceReportExport";
+import { fetchFinancialReportText } from "../../api/financialReports";
 
 const researchScopeLabels: Record<ResearchScope, { zh: string; en: string }> = {
   comprehensive: { zh: "综合研究", en: "Comprehensive" },
@@ -20,10 +21,30 @@ const researchDepthLabels: Record<ResearchDepth, { zh: string; en: string }> = {
   exhaustive: { zh: "全面", en: "Comprehensive" },
 };
 
-export function FinanceResearchReport({ report, assistantAgentId, sessionId, zh, onCitation, onResearch, busy = false, summaryOnly = false }: { report: StockResearchReport | null; assistantAgentId: string; sessionId: string; zh: boolean; onCitation: (citation: ReportCitation) => void; onResearch: () => void; busy?: boolean; summaryOnly?: boolean }) {
+export function FinanceResearchReport({ report: projectedReport, assistantAgentId, sessionId, zh, onCitation, onResearch, busy = false, summaryOnly = false }: { report: StockResearchReport | null; assistantAgentId: string; sessionId: string; zh: boolean; onCitation: (citation: ReportCitation) => void; onResearch: () => void; busy?: boolean; summaryOnly?: boolean }) {
   const [tab, setTab] = useState("all");
-  useEffect(() => setTab("all"), [report?.turnId]);
-  if (!report) return <VStateSurface density="compact" tone={busy ? "loading" : "empty"} busy={busy} title={busy ? (zh ? "研究进行中" : "Research running") : (zh ? "这只股票还没有研究报告" : "No report for this stock")} actions={!busy ? <VButton variant="secondary" onPress={onResearch}>{zh ? "发起研究" : "Start research"}</VButton> : undefined}>{busy ? (zh ? "研究过程见右侧，完成后显示报告。" : "Follow progress on the right. The report appears after completion.") : undefined}</VStateSurface>;
+  const [verified, setVerified] = useState<{ key: string; text?: string; error?: string } | null>(null);
+  const [retry, setRetry] = useState(0);
+  const turnId = projectedReport?.turnId ?? "";
+  const reportKey = JSON.stringify([assistantAgentId, sessionId, turnId]);
+  useEffect(() => setTab("all"), [reportKey]);
+  useEffect(() => {
+    if (!turnId) return;
+    const controller = new AbortController();
+    setVerified({ key: reportKey });
+    void fetchFinancialReportText({ assistantAgentId, sessionId, turnId }, { signal: controller.signal }).then(
+      (text) => { if (!controller.signal.aborted) setVerified({ key: reportKey, text }); },
+      (error: unknown) => { if (!controller.signal.aborted) setVerified({ key: reportKey, error: error instanceof Error ? error.message : "Report unavailable" }); },
+    );
+    return () => controller.abort();
+  }, [assistantAgentId, sessionId, turnId, reportKey, retry]);
+  const report = useMemo(() => projectedReport && verified?.key === reportKey && verified.text
+    ? stockResearchReportFromText(projectedReport, verified.text) : null, [projectedReport, reportKey, verified]);
+  if (!projectedReport) return <VStateSurface density="compact" tone={busy ? "loading" : "empty"} busy={busy} title={busy ? (zh ? "研究进行中" : "Research running") : (zh ? "这只股票还没有研究报告" : "No report for this stock")} actions={!busy ? <VButton variant="secondary" onPress={onResearch}>{zh ? "发起研究" : "Start research"}</VButton> : undefined}>{busy ? (zh ? "研究过程见右侧，完成后显示报告。" : "Follow progress on the right. The report appears after completion.") : undefined}</VStateSurface>;
+  if (!report) {
+    const error = verified?.key === reportKey ? verified.error : undefined;
+    return <VStateSurface density="compact" tone={error ? "error" : "loading"} busy={!error} title={error ? (zh ? "报告读取失败" : "Report unavailable") : (zh ? "核验报告" : "Verifying report")} actions={error ? <VButton variant="secondary" onPress={() => setRetry((value) => value + 1)}>{zh ? "重试" : "Retry"}</VButton> : undefined}>{error}</VStateSurface>;
+  }
   const selected = report.sections.find((section) => section.id === tab);
   const parameters = report.researchParameters;
   const parameterText = (zhLabel: string, enLabel: string, value: string) => `${zh ? zhLabel : enLabel}${zh ? "：" : ": "}${value}`;
