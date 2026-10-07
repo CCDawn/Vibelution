@@ -136,20 +136,23 @@ def test_same_agent_later_tab_selection_survives_delayed_create_ack(page, e2e_in
     from playwright.sync_api import expect
 
     suffix = uuid.uuid4().hex[:8]
-    title_a = f"同Agent来源 {suffix}"
-    a = create_session(e2e_instance.port, title=title_a)
-    aid = fetch_json(e2e_instance.port, f"/api/sessions/{a}")["agentId"]
-    _ready_composer(page, e2e_instance, a)
-    # Arrange the second tab through the actual creation flow, so it exists in
-    # this user's tab workspace independently of index pagination/freshness.
-    with page.expect_request(_create_settled), page.expect_response(
-        lambda response: response.request.method == "POST" and urlsplit(response.url).path == "/api/sessions"
-    ) as created_response:
-        page.get_by_role("button", name="在当前 Agent 下新建会话", exact=True).click()
-    b = created_response.value.json()["id"]
-    assert fetch_json(e2e_instance.port, f"/api/sessions/{b}")["agentId"] == aid
-    expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", b)
-    page.get_by_role("tab").filter(has_text=title_a).click()
+    source = create_session(e2e_instance.port, title=f"同Agent来源 {suffix}")
+    aid = fetch_json(e2e_instance.port, f"/api/sessions/{source}")["agentId"]
+    _ready_composer(page, e2e_instance, source)
+    # Arrange both tabs through real user creation, independently of directory
+    # pagination/freshness; neither title nor server list is a tab identity.
+    tabs = []
+    for _ in range(2):
+        with page.expect_request(_create_settled), page.expect_response(
+            lambda response: response.request.method == "POST" and urlsplit(response.url).path == "/api/sessions"
+        ) as created_response:
+            page.get_by_role("button", name="在当前 Agent 下新建会话", exact=True).click()
+        tab_id = created_response.value.json()["id"]
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{tab_id}")["agentId"] == aid
+        expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", tab_id)
+        tabs.append(tab_id)
+    a, b = tabs
+    page.locator(f'[id="agent-session-tab-session-{a}"]').click()
     expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", a)
     pending = []
     hold = _hold_creates(page, pending)
