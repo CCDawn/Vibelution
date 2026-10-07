@@ -297,12 +297,13 @@ rules:
       - "core/orchestration/**"
       - "core/orchestration/turn_status_bar.py"
       - "core/orchestration/tool_budget_profiles.py"
+      - "tests/test_verify_on_stop.py"
       - "tests/test_turn_status_bar_and_budget_profiles.py"
       - "tests/test_agent_protocol.py"
       - "tests/test_agent_kernel_adapters.py"
       - "tests/test_agent_kernel_source_authority.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_turn_status_bar_and_budget_profiles.py tests/test_agent_protocol.py tests/test_agent_kernel_adapters.py tests/test_agent_kernel_source_authority.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_verify_on_stop.py tests/test_turn_status_bar_and_budget_profiles.py tests/test_agent_protocol.py tests/test_agent_kernel_adapters.py tests/test_agent_kernel_source_authority.py -q"
     notes:
       - "agent.py changes almost always need Launcher/runtime restart before live chat verification."
       - "Prefer focused orchestration tests before full agent regression."
