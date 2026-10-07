@@ -12,6 +12,14 @@ const GitDiffView = lazy(() =>
 type ChatChangeRailProps = {
   className: string;
   lang: "zh" | "en";
+  /** Omit the pane id when a parent tab shell already owns chat-status-pane. */
+  embedded?: boolean;
+  title?: string;
+  emptyLabel?: string;
+  pending?: boolean;
+  pendingLabel?: string;
+  unavailableLabel?: string;
+  detailByPath?: Readonly<Record<string, string>>;
   paths: string[];
   selectedPath: string | null;
   changedPaths: ReadonlySet<string>;
@@ -32,6 +40,13 @@ function fileName(path: string) {
 export function ChatChangeRail({
   className,
   lang,
+  embedded = false,
+  title,
+  emptyLabel,
+  pending = false,
+  pendingLabel,
+  unavailableLabel = "",
+  detailByPath,
   paths,
   selectedPath,
   changedPaths,
@@ -44,9 +59,10 @@ export function ChatChangeRail({
   sourceLabel,
   onSelect,
 }: ChatChangeRailProps) {
-  const title = lang === "zh" ? "本轮改动" : "Changes";
+  const resolvedTitle = title || (lang === "zh" ? "本轮改动" : "Changes");
   const loadingLabel = lang === "zh" ? "正在打开文件" : "Opening the file";
-  const emptyLabel = lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet";
+  const resolvedPendingLabel = pendingLabel || loadingLabel;
+  const resolvedEmptyLabel = emptyLabel || (lang === "zh" ? "这次对话还没有改动文件" : "This chat has no changed files yet");
   const preview = selectedPath && hasDiff && diff ? (
     <GitDiffView
       path={selectedPath}
@@ -66,14 +82,15 @@ export function ChatChangeRail({
   ) : null;
 
   return (
-    <aside id="chat-status-pane" className={`${styles.rail} ${className}`} aria-label={title}>
+    <aside id={embedded ? undefined : "chat-status-pane"} className={`${styles.rail} ${className}`} aria-label={resolvedTitle}>
       <div className={styles.header}>
-        <h2 className={styles.title}>{title}</h2>
+        <h2 className={styles.title}>{resolvedTitle}</h2>
         {paths.length > 0 ? <span className={styles.count}>{paths.length}</span> : null}
       </div>
       {paths.length > 0 ? <ul className={styles.list}>
         {paths.map((path) => {
           const selected = path === selectedPath;
+          const detail = detailByPath?.[path];
           return (
             <li key={path}>
               <VButton
@@ -85,7 +102,10 @@ export function ChatChangeRail({
                 className={selected ? `${styles.fileButton} ${styles.fileButtonActive}` : styles.fileButton}
                 onClick={() => onSelect(path)}
               >
-                <span className={styles.fileName}>{fileName(path)}</span>
+                <span className={styles.fileNameRow}>
+                  <span className={styles.fileName}>{fileName(path)}</span>
+                  {detail ? <span className={styles.fileStatus}>{detail}</span> : null}
+                </span>
                 <span className={styles.filePath}>{path}</span>
               </VButton>
             </li>
@@ -93,8 +113,12 @@ export function ChatChangeRail({
         })}
       </ul> : null}
       <div className={styles.body}>
-        {paths.length === 0 ? (
-          <VStateSurface tone="empty" title={emptyLabel} fill role="status" />
+        {pending && paths.length === 0 ? (
+          <VStateSurface tone="loading" title={resolvedPendingLabel} fill role="status" />
+        ) : unavailableLabel && paths.length === 0 ? (
+          <VStateSurface tone="error" title={unavailableLabel} fill role="alert" />
+        ) : paths.length === 0 ? (
+          <VStateSurface tone="empty" title={resolvedEmptyLabel} fill role="status" />
         ) : diffLoading ? (
           <VStateSurface tone="loading" title={loadingLabel} role="status" />
         ) : (
