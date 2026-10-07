@@ -9,6 +9,8 @@ import {
   type FinancialMarketScreenSort,
   type FinancialMarketScreenStock,
   type FinancialResearchAnnouncement,
+  type FinancialResearchFundamentals,
+  type FinancialResearchMetric,
   type FinancialResearchNewsItem,
   type FinancialStockResearch,
 } from "../../api/financialResearch";
@@ -112,6 +114,32 @@ function displayMetric(value: number | null, unit: string): string {
     return `${quoteNumber(value / 100_000_000)} 亿元`;
   }
   return `${quoteNumber(value)}${unit}`;
+}
+
+function presentDate(value: string | null | undefined): string {
+  return value?.trim() ?? "";
+}
+
+function metricReportDate(item: FinancialResearchMetric, report: FinancialResearchFundamentals): string {
+  return presentDate(item.reportDate) || presentDate(report.reportDate);
+}
+
+function metricPublishedAt(item: FinancialResearchMetric, report: FinancialResearchFundamentals): string {
+  return presentDate(item.publishedAt) || presentDate(report.publishedAt);
+}
+
+function metricFigure(item: FinancialResearchMetric, report: FinancialResearchFundamentals, zh: boolean): string {
+  if (!metricReportDate(item, report) || !metricPublishedAt(item, report)) {
+    return zh ? "没有这一项" : "Not available";
+  }
+  return displayMetric(item.value, item.unit);
+}
+
+function fundamentalsNotice(source: string, zh: boolean): string {
+  const name = source.trim() || (zh ? "来源" : "source");
+  return zh
+    ? `这组数字是${name}快照，不是对照巨潮资讯原文核对过的数。没有报告期或披露日的指标显示为「没有这一项」；缺数值时显示为 —。`
+    : `These figures are a ${name} snapshot and have not been checked against the cninfo original. A metric without a report period or filing date is shown as unavailable; a missing value is shown as —.`;
 }
 
 function marketScreenPrompt(stock: StockIdentity): string {
@@ -389,12 +417,16 @@ function StockResearch({ stock, mode, onResearchPrompt, zh }: { stock: StockIden
       {report.status === "unavailable" ? <VStateSurface tone="error" density="compact" title={zh ? "财务数据源暂不可用" : "Fundamentals unavailable"}>{report.error}</VStateSurface>
         : <>
           {report.error ? <VStateSurface tone="unavailable" density="compact" title={zh ? "来源限制" : "Source limitations"}>{report.error}</VStateSurface> : null}
-          <div className={styles.metrics}>{report.items.map((item) => <VSurface key={item.key} tone="row" className={styles.metric}>
-            <span className={styles.metricLabel}>{item.label}</span>
-            <strong className={styles.metricValue}>{displayMetric(item.value, item.unit)}</strong>
-            <span className={styles.metricMeta}>{zh ? "报告期" : "Period"} {item.reportDate ?? report.reportDate ?? "—"}{item.publishedAt || report.publishedAt ? ` · ${zh ? "披露" : "Filed"} ${item.publishedAt ?? report.publishedAt}` : ""}</span>
-          </VSurface>)}</div>
-          <p className={styles.meta}>{zh ? "缺失指标显示为 —；财务期末日与公告披露日分别列示。" : "Missing values appear as —; period-end and filing dates are shown separately."}</p>
+          <div className={styles.metrics}>{report.items.map((item) => {
+            const reportDate = metricReportDate(item, report);
+            const publishedAt = metricPublishedAt(item, report);
+            return <VSurface key={item.key} tone="row" className={styles.metric}>
+              <span className={styles.metricLabel}>{item.label}</span>
+              <strong className={styles.metricValue}>{metricFigure(item, report, zh)}</strong>
+              <span className={styles.metricMeta}>{zh ? "报告期" : "Period"} {reportDate || "—"}{publishedAt ? ` · ${zh ? "披露" : "Filed"} ${publishedAt}` : ""}</span>
+            </VSurface>;
+          })}</div>
+          <p className={styles.meta}>{fundamentalsNotice(report.source, zh)}</p>
         </>}
     </section>}
   </div>;

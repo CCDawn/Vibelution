@@ -50,6 +50,10 @@ async function render(mode: "screen" | "news" | "fundamentals", props: Partial<R
   await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
+function metricValues(): string[] {
+  return [...node.querySelectorAll("strong")].map((item) => item.textContent ?? "");
+}
+
 function buttonWithText(text: string): HTMLButtonElement {
   const button = Array.from(node.querySelectorAll("button")).find((item) => item.textContent?.includes(text));
   if (!button) throw new Error(`Button not found: ${text}`);
@@ -180,6 +184,55 @@ describe("FinanceMarketExplorer", () => {
     expect(node.textContent).toContain("每股收益");
     expect(node.textContent).toContain("2026-06-30");
     expect(node.textContent).toContain("披露");
+    expect(metricValues()).toContain("2.3元/股");
+    expect(metricValues()).not.toContain("没有这一项");
+    expect(node.textContent).toContain("这组数字是东方财富快照，不是对照巨潮资讯原文核对过的数。");
+  });
+
+  it("hides a figure that has no report period or disclosure date", async () => {
+    api.fetchResearch.mockResolvedValue({
+      ...research,
+      fundamentals: {
+        ...research.fundamentals,
+        reportDate: "2026-06-30",
+        publishedAt: null,
+        items: [
+          { key: "EPSJB", label: "每股收益", value: 2.3, unit: "元/股", reportDate: "  ", publishedAt: " " },
+          { key: "TOTALOPERATEREVE", label: "营业总收入", value: 8.8, unit: "元", reportDate: null, publishedAt: null },
+        ],
+      },
+    });
+    await render("fundamentals");
+    expect(metricValues()).toEqual(["没有这一项", "没有这一项"]);
+    expect(node.textContent).not.toContain("2.3");
+    expect(node.textContent).not.toContain("8.8");
+    expect(node.textContent).toContain("报告期 2026-06-30");
+    expect(node.textContent).not.toContain("披露 2026");
+  });
+
+  it("uses the group dates when a metric leaves them blank", async () => {
+    api.fetchResearch.mockResolvedValue({
+      ...research,
+      fundamentals: {
+        ...research.fundamentals,
+        items: [{ key: "EPSJB", label: "每股收益", value: 2.3, unit: "元/股", reportDate: null, publishedAt: "" }],
+      },
+    });
+    await render("fundamentals");
+    expect(metricValues()).toContain("2.3元/股");
+    expect(node.textContent).toContain("披露 2026-08-28");
+  });
+
+  it("keeps a dash when a dated metric has no value", async () => {
+    api.fetchResearch.mockResolvedValue({
+      ...research,
+      fundamentals: {
+        ...research.fundamentals,
+        items: [{ key: "EPSJB", label: "每股收益", value: null, unit: "元/股", reportDate: "2026-06-30", publishedAt: "2026-08-28" }],
+      },
+    });
+    await render("fundamentals");
+    expect(metricValues()).toEqual(["—"]);
   });
 
   it("links the stock annual report to the cninfo original", async () => {
