@@ -11,6 +11,14 @@ This pack owns read projections and format rendering:
 
 Raw assistant HTML is always escaped. Export sizes are bounded at both the service and browser-adapter boundaries.
 
+Same-Turn `financial_market_snapshot_tool` results also verify raw share-price,
+signed change-percent and PE/PB occurrences by their exact fields. A report with
+one unambiguous stock and quote observation may reuse its labelled quote date
+and source paragraph, so dated close summaries remain readable. Wrong dates,
+currencies, other stocks, forecasts, field collisions and arithmetic are not
+authorized by that quote. Price ranges and derived returns still require their
+own evidence; source-provided PE/PB values do not verify their calculation basis.
+
 Batch export reuses the same exact-Turn authorization and validation for every
 member. It accepts at most 20 distinct reports, limits uncompressed content to
 8 MB, and returns a ZIP in memory. Reports and ZIP packages are not persisted.

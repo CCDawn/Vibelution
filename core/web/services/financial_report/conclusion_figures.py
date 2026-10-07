@@ -48,7 +48,7 @@ _FENCE = re.compile(r"```.*?```", re.DOTALL)
 _UNIT = r"(?:%|％|万亿|亿元|万元|港元|美元|元|股)"
 _NUMBER = r"(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?"
 _PRICE_LABEL = (
-    r"(?:最新公开报价|最新报价|股价|价格|收盘价|latest\s+quote|"
+    r"(?:最新公开报价|最新报价|股价|价格|收盘价|收盘|(?<![\u4e00-\u9fff])收|latest\s+quote|"
     r"stock\s+price|share\s+price)"
 )
 _PRICE_CLAIM = re.compile(
@@ -60,13 +60,28 @@ _PRICE_CLAIM = re.compile(
     r"(?:\s*/\s*(?:股|share))?)\s*(?:\*\*)?",
     re.IGNORECASE,
 )
+_METRIC_CLAIM = re.compile(
+    rf"(?<![A-Za-z])(?P<label>PB|PE|市净率|市盈率|涨跌幅)(?![A-Za-z])"
+    rf"(?:\*\*)?\s*(?:为|是|[:：])?\s*(?:\*\*)?"
+    rf"(?P<number>[+-]?{_NUMBER})(?P<unit>\s*[%％])?",
+    re.IGNORECASE,
+)
+_FOLLOWING_CHANGE = re.compile(
+    rf"[ \t*]*[、，,][ \t*]*(?P<number>[+-]?{_NUMBER})(?P<unit>\s*[%％])"
+)
+_CLAIM_DATE = re.compile(r"(?<!\d)(?P<date>(?:\d{4}-)?\d{2}-\d{2})(?!\d)")
+_METRIC_FIELDS = {
+    "pb": "pbRatio", "市净率": "pbRatio",
+    "pe": "peRatio", "市盈率": "peRatio",
+    "涨跌幅": "changePercent",
+}
 _MARKET_TOOL_STATUSES = {"completed", "success", "partial", "degraded"}
 _MARKET_PAYLOAD_STATUSES = {"ok", "partial"}
 _US_PROVIDER_SUFFIX = re.compile(r"\.(?:OQ|N|AM|PK|PNK|NYSE|NASDAQ)$", re.IGNORECASE)
 _HIGH_RISK_CLAIM = re.compile(
     r"财报|财务报告|年报|季报|营收|营业收入|主营收入|收入|净利(?:润)?|利润|"
     r"现金流|经营现金流|自由现金流|财务指标|财务数据|"
-    r"目标|预测|预期|forecast|revenue|net\s+income|"
+    r"目标|预测|预期|预计|未来|forecast|revenue|net\s+income|"
     r"profit|earnings|cash\s+flow|target\s+price",
     re.IGNORECASE,
 )
@@ -300,7 +315,89 @@ def _market_quote_spans(
                             start + paragraph_start + amount.end(),
                         )
                     )
+    kept.extend(_contextual_market_spans(report_text, conclusion_spans, quotes))
     return kept
+
+
+def _contextual_market_spans(
+    text: str, conclusion_spans: list[tuple[int, int]], quotes: list[dict]
+) -> list[tuple[int, int]]:
+    """Reuse a single stock's dated source, keeping field-specific occurrences.
+
+    A report-level context requires an unambiguous stock and source. It cannot
+    authorize another stock, date, currency, forecast, calculation or metric.
+    """
+    visible = _visible_report_text(text)
+    sources = {match.group(0) for match in _FINANCIAL_SOURCE_URL.finditer(_without_code(text))}
+    kept: list[tuple[int, int]] = []
+    for quote in quotes:
+        if not _contains_quote_identity(visible, quote) or _contains_other_stock(visible, quote):
+            continue
+        if sources != {quote["sourceUrl"]}:
+            continue
+        observations = {
+            (item["date"], item["price"], item.get("peRatio"), item.get("pbRatio"), item.get("changePercent"))
+            for item in quotes if item["symbol"] == quote["symbol"]
+        }
+        if len(observations) != 1:
+            continue
+        if not any(
+            _contains_source_url(text[left:right], quote["sourceUrl"])
+            and _contains_quote_date(text[left:right], quote["date"])
+            for left, right in _paragraph_spans(text)
+        ):
+            continue
+        for start, end in conclusion_spans:
+            chunk = text[start:end]
+            for left, right in _paragraph_spans(chunk, split_list_items=True):
+                paragraph = chunk[left:right]
+                clean = _without_code(paragraph)
+                for match in _PRICE_CLAIM.finditer(clean):
+                    if _currency_for_unit(match.group("unit")) != quote["currency"]:
+                        continue
+                    if _amount_decimal(match.group("number")) != quote["price"]:
+                        continue
+                    if not _safe_contextual_claim(clean, match, quote):
+                        continue
+                    amount = _AMOUNT.match(clean, match.start("number"))
+                    if amount is None:
+                        continue
+                    base = start + left
+                    kept.append((base + amount.start(), base + amount.end()))
+                    change = _FOLLOWING_CHANGE.match(clean, match.end())
+                    if change and _amount_decimal(change.group("number")) == quote.get("changePercent"):
+                        value = _AMOUNT.match(clean, change.start("number"))
+                        if value is not None and _safe_contextual_claim(clean, change, quote):
+                            kept.append((base + value.start(), base + value.end()))
+                for match in _METRIC_CLAIM.finditer(clean):
+                    field = _METRIC_FIELDS[match.group("label").lower()]
+                    if bool(match.group("unit")) != (field == "changePercent"):
+                        continue
+                    if _amount_decimal(match.group("number")) != quote.get(field):
+                        continue
+                    if not _safe_contextual_claim(clean, match, quote):
+                        continue
+                    amount = _AMOUNT.match(clean, match.start("number"))
+                    if amount is not None:
+                        kept.append((start + left + amount.start(), start + left + amount.end()))
+    return kept
+
+
+def _safe_contextual_claim(paragraph: str, match: re.Match[str], quote: dict) -> bool:
+    prefix = paragraph[:match.start()]
+    for boundary in _SENTENCE_BOUNDARY.finditer(prefix):
+        prefix = paragraph[boundary.end():match.start()]
+    if _HIGH_RISK_CLAIM.search(_visible_report_text(prefix)):
+        return False
+    for dated in _CLAIM_DATE.finditer(_visible_report_text(paragraph)):
+        if dated.group("date") not in {quote["date"], quote["date"][5:]}:
+            return False
+    # A different explicitly labelled quote date defeats inherited context.
+    if re.search(r"行情(?:日期|时点|时间)|报价(?:日期|时点|时间)|quote\s+(?:date|time|timestamp)", paragraph, re.I):
+        if not _contains_quote_date(paragraph, quote["date"]):
+            return False
+    tail = paragraph[match.end():].removeprefix("**").lstrip()
+    return re.match(r"[+\-−×*/÷=＝≈]\s*\d", tail) is None
 
 
 def _market_quote_payload(output: str) -> dict | None:
@@ -360,6 +457,11 @@ def _market_quote_payload(output: str) -> dict | None:
         return None
     if not price.is_finite() or price <= 0:
         return None
+    metrics: dict[str, Decimal] = {}
+    for field in ("changePercent", "peRatio", "pbRatio"):
+        value = quote.get(field)
+        if type(value) in (int, float) and math.isfinite(value):
+            metrics[field] = Decimal(str(value))
     return {
         "symbol": symbol,
         "ticker": symbol[2:],
@@ -367,6 +469,7 @@ def _market_quote_payload(output: str) -> dict | None:
         "sourceUrl": source_url,
         "date": parsed_timestamp.date().isoformat(),
         "price": price,
+        **metrics,
     }
 
 
@@ -380,10 +483,13 @@ def _market_for_symbol(symbol: str) -> tuple[str, str, str] | None:
     return None
 
 
-def _paragraph_spans(text: str) -> list[tuple[int, int]]:
+def _paragraph_spans(text: str, *, split_list_items: bool = False) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     cursor = 0
-    for separator in re.finditer(r"\r?\n[ \t]*\r?\n", text):
+    pattern = r"\r?\n[ \t]*\r?\n"
+    if split_list_items:
+        pattern += r"|\r?\n(?=[ \t]*(?:[-*+] |\d+[.)] ))"
+    for separator in re.finditer(pattern, text):
         if separator.start() > cursor:
             spans.append((cursor, separator.start()))
         cursor = separator.end()

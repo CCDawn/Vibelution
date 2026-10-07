@@ -189,13 +189,103 @@ def test_bold_risk_heading_does_not_trigger_full_report_fallback_but_inline_prof
     assert MISSING_FIGURE in grounded_profit
 
 
-def test_market_quote_is_scoped_to_its_conclusion_paragraph():
+def test_single_stock_report_can_reuse_its_dated_source_paragraph():
     report = (
         "**结论**：平安银行（000001）最新报价为 11.57 元/股。\n\n"
         f"行情日期：{QUOTE_DATE}，来源：{SOURCE_URL}。"
     )
     grounded = ground_completed_report(report, _item(_payload()), [])
-    assert "11.57" not in grounded
+    assert "11.57 元/股" in grounded
+
+
+def _synthesis(claim: str, *, date: str = QUOTE_DATE) -> str:
+    return (
+        f"## 结论\nsz000001（平安银行）证据不足。PB 0.48 的含义仍有分歧。\n\n"
+        f"## 行情证据\n来源：{SOURCE_URL} ｜ 行情时间 **{date} 16:15**\n\n"
+        f"## 综合结论\n{claim}"
+    )
+
+
+def test_dated_close_and_named_ratios_keep_only_the_matching_quote_field():
+    claim = "09-30 收 11.57 元、+1.94%，PE 5.5，PB 0.5。净利润 11.57 元。箱体 11.3~11.8 元。"
+    grounded = ground_completed_report(_synthesis(claim), _item(_payload()), [])
+    assert "收 11.57 元、+1.94%" in grounded
+    assert "PE 5.5，PB 0.5" in grounded
+    assert "PB 0.48" not in grounded  # A ratio cannot borrow another field's value.
+    assert "净利润 11.57" not in grounded
+    assert "11.3~11.8" not in grounded  # No raw quote field verifies a predicted range.
+
+
+@pytest.mark.parametrize("claim", [
+    "10-01 收 11.57 元、+1.94%。",
+    "2025-09-30 收 11.57 元、+1.94%。",
+    "09-30 收 11.57 港元、+1.94%。",
+    "09-30 收 11.57 元、-1.94%。",
+    "预计收盘价 11.57 元，目标 PB 0.5，预测 PE 5.5。",
+    "净利润 11.57 元，股价 11.57 元。",
+    "股价 11.57 元 + 0.5 元，PB 0.5 * 2.0。",
+    "PB 5.5，PE 0.5。",
+    "2025-09-30 PB 0.5，PE 5.5。",
+    "sh600000 收盘价 11.57 元，PB 0.5。",
+    "`09-30 收 11.57 元`，涨跌幅 9.99%。",
+])
+def test_report_context_does_not_authorize_forecasts_mismatches_or_math(claim: str):
+    grounded = ground_completed_report(_synthesis(claim), _item(_payload()), [])
+    conclusion = grounded.split("## 综合结论\n", 1)[1]
+    if claim.startswith("`"):
+        assert "涨跌幅 9.99" not in conclusion
+    elif claim == "09-30 收 11.57 元、-1.94%。":
+        assert "11.57 元" in conclusion and "-1.94%" not in conclusion
+    else:
+        assert "11.57" not in conclusion and "PB 0.5" not in conclusion and "PE 5.5" not in conclusion
+
+
+@pytest.mark.parametrize("change", [-1.94, 0.0, 1.94])
+def test_signed_quote_change_and_zero_ratios_are_field_checked(change: float):
+    report = _synthesis(f"涨跌幅 {change:+.2f}%，PB 0.0，PE 0.0。")
+    grounded = ground_completed_report(report, _item(_payload(quote={"changePercent": change, "pbRatio": 0.0, "peRatio": None})), [])
+    assert f"{change:+.2f}%" in grounded and "PB 0.0" in grounded
+    assert "PE 0.0" not in grounded
+
+
+@pytest.mark.parametrize("updates,status", [
+    ({"quote": {"changePercent": True, "pbRatio": "0.5"}}, "completed"),
+    ({"quote": {"changePercent": float("inf"), "pbRatio": float("nan")}}, "completed"),
+    ({}, "failed"),
+    ({"ok": False}, "completed"),
+])
+def test_failed_or_malformed_metrics_never_ground_numbers(updates: dict, status: str):
+    grounded = ground_completed_report(_synthesis("涨跌幅 +1.94%，PB 0.5。"), _item(_payload(**updates), status), [])
+    assert "+1.94%" not in grounded and "PB 0.5" not in grounded
+
+
+def test_wrong_source_date_and_multi_stock_report_cannot_supply_global_context():
+    for report in (
+        _synthesis("股价 11.57 元，PB 0.5。", date="2026-10-01"),
+        _synthesis("股价 11.57 元，PB 0.5。").replace(SOURCE_URL, "https://example.com/quote"),
+        _synthesis("股价 11.57 元，PB 0.5。") + "\n## 其他股票\nsh600000 的估值也很低。",
+        _synthesis("股价 11.57 元，PB 0.5。").replace("行情时间", "抓取时间"),
+    ):
+        grounded = ground_completed_report(report, _item(_payload()), [])
+        assert "11.57" not in grounded and "PB 0.5" not in grounded
+
+
+def test_conflicting_same_stock_observations_do_not_supply_inherited_context():
+    report = _synthesis("09-30 收 11.57 元，PB 0.5。")
+    records = _item(_payload()) + _item(_payload(quote={"pbRatio": 0.6}))
+    grounded = ground_completed_report(report, records, [])
+    assert "11.57" not in grounded and "PB 0.5" not in grounded
+
+
+def test_separate_list_claims_do_not_share_unrelated_dates_or_forecasts():
+    report = _synthesis(
+        "- 行情事实：09-30 收 11.57 元、+1.94%。\n"
+        "- 财报资料：2026-06-30 净利润 11.57 元。\n"
+        "- 预测：目标股价 11.57 元。"
+    )
+    grounded = ground_completed_report(report, _item(_payload()), [])
+    assert "收 11.57 元、+1.94%" in grounded
+    assert "净利润 11.57" not in grounded and "目标股价 11.57" not in grounded
 
 
 def test_quote_date_must_be_labelled_and_link_normalization_skips_markdown_and_code():
