@@ -45,7 +45,10 @@ _PAGE = re.compile(
     re.IGNORECASE,
 )
 _FENCE = re.compile(r"```.*?```", re.DOTALL)
-_UNIT = r"(?:%|％|万亿|亿元|万元|港元|美元|元|股)"
+_UNIT = (
+    r"(?:%|％|万亿|亿元|万元|港元|美元|元(?:\s*/\s*股)?|股|"
+    r"(?:CNY|RMB|HKD|USD)(?:\s*/\s*(?:股|share))?)"
+)
 _NUMBER = r"(?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?"
 _PRICE_LABEL = (
     r"(?:最新公开报价|最新报价|股价|价格|收盘价|收盘|(?<![\u4e00-\u9fff])收|latest\s+quote|"
@@ -100,7 +103,8 @@ _FINANCIAL_SOURCE_URL = re.compile(
 _URL_CHINESE_PUNCTUATION = frozenset("，。；：！？、）】》」』")
 _SENTENCE_BOUNDARY = re.compile(r"[。！？!?；;]|\.(?!\d)")
 _AMOUNT = re.compile(
-    rf"(?<![\d.])(?P<sign>[+-])?(?P<number>{_NUMBER})(?![\d.])(?P<unit>\s*{_UNIT})?"
+    rf"(?<![\d.])(?P<sign>[+-])?(?P<number>{_NUMBER})(?![\d.])(?P<unit>\s*{_UNIT})?",
+    re.IGNORECASE,
 )
 _SCIENCE = re.compile(r"(?<![\d.])[+-]?\d+(?:\.\d+)?[eE][+-]?\d+(?![\d])")
 _OPERATOR_GAP = re.compile(r"\s*([+＋×*/／÷]|[-－−])\s*")
@@ -166,6 +170,11 @@ def ground_completed_report(report_text: str, items: list, events: list) -> str:
 
     records = _tool_records(items, events)
     market_kept = _market_quote_spans(str(report_text or ""), records)
+    from core.web.services.financial_report.market_calculations import (
+        market_calculation_spans,
+    )
+
+    market_kept.extend(market_calculation_spans(str(report_text or ""), records))
     grounded = ground_report_text(
         report_text,
         excerpts_from_records(records),
