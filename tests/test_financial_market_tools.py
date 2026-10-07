@@ -10,12 +10,26 @@ from core.infrastructure.tool_result import (
 )
 from core.web.services import financial_market_service as market
 from core.web.services import financial_research_service as research
+from core.web.services.financial_research.as_of import research_analysis_date_context
+from tools import financial_market_tools as market_tools
 from tools.financial_market_tools import (
     MAX_RESULT_CHARS,
     MAX_SCREEN_RESULT_CHARS,
     financial_market_screen_tool,
     financial_market_snapshot_tool,
 )
+
+FILING = {
+    "title": "贵州茅台2025年年度报告",
+    "url": "https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF",
+    "announcedOn": "2026-04-17",
+    "source": "巨潮资讯",
+}
+
+
+@pytest.fixture(autouse=True)
+def _stub_annual_filing_lookup(monkeypatch):
+    monkeypatch.setattr(market_tools, "lookup_annual_filings", lambda codes, cutoff=None: {})
 
 
 def quote(symbol="sz000001"):
@@ -490,3 +504,99 @@ def test_market_screen_tool_rejects_invalid_criteria_before_provider_call(kwargs
     assert result["ok"] is False
     assert result["status"] == "invalid_request"
     assert calls == []
+
+
+def _screen_provider(**extra):
+    item = {
+        "symbol": "sh600519",
+        "ticker": "600519",
+        "name": "贵州茅台",
+        "market": "上交所",
+        "price": 1600.0,
+        "changePercent": 1.2,
+        "peRatio": 25.0,
+        "pbRatio": 8.0,
+        "volumeLots": 1234,
+        "turnoverYuan": 1900000000.0,
+        "timeOfDay": "15:00:00",
+    }
+    return {
+        "source": "新浪财经",
+        "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
+        "fetchedAt": "2026-10-06T07:00:00+00:00",
+        "dataDate": "2026-04-17",
+        "dataTime": "15:00:00",
+        "coverage": {"providerTotal": 1, "loaded": 1, "complete": True, "totalFiltered": 1},
+        "items": [item],
+        **extra,
+    }
+
+
+def test_screen_attaches_an_annual_filing_on_or_before_the_analysis_date(monkeypatch):
+    seen = {}
+
+    def lookup(codes, cutoff=None):
+        seen["codes"] = list(codes)
+        seen["cutoff"] = cutoff
+        return {"600519": {**FILING, "extra": "drop-me"}}
+
+    monkeypatch.setattr(market_tools, "lookup_annual_filings", lookup)
+    monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: _screen_provider())
+    with research_analysis_date_context("分析截至 2026-10-06"):
+        result = json.loads(financial_market_screen_tool(limit=5))
+
+    assert seen == {"codes": ["600519"], "cutoff": date(2026, 10, 6)}
+    assert result["items"][0]["officialFiling"] == FILING
+    assert "extra" not in result["items"][0]["officialFiling"]
+
+
+def test_screen_omits_a_filing_after_the_analysis_date_or_from_another_host(monkeypatch):
+    monkeypatch.setattr(market_tools, "lookup_annual_filings", lambda codes, cutoff=None: {
+        "600519": {**FILING, "announcedOn": "2026-10-07", "url": "https://evil.example/a.PDF"},
+    })
+    monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: _screen_provider())
+    with research_analysis_date_context("分析截至 2026-10-06"):
+        result = json.loads(financial_market_screen_tool(limit=5))
+
+    assert "officialFiling" not in result["items"][0]
+    assert "evil.example" not in json.dumps(result)
+
+
+def test_screen_survives_a_filing_lookup_failure(monkeypatch):
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("cninfo down")
+
+    monkeypatch.setattr(market_tools, "lookup_annual_filings", explode)
+    monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: _screen_provider())
+    result = json.loads(financial_market_screen_tool(limit=5))
+
+    assert result["ok"] is True
+    assert result["items"][0]["ticker"] == "600519"
+    assert "officialFiling" not in result["items"][0]
+
+
+def test_screen_filing_text_stays_inside_the_result_budget(monkeypatch):
+    def lookup(codes, cutoff=None):
+        return {code: {**FILING, "title": f"{code}2025年年度报告"} for code in codes}
+
+    monkeypatch.setattr(market_tools, "lookup_annual_filings", lookup)
+    monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: {
+        "source": "新浪财经",
+        "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
+        "fetchedAt": "2026-10-05T07:00:00+00:00",
+        "dataDate": None,
+        "dataTime": "15:00:00",
+        "coverage": {"providerTotal": 20, "loaded": 20, "complete": True, "totalFiltered": 20},
+        "items": [
+            {**quote(f"sz{index:06d}"), "name": f"筛选样本公司{index}", "peRatio": 25.0, "pbRatio": 8.0, "timeOfDay": "15:00:00"}
+            for index in range(1, 21)
+        ],
+    })
+
+    raw = financial_market_screen_tool(limit=20)
+    result = json.loads(raw)
+
+    assert len(raw) <= MAX_SCREEN_RESULT_CHARS
+    assert result["returnedCount"] + result["omittedCount"] == 20
+    assert result["items"]
+    assert result["items"][0]["officialFiling"]["url"].startswith("https://static.cninfo.com.cn/")

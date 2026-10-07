@@ -17,3 +17,10 @@ filing dates, units and provider errors accompany every projection.
 
 The adapters require no provider credentials or new dependencies. Fixtures test
 normalization and failures; live provider availability is verified separately.
+
+## A-share annual reports
+
+`official_filings.py` looks up one cninfo annual-report PDF for a screened
+A-share. The result is a title, announcement date, and `static.cninfo.com.cn`
+URL. It is not a page number. Filings after the analysis date, summaries, and
+any other host are left out. A lookup failure does not fail the screen.
