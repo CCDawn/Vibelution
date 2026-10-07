@@ -2,9 +2,9 @@
 
 > 文档 ID：`CC-AUTOMATIC-CHAIN-RELIABILITY-20260830`
 >
-> 状态：`USER-REQUESTED / ACTIVE PLAN / PARTIALLY LANDED（复核缩表见 §2.3）`
+> 状态：`historical`（2026-10-07）。挑战杯已结束，用户决定改为通用科研流程团队。生产样本期限核对、两条遗留会议和 T8 不再收口。已落地的会议驱动留在代码里。本文不再是在研计划。通用流程入口见 [research-flow-v2.md](../../../plans/research-flow-v2.md)。
 >
-> 权威路径：根 `main` 的 `docs/plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md`；任务 worktree 只用于隔离编辑，不作为交付路径
+> 权威路径：本文已迁入 `docs/archive/plans/2026-08/`。下文里的旧「在研」描述只保留当时的修复记录。
 >
 > 证据复核基线：本地 `main@9ea07665d302a01748a178a25a753f86ad35c451`，复核时间 `2026-08-30 22:49 +08:00`；原计划基线 `927ca4858` 已被后续 `77f3dab5a`、`9ea07665d` 等修复推进，实施前仍须重新读取最新 main、active claim 与运行指纹
 >

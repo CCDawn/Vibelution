@@ -327,7 +327,7 @@ flowchart LR
 
 ## 10. 与既有计划的去重边界
 
-[2026-08-30 挑战杯自动运行链路可靠性方案](../../../plans/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) 负责 meeting deadline、durable meeting work、review timeout/cancel、reconcile zero-work、run 隔离和自动推进可靠性。
+[2026-08-30 挑战杯自动运行链路可靠性方案](../2026-08/2026-08-30-challenge-cup-automatic-chain-reliability-plan.md) 负责 meeting deadline、durable meeting work、review timeout/cancel、reconcile zero-work、run 隔离和自动推进可靠性。
 
 本文只负责节点 1–7 的：
 

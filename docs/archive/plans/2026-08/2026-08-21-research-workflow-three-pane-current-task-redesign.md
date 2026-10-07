@@ -1,6 +1,6 @@
 # 科研工作流三栏与当前任务统一改造计划
 
-> **Status**: `user-approved`
+> **Status**: `historical`（2026-10-07）。挑战杯赛题验收不再继续。`currentTask` 投影可留给通用科研工作台，但不按本文的预览和浏览器验收收口。本文不再是在研计划。
 > **Plan mode**: `TASK_GRAPH`
 > **Owner**: `codex-root-research-workflow-three-pane-plan`
 > **Date**: 2026-08-21
@@ -82,16 +82,16 @@
 
 ### 3.1 三套状态源互相竞争
 
-- 外层左栏在 [`useTeamsWorkbenchShellPhase.tsx`](../../web/src/routes/teams/useTeamsWorkbenchShellPhase.tsx) 中使用 `researchPrimaryAction` 和项目三阶段 board columns。
-- workflow 顶栏在 [`ResearchWorkflowToolbar.tsx`](../../web/src/routes/teams/research-workflow/ResearchWorkflowToolbar.tsx) 中同时从正式 runtime node、`navigationLabel` 和 `nextActionStage` 推断阶段。
-- 画布和右栏在 [`ResearchProcessWorkspace.tsx`](../../web/src/routes/teams/research-workflow/ResearchProcessWorkspace.tsx) 中使用题目假说链、会议、资料搜集请求、运行 projection 和 URL selection。
-- 右栏 `panel=question` 在 [`ResearchProcessInspectorPane.tsx`](../../web/src/routes/teams/research-workflow/ResearchProcessInspectorPane.tsx) 中直接挂载完整 `ChallengeQuestionDetailPanel`。
+- 外层左栏在 [`useTeamsWorkbenchShellPhase.tsx`](../../../../web/src/routes/teams/useTeamsWorkbenchShellPhase.tsx) 中使用 `researchPrimaryAction` 和项目三阶段 board columns。
+- workflow 顶栏在 [`ResearchWorkflowToolbar.tsx`](../../../../web/src/routes/teams/research-workflow/ResearchWorkflowToolbar.tsx) 中同时从正式 runtime node、`navigationLabel` 和 `nextActionStage` 推断阶段。
+- 画布和右栏在 [`ResearchProcessWorkspace.tsx`](../../../../web/src/routes/teams/research-workflow/ResearchProcessWorkspace.tsx) 中使用题目假说链、会议、资料搜集请求、运行 projection 和 URL selection。
+- 右栏 `panel=question` 在 [`ResearchProcessInspectorPane.tsx`](../../../../web/src/routes/teams/research-workflow/ResearchProcessInspectorPane.tsx) 中直接挂载完整 `ChallengeQuestionDetailPanel`。
 
 这些状态各自可能正确，但组合后没有唯一“当前任务”。
 
 ### 3.2 `hypothesisConverged` 过早激活正式阶段
 
-当前 [`ResearchProcessWorkspace.tsx`](../../web/src/routes/teams/research-workflow/ResearchProcessWorkspace.tsx) 使用 `hypothesisConverged` 直接决定 `formalRuntimeActive`。但 [`hypothesisFirstNextAction.ts`](../../web/src/routes/teams/research-workflow/hypothesisFirstNextAction.ts) 已明确：尚未闭环的候选/评审会议应优先于收敛状态。
+当前 [`ResearchProcessWorkspace.tsx`](../../../../web/src/routes/teams/research-workflow/ResearchProcessWorkspace.tsx) 使用 `hypothesisConverged` 直接决定 `formalRuntimeActive`。但 [`hypothesisFirstNextAction.ts`](../../../../web/src/routes/teams/research-workflow/hypothesisFirstNextAction.ts) 已明确：尚未闭环的候选/评审会议应优先于收敛状态。
 
 因此“已收敛”和“第 N 轮正在整理”会同时出现。新模型必须保留 next-action 的会议优先规则，不得再由 toolbar 或实验切换器独立推断。
 
@@ -105,7 +105,7 @@
 
 ### 3.5 空网格缺少布局反馈
 
-[`useWorkflowAutoLayout.ts`](../../web/src/components/vui/renderers/shadcn/workflow/useWorkflowAutoLayout.ts) 在 ELK 异步提交前以空 `nodes/edges` 初始化；[`ResearchWorkflowCanvasPane.tsx`](../../web/src/routes/teams/research-workflow/ResearchWorkflowCanvasPane.tsx) 只区分 `graph === null`，无法表达“图已到、布局未提交”。实机等待后节点可以出现，因此需要修复的是状态反馈和 viewport recovery，而不是假设后端没有节点。
+[`useWorkflowAutoLayout.ts`](../../../../web/src/components/vui/renderers/shadcn/workflow/useWorkflowAutoLayout.ts) 在 ELK 异步提交前以空 `nodes/edges` 初始化；[`ResearchWorkflowCanvasPane.tsx`](../../../../web/src/routes/teams/research-workflow/ResearchWorkflowCanvasPane.tsx) 只区分 `graph === null`，无法表达“图已到、布局未提交”。实机等待后节点可以出现，因此需要修复的是状态反馈和 viewport recovery，而不是假设后端没有节点。
 
 ---
 
