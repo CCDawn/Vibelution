@@ -81,4 +81,13 @@ describe("FinanceResearchReport research metadata", () => {
     await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "重试")?.click());
     expect(container.textContent).toContain("Recovered exact report");
   });
+
+  it("offers native follow-up for missing evidence without starting another research", async () => {
+    const supplement = vi.fn(), startResearch = vi.fn();
+    vi.mocked(fetchFinancialReportText).mockResolvedValue("## 结论\n利润没有这一项。");
+    const container = await render({ onSupplementEvidence: supplement, onResearch: startResearch });
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "补充证据")!.click());
+    expect(supplement).toHaveBeenCalledTimes(1);
+    expect(startResearch).not.toHaveBeenCalled();
+  });
 });

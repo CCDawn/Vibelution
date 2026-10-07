@@ -18,8 +18,8 @@ describe("grounded financial report reads", () => {
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   });
   afterEach(() => { act(() => root.unmount()); container.remove(); });
-  async function render(next = target, originalText = raw) {
-    await act(async () => root.render(<FinanceGroundedReportBody target={next} originalText={originalText} zh />));
+  async function render(next = target, originalText = raw, onSupplementEvidence?: () => void) {
+    await act(async () => root.render(<FinanceGroundedReportBody target={next} originalText={originalText} zh onSupplementEvidence={onSupplementEvidence} />));
   }
 
   it("hides the original while loading, then shows only the grounded answer and a missing-evidence notice", async () => {
@@ -63,5 +63,19 @@ describe("grounded financial report reads", () => {
     await render(target, discussion);
     expect(container.querySelector("[data-markdown]")?.textContent).toBe(discussion);
     expect(container.textContent).not.toContain("部分数字未通过核验");
+  });
+
+  it("offers the existing evidence flow only after grounding masks a new figure", async () => {
+    const supplement = vi.fn();
+    vi.mocked(fetchFinancialReportText).mockResolvedValue("## 结论\n利润没有这一项。");
+    await render(target, raw, supplement);
+    const button = Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "补充证据")!;
+    expect(button.title).toBe("在原会话添加来源或附件后追问");
+    await act(async () => button.click());
+    expect(supplement).toHaveBeenCalledTimes(1);
+    expect(fetchFinancialReportText).toHaveBeenCalledTimes(1);
+    vi.mocked(fetchFinancialReportText).mockResolvedValue(raw);
+    await render({ ...target, turnId: "verified-turn" }, raw, supplement);
+    expect(container.textContent).not.toContain("补充证据");
   });
 });

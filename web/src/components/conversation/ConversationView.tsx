@@ -62,8 +62,7 @@ import { ConversationSelectionQuoteMenu } from "./ConversationSelectionQuoteMenu
 import {
   buildQuotedDraftText,
   extractConversationSelectionSnapshot,
-  resolveSelectionQuoteMenuPosition,
-  type ConversationSelectionMenuPosition,
+  type ConversationSelectionRect,
 } from "./conversationTextSelection";
 import { ConversationTranscriptLoadingState } from "./ConversationTranscriptLoadingState";
 import { ConversationTurnNavigator } from "./ConversationTurnNavigator";
@@ -1341,13 +1340,14 @@ export const ConversationView = React.memo(function ConversationView({
   const conversationFindForkDialogRef = useRef<ConversationMessage | null>(null);
   conversationFindForkDialogRef.current = forkDialogMessage;
   // Text-selection quote menu (zai-org/ZCode useTextSelection pattern,
-  // Apache-2.0): snapshot of the selected text plus a container-local anchor.
+  // Apache-2.0): snapshot of the selected text. The menu centers itself on
+  // that viewport rect.
   const timelineAreaRef = useRef<HTMLDivElement | null>(null);
   const selectionQuoteDismissedTextRef = useRef<string | null>(null);
   const selectionQuoteTextRef = useRef("");
   const [selectionQuoteMenu, setSelectionQuoteMenu] = useState<{
     text: string;
-    position: ConversationSelectionMenuPosition;
+    rect: ConversationSelectionRect;
     sourceMessageId: string;
   } | null>(null);
   // Selection quote lifecycle: document-level selectionchange + mouseup/keyup,
@@ -1379,10 +1379,7 @@ export const ConversationView = React.memo(function ConversationView({
       setSelectionQuoteMenu({
         text: snapshot.text,
         sourceMessageId: snapshot.sourceMessageId,
-        position: resolveSelectionQuoteMenuPosition(
-          snapshot.rect,
-          timelineArea.getBoundingClientRect(),
-        ),
+        rect: snapshot.rect,
       });
     };
     const scheduleEvaluation = () => {
@@ -6894,7 +6891,7 @@ export const ConversationView = React.memo(function ConversationView({
 
 {selectionQuoteMenu ? (
         <ConversationSelectionQuoteMenu
-          position={selectionQuoteMenu.position}
+          selectionRect={selectionQuoteMenu.rect}
           quoteLabel={lang === "zh" ? "引用到输入框" : "Quote to composer"}
           referenceLabel={lang === "zh" ? "作为引用" : "As reference"}
           copyLabel={lang === "zh" ? "复制" : "Copy"}
