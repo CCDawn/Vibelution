@@ -34,6 +34,7 @@ import {
 } from "../groupRoomOptimisticIds";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { readSessionCreateRecovery } from "./chatSessionCreateRecovery";
+import { resetSessionCreateAttemptsForTests, sessionCreateAttemptState } from "./sessionCreateAttempt";
 
 const fetchJsonMock = vi.fn();
 vi.mock("../../api/client", () => ({
@@ -332,6 +333,7 @@ function groupCreateTelemetry(): TelemetryEvent {
 }
 
 beforeEach(() => {
+  resetSessionCreateAttemptsForTests();
   sessionStorage.clear();
   fetchJsonMock.mockReset();
   telemetryEvents.length = 0;
@@ -721,6 +723,7 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     const rotatedKey = readSessionCreateRecovery(rejectedTempSessionId)?.idempotencyKey;
     expect(rotatedKey).toBeTruthy();
     expect(rotatedKey).not.toBe(rejectedKey);
+    expect(sessionCreateAttemptState(rejectedTempSessionId)).toBe("failed");
     mutateSessionCreate("agent-a");
     await flushMutationQueue();
     expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: "session-after-conflict" });

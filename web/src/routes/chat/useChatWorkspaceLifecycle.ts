@@ -92,6 +92,7 @@ import {
   rememberSessionCreateRecovery,
   type SessionCreateRecovery,
 } from "./chatSessionCreateRecovery";
+import { clearSessionCreateAttempt, markSessionCreateAttempt } from "./sessionCreateAttempt";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -377,6 +378,7 @@ export function useChatWorkspaceLifecycle({
     const current = createSessionIntentsRef.current.get(tempSessionId);
     if (current?.idempotencyKey === expectedKey) {
       createSessionIntentsRef.current.delete(tempSessionId);
+      clearSessionCreateAttempt(tempSessionId);
     }
     forgetSessionCreateRecovery(tempSessionId, expectedKey);
   };
@@ -389,6 +391,7 @@ export function useChatWorkspaceLifecycle({
     if (!recovery) return;
     // Reload owns no in-flight POST. Let an explicit retry replay the same key.
     createSessionIntentsRef.current.set(recoveryRouteId, { ...recovery, state: "failed" });
+    markSessionCreateAttempt(recoveryRouteId, "failed");
     if (queryClient.getQueryData(queryKeys.session(recoveryRouteId))) return;
     const detail = buildSessionCreateShell(recovery, defaultNewSessionTitle(lang));
     queryClient.setQueryData(queryKeys.session(recoveryRouteId), detail);
@@ -430,6 +433,7 @@ export function useChatWorkspaceLifecycle({
       intent.state = "pending";
       variables.createIntent = intent;
       createSessionIntentsRef.current.set(intent.tempSessionId, intent);
+      markSessionCreateAttempt(intent.tempSessionId, "pending");
       rememberSessionCreateRecovery(intent);
       const idempotencyKey = intent.idempotencyKey;
       const telemetry = startUserAction("session_create", { agentId: normalizedAgentId });
@@ -485,6 +489,7 @@ export function useChatWorkspaceLifecycle({
       if (!nextId) {
         const intent = createSessionIntentsRef.current.get(tempSessionId);
         if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
+        markSessionCreateAttempt(tempSessionId, "failed");
         telemetry?.failed(undefined, { reason: "missing_session_id" });
         return;
       }
@@ -522,6 +527,7 @@ export function useChatWorkspaceLifecycle({
         return;
       }
       forgetCreateSessionIntent(tempSessionId, String(context?.idempotencyKey || ""));
+      clearSessionCreateAttempt(tempSessionId);
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
       // Prefer server title (now defaults to Agent name); fall back to local Agent label.
       const serverTitle = String(nextDetail.title || "").trim();
@@ -726,6 +732,7 @@ export function useChatWorkspaceLifecycle({
         const intent = createSessionIntentsRef.current.get(String(context?.tempSessionId || "").trim());
         if (intent && intent.idempotencyKey === context?.idempotencyKey) intent.state = "failed";
       }
+      markSessionCreateAttempt(tempSessionId, "failed");
       context?.telemetry?.failed(error, {
         tempSessionId: String(context?.tempSessionId || "").trim(),
         agentId: String(context?.agentId || "").trim(),
