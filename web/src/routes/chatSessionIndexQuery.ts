@@ -14,6 +14,7 @@ import { mergePreservedCreatedSessions, unpinSessionCreatePreserve } from "./ses
 import { stabilizeSessionSummaries } from "./sessionIndexReferenceStabilization";
 import { filterOutTombstonedSessions, markSessionDeleteTombstone } from "./sessionDeleteTombstone";
 import { chatAgentSessionStorage, forgetAgentLastSessionBySessionId } from "./chat/chatAgentSessionMemory";
+import { isTempSessionId } from "./sessionOptimisticIds";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
 
@@ -189,7 +190,8 @@ export function updateSessionSummaryCaches(queryClient: QueryClient, updater: Se
  */
 export function evictUnopenableSessionFromCaches(queryClient: QueryClient, sessionId: string) {
   const normalizedSessionId = String(sessionId || "").trim();
-  if (!normalizedSessionId) {
+  // Temp ids are not server rows. A 404 means "not created yet", not "deleted".
+  if (!normalizedSessionId || isTempSessionId(normalizedSessionId)) {
     return;
   }
   markSessionDeleteTombstone(normalizedSessionId, { confirmed: true });

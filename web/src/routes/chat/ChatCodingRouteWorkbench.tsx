@@ -1557,7 +1557,11 @@ export function ChatCodingRouteWorkbench() {
     if (!pageVisible || previousPageVisible || !resyncSessionId) {
       return;
     }
-    void refetchSessionDetailRef.current();
+    // enabled:false does not stop refetch(). A temp shell has no server row;
+    // this GET 404s and the error surface replaces the composer.
+    if (!isTempSessionId(resyncSessionId)) {
+      void refetchSessionDetailRef.current();
+    }
     void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
     postBrowserTelemetry({
@@ -2299,7 +2303,9 @@ export function ChatCodingRouteWorkbench() {
     lang,
     describeError,
     setActiveTab,
-    refetchSessionDetail: () => sessionDetailQuery.refetch(),
+    refetchSessionDetail: () => (
+      isTempSessionId(activeSessionId) ? undefined : sessionDetailQuery.refetch()
+    ),
   });
   const sessionDetailLoadingForActiveSession = isSessionDetailHardLoading({
     activeSessionId,
@@ -2336,16 +2342,18 @@ export function ChatCodingRouteWorkbench() {
   const lastLlmPayloadTrace = detail?.lastLlmPayloadTrace ?? null;
   const projectBusTimeline = projectAgentBusQuery.data;
   const projectBusEvents = projectBusTimeline?.events ?? [];
+  const tempSessionShell = isTempSessionId(activeSessionId);
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
     dataUpdatedAt: sessionDetailQuery.dataUpdatedAt,
     errorUpdatedAt: sessionDetailQuery.errorUpdatedAt,
     streamConnected: sessionStreamConnected,
+    localOnlySession: tempSessionShell,
   });
   const sessionsErrorState = deriveSessionListQueryErrorState(sessionsQuery.data, sessionsQuery.isError, {
     emptyNotFoundAsEmpty: true,
     error: sessionsQuery.error,
   });
-  const sessionDetailErrorMessage = sessionDetailQuery.isError
+  const sessionDetailErrorMessage = sessionDetailQuery.isError && !tempSessionShell
     ? describeError(sessionDetailQuery.error, t("loadFailed"))
     : "";
   const invalidChildSessionLinkMessage = hasInvalidChildSessionLink(sessionDetailQuery.data ?? directSessionActiveSummary)

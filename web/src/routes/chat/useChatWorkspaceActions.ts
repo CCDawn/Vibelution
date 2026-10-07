@@ -193,6 +193,9 @@ export function useChatWorkspaceActions({
   ]);
 
   const handlePrefetchDirectSession = useCallback((sessionId: string) => {
+    if (isTempSessionId(sessionId)) {
+      return;
+    }
     void prefetchSessionDetailWindow(queryClient, sessionId);
   }, [queryClient]);
 

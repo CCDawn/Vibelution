@@ -78,7 +78,7 @@ modelRef?        可选；llmBindings 槽位引用（见 §4）
 | 科研（挑战杯） | `bootstrap_challenge_cup_research_team` 仍直接写 3 字段成员行，未走 `_normalize_members`。组织同步已不再写成员 | 挑战杯收尾已停止，不沿这条启动路径补字段。新增系统团队必须复用 `_normalize_members` |
 | 进化（Gym/自进化） | `ensure_evolution_system_teams` 的成员行经 `_normalize_members` 落成 8 字段 | 保持；不另建成员存储。角色声明仍不在本行展开 |
 | 金融 | 阶段 3 迁移目标 | 迁移时以本文为格式基准：成员行 8 字段、角色 `_dev_role` 字段集、模型只留 agents.json 引用 |
-| 演示模板（medical/heletech） | 旧角色形状（缺 `responsibilities`/`toolPolicy`） | 仅演示用途保留现状；不得作为新格式的先例引用 |
+| 开发团队模板 | 唯一可新建模板。实例化走 `create_team`，成员行经 `_normalize_members`；角色声明用 `_dev_role` | 保持。医疗问诊与妇幼数字健康模板已移除，不再作为格式先例 |
 
 ## 7. 禁止事项
 

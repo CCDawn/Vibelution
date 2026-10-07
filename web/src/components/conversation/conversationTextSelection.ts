@@ -2,7 +2,8 @@
  * Text-selection quote support for the conversation timeline (pattern:
  * zai-org/ZCode useTextSelection + SelectionActionMenu, Apache-2.0). Pure
  * selection geometry/text logic so the ConversationView effect stays a thin
- * listener shell.
+ * listener shell. The menu is centered on the selection in viewport
+ * coordinates, the same anchor SelectionActionMenu uses.
  */
 
 export type ConversationSelectionRect = {
@@ -54,6 +55,19 @@ export type ConversationSelectionMenuPosition = {
 export const SELECTION_QUOTE_MENU_WIDTH_PX = 208;
 export const SELECTION_QUOTE_MENU_HEIGHT_PX = 40;
 export const SELECTION_QUOTE_MENU_GAP_PX = 8;
+export const SELECTION_QUOTE_MENU_VIEWPORT_MARGIN_PX = 12;
+
+/** DOMRect stores coordinates on the prototype. Object spread drops them. */
+export function readSelectionRect(rect: ConversationSelectionRect): ConversationSelectionRect {
+  return {
+    top: rect.top,
+    left: rect.left,
+    bottom: rect.bottom,
+    right: rect.right,
+    width: rect.width,
+    height: rect.height,
+  };
+}
 
 function rectContained(container: HTMLElement, node: Node) {
   return container.contains(node);
@@ -112,7 +126,7 @@ export function extractConversationSelectionSnapshot(
   let union: ConversationSelectionRect | null = null;
   for (let index = 0; index < selection.rangeCount; index += 1) {
     const range = selection.getRangeAt(index);
-    const rect = range.getBoundingClientRect();
+    const rect = readSelectionRect(range.getBoundingClientRect());
     if (rect.width === 0 && rect.height === 0) {
       continue;
     }
@@ -125,7 +139,7 @@ export function extractConversationSelectionSnapshot(
         width: Math.max(union.right, rect.right) - Math.min(union.left, rect.left),
         height: Math.max(union.bottom, rect.bottom) - Math.min(union.top, rect.top),
       }
-      : { ...rect };
+      : rect;
   }
   if (!union) {
     // Degenerate geometry (no painted rects): nothing to anchor a menu to.
@@ -139,24 +153,37 @@ export function extractConversationSelectionSnapshot(
 }
 
 /**
- * Menu anchor in container-local coordinates: hugs the selection top edge
- * (rendered flipped up via translateY(-100%)), flips below the selection
- * when there is no headroom, and clamps horizontally inside the container.
+ * Viewport anchor for a fixed menu. The menu is centered on the selection
+ * and flipped above it (translateY(-100%)). It drops below when the top
+ * edge has no room, and stays inside the viewport.
  */
 export function resolveSelectionQuoteMenuPosition(
   selectionRect: ConversationSelectionRect,
-  containerRect: { top: number; left: number; width: number; height: number },
+  viewport: { width: number; height: number },
+  menuSize: { width: number; height: number } = {
+    width: SELECTION_QUOTE_MENU_WIDTH_PX,
+    height: SELECTION_QUOTE_MENU_HEIGHT_PX,
+  },
 ): ConversationSelectionMenuPosition {
-  const localLeft = selectionRect.left - containerRect.left;
-  const localTop = selectionRect.top - containerRect.top;
-  const localBottom = selectionRect.bottom - containerRect.top;
-  const maxLeft = Math.max(0, containerRect.width - SELECTION_QUOTE_MENU_WIDTH_PX);
-  const left = Math.min(Math.max(0, localLeft), maxLeft);
-  const above = localTop >= SELECTION_QUOTE_MENU_HEIGHT_PX + SELECTION_QUOTE_MENU_GAP_PX;
+  const menuWidth = Math.max(0, menuSize.width);
+  const menuHeight = Math.max(0, menuSize.height);
+  const margin = SELECTION_QUOTE_MENU_VIEWPORT_MARGIN_PX;
+  const viewportWidth = Math.max(viewport.width, menuWidth + margin * 2);
+  const viewportHeight = Math.max(viewport.height, menuHeight + margin * 2);
+  const center = selectionRect.left + selectionRect.width / 2;
+  const maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
+  const left = Math.min(Math.max(margin, center - menuWidth / 2), maxLeft);
+  const above = selectionRect.top >= menuHeight + margin + SELECTION_QUOTE_MENU_GAP_PX;
+  const rawTop = above
+    ? selectionRect.top - SELECTION_QUOTE_MENU_GAP_PX
+    : selectionRect.bottom + SELECTION_QUOTE_MENU_GAP_PX;
+  const visualTop = above ? rawTop - menuHeight : rawTop;
+  const maxVisualTop = Math.max(margin, viewportHeight - menuHeight - margin);
+  const clampedVisualTop = Math.min(Math.max(margin, visualTop), maxVisualTop);
   return {
     above,
     left,
-    top: above ? localTop - SELECTION_QUOTE_MENU_GAP_PX : localBottom + SELECTION_QUOTE_MENU_GAP_PX,
+    top: above ? clampedVisualTop + menuHeight : clampedVisualTop,
   };
 }
 

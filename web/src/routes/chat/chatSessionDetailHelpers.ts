@@ -16,6 +16,7 @@ import {
   assistantTurnItemsForMessage,
 } from "../chatTurnProtocol";
 import { isTurnErrorMessage } from "../../components/conversation/conversationMessagePredicates";
+import { isTempSessionId } from "../sessionOptimisticIds";
 
 export const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 export const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
@@ -59,7 +60,9 @@ export function prefetchSessionDetailWindow(
   options: Pick<SessionDetailWindowOptions, "messageLimit"> = {},
 ): Promise<SessionDetail | undefined> {
   const normalizedSessionId = String(sessionId || "").trim();
-  if (!normalizedSessionId) {
+  // A temp id is a local create shell. Prefetching it 404s and the not-found
+  // path tombstones the row, which removes the tab and blocks the composer.
+  if (!normalizedSessionId || isTempSessionId(normalizedSessionId)) {
     return Promise.resolve(undefined);
   }
   return queryClient.prefetchQuery({
@@ -114,7 +117,7 @@ export function resolveNeighborSessionIdsForPrefetch(input: {
   const ids: string[] = [];
   for (const session of input.sessions) {
     const id = String(session.id || "").trim();
-    if (!id || id === activeSessionId || ids.includes(id)) {
+    if (!id || id === activeSessionId || isTempSessionId(id) || ids.includes(id)) {
       continue;
     }
     ids.push(id);

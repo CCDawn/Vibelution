@@ -117,6 +117,7 @@ export function TeamCommunicationPanel({
   onRevokeTeamMessage,
 }: TeamCommunicationPanelProps) {
   const teamBackLabel = lang === "zh" ? "返回团队页面" : "Back to team";
+  const devTeamFlow = selectedTeam?.teamTemplateId === "dev-team";
   const workspaceHref = teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID);
   const memberMessagesQuery = useQuery({
     queryKey: ["teams", selectedTeam?.teamId || "", "member-messages"],
@@ -153,10 +154,21 @@ export function TeamCommunicationPanel({
               : (lang === "zh" ? "需要先同步群聊" : "sync room first")}
           </span>
         </div>
+        {devTeamFlow ? (
+          <p>
+            {lang === "zh"
+              ? "规划师先拆任务，再用 @开发工程师 A、@开发工程师 B 或 @评审员 派发。这一轮做完后可以停止。"
+              : "The planner splits the task, then assigns @开发工程师 A, @开发工程师 B, or @评审员. Stop the round when it is done."}
+          </p>
+        ) : null}
         <VNativeTextarea
           value={teamTaskTopic}
           onChange={(event) => onTeamTaskTopicChange(event.target.value)}
-          placeholder={lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team"}
+          placeholder={
+            devTeamFlow
+              ? (lang === "zh" ? "写下这轮要完成的开发任务" : "Describe the development task for this round")
+              : (lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team")
+          }
         />
         <VNativeButton
           type="submit"
@@ -165,7 +177,9 @@ export function TeamCommunicationPanel({
           <Play size={14} />
           {startRoundPending
             ? (lang === "zh" ? "启动中" : "Starting")
-            : (lang === "zh" ? "启动团队讨论" : "Start team round")}
+            : devTeamFlow
+              ? (lang === "zh" ? "启动开发轮次" : "Start development round")
+              : (lang === "zh" ? "启动团队讨论" : "Start team round")}
         </VNativeButton>
         {linkedChatRoomId && linkedRoomBusy ? (
           <VNativeButton

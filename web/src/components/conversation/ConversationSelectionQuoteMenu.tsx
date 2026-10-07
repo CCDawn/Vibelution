@@ -1,11 +1,17 @@
-import type { MouseEvent } from "react";
+import { useLayoutEffect, useRef, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 
 import { VButton } from "../vui";
-import type { ConversationSelectionMenuPosition } from "./conversationTextSelection";
+import {
+  resolveSelectionQuoteMenuPosition,
+  SELECTION_QUOTE_MENU_HEIGHT_PX,
+  SELECTION_QUOTE_MENU_WIDTH_PX,
+  type ConversationSelectionRect,
+} from "./conversationTextSelection";
 import styles from "./ConversationSelectionQuoteMenu.styles";
 
 export type ConversationSelectionQuoteMenuProps = {
-  position: ConversationSelectionMenuPosition;
+  selectionRect: ConversationSelectionRect;
   quoteLabel: string;
   copyLabel: string;
   onQuote: () => void;
@@ -20,12 +26,12 @@ export type ConversationSelectionQuoteMenuProps = {
 
 /**
  * Floating action menu over a timeline text selection: quote-to-composer,
- * structured reference chip, and copy. Absolutely positioned inside the
- * timeline area; preventDefault on mousedown keeps the selection alive until
- * the action click lands.
+ * structured reference chip, and copy. Fixed to the viewport and centered
+ * on the selection. preventDefault on mousedown keeps the selection alive
+ * until the action click lands.
  */
 export function ConversationSelectionQuoteMenu({
-  position,
+  selectionRect,
   quoteLabel,
   copyLabel,
   onQuote,
@@ -33,17 +39,49 @@ export function ConversationSelectionQuoteMenu({
   referenceLabel,
   onReference,
 }: ConversationSelectionQuoteMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) {
+      return;
+    }
+    const place = () => {
+      const measured = menu.getBoundingClientRect();
+      const position = resolveSelectionQuoteMenuPosition(
+        selectionRect,
+        { width: window.innerWidth, height: window.innerHeight },
+        {
+          width: measured.width || SELECTION_QUOTE_MENU_WIDTH_PX,
+          height: measured.height || SELECTION_QUOTE_MENU_HEIGHT_PX,
+        },
+      );
+      menu.style.left = `${position.left}px`;
+      menu.style.top = `${position.top}px`;
+      menu.style.transform = position.above ? "translateY(-100%)" : "none";
+    };
+    place();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
+    observer?.observe(menu);
+    window.addEventListener("resize", place);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [
+    selectionRect.bottom,
+    selectionRect.height,
+    selectionRect.left,
+    selectionRect.right,
+    selectionRect.top,
+    selectionRect.width,
+  ]);
   const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
   };
-  return (
+  const menu = (
     <div
+      ref={menuRef}
       className={styles.selectionQuoteMenu}
-      style={{
-        top: position.top,
-        left: position.left,
-        transform: position.above ? "translateY(-100%)" : undefined,
-      }}
       role="toolbar"
       aria-label={quoteLabel}
       data-conversation-selection-menu="1"
@@ -77,4 +115,8 @@ export function ConversationSelectionQuoteMenu({
       </VButton>
     </div>
   );
+  if (typeof document === "undefined") {
+    return menu;
+  }
+  return createPortal(menu, document.body);
 }

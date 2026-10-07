@@ -20,12 +20,12 @@ normalization and failures; live provider availability is verified separately.
 
 ## A-share annual reports
 
-`official_filings.py` looks up one cninfo annual-report PDF. Screening attaches
-it when the announcement day is on or before the analysis date. The stock
-overview list uses the same lookup with no date cutoff, puts that PDF first,
-and drops East Money rows whose titles contain 年度报告. If no original is
-found, those reprints are omitted and the list says so. Other notices stay on
-East Money. The result is a title, announcement date, and
-`static.cninfo.com.cn` URL. It is not a page number. Summaries and any other
-host are left out. A lookup failure does not fail the screen or hide the
-remaining notices.
+`official_filings.py` looks up cninfo periodic-report PDFs. Screening attaches
+one annual report when the announcement day is on or before the analysis date.
+The stock overview list, with no date cutoff, shows the latest annual report,
+semi-annual report, first-quarter report, and third-quarter report, and drops
+East Money rows for those reports. A missing original is named in the list and
+its reprint is omitted. Other notices stay on East Money. Each result is a
+title, announcement date, and `static.cninfo.com.cn` URL. It is not a page
+number. Summaries and any other host are left out. A lookup failure does not
+fail the screen or hide the remaining notices.

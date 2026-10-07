@@ -212,6 +212,28 @@ describe("chatSessionDetailHelpers", () => {
         activeSessionId: "a",
       }),
     ).toEqual([]);
+    expect(
+      resolveNeighborSessionIdsForPrefetch({
+        sessions: [{ id: "temp-session-local" }, { id: "a" }, { id: "b" }],
+        activeSessionId: "real-open",
+        limit: 2,
+      }),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("does not prefetch or tombstone a temporary create shell", async () => {
+    resetSessionDeleteTombstonesForTests();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const fetch = vi.spyOn(client, "fetchJson").mockRejectedValue(new Error("Session not found"));
+    try {
+      await expect(prefetchSessionDetailWindow(queryClient, "temp-session-local")).resolves.toBeUndefined();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(isSessionDeleteTombstoned("temp-session-local")).toBe(false);
+    } finally {
+      queryClient.clear();
+      fetch.mockRestore();
+      resetSessionDeleteTombstonesForTests();
+    }
   });
 
   it("evicts neighbor 404s from list caches during prefetch without throwing", async () => {
