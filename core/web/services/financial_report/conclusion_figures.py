@@ -62,6 +62,7 @@ _PRICE_CLAIM = re.compile(
 )
 _MARKET_TOOL_STATUSES = {"completed", "success", "partial", "degraded"}
 _MARKET_PAYLOAD_STATUSES = {"ok", "partial"}
+_US_PROVIDER_SUFFIX = re.compile(r"\.(?:OQ|N|AM|PK|PNK|NYSE|NASDAQ)$", re.IGNORECASE)
 _HIGH_RISK_CLAIM = re.compile(
     r"财报|财务报告|年报|季报|营收|营业收入|主营收入|收入|净利(?:润)?|利润|"
     r"现金流|经营现金流|自由现金流|财务指标|财务数据|"
@@ -321,10 +322,13 @@ def _market_quote_payload(output: str) -> dict | None:
     quote_ticker = str(quote.get("ticker") or "").strip()
     quote_currency = str(quote.get("currency") or "").strip().upper()
     market = _market_for_symbol(symbol)
+    observed_ticker = quote_ticker
+    if market is not None and market[0] == "USD":
+        observed_ticker = _US_PROVIDER_SUFFIX.sub("", quote_ticker)
     if (
         market is None
         or ticker.casefold() != symbol.casefold()
-        or quote_ticker.casefold() != symbol[2:].casefold()
+        or observed_ticker.casefold() != symbol[2:].casefold()
     ):
         return None
     expected_currency, root_price_unit, quote_price_unit = market
@@ -358,7 +362,7 @@ def _market_quote_payload(output: str) -> dict | None:
         return None
     return {
         "symbol": symbol,
-        "ticker": quote_ticker,
+        "ticker": symbol[2:],
         "currency": expected_currency,
         "sourceUrl": source_url,
         "date": parsed_timestamp.date().isoformat(),
@@ -521,17 +525,17 @@ def _cited_pages(text: str) -> set[int]:
 def _conclusion_spans(text: str) -> list[tuple[int, int]]:
     headings: list[tuple[int, int, str, int]] = []
     markdown_headings = list(_HEADING.finditer(text))
+    bold_headings = []
     for heading in markdown_headings:
         headings.append((heading.start(), heading.end(), heading.group("title"), heading.end()))
     for heading in _BOLD_HEADING.finditer(text):
         title = heading.group("title").strip().rstrip(":：").strip()
         body = heading.group("body") or ""
-        after = heading.group("after") or ""
-        has_separator = ":" in heading.group("title") or "：" in after
-        if body.strip() and not (has_separator or _BOLD_SECTION_TITLE.search(title)):
+        if body.strip() and not _BOLD_SECTION_TITLE.search(title):
             continue
         body_start = heading.start("body") if body.strip() else heading.end()
         headings.append((heading.start(), heading.end(), title, body_start))
+        bold_headings.append(heading)
     headings.sort(key=lambda heading: (heading[0], heading[1]))
     spans: list[tuple[int, int]] = []
     for index, heading in enumerate(headings):
@@ -542,7 +546,7 @@ def _conclusion_spans(text: str) -> list[tuple[int, int]]:
         spans.append((start, end))
     if spans:
         return spans
-    if markdown_headings:
+    if markdown_headings or bold_headings:
         return []
     return [(0, len(text))]
 

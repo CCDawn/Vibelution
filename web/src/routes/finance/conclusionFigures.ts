@@ -5,6 +5,7 @@ const MAX_DIGITS = 40;
 const FAILED = new Set(["failed", "error", "timeout", "timed_out", "blocked", "cancelled", "canceled", "interrupted"]);
 const HEADING = /^[ \t]{0,3}(?:#{1,3}[ \t]+(.+?)[ \t]*$|\*\*([^*\r\n]{1,60})\*\*[ \t]*[：:]?[ \t]*)/gm;
 const CONCLUSION = /结论|摘要|简报|summary|conclusion/i;
+const BOLD_SECTION = /结论|摘要|简报|关键事实|核心事实|风险|建议|summary|conclusions?|key facts|facts|risks?|recommendations?/i;
 const PAGE = /第\s*(\d{1,6})\s*页|PDF\s*(\d{1,6})\s*页|\b(?:p\.|page\s+)(\d{1,6})\b/gi;
 const FENCE = /```[\s\S]*?```/g;
 const AMOUNT = /(?<![\d.])([+-])?((?:\d{1,3}(?:[,，]\d{3})+|\d+)(?:\.\d+)?)(?![\d.])(\s*(?:%|％|万亿|亿元|万元|港元|美元|元|股))?/g;
@@ -60,7 +61,9 @@ function marketPriceSpans(text: string, spans: Array<[number, number]>, items: r
     const quote = payload.quote as Record<string, unknown> | null;
     if (!quote || typeof quote !== "object" || typeof quote.price !== "number" || !Number.isFinite(quote.price) || quote.price <= 0) continue;
     const symbol = typeof payload.ticker === "string" ? payload.ticker : "";
-    if (!/^(?:sh|sz|bj)\d{6}$|^hk\d{5}$|^us[A-Za-z][A-Za-z0-9.]{0,15}$/.test(symbol) || quote.symbol !== symbol || quote.ticker !== symbol.slice(2)) continue;
+    const quoteTicker = typeof quote.ticker === "string" ? quote.ticker : "";
+    const baseTicker = symbol.startsWith("us") ? quoteTicker.replace(/\.(?:OQ|N|AM|PK|PNK|NYSE|NASDAQ)$/i, "") : quoteTicker;
+    if (!/^(?:sh|sz|bj)\d{6}$|^hk\d{5}$|^us[A-Za-z][A-Za-z0-9.]{0,15}$/.test(symbol) || quote.symbol !== symbol || baseTicker !== symbol.slice(2)) continue;
     const currency = ({ sh: "CNY", sz: "CNY", bj: "CNY", hk: "HKD", us: "USD" } as Record<string, string>)[symbol.slice(0, 2)];
     if (payload.currency !== currency || quote.currency !== currency || typeof quote.timestamp !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(quote.timestamp) || !Number.isFinite(Date.parse(quote.timestamp))) continue;
     if (payload.priceUnit !== undefined && payload.priceUnit !== (currency === "CNY" ? "元" : `${currency}/share`)) continue;
@@ -172,7 +175,7 @@ function citedPages(text: string): Set<number> {
 }
 
 function conclusionSpans(text: string): Array<[number, number]> {
-  const headings = [...text.matchAll(HEADING)];
+  const headings = [...text.matchAll(HEADING)].filter((heading) => heading[1] || BOLD_SECTION.test(heading[2] || "") || /^[ \t]*$/.test(text.slice((heading.index ?? 0) + heading[0].length).split("\n")[0]));
   const spans: Array<[number, number]> = [];
   headings.forEach((heading, index) => {
     if (!CONCLUSION.test(heading[1] || heading[2] || "")) return;
@@ -181,7 +184,7 @@ function conclusionSpans(text: string): Array<[number, number]> {
     spans.push([start, end]);
   });
   if (spans.length) return spans;
-  return headings.some((heading) => heading[1]) ? [] : [[0, text.length]];
+  return headings.length ? [] : [[0, text.length]];
 }
 
 function fenceSpans(text: string): Array<[number, number]> {

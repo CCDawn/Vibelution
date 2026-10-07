@@ -165,7 +165,7 @@ def test_us_quote_preserves_canonical_symbol_case_and_requires_usd_share_unit():
         sourceUrl=source_url,
         quote={
             "symbol": "usAAPL",
-            "ticker": "AAPL",
+            "ticker": "AAPL.OQ",
             "marketCode": "US",
             "currency": "USD",
             "priceUnit": "USD/share",
@@ -177,6 +177,16 @@ def test_us_quote_preserves_canonical_symbol_case_and_requires_usd_share_unit():
     )
     assert "11.57 美元" in ground_completed_report(report, _item(payload), [])
     assert "11.57" not in ground_completed_report(report.replace("美元", "港元"), _item(payload), [])
+
+
+def test_bold_risk_heading_does_not_trigger_full_report_fallback_but_inline_profit_does():
+    risk = "**风险**\n跌幅 11.57%。"
+    profit = "**利润**：11.57 元"
+
+    assert ground_completed_report(risk, [], []) == risk
+    grounded_profit = ground_completed_report(profit, [], [])
+    assert "11.57" not in grounded_profit
+    assert MISSING_FIGURE in grounded_profit
 
 
 def test_market_quote_is_scoped_to_its_conclusion_paragraph():

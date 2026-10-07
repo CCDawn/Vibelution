@@ -62,6 +62,24 @@ describe("same-turn market report grounding", () => {
     expect(groundResearchConclusion(claim.replace(unit, "元"), [], [tool(evidence)])).toContain("没有这一项");
   });
 
+  it("accepts the adapter's US exchange suffix without accepting another ticker", () => {
+    const url = "https://gu.qq.com/usAAPL/gp";
+    const evidence = { ...payload, ticker: "usAAPL", currency: "USD", priceUnit: "USD/share", sourceUrl: url, quote: { ...payload.quote, symbol: "usAAPL", ticker: "AAPL.OQ", currency: "USD" } };
+    const claim = `## 结论\nusAAPL 最新报价11.57 美元/股，行情日期2026-09-30，${url}。`;
+    expect(groundResearchConclusion(claim, [], [tool(evidence)])).toContain("11.57 美元");
+    for (const ticker of ["MSFT.OQ", "AAPL.UNKNOWN", "AAPL.OQ.N"]) {
+      expect(groundResearchConclusion(claim, [], [tool({ ...evidence, quote: { ...evidence.quote, ticker } })])).toContain("没有这一项");
+    }
+  });
+
+  it("leaves standalone bold non-conclusion sections intact while guarding inline labels", () => {
+    for (const section of ["**风险**\n跌幅 9.99%", "**风险**：\n跌幅 9.99%", "**关键事实**\n利润 11.57 元"]) {
+      expect(groundResearchConclusion(section, [])).toBe(section);
+    }
+    expect(groundResearchConclusion("**利润**：11.57 元", [])).toContain("没有这一项");
+    expect(groundResearchConclusion("**结论**\n**利润**：11.57 元", [])).toContain("没有这一项");
+  });
+
   it("projects the exact final answer without changing its native stored text", () => {
     const answer = { type: "agent_message", status: "completed", phase: "final_answer", text } as SessionTurnItem;
     const report = projectStockReport([{ role: "user", id: "u", timestamp: "", content: "请对以下主题开展投资研究：核对平安银行公开行情。" }, { role: "assistant", id: "a", timestamp: "", status: "completed", turnId: "quote-turn", turnItems: [tool(), answer] }]);
