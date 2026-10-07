@@ -1,9 +1,10 @@
 """Read cninfo periodic-report identities for an A-share.
 
-Screening asks for one annual report. The stock announcement list asks for
-the latest annual report, semi-annual report, first-quarter report, and
-third-quarter report. The public query returns a title, announcement day,
-and PDF URL. It does not return an interior page. A missing day, a filing
+Screening asks for the annual report, semi-annual report, first-quarter
+report, and third-quarter report on or before the analysis date. The stock
+announcement list asks for the latest of those four reports and does not
+apply that date. The public query returns a title, announcement day, and
+PDF URL. It does not return an interior page. A missing day, a filing
 after an explicit cutoff, a summary, or any URL outside the exchange
 document hosts is omitted. Lookup failures stay empty so the caller still
 returns.
@@ -148,13 +149,12 @@ def accepted_periodic_filing(value: object, *, cutoff: date | None) -> dict[str,
     return record
 
 
-def lookup_annual_filings(tickers: list[object], *, cutoff: date | None = None) -> dict[str, dict[str, str]]:
-    """Look up the latest full annual report for each A-share code.
+_SCREEN_CATEGORY = ";".join(category for _kind, category in _PERIODIC_CATEGORIES)
+_SCREEN_KIND_MATCH = ("semiannual", "q3", "q1", "annual")
+_SCREEN_KIND_ORDER = ("annual", "semiannual", "q1", "q3")
 
-    At most 20 codes are queried. Each read times out, and the whole batch
-    stops waiting after a few seconds. Missing and failed codes are absent.
-    """
 
+def _filing_codes(tickers: list[object], limit: int) -> list[str]:
     codes: list[str] = []
     seen: set[str] = set()
     for raw in tickers:
@@ -163,8 +163,19 @@ def lookup_annual_filings(tickers: list[object], *, cutoff: date | None = None) 
             continue
         seen.add(code)
         codes.append(code)
-        if len(codes) >= MAX_FILING_LOOKUPS:
+        if len(codes) >= limit:
             break
+    return codes
+
+
+def lookup_annual_filings(tickers: list[object], *, cutoff: date | None = None) -> dict[str, dict[str, str]]:
+    """Look up the latest full annual report for each A-share code.
+
+    At most 20 codes are queried. Each read times out, and the whole batch
+    stops waiting after a few seconds. Missing and failed codes are absent.
+    """
+
+    codes = _filing_codes(tickers, MAX_FILING_LOOKUPS)
     if not codes:
         return {}
     found: dict[str, dict[str, str]] = {}
@@ -194,22 +205,105 @@ def lookup_periodic_filings(tickers: list[object], *, cutoff: date | None = None
     stock stops waiting after a few seconds. Missing kinds are absent.
     """
 
-    codes: list[str] = []
-    seen: set[str] = set()
-    for raw in tickers:
-        code = annual_filing_code(raw)
-        if not code or code in seen:
-            continue
-        seen.add(code)
-        codes.append(code)
-        if len(codes) >= MAX_PERIODIC_LOOKUPS:
-            break
     found: dict[str, list[dict[str, str]]] = {}
-    for code in codes:
+    for code in _filing_codes(tickers, MAX_PERIODIC_LOOKUPS):
         rows = _lookup_periodic_one(code, cutoff)
         if rows:
             found[code] = rows
     return found
+
+
+def lookup_screen_filings(tickers: list[object], *, cutoff: date | None = None) -> dict[str, list[dict[str, str]]]:
+    """Look up one latest full report of each periodic kind for a screen.
+
+    At most 20 codes share one deadline. Each code uses one announcement
+    query. The first page is newest-first, so older pages are not requested.
+    Missing kinds and failed codes are absent.
+    """
+
+    codes = _filing_codes(tickers, MAX_FILING_LOOKUPS)
+    if not codes:
+        return {}
+    found: dict[str, list[dict[str, str]]] = {}
+    pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="cninfo-screen")
+    try:
+        futures = {pool.submit(_lookup_screen_one, code, cutoff): code for code in codes}
+        done, pending = wait(futures, timeout=LOOKUP_DEADLINE_SECONDS)
+        for future in pending:
+            future.cancel()
+        for future in done:
+            code = futures[future]
+            try:
+                rows = future.result()
+            except Exception:
+                rows = []
+            if isinstance(rows, list) and rows:
+                found[code] = rows
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    return found
+
+
+def _lookup_screen_one(code: str, cutoff: date | None) -> list[dict[str, str]]:
+    try:
+        searched = _post_json("/new/information/topSearch/query", {"keyWord": code})
+        located = _org_and_column(searched, code)
+        if located is None:
+            return []
+        org_id, column = located
+        payload = _post_json(
+            "/new/hisAnnouncement/query",
+            _announcement_fields(code, org_id, column, cutoff, _SCREEN_CATEGORY),
+        )
+    except Exception:
+        return []
+    return _select_screen_filings(payload, code, cutoff)
+
+
+def _select_screen_filings(payload: object, code: str, cutoff: date | None) -> list[dict[str, str]]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("announcements"), list):
+        return []
+    best: dict[str, tuple[date, str, str]] = {}
+    for row in payload["announcements"][:30]:
+        if not isinstance(row, dict) or str(row.get("secCode") or "").strip() != code:
+            continue
+        announced = _epoch_day(row.get("announcementTime"))
+        url = _document_url(row.get("adjunctUrl"))
+        if announced is None or not url:
+            continue
+        if cutoff is not None and announced > cutoff:
+            continue
+        matched = ""
+        title = ""
+        for kind in _SCREEN_KIND_MATCH:
+            candidate = _periodic_title(row.get("announcementTitle"), kind)
+            if candidate:
+                matched = kind
+                title = candidate
+                break
+        if not matched:
+            continue
+        prior = best.get(matched)
+        if prior is None or announced > prior[0]:
+            best[matched] = (announced, title, url)
+    rows: list[dict[str, str]] = []
+    for kind in _SCREEN_KIND_ORDER:
+        chosen = best.get(kind)
+        if chosen is None:
+            continue
+        record = accepted_periodic_filing(
+            {
+                "kind": kind,
+                "title": chosen[1],
+                "url": chosen[2],
+                "announcedOn": chosen[0].isoformat(),
+                "source": FILING_SOURCE,
+            },
+            cutoff=cutoff,
+        )
+        if record is not None:
+            rows.append(record)
+    return rows
 
 
 def _lookup_one(code: str, cutoff: date | None) -> dict[str, str] | None:
@@ -282,7 +376,7 @@ def _announcement_fields(
     cutoff: date | None,
     category: str = ANNUAL_CATEGORY,
 ) -> dict[str, str]:
-    if category not in _ALLOWED_CATEGORIES:
+    if category != _SCREEN_CATEGORY and category not in _ALLOWED_CATEGORIES:
         raise OfficialFilingLookupError("unexpected category")
     return {
         "pageNum": "1",

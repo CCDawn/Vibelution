@@ -48,7 +48,7 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 |-----------|-------------------|--------|
 | Session list index cache / prewarm signatures | `list_cache.py` | stream capture, agent turn |
 | Session catalog source projection / reconcile | `catalog_bridge.py` | canonical writes, HTTP DTO projection |
-| Live session directory (SQLite control plane) | `directory_runtime.py`, `directory_bridge.py` | turn journal transcript, Agent config authority; list/query use `LIST_QUERY_STARTUP_WAIT_SECONDS=0` and do not fall back to `chat_state`; default list hides `team_agent` / `team_private` unless experiment-bound; visible personal Agent stubs are merged from `directSessionId` |
+| Live session directory (SQLite control plane) | `directory_runtime.py`, `directory_bridge.py` | turn journal transcript, Agent config authority; list/query wait at most `LIST_QUERY_STARTUP_WAIT_SECONDS` (currently 1.5s) during startup, return an empty result if still starting, and do not fall back to `chat_state`; default list hides `team_agent` / `team_private` unless experiment-bound; visible personal Agent stubs are merged from `directSessionId` |
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |
@@ -104,6 +104,7 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 - SSE 连接记录 `session.stream.opened`、`session.stream.failed`、`session.stream.closed`，使用同一个 `streamConnectionId`，并保留 transport、initial mode、持续时间、发送事件数、心跳数和受控 `errorType`；不改变既有 SSE event 名称或 payload。
 - conversation ledger 只在 `turn_completed` / `turn_failed` / `turn_interrupted` 完成 `fsync` 后记录 `conversation.ledger.terminal_committed`，携带 sequence、eventId、耗时和 durability；普通 append 不记录成功事件。append 失败只保留异常类型和消息长度，不记录异常正文。
 - 诊断字段只记录边界元数据，不记录完整 Prompt、响应正文或异常消息；高频健康事件仍由既有采样/节流策略控制。
+- Session directory 启动阶段使用 `session_directory.runtime.stage.<stage>.started/finished` 事件，固定阶段名覆盖 ConversationStore 导入、路径解析、旧 store 关闭、构造、open/publish、Agent 导入、legacy migration 和 direct-session restore。字段仅含 `stage`、`generation`、`durationMs` 与可选 `errorType`；失败收口事件可附 `cleanupErrorType`，不记录路径、会话内容或异常正文。open/publish 前失败会结束当前 generation 并唤醒等待者；open/publish 后的 best-effort 步骤保持现有 `degraded` 语义。
 
 ## Extraction progress
 

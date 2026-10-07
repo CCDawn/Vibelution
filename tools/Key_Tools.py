@@ -2716,7 +2716,7 @@ def _build_key_tools() -> List[BaseTool]:
         changePercent、turnoverYuan、price、volumeLots、peRatio 或 pbRatio。最多返回20只。
         返回来源、抓取时间、行情时分与股票池覆盖完整性。来源未给出交易日期，抓取时间
         不是行情日期；分析日早于今天且快照没有不晚于分析日的交易日期时，不返回候选。
-        能在巨潮资讯核到不晚于分析日的年报 PDF 时，候选会带 officialFiling（标题、公告日和 static.cninfo.com.cn 链接）。核不到就没有这个字段，不得编造页码或公告。
+        能在巨潮资讯核到不晚于分析日的定期报告 PDF 时，候选会带 officialFiling（年报）和 periodicFilings（半年报、一季报、三季报；没有的种类不出现）。字段只有标题、公告日和 static.cninfo.com.cn 链接。核不到就没有对应字段，不得编造页码或公告。
         市值单位未核实，因此不提供市值筛选。只读公开数据，不下单。
         数据可能延迟或缓存，调用仍须原生工具授权；结果不是投资建议。
         """

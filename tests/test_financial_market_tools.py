@@ -29,7 +29,7 @@ FILING = {
 
 @pytest.fixture(autouse=True)
 def _stub_annual_filing_lookup(monkeypatch):
-    monkeypatch.setattr(market_tools, "lookup_annual_filings", lambda codes, cutoff=None: {})
+    monkeypatch.setattr(market_tools, "lookup_screen_filings", lambda codes, cutoff=None: {})
 
 
 def quote(symbol="sz000001"):
@@ -535,12 +535,24 @@ def _screen_provider(**extra):
 def test_screen_attaches_an_annual_filing_on_or_before_the_analysis_date(monkeypatch):
     seen = {}
 
+    semi = {
+        "kind": "semiannual",
+        "title": "贵州茅台2026年半年度报告",
+        "url": "https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF",
+        "announcedOn": "2026-08-15",
+        "source": "巨潮资讯",
+    }
+
     def lookup(codes, cutoff=None):
         seen["codes"] = list(codes)
         seen["cutoff"] = cutoff
-        return {"600519": {**FILING, "extra": "drop-me"}}
+        return {"600519": [
+            {**FILING, "kind": "annual", "extra": "drop-me"},
+            {**semi, "extra": "drop-me"},
+            {**semi, "kind": "q1", "title": "贵州茅台2026年第一季度报告", "announcedOn": "2026-10-07"},
+        ]}
 
-    monkeypatch.setattr(market_tools, "lookup_annual_filings", lookup)
+    monkeypatch.setattr(market_tools, "lookup_screen_filings", lookup)
     monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: _screen_provider())
     with research_analysis_date_context("分析截至 2026-10-06"):
         result = json.loads(financial_market_screen_tool(limit=5))
@@ -548,11 +560,13 @@ def test_screen_attaches_an_annual_filing_on_or_before_the_analysis_date(monkeyp
     assert seen == {"codes": ["600519"], "cutoff": date(2026, 10, 6)}
     assert result["items"][0]["officialFiling"] == FILING
     assert "extra" not in result["items"][0]["officialFiling"]
+    assert result["items"][0]["periodicFilings"] == [semi]
+    assert "2026-10-07" not in json.dumps(result["items"][0])
 
 
 def test_screen_omits_a_filing_after_the_analysis_date_or_from_another_host(monkeypatch):
-    monkeypatch.setattr(market_tools, "lookup_annual_filings", lambda codes, cutoff=None: {
-        "600519": {**FILING, "announcedOn": "2026-10-07", "url": "https://evil.example/a.PDF"},
+    monkeypatch.setattr(market_tools, "lookup_screen_filings", lambda codes, cutoff=None: {
+        "600519": [{**FILING, "kind": "annual", "announcedOn": "2026-10-07", "url": "https://evil.example/a.PDF"}],
     })
     monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: _screen_provider())
     with research_analysis_date_context("分析截至 2026-10-06"):
@@ -566,7 +580,7 @@ def test_screen_survives_a_filing_lookup_failure(monkeypatch):
     def explode(*_args, **_kwargs):
         raise RuntimeError("cninfo down")
 
-    monkeypatch.setattr(market_tools, "lookup_annual_filings", explode)
+    monkeypatch.setattr(market_tools, "lookup_screen_filings", explode)
     monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: _screen_provider())
     result = json.loads(financial_market_screen_tool(limit=5))
 
@@ -577,9 +591,14 @@ def test_screen_survives_a_filing_lookup_failure(monkeypatch):
 
 def test_screen_filing_text_stays_inside_the_result_budget(monkeypatch):
     def lookup(codes, cutoff=None):
-        return {code: {**FILING, "title": f"{code}2025年年度报告"} for code in codes}
+        return {code: [
+            {**FILING, "kind": "annual", "title": f"{code}2025年年度报告"},
+            {"kind": "semiannual", "title": f"{code}2026年半年度报告", "url": FILING["url"], "announcedOn": "2026-08-15", "source": "巨潮资讯"},
+            {"kind": "q1", "title": f"{code}2026年第一季度报告", "url": FILING["url"], "announcedOn": "2026-04-25", "source": "巨潮资讯"},
+            {"kind": "q3", "title": f"{code}2025年第三季度报告", "url": FILING["url"], "announcedOn": "2025-10-30", "source": "巨潮资讯"},
+        ] for code in codes}
 
-    monkeypatch.setattr(market_tools, "lookup_annual_filings", lookup)
+    monkeypatch.setattr(market_tools, "lookup_screen_filings", lookup)
     monkeypatch.setattr(research, "screen_stocks", lambda **kwargs: {
         "source": "新浪财经",
         "sourceUrl": "https://vip.stock.finance.sina.com.cn/mkt/#hs_a",
@@ -600,3 +619,4 @@ def test_screen_filing_text_stays_inside_the_result_budget(monkeypatch):
     assert result["returnedCount"] + result["omittedCount"] == 20
     assert result["items"]
     assert result["items"][0]["officialFiling"]["url"].startswith("https://static.cninfo.com.cn/")
+    assert len(result["items"][0]["periodicFilings"]) == 3

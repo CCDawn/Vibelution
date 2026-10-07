@@ -21,6 +21,13 @@ const screen = JSON.stringify({
       announcedOn: "2026-04-17",
       source: "巨潮资讯",
     },
+    periodicFilings: [{
+      kind: "semiannual",
+      title: "贵州茅台2026年半年度报告",
+      url: "https://static.cninfo.com.cn/finalpage/2026-08-15/1225475868.PDF",
+      announcedOn: "2026-08-15",
+      source: "巨潮资讯",
+    }],
   }],
   notice: "来源只提供行情时分，未提供交易日期。",
 });
@@ -56,6 +63,9 @@ describe("screening comparison report", () => {
     expect(container.textContent).toContain("600519");
     expect(container.textContent).toContain("贵州茅台2025年年度报告");
     expect(container.textContent).toContain("2026-04-17");
+    expect(container.textContent).toContain("半年报");
+    expect(container.textContent).toContain("贵州茅台2026年半年度报告");
+    expect(container.textContent).toContain("三季报：没有这一项");
     expect(container.textContent).toContain("第 42 页");
     expect(container.innerHTML).toContain("https://static.cninfo.com.cn/finalpage/2026-04-17/1225114741.PDF");
     expect(container.textContent).not.toContain("1258.62");

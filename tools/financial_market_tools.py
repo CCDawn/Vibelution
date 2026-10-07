@@ -24,8 +24,9 @@ from core.web.services.financial_research.as_of import (
 )
 from core.web.services.financial_research.official_filings import (
     accepted_annual_filing,
+    accepted_periodic_filing,
     annual_filing_code,
-    lookup_annual_filings,
+    lookup_screen_filings,
 )
 
 MAX_RESULT_CHARS = 3_200
@@ -399,7 +400,7 @@ def _attach_official_filings(items: list[dict]) -> None:
     if not codes:
         return
     try:
-        filings = lookup_annual_filings(codes, cutoff=active_cutoff())
+        filings = lookup_screen_filings(codes, cutoff=active_cutoff())
     except Exception:
         return
     if not isinstance(filings, dict):
@@ -407,9 +408,22 @@ def _attach_official_filings(items: list[dict]) -> None:
     cutoff = active_cutoff()
     for item in items:
         code = _screen_code(item)
-        record = accepted_annual_filing(filings.get(code), cutoff=cutoff) if code else None
-        if record is not None:
-            item["officialFiling"] = record
+        rows = filings.get(code) if code else None
+        if not isinstance(rows, list):
+            continue
+        periodic: list[dict[str, str]] = []
+        for raw in rows:
+            record = accepted_periodic_filing(raw, cutoff=cutoff)
+            if record is None:
+                continue
+            if record["kind"] == "annual":
+                annual = accepted_annual_filing(record, cutoff=cutoff)
+                if annual is not None and "officialFiling" not in item:
+                    item["officialFiling"] = annual
+                continue
+            periodic.append(record)
+        if periodic:
+            item["periodicFilings"] = periodic
 
 
 def _screen_candidate(raw: object) -> dict | None:
@@ -457,8 +471,10 @@ def financial_market_screen_tool(
     fetch time is kept separate from the provider's intraday time. Returned
     candidates and coverage always come from the fixed public-data service.
     Output-budget omissions are reported separately from provider coverage.
-    A candidate may also carry the latest cninfo annual-report PDF on or before
-    the analysis date. A missing filing is omitted and is not a page number.
+    A candidate may also carry cninfo annual, semi-annual, first-quarter, and
+    third-quarter PDFs on or before the analysis date. officialFiling is the
+    annual report. periodicFilings lists the other kinds that were found.
+    A missing kind is omitted and is not a page number.
     """
     for key, (minimum, maximum) in _SCREEN_VALUE_BOUNDS.items():
         value = locals()[key]
