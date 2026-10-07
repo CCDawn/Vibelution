@@ -37,6 +37,15 @@ checked for valid unique ascending dates and consistent tool counts; no
 exchange calendar is inferred, so this does not prove that a provider omitted
 no trading session.
 
+An MA claim may include an immediately following parenthetical recomputation
+note. The note's date tokens are exempt from the quote-date check only when it
+explicitly lists trading dates and close prices, uses calculation/recalculation
+wording, and its ordered dates exactly match the snapshot's final N rows.
+Month/day abbreviations require a leading ISO date to anchor a same-year
+window; every date must be ISO when the window crosses a year boundary. Any
+other date in the claim remains subject to the quote-date check, and the note's
+input closes, total, and unrounded mean are not independently authorized.
+
 Batch export reuses the same exact-Turn authorization and validation for every
 member. It accepts at most 20 distinct reports, limits uncompressed content to
 8 MB, and returns a ZIP in memory. Reports and ZIP packages are not persisted.

@@ -26,6 +26,14 @@ SYMBOL = "sz000001"
 TICKER = "000001"
 SOURCE_URL = f"https://gu.qq.com/{SYMBOL}/gp"
 QUOTE_DATE = "2026-09-30"
+MA5_WINDOW_DATES = (
+    "2026-09-23",
+    "2026-09-24",
+    "2026-09-28",
+    "2026-09-29",
+    "2026-09-30",
+)
+MA5_WINDOW_CLOSES = (11.351, 11.300, 11.300, 11.350, 11.570)
 
 
 def _payload(**updates) -> str:
@@ -172,6 +180,54 @@ def _daily_payload(
     payload.update(payload_updates or {})
     payload["quote"].update(quote_updates or {})
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _ma5_window_payload(
+    *,
+    dates: tuple[str, ...] = MA5_WINDOW_DATES,
+    end_date: str = QUOTE_DATE,
+) -> str:
+    payload = json.loads(
+        _daily_payload(list(MA5_WINDOW_CLOSES), end_date=end_date)
+    )
+    payload["candles"]["rows"] = [
+        [day, close, close, close, close, 100]
+        for day, close in zip(dates, MA5_WINDOW_CLOSES)
+    ]
+    payload.update(
+        {
+            "status": "partial",
+            "message": "已按请求数量或输出长度限制保留最新 K 线。",
+            "requestedLimit": len(dates),
+            "availableCandleCount": 120,
+            "returnedCandleCount": len(dates),
+            "omittedCandleCount": 120 - len(dates),
+        }
+    )
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _ma5_window_note(dates: tuple[str, ...]) -> str:
+    date_list = "、".join(dates)
+    return (
+        f"MA5 = 11.37 元（由 {date_list} 五个交易日的前复权收盘价 "
+        "11.351、11.300、11.300、11.350、11.570 复算，"
+        "合计 56.871 ÷ 5 = 11.3742，四舍五入到两位）"
+    )
+
+
+def _ground_ma5_window_note(
+    claim: str,
+    *,
+    dates: tuple[str, ...] = MA5_WINDOW_DATES,
+    end_date: str = QUOTE_DATE,
+) -> str:
+    report = _calculation_report(claim, quote_date=end_date)
+    return ground_completed_report(
+        report,
+        _item(_ma5_window_payload(dates=dates, end_date=end_date)),
+        [],
+    )
 
 
 def _native_market_output(
@@ -623,6 +679,164 @@ def test_degraded_journal_market_result_grounds_a_complete_requested_window():
     grounded = ground_completed_report(report, items, events)
 
     assert "MA5 11.37 元" in grounded
+
+
+def test_degraded_journal_market_result_grounds_exact_ma_window_and_masks_inputs():
+    payload = json.loads(_ma5_window_payload())
+    output = json.dumps(payload, ensure_ascii=False)
+    report = _calculation_report(_ma5_window_note(MA5_WINDOW_DATES))
+    call_id = "market-snapshot-1"
+    events = [
+        _event(EVENT_USER_MESSAGE, 1, "recorded", {"content": "核对行情指标。"}),
+        _event(
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            2,
+            "ready",
+            {
+                "kind": "tool_call",
+                "toolName": "financial_market_snapshot_tool",
+                "status": "ready",
+                "callId": call_id,
+                "itemId": "tool-quote-degraded",
+                "revision": 0,
+            },
+        ),
+        _event(
+            EVENT_TOOL_RESULT,
+            3,
+            "completed",
+            {
+                "toolCall": {
+                    "id": call_id,
+                    "name": "financial_market_snapshot_tool",
+                    "result": output,
+                    "status": "degraded",
+                    "semanticStatus": "degraded",
+                }
+            },
+        ),
+        _event(
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            4,
+            "completed",
+            {
+                "kind": "assistant_message",
+                "channel": "answer",
+                "phase": "final_answer",
+                "status": "completed",
+                "text": report,
+                "itemId": "answer-quote-degraded",
+                "revision": 0,
+            },
+        ),
+        _event(EVENT_TURN_COMPLETED, 5, "completed"),
+    ]
+    items = session_turn_items_from_events(events, turn_id="turn-quote")
+
+    assert items[0]["status"] == "completed"
+    assert items[0]["semanticStatus"] == "degraded"
+    assert payload["status"] == "partial"
+    assert payload["requestedLimit"] == 5
+    assert payload["availableCandleCount"] == 120
+    assert payload["returnedCandleCount"] == 5
+    assert payload["omittedCandleCount"] == 115
+    assert payload["candles"]["rows"][-1][0] == QUOTE_DATE
+
+    grounded = ground_completed_report(report, items, events)
+
+    assert "MA5 = 11.37 元" in grounded
+    assert grounded.count(MISSING_FIGURE) == 7
+    for unverified_amount in (
+        "11.351",
+        "11.300",
+        "11.350",
+        "11.570",
+        "56.871",
+        "11.3742",
+    ):
+        assert unverified_amount not in grounded
+
+
+def test_ma_calculation_note_accepts_year_anchored_same_year_short_dates():
+    abbreviated_dates = (
+        MA5_WINDOW_DATES[0],
+        *(day[5:] for day in MA5_WINDOW_DATES[1:]),
+    )
+
+    grounded = _ground_ma5_window_note(_ma5_window_note(abbreviated_dates))
+
+    assert "MA5 = 11.37 元" in grounded
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        _ma5_window_note((*MA5_WINDOW_DATES[:-1], "2026-09-29")),
+        _ma5_window_note(
+            (*MA5_WINDOW_DATES[:-2], MA5_WINDOW_DATES[-1], MA5_WINDOW_DATES[-2])
+        ),
+        _ma5_window_note(tuple(day[5:] for day in MA5_WINDOW_DATES)),
+        _ma5_window_note(("2025-09-23", *(day[5:] for day in MA5_WINDOW_DATES[1:]))),
+        _ma5_window_note((*MA5_WINDOW_DATES, "2026-10-01")),
+        _ma5_window_note(MA5_WINDOW_DATES).replace(
+            "复算，", "复算，行情日期 2026-09-29，"
+        ),
+        _ma5_window_note(MA5_WINDOW_DATES).replace(
+            "（由 ", "（截至 2026-09-29；由 "
+        ),
+        _ma5_window_note(MA5_WINDOW_DATES).replace(
+            "（由 ", "（as of 2026-09-29；由 "
+        ),
+        _ma5_window_note(MA5_WINDOW_DATES).replace(
+            "（由 ", "（行情日期：2026-09-29；由 "
+        ),
+        _ma5_window_note(MA5_WINDOW_DATES).replace("MA5 =", "预计 MA5 ="),
+        _ma5_window_note(MA5_WINDOW_DATES).replace("MA5 =", "目标 MA5 ="),
+        _ma5_window_note(MA5_WINDOW_DATES).replace("复算，", "复算，并对照 AAPL，"),
+    ],
+)
+def test_ma_calculation_note_does_not_exempt_invalid_dates_or_claim_context(claim: str):
+    grounded = _ground_ma5_window_note(claim)
+
+    assert f"MA5 = {MISSING_FIGURE}" in grounded
+    assert "11.37 元" not in grounded
+
+
+def test_ma_calculation_note_checks_quote_date_outside_the_input_date_list():
+    quote_date_note = _ma5_window_note(MA5_WINDOW_DATES).replace(
+        "复算，", "复算，行情日期 2026-09-30，"
+    )
+    grounded = _ground_ma5_window_note(quote_date_note)
+
+    assert "MA5 = 11.37 元" in grounded
+
+
+def test_ma_calculation_note_requires_full_iso_dates_for_cross_year_windows():
+    cross_year_dates = (
+        "2025-12-26",
+        "2025-12-29",
+        "2025-12-30",
+        "2025-12-31",
+        "2026-01-02",
+    )
+    abbreviated_cross_year_dates = (
+        cross_year_dates[0],
+        *(day[5:] for day in cross_year_dates[1:]),
+    )
+
+    full_iso = _ground_ma5_window_note(
+        _ma5_window_note(cross_year_dates),
+        dates=cross_year_dates,
+        end_date="2026-01-02",
+    )
+    abbreviated = _ground_ma5_window_note(
+        _ma5_window_note(abbreviated_cross_year_dates),
+        dates=cross_year_dates,
+        end_date="2026-01-02",
+    )
+
+    assert "MA5 = 11.37 元" in full_iso
+    assert f"MA5 = {MISSING_FIGURE}" in abbreviated
 
 
 def test_native_market_adapter_length_clipping_does_not_ground_an_incomplete_request_window(monkeypatch):

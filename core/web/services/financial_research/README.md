@@ -30,4 +30,10 @@ East Money rows for those reports. A missing original is named in the list and
 its reprint is omitted. Other notices stay on East Money. Each result is a
 title, announcement date, and `static.cninfo.com.cn` URL. It is not a page
 number. Summaries and any other host are left out. A lookup failure does not
-fail the screen or hide the remaining notices.
+fail the screen or hide the remaining notices. The research prompt keeps a
+dated public figure and adds the cninfo original for that same period
+(31 March, 30 June, 30 September, or 31 December, same year, announced on
+or after the period end and on or before the analysis date). Any other
+period, year, or missing filing is 没有这一项 beside the figure. The figure
+stays labeled as a snapshot. The read reuses the one-code screen lookup
+and does not download the PDF.

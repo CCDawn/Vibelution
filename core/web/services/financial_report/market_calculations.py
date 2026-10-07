@@ -48,6 +48,15 @@ _MA_CLAIM = re.compile(
     rf"(?:\*\*)?",
     re.IGNORECASE,
 )
+_CALCULATION_DATE_TOKEN = r"(?:\d{4}-)?\d{2}-\d{2}"
+_MA_CALCULATION_NOTE = re.compile(r"^\s*[（(](?P<note>[^()（）]*)[）)]")
+_MA_CALCULATION_WINDOW = re.compile(
+    rf"(?:由|依据|根据|按照|按|使用|从)\s*"
+    rf"(?P<dates>{_CALCULATION_DATE_TOKEN}(?:\s*[、，,]\s*{_CALCULATION_DATE_TOKEN})+)"
+    rf"\s*(?:(?P<count>[一二三四五六七八九十百\d]+)\s*个)?\s*交易日"
+    rf"[^()（）]*?收盘价[^()（）]*?(?:复算|计算)"
+)
+_MA_NOTE_WINDOW_COUNTS = {"五": 5, "十": 10, "二十": 20}
 _RETURN_LABEL = r"(?:区间(?:收益率|收益|涨跌幅|涨幅)|收益率|涨幅)"
 _RETURN_CLAIMS = (
     re.compile(
@@ -133,7 +142,8 @@ def market_calculation_spans(
 
             for match in _MA_CLAIM.finditer(clean):
                 window = int(match.group("ma_window") or match.group("days_window"))
-                closes = [row[1] for row in snapshot["rows"][-window:]]
+                window_rows = snapshot["rows"][-window:]
+                closes = [row[1] for row in window_rows]
                 if len(closes) != window:
                     continue
                 value = _quantized_mean(closes)
@@ -142,6 +152,7 @@ def market_calculation_spans(
                     match,
                     quote_date=quote["date"],
                     quote_symbol=quote["symbol"],
+                    calculation_window_dates=[row[0].isoformat() for row in window_rows],
                 ):
                     continue
                 if not _claim_matches(
@@ -424,6 +435,7 @@ def _claim_is_safe(
     *,
     quote_date: str | None = None,
     quote_symbol: str,
+    calculation_window_dates: list[str] | None = None,
 ) -> bool:
     start, end = match.span()
     sentence_start = 0
@@ -447,10 +459,82 @@ def _claim_is_safe(
     if re.match(r"[+\-−×*/÷=＝≈]\s*\d", tail):
         return False
     if quote_date is not None:
-        dates = {item.group("date") for item in _CLAIM_DATE.finditer(visible)}
+        date_context = list(sentence)
+        allowed_date_spans = _ma_calculation_window_date_spans(
+            sentence,
+            match_end=end - sentence_start,
+            window_dates=calculation_window_dates or [],
+        )
+        for date_start, date_end in allowed_date_spans:
+            date_context[date_start:date_end] = " " * (date_end - date_start)
+        dates = {
+            item.group("date")
+            for item in _CLAIM_DATE.finditer(_visible_report_text("".join(date_context)))
+        }
         if any(value not in {quote_date, quote_date[5:]} for value in dates):
             return False
     return True
+
+
+def _ma_calculation_window_date_spans(
+    sentence: str,
+    *,
+    match_end: int,
+    window_dates: list[str],
+) -> list[tuple[int, int]]:
+    """Ignore only an explicit MA input-date list matching the snapshot window."""
+
+    if not window_dates or len(set(window_dates)) != len(window_dates):
+        return []
+    suffix = sentence[match_end:]
+    note_match = _MA_CALCULATION_NOTE.match(suffix)
+    if note_match is None:
+        return []
+    note = note_match.group("note")
+    clauses = list(_MA_CALCULATION_WINDOW.finditer(note))
+    if len(clauses) != 1:
+        return []
+    clause = clauses[0]
+    date_list = clause.group("dates")
+    date_matches = list(_CLAIM_DATE.finditer(date_list))
+    raw_dates = [item.group("date") for item in date_matches]
+    if len(raw_dates) != len(window_dates):
+        return []
+
+    count_text = clause.group("count")
+    if count_text:
+        described_count = (
+            int(count_text)
+            if count_text.isdigit()
+            else _MA_NOTE_WINDOW_COUNTS.get(count_text)
+        )
+        if described_count != len(window_dates):
+            return []
+
+    has_month_day = any(len(value) == 5 for value in raw_dates)
+    if has_month_day:
+        if len(raw_dates[0]) != 10:
+            return []
+        anchor_year = raw_dates[0][:4]
+        if (
+            len({value[:4] for value in window_dates}) != 1
+            or window_dates[0][:4] != anchor_year
+        ):
+            return []
+        resolved_dates = [
+            value if len(value) == 10 else f"{anchor_year}-{value}"
+            for value in raw_dates
+        ]
+    else:
+        resolved_dates = raw_dates
+    if resolved_dates != window_dates or len(set(resolved_dates)) != len(resolved_dates):
+        return []
+
+    list_start = match_end + note_match.start("note") + clause.start("dates")
+    return [
+        (list_start + item.start("date"), list_start + item.end("date"))
+        for item in date_matches
+    ]
 
 
 def _contains_other_ticker(text: str, quote_symbol: str) -> bool:
