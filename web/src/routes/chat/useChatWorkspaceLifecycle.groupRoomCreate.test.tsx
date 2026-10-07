@@ -33,7 +33,7 @@ import {
   isTempRoomId,
 } from "../groupRoomOptimisticIds";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
-import { readSessionCreateRecovery } from "./chatSessionCreateRecovery";
+import { readSessionCreateRecovery, rememberSessionCreateRecovery } from "./chatSessionCreateRecovery";
 import { resetSessionCreateAttemptsForTests, sessionCreateAttemptState } from "./sessionCreateAttempt";
 
 const fetchJsonMock = vi.fn();
@@ -572,6 +572,30 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     await flushMutationQueue();
     expect(sessionCreateIdempotencyKey(sessionCreateRequests()[1])).toBe(firstKey);
     expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: tempId });
+    sessionStorage.clear();
+  });
+
+  it("restores a committed temp title when the document is reloaded", async () => {
+    sessionStorage.clear();
+    fetchJsonMock.mockRejectedValue(new TypeError("response lost"));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    const recovery = readSessionCreateRecovery(tempId);
+    expect(recovery).toBeTruthy();
+    rememberSessionCreateRecovery({ ...recovery!, title: "探测名aa5815" });
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+    queryClient = new QueryClient();
+    hookOptions = buildOptions(buildRouteStub({ kind: "session", sessionId: tempId }));
+    mount();
+    await flushMutationQueue();
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempId))?.title).toBe("探测名aa5815");
     sessionStorage.clear();
   });
 

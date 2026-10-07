@@ -26,6 +26,7 @@ import {
 import {
   isChildSession,
 } from "../DirectSessionIndexItem";
+import { rememberSessionCreateRecovery, readSessionCreateRecovery } from "./chatSessionCreateRecovery";
 import { pinSessionCreatePreserve } from "../sessionCreatePreserve";
 import { isTempSessionId } from "../sessionOptimisticIds";
 
@@ -63,6 +64,8 @@ function applyTempSessionShellTitle(queryClient: QueryClient, sessionId: string,
     reconcileAgentSessionDetailCache(queryClient, detail);
     pinSessionCreatePreserve(sessionSummaryFromDetail(detail));
   }
+  const recovery = readSessionCreateRecovery(id);
+  if (recovery) rememberSessionCreateRecovery({ ...recovery, title: nextTitle });
   noteTempSessionTitleCommitted(id);
 }
 

@@ -25,6 +25,17 @@ describe("session create recovery identities", () => {
     expect(shell.createdAt).toBe(intent.createdAt);
   });
 
+  it("keeps a committed tab title across a key rotation and still drops drafts", () => {
+    const store = storage();
+    rememberSessionCreateRecovery({
+      ...intent, title: "探测名aa5815", draft: "private draft",
+    } as SessionCreateRecovery, store);
+    expect(readSessionCreateRecovery(intent.tempSessionId, store)).toEqual({ ...intent, title: "探测名aa5815" });
+    expect(store.getItem(SESSION_CREATE_RECOVERY_KEY)).not.toMatch(/private draft/);
+    rememberSessionCreateRecovery({ ...intent, idempotencyKey: "session-create:newer" }, store);
+    expect(readSessionCreateRecovery(intent.tempSessionId, store)?.title).toBe("探测名aa5815");
+  });
+
   it("preserves a newer intent when a late callback forgets an older key", () => {
     const store = storage();
     rememberSessionCreateRecovery(intent, store);
