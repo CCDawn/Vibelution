@@ -1,5 +1,5 @@
 import styles from "./FinanceResearchProcess.styles";
-import { CheckCircle2, Circle, Loader2, ShieldAlert, XCircle, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, ShieldAlert, StopCircle, XCircle, TriangleAlert } from "lucide-react";
 import type { AssistantConversationTurn, ToolCallTurnItem } from "../../api/types";
 import { operationStatusTone } from "../../components/conversation/conversationOperationState";
 import { VButton, VStateSurface } from "../../components/vui";
@@ -43,6 +43,7 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEna
   const error = view?.error || turn?.turnItems.find((item) => item.type === "error")?.text;
   const report = projectStockReport(view?.messages ?? [], view);
   const running = Boolean(view?.busy || view?.submitPending);
+  const stopping = Boolean(view?.stopping);
   const outcome = view ? researchRecordStatus(view, false) : "";
   const approvalPending = Boolean(view?.approvalPending) && (running || !["Failed", "Stopped", "Needs continuation", "Completed"].includes(outcome));
   const stopped = outcome === "Stopped";
@@ -58,23 +59,26 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEna
     : needsContinue ? (zh ? "待继续" : "Needs continuation")
     : completed ? (degraded ? (zh ? "已完成 · 结果需核对" : "Completed · Review results") : (zh ? "已完成" : "Completed"))
     : (zh ? "待开始" : "Ready");
-  const errorPreview = !stopped && error && (error.length > 110 ? `${error.slice(0, 110)}…` : error);
+  const errorPreview = !stopped ? error : "";
 
   return (
     <div className={styles.panel} data-finance-research-process>
-      <div>
+      <div className={styles.heading}>
         <span className={styles.caption}>{zh ? "当前研究" : "Current research"}</span>
-        <p className={styles.title}>
-          {view?.title || (zh ? "等待发起研究" : "Ready to research")}
-        </p>
-      </div>
-      <div className={styles.status} role="status">
-        {approvalPending ? <ShieldAlert size={16} className={styles.warning} />
-          : running ? <Loader2 size={16} className={styles.running} />
-          : failed ? <XCircle size={16} className={styles.error} />
-          : completed ? (degraded ? <TriangleAlert size={16} className={styles.warning} /> : <CheckCircle2 size={16} className={styles.success} />)
-          : <Circle size={16} className={styles.muted} />}
-        <strong>{status}</strong>
+        <div className={styles.headingLine}>
+          <p className={styles.title} title={view?.title || (zh ? "等待发起研究" : "Ready to research")}>
+            {view?.title || (zh ? "等待发起研究" : "Ready to research")}
+          </p>
+          <div className={styles.status} role="status" title={status}>
+            {stopping ? <StopCircle size={16} className={styles.warning} aria-hidden="true" />
+              : approvalPending ? <ShieldAlert size={16} className={styles.warning} aria-hidden="true" />
+              : running ? <Loader2 size={16} className={styles.running} aria-hidden="true" />
+              : failed ? <XCircle size={16} className={styles.error} aria-hidden="true" />
+              : completed ? (degraded ? <TriangleAlert size={16} className={styles.warning} aria-hidden="true" /> : <CheckCircle2 size={16} className={styles.success} aria-hidden="true" />)
+              : <Circle size={16} className={styles.muted} aria-hidden="true" />}
+            <strong className={styles.statusLabel}>{status}</strong>
+          </div>
+        </div>
       </div>
       {tools.length ? (
         <ol className={styles.tools}>
@@ -82,31 +86,29 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEna
             const state = toolState(item, zh);
             return (
             <li key={item.itemId} className={styles.tool}>
-              {item.status === "running" ? <Loader2 size={14} className={styles.runningTool} />
+              {item.status === "running" ? <Loader2 size={14} className={styles.runningTool} aria-hidden="true" />
                 : item.status === "pending" ? <Circle size={14} className={styles.pendingTool} />
-                : state.tone === "failed" ? <XCircle size={14} className={styles.failedTool} />
-                : state.tone === "degraded" ? <TriangleAlert size={14} className={styles.warningTool} />
-                : state.tone === "done" ? <CheckCircle2 size={14} className={styles.completedTool} />
-                : <Circle size={14} className={styles.pendingTool} />}
+                : state.tone === "failed" ? <XCircle size={14} className={styles.failedTool} aria-hidden="true" />
+                : state.tone === "degraded" ? <TriangleAlert size={14} className={styles.warningTool} aria-hidden="true" />
+                : state.tone === "done" ? <CheckCircle2 size={14} className={styles.completedTool} aria-hidden="true" />
+                : <Circle size={14} className={styles.pendingTool} aria-hidden="true" />}
               <div className={styles.toolText}>
-                <strong className={styles.toolTitle}>{zh ? toolLabels[item.toolName] || item.title || item.toolName : item.title || item.toolName}</strong>
-                <p className={state.tone === "degraded" ? styles.warningStatus : styles.toolStatus}>
-                  {state.label}
-                </p>
+                <strong className={styles.toolTitle} title={zh ? toolLabels[item.toolName] || item.title || item.toolName : item.title || item.toolName}>{zh ? toolLabels[item.toolName] || item.title || item.toolName : item.title || item.toolName}</strong>
+                <span className={state.tone === "degraded" ? styles.warningStatus : styles.toolStatus} title={state.label}>{state.label}</span>
               </div>
             </li>
           ); })}
         </ol>
       ) : <p className={styles.empty}>{running ? (zh ? "正在分析…" : "Analyzing…") : turn ? (zh ? "本轮未调用外部工具" : "No external tools used this turn") : (zh ? "尚未开始研究" : "No research started")}</p>}
       {errorPreview ? (
-        <VStateSurface tone="error" title={zh ? "需要处理" : "Needs attention"}>
+        <VStateSurface density="compact" tone="error" title={zh ? "需要处理" : "Needs attention"}>
           <span className={styles.errorText}>{errorPreview}</span>
         </VStateSurface>
       ) : null}
-      {onEnableMarket ? <VButton variant="secondary" onPress={onEnableMarket} isPending={marketPending} isDisabled={marketDisabled || marketPending}>
+      {onEnableMarket ? <VButton className={styles.action} variant="secondary" onPress={onEnableMarket} isPending={marketPending} isDisabled={marketDisabled || marketPending}>
         {zh ? "启用行情查询" : "Enable market queries"}
       </VButton> : null}
-      <VButton variant="secondary" onPress={onOpenChat}>
+      <VButton className={styles.action} variant="secondary" onPress={onOpenChat}>
         {approvalPending ? (zh ? "查看并授权" : "Review and approve")
           : running ? (zh ? "查看研究 / 停止" : "View / stop research")
           : error || failed ? (zh ? "查看与重试" : "View and retry")

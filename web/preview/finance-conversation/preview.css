@@ -5,13 +5,6 @@
 @import "../../src/design/vui-native-controls.css";
 @source "./main.tsx";
 
-/* Isolated visual proposal: existing VUI controls own all interactive behavior.
- * Production VSplitWorkspace is unchanged. Its controlled collapse state is
- * driven by the preview's header actions instead of the centered rail action. */
-.finance-preview [data-vui-layout-handle="collapse-resize"] > button {
-  display: none;
-}
-
 /* Labels, metadata and icons share a baseline. Report paragraphs stay readable. */
 .finance-preview [data-preview-inline] {
   flex-wrap: nowrap;

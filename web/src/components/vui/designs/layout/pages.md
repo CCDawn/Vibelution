@@ -473,8 +473,9 @@ import { VSplitWorkspace } from "@/components/vui";
 | --- | --- | --- |
 | sidebar / main / aside | 列 | 空列勿占宽 |
 | resize.layoutId | 宽度记忆 | 仅 registry id |
-| resize.collapse | 可选 sidebar / aside 收起 | 复用 `PaneCollapseHandle`；标签由消费者提供；收起不覆盖已记忆宽度 |
-| `resize.collapse.*.collapsed` / `onCollapsedChange` | 可选的受控折叠值与回调，必须一起提供 | 响应式策略归页面；未提供时保持内部手动切换。撤销受控值时沿用 owner 最后接受的状态，不采用尚未接受的点击请求。收起只隐藏列、不卸载草稿；点击请求 owner 更新，不另建宽度记忆 |
+| resize.collapse | 可选 sidebar / aside 收起 | `placement` 缺省为 `rail`，复用 `PaneCollapseHandle`；标签由消费者提供；收起不覆盖已记忆宽度 |
+| `resize.collapse.*.placement` | `rail` / `header`，缺省为 `rail` | `header` 时由页面使用现有 `VIconButton` 并提供受控折叠状态；展开时分隔轨只保留 `PaneResizeHandle`，折叠时移除轨道和侧栏，宽度仍复用 `layoutId` 记忆 |
+| `resize.collapse.*.collapsed` / `onCollapsedChange` | 受控折叠值与回调必须一起提供；`header` placement 必须受控 | 响应式策略归页面；`rail` 未提供时保持内部手动切换。撤销受控值时沿用 owner 最后接受的状态，不采用尚未接受的点击请求。收起只隐藏列、不卸载草稿；点击请求 owner 更新，不另建宽度记忆 |
 | columnsClassName | 固定列模板覆盖 | 默认列宽带 16rem 回退，未注入页面变量时仍保持桌面横向分栏 |
 
 ### 实现落点

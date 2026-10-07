@@ -12,7 +12,22 @@ const input = <input aria-label="未保存草稿" defaultValue="初始草稿" />
 async function render(collapse: VSplitWorkspaceResizeConfig["collapse"]) {
   await act(() => root.render(<VSplitWorkspace resize={{ layoutId: "config-settings", collapse }} sidebar={input} main={<div>Models</div>} aside={<div>Inspector</div>} />));
 }
+async function renderSinglePane(
+  collapse: NonNullable<VSplitWorkspaceResizeConfig["collapse"]>,
+  side: "sidebar" | "aside",
+) {
+  await act(() => root.render(
+    <VSplitWorkspace
+      resize={{ layoutId: "config-settings", collapse }}
+      sidebar={side === "sidebar" ? input : undefined}
+      main={<div>Models</div>}
+      aside={side === "aside" ? <div>Inspector</div> : undefined}
+    />,
+  ));
+}
 const pane = () => host.querySelector<HTMLElement>('[data-vui="split-sidebar"]')!;
+const sidePane = (side: "sidebar" | "aside") => host.querySelector<HTMLElement>(`[data-vui="split-${side}"]`)!;
+const mainPane = () => host.querySelector<HTMLElement>('[data-vui="split-main"]')!;
 const button = (name: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!;
 
 beforeEach(() => { host = document.createElement("div"); document.body.append(host); root = createRoot(host); window.localStorage.clear(); });
@@ -41,8 +56,11 @@ describe("VSplitWorkspace controlled collapse", () => {
   it("keeps the existing uncontrolled toggle when no controlled value is supplied", async () => {
     await render({ sidebar: labels });
     expect(pane().hidden).toBe(false);
+    expect(host.querySelector('[data-vui-layout-handle="collapse-resize"]')).not.toBeNull();
+    expect(host.querySelector('[data-vui-layout-handle="resize"][aria-label="调整左侧栏宽度"]')).toBeNull();
     await act(() => button(labels.collapseLabel).click());
     expect(pane().hidden).toBe(true);
+    expect(host.querySelector('[data-vui-layout-handle="collapse-resize"]')).not.toBeNull();
     await act(() => button(labels.expandLabel).click());
     expect(pane().hidden).toBe(false);
   });
@@ -71,6 +89,74 @@ describe("VSplitWorkspace controlled collapse", () => {
     await render({ [side]: { ...labels, collapsed: false, onCollapsedChange } });
     await render({ [side]: labels });
     expect(targetPane().hidden).toBe(false);
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+  });
+
+  it("uses the header placement resize handle and restores the controlled sidebar width", async () => {
+    const onCollapsedChange = vi.fn();
+    const renderHeaderSidebar = (collapsed: boolean) => renderSinglePane({
+      sidebar: { ...labels, placement: "header", collapsed, onCollapsedChange },
+    }, "sidebar");
+
+    await renderHeaderSidebar(false);
+    expect(pane().hidden).toBe(false);
+    const resizeHandle = host.querySelector<HTMLElement>('[data-vui-layout-handle="resize"]')!;
+    expect(resizeHandle.getAttribute("aria-label")).toBe(labels.separatorLabel);
+    expect(host.querySelector('[data-vui-layout-handle="collapse-resize"]')).toBeNull();
+    expect(host.querySelector("button")).toBeNull();
+    expect(host.querySelectorAll('[role="separator"]')).toHaveLength(1);
+
+    await act(() => {
+      resizeHandle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      return Promise.resolve();
+    });
+    expect(resizeHandle.getAttribute("aria-valuenow")).toBe("344");
+    expect(JSON.parse(window.localStorage.getItem("vibelution.pane-layouts.v1") ?? "{}"))
+      .toMatchObject({ "config-settings": { sidebar: 344 } });
+
+    await renderHeaderSidebar(true);
+    expect(pane().hidden).toBe(true);
+    expect(host.querySelector('[data-vui-layout-handle]')).toBeNull();
+    expect(host.querySelector("button")).toBeNull();
+    expect(host.querySelectorAll('[role="separator"]')).toHaveLength(0);
+    expect(mainPane().hidden).toBe(false);
+    expect(mainPane().className).toContain("flex-1");
+
+    await renderHeaderSidebar(false);
+    expect(pane().hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>('[data-vui-layout-handle="resize"]')?.getAttribute("aria-valuenow"))
+      .toBe("344");
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+  });
+
+  it("supports header placement for the aside and removes its track while collapsed", async () => {
+    const onCollapsedChange = vi.fn();
+    const renderHeaderAside = (collapsed: boolean) => renderSinglePane({
+      aside: { ...labels, placement: "header", collapsed, onCollapsedChange },
+    }, "aside");
+
+    await renderHeaderAside(false);
+    expect(sidePane("aside").hidden).toBe(false);
+    const resizeHandle = host.querySelector<HTMLElement>('[data-vui-layout-handle="resize"]')!;
+    expect(resizeHandle.getAttribute("aria-label")).toBe(labels.separatorLabel);
+    await act(() => {
+      resizeHandle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      return Promise.resolve();
+    });
+    expect(resizeHandle.getAttribute("aria-valuenow")).toBe("344");
+
+    await renderHeaderAside(true);
+    expect(sidePane("aside").hidden).toBe(true);
+    expect(host.querySelector('[data-vui-layout-handle]')).toBeNull();
+    expect(host.querySelector("button")).toBeNull();
+    expect(host.querySelectorAll('[role="separator"]')).toHaveLength(0);
+    expect(mainPane().hidden).toBe(false);
+    expect(mainPane().className).toContain("flex-1");
+
+    await renderHeaderAside(false);
+    expect(sidePane("aside").hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>('[data-vui-layout-handle="resize"]')?.getAttribute("aria-valuenow"))
+      .toBe("344");
     expect(onCollapsedChange).not.toHaveBeenCalled();
   });
 });
