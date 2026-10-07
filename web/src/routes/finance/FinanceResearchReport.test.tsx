@@ -67,6 +67,38 @@ describe("FinanceResearchReport research metadata", () => {
     expect(fetchFinancialReportText).toHaveBeenCalledWith({ assistantAgentId: "agent-1", sessionId: "session-1", turnId: "research-turn" }, { signal: expect.any(AbortSignal) });
   });
 
+  it("compares the evidence notice to the raw final answer after local grounding", async () => {
+    const originalText = [
+      "## 结论",
+      "营业收入 1 亿元，净利润 2 亿元，经营现金流 3 亿元，毛利率 4%，净利率 5%，资产总额 6 亿元，负债 7 亿元，ROE 8%。",
+    ].join("\n");
+    const projected = projectStockReport([
+      { role: "assistant", id: "assistant", turnId: "grounding-turn", status: "completed", timestamp: "2026-10-04T12:00:00Z", turnItems: [{ type: "agent_message", phase: "final_answer", status: "completed", text: originalText }] },
+    ] as never)!;
+    const supplement = vi.fn();
+    vi.mocked(fetchFinancialReportText).mockResolvedValue(projected.text);
+
+    const container = await render({ report: projected, onSupplementEvidence: supplement });
+
+    expect(projected.text.match(/没有这一项/g)).toHaveLength(8);
+    expect(container.querySelector("[data-finance-report-body]")?.textContent).toBe(projected.text);
+    expect(container.textContent).toContain("部分数字未通过核验");
+    expect(container.textContent).toContain("补充证据");
+    expect(container.textContent).not.toContain("营业收入 1 亿元");
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "补充证据")?.click());
+    expect(supplement).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the projected body as the evidence baseline for a legacy report without originalText", async () => {
+    const legacy = { ...report, text: "## 结论\n利润没有这一项。", originalText: undefined };
+    vi.mocked(fetchFinancialReportText).mockResolvedValue(legacy.text);
+
+    const container = await render({ report: legacy });
+
+    expect(container.querySelector("[data-finance-report-body]")?.textContent).toBe(legacy.text);
+    expect(container.textContent).not.toContain("部分数字未通过核验");
+  });
+
   it("never displays a late preview from another session and exposes a retry on failure", async () => {
     let resolveOld!: (text: string) => void;
     vi.mocked(fetchFinancialReportText).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));

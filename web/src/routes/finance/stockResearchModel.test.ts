@@ -46,6 +46,17 @@ describe("stock research projections", () => {
     expect(uncited.text).toContain("| 营收 | 没有这一项 |");
     expect(uncited.text).not.toContain("亿元");
   });
+  it("retains the exact native answer as a separate baseline before local grounding", () => {
+    const originalText = [
+      "## 结论",
+      "营业收入 1 亿元，净利润 2 亿元，经营现金流 3 亿元，毛利率 4%，净利率 5%，资产总额 6 亿元，负债 7 亿元，ROE 8%。",
+    ].join("\n");
+    const report = projectStockReport([turn("completed", [{ ...final, text: originalText }])])!;
+
+    expect(report.originalText).toBe(originalText);
+    expect(report.text).not.toBe(originalText);
+    expect(report.text.match(/没有这一项/g)).toHaveLength(8);
+  });
   it("never promotes reasoning, tools, commentary or unfinished turns into reports", () => {
     for (const message of [turn("running", [final]), turn("failed", [final]), turn("completed", [{ ...final, phase: "commentary" }]), turn("completed", [{ type: "tool_call", output: "买入", status: "completed" }])]) expect(projectStockReport([message])).toBeNull();
     const report = projectStockReport([turn("completed", [final])])!;

@@ -9,7 +9,9 @@ const styles = {
   fileButton:
     "vui-routes-chatchangerail fileButton !h-auto min-h-[var(--vui-control-height-sm)] !w-full !min-w-0 !flex-col !items-start !justify-start gap-0 px-2 py-1 text-left [font-size:var(--vui-font-xs)]",
   fileButtonActive: `vui-routes-chatchangerail fileButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
+  fileNameRow: "vui-routes-chatchangerail fileNameRow flex w-full min-w-0 items-center justify-between gap-2",
   fileName: "vui-routes-chatchangerail fileName block min-w-0 truncate font-semibold text-[var(--fg-primary)]",
+  fileStatus: "vui-routes-chatchangerail fileStatus shrink-0 text-[var(--fg-tertiary)]",
   filePath: "vui-routes-chatchangerail filePath block min-w-0 truncate text-[var(--fg-tertiary)]",
   body: "vui-routes-chatchangerail body min-h-0 flex-1 overflow-hidden border-t border-[var(--vui-border-subtle)]",
 } as const;

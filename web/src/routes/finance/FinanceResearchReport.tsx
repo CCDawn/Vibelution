@@ -44,7 +44,7 @@ export function FinanceResearchReport({ report: projectedReport, assistantAgentI
   return <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "研究报告" : "Research report"} data-finance-research-report>
     <div className={styles.heading}><strong className={styles.title}><FileText size={15} />{zh ? (summaryOnly ? "研究简报" : "研究报告") : (summaryOnly ? "Research brief" : "Research report")}</strong><div className={styles.actions}><span className={styles.timestamp}>{report.timestamp ? new Date(report.timestamp).toLocaleDateString("zh-CN") : ""}{busy ? (zh ? " · 上次结果" : " · Previous result") : ""}</span><FinanceReportExport assistantAgentId={assistantAgentId} sessionId={sessionId} turnId={report.turnId} zh={zh} /></div></div>
     {parameterItems.length ? <div className={styles.parameters} role="group" aria-label={zh ? "本次研究参数" : "Research parameters"} data-finance-research-metadata>{parameterItems.map((item) => <span key={item.id} className={styles.parameter}>{item.text}</span>)}</div> : null}
-    <FinanceReportEvidenceNotice text={report.text} originalText={projectedReport.text} zh={zh} onSupplementEvidence={onSupplementEvidence} />
+    <FinanceReportEvidenceNotice text={report.text} originalText={projectedReport.originalText ?? projectedReport.text} zh={zh} onSupplementEvidence={onSupplementEvidence} />
     {summaryOnly && report.summary ? <p className={styles.summary}>{report.summary}</p> : null}
     {summaryOnly && !report.summary && researchTablePreview(report.text) ? <div className={styles.body}><LazyConversationMarkdownRenderer content={researchTablePreview(report.text)} language={zh ? "zh" : "en"} /></div> : null}
     {!summaryOnly ? <>
