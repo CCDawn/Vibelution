@@ -150,6 +150,14 @@ describe("financial assistant page", () => {
     expect(button("打开研究对话")).toBeUndefined();
     expect(container.querySelector("output")?.textContent).toContain("finance_area=watchlist");
   });
+
+  it("does not replace the prepared stock with a previous session's research subject on reload", async () => {
+    nativeMessages = [{ role: "user", id: "existing", content: "请研究 腾讯控股（00700，港交所），分析日期 2026-10-05，重点检查财报、盈利质量与现金流。", timestamp: "" }];
+    await render("/finance?session=native-session&finance_tab=overview&finance_prepare=1");
+    expect(container.querySelector('[aria-label="当前股票"]')?.textContent).toContain("贵州茅台");
+    expect(container.querySelector('[aria-label="当前股票"]')?.textContent).not.toContain("腾讯控股");
+    expect(createChatSession).not.toHaveBeenCalled();
+  });
   it("opens the native conversation first and retains all grouped workspace views", async () => {
     await render("/finance?session=native-session");
     const draft = container.querySelector('textarea[aria-label="native draft"]');

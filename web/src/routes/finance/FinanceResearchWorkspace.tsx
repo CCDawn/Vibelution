@@ -123,12 +123,12 @@ export function FinanceResearchWorkspace({ assistant, sessionId, zh, lifecycle }
   const nativeWorkspace = useMemo(() => <ChatCodingRoute />, []);
   const returnTo = `${location.pathname}${location.search}`;
   useEffect(() => {
-    if (!nativeReady || !messages.length || currentView?.transcriptPending || hydratedSession.current === sessionId) return;
+    if (preparing || area !== "workspace" || tab !== "research" || !nativeReady || !messages.length || currentView?.transcriptPending || hydratedSession.current === sessionId) return;
     hydratedSession.current = sessionId;
     setResearchKind(currentView?.title.startsWith("主题 ·") ? "topic" : "stock");
     const identity = [...messages].reverse().flatMap((message) => message.role === "user" ? [stockFromResearchRequest(message.content)] : []).find((item) => item !== null);
     if (identity && identity.symbol !== stocks.selected.symbol) { stocks.selectStock(identity); setSearchMarket(stockMarketCode(identity)); }
-  }, [currentView?.transcriptPending, messages, nativeReady, sessionId, stocks]);
+  }, [preparing, area, tab, currentView?.transcriptPending, messages, nativeReady, sessionId, stocks]);
   const marketIdentityUpdated = useRef("");
   useEffect(() => { const quote = market.data?.stock; const key = quote ? `${quote.symbol}:${quote.name}` : ""; if (quote?.symbol === stocks.selected.symbol && quote.name !== stocks.selected.name && marketIdentityUpdated.current !== key) { marketIdentityUpdated.current = key; stocks.selectStock(quote); } }, [market.data, stocks]);
   async function openRecord(record: SessionSummary) {
