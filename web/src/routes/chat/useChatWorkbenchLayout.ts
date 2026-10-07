@@ -35,9 +35,9 @@ type DragState = {
 export type UseChatWorkbenchLayoutOptions = {
   standardGroupRoomActive: boolean;
   /**
-   * Whether a status rail exists for this session surface. The rail slot is only
-   * populated in companion mode; when false the rail track is reclaimed for the
-   * conversation and no right resize/collapse affordance is exposed.
+   * Whether the right column exists. Companion mode uses it for the life rail.
+   * A normal chat uses it for the current change list. When false, the track
+   * is given back to the conversation.
    */
   statusRailEnabled: boolean;
   /**

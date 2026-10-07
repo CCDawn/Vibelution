@@ -46,6 +46,9 @@ import {
 } from "../../api/agentPlugins";
 import { listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
 import { fetchFileContent } from "../../api/files";
+import { ChatChangeRail } from "./ChatChangeRail";
+import { buildChatChangeRail } from "./chatChangeRailModel";
+import { useChatChangePreview } from "./useChatChangePreview";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
@@ -616,6 +619,7 @@ export function ChatCodingRouteWorkbench() {
   const directSessionSelectionGenerationRef = useRef(0);
   const retiredDirectSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
+  const openPreviewTab = useChatWorkbenchStore((state) => state.openPreviewTab);
   const [sessionFilter, setSessionFilter] = useState("");
   const [sessionListPrefs, setSessionListPrefs] = useState<SessionListPreferences>(
     () => loadSessionListPreferences(),
@@ -943,33 +947,6 @@ export function ChatCodingRouteWorkbench() {
     setRightIndexPanel,
     toggleConversationGroup,
   } = useChatConversationIndexChrome({ standardGroupRoomActive });
-  const {
-    layoutRef,
-    dragState,
-    responsiveLayout,
-    conversationIndexCollapsed,
-    statusRailCollapsed,
-    conversationIndexOverlayOpen,
-    statusRailOverlayOpen,
-    responsiveOverlayOpen,
-    layoutStyle,
-    chatLayoutClassName,
-    centerPaneClassName,
-    statusRailClassName,
-    conversationIndexPaneClassName,
-    leftPanelWidth,
-    rightPanelWidth,
-    handleResizeStart,
-    handleResizeKeyDown,
-    closeResponsiveOverlayPane,
-    setLeftRailCollapsed,
-    setRightPaneCollapsed,
-    setResponsiveOverlayPane,
-  } = useChatWorkbenchLayout({
-    standardGroupRoomActive,
-    statusRailEnabled: verifiedCompanionMode,
-    indexRailEnabled: !financeSurface,
-  });
   const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive;
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
@@ -1989,7 +1966,60 @@ export function ChatCodingRouteWorkbench() {
     queryFn: () => fetchFileContent(activeFilePath ?? ""),
   });
 
-  const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
+  const changedFileList = sessionDetailQuery.data?.changedFiles ?? EMPTY_SESSION_CHANGED_FILES;
+  const changeRail = useMemo(
+    () => buildChatChangeRail({
+      companion: verifiedCompanionMode,
+      finance: financeSurface,
+      group: groupPanelActive,
+      changedFiles: changedFileList,
+      openTabs: workspace.openTabs,
+      activeTab: workspace.activeTab,
+    }),
+    [
+      verifiedCompanionMode,
+      financeSurface,
+      groupPanelActive,
+      changedFileList,
+      workspace.openTabs,
+      workspace.activeTab,
+    ],
+  );
+  const changePreview = useChatChangePreview(changeRail.selectedPath);
+  const {
+    layoutRef,
+    dragState,
+    responsiveLayout,
+    conversationIndexCollapsed,
+    statusRailCollapsed,
+    conversationIndexOverlayOpen,
+    statusRailOverlayOpen,
+    responsiveOverlayOpen,
+    layoutStyle,
+    chatLayoutClassName,
+    centerPaneClassName,
+    statusRailClassName,
+    conversationIndexPaneClassName,
+    leftPanelWidth,
+    rightPanelWidth,
+    handleResizeStart,
+    handleResizeKeyDown,
+    closeResponsiveOverlayPane,
+    setLeftRailCollapsed,
+    setRightPaneCollapsed,
+    setResponsiveOverlayPane,
+  } = useChatWorkbenchLayout({
+    standardGroupRoomActive,
+    statusRailEnabled: verifiedCompanionMode || changeRail.show,
+    indexRailEnabled: !financeSurface,
+  });
+  const changedFiles = new Set(changedFileList);
+  const changedPathSet = new Set(
+    changedFileList.map((path) => String(path || "").replace(/\\/g, "/").trim()),
+  );
+  const conversationWorkspaceTab = activeCliAgentRunId || !changeRail.show
+    ? workspace.activeTab
+    : "agent";
 
   const {
     locale,
@@ -3858,6 +3888,26 @@ export function ChatCodingRouteWorkbench() {
           });
         }}
       />
+      ) : changeRail.show && changeRail.selectedPath ? (
+      <ChatChangeRail
+        className={statusRailClassName}
+        lang={lang}
+        paths={changeRail.paths}
+        selectedPath={changeRail.selectedPath}
+        changedPaths={changedPathSet}
+        diff={changePreview.diff}
+        diffLoading={changePreview.diffLoading}
+        hasDiff={changePreview.hasDiff}
+        file={changePreview.file}
+        fileLoading={changePreview.fileLoading}
+        fileError={changePreview.fileError ? describeError(changePreview.fileError, t("loadFailed")) : ""}
+        sourceLabel={detail?.title ?? t("currentSession")}
+        onSelect={(path) => {
+          if (activeSessionId) {
+            openPreviewTab(activeSessionId, path);
+          }
+        }}
+      />
       ) : null}
       leftResizeHandle={
       financeSurface ? null : responsiveLayout.leftVisible ? verifiedCompanionMode ? <PaneCollapseHandle
@@ -3918,11 +3968,12 @@ export function ChatCodingRouteWorkbench() {
                 }}
               />
             ) : null}
-            workspaceActiveTab={workspace.activeTab}
+            workspaceActiveTab={conversationWorkspaceTab}
             leftOverlayVisible={responsiveLayout.leftVisible}
             rightOverlayVisible={responsiveLayout.rightVisible}
             conversationIndexOverlayOpen={conversationIndexOverlayOpen}
-            statusRailAvailable={verifiedCompanionMode}
+            statusRailAvailable={verifiedCompanionMode || changeRail.show}
+            rightRailLabel={verifiedCompanionMode ? undefined : (lang === "zh" ? "改动" : "Changes")}
             statusRailOverlayOpen={statusRailOverlayOpen}
             onActivateAgentFallbackTab={() => {
               activeSessionId && setActiveTab(activeSessionId, "agent");
@@ -3956,7 +4007,7 @@ export function ChatCodingRouteWorkbench() {
                 sessionIdsNeedingApproval={sessionIdsNeedingApproval}
                 statusLabel={statusLabel}
                 t={t}
-                workspaceActiveTab={workspace.activeTab}
+                workspaceActiveTab={conversationWorkspaceTab}
                 onCancelRename={cancelRenameSession}
                 onContextMenu={openSessionContextMenu}
                 onDragReference={startSessionReferenceDrag}
@@ -4120,7 +4171,7 @@ export function ChatCodingRouteWorkbench() {
               sessionsPending={sessionsQuery.isPending}
               toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}
-              workspaceActiveTab={workspace.activeTab}
+              workspaceActiveTab={conversationWorkspaceTab}
               onApproveToolApproval={handleApproveToolApproval}
               onApproveToolForSession={handleApproveToolForSession}
               onRejectToolApproval={handleRejectToolApproval}
@@ -4132,12 +4183,12 @@ export function ChatCodingRouteWorkbench() {
       />
       )}
       rightResizeHandle={
-      verifiedCompanionMode && responsiveLayout.rightVisible ? <PaneCollapseHandle
+      (verifiedCompanionMode || changeRail.show) && responsiveLayout.rightVisible ? <PaneCollapseHandle
         side="right"
         collapsed={statusRailCollapsed}
         separatorLabel={t("resizeRightPanel")}
-        collapseLabel={lang === "zh" ? "收起状态栏" : "Collapse status rail"}
-        expandLabel={lang === "zh" ? "展开状态栏" : "Expand status rail"}
+        collapseLabel={verifiedCompanionMode ? (lang === "zh" ? "收起状态栏" : "Collapse status rail") : (lang === "zh" ? "收起改动" : "Collapse changes")}
+        expandLabel={verifiedCompanionMode ? (lang === "zh" ? "展开状态栏" : "Expand status rail") : (lang === "zh" ? "展开改动" : "Expand changes")}
         className={styles.resizeHandleRight}
         active={dragState?.side === "right"}
         valueNow={rightPanelWidth}

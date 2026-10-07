@@ -26,8 +26,10 @@ export type ChatCenterTabStripProps = {
   conversationIndexControl?: ReactNode;
   leftOverlayVisible: boolean;
   rightOverlayVisible: boolean;
-  /** The status rail only exists in companion mode; without it there is no toggle. */
+  /** Companion status, or the change column, can be opened from a narrow window. */
   statusRailAvailable: boolean;
+  /** Label for the narrow-window toggle. Companion keeps the status label. */
+  rightRailLabel?: string;
   conversationIndexOverlayOpen: boolean;
   statusRailOverlayOpen: boolean;
   onActivateAgentFallbackTab: () => void;
@@ -53,6 +55,7 @@ export function ChatCenterTabStrip({
   leftOverlayVisible,
   rightOverlayVisible,
   statusRailAvailable,
+  rightRailLabel,
   conversationIndexOverlayOpen,
   statusRailOverlayOpen,
   onActivateAgentFallbackTab,
@@ -118,7 +121,7 @@ export function ChatCenterTabStrip({
               aria-controls="chat-status-pane"
               onClick={onToggleRightOverlay}
             >
-              {lang === "zh" ? "状态" : "Status"}
+              {rightRailLabel ?? (lang === "zh" ? "状态" : "Status")}
             </VButton>
           ) : null}
         </div>
