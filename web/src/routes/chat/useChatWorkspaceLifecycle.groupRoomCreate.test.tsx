@@ -599,6 +599,38 @@ describe("useChatWorkspaceLifecycle session create idempotency", () => {
     sessionStorage.clear();
   });
 
+  it("keeps a post-reload rename when the failed create is retried", async () => {
+    fetchJsonMock.mockRejectedValue(Object.assign(new Error("session create rejected"), { status: 409 }));
+    hookOptions = buildOptions(buildRouteStub({ kind: "bare" }));
+    mount();
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    const tempId = hookOptions.route.ref.current.kind === "session"
+      ? hookOptions.route.ref.current.sessionId
+      : "";
+    const recovery = readSessionCreateRecovery(tempId);
+    expect(recovery).toBeTruthy();
+    rememberSessionCreateRecovery({ ...recovery!, title: "探测甲c86d55" });
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+    queryClient = new QueryClient();
+    hookOptions = buildOptions(buildRouteStub({ kind: "session", sessionId: tempId }));
+    mount();
+    await flushMutationQueue();
+    const reloaded = readSessionCreateRecovery(tempId);
+    expect(reloaded?.title).toBe("探测甲c86d55");
+    rememberSessionCreateRecovery({ ...reloaded!, title: "探测乙c86d55" });
+    queryClient.setQueryData<SessionDetail>(queryKeys.session(tempId), (current) =>
+      current ? { ...current, title: "探测乙c86d55" } : current,
+    );
+    mutateSessionCreate("agent-a");
+    await flushMutationQueue();
+    expect(readSessionCreateRecovery(tempId)?.title).toBe("探测乙c86d55");
+    expect(queryClient.getQueryData<SessionDetail>(queryKeys.session(tempId))?.title).toBe("探测乙c86d55");
+    expect(hookOptions.route.ref.current).toEqual({ kind: "session", sessionId: tempId });
+  });
+
   it.each([false, true])("cleans only the closed temp pointer with no catalog owner (later selection: %s)", async (laterSelection) => {
     localStorage.clear();
     const deferred = createDeferred<SessionDetail>();
