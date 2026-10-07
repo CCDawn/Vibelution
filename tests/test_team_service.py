@@ -211,21 +211,12 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
     assert team_service.list_teams()["summary"]["activeTeamCount"] == 1
     assert len(chat_room_service.list_chat_rooms()) == 1
     assert chat_room_service.get_chat_room_detail(second["linkedChatRoomId"])["config"]["teamCategory"] == "科研组织团队"
-    assert [member["agentId"] for member in second["members"]] == [alpha["agentId"], beta["agentId"]]
-    assert second["members"][0]["responsibilities"] == ["发现候选来源", "记录覆盖缺口"]
-    assert second["members"][1]["responsibilities"] == ["审查证据", "输出返工建议"]
-    assert {node["agentId"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
-    assert {node["id"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
-    assert next(node for node in canvas["nodes"] if node["agentId"] == alpha["agentId"])["responsibilities"] == ["发现候选来源", "记录覆盖缺口"]
-    assert canvas["edges"] == [
-        {
-            "id": "edge-alpha-beta",
-            "source": alpha["agentId"],
-            "target": beta["agentId"],
-            "label": "同步证据",
-            "type": "communication",
-        },
-    ]
+    # Organization graphs never materialize Team.members: membership is owned
+    # by the PATCH team aggregation entrypoint, and the canvas stays a projection
+    # (only the team's own unbound default role placeholder remains).
+    assert second["members"] == []
+    assert [node for node in canvas["nodes"] if node.get("type") == "agent"] == []
+    assert canvas["edges"] == []
 
 
 def test_research_team_sync_preserves_agent_instance_configuration(tmp_path, monkeypatch):
@@ -251,7 +242,9 @@ def test_research_team_sync_preserves_agent_instance_configuration(tmp_path, mon
 
     team = team_service.ensure_research_team_from_organization(organization)
 
-    assert [member["role"] for member in team["members"]] == ["source_finder", "source_extractor", "source_relation_mapper"]
+    # Org sync creates a memberless shell and must not touch Agent configuration;
+    # roster changes go through the PATCH team aggregation entrypoint.
+    assert team["members"] == []
     for agent_id, expected in before.items():
         assert _agent_config_snapshot(agent_directory_service.get_agent(agent_id)) == expected
 
@@ -749,37 +742,6 @@ def test_challenge_cup_research_team_agents_stay_out_of_ordinary_session_index(
     )
 
 
-def test_research_team_canvas_separates_reporting_and_communication_edges(tmp_path, monkeypatch):
-    _use_tmp_project_root(tmp_path, monkeypatch)
-    ceo = agent_directory_service.create_agent_instance(display_name="CEO", direct_session_id="session-ceo")
-    advisor = agent_directory_service.create_agent_instance(display_name="Advisor", direct_session_id="session-advisor")
-    steward = agent_directory_service.create_agent_instance(display_name="Steward", direct_session_id="session-steward")
-    organization = {
-        "updatedAt": "2026-05-29T00:00:00Z",
-        "agents": [
-            {"nodeId": "ceo", "agentId": ceo["agentId"], "displayName": "CEO", "role": "ceo", "status": "active", "x": 120, "y": 120},
-            {"nodeId": "advisor", "agentId": advisor["agentId"], "displayName": "Advisor", "role": "organization_advisor", "status": "active", "x": 460, "y": 120},
-            {"nodeId": "steward", "agentId": steward["agentId"], "displayName": "Steward", "role": "capability_steward", "status": "active", "x": 800, "y": 120},
-        ],
-        "edges": [
-            {"edgeId": "edge-ceo-advisor", "fromAgentId": ceo["agentId"], "toAgentId": advisor["agentId"], "label": "CEO 下达组织调整任务", "status": "active"},
-            {"edgeId": "edge-advisor-ceo", "fromAgentId": advisor["agentId"], "toAgentId": ceo["agentId"], "label": "组织顾问向 CEO 汇报", "status": "active"},
-            {"edgeId": "edge-advisor-steward", "fromAgentId": advisor["agentId"], "toAgentId": steward["agentId"], "label": "组织顾问请求能力配置", "status": "active"},
-        ],
-    }
-
-    team_service.ensure_research_team_from_organization(organization)
-
-    canvas = team_service.get_team_canvas("research-team")
-    reporting_edges = [edge for edge in canvas["edges"] if edge["type"] == "reports_to"]
-    communication_edges = [edge for edge in canvas["edges"] if edge["type"] == "communication"]
-    assert [(edge["source"], edge["target"]) for edge in reporting_edges] == [
-        (ceo["agentId"], advisor["agentId"]),
-        (ceo["agentId"], steward["agentId"]),
-    ]
-    assert {edge["id"] for edge in communication_edges} == {"edge-ceo-advisor", "edge-advisor-ceo", "edge-advisor-steward"}
-
-
 def test_research_team_sync_reuses_existing_team_chat_room(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
@@ -802,7 +764,8 @@ def test_research_team_sync_reuses_existing_team_chat_room(tmp_path, monkeypatch
     rooms = chat_room_service.list_chat_rooms()
     assert team["linkedChatRoomId"] == existing_room["roomId"]
     assert [room["roomId"] for room in rooms] == [existing_room["roomId"]]
-    assert {participant["agentId"] for participant in rooms[0]["participants"]} == {alpha["agentId"], beta["agentId"]}
+    # Room participants project Team.members, which the org sync keeps empty.
+    assert {participant["agentId"] for participant in rooms[0]["participants"]} == set()
 
 
 def test_research_team_sync_restores_missing_historical_team_chat_room_id(tmp_path, monkeypatch):
@@ -846,7 +809,8 @@ def test_research_team_sync_restores_missing_historical_team_chat_room_id(tmp_pa
     assert room["purpose"] == "research_coordination"
     assert room["title"] == "挑战杯ai科研团队 团队群聊"
     assert room["config"]["teamName"] == "挑战杯ai科研团队"
-    assert [participant["agentId"] for participant in room["participants"]] == [alpha["agentId"], beta["agentId"]]
+    # Participants project Team.members, which the org sync keeps empty.
+    assert [participant["agentId"] for participant in room["participants"]] == []
 
 
 def test_research_team_sync_preserves_current_room_and_restores_historical_room_refs(tmp_path, monkeypatch):
@@ -959,7 +923,8 @@ def test_research_team_sync_updates_existing_historical_room_metadata(tmp_path, 
     assert room["config"]["teamName"] == "挑战杯ai科研团队"
     assert room["config"]["currentLinkedChatRoomId"] == current_room_id
     assert room["config"]["customFlag"] == "keep"
-    assert [participant["agentId"] for participant in room["participants"]] == [alpha["agentId"]]
+    # Participants project Team.members, which the org sync keeps empty.
+    assert [participant["agentId"] for participant in room["participants"]] == []
 
 
 def test_team_chat_room_sync_preserves_existing_config_extensions(tmp_path, monkeypatch):

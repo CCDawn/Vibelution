@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.logging import debug as _debug_logger
+
 from .writeback_materialize import FINDING_REQUIRED_PERSPECTIVES
 
 ARXIV_ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
@@ -2615,17 +2617,22 @@ def _source_collection_owner_agent_id(team: dict[str, Any], payload: dict[str, A
     explicit = s._trim_text(payload.get("ownerAgentId"), max_length=160)
     if explicit:
         return explicit
-    canvas = team.get("canvas") if isinstance(team.get("canvas"), dict) else {}
-    nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
+    # Team.members (teams.json, written only via the PATCH team aggregation
+    # entrypoint) is the sole membership fact source; the canvas is a projection.
+    members = team.get("members") if isinstance(team.get("members"), list) else []
     preferred_roles = ("research_coordination", "data_intake_coordinator", "ceo", "organization_coordinator")
     for preferred_role in preferred_roles:
-        for node in nodes:
-            if not isinstance(node, dict):
+        for member in members:
+            if not isinstance(member, dict):
                 continue
-            role = s._trim_text(node.get("role"), max_length=80)
-            agent_id = s._trim_text(node.get("agentId"), max_length=160)
+            role = s._trim_text(member.get("role"), max_length=80)
+            agent_id = s._trim_text(member.get("agentId"), max_length=160)
             if role == preferred_role and agent_id:
                 return agent_id
+    _debug_logger.warning(
+        f"Source collection owner fell back to the default owner agent; expected a Team.members role match. "
+        f"teamId={str(team.get('teamId') or '').strip()} preferredRoles={'|'.join(preferred_roles)}"
+    )
     return s.DEFAULT_OWNER_AGENT_ID
 
 

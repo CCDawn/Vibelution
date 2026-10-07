@@ -1152,7 +1152,7 @@ def test_applying_confirmed_create_agent_proposal_is_idempotent(org_workspace):
     assert len(created_nodes) == 1
 
 
-def test_edge_proposal_apply_syncs_research_team_canvas(org_workspace):
+def test_edge_proposal_apply_keeps_org_graph_as_sole_org_fact_source(org_workspace):
     org = research_organization_service.get_research_organization()
     ceo, _, steward = _core_agents(org)
 
@@ -1180,13 +1180,14 @@ def test_edge_proposal_apply_syncs_research_team_canvas(org_workspace):
         edge for edge in applied["organization"]["edges"]
         if edge["fromAgentId"] == ceo["agentId"] and edge["toAgentId"] == steward["agentId"]
     )
-    canvas = team_service.get_team_canvas("research-team")
-    canvas_edge = next(
-        edge for edge in canvas["edges"]
-        if edge["source"] == ceo["agentId"] and edge["target"] == steward["agentId"] and edge.get("type") == "communication"
-    )
     assert updated_edge["label"] == "CEO 请求能力策略复核"
-    assert canvas_edge["label"] == "CEO 请求能力策略复核"
+    # The organization graph stays the org's own data; the research Team is a
+    # memberless shell and never receives org-projected members or canvas edges.
+    team = team_service.get_team("research-team")
+    assert team["members"] == []
+    canvas = team_service.get_team_canvas("research-team")
+    assert [node for node in canvas["nodes"] if node.get("type") == "agent"] == []
+    assert canvas["edges"] == []
 
 
 def test_archived_former_agent_stays_visible_but_cannot_receive_new_task(org_workspace):

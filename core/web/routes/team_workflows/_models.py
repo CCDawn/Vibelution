@@ -1,11 +1,13 @@
 from __future__ import annotations
 from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
-from core.web.services.team_workflow_orchestration_service import DEFAULT_OWNER_AGENT_ID, WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
+from core.web.services.team_workflow_orchestration_service import WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH
 
 class WorkflowEnsurePayload(BaseModel):
     workflowKind: str = Field(WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH, max_length=80)
-    ownerAgentId: str = Field(DEFAULT_OWNER_AGENT_ID, max_length=160)
+    # Empty means "derive the owner from the Team.members role match"; an
+    # explicit value always wins.
+    ownerAgentId: str = Field("", max_length=160)
 
 
 class ChallengePhaseOneApprovalPayload(BaseModel):
