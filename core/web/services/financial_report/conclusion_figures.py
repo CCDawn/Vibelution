@@ -378,7 +378,7 @@ def _contextual_market_spans(
                     if not _safe_contextual_claim(clean, match, quote):
                         continue
                     amount = _AMOUNT.match(clean, match.start("number"))
-                    if amount is not None:
+                    if amount is not None and (field == "changePercent" or not amount.group("unit")):
                         kept.append((start + left + amount.start(), start + left + amount.end()))
     return kept
 
@@ -388,6 +388,8 @@ def _safe_contextual_claim(paragraph: str, match: re.Match[str], quote: dict) ->
     for boundary in _SENTENCE_BOUNDARY.finditer(prefix):
         prefix = paragraph[boundary.end():match.start()]
     if _HIGH_RISK_CLAIM.search(_visible_report_text(prefix)):
+        return False
+    if re.search(r"[+\-−×*/÷=＝≈]\s*$", prefix.rstrip().removesuffix("**").rstrip()):
         return False
     for dated in _CLAIM_DATE.finditer(_visible_report_text(paragraph)):
         if dated.group("date") not in {quote["date"], quote["date"][5:]}:
