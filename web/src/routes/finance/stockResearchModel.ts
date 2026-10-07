@@ -1,6 +1,7 @@
 import type { AssistantConversationTurn, ConversationMessage, SessionSummary } from "../../api/types";
 import type { StockCandle, StockIdentity, StockSnapshot } from "../../api/financialMarket";
 import { filingExcerptsFromTurnItems, groundResearchConclusion } from "./conclusionFigures";
+import { isScreeningReportPrompt, projectScreeningComparison } from "./screenComparison";
 import { safeFinancialSourceUrl } from "./financialResearchModel";
 
 export type ReportCitation = { url: string; page: string; label: string };
@@ -132,13 +133,20 @@ export function projectStockReport(messages: readonly ConversationMessage[], ter
   // Native finance starts carry this request contract. Ordinary follow-ups stay
   // in the conversation, leaving the full report and its export stable.
   const isResearchRequest = (text: string) => /分析日期 \d{4}-\d{2}-\d{2}[\s\S]*使用 Markdown 二级标题/.test(text)
+    || isScreeningReportPrompt(text)
     || /(?:重新生成|更新|重写)(?:完整)?(?:研究报告|研报)|(?:regenerate|update|rewrite) (?:the )?(?:full )?(?:research )?report/i.test(text);
   const selected = candidates.filter((candidate) => isResearchRequest(candidate.request)).at(-1) ?? candidates[0];
   if (!selected) return null;
-  const { turn, text: answer } = selected;
+  const { turn, text: answer, request: selectedRequest } = selected;
   // The stored answer stays exact. This report hides a conclusion amount that
-  // is not on a cited filing page and not a program-checked calculation.
-  const text = groundResearchConclusion(answer, filingExcerptsFromTurnItems(turn.turnItems));
+  // is not on a cited filing page and not a program-checked calculation, then
+  // shows screening candidates from the screen tool with a filing page only
+  // when the same turn's evidence search cites that ticker.
+  const text = projectScreeningComparison(
+    groundResearchConclusion(answer, filingExcerptsFromTurnItems(turn.turnItems)),
+    selectedRequest,
+    turn.turnItems,
+  );
   const sections: StockResearchReport["sections"] = [];
   const headings = [...text.matchAll(/^\s{0,3}#{1,3}\s+(.+)$/gm)];
   headings.forEach((heading, index) => sections.push({ id: `section-${index}`, title: cleanResearchPreview(heading[1], 25), text: text.slice(heading.index, headings[index + 1]?.index ?? text.length).trim() }));

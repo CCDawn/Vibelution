@@ -1,4 +1,8 @@
-"""Export exact, completed financial research answers from native Session Turns."""
+"""Export completed financial research answers from native Session Turns.
+
+The stored Turn stays unchanged. Export and catalog apply the conclusion
+figure check, then a screening comparison when this Turn called the screen tool.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,6 @@ import hashlib
 import json
 import re
 import zipfile
-from datetime import date
 from io import BytesIO
 from typing import Literal
 
@@ -23,6 +26,10 @@ from core.web.services import financial_assistant_service as assistant_service
 from core.web.services import session_service
 from core.web.services.financial_report.formats import render_docx, render_print_html
 from core.web.services.financial_report.conclusion_figures import ground_completed_report
+from core.web.services.financial_report.screen_comparison import (
+    is_screening_report_prompt,
+    project_screening_comparison,
+)
 from core.web.services.financial_report.pdf import (
     FinancialPdfTooLarge,
     FinancialPdfUnavailable,
@@ -44,11 +51,6 @@ _TEAM_SYNTHESIS_PROMPT = re.compile(
     r"^\s*你是主助手的股票研究汇总角色。请综合股票\s+[^；。\n]{1,50}的多分析师研究。"
     r"研究日期：(?:\d{4}-\d{2}-\d{2}|未指定)；观察周期：近\d+天",
     re.DOTALL,
-)
-_SCREENING_REPORT_PROMPT = re.compile(
-    r"^请研究以下股票筛选条件，生成筛选报告。分析截至 "
-    r"(?P<analysis_date>\d{4}-\d{2}-\d{2})。按条件筛选股票，列出候选、筛选依据和数据限制。"
-    r"(?:\r?\n|$)"
 )
 _EXPLICIT_REPORT_PROMPT = re.compile(
     r"(?:重新生成|生成|撰写|更新|重写)(?:完整)?(?:一份)?(?:股票|投资|研究)?(?:研究报告|研报)"
@@ -84,17 +86,6 @@ def _normalized_identifier(value: str, label: str) -> str:
     return normalized
 
 
-def _is_screening_report_prompt(text: str) -> bool:
-    match = _SCREENING_REPORT_PROMPT.match(text)
-    if match is None:
-        return False
-    try:
-        date.fromisoformat(match.group("analysis_date"))
-    except ValueError:
-        return False
-    return True
-
-
 def _research_request(text: str) -> bool:
     candidate = str(text or "").strip()
     return bool(
@@ -104,7 +95,7 @@ def _research_request(text: str) -> bool:
             _STOCK_RESEARCH_PROMPT.search(candidate)
             or _TOPIC_RESEARCH_PROMPT.search(candidate)
             or _TEAM_SYNTHESIS_PROMPT.search(candidate)
-            or _is_screening_report_prompt(candidate)
+            or is_screening_report_prompt(candidate)
             or _EXPLICIT_REPORT_PROMPT.search(candidate)
         )
     )
@@ -248,6 +239,7 @@ def _completed_report_from_events(all_events: list, session_id: str, turn_id: st
     ):
         raise FinancialReportUnavailable("已停止的研究不能导出")
     report_text = ground_completed_report(report_text, items, turn_events)
+    report_text = project_screening_comparison(report_text, request_text, items, turn_events)
     if len(report_text) > MAX_REPORT_TEXT_CHARS:
         raise FinancialReportTooLarge("研究报告超过导出大小限制")
     completed_at = str(getattr(terminal, "timestamp", "") or "").strip()

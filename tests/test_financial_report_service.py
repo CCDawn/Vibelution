@@ -268,3 +268,152 @@ def test_oversized_turn_is_rejected_before_formatting(report_env):
     report_env[:] = _turn(answer="x" * (service.MAX_REPORT_TEXT_CHARS + 1))
     with pytest.raises(service.FinancialReportTooLarge):
         _export("docx")
+
+
+SCREEN_REQUEST = (
+    "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-10-06。"
+    "按条件筛选股票，列出候选、筛选依据和数据限制。\n\n"
+    "用户选股条件：PE低于20"
+)
+NOTICE = "来源只提供行情时分，未提供交易日期；抓取时间不代表行情日期。市值单位未核实，未用于筛选。"
+
+
+def _screen_output(items, **extra):
+    payload = {
+        "ok": True,
+        "status": "partial",
+        "source": "新浪财经",
+        "fetchedAt": "2026-10-06T10:00:00+08:00",
+        "coverage": {"providerTotal": 5000, "loaded": 120, "complete": False, "totalFiltered": len(items)},
+        "returnedCount": len(items),
+        "items": items,
+        "notice": NOTICE,
+    }
+    payload.update(extra)
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _evidence(ticker, page, excerpt="营业收入 200.00 元"):
+    return json.dumps({"ticker": ticker, "query": "营收", "report_period": "2024FY"}, ensure_ascii=False), json.dumps({
+        "results": [{"knowledgeItemId": "k1", "excerpt": excerpt}],
+        "citations": [{"knowledgeItemId": "k1", "financialEvidence": [{"page": page}]}],
+    }, ensure_ascii=False)
+
+
+def _screen_turn(answer, tools):
+    events = [_event(EVENT_USER_MESSAGE, 1, status="recorded", payload={"content": SCREEN_REQUEST})]
+    sequence = 2
+    for tool in tools:
+        events.append(_event(
+            EVENT_ASSISTANT_ITEM_COMMITTED,
+            sequence,
+            status=tool.get("status", "completed"),
+            payload={
+                "kind": "tool_call",
+                "toolName": tool["name"],
+                "status": tool.get("status", "completed"),
+                "input": tool.get("input", ""),
+                "output": tool["output"],
+                "itemId": tool["id"],
+                "revision": 0,
+            },
+        ))
+        sequence += 1
+    events.append(_event(EVENT_ASSISTANT_ITEM_COMMITTED, sequence, status="completed", payload={
+        "kind": "assistant_message", "channel": "answer", "phase": "final_answer",
+        "status": "completed", "text": answer, "itemId": "answer-1", "revision": 0,
+    }))
+    events.append(_event(EVENT_TURN_COMPLETED, sequence + 1, status="completed"))
+    return events
+
+
+def test_screening_export_lists_tool_candidates_and_only_matching_filing_pages(report_env):
+    evidence_input, evidence_output = _evidence("sh600519", 42)
+    failed_input, failed_output = _evidence("000001", 99)
+    report_env[:] = _screen_turn("模型说明工具不支持市值。毛利率 91.93%。", [
+        {"id": "screen", "name": "financial_market_screen_tool", "output": _screen_output([
+            {"symbol": "sh600519", "ticker": "600519", "name": "贵州茅台", "price": 1258.62, "peRatio": 20.1},
+            {"symbol": "sz000001", "ticker": "000001", "name": "平安银行", "price": 10},
+        ], coverage={"providerTotal": 5000, "loaded": 120, "complete": False, "totalFiltered": 2}, returnedCount=2)},
+        {"id": "evidence", "name": "financial_evidence_search_tool", "input": evidence_input, "output": evidence_output},
+        {"id": "failed", "name": "financial_evidence_search_tool", "status": "failed", "input": failed_input, "output": failed_output},
+        {"id": "rag", "name": "financial_report_query_tool", "output": json.dumps({"page": 7, "text": "第 7 页"})},
+    ])
+
+    content = _export("markdown")["content"]
+
+    assert content.startswith("## 筛选对照（本轮工具结果）\n")
+    assert "| 贵州茅台 | 600519 | 第 42 页 |" in content
+    assert "| 平安银行 | 000001 | 没有这一项 |" in content
+    assert "覆盖不完整，结果仅基于已加载范围。" in content
+    assert "候选和财报页码以上表为准。" in content
+    assert "工具不支持市值" in content
+    assert "1258.62" not in content
+    assert "91.93" not in content
+    assert "第 7 页" not in content
+    assert "第 99 页" not in content
+    assert _export("markdown")["content"] == content
+
+
+def test_cleared_screen_export_does_not_keep_invented_candidates(report_env):
+    message = "筛选快照没有不晚于分析日期 2024-12-31 的交易日期，未作为本次研究依据。"
+    report_env[:] = _screen_turn("虚构股份 999999 见第1页", [
+        {"id": "screen", "name": "financial_market_screen_tool", "output": _screen_output(
+            [],
+            message=message,
+            notice=message,
+            returnedCount=0,
+            coverage={"providerTotal": 5000, "loaded": 120, "complete": False, "totalFiltered": 0},
+        )},
+    ])
+
+    content = _export("markdown")["content"]
+
+    assert message in content
+    assert "没有符合条件的候选。" in content
+    assert "虚构股份" not in content
+    assert "999999" not in content
+    assert "## 模型原文" not in content
+
+
+def test_screen_projection_ignores_a_missing_or_failed_payload():
+    from core.web.services.financial_report.screen_comparison import project_screening_comparison
+
+    answer = "目标Turn筛选结论"
+    assert project_screening_comparison(answer, SCREEN_REQUEST, [], []) == answer
+    failed = json.dumps({"ok": False, "status": "unavailable", "items": [{"ticker": "600519", "name": "贵州茅台"}]})
+    items = [{"type": "tool_call", "toolName": "financial_market_screen_tool", "status": "failed", "output": _screen_output([{"ticker": "600519", "name": "贵州茅台"}])}]
+    assert project_screening_comparison(answer, SCREEN_REQUEST, items, []) == answer
+    unavailable = [{"type": "tool_call", "toolName": "financial_market_screen_tool", "status": "completed", "output": failed}]
+    assert project_screening_comparison(answer, SCREEN_REQUEST, unavailable, []) == answer
+    assert project_screening_comparison(answer, "请研究 示例公司，分析日期 2026-10-06", [
+        {"type": "tool_call", "toolName": "financial_market_screen_tool", "status": "completed", "output": _screen_output([{"ticker": "600519", "name": "贵州茅台"}])},
+    ], []) == answer
+
+
+def test_screen_page_matches_symbol_prefix_and_not_a_longer_number():
+    from core.chat.turn_journal import EVENT_TOOL_RESULT
+    from core.web.services.financial_report.screen_comparison import project_screening_comparison
+
+    output = _screen_output([
+        {"ticker": "600519", "name": "贵州茅台"},
+    ], coverage={"providerTotal": 10, "loaded": 10, "complete": True, "totalFiltered": 8}, returnedCount=2, outputTruncated=True)
+    evidence_output = json.dumps({
+        "results": [{"knowledgeItemId": "k1", "excerpt": "营业收入 200.00 元"}],
+        "citations": [{"knowledgeItemId": "k1", "financialEvidence": [{"page": 12}, {"page": 40}, {"page": True}]}],
+    }, ensure_ascii=False)
+    event = TurnJournalEvent(
+        schema_version=2, event_id="event-tool", session_id="session-1", turn_id="turn-1", sequence=2,
+        event_type=EVENT_TOOL_RESULT, status="completed", timestamp="2026-10-06T12:00:02+08:00", source="test",
+        payload={"toolCall": {"name": "financial_evidence_search_tool", "status": "completed", "arguments": {"ticker": "sh600519"}, "result": evidence_output}},
+    )
+    items = [{"type": "tool_call", "toolName": "financial_market_screen_tool", "status": "completed", "output": output}]
+    content = project_screening_comparison("原文", SCREEN_REQUEST, items, [event])
+    assert "已加载 10 / 行情池 10。覆盖完整。" in content
+    assert "符合条件 8，本次返回 2。" in content
+    assert "工具输出已截断，未列入被省略的候选。" in content
+    assert "| 贵州茅台 | 600519 | 第 12 页、第 40 页 |" in content
+    assert content == project_screening_comparison(content, SCREEN_REQUEST, items, [event])
+    glued = [{"type": "tool_call", "toolName": "financial_evidence_search_tool", "status": "completed", "input": json.dumps({"ticker": "1600519"}), "output": evidence_output}]
+    without_page = project_screening_comparison("原文", SCREEN_REQUEST, items + glued, [])
+    assert "| 贵州茅台 | 600519 | 没有这一项 |" in without_page
