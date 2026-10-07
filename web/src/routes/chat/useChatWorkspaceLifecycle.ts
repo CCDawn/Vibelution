@@ -394,7 +394,16 @@ export function useChatWorkspaceLifecycle({
     const recovery = readSessionCreateRecovery(recoveryRouteId);
     if (!recovery) return;
     // Reload owns no in-flight POST. Let an explicit retry replay the same key.
-    createSessionIntentsRef.current.set(recoveryRouteId, { ...recovery, state: "failed" });
+    // Keep the title in the recovery record. Copying it onto this intent makes
+    // the next retry look like an explicit title write and puts back the name
+    // from before this document was reloaded.
+    createSessionIntentsRef.current.set(recoveryRouteId, {
+      tempSessionId: recovery.tempSessionId,
+      agentId: recovery.agentId,
+      idempotencyKey: recovery.idempotencyKey,
+      createdAt: recovery.createdAt,
+      state: "failed",
+    });
     markSessionCreateAttempt(recoveryRouteId, "failed");
     if (queryClient.getQueryData(queryKeys.session(recoveryRouteId))) return;
     const recoveredTitle = String(recovery.title || "").trim();
