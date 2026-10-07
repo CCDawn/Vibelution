@@ -1,9 +1,9 @@
 # 在研草案（非正式规范）
 
-本目录只放尚未关闭、且已在 [docs/README.md](../README.md) 白名单中的草案。
+本文件是在研草案的唯一清单。[docs/README.md](../README.md) 只指向这里，不复制状态。
 **不是**现行规则；权威顺序见 [ADR 0005](../adr/0005-docs-authority-and-archive-policy.md)。
 
-关闭条件达到后：改 Status 为 `implemented` / `superseded` / `historical`，然后 `git mv` 到 `docs/archive/plans/<yyyy-mm>/`，并更新本文件与 `docs/README.md`。
+关闭条件达到后：改 Status 为 `implemented` / `superseded` / `historical`，然后 `git mv` 到 `docs/archive/plans/<yyyy-mm>/`，并只更新本文件。
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
@@ -24,6 +24,7 @@
 
 历史快照（已迁出）：
 
+- `2026-08-26-challenge-workflow-recovery-closure.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-26-challenge-workflow-recovery-closure.md)（Implemented；terminal run 归档、collection 孤儿恢复与恢复动作面已合入 main）
 - `2026-09-02-challenge-cup-10-parallel-concurrency-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-02-challenge-cup-10-parallel-concurrency-plan.md)（implemented；A/B/C 与 D2 已合入。D1 集中 marker、sideflow 混跑和 B5 上限 e2e 仍是后续增量）
 - `2026-09-05-independent-operator-experiment-flow-plan.md` → [archive/plans/2026-09/](../archive/plans/2026-09/2026-09-05-independent-operator-experiment-flow-plan.md)（superseded；产品流程见 [research-flow-v2.md](research-flow-v2.md)，本文只留调研和早期证据）
 - `2026-08-13-portable-branch-workspace.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-13-portable-branch-workspace.md)（superseded；目录池与分支清单见 worktree-collaboration / instance-lifecycle，整树替换晋升未采用）

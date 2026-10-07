@@ -1,8 +1,8 @@
 # Windows 最终用户快速安装（对齐结论）
 
 **日期**：2026-08-06
-**状态**：对齐确认 · Phase 1 落地中
-**分支建议**：`feat/windows-end-user-install`
+**状态**：Phase 1 的脚本和指南已经落地（2026-10-07 复核）。干净机器实装冒烟仍未勾选。Phase 2 便携包和 Phase 3 安装器未交付。
+**当前安装步骤**：[docs/guides/install-windows.md](../guides/install-windows.md)。本文只记录分期，不代替那份指南。
 
 ## 1. 目标
 

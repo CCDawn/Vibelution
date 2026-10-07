@@ -752,5 +752,5 @@ npm run build
 
 1. 把 Status 改为 `implemented`、`superseded` 或 `historical`；
 2. `git mv` 到 `docs/archive/plans/<yyyy-mm>/`；
-3. 更新 `docs/plans/README.md` 和 `docs/README.md`；
+3. 只更新 `docs/plans/README.md`；`docs/README.md` 不再复制在研清单；
 4. 不把本文继续当成运行时或 UI 规则真源。
