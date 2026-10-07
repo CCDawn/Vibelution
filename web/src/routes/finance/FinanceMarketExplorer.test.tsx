@@ -127,6 +127,30 @@ describe("FinanceMarketExplorer", () => {
     expect(node.textContent).not.toContain("987654321");
   });
 
+  it("shows the source trading date when Sina provides one", async () => {
+    api.fetchScreen.mockResolvedValue({ ...screen, dataDate: "2026-10-05" });
+    await render("screen");
+    expect(node.textContent).toContain("14:55:00 · 2026-10-05");
+    expect(node.textContent).not.toContain("Date unavailable");
+  });
+
+  it("keeps the last successful screen and source timestamp after a refresh failure", async () => {
+    await render("screen");
+    api.fetchScreen.mockRejectedValueOnce(new Error("screen refresh failed"));
+    await act(async () => buttonWithText("刷新").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(node.textContent).toContain("刷新失败，当前显示上次成功获取的数据");
+    expect(node.textContent).toContain("screen refresh failed");
+    expect(node.textContent).toContain("贵州茅台");
+    expect(node.textContent).toContain("上次成功抓取 2026-10-05T01:00:00+00:00");
+
+    await act(async () => buttonWithText("重试").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(api.fetchScreen).toHaveBeenCalledTimes(3);
+    expect(node.textContent).not.toContain("screen refresh failed");
+  });
+
   it("disables only AI research when the native handoff is unavailable", async () => {
     const onResearchPrompt = vi.fn();
     await render("screen", { onResearchPrompt, researchDisabled: true });
@@ -224,6 +248,23 @@ describe("FinanceMarketExplorer", () => {
     expect(api.fetchResearch).toHaveBeenLastCalledWith(stock.symbol, expect.objectContaining({ signal: expect.anything() }));
     expect(node.textContent).toContain("每股收益");
     expect(node.textContent).not.toContain("财务数据源暂不可用");
+  });
+
+  it("keeps cached fundamentals and retries after a failed source refresh", async () => {
+    await render("fundamentals");
+    api.fetchResearch.mockRejectedValueOnce(new Error("research refresh failed"));
+    await act(async () => buttonWithText("刷新资料").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(node.textContent).toContain("刷新失败，当前显示上次成功获取的数据");
+    expect(node.textContent).toContain("research refresh failed");
+    expect(node.textContent).toContain("每股收益");
+    expect(node.textContent).toContain("上次成功抓取 2026-10-05T01:00:00+00:00");
+
+    await act(async () => buttonWithText("重试").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(api.fetchResearch).toHaveBeenCalledTimes(3);
+    expect(node.textContent).not.toContain("research refresh failed");
   });
 
   it("applies PB sorting in the selected direction", async () => {

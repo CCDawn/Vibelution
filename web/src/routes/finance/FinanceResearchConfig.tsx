@@ -93,7 +93,7 @@ export function FinanceResearchConfig({ value, onChange, onStart, disabled, pend
   const currentModel = optionsMatchSession ? sessionLlmOptions?.model : null;
   const currentModelId = modelId(currentModel);
   const currentDefaultReady = Boolean(currentModel && financialResearchModelUnavailableReason(currentModel) === null);
-  const selectedKey = turnModelSelection?.modelId || (currentDefaultReady ? FOLLOW_SESSION_MODEL : null);
+  const selectedKey = turnModelSelection?.modelId || (currentDefaultReady ? FOLLOW_SESSION_MODEL : "");
   const modelOptions = [
     {
       id: FOLLOW_SESSION_MODEL,

@@ -27,6 +27,11 @@ async function render(props: Partial<React.ComponentProps<typeof FinanceWatchlis
   await act(async () => root?.render(<QueryClientProvider client={client}><FinanceWatchlistTable watchlist={watchlist} onSelectStock={() => {}} onRemoveStock={() => {}} zh {...props} /></QueryClientProvider>));
   await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
+function buttonWithText(text: string): HTMLButtonElement {
+  const button = Array.from(node.querySelectorAll("button")).find((item) => item.textContent?.includes(text));
+  if (!button) throw new Error(`Button not found: ${text}`);
+  return button;
+}
 beforeEach(() => {
   api.fetchQuotes.mockReset().mockResolvedValue({ source: "腾讯财经", sourceUrl: "https://gu.qq.com/", fetchedAt: "2026-10-05T01:00:00+00:00", items: [
     { symbol: "sz000001", quote: quote(watchlist[0], -1.2), error: null },
@@ -50,5 +55,36 @@ describe("FinanceWatchlistTable", () => {
     expect(remove).toBeTruthy();
     await act(async () => remove?.click());
     expect(onRemoveStock).toHaveBeenCalledWith(watchlist[0]);
+  });
+
+  it("shows each row's source timestamp and provider error", async () => {
+    api.fetchQuotes.mockResolvedValueOnce({
+      source: "腾讯财经", sourceUrl: "https://gu.qq.com/", fetchedAt: "2026-10-05T01:00:00+00:00", items: [
+        { symbol: "sz000001", quote: quote(watchlist[0], -1.2), error: "单股报价有警告" },
+        { symbol: "sh600519", quote: null, error: "供应商未返回报价" },
+      ],
+    });
+    await render();
+
+    expect(node.textContent).toContain("2026-10-05T09:30:00+08:00");
+    expect(node.textContent).toContain("单股报价有警告");
+    expect(node.textContent).toContain("供应商未返回报价");
+  });
+
+  it("keeps cached quotes and retries after a refresh failure", async () => {
+    await render();
+    api.fetchQuotes.mockRejectedValueOnce(new Error("quotes refresh failed"));
+    await act(async () => buttonWithText("刷新行情").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(node.textContent).toContain("刷新失败，当前显示上次成功获取的数据");
+    expect(node.textContent).toContain("quotes refresh failed");
+    expect(node.textContent).toContain("贵州茅台");
+    expect(node.textContent).toContain("上次成功抓取 2026-10-05T01:00:00+00:00");
+
+    await act(async () => buttonWithText("重试").click());
+    await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(api.fetchQuotes).toHaveBeenCalledTimes(3);
+    expect(node.textContent).not.toContain("quotes refresh failed");
   });
 });
