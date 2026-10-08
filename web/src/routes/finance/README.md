@@ -86,3 +86,9 @@ The surface targets desktop CN/HK/US community research. Provider-wide screening
 Verification uses domain/native lifecycle tests, VUI/API contracts, TypeScript/production build and isolated Launcher/browser acceptance with confirmed instance/code identity. Provider HTTP success does not prove exchange-grade realtime data; model configuration does not prove successful research.
 
 Runtime diagnostics reuse native archive/delete, Turn and episodic-memory events. Finance adds bounded direct-binding repair and paper-account/order events, with stable IDs and outcomes; prompts, preference text, transaction reasons and report bodies are excluded. Public read-only data and visual projections add no persistence events.
+
+## Research outcome loop
+
+Report details register an explicit CN direction/threshold/deadline bound to the native Turn. Review adds outcome checks and historical MA backtests using the existing desktop content area. Prospective and retrospective checks remain separate; due checks run only while the managed app is running and unavailable market coverage is retryable. AI reflection starts a native topic Turn. User-confirmed lessons use canonical Agent episodic memory and are explicitly read by subsequent same-stock stock research and primary team roles, excluding lessons dated after the requested historical cutoff.
+
+The backtest is a deterministic indicator experiment over the latest 120 qfq daily bars, with warm-up, next-open execution, commissions/slippage, same-cost buy-and-hold and marked-to-close terminal positions. It does not evaluate free-text LLM signals or write paper orders; adjusted-series hindsight and unmodeled exchange/corporate-action rules are shown beside the result.

@@ -6,8 +6,61 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.web.services import financial_report_service as service
+from core.web.services.financial_preferences_service import FinancialPreferenceError
+from .financial_evaluation_models import (
+    BacktestRequest, BacktestResult, ClaimPage, ClaimRecord, ClaimRequest,
+    FeedbackPrompt, LessonRecord, LessonRequest, ReflectionContext,
+)
 
 router = APIRouter(tags=["financial-reports"])
+
+
+def _evaluation(call, *args):
+    try:
+        return call(*args)
+    except FinancialPreferenceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except service.FinancialReportNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except service.FinancialReportUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except service.FinancialReportInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/financial-reports/{assistant_agent_id}/validations", response_model=ClaimPage)
+def report_validations(assistant_agent_id: str) -> dict:
+    return _evaluation(service.list_report_validations, assistant_agent_id)
+
+
+@router.post("/financial-reports/{assistant_agent_id}/validations", response_model=ClaimRecord)
+def create_report_validation(assistant_agent_id: str, payload: ClaimRequest) -> dict:
+    return _evaluation(service.create_report_validation, assistant_agent_id, payload.model_dump())
+
+
+@router.post("/financial-reports/{assistant_agent_id}/validations/{validation_id}/check", response_model=ClaimRecord)
+def check_report_validation(assistant_agent_id: str, validation_id: str) -> dict:
+    return _evaluation(service.check_report_validation, assistant_agent_id, validation_id)
+
+
+@router.get("/financial-reports/{assistant_agent_id}/validations/{validation_id}/feedback", response_model=FeedbackPrompt)
+def report_feedback(assistant_agent_id: str, validation_id: str) -> dict:
+    return _evaluation(service.report_feedback_prompt, assistant_agent_id, validation_id)
+
+
+@router.post("/financial-reports/{assistant_agent_id}/validations/{validation_id}/lesson", response_model=LessonRecord)
+def report_lesson(assistant_agent_id: str, validation_id: str, payload: LessonRequest) -> dict:
+    return _evaluation(service.save_report_lesson, assistant_agent_id, validation_id, payload.text, payload.clientRequestId)
+
+
+@router.get("/financial-reports/{assistant_agent_id}/reflection-context", response_model=ReflectionContext)
+def reflection_context(assistant_agent_id: str, symbol: str = Query(max_length=24), analysisDate: str = Query(min_length=10, max_length=10)) -> dict:
+    return _evaluation(service.report_reflection_context, assistant_agent_id, symbol, analysisDate)
+
+
+@router.post("/financial-reports/{assistant_agent_id}/backtest", response_model=BacktestResult)
+def report_backtest(assistant_agent_id: str, payload: BacktestRequest) -> dict:
+    return _evaluation(service.backtest_research_strategy, assistant_agent_id, payload.model_dump())
 
 
 class FinancialReportExportRequest(BaseModel):

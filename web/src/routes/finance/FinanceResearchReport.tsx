@@ -5,6 +5,7 @@ import { LazyConversationMarkdownRenderer } from "../../components/conversation/
 import { VButton, VStateSurface, VSurface, VTabs } from "../../components/vui";
 import { researchTablePreview, stockResearchReportFromText, type ReportCitation, type ResearchDepth, type ResearchScope, type StockResearchReport } from "./stockResearchModel";
 import { FinanceReportExport } from "./FinanceReportExport";
+import { FinanceClaimRegistration } from "./FinanceClaimRegistration";
 import { FinanceReportEvidenceNotice, FinanceReportReadState, useGroundedFinancialReport } from "./FinanceGroundedReport";
 
 const researchScopeLabels: Record<ResearchScope, { zh: string; en: string }> = {
@@ -42,7 +43,7 @@ export function FinanceResearchReport({ report: projectedReport, assistantAgentI
     parameters?.depth && researchDepthLabels[parameters.depth] ? { id: "depth", text: parameterText("深度", "Depth", researchDepthLabels[parameters.depth][zh ? "zh" : "en"]) } : null,
   ].filter((item): item is { id: string; text: string } => item !== null);
   return <VSurface tone="panel" padding="normal" className={styles.surface} ariaLabel={zh ? "研究报告" : "Research report"} data-finance-research-report>
-    <div className={styles.heading}><strong className={styles.title}><FileText size={15} />{zh ? (summaryOnly ? "研究简报" : "研究报告") : (summaryOnly ? "Research brief" : "Research report")}</strong><div className={styles.actions}><span className={styles.timestamp}>{report.timestamp ? new Date(report.timestamp).toLocaleDateString("zh-CN") : ""}{busy ? (zh ? " · 上次结果" : " · Previous result") : ""}</span><FinanceReportExport assistantAgentId={assistantAgentId} sessionId={sessionId} turnId={report.turnId} zh={zh} /></div></div>
+    <div className={styles.heading}><strong className={styles.title}><FileText size={15} />{zh ? (summaryOnly ? "研究简报" : "研究报告") : (summaryOnly ? "Research brief" : "Research report")}</strong><div className={styles.actions}><span className={styles.timestamp}>{report.timestamp ? new Date(report.timestamp).toLocaleDateString("zh-CN") : ""}{busy ? (zh ? " · 上次结果" : " · Previous result") : ""}</span><FinanceReportExport assistantAgentId={assistantAgentId} sessionId={sessionId} turnId={report.turnId} zh={zh} />{!summaryOnly ? <FinanceClaimRegistration key={reportKey} initialSymbol={parameters?.stock?.ticker} agentId={assistantAgentId} sessionId={sessionId} turnId={report.turnId} zh={zh} /> : null}</div></div>
     {parameterItems.length ? <div className={styles.parameters} role="group" aria-label={zh ? "本次研究参数" : "Research parameters"} data-finance-research-metadata>{parameterItems.map((item) => <span key={item.id} className={styles.parameter}>{item.text}</span>)}</div> : null}
     <FinanceReportEvidenceNotice text={report.text} originalText={projectedReport.originalText ?? projectedReport.text} zh={zh} onSupplementEvidence={onSupplementEvidence} />
     {summaryOnly && report.summary ? <p className={styles.summary}>{report.summary}</p> : null}
