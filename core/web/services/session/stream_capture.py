@@ -1707,6 +1707,51 @@ def _reset_capture_stream_restart_boundary(
         s._set_session_live_output(session_id, turn_id=capture.turn_id, content="")
 
 
+def peek_uncommitted_live_stream_tail() -> tuple[str, str]:
+    """Read the live assistant tail that has not been committed yet.
+
+    Does not clear the capture. A recovery plan that declines must leave the
+    tail in place for the existing failure path.
+    """
+
+    context = _SESSION_UI_CAPTURE_CONTEXT.get({})
+    if not isinstance(context, dict):
+        return "", ""
+    capture = context.get("capture")
+    batcher = context.get("textBatcher")
+    text = ""
+    thought = ""
+    if capture is not None:
+        try:
+            text = str(capture.uncommitted_content_segment() or "")
+        except Exception:
+            text = str(getattr(capture, "content", "") or "")
+        thought = str(getattr(capture, "thought", "") or "")
+        if not thought:
+            thought = str(getattr(capture, "_latest_thought_text", "") or "")
+    if batcher is not None:
+        pending_text = str(getattr(batcher, "_pending_response_content", "") or "")
+        pending_thought = str(getattr(batcher, "_pending_thought_text", "") or "")
+        if len(pending_text) > len(text):
+            text = pending_text
+        if len(pending_thought) > len(thought):
+            thought = pending_thought
+    return text, thought
+
+
+def discard_uncommitted_live_stream_tail() -> None:
+    """Drop the live uncommitted tail without journaling it as an assistant message."""
+
+    context = _SESSION_UI_CAPTURE_CONTEXT.get({})
+    if not isinstance(context, dict):
+        return
+    capture = context.get("capture")
+    if not isinstance(capture, SessionTurnCapture):
+        return
+    session_id = str(context.get("sessionId") or "").strip()
+    _reset_capture_stream_restart_boundary(_service(), session_id, context, capture)
+
+
 def _ensure_session_ui_capture_hooks(ui: Any) -> None:
     s = _service()
     if bool(getattr(ui, "_vibelution_session_capture_wrapped", False)):

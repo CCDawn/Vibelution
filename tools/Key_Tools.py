@@ -74,6 +74,7 @@ from core.infrastructure.workspace_cleaner import (
     clean_workspace_debris_tool as _clean_workspace_debris_impl,
     get_session_files_tool as _get_session_files_impl,
 )
+from tools.agent_tools import continue_subagent as _continue_subagent_impl
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
 from tools.episodic_memory_tools import (
@@ -2296,6 +2297,28 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def send_message_tool(
+        to: str,
+        message: str,
+        summary: str = "",
+    ) -> str:
+        """
+        按子代理编号继续同一场会话。
+
+        只能发给已经派出的子代理编号。不会新开一场，也不会另建会话。
+        对方还在跑时，这句话排在原会话后面；已经结束时，用同一编号接着做。
+
+        Args:
+            to: 子代理编号，形如 subagent-...
+            message: 要让它接着做的内容（必填）。
+            summary: 可选短摘要，只用于进度，不代替正文。
+
+        Returns:
+            JSON。delivery=queued 表示还在跑并已排队；否则是这一场的执行结果。
+        """
+        return _continue_subagent_impl(to=to, message=message, summary=summary)
+
+    @tool
     def append_personal_memory_tool(
         text: str,
         kind: str = "note",
@@ -3549,6 +3572,7 @@ def _build_key_tools() -> List[BaseTool]:
         get_session_files_tool,
         # Agent 间通信
         agent_message_tool,
+        send_message_tool,
         append_personal_memory_tool,
         supersede_personal_memory_tool,
         agent_tool_permission_request_tool,

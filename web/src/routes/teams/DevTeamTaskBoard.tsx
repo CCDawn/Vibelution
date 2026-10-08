@@ -39,7 +39,81 @@ type DevTeamTaskBoardProps = {
   lang: "zh" | "en";
   teamId: string;
   members: TeamMember[];
+  speakingMemberId?: string;
 };
+
+const LIVE_ROUND_STATUSES = new Set(["queued", "running", "stopping"]);
+
+export type SpeakingParticipant = {
+  participantId?: string;
+  agentId?: string;
+  teamRole?: string;
+};
+
+export type SpeakingRound = {
+  roundId?: string;
+  status?: string;
+  speakerProgress?: Array<{
+    participantId?: string;
+    state?: string;
+    updatedAt?: string;
+  }>;
+};
+
+export function speakingTeamMemberId(
+  members: TeamMember[],
+  participants: SpeakingParticipant[],
+  round: SpeakingRound | null | undefined,
+) {
+  const status = String(round?.status || "").trim().toLowerCase();
+  if (!LIVE_ROUND_STATUSES.has(status)) {
+    return "";
+  }
+  const running = (round?.speakerProgress ?? [])
+    .filter((item) => String(item.state || "").trim() === "running" && String(item.participantId || "").trim())
+    .slice()
+    .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
+  const participantId = String(running[0]?.participantId || "").trim();
+  if (!participantId) {
+    return "";
+  }
+  const participant = participants.find((item) => String(item.participantId || "").trim() === participantId);
+  if (!participant) {
+    return "";
+  }
+  const agentId = String(participant.agentId || "").trim();
+  const byAgent = agentId ? members.find((member) => member.agentId === agentId) : undefined;
+  if (byAgent) {
+    return byAgent.memberId;
+  }
+  const role = String(participant.teamRole || "").trim();
+  return members.find((member) => member.role === role)?.memberId || "";
+}
+
+export function speakingTeamMemberIdFromRoom(
+  members: TeamMember[],
+  room: {
+    participants?: SpeakingParticipant[];
+    rounds?: SpeakingRound[];
+    activeRoundId?: string;
+  } | null | undefined,
+) {
+  if (!room) {
+    return "";
+  }
+  const rounds = room.rounds ?? [];
+  const activeId = String(room.activeRoundId || "").trim();
+  const round = (activeId ? rounds.find((item) => item.roundId === activeId) : undefined) ?? rounds[rounds.length - 1];
+  return speakingTeamMemberId(members, room.participants ?? [], round);
+}
+
+function initialActorId(members: TeamMember[], speakingMemberId: string | undefined) {
+  const speakingId = speakingMemberId?.trim() || "";
+  if (speakingId && members.some((member) => member.memberId === speakingId)) {
+    return speakingId;
+  }
+  return members.find((member) => member.role === "规划师")?.memberId || members[0]?.memberId || "";
+}
 
 function taskKey(teamId: string) {
   return ["teams", teamId, "dev-tasks"] as const;
@@ -60,13 +134,21 @@ type TaskActionBody = {
   ownerMemberId?: string;
   reviewNote?: string;
   subject?: string;
+  description?: string;
   writeScopes?: string[];
+  blockedBy?: string[];
 };
 
-export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProps) {
+export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" }: DevTeamTaskBoardProps) {
   const queryClient = useQueryClient();
-  const planner = members.find((member) => member.role === "规划师");
-  const [actorId, setActorId] = useState(planner?.memberId || members[0]?.memberId || "");
+  const [actorId, setActorId] = useState(() => initialActorId(members, speakingMemberId));
+  useEffect(() => {
+    const speakingId = speakingMemberId.trim();
+    if (!speakingId || !members.some((member) => member.memberId === speakingId)) {
+      return;
+    }
+    setActorId(speakingId);
+  }, [members, speakingMemberId]);
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [scopes, setScopes] = useState("");
@@ -107,7 +189,9 @@ export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProp
         ownerMemberId: body.ownerMemberId,
         reviewNote: body.reviewNote,
         subject: body.subject,
+        description: body.description,
         writeScopes: body.writeScopes,
+        blockedBy: body.blockedBy,
       }),
     onSuccess: replaceTasks,
   });
@@ -130,20 +214,10 @@ export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProp
       meta={text("群聊仍只记录这一轮讨论", "The room still only keeps this round")}
     >
       <VStack>
-      <label>
+      <span>
         {text("当前身份", "Acting as")}
-        <VNativeSelect
-          aria-label={text("当前身份", "Acting as")}
-          value={actorId}
-          onChange={(event) => setActorId(event.target.value)}
-        >
-          {members.map((member) => (
-            <option key={member.memberId} value={member.memberId}>
-              {member.role}
-            </option>
-          ))}
-        </VNativeSelect>
-      </label>
+        <strong aria-label={text("当前身份", "Acting as")}>{actorRole || text("未指定", "Unassigned")}</strong>
+      </span>
       {isPlanner ? (
         <form
           onSubmit={(event) => {
@@ -248,12 +322,17 @@ function TaskCard({
   const [note, setNote] = useState("");
   const [nextOwner, setNextOwner] = useState(task.ownerMemberId);
   const scopeText = task.writeScopes.join("、");
+  const blockerText = task.blockedBy.join("、");
   const [subjectDraft, setSubjectDraft] = useState(task.subject);
+  const [descriptionDraft, setDescriptionDraft] = useState(task.description);
   const [scopeDraft, setScopeDraft] = useState(scopeText);
+  const [blockerDraft, setBlockerDraft] = useState(blockerText);
   useEffect(() => {
     setSubjectDraft(task.subject);
+    setDescriptionDraft(task.description);
     setScopeDraft(scopeText);
-  }, [task.revision, task.subject, scopeText]);
+    setBlockerDraft(blockerText);
+  }, [task.revision, task.subject, task.description, scopeText, blockerText]);
   const text = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const status = STATUS_LABELS[task.status] || { zh: task.status, en: task.status };
   const canClaim = (actorRole === "开发工程师 A" || actorRole === "开发工程师 B")
@@ -262,7 +341,11 @@ function TaskCard({
   const canReview = actorRole === "评审员";
   const canPlan = actorRole === "规划师";
   const nextScopes = splitList(scopeDraft);
-  const sameEdit = subjectDraft.trim() === task.subject && nextScopes.join("\n") === task.writeScopes.join("\n");
+  const nextBlockers = splitList(blockerDraft);
+  const sameEdit = subjectDraft.trim() === task.subject
+    && descriptionDraft.trim() === task.description
+    && nextScopes.join("\n") === task.writeScopes.join("\n")
+    && nextBlockers.join("\n") === task.blockedBy.join("\n");
 
   return (
     <article aria-label={task.subject}>
@@ -330,11 +413,23 @@ function TaskCard({
             placeholder={text("任务主题", "Task subject")}
             onChange={(event) => setSubjectDraft(event.target.value)}
           />
+          <VNativeTextarea
+            aria-label={text(`修改说明 ${task.id}`, `Edit description ${task.id}`)}
+            value={descriptionDraft}
+            placeholder={text("验收标准和边界", "Acceptance and boundary")}
+            onChange={(event) => setDescriptionDraft(event.target.value)}
+          />
           <VNativeInput
             aria-label={text(`修改写范围 ${task.id}`, `Edit write scopes ${task.id}`)}
             value={scopeDraft}
             placeholder={text("写范围，例如 web/src/routes/login", "Write scopes, for example web/src/routes/login")}
             onChange={(event) => setScopeDraft(event.target.value)}
+          />
+          <VNativeInput
+            aria-label={text(`修改依赖 ${task.id}`, `Edit dependencies ${task.id}`)}
+            value={blockerDraft}
+            placeholder={text("依赖任务编号，例如 task-1", "Blocked by, for example task-1")}
+            onChange={(event) => setBlockerDraft(event.target.value)}
           />
           <VNativeButton
             type="button"
@@ -345,7 +440,9 @@ function TaskCard({
               action: "update",
               expectedRevision: task.revision,
               subject: subjectDraft.trim(),
+              description: descriptionDraft.trim(),
               writeScopes: nextScopes,
+              blockedBy: nextBlockers,
             })}
           >
             {text("保存修改", "Save edits")}

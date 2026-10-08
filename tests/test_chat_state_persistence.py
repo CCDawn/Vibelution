@@ -1313,6 +1313,39 @@ def test_create_child_session_writes_only_parent_and_child_rows(tmp_path, monkey
     assert load_session_chat_state(tmp_path, child_id)["title"] == "Child"
 
 
+def test_create_child_session_can_skip_parent_card_and_active_child(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    _stub_compat_shell_side_effects(monkeypatch)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_latest_user_message_id", lambda *_args, **_kwargs: "")
+    announced: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "_append_session_conversation_event",
+        lambda *_args, **_kwargs: announced.append("card"),
+    )
+    monkeypatch.setattr(session_service, "_record_child_session_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "get_session_detail", lambda session_id, **_kwargs: {"id": session_id})
+
+    result = session_service.create_child_session(
+        "session-a",
+        user_request="继续原来的子代理",
+        task_title="Quiet child",
+        auto_start=False,
+        switch_to_child=False,
+        announce_on_parent=False,
+        track_active_child=False,
+    )
+
+    child_id = str(result.get("childSessionId") or "")
+    parent = load_session_chat_state(tmp_path, "session-a")
+    assert child_id
+    assert announced == []
+    assert child_id in list(parent.get("child_session_ids") or [])
+    assert not str(parent.get("active_child_session_id") or "").strip()
+
+
 def test_archive_agent_sessions_upserts_archived_rows_without_dropping_siblings(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     _seed_two_runtime_rows(tmp_path, status_a="ready")

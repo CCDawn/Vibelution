@@ -598,6 +598,7 @@ class ToolExecutor:
         "financial_evidence_stage_tool",
         "financial_evidence_withdraw_tool",
         "spawn_agent_tool",
+        "send_message_tool",
         "apply_patch_tool",
         "apply_diff_edit_tool",
         "write_file_tool",
@@ -638,6 +639,7 @@ class ToolExecutor:
     }
     _RUNTIME_GOAL_SUBAGENT_BLOCKED_TOOLS = {
         "spawn_agent_tool",
+        "send_message_tool",
         "cli_agent_run_tool",
         "agent_message_tool",
     }
@@ -1371,6 +1373,8 @@ class ToolExecutor:
             return None
         if tool_name == "spawn_agent_tool":
             return "[只读子代理] 当前子 agent 运行在只读模式，禁止继续派发子 agent。"
+        if tool_name == "send_message_tool":
+            return "[只读子代理] 当前子 agent 运行在只读模式，禁止给其他子代理发消息。"
         return f"[只读子代理] 当前子 agent 运行在只读模式，禁止调用 `{tool_name}`。"
 
     def _check_runtime_block(self, tool_name: str, tool_args: dict) -> Optional[str]:
