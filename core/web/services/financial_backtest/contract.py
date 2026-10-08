@@ -11,6 +11,7 @@ from datetime import date
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from core.web.services import financial_market_service as market
 from core.web.services.financial_backtest.data import BacktestInputError
 
 PREVIEW_TTL_SECONDS = 60 * 60
@@ -53,9 +54,41 @@ class FinancialBacktestStoreError(FinancialBacktestError):
 def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise BacktestInputError("回测请求必须是对象")
-    symbol = str(payload.get("symbol") or "").strip()
+    raw_symbol = payload.get("symbol")
+    raw_symbols = payload.get("symbols")
+    if raw_symbol is not None and raw_symbols is not None:
+        raise BacktestInputError("symbol与symbols不能同时传入，请选其一")
+    if raw_symbols is not None:
+        if not isinstance(raw_symbols, (list, tuple)) or isinstance(raw_symbols, (str, bytes)):
+            raise BacktestInputError("symbols必须是股票代码列表")
+        if not raw_symbols or len(raw_symbols) > 10:
+            raise BacktestInputError("组合股票数量必须为1到10只")
+        normalized_symbols: list[str] = []
+        for value in raw_symbols:
+            if not isinstance(value, str) or not value.strip():
+                raise BacktestInputError("symbols必须只包含有效股票代码")
+            try:
+                normalized_symbols.append(market.normalize_a_share_symbol(value))
+            except market.MarketDataError as exc:
+                raise BacktestInputError(f"股票代码无效：{value}") from exc
+        if len(set(normalized_symbols)) != len(normalized_symbols):
+            raise BacktestInputError("symbols包含重复股票代码")
+        symbols = sorted(normalized_symbols)
+        symbol = None
+        mode = "basket"
+    else:
+        symbol = str(raw_symbol or "").strip()
+        if not symbol:
+            raise BacktestInputError("请传入symbol或symbols其中一个字段")
+        symbols = []
+        mode = "single"
     start_date = _iso_date(payload.get("startDate"), "startDate")
     end_date = _iso_date(payload.get("endDate"), "endDate")
+    out_of_sample_start_date = (
+        None
+        if payload.get("outOfSampleStartDate") is None
+        else _iso_date(payload.get("outOfSampleStartDate"), "outOfSampleStartDate")
+    )
     if start_date > end_date:
         raise BacktestInputError("startDate不能晚于endDate")
     strategy = payload.get("strategy")
@@ -79,9 +112,12 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     if len(model_id) > 160:
         raise BacktestInputError("modelId无效")
     return {
+        "mode": mode,
         "symbol": symbol,
+        "symbols": symbols,
         "startDate": start_date,
         "endDate": end_date,
+        "outOfSampleStartDate": out_of_sample_start_date,
         "strategy": strategy,
         "params": params,
         "maxTokens": max_tokens,

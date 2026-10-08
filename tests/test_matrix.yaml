@@ -63,6 +63,20 @@ rules:
       - "core/web/services/team_workflow/research_runtime/hypothesis_command_attempts.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_research_workflow_meeting_runtime.py tests/test_research_workflow_meeting_driver_recovery.py tests/test_research_workflow_hypothesis_command_attempts.py -q -n 3 --dist loadfile"
+  - id: finance-ai-backtests
+    description: "Frozen single-stock and shared-cash portfolio simulation, model recovery and holdout evaluation."
+    executionLayers:
+      - "focused"
+      - "backend"
+    paths:
+      - "core/web/services/financial_backtest/**"
+      - "core/web/services/financial_backtest_service.py"
+      - "core/web/routes/financial_backtests.py"
+      - "core/web/routes/financial_backtest_models.py"
+      - "tests/test_financial_backtest*.py"
+      - "tests/test_financial_ai_backtest_routes.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_backtest_execution.py tests/test_financial_backtest_model.py tests/test_financial_backtest_runtime.py tests/test_financial_backtest_integration.py tests/test_financial_ai_backtest_routes.py tests/test_financial_backtest_basket_data.py tests/test_financial_backtest_portfolio.py tests/test_financial_backtest_basket_integration.py tests/test_financial_backtest_evaluation.py -q -n 3 --dist loadfile"
   - id: finance-portfolio-proposals
     description: "Research-linked portfolio proposals, approval risk fences and atomic paper batches."
     executionLayers:

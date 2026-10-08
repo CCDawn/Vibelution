@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -11,13 +12,20 @@ from typing import Any
 from uuid import uuid4
 
 from core.web.services import financial_assistant_service
-from core.web.services.financial_backtest import data, engine
+from core.web.services.financial_backtest import (
+    basket_data,
+    data,
+    engine,
+    evaluation,
+    portfolio_engine,
+)
 from core.web.services.financial_backtest.contract import (
     MAX_OUTPUT_TOKENS_PER_DECISION,
     FinancialBacktestConflict,
     sha256_json,
 )
 from core.web.services.financial_backtest.decision import (
+    build_basket_decision_input,
     build_decision_input,
     build_messages,
     infer_decision,
@@ -162,6 +170,7 @@ class FinancialBacktestWorker:
         if isinstance(latest_submission, Mapping) and str(latest_submission.get("status") or "") == "submitting":
             return
         snapshot = _restore_snapshot(self._store.load_snapshot(agent_id, str(run.get("dataHash") or "")))
+        is_basket = isinstance(snapshot, basket_data.BasketSnapshot)
         params = dict(run.get("params") or {})
         schedule = tuple(str(item) for item in run.get("decisionSchedule", []))
         decisions = [dict(item) for item in run.get("decisions", []) if isinstance(item, Mapping)]
@@ -185,13 +194,29 @@ class FinancialBacktestWorker:
             if status not in {"queued", "running"}:
                 return
             decisions = [dict(item) for item in run.get("decisions", []) if isinstance(item, Mapping)]
-            previous = [
-                {"date": item["date"], "targetWeight": float(item["targetWeight"]) / 100.0, "reason": item["reason"], **({"confidence": item["confidence"]} if item.get("confidence") is not None else {})}
-                for item in decisions
-                if str(item.get("date") or "") < decision_date
-            ]
-            portfolio = engine.portfolio_at(snapshot, params, previous, decision_date)
-            decision_input = build_decision_input(snapshot, params, as_of_date=decision_date, portfolio=portfolio)
+            previous: list[dict[str, Any]] = []
+            for item in decisions:
+                if str(item.get("date") or "") >= decision_date:
+                    continue
+                prior = {"date": item["date"], "reason": item["reason"]}
+                if is_basket:
+                    prior["targetWeights"] = {
+                        str(symbol): float(weight) / 100.0
+                        for symbol, weight in (item.get("targetWeights") or {}).items()
+                    }
+                else:
+                    prior["targetWeight"] = float(item["targetWeight"]) / 100.0
+                if item.get("confidence") is not None:
+                    prior["confidence"] = item["confidence"]
+                previous.append(prior)
+            if is_basket:
+                portfolio = portfolio_engine.portfolio_at(snapshot, params, previous, decision_date)
+                decision_input = build_basket_decision_input(
+                    snapshot, params, as_of_date=decision_date, portfolio=portfolio
+                )
+            else:
+                portfolio = engine.portfolio_at(snapshot, params, previous, decision_date)
+                decision_input = build_decision_input(snapshot, params, as_of_date=decision_date, portfolio=portfolio)
             input_hash = sha256_json(decision_input)
             reserved_call_tokens = reserve_decision_call(build_messages(decision_input))
             plan = run.get("reservationPlan") if isinstance(run.get("reservationPlan"), Mapping) else {}
@@ -247,6 +272,14 @@ class FinancialBacktestWorker:
                     )
                 if str(decision.get("inputHash") or "") != input_hash:
                     raise ValueError("decision input hash mismatch")
+                _validate_decision_result(
+                    decision,
+                    expected_date=decision_date,
+                    model_id=str(run.get("modelId") or ""),
+                    is_basket=is_basket,
+                    symbols=tuple(snapshot.symbols) if is_basket else (),
+                    max_position_pct=float(params.get("maxPositionPct", 100)),
+                )
             except Exception as exc:  # noqa: BLE001 - provider outcome/charge can be unknown
                 self._mark_unknown(
                     agent_id, run_id, decision_date, _safe_error_code(exc), expected_attempt_id=attempt_id
@@ -382,7 +415,6 @@ class FinancialBacktestWorker:
                 raise FinancialBacktestConflict("回测决策日期已经存在，不重复写入")
             public = {
                 "date": str(decision["date"]),
-                "targetWeight": float(decision["targetWeight"]),
                 "reason": str(decision["reason"]),
                 "modelId": str(decision["modelId"]),
                 "inputHash": str(decision["inputHash"]),
@@ -390,6 +422,13 @@ class FinancialBacktestWorker:
                 "attempts": max(1, int(attempt)),
                 "tokens": max(0, int(decision.get("tokens") or 0)),
             }
+            if isinstance(decision.get("targetWeights"), Mapping):
+                public["targetWeights"] = {
+                    str(symbol): float(weight)
+                    for symbol, weight in decision["targetWeights"].items()
+                }
+            else:
+                public["targetWeight"] = float(decision["targetWeight"])
             if decision.get("confidence") is not None:
                 public["confidence"] = float(decision["confidence"])
             rows.append(public)
@@ -520,24 +559,57 @@ class FinancialBacktestWorker:
         except Exception as exc:  # noqa: BLE001 - no secondary failure may cause a retry
             _log_worker_error("failure-quarantine", exc)
 
-    def _complete_run(self, agent_id: str, run_id: str, snapshot: data.BacktestSnapshot, params: Mapping[str, Any]) -> None:
+    def _complete_run(
+        self,
+        agent_id: str,
+        run_id: str,
+        snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot,
+        params: Mapping[str, Any],
+    ) -> None:
         run = self._store.load_run(agent_id, run_id)
         schedule = tuple(str(item) for item in run.get("decisionSchedule", []))
         rows = [dict(item) for item in run.get("decisions", []) if isinstance(item, Mapping)]
         if {str(item.get("date") or "") for item in rows} != set(schedule):
             self._mark_failed(agent_id, run_id, "decision_plan_incomplete", "完整回测缺少AI决策点，不能计算绩效")
             return
-        engine_decisions = [
-            {
-                "date": str(item["date"]),
-                "targetWeight": float(item["targetWeight"]) / 100.0,
-                "reason": str(item["reason"]),
-                **({"confidence": item["confidence"]} if item.get("confidence") is not None else {}),
-                "inputHash": str(item["inputHash"]),
-            }
-            for item in rows
-        ]
-        result = engine.simulate(snapshot, params, engine_decisions)
+        if isinstance(snapshot, basket_data.BasketSnapshot):
+            engine_decisions = [
+                {
+                    "date": str(item["date"]),
+                    "targetWeights": {
+                        str(symbol): float(weight) / 100.0
+                        for symbol, weight in item["targetWeights"].items()
+                    },
+                    "reason": str(item["reason"]),
+                    **({"confidence": item["confidence"]} if item.get("confidence") is not None else {}),
+                    "inputHash": str(item["inputHash"]),
+                }
+                for item in rows
+            ]
+            result = portfolio_engine.simulate(snapshot, params, engine_decisions)
+        else:
+            engine_decisions = [
+                {
+                    "date": str(item["date"]),
+                    "targetWeight": float(item["targetWeight"]) / 100.0,
+                    "reason": str(item["reason"]),
+                    **({"confidence": item["confidence"]} if item.get("confidence") is not None else {}),
+                    "inputHash": str(item["inputHash"]),
+                }
+                for item in rows
+            ]
+            result = engine.simulate(snapshot, params, engine_decisions)
+        out_of_sample_start = run.get("outOfSampleStartDate") or params.get("outOfSampleStartDate")
+        window_evaluation = (
+            evaluation.evaluate_windows(
+                result["equity"],
+                result["orders"],
+                initial_cash=float(params["initialCash"]),
+                out_of_sample_start_date=str(out_of_sample_start),
+            )
+            if out_of_sample_start
+            else None
+        )
         def mutate(state: dict[str, Any]) -> None:
             if str(state.get("status") or "") == "stop_requested":
                 # The last requested decision completed; the result is complete and deterministic.
@@ -546,10 +618,17 @@ class FinancialBacktestWorker:
             state["completedDecisionCount"] = len(rows)
             state["progress"] = 1.0
             state["metrics"] = result["metrics"]
+            state["evaluation"] = window_evaluation
+            if out_of_sample_start:
+                state["outOfSampleStartDate"] = str(out_of_sample_start)
             state["equity"] = result["equity"]
             state["trades"] = result["trades"]
             state["orders"] = result["orders"]
             state["benchmarkOrders"] = result.get("benchmarkOrders", [])
+            state["benchmarkStatus"] = result.get("benchmarkStatus")
+            state["unfilledBenchmarkSymbols"] = list(
+                result.get("unfilledBenchmarkSymbols") or []
+            )
             state["completedAt"] = _iso(_now(self._now_provider))
             state["currentDecisionDate"] = None
             state["decisionSubmission"] = None
@@ -612,8 +691,68 @@ def _financial_assistant_ids() -> list[str]:
     ]
 
 
-def _restore_snapshot(payload: Mapping[str, Any]) -> data.BacktestSnapshot:
+def _validate_decision_result(
+    decision: Mapping[str, Any],
+    *,
+    expected_date: str,
+    model_id: str,
+    is_basket: bool,
+    symbols: tuple[str, ...],
+    max_position_pct: float,
+) -> None:
+    if not isinstance(decision, Mapping):
+        raise TypeError("decision result must be an object")
+    if str(decision.get("date") or "") != expected_date:
+        raise ValueError("decision date mismatch")
+    if str(decision.get("modelId") or "") != model_id:
+        raise ValueError("decision model mismatch")
+    reason = decision.get("reason")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 2_000:
+        raise ValueError("decision reason is invalid")
+    confidence = decision.get("confidence")
+    if confidence is not None:
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            raise TypeError("decision confidence is invalid")
+        if not math.isfinite(float(confidence)) or not 0 <= float(confidence) <= 1:
+            raise ValueError("decision confidence is invalid")
+    if is_basket:
+        weights = decision.get("targetWeights")
+        if not isinstance(weights, Mapping) or set(weights) != set(symbols):
+            raise ValueError("decision targetWeights do not match the frozen symbols")
+        if decision.get("targetWeight") is not None:
+            raise ValueError("basket decision has single-symbol targetWeight")
+        values: list[float] = []
+        for symbol in symbols:
+            value = weights[symbol]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"decision target weight is invalid for {symbol}")
+            normalized = float(value)
+            if not math.isfinite(normalized) or normalized < 0 or normalized > max_position_pct:
+                raise ValueError(f"decision target weight is out of range for {symbol}")
+            values.append(normalized)
+        if sum(values) > 100:
+            raise ValueError("decision target weights exceed 100 percent")
+        return
+    value = decision.get("targetWeight")
+    if decision.get("targetWeights") is not None:
+        raise ValueError("single-symbol decision has targetWeights")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("decision targetWeight is invalid")
+    normalized = float(value)
+    if not math.isfinite(normalized) or normalized < 0 or normalized > max_position_pct:
+        raise ValueError("decision targetWeight is out of range")
+
+
+def _restore_snapshot(payload: Mapping[str, Any]) -> data.BacktestSnapshot | basket_data.BasketSnapshot:
     try:
+        basket_payload = payload.get("basketSnapshot")
+        if basket_payload is not None:
+            if not isinstance(basket_payload, Mapping):
+                raise TypeError("basketSnapshot must be an object")
+            snapshot = basket_data.restore_basket_snapshot(basket_payload)
+            if str(payload.get("dataHash") or "") != snapshot.data_hash:
+                raise ValueError("basket data hash mismatch")
+            return snapshot
         coverage_payload = dict(payload["coverage"])
         coverage_payload["providerWindows"] = tuple(coverage_payload.get("providerWindows") or [])
         coverage = data.BacktestCoverage(**coverage_payload)

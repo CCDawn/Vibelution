@@ -4,15 +4,25 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    model_validator,
+)
 
 
 class FinancialBacktestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    symbol: StrictStr = Field(min_length=1, max_length=24)
+    symbol: StrictStr | None = Field(default=None, min_length=1, max_length=24)
+    symbols: list[StrictStr] | None = Field(default=None, min_length=1, max_length=10)
     startDate: StrictStr = Field(min_length=10, max_length=10)
     endDate: StrictStr = Field(min_length=10, max_length=10)
+    outOfSampleStartDate: StrictStr | None = Field(default=None, min_length=10, max_length=10)
     strategy: StrictStr = Field(min_length=1, max_length=4_000)
     initialCash: StrictFloat | StrictInt = Field(default=100_000, ge=1_000, le=100_000_000, allow_inf_nan=False)
     maxPositionPct: StrictFloat | StrictInt = Field(default=100, ge=0, le=100, allow_inf_nan=False)
@@ -23,6 +33,12 @@ class FinancialBacktestRequest(BaseModel):
     maxDecisions: StrictInt = Field(default=500, ge=1, le=500)
     maxTokens: StrictInt = Field(default=500_000, ge=512, le=2_000_000)
     modelId: StrictStr | None = Field(default=None, max_length=160)
+
+    @model_validator(mode="after")
+    def require_one_symbol_selector(self) -> FinancialBacktestRequest:
+        if bool(self.symbol) == bool(self.symbols):
+            raise ValueError("请传入symbol或symbols其中一个字段")
+        return self
 
 
 class FinancialBacktestPreviewRequest(FinancialBacktestRequest):
@@ -88,6 +104,7 @@ class FinancialBacktestParams(BaseModel):
     slippageBps: float
     maxDecisions: int
     maxTokens: int
+    outOfSampleStartDate: str | None = None
 
 
 class FinancialBacktestPreview(BaseModel):
@@ -96,8 +113,13 @@ class FinancialBacktestPreview(BaseModel):
     agentId: str
     previewId: str
     expiresAt: str
-    symbol: str
+    symbol: str | None
+    symbols: list[str] = Field(default_factory=list)
     dateCoverage: FinancialBacktestCoverage
+    assetCoverage: dict[str, FinancialBacktestCoverage] = Field(default_factory=dict)
+    assetDataHashes: dict[str, str] = Field(default_factory=dict)
+    assetSources: dict[str, dict[str, str]] = Field(default_factory=dict)
+    outOfSampleStartDate: str | None = None
     decisionSchedule: list[str]
     decisionCount: int
     maxDecisions: int
@@ -125,7 +147,8 @@ class FinancialBacktestDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     date: str
-    targetWeight: float = Field(ge=0, le=100, description="AI目标仓位百分比，0到maxPositionPct")
+    targetWeight: float | None = Field(default=None, ge=0, le=100, description="AI目标仓位百分比，0到maxPositionPct")
+    targetWeights: dict[str, float] | None = None
     reason: str = Field(min_length=1, max_length=2_000)
     confidence: float | None = Field(default=None, ge=0, le=1)
     modelId: str
@@ -133,6 +156,12 @@ class FinancialBacktestDecision(BaseModel):
     decisionHash: str
     attempts: int = 1
     tokens: int = 0
+
+    @model_validator(mode="after")
+    def require_one_weight_shape(self) -> FinancialBacktestDecision:
+        if (self.targetWeight is None) == (self.targetWeights is None):
+            raise ValueError("决策必须且只能包含targetWeight或targetWeights")
+        return self
 
 
 class FinancialBacktestEquityPoint(BaseModel):
@@ -142,11 +171,15 @@ class FinancialBacktestEquityPoint(BaseModel):
     equity: float
     benchmarkEquity: float
     cash: float
-    shares: int
-    units: int
-    marketValue: float
-    benchmarkCash: float
-    benchmarkShares: int
+    shares: int | None = None
+    units: int | None = None
+    marketValue: float | None = None
+    benchmarkCash: float | None = None
+    benchmarkShares: int | None = None
+    positions: dict[str, int] | None = None
+    marketValues: dict[str, float] | None = None
+    sellablePositions: dict[str, int] | None = None
+    benchmarkPositions: dict[str, int] | None = None
 
 
 class FinancialBacktestTrade(BaseModel):
@@ -164,6 +197,7 @@ class FinancialBacktestTrade(BaseModel):
     slippageCost: float
     notional: float
     tPlusOne: bool
+    symbol: str | None = None
 
 
 class FinancialBacktestOrder(BaseModel):
@@ -185,6 +219,7 @@ class FinancialBacktestOrder(BaseModel):
     slippageCost: float
     tPlusOne: bool
     limitStatus: str
+    symbol: str | None = None
 
 
 class FinancialBacktestRunSummary(BaseModel):
@@ -192,7 +227,8 @@ class FinancialBacktestRunSummary(BaseModel):
 
     agentId: str
     runId: str
-    symbol: str
+    symbol: str | None
+    symbols: list[str] = Field(default_factory=list)
     status: Literal["queued", "running", "stop_requested", "stopped", "paused_unknown", "completed", "failed", "blocked"]
     createdAt: str
     updatedAt: str
@@ -206,7 +242,11 @@ class FinancialBacktestRunSummary(BaseModel):
     dataHash: str
     totalReturnPct: float | None = None
     maxDrawdownPct: float | None = None
+    benchmarkStatus: Literal["invested", "partial_cash_sleeves", "cash_only"] | None = None
+    unfilledBenchmarkSymbols: list[str] = Field(default_factory=list)
     terminalReason: str | None = None
+    outOfSampleStartDate: str | None = None
+    evaluation: dict[str, Any] | None = None
 
 
 class FinancialBacktestRunPage(BaseModel):
@@ -224,7 +264,8 @@ class FinancialBacktestRun(BaseModel):
     agentId: str
     runId: str
     clientRequestId: str
-    symbol: str
+    symbol: str | None
+    symbols: list[str] = Field(default_factory=list)
     status: Literal["queued", "running", "stop_requested", "stopped", "paused_unknown", "completed", "failed", "blocked"]
     progress: float
     currentDecisionDate: str | None
@@ -241,6 +282,10 @@ class FinancialBacktestRun(BaseModel):
     dataHash: str
     params: FinancialBacktestParams
     dateCoverage: FinancialBacktestCoverage
+    assetCoverage: dict[str, FinancialBacktestCoverage] = Field(default_factory=dict)
+    assetDataHashes: dict[str, str] = Field(default_factory=dict)
+    assetSources: dict[str, dict[str, str]] = Field(default_factory=dict)
+    outOfSampleStartDate: str | None = None
     actionsStatus: Literal["clear", "factor_check_passed", "blocked", "unavailable"]
     actionDates: list[str]
     source: str
@@ -251,10 +296,13 @@ class FinancialBacktestRun(BaseModel):
     warnings: list[str]
     decisions: list[FinancialBacktestDecision]
     metrics: dict[str, Any] | None
+    evaluation: dict[str, Any] | None = None
     equity: list[FinancialBacktestEquityPoint]
     trades: list[FinancialBacktestTrade]
     orders: list[FinancialBacktestOrder]
     benchmarkOrders: list[FinancialBacktestOrder] = Field(default_factory=list)
+    benchmarkStatus: Literal["invested", "partial_cash_sleeves", "cash_only"] | None = None
+    unfilledBenchmarkSymbols: list[str] = Field(default_factory=list)
     startedAt: str | None
     updatedAt: str
     completedAt: str | None
@@ -270,6 +318,7 @@ class FinancialBacktestExport(BaseModel):
     agentId: str
     runId: str
     format: Literal["json", "csv"]
+    schemaVersion: Literal[1, 2] = 1
     fileName: str
     mediaType: str
     encoding: Literal["utf8", "base64"]

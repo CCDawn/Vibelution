@@ -482,7 +482,8 @@ def _execute_benchmark(
     while filled:
         notional = Decimal(filled) * fill_price
         fee = _fee(notional, commission_rate, minimum_commission)
-        if notional + fee <= initial_cash:
+        stamp = _stamp_duty(notional, execution.date, "buy")
+        if notional + fee + stamp <= initial_cash:
             break
         filled -= _LOT_SIZE
     if not filled:
