@@ -9,8 +9,8 @@ re-check and resume -> next review meeting auto-opens with continuous lineage.
 
 Also covers: missing searchEnvelope never triggers collection and keeps
 ``source_finding`` blocked; an unconverged latest round blocks
-``hypothesis_design``; the round budget forces a manual decision; interruption
-recovery keeps rounds and stays idempotent.
+``hypothesis_design``. Budget, sibling-gate, failure-trace, and handoff-replay
+cases read stored meetings and links; they do not open a review room.
 
 All discussion content comes from fake runners and the collection run creation
 is faked at ``source_collection.runs.start_source_collection_run``; no real
@@ -4743,6 +4743,162 @@ def _review_meetings(recorded: dict) -> list[dict]:
     return _opened_review_meetings(recorded["reviewMeeting"])
 
 
+def _seed_selection_record(
+    team_id: str,
+    agent_id: str,
+    selection_id: str,
+    candidate_ids: list[str],
+    meeting: dict,
+) -> dict:
+    """Append one selection row. ``record_hypothesis_selection`` also opens a review room."""
+    record = {
+        "schemaVersion": 1,
+        "selectionId": selection_id,
+        "program": meeting["program"],
+        "theme": meeting["theme"],
+        "campaign": meeting["campaign"],
+        "question": meeting["question"],
+        "branch": meeting["branch"],
+        "workflow": meeting["workflow"],
+        "agentId": meeting["agentId"],
+        "mode": meeting["mode"],
+        "scopeHash": meeting["scopeHash"],
+        "workflowRunId": "",
+        "questionId": _QUESTION_ID,
+        "selectedCandidateIds": list(candidate_ids),
+        "previousSelectionId": "",
+        "decidedBy": agent_id,
+        "createdAt": "2026-08-20T00:00:00Z",
+        "selectionHash": f"seed-{selection_id}",
+    }
+    selections._append_jsonl(selections._storage_path(team_id), record)
+    return record
+
+
+def _seed_close_payload(agent_id: str) -> dict:
+    return {
+        "summary": "seeded review closure",
+        "discussionTopics": ["novelty"],
+        "decisions": [_select_decision(agent_id)],
+        "closedBy": agent_id,
+        "memorySummaries": {agent_id: f"{agent_id} 的评审记忆"},
+        "memoryClass": "lesson",
+        "reusePolicy": "reusable_same_scope",
+        "evidenceStatus": "reported",
+    }
+
+
+def _stamp_digest_source_message(team_id: str, digest_id: str) -> None:
+    """Generation refuses a legacy digest with no source message.
+
+    The cited message is not the decision under test. Stamping one ref lets
+    round generation reach the claim check without opening a review room.
+    """
+    path = meetings._digests_path(team_id)
+    digest = meetings._latest_by_id(meetings._read_jsonl(path), "digestId", digest_id)
+    assert digest is not None
+    stamped = dict(digest)
+    stamped["sourceMessageRefs"] = [f"seed-message:{digest_id}"]
+    meetings._append_jsonl(path, stamped)
+
+
+def _seed_review_meeting(
+    team_id: str,
+    agent_id: str,
+    *,
+    meeting_round_id: str,
+    selection_id: str,
+    round_index: int,
+    candidate_id: str,
+    candidate_order: int,
+    closed: bool = False,
+    collection_request_id: str = "",
+    previous_meeting_round_id: str = "",
+    cite_source_message: bool = False,
+) -> dict:
+    """Store one review meeting and its link. No child session and no chat round."""
+    created = meetings.create_meeting_round(
+        team_id,
+        {
+            **_scope_fields(agent_id),
+            "meetingRoundId": meeting_round_id,
+            "meetingType": "hypothesis_review",
+            "participants": [agent_id],
+            "inputArtifactRefs": [f"hypothesis_selection:{selection_id}"],
+            "discussionItemRefs": [f"hypothesis_candidate:{candidate_id}"],
+        },
+    )
+    meeting = dict(created["meetingRound"])
+    if closed:
+        closed_result = meetings.close_meeting_round(
+            team_id, meeting_round_id, _seed_close_payload(agent_id)
+        )
+        meeting = dict(closed_result["meetingRound"])
+        if cite_source_message:
+            _stamp_digest_source_message(team_id, str(meeting["digestId"]))
+            meeting = dict(
+                meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+            )
+    chain._record_review_round_link(
+        team_id,
+        meeting_round_id=meeting_round_id,
+        previous_meeting_round_id=previous_meeting_round_id,
+        selection_id=selection_id,
+        collection_request_id=collection_request_id,
+        question_id=_QUESTION_ID,
+        round_index=round_index,
+        candidate_id=candidate_id,
+        candidate_order=candidate_order,
+    )
+    return meeting
+
+
+def _seed_collection_request(
+    team_id: str,
+    request_id: str,
+    meeting: dict,
+    *,
+    status: str = "pending",
+    handoff_ref: str = "",
+) -> dict:
+    """Append one collection request. An empty collection run skips claim materialization."""
+    record = {
+        "schemaVersion": 1,
+        "recordKind": chain.COLLECTION_REQUEST_KIND,
+        "requestId": request_id,
+        "requestHash": f"seed-{request_id}",
+        "status": status,
+        "meetingRoundId": meeting["meetingRoundId"],
+        "decisionId": "decision-seed",
+        "questionId": _QUESTION_ID,
+        "program": str(meeting.get("program") or ""),
+        "theme": str(meeting.get("theme") or ""),
+        "campaign": str(meeting.get("campaign") or ""),
+        "question": str(meeting.get("question") or ""),
+        "branch": str(meeting.get("branch") or ""),
+        "workflow": str(meeting.get("workflow") or ""),
+        "agentId": str(meeting.get("agentId") or ""),
+        "mode": str(meeting.get("mode") or ""),
+        "scopeHash": str(meeting.get("scopeHash") or ""),
+        "searchEnvelope": {},
+        "requirements": {},
+        "writebackPolicy": {},
+        "hypothesisCandidateIds": [],
+        "collectionRunId": "",
+        "collectionRunStatus": "",
+        "createdAt": "2026-08-20T00:00:00Z",
+        "handedOffAt": "2026-08-20T01:00:00Z" if status == "handed_off" else "",
+        "handoffRef": handoff_ref if status == "handed_off" else "",
+        "handoffError": {},
+    }
+    chain._append_jsonl(chain._storage_path(team_id), record)
+    return record
+
+
+def _stored_meeting_count(team_id: str) -> int:
+    return len(meetings.list_meeting_rounds(team_id)["meetings"])
+
+
 def test_selection_review_prompt_hydrates_canonical_candidate_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -5016,81 +5172,119 @@ def test_unconverged_round_blocks_hypothesis_design(
 def test_chain_state_budget_tracks_current_selection_not_history(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Budget exhaustion must follow the current selection's rounds; earlier
-    selections and superseded rounds must not fake budget_exhausted."""
-    team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    _fake_collection_runs(monkeypatch)
-    agent_ids = [agents[role] for role in _ROLES]
+    """Budget exhaustion follows the current selection's stored rounds.
 
-    recorded = _open_first_meeting(team_id, agent_ids)
-    previous_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-    for _ in range(2):
-        opened = chain.open_next_review_meeting(
+    The current selection is the last appended review link, not the selection
+    with the highest round index. Older meetings stay on disk. This case does
+    not open a review room.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    agent_id = agents["coordinator"]
+    selection_a = "hsel-budget-history-a"
+    previous_id = ""
+    anchor = None
+    for round_index in (1, 2, 3):
+        meeting = _seed_review_meeting(
             team_id,
+            agent_id,
+            meeting_round_id=f"meeting-budget-a-r{round_index}",
+            selection_id=selection_a,
+            round_index=round_index,
+            candidate_id="hyp-a",
+            candidate_order=0,
             previous_meeting_round_id=previous_id,
-            agent_runner=_marker_runner,
         )
-        assert opened["status"] == "opened"
-        previous_id = opened["meetingRound"]["meetingRoundId"]
+        anchor = meeting
+        previous_id = meeting["meetingRoundId"]
+    assert anchor is not None
+    _seed_selection_record(
+        team_id, agent_id, selection_a, ["hyp-a", "hyp-b"], anchor
+    )
 
     exhausted_state = chain.chain_state(team_id, _QUESTION_ID)
     assert exhausted_state["budgetExhausted"] is True
     assert exhausted_state["roundBudget"] == 3
+    assert exhausted_state["selectionId"] == selection_a
+    assert exhausted_state["meetingCount"] == 3
 
-    # Re-selecting candidates starts a fresh selection: its rounds restart at 1
-    # and budget exhaustion must clear even though the question keeps all old
-    # review meetings.
-    reselected = selections.record_hypothesis_selection(
+    # A later selection whose own round is 1 clears exhaustion. The three
+    # earlier meetings remain.
+    selection_b = "hsel-budget-history-b"
+    refreshed_meeting = _seed_review_meeting(
         team_id,
-        _selection_payload(agent_ids[1]),
-        agent_runner=_marker_runner,
+        agent_id,
+        meeting_round_id="meeting-budget-b-r1",
+        selection_id=selection_b,
+        round_index=1,
+        candidate_id="hyp-a",
+        candidate_order=0,
     )
-    assert reselected["status"] == "created"
+    _seed_selection_record(
+        team_id, agent_id, selection_b, ["hyp-a", "hyp-c"], refreshed_meeting
+    )
     refreshed_state = chain.chain_state(team_id, _QUESTION_ID)
     assert refreshed_state["budgetExhausted"] is False
     assert refreshed_state["roundBudget"] == 3
+    assert refreshed_state["selectionId"] == selection_b
+    assert refreshed_state["meetingCount"] == 4
 
 
 def test_round_budget_exhaustion_requires_manual_decision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """open_next reports budget_exhausted from stored links and opens nothing."""
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    _fake_collection_runs(monkeypatch)
-    agent_ids = [agents[role] for role in _ROLES]
-
-    recorded = _open_first_meeting(team_id, agent_ids)
-    first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+    agent_id = agents["coordinator"]
+    selection_id = "hsel-budget-limit"
+    first = _seed_review_meeting(
+        team_id,
+        agent_id,
+        meeting_round_id="meeting-budget-limit-r1",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-a",
+        candidate_order=0,
+    )
+    _seed_selection_record(
+        team_id, agent_id, selection_id, ["hyp-a", "hyp-b"], first
+    )
+    stored_count = _stored_meeting_count(team_id)
 
     # The limit is server-owned: callers cannot shrink or raise it.
     with pytest.raises(ValueError, match="fixed at 3"):
         chain.open_next_review_meeting(
             team_id,
-            previous_meeting_round_id=first_meeting_id,
+            previous_meeting_round_id=first["meetingRoundId"],
             budget=1,
             agent_runner=_marker_runner,
         )
+    assert _stored_meeting_count(team_id) == stored_count
 
-    previous_id = first_meeting_id
-    for expected_round in range(2, 4):
-        opened = chain.open_next_review_meeting(
+    previous_id = first["meetingRoundId"]
+    third = first
+    for round_index in (2, 3):
+        third = _seed_review_meeting(
             team_id,
+            agent_id,
+            meeting_round_id=f"meeting-budget-limit-r{round_index}",
+            selection_id=selection_id,
+            round_index=round_index,
+            candidate_id="hyp-a",
+            candidate_order=0,
             previous_meeting_round_id=previous_id,
-            agent_runner=_marker_runner,
         )
-        assert opened["status"] == "opened"
-        assert opened["roundIndex"] == expected_round
-        previous_id = opened["meetingRound"]["meetingRoundId"]
+        previous_id = third["meetingRoundId"]
+    stored_count = _stored_meeting_count(team_id)
 
     exhausted = chain.open_next_review_meeting(
         team_id,
-        previous_meeting_round_id=previous_id,
+        previous_meeting_round_id=third["meetingRoundId"],
         agent_runner=_marker_runner,
     )
     assert exhausted["status"] == "budget_exhausted"
     assert exhausted["roundIndex"] == 4
     assert exhausted["budget"] == 3
+    assert _stored_meeting_count(team_id) == stored_count
 
 
 def test_canonical_next_review_round_fans_out_the_full_selection(
@@ -5228,44 +5422,50 @@ def test_sibling_gate_classifies_only_actionable_siblings_as_pending(
 def test_open_next_review_meeting_reports_sibling_reviews_pending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The manual open-next command surfaces the blocked reason for the UI."""
-    team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    _fake_collection_runs(monkeypatch)
-    agent_ids = [agents[role] for role in _ROLES]
+    """The gated open-next command reports the still-open sibling and opens nothing.
 
-    recorded = _open_first_meeting(team_id, agent_ids)
-    first_round = _review_meetings(recorded)
-    assert len(first_round) == 2
-    first_meeting_id = first_round[0]["meetingRoundId"]
-    sibling_meeting_id = first_round[1]["meetingRoundId"]
-    _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-    chain.close_review_meeting(
+    An open sibling is enough to block. This case does not drive the sibling
+    through the digest approval room, and it does not exercise the ungated
+    open (that path still creates sessions).
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    agent_id = agents["coordinator"]
+    selection_id = "hsel-sibling-pending"
+    closed_meeting = _seed_review_meeting(
         team_id,
-        first_meeting_id,
-        _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+        agent_id,
+        meeting_round_id="meeting-sibling-a",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-a",
+        candidate_order=0,
+        closed=True,
     )
-    _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
+    open_sibling = _seed_review_meeting(
+        team_id,
+        agent_id,
+        meeting_round_id="meeting-sibling-b",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-b",
+        candidate_order=1,
+    )
+    _seed_selection_record(
+        team_id, agent_id, selection_id, ["hyp-a", "hyp-b"], closed_meeting
+    )
+    stored_count = _stored_meeting_count(team_id)
 
     blocked = chain.open_next_review_meeting(
         team_id,
-        previous_meeting_round_id=first_meeting_id,
+        previous_meeting_round_id=closed_meeting["meetingRoundId"],
         fan_out_selection=True,
         enforce_sibling_archive_gate=True,
         agent_runner=_marker_runner,
     )
     assert blocked["status"] == "sibling_reviews_pending"
-    assert blocked["pendingMeetingRoundIds"] == [sibling_meeting_id]
+    assert blocked["pendingMeetingRoundIds"] == [open_sibling["meetingRoundId"]]
     assert blocked["pendingCandidateIds"] == ["hyp-b"]
-
-    # The ungated direct path keeps its legacy behaviour.
-    unguarded = chain.open_next_review_meeting(
-        team_id,
-        previous_meeting_round_id=first_meeting_id,
-        fan_out_selection=True,
-        agent_runner=_marker_runner,
-    )
-    assert unguarded["status"] in {"opened", "created", "reused"}
+    assert _stored_meeting_count(team_id) == stored_count
 
 
 def test_v2_open_next_review_command_enforces_sibling_archive_gate(
@@ -5321,290 +5521,216 @@ def test_v2_open_next_review_command_enforces_sibling_archive_gate(
 def test_sibling_archive_gate_defers_next_review_until_last_sibling_closes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Confirming one candidate must not overwrite its sibling's approval gate.
+    """A handoff while a sibling review is still open must not open the next round.
 
-    The first handoff of a fan-out round reports ``sibling_reviews_pending``
-    while the sibling digest still awaits confirmation; the last sibling's
-    close re-opens the deferred round exactly once, and handoff replays
-    resolve to the already-open round instead of stacking another.
+    The first handoff and its replay both report ``sibling_reviews_pending``
+    and leave the stored round at index 1. Closing the last sibling, which
+    would open the deferred round, stays on the real fan-out tests.
     """
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    _fake_collection_runs(monkeypatch)
-    runtime = _build_runtime(tmp_path)
-    try:
-        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
-        agent_ids = [agents[role] for role in _ROLES]
+    agent_id = agents["coordinator"]
+    selection_id = "hsel-sibling-defer"
+    closed_meeting = _seed_review_meeting(
+        team_id,
+        agent_id,
+        meeting_round_id="meeting-defer-a",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-a",
+        candidate_order=0,
+        closed=True,
+    )
+    open_sibling = _seed_review_meeting(
+        team_id,
+        agent_id,
+        meeting_round_id="meeting-defer-b",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-b",
+        candidate_order=1,
+    )
+    _seed_selection_record(
+        team_id, agent_id, selection_id, ["hyp-a", "hyp-b"], closed_meeting
+    )
+    request = _seed_collection_request(
+        team_id, "hfcr-defer-1", closed_meeting, status="pending"
+    )
+    stored_count = _stored_meeting_count(team_id)
 
-        with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids)
-            first_round = _review_meetings(recorded)
-            assert len(first_round) == 2
-            first_meeting_id = first_round[0]["meetingRoundId"]
-            sibling_meeting_id = first_round[1]["meetingRoundId"]
+    handoff = chain.record_collection_handoff(
+        team_id,
+        request["requestId"],
+        handoff_ref="knowledge_package:pkg-1",
+        agent_runner=_marker_runner,
+    )
+    deferred = handoff["nextMeeting"]
+    assert deferred["status"] == "sibling_reviews_pending"
+    assert deferred["pendingMeetingRoundIds"] == [open_sibling["meetingRoundId"]]
+    assert deferred["pendingCandidateIds"] == ["hyp-b"]
+    links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
+    assert {int(link["roundIndex"]) for link in links} == {1}
+    assert _stored_meeting_count(team_id) == stored_count
 
-            closed_first = _close_first_meeting_with_envelope(
-                team_id, agent_ids, first_meeting_id, runtime
-            )
-            request = closed_first["collection"]["requests"][0]
-            assert closed_first["deferredNextReview"] is None
-
-            # The sibling digest now waits for the operator; the handoff must
-            # not open a round that would overwrite this confirmation gate.
-            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
-            handoff = chain.record_collection_handoff(
-                team_id,
-                request["requestId"],
-                handoff_ref="knowledge_package:pkg-1",
-                runtime=runtime,
-                agent_runner=_marker_runner,
-            )
-            deferred = handoff["nextMeeting"]
-            assert deferred["status"] == "sibling_reviews_pending"
-            assert deferred["pendingMeetingRoundIds"] == [sibling_meeting_id]
-            assert deferred["pendingCandidateIds"] == ["hyp-b"]
-            links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)[
-                "links"
-            ]
-            assert {int(link["roundIndex"]) for link in links} == {1}
-
-            # The handoff replay keeps reporting the deferred gate.
-            replay_handoff = chain.record_collection_handoff(
-                team_id,
-                request["requestId"],
-                handoff_ref="knowledge_package:pkg-1",
-                runtime=runtime,
-                agent_runner=_marker_runner,
-            )
-            assert replay_handoff["nextMeeting"]["status"] == "sibling_reviews_pending"
-
-            # Confirming the last sibling archives the logical round and
-            # re-opens the deferred round exactly once.
-            closed_sibling = chain.close_review_meeting(
-                team_id,
-                sibling_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-                agent_runner=_marker_runner,
-            )
-            triggered = closed_sibling["deferredNextReview"]
-            assert triggered["status"] in {"opened", "created", "reused"}
-            assert triggered["roundIndex"] == 2
-            second_round = _opened_review_meetings(triggered)
-            assert len(second_round) == 2
-
-            # Replaying the sibling close must not stack another round.
-            reclosed_sibling = chain.close_review_meeting(
-                team_id,
-                sibling_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            assert reclosed_sibling["status"] == "reused"
-            assert reclosed_sibling["deferredNextReview"] is None
-            links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)[
-                "links"
-            ]
-            assert [int(link["roundIndex"]) for link in links] == [1, 1, 2, 2]
-
-            # The replayed handoff now resolves to the already-open round.
-            rehandoff = chain.record_collection_handoff(
-                team_id,
-                request["requestId"],
-                handoff_ref="knowledge_package:pkg-1",
-                runtime=runtime,
-                agent_runner=_marker_runner,
-            )
-            assert rehandoff["nextMeeting"]["status"] == "reused"
-            assert (
-                rehandoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
-                == second_round[0]["meetingRoundId"]
-            )
-    finally:
-        runtime.close()
+    replay_handoff = chain.record_collection_handoff(
+        team_id,
+        request["requestId"],
+        handoff_ref="knowledge_package:pkg-1",
+        agent_runner=_marker_runner,
+    )
+    assert replay_handoff["status"] == "reused"
+    assert replay_handoff["nextMeeting"]["status"] == "sibling_reviews_pending"
+    links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
+    assert {int(link["roundIndex"]) for link in links} == {1}
+    assert _stored_meeting_count(team_id) == stored_count
 
 
 def test_late_handoff_for_archived_round_does_not_stack_another_round(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two sibling handoffs of one logical round must share one follow-up.
+    """A handoff for an older round is skipped once a newer round is already stored.
 
-    The first handoff of the fully archived round opens the next round; a
-    late handoff bound to the same now-superseded round is skipped instead of
-    stacking a second live round on top of it.
+    The newer round is closed, so the sibling gate would not block. Skipping
+    is the only thing that keeps this handoff from opening another meeting.
     """
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    _fake_collection_runs(monkeypatch)
-    agent_ids = [agents[role] for role in _ROLES]
-
-    recorded = _open_first_meeting(team_id, agent_ids)
-    first_round = _review_meetings(recorded)
-    assert len(first_round) == 2
-    first_meeting_id = first_round[0]["meetingRoundId"]
-    sibling_meeting_id = first_round[1]["meetingRoundId"]
-
-    _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-    closed_first = chain.close_review_meeting(
+    agent_id = agents["coordinator"]
+    selection_id = "hsel-late-handoff"
+    first = _seed_review_meeting(
         team_id,
-        first_meeting_id,
-        _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
+        agent_id,
+        meeting_round_id="meeting-late-a-r1",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-a",
+        candidate_order=0,
+        closed=True,
     )
-    first_request = closed_first["collection"]["requests"][0]
-
-    _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
-    closed_sibling = chain.close_review_meeting(
+    _seed_review_meeting(
         team_id,
-        sibling_meeting_id,
-        _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
+        agent_id,
+        meeting_round_id="meeting-late-b-r1",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-b",
+        candidate_order=1,
+        closed=True,
     )
-    sibling_request = closed_sibling["collection"]["requests"][0]
-    # Both siblings are archived but nothing is handed off yet, so the
-    # closure trigger has no deferred open to retry.
-    assert closed_sibling["deferredNextReview"] is None
-
-    first_open = chain.record_collection_handoff(
+    _seed_review_meeting(
         team_id,
-        first_request["requestId"],
-        handoff_ref="knowledge_package:pkg-1",
-        agent_runner=_marker_runner,
+        agent_id,
+        meeting_round_id="meeting-late-a-r2",
+        selection_id=selection_id,
+        round_index=2,
+        candidate_id="hyp-a",
+        candidate_order=0,
+        previous_meeting_round_id=first["meetingRoundId"],
+        closed=True,
     )
-    assert first_open["nextMeeting"]["status"] in {"opened", "created", "reused"}
-    assert first_open["nextMeeting"]["roundIndex"] == 2
+    _seed_selection_record(
+        team_id, agent_id, selection_id, ["hyp-a", "hyp-b"], first
+    )
+    request = _seed_collection_request(
+        team_id, "hfcr-late-1", first, status="pending"
+    )
+    stored_count = _stored_meeting_count(team_id)
 
     late_open = chain.record_collection_handoff(
         team_id,
-        sibling_request["requestId"],
+        request["requestId"],
         handoff_ref="knowledge_package:pkg-2",
         agent_runner=_marker_runner,
     )
     assert late_open["nextMeeting"]["status"] == "skipped"
     assert late_open["nextMeeting"]["reason"] == "newer_review_round_already_open"
+    assert late_open["nextMeeting"]["requestRoundIndex"] == 1
+    assert late_open["nextMeeting"]["roundIndex"] == 2
     links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
-    assert [int(link["roundIndex"]) for link in links] == [1, 1, 2, 2]
+    assert [int(link["roundIndex"]) for link in links] == [1, 1, 2]
+    assert _stored_meeting_count(team_id) == stored_count
 
 
 def test_interruption_recovery_preserves_rounds_and_idempotency(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A handed-off request that already has a follow-up link reuses that meeting.
+
+    Selection replay still opens a review room, so this case no longer calls
+    it. The proof that remains is the handoff replay: the stored link is
+    returned and no new meeting is created.
+    """
     team_id, agents = _hf_env(tmp_path, monkeypatch)
-    _patch_approved_question(monkeypatch)
-    collection_calls = _fake_collection_runs(monkeypatch)
-    runtime = _build_runtime(tmp_path)
-    try:
-        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
-        agent_ids = [agents[role] for role in _ROLES]
+    agent_id = agents["coordinator"]
+    selection_id = "hsel-handoff-replay"
+    request_id = "hfcr-replay-1"
+    linked = _seed_review_meeting(
+        team_id,
+        agent_id,
+        meeting_round_id="meeting-replay-r2",
+        selection_id=selection_id,
+        round_index=2,
+        candidate_id="hyp-a",
+        candidate_order=0,
+        previous_meeting_round_id="meeting-replay-r1",
+        collection_request_id=request_id,
+        closed=True,
+    )
+    _seed_selection_record(
+        team_id, agent_id, selection_id, ["hyp-a", "hyp-b"], linked
+    )
+    _seed_collection_request(
+        team_id,
+        request_id,
+        linked,
+        status="handed_off",
+        handoff_ref="knowledge_package:pkg-1",
+    )
+    stored_count = _stored_meeting_count(team_id)
+    link_count = len(
+        chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
+    )
 
-        with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids)
-            selection_id = recorded["selection"]["selectionId"]
-            first_round_meetings = _review_meetings(recorded)
-            assert len(first_round_meetings) == 2
-            first_meeting_id = first_round_meetings[0]["meetingRoundId"]
-            sibling_meeting_id = first_round_meetings[1]["meetingRoundId"]
+    rehandoff = chain.record_collection_handoff(
+        team_id,
+        request_id,
+        handoff_ref="knowledge_package:pkg-1",
+        agent_runner=_marker_runner,
+    )
+    assert rehandoff["status"] == "reused"
+    assert rehandoff["nextMeeting"]["status"] == "reused"
+    assert (
+        rehandoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
+        == linked["meetingRoundId"]
+    )
+    assert rehandoff["nextMeeting"]["roundIndex"] == 2
+    assert _stored_meeting_count(team_id) == stored_count
+    assert (
+        len(chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"])
+        == link_count
+    )
 
-            # Re-recording the same selection reuses everything (recovery from
-            # a crash between selection persistence and meeting opening).
-            replayed = selections.record_hypothesis_selection(
-                team_id,
-                _selection_payload(agent_ids[0]),
-                agent_runner=_marker_runner,
-            )
-            assert replayed["status"] == "reused"
-            assert replayed["reviewMeeting"]["status"] == "reused"
-            assert (
-                replayed["reviewMeeting"]["meetingRound"]["meetingRoundId"]
-                == first_meeting_id
-            )
-
-            closed_first = _close_first_meeting_with_envelope(
-                team_id, agent_ids, first_meeting_id, runtime
-            )
-            request = closed_first["collection"]["requests"][0]
-            assert (
-                closed_first["hypothesisRound"]["status"]
-                == "waiting_for_sibling_reviews"
-            )
-            _drive_to_awaiting_approval(team_id, sibling_meeting_id, agent_ids[0])
-            closed_sibling = chain.close_review_meeting(
-                team_id,
-                sibling_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            first_round_id = closed_sibling["hypothesisRound"]["round"]["roundId"]
-            assert closed_sibling["hypothesisRound"]["status"] == "created"
-
-            # Re-closing with the identical payload replays the closure and
-            # must not duplicate the collection request, the facade call, or
-            # the generated HypothesisRound.
-            reclosed = chain.close_review_meeting(
-                team_id,
-                first_meeting_id,
-                _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            assert reclosed["status"] == "reused"
-            assert len(reclosed["collection"]["requests"]) == 1
-            assert reclosed["collection"]["requests"][0]["requestId"] == request["requestId"]
-            assert len(collection_calls) == 1
-            assert reclosed["hypothesisRound"]["status"] == "reused"
-            assert reclosed["hypothesisRound"]["round"]["roundId"] == first_round_id
-            assert (
-                hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 1
-            )
-
-            handoff = chain.record_collection_handoff(
-                team_id,
-                request["requestId"],
-                handoff_ref="knowledge_package:pkg-1",
-                runtime=runtime,
-                agent_runner=_marker_runner,
-            )
-            second_round_meetings = _opened_review_meetings(handoff["nextMeeting"])
-            assert len(second_round_meetings) == 2
-            assert {
-                ref.split(":", 1)[1]
-                for item in second_round_meetings
-                for ref in list(item.get("discussionItemRefs") or [])
-                if str(ref).startswith("hypothesis_candidate:")
-            } == {"hyp-a", "hyp-b"}
-            second_meeting_id = second_round_meetings[0]["meetingRoundId"]
-
-            # Repeating the handoff is a no-op: no new meeting, no new link.
-            rehandoff = chain.record_collection_handoff(
-                team_id,
-                request["requestId"],
-                handoff_ref="knowledge_package:pkg-1",
-                runtime=runtime,
-                agent_runner=_marker_runner,
-            )
-            assert rehandoff["status"] == "reused"
-            assert (
-                rehandoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
-                == second_meeting_id
-            )
-            links = chain.list_review_round_links(team_id, question_id=_QUESTION_ID)["links"]
-            assert len(links) == 2 + len(second_round_meetings)
-
-            # Chain state survives a fresh read (no in-memory state).
-            state = chain.chain_state(team_id, _QUESTION_ID)
-            assert state["selectionId"] == selection_id
-            assert state["firstMeetingId"] == first_meeting_id
-            assert state["firstMeetingClosed"] is True
-            assert state["collectionRequestCount"] == 1
-            assert state["pendingCollectionCount"] == 0
-            assert state["collectionReady"] is True
-            assert state["meetingCount"] == 2 + len(second_round_meetings)
-            assert state["hypothesisRoundCount"] == 1
-    finally:
-        runtime.close()
+    replayed_again = chain.record_collection_handoff(
+        team_id,
+        request_id,
+        handoff_ref="knowledge_package:pkg-1",
+        agent_runner=_marker_runner,
+    )
+    assert replayed_again["nextMeeting"]["status"] == "reused"
+    assert (
+        replayed_again["nextMeeting"]["meetingRound"]["meetingRoundId"]
+        == linked["meetingRoundId"]
+    )
+    assert _stored_meeting_count(team_id) == stored_count
 
 
 def test_close_reports_failed_hypothesis_round_without_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A candidate without a claim fails round generation, not the closure."""
+    """An empty candidate claim fails generation and leaves the closed meetings closed.
+
+    The proof moved to ``_generate_hypothesis_round`` fed with stored closed
+    meetings. ``close_review_meeting`` is not called, so this case no longer
+    covers the collection trigger that a real closure would start.
+    """
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(
         monkeypatch,
@@ -5614,55 +5740,48 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
             {"hypothesis_id": "hyp-c", "statement": "hyp-c 的机制陈述"},
         ],
     )
-    collection_calls = _fake_collection_runs(monkeypatch)
     runtime = _build_runtime(tmp_path)
     try:
         _seed_parent_run(runtime, team_id, agents["experiment_planner"])
-        agent_ids = [agents[role] for role in _ROLES]
+        agent_id = agents["coordinator"]
+        selection_id = "hsel-empty-claim"
+        first = _seed_review_meeting(
+            team_id,
+            agent_id,
+            meeting_round_id="meeting-empty-claim-a",
+            selection_id=selection_id,
+            round_index=1,
+            candidate_id="hyp-a",
+            candidate_order=0,
+            closed=True,
+            cite_source_message=True,
+        )
+        second = _seed_review_meeting(
+            team_id,
+            agent_id,
+            meeting_round_id="meeting-empty-claim-b",
+            selection_id=selection_id,
+            round_index=1,
+            candidate_id="hyp-b",
+            candidate_order=1,
+            closed=True,
+            cite_source_message=True,
+        )
+        _seed_selection_record(
+            team_id, agent_id, selection_id, ["hyp-a", "hyp-b"], first
+        )
+
+        failed = chain._generate_hypothesis_round(team_id, second)
+        assert failed["status"] == "failed"
+        assert "hyp-b" in failed["error"]
+        assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
+        for meeting_id in (first["meetingRoundId"], second["meetingRoundId"]):
+            stored = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
+            assert stored["status"] == "closed"
 
         with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids)
-            sibling_meetings = _review_meetings(recorded)
-            assert len(sibling_meetings) == 2
-            first_meeting_id = sibling_meetings[0]["meetingRoundId"]
-            second_meeting_id = sibling_meetings[1]["meetingRoundId"]
-            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed_first = chain.close_review_meeting(
-                team_id,
-                first_meeting_id,
-                _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-
-            assert closed_first["meetingRound"]["status"] == "closed"
-            assert len(closed_first["collection"]["requests"]) == 1
-            assert len(collection_calls) == 1
-            assert (
-                closed_first["hypothesisRound"]["status"]
-                == "waiting_for_sibling_reviews"
-            )
-
-            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
-                team_id,
-                second_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-
-            # The closure and the collection trigger stand; only the round
-            # generation reports a structured failure (fail-closed via the
-            # readiness layer, never a rollback of the closed fact).
-            assert closed["meetingRound"]["status"] == "closed"
-            assert len(collection_calls) == 1
-            hypothesis_round = closed["hypothesisRound"]
-            assert hypothesis_round["status"] == "failed"
-            assert "hyp-b" in hypothesis_round["error"]
-            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
-
-            # hypothesis_design stays blocked on the unconverged round gate.
             design = _evaluate(runtime, team_id, "hypothesis_design")
-            assert "hypothesis_round_unconverged" in _blocker_codes(design)
+        assert "hypothesis_round_unconverged" in _blocker_codes(design)
     finally:
         runtime.close()
 
@@ -8816,7 +8935,12 @@ def test_regenerate_hypothesis_round_requires_closed_review_meeting(monkeypatch)
 def test_round_failure_traces_persist_and_backfill_on_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Sibling wait and failed generation both leave traces the retry resolves."""
+    """Sibling wait and a failed generation leave traces the retry resolves.
+
+    Meetings are stored closed or open. Generation is called directly, so a
+    review room is not opened. The retry still goes through
+    ``regenerate_hypothesis_round``.
+    """
     team_id, agents = _hf_env(tmp_path, monkeypatch)
     _patch_approved_question(
         monkeypatch,
@@ -8826,97 +8950,98 @@ def test_round_failure_traces_persist_and_backfill_on_retry(
             {"hypothesis_id": "hyp-c", "statement": "hyp-c 的机制陈述"},
         ],
     )
-    _fake_collection_runs(monkeypatch)
-    runtime = _build_runtime(tmp_path)
-    try:
-        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
-        agent_ids = [agents[role] for role in _ROLES]
+    agent_id = agents["coordinator"]
+    selection_id = "hsel-failure-trace"
+    first = _seed_review_meeting(
+        team_id,
+        agent_id,
+        meeting_round_id="meeting-trace-a",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-a",
+        candidate_order=0,
+        closed=True,
+        cite_source_message=True,
+    )
+    second = _seed_review_meeting(
+        team_id,
+        agent_id,
+        meeting_round_id="meeting-trace-b",
+        selection_id=selection_id,
+        round_index=1,
+        candidate_id="hyp-b",
+        candidate_order=1,
+    )
+    _seed_selection_record(
+        team_id, agent_id, selection_id, ["hyp-a", "hyp-b"], first
+    )
+    first_meeting_id = first["meetingRoundId"]
+    second_meeting_id = second["meetingRoundId"]
 
-        with server_operator_scope("u-1", roles=("operator",)):
-            recorded = _open_first_meeting(team_id, agent_ids)
-            sibling_meetings = _review_meetings(recorded)
-            assert len(sibling_meetings) == 2
-            first_meeting_id = sibling_meetings[0]["meetingRoundId"]
-            second_meeting_id = sibling_meetings[1]["meetingRoundId"]
+    # 1) Sibling still open: a blocked trace is appended.
+    waiting = chain._generate_hypothesis_round(team_id, first)
+    assert waiting["status"] == "waiting_for_sibling_reviews"
+    assert waiting["failureRecordId"].startswith("hrfail-")
+    blocked_list = hrounds.list_hypothesis_round_failures(team_id)
+    assert blocked_list["failureCount"] == 1
+    assert blocked_list["openFailureCount"] == 1
+    blocked = blocked_list["failures"][0]
+    assert blocked["status"] == "blocked"
+    assert blocked["failureCode"] == "fan_in_waiting_for_sibling_reviews"
+    assert blocked["selectionId"] == selection_id
+    assert blocked["roundIndex"] == 1
+    assert blocked["meetingRoundIds"] == [first_meeting_id]
+    assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
 
-            # 1) Sibling still open: a blocked trace is appended.
-            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
-            closed_first = chain.close_review_meeting(
-                team_id,
-                first_meeting_id,
-                _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            waiting = closed_first["hypothesisRound"]
-            assert waiting["status"] == "waiting_for_sibling_reviews"
-            assert waiting["failureRecordId"].startswith("hrfail-")
-            blocked_list = hrounds.list_hypothesis_round_failures(team_id)
-            assert blocked_list["failureCount"] == 1
-            assert blocked_list["openFailureCount"] == 1
-            blocked = blocked_list["failures"][0]
-            assert blocked["status"] == "blocked"
-            assert blocked["failureCode"] == "fan_in_waiting_for_sibling_reviews"
-            assert blocked["selectionId"]
-            assert blocked["roundIndex"] == 1
-            assert blocked["meetingRoundIds"] == [first_meeting_id]
-            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
+    # 2) Fan-in ready but generation fails: a classified failed trace.
+    closed_second = meetings.close_meeting_round(
+        team_id, second_meeting_id, _seed_close_payload(agent_id)
+    )
+    _stamp_digest_source_message(
+        team_id, str(closed_second["meetingRound"]["digestId"])
+    )
+    second_meeting = meetings.get_meeting_round(team_id, second_meeting_id)[
+        "meetingRound"
+    ]
+    failed_round = chain._generate_hypothesis_round(team_id, second_meeting)
+    assert failed_round["status"] == "failed"
+    assert "hyp-b" in failed_round["error"]
+    assert failed_round["failureRecordId"].startswith("hrfail-")
+    failures = hrounds.list_hypothesis_round_failures(team_id)
+    assert failures["failureCount"] == 2
+    assert failures["openFailureCount"] == 2
+    failed_trace = next(
+        item
+        for item in failures["failures"]
+        if item["failureCode"] != "fan_in_waiting_for_sibling_reviews"
+    )
+    assert failed_trace["failureCode"] == "hypothesis_round_precondition_failed"
+    assert failed_trace["status"] == "failed"
+    assert first_meeting_id in failed_trace["meetingRoundIds"]
+    assert second_meeting_id in failed_trace["meetingRoundIds"]
+    assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
 
-            # 2) Fan-in ready but generation fails: a classified failed trace.
-            _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
-            closed = chain.close_review_meeting(
-                team_id,
-                second_meeting_id,
-                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
-                runtime=runtime,
-            )
-            failed_round = closed["hypothesisRound"]
-            assert failed_round["status"] == "failed"
-            assert "hyp-b" in failed_round["error"]
-            assert failed_round["failureRecordId"].startswith("hrfail-")
-            failures = hrounds.list_hypothesis_round_failures(team_id)
-            assert failures["failureCount"] == 2
-            assert failures["openFailureCount"] == 2
-            failed_trace = next(
-                item
-                for item in failures["failures"]
-                if item["failureCode"] != "fan_in_waiting_for_sibling_reviews"
-            )
-            assert failed_trace["failureCode"] == (
-                "hypothesis_round_precondition_failed"
-            )
-            assert failed_trace["status"] == "failed"
-            assert first_meeting_id in failed_trace["meetingRoundIds"]
-            assert second_meeting_id in failed_trace["meetingRoundIds"]
-            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
-
-            # 3) Failure cause removed: the regenerate command rebuilds the
-            # round and resolves every open trace.
-            _patch_approved_question(
-                monkeypatch,
-                hypotheses=[
-                    {"hypothesis_id": "hyp-a", "statement": "hyp-a 的机制陈述"},
-                    {"hypothesis_id": "hyp-b", "statement": "hyp-b 的机制陈述"},
-                    {"hypothesis_id": "hyp-c", "statement": "hyp-c 的机制陈述"},
-                ],
-            )
-            regenerated = chain.regenerate_hypothesis_round(
-                team_id, second_meeting_id
-            )
-            assert regenerated["status"] == "created"
-            round_id = regenerated["roundId"]
-            assert round_id
-            assert regenerated["round"]["roundId"] == round_id
-            assert regenerated["round"]["status"] == "closed"
-            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 1
-            after = hrounds.list_hypothesis_round_failures(team_id)
-            assert after["failureCount"] == 2
-            assert after["openFailureCount"] == 0
-            assert all(
-                item["resolvedByRoundId"] == round_id
-                for item in after["failures"]
-            )
-    finally:
-        runtime.close()
+    # 3) Failure cause removed: the regenerate command rebuilds the round
+    # and resolves every open trace.
+    _patch_approved_question(
+        monkeypatch,
+        hypotheses=[
+            {"hypothesis_id": "hyp-a", "statement": "hyp-a 的机制陈述"},
+            {"hypothesis_id": "hyp-b", "statement": "hyp-b 的机制陈述"},
+            {"hypothesis_id": "hyp-c", "statement": "hyp-c 的机制陈述"},
+        ],
+    )
+    regenerated = chain.regenerate_hypothesis_round(team_id, second_meeting_id)
+    assert regenerated["status"] == "created"
+    round_id = regenerated["roundId"]
+    assert round_id
+    assert regenerated["round"]["roundId"] == round_id
+    assert regenerated["round"]["status"] == "closed"
+    assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 1
+    after = hrounds.list_hypothesis_round_failures(team_id)
+    assert after["failureCount"] == 2
+    assert after["openFailureCount"] == 0
+    assert all(item["resolvedByRoundId"] == round_id for item in after["failures"])
 # ---------------------------------------------------------------------------
 # V2 operator stop semantics: a stalled meeting that already produced
 # completed messages must terminate through a real stopped-execution close
