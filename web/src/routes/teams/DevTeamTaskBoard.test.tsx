@@ -9,11 +9,13 @@ import type { TeamMember } from "../../api/types";
 import { DevTeamTaskBoard } from "./DevTeamTaskBoard";
 
 const listDevTeamTasks = vi.fn();
+const listDevTeamTaskChanges = vi.fn();
 const createDevTeamTask = vi.fn();
 const mutateDevTeamTask = vi.fn();
 
 vi.mock("../../api/devTeamTasks", () => ({
   listDevTeamTasks: (...args: unknown[]) => listDevTeamTasks(...args),
+  listDevTeamTaskChanges: (...args: unknown[]) => listDevTeamTaskChanges(...args),
   createDevTeamTask: (...args: unknown[]) => createDevTeamTask(...args),
   mutateDevTeamTask: (...args: unknown[]) => mutateDevTeamTask(...args),
 }));
@@ -74,6 +76,7 @@ async function renderBoard() {
 describe("DevTeamTaskBoard", () => {
   afterEach(() => {
     listDevTeamTasks.mockReset();
+    listDevTeamTaskChanges.mockReset();
     createDevTeamTask.mockReset();
     mutateDevTeamTask.mockReset();
     act(() => root?.unmount());
@@ -125,6 +128,37 @@ describe("DevTeamTaskBoard", () => {
         expect(host?.textContent).toContain("工作区 codex/dev-team-1");
       });
     });
+  });
+
+  it("shows the task workspace changes to the reviewer", async () => {
+    listDevTeamTasks.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      tasks: [{ ...readyTask, status: "in_progress", ready: false, workspaceBranch: "codex/dev-team-1" }],
+      updatedAt: "",
+    });
+    listDevTeamTaskChanges.mockResolvedValue({
+      available: true,
+      workspace: true,
+      truncated: 1,
+      changes: [{ path: "web/src/routes/login.tsx", status: "modified" }],
+    });
+    await renderBoard();
+    const actor = host?.querySelector<HTMLSelectElement>('select[aria-label="当前身份"]');
+    await act(async () => {
+      if (actor) {
+        setNativeValue(actor, "m-rev");
+      }
+    });
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.textContent).toContain("修改 web/src/routes/login.tsx");
+        expect(host?.textContent).toContain("还有 1 个文件没有列在这里。");
+      });
+    });
+    expect(listDevTeamTaskChanges).toHaveBeenCalledWith("team-1", "task-1", expect.anything());
+    expect(host?.textContent).toContain("完成");
+    expect(host?.textContent).toContain("退回");
   });
 
   it("lets the planner add a task without writing it into the room", async () => {
