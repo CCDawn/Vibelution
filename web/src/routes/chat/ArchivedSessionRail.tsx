@@ -13,6 +13,7 @@ import {
   sortArchivedSessions,
   visibleArchivedSessions,
 } from "./archivedSessionRailModel";
+import styles from "./ArchivedSessionRail.styles";
 import type { SessionListSortBy } from "./sessionListPreferences";
 
 type ArchivedSessionRailProps = {
@@ -59,9 +60,9 @@ export function ArchivedSessionRail({
   const hiddenCount = Math.max(0, sorted.length - visible.length);
 
   return (
-    <section className="flex min-w-0 flex-col gap-1" data-vui="archived-session-rail" aria-label={t("archivedSessionsGroup")}>
-      <div className="flex min-w-0 items-center justify-between gap-2 px-2 py-1">
-        <p className="min-w-0 truncate text-[length:var(--vui-font-xs)] text-[var(--fg-tertiary)]">
+    <section className={styles.section} data-vui="archived-session-rail" aria-label={t("archivedSessionsGroup")}>
+      <div className={styles.toolbar}>
+        <p className={styles.count}>
           {t("archivedSessionCount")} {count}
         </p>
         <VButton

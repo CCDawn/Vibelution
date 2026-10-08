@@ -74,7 +74,7 @@ const styles = {
   sessionItemWithBulkSelect:
     "vui-routes-chatcodingroute sessionItemWithBulkSelect grid-cols-[28px_minmax(0,1fr)] items-center",
   sessionItemWithTrailingActions:
-    "vui-routes-chatcodingroute sessionItemWithTrailingActions grid-cols-[minmax(0,1fr)_auto] items-center pr-1",
+    "vui-routes-chatcodingroute sessionItemWithTrailingActions grid grid-cols-[minmax(0,1fr)_auto] items-center pr-1",
   sessionItemBulkSelected:
     "vui-routes-chatcodingroute sessionItemBulkSelected border-[color-mix(in_srgb,var(--fg-primary)_22%,var(--vui-border-hairline))] bg-[var(--vui-control-muted)]",
   sessionBulkSelectControl:
