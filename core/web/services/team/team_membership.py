@@ -262,7 +262,7 @@ def _apply_team_contract(
     }
     if expected["teamSource"] in s.TEAM_SOURCE_TO_KIND:
         expected["teamKind"] = s.TEAM_SOURCE_TO_KIND[expected["teamSource"]]
-    if expected["teamKind"] != "template_demo":
+    if expected["teamKind"] not in s.TEAM_KINDS_WITH_TEMPLATE_ID:
         expected["teamTemplateId"] = ""
     elif not expected["teamTemplateId"]:
         expected["teamTemplateId"] = s._infer_team_template_id(team)

@@ -49,7 +49,23 @@ def get_team_template(template_id: str) -> dict[str, Any]:
     return dict(template)
 
 
-def instantiate_team_template(template_id: str, *, name: str = "") -> dict[str, Any]:
+def instantiate_team_template(
+    template_id: str,
+    *,
+    name: str = "",
+    team_kind: str = "",
+    team_category: str = "",
+    team_source: str = "",
+    team_purpose: str = "",
+) -> dict[str, Any]:
+    """Materialize one template into a Team.
+
+    The keyword overrides let other entrypoints reuse the same materialization
+    with a different membership contract (e.g. task-scoped ephemeral teams keep
+    the dev-team roles/room/canvas but carry kind ``ephemeral``). Empty values
+    keep the template defaults.
+    """
+
     template = _resolve_template(template_id)
     _sync_project_roots()
     created_agents: list[dict[str, Any]] = []
@@ -92,13 +108,14 @@ def instantiate_team_template(template_id: str, *, name: str = "") -> dict[str, 
     team = team_service.create_team(
         name=trim_lines(name or "", max_lines=1).strip() or str(template["defaultTeamName"]),
         description=str(template["description"]),
-        purpose=str(template["purpose"]),
+        purpose=str(team_purpose or template["purpose"]),
         members=members,
-        team_kind="template_demo",
-        team_category="演示业务团队",
-        team_source="team_template",
+        team_kind=str(team_kind or "template_demo"),
+        team_category=str(team_category or "演示业务团队"),
+        team_source=str(team_source or "team_template"),
         team_template_id=str(template["templateId"]),
     )
+    resolved_team_source = str(team_source or "team_template")
     room_id = str(team.get("linkedChatRoomId") or "").strip()
     if room_id:
         room = chat_room_service.update_chat_room(
@@ -107,7 +124,7 @@ def instantiate_team_template(template_id: str, *, name: str = "") -> dict[str, 
             purpose=str(template["chatRoom"]["purpose"]),
             config={
                 **dict((team.get("linkedChatRoom") or {}) if isinstance(team.get("linkedChatRoom"), dict) else {}),
-                "source": "team_template",
+                "source": resolved_team_source,
                 "teamId": team["teamId"],
                 "teamTemplateId": template["templateId"],
                 **dict(template.get("chatRoom", {}).get("config") or {}),

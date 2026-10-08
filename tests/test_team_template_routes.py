@@ -149,3 +149,48 @@ def test_team_template_instantiate_creates_dev_team(tmp_path, monkeypatch):
     assert "apply_diff_edit_tool" in policy_by_role["dev_team_developer_a"]["allowedTools"]
     assert policy_by_role["dev_team_developer_b"]["writeScopes"] == ["private"]
     assert "apply_diff_edit_tool" in policy_by_role["dev_team_developer_b"]["allowedTools"]
+
+
+def test_ephemeral_team_route_creates_task_scoped_dev_team(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+    client = _client()
+
+    response = client.post(
+        "/api/teams/ephemeral",
+        json={"topic": "给导入向导补一个空态页", "name": "导入向导临时组队"},
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    team = payload["team"]
+    assert team["name"] == "导入向导临时组队"
+    assert team["teamKind"] == "ephemeral"
+    assert team["teamSource"] == "ephemeral_task"
+    assert team["teamCategory"] == "临时任务团队"
+    assert team["teamTemplateId"] == "dev-team"
+    assert team["purpose"] == "给导入向导补一个空态页"
+    assert team["status"] == "active"
+    assert {member["role"] for member in team["members"]} == {
+        "规划师",
+        "开发工程师 A",
+        "开发工程师 B",
+        "评审员",
+    }
+    assert team["linkedChatRoom"]["mode"] == "planned"
+    assert team["linkedChatRoom"]["purpose"] == "meeting"
+    assert payload["roomId"] == team["linkedChatRoomId"]
+    assert payload["taskId"] == "task-1"
+    assert payload["topic"] == "给导入向导补一个空态页"
+
+    listed = client.get(f"/api/teams/{team['teamId']}/dev-tasks")
+    assert listed.status_code == 200, listed.text
+    tasks = listed.json()["tasks"]
+    assert [item["id"] for item in tasks] == ["task-1"]
+    assert tasks[0]["status"] == "pending"
+    assert tasks[0]["description"] == "给导入向导补一个空态页"
+
+    missing_topic = client.post("/api/teams/ephemeral", json={"name": "没有主题"})
+    assert missing_topic.status_code == 422
+    blank_topic = client.post("/api/teams/ephemeral", json={"topic": "   "})
+    assert blank_topic.status_code == 422

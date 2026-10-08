@@ -15,8 +15,11 @@ from core.web.services import (
     team_service,
 )
 from core.web.services.team.team_format import MEMBER_ROW_FIELDS
+from core.web.services.team.dev_task_board import list_dev_tasks
+from core.web.services.team.ephemeral_team_service import EphemeralTeamError, create_ephemeral_team
 from tests.helpers.system_agent_state import (
     _evolution_system_agent_payloads,
+    _mark_config_agent_instances_present,
     _seed_ai_search_system_team_ready,
     _seed_challenge_cup_agent_assets,
     _seed_system_team_bootstrap_ready,
@@ -2757,3 +2760,56 @@ def test_custom_team_stays_editable_and_archivable(tmp_path, monkeypatch):
     assert updated["description"] == "自有团队可编辑"
     archived = team_service.archive_team(team["teamId"])
     assert archived["status"] == "archived"
+
+
+def test_create_ephemeral_team_binds_one_task_and_keeps_template_contract(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+    create_ephemeral_team(tmp_path, topic="给登录页加记住我选项", name="登录页临时组队")
+
+    result = create_ephemeral_team(tmp_path, topic="给登录页加记住我选项")
+
+    team = result["team"]
+    assert team["name"] == "临时组队·给登录页加记住我选项"
+    assert team["teamKind"] == "ephemeral"
+    assert team["teamSource"] == "ephemeral_task"
+    assert team["teamCategory"] == "临时任务团队"
+    assert team["teamTemplateId"] == "dev-team"
+    assert team["systemManaged"] is False
+    assert team["purpose"] == "给登录页加记住我选项"
+    assert team["status"] == "active"
+    assert {member["role"] for member in team["members"]} == {"规划师", "开发工程师 A", "开发工程师 B", "评审员"}
+    assert team["linkedChatRoom"]["mode"] == "planned"
+    assert team["linkedChatRoom"]["purpose"] == "meeting"
+    assert team["linkedChatRoom"]["participantCount"] == 4
+    assert result["roomId"] == team["linkedChatRoomId"]
+    assert result["taskId"] == "task-1"
+
+    board = list_dev_tasks(team["teamId"])
+    assert [item["id"] for item in board["tasks"]] == ["task-1"]
+    assert board["tasks"][0]["status"] == "pending"
+    assert board["tasks"][0]["subject"] == "给登录页加记住我选项"
+    assert board["tasks"][0]["description"] == "给登录页加记住我选项"
+
+    with pytest.raises(EphemeralTeamError, match="Topic is required"):
+        create_ephemeral_team(tmp_path, topic="   ")
+
+
+def test_ephemeral_team_can_be_archived_manually_with_member_cascade(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+    result = create_ephemeral_team(tmp_path, topic="整理发布清单")
+    team_id = result["team"]["teamId"]
+    agent_ids = [member["agentId"] for member in result["team"]["members"]]
+    room_id = result["roomId"]
+
+    archived = team_service.archive_team(team_id)
+
+    assert archived["status"] == "archived"
+    assert archived["teamKind"] == "ephemeral"
+    assert archived["teamSource"] == "ephemeral_task"
+    assert archived["teamTemplateId"] == "dev-team"
+    assert archived["linkedChatRoomId"] == ""
+    assert chat_room_service.get_chat_room_detail(room_id) is None
+    for agent_id in agent_ids:
+        assert agent_directory_service.get_agent(agent_id, include_archived=True)["status"] == "archived"

@@ -35,6 +35,16 @@ TEAM_KIND_DEFAULTS = {
         "chatRoomPurpose": "supervised_evolution",
     },
     "template_demo": {"teamCategory": "演示业务团队", "teamSource": "team_template", "chatRoomPurpose": "meeting"},
+    # Task-scoped ephemeral teams materialize the dev-team template for one
+    # topic and dissolve (archive) themselves once the dev-task board holds no
+    # open task. Not a derived kind: the board closure owns the lifecycle, so
+    # the team stays user-archivable and not system-managed.
+    "ephemeral": {
+        "teamCategory": "临时任务团队",
+        "teamSource": "ephemeral_task",
+        "chatRoomPurpose": "meeting",
+        "lifecycle": "task-scoped",
+    },
     # Financial analyst teams are provisioned and repaired by the
     # financial-team workflow (purpose prefix ``financial-stock-agent-team-v1``);
     # chatRoomPurpose stays "discussion" so pre-migration linked rooms keep
@@ -59,6 +69,7 @@ TEAM_SOURCE_TO_KIND = {
     "self_evolution": "self_evolution",
     "supervised_evolution": "supervised_evolution",
     "team_template": "template_demo",
+    "ephemeral_task": "ephemeral",
     "financial": "financial",
 }
 
@@ -73,6 +84,11 @@ TEAM_ID_TO_KIND = {
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
     "dev-team": "dev-team",
 }
+
+# Team kinds that legitimately carry a teamTemplateId through the membership
+# contract: template instances and task-scoped ephemeral teams (which
+# materialize the dev-team template and run its shared task board).
+TEAM_KINDS_WITH_TEMPLATE_ID = frozenset({"template_demo", "ephemeral"})
 
 
 def infer_team_template_id(team: dict[str, Any]) -> str:
@@ -146,7 +162,7 @@ def team_is_system_managed(team: dict[str, Any] | None) -> bool:
 
 
 def team_kind_allows_member_agent_cascade(team: dict[str, Any]) -> bool:
-    return str(team.get("teamKind") or infer_team_kind(team)).strip() in {"custom", "template_demo"}
+    return str(team.get("teamKind") or infer_team_kind(team)).strip() in {"custom", "template_demo", "ephemeral"}
 
 
 # Historical private aliases used by team_service.

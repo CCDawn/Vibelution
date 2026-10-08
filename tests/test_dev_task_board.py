@@ -1,12 +1,14 @@
 import os
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from core.infrastructure import git_process
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
+    agent_bulk_delete_service,
     agent_directory_service,
     chat_room_service,
     session_service,
@@ -16,18 +18,22 @@ from core.web.services import (
 from core.web.services.team.dev_task_board import (
     DevTaskBoardError,
     DevTaskStaleRevision,
+    _maybe_dissolve_ephemeral_team,
     apply_action,
     apply_board_action,
     apply_claim_with_workspace,
     apply_create,
+    create_dev_task,
     dev_task_board_prompt,
     dev_task_views,
     empty_dev_task_board,
     ensure_dev_task_workspace,
     format_dev_task_board_prompt,
+    mutate_dev_task,
     parse_dev_task_change_output,
     read_dev_task_changes,
 )
+from core.web.services.team.ephemeral_team_service import create_ephemeral_team
 from tests.helpers.system_agent_state import _mark_config_agent_instances_present
 
 
@@ -724,3 +730,103 @@ def _git(cwd: Path, args: list[str], env: dict | None = None) -> str:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     return str(result.stdout or "")
+
+
+def _ephemeral_env(tmp_path, monkeypatch):
+    # 临时组队链路会级联归档成员 Agent：钉住 data home 与 bulk 归档服务的根，
+    # 防止落到操作员真实数据目录。
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr(agent_bulk_delete_service, "PROJECT_ROOT", tmp_path)
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+
+
+def _planner_member_id(team: dict) -> str:
+    return next(str(member["memberId"]) for member in team["members"] if member["role"] == "规划师")
+
+
+def _capture_team_events(monkeypatch) -> list[tuple]:
+    events: list[tuple] = []
+    monkeypatch.setattr(team_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    return events
+
+
+def test_closed_board_dissolves_ephemeral_team_and_emits_event(tmp_path, monkeypatch):
+    _ephemeral_env(tmp_path, monkeypatch)
+    events = _capture_team_events(monkeypatch)
+    result = create_ephemeral_team(tmp_path, topic="给导出按钮补一个快捷键")
+    team_id = result["team"]["teamId"]
+
+    payload = mutate_dev_task(
+        team_id,
+        result["taskId"],
+        actor_member_id=_planner_member_id(result["team"]),
+        action="delete",
+        expected_revision=1,
+    )
+    assert payload["tasks"] == []
+
+    archived = team_service.get_team(team_id)
+    assert archived["status"] == "archived"
+    assert archived["teamKind"] == "ephemeral"
+    dissolved = [item for item in events if item[0][2] == "team.ephemeral_dissolved"]
+    assert len(dissolved) == 1
+    assert dissolved[-1][1]["fields"]["reason"] == "dev_task_board_all_completed"
+    assert dissolved[-1][1]["fields"]["boardTaskCount"] == 1
+
+
+def test_dissolved_ephemeral_team_stays_idempotent_on_repeat_triggers(tmp_path, monkeypatch):
+    _ephemeral_env(tmp_path, monkeypatch)
+    events = _capture_team_events(monkeypatch)
+    result = create_ephemeral_team(tmp_path, topic="清理过期缓存键")
+    team_id = result["team"]["teamId"]
+    mutate_dev_task(
+        team_id,
+        result["taskId"],
+        actor_member_id=_planner_member_id(result["team"]),
+        action="delete",
+        expected_revision=1,
+    )
+    assert team_service.get_team(team_id)["status"] == "archived"
+
+    # 再次触发（板全关 / 空板）不重复归档、不抛错。
+    _maybe_dissolve_ephemeral_team(result["team"], {"tasks": [{"id": "task-1", "status": "completed"}]})
+    _maybe_dissolve_ephemeral_team(result["team"], empty_dev_task_board())
+    assert len([item for item in events if item[0][2] == "team.ephemeral_dissolved"]) == 1
+    assert team_service.get_team(team_id)["status"] == "archived"
+
+    # 解散后的板操作按既有领域错误拒绝，不崩溃也不二次归档。
+    with pytest.raises(DevTaskBoardError):
+        mutate_dev_task(
+            team_id,
+            result["taskId"],
+            actor_member_id=_planner_member_id(result["team"]),
+            action="delete",
+            expected_revision=1,
+        )
+    assert len([item for item in events if item[0][2] == "team.ephemeral_dissolved"]) == 1
+
+
+def test_closed_board_keeps_non_ephemeral_dev_team_active(tmp_path, monkeypatch):
+    _ephemeral_env(tmp_path, monkeypatch)
+    events = _capture_team_events(monkeypatch)
+    instantiated = team_template_service.instantiate_team_template("dev-team", name="常驻开发团队")
+    team = instantiated["team"]
+    planner = _planner_member_id(team)
+
+    create_dev_task_result = create_dev_task(
+        str(team["teamId"]),
+        actor_member_id=planner,
+        subject="常驻团队的第一个任务",
+    )
+    task_id = create_dev_task_result["tasks"][0]["id"]
+    mutate_dev_task(
+        str(team["teamId"]),
+        task_id,
+        actor_member_id=planner,
+        action="delete",
+        expected_revision=1,
+    )
+
+    assert team_service.get_team(str(team["teamId"]))["status"] == "active"
+    assert [item for item in events if item[0][2] == "team.ephemeral_dissolved"] == []
