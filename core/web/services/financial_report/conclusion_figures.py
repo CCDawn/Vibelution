@@ -169,6 +169,11 @@ def ground_completed_report(report_text: str, items: list, events: list) -> str:
     """Ground one completed Turn without reading anything outside that Turn."""
 
     records = _tool_records(items, events)
+    return ground_report_records(report_text, records)
+
+
+def ground_report_records(report_text: str, records: list[tuple[str, str, str]]) -> str:
+    """Apply the same checker to caller-authorized original tool records."""
     market_kept = _market_quote_spans(str(report_text or ""), records)
     from core.web.services.financial_report.market_calculations import (
         market_calculation_spans,

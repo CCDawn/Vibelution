@@ -155,10 +155,10 @@ def _completed_report(agent_id: str, session_id: str, turn_id: str) -> tuple[str
         )
     except (OSError, RuntimeError, TypeError, ValueError):
         raise FinancialReportNotFound("未找到研究会话") from None
-    return _completed_report_from_events(all_events, session_id, turn_id)
+    return _completed_report_from_events(all_events, session_id, turn_id, agent_id=agent_id)
 
 
-def _completed_report_from_events(all_events: list, session_id: str, turn_id: str) -> tuple[str, str, str]:
+def _completed_report_from_events(all_events: list, session_id: str, turn_id: str, *, agent_id: str = "") -> tuple[str, str, str]:
     """Read an already-authorized snapshot, sharing export validation with catalog."""
     turn_events = [
         event
@@ -238,7 +238,16 @@ def _completed_report_from_events(all_events: list, session_id: str, turn_id: st
         flags=re.IGNORECASE,
     ):
         raise FinancialReportUnavailable("已停止的研究不能导出")
-    report_text = ground_completed_report(report_text, items, turn_events)
+    if agent_id and _TEAM_SYNTHESIS_PROMPT.search(request_text):
+        from core.web.services.financial_report.conclusion_figures import ground_report_records
+        from core.web.services.financial_report.team_evidence import original_tool_records, team_report_records
+
+        records = team_report_records(agent_id, session_id, turn_id, request=request_text,
+            report=report_text, completed_at=str(terminal.timestamp),
+            own=original_tool_records(all_events, session_id=session_id, turn_id=turn_id))
+        report_text = ground_report_records(report_text, records)
+    else:
+        report_text = ground_completed_report(report_text, items, turn_events)
     report_text = project_screening_comparison(report_text, request_text, items, turn_events)
     if len(report_text) > MAX_REPORT_TEXT_CHARS:
         raise FinancialReportTooLarge("研究报告超过导出大小限制")

@@ -11,6 +11,31 @@ This pack owns read projections and format rendering:
 
 Raw assistant HTML is always escaped. Export sizes are bounded at both the service and browser-adapter boundaries.
 
+`team_evidence.py` adds read-only original tool records to an owner-scoped
+multi-analyst summary. It resolves the exact summary Session/Turn to one of at
+most 40 runs, rechecks current team/role permissions, and verifies each native
+role's owner, submission ID, successful terminal and committed final answer.
+Only role Turns completed strictly before summary submission can contribute;
+equal timestamps cannot prove ordering. The active Journal branch, latest
+committed answer revision and latest outcome for each original tool call are
+used. Provisional/nonterminal answers and failed items cannot contribute. Ordinary
+reports and legacy summaries without this source binding retain same-Turn
+grounding. Missing or changed provenance fails closed without modifying the
+Journal or blocking export.
+
+Borrowed PDF excerpts require the run's ticker, an explicitly cited exact source
+URL and report period, valid original-PDF metadata including an exact excerpt
+hash match, and publication no later than
+the research date. Market snapshots require the run's exact symbol and a dated
+quote on or before that date, then pass the existing quote/calculation checks.
+Analyst opinions, news prose and public fundamentals summaries do not authorize
+numbers. Truncated excerpts whose original hash cannot be verified are rejected.
+Each tool output is bounded to 32,000 characters and combined borrowed
+records to 60. Duplicate observations are folded; conflicting page excerpts or
+market snapshots cannot authorize either version's numbers. All export formats
+and report catalog previews use the same projection. No external project code
+is copied and no second evidence/report store is created.
+
 Same-Turn `financial_market_snapshot_tool` results also verify raw share-price,
 signed change-percent and PE/PB occurrences by their exact fields. A report with
 one unambiguous stock and quote observation may reuse its labelled quote date

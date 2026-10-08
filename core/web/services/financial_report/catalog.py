@@ -78,7 +78,7 @@ def _session_rows(agent_id: str, row: dict) -> list[dict]:
         if not any(event.event_type == EVENT_TURN_COMPLETED for event in turn_events):
             continue
         try:
-            text, completed_at, _suffix = reports._completed_report_from_events(turn_events, session_id, turn_id)
+            text, completed_at, _suffix = reports._completed_report_from_events(events, session_id, turn_id, agent_id=agent_id)
         except reports.FinancialReportExportError:
             continue
         user_events = sorted((event for event in turn_events if event.event_type == EVENT_USER_MESSAGE and getattr(event, "visible_in_model", True)), key=lambda event: getattr(event, "sequence", 0))
