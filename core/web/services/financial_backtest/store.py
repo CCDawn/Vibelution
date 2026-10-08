@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -52,6 +53,12 @@ class FinancialBacktestStore:
                 root.relative_to(owner_root)
             except ValueError as exc:
                 raise FinancialBacktestStoreError("回测存储路径超出智能体私有工作区") from exc
+        # Instance/Agent territory plus a content hash exceeds MAX_PATH on
+        # Windows. Extend filesystem paths after the ordinary containment check;
+        # this also protects transaction sidecars and atomic-write temp files.
+        if os.name == "nt" and not str(root).startswith("\\\\?\\"):
+            raw = str(root)
+            root = Path("\\\\?\\UNC\\" + raw[2:] if raw.startswith("\\\\") else "\\\\?\\" + raw)
         if create:
             for name in ("snapshots", "previews", "runs"):
                 (root / name).mkdir(parents=True, exist_ok=True)

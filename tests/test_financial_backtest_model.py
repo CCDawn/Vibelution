@@ -197,6 +197,19 @@ def test_runtime_config_for_decision_is_bounded_and_disables_qwen_thinking(monke
     assert config.llm.get_profile("primary").retry_policy.max_attempts == 5
 
 
+def test_model_fingerprint_detects_sampling_change_with_same_model_id(monkeypatch):
+    from core.web.services.financial_backtest import service
+
+    config = _decision_config()
+    monkeypatch.setattr(decision_mod, "get_config", lambda: config)
+    original = service._model_fingerprint("test-qwen")
+    config.llm.get_profile("primary").temperature = 0.123
+    changed = service._model_fingerprint("test-qwen")
+
+    assert len(original) == len(changed) == 64
+    assert changed != original
+
+
 def test_qwen_decision_payload_explicitly_disables_thinking(monkeypatch):
     config = _decision_config()
     monkeypatch.setattr(decision_mod, "get_config", lambda: config)

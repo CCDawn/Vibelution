@@ -21,6 +21,7 @@
 | --- | --- | --- |
 | `session/` | `session_service.py` | [session/README.md](session/README.md) |
 | `financial_report/` | `financial_report_service.py` | [financial_report/README.md](financial_report/README.md) |
+| `financial_backtest/` | `financial_backtest_service.py` | [financial_backtest/README.md](financial_backtest/README.md) |
 | `team_workflow/` | `team_workflow_orchestration_service.py` | [team_workflow/README.md](team_workflow/README.md) |
 | `team/` | `team_service.py` | [team/README.md](team/README.md) |
 | `team_knowledge/` | `team_knowledge_service.py` | [team_knowledge/README.md](team_knowledge/README.md) |
@@ -98,6 +99,7 @@
 | `agent_operation_service.py` | Shared Agent catalog operations for HTTP routes and governed tools. | — | `agents.py` | `test_project_operation_tools.py` |
 | `agent_perception_service.py` | Operator-scoped perception configuration, bounded source reads and native background runs. | `agent_perception/` | `agents.py` | `test_agent_perception_policy.py`, `test_agent_perception_service.py`, `test_agent_perception_routes.py`, `test_agent_perception_runtime.py` |
 | `financial_assistant_service.py` | Financial specialist entry and explicit setup over native Agent/Session/knowledge lifecycle. | — | `financial_assistant.py` | `test_financial_assistant_service.py` |
+| `financial_backtest_service.py` | Durable historical AI decisions, simulation, recovery and export. | `financial_backtest/` | `financial_backtests.py` | `test_financial_backtest_execution.py`, `test_financial_backtest_runtime.py`, `test_financial_backtest_integration.py`, `test_financial_backtest_model.py`, `test_financial_ai_backtest_routes.py` |
 | `financial_market_service.py` | Read-only public A-share quotes, OHLC and search with source/time/unit validation. | — | `financial_assistant.py` | `test_financial_market_service.py` |
 | `financial_paper_service.py` | Simulation-only ledger for the financial Agent. | `financial_paper/` | `financial_paper.py` | `test_financial_paper_service.py` |
 | `financial_portfolio_service.py` | Read-only portfolio research derived from an Agent's paper ledger. | — | `financial_portfolio.py` | `test_financial_portfolio_service.py` |

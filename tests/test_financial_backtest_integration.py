@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from dataclasses import replace
 from datetime import datetime, timezone
 from io import StringIO
@@ -76,6 +77,7 @@ def _install_scenario(
     tmp_path: Path,
     *,
     snapshot: data.BacktestSnapshot | None = None,
+    storage_root: Path | None = None,
 ) -> tuple[FinancialBacktestStore, data.BacktestSnapshot, list[dict[str, Any]]]:
     agent = {
         "agentId": _AGENT_ID,
@@ -96,7 +98,9 @@ def _install_scenario(
     monkeypatch.setattr(runtime, "_record_event", lambda *args, **kwargs: None)
 
     snapshot = snapshot or _snapshot()
-    store = FinancialBacktestStore(path_resolver=lambda owner_id: tmp_path / owner_id / "ai-backtests")
+    store = FinancialBacktestStore(
+        path_resolver=lambda owner_id: (storage_root or tmp_path) / owner_id / "ai-backtests"
+    )
     prepared_requests: list[dict[str, Any]] = []
 
     def prepare_data(payload: dict[str, Any]) -> data.BacktestSnapshot:
@@ -334,3 +338,49 @@ def test_benchmark_retries_after_zero_volume_rejection_and_passes_real_dto(monke
     assert dto.status == "completed"
     assert [order.status for order in dto.benchmarkOrders] == ["rejected", "filled"]
     assert [order.date for order in dto.benchmarkOrders] == [_DAY_TWO, _DAY_THREE]
+
+
+def test_long_windows_storage_root_completes_backtest_and_export(monkeypatch, tmp_path):
+    storage_root = tmp_path
+    while len(str(storage_root / _AGENT_ID / "ai-backtests")) < 235:
+        deficit = 235 - len(str(storage_root / _AGENT_ID / "ai-backtests"))
+        storage_root = storage_root / ("x" * min(120, deficit))
+
+    store, _snapshot_value, _prepared_requests = _install_scenario(
+        monkeypatch, tmp_path, storage_root=storage_root
+    )
+    root = store.root_for(_AGENT_ID)
+    if os.name == "nt":
+        assert str(root).startswith("\\\\?\\")
+    assert len(str(root)) >= 235
+
+    preview = _new_preview(store, data_loader=service.data.prepare_data)
+    snapshot_path = root / "snapshots" / f"{preview['dataHash']}.json"
+    snapshot_lock_path = snapshot_path.with_name(snapshot_path.name + ".transaction.lock")
+    assert len(str(snapshot_path)) > 260
+    assert len(str(snapshot_lock_path)) > 260
+    assert store.load_snapshot(_AGENT_ID, preview["dataHash"])["dataHash"] == preview["dataHash"]
+
+    started = api.start_financial_backtest_run(
+        _AGENT_ID,
+        str(uuid4()),
+        preview["previewId"],
+        store=store,
+        now_provider=lambda: _NOW,
+    )
+    worker = runtime.FinancialBacktestWorker(
+        store=store,
+        assistant_loader=lambda: [_AGENT_ID],
+        decision_runner=lambda **kwargs: _decision(kwargs["decision_input"], 0),
+        worker_id="long-path-worker",
+    )
+    assert worker.process_pending_once(stop_requested=lambda: False) == 1
+
+    completed = api.get_financial_backtest_run(_AGENT_ID, started["runId"], store=store)
+    dto = FinancialBacktestRun.model_validate(completed)
+    assert dto.status == "completed"
+    exported = api.export_financial_backtest_run(
+        _AGENT_ID, started["runId"], "json", store=store
+    )
+    assert exported["mediaType"] == "application/json"
+    assert json.loads(exported["content"])["status"] == "completed"
