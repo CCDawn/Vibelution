@@ -88,6 +88,8 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
   const [planDirty, setPlanDirty] = useState(false);
   const [createAttempt, setCreateAttempt] = useState<CreateAttempt | null>(null);
   const [approvalOpen, setApprovalOpen] = useState(false);
+  const [expandedReportPreviews, setExpandedReportPreviews] = useState<Set<string>>(() => new Set());
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [pending, setPending] = useState("");
   const [error, setError] = useState("");
   const [, refreshExpiry] = useState(0);
@@ -113,6 +115,8 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     setPlanDirty(false);
     setCreateAttempt(null);
     setApprovalOpen(false);
+    setExpandedReportPreviews(new Set());
+    setSummaryExpanded(false);
     setPending("");
     setError("");
   }, [agentId]);
@@ -151,6 +155,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     setEditedTargets(proposal.targets.map((target) => ({ ...target })));
     setEditedPolicy({ ...proposal.policy });
     setPlanDirty(false);
+    setSummaryExpanded(false);
     setError("");
   }, [proposal?.proposalId, proposal?.planHash]);
 
@@ -195,6 +200,15 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     });
   }
 
+  function toggleReportPreview(key: string) {
+    setExpandedReportPreviews((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   function selectProposal(id: string) {
     setSelectedProposalId(id);
     setPlanDirty(false);
@@ -223,7 +237,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
   async function submitCreate(request: FinancialPortfolioProposalCreateRequest, retry = false) {
     if (pending || gate.current) return;
     setCreateAttempt({ request, retryAllowed: false });
-    setSelectedProposalId(request.clientRequestId);
+    setSelectedProposalId("");
     const requestPromise = createFinancialPortfolioProposal(agentId, request);
     void queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.proposals(agentId) });
     const outcome = await runAction("create", () => requestPromise);
@@ -365,11 +379,20 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
         </div>
         {reportCatalog.isPending ? <VStateSurface tone="loading" density="compact" busy title={zh ? "读取研究报告" : "Loading reports"} /> : reportCatalog.isError ? <VStateSurface tone="error" density="compact" title={errorText(reportCatalog.error)} actions={<VButton onPress={() => void reportCatalog.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !reports.length ? <VStateSurface tone="empty" density="compact" title={zh ? "暂无已完成研究报告" : "No completed reports yet"} /> : <div className={styles.reports}>
           {reports.map((report) => {
-            const checked = selectedReports.has(reportKey(report));
-            return <label key={reportKey(report)} className={styles.report}>
+            const key = reportKey(report);
+            const checked = selectedReports.has(key);
+            const previewExpanded = expandedReportPreviews.has(key);
+            return <div key={key} className={styles.report}>
               <VCheckbox aria-label={`${zh ? "选择报告" : "Select report"} ${report.title}`} isSelected={checked} isDisabled={frozenCreateForm || (!checked && selectedReports.size >= 5)} onChange={(value) => selectReport(report, value)} />
-              <span className={styles.reportText}><strong>{report.title}</strong><small>{zh ? "完成于 " : "Completed "}{formatTime(report.completedAt, zh)}</small><small>{report.preview}</small></span>
-            </label>;
+              <div className={styles.reportText}>
+                <strong className={styles.reportTitle} title={report.title}>{report.title}</strong>
+                <small className={styles.reportMeta}>{zh ? "完成于 " : "Completed "}{formatTime(report.completedAt, zh)}</small>
+                {report.preview ? <div className={styles.reportPreviewRow}>
+                  <small className={`${styles.reportPreview} ${previewExpanded ? "" : styles.reportPreviewCollapsed}`} data-report-preview={key}>{report.preview}</small>
+                  <VButton density="compact" variant="ghost" className={styles.textToggle} aria-label={`${zh ? (previewExpanded ? "收起报告摘要" : "展开报告摘要") : (previewExpanded ? "Collapse report summary" : "Expand report summary")} ${report.title}`} onPress={() => toggleReportPreview(key)}>{zh ? (previewExpanded ? "收起" : "展开") : (previewExpanded ? "Show less" : "Show more")}</VButton>
+                </div> : null}
+              </div>
+            </div>;
           })}
           {reportCatalog.hasNextPage ? <VButton variant="ghost" isDisabled={Boolean(pending)} isPending={reportCatalog.isFetchingNextPage} onPress={() => void reportCatalog.fetchNextPage()}>{zh ? "加载更早报告" : "Load earlier reports"}</VButton> : null}
         </div>}
@@ -412,7 +435,10 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
         {proposal.status === "ready" || proposal.status === "blocked" ? <VButton variant="secondary" isPending={pending === "preview"} isDisabled={!canPreview} onPress={() => void previewEditedPlan()}>{zh ? "重新检查计划" : "Recheck plan"}</VButton> : null}
       </div>
       {proposal.error ? <VStateSurface tone="error" density="compact" title={proposal.error} /> : null}
-      {proposal.summaryReason ? <p className={styles.note}>{proposal.summaryReason}</p> : null}
+      {proposal.summaryReason ? <div className="grid min-w-0 justify-items-start gap-1">
+        <p className={`${styles.summaryReason} ${summaryExpanded ? "" : styles.summaryReasonCollapsed}`} data-model-summary>{proposal.summaryReason}</p>
+        {proposal.summaryReason.length > 180 ? <VButton density="compact" variant="ghost" className={styles.textToggle} aria-label={zh ? (summaryExpanded ? "收起模型摘要" : "展开模型摘要") : (summaryExpanded ? "Collapse model summary" : "Expand model summary")} onPress={() => setSummaryExpanded((current) => !current)}>{zh ? (summaryExpanded ? "收起" : "展开") : (summaryExpanded ? "Show less" : "Show more")}</VButton> : null}
+      </div> : null}
       {proposal.reportRefs.length ? <div className="grid min-w-0 gap-1" aria-label={zh ? "参考报告" : "Source reports"}>
         {proposal.reportRefs.map((ref) => {
           const source = reportsByRef.get(reportKey(ref));

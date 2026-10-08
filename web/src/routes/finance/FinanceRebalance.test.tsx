@@ -153,6 +153,25 @@ describe("FinanceRebalance", () => {
     expect(node.textContent).toContain("模型 model-1");
   });
 
+  it("does not read a proposal until its create request has returned", async () => {
+    let resolveCreate!: (value: FinancialPortfolioProposal) => void;
+    api.create.mockImplementation(() => new Promise<FinancialPortfolioProposal>((resolve) => { resolveCreate = resolve; }));
+    await render();
+    await act(async () => node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title}"]`)!.click());
+    await setValue(input("组合目标"), "保留有证据的仓位");
+
+    await act(async () => button("生成建议").click());
+    await settle();
+
+    expect(api.create).toHaveBeenCalledTimes(1);
+    expect(api.fetchProposal).not.toHaveBeenCalled();
+    expect(node.textContent).not.toContain("组合建议不存在");
+
+    await act(async () => resolveCreate(readyProposal()));
+    await settle();
+    expect(node.textContent).toContain("建议详情");
+  });
+
   it("shows a source as unavailable instead of substituting another report from the same session", async () => {
     const missingSource = readyProposal({ reportRefs: [{ sessionId: report.sessionId, turnId: "turn-older", contentHash: "older-hash" }] });
     api.fetchProposals.mockResolvedValue({ items: [missingSource] });
@@ -166,6 +185,32 @@ describe("FinanceRebalance", () => {
     expect(sourceList?.textContent).not.toContain("浦发银行研究");
     expect(node.textContent).toContain("模型 model-1");
     expect(node.querySelector("[data-export-session]")).toBeNull();
+  });
+
+  it("clamps long report previews and model summaries while preserving their source text", async () => {
+    const longPreview = "来源内容。".repeat(50);
+    const longSummary = "模型依据。".repeat(80);
+    api.fetchReports.mockResolvedValue({ items: [{ ...report, preview: longPreview }], nextCursor: null, scannedSessions: 1, order: "session_recency" });
+    const proposal = readyProposal({ summaryReason: longSummary });
+    api.fetchProposals.mockResolvedValue({ items: [proposal] });
+    api.fetchProposal.mockResolvedValue(proposal);
+    await render();
+    await act(async () => button("待批准").click());
+    await settle();
+
+    const preview = node.querySelector<HTMLElement>("[data-report-preview]");
+    const summary = node.querySelector<HTMLElement>("[data-model-summary]");
+    expect(preview?.className).toContain("truncate");
+    expect(preview?.className).toContain("whitespace-nowrap");
+    expect(preview?.textContent).toBe(longPreview);
+    expect(summary?.className).toContain("line-clamp-3");
+    expect(summary?.textContent).toBe(longSummary);
+
+    await act(async () => node.querySelector<HTMLButtonElement>('button[aria-label="展开报告摘要 浦发银行研究"]')!.click());
+    await act(async () => node.querySelector<HTMLButtonElement>('button[aria-label="展开模型摘要"]')!.click());
+    expect(node.querySelector("[data-report-preview]")?.className).not.toContain("truncate");
+    expect(node.querySelector("[data-report-preview]")?.className).not.toContain("whitespace-nowrap");
+    expect(node.querySelector("[data-model-summary]")?.className).not.toContain("line-clamp-3");
   });
 
   it("requires a fresh server plan hash and a second explicit confirmation before simulated execution", async () => {
@@ -207,6 +252,8 @@ describe("FinanceRebalance", () => {
     await act(async () => button("生成建议").click());
     await settle();
     expect(api.create).toHaveBeenCalledTimes(1);
+    expect(api.fetchProposal).not.toHaveBeenCalled();
+    expect(node.textContent).not.toContain("组合建议不存在");
 
     api.fetchProposal.mockRejectedValueOnce(new FetchJsonHttpError("组合建议不存在", { status: 404 }));
     await act(async () => button("查询结果").click());
