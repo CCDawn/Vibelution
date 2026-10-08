@@ -7,6 +7,7 @@ import json
 from types import SimpleNamespace
 
 from core.llm.client import _receipt_output_hash
+from core.research.operator_optimization.d1_action import choose_iteration_action
 from core.web.services import session_service
 
 from ..research_project_agent_sessions import resolve_research_project_agent_session
@@ -95,9 +96,53 @@ def recover_decision_turn(store, task):
     return task
 
 
+def _local_decision_handle(task):
+    return AgentTaskHandle("", task["formalNodeAttempt"], task["taskId"], "")
+
+
+def _complete_local_decision(task, action, handle):
+    local = task["localAction"]
+    if (handle.session_id, handle.task_id, handle.turn_id) != ("", task["taskId"], ""):
+        raise CampaignConflict("Decision Agent completion belongs to another task or turn")
+    inputs = decision_task_input(task["teamId"], action.run_id)
+    if str(local.get("inputHash") or "") != inputs["inputHash"]:
+        raise CampaignConflict("Decision output belongs to different feedback evidence")
+    if local.get("kind") not in inputs["actionPolicy"]["availableActions"]:
+        raise CampaignConflict("Decision action is unavailable for the frozen evidence")
+    probability = float(local["probability"])
+    output = {
+        "schemaVersion": 2,
+        "inputHash": inputs["inputHash"],
+        "kind": local["kind"],
+        "reason": f"d1-3B {probability:.4f}",
+    }
+    ref = materialize_iteration_decision(
+        task["teamId"], action.run_id, output, decided_by=task["agentId"]
+    )
+    return AgentTurnResult(
+        (
+            {
+                "kind": ref.kind,
+                "sha256": ref.sha256,
+                "canonicalRef": build_canonical_ref(
+                    kind=ref.kind,
+                    team_id=task["teamId"],
+                    authority_run_id=action.run_id,
+                    content_hash=ref.sha256,
+                ),
+            },
+        ),
+        handle,
+        usage={
+            "costStatus": "local",
+            "inputTokens": int(local.get("inputTokens") or 0),
+            "outputTokens": 0,
+        },
+    )
+
+
 def create_decision_task(store, action, agent_id):
     task = prepare_decision_task(store, action, agent_id)
-    reserve_decision_budget(store, task)
     lock = (
         campaign_root(task["teamId"], task["researchProjectId"])
         / f"{task['formalNodeRunId']}.decision"
@@ -106,6 +151,19 @@ def create_decision_task(store, action, agent_id):
         task = store.read(
             lambda repo: read_decision_task(repo, action.run_id, action.node_run_id)
         )
+        if task.get("localAction"):
+            return _local_decision_handle(task)
+        if not task["sessionId"] and not task["turnId"]:
+            inputs = decision_task_input(task["teamId"], action.run_id)
+            choice = choose_iteration_action(inputs)
+            if (
+                isinstance(choice, dict)
+                and choice.get("inputHash") == task["inputHash"]
+                and choice.get("kind")
+            ):
+                task = _update_task(store, task, {"localAction": choice})
+                return _local_decision_handle(task)
+        reserve_decision_budget(store, task)
         if not task["sessionId"]:
             tasks = json.loads(store.get_run(action.run_id).input_snapshot_json)[
                 "operatorDecisionTasks"
@@ -194,6 +252,8 @@ def execute_decision_task(store, action, handle):
     task = store.read(
         lambda repo: read_decision_task(repo, action.run_id, action.node_run_id)
     )
+    if task.get("localAction"):
+        return _complete_local_decision(task, action, handle)
     if (handle.session_id, handle.task_id, handle.turn_id) != (
         task["sessionId"],
         task["taskId"],
