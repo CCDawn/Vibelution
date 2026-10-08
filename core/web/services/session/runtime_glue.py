@@ -897,14 +897,24 @@ def _conversation_hidden_from_index(
 
 
 def _conversation_is_read_only(conversation: dict[str, Any]) -> bool:
-    s = _service()
+    """Read-only admission for one conversation row.
+
+    User session archive (``source=session_archive``) only hides the row from
+    the default list. It stays writable unless the session was already
+    manually read-only. Agent archive and any other archived seal stay
+    read-only.
+    """
+
     archive_state = conversation.get("archive_state") or conversation.get(
         "archiveState"
     )
-    archived = (
-        isinstance(archive_state, dict)
-        and str(archive_state.get("status") or "").strip().lower() == "archived"
-    )
+    if not isinstance(archive_state, dict):
+        archive_state = {}
+    status = str(archive_state.get("status") or "").strip().lower()
+    source = str(archive_state.get("source") or "").strip().lower()
+    if status == "archived" and source == "session_archive":
+        return bool(archive_state.get("previousConversationReadOnly"))
+    archived = status == "archived"
     return bool(
         conversation.get("read_only")
         or conversation.get("readOnly")

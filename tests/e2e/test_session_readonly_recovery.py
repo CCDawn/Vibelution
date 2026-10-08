@@ -108,9 +108,9 @@ def test_unarchive_and_reload_restore_input_without_losing_draft(page, e2e_insta
     try:
         page.reload(wait_until="domcontentloaded")
         composer = page.locator(COMPOSER).first
-        expect(composer).to_be_disabled(timeout=15000)
+        expect(composer).to_be_enabled(timeout=15000)
         expect(composer).to_have_value(draft)
-        expect(page.get_by_role("button", name="发送", exact=True)).to_be_disabled()
+        expect(page.get_by_role("button", name="发送", exact=True)).to_be_enabled()
         expect(page.get_by_role("group", name="试试从这里开始")).to_have_count(0)
         post_json(e2e_instance.port, f"/api/sessions/{sid}/unarchive")
         assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["readOnly"] is False
@@ -131,7 +131,7 @@ def test_archived_history_edit_action_is_disabled(page, e2e_instance):
     sid = create_session(e2e_instance.port, title="只读历史消息编辑入口")
     post_json(e2e_instance.port, f"/api/sessions/{sid}/archive")
     detail = fetch_json(e2e_instance.port, f"/api/sessions/{sid}")
-    assert detail["readOnly"] is True
+    assert detail["readOnly"] is False
     # Controlled browser transcript fixture; never writes a message to backend.
     detail = {**detail, "messages": [{"id": "readonly-fixture-user", "role": "user",
               "timestamp": "2026-10-06T12:00:00Z", "content": "历史消息只供查看"}],
@@ -152,7 +152,7 @@ def test_archived_history_edit_action_is_disabled(page, e2e_instance):
         message = page.get_by_text("历史消息只供查看", exact=True).first
         expect(message).to_be_visible(timeout=15000)
         message.hover()
-        expect(page.get_by_role("button", name="编辑并重新发送", exact=True).first).to_be_disabled()
+        expect(page.get_by_role("button", name="编辑并重新发送", exact=True).first).to_be_enabled()
         expect(page.locator('[data-conversation-inline-edit="1"]')).to_have_count(0)
         _assert_no_turns(e2e_instance, [sid], ["历史消息只供查看"])
     finally:
