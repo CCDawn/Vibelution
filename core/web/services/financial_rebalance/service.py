@@ -137,9 +137,13 @@ def create_proposal(agent_id: str, payload: dict) -> dict:
     quotes = _quotes(symbols)
     if len(quotes) != len(symbols):
         raise RebalanceError("候选或已有持仓缺少行情，尚未调用模型")
-    quote_checks = build_plan(context, [{"symbol": symbol, "weightPct": 0.0, "reason": "调用前只检查行情"} for symbol in symbols], quotes, policy, now=_now())["riskChecks"]
+    preflight_plan = build_plan(context, [{"symbol": symbol, "weightPct": 0.0, "reason": "调用前只检查行情"} for symbol in symbols], quotes, policy, now=_now())
+    quote_checks = preflight_plan["riskChecks"]
     if any(not row["passed"] for row in quote_checks if row["code"] in {"quote_coverage", "quote_freshness"}):
         raise RebalanceError("行情已过期或时间不明，尚未调用模型；请刷新行情后再试")
+    account_valuation = preflight_plan.get("accountValuation")
+    if not isinstance(account_valuation, dict):
+        raise RebalanceError("无法根据已校验报价计算模拟账户估值，尚未调用模型")
     proposal = {"proposalId": proposal_id, "agentId": agent_id, "status": "generating", "createdAt": _now().isoformat(), "expiresAt": "", "modelId": model_id, "reportRefs": refs, "targets": [], "summaryReason": "", "riskChecks": [], "orders": [], "metrics": {"equityYuan": "0.00", "cashAfterYuan": context["cashYuan"], "turnoverPct": "0.00", "feesYuan": "0.00"}, "policy": policy, "planHash": "", "error": None, "execution": None, "_requestHash": request_hash, "_symbols": symbols}
     with store.lock(agent_id, proposal_id):
         try:
@@ -153,7 +157,7 @@ def create_proposal(agent_id: str, payload: dict) -> dict:
         store.write(agent_id, proposal)
     _event(agent_id, proposal_id, "generating")
     try:
-        inferred = decision.infer(agent_id, proposal_id, model_id, model_config, {"symbols": symbols, "instruction": instruction, "policy": policy, "reports": documents, "account": context, "quotes": quotes, "simulationOnly": True})
+        inferred = decision.infer(agent_id, proposal_id, model_id, model_config, {"symbols": symbols, "instruction": instruction, "policy": policy, "reports": documents, "account": account_valuation, "quotes": quotes, "simulationOnly": True})
         if (_now() - datetime.fromisoformat(proposal["createdAt"])).total_seconds() > GENERATION_TIMEOUT_SECONDS:
             raise RebalanceError("模型结果超过本次有效时间，请明确重新生成")
         _validate_sources(agent_id, proposal)

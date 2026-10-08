@@ -190,3 +190,150 @@ def test_risk_refuses_missing_stale_quotes_and_locked_shares(proposal_env):
 def test_target_numbers_fail_closed(weights):
     with pytest.raises(RebalanceError):
         normalize_targets([{"symbol": "sh600519", "weightPct": weights[0], "reason": "test"}], ["sh600519"])
+
+
+def test_build_plan_exposes_deterministic_current_account_valuation():
+    context = {
+        "cashYuan": "704320.32",
+        "positions": [
+            {"symbol": "sh600519", "quantity": 100, "sellableQuantity": 100}
+        ],
+    }
+    quotes = {
+        "sh600519": {
+            "name": "测试股票",
+            "priceYuan": "2955.91",
+            "timestamp": NOW.isoformat(),
+            "fetchedAt": NOW.isoformat(),
+        }
+    }
+    plan = build_plan(
+        context,
+        [{"symbol": "sh600519", "weightPct": 20.0, "reason": "控制风险"}],
+        quotes,
+        DEFAULT_POLICY,
+        now=NOW,
+    )
+
+    valuation = plan["accountValuation"]
+    assert valuation["cashYuan"] == "704320.32"
+    assert valuation["marketValueYuan"] == "295591.00"
+    assert valuation["equityYuan"] == "999911.32"
+    assert valuation["cashWeightPct"] == "70.44"
+    assert valuation["positions"] == [
+        {
+            "symbol": "sh600519",
+            "quantity": 100,
+            "sellableQuantity": 100,
+            "priceYuan": "2955.91",
+            "marketValueYuan": "295591.00",
+            "weightPct": "29.56",
+        }
+    ]
+
+
+def test_model_receives_build_plan_account_valuation_instead_of_raw_context(
+    proposal_env, monkeypatch
+):
+    context = {
+        "ledgerFingerprint": "f" * 64,
+        "cashYuan": "704320.32",
+        "positions": [
+            {"symbol": "sh600519", "quantity": 100, "sellableQuantity": 100}
+        ],
+    }
+    quote = {
+        "name": "测试股票",
+        "priceYuan": "2955.91",
+        "timestamp": NOW.isoformat(),
+        "fetchedAt": NOW.isoformat(),
+    }
+    monkeypatch.setattr(service.paper, "read_rebalance_context", lambda _agent_id: context)
+    monkeypatch.setattr(service, "_quotes", lambda symbols: {symbol: quote for symbol in symbols})
+
+    proposal = service.create_proposal(proposal_env["agentId"], proposal_env["payload"])
+
+    model_input = proposal_env["calls"][0]
+    assert proposal["status"] == "ready"
+    assert model_input["account"]["equityYuan"] == "999911.32"
+    assert model_input["account"]["cashYuan"] == "704320.32"
+    assert model_input["account"]["positions"][0]["weightPct"] == "29.56"
+    assert "ledgerFingerprint" not in model_input["account"]
+    assert "ledgerFingerprint" not in json.dumps(model_input, ensure_ascii=False)
+
+
+def test_infer_keeps_numeric_target_fields_and_requires_qualitative_reasons(monkeypatch):
+    from types import SimpleNamespace
+
+    response_body = {
+        "targets": [
+            {"symbol": "sh600519", "weightPct": 20.0, "reason": "关注单一股票的经营质量和风险暴露"}
+        ],
+        "summaryReason": "从业绩韧性和流动性两个方面，对统一标的采取审慎建议",
+    }
+    seen_messages = []
+    monkeypatch.setattr(decision, "get_llm_client", lambda **_kwargs: object())
+
+    def invoke(_client, messages, **_kwargs):
+        seen_messages.extend(messages)
+        return SimpleNamespace(
+            content=json.dumps(response_body, ensure_ascii=False),
+            response_metadata={},
+        )
+
+    monkeypatch.setattr(decision, "invoke_llm", invoke)
+    result = decision.infer(
+        "agent",
+        "proposal",
+        "test/model",
+        object(),
+        {
+            "symbols": ["sh600519"],
+            "account": {
+                "cashYuan": "704320.32",
+                "marketValueYuan": "295591.00",
+                "equityYuan": "999911.32",
+                "cashWeightPct": "70.44",
+                "positions": [{"symbol": "sh600519", "weightPct": "29.56"}],
+            },
+        },
+    )
+
+    assert result["targets"][0]["weightPct"] == 20.0
+    assert "权威" in seen_messages[0]["content"]
+    assert "定性" in seen_messages[0]["content"]
+
+
+@pytest.mark.parametrize(
+    ("summary_reason", "target_reason"),
+    [
+        ("净值约84.9万元，保留现金", "控制波动"),
+        ("保留现金，控制风险", "当前仓位34.8%，建议降低"),
+        ("配置保持谨慎", "仓位约三成，控制风险"),
+    ],
+)
+def test_infer_rejects_numeric_claims_in_visible_reasons(
+    summary_reason, target_reason, monkeypatch
+):
+    from types import SimpleNamespace
+
+    response_body = {
+        "targets": [
+            {"symbol": "sh600519", "weightPct": 20.0, "reason": target_reason}
+        ],
+        "summaryReason": summary_reason,
+    }
+    monkeypatch.setattr(decision, "get_llm_client", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        decision,
+        "invoke_llm",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            content=json.dumps(response_body, ensure_ascii=False),
+            response_metadata={},
+        ),
+    )
+
+    with pytest.raises(RebalanceError, match="定性说明"):
+        decision.infer(
+            "agent", "proposal", "test/model", object(), {"symbols": ["sh600519"]}
+        )

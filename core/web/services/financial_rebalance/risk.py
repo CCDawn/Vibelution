@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
-from decimal import ROUND_FLOOR, Decimal, InvalidOperation
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from core.web.services import financial_market_service as market
@@ -80,6 +80,15 @@ def _age(value: str, now: datetime) -> float | None:
         return None
 
 
+def _percentage_text(amount: Decimal, total: Decimal) -> str:
+    if total <= 0:
+        return "0.00"
+    percentage = (amount * Decimal(100) / total).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    return format(percentage, ".2f")
+
+
 def build_plan(context: dict, targets: list[dict], quotes: dict[str, dict], policy: dict, *, now: datetime) -> dict:
     """Return the exact batch and independent risk results; never mutate an account."""
     checks: list[dict] = []
@@ -104,14 +113,36 @@ def build_plan(context: dict, targets: list[dict], quotes: dict[str, dict], poli
     check("target_concentration", "目标单股上限", all(row["weightPct"] <= policy["maxPositionPct"] for row in targets), f"单股目标不超过{policy['maxPositionPct']:g}%")
     empty_metrics = {"equityYuan": "0.00", "cashAfterYuan": str(context["cashYuan"]), "turnoverPct": "0.00", "feesYuan": "0.00"}
     if not available:
-        return {"riskChecks": checks, "orders": [], "metrics": empty_metrics, "canApprove": False}
+        return {"riskChecks": checks, "orders": [], "metrics": empty_metrics, "accountValuation": None, "canApprove": False}
     prices = {symbol: ledger._money(quotes[symbol]["priceYuan"]) for symbol in symbols}
     if any(price <= 0 for price in prices.values()):
         raise RebalanceError("报价必须大于零")
     cash = ledger._money(context["cashYuan"])
-    equity = cash + sum((prices[symbol] * row["quantity"] for symbol, row in positions.items()), Decimal(0))
+    position_values = {
+        symbol: ledger._money(prices[symbol] * row["quantity"])
+        for symbol, row in positions.items()
+    }
+    market_value = sum(position_values.values(), Decimal(0))
+    equity = cash + market_value
     if equity <= 0:
         raise RebalanceError("模拟账户净值必须大于零")
+    account_valuation = {
+        "cashYuan": ledger._money_text(cash),
+        "marketValueYuan": ledger._money_text(market_value),
+        "equityYuan": ledger._money_text(equity),
+        "cashWeightPct": _percentage_text(cash, equity),
+        "positions": [
+            {
+                "symbol": symbol,
+                "quantity": int(positions[symbol]["quantity"]),
+                "sellableQuantity": int(positions[symbol].get("sellableQuantity") or 0),
+                "priceYuan": ledger._money_text(prices[symbol]),
+                "marketValueYuan": ledger._money_text(position_values[symbol]),
+                "weightPct": _percentage_text(position_values[symbol], equity),
+            }
+            for symbol in sorted(position_values)
+        ],
+    }
     orders = []
     final_quantities = {symbol: row["quantity"] for symbol, row in positions.items()}
     for target in targets:
@@ -144,4 +175,15 @@ def build_plan(context: dict, targets: list[dict], quotes: dict[str, dict], poli
     check("turnover", "调仓换手", turnover <= Decimal(str(policy["maxTurnoverPct"])), f"预计{turnover:.2f}%，上限{policy['maxTurnoverPct']:g}%（买卖金额之和/净值）")
     check("position_count", "持仓数量", sum(quantity > 0 for quantity in final_quantities.values()) <= 20, "最多20只持仓")
     check("orders", "可执行订单", bool(orders), "有待执行的模拟订单" if orders else "当前仓位与目标一致或资金不足一手，无需调仓")
-    return {"riskChecks": checks, "orders": orders, "metrics": {"equityYuan": ledger._money_text(equity), "cashAfterYuan": ledger._money_text(cash), "turnoverPct": f"{turnover:.2f}", "feesYuan": ledger._money_text(fees)}, "canApprove": all(item["passed"] for item in checks)}
+    return {
+        "riskChecks": checks,
+        "orders": orders,
+        "metrics": {
+            "equityYuan": ledger._money_text(equity),
+            "cashAfterYuan": ledger._money_text(cash),
+            "turnoverPct": f"{turnover:.2f}",
+            "feesYuan": ledger._money_text(fees),
+        },
+        "accountValuation": account_valuation,
+        "canApprove": all(item["passed"] for item in checks),
+    }
