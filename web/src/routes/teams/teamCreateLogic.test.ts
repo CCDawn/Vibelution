@@ -117,6 +117,19 @@ describe("route picker visibility (fixed boards ∪ user-created)", () => {
     )).toBe(false);
   });
 
+  it("keeps evolution hiding flag-driven when kind fields are absent", () => {
+    expect(isVisibleRouteTeam(
+      makeTeam({ teamId: "self-evolution-team", teamSource: "", teamKind: "", systemManaged: true }),
+      TEAM_PICKER_TEAM_IDS,
+    )).toBe(false);
+    // A non-managed flag cannot resurface a stale evolution kind: such a team
+    // is neither a picker board nor a manual/custom/template team.
+    expect(isVisibleRouteTeam(
+      makeTeam({ teamId: "team-stale-kind", teamSource: "", teamKind: "self_evolution", systemManaged: false }),
+      TEAM_PICKER_TEAM_IDS,
+    )).toBe(false);
+  });
+
   it("hides workflow-owned teams that are not fixed picker boards", () => {
     expect(isVisibleRouteTeam(
       makeTeam({ teamId: "research-org-x", teamSource: "research_organization", teamKind: "research" }),

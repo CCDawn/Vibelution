@@ -9,6 +9,7 @@ from typing import Any
 
 AI_SEARCH_TEAM_ID = "ai-search-team"
 KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"
+EVOLUTION_SYSTEM_TEAM_IDS = {"self-evolution-team", "supervised-evolution-team"}
 
 TEAM_KIND_DEFAULTS = {
     "custom": {"teamCategory": "自定义团队", "teamSource": "manual", "chatRoomPurpose": "discussion"},
@@ -99,6 +100,42 @@ def infer_team_kind(team: dict[str, Any], *, fallback: str = "") -> str:
 def team_default_chat_room_purpose(team: dict[str, Any]) -> str:
     kind = infer_team_kind(team)
     return str(TEAM_KIND_DEFAULTS.get(kind, TEAM_KIND_DEFAULTS["custom"]).get("chatRoomPurpose") or "discussion")
+
+
+# Single behavior key for workflow-managed system teams. Behavior branches
+# (PATCH lock, archive refusal, derived prune, route hiding, conversation
+# index exclusion) must read ``team_is_system_managed`` instead of kind
+# enumerations; ``teamKind`` itself stays a display value derived from the
+# team category contract.
+SYSTEM_MANAGED_TEAM_IDS = {
+    "research-team",
+    KNOWLEDGE_EXPANSION_TEAM_ID,
+    AI_SEARCH_TEAM_ID,
+    *EVOLUTION_SYSTEM_TEAM_IDS,
+}
+SYSTEM_MANAGED_TEAM_SOURCES = {
+    source
+    for source, kind in TEAM_SOURCE_TO_KIND.items()
+    if kind in DERIVED_TEAM_KINDS
+}
+
+
+def team_is_system_managed(team: dict[str, Any] | None) -> bool:
+    """Return whether a workflow maintains this team's lifecycle and roster.
+
+    Primary judgment: the team matches a managed spec id or carries a managed
+    ``teamSource``. Legacy fallback: stored kind representations (``teamKind``
+    or the retired ``systemTeamKind``) that still infer to a derived workflow
+    kind remain managed, so pre-flag records keep their protection.
+    """
+
+    if not isinstance(team, dict):
+        return False
+    if str(team.get("teamId") or "").strip() in SYSTEM_MANAGED_TEAM_IDS:
+        return True
+    if str(team.get("teamSource") or "").strip() in SYSTEM_MANAGED_TEAM_SOURCES:
+        return True
+    return infer_team_kind(team) in DERIVED_TEAM_KINDS
 
 
 def team_kind_allows_member_agent_cascade(team: dict[str, Any]) -> bool:

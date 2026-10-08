@@ -173,20 +173,46 @@ def apply_challenge_cup_research_team_copy_refresh(*, reason: str = "") -> dict[
 
 
 def evolution_system_teams_missing() -> bool:
-    """Return whether the system Team bootstrap is required for the list surface."""
+    """Return whether the evolution system Teams need (re)bootstrap.
+
+    Mirrors the strict ``ai_search_system_team_missing`` probe shape: a team
+    counts as missing when its id is absent from the active roster, its
+    kind/source contract drifted from the spec, or its roster is empty or
+    references unavailable agents. The empty-roster check is the pull-back
+    for the derived prune: legacy members=0 records self-heal on the next
+    bootstrap without waiting for a fresh team id.
+    """
 
     s = _service()
     with s._TEAM_LOCK:
         state = s._load_index()
         if s._repair_index_shape(state):
             s._save_index(state)
-        active_team_ids = {
-            str(item.get("teamId") or "").strip()
-            for item in list(state.get("teams") or [])
-            if isinstance(item, dict)
-            and str(item.get("status") or s.DEFAULT_TEAM_STATUS).strip() != "archived"
-        }
-    return not s.EVOLUTION_SYSTEM_TEAM_IDS.issubset(active_team_ids)
+        active_agent_ids: set[str] | None = None
+        for spec in s.EVOLUTION_SYSTEM_TEAM_SPECS:
+            team_id = str(spec.get("teamId") or "").strip()
+            source = str(spec.get("source") or "").strip()
+            team = s._find_team(state, team_id)
+            if not isinstance(team, dict):
+                return True
+            if str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() == "archived":
+                return True
+            if str(team.get("teamKind") or s._infer_team_kind(team)).strip() != str(spec.get("teamKind") or source).strip():
+                return True
+            if str(team.get("teamSource") or "").strip() != str(spec.get("teamSource") or source).strip():
+                return True
+            members = [
+                member
+                for member in list(team.get("members") or [])
+                if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+            ]
+            if not members:
+                return True
+            if active_agent_ids is None:
+                active_agent_ids = set(s._agent_reference_maps().get("active_by_id") or {})
+            if any(str(member.get("agentId") or "").strip() not in active_agent_ids for member in members):
+                return True
+    return False
 
 
 def challenge_cup_research_team_missing() -> bool:
@@ -692,6 +718,14 @@ def ensure_ai_search_system_team() -> dict[str, Any]:
 
 
 def _ensure_evolution_system_agents() -> dict[str, list[dict[str, Any]]]:
+    """Ensure fixed-role agents exist for both evolution modes.
+
+    Fail-soft per source: a materialization failure is recorded and leaves
+    that source's list empty. Callers must treat an empty list as "not
+    ensured" and never derive an empty roster from it (see
+    ``_ensure_evolution_system_team_in_state``).
+    """
+
     s = _service()
     project_root = Path(s.PROJECT_ROOT).resolve()
     ensured: dict[str, list[dict[str, Any]]] = {"self_evolution": [], "supervised_evolution": []}
@@ -1365,9 +1399,18 @@ def _ensure_evolution_system_team_in_state(
     if not team_id or not source:
         return None, False
     members = s._system_members_from_agents(ensured_agents.get(source) or [], source=source)
-    members = s._members_without_cross_team_conflicts(members, state, team_id, source=source)
-    now = s.utc_now_iso()
     team = s._find_team(state, team_id)
+    if not members:
+        # Fail-soft: fixed-role materialization produced no members (the sync
+        # failure is recorded by _ensure_evolution_system_agents), or every
+        # candidate conflicts with another active team. Never persist an empty
+        # roster over a managed team and never create a hollow one; the
+        # upgraded missing probe keeps bootstrap retrying until roles converge.
+        return team, False
+    members = s._members_without_cross_team_conflicts(members, state, team_id, source=source)
+    if not members:
+        return team, False
+    now = s.utc_now_iso()
     created = team is None
     changed = created
     if team is None:
@@ -1380,7 +1423,6 @@ def _ensure_evolution_system_team_in_state(
             "members": members,
             "linkedChatRoomId": "",
             "canvasPath": s._relative_path(s._team_canvas_path(team_id)),
-            "systemTeamKind": source,
             "teamKind": str(spec.get("teamKind") or source).strip(),
             "teamCategory": str(spec.get("teamCategory") or "").strip(),
             "teamSource": str(spec.get("teamSource") or source).strip(),
@@ -1403,7 +1445,6 @@ def _ensure_evolution_system_team_in_state(
             "status": s.DEFAULT_TEAM_STATUS,
             "members": members,
             "canvasPath": s._relative_path(s._team_canvas_path(team_id)),
-            "systemTeamKind": source,
             "teamKind": str(spec.get("teamKind") or source).strip(),
             "teamCategory": str(spec.get("teamCategory") or "").strip(),
             "teamSource": str(spec.get("teamSource") or source).strip(),

@@ -144,6 +144,11 @@ export function isDiscussionTeam(team: Team | undefined | null) {
   if (status === "archived") {
     return false;
   }
+  // systemManaged=false means the backend keeps the team discussion-visible;
+  // the evolution-only sets below remain the fallback for pre-flag payloads.
+  if (team.systemManaged === false) {
+    return true;
+  }
   return !(
     NON_DISCUSSION_TEAM_IDS.has(teamId)
     || NON_DISCUSSION_TEAM_KINDS.has(teamKind)

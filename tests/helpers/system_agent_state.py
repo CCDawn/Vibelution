@@ -146,6 +146,51 @@ def _seed_challenge_cup_agent_assets() -> list[dict[str, Any]]:
     return agents
 
 
+def _evolution_team_id_for_source(source: str) -> str:
+    return "self-evolution-team" if str(source or "").strip() == "self_evolution" else "supervised-evolution-team"
+
+
+def _seed_evolution_system_team_members() -> None:
+    """Materialize real fixed-role Directory agents and sync managed rosters.
+
+    The upgraded missing probe treats an empty roster or an unresolvable
+    member agentId as "bootstrap required", so a ready-state seed must carry
+    members backed by real AgentDirectory records.
+    """
+
+    for source, roles in (
+        ("self_evolution", SELF_EVOLUTION_AGENT_ROLES),
+        ("supervised_evolution", SUPERVISED_AGENT_ROLES),
+    ):
+        metadata_key = "selfEvolutionRole" if source == "self_evolution" else "supervisedRole"
+        metadata_label_key = "selfEvolutionRoleLabel" if source == "self_evolution" else "supervisedRoleLabel"
+        agents: list[dict[str, Any]] = []
+        for role in roles:
+            role_name = str((role.get("role") if isinstance(role, dict) else role.role) or "").strip()
+            label = str((role.get("label") if isinstance(role, dict) else role.label) or role_name).strip()
+            agents.append(
+                agent_directory_service.create_agent_instance(
+                    display_name=label,
+                    primary_mode=source,
+                    role_key=role_name,
+                    metadata={
+                        "fixedRole": True,
+                        "protected": True,
+                        "agentMode": source,
+                        metadata_key: role_name,
+                        metadata_label_key: label,
+                        "functionalDisplayName": label,
+                    },
+                )
+            )
+        members = team_service._system_members_from_agents(agents, source=source)
+        state = team_service._load_index()
+        team = team_service._find_team(state, _evolution_team_id_for_source(source))
+        if isinstance(team, dict) and members:
+            team["members"] = members
+        team_service._save_index(state)
+
+
 def _seed_system_team_bootstrap_ready() -> None:
     _seed_challenge_cup_agent_assets()
     team_service.bootstrap_challenge_cup_research_team()
@@ -174,6 +219,7 @@ def _seed_system_team_bootstrap_ready() -> None:
     state["updatedAt"] = now
     team_service._save_index(state)
     team_service._ensure_ai_search_source_scope_file()
+    _seed_evolution_system_team_members()
 
 
 def _seed_ai_search_system_team_ready() -> dict[str, Any]:

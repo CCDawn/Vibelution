@@ -14,6 +14,7 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 from core.infrastructure import developer_sandbox
 from core.web.services import agent_directory_service, chat_room_service
+from core.web.services.team.kind_helpers import team_is_system_managed
 from core.web.services.team_conversation_contract import build_team_conversation_projection
 
 
@@ -44,6 +45,7 @@ def _team_to_api(
     ).to_api()
     return {
         **repaired,
+        "systemManaged": team_is_system_managed(repaired),
         "memberCount": len(repaired.get("members") or []),
         "canvas": canvas_summary,
         **s._ai_search_source_scope_api_fields(repaired),
@@ -79,6 +81,7 @@ def _team_to_compact_reference(
         "teamCategory": str(repaired.get("teamCategory") or "").strip(),
         "teamSource": str(repaired.get("teamSource") or "").strip(),
         "teamTemplateId": str(repaired.get("teamTemplateId") or "").strip(),
+        "systemManaged": team_is_system_managed(repaired),
         "sourceScopePath": str(repaired.get("sourceScopePath") or "").strip(),
         "members": members,
         "memberCount": len(members),
@@ -106,6 +109,7 @@ def _team_to_graph_reference(team: dict[str, Any]) -> dict[str, Any]:
         "teamCategory": str(repaired.get("teamCategory") or "").strip(),
         "teamSource": str(repaired.get("teamSource") or "").strip(),
         "teamTemplateId": str(repaired.get("teamTemplateId") or "").strip(),
+        "systemManaged": team_is_system_managed(repaired),
         "members": members,
         "memberCount": len(members),
         "linkedChatRoomId": str(repaired.get("linkedChatRoomId") or "").strip(),
@@ -154,6 +158,7 @@ def _team_to_api_without_canvas_summary(
     ).to_api()
     return {
         **repaired,
+        "systemManaged": team_is_system_managed(repaired),
         "memberCount": len(repaired.get("members") or []),
         "canvas": s._canvas_path_summary(repaired, team_id=team_id),
         **s._ai_search_source_scope_api_fields(repaired),

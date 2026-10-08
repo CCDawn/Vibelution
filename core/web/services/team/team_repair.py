@@ -11,6 +11,7 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 from core.web.services import agent_directory_service
+from core.web.services.team.kind_helpers import team_is_system_managed
 
 
 def _service():
@@ -345,7 +346,7 @@ def _prune_unavailable_derived_team_members(
     s = _service()
     if str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() == "archived":
         return []
-    if s._infer_team_kind(team) not in s.DERIVED_TEAM_KINDS:
+    if not team_is_system_managed(team):
         return []
     stale_member_agent_ids = {
         str(agent_id or "").strip()

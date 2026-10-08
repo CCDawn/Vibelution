@@ -1,5 +1,6 @@
 import json
 import threading
+from typing import Any
 
 import pytest
 
@@ -963,8 +964,12 @@ def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeyp
     teams = {team["teamId"]: team for team in result["teams"]}
 
     assert set(teams) == {"self-evolution-team", "supervised-evolution-team"}
-    assert teams["self-evolution-team"]["systemTeamKind"] == "self_evolution"
-    assert teams["supervised-evolution-team"]["systemTeamKind"] == "supervised_evolution"
+    # Managed materialization no longer writes the retired systemTeamKind
+    # field; managed-ness is projected via the systemManaged flag instead.
+    assert "systemTeamKind" not in teams["self-evolution-team"]
+    assert "systemTeamKind" not in teams["supervised-evolution-team"]
+    assert teams["self-evolution-team"]["systemManaged"] is True
+    assert teams["supervised-evolution-team"]["systemManaged"] is True
     assert teams["self-evolution-team"]["teamKind"] == "self_evolution"
     assert teams["self-evolution-team"]["teamCategory"] == "自进化系统团队"
     assert teams["self-evolution-team"]["teamSource"] == "self_evolution"
@@ -2512,3 +2517,193 @@ def test_team_detail_members_include_model_summary(tmp_path, monkeypatch):
     refreshed_models = {member["agentId"]: member.get("model") for member in refreshed["members"]}
     assert refreshed_models[beta["agentId"]]["configured"] is True
     assert refreshed_models[beta["agentId"]]["dialogueModelId"] == "test-provider/other-model"
+
+
+def _real_evolution_agents_for_source(source: str) -> list[dict]:
+    """Materialize real fixed-role Directory agents for one evolution source."""
+
+    if source == "self_evolution":
+        from core.web.services.self_evolution_control_service import SELF_EVOLUTION_AGENT_ROLES
+
+        roles: list[Any] = list(SELF_EVOLUTION_AGENT_ROLES)
+        metadata_key, metadata_label_key = "selfEvolutionRole", "selfEvolutionRoleLabel"
+    else:
+        from core.web.services import supervised_agent_service
+
+        roles = list(supervised_agent_service.SUPERVISED_AGENT_ROLES)
+        metadata_key, metadata_label_key = "supervisedRole", "supervisedRoleLabel"
+    agents: list[dict] = []
+    for role in roles:
+        role_name = str((role.get("role") if isinstance(role, dict) else role.role) or "").strip()
+        label = str((role.get("label") if isinstance(role, dict) else role.label) or role_name).strip()
+        agents.append(
+            agent_directory_service.create_agent_instance(
+                display_name=label,
+                primary_mode=source,
+                role_key=role_name,
+                metadata={
+                    "fixedRole": True,
+                    "protected": True,
+                    "agentMode": source,
+                    metadata_key: role_name,
+                    metadata_label_key: label,
+                    "functionalDisplayName": label,
+                },
+            )
+        )
+    return agents
+
+
+def _seed_members_zero_evolution_teams() -> None:
+    """Write the legacy defect state: managed teams present but rosters empty."""
+
+    now = team_service.utc_now_iso()
+    state = team_service._load_index()
+    for spec in team_service.EVOLUTION_SYSTEM_TEAM_SPECS:
+        team_id = str(spec.get("teamId") or "")
+        state.setdefault("teams", []).append(
+            {
+                "teamId": team_id,
+                "name": str(spec.get("name") or team_id),
+                "description": str(spec.get("description") or ""),
+                "purpose": str(spec.get("purpose") or ""),
+                "status": team_service.DEFAULT_TEAM_STATUS,
+                "members": [],
+                "linkedChatRoomId": "",
+                "canvasPath": team_service._relative_path(team_service._team_canvas_path(team_id)),
+                "teamKind": str(spec.get("teamKind") or ""),
+                "teamCategory": str(spec.get("teamCategory") or ""),
+                "teamSource": str(spec.get("teamSource") or ""),
+                "teamTemplateId": "",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+    team_service._save_index(state)
+
+
+def test_evolution_members_zero_teams_self_heal_via_bootstrap_probe(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_members_zero_evolution_teams()
+    # The upgraded probe treats the empty roster as bootstrap-required even
+    # though both team ids exist with the right kind/source contract.
+    assert team_service.evolution_system_teams_missing() is True
+
+    real_agents = {
+        "self_evolution": _real_evolution_agents_for_source("self_evolution"),
+        "supervised_evolution": _real_evolution_agents_for_source("supervised_evolution"),
+    }
+    monkeypatch.setattr(
+        team_service,
+        "_ensure_evolution_system_agents",
+        lambda: {source: list(agents) for source, agents in real_agents.items()},
+    )
+
+    team_service.ensure_evolution_system_teams()
+
+    assert team_service.evolution_system_teams_missing() is False
+    for source, agents in real_agents.items():
+        team = team_service.get_team(f"{'self' if source == 'self_evolution' else 'supervised'}-evolution-team")
+        assert team["memberCount"] == len(agents)
+        assert [member["agentId"] for member in team["members"]] == [
+            str(agent["agentId"]) for agent in agents
+        ]
+        assert team["systemManaged"] is True
+
+
+def test_evolution_agent_materialization_failure_preserves_existing_members(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    from core.web.services import self_evolution_control_service, supervised_agent_service
+
+    self_agents = _real_evolution_agents_for_source("self_evolution")
+    supervised_agents = _real_evolution_agents_for_source("supervised_evolution")
+    ensure_state = {"self_agents": list(self_agents)}
+
+    def ensure_self_agents():
+        if ensure_state["self_agents"] is None:
+            raise team_service.TeamServiceError("self evolution directory unavailable")
+        return list(ensure_state["self_agents"])
+
+    monkeypatch.setattr(self_evolution_control_service, "ensure_self_evolution_agent_instances", ensure_self_agents)
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "ensure_supervised_agent_instances",
+        lambda: list(supervised_agents),
+    )
+
+    team_service.ensure_evolution_system_teams()
+    before = team_service._find_team(team_service._load_index(), "self-evolution-team")["members"]
+    assert before
+
+    events = []
+
+    def record_event(*args, **kwargs):
+        events.append((args, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(team_service, "record_runtime_scene_event", record_event)
+    # Next bootstrap: self-evolution materialization fails; supervised syncs.
+    ensure_state["self_agents"] = None
+    team_service.ensure_evolution_system_teams()
+
+    after = team_service._find_team(team_service._load_index(), "self-evolution-team")["members"]
+    assert after == before, "a failed agent ensure must never clear an existing managed roster"
+    assert any(args[2] == "team.system_evolution_sync_failed" for args, _ in events)
+    # A preserved, resolvable roster stays healthy: the probe must not flap
+    # bootstrap for a transient materialization failure. Actual gaps (missing
+    # team, empty roster, stale agent ids) keep probing True and retry.
+    assert team_service.evolution_system_teams_missing() is False
+
+
+@pytest.mark.parametrize(
+    ("team_kind", "team_source"),
+    [
+        ("research", "research_organization"),
+        ("knowledge_expansion", "knowledge_expansion"),
+        ("ai_search", "ai_search"),
+        ("self_evolution", "self_evolution"),
+        ("supervised_evolution", "supervised_evolution"),
+    ],
+)
+def test_system_managed_protection_matrix_is_kind_independent(tmp_path, monkeypatch, team_kind, team_source):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name=f"保护矩阵 {team_kind}", team_kind=team_kind, team_source=team_source)
+    assert team["systemManaged"] is True
+
+    with pytest.raises(team_service.TeamLockedError, match="System Team"):
+        team_service.update_team(team["teamId"], name="renamed")
+
+    with pytest.raises(team_service.TeamServiceError, match="System Team cannot be archived"):
+        team_service.archive_team(team["teamId"])
+
+    assert team_service.get_team(team["teamId"])["status"] == "active"
+
+
+def test_system_managed_predicate_covers_source_only_legacy_rows(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="仅来源特例团队")
+    state = team_service._load_index()
+    stored = next(item for item in state["teams"] if item["teamId"] == team["teamId"])
+    stored["teamKind"] = ""
+    stored["teamCategory"] = ""
+    stored["teamSource"] = "self_evolution"
+    team_service._save_index(state)
+
+    # No kind anywhere: teamSource alone keeps the managed protection.
+    with pytest.raises(team_service.TeamLockedError, match="System Team"):
+        team_service.update_team(team["teamId"], name="renamed")
+
+    with pytest.raises(team_service.TeamServiceError, match="System Team cannot be archived"):
+        team_service.archive_team(team["teamId"])
+
+
+def test_custom_team_stays_editable_and_archivable(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Owner", direct_session_id="session-owner")
+    team = team_service.create_team(name="普通自有团队", members=[{"agentId": agent["agentId"]}])
+
+    assert team["systemManaged"] is False
+    updated = team_service.update_team(team["teamId"], description="自有团队可编辑")
+    assert updated["description"] == "自有团队可编辑"
+    archived = team_service.archive_team(team["teamId"])
+    assert archived["status"] == "archived"

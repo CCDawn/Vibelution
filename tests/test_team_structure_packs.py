@@ -46,6 +46,39 @@ def test_facade_reexports_kind_helpers() -> None:
     assert facade.TEAM_SOURCE_TO_KIND is kind_helpers.TEAM_SOURCE_TO_KIND
     assert facade.TEAM_ID_TO_KIND is kind_helpers.TEAM_ID_TO_KIND
     assert facade.DERIVED_TEAM_KINDS is kind_helpers.DERIVED_TEAM_KINDS
+    # The managed id set has a single definition; team_constants re-exports it.
+    assert facade.EVOLUTION_SYSTEM_TEAM_IDS is team_constants.EVOLUTION_SYSTEM_TEAM_IDS
+    assert facade.EVOLUTION_SYSTEM_TEAM_IDS is kind_helpers.EVOLUTION_SYSTEM_TEAM_IDS
+
+
+def test_team_is_system_managed_predicate_judgment_set() -> None:
+    # Primary judgment: managed spec ids.
+    assert kind_helpers.team_is_system_managed({"teamId": "self-evolution-team"}) is True
+    assert kind_helpers.team_is_system_managed({"teamId": "supervised-evolution-team"}) is True
+    assert kind_helpers.team_is_system_managed({"teamId": "research-team"}) is True
+    assert kind_helpers.team_is_system_managed({"teamId": "knowledge-expansion-team"}) is True
+    assert kind_helpers.team_is_system_managed({"teamId": "ai-search-team"}) is True
+    # Primary judgment: managed teamSource, even without any kind field.
+    assert kind_helpers.team_is_system_managed({"teamSource": "self_evolution"}) is True
+    assert kind_helpers.team_is_system_managed({"teamSource": "research_organization"}) is True
+    assert kind_helpers.team_is_system_managed({"teamSource": "manual"}) is False
+    assert kind_helpers.team_is_system_managed({"teamSource": "team_template"}) is False
+    # Legacy fallback: kind representations of pre-flag records stay protected.
+    assert kind_helpers.team_is_system_managed({"teamKind": "supervised_evolution"}) is True
+    assert kind_helpers.team_is_system_managed({"systemTeamKind": "self_evolution"}) is True
+    # Non-managed teams and malformed rows.
+    assert kind_helpers.team_is_system_managed({"teamId": "custom", "teamKind": "custom", "teamSource": "manual"}) is False
+    assert kind_helpers.team_is_system_managed({}) is False
+    assert kind_helpers.team_is_system_managed(None) is False
+    assert kind_helpers.team_is_system_managed("self-evolution-team") is False
+
+
+def test_evolution_system_team_specs_declare_managed_flag() -> None:
+    assert team_constants.EVOLUTION_SYSTEM_TEAM_SPECS
+    for spec in team_constants.EVOLUTION_SYSTEM_TEAM_SPECS:
+        assert spec["managed"] is True
+        assert spec["teamId"] in kind_helpers.SYSTEM_MANAGED_TEAM_IDS
+        assert spec["source"] in kind_helpers.SYSTEM_MANAGED_TEAM_SOURCES
 
 
 def test_facade_reexports_ai_search_ranking() -> None:

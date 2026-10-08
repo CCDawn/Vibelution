@@ -424,9 +424,18 @@ export function TeamSettingsDialog({
 
 /** Mirrors the backend guard: archived and workflow-managed system teams reject PATCH edits. */
 export function isReadOnlyTeam(team: Team): boolean {
+  if (team.status === "archived") {
+    return true;
+  }
+  // Backend-projected systemManaged is the behavior authority; the
+  // id/kind/source enumeration below is the legacy fallback for payloads
+  // that predate the flag. Research/knowledge/AI-search coverage is
+  // preserved on both paths.
+  if (team.systemManaged != null) {
+    return team.systemManaged;
+  }
   return (
-    team.status === "archived"
-    || team.teamId === "research-team"
+    team.teamId === "research-team"
     || team.teamId === "knowledge-expansion-team"
     || team.teamId === "ai-search-team"
     || team.teamId === "self-evolution-team"

@@ -49,6 +49,11 @@ export function isEvolutionSystemTeam(team: Team | null | undefined) {
   if (!team) {
     return false;
   }
+  // The backend systemManaged flag is the behavior authority; when present
+  // and false the legacy kind/source enumerations must not re-manage the team.
+  if (team.systemManaged === false) {
+    return false;
+  }
   return (
     EVOLUTION_SYSTEM_TEAM_IDS.has(team.teamId)
     || team.teamKind === "self_evolution"
@@ -66,6 +71,14 @@ export function isAiSearchScopeTeam(team: Team | null | undefined) {
 }
 
 export function isSystemManagedTeam(team: Team | null | undefined) {
+  if (!team) {
+    return false;
+  }
+  // Backend-projected flag first; the workflow-team composition below is the
+  // legacy fallback for payloads that predate the flag.
+  if (team.systemManaged != null) {
+    return team.systemManaged;
+  }
   return isResearchWorkflowTeam(team) || isEvolutionSystemTeam(team) || isAiSearchScopeTeam(team);
 }
 

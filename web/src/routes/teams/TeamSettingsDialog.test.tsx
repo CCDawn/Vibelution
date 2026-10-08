@@ -477,4 +477,18 @@ describe("TeamSettingsDialog wiring contract", () => {
     expect(teamSettingsCopy("zh").archiveAction).toContain("归档");
     expect(teamSettingsCopy("en").dangerHeading).toBe("Danger zone");
   });
+
+  it("keys read-only judgment on the systemManaged flag with legacy fallback", () => {
+    // Backend authority: the flag alone locks, even without kind fields, and
+    // preserves the research/knowledge/AI-search coverage.
+    expect(isReadOnlyTeam(makeTeam({ teamId: "flag-team", teamKind: "", systemManaged: true }))).toBe(true);
+    expect(isReadOnlyTeam(makeTeam({ teamId: "research-team", teamKind: "", teamSource: "", systemManaged: true }))).toBe(true);
+    // An explicit non-managed flag overrides stale kind enumerations.
+    expect(isReadOnlyTeam(makeTeam({ teamKind: "self_evolution", systemManaged: false }))).toBe(false);
+    // Archived stays read-only regardless of the flag.
+    expect(isReadOnlyTeam(makeTeam({ status: "archived", systemManaged: false }))).toBe(true);
+    // Missing flag (pre-flag payloads) falls back to the id/kind/source guard.
+    expect(isReadOnlyTeam(makeTeam({ teamKind: "", teamSource: "self_evolution" }))).toBe(true);
+    expect(isReadOnlyTeam(makeTeam({}))).toBe(false);
+  });
 });

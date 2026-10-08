@@ -8,11 +8,13 @@ import {
 } from "../TeamsRoute.canvasData";
 import {
   isAiSearchScopeTeam,
+  isEvolutionSystemTeam,
   isKnowledgeExpansionWorkflowTeam,
   isResearchWorkflowTeam,
   isSystemManagedTeam,
   sourceCollectionAgentRolesForTeam,
   sourceCollectionWorkflowKindForTeam,
+  systemManagedTeamArchiveReason,
 } from "./teamKindModel";
 
 function team(partial: Partial<Team> & Pick<Team, "teamId">): Team {
@@ -23,6 +25,7 @@ function team(partial: Partial<Team> & Pick<Team, "teamId">): Team {
     members: partial.members || [],
     teamKind: partial.teamKind,
     teamSource: partial.teamSource,
+    systemManaged: partial.systemManaged,
   } as Team;
 }
 
@@ -33,6 +36,24 @@ describe("teamKindModel", () => {
     expect(isAiSearchScopeTeam(team({ teamId: AI_SEARCH_TEAM_ID }))).toBe(true);
     expect(isSystemManagedTeam(team({ teamId: RESEARCH_TEAM_ID }))).toBe(true);
     expect(isSystemManagedTeam(team({ teamId: "user-team-1" }))).toBe(false);
+  });
+
+  it("keys system-managed judgment on the backend flag with legacy fallback", () => {
+    // Flag alone decides, without kind/source/id enumerations.
+    expect(isSystemManagedTeam(team({ teamId: "self-evolution-team", systemManaged: true }))).toBe(true);
+    expect(isSystemManagedTeam(team({ teamId: "user-team-1", systemManaged: true }))).toBe(true);
+    // An explicit non-managed flag overrides stale kind enumerations.
+    expect(isSystemManagedTeam(team({ teamId: "user-team-1", teamKind: "research", systemManaged: false }))).toBe(false);
+    // Missing flag (pre-flag payloads) falls back to the workflow composition.
+    expect(isSystemManagedTeam(team({ teamId: "user-team-1", teamKind: "self_evolution" }))).toBe(true);
+  });
+
+  it("keeps evolution-system judgment evolution-scoped under the flag", () => {
+    expect(isEvolutionSystemTeam(team({ teamId: "self-evolution-team", systemManaged: true }))).toBe(true);
+    expect(isEvolutionSystemTeam(team({ teamId: RESEARCH_TEAM_ID, systemManaged: true }))).toBe(false);
+    expect(isEvolutionSystemTeam(team({ teamId: "user-team-1", teamKind: "self_evolution", systemManaged: false }))).toBe(false);
+    expect(systemManagedTeamArchiveReason(team({ teamId: "self-evolution-team", systemManaged: true }), "zh")).not.toBe("");
+    expect(systemManagedTeamArchiveReason(team({ teamId: "user-team-1", systemManaged: false }), "zh")).toBe("");
   });
 
   it("selects source-collection role packs by team kind", () => {

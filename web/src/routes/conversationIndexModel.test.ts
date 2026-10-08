@@ -681,6 +681,15 @@ describe("conversationIndexModel", () => {
     expect(isDiscussionTeam(team({ teamKind: "ai_search", teamSource: "ai_search" }))).toBe(true);
   });
 
+  it("keys discussion visibility on the systemManaged flag with legacy fallback", () => {
+    // Backend authority: an explicit non-managed flag stays discussion-visible
+    // even when a stale kind enumeration would exclude it.
+    expect(isDiscussionTeam(team({ systemManaged: false, teamKind: "self_evolution" }))).toBe(true);
+    // Managed evolution teams stay excluded with or without kind fields.
+    expect(isDiscussionTeam(team({ teamId: "supervised-evolution-team", systemManaged: true }))).toBe(false);
+    expect(isDiscussionTeam(team({ systemManaged: true }))).toBe(true);
+  });
+
   it("tracks child-session root links for tab ownership", () => {
     const child = session({ sessionKind: "child", parentSessionId: "root-1" });
     const orphan = session({ sessionKind: "child", parentSessionId: "" });

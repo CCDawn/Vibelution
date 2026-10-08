@@ -13,6 +13,7 @@ from core.research.workflow.contracts import CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
 
 from .kind_helpers import (
     AI_SEARCH_TEAM_ID,
+    EVOLUTION_SYSTEM_TEAM_IDS,
     KNOWLEDGE_EXPANSION_TEAM_ID,
 )
 
@@ -30,7 +31,9 @@ TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS = 30.0
 AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS = 8.0
 AI_SEARCH_SOURCE_PAGE_MAX_BYTES = 400_000
 AI_SEARCH_SOURCE_PAGE_USER_AGENT = "Vibelution-AI-Search/1.0"
-EVOLUTION_SYSTEM_TEAM_IDS = {"self-evolution-team", "supervised-evolution-team"}
+# ``managed`` marks these specs as system-managed: lifecycle (PATCH lock,
+# archive refusal) and roster are owned by the evolution workflows. The
+# behavior key is ``kind_helpers.team_is_system_managed``.
 EVOLUTION_SYSTEM_TEAM_SPECS = (
     {
         "teamId": "self-evolution-team",
@@ -42,6 +45,7 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
         "teamCategory": "自进化系统团队",
         "teamSource": "self_evolution",
         "chatRoomPurpose": "self_evolution",
+        "managed": True,
     },
     {
         "teamId": "supervised-evolution-team",
@@ -53,6 +57,7 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
         "teamCategory": "监督进化系统团队",
         "teamSource": "supervised_evolution",
         "chatRoomPurpose": "supervised_evolution",
+        "managed": True,
     },
 )
 _LEGACY_RESEARCH_TEAM_MEMBER_ROLE_KEYS = {

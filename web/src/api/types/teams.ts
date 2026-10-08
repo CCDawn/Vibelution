@@ -264,6 +264,8 @@ export type Team = {
   teamCategory: string;
   teamSource: "manual" | "research_organization" | "ai_search" | "self_evolution" | "supervised_evolution" | "team_template" | string;
   teamTemplateId?: string;
+  /** Backend authority: lifecycle and roster are owned by a workflow. */
+  systemManaged?: boolean;
   sourceScopePath?: string;
   sourceScope?: AiSearchSourceScope;
   members: TeamMember[];

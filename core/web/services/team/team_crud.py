@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from core.chat.chat_task_types import trim_lines
 from core.web.services import agent_directory_service, chat_room_service, project_agent_bus_service
+from core.web.services.team.kind_helpers import team_is_system_managed
 
 
 def _service():
@@ -333,7 +334,7 @@ def _reject_locked_team_update(team: dict[str, Any]) -> None:
     team_id = str(team.get("teamId") or "").strip()
     if str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() == "archived":
         raise s.TeamLockedError(f"Archived Team is read-only and cannot be edited: {team_id}")
-    if s._infer_team_kind(team) in s.DERIVED_TEAM_KINDS:
+    if team_is_system_managed(team):
         raise s.TeamLockedError(f"System Team is maintained by workflows and is read-only here: {team_id}")
 
 
@@ -521,10 +522,10 @@ def archive_team(team_id: str) -> dict[str, Any]:
 
 def _reject_system_or_unsupported_team_archive(team: dict[str, Any]) -> None:
     s = _service()
-    team_kind = str(team.get("teamKind") or s._infer_team_kind(team)).strip() or "custom"
-    if team_kind in {"research", "ai_search", "self_evolution", "supervised_evolution"}:
+    if team_is_system_managed(team):
         s._record_team_archive_rejected(team, reason="system_team")
         raise s.TeamServiceError("System Team cannot be archived with cascade Agent deletion.")
+    team_kind = str(team.get("teamKind") or s._infer_team_kind(team)).strip() or "custom"
     if team_kind not in {"custom", "template_demo"}:
         s._record_team_archive_rejected(team, reason="unsupported_team_kind")
         raise s.TeamServiceError(f"Team kind cannot be archived with cascade Agent deletion: {team_kind}")
