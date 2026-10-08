@@ -444,23 +444,23 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
         {proposal.status === "ready" || proposal.status === "blocked" ? <VButton variant="secondary" isPending={pending === "preview"} isDisabled={!canPreview} onPress={() => void previewEditedPlan()}>{zh ? "重新检查计划" : "Recheck plan"}</VButton> : null}
       </div>
       {proposal.error ? <VStateSurface tone="error" density="compact" title={proposal.error} /> : null}
-      {proposal.summaryReason ? <div className="grid min-w-0 justify-items-start gap-1">
+      {proposal.summaryReason ? <div className={styles.summarySection}>
         <p className={`${styles.summaryReason} ${summaryExpanded ? "" : styles.summaryReasonCollapsed}`} data-model-summary>{proposal.summaryReason}</p>
         {proposal.summaryReason.length > 180 ? <VButton density="compact" variant="ghost" className={styles.textToggle} aria-label={zh ? (summaryExpanded ? "收起模型摘要" : "展开模型摘要") : (summaryExpanded ? "Collapse model summary" : "Expand model summary")} onPress={() => setSummaryExpanded((current) => !current)}>{zh ? (summaryExpanded ? "收起" : "展开") : (summaryExpanded ? "Show less" : "Show more")}</VButton> : null}
       </div> : null}
-      {proposal.reportRefs.length ? <div className="grid min-w-0 gap-1" aria-label={zh ? "参考报告" : "Source reports"}>
+      {proposal.reportRefs.length ? <div className={styles.reports} aria-label={zh ? "参考报告" : "Source reports"}>
         {proposal.reportRefs.map((ref) => {
           const source = reportsByRef.get(reportKey(ref));
           const sourceLabel = source
             ? `${source.title} · ${formatTime(source.completedAt, zh)}`
             : (zh ? "报告暂不可用" : "Report temporarily unavailable");
-          return <div key={reportKey(ref)} className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[10px] text-vui-fg-tertiary" title={sourceLabel}>{sourceLabel}</span>
+          return <div key={reportKey(ref)} className={styles.sourceRow}>
+            <span className={styles.sourceLabel} title={sourceLabel}>{sourceLabel}</span>
             {source ? <FinanceReportExport assistantAgentId={agentId} sessionId={ref.sessionId} turnId={ref.turnId} zh={zh} /> : null}
           </div>;
         })}
       </div> : <p className={styles.note}>{zh ? "没有参考报告" : "No source reports"}</p>}
-      <p className="m-0 min-w-0 truncate text-[10px] text-vui-fg-tertiary" title={proposal.modelId}>{zh ? "模型" : "Model"} {proposal.modelId}</p>
+      <p className={styles.modelLabel} title={proposal.modelId}>{zh ? "模型" : "Model"} {proposal.modelId}</p>
 
       <div className={styles.fields}>
         <label className={styles.field}>{zh ? "单股仓位上限 %" : "Max position %"}<VInput type="number" min="1" max="100" step="0.1" value={String(editedPolicy.maxPositionPct)} disabled={proposal.status === "executed" || proposal.status === "failed" || proposal.status === "generating" || Boolean(pending)} onChange={(event) => editPlanPolicy("maxPositionPct", Number(event.target.value))} /></label>
