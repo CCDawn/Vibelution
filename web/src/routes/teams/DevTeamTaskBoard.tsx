@@ -50,30 +50,32 @@ export type SpeakingParticipant = {
   teamRole?: string;
 };
 
+export type SpeakingProgress = {
+  participantId?: string;
+  state?: string;
+  status?: string;
+  updatedAt?: string;
+};
+
+export type SpeakingMessage = {
+  participantId?: string;
+  timestamp?: string;
+};
+
 export type SpeakingRound = {
   roundId?: string;
   status?: string;
-  speakerProgress?: Array<{
-    participantId?: string;
-    state?: string;
-    updatedAt?: string;
-  }>;
+  speakerProgress?: SpeakingProgress[];
+  messages?: SpeakingMessage[];
 };
 
-export function speakingTeamMemberId(
+const SPOKEN_STATUSES = new Set(["completed", "partial", "failed", "blocked"]);
+
+function memberIdForParticipant(
   members: TeamMember[],
   participants: SpeakingParticipant[],
-  round: SpeakingRound | null | undefined,
+  participantId: string,
 ) {
-  const status = String(round?.status || "").trim().toLowerCase();
-  if (!LIVE_ROUND_STATUSES.has(status)) {
-    return "";
-  }
-  const running = (round?.speakerProgress ?? [])
-    .filter((item) => String(item.state || "").trim() === "running" && String(item.participantId || "").trim())
-    .slice()
-    .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
-  const participantId = String(running[0]?.participantId || "").trim();
   if (!participantId) {
     return "";
   }
@@ -87,7 +89,65 @@ export function speakingTeamMemberId(
     return byAgent.memberId;
   }
   const role = String(participant.teamRole || "").trim();
+  if (!role) {
+    return "";
+  }
   return members.find((member) => member.role === role)?.memberId || "";
+}
+
+function latestProgressParticipantId(
+  round: SpeakingRound | null | undefined,
+  include: (item: SpeakingProgress) => boolean,
+) {
+  const matches = (round?.speakerProgress ?? [])
+    .filter((item) => include(item) && String(item.participantId || "").trim())
+    .slice()
+    .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
+  return String(matches[0]?.participantId || "").trim();
+}
+
+function lastMessageMemberId(
+  members: TeamMember[],
+  participants: SpeakingParticipant[],
+  round: SpeakingRound | null | undefined,
+) {
+  const messages = round?.messages ?? [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const participantId = String(messages[index]?.participantId || "").trim();
+    const memberId = memberIdForParticipant(members, participants, participantId);
+    if (memberId) {
+      return memberId;
+    }
+  }
+  return "";
+}
+
+export function speakingTeamMemberId(
+  members: TeamMember[],
+  participants: SpeakingParticipant[],
+  round: SpeakingRound | null | undefined,
+) {
+  const status = String(round?.status || "").trim().toLowerCase();
+  if (LIVE_ROUND_STATUSES.has(status)) {
+    const runningId = latestProgressParticipantId(
+      round,
+      (item) => String(item.state || "").trim() === "running",
+    );
+    const runningMember = memberIdForParticipant(members, participants, runningId);
+    if (runningMember) {
+      return runningMember;
+    }
+  }
+  const messageMember = lastMessageMemberId(members, participants, round);
+  if (messageMember) {
+    return messageMember;
+  }
+  const settledId = latestProgressParticipantId(round, (item) => {
+    const state = String(item.state || "").trim();
+    const progressStatus = String(item.status || "").trim();
+    return state === "settled" && SPOKEN_STATUSES.has(progressStatus);
+  });
+  return memberIdForParticipant(members, participants, settledId);
 }
 
 export function speakingTeamMemberIdFromRoom(
