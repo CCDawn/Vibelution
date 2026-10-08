@@ -60,7 +60,9 @@ type TaskActionBody = {
   ownerMemberId?: string;
   reviewNote?: string;
   subject?: string;
+  description?: string;
   writeScopes?: string[];
+  blockedBy?: string[];
 };
 
 export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProps) {
@@ -107,7 +109,9 @@ export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProp
         ownerMemberId: body.ownerMemberId,
         reviewNote: body.reviewNote,
         subject: body.subject,
+        description: body.description,
         writeScopes: body.writeScopes,
+        blockedBy: body.blockedBy,
       }),
     onSuccess: replaceTasks,
   });
@@ -248,12 +252,17 @@ function TaskCard({
   const [note, setNote] = useState("");
   const [nextOwner, setNextOwner] = useState(task.ownerMemberId);
   const scopeText = task.writeScopes.join("、");
+  const blockerText = task.blockedBy.join("、");
   const [subjectDraft, setSubjectDraft] = useState(task.subject);
+  const [descriptionDraft, setDescriptionDraft] = useState(task.description);
   const [scopeDraft, setScopeDraft] = useState(scopeText);
+  const [blockerDraft, setBlockerDraft] = useState(blockerText);
   useEffect(() => {
     setSubjectDraft(task.subject);
+    setDescriptionDraft(task.description);
     setScopeDraft(scopeText);
-  }, [task.revision, task.subject, scopeText]);
+    setBlockerDraft(blockerText);
+  }, [task.revision, task.subject, task.description, scopeText, blockerText]);
   const text = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const status = STATUS_LABELS[task.status] || { zh: task.status, en: task.status };
   const canClaim = (actorRole === "开发工程师 A" || actorRole === "开发工程师 B")
@@ -262,7 +271,11 @@ function TaskCard({
   const canReview = actorRole === "评审员";
   const canPlan = actorRole === "规划师";
   const nextScopes = splitList(scopeDraft);
-  const sameEdit = subjectDraft.trim() === task.subject && nextScopes.join("\n") === task.writeScopes.join("\n");
+  const nextBlockers = splitList(blockerDraft);
+  const sameEdit = subjectDraft.trim() === task.subject
+    && descriptionDraft.trim() === task.description
+    && nextScopes.join("\n") === task.writeScopes.join("\n")
+    && nextBlockers.join("\n") === task.blockedBy.join("\n");
 
   return (
     <article aria-label={task.subject}>
@@ -330,11 +343,23 @@ function TaskCard({
             placeholder={text("任务主题", "Task subject")}
             onChange={(event) => setSubjectDraft(event.target.value)}
           />
+          <VNativeTextarea
+            aria-label={text(`修改说明 ${task.id}`, `Edit description ${task.id}`)}
+            value={descriptionDraft}
+            placeholder={text("验收标准和边界", "Acceptance and boundary")}
+            onChange={(event) => setDescriptionDraft(event.target.value)}
+          />
           <VNativeInput
             aria-label={text(`修改写范围 ${task.id}`, `Edit write scopes ${task.id}`)}
             value={scopeDraft}
             placeholder={text("写范围，例如 web/src/routes/login", "Write scopes, for example web/src/routes/login")}
             onChange={(event) => setScopeDraft(event.target.value)}
+          />
+          <VNativeInput
+            aria-label={text(`修改依赖 ${task.id}`, `Edit dependencies ${task.id}`)}
+            value={blockerDraft}
+            placeholder={text("依赖任务编号，例如 task-1", "Blocked by, for example task-1")}
+            onChange={(event) => setBlockerDraft(event.target.value)}
           />
           <VNativeButton
             type="button"
@@ -345,7 +370,9 @@ function TaskCard({
               action: "update",
               expectedRevision: task.revision,
               subject: subjectDraft.trim(),
+              description: descriptionDraft.trim(),
               writeScopes: nextScopes,
+              blockedBy: nextBlockers,
             })}
           >
             {text("保存修改", "Save edits")}

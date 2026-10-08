@@ -193,11 +193,48 @@ describe("DevTeamTaskBoard", () => {
       action: "update",
       expectedRevision: 1,
       subject: "改过的主题",
+      description: "只改团队页",
       writeScopes: ["web/src/routes/login"],
+      blockedBy: [],
     });
-    const payload = mutateDevTeamTask.mock.calls[0]?.[2] as Record<string, unknown>;
-    expect(payload.description).toBeUndefined();
-    expect(payload.blockedBy).toBeUndefined();
+  });
+
+  it("lets the planner change the description and dependencies", async () => {
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
+    mutateDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
+    await renderBoard();
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.querySelector('textarea[aria-label="修改说明 task-1"]')).toBeTruthy();
+      });
+    });
+    const description = host?.querySelector<HTMLTextAreaElement>('textarea[aria-label="修改说明 task-1"]');
+    const blockers = host?.querySelector<HTMLInputElement>('input[aria-label="修改依赖 task-1"]');
+    const save = host?.querySelector<HTMLButtonElement>('button[aria-label="保存修改 task-1"]');
+    expect(description?.value).toBe("只改团队页");
+    expect(blockers?.value).toBe("");
+    expect(save?.disabled).toBe(true);
+    await act(async () => {
+      if (description) {
+        setNativeValue(description, "改过的说明");
+      }
+      if (blockers) {
+        setNativeValue(blockers, "task-2");
+      }
+    });
+    expect(save?.disabled).toBe(false);
+    await act(async () => {
+      save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(mutateDevTeamTask).toHaveBeenCalledWith("team-1", "task-1", {
+      actorMemberId: "m-plan",
+      action: "update",
+      expectedRevision: 1,
+      subject: "补任务板",
+      description: "改过的说明",
+      writeScopes: ["web/src/routes/teams"],
+      blockedBy: ["task-2"],
+    });
   });
 
   it("does not offer subject edits on a completed task", async () => {

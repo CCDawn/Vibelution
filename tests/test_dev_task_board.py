@@ -257,6 +257,48 @@ def test_planner_can_change_subject_and_scopes_without_touching_the_rest():
     assert task["revision"] == 4
 
 
+def test_planner_can_change_description_and_dependencies_without_touching_subject():
+    board = _create(description="原来的说明", write_scopes=["web/src/routes/login"])
+    board = _create(
+        board,
+        subject="再做页面",
+        description="原来的页面说明",
+        write_scopes=["web/src/routes/login/button"],
+        owner_member_id="m-b",
+    )
+    _act(
+        board,
+        "task-2",
+        actor_member_id="m-plan",
+        action="update",
+        expected_revision=1,
+        description="改过的说明",
+        blocked_by=["task-1"],
+    )
+    task = board["tasks"][1]
+    assert task["subject"] == "再做页面"
+    assert task["writeScopes"] == ["web/src/routes/login/button"]
+    assert task["description"] == "改过的说明"
+    assert task["blockedBy"] == ["task-1"]
+    assert task["revision"] == 2
+    assert board["tasks"][0]["description"] == "原来的说明"
+    assert board["tasks"][0]["revision"] == 1
+
+    _act(
+        board,
+        "task-2",
+        actor_member_id="m-plan",
+        action="update",
+        expected_revision=2,
+        description="",
+        blocked_by=[],
+    )
+    assert task["description"] == ""
+    assert task["blockedBy"] == []
+    assert task["subject"] == "再做页面"
+    assert task["revision"] == 3
+
+
 def test_prompt_snapshot_is_readonly_and_flattens_task_text():
     text = format_dev_task_board_prompt(
         [
