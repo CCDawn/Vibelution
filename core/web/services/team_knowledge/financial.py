@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlsplit
 
+from core.web.services.financial_research.as_of import active_cutoff, on_or_before
+
 PROFILE = "financial_reports_v1"
 BASE_NAME = "Financial Reports"
 _FIELDS = {
@@ -426,6 +428,56 @@ def eligible_financial_items(
     }
 
 
+def _financial_evidence_as_of(value: Any, cutoff) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    evidence = value.get("financialEvidence")
+    if (
+        not isinstance(evidence, list)
+        or len(evidence) != 1
+        or not isinstance(evidence[0], dict)
+        or not on_or_before(evidence[0].get("publishedAt"), cutoff)
+    ):
+        return None
+    return evidence[0]
+
+
+def _historical_financial_search_payload(payload: dict, cutoff) -> dict:
+    """Keep only result excerpts with a matching, dated source citation."""
+    citations_by_id = {}
+    for citation in list(payload.get("citations") or []):
+        if not isinstance(citation, dict):
+            continue
+        item_id = str(citation.get("knowledgeItemId") or "").strip()
+        evidence = _financial_evidence_as_of(citation, cutoff)
+        if item_id and evidence is not None:
+            citations_by_id[item_id] = evidence
+
+    results = []
+    citations = []
+    for row in list(payload.get("results") or []):
+        if not isinstance(row, dict):
+            continue
+        item_id = str(row.get("knowledgeItemId") or "").strip()
+        evidence = _financial_evidence_as_of(row, cutoff)
+        citation_evidence = citations_by_id.get(item_id)
+        if not item_id or evidence is None or evidence != citation_evidence:
+            continue
+        results.append(
+            {
+                "knowledgeItemId": item_id,
+                "financialEvidence": [evidence],
+                "excerpt": str(row.get("excerpt") or ""),
+            }
+        )
+        citations.append({"knowledgeItemId": item_id, "financialEvidence": [evidence]})
+    return {
+        "status": "found" if results else "insufficient_evidence",
+        "results": results,
+        "citations": citations,
+    }
+
+
 def search_financial_evidence(
     *,
     agent_id: str,
@@ -453,6 +505,7 @@ def search_financial_evidence(
         raise s.TeamKnowledgePermissionError(
             "Financial knowledge base is outside the Agent memory policy."
         )
+    cutoff = active_cutoff()
     from core.web.services import unified_knowledge_search_service
 
     payload = unified_knowledge_search_service.search_unified_memory(
@@ -472,6 +525,8 @@ def search_financial_evidence(
         limit=max(1, min(10, int(limit))),
         max_context_chars=1800,
     )
+    if cutoff is not None:
+        payload = _historical_financial_search_payload(payload, cutoff)
     return {
         "status": "found" if payload.get("results") else "insufficient_evidence",
         **payload,

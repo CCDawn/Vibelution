@@ -18,6 +18,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from core.web.services.financial_research.as_of import active_cutoff
+
 PREFIX = "VIBELUTION_FINANCE_RAGFLOW_"
 REQUIRED_CONFIG = tuple(PREFIX + key for key in ("BASE_URL", "API_KEY", "CHAT_ID"))
 MAX_SOCKET_TIMEOUT_SECONDS = 120
@@ -37,6 +39,7 @@ _MESSAGES = {
     "upstream_error": "财报服务返回错误；本次没有可验证的答案。",
     "invalid_response": "财报服务返回了不符合约定的响应；未展示未经验证的答案。",
     "insufficient_evidence": "证据不足，无法在指定公司和报告范围内回答。",
+    "historical_evidence_unavailable": "历史分析缺少原文披露日期，无法确认财报证据在分析日已公开；未查询远端服务。",
 }
 
 
@@ -368,6 +371,8 @@ def financial_report_query_tool(question: str, ticker: str, report_period: str) 
         except UnicodeError:
             raise FinanceError("invalid_request") from None
         scope = {"ticker": ticker, "report_period": report_period}
+        if active_cutoff() is not None:
+            raise FinanceError("historical_evidence_unavailable")
         config = _load_config()
         result = _answer(_completion(config, question.strip(), scope), scope)
         encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)

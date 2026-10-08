@@ -1,6 +1,7 @@
 """Financial profile integration against the real file-backed governed store."""
 
 import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -19,6 +20,7 @@ from core.web.services import (
 from core.web.services import (
     team_knowledge_service as knowledge,
 )
+from core.web.services.financial_research.as_of import research_analysis_date_context
 from core.web.services.team_knowledge import financial
 
 EXCERPT = "本公司2025年度营业收入为123.45元。"
@@ -229,6 +231,90 @@ def test_reviewed_excerpt_uses_existing_rag_and_preserves_citations(finance_env)
         )
         == 1
     )
+
+
+def test_historical_search_hides_future_financial_excerpt(finance_env):
+    env = finance_env
+    staged = stage(env)
+    review(env, staged)
+
+    with research_analysis_date_context("研究日期：2025-12-31"):
+        result = search(env)
+
+    assert result["status"] == "insufficient_evidence"
+    assert result["results"] == [] and result["citations"] == []
+    assert EXCERPT not in json.dumps(result, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("published_at", ["2026-03-01T00:00:00+00:00", None])
+def test_historical_search_drops_future_or_undated_payload_and_bypass_fields(
+    finance_env, monkeypatch, published_at
+):
+    env = finance_env
+    knowledge.get_financial_knowledge_base(
+        agent_id=env["owner"], create_if_missing=True
+    )
+    metadata = evidence()
+    if published_at is None:
+        metadata.pop("publishedAt")
+    else:
+        metadata["publishedAt"] = published_at
+    secret = "FUTURE_OR_UNDATED_FINANCIAL_EXCERPT"
+    monkeypatch.setattr(
+        unified_knowledge_search_service,
+        "search_unified_memory",
+        lambda **_kwargs: {
+            "status": "found",
+            "results": [
+                {
+                    "knowledgeItemId": "bypass-item",
+                    "financialEvidence": [metadata],
+                    "excerpt": secret,
+                    "snippet": secret,
+                    "context": secret,
+                }
+            ],
+            "citations": [
+                {
+                    "knowledgeItemId": "bypass-item",
+                    "financialEvidence": [metadata],
+                    "context": secret,
+                }
+            ],
+            "contexts": [{"text": secret, "source": {"financialEvidence": [metadata]}}],
+            "snippets": [secret],
+        },
+    )
+
+    with research_analysis_date_context("研究日期：2025-12-31"):
+        result = search(env)
+
+    assert result["status"] == "insufficient_evidence"
+    assert result["results"] == [] and result["citations"] == []
+    assert secret not in json.dumps(result, ensure_ascii=False)
+
+
+def test_future_superseding_amendment_does_not_restore_old_evidence_as_of(
+    finance_env,
+):
+    env = finance_env
+    original = stage(env, publishedAt="2025-05-01T00:00:00+00:00")
+    review(env, original)
+    amended = stage(
+        env,
+        documentSha256="b" * 64,
+        reportVersion="amended",
+        publishedAt="2026-03-01T00:00:00+00:00",
+        supersedesSha256="a" * 64,
+    )
+    review(env, amended)
+
+    with research_analysis_date_context("研究日期：2025-12-31"):
+        result = search(env)
+
+    assert result["status"] == "insufficient_evidence"
+    assert result["results"] == [] and result["citations"] == []
+    assert EXCERPT not in json.dumps(result, ensure_ascii=False)
 
 
 @pytest.mark.parametrize(

@@ -49,18 +49,22 @@ def published_date(value: object) -> date | None:
     text = str(value or "").strip()
     if not text:
         return None
-    iso = re.match(r"^(\d{4}-\d{2}-\d{2})", text)
-    if iso:
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         try:
-            return date.fromisoformat(iso.group(1))
+            return date.fromisoformat(text)
         except ValueError:
             return None
     try:
-        parsed = parsedate_to_datetime(text)
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except (TypeError, ValueError, IndexError, OverflowError):
-        return None
+        try:
+            parsed = parsedate_to_datetime(text)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
     if parsed is None:
         return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(ZoneInfo("Asia/Shanghai"))
     return parsed.date()
 
 

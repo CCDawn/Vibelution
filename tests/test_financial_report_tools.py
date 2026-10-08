@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+from core.web.services.financial_research.as_of import research_analysis_date_context
 from tools import financial_report_tools as finance
 
 QUESTION = "贵州茅台2025年年度报告营业收入是多少？"
@@ -103,6 +104,15 @@ def test_missing_configuration_does_not_access_network():
     availability = finance.financial_report_availability()
     assert availability["available"] is False
     assert availability["connectivityVerified"] is False
+
+
+def test_historical_report_query_fails_closed_without_disclosure_dates(configured):
+    with research_analysis_date_context("研究日期：2024-12-31"):
+        result = ask()
+
+    assert result["status"] == "historical_evidence_unavailable"
+    assert result["answer"] is None and result["citations"] == []
+    finance.build_opener.assert_not_called()
 
 
 @pytest.mark.parametrize(

@@ -11,11 +11,13 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import agent_directory_service
 from core.web.services import team_knowledge_service as knowledge
+from core.web.services.financial_research.as_of import research_analysis_date_context
 from tests.helpers.tool_authorization import authorized_agent_tool_executor
 from tests.test_financial_knowledge_service import (
     EXCERPT,
     evidence,
     review,
+    stage,
 )
 from tests.test_financial_knowledge_service import (
     finance_env as _finance_env,
@@ -118,6 +120,78 @@ def test_actual_executor_stages_and_searches_only_after_review(finance_env, monk
         event_name, event = events[-1]
         assert event_name == EventNames.TOOL_SUCCESS
         assert event["semanticStatus"] == "succeeded"
+
+
+def test_actual_executor_propagates_analysis_cutoff_to_financial_search(finance_env):
+    env = finance_env
+    staged = stage(env)
+    review(env, staged)
+    grant_financial_memory(env["owner"], "read")
+
+    with authorized_agent_tool_executor(
+        env["owner"], executable_tools=(SEARCH,)
+    ) as execute, research_analysis_date_context("研究日期：2025-12-31"):
+        raw, _ = execute(
+            SEARCH,
+            {"query": "营业收入", "ticker": "600519", "report_period": "2025FY"},
+        )
+
+    result = json.loads(raw)
+    assert result["status"] == "insufficient_evidence"
+    assert result["results"] == [] and result["citations"] == []
+    assert EXCERPT not in raw
+
+
+def test_actual_executor_keeps_pre_cutoff_evidence_through_historical_compaction(
+    finance_env,
+):
+    env = finance_env
+    staged = stage(env)
+    review(env, staged)
+    grant_financial_memory(env["owner"], "read")
+
+    with authorized_agent_tool_executor(
+        env["owner"], executable_tools=(SEARCH,)
+    ) as execute, research_analysis_date_context("研究日期：2026-04-01"):
+        raw, _ = execute(
+            SEARCH,
+            {"query": "营业收入", "ticker": "600519", "report_period": "2025FY"},
+        )
+
+    result = json.loads(raw)
+    assert result["status"] == "found"
+    assert EXCERPT in result["results"][0]["excerpt"]
+    assert result["citations"][0]["financialEvidence"][0]["publishedAt"] == evidence()[
+        "publishedAt"
+    ]
+
+
+def test_financial_search_compactor_rejects_future_and_undated_evidence_as_of():
+    for metadata in (
+        evidence(),
+        {key: value for key, value in evidence().items() if key != "publishedAt"},
+    ):
+        secret = "FUTURE_OR_UNDATED_FINANCIAL_EXCERPT"
+        payload = {
+            "status": "found",
+            "results": [
+                {
+                    "knowledgeItemId": "item-1",
+                    "financialEvidence": [metadata],
+                    "excerpt": secret,
+                }
+            ],
+            "citations": [
+                {"knowledgeItemId": "item-1", "financialEvidence": [metadata]}
+            ],
+        }
+
+        with research_analysis_date_context("研究日期：2025-12-31"):
+            result = financial_memory_tools._compact_search(payload)
+
+        assert result["status"] == "insufficient_evidence"
+        assert result["results"] == [] and result["citations"] == []
+        assert secret not in json.dumps(result, ensure_ascii=False)
 
 
 def test_executor_denied_stage_cannot_create_a_library(finance_env):

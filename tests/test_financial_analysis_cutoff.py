@@ -1,7 +1,10 @@
 import json
 from datetime import date
 
+import pytest
+
 from core.web.services.financial_research.as_of import (
+    published_date,
     redact_research_history,
     redact_research_prompt,
     research_analysis_date_context,
@@ -13,12 +16,23 @@ from tools.financial_market_tools import (
     financial_market_snapshot_tool,
 )
 
-
 REQUEST = "请研究 贵州茅台（600519，上交所），分析日期 2024-12-31，使用 Markdown 二级标题整理研究报告。"
 QUOTE = (
     "行情快照（腾讯财经，可能延迟）：2026-09-30T16:14:58+08:00，价格 1258.62 元，涨跌 1.86%。"
     "这是带时点的报价，不是已审核财报证据。"
 )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2024-12-30T16:30:00Z", date(2024, 12, 31)),
+        ("2024-12-31T16:00:00Z", date(2025, 1, 1)),
+        ("2024-12-30T16:30:00+00:00", date(2024, 12, 31)),
+    ],
+)
+def test_published_timestamp_uses_shanghai_calendar_day(value, expected):
+    assert published_date(value) == expected
 
 
 def test_model_prompt_drops_a_quote_newer_than_the_analysis_date():

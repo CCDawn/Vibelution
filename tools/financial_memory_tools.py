@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Callable
 
+from core.web.services.financial_research.as_of import active_cutoff, on_or_before
 from tools.team_knowledge_tools import _current_runtime, _policy_ids
 
 MAX_RESULT_CHARS = 3_200
@@ -119,6 +120,7 @@ def _run(action: str, callback: Callable) -> str:
 
 def _compact_search(payload: dict) -> dict:
     """Keep original page/version citations intact within native ToolMessage budget."""
+    cutoff = active_cutoff()
     result = {
         "status": payload["status"],
         "results": [],
@@ -132,12 +134,26 @@ def _compact_search(payload: dict) -> dict:
         row.get("knowledgeItemId"): row for row in payload.get("citations", [])
     }
     rows = payload.get("results", [])
+    eligible_row_count = 0
     for row in rows:
         item_id = row.get("knowledgeItemId")
         citation = citations.get(item_id)
         if not citation or not citation.get("financialEvidence"):
             continue
         evidence = [dict(meta) for meta in citation["financialEvidence"]]
+        if cutoff is not None:
+            row_evidence = row.get("financialEvidence")
+            if (
+                not isinstance(row_evidence, list)
+                or len(row_evidence) != 1
+                or not isinstance(row_evidence[0], dict)
+                or len(evidence) != 1
+                or not on_or_before(row_evidence[0].get("publishedAt"), cutoff)
+                or not on_or_before(evidence[0].get("publishedAt"), cutoff)
+                or row_evidence[0] != evidence[0]
+            ):
+                continue
+        eligible_row_count += 1
         for meta in evidence:
             if len(meta.get("sourceUrl", "")) > 512:
                 meta["sourceUrl"] = None
@@ -163,7 +179,9 @@ def _compact_search(payload: dict) -> dict:
             break
         result = candidate
     result["omittedResultCount"] = len(rows) - len(result["results"])
-    if rows and not result["results"]:
+    if cutoff is not None and rows and not eligible_row_count:
+        result["status"] = "insufficient_evidence"
+    elif rows and not result["results"]:
         result["status"] = "response_too_large"
     return result
 
