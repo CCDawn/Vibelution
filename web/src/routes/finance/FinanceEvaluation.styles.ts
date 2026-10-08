@@ -8,4 +8,5 @@ export default {
   table: "min-w-0 overflow-x-auto",
   chart: "h-44 w-full text-vui-accent-cool",
   status: "text-xs font-medium",
+  claim: "m-0 break-words text-xs",
 } as const;

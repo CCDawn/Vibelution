@@ -39,7 +39,7 @@ export function FinanceOutcomeReview({ agentId, zh, disabled, onResearchPrompt, 
     {error && !lesson ? <VStateSurface tone="error" density="compact" title={error} /> : null}
     {query.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取核验记录" : "Loading checks"} /> : query.isError ? <VStateSurface tone="error" title={query.error.message} actions={<VButton onPress={() => void query.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !rows.length ? <VStateSurface tone="empty" title={zh ? "没有核验记录" : "No tracked claims"}>{zh ? "打开已完成的股票报告，选择「登记到期核验」。" : "Open a completed stock report and select Track outcome."}</VStateSurface> : rows.map(row => <VSurface key={row.id} tone="panel" padding="normal" className={styles.panel}>
       <div className={styles.row}><strong>{row.symbol}</strong><span className={styles.status}>{status(row)}</span><span className={styles.note}>{row.analysisDate} → {row.dueDate} · {row.direction === "up" ? "↑" : "↓"} {row.thresholdPct}%{row.retrospective ? (zh ? " · 事后回顾" : " · Retrospective") : ""}</span></div>
-      <p className="m-0 break-words text-xs">{row.claimText}</p>
+      <p className={styles.claim}>{row.claimText}</p>
       {row.evidence ? <p className={styles.note}>{row.evidence.baseDate} {row.evidence.baseClose.toFixed(3)} → {row.evidence.dueDateQuoteDate} {row.evidence.dueClose.toFixed(3)} · {row.evidence.returnPct.toFixed(2)}% · <a href={row.evidence.sourceUrl} target="_blank" rel="noreferrer">{zh ? "行情来源" : "Source"}</a></p> : null}
       {row.error ? <VStateSurface tone="error" density="compact" title={row.error.unavailableReason} /> : null}
       {row.lesson ? <p className={styles.note}>{zh ? "已确认教训：" : "Confirmed lesson: "}{row.lesson.text}</p> : null}
