@@ -113,6 +113,7 @@ describe("DevTeamTaskBoard", () => {
       expectedRevision: 1,
     });
     expect(host?.textContent).not.toContain("工作区");
+    expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
   });
 
   it("shows the opened workspace branch on the task card", async () => {
@@ -159,6 +160,60 @@ describe("DevTeamTaskBoard", () => {
     expect(listDevTeamTaskChanges).toHaveBeenCalledWith("team-1", "task-1", expect.anything());
     expect(host?.textContent).toContain("完成");
     expect(host?.textContent).toContain("退回");
+  });
+
+  it("lets the planner change the subject and write scopes", async () => {
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
+    mutateDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
+    await renderBoard();
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.querySelector('input[aria-label="修改主题 task-1"]')).toBeTruthy();
+      });
+    });
+    const subject = host?.querySelector<HTMLInputElement>('input[aria-label="修改主题 task-1"]');
+    const scopes = host?.querySelector<HTMLInputElement>('input[aria-label="修改写范围 task-1"]');
+    expect(subject?.value).toBe("补任务板");
+    expect(scopes?.value).toBe("web/src/routes/teams");
+    await act(async () => {
+      if (subject) {
+        setNativeValue(subject, "改过的主题");
+      }
+      if (scopes) {
+        setNativeValue(scopes, "web/src/routes/login");
+      }
+    });
+    const save = host?.querySelector<HTMLButtonElement>('button[aria-label="保存修改 task-1"]');
+    expect(save?.disabled).toBe(false);
+    await act(async () => {
+      save?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(mutateDevTeamTask).toHaveBeenCalledWith("team-1", "task-1", {
+      actorMemberId: "m-plan",
+      action: "update",
+      expectedRevision: 1,
+      subject: "改过的主题",
+      writeScopes: ["web/src/routes/login"],
+    });
+    const payload = mutateDevTeamTask.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(payload.description).toBeUndefined();
+    expect(payload.blockedBy).toBeUndefined();
+  });
+
+  it("does not offer subject edits on a completed task", async () => {
+    listDevTeamTasks.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      tasks: [{ ...readyTask, status: "completed", ready: false }],
+      updatedAt: "",
+    });
+    await renderBoard();
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.textContent).toContain("补任务板");
+      });
+    });
+    expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
   });
 
   it("lets the planner add a task without writing it into the room", async () => {

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   createDevTeamTask,
@@ -53,6 +53,16 @@ function roleOf(members: TeamMember[], memberId: string) {
   return members.find((member) => member.memberId === memberId)?.role || "";
 }
 
+type TaskActionBody = {
+  taskId: string;
+  action: "assign" | "claim" | "complete" | "rework" | "delete" | "update";
+  expectedRevision: number;
+  ownerMemberId?: string;
+  reviewNote?: string;
+  subject?: string;
+  writeScopes?: string[];
+};
+
 export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProps) {
   const queryClient = useQueryClient();
   const planner = members.find((member) => member.role === "规划师");
@@ -89,13 +99,15 @@ export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProp
     },
   });
   const changeTask = useMutation({
-    mutationFn: (body: { taskId: string; action: "assign" | "claim" | "complete" | "rework" | "delete"; expectedRevision: number; ownerMemberId?: string; reviewNote?: string }) =>
+    mutationFn: (body: TaskActionBody) =>
       mutateDevTeamTask(teamId, body.taskId, {
         actorMemberId: actorId,
         action: body.action,
         expectedRevision: body.expectedRevision,
         ownerMemberId: body.ownerMemberId,
         reviewNote: body.reviewNote,
+        subject: body.subject,
+        writeScopes: body.writeScopes,
       }),
     onSuccess: replaceTasks,
   });
@@ -231,10 +243,17 @@ function TaskCard({
   actorRole: string;
   actorId: string;
   pending: boolean;
-  onAction: (body: { taskId: string; action: "assign" | "claim" | "complete" | "rework" | "delete"; expectedRevision: number; ownerMemberId?: string; reviewNote?: string }) => void;
+  onAction: (body: TaskActionBody) => void;
 }) {
   const [note, setNote] = useState("");
   const [nextOwner, setNextOwner] = useState(task.ownerMemberId);
+  const scopeText = task.writeScopes.join("、");
+  const [subjectDraft, setSubjectDraft] = useState(task.subject);
+  const [scopeDraft, setScopeDraft] = useState(scopeText);
+  useEffect(() => {
+    setSubjectDraft(task.subject);
+    setScopeDraft(scopeText);
+  }, [task.revision, task.subject, scopeText]);
   const text = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const status = STATUS_LABELS[task.status] || { zh: task.status, en: task.status };
   const canClaim = (actorRole === "开发工程师 A" || actorRole === "开发工程师 B")
@@ -242,6 +261,8 @@ function TaskCard({
     && (!task.ownerMemberId || task.ownerMemberId === actorId);
   const canReview = actorRole === "评审员";
   const canPlan = actorRole === "规划师";
+  const nextScopes = splitList(scopeDraft);
+  const sameEdit = subjectDraft.trim() === task.subject && nextScopes.join("\n") === task.writeScopes.join("\n");
 
   return (
     <article aria-label={task.subject}>
@@ -303,6 +324,32 @@ function TaskCard({
       ) : null}
       {canPlan && task.status !== "completed" ? (
         <>
+          <VNativeInput
+            aria-label={text(`修改主题 ${task.id}`, `Edit subject ${task.id}`)}
+            value={subjectDraft}
+            placeholder={text("任务主题", "Task subject")}
+            onChange={(event) => setSubjectDraft(event.target.value)}
+          />
+          <VNativeInput
+            aria-label={text(`修改写范围 ${task.id}`, `Edit write scopes ${task.id}`)}
+            value={scopeDraft}
+            placeholder={text("写范围，例如 web/src/routes/login", "Write scopes, for example web/src/routes/login")}
+            onChange={(event) => setScopeDraft(event.target.value)}
+          />
+          <VNativeButton
+            type="button"
+            disabled={pending || !subjectDraft.trim() || sameEdit}
+            aria-label={text(`保存修改 ${task.id}`, `Save edits ${task.id}`)}
+            onClick={() => onAction({
+              taskId: task.id,
+              action: "update",
+              expectedRevision: task.revision,
+              subject: subjectDraft.trim(),
+              writeScopes: nextScopes,
+            })}
+          >
+            {text("保存修改", "Save edits")}
+          </VNativeButton>
           <VNativeSelect
             aria-label={text(`改派 ${task.id}`, `Assign ${task.id}`)}
             value={nextOwner}

@@ -218,6 +218,45 @@ def test_absolute_write_scope_is_rejected():
     assert board["tasks"] == []
 
 
+def test_planner_can_change_subject_and_scopes_without_touching_the_rest():
+    board = _create(description="原来的说明", write_scopes=["web/src/routes/login"])
+    _act(
+        board,
+        "task-1",
+        actor_member_id="m-plan",
+        action="update",
+        expected_revision=1,
+        subject="新主题",
+        write_scopes=["web/src/routes/login/button"],
+    )
+    task = board["tasks"][0]
+    assert task["subject"] == "新主题"
+    assert task["writeScopes"] == ["web/src/routes/login/button"]
+    assert task["description"] == "原来的说明"
+    assert task["blockedBy"] == []
+    assert task["revision"] == 2
+
+    try:
+        _act(board, "task-1", actor_member_id="m-a", action="update", expected_revision=2, subject="工程师不能改")
+    except DevTaskBoardError as exc:
+        assert "当前角色不能" in str(exc)
+    else:
+        raise AssertionError("engineer updated a task")
+    assert task["subject"] == "新主题"
+    assert task["revision"] == 2
+
+    _act(board, "task-1", actor_member_id="m-a", action="claim", expected_revision=2)
+    _act(board, "task-1", actor_member_id="m-rev", action="complete", expected_revision=3)
+    try:
+        _act(board, "task-1", actor_member_id="m-plan", action="update", expected_revision=4, subject="收口后不能改")
+    except DevTaskBoardError as exc:
+        assert "不能再改" in str(exc)
+    else:
+        raise AssertionError("completed task was edited")
+    assert task["subject"] == "新主题"
+    assert task["revision"] == 4
+
+
 def test_prompt_snapshot_is_readonly_and_flattens_task_text():
     text = format_dev_task_board_prompt(
         [
