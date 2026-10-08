@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from core.web.services.team.dev_task_board import (
     DevTaskStaleRevision,
     create_dev_task,
+    dev_task_changes,
     list_dev_tasks,
     mutate_dev_task,
 )
@@ -47,6 +48,18 @@ class DevTaskCreatePayload(BaseModel):
     writeScopes: list[str] = Field(default_factory=list, max_length=8)
     blockedBy: list[str] = Field(default_factory=list, max_length=20)
     ownerMemberId: str = Field(default="", max_length=96)
+
+
+class DevTaskChangeView(BaseModel):
+    path: str
+    status: str
+
+
+class DevTaskChangesResponse(BaseModel):
+    available: bool = False
+    workspace: bool = False
+    truncated: int = 0
+    changes: list[DevTaskChangeView] = Field(default_factory=list)
 
 
 class DevTaskMutatePayload(BaseModel):
@@ -90,6 +103,18 @@ def register_dev_team_task_routes(router: APIRouter) -> None:
                 blocked_by=payload.blockedBy,
                 owner_member_id=payload.ownerMemberId,
             )
+        except TeamNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except TeamServiceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get(
+        "/teams/{team_id}/dev-tasks/{task_id}/changes",
+        response_model=DevTaskChangesResponse,
+    )
+    def dev_task_change_list(team_id: str, task_id: str) -> dict:
+        try:
+            return dev_task_changes(team_id, task_id)
         except TeamNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except TeamServiceError as exc:

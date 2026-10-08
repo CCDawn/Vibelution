@@ -3,9 +3,11 @@ import { useState } from "react";
 
 import {
   createDevTeamTask,
+  listDevTeamTaskChanges,
   listDevTeamTasks,
   mutateDevTeamTask,
   type DevTeamTask,
+  type DevTeamTaskChanges,
   type DevTeamTaskList,
 } from "../../api/devTeamTasks";
 import type { TeamMember } from "../../api/types";
@@ -24,6 +26,13 @@ const STATUS_LABELS: Record<string, { zh: string; en: string }> = {
   in_progress: { zh: "进行中", en: "In progress" },
   rework: { zh: "退回", en: "Rework" },
   completed: { zh: "完成", en: "Done" },
+};
+
+const CHANGE_LABELS: Record<string, { zh: string; en: string }> = {
+  added: { zh: "新增", en: "Added" },
+  modified: { zh: "修改", en: "Modified" },
+  deleted: { zh: "删除", en: "Deleted" },
+  untracked: { zh: "未跟踪", en: "Untracked" },
 };
 
 type DevTeamTaskBoardProps = {
@@ -191,6 +200,7 @@ export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProp
         <TaskCard
           key={task.id}
           lang={lang}
+          teamId={teamId}
           task={task}
           members={members}
           actorRole={actorRole}
@@ -206,6 +216,7 @@ export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProp
 
 function TaskCard({
   lang,
+  teamId,
   task,
   members,
   actorRole,
@@ -214,6 +225,7 @@ function TaskCard({
   onAction,
 }: {
   lang: "zh" | "en";
+  teamId: string;
   task: DevTeamTask;
   members: TeamMember[];
   actorRole: string;
@@ -245,6 +257,9 @@ function TaskCard({
       {task.writeScopeWarnings.map((warning) => (
         <p key={warning} role="status">{warning}</p>
       ))}
+      {canReview && (task.status === "in_progress" || task.status === "rework" || task.status === "completed") ? (
+        <TaskChangeList lang={lang} teamId={teamId} taskId={task.id} />
+      ) : null}
       {canClaim ? (
         <VNativeButton
           type="button"
@@ -321,5 +336,56 @@ function TaskCard({
       ) : null}
       </VStack>
     </article>
+  );
+}
+
+function TaskChangeList({ lang, teamId, taskId }: { lang: "zh" | "en"; teamId: string; taskId: string }) {
+  const text = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const changesQuery = useQuery({
+    queryKey: ["teams", teamId, "dev-tasks", taskId, "changes"],
+    queryFn: ({ signal }) => listDevTeamTaskChanges(teamId, taskId, { signal }),
+    enabled: Boolean(teamId && taskId),
+  });
+  const data = changesQuery.data;
+  return (
+    <div aria-label={text(`改动 ${taskId}`, `Changes ${taskId}`)}>
+      <TaskChangeBody lang={lang} loading={changesQuery.isLoading} failed={changesQuery.isError} data={data} text={text} />
+    </div>
+  );
+}
+
+function TaskChangeBody({
+  lang,
+  loading,
+  failed,
+  data,
+  text,
+}: {
+  lang: "zh" | "en";
+  loading: boolean;
+  failed: boolean;
+  data: DevTeamTaskChanges | undefined;
+  text: (zh: string, en: string) => string;
+}) {
+  if (loading) {
+    return <span>{text("正在看改动", "Looking at the changes")}</span>;
+  }
+  if (failed || !data || !data.available) {
+    return <span>{text("看不出改了什么", "The changes could not be read")}</span>;
+  }
+  if (!data.workspace) {
+    return <span>{text("还没有任务工作区", "No task workspace yet")}</span>;
+  }
+  if (data.changes.length === 0) {
+    return <span>{text("没有改动", "No changes")}</span>;
+  }
+  return (
+    <>
+      {data.changes.map((change) => {
+        const label = CHANGE_LABELS[change.status] || { zh: change.status, en: change.status };
+        return <span key={`${change.status}:${change.path}`}>{lang === "zh" ? label.zh : label.en} {change.path}</span>;
+      })}
+      {data.truncated > 0 ? <span>{text(`还有 ${data.truncated} 个文件没有列在这里。`, `${data.truncated} more files are not listed.`)}</span> : null}
+    </>
   );
 }
