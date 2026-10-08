@@ -27,6 +27,27 @@ _FINGERPRINT = "frozen-model-fingerprint"
 _NOW = datetime(2024, 1, 10, 12, 0, tzinfo=timezone.utc)
 
 
+def test_backtest_registers_and_rearms_in_real_runtime_task_store(monkeypatch, tmp_path):
+    from core.web.services import runtime_task_registry
+
+    tasks = runtime_task_registry.RuntimeTaskStore(tmp_path / "runtime-tasks")
+    monkeypatch.setattr(runtime_task_registry, "default_store", lambda: tasks)
+    run = {"runId": str(uuid4()), "decisionCount": 2, "completedDecisionCount": 0}
+    task_id = f"financial-backtest-{run['runId']}"
+    assert tasks.load_state(task_id) == {}
+
+    service._sync_runtime_task(_AGENT_ID, run, "queued")
+    assert tasks.load_state(task_id)["coordinationOwner"] == "financial_ai_backtest"
+    assert tasks.load_state(task_id)["financialBacktest"]["agentId"] == _AGENT_ID
+    assert tasks.has_active_tasks()
+    service._sync_runtime_task(_AGENT_ID, run, "stopped")
+    assert not tasks.has_active_tasks()
+    service._sync_runtime_task(_AGENT_ID, run, "queued", rearm=True)
+    assert tasks.has_active_tasks()
+    service._sync_runtime_task(_AGENT_ID, run, "completed")
+    assert not tasks.has_active_tasks()
+
+
 def _snapshot() -> data.BacktestSnapshot:
     candles = (
         data.Candle(_DAY_ONE, 10.0, 10.5, 9.5, 10.0, 100_000),

@@ -608,7 +608,7 @@ def _sync_runtime_task(agent_id: str, run: Mapping[str, Any], status: str, *, re
         "completedDecisionCount": int(run.get("completedDecisionCount") or 0),
         "uncertainDecisionDate": str(run.get("uncertainDecisionDate") or ""),
     }
-    if current is None:
+    if not current:
         snapshot = runtime_task_registry.new_snapshot(
             kind=runtime_task_registry.KIND_RESEARCH_TASK,
             task_id=task_id,
