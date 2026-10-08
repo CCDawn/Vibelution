@@ -5830,15 +5830,12 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                     enabled=bool(context.get("_speakerDeltaCapture")),
                     structured_context=bool(context.get("_structuredChatRoomContext")),
                 ):
+                    disable_tools, allowed_tool_names = _room_turn_tool_access(context)
                     result = run_existing_agent_single_turn(
                         agent_runtime,
                         initial_prompt=prompt,
-                        disable_tools=not bool(context.get("_structuredChatRoomContext")),
-                        allowed_tool_names=(
-                            ["read_chat_room_context_refs"]
-                            if context.get("_structuredChatRoomContext")
-                            else None
-                        ),
+                        disable_tools=disable_tools,
+                        allowed_tool_names=allowed_tool_names,
                         prompt_cache_partition=speaker_prompt_cache_partition,
                         turn_identity=turn_identity,
                         interrupt_checker=interrupt_checker,
@@ -6305,6 +6302,24 @@ def _speaker_room_contract_lines(
         task_flow_line,
         "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
     ]
+
+
+def _room_turn_tool_access(context: Mapping) -> tuple[bool, list[str] | None]:
+    """Tool surface for one room speaking turn.
+
+    Dev-team turns execute the loop itself (board ops, edits inside the
+    claimed task worktree, test runs), so they run with the speaker's policy
+    tools like a normal chat turn. Every other room stays a tool-less
+    speaking venue; structured-context rooms keep only the context reader.
+    """
+
+    dev_team_turn = bool(str(context.get("devTeamId") or "").strip())
+    structured = bool(context.get("_structuredChatRoomContext"))
+    if dev_team_turn:
+        return False, None
+    if structured:
+        return False, ["read_chat_room_context_refs"]
+    return True, None
 
 
 def _dev_team_planner_convergence_line(dev_team_id: str, participant: dict[str, Any]) -> str:

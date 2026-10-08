@@ -40,6 +40,9 @@ toolPolicy:
     - run_test_for_tool
   writeScopes:
     - private
+# 自主开发闭环：工程师在认领任务 worktree 内的写操作免交互审批；
+# 工具面仍由上方 allowedTools/writeScopes 与任务板角色门约束。
+permissionPreset: full_access
 ---
 
 # 开发工程师 A（dev_team_developer_a）

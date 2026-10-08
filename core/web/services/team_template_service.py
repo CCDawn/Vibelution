@@ -71,6 +71,7 @@ def instantiate_team_template(template_id: str, *, name: str = "") -> dict[str, 
             tool_policy=_role_tool_policy(role),
             persona_profile=role["personaProfile"],
             task_profile=role["taskProfile"],
+            permission_preset=str(role.get("permissionPreset") or "").strip() or None,
             metadata={
                 "teamTemplateId": template["templateId"],
                 "teamTemplateRole": role["roleKey"],

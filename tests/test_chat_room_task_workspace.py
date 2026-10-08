@@ -385,3 +385,26 @@ def test_board_prompt_marks_the_all_completed_state():
     assert "全部任务已完成" not in format_dev_task_board_prompt(
         [{"id": "task-4", "status": "rework", "ownerRole": "开发工程师 A", "subject": "退回"}]
     )
+
+
+def test_room_turn_tool_access_rules():
+    # Dev-team turns execute the loop itself: policy tools, structured or not.
+    assert chat_room_service._room_turn_tool_access(
+        {"devTeamId": "team-9", "_structuredChatRoomContext": True}
+    ) == (False, None)
+    assert chat_room_service._room_turn_tool_access({"devTeamId": "team-9"}) == (False, None)
+    # Every other room stays a tool-less venue; structured rooms keep the reader.
+    assert chat_room_service._room_turn_tool_access({"_structuredChatRoomContext": True}) == (
+        False,
+        ["read_chat_room_context_refs"],
+    )
+    assert chat_room_service._room_turn_tool_access({}) == (True, None)
+    assert chat_room_service._room_turn_tool_access({"devTeamId": "   "}) == (True, None)
+
+
+def test_dev_task_board_tool_descriptor_does_not_require_approval():
+    from core.web.services.tool_catalog import build_tool_descriptor
+
+    descriptor = build_tool_descriptor("dev_task_board_tool", args_schema={"type": "object"})
+    assert descriptor.approval == "never"
+    assert descriptor.write_scope_gated is False

@@ -112,9 +112,10 @@ def test_builtin_role_files_match_contract_golden_shape():
         "financial_market",
         "financial_news",
     )
+    optional_keys = {"modelRef", "permissionPreset"}
     for key in keys:
         role = role_definition_service.builtin_role_definition(key)
-        assert set(role) == set(team_format.ROLE_DEFINITION_FIELDS), key
+        assert set(team_format.ROLE_DEFINITION_FIELDS) <= set(role) <= set(team_format.ROLE_DEFINITION_FIELDS) | optional_keys, key
         assert set(role["personaProfile"]) == set(team_format.PERSONA_PROFILE_FIELDS), key
         assert set(role["taskProfile"]) == set(team_format.TASK_PROFILE_FIELDS), key
         assert set(role["toolPolicy"]) == set(team_format.TOOL_POLICY_FIELDS), key
@@ -298,3 +299,38 @@ def test_load_role_definitions_preserves_requested_order_and_rejects_duplicates(
 
     with pytest.raises(role_definition_service.RoleDefinitionError):
         role_definition_service.load_role_definitions([keys[0], keys[0]], project_root=root)
+
+
+def test_builtin_developer_roles_carry_full_access_preset():
+    for key in ("dev_team_developer_a", "dev_team_developer_b"):
+        role = role_definition_service.builtin_role_definition(key)
+        assert role.get("permissionPreset") == "full_access", key
+    for key in ("dev_team_planner", "dev_team_reviewer"):
+        role = role_definition_service.builtin_role_definition(key)
+        assert "permissionPreset" not in role, key
+
+
+def test_role_frontmatter_rejects_invalid_permission_preset():
+    mapping = {
+        "roleKey": "dev_team_developer_a",
+        "role": "x",
+        "purpose": "x",
+        "agentName": "x",
+        "responsibilities": ["x"],
+        "personaProfile": {
+            "personality": "x",
+            "communicationStyle": "x",
+            "background": "x",
+            "identityNotes": "x",
+            "expertise": ["x"],
+        },
+        "taskProfile": {"mission": "x"},
+        "toolPolicy": {
+            "allowedTools": ["read_file_tool"],
+            "preferredTools": [],
+            "writeScopes": [],
+        },
+        "permissionPreset": "yolo_everything",
+    }
+    with pytest.raises(role_definition_service.RoleDefinitionError):
+        role_definition_service._role_from_mapping(mapping, source="bad_role.md")

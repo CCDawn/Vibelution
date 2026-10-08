@@ -637,8 +637,13 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     "dev_task_board_tool": {
         "category": "agent_collaboration",
         "capabilityTags": ["dev_team_task_board", "task_state", "structured_result"],
+        # Control-plane op on the team board JSON only: identity-chained to the
+        # team member row and role-gated inside the tool (planner create/update,
+        # engineer claim, reviewer complete/rework). HIGH tier would demand an
+        # interactive approval per call, which no autonomous dev-team loop can
+        # satisfy; the write-scope gate already exempts team_workflow_state_write.
         "riskTags": ["team_workflow_state_write"],
-        "permissionTier": HIGH_PERMISSION_TIER,
+        "permissionTier": MEDIUM_PERMISSION_TIER,
     },
     "knowledge_base_acl_grant_tool": {
         "category": "memory_context",

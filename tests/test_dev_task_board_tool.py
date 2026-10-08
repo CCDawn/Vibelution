@@ -373,3 +373,12 @@ def _git(cwd: Path, args: list, env: dict | None = None) -> str:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     return str(result.stdout or "")
+
+
+def test_instantiated_developer_agents_run_with_full_access(dev_team):
+    for role in ("开发工程师 A", "开发工程师 B"):
+        agent = agent_directory_service.get_agent(dev_team["agentByRole"][role])
+        assert str(agent.get("permissionPreset") or "") == "full_access", role
+    for role in ("规划师", "评审员"):
+        agent = agent_directory_service.get_agent(dev_team["agentByRole"][role])
+        assert str(agent.get("permissionPreset") or "") != "full_access", role

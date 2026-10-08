@@ -70,7 +70,7 @@ ROLE_DEFINITIONS_PACKAGE_DIR = Path(__file__).resolve().parent / "role_definitio
 ROLE_REGISTRY_SCHEMA_VERSION = 1
 # Bump when shipped role files change in a way that must overwrite seeded
 # workspace copies; user-created roles are never affected by the bump.
-BUILTIN_ROLE_CONTENT_VERSION = 3
+BUILTIN_ROLE_CONTENT_VERSION = 4
 ROLE_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
 
 _FRONTMATTER_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -85,6 +85,7 @@ _ROLE_TOP_LEVEL_KEYS = frozenset(
         "taskProfile",
         "toolPolicy",
         "modelRef",
+        "permissionPreset",
     }
 )
 _TOP_LEVEL_SCALAR_KEYS = ("roleKey", "role", "purpose", "agentName")
@@ -335,6 +336,17 @@ def _role_from_mapping(mapping: dict[str, Any], *, source: str) -> dict[str, Any
 
     if "modelRef" in mapping:
         role["modelRef"] = _require_str(mapping, "modelRef", source=source, where="frontmatter")
+
+    if "permissionPreset" in mapping:
+        from core.web.services.agent_config_authority import (
+            normalize_permission_preset,
+        )
+
+        preset = _require_str(mapping, "permissionPreset", source=source, where="frontmatter")
+        try:
+            role["permissionPreset"] = normalize_permission_preset(preset, strict=True)
+        except ValueError as exc:
+            raise RoleDefinitionError(f"{source}: permissionPreset 非法：{exc}") from exc
 
     result = team_format.validate_role_definition(role)
     if not result["valid"]:
