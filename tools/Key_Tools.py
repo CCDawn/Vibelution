@@ -77,6 +77,7 @@ from core.infrastructure.workspace_cleaner import (
 from tools.agent_tools import continue_subagent as _continue_subagent_impl
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
+from tools.dev_task_board_tools import dev_task_board_tool as _dev_task_board_impl
 from tools.episodic_memory_tools import (
     append_personal_memory_tool as _append_personal_memory_impl,
     supersede_personal_memory_tool as _supersede_personal_memory_impl,
@@ -2297,6 +2298,61 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def dev_task_board_tool(
+        action: str,
+        team_id: str,
+        task_id: str = "",
+        expected_revision: int = 0,
+        subject: Optional[str] = None,
+        description: Optional[str] = None,
+        write_scopes: Optional[List[str]] = None,
+        blocked_by: Optional[List[str]] = None,
+        review_note: str = "",
+        owner_member_id: str = "",
+    ) -> str:
+        """
+        【开发团队任务板】以你自己的团队成员身份操作共享任务板。
+
+        只适用于开发团队（dev-team）成员；身份由当前运行时自动解析，不能代他人操作。
+
+        Args:
+            action: 动作，六选一：
+                create_task（规划师）：建任务，带 subject/description，可选 writeScopes/blockedBy/ownerMemberId。
+                update_task（规划师）：改任务，带 taskId/expectedRevision，可选 subject/description/writeScopes/blockedBy。
+                claim_task（开发工程师）：认领任务并打开任务 worktree，带 taskId/expectedRevision。
+                read_task_changes（规划师/评审员）：读任务 worktree 的改动清单和有界 diff，带 taskId。
+                complete_task（评审员）：评审通过收口，带 taskId/expectedRevision/reviewNote。
+                rework_task（评审员）：退回重做，带 taskId/expectedRevision/reviewNote。
+            team_id: 团队 ID（从你的团队上下文或看板摘要里取）。
+            task_id: 任务编号，如 task-3；read/update/claim/complete/rework 必填。
+            expected_revision: 任务当前版本号（防并发覆盖）；update/claim/complete/rework 必填，
+                用你最近一次看到的 revision；版本过期会返回 STALE_REVISION，重读后用新版本重试。
+            subject: 任务主题；create 必填，update 可选。
+            description: 任务说明；create/update 可选。
+            write_scopes: 允许改动的相对路径列表；create/update 可选。
+            blocked_by: 依赖的任务编号列表；create/update 可选。
+            review_note: 评审说明；complete/rework 使用。
+            owner_member_id: 可选，create 时直接指定负责人成员 ID。
+
+        Returns:
+            JSON 文本。成功含 taskId/status/revision/owner/worktree 路径；
+            read_task_changes 另含每个文件的有界 diff（未跟踪文件会标注）。
+            失败含 code 与可行动说明（角色不符/版本冲突/依赖未就绪等）。
+        """
+        return _dev_task_board_impl(
+            action=action,
+            team_id=team_id,
+            task_id=task_id,
+            expected_revision=expected_revision,
+            subject=subject,
+            description=description,
+            write_scopes=write_scopes,
+            blocked_by=blocked_by,
+            review_note=review_note,
+            owner_member_id=owner_member_id,
+        )
+
+    @tool
     def send_message_tool(
         to: str,
         message: str,
@@ -3573,6 +3629,7 @@ def _build_key_tools() -> List[BaseTool]:
         # Agent 间通信
         agent_message_tool,
         send_message_tool,
+        dev_task_board_tool,
         append_personal_memory_tool,
         supersede_personal_memory_tool,
         agent_tool_permission_request_tool,

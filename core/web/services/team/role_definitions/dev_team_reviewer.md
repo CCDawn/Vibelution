@@ -30,6 +30,7 @@ toolPolicy:
     - code_symbol_tool
     - get_git_status_summary_tool
     - get_recent_changes_tool
+    - dev_task_board_tool
   preferredTools:
     - get_git_status_summary_tool
     - get_recent_changes_tool

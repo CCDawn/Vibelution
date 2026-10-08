@@ -32,6 +32,7 @@ toolPolicy:
     - get_git_status_summary_tool
     - get_recent_changes_tool
     - list_child_sessions_tool
+    - dev_task_board_tool
   preferredTools:
     - read_file_tool
     - grep_search_tool

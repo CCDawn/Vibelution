@@ -34,6 +34,7 @@ toolPolicy:
     - run_test_for_tool
     - get_git_status_summary_tool
     - explain_current_worktree_tool
+    - dev_task_board_tool
   preferredTools:
     - apply_diff_edit_tool
     - run_test_for_tool

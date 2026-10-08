@@ -185,14 +185,15 @@ def test_builtin_version_bump_overwrites_builtin_but_not_user_roles(tmp_path, mo
     user_file = _workspace_root(root) / "roles" / "custom_analyst.md"
     user_before = user_file.read_text(encoding="utf-8")
 
-    monkeypatch.setattr(role_definition_service, "BUILTIN_ROLE_CONTENT_VERSION", 2)
+    bumped_version = role_definition_service.BUILTIN_ROLE_CONTENT_VERSION + 1
+    monkeypatch.setattr(role_definition_service, "BUILTIN_ROLE_CONTENT_VERSION", bumped_version)
     payload = role_definition_service.repair_role_definitions(project_root=root)
 
     # Builtin file is restored to shipped content and its metadata is bumped;
     # the user-created role is untouched.
     assert planner_file.read_text(encoding="utf-8") == role_definition_service.builtin_role_markdown("dev_team_planner")
     planner_entry = _entry_by_key(payload, "dev_team_planner")
-    assert planner_entry["metadata"]["builtinContentVersion"] == 2
+    assert planner_entry["metadata"]["builtinContentVersion"] == bumped_version
     assert user_file.read_text(encoding="utf-8") == user_before
     user_entry = _entry_by_key(payload, "custom_analyst")
     assert user_entry["metadata"]["builtin"] is False
