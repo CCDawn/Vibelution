@@ -1,0 +1,30 @@
+const border = "border-vui-border-hairline";
+const muted = "text-vui-fg-tertiary";
+
+export default {
+  root: "grid min-w-0 content-start gap-3",
+  section: `grid min-w-0 content-start gap-3 border-t ${border} pt-3`,
+  heading: "flex min-w-0 flex-wrap items-center justify-between gap-2 [&>h3]:m-0 [&>h3]:text-sm [&>p]:m-0",
+  layout: "grid min-w-0 grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.85fr)]",
+  panel: "grid min-w-0 content-start gap-2 overflow-hidden",
+  panelTitle: "m-0 text-xs font-semibold",
+  fields: "grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2",
+  field: `grid min-w-0 gap-1 text-xs ${muted}`,
+  textarea: "min-h-20",
+  note: `m-0 whitespace-pre-wrap break-words text-xs leading-5 ${muted}`,
+  controls: "flex min-w-0 flex-wrap items-center gap-2",
+  reports: "grid min-w-0 gap-1",
+  historyButton: "!h-auto !min-h-8 !justify-start whitespace-normal !py-1 text-left",
+  historyButtonText: "grid min-w-0 gap-0.5",
+  report: `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2 border-b ${border} py-1.5`,
+  reportText: "grid min-w-0 gap-0.5 [&>strong]:truncate [&>strong]:text-xs [&>small]:break-words [&>small]:text-[10px] [&>small]:text-vui-fg-tertiary",
+  table: "min-w-0 max-w-full overflow-x-auto",
+  status: "inline-flex items-center rounded border border-vui-border-hairline px-1.5 py-0.5 text-[10px] text-vui-fg-secondary",
+  passed: "text-[var(--vui-status-success-fg)]",
+  failed: "text-[var(--vui-status-danger-fg)]",
+  risk: "grid min-w-0 gap-1 [&>li]:break-words [&>li]:text-xs",
+  error: "break-words text-xs text-[var(--vui-status-danger-fg)]",
+  dialogOrders: "grid max-h-64 min-w-0 gap-1 overflow-y-auto text-xs",
+  dialogOrder: `grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 border-b ${border} py-1.5`,
+  muted,
+} as const;

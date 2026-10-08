@@ -22,6 +22,7 @@
 | `session/` | `session_service.py` | [session/README.md](session/README.md) |
 | `financial_report/` | `financial_report_service.py` | [financial_report/README.md](financial_report/README.md) |
 | `financial_backtest/` | `financial_backtest_service.py` | [financial_backtest/README.md](financial_backtest/README.md) |
+| `financial_rebalance/` | `financial_rebalance_service.py` | [financial_rebalance/README.md](financial_rebalance/README.md) |
 | `team_workflow/` | `team_workflow_orchestration_service.py` | [team_workflow/README.md](team_workflow/README.md) |
 | `team/` | `team_service.py` | [team/README.md](team/README.md) |
 | `team_knowledge/` | `team_knowledge_service.py` | [team_knowledge/README.md](team_knowledge/README.md) |
@@ -103,6 +104,7 @@
 | `financial_market_service.py` | Read-only public A-share quotes, OHLC and search with source/time/unit validation. | — | `financial_assistant.py` | `test_financial_market_service.py` |
 | `financial_paper_service.py` | Simulation-only ledger for the financial Agent. | `financial_paper/` | `financial_paper.py` | `test_financial_paper_service.py` |
 | `financial_portfolio_service.py` | Read-only portfolio research derived from an Agent's paper ledger. | — | `financial_portfolio.py` | `test_financial_portfolio_service.py` |
+| `financial_rebalance_service.py` | Research-linked target allocations, deterministic risk and approved atomic paper execution. | `financial_rebalance/` | `financial_portfolio.py` | `test_financial_rebalance.py`, `test_financial_rebalance_routes.py`, `test_financial_rebalance_ledger.py` |
 | `financial_preferences_service.py` | Explicit user preferences over canonical Agent personal memory. | — | `financial_preferences.py` | `test_financial_preferences_service.py` |
 | `financial_report_service.py` | Bounded exports from an owned financial Agent's canonical completed research Turn. | `financial_report/` | `financial_reports.py` | `test_financial_report_service.py` |
 | `financial_research_service.py` | Read-only market screening and cited stock research projections. | — | `financial_research.py` | `test_financial_research_service.py` |

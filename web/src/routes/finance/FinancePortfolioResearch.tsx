@@ -13,6 +13,7 @@ import type { FinancialAssistant } from "../../api/financialAssistant";
 import type { StockIdentity } from "../../api/types/financialMarket";
 import { VButton, VDenseTable, VMetricStrip, VStateSurface, VSurface, type VDenseTableColumn } from "../../components/vui";
 import styles from "./FinancePortfolioResearch.styles";
+import { FinanceRebalance } from "./FinanceRebalance";
 
 export type FinancePortfolioResearchProps = {
   assistant: FinancialAssistant;
@@ -177,6 +178,8 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
     </header>
 
     <VMetricStrip ariaLabel={zh ? "模拟组合摘要" : "Simulated portfolio summary"} metrics={metrics} />
+
+    <FinanceRebalance agentId={assistant.agentId} positions={data.positions} zh={zh} />
 
     {!data.summary.valuationComplete ? <VStateSurface tone="unavailable" density="compact" title={zh ? "估值不完整，组合权重暂不可用" : "Valuation is partial; portfolio weights are unavailable"}>
       {zh ? `已估值 ${data.summary.valuedPositionCount} / ${data.summary.positionCount} 只持仓。缺失估值的仓位不会被当作零值参与权重计算。` : `${data.summary.valuedPositionCount} of ${data.summary.positionCount} holdings are valued. Missing marks are not treated as zero when calculating weights.`}

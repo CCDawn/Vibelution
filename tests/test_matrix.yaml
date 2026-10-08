@@ -63,6 +63,21 @@ rules:
       - "core/web/services/team_workflow/research_runtime/hypothesis_command_attempts.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_research_workflow_meeting_runtime.py tests/test_research_workflow_meeting_driver_recovery.py tests/test_research_workflow_hypothesis_command_attempts.py -q -n 3 --dist loadfile"
+  - id: finance-portfolio-proposals
+    description: "Research-linked portfolio proposals, approval risk fences and atomic paper batches."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/financial_rebalance/**"
+      - "core/web/services/financial_rebalance_service.py"
+      - "core/web/services/financial_paper/rebalance.py"
+      - "core/web/services/financial_paper/ledger.py"
+      - "core/web/routes/financial_rebalance_models.py"
+      - "core/web/routes/financial_portfolio.py"
+      - "tests/test_financial_rebalance*.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_rebalance.py tests/test_financial_rebalance_routes.py tests/test_financial_rebalance_ledger.py -q -n 3 --dist loadfile"
   - id: finance-stock-research-domain
     description: "Public screening and research sources, private paper ledger and portfolio, native preferences and analyst-turn orchestration."
     executionLayers:

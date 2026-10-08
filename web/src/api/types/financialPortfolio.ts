@@ -80,3 +80,71 @@ export type FinancialPortfolioResearch = {
   };
   notice: string;
 };
+
+export type FinancialPortfolioProposalStatus = "generating" | "ready" | "blocked" | "failed" | "executed";
+
+export type FinancialPortfolioRebalancePolicy = {
+  maxPositionPct: number;
+  minCashPct: number;
+  maxTurnoverPct: number;
+  maxQuoteAgeHours: number;
+};
+
+export type FinancialPortfolioRebalanceTarget = {
+  symbol: string;
+  weightPct: number;
+  reason: string;
+};
+
+export type FinancialPortfolioProposal = {
+  proposalId: string;
+  agentId: string;
+  status: FinancialPortfolioProposalStatus;
+  createdAt: string;
+  expiresAt: string;
+  modelId: string;
+  reportRefs: Array<{ sessionId: string; turnId: string; contentHash: string }>;
+  targets: FinancialPortfolioRebalanceTarget[];
+  summaryReason: string;
+  riskChecks: Array<{ code: string; label: string; passed: boolean; detail: string }>;
+  orders: Array<{
+    symbol: string;
+    name: string;
+    side: "buy" | "sell";
+    quantity: number;
+    priceYuan: string;
+    grossAmountYuan: string;
+    feeYuan: string;
+    reason?: string;
+  }>;
+  metrics: {
+    equityYuan: string;
+    cashAfterYuan: string;
+    turnoverPct: string;
+    feesYuan: string;
+  };
+  policy: FinancialPortfolioRebalancePolicy;
+  planHash: string;
+  error: string | null;
+  execution: { batchId: string; executedAt: string } | null;
+};
+
+export type FinancialPortfolioProposalList = { items: FinancialPortfolioProposal[] };
+
+export type FinancialPortfolioProposalCreateRequest = {
+  clientRequestId: string;
+  symbols: string[];
+  reports: Array<{ sessionId: string; turnId: string }>;
+  instruction: string;
+  policy: FinancialPortfolioRebalancePolicy;
+};
+
+export type FinancialPortfolioProposalPreviewRequest = {
+  targets: FinancialPortfolioRebalanceTarget[];
+  policy: FinancialPortfolioRebalancePolicy;
+};
+
+export type FinancialPortfolioProposalApprovalRequest = {
+  planHash: string;
+  confirmSimulation: true;
+};

@@ -61,6 +61,8 @@ Confirmed native tombstones or exact-report 404 responses disable missing-case e
 
 ## Paper account and portfolio
 
+The simulated-holdings portfolio view adds research-linked allocation proposals. The user selects exact completed report Turns, candidate A-share symbols and risk limits, then explicitly requests one model call. Target weights can be edited and checked without another model call. The server shows exact simulated orders and independent risk checks; only explicit approval of the latest unexpired plan hash can execute the atomic paper batch. Changed account/source state, stale quotes, dirty controls and failed risk checks block execution. Proposal history survives page reloads, unknown creation requests retain the same UUID, and successful execution invalidates account, review and portfolio caches. Manual holdings remain research-only.
+
 `financialPaper` owns a private Agent-scoped virtual ledger. GET never opens an account; explicit creation seeds RMB 1,000,000. Server-read public quotes, integer A-share lots, cash/holding checks, declared fees and Beijing calendar-day T+1 govern simulated orders. Client idempotency keys and synchronous UI gates prevent duplicate writes. These declared simulation rules do not provide an exchange calendar or broker connection.
 
 Holdings use one bounded quote batch instead of candles per position. Unavailable quotes may retain the actual prior transaction quote with a visible stale/partial mark. Reviews use recorded trades/monthly aggregates, not invented historical NAV. AI review prepares a draft containing the actual ledger in a separate native topic Session, retaining existing stock reports.

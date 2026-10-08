@@ -184,6 +184,10 @@ def _load_ledger(path: Path, agent_id: str) -> dict[str, Any] | None:
         or not isinstance(payload.get("account"), dict)
         or not isinstance(payload.get("positions"), dict)
         or not isinstance(payload.get("orders"), list)
+        or (
+            "rebalanceBatches" in payload
+            and not isinstance(payload.get("rebalanceBatches"), list)
+        )
     ):
         raise PaperAccountConflictError("模拟账本格式或归属不匹配，未覆盖现有数据")
     return payload
@@ -213,6 +217,7 @@ def _new_ledger(agent_id: str) -> dict[str, Any]:
         },
         "positions": {},
         "orders": [],
+        "rebalanceBatches": [],
     }
 
 
@@ -566,6 +571,178 @@ def _existing_idempotent_order(
     return None
 
 
+def apply_order_to_ledger(
+    ledger: dict[str, Any],
+    *,
+    client_order_id: str,
+    symbol: str,
+    side: Literal["buy", "sell"],
+    quantity: int,
+    reason: str,
+    quote: dict[str, Any],
+    order_time: datetime,
+) -> dict[str, Any]:
+    """Apply one already-priced simulated order to an in-memory ledger.
+
+    This helper has no I/O. Callers own idempotency, locking, and persistence;
+    rebalance execution uses it on a copy so a failed later leg cannot commit
+    earlier legs.
+    """
+    key, normalized_symbol, normalized_quantity, normalized_reason, fingerprint = (
+        _normalize_order(client_order_id, symbol, side, quantity, reason)
+    )
+    normalized_side = str(side or "").strip().lower()
+    if not isinstance(quote, dict) or quote.get("symbol") != normalized_symbol:
+        raise InvalidPaperOrderError("模拟成交报价与股票代码不匹配")
+    try:
+        price = _money(quote["priceYuan"])
+        ticker = str(quote["ticker"])
+        name = str(quote["name"])
+        market_name = str(quote["market"])
+        quote_source = str(quote["source"])
+        quote_source_url = str(quote["sourceUrl"])
+        quote_timestamp = str(quote["timestamp"])
+        quote_fetched_at = str(quote["fetchedAt"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InvalidPaperOrderError("模拟成交报价信息不完整") from exc
+    if price <= 0 or not all(
+        (ticker, name, market_name, quote_source, quote_source_url, quote_timestamp, quote_fetched_at)
+    ):
+        raise InvalidPaperOrderError("模拟成交报价信息不完整")
+
+    gross = _money(price * normalized_quantity)
+    commission, stamp_duty = _calculate_fee(gross, normalized_side)
+    total_fee = _money(commission + stamp_duty)
+    order_time_text = _utc_text(order_time)
+    local_order_day = _beijing_date(order_time).isoformat()
+
+    positions: dict[str, Any] = ledger["positions"]
+    position = positions.get(normalized_symbol)
+    if normalized_side == BUY:
+        if position is None and len(positions) >= _MAX_OPEN_POSITIONS:
+            raise InvalidPaperOrderError(f"最多同时持有 {_MAX_OPEN_POSITIONS} 只股票")
+        cash = _money(ledger["account"].get("cashYuan", "0"))
+        total_debit = _money(gross + total_fee)
+        if total_debit > cash:
+            raise InsufficientCashError(
+                f"模拟余额不足：需要 {total_debit:.2f} 元（含费用）"
+            )
+        if position is None:
+            position = {
+                "symbol": normalized_symbol,
+                "ticker": ticker,
+                "name": name,
+                "market": market_name,
+                "lots": [],
+                "lastQuote": quote,
+            }
+            positions[normalized_symbol] = position
+        position["ticker"], position["name"], position["market"] = (
+            ticker,
+            name,
+            market_name,
+        )
+        position["lastQuote"] = quote
+        position["lots"].append(
+            {
+                "acquiredAt": order_time_text,
+                "acquiredBeijingDate": local_order_day,
+                "remainingQuantity": normalized_quantity,
+                "remainingCostYuan": _money_text(total_debit),
+            }
+        )
+        ledger["account"]["cashYuan"] = _money_text(cash - total_debit)
+        realized = Decimal("0.00")
+        cash_change = _money(-total_debit)
+    else:
+        if position is None:
+            raise InsufficientSharesError("当前没有该股票的可卖持仓")
+        lots = sorted(
+            position.get("lots", []),
+            key=lambda lot: str(lot.get("acquiredAt") or ""),
+        )
+        available_lots: list[dict[str, Any]] = []
+        for lot in lots:
+            try:
+                acquired_day = date.fromisoformat(
+                    str(lot.get("acquiredBeijingDate") or "")
+                )
+            except ValueError:
+                continue
+            if acquired_day < _beijing_date(order_time):
+                available_lots.append(lot)
+        available = sum(
+            int(lot.get("remainingQuantity") or 0) for lot in available_lots
+        )
+        if normalized_quantity > available:
+            raise InsufficientSharesError(
+                f"可卖 {available} 股；模拟 T+1 按北京时间自然日，今日买入股份次日才可卖"
+            )
+        needed = normalized_quantity
+        allocated_cost = Decimal("0.00")
+        for lot in available_lots:
+            if needed <= 0:
+                break
+            lot_quantity = int(lot.get("remainingQuantity") or 0)
+            lot_cost = _money(lot.get("remainingCostYuan", "0"))
+            take = min(needed, lot_quantity)
+            consumed_cost = (
+                lot_cost
+                if take == lot_quantity
+                else min(
+                    lot_cost,
+                    _money(lot_cost * Decimal(take) / Decimal(lot_quantity)),
+                )
+            )
+            lot["remainingQuantity"] = lot_quantity - take
+            lot["remainingCostYuan"] = _money_text(lot_cost - consumed_cost)
+            allocated_cost += consumed_cost
+            needed -= take
+        remaining_lots = [
+            lot for lot in lots if int(lot.get("remainingQuantity") or 0) > 0
+        ]
+        net_credit = _money(gross - total_fee)
+        cash = _money(ledger["account"].get("cashYuan", "0"))
+        ledger["account"]["cashYuan"] = _money_text(cash + net_credit)
+        realized = _money(net_credit - allocated_cost)
+        cash_change = net_credit
+        if remaining_lots:
+            position["lots"] = remaining_lots
+            position["lastQuote"] = quote
+        else:
+            positions.pop(normalized_symbol, None)
+
+    order = {
+        "orderId": str(uuid4()),
+        "clientOrderId": key,
+        "requestFingerprint": fingerprint,
+        "symbol": normalized_symbol,
+        "ticker": ticker,
+        "name": name,
+        "market": market_name,
+        "side": normalized_side,
+        "quantity": normalized_quantity,
+        "priceYuan": _money_text(price),
+        "grossAmountYuan": _money_text(gross),
+        "commissionYuan": _money_text(commission),
+        "stampDutyYuan": _money_text(stamp_duty),
+        "totalFeeYuan": _money_text(total_fee),
+        "cashChangeYuan": _money_text(cash_change),
+        "realizedPnlYuan": _money_text(realized),
+        "reason": normalized_reason,
+        "createdAt": order_time_text,
+        "beijingDate": local_order_day,
+        "quoteSource": quote_source,
+        "quoteSourceUrl": quote_source_url,
+        "quoteTimestamp": quote_timestamp,
+        "quoteDate": quote_timestamp[:10],
+        "quoteFetchedAt": quote_fetched_at,
+        "priceNotice": "模拟成交按服务端取得的腾讯公开最新报价；下单价非交易所成交回报。",
+    }
+    ledger["orders"].append(order)
+    return order
+
+
 def submit_order(
     agent_id: str,
     *,
@@ -585,13 +762,7 @@ def submit_order(
         return _account_snapshot_from_ledger(ledger_before_quote, order_limit=50)
 
     quote = _get_quote(normalized_symbol)
-    price = _money(quote["priceYuan"])
-    gross = _money(price * normalized_quantity)
-    commission, stamp_duty = _calculate_fee(gross, side)
-    total_fee = _money(commission + stamp_duty)
     order_time = _utc_now()
-    order_time_text = _utc_text(order_time)
-    local_order_day = _beijing_date(order_time).isoformat()
 
     with _transaction_lock(path):
         ledger = _load_ledger(path, normalized_id)
@@ -601,132 +772,16 @@ def submit_order(
         if existing:
             return _account_snapshot_from_ledger(ledger, order_limit=50)
 
-        positions: dict[str, Any] = ledger["positions"]
-        position = positions.get(normalized_symbol)
-        if side == BUY:
-            if position is None and len(positions) >= _MAX_OPEN_POSITIONS:
-                raise InvalidPaperOrderError(
-                    f"最多同时持有 {_MAX_OPEN_POSITIONS} 只股票"
-                )
-            cash = _money(ledger["account"].get("cashYuan", "0"))
-            total_debit = _money(gross + total_fee)
-            if total_debit > cash:
-                raise InsufficientCashError(
-                    f"模拟余额不足：需要 {total_debit:.2f} 元（含费用）"
-                )
-            if position is None:
-                position = {
-                    "symbol": normalized_symbol,
-                    "ticker": quote["ticker"],
-                    "name": quote["name"],
-                    "market": quote["market"],
-                    "lots": [],
-                    "lastQuote": quote,
-                }
-                positions[normalized_symbol] = position
-            position["ticker"], position["name"], position["market"] = (
-                quote["ticker"],
-                quote["name"],
-                quote["market"],
-            )
-            position["lastQuote"] = quote
-            position["lots"].append(
-                {
-                    "acquiredAt": order_time_text,
-                    "acquiredBeijingDate": local_order_day,
-                    "remainingQuantity": normalized_quantity,
-                    "remainingCostYuan": _money_text(total_debit),
-                }
-            )
-            ledger["account"]["cashYuan"] = _money_text(cash - total_debit)
-            realized = Decimal("0.00")
-            cash_change = _money(-total_debit)
-        else:
-            if position is None:
-                raise InsufficientSharesError("当前没有该股票的可卖持仓")
-            lots = sorted(
-                position.get("lots", []),
-                key=lambda lot: str(lot.get("acquiredAt") or ""),
-            )
-            available_lots: list[dict[str, Any]] = []
-            for lot in lots:
-                try:
-                    acquired_day = date.fromisoformat(
-                        str(lot.get("acquiredBeijingDate") or "")
-                    )
-                except ValueError:
-                    continue
-                if acquired_day < _beijing_date(order_time):
-                    available_lots.append(lot)
-            available = sum(
-                int(lot.get("remainingQuantity") or 0) for lot in available_lots
-            )
-            if normalized_quantity > available:
-                raise InsufficientSharesError(
-                    f"可卖 {available} 股；模拟 T+1 按北京时间自然日，今日买入股份次日才可卖"
-                )
-            needed = normalized_quantity
-            allocated_cost = Decimal("0.00")
-            for lot in available_lots:
-                if needed <= 0:
-                    break
-                lot_quantity = int(lot.get("remainingQuantity") or 0)
-                lot_cost = _money(lot.get("remainingCostYuan", "0"))
-                take = min(needed, lot_quantity)
-                consumed_cost = (
-                    lot_cost
-                    if take == lot_quantity
-                    else min(
-                        lot_cost,
-                        _money(lot_cost * Decimal(take) / Decimal(lot_quantity)),
-                    )
-                )
-                lot["remainingQuantity"] = lot_quantity - take
-                lot["remainingCostYuan"] = _money_text(lot_cost - consumed_cost)
-                allocated_cost += consumed_cost
-                needed -= take
-            remaining_lots = [
-                lot for lot in lots if int(lot.get("remainingQuantity") or 0) > 0
-            ]
-            net_credit = _money(gross - total_fee)
-            cash = _money(ledger["account"].get("cashYuan", "0"))
-            ledger["account"]["cashYuan"] = _money_text(cash + net_credit)
-            realized = _money(net_credit - allocated_cost)
-            cash_change = net_credit
-            if remaining_lots:
-                position["lots"] = remaining_lots
-                position["lastQuote"] = quote
-            else:
-                positions.pop(normalized_symbol, None)
-
-        order = {
-            "orderId": str(uuid4()),
-            "clientOrderId": key,
-            "requestFingerprint": fingerprint,
-            "symbol": normalized_symbol,
-            "ticker": quote["ticker"],
-            "name": quote["name"],
-            "market": quote["market"],
-            "side": side,
-            "quantity": normalized_quantity,
-            "priceYuan": _money_text(price),
-            "grossAmountYuan": _money_text(gross),
-            "commissionYuan": _money_text(commission),
-            "stampDutyYuan": _money_text(stamp_duty),
-            "totalFeeYuan": _money_text(total_fee),
-            "cashChangeYuan": _money_text(cash_change),
-            "realizedPnlYuan": _money_text(realized),
-            "reason": normalized_reason,
-            "createdAt": order_time_text,
-            "beijingDate": local_order_day,
-            "quoteSource": quote["source"],
-            "quoteSourceUrl": quote["sourceUrl"],
-            "quoteTimestamp": quote["timestamp"],
-            "quoteDate": quote["timestamp"][:10],
-            "quoteFetchedAt": quote["fetchedAt"],
-            "priceNotice": "模拟成交按服务端取得的腾讯公开最新报价；下单价非交易所成交回报。",
-        }
-        ledger["orders"].append(order)
+        order = apply_order_to_ledger(
+            ledger,
+            client_order_id=key,
+            symbol=normalized_symbol,
+            side=side,
+            quantity=normalized_quantity,
+            reason=normalized_reason,
+            quote=quote,
+            order_time=order_time,
+        )
         _write_ledger(path, ledger)
         record_runtime_scene_event_quietly(
             "finance",

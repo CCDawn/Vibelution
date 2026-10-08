@@ -8,12 +8,21 @@ import { FetchJsonHttpError } from "../../api/client";
 import type { FinancialPortfolioResearch } from "../../api/financialPortfolio";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 
-const api = vi.hoisted(() => ({ fetchResearch: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchResearch: vi.fn(), fetchProposals: vi.fn(), fetchProposal: vi.fn() }));
+const reportsApi = vi.hoisted(() => ({ fetchReports: vi.fn() }));
 vi.mock("../../api/financialPortfolio", () => ({
   fetchFinancialPortfolioResearch: api.fetchResearch,
+  fetchFinancialPortfolioProposals: api.fetchProposals,
+  fetchFinancialPortfolioProposal: api.fetchProposal,
   financialPortfolioKeys: {
     research: (agentId: string) => ["financial-portfolio", agentId, "research"],
+    proposals: (agentId: string) => ["financial-portfolio", agentId, "proposals"],
+    proposal: (agentId: string, proposalId: string) => ["financial-portfolio", agentId, "proposal", proposalId],
   },
+}));
+vi.mock("../../api/financialReports", () => ({
+  fetchFinancialReports: reportsApi.fetchReports,
+  financialReportKeys: { catalog: (agentId: string, filters: unknown) => ["finance", "report-catalog", agentId, filters] },
 }));
 
 import { FinancePortfolioResearch } from "./FinancePortfolioResearch";
@@ -105,6 +114,9 @@ function buttonWithText(text: string): HTMLButtonElement {
 
 beforeEach(() => {
   api.fetchResearch.mockReset().mockResolvedValue(research);
+  api.fetchProposals.mockReset().mockResolvedValue({ items: [] });
+  api.fetchProposal.mockReset();
+  reportsApi.fetchReports.mockReset().mockResolvedValue({ items: [], nextCursor: null, scannedSessions: 0, order: "session_recency" });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   node = document.createElement("div"); document.body.appendChild(node); root = createRoot(node);
 });

@@ -1,0 +1,15 @@
+# Research-linked paper portfolio proposals
+
+`financial_rebalance_service.py` is the public facade and the existing portfolio router owns additive typed endpoints. `service.py` reads exact completed, owned report exports, invokes one tool-free allocation model, builds a deterministic plan and accepts explicit approval. Model output and research text cannot submit orders. Native Sessions remain the sole report/transcript authority; proposal artifacts retain report references and hashes, not report bodies.
+
+`decision.py` bounds the model response, disables automatic transport retries and uses the financial Agent's configured model. The request UUID is also the proposal UUID. The generating record is persisted before inference; repeating the same request returns its state and never invokes the model again. Unknown calls are not automatically resent. After ten minutes, an unresolved generation is shown as failed/unknown; explicitly generating a new request may incur another model charge. No inference runs on GET or page reload.
+
+`risk.py` calculates exact simulated orders from the full candidate/holding set, long-only targets and current server quotes. Policy bounds cover single-position concentration, minimum cash and gross turnover. Data coverage, quote/fetch age, T+1 sellability, integer lots, fees, cash and position count are deterministic checks. Any failing check blocks approval. A 0.1% sizing allowance precedes lot rounding; actual cash, fees and final weights are independently checked, so this allowance never relaxes a limit.
+
+`store.py` stores at most 200 proposal artifacts in the Agent's existing private paper-account territory. Plan hashes bind the account fingerprint, source hashes, targets, policy, exact orders, quote snapshots and expiry. Approval rechecks report ownership/content, account state and time-sensitive risk. Editing or refreshing a preview invalidates its earlier hash. Reads and preview never write the simulated account.
+
+`financial_paper/rebalance.py` remains the only batch execution writer. It validates account identity and fingerprint under the paper ledger lock, applies sell orders before buys to a copy through the same accounting routine as single orders, and writes the full batch once. Any failed leg leaves the ledger unchanged. A duplicate batch/hash returns its original result. If the process stops after the ledger write but before the proposal projection is saved, GET/approval reads the authoritative ledger batch instead of executing again.
+
+This is A-share cash-account simulation using frozen public quotes, valid for at most 120 seconds after fetch and the declared quote-age policy. It does not model an exchange queue, broker execution, exchange trading calendar or actual fill availability. Existing manual paper orders retain their previous behavior; the stricter approval and data-age checks belong to portfolio proposals.
+
+Tests: `test_financial_rebalance.py`, `test_financial_rebalance_routes.py`, `test_financial_rebalance_ledger.py`, plus existing paper-account regression. Frontend contracts and isolated browser acceptance are required separately.
