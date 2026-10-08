@@ -1072,6 +1072,9 @@ def test_self_evolution_turn_runs_executor_then_reviewer_with_context_packets(tm
         "provider_id": base_config.llm.profiles["primary"].provider_id,
         "model": "self-executor-runtime",
         "streaming": False,
+        # 校验闸（tool_chat 默认合同禁配 disabled）落地后，无工具假模型
+        # 必须显式声明 basic_chat 合同，否则 resolve 抛错被吞成 config=None。
+        "contract": "basic_chat",
         "tool_calling_mode": "disabled",
     }
     monkeypatch.setattr(session_service, "get_config", lambda: base_config)
