@@ -7,7 +7,10 @@ import json
 from types import SimpleNamespace
 
 from core.llm.client import _receipt_output_hash
-from core.research.operator_optimization.d1_action import choose_iteration_action
+from core.research.operator_optimization.d1_action import (
+    choose_iteration_action,
+    decision_reason_name,
+)
 from core.web.services import session_service
 
 from ..research_project_agent_sessions import resolve_research_project_agent_session
@@ -114,7 +117,7 @@ def _complete_local_decision(task, action, handle):
         "schemaVersion": 2,
         "inputHash": inputs["inputHash"],
         "kind": local["kind"],
-        "reason": f"d1-3B {probability:.4f}",
+        "reason": f"{decision_reason_name(str(local.get('model') or ''))} {probability:.4f}",
     }
     ref = materialize_iteration_decision(
         task["teamId"], action.run_id, output, decided_by=task["agentId"]

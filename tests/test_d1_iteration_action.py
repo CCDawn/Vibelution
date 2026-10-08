@@ -6,8 +6,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from core.research.operator_optimization import d1_action
 from core.research.operator_optimization.d1_action import (
     choose_iteration_action,
+    decision_reason_name,
     min_probability,
     systemone_url,
 )
@@ -122,12 +124,16 @@ def test_blank_url_disables_the_call(monkeypatch):
     assert choose_iteration_action(_INPUTS) is None
 
 
-def test_missing_url_uses_the_local_default(monkeypatch):
+def test_missing_env_without_a_binding_does_not_call(monkeypatch):
     monkeypatch.delenv("VIBELUTION_D1_SYSTEMONE_URL", raising=False)
-    assert systemone_url() == "http://127.0.0.1:8088/v1/systemone"
+    monkeypatch.setattr(d1_action, "_load_bound_entry", lambda: None)
+    assert systemone_url() == ""
+    assert choose_iteration_action(_INPUTS) is None
 
 
 def test_probability_cutoff_rejects_bad_env_and_a_single_option(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_D1_SYSTEMONE_URL", raising=False)
+    monkeypatch.setattr(d1_action, "_load_bound_entry", lambda: None)
     monkeypatch.setenv("VIBELUTION_D1_MIN_PROBABILITY", "nope")
     assert min_probability() == 0.80
     monkeypatch.setenv("VIBELUTION_D1_MIN_PROBABILITY", "0.95")
@@ -136,3 +142,87 @@ def test_probability_cutoff_rejects_bad_env_and_a_single_option(monkeypatch):
         **_INPUTS,
         "actionPolicy": {"availableActions": ["stop"]},
     }) is None
+
+
+def _serve(response):
+    server = _Server(response)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def _bind(monkeypatch, server, *, model_id, cutoff):
+    host, port = server.server_address
+    monkeypatch.delenv("VIBELUTION_D1_SYSTEMONE_URL", raising=False)
+    monkeypatch.setattr(d1_action, "_load_bound_entry", lambda: {
+        "id": "julia-1",
+        "model_id": model_id,
+        "base_url": f"http://{host}:{port}/v1/systemone",
+        "min_probability": cutoff,
+    })
+
+
+def test_bound_catalog_entry_posts_its_model_id(monkeypatch):
+    monkeypatch.delenv("VIBELUTION_D1_MIN_PROBABILITY", raising=False)
+    server = _serve(_answer("stop", 0.88))
+    try:
+        _bind(monkeypatch, server, model_id="ggml-org/Julia-1-GGUF", cutoff=0.80)
+        choice = choose_iteration_action(_INPUTS)
+        assert choice["kind"] == "stop"
+        assert choice["model"] == "ggml-org/Julia-1-GGUF"
+        assert server.bodies[0]["model"] == "ggml-org/Julia-1-GGUF"
+        assert decision_reason_name(choice["model"]) == "ggml-org/Julia-1-GGUF"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_catalog_cutoff_is_the_entry_probability(monkeypatch):
+    monkeypatch.setenv("VIBELUTION_D1_MIN_PROBABILITY", "0.50")
+    server = _serve(_answer("stop", 0.91))
+    try:
+        _bind(monkeypatch, server, model_id="ggml-org/Julia-1-GGUF", cutoff=0.95)
+        assert choose_iteration_action(_INPUTS) is None
+        assert server.bodies
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_blank_env_disables_a_bound_catalog_entry(monkeypatch):
+    server = _serve(_answer("stop", 0.99))
+    try:
+        _bind(monkeypatch, server, model_id="ggml-org/Julia-1-GGUF", cutoff=0.80)
+        monkeypatch.setenv("VIBELUTION_D1_SYSTEMONE_URL", " ")
+        assert choose_iteration_action(_INPUTS) is None
+        assert server.bodies == []
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_env_probability_override_rejects_a_weaker_choice(endpoint, monkeypatch):
+    endpoint(_answer("stop", 0.91))
+    monkeypatch.setenv("VIBELUTION_D1_MIN_PROBABILITY", "0.95")
+    assert choose_iteration_action(_INPUTS) is None
+
+
+def test_probe_reports_the_posted_choice():
+    from config.decision_models import probe_decision_model
+
+    server = _serve(_answer("stop", 0.93))
+    try:
+        host, port = server.server_address
+        result = probe_decision_model(
+            f"http://{host}:{port}/v1/systemone",
+            "LiquidAI/d1-3B",
+        )
+        assert result["ok"] is True
+        assert result["choice"] == "stop"
+        assert result["probability"] == 0.93
+        assert server.bodies[0]["model"] == "LiquidAI/d1-3B"
+        missed = probe_decision_model("http://127.0.0.1:9/v1/systemone", "LiquidAI/d1-3B")
+        assert missed["ok"] is False
+    finally:
+        server.shutdown()
+        server.server_close()

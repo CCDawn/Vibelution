@@ -482,6 +482,8 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
             "discovery",
             "model_library",
             "model_aliases",
+            "decision_models",
+            "decision_handoff_model_id",
         }
         unknown_llm_keys = sorted(key for key in llm_section if key not in supported_llm_keys)
         if unknown_llm_keys:

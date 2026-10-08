@@ -30,6 +30,8 @@ from pydantic import (
 )
 from pydantic import ConfigDict
 
+from config.decision_models import DecisionModelConfig, validate_decision_catalog
+
 from .llm_security import is_llm_local_network_base_url
 
 
@@ -601,6 +603,8 @@ class LLMConfig(BaseModel):
     profiles: Dict[str, LLMProfile] = Field(default_factory=dict)
     model_library: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     model_aliases: Dict[str, str] = Field(default_factory=dict)
+    decision_models: Dict[str, DecisionModelConfig] = Field(default_factory=dict)
+    decision_handoff_model_id: str = ""
     route_concurrency: int = Field(
         default=DEFAULT_LLM_ROUTE_CONCURRENCY,
         description="单条 LLM 路由（provider|base_url|model|profile）的最大并发请求数",
@@ -679,6 +683,17 @@ class LLMConfig(BaseModel):
                 raise ValueError(
                     f"llm.profiles.{profile_id}.provider_id references unknown provider: {provider_ref}"
                 )
+        catalog = validate_decision_catalog(
+            {
+                key: value.model_dump() if isinstance(value, DecisionModelConfig) else value
+                for key, value in self.decision_models.items()
+            },
+            self.decision_handoff_model_id,
+        )
+        self.decision_models = {
+            key: DecisionModelConfig.model_validate(value) for key, value in catalog.items()
+        }
+        self.decision_handoff_model_id = str(self.decision_handoff_model_id or "").strip()
         return self
 
     def get_role_profile_id(self, role: str = "primary") -> str:

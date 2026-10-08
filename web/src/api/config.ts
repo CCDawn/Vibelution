@@ -1,5 +1,6 @@
 import { fetchJson } from "./client";
 import type {
+  ConfigDecisionModelProbe,
   ConfigLlmTestResult,
   ConfigMigrationPreview,
   ConfigMigrationPreviewRequest,
@@ -154,6 +155,13 @@ export function deleteDraftModel(body: ConfigDraftEnvelope): Promise<ConfigWorks
 
 export function testConfigLlm(body: ConfigDraftEnvelope): Promise<ConfigLlmTestResult> {
   return postConfigJson<ConfigLlmTestResult>("/api/config/test-llm", body);
+}
+
+export function testDecisionModel(body: {
+  baseUrl: string;
+  modelId: string;
+}): Promise<ConfigDecisionModelProbe> {
+  return postConfigJson<ConfigDecisionModelProbe>("/api/config/test-decision-model", body);
 }
 
 export function checkDraftModelCapabilities(

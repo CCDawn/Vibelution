@@ -421,8 +421,27 @@ export type ConfigWorkspace = ConfigSummary & ConfigProviderWorkspaceFields & {
   editorSections: ConfigEditorSection[];
   editorMeta: Record<string, ConfigEditorMeta>;
   modelPresetOptions: ConfigModelPresetOption[];
+  decisionModelPresets?: ConfigDecisionModelPreset[];
   providerPresetOptions: ConfigProviderPresetOption[];
   modelOptions: ConfigModelOption[];
+};
+
+export type ConfigDecisionModelPreset = {
+  presetId: string;
+  label: string;
+  modelId: string;
+  baseUrl: string;
+  noteZh: string;
+  noteEn: string;
+};
+
+export type ConfigDecisionModelProbe = {
+  ok: boolean;
+  choice?: string;
+  probability?: number;
+  error?: string;
+  baseUrl?: string;
+  model?: string;
 };
 
 export type ConfigLlmTestResult = {
