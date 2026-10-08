@@ -8,8 +8,8 @@ export default {
   parameter: "inline-flex shrink-0 max-w-full items-center whitespace-nowrap rounded-md border border-[var(--vui-border-subtle)] px-2 py-1",
   summary: "text-sm leading-7 font-medium text-[var(--fg-primary)] mt-0 mb-4",
   chapters: "mb-4",
-  chapterList: "flex-nowrap overflow-x-auto",
-  chapterTrigger: "shrink-0 max-w-40 whitespace-nowrap",
+  chapterList: "!flex-nowrap overflow-x-auto",
+  chapterTrigger: "shrink-0 !max-w-40 whitespace-nowrap",
   body: "min-w-0 text-sm leading-7 break-words [&_table]:w-full [&_table]:text-xs [&_th]:text-left [&_td]:p-2 [&_th]:p-2 [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_a]:text-[var(--accent-cool)]",
   citations: "flex flex-wrap items-center gap-2 border-t border-[var(--vui-border-subtle)] pt-3 mt-4",
 } as const;
