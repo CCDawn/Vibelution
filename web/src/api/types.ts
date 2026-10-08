@@ -18,3 +18,4 @@ export * from "./types/financialTeam";
 export * from "./types/financialPortfolio";
 export * from "./types/financialJobs";
 export * from "./types/financialReports";
+export * from "./types/financialBacktests";
