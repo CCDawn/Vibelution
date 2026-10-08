@@ -70,7 +70,7 @@ ROLE_DEFINITIONS_PACKAGE_DIR = Path(__file__).resolve().parent / "role_definitio
 ROLE_REGISTRY_SCHEMA_VERSION = 1
 # Bump when shipped role files change in a way that must overwrite seeded
 # workspace copies; user-created roles are never affected by the bump.
-BUILTIN_ROLE_CONTENT_VERSION = 2
+BUILTIN_ROLE_CONTENT_VERSION = 3
 ROLE_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
 
 _FRONTMATTER_KEY_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")

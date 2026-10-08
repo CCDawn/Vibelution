@@ -21,6 +21,11 @@ from tests.helpers.system_agent_state import _mark_config_agent_instances_presen
 READONLY_CONTRACT = "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。"
 ENGINEER_CONTRACT = "只允许在你认领任务的工作区内修改文件（路径见任务摘要）"
 CONVERGENCE_LINE = "当任务摘要显示全部任务已完成，总结成果并宣布本团队目标收敛"
+PLANNER_FLOW_LINE = "派发前必须先用 dev_task_board_tool 的 create_task 把拆分后的任务落到共享任务板"
+ENGINEER_FLOW_LINE = "开工前先用 dev_task_board_tool 的 claim_task 认领派给你的任务并取得任务工作区"
+REVIEWER_FLOW_LINE = "评审依据 dev_task_board_tool 的 read_task_changes 返回的任务 diff 与测试输出"
+DEV_TEAM_HEADER = "你正在参加 Vibelution 的开发团队群聊。"
+READONLY_HEADER = "你正在参加 Vibelution 的只读 Agent 群聊。"
 
 
 def _client() -> TestClient:
@@ -242,9 +247,12 @@ def test_engineer_contract_differs_and_planner_gets_the_convergence_line(monkeyp
         prior_messages=[],
     )
     assert ENGINEER_CONTRACT in engineer_prompt
+    assert ENGINEER_FLOW_LINE in engineer_prompt
     assert "不要修改文件" not in engineer_prompt
     assert CONVERGENCE_LINE not in engineer_prompt
     assert "BOARD:team-9" in engineer_prompt
+    assert DEV_TEAM_HEADER in engineer_prompt
+    assert READONLY_HEADER not in engineer_prompt
 
     planner_prompt = chat_room_service._build_participant_prompt(
         room=room,
@@ -252,8 +260,11 @@ def test_engineer_contract_differs_and_planner_gets_the_convergence_line(monkeyp
         participant={"participantId": "p-plan", "teamRole": "规划师", "teamId": "team-9"},
         prior_messages=[],
     )
-    assert READONLY_CONTRACT in planner_prompt
+    assert PLANNER_FLOW_LINE in planner_prompt
+    assert READONLY_CONTRACT not in planner_prompt
+    assert "不要直接修改仓库文件" in planner_prompt
     assert CONVERGENCE_LINE in planner_prompt
+    assert DEV_TEAM_HEADER in planner_prompt
 
     reviewer_prompt = chat_room_service._build_participant_prompt(
         room=room,
@@ -261,7 +272,8 @@ def test_engineer_contract_differs_and_planner_gets_the_convergence_line(monkeyp
         participant={"participantId": "p-rev", "teamRole": "评审员", "teamId": "team-9"},
         prior_messages=[],
     )
-    assert READONLY_CONTRACT in reviewer_prompt
+    assert REVIEWER_FLOW_LINE in reviewer_prompt
+    assert READONLY_CONTRACT not in reviewer_prompt
     assert CONVERGENCE_LINE not in reviewer_prompt
     assert ENGINEER_CONTRACT not in reviewer_prompt
 
@@ -285,9 +297,14 @@ def test_non_dev_team_rooms_keep_the_readonly_contract(monkeypatch):
         prior_messages=[],
     )
     assert READONLY_CONTRACT in prompt
+    assert READONLY_HEADER in prompt
+    assert DEV_TEAM_HEADER not in prompt
     assert ENGINEER_CONTRACT not in prompt
     assert CONVERGENCE_LINE not in prompt
     assert "共享任务板" not in prompt
+    assert PLANNER_FLOW_LINE not in prompt
+    assert ENGINEER_FLOW_LINE not in prompt
+    assert REVIEWER_FLOW_LINE not in prompt
 
 
 def test_structured_contract_appends_the_engineer_write_line_only(monkeypatch):
@@ -311,6 +328,7 @@ def test_structured_contract_appends_the_engineer_write_line_only(monkeypatch):
     )
     assert "严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。" in engineer_prompt
     assert ENGINEER_CONTRACT in engineer_prompt
+    assert ENGINEER_FLOW_LINE in engineer_prompt
     assert "不要修改文件" not in engineer_prompt
     assert CONVERGENCE_LINE not in engineer_prompt
 
@@ -321,8 +339,18 @@ def test_structured_contract_appends_the_engineer_write_line_only(monkeypatch):
         prior_messages=[],
     )
     assert "严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。" in planner_prompt
+    assert PLANNER_FLOW_LINE in planner_prompt
     assert ENGINEER_CONTRACT not in planner_prompt
     assert CONVERGENCE_LINE in planner_prompt
+
+    reviewer_prompt = chat_room_service._build_participant_prompt(
+        room=room,
+        round_payload=round_payload,
+        participant={"participantId": "p-rev", "teamRole": "评审员", "teamId": "team-9"},
+        prior_messages=[],
+    )
+    assert "严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。" in reviewer_prompt
+    assert REVIEWER_FLOW_LINE in reviewer_prompt
 
     plain_prompt = chat_room_service._build_participant_prompt(
         room={"roomId": "room-plain", "title": "普通群聊", "mode": "round_robin"},
@@ -332,6 +360,7 @@ def test_structured_contract_appends_the_engineer_write_line_only(monkeypatch):
     )
     assert "严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。" in plain_prompt
     assert ENGINEER_CONTRACT not in plain_prompt
+    assert ENGINEER_FLOW_LINE not in plain_prompt
 
 
 def test_board_prompt_marks_the_all_completed_state():

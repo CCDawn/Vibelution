@@ -5997,9 +5997,16 @@ def _build_participant_prompt(
     response_contract_lines = _speaker_room_contract_lines(
         dev_team_id, participant, structured=structured_room_context
     )
+    # Dev-team engineers may write inside their claimed task worktree; the
+    # generic read-only room header would contradict that write contract.
+    room_header_line = (
+        "你正在参加 Vibelution 的开发团队群聊。"
+        if str(dev_team_id or "").strip()
+        else "你正在参加 Vibelution 的只读 Agent 群聊。"
+    )
     return "\n".join(
         [
-            "你正在参加 Vibelution 的只读 Agent 群聊。",
+            room_header_line,
             f"群聊: {room.get('title') or room.get('roomId')}",
             f"当前议题: {round_payload.get('topic') or ''}",
             f"调度模式: {round_payload.get('mode') or DEFAULT_MODE}",
@@ -6236,29 +6243,66 @@ def _speaker_room_contract_lines(
     *,
     structured: bool,
 ) -> list[str]:
-    engineer_write_line = ""
-    if str(dev_team_id or "").strip():
-        try:
-            from core.web.services.team.dev_task_board import ENGINEER_ROLES
+    """Per-turn speaking contract.
 
-            if str(participant.get("teamRole") or "").strip() in ENGINEER_ROLES:
+    Dev-team roles also get a task-flow line driving the shared board tool:
+    without it the planner dispatches purely in prose and engineers have no
+    claimable task worktree to write in, so the loop can never reach code.
+    """
+
+    engineer_write_line = ""
+    task_flow_line = ""
+    if str(dev_team_id or "").strip():
+        team_role = str(participant.get("teamRole") or "").strip()
+        try:
+            from core.web.services.team.dev_task_board import (
+                ENGINEER_ROLES,
+                PLANNER_ROLE,
+                REVIEWER_ROLE,
+            )
+
+            if team_role in ENGINEER_ROLES:
                 engineer_write_line = (
                     "只允许在你认领任务的工作区内修改文件（路径见任务摘要）；不要提交、不要启动进化或部署。"
+                )
+                task_flow_line = (
+                    "开工前先用 dev_task_board_tool 的 claim_task 认领派给你的任务并取得任务工作区；"
+                    "没有可认领的任务时说明阻塞，不要在任务工作区之外写任何文件。"
+                )
+            elif team_role == PLANNER_ROLE:
+                task_flow_line = (
+                    "派发前必须先用 dev_task_board_tool 的 create_task 把拆分后的任务落到共享任务板"
+                    "（一个可验证单元一条任务，写明目标、边界与验收标准），再用 @角色名 指派负责人；"
+                    "任务信息或验收口径变化时用 update_task 更新。"
+                )
+            elif team_role == REVIEWER_ROLE:
+                task_flow_line = (
+                    "评审依据 dev_task_board_tool 的 read_task_changes 返回的任务 diff 与测试输出；"
+                    "结论用 complete_task（通过）或 rework_task（返工）落回任务板，并在群聊里给出理由。"
                 )
         except Exception:
             engineer_write_line = ""
     if structured:
         lines = ["严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。"]
+        if task_flow_line:
+            lines.append(task_flow_line)
         if engineer_write_line:
             lines.append(engineer_write_line)
         return lines
     if not engineer_write_line:
+        if task_flow_line:
+            return [
+                "请给出一段紧凑、可读的群聊发言；不要直接修改仓库文件、不要提交、不要启动进化或部署，共享任务板操作按任务流程行执行。",
+                task_flow_line,
+                "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
+            ]
         return [
             "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
             "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
         ]
     return [
         "请给出一段紧凑、可读的群聊发言。只允许在你认领任务的工作区内修改文件（路径见任务摘要）；不要提交、不要启动进化或部署。",
+        task_flow_line,
         "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
     ]
 
