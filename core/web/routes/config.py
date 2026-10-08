@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
+from config.decision_models import probe_decision_model
 from config.provider_merge_migration import (
     ProviderMergeConflictError,
     ProviderMergeVerificationError,
@@ -18,6 +19,7 @@ from config.provider_merge_migration import (
 from core.web.routes.config_draft_model_models import (
     ConfigLlmTestResponse,
     ConfigModelDiscoveryResponse,
+    DecisionModelProbeResponse,
 )
 from core.web.routes.config_migration_models import (
     ConfigMigrationApplyResponse,
@@ -783,6 +785,25 @@ def config_draft_delete_model(payload: ConfigDraftDeleteModelPayload) -> dict:
             base_hash=payload.baseHash,
             model_id=payload.modelId,
         )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
+
+
+class DecisionModelProbePayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    baseUrl: str = ""
+    modelId: str = ""
+
+
+@router.post(
+    "/config/test-decision-model",
+    response_model=DecisionModelProbeResponse,
+    response_model_exclude_unset=True,
+)
+def config_test_decision_model(payload: DecisionModelProbePayload) -> dict:
+    try:
+        return probe_decision_model(payload.baseUrl, payload.modelId)
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
 

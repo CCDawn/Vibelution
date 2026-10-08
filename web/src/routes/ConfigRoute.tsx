@@ -2,6 +2,7 @@ import "../design/route-css/config.tailwind.css";
 import { ConfigSettingsIndex } from "./ConfigSettingsIndex";
 import { ConfigDesktopPetSettings } from "./ConfigDesktopPetSettings";
 import { ConfigShortcutsPanel } from "./ConfigShortcutsPanel";
+import { ConfigDecisionModelsPanel, readDecisionModelMap } from "./ConfigDecisionModelsPanel";
 import { ConfigUiFontSettings } from "./ConfigUiFontSettings";
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -2105,6 +2106,21 @@ export function ConfigRoute() {
               />
             )}
             {providerActionError ? <p className={styles.noticeError} role="alert">{providerActionError}</p> : null}
+            {workspace.schemaVersion === 2 ? <ConfigDecisionModelsPanel
+              models={readDecisionModelMap(asRecord(draftConfig.llm).decision_models)}
+              handoffModelId={getString(asRecord(draftConfig.llm).decision_handoff_model_id)}
+              presets={workspace.decisionModelPresets ?? []}
+              disabled={structuredActionsDisabled || Boolean(busyAction)}
+              lang={currentLanguage}
+              onCommit={(nextModels, nextHandoff) => {
+                void updateSimpleDraft((next) => {
+                  const llm = { ...asRecord(next.llm) };
+                  llm.decision_models = nextModels;
+                  llm.decision_handoff_model_id = nextHandoff;
+                  next.llm = llm;
+                });
+              }}
+            /> : null}
           </div>
         ) : null}
 
