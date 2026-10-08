@@ -2423,11 +2423,16 @@ class AgentRuntime:
                 getattr(self, "_seeded_history_ledger_fingerprint", "") or ""
             ).strip()
             if seeded_ledger_fingerprint:
-                # One-shot per turn: the seed was ledger-assembled by the
-                # session worker, so verify provenance (same ledger state)
-                # rather than seed == canonical replay, which legal context
-                # windowing/compaction would always break.
-                self._seeded_history_ledger_fingerprint = ""
+                # The seed was ledger-assembled by the session worker, so
+                # verify provenance (same ledger state) rather than seed ==
+                # canonical replay, which legal context windowing/compaction
+                # would always break. The stamp stays valid for later LLM
+                # sends of the same turn while the ledger still matches it:
+                # execution paths that do not journal mid-turn (chat-room
+                # speaker turns) grow the in-flight suffix in memory only,
+                # and that suffix is runtime-owned, not history. When the
+                # ledger has advanced (worker-journaled turns), drop the
+                # stamp and fall through to the strict journal replay.
                 from core.orchestration.turn_message_assembly import (
                     ledger_seeded_history_fingerprint,
                 )
@@ -2438,6 +2443,7 @@ class AgentRuntime:
                 )
                 if live_fingerprint == seeded_ledger_fingerprint:
                     return messages, True
+                self._seeded_history_ledger_fingerprint = ""
             reconciled = reconcile_chat_messages_with_ledger(
                 messages,
                 events,
