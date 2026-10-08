@@ -6,8 +6,8 @@ import re
 from collections import defaultdict
 from datetime import date as calendar_date
 
-from core.chat.turn_journal import EVENT_TURN_COMPLETED, EVENT_USER_MESSAGE
 from core.chat.conversation_store.repository import parse_directory_cursor_entry
+from core.chat.turn_journal import EVENT_TURN_COMPLETED
 from core.web.services import financial_market_service as market
 from core.web.services import financial_report_service as reports
 
@@ -81,8 +81,7 @@ def _session_rows(agent_id: str, row: dict) -> list[dict]:
             text, completed_at, _suffix = reports._completed_report_from_events(events, session_id, turn_id, agent_id=agent_id)
         except reports.FinancialReportExportError:
             continue
-        user_events = sorted((event for event in turn_events if event.event_type == EVENT_USER_MESSAGE and getattr(event, "visible_in_model", True)), key=lambda event: getattr(event, "sequence", 0))
-        request = str((user_events[-1].payload or {}).get("content") or "") if user_events else ""
+        request = reports._initial_user_request(turn_events)
         title, ticker, market_code = _subject(request, str(row.get("title") or "研究报告"))
         preview = re.sub(r"https?://\S+|[#*_`>|]", " ", text)
         preview = re.sub(r"\s+", " ", preview).strip()[:240]

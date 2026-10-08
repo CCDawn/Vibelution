@@ -19,6 +19,7 @@ import type {
   FinancialPortfolioRebalanceTarget,
 } from "../../api/types/financialPortfolio";
 import { VButton, VCheckbox, VDenseTable, VDialog, VInput, VStateSurface, VSurface, VTextarea, type VDenseTableColumn } from "../../components/vui";
+import { FinanceReportExport } from "./FinanceReportExport";
 import styles from "./FinanceRebalance.styles";
 
 const DEFAULT_POLICY: FinancialPortfolioRebalancePolicy = {
@@ -125,6 +126,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     retry: false,
   });
   const reports = reportCatalog.data?.pages.flatMap((page) => page.items) ?? [];
+  const reportsByRef = useMemo(() => new Map(reports.map((report) => [reportKey(report), report])), [reports]);
   const proposalList = useQuery({
     queryKey: financialPortfolioKeys.proposals(agentId),
     queryFn: ({ signal }) => fetchFinancialPortfolioProposals(agentId, { signal }),
@@ -228,7 +230,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     if (!outcome.ok) {
       if (outcome.stale) return;
       setCreateAttempt({ request, retryAllowed: false });
-      if (retry) setError(zh ? "同一请求重试仍未确认结果。请先读取该 UUID 的结果，再决定是否安全重试。" : "The retry result is still unknown. Read this UUID before deciding whether another same-ID retry is safe.");
+      if (retry) setError(zh ? "结果暂未确认，请先查询结果，再决定是否重试。" : "The result is still unknown. Check it before retrying.");
       return;
     }
     queryClient.setQueryData(financialPortfolioKeys.proposal(agentId, outcome.value.proposalId), outcome.value);
@@ -251,7 +253,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     }
     if (isFinancialPortfolioProposalNotFound(outcome.error)) {
       setCreateAttempt({ request, retryAllowed: true });
-      setError(zh ? "服务器尚无此 UUID 的记录；可使用原请求内容和相同 UUID 重试。" : "No record exists for this UUID; retry the identical request with the same UUID.");
+      setError(zh ? "暂未找到结果，可以重试生成。" : "No result was found. You can retry generation.");
     }
   }
 
@@ -347,21 +349,26 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     <header className={styles.heading}>
       <div>
         <h3>{zh ? "组合调仓" : "Portfolio rebalance"}</h3>
-        <p className={styles.note}>{zh ? "使用已完成研究报告生成模拟仓位建议；订单只会在你核对精确计划并批准后写入模拟账本。" : "Build a paper allocation from completed reports. Orders enter the paper ledger only after you review and approve the exact plan."}</p>
+        <p className={styles.note}>{zh ? "选报告、生成建议，确认后只在模拟账户成交。" : "Select reports, generate a proposal, then confirm simulated trades."}</p>
       </div>
       <VButton variant="secondary" isDisabled={Boolean(pending) || Boolean(createAttempt)} onPress={startNewProposal}>{zh ? "新建建议" : "New proposal"}</VButton>
     </header>
 
     <div className={styles.layout}>
       <VSurface tone="panel" padding="normal" className={styles.panel}>
-        <h4 className={styles.panelTitle}>{zh ? "研究输入与风控" : "Research inputs and risk policy"}</h4>
-        <p className={styles.note}>{zh ? "最多选5份已完成研究；服务端会按原生 Session/Turn 重新读取正文并核验归属。" : "Select up to five completed reports. The server reloads the exact native Session/Turn and verifies ownership."}</p>
-        {reportCatalog.isPending ? <VStateSurface tone="loading" density="compact" busy title={zh ? "读取已完成研究报告" : "Loading completed reports"} /> : reportCatalog.isError ? <VStateSurface tone="error" density="compact" title={errorText(reportCatalog.error)} actions={<VButton onPress={() => void reportCatalog.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !reports.length ? <VStateSurface tone="empty" density="compact" title={zh ? "还没有可用的已完成研究报告" : "No completed research reports"} /> : <div className={styles.reports}>
+        <div className={styles.heading}>
+          <div>
+            <h4 className={styles.panelTitle}>{zh ? "研究报告与风控" : "Reports and risk"}</h4>
+            <p className={styles.note}>{zh ? "最多选5份已完成报告。" : "Select up to five completed reports."}</p>
+          </div>
+          <VButton variant="ghost" isPending={reportCatalog.isFetching} onPress={() => void reportCatalog.refetch()}>{zh ? "刷新报告" : "Refresh reports"}</VButton>
+        </div>
+        {reportCatalog.isPending ? <VStateSurface tone="loading" density="compact" busy title={zh ? "读取研究报告" : "Loading reports"} /> : reportCatalog.isError ? <VStateSurface tone="error" density="compact" title={errorText(reportCatalog.error)} actions={<VButton onPress={() => void reportCatalog.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !reports.length ? <VStateSurface tone="empty" density="compact" title={zh ? "暂无已完成研究报告" : "No completed reports yet"} /> : <div className={styles.reports}>
           {reports.map((report) => {
             const checked = selectedReports.has(reportKey(report));
             return <label key={reportKey(report)} className={styles.report}>
-              <VCheckbox aria-label={`${zh ? "选择报告" : "Select report"} ${report.title} ${report.turnId}`} isSelected={checked} isDisabled={frozenCreateForm || (!checked && selectedReports.size >= 5)} onChange={(value) => selectReport(report, value)} />
-              <span className={styles.reportText}><strong>{report.title}</strong><small>{report.sessionTitle} · Turn {report.turnId} · {formatTime(report.completedAt, zh)}</small><small>{report.preview}</small></span>
+              <VCheckbox aria-label={`${zh ? "选择报告" : "Select report"} ${report.title}`} isSelected={checked} isDisabled={frozenCreateForm || (!checked && selectedReports.size >= 5)} onChange={(value) => selectReport(report, value)} />
+              <span className={styles.reportText}><strong>{report.title}</strong><small>{zh ? "完成于 " : "Completed "}{formatTime(report.completedAt, zh)}</small><small>{report.preview}</small></span>
             </label>;
           })}
           {reportCatalog.hasNextPage ? <VButton variant="ghost" isDisabled={Boolean(pending)} isPending={reportCatalog.isFetchingNextPage} onPress={() => void reportCatalog.fetchNextPage()}>{zh ? "加载更早报告" : "Load earlier reports"}</VButton> : null}
@@ -375,12 +382,12 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
           <label className={styles.field}>{zh ? "换手上限 %" : "Max turnover %"}<VInput type="number" min="0" max="200" step="0.1" value={String(policy.maxTurnoverPct)} disabled={frozenCreateForm} onChange={(event) => setPolicy((current) => ({ ...current, maxTurnoverPct: Number(event.target.value) }))} /></label>
           <label className={styles.field}>{zh ? "报价最大时效（小时）" : "Max quote age (hours)"}<VInput type="number" min="1" max="168" step="1" value={String(policy.maxQuoteAgeHours)} disabled={frozenCreateForm} onChange={(event) => setPolicy((current) => ({ ...current, maxQuoteAgeHours: Number(event.target.value) }))} /></label>
         </div>
-        <p className={styles.note}>{zh ? `已选 ${selectedReportRows.length}/5 份报告；候选 ${symbols.length}/10 只。已有持仓会由服务端自动并入，并限制长仓、整手和T+1卖出。` : `${selectedReportRows.length}/5 reports selected; ${symbols.length}/10 candidates. Existing holdings are included server-side; long-only, board lots, and T+1 sells apply.`}</p>
+        <p className={styles.note}>{zh ? `已选 ${selectedReportRows.length}/5 份报告；候选 ${symbols.length}/10 只。现有持仓计入建议；仅做多、按整手交易并遵守T+1卖出规则。` : `${selectedReportRows.length}/5 reports selected; ${symbols.length}/10 candidates. Existing holdings are included; long-only, board lots, and T+1 sells apply.`}</p>
         <div className={styles.controls}>
-          <VButton variant="primary" isPending={pending === "create"} isDisabled={!canCreate} onPress={() => void submitCreate(buildCreateRequest())}>{zh ? "生成组合建议" : "Generate proposal"}</VButton>
+          <VButton variant="primary" isPending={pending === "create"} isDisabled={!canCreate} onPress={() => void submitCreate(buildCreateRequest())}>{zh ? "生成建议" : "Generate proposal"}</VButton>
           {createAttempt ? <>
-            <VButton variant="secondary" isPending={pending === "readback"} isDisabled={Boolean(pending)} onPress={() => void readUnknownCreate()}>{zh ? `查询请求 ${createAttempt.request.clientRequestId.slice(0, 8)}` : `Check request ${createAttempt.request.clientRequestId.slice(0, 8)}`}</VButton>
-            {createAttempt.retryAllowed ? <VButton variant="secondary" isPending={pending === "create"} isDisabled={Boolean(pending)} onPress={() => void submitCreate(createAttempt.request, true)}>{zh ? "用同一请求重试" : "Retry same request"}</VButton> : null}
+            <VButton variant="secondary" isPending={pending === "readback"} isDisabled={Boolean(pending)} onPress={() => void readUnknownCreate()}>{zh ? "查询结果" : "Check result"}</VButton>
+            {createAttempt.retryAllowed ? <VButton variant="secondary" isPending={pending === "create"} isDisabled={Boolean(pending)} onPress={() => void submitCreate(createAttempt.request, true)}>{zh ? "重试生成" : "Retry generation"}</VButton> : null}
           </> : null}
         </div>
       </VSurface>
@@ -389,7 +396,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
         <div className={styles.heading}><h4 className={styles.panelTitle}>{zh ? "历史建议" : "Proposal history"}</h4><VButton variant="ghost" isDisabled={proposalList.isFetching} onPress={() => void proposalList.refetch()}>{zh ? "刷新" : "Refresh"}</VButton></div>
         {proposalList.isPending ? <VStateSurface tone="loading" density="compact" busy title={zh ? "读取建议历史" : "Loading proposals"} /> : proposalList.isError ? <VStateSurface tone="error" density="compact" title={errorText(proposalList.error)} actions={<VButton onPress={() => void proposalList.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !proposalList.data?.items.length ? <VStateSurface tone="empty" density="compact" title={zh ? "尚无组合建议" : "No proposals yet"} /> : <div className={styles.reports}>
           {proposalList.data.items.map((item) => <VButton key={item.proposalId} variant={item.proposalId === selectedProposalId ? "secondary" : "ghost"} className={styles.historyButton} onPress={() => selectProposal(item.proposalId)}>
-            <span className={styles.historyButtonText}><strong>{statusLabels[item.status][zh ? "zh" : "en"]} · {formatTime(item.createdAt, zh)}</strong><small className={styles.muted}>{item.proposalId}</small></span>
+            <span className={styles.historyButtonText}><strong>{statusLabels[item.status][zh ? "zh" : "en"]} · {formatTime(item.createdAt, zh)}</strong></span>
           </VButton>)}
         </div>}
       </VSurface>
@@ -401,12 +408,24 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
 
     {proposal ? <VSurface tone="panel" padding="normal" className={styles.panel}>
       <div className={styles.heading}>
-        <div><h4 className={styles.panelTitle}>{zh ? "方案详情" : "Proposal details"} <span className={styles.status}>{statusLabels[proposal.status][zh ? "zh" : "en"]}</span></h4><p className={styles.note}>{proposal.proposalId} · {proposal.modelId} · {zh ? "创建" : "Created"} {formatTime(proposal.createdAt, zh)}{proposal.expiresAt ? ` · ${zh ? "计划有效至" : "Plan expires"} ${formatTime(proposal.expiresAt, zh)}` : ""}</p></div>
+        <div><h4 className={styles.panelTitle}>{zh ? "建议详情" : "Proposal details"} <span className={styles.status}>{statusLabels[proposal.status][zh ? "zh" : "en"]}</span></h4><p className={styles.note}>{zh ? "创建" : "Created"} {formatTime(proposal.createdAt, zh)}{proposal.expiresAt ? ` · ${zh ? "有效至" : "Expires"} ${formatTime(proposal.expiresAt, zh)}` : ""}</p></div>
         {proposal.status === "ready" || proposal.status === "blocked" ? <VButton variant="secondary" isPending={pending === "preview"} isDisabled={!canPreview} onPress={() => void previewEditedPlan()}>{zh ? "重新检查计划" : "Recheck plan"}</VButton> : null}
       </div>
       {proposal.error ? <VStateSurface tone="error" density="compact" title={proposal.error} /> : null}
       {proposal.summaryReason ? <p className={styles.note}>{proposal.summaryReason}</p> : null}
-      <p className={styles.note}>{zh ? "依据报告" : "Source reports"}：{proposal.reportRefs.map((ref) => `${ref.sessionId} / ${ref.turnId}`).join("；") || "—"}</p>
+      {proposal.reportRefs.length ? <div className="grid min-w-0 gap-1" aria-label={zh ? "参考报告" : "Source reports"}>
+        {proposal.reportRefs.map((ref) => {
+          const source = reportsByRef.get(reportKey(ref));
+          const sourceLabel = source
+            ? `${source.title} · ${formatTime(source.completedAt, zh)}`
+            : (zh ? "报告暂不可用" : "Report temporarily unavailable");
+          return <div key={reportKey(ref)} className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-[10px] text-vui-fg-tertiary" title={sourceLabel}>{sourceLabel}</span>
+            {source ? <FinanceReportExport assistantAgentId={agentId} sessionId={ref.sessionId} turnId={ref.turnId} zh={zh} /> : null}
+          </div>;
+        })}
+      </div> : <p className={styles.note}>{zh ? "没有参考报告" : "No source reports"}</p>}
+      <p className="m-0 min-w-0 truncate text-[10px] text-vui-fg-tertiary" title={proposal.modelId}>{zh ? "模型" : "Model"} {proposal.modelId}</p>
 
       <div className={styles.fields}>
         <label className={styles.field}>{zh ? "单股仓位上限 %" : "Max position %"}<VInput type="number" min="1" max="100" step="0.1" value={String(editedPolicy.maxPositionPct)} disabled={proposal.status === "executed" || proposal.status === "failed" || proposal.status === "generating" || Boolean(pending)} onChange={(event) => editPlanPolicy("maxPositionPct", Number(event.target.value))} /></label>
@@ -417,19 +436,19 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
       <div className={styles.table}><VDenseTable ariaLabel={zh ? "可编辑组合目标仓位" : "Editable portfolio targets"} rows={editedTargets} getRowKey={(row) => row.symbol} emptyText={zh ? "尚无目标仓位" : "No target weights"} columns={targetColumns} /></div>
       {proposal.riskChecks.length ? <ul className={styles.risk} aria-label={zh ? "确定性风险检查" : "Deterministic risk checks"}>{proposal.riskChecks.map((check) => <li key={check.code} className={check.passed ? styles.passed : styles.failed}><strong>{check.passed ? "✓" : "!"} {check.label}：</strong>{check.detail}</li>)}</ul> : null}
       <div className={styles.controls}><span className={styles.note}>{zh ? "净值" : "Equity"} {money(proposal.metrics.equityYuan, zh)} · {zh ? "预计现金" : "Cash after"} {money(proposal.metrics.cashAfterYuan, zh)} · {zh ? "换手" : "Turnover"} {proposal.metrics.turnoverPct}% · {zh ? "费用" : "Fees"} {money(proposal.metrics.feesYuan, zh)}</span>
-        {planDirty ? <span className={styles.error}>{zh ? "目标或风控参数已修改，或服务端校验未通过；重新检查并取得新 planHash 前不能批准。" : "Targets or risk policy changed, or server validation failed. Recheck for a new planHash before approval."}</span> : null}
-        {isExpired ? <span className={styles.error}>{zh ? "方案已过期，请重新检查行情与风控。" : "Plan expired; recheck quotes and risk."}</span> : null}
-        {proposal.status === "ready" && !allRiskChecksPassed ? <span className={styles.error}>{zh ? "风险检查不完整，暂不能批准。" : "Risk checks are incomplete; approval is disabled."}</span> : null}
-        {proposal.status === "blocked" ? <span className={styles.error}>{zh ? "至少一项风控未通过，不能批准。" : "At least one risk check failed; approval is disabled."}</span> : null}
-        <VButton variant="primary" isDisabled={!canApprove} onPress={() => setApprovalOpen(true)}>{zh ? "核对并批准模拟调仓" : "Review and approve paper rebalance"}</VButton>
+        {planDirty ? <span className={styles.error}>{zh ? "目标或风控已修改，请重新检查后确认。" : "Targets or risk settings changed. Recheck before confirming."}</span> : null}
+        {isExpired ? <span className={styles.error}>{zh ? "建议已过期，请重新检查行情与风控。" : "Proposal expired; recheck quotes and risk."}</span> : null}
+        {proposal.status === "ready" && !allRiskChecksPassed ? <span className={styles.error}>{zh ? "风控检查未完成，暂不能确认。" : "Risk checks are incomplete; confirmation is disabled."}</span> : null}
+        {proposal.status === "blocked" ? <span className={styles.error}>{zh ? "风控未通过，不能确认。" : "Risk checks failed; confirmation is disabled."}</span> : null}
+        <VButton variant="primary" isDisabled={!canApprove} onPress={() => setApprovalOpen(true)}>{zh ? "核对订单" : "Review orders"}</VButton>
       </div>
-      <div className={styles.table}><VDenseTable ariaLabel={zh ? "精确模拟调仓订单" : "Exact paper rebalance orders"} rows={proposal.orders} getRowKey={(row) => `${row.side}:${row.symbol}`} emptyText={zh ? "没有可执行订单" : "No executable orders"} columns={orderColumns} /></div>
-      {proposal.execution ? <p className={styles.note}>{zh ? "模拟批次" : "Paper batch"} {proposal.execution.batchId} · {formatTime(proposal.execution.executedAt, zh)}</p> : null}
+      <div className={styles.table}><VDenseTable ariaLabel={zh ? "模拟订单" : "Simulated orders"} rows={proposal.orders} getRowKey={(row) => `${row.side}:${row.symbol}`} emptyText={zh ? "没有可执行订单" : "No executable orders"} columns={orderColumns} /></div>
+      {proposal.execution ? <p className={styles.note}>{zh ? "模拟成交" : "Simulated trades"} · {formatTime(proposal.execution.executedAt, zh)}</p> : null}
     </VSurface> : null}
 
-    <VDialog open={approvalOpen} onOpenChange={setApprovalOpen} title={zh ? "批准精确模拟订单" : "Approve exact paper orders"} description={zh ? "确认后只写入当前模拟账户，不会发送真实券商订单。批准绑定当前 planHash。" : "Confirmation writes only to this paper account. No broker order is sent. Approval is bound to the current planHash."} footer={<>
+    <VDialog open={approvalOpen} onOpenChange={setApprovalOpen} title={zh ? "确认模拟成交" : "Confirm simulated trades"} description={zh ? "只在模拟账户成交，不会发送真实订单。" : "Trades are simulated only. No real orders are sent."} footer={<>
       <VButton variant="secondary" isDisabled={Boolean(pending)} onPress={() => setApprovalOpen(false)}>{zh ? "返回检查" : "Back"}</VButton>
-      <VButton variant="primary" isPending={pending === "approve"} isDisabled={!canApprove} onPress={() => void approvePlan()}>{zh ? "确认模拟调仓" : "Confirm paper rebalance"}</VButton>
+      <VButton variant="primary" isPending={pending === "approve"} isDisabled={!canApprove} onPress={() => void approvePlan()}>{zh ? "确认模拟成交" : "Confirm simulated trades"}</VButton>
     </>}>
       {proposal ? <div className={styles.dialogOrders}>
         {proposal.orders.map((order) => <div key={`${order.side}:${order.symbol}`} className={styles.dialogOrder}><strong>{order.side === "buy" ? (zh ? "买入" : "Buy") : (zh ? "卖出" : "Sell")} {order.name} · {order.symbol}</strong><span>{order.quantity.toLocaleString()} {zh ? "股" : "shares"}</span><small>{money(order.priceYuan, zh)} × {order.quantity.toLocaleString()} · {zh ? "费用" : "fee"} {money(order.feeYuan, zh)}</small><small>{order.reason || "—"}</small></div>)}

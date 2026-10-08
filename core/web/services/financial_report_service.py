@@ -136,6 +136,34 @@ def _research_request(text: str) -> bool:
     )
 
 
+_GUIDANCE_MESSAGE_KINDS = frozenset({"user_guidance", "user_interrupt_guidance"})
+
+
+def _initial_user_request(turn_events: list) -> str:
+    """Return the Turn's initiating user message, excluding in-turn guidance."""
+    user_events = sorted(
+        (
+            event
+            for event in turn_events
+            if event.event_type == EVENT_USER_MESSAGE
+            and bool(getattr(event, "visible_in_model", True))
+        ),
+        key=lambda event: (
+            int(getattr(event, "sequence", 0) or 0),
+            str(getattr(event, "event_id", "")),
+        ),
+    )
+    for event in user_events:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        kind = str(metadata.get("kind") or "").strip()
+        source = str(getattr(event, "source", "") or "").strip()
+        if kind in _GUIDANCE_MESSAGE_KINDS or source == "submit_session_guidance":
+            continue
+        return str(payload.get("content") or "")
+    return ""
+
+
 def _report_file_suffix(request_text: str, turn_id: str) -> str:
     request = str(request_text or "")
     header = ""
@@ -229,14 +257,7 @@ def _completed_report_from_events(all_events: list, session_id: str, turn_id: st
     if terminal_payload.get("marker") or terminal_payload.get("errorType") or terminal_payload.get("error_type"):
         raise FinancialReportUnavailable("研究尚未成功完成，暂不能导出")
 
-    user_events = [
-        event
-        for event in turn_events
-        if event.event_type == EVENT_USER_MESSAGE
-        and bool(getattr(event, "visible_in_model", True))
-    ]
-    user_events.sort(key=lambda event: (int(getattr(event, "sequence", 0) or 0), str(getattr(event, "event_id", ""))))
-    request_text = str((user_events[-1].payload or {}).get("content") or "") if user_events else ""
+    request_text = _initial_user_request(turn_events)
     if not request_text or not _research_request(request_text):
         raise FinancialReportUnavailable("该轮内容不是研究报告，暂不能导出")
 

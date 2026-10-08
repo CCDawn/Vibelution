@@ -24,7 +24,7 @@ GATED_REPORT = REPORT.replace("| 营收 | 12 亿元 |", "| 营收 | 没有这一
 RESEARCH_REQUEST = "请研究 示例公司（600000，上海证券交易所），分析日期 2026-10-06，使用 Markdown 二级标题整理研究报告。"
 
 
-def _event(event_type: str, sequence: int, *, turn_id: str = "turn-1", status: str = "", payload: dict | None = None, session_id: str = "session-1"):
+def _event(event_type: str, sequence: int, *, turn_id: str = "turn-1", status: str = "", payload: dict | None = None, session_id: str = "session-1", source: str = "test"):
     return TurnJournalEvent(
         schema_version=2,
         event_id=f"event-{sequence}",
@@ -34,21 +34,37 @@ def _event(event_type: str, sequence: int, *, turn_id: str = "turn-1", status: s
         event_type=event_type,
         status=status,
         timestamp=f"2026-10-06T12:00:{sequence:02d}+08:00",
-        source="test",
+        source=source,
         payload=payload or {},
     )
 
 
-def _turn(*, request: str = RESEARCH_REQUEST, terminal: str = EVENT_TURN_COMPLETED, status: str = "completed", answer: str = REPORT, turn_id: str = "turn-1", session_id: str = "session-1"):
+def _turn(*, request: str = RESEARCH_REQUEST, terminal: str = EVENT_TURN_COMPLETED, status: str = "completed", answer: str = REPORT, turn_id: str = "turn-1", session_id: str = "session-1", guidance: str | None = None):
     events = [
         _event(EVENT_USER_MESSAGE, 1, turn_id=turn_id, session_id=session_id, status="recorded", payload={"content": request}),
     ]
+    sequence = 2
+    if guidance is not None:
+        events.append(_event(
+            EVENT_USER_MESSAGE,
+            sequence,
+            turn_id=turn_id,
+            session_id=session_id,
+            status="recorded",
+            source="submit_session_guidance",
+            payload={
+                "content": guidance,
+                "metadata": {"kind": "user_guidance", "guidanceMode": "safe"},
+            },
+        ))
+        sequence += 1
     if answer:
-        events.append(_event(EVENT_ASSISTANT_ITEM_COMMITTED, 2, turn_id=turn_id, session_id=session_id, status="completed", payload={
+        events.append(_event(EVENT_ASSISTANT_ITEM_COMMITTED, sequence, turn_id=turn_id, session_id=session_id, status="completed", payload={
             "kind": "assistant_message", "channel": "answer", "phase": "final_answer",
             "status": "completed", "text": answer, "itemId": "answer-1", "revision": 0,
         }))
-    events.append(_event(terminal, 3, turn_id=turn_id, session_id=session_id, status=status))
+        sequence += 1
+    events.append(_event(terminal, sequence, turn_id=turn_id, session_id=session_id, status=status))
     return events
 
 
@@ -199,6 +215,18 @@ def test_only_exact_owned_completed_research_turn_can_export(report_env, monkeyp
     synthesis_export = _export("markdown")
     assert synthesis_export["content"] == GATED_REPORT
     assert synthesis_export["fileName"] == "stock-research-2026-10-06-600000.md"
+
+
+def test_safe_guidance_does_not_replace_or_create_the_turn_research_request(report_env):
+    report_env[:] = _turn(guidance="当前验收只需直接完成一份简短报告。")
+
+    exported = _export()
+    assert exported["content"] == GATED_REPORT
+    assert exported["fileName"] == "stock-research-2026-10-06-600000.md"
+
+    report_env[:] = _turn(request="请介绍一下这家公司。", guidance=RESEARCH_REQUEST)
+    with pytest.raises(service.FinancialReportUnavailable, match="不是研究报告"):
+        _export()
 
 
 def test_finance_screen_prompt_exports_the_requested_completed_turn(report_env):

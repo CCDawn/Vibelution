@@ -12,9 +12,32 @@ from core.web.services import financial_report_service as reports
 from core.web.services.financial_report import catalog
 
 
-def _turn(session, turn, request, stamp="2026-10-06T12:00:00+08:00"):
-    records = [(EVENT_USER_MESSAGE, "recorded", {"content": request}), (EVENT_ASSISTANT_ITEM_COMMITTED, "completed", {"kind": "assistant_message", "channel": "answer", "phase": "final_answer", "status": "completed", "text": f"## 结论\n{turn} 原始结果", "itemId": f"answer-{turn}"}), (EVENT_TURN_COMPLETED, "completed", {})]
-    return [TurnJournalEvent(schema_version=2, event_id=f"{turn}-{index}", session_id=session, turn_id=turn, sequence=index, event_type=kind, status=status, timestamp=stamp, source="test", payload=payload) for index, (kind, status, payload) in enumerate(records, 1)]
+def _turn(session, turn, request, stamp="2026-10-06T12:00:00+08:00", guidance=None):
+    records = [(EVENT_USER_MESSAGE, "recorded", {"content": request})]
+    if guidance is not None:
+        records.append((EVENT_USER_MESSAGE, "recorded", {
+            "content": guidance,
+            "metadata": {"kind": "user_guidance", "guidanceMode": "safe"},
+        }))
+    records.extend([
+        (EVENT_ASSISTANT_ITEM_COMMITTED, "completed", {"kind": "assistant_message", "channel": "answer", "phase": "final_answer", "status": "completed", "text": f"## 结论\n{turn} 原始结果", "itemId": f"answer-{turn}"}),
+        (EVENT_TURN_COMPLETED, "completed", {}),
+    ])
+    return [
+        TurnJournalEvent(
+            schema_version=2,
+            event_id=f"{turn}-{index}",
+            session_id=session,
+            turn_id=turn,
+            sequence=index,
+            event_type=kind,
+            status=status,
+            timestamp=stamp,
+            source=("submit_session_guidance" if payload.get("metadata", {}).get("kind") == "user_guidance" else "test"),
+            payload=payload,
+        )
+        for index, (kind, status, payload) in enumerate(records, 1)
+    ]
 
 
 @pytest.fixture
@@ -44,6 +67,23 @@ def test_catalog_paginates_individual_reports_without_followup_or_foreign_conten
     assert [row["turnId"] for row in final["items"]] == ["turn-cn"]
     assert final["nextCursor"] is None
     assert first["order"] == "session_recency"
+
+
+def test_catalog_uses_the_initial_request_for_a_turn_with_safe_guidance(env):
+    _rows, events = env
+    initial_request = "请研究 银行（600000，上交所），分析日期 2026-10-06。"
+    guidance = "请研究 Apple（AAPL，NASDAQ），分析日期 2026-10-06。"
+    events["session-old"] = _turn(
+        "session-old", "turn-cn", initial_request, guidance=guidance
+    )
+
+    reports_page = catalog.list_reports("agent-1")
+    report = next(item for item in reports_page["items"] if item["turnId"] == "turn-cn")
+
+    assert report["ticker"] == "600000"
+    assert report["marketCode"] == "CN"
+    assert report["title"].startswith("银行")
+    assert report["kind"] == "research"
 
 
 def test_catalog_filters_real_calendar_market_and_exact_ticker(env):

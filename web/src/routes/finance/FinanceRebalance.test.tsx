@@ -29,6 +29,9 @@ vi.mock("../../api/financialReports", () => ({
   fetchFinancialReports: api.fetchReports,
   financialReportKeys: { catalog: (agentId: string, filters: unknown) => ["finance", "report-catalog", agentId, filters] },
 }));
+vi.mock("./FinanceReportExport", () => ({
+  FinanceReportExport: ({ sessionId, turnId }: { sessionId: string; turnId: string }) => <span data-export-session={sessionId} data-export-turn={turnId} />,
+}));
 
 import { FinanceRebalance } from "./FinanceRebalance";
 
@@ -115,14 +118,24 @@ afterEach(async () => {
 });
 
 describe("FinanceRebalance", () => {
+  it("refreshes the completed report list in place", async () => {
+    await render();
+    expect(api.fetchReports).toHaveBeenCalledTimes(1);
+
+    await act(async () => button("刷新报告").click());
+    await settle();
+
+    expect(api.fetchReports).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the exact selected completed report and current holdings to create an idempotent proposal", async () => {
     await render();
     expect(input("候选股票代码").value).toBe("sh600519");
-    const reportCheckbox = node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title} ${report.turnId}"]`);
+    const reportCheckbox = node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title}"]`);
     expect(reportCheckbox).not.toBeNull();
     await act(async () => reportCheckbox!.click());
     await setValue(input("组合目标"), "降低单股集中度并保留现金");
-    await act(async () => button("生成组合建议").click());
+    await act(async () => button("生成建议").click());
     await settle();
 
     expect(api.create).toHaveBeenCalledTimes(1);
@@ -134,7 +147,25 @@ describe("FinanceRebalance", () => {
       policy: { maxPositionPct: 30, minCashPct: 10, maxTurnoverPct: 100, maxQuoteAgeHours: 72 },
     });
     expect(node.textContent).toContain("浦发银行研究");
-    expect(node.querySelector('[aria-label="精确模拟调仓订单"]')).not.toBeNull();
+    expect(node.querySelector('[aria-label="模拟订单"]')).not.toBeNull();
+    expect(node.querySelector('[data-export-session="session-1"][data-export-turn="turn-8"]')).not.toBeNull();
+    expect(node.querySelector('span[title*="浦发银行研究"]')?.getAttribute("title")).toMatch(/2026/);
+    expect(node.textContent).toContain("模型 model-1");
+  });
+
+  it("shows a source as unavailable instead of substituting another report from the same session", async () => {
+    const missingSource = readyProposal({ reportRefs: [{ sessionId: report.sessionId, turnId: "turn-older", contentHash: "older-hash" }] });
+    api.fetchProposals.mockResolvedValue({ items: [missingSource] });
+    api.fetchProposal.mockResolvedValue(missingSource);
+    await render();
+    await act(async () => button("待批准").click());
+    await settle();
+
+    const sourceList = node.querySelector('[aria-label="参考报告"]');
+    expect(sourceList?.textContent).toContain("报告暂不可用");
+    expect(sourceList?.textContent).not.toContain("浦发银行研究");
+    expect(node.textContent).toContain("模型 model-1");
+    expect(node.querySelector("[data-export-session]")).toBeNull();
   });
 
   it("requires a fresh server plan hash and a second explicit confirmation before simulated execution", async () => {
@@ -144,23 +175,23 @@ describe("FinanceRebalance", () => {
     await render();
     await act(async () => button("待批准").click());
     await settle();
-    const approveButton = button("核对并批准模拟调仓");
+    const approveButton = button("核对订单");
     expect(approveButton.disabled).toBe(false);
 
     await setValue(input("sh600519目标仓位"), "18");
     await settle();
-    expect(button("核对并批准模拟调仓").disabled).toBe(true);
+    expect(button("核对订单").disabled).toBe(true);
     await act(async () => button("重新检查计划").click());
     await settle();
     expect(api.preview).toHaveBeenCalledWith("agent-1", proposal.proposalId, {
       targets: [{ symbol: "sh600519", weightPct: 18, reason: "降低集中度" }],
       policy: proposal.policy,
     });
-    expect(button("核对并批准模拟调仓").disabled).toBe(false);
-    await act(async () => button("核对并批准模拟调仓").click());
-    expect(document.body.textContent).toContain("批准精确模拟订单");
+    expect(button("核对订单").disabled).toBe(false);
+    await act(async () => button("核对订单").click());
+    expect(document.body.textContent).toContain("确认模拟成交");
     expect(document.body.textContent).toContain("卖出 贵州茅台 · sh600519");
-    await act(async () => button("确认模拟调仓").click());
+    await act(async () => button("确认模拟成交").click());
     await settle();
 
     expect(api.approve).toHaveBeenCalledWith("agent-1", proposal.proposalId, { planHash: "plan-hash-2", confirmSimulation: true });
@@ -170,18 +201,18 @@ describe("FinanceRebalance", () => {
   it("reads an ambiguous create by its UUID before allowing the identical retry", async () => {
     api.create.mockRejectedValueOnce(new Error("network disconnected")).mockResolvedValueOnce(readyProposal());
     await render();
-    const checkbox = node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title} ${report.turnId}"]`)!;
+    const checkbox = node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title}"]`)!;
     await act(async () => checkbox.click());
     await setValue(input("组合目标"), "按证据降低集中度");
-    await act(async () => button("生成组合建议").click());
+    await act(async () => button("生成建议").click());
     await settle();
     expect(api.create).toHaveBeenCalledTimes(1);
 
     api.fetchProposal.mockRejectedValueOnce(new FetchJsonHttpError("组合建议不存在", { status: 404 }));
-    await act(async () => button("查询请求 11111111").click());
+    await act(async () => button("查询结果").click());
     await settle();
-    expect(button("用同一请求重试")).not.toBeNull();
-    await act(async () => button("用同一请求重试").click());
+    expect(button("重试生成")).not.toBeNull();
+    await act(async () => button("重试生成").click());
     await settle();
 
     expect(api.create).toHaveBeenCalledTimes(2);
@@ -195,7 +226,7 @@ describe("FinanceRebalance", () => {
     await render();
     await act(async () => button("风控阻断").click());
     await settle();
-    expect(button("核对并批准模拟调仓").disabled).toBe(true);
+    expect(button("核对订单").disabled).toBe(true);
 
     const expired = readyProposal({ proposalId: "22222222-2222-4222-8222-222222222222", expiresAt: "2000-01-01T00:00:00Z" });
     await act(async () => {
@@ -206,8 +237,8 @@ describe("FinanceRebalance", () => {
     await settle();
     await act(async () => button("待批准").click());
     await settle();
-    expect(button("核对并批准模拟调仓").disabled).toBe(true);
-    expect(node.textContent).toContain("方案已过期");
+    expect(button("核对订单").disabled).toBe(true);
+    expect(node.textContent).toContain("建议已过期");
     expect(button("重新检查计划").disabled).toBe(false);
 
     await act(async () => button("重新检查计划").click());
@@ -216,7 +247,7 @@ describe("FinanceRebalance", () => {
       targets: expired.targets,
       policy: expired.policy,
     });
-    expect(button("核对并批准模拟调仓").disabled).toBe(false);
+    expect(button("核对订单").disabled).toBe(false);
   });
 
   it("reads back an uncertain approval and invalidates the paper account if it executed", async () => {
@@ -234,8 +265,8 @@ describe("FinanceRebalance", () => {
     await render();
     await act(async () => button("待批准").click());
     await settle();
-    await act(async () => button("核对并批准模拟调仓").click());
-    await act(async () => button("确认模拟调仓").click());
+    await act(async () => button("核对订单").click());
+    await act(async () => button("确认模拟成交").click());
     await settle();
 
     expect(api.approve).toHaveBeenCalledTimes(1);
@@ -250,14 +281,14 @@ describe("FinanceRebalance", () => {
     let resolveCreate!: (value: FinancialPortfolioProposal) => void;
     api.create.mockImplementation(() => new Promise<FinancialPortfolioProposal>((resolve) => { resolveCreate = resolve; }));
     await render();
-    await act(async () => node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title} ${report.turnId}"]`)!.click());
+    await act(async () => node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title}"]`)!.click());
     await setValue(input("组合目标"), "保留现有仓位");
-    await act(async () => button("生成组合建议").click());
+    await act(async () => button("生成建议").click());
     await render("agent-2");
     await act(async () => { resolveCreate(readyProposal()); });
     await settle();
 
-    expect(node.textContent).not.toContain("方案详情");
+    expect(node.textContent).not.toContain("建议详情");
     expect(node.textContent).not.toContain("model-1");
     expect(api.create).toHaveBeenCalledTimes(1);
   });
