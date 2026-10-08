@@ -5981,6 +5981,7 @@ def _build_participant_prompt(
         if str(round_payload.get("mode") or room.get("mode") or DEFAULT_MODE).strip().lower() == "planned"
         else ""
     )
+    board_prompt = _dev_team_board_prompt(room, round_payload, participant)
     response_contract_lines = (
         ["严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。"]
         if structured_room_context
@@ -5996,6 +5997,7 @@ def _build_participant_prompt(
             f"当前议题: {round_payload.get('topic') or ''}",
             f"调度模式: {round_payload.get('mode') or DEFAULT_MODE}",
             *([planned_dispatch_line] if planned_dispatch_line else []),
+            *([board_prompt] if board_prompt else []),
             f"对话目的: {purpose}",
             f"本轮推进模式: {effective_purpose}",
             f"你的发言视角: {role_view}",
@@ -6154,6 +6156,45 @@ def _participant_role_view(participant: dict[str, Any]) -> str:
     if title:
         title = re.sub(r"\s*Agent\s*$", "", title, flags=re.IGNORECASE).strip()
     return title or str(participant.get("participantId") or "").strip() or "群聊成员"
+
+
+def _config_mapping(source: Any) -> dict[str, Any]:
+    if not isinstance(source, dict):
+        return {}
+    config = source.get("config")
+    return config if isinstance(config, dict) else {}
+
+
+def _dev_team_prompt_team_id(
+    room: dict[str, Any],
+    round_payload: dict[str, Any],
+    participant: dict[str, Any],
+) -> str:
+    configs = [_config_mapping(room), _config_mapping(round_payload)]
+    if not any(str(item.get("teamTemplateId") or "").strip() == "dev-team" for item in configs):
+        return ""
+    for item in configs:
+        team_id = str(item.get("teamId") or "").strip()
+        if team_id:
+            return team_id
+    return str(participant.get("teamId") or "").strip()
+
+
+def _dev_task_board_prompt(team_id: str) -> str:
+    from core.web.services.team.dev_task_board import dev_task_board_prompt
+
+    return dev_task_board_prompt(team_id)
+
+
+def _dev_team_board_prompt(
+    room: dict[str, Any],
+    round_payload: dict[str, Any],
+    participant: dict[str, Any],
+) -> str:
+    team_id = _dev_team_prompt_team_id(room, round_payload, participant)
+    if not team_id:
+        return ""
+    return _dev_task_board_prompt(team_id)
 
 
 def _format_participant_team_context(participant: dict[str, Any]) -> str:
