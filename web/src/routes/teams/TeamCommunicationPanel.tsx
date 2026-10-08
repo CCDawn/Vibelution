@@ -27,7 +27,7 @@ import { formatTime } from "./source-collection/presentationModel";
 import { teamChatRoomRoute } from "./researchStageAgentPresentation";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
 import { chatRoomStatusLabel } from "./workflowPresentation";
-import { DevTeamTaskBoard } from "./DevTeamTaskBoard";
+import { DevTeamTaskBoard, speakingTeamMemberIdFromRoom } from "./DevTeamTaskBoard";
 
 const styles = {
   ...shellStyles,
@@ -257,6 +257,7 @@ export function TeamCommunicationPanel({
           lang={lang}
           teamId={selectedTeam.teamId}
           members={selectedTeam.members ?? []}
+          speakingMemberId={speakingTeamMemberIdFromRoom(selectedTeam.members ?? [], linkedRoomDetail)}
         />
       ) : null}
       <form

@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TeamMember } from "../../api/types";
-import { DevTeamTaskBoard } from "./DevTeamTaskBoard";
+import { DevTeamTaskBoard, speakingTeamMemberId, speakingTeamMemberIdFromRoom } from "./DevTeamTaskBoard";
 
 const listDevTeamTasks = vi.fn();
 const listDevTeamTaskChanges = vi.fn();
@@ -47,6 +47,7 @@ const readyTask = {
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
+let client: QueryClient | null = null;
 
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
   const prototype = Object.getPrototypeOf(element);
@@ -56,20 +57,33 @@ function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement | HTMLSe
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-async function renderBoard() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function boardElement(speakingMemberId = "") {
+  if (!client) {
+    throw new Error("query client missing");
+  }
+  return (
+    <QueryClientProvider client={client}>
+      <DevTeamTaskBoard lang="zh" teamId="team-1" members={members} speakingMemberId={speakingMemberId} />
+    </QueryClientProvider>
+  );
+}
+
+async function renderBoard(speakingMemberId = "") {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(
-      <QueryClientProvider client={client}>
-        <DevTeamTaskBoard lang="zh" teamId="team-1" members={members} />
-      </QueryClientProvider>,
-    );
+    root?.render(boardElement(speakingMemberId));
   });
   await act(async () => {
     await listDevTeamTasks.mock.results[0]?.value;
+  });
+}
+
+async function setSpeaker(speakingMemberId: string) {
+  await act(async () => {
+    root?.render(boardElement(speakingMemberId));
   });
 }
 
@@ -83,24 +97,20 @@ describe("DevTeamTaskBoard", () => {
     host?.remove();
     host = null;
     root = null;
+    client = null;
   });
 
   it("lets an engineer claim a ready task and shows the overlap warning", async () => {
     listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
     mutateDevTeamTask.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" });
-    await renderBoard();
+    await renderBoard("m-a");
     await act(async () => {
       await vi.waitFor(() => {
         expect(host?.textContent).toContain("与 task-2 的写范围重叠");
       });
     });
-    const actor = host?.querySelector<HTMLSelectElement>('select[aria-label="当前身份"]');
-    expect(actor).toBeTruthy();
-    await act(async () => {
-      if (actor) {
-        setNativeValue(actor, "m-a");
-      }
-    });
+    expect(host?.querySelector('select[aria-label="当前身份"]')).toBeNull();
+    expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("开发工程师 A");
     const claim = host?.querySelector<HTMLButtonElement>('button[aria-label="认领 task-1"]');
     expect(claim).toBeTruthy();
     await act(async () => {
@@ -144,13 +154,7 @@ describe("DevTeamTaskBoard", () => {
       truncated: 1,
       changes: [{ path: "web/src/routes/login.tsx", status: "modified" }],
     });
-    await renderBoard();
-    const actor = host?.querySelector<HTMLSelectElement>('select[aria-label="当前身份"]');
-    await act(async () => {
-      if (actor) {
-        setNativeValue(actor, "m-rev");
-      }
-    });
+    await renderBoard("m-rev");
     await act(async () => {
       await vi.waitFor(() => {
         expect(host?.textContent).toContain("修改 web/src/routes/login.tsx");
@@ -274,5 +278,91 @@ describe("DevTeamTaskBoard", () => {
       actorMemberId: "m-plan",
       subject: "补任务板",
     }));
+  });
+
+  it("follows the speaking member and keeps that identity when speaking stops", async () => {
+    listDevTeamTasks.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [readyTask], updatedAt: "" });
+    await renderBoard("m-a");
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("开发工程师 A");
+        expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeTruthy();
+      });
+    });
+    expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
+
+    await setSpeaker("");
+    expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("开发工程师 A");
+    expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeTruthy();
+
+    await setSpeaker("m-rev");
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.querySelector('[aria-label="当前身份"]')?.textContent).toBe("评审员");
+      });
+    });
+    expect(host?.querySelector('button[aria-label="认领 task-1"]')).toBeNull();
+    expect(host?.querySelector('button[aria-label="保存修改 task-1"]')).toBeNull();
+  });
+});
+
+describe("speaking team member", () => {
+  const roomMembers = members;
+
+  it("uses the running speaker and ignores queued or settled turns", () => {
+    const participants = [
+      { participantId: "p-plan", agentId: "a1", teamRole: "规划师" },
+      { participantId: "p-a", agentId: "a2", teamRole: "开发工程师 A" },
+      { participantId: "p-rev", agentId: "a3", teamRole: "评审员" },
+    ];
+    expect(speakingTeamMemberId(roomMembers, participants, {
+      status: "running",
+      speakerProgress: [
+        { participantId: "p-plan", state: "queued", updatedAt: "2026-10-08T00:00:03Z" },
+        { participantId: "p-a", state: "running", updatedAt: "2026-10-08T00:00:01Z" },
+        { participantId: "p-rev", state: "settled", updatedAt: "2026-10-08T00:00:02Z" },
+      ],
+    })).toBe("m-a");
+    expect(speakingTeamMemberId(roomMembers, participants, {
+      status: "running",
+      speakerProgress: [
+        { participantId: "p-a", state: "running", updatedAt: "2026-10-08T00:00:01Z" },
+        { participantId: "p-rev", state: "running", updatedAt: "2026-10-08T00:00:02Z" },
+      ],
+    })).toBe("m-rev");
+  });
+
+  it("matches a speaker by role when the agent id is missing", () => {
+    expect(speakingTeamMemberId(members, [
+      { participantId: "p-rev", teamRole: "评审员" },
+    ], {
+      status: "stopping",
+      speakerProgress: [{ participantId: "p-rev", state: "running" }],
+    })).toBe("m-rev");
+  });
+
+  it("returns nobody when the round is idle or the speaker is not on the team", () => {
+    const participants = [{ participantId: "p-a", agentId: "a2", teamRole: "开发工程师 A" }];
+    expect(speakingTeamMemberId(members, participants, {
+      status: "completed",
+      speakerProgress: [{ participantId: "p-a", state: "running" }],
+    })).toBe("");
+    expect(speakingTeamMemberId(members, participants, {
+      status: "queued",
+      speakerProgress: [{ participantId: "p-a", state: "queued" }],
+    })).toBe("");
+    expect(speakingTeamMemberId(members, participants, {
+      status: "running",
+      speakerProgress: [{ participantId: "p-missing", state: "running" }],
+    })).toBe("");
+    expect(speakingTeamMemberIdFromRoom(members, {
+      activeRoundId: "round-live",
+      participants,
+      rounds: [
+        { roundId: "round-old", status: "completed", speakerProgress: [{ participantId: "p-a", state: "running" }] },
+        { roundId: "round-live", status: "running", speakerProgress: [{ participantId: "p-a", state: "running" }] },
+      ],
+    })).toBe("m-a");
+    expect(speakingTeamMemberIdFromRoom(members, null)).toBe("");
   });
 });

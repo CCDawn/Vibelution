@@ -17,6 +17,7 @@ vi.mock("../../api/teamMemberMessages", () => ({
 
 vi.mock("../../api/devTeamTasks", () => ({
   listDevTeamTasks: vi.fn().mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" }),
+  listDevTeamTaskChanges: vi.fn(),
   createDevTeamTask: vi.fn(),
   mutateDevTeamTask: vi.fn(),
 }));
@@ -122,6 +123,38 @@ describe("TeamCommunicationPanel round controls", () => {
       } as Team,
     });
     expect(html).toContain("共享任务板");
+  });
+
+  it("shows the speaking role on the task board instead of a manual identity", () => {
+    const html = renderPanel({
+      selectedTeam: {
+        ...selectedTeam,
+        teamTemplateId: "dev-team",
+        name: "开发团队",
+        members: [
+          { memberId: "m-plan", role: "规划师", agentName: "规划师", agentId: "a-plan", agentCode: "plan", agentStatus: "active", purpose: "" },
+          { memberId: "m-a", role: "开发工程师 A", agentName: "工程师A", agentId: "a-eng", agentCode: "dev-a", agentStatus: "active", purpose: "" },
+        ],
+      } as Team,
+      linkedRoomDetail: {
+        ...linkedRoomDetail,
+        participants: [
+          { participantId: "p-a", agentId: "a-eng", teamRole: "开发工程师 A" },
+        ],
+        activeRoundId: "round-1",
+        rounds: [
+          {
+            roundId: "round-1",
+            status: "running",
+            speakerProgress: [{ participantId: "p-a", state: "running", updatedAt: "2026-10-08T00:00:00Z" }],
+          },
+        ],
+      } as ChatRoomDetail,
+    });
+    expect(html).toContain('aria-label="当前身份"');
+    expect(html).toContain("开发工程师 A");
+    expect(html).not.toContain("新建任务");
+    expect(html).not.toContain("<select");
   });
 
   it("shows an in-place stop action while the linked room is busy", () => {

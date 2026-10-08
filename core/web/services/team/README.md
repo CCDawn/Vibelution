@@ -20,7 +20,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Team API projection / agent refs | `team_projection.py` | index write repair |
 | Active membership / contract helpers | `team_membership.py` | runtime-scene telemetry; public CRUD |
 | Same-team member message index | `team_member_messages.py` | broadcast `send_team_message`; session body SSOT |
-| Development-team shared task board | `dev_task_board.py` (engineer claim opens one task worktree; review reads that worktree's file list; planner can edit subject, description, write scopes, and dependencies) | chat-room transcript writes; member rows; non-dev teams; opening a worktree on assign, review, or delete |
+| Development-team shared task board | `dev_task_board.py` (engineer claim opens one task worktree; review reads that worktree's file list; planner can edit subject, description, write scopes, and dependencies; acting identity follows the speaking room participant and stays when nobody is speaking) | chat-room transcript writes; member rows; non-dev teams; opening a worktree on assign, review, or delete |
 | Team runtime-scene logging helpers | `team_logging.py` | membership resolve; index IO |
 | Team index / path / lock store helpers | `team_store.py` | domain CRUD; system materialize |
 | Team domain constants / role catalogs | `team_constants.py` | mutable locks; kind maps (`kind_helpers`) |

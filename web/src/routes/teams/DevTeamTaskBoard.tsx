@@ -39,7 +39,81 @@ type DevTeamTaskBoardProps = {
   lang: "zh" | "en";
   teamId: string;
   members: TeamMember[];
+  speakingMemberId?: string;
 };
+
+const LIVE_ROUND_STATUSES = new Set(["queued", "running", "stopping"]);
+
+export type SpeakingParticipant = {
+  participantId?: string;
+  agentId?: string;
+  teamRole?: string;
+};
+
+export type SpeakingRound = {
+  roundId?: string;
+  status?: string;
+  speakerProgress?: Array<{
+    participantId?: string;
+    state?: string;
+    updatedAt?: string;
+  }>;
+};
+
+export function speakingTeamMemberId(
+  members: TeamMember[],
+  participants: SpeakingParticipant[],
+  round: SpeakingRound | null | undefined,
+) {
+  const status = String(round?.status || "").trim().toLowerCase();
+  if (!LIVE_ROUND_STATUSES.has(status)) {
+    return "";
+  }
+  const running = (round?.speakerProgress ?? [])
+    .filter((item) => String(item.state || "").trim() === "running" && String(item.participantId || "").trim())
+    .slice()
+    .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")));
+  const participantId = String(running[0]?.participantId || "").trim();
+  if (!participantId) {
+    return "";
+  }
+  const participant = participants.find((item) => String(item.participantId || "").trim() === participantId);
+  if (!participant) {
+    return "";
+  }
+  const agentId = String(participant.agentId || "").trim();
+  const byAgent = agentId ? members.find((member) => member.agentId === agentId) : undefined;
+  if (byAgent) {
+    return byAgent.memberId;
+  }
+  const role = String(participant.teamRole || "").trim();
+  return members.find((member) => member.role === role)?.memberId || "";
+}
+
+export function speakingTeamMemberIdFromRoom(
+  members: TeamMember[],
+  room: {
+    participants?: SpeakingParticipant[];
+    rounds?: SpeakingRound[];
+    activeRoundId?: string;
+  } | null | undefined,
+) {
+  if (!room) {
+    return "";
+  }
+  const rounds = room.rounds ?? [];
+  const activeId = String(room.activeRoundId || "").trim();
+  const round = (activeId ? rounds.find((item) => item.roundId === activeId) : undefined) ?? rounds[rounds.length - 1];
+  return speakingTeamMemberId(members, room.participants ?? [], round);
+}
+
+function initialActorId(members: TeamMember[], speakingMemberId: string | undefined) {
+  const speakingId = speakingMemberId?.trim() || "";
+  if (speakingId && members.some((member) => member.memberId === speakingId)) {
+    return speakingId;
+  }
+  return members.find((member) => member.role === "规划师")?.memberId || members[0]?.memberId || "";
+}
 
 function taskKey(teamId: string) {
   return ["teams", teamId, "dev-tasks"] as const;
@@ -65,10 +139,16 @@ type TaskActionBody = {
   blockedBy?: string[];
 };
 
-export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProps) {
+export function DevTeamTaskBoard({ lang, teamId, members, speakingMemberId = "" }: DevTeamTaskBoardProps) {
   const queryClient = useQueryClient();
-  const planner = members.find((member) => member.role === "规划师");
-  const [actorId, setActorId] = useState(planner?.memberId || members[0]?.memberId || "");
+  const [actorId, setActorId] = useState(() => initialActorId(members, speakingMemberId));
+  useEffect(() => {
+    const speakingId = speakingMemberId.trim();
+    if (!speakingId || !members.some((member) => member.memberId === speakingId)) {
+      return;
+    }
+    setActorId(speakingId);
+  }, [members, speakingMemberId]);
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [scopes, setScopes] = useState("");
@@ -134,20 +214,10 @@ export function DevTeamTaskBoard({ lang, teamId, members }: DevTeamTaskBoardProp
       meta={text("群聊仍只记录这一轮讨论", "The room still only keeps this round")}
     >
       <VStack>
-      <label>
+      <span>
         {text("当前身份", "Acting as")}
-        <VNativeSelect
-          aria-label={text("当前身份", "Acting as")}
-          value={actorId}
-          onChange={(event) => setActorId(event.target.value)}
-        >
-          {members.map((member) => (
-            <option key={member.memberId} value={member.memberId}>
-              {member.role}
-            </option>
-          ))}
-        </VNativeSelect>
-      </label>
+        <strong aria-label={text("当前身份", "Acting as")}>{actorRole || text("未指定", "Unassigned")}</strong>
+      </span>
       {isPlanner ? (
         <form
           onSubmit={(event) => {
