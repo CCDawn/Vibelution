@@ -5,7 +5,7 @@ import type { StockIdentity } from "../../api/types/financialMarket";
 import { VButton, VDenseTable, VInput, VSelect, VStateSurface, VSurface } from "../../components/vui";
 import { FinanceAIBacktest } from "./FinanceAIBacktest";
 import { evaluationReferenceBlock } from "./financialEvaluationModel";
-import styles from "./FinanceEvaluation.styles";
+import styles from "./FinanceBacktest.styles";
 
 const dateAgo = (days: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() - days * 86400000));
 const pct = (v: number) => `${v.toFixed(2)}%`;
@@ -14,7 +14,7 @@ type BacktestProps = { agentId: string; stock: StockIdentity; zh: boolean; onRes
 export function FinanceBacktest(props: BacktestProps) {
   const [mode, setMode] = useState("ai");
   return <div className={styles.panel}>
-    <div className={`${styles.row} px-3 pt-3`}><h3 className={styles.title}>{props.zh ? `历史回测 · ${props.stock.name} ${props.stock.ticker}` : `Backtest · ${props.stock.ticker}`}</h3><VSelect aria-label="回测模式" className="w-44" selectedKey={mode} options={[{ id: "ai", label: props.zh ? "AI策略回测" : "AI strategy" }, { id: "ma", label: props.zh ? "均线策略对照" : "MA reference" }]} onSelectionChange={key => setMode(String(key))} /></div>
+    <div className={styles.modeRow}><h3 className={styles.title}>{props.zh ? `历史回测 · ${props.stock.name} ${props.stock.ticker}` : `Backtest · ${props.stock.ticker}`}</h3><VSelect aria-label="回测模式" className={styles.modeSelect} selectedKey={mode} options={[{ id: "ai", label: props.zh ? "AI策略回测" : "AI strategy" }, { id: "ma", label: props.zh ? "均线策略对照" : "MA reference" }]} onSelectionChange={key => setMode(String(key))} /></div>
     {mode === "ai" ? <FinanceAIBacktest key={`${props.agentId}:${props.stock.symbol}`} {...props} /> : <FinanceMABacktest key={`${props.agentId}:${props.stock.symbol}`} {...props} />}
   </div>;
 }
