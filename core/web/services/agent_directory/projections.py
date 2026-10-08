@@ -1016,9 +1016,11 @@ def active_agent_runtime(
         or ("supervised_conversation_harness" if normalized_supervised_role else ""),
     )
     tool_policy = s._effective_agent_tool_policy(tool_policy, delegation_policy)
-    from core.authorization.collaboration_mode import with_collaboration_controls
+    policy_id = str(tool_policy.get("policyId") or tool_policy.get("id") or "")
+    if policy_id.startswith("tool-"):
+        from core.authorization.collaboration_mode import with_collaboration_controls
 
-    tool_policy = with_collaboration_controls(tool_policy)
+        tool_policy = with_collaboration_controls(tool_policy)
     memory_policy = (
         copy.deepcopy(agent_snapshot.get("memoryPolicy"))
         if isinstance(agent_snapshot.get("memoryPolicy"), dict)
