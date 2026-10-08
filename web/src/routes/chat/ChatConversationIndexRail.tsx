@@ -333,20 +333,14 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               data-vui="session-archive-toggle"
               isIconOnly
               className={styles.railActionButton}
-              aria-label={showArchivedSessions
-                ? (lang === "zh" ? "隐藏已归档会话" : "Hide archived sessions")
-                : (lang === "zh" ? "显示已归档会话" : "Show archived sessions")}
+              aria-label={showArchivedSessions ? t("closeArchivedSessions") : t("showArchivedSessions")}
               aria-pressed={showArchivedSessions}
               onClick={onToggleShowArchivedSessions}
-              title={showArchivedSessions
-                ? (lang === "zh" ? "隐藏已归档会话" : "Hide archived sessions")
-                : (lang === "zh" ? "显示已归档会话" : "Show archived sessions")}
+              title={showArchivedSessions ? t("closeArchivedSessions") : t("showArchivedSessions")}
               icon={
-                <Archive
-                  size={16}
-                  aria-hidden="true"
-                  className={showArchivedSessions ? "text-[var(--accent-cool)]" : undefined}
-                />
+                showArchivedSessions
+                  ? <X size={16} aria-hidden="true" />
+                  : <Archive size={16} aria-hidden="true" />
               }
             >
               {null}

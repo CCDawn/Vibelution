@@ -73,6 +73,8 @@ const styles = {
   sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden ${vuiDenseRowClass} text-left shadow-none transition-[border-color,background-color,box-shadow] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:${vuiStateSelectedRowFillClass}`,
   sessionItemWithBulkSelect:
     "vui-routes-chatcodingroute sessionItemWithBulkSelect grid-cols-[28px_minmax(0,1fr)] items-center",
+  sessionItemWithTrailingActions:
+    "vui-routes-chatcodingroute sessionItemWithTrailingActions grid grid-cols-[minmax(0,1fr)_auto] items-center pr-1",
   sessionItemBulkSelected:
     "vui-routes-chatcodingroute sessionItemBulkSelected border-[color-mix(in_srgb,var(--fg-primary)_22%,var(--vui-border-hairline))] bg-[var(--vui-control-muted)]",
   sessionBulkSelectControl:

@@ -17,5 +17,11 @@ class ConfigLlmTestResponse(BaseModel):
     ok: bool = False
 
 
+class DecisionModelProbeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = False
+
+
 class ConfigModelDiscoveryResponse(BaseModel):
     model_config = ConfigDict(extra="allow")

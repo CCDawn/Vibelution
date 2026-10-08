@@ -877,7 +877,6 @@ function computeConversationIndexModel({
   const buckets = new Map<ConversationIndexGroupKey, ConversationSummary[]>(
     CONVERSATION_GROUP_ORDER.map((groupKey) => [groupKey, []]),
   );
-  buckets.set("archived", []);
   const teamOrderById = new Map(
     discussionTeams.map((team, index) => [String(team.teamId ?? "").trim(), index]),
   );
@@ -893,7 +892,6 @@ function computeConversationIndexModel({
       const archivedSession = (archivedSessionId ? sessionsById.get(archivedSessionId) : undefined)
         ?? (archivedSessionId ? rawSessionsById.get(archivedSessionId) : undefined);
       if (archivedSession && isSessionArchived(archivedSession)) {
-        buckets.get("archived")?.push(conversation);
         return;
       }
     }
@@ -933,17 +931,7 @@ function computeConversationIndexModel({
         groupKind: "team" as const,
       });
     });
-  const archivedBucket = buckets.get("archived") ?? [];
-  const archivedConversationGroups: ConversationIndexGroup[] = archivedBucket.length
-    ? [{
-        groupKey: "archived" as const,
-        label: conversationGroupLabel("archived", lang),
-        items: archivedBucket,
-        groupKind: "default" as const,
-      }]
-    : [];
   const groupedConversations = [
-    ...archivedConversationGroups,
     ...leadingGroupKeys
       .map((groupKey) => ({
         groupKey,

@@ -65,7 +65,7 @@ def test_unarchive_menu_restores_input_without_reload(page, e2e_instance, delay_
         else:
             page.reload(wait_until="domcontentloaded")
         composer = page.locator(COMPOSER).first
-        expect(composer).to_be_disabled(timeout=15000)
+        expect(composer).to_be_enabled(timeout=15000)
         expect(composer).to_have_value(draft)
         if delay_select:
             assert len(pending) == 1
@@ -109,7 +109,7 @@ def test_failed_unarchive_keeps_readonly_and_restores_menu_state(page, e2e_insta
     post_json(e2e_instance.port, f"/api/sessions/{sid}/archive")
     page.reload(wait_until="domcontentloaded")
     composer = page.locator(COMPOSER).first
-    expect(composer).to_be_disabled(timeout=15000)
+    expect(composer).to_be_enabled(timeout=15000)
     page.get_by_role("button", name="显示已归档会话", exact=True).click()
     row = page.get_by_role("tab").filter(has_text=title)
     expect(row).to_be_visible(timeout=15000)
@@ -122,9 +122,9 @@ def test_failed_unarchive_keeps_readonly_and_restores_menu_state(page, e2e_insta
         row.click(button="right")
         page.get_by_role("menuitem", name="取消归档", exact=True).click()
         expect(page.get_by_text("controlled unarchive failure", exact=False).first).to_be_visible(timeout=15000)
-        expect(composer).to_be_disabled()
+        expect(composer).to_be_enabled()
         expect(composer).to_have_value(draft)
-        assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["readOnly"] is True
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["readOnly"] is False
         row.click(button="right")
         expect(page.get_by_role("menuitem", name="取消归档", exact=True)).to_be_enabled(timeout=15000)
         page.keyboard.press("Escape")

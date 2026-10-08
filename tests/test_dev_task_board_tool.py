@@ -131,6 +131,26 @@ def test_engineer_can_only_claim_and_read_is_denied(dev_team):
     assert (worktree / ".git").exists()
 
 
+def test_claim_result_routes_writes_to_absolute_worktree(dev_team):
+    """Claim turn write routing: the engineer's tools resolve relative paths
+    against the agent private workspace until next turn start, so the claim
+    result must hand over the absolute worktree path."""
+
+    env = dev_team
+    created = _create_task(env, env["teamId"])
+    assert "workspaceAbsolutePath" not in created
+
+    _as("开发工程师 A", env)
+    claimed = _claim(env, env["teamId"], "task-1", 1)
+    assert claimed["status"] == "ok"
+    absolute = Path(claimed["workspaceAbsolutePath"])
+    assert absolute.is_absolute()
+    assert absolute == (env["root"] / claimed["workspacePath"]).resolve()
+    assert (absolute / ".git").exists()
+    assert str(absolute) in claimed["message"]
+    assert "apply_patch_tool" in claimed["message"]
+
+
 def test_claim_reuses_apply_claim_with_workspace_and_second_engineer_is_blocked(dev_team):
     env = dev_team
     _as("规划师", env)

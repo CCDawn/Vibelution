@@ -34,11 +34,12 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { forkSessionFromNode, listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals, pinChatSession, unpinChatSession } from "../../api/chat";
-import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchive";
+import { archiveChatSession, listArchivedChatSessions, unarchiveChatSession } from "../../api/sessionArchive";
 import { archiveAgent, updateAgent } from "../../api/agents";
 import {
   listVirtualHumanCompanionActivity,
@@ -46,6 +47,7 @@ import {
 } from "../../api/agentPlugins";
 import { listAgentKnowledgeBases, searchKnowledgeItems } from "../../api/knowledge";
 import { fetchFileContent } from "../../api/files";
+import { ArchivedSessionRail } from "./ArchivedSessionRail";
 import { ChatChangeRail } from "./ChatChangeRail";
 import { ChatSidePane, type ChatSidePaneTab } from "./ChatSidePane";
 import { buildChatChangeRail } from "./chatChangeRailModel";
@@ -1229,16 +1231,18 @@ export function ChatCodingRouteWorkbench() {
             archivedAt: new Date().toISOString(),
           }
         : {};
-      updateSessionSummaryCaches(queryClient, (sessions) =>
-        sessions?.map((session) => session.id === variables.sessionId
+      const patchArchivedSummary = (session: SessionSummary) => (
+        session.id === variables.sessionId
           ? {
               ...session,
               archiveState: nextArchiveState,
-              readOnly: variables.archive,
               hiddenFromIndex: variables.archive,
+              ...(variables.archive ? { pinnedAtMs: null } : {}),
             }
-          : session),
+          : session
       );
+      updateSessionSummaryCaches(queryClient, (sessions) => sessions?.map(patchArchivedSummary));
+      updateAgentSessionSummaryCaches(queryClient, (sessions) => sessions?.map(patchArchivedSummary));
       return { telemetry };
     },
     onSuccess: (_result, variables, context) => {
@@ -3251,6 +3255,40 @@ export function ChatCodingRouteWorkbench() {
       archive: !isSessionArchived(session),
     });
   }, [sessionArchiveMutation, setSessionContextMenu]);
+  const refreshArchivedSessions = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sessionArchive() });
+  }, [queryClient]);
+  const handleDeleteArchivedSession = useCallback((session: SessionSummary) => {
+    deleteSessionMutation.mutate(
+      { sessionId: session.id },
+      { onSettled: refreshArchivedSessions },
+    );
+  }, [deleteSessionMutation, refreshArchivedSessions]);
+  const handleDeleteAllArchivedSessions = useCallback(() => {
+    void (async () => {
+      const sessionIds: string[] = [];
+      let cursor = "";
+      do {
+        const page = await listArchivedChatSessions({ limit: 200, cursor });
+        for (const item of page.items) {
+          if (!item.id || isBusyPhase(item.currentPhase || item.status)) {
+            continue;
+          }
+          sessionIds.push(item.id);
+        }
+        cursor = page.nextCursor || "";
+      } while (cursor);
+      try {
+        for (let index = 0; index < sessionIds.length; index += 100) {
+          await bulkDeleteSessionsMutation.mutateAsync({
+            sessionIds: sessionIds.slice(index, index + 100),
+          });
+        }
+      } finally {
+        refreshArchivedSessions();
+      }
+    })();
+  }, [bulkDeleteSessionsMutation, refreshArchivedSessions, isBusyPhase]);
 
   const handleTogglePinSession = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);
@@ -3341,16 +3379,24 @@ export function ChatCodingRouteWorkbench() {
   }, [t]);
   // Pinned-first split plus optional day buckets over the loaded page; the
   // backend already orders pinned first, the split only isolates the section.
-  const sessionListRailGroups = (() => {
-    const { pinned, unpinned } = splitPinnedSessions(allVisibleSessions);
-    const timelineGroups = sessionListPrefs.timelineGrouping
-      ? groupSessionsByTimeline(unpinned, Date.now())
-      : [];
-    if (!pinned.length && !timelineGroups.length) {
-      return null;
-    }
-    const renderSessionList = (sessions: SessionSummary[]) => (
+  const sessionListRail = (() => {
+    const railSessions = allVisibleSessions.filter((session) => !isSessionArchived(session));
+    const { pinned, unpinned } = splitPinnedSessions(railSessions);
+    const timelineGroups = showArchivedSessions || !sessionListPrefs.timelineGrouping
+      ? []
+      : groupSessionsByTimeline(unpinned, Date.now());
+    const renderSessionList = (
+      sessions: SessionSummary[],
+      renderTrailingActions?: (session: SessionSummary) => ReactNode,
+    ) => {
+      const listSessionsById = new Map(sessionsById);
+      for (const session of sessions) {
+        const existing = listSessionsById.get(session.id);
+        listSessionsById.set(session.id, existing ? { ...existing, ...session } : session);
+      }
+      return (
       <DirectSessionIndexList
+        renderTrailingActions={renderTrailingActions}
         activeSessionId={activeSessionId}
         addToReviewSucceededLabel={t("addSessionToReviewSucceeded")}
         agentsById={agentsById}
@@ -3372,7 +3418,7 @@ export function ChatCodingRouteWorkbench() {
         runtimeRunningSessionIds={runtimeRunningSessionIds}
         sessionComposerErrors={sessionComposerErrors}
         sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-        sessionsById={sessionsById}
+        sessionsById={listSessionsById}
         statusLabel={statusLabel}
         t={t}
         onCancelRename={cancelRenameSession}
@@ -3383,8 +3429,9 @@ export function ChatCodingRouteWorkbench() {
         onRenameTitleChange={setEditingSessionTitle}
         onSubmitRename={submitRenameSession}
       />
-    );
-    return (
+      );
+    };
+    const groups = !pinned.length && !timelineGroups.length ? null : (
       <>
         {pinned.length ? (
           <ConversationIndexSection
@@ -3409,6 +3456,18 @@ export function ChatCodingRouteWorkbench() {
         ))}
       </>
     );
+    return { groups, renderSessionList };
+  })();
+  const archivedRailSessions = (() => {
+    const fromQuery = archivedSessions.filter((session) => {
+      const cached = sessionsById.get(session.id);
+      return !cached || isSessionArchived(cached);
+    });
+    const known = new Set(fromQuery.map((session) => session.id));
+    const optimistic = allVisibleSessions.filter((session) => (
+      isSessionArchived(session) && !known.has(session.id)
+    ));
+    return [...fromQuery, ...optimistic];
   })();
   const conversationIndexPanel = (
     <>
@@ -3426,36 +3485,73 @@ export function ChatCodingRouteWorkbench() {
           { value: "createdAt", label: t("sessionListSortByCreated") },
         ]}
       />
-      <VIconButton
-        type="button"
-        label={t("sessionListTimelineToggle")}
-        tooltip={t("sessionListTimelineToggle")}
-        aria-pressed={sessionListPrefs.timelineGrouping}
-        onClick={() => setSessionListPrefs((current) => ({
-          ...current,
-          timelineGrouping: !current.timelineGrouping,
-        }))}
-        icon={<ListTree size={16} aria-hidden="true" />}
-      />
+      {showArchivedSessions ? null : (
+        <VIconButton
+          type="button"
+          data-vui="chat-session-timeline-toggle"
+          label={t("sessionListTimelineToggle")}
+          tooltip={t("sessionListTimelineToggle")}
+          aria-pressed={sessionListPrefs.timelineGrouping}
+          onClick={() => setSessionListPrefs((current) => ({
+            ...current,
+            timelineGrouping: !current.timelineGrouping,
+          }))}
+          icon={<ListTree size={16} aria-hidden="true" />}
+        />
+      )}
     </div>
     <ChatConversationIndexPanelContent
       styles={styles}
       loadingLabel={t("loadingSession")}
-      emptyTitle={t("noSessionsYet")}
       sessionsErrorMessage={sessionsErrorMessage}
       sessionComposerSessionsError={sessionComposerErrors.__sessions__}
       sessionsTransientError={Boolean(sessionsErrorState.transientError)}
       sessionsBlockingError={Boolean(sessionsErrorState.blockingError)}
       conversationIndexLoading={conversationIndexLoading}
       isEmpty={
-        filteredConversations.length === 0
-        && archiveVisibleAgents.length === 0
-        && filteredTeams.length === 0
-        && filteredStandaloneGroupConversations.length === 0
-        && allVisibleSessions.length === 0
+        showArchivedSessions
+          ? !archivedSessionsQuery.isPending
+            && archivedSessions.length === 0
+            && allVisibleSessions.every((session) => !isSessionArchived(session) && !(Number(session.pinnedAtMs ?? 0) > 0))
+          : filteredConversations.length === 0
+            && archiveVisibleAgents.length === 0
+            && filteredTeams.length === 0
+            && filteredStandaloneGroupConversations.length === 0
+            && allVisibleSessions.length === 0
       }
+      emptyTitle={showArchivedSessions ? t("noArchivedSessions") : t("noSessionsYet")}
     >
-          {sessionListRailGroups}
+          {sessionListRail.groups}
+          {showArchivedSessions ? (
+            <ArchivedSessionRail
+              sessions={archivedRailSessions}
+              totalCount={Math.max(archivedSessionsQuery.data?.totalEstimate ?? 0, archivedRailSessions.length)}
+              sortBy={sessionListPrefs.sortBy}
+              loading={archivedSessionsQuery.isPending}
+              archivePendingSessionId={
+                sessionArchiveMutation.isPending
+                  ? String(sessionArchiveMutation.variables?.sessionId || "")
+                  : ""
+              }
+              deletePendingSessionId={
+                deleteSessionMutation.isPending
+                  ? String(deleteSessionMutation.variables?.sessionId || "")
+                  : ""
+              }
+              deleteAllPending={bulkDeleteSessionsMutation.isPending}
+              isBusyPhase={isBusyPhase}
+              lang={lang}
+              t={t}
+              onUnarchive={(session) => sessionArchiveMutation.mutate({
+                sessionId: session.id,
+                archive: false,
+              })}
+              onDelete={handleDeleteArchivedSession}
+              onDeleteAll={handleDeleteAllArchivedSessions}
+              renderSessions={sessionListRail.renderSessionList}
+            />
+          ) : null}
+          {showArchivedSessions ? null : <>
           <AgentConversationDirectory
             activeAgentId={selectedChatAgentId}
             activeSessionId={activeSessionId}
@@ -3569,6 +3665,7 @@ export function ChatCodingRouteWorkbench() {
             bulkSelectLabel={lang === "zh" ? "选择会话" : "Select session"}
             onToggleBulk={toggleBulkSession}
           />
+          </>}
           {sessionContextMenu && contextMenuSession ? (
             <Suspense fallback={null}>
               <SessionContextMenu

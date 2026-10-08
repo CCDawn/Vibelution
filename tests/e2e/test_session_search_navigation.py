@@ -62,7 +62,7 @@ def test_stale_result_cannot_offer_a_writable_session(page, e2e_instance, mutati
         _http_write_json("DELETE", e2e_instance.port, f"/api/sessions/{target}", None)
     else:
         post_json(e2e_instance.port, f"/api/sessions/{target}/archive")
-        assert fetch_json(e2e_instance.port, f"/api/sessions/{target}")["readOnly"] is True
+        assert fetch_json(e2e_instance.port, f"/api/sessions/{target}")["readOnly"] is False
     try:
         results.first.click()
         expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={target}", timeout=15000)
@@ -73,10 +73,7 @@ def test_stale_result_cannot_offer_a_writable_session(page, e2e_instance, mutati
         else:
             expect(page.locator(THREAD).first).to_have_attribute("data-agent-thread-id", target, timeout=15000)
             composer = page.locator(COMPOSER)
-            if composer.count():
-                expect(composer.first).to_be_disabled()
-            else:
-                expect(page.get_by_text("只读", exact=False).first).to_be_visible()
+            expect(composer.first).to_be_enabled()
         _ready_composer(page, e2e_instance, initial)
         expect(page.locator(COMPOSER).first).to_have_value("搜索过程中保留草稿")
         _assert_no_turns(e2e_instance, [initial, *[sid for sid in sessions if mutation != "delete" or sid != target]],

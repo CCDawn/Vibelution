@@ -1,22 +1,21 @@
-"""Local Liquid d1-3B choice for one operator iteration action.
+"""Local decision-model choice for one operator iteration action.
 
-The model only picks among actions the server already marked available.
-A missing server, a low probability, or an illegal label returns None so
-the existing decision Agent still writes the reason.
+The bound catalog entry picks among actions the server already marked
+available. A missing binding, a missing server, a low probability, or an
+illegal label returns None so the existing decision Agent still writes
+the reason. An empty VIBELUTION_D1_SYSTEMONE_URL disables the call.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import urllib.error
-import urllib.request
 from collections.abc import Mapping
 
-_DEFAULT_URL = "http://127.0.0.1:8088/v1/systemone"
+from config.decision_models import bound_decision_model, normalize_decision_base_url, post_systemone
+
 _DEFAULT_MIN_PROBABILITY = 0.80
-_MODEL_ID = "LiquidAI/d1-3B"
-_TIMEOUT_SECONDS = 20
+_ENV_MODEL_ID = "LiquidAI/d1-3B"
 _STATE_LIMIT = 6000
 
 _ACTION_CRITERIA = {
@@ -29,12 +28,52 @@ _ACTION_CRITERIA = {
 }
 
 
+def decision_reason_name(model_id: str) -> str:
+    """Short name stored on a local decision. d1 keeps its existing label."""
+
+    text = str(model_id or "").strip()
+    if text in {"", "LiquidAI/d1-3B"}:
+        return "d1-3B"
+    return text
+
+
 def systemone_url() -> str:
-    """Return the local endpoint. An empty env value disables the call."""
+    """Return an explicit env override. Missing means use the bound catalog entry."""
 
     if "VIBELUTION_D1_SYSTEMONE_URL" in os.environ:
         return os.environ["VIBELUTION_D1_SYSTEMONE_URL"].strip()
-    return _DEFAULT_URL
+    return ""
+
+
+def _load_bound_entry() -> dict | None:
+    try:
+        from config.settings import get_config
+
+        llm = get_config().llm
+    except Exception:
+        return None
+    raw_models = {
+        key: value.model_dump() if hasattr(value, "model_dump") else value
+        for key, value in dict(llm.decision_models or {}).items()
+    }
+    return bound_decision_model(raw_models, llm.decision_handoff_model_id)
+
+
+def _runtime_target() -> tuple[str, str, float] | None:
+    if "VIBELUTION_D1_SYSTEMONE_URL" in os.environ:
+        raw_url = os.environ["VIBELUTION_D1_SYSTEMONE_URL"].strip()
+        if not raw_url:
+            return None
+        try:
+            url = normalize_decision_base_url(raw_url)
+        except ValueError:
+            return None
+        model = os.environ.get("VIBELUTION_D1_MODEL_ID", "").strip() or _ENV_MODEL_ID
+        return url, model, min_probability()
+    bound = _load_bound_entry()
+    if not bound:
+        return None
+    return str(bound["base_url"]), str(bound["model_id"]), float(bound["min_probability"])
 
 
 def min_probability() -> float:
@@ -61,11 +100,12 @@ def _clip(value: object) -> str:
 
 
 def choose_iteration_action(inputs: Mapping) -> dict | None:
-    """Ask d1-3B for one legal action. None means use the decision Agent."""
+    """Ask the bound decision model for one legal action. None uses the decision Agent."""
 
-    url = systemone_url()
-    if not url:
+    target = _runtime_target()
+    if target is None:
         return None
+    url, model_id, cutoff = target
     policy = inputs.get("actionPolicy")
     if not isinstance(policy, Mapping):
         return None
@@ -80,7 +120,7 @@ def choose_iteration_action(inputs: Mapping) -> dict | None:
         "evaluation": _clip(inputs.get("evaluation")),
     }
     body = {
-        "model": _MODEL_ID,
+        "model": model_id,
         "state": state,
         "questions": {
             "next": {
@@ -90,18 +130,8 @@ def choose_iteration_action(inputs: Mapping) -> dict | None:
             }
         },
     }
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeError, ValueError):
-        return None
-    if not isinstance(payload, dict):
+    payload = post_systemone(url, body)
+    if payload is None:
         return None
     answers = payload.get("answers")
     answer = answers.get("next") if isinstance(answers, dict) else None
@@ -115,7 +145,7 @@ def choose_iteration_action(inputs: Mapping) -> dict | None:
         probability = float(probabilities.get(kind))
     except (TypeError, ValueError):
         return None
-    if probability < min_probability():
+    if probability < cutoff:
         return None
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
     try:
@@ -126,6 +156,6 @@ def choose_iteration_action(inputs: Mapping) -> dict | None:
         "kind": kind,
         "probability": round(probability, 4),
         "inputHash": str(inputs.get("inputHash") or ""),
-        "model": _MODEL_ID,
+        "model": model_id,
         "inputTokens": max(0, input_tokens),
     }

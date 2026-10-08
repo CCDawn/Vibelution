@@ -1384,5 +1384,81 @@ class TestShellCommandDialectGuidance:
         assert "session_id" in _WRITE_STDIN_TOOL_DOCSTRING
 
 
+# --- run_test_for：worktree 感知 ------------------------------------------------
+
+
+def test_run_test_for_derives_test_path_from_source_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Worktree 源码：测试文件按源文件自己的项目根（上两级）推导，而不是主仓根。"""
+
+    from tools import shell_tools
+
+    worktree = tmp_path / "wt"
+    (worktree / "scripts").mkdir(parents=True)
+    (worktree / "tests").mkdir(parents=True)
+    (worktree / "scripts" / "loop_demo.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    (worktree / "tests" / "test_loop_demo.py").write_text("def test_add():\n    assert True\n", encoding="utf-8")
+
+    captured: dict = {}
+
+    def fake_execute(cmd: str, timeout: int = 120) -> str:
+        captured["cmd"] = cmd
+        return "FAKE-PASSED"
+
+    monkeypatch.setattr(shell_tools, "execute_shell_command", fake_execute)
+    result = shell_tools.run_test_for(source_path=str(worktree / "scripts" / "loop_demo.py"))
+    assert "FAKE-PASSED" in result
+    assert str(worktree / "tests" / "test_loop_demo.py") in captured["cmd"]
+
+
+def test_run_test_for_resolves_relative_source_against_workspace_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """相对 source_path 优先按 workspace override（任务 worktree）解析。"""
+
+    from tools import shell_tools
+    from tools.shell_tools import workspace_root_override
+
+    worktree = tmp_path / "wt"
+    (worktree / "scripts").mkdir(parents=True)
+    (worktree / "tests").mkdir(parents=True)
+    (worktree / "scripts" / "loop_demo.py").write_text("x = 1\n", encoding="utf-8")
+    (worktree / "tests" / "test_loop_demo.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+    captured: dict = {}
+
+    def fake_execute(cmd: str, timeout: int = 120) -> str:
+        captured["cmd"] = cmd
+        return "FAKE-PASSED"
+
+    monkeypatch.setattr(shell_tools, "execute_shell_command", fake_execute)
+    with workspace_root_override(str(worktree)):
+        result = shell_tools.run_test_for(source_path="scripts/loop_demo.py")
+    assert "FAKE-PASSED" in result
+    assert str(worktree / "tests" / "test_loop_demo.py") in captured["cmd"]
+
+
+def test_run_test_for_falls_back_to_project_root_tests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """深层源码或无邻近 tests 时，保持旧行为：回落 PROJECT_ROOT/tests。"""
+
+    from tools import shell_tools
+
+    main_root = tmp_path / "main"
+    (main_root / "tools").mkdir(parents=True)
+    (main_root / "tests").mkdir(parents=True)
+    (main_root / "tools" / "legacy.py").write_text("y = 2\n", encoding="utf-8")
+    (main_root / "tests" / "test_legacy.py").write_text("def test_y():\n    assert True\n", encoding="utf-8")
+
+    captured: dict = {}
+
+    def fake_execute(cmd: str, timeout: int = 120) -> str:
+        captured["cmd"] = cmd
+        return "FAKE-PASSED"
+
+    monkeypatch.setattr(shell_tools, "PROJECT_ROOT", main_root)
+    monkeypatch.setattr(shell_tools, "execute_shell_command", fake_execute)
+    result = shell_tools.run_test_for(source_path="tools/legacy.py")
+    assert "FAKE-PASSED" in result
+    assert str(main_root / "tests" / "test_legacy.py") in captured["cmd"]
+
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

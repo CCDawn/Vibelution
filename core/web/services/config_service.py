@@ -82,6 +82,7 @@ from config.public_config import (
     validate_llm_api_key_env,
     validate_llm_public_config,
 )
+from config.decision_models import decision_model_preset_payloads
 from config.llm_security import validate_llm_provider_target
 from config.settings import reload_config
 
@@ -2087,6 +2088,7 @@ def _build_workspace(
         "editorMeta": editor_meta,
         **_provider_workspace_fields(public_config),
         "modelPresetOptions": list_llm_model_preset_options(),
+        "decisionModelPresets": decision_model_preset_payloads(),
         "providerPresetOptions": list_llm_provider_preset_options(),
         "modelOptions": _decorate_model_options(public_config, normalized_meta),
     }
