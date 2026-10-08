@@ -309,7 +309,7 @@ describe("DevTeamTaskBoard", () => {
 describe("speaking team member", () => {
   const roomMembers = members;
 
-  it("uses the running speaker and ignores queued or settled turns", () => {
+  it("uses the running speaker ahead of an earlier turn", () => {
     const participants = [
       { participantId: "p-plan", agentId: "a1", teamRole: "规划师" },
       { participantId: "p-a", agentId: "a2", teamRole: "开发工程师 A" },
@@ -364,5 +364,56 @@ describe("speaking team member", () => {
       ],
     })).toBe("m-a");
     expect(speakingTeamMemberIdFromRoom(members, null)).toBe("");
+  });
+
+  it("uses the last speaker of a finished round when nobody is speaking", () => {
+    const participants = [
+      { participantId: "p-plan", agentId: "a1", teamRole: "规划师" },
+      { participantId: "p-a", agentId: "a2", teamRole: "开发工程师 A" },
+      { participantId: "p-rev", agentId: "a3", teamRole: "评审员" },
+    ];
+    const finished = {
+      roundId: "round-done",
+      status: "completed",
+      messages: [
+        { participantId: "p-plan", timestamp: "2026-10-08T00:00:01Z" },
+        { participantId: "p-rev", timestamp: "2026-10-08T00:00:02Z" },
+      ],
+      speakerProgress: [
+        { participantId: "p-plan", state: "settled", status: "completed", updatedAt: "2026-10-08T00:00:01Z" },
+        { participantId: "p-rev", state: "settled", status: "completed", updatedAt: "2026-10-08T00:00:02Z" },
+        { participantId: "p-a", state: "settled", status: "stopped", updatedAt: "2026-10-08T00:00:03Z" },
+      ],
+    };
+    expect(speakingTeamMemberId(members, participants, finished)).toBe("m-rev");
+    expect(speakingTeamMemberId(members, participants, {
+      status: "completed",
+      messages: [
+        { participantId: "p-rev" },
+        { participantId: "user-1" },
+      ],
+    })).toBe("m-rev");
+    expect(speakingTeamMemberId(members, participants, {
+      status: "running",
+      messages: [{ participantId: "p-a" }],
+      speakerProgress: [
+        { participantId: "p-a", state: "settled", status: "completed", updatedAt: "2026-10-08T00:00:01Z" },
+        { participantId: "p-plan", state: "queued", updatedAt: "2026-10-08T00:00:02Z" },
+      ],
+    })).toBe("m-a");
+    expect(speakingTeamMemberId(members, participants, {
+      status: "completed",
+      speakerProgress: [
+        { participantId: "p-rev", state: "settled", status: "completed", updatedAt: "2026-10-08T00:00:02Z" },
+        { participantId: "p-a", state: "settled", status: "stopped", updatedAt: "2026-10-08T00:00:03Z" },
+      ],
+    })).toBe("m-rev");
+    expect(speakingTeamMemberIdFromRoom(members, {
+      participants,
+      rounds: [
+        { roundId: "round-old", status: "completed", messages: [{ participantId: "p-plan" }] },
+        finished,
+      ],
+    })).toBe("m-rev");
   });
 });

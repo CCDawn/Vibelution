@@ -157,6 +157,45 @@ describe("TeamCommunicationPanel round controls", () => {
     expect(html).not.toContain("<select");
   });
 
+  it("keeps the last speaker when the round is open again and nobody is speaking", () => {
+    const html = renderPanel({
+      selectedTeam: {
+        ...selectedTeam,
+        teamTemplateId: "dev-team",
+        name: "开发团队",
+        members: [
+          { memberId: "m-plan", role: "规划师", agentName: "规划师", agentId: "a-plan", agentCode: "plan", agentStatus: "active", purpose: "" },
+          { memberId: "m-rev", role: "评审员", agentName: "评审员", agentId: "a-rev", agentCode: "rev", agentStatus: "active", purpose: "" },
+        ],
+      } as Team,
+      linkedRoomBusy: false,
+      linkedRoomDetail: {
+        ...linkedRoomDetail,
+        status: "ready",
+        participants: [
+          { participantId: "p-plan", agentId: "a-plan", teamRole: "规划师" },
+          { participantId: "p-rev", agentId: "a-rev", teamRole: "评审员" },
+        ],
+        activeRoundId: "",
+        rounds: [
+          {
+            roundId: "round-done",
+            status: "completed",
+            messages: [
+              { participantId: "p-plan", timestamp: "2026-10-08T00:00:01Z" },
+              { participantId: "p-rev", timestamp: "2026-10-08T00:00:02Z" },
+            ],
+            speakerProgress: [
+              { participantId: "p-rev", state: "settled", status: "completed", updatedAt: "2026-10-08T00:00:02Z" },
+            ],
+          },
+        ],
+      } as ChatRoomDetail,
+    });
+    expect(html).toContain('aria-label="当前身份">评审员');
+    expect(html).not.toContain("新建任务");
+  });
+
   it("shows an in-place stop action while the linked room is busy", () => {
     const html = renderPanel();
 

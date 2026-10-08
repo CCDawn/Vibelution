@@ -2262,6 +2262,17 @@ def test_launcher_active_work_guard_keeps_current_active_snapshot_even_if_old(tm
     assert launcher_service.launcher_active_work_runs()[0]["runId"] == "chat-turn-current"
 
 
+def _pin_empty_launcher_status_store(monkeypatch, tmp_path) -> None:
+    """Status classification must not scan the live results directory or work-run store."""
+
+    runtime_dir = tmp_path / ".runtime" / "runtime-manager"
+    monkeypatch.setattr(launcher_service, "INBOX_DIR", runtime_dir / "inbox")
+    monkeypatch.setattr(launcher_service, "PROCESSING_DIR", runtime_dir / "processing")
+    monkeypatch.setattr(launcher_service, "RESULTS_DIR", runtime_dir / "results")
+    monkeypatch.setattr(launcher_service, "EVENTS_PATH", runtime_dir / "events.jsonl")
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+
+
 def test_launcher_status_exposes_guardian_adapter_migration_contract(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2278,6 +2289,7 @@ def test_launcher_status_exposes_guardian_adapter_migration_contract(tmp_path, m
         encoding="utf-8",
     )
     monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
     monkeypatch.setattr(
         launcher_service,
         "load_state",
@@ -2731,6 +2743,7 @@ def test_launcher_status_shows_control_surface_when_project_window_is_closed(tmp
         encoding="utf-8",
     )
     monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
     monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
     monkeypatch.setattr(
         launcher_service,
@@ -2794,6 +2807,7 @@ def test_launcher_status_keeps_project_open_when_launcher_control_surface_stays_
         encoding="utf-8",
     )
     monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
     monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) in {3210, 4001, 10952})
     monkeypatch.setattr(
         launcher_service,
@@ -3028,6 +3042,7 @@ def test_launcher_status_reclassifies_control_surface_with_managed_backend_as_pa
         encoding="utf-8",
     )
     monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
     monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) in {3210, 4001})
     monkeypatch.setattr(
         launcher_service,
@@ -3099,6 +3114,7 @@ def test_launcher_status_marks_missing_managed_window_as_partial(tmp_path, monke
         encoding="utf-8",
     )
     monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    _pin_empty_launcher_status_store(monkeypatch, tmp_path)
     monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: int(pid) in {3210, 10952})
     monkeypatch.setattr(
         launcher_service,
