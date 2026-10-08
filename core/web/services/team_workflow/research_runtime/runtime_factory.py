@@ -54,7 +54,9 @@ WORKFLOW_WORKERS_ENV = "VIBELUTION_WORKFLOW_WORKERS"
 # Budget-exhaustion auto-advance sweep cadence: the maintenance tick runs far
 # more often than the scan needs to (same self-throttle pattern as the stuck
 # digest watchdog in meeting_driver_work).
-AUTO_ADVANCE_SWEEP_INTERVAL_MS = 30_000
+# The main advance path is event-driven (pump.wake); this sweep is only a
+# crash-recovery backstop, so its default cadence stays low-frequency.
+AUTO_ADVANCE_SWEEP_INTERVAL_MS = 300_000
 AUTO_ADVANCE_SWEEP_INTERVAL_ENV = "VIBELUTION_AUTO_ADVANCE_SWEEP_INTERVAL_MS"
 _LAST_AUTO_ADVANCE_SWEEP_MS: int | None = None
 _AUTO_ADVANCE_SWEEP_LOCK = threading.Lock()

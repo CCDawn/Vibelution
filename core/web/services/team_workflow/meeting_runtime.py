@@ -3067,7 +3067,9 @@ def schedule_meeting_digest_redrive(team_id: str, meeting_round_id: str) -> dict
 # once; the second failure reaches the cap and stays auditable for the
 # operator retry instead of looping LLM calls forever.
 MAX_DIGEST_AUTO_REDRIVE_ATTEMPTS = 2
-DIGEST_MISSING_SWEEP_INTERVAL_MS = 30_000
+# The main advance path is event-driven (pump.wake); this sweep is only a
+# crash-recovery backstop, so its default cadence stays low-frequency.
+DIGEST_MISSING_SWEEP_INTERVAL_MS = 300_000
 DIGEST_MISSING_SWEEP_INTERVAL_ENV = "VIBELUTION_DIGEST_MISSING_SWEEP_INTERVAL_MS"
 # Throttle stamp for the missing-digest sweep; touched only under its lock.
 _LAST_DIGEST_MISSING_SWEEP_MS: int | None = None

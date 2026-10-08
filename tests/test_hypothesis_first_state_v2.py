@@ -885,8 +885,9 @@ def test_collection_auto_accept_pending_false_without_waiting_handoff(
     assert state.collection.lifecycle != "waiting_human"
     assert state.collection.autoAccept is not None
     assert state.collection.autoAccept.pending is False
-    # Default cadence when the operator override is absent.
-    assert state.collection.autoAccept.intervalMs == 30_000
+    # Default cadence when the operator override is absent (crash-recovery
+    # backstop; the main advance path is event-driven via pump.wake).
+    assert state.collection.autoAccept.intervalMs == 300_000
 
 
 def test_succeeded_formal_run_with_missing_delivery_stays_program_delivery_blocked() -> None:
