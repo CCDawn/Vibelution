@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { testDecisionModel } from "../api/config";
 import type { ConfigDecisionModelPreset, ConfigDecisionModelProbe } from "../api/types/config";
 import { VButton, VCheckbox, VInput, VSection, VStringSelect } from "../components/vui";
+import styles from "./ConfigDecisionModelsPanel.styles";
 
 export type DecisionModelEntry = {
   label: string;
@@ -246,13 +247,13 @@ export function ConfigDecisionModelsPanel({
 
   return (
     <VSection id="config-decision-models" title={zh ? "决策模型" : "Decision models"} data-testid="config-decision-models">
-      <p className="text-sm text-muted-foreground">
+      <p className={styles.intro}>
         {zh
           ? "这里保存一整类本地决策模型。它们不进入对话槽。可以启用多条，Agent 交接只绑定一条；没绑定就不会调用。配置页不下载权重，也不启动服务。"
           : "Store a class of local decision models here. They stay out of chat slots. Several can be enabled, and agent handoff binds exactly one. No binding means no call. This page does not download weights or start the server."}
       </p>
-      {holdReason ? <p className="text-sm text-muted-foreground">{holdReason}</p> : null}
-      <div className="flex flex-wrap gap-2">
+      {holdReason ? <p className={styles.hold}>{holdReason}</p> : null}
+      <div className={styles.actions}>
         {presets.map((preset) => (
           <VButton
             key={preset.presetId}
@@ -292,7 +293,7 @@ export function ConfigDecisionModelsPanel({
           {zh ? "自定义" : "Custom"}
         </VButton>
       </div>
-      <label className="grid max-w-md gap-1 text-sm">
+      <label className={styles.narrow}>
         <span>{zh ? "交接使用" : "Handoff uses"}</span>
         <VStringSelect
           ariaLabel={zh ? "交接使用的决策模型" : "Decision model bound to handoff"}
@@ -304,9 +305,9 @@ export function ConfigDecisionModelsPanel({
         />
       </label>
       {Object.entries(draft).map(([id, entry]) => (
-        <div key={id} className="grid gap-2 rounded-md border border-border p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <strong>{entry.label || id}</strong>
+        <div key={id} className={styles.card}>
+          <div className={styles.cardHeader}>
+            <strong className={styles.cardTitle}>{entry.label || id}</strong>
             <VCheckbox
               isSelected={entry.enabled}
               isDisabled={disabled}
@@ -315,8 +316,8 @@ export function ConfigDecisionModelsPanel({
               {zh ? "启用" : "Enabled"}
             </VCheckbox>
           </div>
-          {entry.note ? <p className="text-sm text-muted-foreground">{entry.note}</p> : null}
-          <label className="grid gap-1 text-sm">
+          {entry.note ? <p className={styles.note}>{entry.note}</p> : null}
+          <label className={styles.field}>
             <span>{zh ? "名称" : "Name"}</span>
             <VInput
               value={entry.label}
@@ -325,7 +326,7 @@ export function ConfigDecisionModelsPanel({
               onBlur={() => publish(draftRef.current, handoffRef.current)}
             />
           </label>
-          <label className="grid gap-1 text-sm">
+          <label className={styles.field}>
             <span>{zh ? "模型名" : "Model id"}</span>
             <VInput
               value={entry.model_id}
@@ -334,7 +335,7 @@ export function ConfigDecisionModelsPanel({
               onBlur={() => publish(draftRef.current, handoffRef.current)}
             />
           </label>
-          <label className="grid gap-1 text-sm">
+          <label className={styles.field}>
             <span>{zh ? "本地地址" : "Local URL"}</span>
             <VInput
               value={entry.base_url}
@@ -343,7 +344,7 @@ export function ConfigDecisionModelsPanel({
               onBlur={() => publish(draftRef.current, handoffRef.current)}
             />
           </label>
-          <label className="grid max-w-xs gap-1 text-sm">
+          <label className={styles.narrow}>
             <span>{zh ? "最低概率" : "Minimum probability"}</span>
             <VInput
               type="number"
@@ -359,7 +360,7 @@ export function ConfigDecisionModelsPanel({
               onBlur={() => publish(draftRef.current, handoffRef.current)}
             />
           </label>
-          <div className="flex flex-wrap gap-2">
+          <div className={styles.actions}>
             <VButton
               isDisabled={disabled || probing === id}
               onPress={() => {
@@ -389,7 +390,7 @@ export function ConfigDecisionModelsPanel({
             </VButton>
           </div>
           {probe[id] ? (
-            <p className="text-sm">
+            <p className={styles.probe}>
               {probe[id].ok
                 ? `${probe[id].choice ?? ""} ${probe[id].probability ?? ""}`.trim()
                 : probe[id].error}
