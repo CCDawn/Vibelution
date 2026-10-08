@@ -38,8 +38,27 @@ function writeJson<T>(url: string, method: string, body: unknown): Promise<T> {
   });
 }
 
+export type DevTeamTaskChange = {
+  path: string;
+  status: string;
+};
+
+export type DevTeamTaskChanges = {
+  available: boolean;
+  workspace: boolean;
+  truncated: number;
+  changes: DevTeamTaskChange[];
+};
+
 export function listDevTeamTasks(teamId: string, init?: RequestInit) {
   return fetchJson<DevTeamTaskList>(`/api/teams/${encodeURIComponent(teamId)}/dev-tasks`, init);
+}
+
+export function listDevTeamTaskChanges(teamId: string, taskId: string, init?: RequestInit) {
+  return fetchJson<DevTeamTaskChanges>(
+    `/api/teams/${encodeURIComponent(teamId)}/dev-tasks/${encodeURIComponent(taskId)}/changes`,
+    init,
+  );
 }
 
 export function createDevTeamTask(

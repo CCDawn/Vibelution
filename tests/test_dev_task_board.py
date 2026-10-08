@@ -25,6 +25,8 @@ from core.web.services.team.dev_task_board import (
     empty_dev_task_board,
     ensure_dev_task_workspace,
     format_dev_task_board_prompt,
+    parse_dev_task_change_output,
+    read_dev_task_changes,
 )
 from tests.helpers.system_agent_state import _mark_config_agent_instances_present
 
@@ -316,6 +318,15 @@ def test_dev_task_routes_keep_the_chat_room_unchanged(tmp_path, monkeypatch):
     worktree = tmp_path / str(current["workspacePath"])
     assert (worktree / ".git").exists()
 
+    changes = client.get(f"/api/teams/{team['teamId']}/dev-tasks/{task['id']}/changes")
+    assert changes.status_code == 200, changes.text
+    change_body = changes.json()
+    assert change_body["workspace"] is True
+    assert change_body["available"] is True
+    for item in change_body["changes"]:
+        assert ".." not in item["path"]
+        assert not str(item["path"]).startswith("/")
+
     stale = client.post(
         f"/api/teams/{team['teamId']}/dev-tasks/{task['id']}",
         json={"actorMemberId": members["评审员"], "action": "complete", "expectedRevision": task["revision"]},
@@ -497,6 +508,70 @@ def test_rework_keeps_the_claimed_workspace(monkeypatch):
     assert task["status"] == "rework"
     assert task["workspaceBranch"] == "codex/dev-a"
     assert task["workspacePath"] == ".worktrees/dev-a"
+
+
+def test_change_parser_drops_unsafe_paths_and_caps_the_list():
+    payload = parse_dev_task_change_output(
+        "M\0web/src/login.tsx\0D\0../secrets\0A\0C:/Windows/note.txt\0",
+        "notes/todo.md\0",
+    )
+    assert payload["available"] is True
+    assert {item["path"]: item["status"] for item in payload["changes"]} == {
+        "notes/todo.md": "untracked",
+        "web/src/login.tsx": "modified",
+    }
+
+    unsafe = parse_dev_task_change_output("M\0../secrets\0", "")
+    assert unsafe["available"] is False
+    assert unsafe["changes"] == []
+
+    names = "".join(f"A\0file-{index:02d}.txt\0" for index in range(22))
+    capped = parse_dev_task_change_output(names, "")
+    shown = {item["path"] for item in capped["changes"]}
+    assert len(capped["changes"]) == 20
+    assert capped["truncated"] == 2
+    assert "file-00.txt" in shown
+    assert "file-20.txt" not in shown
+    assert "file-21.txt" not in shown
+
+
+def test_review_reads_the_task_worktree_and_hides_a_missing_one(tmp_path, monkeypatch):
+    _seed_main_repo(tmp_path, monkeypatch)
+    opened = ensure_dev_task_workspace(
+        team_id="team-1",
+        task_id="task-1",
+        member_id="m-a",
+        project_root=tmp_path,
+    )
+    worktree = tmp_path / opened["workspacePath"]
+    (worktree / "README.md").write_text("changed\n", encoding="utf-8")
+    (worktree / "web" / "src").mkdir(parents=True)
+    (worktree / "web" / "src" / "login.tsx").write_text("button\n", encoding="utf-8")
+    payload = read_dev_task_changes(
+        tmp_path,
+        workspace_path=opened["workspacePath"],
+        workspace_branch=opened["workspaceBranch"],
+    )
+    found = {item["path"]: item["status"] for item in payload["changes"]}
+    assert found["README.md"] == "modified"
+    assert found["web/src/login.tsx"] == "untracked"
+
+    missing = read_dev_task_changes(
+        tmp_path,
+        workspace_path=".worktrees/missing",
+        workspace_branch="codex/missing",
+    )
+    assert missing == {"available": False, "workspace": True, "truncated": 0, "changes": []}
+    outside = read_dev_task_changes(
+        tmp_path,
+        workspace_path="../outside",
+        workspace_branch="codex/dev",
+    )
+    assert outside["available"] is False
+    assert outside["changes"] == []
+    empty = read_dev_task_changes(tmp_path, workspace_path="", workspace_branch="")
+    assert empty["workspace"] is False
+    assert empty["changes"] == []
 
 
 def _seed_main_repo(path: Path, monkeypatch) -> None:

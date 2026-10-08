@@ -5,7 +5,8 @@ snapshots only: revision, owner, blockers, and advisory write scopes.
 Overlapping scopes are reported on the view and never block a claim.
 
 An engineer claim opens that engineer's task worktree. Assign, review, and
-delete do not. The worktree is not a second transcript.
+delete do not. A reviewer can read the file list for that worktree before
+completing or sending it back. The list is not written into the chat room.
 """
 
 from __future__ import annotations
@@ -54,6 +55,9 @@ _PROMPT_STATUS_LABELS = {
 _PROMPT_OPEN_STATUSES = frozenset({"pending", "in_progress", "rework"})
 _PROMPT_TASK_LIMIT = 20
 _PROMPT_SUBJECT_LIMIT = 80
+_CHANGE_LIMIT = 20
+_CHANGE_PATH_LIMIT = 180
+_CHANGE_CODES = {"A": "added", "M": "modified", "D": "deleted", "T": "modified"}
 _WORKSPACE_FAILURE = "任务工作区没有打开。"
 _WORKTREE_ADD_TIMEOUT_SECONDS = 180.0
 _PINNED_GIT_ENV = frozenset(
@@ -405,6 +409,139 @@ def ensure_dev_task_workspace(
     except (OSError, BranchWorkspaceError) as exc:
         raise DevTaskBoardError(_WORKSPACE_FAILURE) from exc
     return {"workspacePath": f".worktrees/{slug}", "workspaceBranch": branch}
+
+
+def dev_task_changes(team_id: str, task_id: str) -> dict[str, Any]:
+    """Read-only file list for one task worktree. Missing diffs do not raise."""
+
+    from core.web.services import team_service
+
+    team = get_team(team_id)
+    _require_dev_team(team)
+    path = team_store._dev_task_board_path(str(team.get("teamId") or team_id))
+    with team_service._TEAM_LOCK:
+        board = _read_board(path)
+        task = _require_task(board, task_id)
+        workspace_path = str(task.get("workspacePath") or "")
+        workspace_branch = str(task.get("workspaceBranch") or "")
+    return read_dev_task_changes(
+        team_service.PROJECT_ROOT,
+        workspace_path=workspace_path,
+        workspace_branch=workspace_branch,
+    )
+
+
+def read_dev_task_changes(
+    project_root: Path | str,
+    *,
+    workspace_path: str,
+    workspace_branch: str,
+) -> dict[str, Any]:
+    if not str(workspace_path or "").strip() and not str(workspace_branch or "").strip():
+        return _changes_without_workspace()
+    try:
+        with _without_pinned_git_env():
+            directory = _checked_task_worktree(project_root, workspace_path, workspace_branch)
+            diff = _git_at(directory, ["diff", "--name-status", "-z", "--no-renames", "main", "--"])
+            untracked = _git_at(directory, ["ls-files", "-z", "-o", "--exclude-standard"])
+    except (OSError, BranchWorkspaceError, DevTaskBoardError):
+        return _changes_unavailable()
+    if diff.returncode != 0 or untracked.returncode != 0:
+        return _changes_unavailable()
+    return parse_dev_task_change_output(str(diff.stdout or ""), str(untracked.stdout or ""))
+
+
+def parse_dev_task_change_output(name_status: str, untracked: str) -> dict[str, Any]:
+    kept: list[dict[str, str]] = []
+    rejected = 0
+    seen: set[tuple[str, str]] = set()
+
+    def add(status: str, raw_path: str) -> None:
+        nonlocal rejected
+        path = _safe_change_path(raw_path)
+        if not path:
+            rejected += 1
+            return
+        key = (status, path)
+        if key in seen:
+            return
+        seen.add(key)
+        kept.append({"path": path, "status": status})
+
+    records = str(name_status or "").split("\0")
+    index = 0
+    while index < len(records):
+        raw_status = records[index]
+        index += 1
+        if not raw_status:
+            continue
+        status_code = raw_status
+        raw_path = ""
+        if "\t" in raw_status:
+            status_code, raw_path = raw_status.split("\t", 1)
+        elif index < len(records):
+            raw_path = records[index]
+            index += 1
+        else:
+            rejected += 1
+            continue
+        mapped = _CHANGE_CODES.get(status_code.strip()[:1], "")
+        if not mapped:
+            rejected += 1
+            continue
+        add(mapped, raw_path)
+
+    for raw_path in str(untracked or "").split("\0"):
+        if raw_path:
+            add("untracked", raw_path)
+
+    if rejected and not kept:
+        return _changes_unavailable()
+    kept.sort(key=lambda item: (item["path"], item["status"]))
+    hidden = max(0, len(kept) - _CHANGE_LIMIT)
+    return {
+        "available": True,
+        "workspace": True,
+        "truncated": hidden,
+        "changes": kept[:_CHANGE_LIMIT],
+    }
+
+
+def _changes_without_workspace() -> dict[str, Any]:
+    return {"available": True, "workspace": False, "truncated": 0, "changes": []}
+
+
+def _changes_unavailable() -> dict[str, Any]:
+    return {"available": False, "workspace": True, "truncated": 0, "changes": []}
+
+
+def _safe_change_path(raw: str) -> str:
+    text = str(raw or "").replace("\\", "/").strip()
+    if text.startswith("./"):
+        text = text[2:]
+    text = " ".join(text.split()).replace("`", "")
+    if not text or text.startswith("/") or _DRIVE_PREFIX.match(text):
+        return ""
+    parts = [part for part in text.split("/") if part]
+    if ".." in parts or "." in parts:
+        return ""
+    normalized = "/".join(parts)
+    if len(normalized) > _CHANGE_PATH_LIMIT:
+        return normalized[:_CHANGE_PATH_LIMIT].rstrip() + "…"
+    return normalized
+
+
+def _checked_task_worktree(project_root: Path | str, workspace_path: str, workspace_branch: str) -> Path:
+    slug = _stored_workspace_slug(workspace_path, workspace_branch)
+    layout = resolve_branch_workspace(project_root)
+    pool = layout.branch_pool.resolve()
+    absolute = (pool / slug).resolve()
+    if absolute.parent != pool or not absolute.is_dir():
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+    head = _git_at(absolute, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if head.returncode != 0 or str(head.stdout or "").strip() != f"codex/{slug}":
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+    return absolute
 
 
 def _workspace_target(
