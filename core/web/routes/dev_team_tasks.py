@@ -28,6 +28,8 @@ class DevTaskView(BaseModel):
     reviewNote: str = ""
     ready: bool = False
     writeScopeWarnings: list[str] = Field(default_factory=list)
+    workspacePath: str = ""
+    workspaceBranch: str = ""
     updatedAt: str = ""
 
 

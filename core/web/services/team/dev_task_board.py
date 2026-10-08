@@ -3,14 +3,27 @@
 The linked chat room remains the conversation record. This file stores task
 snapshots only: revision, owner, blockers, and advisory write scopes.
 Overlapping scopes are reported on the view and never block a claim.
+
+An engineer claim opens that engineer's task worktree. Assign, review, and
+delete do not. The worktree is not a second transcript.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
+from core.infrastructure import git_process
+from core.infrastructure.branch_workspace import (
+    BranchWorkspaceError,
+    allocate_worktree_path,
+    resolve_branch_workspace,
+)
 from core.web.services.team import team_store
 from core.web.services.team_service import (
     TeamServiceError,
@@ -41,6 +54,21 @@ _PROMPT_STATUS_LABELS = {
 _PROMPT_OPEN_STATUSES = frozenset({"pending", "in_progress", "rework"})
 _PROMPT_TASK_LIMIT = 20
 _PROMPT_SUBJECT_LIMIT = 80
+_WORKSPACE_FAILURE = "任务工作区没有打开。"
+_WORKTREE_ADD_TIMEOUT_SECONDS = 180.0
+_PINNED_GIT_ENV = frozenset(
+    {
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+    }
+)
+_STORED_BRANCH = re.compile(r"^codex/(?P<slug>[A-Za-z0-9][A-Za-z0-9._-]{0,78})$")
+_SLUG_BREAK = re.compile(r"[^A-Za-z0-9]+")
 
 
 class DevTaskBoardError(TeamServiceError):
@@ -138,14 +166,19 @@ def mutate_dev_task(
     blocked_by: list[str] | None = None,
     review_note: str = "",
 ) -> dict[str, Any]:
+    from core.web.services import team_service
+
+    project_root = team_service.PROJECT_ROOT
+
     def mutate(team: dict[str, Any], board: dict[str, Any]) -> dict[str, Any]:
-        return apply_action(
+        return apply_board_action(
             team,
             board,
             task_id=task_id,
             actor_member_id=actor_member_id,
             action=action,
             expected_revision=expected_revision,
+            project_root=project_root,
             owner_member_id=owner_member_id,
             subject=subject,
             description=description,
@@ -248,6 +281,235 @@ def apply_action(
     return board
 
 
+def apply_board_action(
+    team: dict[str, Any],
+    board: dict[str, Any],
+    *,
+    task_id: str,
+    actor_member_id: str,
+    action: str,
+    expected_revision: int,
+    project_root: Path | str,
+    owner_member_id: str = "",
+    subject: str | None = None,
+    description: str | None = None,
+    write_scopes: list[str] | None = None,
+    blocked_by: list[str] | None = None,
+    review_note: str = "",
+    now: str = "",
+) -> dict[str, Any]:
+    if str(action or "").strip() == "claim":
+        return apply_claim_with_workspace(
+            team,
+            board,
+            task_id=task_id,
+            actor_member_id=actor_member_id,
+            expected_revision=expected_revision,
+            project_root=project_root,
+            now=now,
+        )
+    return apply_action(
+        team,
+        board,
+        task_id=task_id,
+        actor_member_id=actor_member_id,
+        action=action,
+        expected_revision=expected_revision,
+        owner_member_id=owner_member_id,
+        subject=subject,
+        description=description,
+        write_scopes=write_scopes,
+        blocked_by=blocked_by,
+        review_note=review_note,
+        now=now,
+    )
+
+
+def apply_claim_with_workspace(
+    team: dict[str, Any],
+    board: dict[str, Any],
+    *,
+    task_id: str,
+    actor_member_id: str,
+    expected_revision: int,
+    project_root: Path | str,
+    now: str = "",
+) -> dict[str, Any]:
+    """Claim, then open the engineer worktree. A failed open leaves the task unclaimed."""
+
+    task = _require_task(board, task_id)
+    snapshot = {
+        "status": task.get("status"),
+        "revision": task.get("revision"),
+        "ownerMemberId": task.get("ownerMemberId"),
+        "updatedAt": task.get("updatedAt"),
+    }
+    board_updated_at = board.get("updatedAt")
+    apply_action(
+        team,
+        board,
+        task_id=task_id,
+        actor_member_id=actor_member_id,
+        action="claim",
+        expected_revision=expected_revision,
+        now=now,
+    )
+    try:
+        fields = ensure_dev_task_workspace(
+            team_id=str(team.get("teamId") or ""),
+            task_id=str(task.get("id") or task_id),
+            member_id=str(task.get("ownerMemberId") or actor_member_id),
+            project_root=project_root,
+            workspace_path=str(task.get("workspacePath") or ""),
+            workspace_branch=str(task.get("workspaceBranch") or ""),
+        )
+    except Exception as exc:
+        task["status"] = snapshot["status"]
+        task["revision"] = snapshot["revision"]
+        task["ownerMemberId"] = snapshot["ownerMemberId"]
+        task["updatedAt"] = snapshot["updatedAt"]
+        board["updatedAt"] = board_updated_at
+        if isinstance(exc, DevTaskBoardError):
+            raise
+        raise DevTaskBoardError(_WORKSPACE_FAILURE) from exc
+    task["workspacePath"] = fields["workspacePath"]
+    task["workspaceBranch"] = fields["workspaceBranch"]
+    return board
+
+
+def ensure_dev_task_workspace(
+    *,
+    team_id: str,
+    task_id: str,
+    member_id: str,
+    project_root: Path | str,
+    workspace_path: str = "",
+    workspace_branch: str = "",
+) -> dict[str, str]:
+    """Open or reuse one task worktree branched from local main."""
+
+    slug, branch = _workspace_target(
+        team_id,
+        task_id,
+        member_id,
+        workspace_path,
+        workspace_branch,
+    )
+    try:
+        with _without_pinned_git_env():
+            layout = resolve_branch_workspace(project_root)
+            absolute = allocate_worktree_path(layout.integration_root, slug)
+            _materialize_worktree(layout.integration_root, absolute, branch)
+    except DevTaskBoardError:
+        raise
+    except (OSError, BranchWorkspaceError) as exc:
+        raise DevTaskBoardError(_WORKSPACE_FAILURE) from exc
+    return {"workspacePath": f".worktrees/{slug}", "workspaceBranch": branch}
+
+
+def _workspace_target(
+    team_id: str,
+    task_id: str,
+    member_id: str,
+    workspace_path: str,
+    workspace_branch: str,
+) -> tuple[str, str]:
+    path = str(workspace_path or "").strip()
+    branch = str(workspace_branch or "").strip()
+    if path or branch:
+        slug = _stored_workspace_slug(path, branch)
+        return slug, f"codex/{slug}"
+    slug = _dev_task_slug(team_id, task_id, member_id)
+    return slug, f"codex/{slug}"
+
+
+def _stored_workspace_slug(workspace_path: str, workspace_branch: str) -> str:
+    match = _STORED_BRANCH.fullmatch(str(workspace_branch or "").strip())
+    if match is None:
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+    slug = match.group("slug")
+    if slug in {".", "..", "_retired"} or ".." in slug.split("/"):
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+    normalized = str(workspace_path or "").replace("\\", "/").strip()
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    if normalized != f".worktrees/{slug}":
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+    return slug
+
+
+def _dev_task_slug(team_id: str, task_id: str, member_id: str) -> str:
+    digest = hashlib.sha256(f"{team_id}\n{task_id}\n{member_id}".encode()).hexdigest()[:10]
+    token = _SLUG_BREAK.sub("-", f"{team_id}-{task_id}-{member_id}").strip("-").lower()
+    body = token[:48].strip("-")
+    slug = f"dev-{body}-{digest}" if body else f"dev-{digest}"
+    slug = slug[:80].strip("-")
+    if slug in {"", ".", "..", "_retired"} or ".." in slug:
+        return f"dev-{digest}"
+    return slug
+
+
+@contextmanager
+def _without_pinned_git_env():
+    saved = {key: os.environ.pop(key) for key in _PINNED_GIT_ENV if key in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
+def _git_at(checkout: Path, args: list[str], *, timeout: float = 30.0):
+    return git_process.run_git(
+        args,
+        cwd=str(checkout),
+        timeout=timeout,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        env={key: value for key, value in os.environ.items() if key not in _PINNED_GIT_ENV},
+    )
+
+
+def _branch_exists(root: Path, branch: str) -> bool:
+    result = _git_at(root, ["for-each-ref", "--format=%(refname)", f"refs/heads/{branch}"])
+    if result.returncode != 0:
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+    return f"refs/heads/{branch}" in str(result.stdout or "").split()
+
+
+def _materialize_worktree(root: Path, absolute: Path, branch: str) -> None:
+    if absolute.exists():
+        if not absolute.is_dir():
+            raise DevTaskBoardError(_WORKSPACE_FAILURE)
+        head = _git_at(absolute, ["rev-parse", "--abbrev-ref", "HEAD"])
+        current = str(head.stdout or "").strip()
+        if head.returncode != 0 or current != branch:
+            raise DevTaskBoardError(_WORKSPACE_FAILURE)
+        return
+    if _branch_exists(root, branch):
+        _git_at(root, ["worktree", "prune"])
+        added = _git_at(
+            root,
+            ["worktree", "add", str(absolute), branch],
+            timeout=_WORKTREE_ADD_TIMEOUT_SECONDS,
+        )
+    else:
+        if not _branch_exists(root, "main"):
+            raise DevTaskBoardError(_WORKSPACE_FAILURE)
+        added = _git_at(
+            root,
+            ["worktree", "add", str(absolute), "-b", branch, "main"],
+            timeout=_WORKTREE_ADD_TIMEOUT_SECONDS,
+        )
+    if added.returncode != 0 or not absolute.is_dir():
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+    head = _git_at(absolute, ["rev-parse", "--abbrev-ref", "HEAD"])
+    if head.returncode != 0 or str(head.stdout or "").strip() != branch:
+        raise DevTaskBoardError(_WORKSPACE_FAILURE)
+
+
 def dev_task_views(team: dict[str, Any], board: dict[str, Any]) -> list[dict[str, Any]]:
     members = _members_by_id(team)
     tasks = _tasks(board)
@@ -270,6 +532,8 @@ def dev_task_views(team: dict[str, Any], board: dict[str, Any]) -> list[dict[str
                 "reviewNote": str(task.get("reviewNote") or ""),
                 "ready": _ready(task, tasks),
                 "writeScopeWarnings": _scope_warnings(task, tasks),
+                "workspacePath": str(task.get("workspacePath") or ""),
+                "workspaceBranch": str(task.get("workspaceBranch") or ""),
                 "updatedAt": str(task.get("updatedAt") or ""),
             }
         )
@@ -576,7 +840,11 @@ def _prompt_task_line(task: dict[str, Any]) -> str:
     owner = _prompt_text(task.get("ownerRole"), limit=40) or "未指定"
     subject = _prompt_text(task.get("subject"), limit=_PROMPT_SUBJECT_LIMIT) or "（无主题）"
     task_id = _prompt_text(task.get("id"), limit=40) or "task"
-    return f"- {task_id} | {status} | {owner} | {subject}"
+    line = f"- {task_id} | {status} | {owner} | {subject}"
+    branch = _prompt_text(task.get("workspaceBranch"), limit=80)
+    if branch:
+        return f"{line} | {branch}"
+    return line
 
 
 def _prompt_text(value: Any, *, limit: int) -> str:
