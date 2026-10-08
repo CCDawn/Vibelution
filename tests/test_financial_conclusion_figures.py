@@ -1,6 +1,7 @@
 """Conclusion amounts stay only when a cited filing page or a checked sum supports them."""
 
 import json
+import pytest
 
 from core.chat.turn_journal import (
     EVENT_ASSISTANT_ITEM_COMMITTED,
@@ -141,6 +142,17 @@ def test_code_urls_science_fullwidth_and_repeat_runs_stay_stable():
     assert ground_report_text(risk, []) == risk
     once = ground_report_text("## 结论\n毛利率 91.93%。", [])
     assert ground_report_text(once, []) == once
+
+
+@pytest.mark.parametrize("identity", ["600519", "sh600519", "hk00700", "０００００１"])
+@pytest.mark.parametrize("label", ["股价", "股票价格"])
+def test_stock_identity_before_a_price_label_is_not_a_share_quantity(identity, label):
+    text = f"## 结论\n{identity} {label} 123.45 元。持仓 600519 股。"
+    projected = ground_report_text(text, [])
+    assert f"{identity} {label}" in projected
+    assert "123.45" not in projected
+    assert "持仓 600519 股" not in projected
+    assert projected.count(MISSING_FIGURE) == 2
 
 
 def test_only_successful_filing_search_can_ground_a_number():
