@@ -144,7 +144,7 @@ def create_proposal(agent_id: str, payload: dict) -> dict:
     account_valuation = preflight_plan.get("accountValuation")
     if not isinstance(account_valuation, dict):
         raise RebalanceError("无法根据已校验报价计算模拟账户估值，尚未调用模型")
-    proposal = {"proposalId": proposal_id, "agentId": agent_id, "status": "generating", "createdAt": _now().isoformat(), "expiresAt": "", "modelId": model_id, "reportRefs": refs, "targets": [], "summaryReason": "", "riskChecks": [], "orders": [], "metrics": {"equityYuan": "0.00", "cashAfterYuan": context["cashYuan"], "turnoverPct": "0.00", "feesYuan": "0.00"}, "policy": policy, "planHash": "", "error": None, "execution": None, "_requestHash": request_hash, "_symbols": symbols}
+    proposal = {"proposalId": proposal_id, "agentId": agent_id, "status": "generating", "createdAt": _now().isoformat(), "expiresAt": "", "modelId": model_id, "reportRefs": refs, "targets": [], "summaryReason": "", "riskChecks": [], "orders": [], "metrics": {"equityYuan": account_valuation["equityYuan"], "cashAfterYuan": context["cashYuan"], "turnoverPct": "0.00", "feesYuan": "0.00"}, "policy": policy, "planHash": "", "error": None, "execution": None, "_requestHash": request_hash, "_symbols": symbols}
     with store.lock(agent_id, proposal_id):
         try:
             existing = store.read(agent_id, proposal_id)

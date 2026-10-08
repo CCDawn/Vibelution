@@ -27,6 +27,7 @@ NOW = datetime(2026, 10, 5, 7, 0, 30, tzinfo=timezone.utc)
 @pytest.fixture
 def proposal_env(paper_env, monkeypatch):
     agent_id = paper_env["agent"]["agentId"]
+    real_infer = decision.infer
     ledger.open_account(agent_id)
     monkeypatch.setattr(service, "_now", lambda: NOW)
     monkeypatch.setattr(ledger, "_utc_now", lambda: NOW)
@@ -40,7 +41,13 @@ def proposal_env(paper_env, monkeypatch):
 
     monkeypatch.setattr(decision, "infer", infer)
     payload = {"clientRequestId": str(uuid4()), "symbols": ["sh600519"], "reports": [{"sessionId": "report-session", "turnId": "report-turn"}], "instruction": "控制回撤的模拟组合", "policy": dict(DEFAULT_POLICY)}
-    return {**paper_env, "agentId": agent_id, "calls": calls, "payload": payload}
+    return {
+        **paper_env,
+        "agentId": agent_id,
+        "calls": calls,
+        "payload": payload,
+        "real_infer": real_infer,
+    }
 
 
 def test_generation_is_read_only_and_idempotent_then_approval_executes_once(proposal_env):
@@ -85,6 +92,24 @@ def test_unknown_inference_is_not_automatically_retried(proposal_env, monkeypatc
     second = service.create_proposal(proposal_env["agentId"], proposal_env["payload"])
     assert second == first
     assert len(calls) == 1
+
+
+def test_failed_proposal_readback_keeps_account_equity(proposal_env, monkeypatch):
+    calls = []
+
+    def fail(*args):
+        calls.append(args[-1])
+        raise RebalanceError("模型暂时不可用")
+
+    monkeypatch.setattr(decision, "infer", fail)
+    failed = service.create_proposal(proposal_env["agentId"], proposal_env["payload"])
+    reread = service.get_proposal(proposal_env["agentId"], failed["proposalId"])
+
+    assert failed["status"] == "failed"
+    assert len(calls) == 1
+    assert failed["metrics"]["equityYuan"] == calls[0]["account"]["equityYuan"]
+    assert reread["metrics"]["equityYuan"] == calls[0]["account"]["equityYuan"]
+    assert failed["metrics"]["cashAfterYuan"] == calls[0]["account"]["cashYuan"]
 
 
 def test_stale_market_data_is_rejected_before_model_call(proposal_env, monkeypatch):
@@ -304,36 +329,128 @@ def test_infer_keeps_numeric_target_fields_and_requires_qualitative_reasons(monk
     assert "定性" in seen_messages[0]["content"]
 
 
-@pytest.mark.parametrize(
-    ("summary_reason", "target_reason"),
-    [
-        ("净值约84.9万元，保留现金", "控制波动"),
-        ("保留现金，控制风险", "当前仓位34.8%，建议降低"),
-        ("配置保持谨慎", "仓位约三成，控制风险"),
-    ],
-)
-def test_infer_rejects_numeric_claims_in_visible_reasons(
-    summary_reason, target_reason, monkeypatch
-):
+def _mock_model_response(monkeypatch, response_body):
     from types import SimpleNamespace
 
-    response_body = {
-        "targets": [
-            {"symbol": "sh600519", "weightPct": 20.0, "reason": target_reason}
-        ],
-        "summaryReason": summary_reason,
-    }
+    calls = []
     monkeypatch.setattr(decision, "get_llm_client", lambda **_kwargs: object())
-    monkeypatch.setattr(
-        decision,
-        "invoke_llm",
-        lambda *_args, **_kwargs: SimpleNamespace(
+
+    def invoke(*_args, **_kwargs):
+        calls.append(1)
+        return SimpleNamespace(
             content=json.dumps(response_body, ensure_ascii=False),
             response_metadata={},
-        ),
+        )
+
+    monkeypatch.setattr(decision, "invoke_llm", invoke)
+    return calls
+
+
+def test_infer_filters_numeric_sentences_and_preserves_qualitative_text(monkeypatch):
+    response_body = {
+        "targets": [
+            {
+                "symbol": "sh600519",
+                "weightPct": 20.0,
+                "reason": "当前仓位34.8%，建议降低。基本面证据仍不充分，应限制集中暴露。",
+            }
+        ],
+        "summaryReason": "预计净值84.9万元，现金保留。研究报告显示经营稳健。组合需保持谨慎。",
+    }
+    calls = _mock_model_response(monkeypatch, response_body)
+
+    result = decision.infer(
+        "agent", "proposal", "test/model", object(), {"symbols": ["sh600519"]}
     )
 
-    with pytest.raises(RebalanceError, match="定性说明"):
+    assert result["targets"][0]["weightPct"] == 20.0
+    assert result["summaryReason"].startswith("研究报告显示经营稳健。组合需保持谨慎。")
+    assert result["targets"][0]["reason"] == "基本面证据仍不充分，应限制集中暴露。"
+    assert "84.9万元" not in result["summaryReason"]
+    assert "34.8%" not in result["targets"][0]["reason"]
+    assert "未核验数值" in result["summaryReason"]
+    assert len(calls) == 1
+
+
+def test_numeric_reason_filter_does_not_change_allocation_or_paper_ledger(
+    proposal_env, monkeypatch
+):
+    response_body = {
+        "targets": [
+            {
+                "symbol": "sh600519",
+                "weightPct": 20.0,
+                "reason": "经营质量稳健。当前仓位34.8%，建议降低。",
+            }
+        ],
+        "summaryReason": "组合分散并保留现金。",
+    }
+    calls = _mock_model_response(monkeypatch, response_body)
+    monkeypatch.setattr(decision, "infer", proposal_env["real_infer"])
+    agent_id = proposal_env["agentId"]
+    before = paper.read_rebalance_context(agent_id)
+
+    proposal = service.create_proposal(agent_id, proposal_env["payload"])
+    saved = store.read(agent_id, proposal["proposalId"])
+    expected = build_plan(
+        saved["_context"],
+        [{"symbol": "sh600519", "weightPct": 20.0, "reason": "无数值说明"}],
+        saved["_quotes"],
+        saved["policy"],
+        now=NOW,
+    )
+    order_fields = (
+        "symbol",
+        "side",
+        "quantity",
+        "priceYuan",
+        "grossAmountYuan",
+        "feeYuan",
+    )
+
+    assert proposal["status"] == "ready"
+    assert proposal["targets"][0]["weightPct"] == 20.0
+    assert proposal["targets"][0]["reason"] == "经营质量稳健。"
+    assert "未核验数值" in proposal["summaryReason"]
+    assert all("34.8%" not in order["reason"] for order in proposal["orders"])
+    assert [tuple(order[field] for field in order_fields) for order in proposal["orders"]] == [
+        tuple(order[field] for field in order_fields) for order in expected["orders"]
+    ]
+    assert proposal["metrics"] == expected["metrics"]
+    assert paper.read_rebalance_context(agent_id) == before
+    assert len(calls) == 1
+
+
+def test_infer_shows_explicit_notice_when_all_reason_sentences_are_filtered(monkeypatch):
+    notice = "模型说明含未核验数值，已省略；请核对研究报告与风控。"
+    response_body = {
+        "targets": [
+            {"symbol": "sh600519", "weightPct": 20.0, "reason": "当前仓位三成，应减仓。"}
+        ],
+        "summaryReason": "净值84.9万元。现金比例25%。",
+    }
+    calls = _mock_model_response(monkeypatch, response_body)
+
+    result = decision.infer(
+        "agent", "proposal", "test/model", object(), {"symbols": ["sh600519"]}
+    )
+
+    assert result["summaryReason"] == notice
+    assert result["targets"][0]["reason"] == notice
+    assert result["targets"][0]["weightPct"] == 20.0
+    assert len(calls) == 1
+
+
+def test_infer_still_rejects_invalid_structured_target_weight(monkeypatch):
+    response_body = {
+        "targets": [
+            {"symbol": "sh600519", "weightPct": 101.0, "reason": "当前仓位三成，应减仓。"}
+        ],
+        "summaryReason": "保留现金并控制风险。",
+    }
+    _mock_model_response(monkeypatch, response_body)
+
+    with pytest.raises(RebalanceError, match="目标仓位须在0到100之间"):
         decision.infer(
             "agent", "proposal", "test/model", object(), {"symbols": ["sh600519"]}
         )
