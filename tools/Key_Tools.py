@@ -130,7 +130,11 @@ from tools.python_intelligence_tools import (
     code_symbol_tool as _code_symbol_impl,
     python_lint_tool as _python_lint_impl,
 )
-from tools.plan_tools import plan_update_tool as _plan_update_impl
+from tools.plan_tools import (
+    enter_plan_mode_tool as _enter_plan_mode_impl,
+    exit_plan_mode_tool as _exit_plan_mode_impl,
+    plan_update_tool as _plan_update_impl,
+)
 from tools.todo_tools import todo_write as _todo_write_impl
 from tools.conversation_log_tools import conversation_log_inspect_tool as _conversation_log_inspect_impl
 from tools.user_action_telemetry_tools import user_action_telemetry_query_tool as _user_action_telemetry_query_impl
@@ -1616,6 +1620,26 @@ def _build_key_tools() -> List[BaseTool]:
             JSON 格式的计划更新结果。
         """
         return _plan_update_impl(plan=plan, explanation=explanation, plan_id=plan_id)
+
+    @tool
+    def enter_plan_mode_tool() -> str:
+        """
+        【进入计划模式】把当前会话切到只能看。
+
+        不需要你点头。进入后写文件、跑命令会被拒绝。看完代码后调用 exit_plan_mode_tool 提交计划。
+        """
+        return _enter_plan_mode_impl()
+
+    @tool
+    def exit_plan_mode_tool(plan: str, allowed_prompts: Optional[List[Dict]] = None) -> str:
+        """
+        【退出计划模式】提交计划正文，等你点头后保存，并恢复进入前的模式。
+
+        Args:
+            plan: 计划正文，最多 20000 字
+            allowed_prompts: 可选，之后要跑的命令类别，例如 [{"tool": "exec_command", "prompt": "跑测试"}]
+        """
+        return _exit_plan_mode_impl(plan=plan, allowed_prompts=allowed_prompts)
 
     @tool
     def todo_write(todos: List[Dict]) -> str:
@@ -3489,6 +3513,8 @@ def _build_key_tools() -> List[BaseTool]:
         task_update_tool,
         task_list_tool,
         plan_update_tool,
+        enter_plan_mode_tool,
+        exit_plan_mode_tool,
         todo_write,
         create_child_session_tool,
         list_child_sessions_tool,

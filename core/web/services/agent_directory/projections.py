@@ -1016,6 +1016,9 @@ def active_agent_runtime(
         or ("supervised_conversation_harness" if normalized_supervised_role else ""),
     )
     tool_policy = s._effective_agent_tool_policy(tool_policy, delegation_policy)
+    from core.authorization.collaboration_mode import with_collaboration_controls
+
+    tool_policy = with_collaboration_controls(tool_policy)
     memory_policy = (
         copy.deepcopy(agent_snapshot.get("memoryPolicy"))
         if isinstance(agent_snapshot.get("memoryPolicy"), dict)
@@ -1069,6 +1072,16 @@ def active_agent_runtime(
         "delegationPolicy": delegation_policy,
         "supervisionPolicy": supervision_policy,
     }
+    if str(session_id or "").strip():
+        try:
+            from core.web.services.session import directory_runtime
+
+            if directory_runtime.get_open_directory_store() is not None:
+                from core.web.services.session.collaboration_mode import load_collaboration_state
+
+                context["collaborationMode"] = load_collaboration_state(str(session_id).strip())
+        except Exception:
+            pass
     token = s._CURRENT_AGENT_RUNTIME.set(context)
     try:
         yield context

@@ -613,6 +613,8 @@ class ToolExecutor:
         "task_create_tool",
         "task_update_tool",
         "plan_update_tool",
+        "enter_plan_mode_tool",
+        "exit_plan_mode_tool",
         "task_start_tool",
         "task_stop_tool",
         "clean_workspace_debris_tool",

@@ -499,6 +499,27 @@ def authorize_tool_execution(
             context,
             tool_name=normalized_tool,
         )
+    collaboration = _collaboration_decision(runtime, normalized_tool, tool_args or {})
+    if collaboration is not None and collaboration.decision == "deny":
+        _record_execution_denial_reason(
+            tool_name=normalized_tool,
+            gate_id="collaboration_mode_denied",
+            reason_code="",
+            rule_id=collaboration.rule_id,
+            agent_id=runtime_agent_id,
+            turn_id=runtime_turn_id,
+            context=context,
+        )
+        return ToolExecutionAuthorizationResult(
+            enforced=True,
+            allowed=False,
+            code="collaboration_mode_denied",
+            message=collaboration.reason,
+            agent_id=runtime_agent_id,
+            turn_id=runtime_turn_id,
+            decision_fingerprint=context.decision_fingerprint,
+            rule_id=collaboration.rule_id,
+        )
     from core.web.services.agent_perception.access import legacy_tool_read_denial, current_perception_turn
 
     perception_turn = current_perception_turn()
@@ -584,6 +605,10 @@ def authorize_tool_execution(
         ),
         None,
     )
+    if collaboration is not None and collaboration.decision == "allow":
+        approval_requirement = None
+    elif collaboration is not None and collaboration.decision == "ask" and approval_requirement is None:
+        approval_requirement = ("always", "low")
     if approval_requirement is not None:
         from core.web.services.session.tool_approvals import (
             ToolApprovalError,
@@ -649,6 +674,25 @@ def authorize_tool_execution(
         turn_id=context.turn_id,
         decision_fingerprint=context.decision_fingerprint,
     )
+
+
+def _collaboration_decision(runtime: Mapping[str, Any], tool_name: str, tool_args: Mapping[str, Any]):
+    embedded = runtime.get("collaborationMode")
+    session_id = _coerce_text(runtime.get("sessionId")).strip()
+    if not isinstance(embedded, Mapping) and not session_id:
+        return None
+    from core.authorization.collaboration_mode import check_collaboration_mode, normalize_collaboration_state
+
+    if isinstance(embedded, Mapping):
+        state = normalize_collaboration_state(embedded)
+    else:
+        from core.web.services.session.collaboration_mode import load_collaboration_state
+
+        try:
+            state = load_collaboration_state(session_id)
+        except Exception:
+            return None
+    return check_collaboration_mode(state, tool_name, tool_args=tool_args)
 
 
 def _runtime_constraint_denial(

@@ -103,4 +103,113 @@ def plan_update_tool(plan: Any, explanation: str = "", plan_id: str = "current")
     )
 
 
-__all__ = ["plan_update_tool"]
+def _current_session_id() -> str:
+    from core.web.services.agent_directory_service import current_agent_runtime
+
+    runtime = current_agent_runtime() or {}
+    return str(runtime.get("sessionId") or "").strip()
+
+
+def _approved_plan_path(session_id: str) -> Path:
+    safe = _safe_plan_id(session_id)
+    return _workspace_root() / ".vibelution" / "plans" / f"plan-{safe}.md"
+
+
+def enter_plan_mode_tool() -> str:
+    """Switch the current session into plan mode. Writes stay blocked until exit."""
+
+    from core.web.services.session.collaboration_mode import (
+        CollaborationModeError,
+        enter_session_plan_mode,
+    )
+
+    session_id = _current_session_id()
+    if not session_id:
+        return json.dumps(
+            {"status": "error", "code": "NO_SESSION", "message": "当前没有可切换模式的会话。"},
+            ensure_ascii=False,
+        )
+    try:
+        transition = enter_session_plan_mode(session_id)
+    except CollaborationModeError as exc:
+        return json.dumps(
+            {"status": "error", "code": "PLAN_MODE_REJECTED", "message": str(exc)},
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {
+            "status": "ok",
+            "message": "已进入计划模式。现在只查看代码并写出实现计划，不要改文件。",
+            "mode": transition["mode"],
+            "previousMode": transition["previousMode"],
+            "planEnabled": True,
+            "previousPlanEnabled": transition["previousPlanEnabled"],
+        },
+        ensure_ascii=False,
+    )
+
+
+def exit_plan_mode_tool(plan: str, allowed_prompts: Any = None) -> str:
+    """Ask the user to approve the plan, save it, and leave plan mode."""
+
+    from core.authorization.collaboration_mode import PLAN_MAX_CHARS, plan_is_enabled
+    from core.web.services.session.collaboration_mode import (
+        CollaborationModeError,
+        exit_session_plan_mode,
+        load_collaboration_state,
+    )
+
+    text = plan if isinstance(plan, str) else ""
+    if not text.strip():
+        return json.dumps(
+            {"status": "error", "code": "INVALID_PLAN", "message": "退出计划需要一份计划正文。"},
+            ensure_ascii=False,
+        )
+    if len(text) > PLAN_MAX_CHARS:
+        return json.dumps(
+            {
+                "status": "error",
+                "code": "INVALID_PLAN",
+                "message": f"计划正文不能超过 {PLAN_MAX_CHARS} 字。",
+            },
+            ensure_ascii=False,
+        )
+    session_id = _current_session_id()
+    if not session_id:
+        return json.dumps(
+            {"status": "error", "code": "NO_SESSION", "message": "当前没有可切换模式的会话。"},
+            ensure_ascii=False,
+        )
+    if not plan_is_enabled(load_collaboration_state(session_id)):
+        return json.dumps(
+            {"status": "error", "code": "PLAN_MODE_REJECTED", "message": "当前不在计划模式，不能退出计划。"},
+            ensure_ascii=False,
+        )
+    path = _approved_plan_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    try:
+        transition = exit_session_plan_mode(session_id)
+    except CollaborationModeError as exc:
+        return json.dumps(
+            {"status": "error", "code": "PLAN_MODE_REJECTED", "message": str(exc)},
+            ensure_ascii=False,
+        )
+    prompts = allowed_prompts if isinstance(allowed_prompts, list) else []
+    return json.dumps(
+        {
+            "status": "ok",
+            "approved": True,
+            "plan": text,
+            "path": str(path),
+            "mode": transition["mode"],
+            "previousMode": transition["previousMode"],
+            "planEnabled": False,
+            "previousPlanEnabled": True,
+            "allowedPrompts": prompts,
+        },
+        ensure_ascii=False,
+    )
+
+
+__all__ = ["plan_update_tool", "enter_plan_mode_tool", "exit_plan_mode_tool"]

@@ -64,7 +64,7 @@ Model 可见性
 | `conversation_history_tools.py` | `history_search_tool` · `history_fetch_tool` · `history_timeline_tool` · `history_checkpoint_tool` | `test_agent_protocol.py` |
 | `conversation_log_tools.py` | `conversation_log_inspect_tool` | `test_conversation_log_tools.py` |
 | `python_intelligence_tools.py` | `code_symbol_tool` · `python_lint_tool` | `test_python_intelligence_tools.py` |
-| `plan_tools.py` | `plan_update_tool` | `test_agent_protocol.py` |
+| `plan_tools.py` | `plan_update_tool` · `enter_plan_mode_tool` · `exit_plan_mode_tool` | `test_collaboration_mode.py` |
 | `computer_use_tools.py` | `computer_use_session_tool` · `computer_use_task_tool` | `test_agent_protocol.py` |
 | `image2_tools.py` | `image2_generate_tool` | `test_image2_tools.py` |
 | `rebirth_tools.py` | `trigger_self_restart_tool` | `test_rebirth_tools.py` |

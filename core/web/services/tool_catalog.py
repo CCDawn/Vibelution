@@ -495,6 +495,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["task_state_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "enter_plan_mode_tool": {
+        "category": "task_runtime",
+        "capabilityTags": ["plan", "session_control"],
+        "riskTags": ["session_state_write"],
+        "permissionTier": LOW_PERMISSION_TIER,
+    },
+    "exit_plan_mode_tool": {
+        "category": "task_runtime",
+        "capabilityTags": ["plan", "session_control"],
+        "riskTags": ["session_state_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "todo_write": {
         "category": "task_runtime",
         "capabilityTags": ["todo_checklist", "turn_progress", "read_only"],
@@ -1061,6 +1073,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "grep_search_tool",
             "glob_tool",
             "task_list_tool",
+            "enter_plan_mode_tool",
+            "exit_plan_mode_tool",
             "get_git_status_summary_tool",
             "get_recent_changes_tool",
             "conversation_log_inspect_tool",
@@ -1220,6 +1234,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "explain_current_worktree_tool",
             "github_project_library_search_tool",
             "github_project_library_clone_tool",
+            "enter_plan_mode_tool",
+            "exit_plan_mode_tool",
         ],
         "preferredToolNames": [
             "grep_search_tool",

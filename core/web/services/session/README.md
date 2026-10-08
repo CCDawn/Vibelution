@@ -16,6 +16,7 @@ Historical structure/optimization notes (non-authoritative): `docs/archive/plans
 | You are changing… | Open first |
 |-------------------|------------|
 | Submit / guidance / edit-resubmit | `submit.py` |
+| Session plan / build / edit / yolo mode | `collaboration_mode.py` |
 | Trusted plugin proactive turn without a user message | `proactive.py` |
 | Turn schedule / executor handoff | `schedule.py` |
 | Run turn / continuation loop | `worker.py` |
