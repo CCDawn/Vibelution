@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -18,6 +19,21 @@ from core.web.services.financial_backtest.data import (
     CorporateActionUnsupported,
 )
 from core.web.services.financial_backtest.engine import BacktestDecisionError
+
+
+def test_benchmark_reserves_historical_buy_stamp_duty() -> None:
+    cash, shares, order = engine._execute_benchmark(
+        execution=Candle("2007-06-01", 10, 11, 9, 10, 100_000),
+        previous_close=10,
+        initial_cash=Decimal(10000),
+        commission_rate=Decimal(0),
+        minimum_commission=Decimal(5),
+        slippage_rate=Decimal(0),
+        symbol="sh600000",
+    )
+    assert shares == 900
+    assert cash == Decimal(973)
+    assert order["stampDuty"] == 27
 
 
 def _weekdays(start: str, end: str) -> list[str]:

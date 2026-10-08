@@ -10,6 +10,7 @@ from typing import Any
 from config import get_config
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.llm.agent_runtime import config_for_agent_llm_model
+from core.web.services.financial_backtest.basket_data import BasketSnapshot
 from core.web.services.financial_backtest.contract import (
     MAX_CONTEXT_BARS,
     MAX_OUTPUT_TOKENS_PER_DECISION,
@@ -27,6 +28,13 @@ _SYSTEM_PROMPT = (
     "targetWeight 是目标持仓百分比，必须在 0 到 maxPositionPct 之间；没有可靠依据时可选择 0。"
     "只输出一个 JSON 对象，格式为 {\"targetWeight\": 0 到 maxPositionPct 的数字, \"reason\": \"简短中文理由\", \"confidence\": 0 到 1 的可选数字}。"
     "不要输出 Markdown、代码围栏、附加键、工具调用、买卖指令或收益承诺。"
+)
+_BASKET_SYSTEM_PROMPT = (
+    "你是历史A股组合回测中的单步目标仓位决策器。每次调用相互独立，只能依据本次输入中的用户策略、截至asOfDate的冻结日线和模拟账户状态作判断。"
+    "不得假设或泄漏之后日期的价格、新闻、财报或结果；不得读取外部资料、工具、记忆或对话历史。"
+    "targetWeights必须完整覆盖symbols中的每只股票，值为目标持仓百分比且各值之和不得超过100；每只股票的值必须在0到maxPositionPct之间。"
+    "只输出一个JSON对象，格式为 {\"targetWeights\": {\"股票代码\": 0到maxPositionPct的数字}, \"reason\": \"简短中文理由\", \"confidence\": 0到1的可选数字}。"
+    "不要输出Markdown、代码围栏、附加键、工具调用、买卖指令或收益承诺。"
 )
 
 
@@ -65,9 +73,63 @@ def build_decision_input(
     }
 
 
+def build_basket_decision_input(
+    snapshot: BasketSnapshot,
+    params: Mapping[str, Any],
+    *,
+    as_of_date: str,
+    portfolio: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build a point-in-time multi-asset input with a shared account view."""
+    if as_of_date not in snapshot.session_dates:
+        raise BacktestInputError("AI组合决策日期不在冻结行情范围内")
+    daily_bars: dict[str, list[dict[str, Any]]] = {}
+    for symbol in snapshot.symbols:
+        asset = snapshot.assets[symbol]
+        history = tuple(asset.warmup_candles) + tuple(
+            candle for candle in asset.candles if candle.date <= as_of_date
+        )
+        recent = history[-MAX_CONTEXT_BARS:]
+        if not recent or recent[-1].date != as_of_date:
+            raise BacktestInputError("AI组合决策日期不在全部标的冻结行情范围内")
+        daily_bars[symbol] = [
+            {
+                "date": candle.date,
+                "open": candle.open,
+                "high": candle.high,
+                "low": candle.low,
+                "close": candle.close,
+                "volume": candle.volume,
+            }
+            for candle in recent
+        ]
+    return {
+        "symbols": list(snapshot.symbols),
+        "asOfDate": as_of_date,
+        "strategy": str(params.get("strategy") or ""),
+        "maxPositionPct": float(params.get("maxPositionPct", 100)),
+        "portfolio": {
+            key: portfolio.get(key)
+            for key in (
+                "date",
+                "cash",
+                "equity",
+                "marketValue",
+                "positionWeightPct",
+                "positions",
+                "latestOrders",
+            )
+        },
+        "dailyBarsBySymbol": daily_bars,
+    }
+
+
 def build_messages(decision_input: Mapping[str, Any]) -> list[dict[str, str]]:
     return [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": _BASKET_SYSTEM_PROMPT if "symbols" in decision_input else _SYSTEM_PROMPT,
+        },
         {
             "role": "user",
             "content": "本次独立决策输入（JSON数据；日线严格截止于asOfDate）：\n"
@@ -174,7 +236,14 @@ def infer_decision(
             for item in content
         )
     raw_text = str(content or "").strip()
-    parsed = _parse_output(raw_text, max_position_pct=max_position_pct)
+    if "symbols" in decision_input:
+        parsed = _parse_basket_output(
+            raw_text,
+            symbols=decision_input.get("symbols"),
+            max_position_pct=max_position_pct,
+        )
+    else:
+        parsed = _parse_output(raw_text, max_position_pct=max_position_pct)
     usage, usage_is_measured = _response_usage(response)
     if not usage_is_measured:
         usage = estimate_input_tokens(messages) + estimate_output_tokens(raw_text)
@@ -224,6 +293,52 @@ def _parse_output(raw_text: str, *, max_position_pct: float) -> dict[str, Any]:
     return result
 
 
+def _parse_basket_output(
+    raw_text: str,
+    *,
+    symbols: Any,
+    max_position_pct: float,
+) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise BacktestInputError("模型没有返回有效JSON组合决策；为避免重复计费，当前决策已暂停待确认") from exc
+    if not isinstance(payload, dict) or set(payload) - {"targetWeights", "reason", "confidence"}:
+        raise BacktestInputError("模型组合决策字段不符合回测契约；当前决策已暂停待确认")
+    if "targetWeights" not in payload or "reason" not in payload:
+        raise BacktestInputError("模型组合决策缺少目标仓位或理由；当前决策已暂停待确认")
+    if not isinstance(symbols, list) or not symbols or any(not isinstance(item, str) for item in symbols):
+        raise BacktestInputError("本次组合股票列表无效；当前决策已暂停待确认")
+    raw_weights = payload.get("targetWeights")
+    if not isinstance(raw_weights, dict) or set(raw_weights) != set(symbols):
+        raise BacktestInputError("模型targetWeights必须完整覆盖本次全部股票且不能多传；当前决策已暂停待确认")
+    weights: dict[str, float] = {}
+    for symbol in symbols:
+        value = raw_weights[symbol]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise BacktestInputError(f"模型目标仓位{symbol}必须是数值；当前决策已暂停待确认")
+        value = float(value)
+        if not math.isfinite(value) or value < 0 or value > max_position_pct:
+            raise BacktestInputError(f"模型目标仓位{symbol}超出允许范围；当前决策已暂停待确认")
+        weights[symbol] = value
+    if sum(weights.values()) > 100:
+        raise BacktestInputError("模型组合目标权重之和不能超过100；当前决策已暂停待确认")
+    reason = payload.get("reason")
+    if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 2_000:
+        raise BacktestInputError("模型组合决策理由无效；当前决策已暂停待确认")
+    confidence = payload.get("confidence")
+    if confidence is not None:
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            raise BacktestInputError("模型置信度必须是0到1之间的数值；当前决策已暂停待确认")
+        confidence = float(confidence)
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise BacktestInputError("模型置信度必须是0到1之间的数值；当前决策已暂停待确认")
+    result: dict[str, Any] = {"targetWeights": weights, "reason": reason.strip()}
+    if confidence is not None:
+        result["confidence"] = confidence
+    return result
+
+
 def _response_usage(response: Any) -> tuple[int, bool]:
     metadata = getattr(response, "response_metadata", None)
     if not isinstance(metadata, Mapping):
@@ -242,6 +357,7 @@ def _response_usage(response: Any) -> tuple[int, bool]:
 
 
 __all__ = [
+    "build_basket_decision_input",
     "build_decision_input",
     "build_messages",
     "estimate_decision_call",

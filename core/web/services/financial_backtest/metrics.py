@@ -86,10 +86,11 @@ def calculate_metrics(
     total_fees: float,
     commission_fees: float,
     stamp_duty: float,
+    benchmark_initial_cash: float | None = None,
 ) -> dict[str, float | int | None]:
     """Calculate strategy and same-cost benchmark metrics from marked equity."""
     strategy = _series_stats(equity, "equity", initial_cash)
-    benchmark = _series_stats(equity, "benchmarkEquity", initial_cash)
+    benchmark = _series_stats(equity, "benchmarkEquity", initial_cash if benchmark_initial_cash is None else benchmark_initial_cash)
     strategy_return = float(strategy["totalReturnPct"])
     benchmark_return = float(benchmark["totalReturnPct"])
     win_rate = (

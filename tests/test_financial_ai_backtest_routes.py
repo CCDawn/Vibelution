@@ -46,6 +46,44 @@ def test_preview_response_preserves_calendar_evidence_and_never_starts_a_model(m
     assert calls[0][0] == "a"
 
 
+def test_preview_accepts_basket_symbols_and_optional_frozen_oos_date(monkeypatch):
+    response = {**preview(), "symbol": None, "symbols": ["sh600000", "sh600001"], "outOfSampleStartDate": "2026-09-02"}
+    response["params"] = {**response["params"], "outOfSampleStartDate": "2026-09-02"}
+    calls = []
+    monkeypatch.setattr(routes.service, "create_financial_backtest_preview", lambda owner, payload: (calls.append((owner, payload)) or response))
+    result = client().post(
+        "/api/financial-backtests/a/preview",
+        json={
+            "symbols": ["600000", "600001"],
+            "startDate": "2026-09-01",
+            "endDate": "2026-09-03",
+            "outOfSampleStartDate": "2026-09-02",
+            "strategy": "趋势",
+        },
+    )
+    assert result.status_code == 200
+    assert result.json()["symbol"] is None
+    assert result.json()["symbols"] == ["sh600000", "sh600001"]
+    assert result.json()["outOfSampleStartDate"] == "2026-09-02"
+    assert calls[0][1]["symbols"] == ["600000", "600001"]
+    assert calls[0][1]["outOfSampleStartDate"] == "2026-09-02"
+
+
+def test_preview_requires_exactly_one_symbol_selector(monkeypatch):
+    monkeypatch.setattr(routes.service, "create_financial_backtest_preview", lambda *args: pytest.fail("invalid selector reached service"))
+    result = client().post(
+        "/api/financial-backtests/a/preview",
+        json={
+            "symbol": "600000",
+            "symbols": ["600000"],
+            "startDate": "2026-09-01",
+            "endDate": "2026-09-03",
+            "strategy": "趋势",
+        },
+    )
+    assert result.status_code == 422
+
+
 def test_start_and_resume_forward_exact_immutable_identifiers(monkeypatch):
     response = run()
     calls = []

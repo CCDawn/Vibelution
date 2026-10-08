@@ -12,14 +12,21 @@ from typing import Any
 from uuid import uuid4
 
 from core.web.services import agent_directory_service as directory
-from core.web.services.financial_backtest import data, engine
+from core.web.services.financial_backtest import (
+    basket_data,
+    data,
+    engine,
+    portfolio_engine,
+)
 from core.web.services.financial_backtest.contract import (
     DEFAULT_MAX_TOKENS,
     MAX_OUTPUT_TOKENS_PER_DECISION,
+    MAX_RESULT_CHARS,
     MAX_RUNS_PER_AGENT,
     PREVIEW_TTL_SECONDS,
     FinancialBacktestConflict,
     FinancialBacktestNotFound,
+    FinancialBacktestStoreError,
     canonical_request_id,
     canonical_uuid,
     deterministic_run_id,
@@ -28,6 +35,7 @@ from core.web.services.financial_backtest.contract import (
     sha256_json,
 )
 from core.web.services.financial_backtest.decision import (
+    build_basket_decision_input,
     build_decision_input,
     build_messages,
     reserve_decision_call,
@@ -48,7 +56,7 @@ def create_financial_backtest_preview(
     payload: Mapping[str, Any],
     *,
     store: FinancialBacktestStore | None = None,
-    data_loader: Callable[[Mapping[str, Any]], data.BacktestSnapshot] | None = None,
+    data_loader: Callable[[Mapping[str, Any]], data.BacktestSnapshot | basket_data.BasketSnapshot] | None = None,
     now_provider: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     selected_store = store or default_store()
@@ -56,25 +64,65 @@ def create_financial_backtest_preview(
     _agent, bound_model_id = _require_owner_and_model(agent_id, request.get("modelId"))
     request["modelId"] = bound_model_id
     model_fingerprint = _model_fingerprint(bound_model_id)
-    snapshot = (data_loader or data.prepare_data)(request)
-    if snapshot.actions_status not in _ALLOWED_ACTION_STATUSES:
-        raise FinancialBacktestConflict("公司行动/复权完整性检查未通过，当前行情不能用于AI回测")
+    if request["mode"] == "basket":
+        loader = data_loader or (
+            lambda value: basket_data.prepare_basket_data(
+                value["symbols"], value["startDate"], value["endDate"]
+            )
+        )
+        snapshot = loader(request)
+        asset_snapshots = [snapshot.assets[symbol] for symbol in snapshot.symbols]
+        if any(asset.actions_status not in _ALLOWED_ACTION_STATUSES for asset in asset_snapshots):
+            raise FinancialBacktestConflict("组合中有股票未通过公司行动/复权完整性检查，当前行情不能用于AI回测")
+        schedule = portfolio_engine.build_decision_schedule(snapshot, {**request["params"], "maxDecisions": request["params"]["maxDecisions"]})
+        symbols = list(snapshot.symbols)
+        selected_symbol = None
+        action_dates = sorted({day for asset in asset_snapshots for day in asset.action_dates})
+        actions_status = "factor_check_passed" if any(asset.actions_status == "factor_check_passed" for asset in asset_snapshots) else "clear"
+        date_coverage = snapshot.assets[snapshot.symbols[0]].coverage.to_dict()
+        asset_coverage = {symbol: snapshot.assets[symbol].coverage.to_dict() for symbol in snapshot.symbols}
+        asset_data_hashes = {symbol: snapshot.assets[symbol].data_hash for symbol in snapshot.symbols}
+        asset_sources = {symbol: {"source": snapshot.assets[symbol].source, "sourceUrl": snapshot.assets[symbol].source_url, "fetchedAt": snapshot.assets[symbol].fetched_at} for symbol in snapshot.symbols}
+        snapshot_payload = {"dataHash": snapshot.data_hash, "basketSnapshot": snapshot.to_dict()}
+        source_url = ""
+        fetched_at = max(asset.fetched_at for asset in asset_snapshots)
+    else:
+        snapshot = (data_loader or data.prepare_data)(request)
+        if snapshot.actions_status not in _ALLOWED_ACTION_STATUSES:
+            raise FinancialBacktestConflict("公司行动/复权完整性检查未通过，当前行情不能用于AI回测")
+        schedule = engine.build_decision_schedule(snapshot, request["params"])
+        engine.validate_benchmark(snapshot, request["params"])
+        symbols = [snapshot.symbol]
+        selected_symbol = snapshot.symbol
+        action_dates = list(snapshot.action_dates)
+        actions_status = snapshot.actions_status
+        date_coverage = snapshot.coverage.to_dict()
+        asset_coverage = {snapshot.symbol: snapshot.coverage.to_dict()}
+        asset_data_hashes = {snapshot.symbol: snapshot.data_hash}
+        asset_sources = {snapshot.symbol: {"source": snapshot.source, "sourceUrl": snapshot.source_url, "fetchedAt": snapshot.fetched_at}}
+        snapshot_payload = snapshot.to_dict()
+        source_url = snapshot.source_url
+        fetched_at = snapshot.fetched_at
 
     params = {**request["params"], "strategy": request["strategy"], "maxTokens": request["maxTokens"]}
-    schedule = engine.build_decision_schedule(snapshot, params)
-    engine.validate_benchmark(snapshot, params)
+    out_of_sample_start_date = _out_of_sample_start_date(
+        snapshot, request.get("outOfSampleStartDate")
+    )
+    params["outOfSampleStartDate"] = out_of_sample_start_date
     params_hash = sha256_json(
         {
-            "symbol": request["symbol"],
+            "symbol": selected_symbol,
+            "symbols": symbols,
             "startDate": request["startDate"],
             "endDate": request["endDate"],
+            "outOfSampleStartDate": out_of_sample_start_date,
             "strategy": request["strategy"],
             "params": request["params"],
             "maxTokens": request["maxTokens"],
             "modelId": bound_model_id,
         }
     )
-    selected_store.save_snapshot(agent_id, snapshot.to_dict())
+    selected_store.save_snapshot(agent_id, snapshot_payload)
     now = _now(now_provider)
     expires_at = now + timedelta(seconds=PREVIEW_TTL_SECONDS)
     estimated_tokens, reserved_output_tokens, reservation_plan = _estimate_budget(snapshot, params, schedule)
@@ -86,8 +134,13 @@ def create_financial_backtest_preview(
         "agentId": str(agent_id),
         "previewId": str(uuid4()),
         "expiresAt": _iso(expires_at),
-        "symbol": snapshot.symbol,
-        "dateCoverage": snapshot.coverage.to_dict(),
+        "symbol": selected_symbol,
+        "symbols": symbols,
+        "dateCoverage": date_coverage,
+        "assetCoverage": asset_coverage,
+        "assetDataHashes": asset_data_hashes,
+        "assetSources": asset_sources,
+        "outOfSampleStartDate": out_of_sample_start_date,
         "decisionSchedule": list(schedule),
         "decisionCount": len(schedule),
         "maxDecisions": int(params["maxDecisions"]),
@@ -98,14 +151,14 @@ def create_financial_backtest_preview(
         "modelConfigHash": model_fingerprint,
         "paramsHash": params_hash,
         "dataHash": snapshot.data_hash,
-        "actionsStatus": snapshot.actions_status,
-        "actionDates": list(snapshot.action_dates),
+        "actionsStatus": actions_status,
+        "actionDates": action_dates,
         "canStart": can_start,
         "blockReason": block_reason,
         "warnings": _preview_warnings(snapshot, estimated_tokens, max_tokens),
         "source": snapshot.source,
-        "sourceUrl": snapshot.source_url,
-        "fetchedAt": snapshot.fetched_at,
+        "sourceUrl": source_url,
+        "fetchedAt": fetched_at,
         "adjustment": "raw",
         "notice": "\n".join(snapshot.notice),
         "params": public_params,
@@ -114,7 +167,7 @@ def create_financial_backtest_preview(
         "createdAt": _iso(now),
     }
     selected_store.save_preview(agent_id, preview)
-    return {key: value for key, value in preview.items() if key not in {"createdAt", "_reservationPlan", "_modelFingerprint"}}
+    return {key: value for key, value in preview.items() if key not in {"createdAt", "_reservationPlan", "_modelFingerprint", "mode"}}
 
 
 def start_financial_backtest_run(
@@ -163,7 +216,9 @@ def start_financial_backtest_run(
         "runId": run_id,
         "clientRequestId": request_id,
         "requestHash": request_hash,
-        "symbol": str(preview["symbol"]),
+        "mode": "basket" if preview.get("symbol") is None else "single",
+        "symbol": preview.get("symbol"),
+        "symbols": list(preview.get("symbols") or ([preview["symbol"]] if preview.get("symbol") else [])),
         "status": "queued",
         "progress": 0.0,
         "currentDecisionDate": None,
@@ -181,6 +236,10 @@ def start_financial_backtest_run(
         "dataHash": str(preview["dataHash"]),
         "params": dict(preview["params"]),
         "dateCoverage": dict(preview["dateCoverage"]),
+        "assetCoverage": dict(preview.get("assetCoverage") or {}),
+        "assetDataHashes": dict(preview.get("assetDataHashes") or {}),
+        "assetSources": dict(preview.get("assetSources") or {}),
+        "outOfSampleStartDate": preview.get("outOfSampleStartDate"),
         "actionsStatus": str(preview["actionsStatus"]),
         "actionDates": list(preview.get("actionDates") or []),
         "source": str(preview["source"]),
@@ -191,6 +250,7 @@ def start_financial_backtest_run(
         "warnings": list(preview.get("warnings") or []),
         "decisions": [],
         "metrics": None,
+        "evaluation": None,
         "equity": [],
         "trades": [],
         "orders": [],
@@ -320,37 +380,101 @@ def export_financial_backtest_run(
     store: FinancialBacktestStore | None = None,
 ) -> dict[str, Any]:
     _require_owner(agent_id)
-    run = (store or default_store()).load_run(agent_id, run_id)
+    selected_store = store or default_store()
+    run = selected_store.load_run(agent_id, run_id)
     normalized_format = str(export_format or "").strip().lower()
     if normalized_format not in {"json", "csv"}:
         raise FinancialBacktestConflict("导出格式仅支持json或csv")
     projected = project_run(run)
+    schema_version = 2 if _is_basket_run(run) else 1
     if normalized_format == "json":
-        content = json.dumps(projected, ensure_ascii=False, indent=2, allow_nan=False)
+        export_payload = {"schemaVersion": schema_version, **projected}
+        if _is_basket_run(run):
+            snapshot_payload = selected_store.load_snapshot(agent_id, str(run.get("dataHash") or ""))
+            basket_snapshot = snapshot_payload.get("basketSnapshot")
+            if not isinstance(basket_snapshot, Mapping):
+                raise FinancialBacktestStoreError("组合回测冻结快照格式无效，无法导出")
+            try:
+                restored_snapshot = basket_data.restore_basket_snapshot(basket_snapshot)
+            except data.BacktestDataError as exc:
+                raise FinancialBacktestStoreError("组合回测冻结快照校验失败，无法导出") from exc
+            run_symbols = run.get("symbols")
+            if (
+                restored_snapshot.data_hash != str(run.get("dataHash") or "")
+                or not isinstance(run_symbols, (list, tuple))
+                or tuple(str(symbol) for symbol in run_symbols) != restored_snapshot.symbols
+            ):
+                raise FinancialBacktestStoreError("组合回测冻结快照与运行记录不匹配，无法导出")
+            export_payload["snapshot"] = restored_snapshot.to_dict()
+        content = json.dumps(export_payload, ensure_ascii=False, indent=2, allow_nan=False)
+        if len(content) > MAX_RESULT_CHARS:
+            raise FinancialBacktestConflict("回测JSON导出超过安全大小限制，未生成截断文件")
         media_type = "application/json"
         filename = f"backtest-{run['runId']}.json"
     else:
         output = io.StringIO(newline="")
         writer = csv.writer(output)
-        writer.writerow(["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"])
-        writer.writerow([_csv_safe(projected.get(key)) for key in ("runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash")])
+        if _is_basket_run(run):
+            writer.writerow(["runId", "symbol", "symbols", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"])
+            writer.writerow([_csv_safe(projected.get("runId")), "", _csv_safe(",".join(projected.get("symbols") or [])), *[_csv_safe(projected.get(key)) for key in ("status", "modelId", "modelConfigHash", "paramsHash", "dataHash")]])
+        else:
+            writer.writerow(["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"])
+            writer.writerow([_csv_safe(projected.get(key)) for key in ("runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash")])
         output.write("\n")
-        writer.writerow(["date", "equity", "benchmarkEquity", "cash", "shares", "marketValue"])
-        for row in projected["equity"]:
-            writer.writerow([_csv_safe(row.get(key)) for key in ("date", "equity", "benchmarkEquity", "cash", "shares", "marketValue")])
+        if _is_basket_run(run):
+            writer.writerow(["date", "equity", "benchmarkEquity", "cash", "marketValue", "positions", "marketValues", "benchmarkPositions"])
+            for row in projected["equity"]:
+                writer.writerow([
+                    _csv_safe(
+                        json.dumps(row.get(key) or {}, ensure_ascii=False, sort_keys=True)
+                    )
+                    if key in {"positions", "marketValues", "benchmarkPositions"}
+                    else _csv_safe(row.get(key))
+                    for key in (
+                        "date",
+                        "equity",
+                        "benchmarkEquity",
+                        "cash",
+                        "marketValue",
+                        "positions",
+                        "marketValues",
+                        "benchmarkPositions",
+                    )
+                ])
+        else:
+            writer.writerow(["date", "equity", "benchmarkEquity", "cash", "shares", "marketValue"])
+            for row in projected["equity"]:
+                writer.writerow([_csv_safe(row.get(key)) for key in ("date", "equity", "benchmarkEquity", "cash", "shares", "marketValue")])
         output.write("\n")
-        writer.writerow(["account", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason"])
+        writer.writerow(["account", "symbol", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason"] if _is_basket_run(run) else ["account", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason"])
         for account, orders in (("strategy", projected["orders"]), ("benchmark", projected["benchmarkOrders"])):
             for row in orders:
-                writer.writerow([account, *[_csv_safe(row.get(key)) for key in ("signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason")]])
+                keys = ("symbol", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason") if _is_basket_run(run) else ("signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason")
+                writer.writerow([account, *[_csv_safe(row.get(key)) for key in keys]])
         output.write("\n")
-        writer.writerow(["date", "targetWeight", "reason", "confidence", "modelId", "decisionHash"])
+        writer.writerow(["date", "targetWeight", "targetWeights", "reason", "confidence", "modelId", "decisionHash"] if _is_basket_run(run) else ["date", "targetWeight", "reason", "confidence", "modelId", "decisionHash"])
         for row in projected["decisions"]:
-            writer.writerow([_csv_safe(row.get(key)) for key in ("date", "targetWeight", "reason", "confidence", "modelId", "decisionHash")])
+            if _is_basket_run(run):
+                writer.writerow([_csv_safe(row.get("date")), "", _csv_safe(json.dumps(row.get("targetWeights") or {}, ensure_ascii=False, sort_keys=True)), *[_csv_safe(row.get(key)) for key in ("reason", "confidence", "modelId", "decisionHash")]])
+            else:
+                writer.writerow([_csv_safe(row.get(key)) for key in ("date", "targetWeight", "reason", "confidence", "modelId", "decisionHash")])
         output.write("\n")
         writer.writerow(["metric", "value"])
         for key, value in (projected["metrics"] or {}).items():
             writer.writerow([_csv_safe(key), _csv_safe(value)])
+        if isinstance(projected.get("evaluation"), Mapping):
+            output.write("\n")
+            writer.writerow(["window", "field", "value"])
+            for window in ("inSample", "outOfSample"):
+                values = projected["evaluation"].get(window)
+                if not isinstance(values, Mapping):
+                    continue
+                for key, value in values.items():
+                    if key == "metrics" and isinstance(value, Mapping):
+                        for metric, metric_value in value.items():
+                            writer.writerow([window, metric, _csv_safe(metric_value)])
+                    else:
+                        writer.writerow([window, key, _csv_safe(value)])
         content = output.getvalue()
         media_type = "text/csv"
         filename = f"backtest-{run['runId']}.csv"
@@ -358,11 +482,24 @@ def export_financial_backtest_run(
         "agentId": str(agent_id),
         "runId": str(run["runId"]),
         "format": normalized_format,
+        "schemaVersion": schema_version,
         "fileName": filename,
         "mediaType": media_type,
         "encoding": "utf8",
         "content": content,
     }
+
+
+def _is_basket_run(run: Mapping[str, Any]) -> bool:
+    return str(run.get("mode") or "") == "basket" or run.get("symbol") is None
+
+
+def _run_symbols(run: Mapping[str, Any]) -> list[str]:
+    values = run.get("symbols")
+    if isinstance(values, list):
+        return [str(item) for item in values if str(item or "").strip()]
+    symbol = str(run.get("symbol") or "").strip()
+    return [symbol] if symbol else []
 
 
 def project_summary(run: Mapping[str, Any]) -> dict[str, Any]:
@@ -372,7 +509,8 @@ def project_summary(run: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "agentId": str(run.get("agentId") or ""),
         "runId": str(run.get("runId") or ""),
-        "symbol": str(run.get("symbol") or ""),
+        "symbol": None if _is_basket_run(run) else str(run.get("symbol") or ""),
+        "symbols": _run_symbols(run),
         "status": project_status(run.get("status")),
         "createdAt": str(run.get("createdAt") or ""),
         "updatedAt": str(run.get("updatedAt") or ""),
@@ -386,7 +524,11 @@ def project_summary(run: Mapping[str, Any]) -> dict[str, Any]:
         "dataHash": str(run.get("dataHash") or ""),
         "totalReturnPct": metrics.get("totalReturnPct"),
         "maxDrawdownPct": metrics.get("maxDrawdownPct"),
+        "benchmarkStatus": run.get("benchmarkStatus"),
+        "unfilledBenchmarkSymbols": list(run.get("unfilledBenchmarkSymbols") or []),
         "terminalReason": run.get("terminalReason"),
+        "outOfSampleStartDate": run.get("outOfSampleStartDate") or (run.get("params") or {}).get("outOfSampleStartDate"),
+        "evaluation": dict(run["evaluation"]) if isinstance(run.get("evaluation"), Mapping) else None,
     }
 
 
@@ -397,12 +539,13 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
     for item in run.get("decisions", []) if isinstance(run.get("decisions"), list) else []:
         if not isinstance(item, Mapping):
             continue
-        decisions.append({key: item[key] for key in ("date", "targetWeight", "reason", "confidence", "modelId", "inputHash", "decisionHash", "attempts", "tokens") if key in item})
+        decisions.append({key: item[key] for key in ("date", "targetWeight", "targetWeights", "reason", "confidence", "modelId", "inputHash", "decisionHash", "attempts", "tokens") if key in item})
     return {
         "agentId": str(run.get("agentId") or ""),
         "runId": str(run.get("runId") or ""),
         "clientRequestId": str(run.get("clientRequestId") or ""),
-        "symbol": str(run.get("symbol") or ""),
+        "symbol": None if _is_basket_run(run) else str(run.get("symbol") or ""),
+        "symbols": _run_symbols(run),
         "status": project_status(run.get("status")),
         "progress": completed / count if count else 0.0,
         "currentDecisionDate": run.get("currentDecisionDate"),
@@ -419,6 +562,10 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "dataHash": str(run.get("dataHash") or ""),
         "params": dict(run.get("params") or {}),
         "dateCoverage": dict(run.get("dateCoverage") or {}),
+        "assetCoverage": dict(run.get("assetCoverage") or {}),
+        "assetDataHashes": dict(run.get("assetDataHashes") or {}),
+        "assetSources": dict(run.get("assetSources") or {}),
+        "outOfSampleStartDate": run.get("outOfSampleStartDate") or (run.get("params") or {}).get("outOfSampleStartDate"),
         "actionsStatus": str(run.get("actionsStatus") or "unavailable"),
         "actionDates": list(run.get("actionDates") or []),
         "source": str(run.get("source") or ""),
@@ -429,10 +576,13 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "warnings": [str(item) for item in run.get("warnings", []) if str(item or "").strip()],
         "decisions": decisions,
         "metrics": dict(run["metrics"]) if isinstance(run.get("metrics"), Mapping) else None,
+        "evaluation": dict(run["evaluation"]) if isinstance(run.get("evaluation"), Mapping) else None,
         "equity": list(run.get("equity") or []),
         "trades": list(run.get("trades") or []),
         "orders": list(run.get("orders") or []),
         "benchmarkOrders": list(run.get("benchmarkOrders") or []),
+        "benchmarkStatus": run.get("benchmarkStatus"),
+        "unfilledBenchmarkSymbols": list(run.get("unfilledBenchmarkSymbols") or []),
         "startedAt": run.get("startedAt"),
         "updatedAt": str(run.get("updatedAt") or ""),
         "completedAt": run.get("completedAt"),
@@ -538,31 +688,84 @@ def _public_params(params: Mapping[str, Any]) -> dict[str, Any]:
         "slippageBps",
         "maxDecisions",
         "maxTokens",
+        "outOfSampleStartDate",
     )
     return {key: params[key] for key in keys}
 
 
-def _estimate_budget(snapshot: data.BacktestSnapshot, params: Mapping[str, Any], schedule: tuple[str, ...]) -> tuple[int, int, dict[str, int]]:
+def _estimate_budget(
+    snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot,
+    params: Mapping[str, Any],
+    schedule: tuple[str, ...],
+) -> tuple[int, int, dict[str, int]]:
     cash = float(params["initialCash"])
-    portfolio = {
-        "date": snapshot.start_date,
-        "cash": cash,
-        "shares": 0,
-        "sellableShares": 0,
-        "marketValue": 0.0,
-        "equity": cash,
-        "positionWeightPct": 0.0,
-    }
     reservation_plan: dict[str, int] = {}
     for decision_date in schedule:
-        decision_input = build_decision_input(snapshot, params, as_of_date=decision_date, portfolio=portfolio)
+        if isinstance(snapshot, basket_data.BasketSnapshot):
+            positions = []
+            for symbol in snapshot.symbols:
+                candle = next(item for item in snapshot.assets[symbol].candles if item.date == decision_date)
+                positions.append({
+                    "symbol": symbol,
+                    "shares": 0,
+                    "sellableShares": 0,
+                    "marketValue": 0.0,
+                    "weightPct": 0.0,
+                    "close": candle.close,
+                })
+            portfolio = {
+                "date": decision_date,
+                "cash": cash,
+                "equity": cash,
+                "marketValue": 0.0,
+                "positionWeightPct": 0.0,
+                "positions": positions,
+                "latestOrders": [],
+            }
+            decision_input = build_basket_decision_input(
+                snapshot, params, as_of_date=decision_date, portfolio=portfolio
+            )
+        else:
+            portfolio = {
+                "date": decision_date,
+                "cash": cash,
+                "shares": 0,
+                "sellableShares": 0,
+                "marketValue": 0.0,
+                "equity": cash,
+                "positionWeightPct": 0.0,
+            }
+            decision_input = build_decision_input(
+                snapshot, params, as_of_date=decision_date, portfolio=portfolio
+            )
         messages = build_messages(decision_input)
         # Runtime reserve_decision_call also includes wire-wrapper room. Add a
-        # separate margin here for the seven changing numeric portfolio fields;
-        # a filled account serializes more digits than the initial empty account.
-        reservation_plan[decision_date] = reserve_decision_call(messages) + 1_024
+        # separate account margin: filled positions and the five recent orders
+        # grow the prompt after earlier decisions. Basket inputs reserve per
+        # symbol so a ten-asset account is not estimated from its first asset.
+        account_margin = 1_024 + (512 * len(snapshot.symbols)) if isinstance(snapshot, basket_data.BasketSnapshot) else 1_024
+        reservation_plan[decision_date] = reserve_decision_call(messages) + account_margin
     output = len(schedule) * MAX_OUTPUT_TOKENS_PER_DECISION
     return sum(reservation_plan.values()), output, reservation_plan
+
+
+def _out_of_sample_start_date(
+    snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot,
+    requested_date: str | None = None,
+) -> str:
+    dates = (
+        list(snapshot.session_dates)
+        if isinstance(snapshot, basket_data.BasketSnapshot)
+        else [candle.date for candle in snapshot.candles]
+    )
+    if len(dates) < 2:
+        raise data.BacktestInputError("样本外评估至少需要两个完整交易日")
+    if requested_date is not None:
+        if requested_date not in dates or dates.index(requested_date) == 0:
+            raise data.BacktestInputError("outOfSampleStartDate必须是区间内交易日，且前面至少保留一个交易日")
+        return requested_date
+    boundary = min(len(dates) - 1, max(1, int(len(dates) * 0.8)))
+    return dates[boundary]
 
 
 def _preview_warnings(snapshot: data.BacktestSnapshot, estimated_tokens: int, max_tokens: int) -> list[str]:

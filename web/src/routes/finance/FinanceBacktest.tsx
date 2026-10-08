@@ -14,8 +14,8 @@ type BacktestProps = { agentId: string; stock: StockIdentity; zh: boolean; onRes
 export function FinanceBacktest(props: BacktestProps) {
   const [mode, setMode] = useState("ai");
   return <div className={styles.panel}>
-    <div className={styles.modeRow}><h3 className={styles.title}>{props.zh ? `历史回测 · ${props.stock.name} ${props.stock.ticker}` : `Backtest · ${props.stock.ticker}`}</h3><VSelect aria-label="回测模式" className={styles.modeSelect} selectedKey={mode} options={[{ id: "ai", label: props.zh ? "AI策略回测" : "AI strategy" }, { id: "ma", label: props.zh ? "均线策略对照" : "MA reference" }]} onSelectionChange={key => setMode(String(key))} /></div>
-    {mode === "ai" ? <FinanceAIBacktest key={`${props.agentId}:${props.stock.symbol}`} {...props} /> : <FinanceMABacktest key={`${props.agentId}:${props.stock.symbol}`} {...props} />}
+    <div className={styles.modeRow}><h3 className={styles.title}>{props.zh ? "历史回测" : "Backtest"}</h3><VSelect aria-label="回测模式" className={styles.modeSelect} selectedKey={mode} options={[{ id: "ai", label: props.zh ? "AI策略回测" : "AI strategy" }, { id: "ma", label: props.zh ? "均线策略对照" : "MA reference" }]} onSelectionChange={key => setMode(String(key))} /></div>
+    {mode === "ai" ? <FinanceAIBacktest key={props.agentId} {...props} /> : <FinanceMABacktest key={`${props.agentId}:${props.stock.symbol}`} {...props} />}
   </div>;
 }
 export function FinanceMABacktest({ agentId, stock, zh, onResearchPrompt, disabled, availableDates }: BacktestProps) {
