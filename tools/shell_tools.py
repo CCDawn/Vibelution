@@ -273,7 +273,15 @@ def _popen_command_for_route(route: "ShellCommandRoute", *, rewritten_command: s
     original = str(rewritten_command or route.command or "").strip()
     if route.route == "cmd":
         # Avoid shell=True (implicit cmd) — invoke cmd.exe explicitly, hidden.
-        return ["cmd.exe", "/d", "/s", "/c", original], False
+        # Pass ONE command-line string with shell=False: an argv list would let
+        # list2cmdline escape the command's own quotes (\"…), which cmd then
+        # bakes into the executable name (venv-python rewrite, quoted paths).
+        # A command starting with a quoted executable gets one extra outer
+        # quote pair — cmd /s strips exactly that pair, preserving the inner
+        # quoted path (canonical `cmd /c ""…""` form).
+        if original.startswith('"'):
+            original = f'"{original}"'
+        return f"cmd.exe /d /s /c {original}", False
     if route.route == "powershell":
         return [
             "powershell.exe",

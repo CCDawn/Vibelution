@@ -218,13 +218,13 @@ class TestShellCommandClassifier:
         assert route.route == "powershell"
         assert "-WindowStyle Hidden" in route.final_command
 
-    def test_popen_command_prefers_shell_false_argv_on_windows(self, monkeypatch):
+    def test_popen_command_prefers_shell_false_on_windows(self, monkeypatch):
         monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
         cmd_route = shell_tools.classify_shell_command("dir")
-        argv, use_shell = shell_tools._popen_command_for_route(cmd_route, rewritten_command="dir")
+        cmd_line, use_shell = shell_tools._popen_command_for_route(cmd_route, rewritten_command="dir")
         assert use_shell is False
-        assert argv[:4] == ["cmd.exe", "/d", "/s", "/c"]
-        assert argv[-1] == "dir"
+        # 单字符串形态（不经 list2cmdline 转义），显式 cmd.exe 仍是入口。
+        assert cmd_line == "cmd.exe /d /s /c dir"
 
         ps_route = shell_tools.classify_shell_command("Get-ChildItem tools")
         ps_argv, ps_shell = shell_tools._popen_command_for_route(
@@ -339,3 +339,57 @@ class TestWindowsRouting:
         out = shell_tools.execute_shell_command("foo 2>/dev/null", timeout=10)
         assert "跨平台警告" in out
         assert "bash -c" in out, "拦截提示应包含 bash -c 逃生口"
+
+
+# ---------------------------------------------------------------------------
+# cmd 路由单字符串 + 外层引号对（venv python 改写回归）
+# ---------------------------------------------------------------------------
+
+class TestCmdRouteQuoting:
+    """argv 列表形态会让 list2cmdline 转义命令自带引号（\"...），cmd 再把引号
+    烤进可执行文件名（实弹：venv python 改写后 '不是内部或外部命令'）。
+    cmd 路由必须走单字符串 shell=False，并以引号开头的命令补一层外引号对。
+    """
+
+    def _route(self):
+        return shell_tools.ShellCommandRoute(
+            route="cmd", final_command="x", reason="default", command="python -m pytest t.py"
+        )
+
+    def test_plain_command_uses_single_string_not_argv_list(self):
+        cmd, shell = shell_tools._popen_command_for_route(
+            self._route(), rewritten_command="python -m pytest t.py"
+        )
+        assert shell is False
+        assert isinstance(cmd, str)
+        assert cmd == "cmd.exe /d /s /c python -m pytest t.py"
+
+    def test_leading_quoted_executable_gets_one_outer_quote_pair(self):
+        quoted = '"C:\repo\.venv\Scripts\python.exe" -m pytest t.py'
+        cmd, shell = shell_tools._popen_command_for_route(
+            self._route(), rewritten_command=quoted
+        )
+        assert shell is False
+        assert cmd == f'cmd.exe /d /s /c "{quoted}"'
+
+    @pytest.mark.skipif(not shell_tools.IS_WINDOWS, reason="Windows cmd quoting")
+    def test_quoted_venv_python_actually_executes(self):
+        import subprocess
+
+        venv_python = shell_tools._get_project_python_executable()
+        if not venv_python.exists():
+            pytest.skip("project venv interpreter not present")
+        quoted = f'"{venv_python}" --version'
+        cmd, shell = shell_tools._popen_command_for_route(
+            self._route(), rewritten_command=quoted
+        )
+        proc = subprocess.run(
+            cmd,
+            shell=shell,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            **shell_tools._subprocess_no_window_kwargs(),
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "Python" in (proc.stdout or "")
