@@ -30,6 +30,11 @@ The team inspector follows the selected run rather than the assistant Session's 
 
 ## Public market data
 
+When opening a native team synthesis Session, stock identity is restored from
+the exact task header before matching its report. Quoted analyst answers never
+override that identity. The quote adapter can then resolve the company name;
+until it does, the canonical ticker is displayed rather than a prior stock.
+
 The existing Tencent adapter owns CN/HK/US identities, quotes and day/week/month candles. A-share candles are adjusted; international candles stay raw. Provider, quote/fetch times, market currency, share/lot units and missing values stay explicit. Mixed-currency lists never sort prices or amounts as comparable values. MA5/20, BOLL(20,2), MACD(12,26,9) and Wilder RSI(14) calculate on all loaded candles before slicing; missing warm-up values are never generated.
 
 `financialResearch` owns bounded batch quotes, provider screening, news, announcements and fundamentals. The Sina universe is provider coverage, not complete exchange coverage. Partial pages/deadlines stay visible. Unknown market-cap units remain null; unavailable filters are omitted. A source time without a date is not a fabricated data date. Cache hits preserve source fetch time. Natural-language screening prepares real native research, not an AI result before model execution.

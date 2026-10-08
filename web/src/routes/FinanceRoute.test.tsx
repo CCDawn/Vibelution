@@ -176,6 +176,21 @@ describe("financial assistant page", () => {
     expect(createChatSession).not.toHaveBeenCalled();
     expect(nativeSubmit).not.toHaveBeenCalled();
   });
+  it("opens a team summary report for its own stock instead of the last selected stock", async () => {
+    nativeTitle = "股票研究汇总 · SZ000001";
+    nativeMessages = [
+      { role: "user", id: "u", timestamp: "", content: "你是主助手的股票研究汇总角色。请综合股票 sz000001 的多分析师研究。研究日期：2026-10-07；观察周期：近30天。\n引用资料中另有600519。" },
+      { role: "assistant", id: "a", turnId: "team-turn", timestamp: "2026-10-07T06:40:00Z", status: "completed", turnItems: [{ type: "agent_message", phase: "final_answer", status: "completed", text: "## 结论\n平安银行资料不足。" }] },
+    ] as never;
+    vi.mocked(fetchFinancialReportText).mockResolvedValue("## 结论\n平安银行资料不足。");
+    await render("/finance?session=native-session&finance_tab=report");
+    await settle();
+    expect(container.querySelector('[aria-label="当前股票"]')?.textContent).toContain("000001");
+    expect(container.querySelector('[aria-label="当前股票"]')?.textContent).not.toContain("600519");
+    expect(container.querySelector("[data-finance-report-body]")?.textContent).toContain("平安银行资料不足");
+    expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+  });
   it("opens the native conversation first and retains all grouped workspace views", async () => {
     await render("/finance?session=native-session");
     const draft = container.querySelector('textarea[aria-label="native draft"]');

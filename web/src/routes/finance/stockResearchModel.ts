@@ -101,6 +101,13 @@ function canonicalUsTicker(value: string): string | null {
 }
 
 export function stockFromResearchRequest(text: string): StockIdentity | null {
+  // Read only the native synthesis task header, never tickers in quoted role answers.
+  const team = /^\s*你是主助手的股票研究汇总角色。请综合股票 (sh6\d{5}|sz[03]\d{5}|bj[489]\d{5}|hk\d{5}|us[A-Z][A-Z0-9.-]{0,9}) 的多分析师研究。研究日期：/.exec(text.slice(0, 250));
+  if (team) {
+    const symbol = team[1], ticker = symbol.slice(2);
+    const market = symbol.startsWith("sh") ? "上交所" : symbol.startsWith("sz") ? "深交所" : symbol.startsWith("bj") ? "北交所" : symbol.startsWith("hk") ? "港交所" : "美股";
+    return stockIdentityFromUnknown({ symbol, ticker, name: ticker, market });
+  }
   const match = /^\s*请研究\s+(.{1,60}?)（([A-Z][A-Z0-9.-]{0,9}|\d{5,6})，([^）\n]{1,30})）/.exec(text.slice(0, 250));
   if (!match) return null;
   const [, name, ticker, market] = match;

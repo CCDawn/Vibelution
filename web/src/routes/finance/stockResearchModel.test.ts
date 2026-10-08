@@ -184,6 +184,19 @@ describe("stock research projections", () => {
       expect(reportMatchesStock(report, messages, { symbol: "usMSFT", ticker: "MSFT", name: "Microsoft", market: "NASDAQ" })).toBe(false);
     }
   });
+  it("restores only the native team synthesis header stock, ignoring quoted analyst tickers", () => {
+    for (const symbol of ["sh600519", "sz000001", "bj920001", "hk00700", "usBRK.B"]) {
+      const request = `你是主助手的股票研究汇总角色。请综合股票 ${symbol} 的多分析师研究。研究日期：2026-10-07；观察周期：近30天。\n被引用的观点：请研究 贵州茅台（600519，上交所）`;
+      const identity = stockFromResearchRequest(request);
+      expect(identity?.symbol).toBe(symbol);
+      const messages: ConversationMessage[] = [{ role: "user", id: "u", timestamp: "", content: request }, turn("completed", [final])];
+      const report = projectStockReport(messages)!;
+      expect(reportMatchesStock(report, messages, identity!)).toBe(true);
+      expect(report.researchParameters?.stock?.symbol).toBe(symbol);
+    }
+    expect(stockFromResearchRequest("观点引用：你是主助手的股票研究汇总角色。请综合股票 sz000001 的多分析师研究。研究日期：2026-10-07")).toBeNull();
+    expect(stockFromResearchRequest("你是主助手的股票研究汇总角色。请综合股票 sh000001 的多分析师研究。研究日期：2026-10-07")).toBeNull();
+  });
   it("shows each screened stock with a filing page from the same turn or 没有这一项", () => {
     const request = "请研究以下股票筛选条件，生成筛选报告。分析截至 2026-10-06。按条件筛选股票，列出候选、筛选依据和数据限制。\n\n用户选股条件：PE低于20";
     const screen = JSON.stringify({
