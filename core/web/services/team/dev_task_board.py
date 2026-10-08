@@ -117,6 +117,8 @@ def format_dev_task_board_prompt(tasks: list[dict[str, Any]] | None, *, unavaila
         hidden = len(ordered) - _PROMPT_TASK_LIMIT
         if hidden > 0:
             lines.append(f"- 还有 {hidden} 项没有列在这里。")
+        if not open_tasks:
+            lines.append("- 全部任务已完成。")
     lines.append("发言可以引用任务编号。派发仍用 @角色名，例如 @开发工程师 A、@开发工程师 B 或 @评审员。")
     return "\n".join(lines)
 
@@ -997,3 +999,83 @@ def _task_sort_key(task: dict[str, Any]) -> tuple[int, str]:
     if raw.startswith("task-") and raw[5:].isdigit():
         return (int(raw[5:]), raw)
     return (10**9, raw)
+
+
+_ACTIVE_BIND_STATUSES = frozenset({"in_progress", "rework"})
+
+
+def member_active_task_workspace(
+    team_id: str,
+    agent_id: str,
+    *,
+    project_root: Path | str | None = None,
+) -> Path | None:
+    """Absolute worktree of this agent's own active (in_progress/rework) task.
+
+    Read-only board lookup for the chat-room speaker binding: it never writes
+    the board and never opens a worktree. Any failure resolves to ``None`` so
+    the caller keeps the previous workspace unchanged.
+    """
+
+    normalized_team_id = str(team_id or "").strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_team_id or not normalized_agent_id:
+        return None
+    try:
+        from core.web.services import team_service
+
+        team = get_team(normalized_team_id)
+        _require_dev_team(team)
+        member_id = _member_id_for_agent(team, normalized_agent_id)
+        if not member_id:
+            return None
+        path = team_store._dev_task_board_path(normalized_team_id)
+        with team_service._TEAM_LOCK:
+            board = _read_board(path)
+            task = _member_active_task(board, member_id)
+            workspace_path = str(task.get("workspacePath") or "") if task else ""
+            workspace_branch = str(task.get("workspaceBranch") or "") if task else ""
+        if not workspace_path:
+            return None
+        root = (
+            Path(project_root)
+            if project_root is not None
+            else Path(team_service.PROJECT_ROOT)
+        )
+        return _resolved_task_worktree(root, workspace_path, workspace_branch)
+    except (OSError, ValueError, TypeError, TeamServiceError, DevTaskBoardError):
+        return None
+
+
+def _member_id_for_agent(team: dict[str, Any], agent_id: str) -> str:
+    for member in _members(team):
+        if str(member.get("agentId") or "").strip() == agent_id:
+            return str(member.get("memberId") or "").strip()
+    return ""
+
+
+def _member_active_task(board: dict[str, Any], member_id: str) -> dict[str, Any] | None:
+    active = [
+        task
+        for task in _tasks(board)
+        if str(task.get("ownerMemberId") or "") == member_id
+        and task.get("status") in _ACTIVE_BIND_STATUSES
+    ]
+    if not active:
+        return None
+    return min(active, key=_task_sort_key)
+
+
+def _resolved_task_worktree(
+    project_root: Path | str,
+    workspace_path: str,
+    workspace_branch: str,
+) -> Path | None:
+    """Validate the stored ``.worktrees/<slug>`` pointer and return its directory."""
+
+    slug = _stored_workspace_slug(workspace_path, workspace_branch)
+    pool = (Path(project_root).resolve() / ".worktrees").resolve()
+    candidate = (pool / slug).resolve()
+    if candidate.parent != pool or not candidate.is_dir():
+        return None
+    return candidate

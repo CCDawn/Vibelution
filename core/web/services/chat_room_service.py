@@ -2732,6 +2732,7 @@ def _execute_chat_room_round(
                 "meetingRoundId": str(round_config.get("meetingRoundId") or "").strip(),
                 "meetingType": str(round_config.get("meetingType") or "").strip().lower(),
                 "teamId": str(round_config.get("teamId") or "").strip(),
+                "devTeamId": _dev_team_prompt_team_id(room, round_payload, participant),
                 "questionId": str(round_config.get("question") or "").strip().upper(),
                 "challengeDeadlineAtMs": _positive_int(
                     round_config.get(_CHALLENGE_ROOM_DEADLINE_CONFIG_KEY)
@@ -5584,6 +5585,15 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         timings["workspacePolicyMs"] = _elapsed_ms(stage_started_at)
         workspace = agent_workspace if not write_decision or write_decision.allowed else session_workspace
         stage_started_at = _perf_counter()
+        # Dev-team speaker binding: an engineer owning an active board task
+        # speaks from that task's worktree; everyone else keeps the workspace
+        # resolved above, byte-for-byte.
+        task_workspace = _participant_task_workspace(context, participant)
+        timings["taskWorkspaceBindMs"] = _elapsed_ms(stage_started_at)
+        timings["taskWorkspaceBound"] = task_workspace is not None
+        if task_workspace is not None:
+            workspace = task_workspace
+        stage_started_at = _perf_counter()
         from core.web.services.team_workflow.research_runtime.meeting_model_route import resolve_meeting_speaker_llm
 
         resolved_agent_llm = resolve_meeting_speaker_llm(agent, context, _resolve_chat_room_agent_llm)
@@ -5982,13 +5992,10 @@ def _build_participant_prompt(
         else ""
     )
     board_prompt = _dev_team_board_prompt(room, round_payload, participant)
-    response_contract_lines = (
-        ["严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。"]
-        if structured_room_context
-        else [
-            "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
-            "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
-        ]
+    dev_team_id = _dev_team_prompt_team_id(room, round_payload, participant)
+    planner_convergence_line = _dev_team_planner_convergence_line(dev_team_id, participant)
+    response_contract_lines = _speaker_room_contract_lines(
+        dev_team_id, participant, structured=structured_room_context
     )
     return "\n".join(
         [
@@ -5998,6 +6005,7 @@ def _build_participant_prompt(
             f"调度模式: {round_payload.get('mode') or DEFAULT_MODE}",
             *([planned_dispatch_line] if planned_dispatch_line else []),
             *([board_prompt] if board_prompt else []),
+            *([planner_convergence_line] if planner_convergence_line else []),
             f"对话目的: {purpose}",
             f"本轮推进模式: {effective_purpose}",
             f"你的发言视角: {role_view}",
@@ -6195,6 +6203,76 @@ def _dev_team_board_prompt(
     if not team_id:
         return ""
     return _dev_task_board_prompt(team_id)
+
+
+def _participant_task_workspace(context: Any, participant: dict[str, Any]) -> Path | None:
+    """Bind a dev-team speaker to their own claimed task worktree.
+
+    Fires only when the round is bound to a dev-team team, the participant's
+    agent maps to a team member, and that member owns an active
+    (in_progress/rework) board task whose stored ``.worktrees/<slug>``
+    directory exists under the product project root. Any other speaker —
+    including engineers without a claim and members of other teams — keeps
+    the workspace resolved by the caller, byte-for-byte.
+    """
+
+    team_id = ""
+    if isinstance(context, Mapping):
+        team_id = str(context.get("devTeamId") or "").strip()
+    agent_id = str(participant.get("agentId") or "").strip()
+    if not team_id or not agent_id:
+        return None
+    try:
+        from core.web.services.team.dev_task_board import member_active_task_workspace
+
+        return member_active_task_workspace(team_id, agent_id)
+    except Exception:
+        return None
+
+
+def _speaker_room_contract_lines(
+    dev_team_id: str,
+    participant: dict[str, Any],
+    *,
+    structured: bool,
+) -> list[str]:
+    engineer_write_line = ""
+    if str(dev_team_id or "").strip():
+        try:
+            from core.web.services.team.dev_task_board import ENGINEER_ROLES
+
+            if str(participant.get("teamRole") or "").strip() in ENGINEER_ROLES:
+                engineer_write_line = (
+                    "只允许在你认领任务的工作区内修改文件（路径见任务摘要）；不要提交、不要启动进化或部署。"
+                )
+        except Exception:
+            engineer_write_line = ""
+    if structured:
+        lines = ["严格遵循 system 区中的群聊结构化输出合同；不要在 JSON 前后添加说明。"]
+        if engineer_write_line:
+            lines.append(engineer_write_line)
+        return lines
+    if not engineer_write_line:
+        return [
+            "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
+            "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
+        ]
+    return [
+        "请给出一段紧凑、可读的群聊发言。只允许在你认领任务的工作区内修改文件（路径见任务摘要）；不要提交、不要启动进化或部署。",
+        "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
+    ]
+
+
+def _dev_team_planner_convergence_line(dev_team_id: str, participant: dict[str, Any]) -> str:
+    if not str(dev_team_id or "").strip():
+        return ""
+    try:
+        from core.web.services.team.dev_task_board import PLANNER_ROLE
+    except Exception:
+        return ""
+    if str(participant.get("teamRole") or "").strip() != PLANNER_ROLE:
+        return ""
+    return "当任务摘要显示全部任务已完成，总结成果并宣布本团队目标收敛。"
 
 
 def _format_participant_team_context(participant: dict[str, Any]) -> str:
