@@ -35,6 +35,11 @@ TEAM_KIND_DEFAULTS = {
         "chatRoomPurpose": "supervised_evolution",
     },
     "template_demo": {"teamCategory": "演示业务团队", "teamSource": "team_template", "chatRoomPurpose": "meeting"},
+    # Financial analyst teams are provisioned and repaired by the
+    # financial-team workflow (purpose prefix ``financial-stock-agent-team-v1``);
+    # chatRoomPurpose stays "discussion" so pre-migration linked rooms keep
+    # their purpose without a rename churn.
+    "financial": {"teamCategory": "股票研究团队", "teamSource": "financial", "chatRoomPurpose": "discussion"},
 }
 
 DERIVED_TEAM_KINDS = {
@@ -43,6 +48,7 @@ DERIVED_TEAM_KINDS = {
     "ai_search",
     "self_evolution",
     "supervised_evolution",
+    "financial",
 }
 
 TEAM_SOURCE_TO_KIND = {
@@ -53,6 +59,7 @@ TEAM_SOURCE_TO_KIND = {
     "self_evolution": "self_evolution",
     "supervised_evolution": "supervised_evolution",
     "team_template": "template_demo",
+    "financial": "financial",
 }
 
 TEAM_ID_TO_KIND = {

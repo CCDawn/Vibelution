@@ -13,12 +13,27 @@ from core.web.services import (
     financial_assistant_service,
     runtime_scene_service,
     session_service,
+    team_service,
 )
 from core.web.services.financial_team import provisioning, runs
 from core.web.services.session import directory_runtime
+from core.web.services.team import role_definition_service, team_format
 from tests.test_financial_knowledge_service import finance_env as _finance_env
 
 finance_env = _finance_env
+
+
+# Unified member row shape (docs/standards/unified-team-format.md §3).
+MEMBER_ROW_FIELDS = {
+    "memberId",
+    "agentId",
+    "agentCode",
+    "agentName",
+    "role",
+    "purpose",
+    "responsibilities",
+    "agentStatus",
+}
 
 
 @pytest.fixture
@@ -1780,3 +1795,191 @@ def test_record_turn_requires_native_submission_turn_binding(monkeypatch, tmp_pa
             client_submission_id="submission-market",
             turn_id="turn-unrelated",
         )
+
+
+# --- unified team format migration (phase 3 lane F) -------------------------
+
+
+def _stored_team(team_id):
+    state = team_service._load_index()
+    return next(
+        item
+        for item in state["teams"]
+        if str(item.get("teamId") or "").strip() == team_id
+    )
+
+
+def _overwrite_stored_team(team_id, mutate):
+    state = team_service._load_index()
+    record = next(
+        item
+        for item in state["teams"]
+        if str(item.get("teamId") or "").strip() == team_id
+    )
+    mutate(record)
+    team_service._save_index(state)
+
+
+def test_financial_role_files_match_operational_specs():
+    """Role file layer content stays equivalent to the operational specs."""
+
+    for role, spec in provisioning.ROLE_SPECS.items():
+        key = provisioning.FINANCIAL_ROLE_KEYS[role]
+        definition = role_definition_service.builtin_role_definition(key)
+        assert definition["roleKey"] == key
+        assert definition["role"] == spec["teamRole"]
+        assert definition["purpose"] == spec["label"]
+        assert set(definition) == set(team_format.ROLE_DEFINITION_FIELDS)
+        persona = definition["personaProfile"]
+        assert persona["personality"] == (
+            "谨慎、证据优先，清楚区分事实、判断和不确定性。"
+        )
+        assert persona["communicationStyle"] == (
+            "先给结论，再写数据时间、来源、风险和证据缺口。"
+        )
+        assert persona["identityNotes"] == (
+            f"股票研究团队中的{spec['label']}；"
+            "是独立原生 Agent，不代表持牌机构，不承诺收益。"
+        )
+        assert persona["expertise"] == list(spec["expertise"])
+        task = spec["task"]
+        for field in (
+            "mission",
+            "responsibilities",
+            "preferredTasks",
+            "avoidTasks",
+            "successCriteria",
+            "constraints",
+            "deliverables",
+        ):
+            assert definition["taskProfile"][field] == task[field], (role, field)
+        assert definition["toolPolicy"]["allowedTools"] == list(
+            spec["requiredTools"]
+        )
+        assert definition["toolPolicy"]["preferredTools"] == []
+        assert definition["toolPolicy"]["writeScopes"] == []
+        assert team_format.validate_role_definition(definition)["valid"]
+
+
+def test_financial_team_provision_registers_unified_identity(
+    financial_team_env,
+):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    first = provisioning.provision_financial_team(assistant_id)
+    assert first["status"] == "ready"
+
+    record = _stored_team(first["teamId"])
+    assert record["teamKind"] == provisioning.FINANCIAL_TEAM_KIND
+    assert record["teamCategory"] == provisioning.FINANCIAL_TEAM_CATEGORY
+    assert record["teamSource"] == provisioning.FINANCIAL_TEAM_SOURCE
+    assert record["purpose"] == provisioning._team_purpose(assistant_id)
+    assert len(record["members"]) == len(provisioning.ROLE_SPECS)
+    for member in record["members"]:
+        assert set(member) == MEMBER_ROW_FIELDS
+
+    detail = team_service.get_team(first["teamId"])
+    assert detail["systemManaged"] is True
+
+    # Workflow-owned lifecycle: operator PATCH and cascade archive are locked.
+    with pytest.raises(team_service.TeamLockedError, match="System Team"):
+        team_service.update_team(first["teamId"], name="改名尝试")
+    with pytest.raises(
+        team_service.TeamServiceError, match="System Team cannot be archived"
+    ):
+        team_service.archive_team(first["teamId"])
+
+    second = provisioning.provision_financial_team(assistant_id)
+    assert second["status"] == "ready"
+    assert second["teamId"] == first["teamId"]
+
+
+def test_financial_team_member_repair_bypasses_operator_patch_lock(
+    financial_team_env,
+):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    first = provisioning.provision_financial_team(assistant_id)
+    expected_ids = {role["agentId"] for role in first["roles"]}
+
+    _overwrite_stored_team(
+        first["teamId"], lambda record: record["members"].pop()
+    )
+
+    second = provisioning.provision_financial_team(assistant_id)
+    assert second["status"] == "ready"
+    repaired = _stored_team(first["teamId"])
+    assert {member["agentId"] for member in repaired["members"]} == expected_ids
+    assert len(repaired["members"]) == len(provisioning.ROLE_SPECS)
+    for member in repaired["members"]:
+        assert set(member) == MEMBER_ROW_FIELDS
+
+
+def test_financial_team_soft_archive_path_still_conflicts(financial_team_env):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    first = provisioning.provision_financial_team(assistant_id)
+
+    _overwrite_stored_team(
+        first["teamId"],
+        lambda record: record.update(status="archived"),
+    )
+
+    with pytest.raises(
+        provisioning.FinancialTeamConflictError, match="已归档"
+    ):
+        provisioning.provision_financial_team(assistant_id)
+
+    # The archived record is still the owner's team and is never rebuilt.
+    team = provisioning.get_financial_team(assistant_id)
+    assert team["teamId"] == first["teamId"]
+    assert team["status"] == "needs_attention"
+    assert _stored_team(first["teamId"])["status"] == "archived"
+
+
+def test_purpose_prefix_legacy_team_still_recognized(financial_team_env):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    purpose = provisioning._team_purpose(assistant_id)
+    created = team_service.create_team(name="存量分析团队", purpose=purpose)
+    record = _stored_team(created["teamId"])
+    record["teamKind"] = ""
+    record["teamCategory"] = ""
+    record["teamSource"] = ""
+    team_service._save_index(team_service._load_index())
+
+    # No identity flags at all: the purpose prefix stays the legacy fallback.
+    found = provisioning._find_team(assistant_id)
+    assert found is not None
+    assert found["teamId"] == created["teamId"]
+    assert found["purpose"] == purpose
+
+
+def test_backfill_financial_team_identities_is_idempotent(financial_team_env):
+    assistant_id = financial_team_env["assistant"]["agentId"]
+    purpose = provisioning._team_purpose(assistant_id)
+    created = team_service.create_team(name="存量分析团队", purpose=purpose)
+    _overwrite_stored_team(
+        created["teamId"],
+        lambda record: record.update(
+            teamKind="",
+            teamCategory="",
+            teamSource="",
+            members=[],
+        ),
+    )
+    index_path = team_service._teams_index_path()
+
+    first = provisioning.backfill_financial_team_identities()
+    assert first["backfilledTeamCount"] == 1
+    assert created["teamId"] in first["teamIds"]
+
+    record = _stored_team(created["teamId"])
+    assert record["teamKind"] == provisioning.FINANCIAL_TEAM_KIND
+    assert record["teamCategory"] == provisioning.FINANCIAL_TEAM_CATEGORY
+    assert record["teamSource"] == provisioning.FINANCIAL_TEAM_SOURCE
+    # Identity-only backfill: business fields stay untouched.
+    assert record["teamId"] == created["teamId"]
+    assert record["purpose"] == purpose
+    assert record["members"] == []
+
+    snapshot = index_path.read_bytes()
+    second = provisioning.backfill_financial_team_identities()
+    assert second == {"backfilledTeamCount": 0, "teamIds": []}
+    assert index_path.read_bytes() == snapshot

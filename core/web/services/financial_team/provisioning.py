@@ -15,10 +15,27 @@ from core.web.services import agent_directory_service as directory
 from core.web.services import financial_assistant_service as assistant_service
 from core.web.services import session_service, team_service
 from core.web.services.session import directory_runtime
+from core.web.services.team import role_definition_service
 
 PROFILE_VERSION = 1
 TEAM_PURPOSE_PREFIX = "financial-stock-agent-team-v1"
 AGENT_MARKER = "financialAnalysisTeam"
+# Unified team format identity (docs/standards/unified-team-format.md §2):
+# workflow-owned stock research teams are explicit records, not inferred
+# customs. The purpose prefix stays the business identity; these fields make
+# the team kind/source machine-checkable (kind_helpers.team_is_system_managed).
+FINANCIAL_TEAM_KIND = "financial"
+FINANCIAL_TEAM_SOURCE = "financial"
+FINANCIAL_TEAM_CATEGORY = "股票研究团队"
+# Role declarations live in the workspace role file layer (unified format §5);
+# builtin content ships under core/web/services/team/role_definitions/*.md.
+FINANCIAL_ROLE_KEYS = {
+    "market": "financial_market",
+    "fundamental": "financial_fundamental",
+    "news": "financial_news",
+    "bull": "financial_bull",
+    "bear": "financial_bear",
+}
 _LOCK = threading.RLock()
 
 
@@ -392,18 +409,80 @@ def _read_team(team_id: str) -> dict[str, Any] | None:
 
 
 def _find_team(owner_agent_id: str) -> dict[str, Any] | None:
+    """Resolve the owner's analysis team by managed identity first.
+
+    Primary: records already flagged ``teamSource``/``teamKind`` financial.
+    Legacy fallback: purpose-prefix equality, so pre-backfill records stay
+    recognizable during the migration window.
+    """
+
     purpose = _team_purpose(owner_agent_id)
     state = team_service._load_index()
-    matches = [
+    purpose_matches = [
         item
         for item in state.get("teams", [])
-        if isinstance(item, dict) and str(item.get("purpose") or "").strip() == purpose
+        if isinstance(item, dict)
+        and str(item.get("purpose") or "").strip() == purpose
     ]
+    matches = [
+        item for item in purpose_matches if _team_identity_is_financial(item)
+    ] or purpose_matches
     if len(matches) > 1:
         raise FinancialTeamConflictError(
             "检测到多个同源分析团队，请先在 Team 管理中核对"
         )
     return matches[0] if matches else None
+
+
+def _team_identity_is_financial(team: dict[str, Any]) -> bool:
+    return (
+        str(team.get("teamSource") or "").strip() == FINANCIAL_TEAM_SOURCE
+        or str(team.get("teamKind") or "").strip() == FINANCIAL_TEAM_KIND
+    )
+
+
+def _is_backfill_candidate(team: dict[str, Any]) -> bool:
+    purpose = str(team.get("purpose") or "").strip()
+    if purpose.startswith(f"{TEAM_PURPOSE_PREFIX}:"):
+        return True
+    # Partial identity (one flag set, the other missing) also gets healed.
+    return _team_identity_is_financial(team)
+
+
+def backfill_financial_team_identities() -> dict[str, Any]:
+    """Idempotent in-place identity backfill for stock research teams.
+
+    Legacy records are recognized by the business purpose prefix; only the
+    contract fields ``teamKind``/``teamCategory``/``teamSource`` are filled —
+    ``teamId``/``purpose``/``members`` stay untouched. A second run over
+    unchanged data writes nothing (``_apply_team_contract`` reports no
+    change, so neither the index nor ``updatedAt`` is touched).
+    """
+
+    s = team_service
+    backfilled: list[str] = []
+    with s._TEAM_LOCK:
+        state = s._load_index()
+        for team in state.get("teams", []):
+            if not isinstance(team, dict) or not _is_backfill_candidate(team):
+                continue
+            if s._apply_team_contract(
+                team,
+                team_kind=FINANCIAL_TEAM_KIND,
+                team_category=FINANCIAL_TEAM_CATEGORY,
+                team_source=FINANCIAL_TEAM_SOURCE,
+            ):
+                team["updatedAt"] = s.utc_now_iso()
+                backfilled.append(str(team.get("teamId") or "").strip())
+                s._record_team_event(
+                    "team.financial_identity_backfilled",
+                    team,
+                    fields={"purposePrefix": TEAM_PURPOSE_PREFIX},
+                )
+        if backfilled:
+            state["updatedAt"] = s.utc_now_iso()
+            s._save_index(state)
+    return {"backfilledTeamCount": len(backfilled), "teamIds": backfilled}
 
 
 def _role_agents(owner_agent_id: str) -> dict[str, dict[str, Any]]:
@@ -476,8 +555,47 @@ def _expected_role_config(
     )
 
 
-def _expected_role_metadata(owner: dict[str, Any], role: str) -> dict[str, Any]:
+def _financial_role_definitions() -> dict[str, dict[str, Any]]:
+    """Load the financial role declarations through the role file layer.
+
+    Fail closed: a missing or malformed role aborts the operation with a
+    locatable conflict instead of materializing a partially declared Agent.
+    """
+
+    keys = [FINANCIAL_ROLE_KEYS[role] for role in ROLE_SPECS]
+    try:
+        definitions = role_definition_service.load_role_definitions(
+            keys, project_root=Path(session_service.PROJECT_ROOT)
+        )
+    except role_definition_service.RoleDefinitionError as exc:
+        raise FinancialTeamConflictError(f"金融团队角色定义不可用：{exc}") from exc
+    return {role: definitions[index] for index, role in enumerate(ROLE_SPECS)}
+
+
+def _expected_role_metadata(
+    owner: dict[str, Any], role: str, role_definition: dict[str, Any]
+) -> dict[str, Any]:
+    """Build the managed Agent metadata for one role.
+
+    Persona/task texts come from the role file layer (unified format §5,
+    loaded through ``team_format.validate_role_definition``). ``taskTypes``
+    stays an Agent-instance-only field fed from the operational spec, and
+    ``background`` stays empty so pre-migration role Agents keep comparing
+    equal (provisioning stays idempotent for existing deployments).
+    """
+
     spec = ROLE_SPECS[role]
+    persona = (
+        role_definition.get("personaProfile")
+        if isinstance(role_definition.get("personaProfile"), dict)
+        else {}
+    )
+    task = (
+        role_definition.get("taskProfile")
+        if isinstance(role_definition.get("taskProfile"), dict)
+        else {}
+    )
+    spec_task = spec["task"] if isinstance(spec.get("task"), dict) else {}
     return {
         AGENT_MARKER: {
             "schemaVersion": PROFILE_VERSION,
@@ -485,12 +603,30 @@ def _expected_role_metadata(owner: dict[str, Any], role: str) -> dict[str, Any]:
             "role": role,
         },
         "personaProfile": {
-            "personality": "谨慎、证据优先，清楚区分事实、判断和不确定性。",
-            "communicationStyle": "先给结论，再写数据时间、来源、风险和证据缺口。",
-            "identityNotes": f"股票研究团队中的{spec['label']}；是独立原生 Agent，不代表持牌机构，不承诺收益。",
-            "expertise": list(spec["expertise"]),
+            "personality": str(persona.get("personality") or ""),
+            "communicationStyle": str(persona.get("communicationStyle") or ""),
+            "identityNotes": str(persona.get("identityNotes") or ""),
+            "expertise": [
+                str(item) for item in list(persona.get("expertise") or [])
+            ],
         },
-        "taskProfile": copy.deepcopy(spec["task"]),
+        "taskProfile": {
+            **{
+                key: str(task.get(key) or "")
+                for key in (
+                    "mission",
+                    "responsibilities",
+                    "preferredTasks",
+                    "avoidTasks",
+                    "successCriteria",
+                    "constraints",
+                    "deliverables",
+                )
+            },
+            "taskTypes": [
+                str(item) for item in list(spec_task.get("taskTypes") or [])
+            ],
+        },
         "delegationPolicy": {"allowSubagents": False, "allowWakeMessages": False},
     }
 
@@ -511,6 +647,7 @@ def _role_agent_configuration_is_current(
     owner: dict[str, Any],
     role: str,
     agent: dict[str, Any],
+    role_definition: dict[str, Any],
     *,
     expected_team_id: str = "",
     allow_missing_team_marker: bool = False,
@@ -520,7 +657,7 @@ def _role_agent_configuration_is_current(
         agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
     )
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    expected_metadata = _expected_role_metadata(owner, role)
+    expected_metadata = _expected_role_metadata(owner, role, role_definition)
     actual_marker = (
         metadata.get(AGENT_MARKER)
         if isinstance(metadata.get(AGENT_MARKER), dict)
@@ -561,6 +698,7 @@ def _role_agent_is_current(
     owner: dict[str, Any],
     role: str,
     agent: dict[str, Any],
+    role_definition: dict[str, Any],
     *,
     expected_team_id: str = "",
 ) -> bool:
@@ -568,6 +706,7 @@ def _role_agent_is_current(
         owner,
         role,
         agent,
+        role_definition,
         expected_team_id=expected_team_id,
     ) and _native_direct_session_matches_agent(
         str(agent.get("agentId") or ""),
@@ -579,6 +718,7 @@ def _project_team(
     owner: dict[str, Any],
     team: dict[str, Any] | None,
     agents: dict[str, dict[str, Any]],
+    role_definitions: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     owner_id = str(owner.get("agentId") or "").strip()
     owner_metadata = (
@@ -607,7 +747,11 @@ def _project_team(
         ready = bool(
             agent
             and _role_agent_configuration_is_current(
-                owner, role, agent, expected_team_id=team_id
+                owner,
+                role,
+                agent,
+                role_definitions[role],
+                expected_team_id=team_id,
             )
             and agent.get("agentId") in team_members
             and session_id
@@ -661,8 +805,9 @@ def get_financial_team(assistant_agent_id: str) -> dict[str, Any]:
     """Read setup state only. It never provisions Agents or advances a run."""
     owner = _financial_assistant(assistant_agent_id)
     agents = _role_agents(str(owner["agentId"]))
+    backfill_financial_team_identities()
     team = _find_team(str(owner["agentId"]))
-    return _project_team(owner, team, agents)
+    return _project_team(owner, team, agents, _financial_role_definitions())
 
 
 @contextmanager
@@ -685,13 +830,15 @@ def _provision_lock(owner: dict[str, Any]) -> Iterator[None]:
         yield
 
 
-def _new_role_agent(owner: dict[str, Any], role: str) -> dict[str, Any]:
+def _new_role_agent(
+    owner: dict[str, Any], role: str, role_definition: dict[str, Any]
+) -> dict[str, Any]:
     spec = ROLE_SPECS[role]
     bindings, policy = _expected_role_config(owner, role)
     display_name = (
         f"{str(owner.get('displayName') or '炒股智能体').strip()} · {spec['label']}"
     )
-    metadata = _expected_role_metadata(owner, role)
+    metadata = _expected_role_metadata(owner, role, role_definition)
     agent = directory.create_agent_instance(
         display_name=display_name,
         llm_bindings=bindings,
@@ -716,8 +863,15 @@ def _new_role_agent(owner: dict[str, Any], role: str) -> dict[str, Any]:
     return refreshed
 
 
-def _team_members(agents: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
-    return [
+def _team_members(agents: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Materialize member rows through the single normalization exit.
+
+    The unified-format member row is the 8-field shape produced by
+    ``team_service._normalize_members`` (unified-team-format.md §3); raw
+    drafts only carry the binding identity (agentId/role/purpose).
+    """
+
+    rows = [
         {
             "agentId": str(agents[role]["agentId"]),
             "role": str(ROLE_SPECS[role]["teamRole"]),
@@ -725,6 +879,68 @@ def _team_members(agents: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
         }
         for role in ROLE_SPECS
     ]
+    return team_service._normalize_members(rows, require_active=True)
+
+
+def _append_missing_team_members(
+    team_id: str, additions: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Append provisioning-owned member rows without the operator PATCH path.
+
+    Financial teams are system-managed, so ``update_team`` rejects operator
+    edits; the provisioning workflow still owns this roster repair. The write
+    mirrors ``update_team``'s member path: locked index mutation, join guard,
+    direct session bootstrap, chat room link and canvas refresh.
+    """
+
+    s = team_service
+    normalized = s._normalize_members(additions, require_active=True)
+    with s._TEAM_LOCK:
+        state = s._load_index()
+        team = s._find_team(state, team_id)
+        if team is None:
+            raise FinancialTeamConflictError("股票分析团队不存在，无法补齐成员")
+        if str(team.get("status") or "active") != "active":
+            raise FinancialTeamConflictError(
+                "股票分析团队已归档，请先在 Team 管理中核对"
+            )
+        existing_ids = {
+            str(item.get("agentId") or "").strip()
+            for item in list(team.get("members") or [])
+            if isinstance(item, dict)
+        }
+        pending = [
+            item
+            for item in normalized
+            if str(item.get("agentId") or "").strip() not in existing_ids
+        ]
+        if pending:
+            s._ensure_members_can_join_team(pending, state, team_id)
+            team["members"] = [*list(team.get("members") or []), *pending]
+            now = s.utc_now_iso()
+            team["updatedAt"] = now
+            state["updatedAt"] = now
+            s._save_index(state)
+    if not pending:
+        return team
+    s._ensure_active_member_direct_sessions(team)
+    s._ensure_team_chat_room_link(team)
+    with s._TEAM_LOCK:
+        state = s._load_index()
+        stored = s._find_team(state, team_id)
+        if stored is not None:
+            stored["linkedChatRoomId"] = str(team.get("linkedChatRoomId") or "").strip()
+            stored["updatedAt"] = s.utc_now_iso()
+            state["updatedAt"] = stored["updatedAt"]
+            s._save_index(state)
+            team = stored
+    s._sync_team_canvas_membership(team)
+    s._record_team_event(
+        "team.financial_members_repaired",
+        team,
+        fields={"addedMemberCount": len(pending)},
+    )
+    return team
 
 
 def provision_financial_team(assistant_agent_id: str) -> dict[str, Any]:
@@ -732,7 +948,9 @@ def provision_financial_team(assistant_agent_id: str) -> dict[str, Any]:
     owner = _financial_assistant(assistant_agent_id)
     with _LOCK, _provision_lock(owner):
         owner = _financial_assistant(assistant_agent_id)
+        role_definitions = _financial_role_definitions()
         role_agents = _role_agents(str(owner["agentId"]))
+        backfill_financial_team_identities()
         raw_team = _find_team(str(owner["agentId"]))
         expected_team_id = str((raw_team or {}).get("teamId") or "").strip()
         owner_metadata = (
@@ -749,11 +967,14 @@ def provision_financial_team(assistant_agent_id: str) -> dict[str, Any]:
         )
         for role in ROLE_SPECS:
             if role not in role_agents:
-                role_agents[role] = _new_role_agent(owner, role)
+                role_agents[role] = _new_role_agent(
+                    owner, role, role_definitions[role]
+                )
             elif not _role_agent_configuration_is_current(
                 owner,
                 role,
                 role_agents[role],
+                role_definitions[role],
                 expected_team_id=expected_team_id,
                 allow_missing_team_marker=team_marker_incomplete,
             ):
@@ -780,6 +1001,7 @@ def provision_financial_team(assistant_agent_id: str) -> dict[str, Any]:
                         owner,
                         role,
                         refreshed,
+                        role_definitions[role],
                         expected_team_id=expected_team_id,
                         allow_missing_team_marker=team_marker_incomplete,
                     )
@@ -801,6 +1023,9 @@ def provision_financial_team(assistant_agent_id: str) -> dict[str, Any]:
                 description="由真实原生 Agent 和各自原生 Session 组成的股票研究团队。",
                 purpose=purpose,
                 members=members,
+                team_kind=FINANCIAL_TEAM_KIND,
+                team_category=FINANCIAL_TEAM_CATEGORY,
+                team_source=FINANCIAL_TEAM_SOURCE,
             )
         else:
             team_id = str(raw_team.get("teamId") or "").strip()
@@ -823,15 +1048,16 @@ def provision_financial_team(assistant_agent_id: str) -> dict[str, Any]:
                     "股票分析团队包含未登记的额外成员，初始化不会移除或覆盖他们"
                 )
             if current_ids != expected_ids:
-                team = team_service.update_team(
+                # Workflow-owned roster repair: the operator PATCH lock
+                # (team_is_system_managed) must not block the provisioning
+                # workflow from re-adding its own members, so this append goes
+                # through the locked direct write instead of update_team.
+                team = _append_missing_team_members(
                     team_id,
-                    members=[
-                        *current_members,
-                        *(
-                            item
-                            for item in members
-                            if item["agentId"] not in current_ids
-                        ),
+                    [
+                        item
+                        for item in members
+                        if item["agentId"] not in current_ids
                     ],
                 )
 

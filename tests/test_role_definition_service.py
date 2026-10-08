@@ -106,6 +106,11 @@ def test_builtin_role_files_match_contract_golden_shape():
         "dev_team_developer_b",
         "dev_team_planner",
         "dev_team_reviewer",
+        "financial_bear",
+        "financial_bull",
+        "financial_fundamental",
+        "financial_market",
+        "financial_news",
     )
     for key in keys:
         role = role_definition_service.builtin_role_definition(key)
@@ -136,8 +141,13 @@ def test_repair_seeds_registry_and_role_files_into_workspace(tmp_path, monkeypat
         "dev_team_developer_b.md",
         "dev_team_planner.md",
         "dev_team_reviewer.md",
+        "financial_bear.md",
+        "financial_bull.md",
+        "financial_fundamental.md",
+        "financial_market.md",
+        "financial_news.md",
     ]
-    assert len(payload["roles"]) == 4
+    assert len(payload["roles"]) == 9
     for entry in payload["roles"]:
         assert entry["metadata"]["builtin"] is True
         assert entry["metadata"]["builtinContentVersion"] == role_definition_service.BUILTIN_ROLE_CONTENT_VERSION
