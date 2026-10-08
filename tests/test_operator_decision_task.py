@@ -71,6 +71,7 @@ prepared = fixtures.prepared
 
 @pytest.fixture
 def native_decision(activity, prepared, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_D1_SYSTEMONE_URL", "")
     _use_fake_local_research_config(monkeypatch)
     fixtures.measure(prepared, monkeypatch, ["failed", "fast"])
     evaluation.publish_evaluation(
@@ -320,3 +321,93 @@ def test_decision_input_drift_is_rejected_before_another_call(
             estimated_input_tokens=10,
             max_output_tokens=10,
         )
+
+
+def test_high_confidence_d1_choice_records_action_without_a_session(
+    native_decision, activity, monkeypatch
+):
+    store, action, agent_id, scheduled, _ = native_decision
+    inputs = decision_output.decision_task_input(activity[0], action.run_id)
+    calls = []
+
+    def choose(payload):
+        calls.append(payload["inputHash"])
+        return {
+            "kind": "stop",
+            "probability": 0.91,
+            "inputHash": inputs["inputHash"],
+            "model": "LiquidAI/d1-3B",
+            "inputTokens": 12,
+        }
+
+    monkeypatch.setattr(decision_task, "choose_iteration_action", choose)
+    handle = decision_task.create_decision_task(store, action, agent_id)
+    assert handle.session_id == ""
+    assert handle.turn_id == ""
+    assert scheduled == []
+    assert calls == [inputs["inputHash"]]
+    assert decision_task.create_decision_task(store, action, agent_id) == handle
+    assert calls == [inputs["inputHash"]]
+    result = decision_task.execute_decision_task(store, action, handle)
+    again = decision_task.execute_decision_task(store, action, handle)
+    assert result.usage == {
+        "costStatus": "local",
+        "inputTokens": 12,
+        "outputTokens": 0,
+    }
+    assert again.materialized_refs == result.materialized_refs
+    rows = list_workflow_artifacts(
+        activity[0],
+        kind="optimization_iteration_decision",
+        workflow_run_id=action.run_id,
+    )
+    assert len(rows) == 1
+    artifact = OperatorIterationDecisionArtifact.model_validate(rows[0]["payload"])
+    assert artifact.decision.kind == "stop"
+    assert artifact.decision.reason == "d1-3B 0.9100"
+    assert artifact.decision.decidedBy == agent_id
+    assert scheduled == []
+
+
+def test_local_d1_choice_releases_the_unused_decision_reservation(
+    native_decision, monkeypatch
+):
+    from core.web.services.team_workflow.operator_optimization.decision_authority import (
+        prepare_decision_task,
+        reserve_decision_budget,
+    )
+    from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+        RealDomainPorts,
+    )
+
+    store, action, agent_id, scheduled, _ = native_decision
+    task = prepare_decision_task(store, action, agent_id)
+    reservation = reserve_decision_budget(store, task)
+    monkeypatch.setattr(
+        decision_task,
+        "choose_iteration_action",
+        lambda payload: {
+            "kind": "stop",
+            "probability": 0.91,
+            "inputHash": payload["inputHash"],
+            "model": "LiquidAI/d1-3B",
+            "inputTokens": 4,
+        },
+    )
+    handle = decision_task.create_decision_task(store, action, agent_id)
+    result = decision_task.execute_decision_task(store, action, handle)
+    ports = RealDomainPorts(store)
+    settled = ports.settle_budget(reservation=reservation, usage=result.usage)
+    assert settled["status"] == "settled"
+    assert settled["modelBudgetStatus"] == "released"
+    again = ports.settle_budget(reservation=reservation, usage=result.usage)
+    assert again["modelBudgetStatus"] == "released"
+    row = store.read(
+        lambda repo: repo.execute(
+            "SELECT status FROM budget_receipts WHERE reservation_id = ?",
+            (reservation["reservationId"],),
+        ).fetchone()
+    )
+    assert str(row[0]) == "released"
+    assert scheduled == []
+    assert handle.session_id == ""

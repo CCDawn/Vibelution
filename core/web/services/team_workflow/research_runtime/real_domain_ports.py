@@ -436,6 +436,8 @@ class RealDomainPorts:
     def settle_budget(self, *, reservation: dict[str, Any], usage: dict[str, Any]) -> dict[str, Any]:
         """Settle reserved budget. Raises RuntimeError on failure (callers must
         treat any raised exception as a hard settle failure)."""
+        if str((usage or {}).get("costStatus") or "") == "local":
+            return self._release_unused_local_model_budget(reservation)
         from .budget_authority_adapter import (
             BudgetAuthorityError,
             settle_budget_authority,
@@ -447,6 +449,52 @@ class RealDomainPorts:
             )
         except BudgetAuthorityError as exc:
             raise RuntimeError(f"budget_settle_failed:{exc.code}:{exc}") from exc
+
+    def _release_unused_local_model_budget(self, reservation: dict[str, Any]) -> dict[str, Any]:
+        """Close a decision reservation that the local model never called.
+
+        The dispatcher only accepts ``settled``. The receipt itself stays
+        ``released`` with zero calls, so the campaign limit is not charged.
+        """
+
+        from ..operator_optimization.model_budget import (
+            ModelBudgetError,
+            finish_model_budget_in_uow,
+        )
+
+        reservation_id = str(reservation.get("reservationId") or "")
+
+        def release(uow: Any) -> str:
+            row = uow.repository.execute(
+                "SELECT status FROM budget_receipts WHERE reservation_id = ?",
+                (reservation_id,),
+            ).fetchone()
+            current = str(row[0] or "") if row is not None else ""
+            if current == "released":
+                return "released"
+            try:
+                return finish_model_budget_in_uow(
+                    uow,
+                    reservation=reservation,
+                    unused_status="released",
+                    now_ms=int(time.time() * 1000),
+                )
+            except ModelBudgetError as exc:
+                if exc.code == "operator_model_budget_terminal" and current == "released":
+                    return "released"
+                raise
+
+        try:
+            status = self._store.submit(release, force_flush=True).result(timeout=30)
+        except ModelBudgetError as exc:
+            raise RuntimeError(f"budget_settle_failed:{exc.code}:{exc}") from exc
+        if status != "released":
+            raise RuntimeError(f"budget_settle_failed:local_decision:{status}")
+        return {
+            "status": "settled",
+            "costStatus": "local",
+            "modelBudgetStatus": "released",
+        }
 
     def void_budget(
         self,
