@@ -98,6 +98,10 @@ def _team_canvas_path(team_id: str) -> Path:
     return s._teams_root() / s._safe_token(team_id, default="team", max_length=96) / "canvas.json"
 
 
+def _dev_task_board_path(team_id: str) -> Path:
+    return _team_canvas_path(team_id).parent / "dev-task-board.json"
+
+
 def _project_root() -> Path:
     s = _service()
     root = Path(s.PROJECT_ROOT).resolve()

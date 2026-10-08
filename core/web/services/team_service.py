@@ -137,6 +137,7 @@ _write_json = _team_store._write_json
 _teams_root = _team_store._teams_root
 _teams_index_path = _team_store._teams_index_path
 _team_canvas_path = _team_store._team_canvas_path
+_dev_task_board_path = _team_store._dev_task_board_path
 _project_root = _team_store._project_root
 _sync_project_bus_root = _team_store._sync_project_bus_root
 _relative_path = _team_store._relative_path

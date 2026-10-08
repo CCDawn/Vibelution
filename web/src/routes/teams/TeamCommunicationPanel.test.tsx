@@ -15,6 +15,12 @@ vi.mock("../../api/teamMemberMessages", () => ({
   teamMemberMessageSessionHref: vi.fn().mockReturnValue("/chat"),
 }));
 
+vi.mock("../../api/devTeamTasks", () => ({
+  listDevTeamTasks: vi.fn().mockResolvedValue({ schemaVersion: 1, teamId: "team-1", tasks: [], updatedAt: "" }),
+  createDevTeamTask: vi.fn(),
+  mutateDevTeamTask: vi.fn(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const selectedTeam = {
@@ -102,6 +108,20 @@ describe("TeamCommunicationPanel round controls", () => {
     host?.remove();
     host = null;
     root = null;
+  });
+
+  it("shows the shared task board only on a development team", () => {
+    expect(renderPanel()).not.toContain("共享任务板");
+    const html = renderPanel({
+      selectedTeam: {
+        ...selectedTeam,
+        teamTemplateId: "dev-team",
+        members: [
+          { memberId: "m-plan", role: "规划师", agentName: "规划师", agentId: "a1", agentCode: "plan", agentStatus: "active", purpose: "" },
+        ],
+      } as Team,
+    });
+    expect(html).toContain("共享任务板");
   });
 
   it("shows an in-place stop action while the linked room is busy", () => {
