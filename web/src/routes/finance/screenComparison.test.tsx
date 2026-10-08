@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import React, { act } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FinanceResearchReport } from "./FinanceResearchReport";
@@ -57,7 +58,7 @@ describe("screening comparison report", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => {
-      root?.render(<FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-1" zh onCitation={() => {}} onResearch={() => {}} />);
+      root?.render(<QueryClientProvider client={new QueryClient()}><FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-1" zh onCitation={() => {}} onResearch={() => {}} /></QueryClientProvider>);
     });
     expect(container.textContent).toContain("贵州茅台");
     expect(container.textContent).toContain("600519");
