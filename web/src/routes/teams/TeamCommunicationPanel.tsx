@@ -27,6 +27,7 @@ import { formatTime } from "./source-collection/presentationModel";
 import { teamChatRoomRoute } from "./researchStageAgentPresentation";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
 import { chatRoomStatusLabel } from "./workflowPresentation";
+import { DevTeamTaskBoard } from "./DevTeamTaskBoard";
 
 const styles = {
   ...shellStyles,
@@ -157,8 +158,8 @@ export function TeamCommunicationPanel({
         {devTeamFlow ? (
           <p>
             {lang === "zh"
-              ? "规划师先拆任务，再用 @开发工程师 A、@开发工程师 B 或 @评审员 派发。这一轮做完后可以停止。"
-              : "The planner splits the task, then assigns @开发工程师 A, @开发工程师 B, or @评审员. Stop the round when it is done."}
+              ? "先在下面的任务板里拆任务并指定负责人。需要讨论时，再用 @开发工程师 A、@开发工程师 B 或 @评审员 派发这一轮。这一轮做完后可以停止。"
+              : "Split the work on the task board below and name an owner. When the room needs a round, assign @开发工程师 A, @开发工程师 B, or @评审员. Stop the round when it is done."}
           </p>
         ) : null}
         <VNativeTextarea
@@ -251,6 +252,13 @@ export function TeamCommunicationPanel({
           ) : null}
         </section>
       </form>
+      {devTeamFlow && selectedTeam?.teamId ? (
+        <DevTeamTaskBoard
+          lang={lang}
+          teamId={selectedTeam.teamId}
+          members={selectedTeam.members ?? []}
+        />
+      ) : null}
       <form
         className={styles.teamMessageForm}
         onSubmit={(event) => {
