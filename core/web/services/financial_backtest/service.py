@@ -255,12 +255,13 @@ def request_financial_backtest_stop(
     store: FinancialBacktestStore | None = None,
 ) -> dict[str, Any]:
     selected_store = store or default_store()
-    _require_owner_and_model(agent_id)
+    _require_owner(agent_id)
     def mutate(run: dict[str, Any]) -> None:
         status = project_status(run.get("status"))
         if status in _TERMINAL_STATUSES:
             return
-        if status == "queued":
+        submission = run.get("decisionSubmission") if isinstance(run.get("decisionSubmission"), Mapping) else {}
+        if status == "queued" and submission.get("status") != "submitting":
             run["status"] = "stopped"
             run["completedAt"] = _iso(_now())
             run["terminalReason"] = "用户停止了尚未开始的回测"

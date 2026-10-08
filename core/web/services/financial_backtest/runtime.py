@@ -371,7 +371,8 @@ class FinancialBacktestWorker:
         def mutate(run: dict[str, Any]) -> None:
             submission = run.get("decisionSubmission") if isinstance(run.get("decisionSubmission"), Mapping) else {}
             if (
-                str(submission.get("status") or "") != "submitting"
+                str(run.get("status") or "") not in {"running", "stop_requested"}
+                or str(submission.get("status") or "") != "submitting"
                 or str(submission.get("attemptId") or "") != attempt_id
                 or str(submission.get("workerId") or "") != self._worker_id
             ):

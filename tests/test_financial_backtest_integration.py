@@ -243,7 +243,7 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     csv_export = api.export_financial_backtest_run(_AGENT_ID, first_start["runId"], "csv", store=store)
     rows = list(csv.reader(StringIO(csv_export["content"])))
     assert csv_export["mediaType"] == "text/csv"
-    assert rows[0] == ["runId", "symbol", "status", "modelId", "paramsHash", "dataHash"]
+    assert rows[0] == ["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"]
     assert any(row and row[0] == first_start["runId"] for row in rows)
     assert any(row[:2] == ["account", "signalDate"] for row in rows)
     assert any(row and row[0] == "benchmark" for row in rows)
@@ -268,7 +268,9 @@ def test_stop_then_resume_keeps_successful_decision_and_skips_rebilling(monkeypa
         decision_input = dict(kwargs["decision_input"])
         calls.append(decision_input)
         if decision_input["asOfDate"] == _DAY_ONE:
-            api.request_financial_backtest_stop(_AGENT_ID, started["runId"], store=store)
+            stopping = api.request_financial_backtest_stop(_AGENT_ID, started["runId"], store=store)
+            assert stopping["status"] == "stop_requested"
+            assert stopping["startedAt"]
             return _decision(decision_input, 100)
         return _decision(decision_input, 0)
 
@@ -282,6 +284,7 @@ def test_stop_then_resume_keeps_successful_decision_and_skips_rebilling(monkeypa
     assert worker.process_pending_once(stop_requested=lambda: False) == 1
     stopped = api.get_financial_backtest_run(_AGENT_ID, started["runId"], store=store)
     assert stopped["status"] == "stopped"
+    assert "尚未开始" not in stopped["terminalReason"]
     assert stopped["completedDecisionCount"] == 1
     assert stopped["decisions"][0]["date"] == _DAY_ONE
 
