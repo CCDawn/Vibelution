@@ -1231,6 +1231,12 @@ def _run_session_turn_impl(context: dict[str, Any]) -> None:
         supplied_agent = None
     agent_instance = supplied_agent or (s.get_agent(agent_id, include_archived=False) if agent_id else None)
     historical_agent = None if agent_instance else (s.get_agent(agent_id, include_archived=True) if agent_id else None)
+    if supplied_agent:
+        # Admission freezes configuration, not lifecycle permission. An Agent
+        # may be archived or removed while this turn waits in the queue.
+        historical_agent = s.get_agent(agent_id, include_archived=True)
+        if not historical_agent or str(historical_agent.get("status") or "").strip().lower() == "archived":
+            agent_instance = None
     # archived 兼容视图（include_archived=True）在 agent 未归档时返回同一条
     # 活跃记录，因此状态直接取已取到的 instance/historical，省掉一次每轮
     # 重复的 agent 目录读取。
