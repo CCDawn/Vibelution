@@ -13,6 +13,17 @@ DelegationAccess = Literal["none", "assigned_only"]
 ApprovalMode = Literal["never", "on_request", "always"]
 TurnSource = Literal["session", "team", "research", "supervised", "self_evolution"]
 
+# writeScopes 闸门的控制面豁免标签集。语义定案：本闸门管辖「工作区/产物
+# 写」（文件/内存/会话状态等落盘变更）；下列标签表达的是控制面操作——
+# 跨 agent 消息与唤醒（cross_agent_message / can_wake_agent）和团队工作流
+# 状态写（team_workflow_state_write，如任务看板）——由各自更细的门（板服务
+# apply_* 角色门、唤醒/协作策略）管辖，豁免于本闸门。写类标签全部落在此
+# 集合内的工具（如 agent_message_tool / dev_task_board_tool）不受「声明空
+# 写范围即硬禁」影响，仍受 allowedTools / mutationAccess 等其他闸门管辖。
+WRITE_SCOPE_EXEMPT_RISK_TAGS = frozenset(
+    {"cross_agent_message", "can_wake_agent", "team_workflow_state_write"}
+)
+
 
 class ToolAuthorizationError(ValueError):
     """Base error for fail-closed authorization input failures."""
@@ -51,6 +62,7 @@ class ToolDenyCode(str, Enum):
     ENVIRONMENT_UNAVAILABLE = "environment_unavailable"
     NETWORK_DENIED = "network_denied"
     MUTATION_DENIED = "mutation_denied"
+    WRITE_SCOPE_DENIED = "write_scope_denied"
     APPROVAL_REQUIRED = "approval_required"
 
 
@@ -84,6 +96,12 @@ class ToolPolicyV2:
     mutation_access: MutationAccess
     delegation_access: DelegationAccess
     max_calls_per_turn: int
+    # 仅当源 policy 显式携带 writeScopes 键时为 True（空数组与非空皆算）。
+    # 决策层分工：本标志只在「声明了写范围却为零范围」时对写类工具硬禁
+    # （WRITE_SCOPE_DENIED）；非空 scope 的路径包含约束由会话工作区容器层
+    # （任务 worktree 绑定）承担，决策层不做路径判定。未声明（键缺失）时
+    # 本标志为 False，写工具行为与历史版本完全一致。
+    write_scopes_declared: bool = False
     approval_overrides: tuple[tuple[str, ApprovalMode], ...] = ()
 
     def approval_override_for(self, tool_name: str) -> ApprovalMode | None:

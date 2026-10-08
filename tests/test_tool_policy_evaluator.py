@@ -460,3 +460,230 @@ def test_fixed_role_profiles_materialize_forbidden_tools_inside_policy_v2(role_k
     assert policy is not None
     assert set(case["expected_required_tools"]).issubset(policy.allowed_tools)
     assert set(case["expected_forbidden_tools"]).issubset(policy.blocked_tools)
+
+
+def test_explicit_empty_write_scopes_hard_deny_write_tools():
+    """planner 形状：显式 writeScopes: [] 时写类工具在决策层被 WRITE_SCOPE_DENIED 拒绝。"""
+
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "apply_patch_tool"],
+            "preferredTools": [],
+            "networkAccess": "full",
+            "mutationAccess": "controlled",
+            "writeScopes": [],
+        }
+    )
+    assert policy.write_scopes_declared is True
+
+    decision = _evaluate(policy, _grant())
+
+    assert decision.visible_tools == ("apply_patch_tool", "grep_search_tool")
+    assert decision.executable_tools == ("grep_search_tool",)
+    reason = decision.deny_reason_for("apply_patch_tool")
+    assert reason is not None
+    assert reason.code is ToolDenyCode.WRITE_SCOPE_DENIED
+    assert reason.gate_id == "policy.writeScopes"
+    assert reason.rule_id == "policy-test:policy.writeScopes:write_scope_denied"
+    assert "write" in reason.message.lower()
+    projection = decision.public_projection()["denied"]["apply_patch_tool"]
+    assert projection["code"] == "write_scope_denied"
+    assert projection["ruleId"] == reason.rule_id
+
+
+def test_non_empty_write_scopes_keep_write_tools_executable():
+    """developer 形状：非空 writeScopes（如 [private]）放行写工具；路径约束归容器层。"""
+
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "apply_patch_tool"],
+            "preferredTools": [],
+            "networkAccess": "full",
+            "mutationAccess": "controlled",
+            "writeScopes": ["private"],
+        }
+    )
+    assert policy.write_scopes_declared is True
+
+    decision = _evaluate(policy, _grant())
+
+    assert decision.executable_tools == ("apply_patch_tool", "grep_search_tool")
+    assert decision.deny_reason_for("apply_patch_tool") is None
+
+
+def test_missing_write_scopes_key_keeps_legacy_behavior_and_decision_shape():
+    """legacy 形状：未声明 writeScopes 键的存量策略零影响，写工具照常可执行。"""
+
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "apply_patch_tool"],
+            "preferredTools": [],
+            "networkAccess": "full",
+            "mutationAccess": "controlled",
+        }
+    )
+    assert policy.write_scopes_declared is False
+    # 投影 schema 保持稳定：不因内部 declared 标志新增键。
+    assert "writeScopesDeclared" not in policy.public_projection()
+
+    decision = _evaluate(policy, _grant())
+
+    assert decision.executable_tools == ("apply_patch_tool", "grep_search_tool")
+    assert decision.deny_reason_for("apply_patch_tool") is None
+
+
+def test_explicit_empty_write_scopes_do_not_touch_non_write_tools():
+    """非写工具不受空写范围闸门影响：read/network 工具保持可执行。"""
+
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "web_search_tool"],
+            "preferredTools": [],
+            "networkAccess": "full",
+            "mutationAccess": "controlled",
+            "writeScopes": [],
+        }
+    )
+
+    decision = _evaluate(policy, _grant())
+
+    assert decision.executable_tools == ("grep_search_tool", "web_search_tool")
+    assert decision.deny_reason_for("grep_search_tool") is None
+    assert decision.deny_reason_for("web_search_tool") is None
+
+
+def test_role_profile_materialization_keeps_empty_default_scopes_inert():
+    """代码内置角色 profile 物化总是携带 writeScopes 键：空默认按未声明处理，存量固定角色零影响。"""
+
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "apply_patch_tool"],
+            "preferredTools": [],
+            "networkAccess": "full",
+            "mutationAccess": "controlled",
+            "writeScopes": [],
+            "roleToolProfileId": "profile-research-collector",
+        }
+    )
+    assert policy.write_scopes_declared is False
+
+    decision = _evaluate(policy, _grant())
+
+    assert decision.executable_tools == ("apply_patch_tool", "grep_search_tool")
+    assert decision.deny_reason_for("apply_patch_tool") is None
+
+
+def _control_plane_write_scope_policy_and_descriptors():
+    """planner 形状：显式空写范围 + 控制面类与文件写类工具各一。"""
+
+    descriptors = (
+        tool_catalog.build_tool_descriptor("agent_message_tool", args_schema={"type": "object"}),
+        tool_catalog.build_tool_descriptor("dev_task_board_tool", args_schema={"type": "object"}),
+        tool_catalog.build_tool_descriptor("apply_diff_edit_tool", args_schema={"type": "object"}),
+    )
+    policy = normalize_legacy_tool_policy(
+        {
+            "policyId": "policy-planner",
+            "allowedTools": ["agent_message_tool", "dev_task_board_tool", "apply_diff_edit_tool"],
+            "preferredTools": [],
+            "mutationAccess": "controlled",
+            "writeScopes": [],
+        },
+        registered_tool_names=[descriptor.name for descriptor in descriptors],
+    )
+    grant = TurnToolGrant(
+        turn_id="turn-planner",
+        source="team",
+        allowed_capabilities=tuple(sorted({capability for descriptor in descriptors for capability in descriptor.capabilities})),
+        denied_tools=(),
+        approval_mode="on_request",
+    )
+    return descriptors, policy, grant
+
+
+def test_communication_only_write_tool_is_exempt_from_empty_write_scope_gate():
+    """agent_message_tool 写类标签全部落在控制面豁免集：空写范围下仍放行队内沟通。"""
+
+    descriptors, policy, grant = _control_plane_write_scope_policy_and_descriptors()
+    message_descriptor = descriptors[0]
+    assert message_descriptor.risk == "write"
+    assert message_descriptor.write_scope_gated is False
+    assert policy.write_scopes_declared is True
+
+    decision = evaluate_tool_policy(
+        agent_id="agent-1",
+        policy=policy,
+        grant=grant,
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="registry-planner",
+        generated_at="2026-10-08T00:00:00Z",
+    )
+
+    assert "agent_message_tool" in decision.executable_tools
+    assert decision.deny_reason_for("agent_message_tool") is None
+
+
+def test_team_workflow_state_write_tool_is_exempt_from_empty_write_scope_gate():
+    """dev_task_board_tool（team_workflow_state_write）是控制面操作：空写范围下放行。"""
+
+    descriptors, policy, grant = _control_plane_write_scope_policy_and_descriptors()
+    board_descriptor = descriptors[1]
+    assert board_descriptor.risk == "write"
+    assert board_descriptor.write_scope_gated is False
+    assert policy.write_scopes_declared is True
+
+    decision = evaluate_tool_policy(
+        agent_id="agent-1",
+        policy=policy,
+        grant=grant,
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="registry-planner",
+        generated_at="2026-10-08T00:00:00Z",
+    )
+
+    assert decision.executable_tools == ("agent_message_tool", "dev_task_board_tool")
+    assert decision.deny_reason_for("dev_task_board_tool") is None
+
+
+def test_file_write_tool_still_denied_under_empty_write_scope_gate():
+    """apply_diff_edit_tool（file_write）不受控制面豁免影响：空写范围下仍 WRITE_SCOPE_DENIED。"""
+
+    descriptors, policy, grant = _control_plane_write_scope_policy_and_descriptors()
+    edit_descriptor = descriptors[2]
+    assert edit_descriptor.risk == "write"
+    assert edit_descriptor.write_scope_gated is True
+
+    decision = evaluate_tool_policy(
+        agent_id="agent-1",
+        policy=policy,
+        grant=grant,
+        descriptors=descriptors,
+        registry_version=1,
+        registry_fingerprint="registry-planner",
+        generated_at="2026-10-08T00:00:00Z",
+    )
+
+    reason = decision.deny_reason_for("apply_diff_edit_tool")
+    assert reason is not None
+    assert reason.code is ToolDenyCode.WRITE_SCOPE_DENIED
+    assert reason.gate_id == "policy.writeScopes"
+    assert reason.rule_id == "policy-planner:policy.writeScopes:write_scope_denied"
+
+
+def test_registry_projection_carries_write_scope_gate_flag_to_decision():
+    """Registry 投影的 writeScopeGated 透传进决策输入：缺字段时 fail-closed 视为受闸。"""
+
+    from core.authorization import tool_authorization_service as auth_service
+
+    message_descriptor = tool_catalog.build_tool_descriptor("agent_message_tool", args_schema={"type": "object"})
+    projection = message_descriptor.public_projection()
+    assert projection["writeScopeGated"] is False
+
+    parsed = auth_service._descriptors_from_registry({"descriptors": [projection]})[0]
+    assert parsed.write_scope_gated is False
+    legacy_parsed = auth_service._descriptors_from_registry(
+        {"descriptors": [{key: value for key, value in projection.items() if key != "writeScopeGated"}]}
+    )[0]
+    assert legacy_parsed.write_scope_gated is True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.authorization.tool_policy_models import WRITE_SCOPE_EXEMPT_RISK_TAGS
 from dataclasses import dataclass
 from hashlib import sha256
 import json
@@ -105,6 +106,11 @@ class ToolDescriptor:
     concurrency: ToolConcurrency
     scopes: tuple[str, ...]
     approval: ToolApproval
+    # writeScopes 决策层闸门的派生判定：risk=write 且写类标签并未全部落在
+    # 控制面豁免集（core.authorization.tool_policy_models.
+    # WRITE_SCOPE_EXEMPT_RISK_TAGS）内时为 True。标签 facts 只在本层可得，
+    # 因此派生成布尔随描述符与 Registry 投影流转；缺省 True 保持 fail-closed。
+    write_scope_gated: bool = True
     aliases: tuple[str, ...] = ()
     availability: ToolAvailability = ToolAvailability()
 
@@ -119,6 +125,7 @@ class ToolDescriptor:
             "concurrency": self.concurrency,
             "scopes": list(self.scopes),
             "approval": self.approval,
+            "writeScopeGated": self.write_scope_gated,
             "aliases": list(self.aliases),
             "availability": self.availability.public_projection(),
         }
@@ -625,6 +632,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "category": "agent_collaboration",
         "capabilityTags": ["agent_inbox", "message_consume_all", "governed_write"],
         "riskTags": ["session_state_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "dev_task_board_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["dev_team_task_board", "task_state", "structured_result"],
+        "riskTags": ["team_workflow_state_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
     "knowledge_base_acl_grant_tool": {
@@ -1496,6 +1509,8 @@ def build_tool_descriptor(
         "on_request" if str(metadata.get("permissionTier") or "") == HIGH_PERMISSION_TIER else "never"
     )
     concurrency: ToolConcurrency = "serialized" if risk in {"write", "execute", "destructive"} else "safe"
+    risk_tags = {str(item or "").strip() for item in metadata.get("riskTags") or [] if str(item or "").strip()}
+    write_scope_gated = risk == "write" and bool(risk_tags - WRITE_SCOPE_EXEMPT_RISK_TAGS)
     descriptor = ToolDescriptor(
         name=name,
         schema_version=TOOL_DESCRIPTOR_SCHEMA_VERSION,
@@ -1506,6 +1521,7 @@ def build_tool_descriptor(
         concurrency=concurrency,
         scopes=tuple(scopes),
         approval=approval,
+        write_scope_gated=write_scope_gated,
         aliases=normalized_aliases,
         availability=ToolAvailability(
             platforms=normalized_platforms,

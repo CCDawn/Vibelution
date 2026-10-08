@@ -50,6 +50,10 @@ class ToolDescriptorLike(Protocol):
     risk: str
     approval: str
     aliases: Sequence[str]
+    # writeScopes 闸门派生判定：risk=write 且写类标签未全部落在控制面豁免集
+    # （WRITE_SCOPE_EXEMPT_RISK_TAGS，见 tool_policy_models）内时为 True。
+    # 决策输入只带 risk 不带标签 facts，由 Registry 描述符链透传该布尔。
+    write_scope_gated: bool
 
 
 def normalize_legacy_tool_policy(
@@ -115,6 +119,15 @@ def normalize_legacy_tool_policy(
         registered=registered,
         alias_map=alias_map,
     )
+    write_scopes = _normalized_names(raw_policy.get("writeScopes") or (), field="write scope")
+    # 「显式空=禁写」只对源 policy 真正声明过 writeScopes 键的策略生效：
+    # 键缺失（存量 legacy agent）不启用闸门，行为与历史版本一致。代码内置
+    # 角色 profile 的物化（build_policy_from_role_profile）总是携带该键，
+    # 无法区分「作者声明空」与「helper 默认空」，因此对带 roleToolProfileId
+    # 标记且范围为空的策略按未声明处理，保持既有固定角色零影响。
+    write_scopes_declared = raw_policy.get("writeScopes") is not None and not (
+        not write_scopes and _has_role_tool_profile_marker(raw_policy)
+    )
     return ToolPolicyV2(
         policy_id=resolved_policy_id,
         policy_version=policy_version,
@@ -122,11 +135,12 @@ def normalize_legacy_tool_policy(
         blocked_tools=blocked,
         preferred_tools=preferred,
         read_scopes=_normalized_names(raw_policy.get("readScopes") or (), field="read scope"),
-        write_scopes=_normalized_names(raw_policy.get("writeScopes") or (), field="write scope"),
+        write_scopes=write_scopes,
         network_access=network_access,
         mutation_access=mutation_access,
         delegation_access=delegation_access,  # type: ignore[arg-type]
         max_calls_per_turn=max_calls,
+        write_scopes_declared=write_scopes_declared,
         approval_overrides=approval_overrides,
     )
 
@@ -369,6 +383,29 @@ def _execution_deny_reason(
             "execution",
             "Mutation access is disabled",
         )
+    # writeScopes 决策层闸门：仅当角色策略显式声明 writeScopes 且范围为空时，
+    # 对写类工具硬禁（WRITE_SCOPE_DENIED）。管辖语义：本闸门只管「工作区/
+    # 产物写」（文件/内存/会话状态等落盘变更）的「声明了却零范围」硬禁；
+    # 非空 scope 的路径包含约束由会话工作区容器层（任务 worktree 绑定）承担，
+    # 决策层不做路径判定。控制面操作豁免：跨 agent 消息/唤醒与团队工作流
+    # 状态写（写类标签全部落在 WRITE_SCOPE_EXEMPT_RISK_TAGS 内的工具，如
+    # agent_message_tool / dev_task_board_tool）由各自更细的门管辖，不受本
+    # 闸门影响。放在 mutation 闸门之后：mutationAccess=none 的既有策略继续
+    # 报 MUTATION_DENIED，审计码不变。write_scope_gated 缺省按 True 处理，
+    # 旧描述符形状 fail-closed。
+    if (
+        descriptor.risk == "write"
+        and getattr(descriptor, "write_scope_gated", True)
+        and policy.write_scopes_declared
+        and not policy.write_scopes
+    ):
+        return _deny_reason(
+            policy_id,
+            ToolDenyCode.WRITE_SCOPE_DENIED,
+            "policy.writeScopes",
+            "execution",
+            "Role declared an empty write scope; write-class tools are denied",
+        )
     required_approval = policy.approval_override_for(descriptor.name) or str(descriptor.approval or "never")
     if grant.approval_mode == "never" and required_approval != "never":
         return _deny_reason(
@@ -509,6 +546,19 @@ def _normalize_mutation_access(value: Any) -> str:
     if normalized not in _MUTATION_ACCESS:
         raise ToolPolicyInvalidError(f"Unsupported mutationAccess: {normalized}")
     return normalized
+
+
+def _has_role_tool_profile_marker(raw_policy: Mapping[str, Any]) -> bool:
+    """Detect a code-defined role profile materialization.
+
+    ``build_policy_from_role_profile`` stamps ``roleToolProfileId`` onto every
+    projected policy and always emits the ``writeScopes`` key, so the key's
+    presence alone cannot distinguish "author declared empty scopes" from the
+    helper default. Only stored/explicit policies (agents.json, team role
+    materialization) speak for themselves.
+    """
+
+    return bool(str(raw_policy.get("roleToolProfileId") or "").strip())
 
 
 def _narrow_network_access(policy_value: str, grant_value: str | None) -> str:

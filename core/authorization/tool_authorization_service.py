@@ -169,6 +169,9 @@ class _RegistryDescriptor:
     risk: str
     approval: str
     aliases: tuple[str, ...]
+    # writeScopes 闸门派生判定（由 Registry 投影 writeScopeGated 透传）；
+    # 缺省 True 保持 fail-closed：旧 payload 未带字段时写工具照旧受闸。
+    write_scope_gated: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -816,6 +819,7 @@ def _descriptors_from_registry(payload: Mapping[str, Any]) -> tuple[_RegistryDes
                 risk=_coerce_text(item.get("risk") or "read").strip() or "read",
                 approval=_coerce_text(item.get("approval") or "never").strip() or "never",
                 aliases=tuple(_coerce_str_list(item.get("aliases"))),
+                write_scope_gated=_coerce_bool(item.get("writeScopeGated"), True),
             )
         )
     return tuple(descriptors)

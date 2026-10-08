@@ -551,3 +551,150 @@ def test_non_mapping_runtime_install_fails_closed_without_dict_crash(monkeypatch
 
     with pytest.raises(tool_authorization_service.ToolAuthorizationContextError):
         _install()
+
+
+def _write_scope_runtime(monkeypatch, *, tool_policy):
+    """Runtime fixture carrying an explicit toolPolicy shape (writeScopes included)."""
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-planner",
+            "turnId": "turn-planner",
+            "agentConfigSnapshot": {
+                "agentId": "agent-planner",
+                "configRevision": 3,
+                "configHash": "config-hash-planner",
+            },
+            "permissionPreset": "request_approval",
+            "runtimePermissions": {
+                "preset": "request_approval",
+                "sandboxMode": "workspace_write",
+                "approvalPolicy": "on_request",
+                "approvalsReviewer": "user",
+            },
+            "toolPolicy": tool_policy,
+        },
+    )
+
+
+def _install_real_write_scope_decision(*, tool_policy, write_tool):
+    """Evaluate a real decision for one write-class tool and install it end to end.
+
+    apply_diff_edit_tool 是规格点名的写类工具（file_write），被拒用例在
+    executable 检查处即被拦、不会触及审批流；放行用例改用审批豁免白名单里的
+    source_collection_stage_writeback_tool（risk=write），隔离 session 审批流。
+    """
+
+    from core.authorization.tool_policy_evaluator import evaluate_tool_policy, normalize_legacy_tool_policy
+    from core.web.services import tool_catalog
+
+    descriptor = tool_catalog.build_tool_descriptor(write_tool, args_schema={"type": "object"})
+    policy = normalize_legacy_tool_policy(
+        {"policyId": "tool-dev-planner", **tool_policy},
+        registered_tool_names=(descriptor.name,),
+    )
+    grant = tool_authorization_service.TurnToolGrant(
+        turn_id="turn-planner",
+        source="team",
+        allowed_capabilities=tuple(descriptor.capabilities),
+        denied_tools=(),
+        approval_mode="on_request",
+    )
+    decision = evaluate_tool_policy(
+        agent_id="agent-planner",
+        policy=policy,
+        grant=grant,
+        descriptors=(descriptor,),
+        registry_version=1,
+        registry_fingerprint="registry-planner",
+        generated_at="2026-10-08T00:00:00Z",
+    )
+    tool_authorization_service.install_execution_authorization(
+        SimpleNamespace(decision=decision)
+    )
+    return decision
+
+
+def test_explicit_empty_write_scope_policy_blocks_write_tool_at_execution(monkeypatch):
+    """决策层 WRITE_SCOPE_DENIED 落到执行层：tool_not_executable 且 ruleId 可审计回闸门。"""
+
+    _write_scope_runtime(
+        monkeypatch,
+        tool_policy={
+            "policyId": "tool-dev-planner",
+            "allowedTools": ["apply_diff_edit_tool"],
+            "preferredTools": [],
+            "writeScopes": [],
+        },
+    )
+    decision = _install_real_write_scope_decision(
+        tool_policy={
+            "allowedTools": ["apply_diff_edit_tool"],
+            "preferredTools": [],
+            "writeScopes": [],
+        },
+        write_tool="apply_diff_edit_tool",
+    )
+    reason = decision.deny_reason_for("apply_diff_edit_tool")
+    assert reason is not None
+    assert reason.rule_id == "tool-dev-planner:policy.writeScopes:write_scope_denied"
+
+    executor = ToolExecutor()
+    calls = []
+    executor.register_tool("apply_diff_edit_tool", lambda: calls.append("called") or "unsafe")
+
+    result, action = executor.execute("apply_diff_edit_tool", {}, tool_call_id="call-planner")
+
+    assert "未被本回合授权执行" in result
+    assert action is None
+    assert calls == []
+    execution = tool_authorization_service.authorize_tool_execution(
+        tool_name="apply_diff_edit_tool",
+        tool_call_id="call-planner",
+    )
+    assert execution.allowed is False
+    assert execution.code == "tool_not_executable"
+    assert execution.reason_code == "write_scope_denied"
+    assert execution.rule_id == "tool-dev-planner:policy.writeScopes:write_scope_denied"
+
+
+def test_undeclared_write_scope_policy_keeps_write_tool_executable(monkeypatch):
+    """未声明 writeScopes 键的存量策略零影响：写工具照常放行执行。
+
+    用审批豁免白名单内的写类工具（risk=write），避免测试依赖 session 审批流。
+    """
+
+    write_tool = "source_collection_stage_writeback_tool"
+    _write_scope_runtime(
+        monkeypatch,
+        tool_policy={
+            "policyId": "tool-dev-planner",
+            "allowedTools": [write_tool],
+            "preferredTools": [],
+        },
+    )
+    decision = _install_real_write_scope_decision(
+        tool_policy={
+            "allowedTools": [write_tool],
+            "preferredTools": [],
+        },
+        write_tool=write_tool,
+    )
+    assert decision.deny_reason_for(write_tool) is None
+
+    executor = ToolExecutor()
+    calls = []
+    executor.register_tool(write_tool, lambda: calls.append("called") or "ok")
+
+    result, action = executor.execute(write_tool, {}, tool_call_id="call-planner")
+
+    assert result == "ok"
+    assert calls == ["called"]
+    assert action is None
+    execution = tool_authorization_service.authorize_tool_execution(
+        tool_name=write_tool,
+        tool_call_id="call-planner",
+    )
+    assert execution.allowed is True
