@@ -43,6 +43,7 @@
 | `financialPreferences.ts` | `/api/financial-preferences/*`, explicit user preferences in canonical Agent personal memory; no second memory store |
 | `financialTeam.ts` | `/api/financial-teams/*`, native analyst Agents and Session/Turn orchestration references |
 | `financialJobs.ts` | `/api/financial-jobs/*`, owned batch queue and Beijing-time schedules; precise stop and unfinished retry |
+| `financialBacktests.ts` | `/api/financial-backtests/*`, frozen historical-data previews and owned managed AI backtest tasks, exact stop/resume and bounded JSON/CSV download |
 | `financialReports.ts` | `/api/financial-reports/*`, export an exact completed native Turn to Markdown, JSON, DOCX or isolated print HTML |
 | `financialPortfolio.ts` | `/api/financial-portfolios/*`, read-only research over the owned paper ledger and actual public price samples |
 | `files.ts` | `/api/files/content` |

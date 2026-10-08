@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { checkFinancialClaim, fetchFinancialClaims, fetchFinancialFeedback, runFinancialBacktest } from "../../api/financialEvaluation";
 import type { FinancialClaim } from "../../api/types/financialEvaluation";
 import { FinanceOutcomeReview } from "./FinanceOutcomeReview";
-import { FinanceBacktest } from "./FinanceBacktest";
+import { FinanceMABacktest as FinanceBacktest } from "./FinanceBacktest";
 
 vi.mock("../../api/financialEvaluation", async importOriginal => ({ ...await importOriginal<typeof import("../../api/financialEvaluation")>(), fetchFinancialClaims: vi.fn(), checkFinancialClaim: vi.fn(), fetchFinancialFeedback: vi.fn(), runFinancialBacktest: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

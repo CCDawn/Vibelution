@@ -4976,6 +4976,14 @@ class LLMClient:
         invocation_scope: Any = None,
     ) -> Any:
         max_attempts = _retry_policy_max_attempts(self.profile, role=self.role)
+        disable_automatic_retries = bool(
+            (metadata or {}).get("disableAutomaticRetries")
+        )
+        if disable_automatic_retries:
+            # Point-in-time AI backtests cannot silently replay a provider call:
+            # after a timeout or protocol rejection, the charge/result may be
+            # unknown. The owning backtest state machine handles explicit retry.
+            max_attempts = 1
         last_error: LLMError | None = None
         # 2026-10-02 聚合器协议错误止血（见模块注释）：B 有界重试与 C 去参降级
         # 共享这份独立小预算，不计入 5xx/network 的主重试预算；总尝试次数上
@@ -5092,7 +5100,7 @@ class LLMClient:
                 # 2026-10-02 聚合器协议错误止血（见模块注释）：C 去参降级优先
                 # 于 B 盲重试；两者共享 _PROTOCOL_EXTRA_ATTEMPT_BUDGET，预算耗
                 # 尽后走既有失败路径（provider_protocol_error 仍 fail-closed）。
-                extra_budget_left = (
+                extra_budget_left = not disable_automatic_retries and (
                     param_degrade_rounds + protocol_retries_used
                 ) < _PROTOCOL_EXTRA_ATTEMPT_BUDGET
                 unsupported_params = (
@@ -5145,7 +5153,11 @@ class LLMClient:
                 # 缩水：终止上限按已消耗的协议预算等额放宽（总尝试次数仍被
                 # range 的 max_attempts + _PROTOCOL_EXTRA_ATTEMPT_BUDGET 封顶）。
                 extra_used = param_degrade_rounds + protocol_retries_used
-                if not classification.is_transient_retryable or attempt >= max_attempts + extra_used:
+                if (
+                    disable_automatic_retries
+                    or not classification.is_transient_retryable
+                    or attempt >= max_attempts + extra_used
+                ):
                     _record_llm_scene_event(
                         phase,
                         event_code,
