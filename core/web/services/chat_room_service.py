@@ -3101,6 +3101,7 @@ def _execute_chat_room_round(
             "finishedAt": finished_at,
         },
     )
+    _append_dev_artifact_timeline_event(room, target_round)
     if completed_count > 0:
         _sync_group_context_events(room, target_round)
         _deliver_round_digest_to_targeted_inboxes(room, target_round)
@@ -9773,6 +9774,83 @@ def _append_room_timeline_event(
         except Exception:
             return None
         return None
+
+
+_DEV_ARTIFACT_MAX_TASKS = 10
+_DEV_ARTIFACT_MAX_CHANGED_PATHS = 50
+
+
+def _append_dev_artifact_timeline_event(
+    room: dict[str, Any],
+    round_payload: Mapping[str, Any],
+) -> None:
+    """Summarize bound dev-task-board workspaces as one artifact timeline event.
+
+    Fires only for rooms bound to a dev-team team: ``list_dev_tasks`` enforces
+    the same ``_require_dev_team`` judgment the board applies on every read, so
+    non-dev rooms (and unbound rooms) never produce an artifact event. The
+    summary aggregates the changed paths of board tasks that own a workspace,
+    bounded in git calls (at most ``_DEV_ARTIFACT_MAX_TASKS`` workspaces, 3 git
+    invocations each) and in payload size (at most
+    ``_DEV_ARTIFACT_MAX_CHANGED_PATHS`` path records). Entirely fail-soft: any
+    error skips the event and never disturbs the round finish path —
+    ``_append_room_timeline_event`` already swallows its own failures, and this
+    wrapper covers the aggregation itself. Must be called OUTSIDE
+    ``_CHAT_ROOM_LOCK`` (the board read takes ``team_service._TEAM_LOCK``).
+    """
+
+    try:
+        team_id = str(_config_mapping(room).get("teamId") or "").strip()
+        if not team_id:
+            return
+        from core.web.services.team import dev_task_board
+
+        board = dev_task_board.list_dev_tasks(team_id)
+        tasks = [
+            item
+            for item in board.get("tasks") or []
+            if isinstance(item, dict) and str(item.get("workspacePath") or "").strip()
+        ]
+        if not tasks:
+            return
+        task_ids: list[str] = []
+        changed_paths: list[dict[str, str]] = []
+        file_count = 0
+        for task in tasks[:_DEV_ARTIFACT_MAX_TASKS]:
+            changes = dev_task_board.read_dev_task_changes(
+                PROJECT_ROOT,
+                workspace_path=str(task.get("workspacePath") or ""),
+                workspace_branch=str(task.get("workspaceBranch") or ""),
+            )
+            records = changes.get("changes") if isinstance(changes, dict) else None
+            if not isinstance(records, list):
+                continue
+            task_ids.append(str(task.get("id") or ""))
+            file_count += len(records) + max(0, int(changes.get("truncated") or 0))
+            for record in records:
+                if len(changed_paths) >= _DEV_ARTIFACT_MAX_CHANGED_PATHS:
+                    break
+                if isinstance(record, dict) and str(record.get("path") or "").strip():
+                    changed_paths.append(
+                        {"path": str(record.get("path")), "status": str(record.get("status") or "")}
+                    )
+        if not task_ids or file_count <= 0:
+            return
+        _append_room_timeline_event(
+            room,
+            type=room_timeline.EVENT_TYPE_ARTIFACT,
+            round_id=str(round_payload.get("roundId") or ""),
+            payload={
+                "source": "dev_task_board",
+                "taskIds": task_ids,
+                "fileCount": file_count,
+                "changedPaths": changed_paths,
+                "changedPathsTruncated": file_count > len(changed_paths),
+                "tasksTruncated": len(tasks) > _DEV_ARTIFACT_MAX_TASKS,
+            },
+        )
+    except Exception:  # noqa: BLE001 - artifact summary never blocks round finish
+        return
 
 
 def _record_chat_room_detail_loaded(

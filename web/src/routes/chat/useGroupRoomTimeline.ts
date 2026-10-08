@@ -43,9 +43,22 @@ export type GroupTimelineMemberChangeRow = {
   participantCount: number;
 };
 
+/** System row for one dev-task-board artifact delivery (bounded payload). */
+export type GroupTimelineArtifactRow = {
+  key: string;
+  seq: number;
+  createdAt: string;
+  fileCount: number;
+  /** Bounded path summary (backend caps the list; may not cover fileCount). */
+  changedPaths: string[];
+  /** True when the backend trimmed the path list below fileCount. */
+  changedPathsTruncated: boolean;
+};
+
 export type GroupTimelineItem =
   | { kind: "round"; round: ChatRoomRound }
-  | { kind: "member_change"; row: GroupTimelineMemberChangeRow };
+  | { kind: "member_change"; row: GroupTimelineMemberChangeRow }
+  | { kind: "artifact"; row: GroupTimelineArtifactRow };
 
 /** One cursor-chain accumulation stored under queryKeys.chatRoomTimeline. */
 export type GroupRoomTimelineAccumulation = {
@@ -108,9 +121,9 @@ function messageFromPayload(payload: Record<string, unknown>): ChatRoomMessage |
 /**
  * Folds the flat append-only timeline into the surface's render view model:
  * round_state(start) opens a round section, message events cluster into their
- * round by roundId, round_state(finish) seals it with the digest, and
- * member_change events become lightweight system rows between sections.
- * Artifact events are kept as an explicit no-op branch (schema-only today).
+ * round by roundId, round_state(finish) seals it with the digest,
+ * member_change events become lightweight system rows between sections, and
+ * dev-board artifact events become file-delivery system rows.
  */
 export function foldGroupTimelineEvents(events: ChatRoomTimelineEvent[]): GroupTimelineItem[] {
   const items: GroupTimelineItem[] = [];
@@ -181,9 +194,30 @@ export function foldGroupTimelineEvents(events: ChatRoomTimelineEvent[]): GroupT
         },
       });
     } else if (type === "artifact") {
-      // Schema-only today: no backend write point, no UI. Kept visible so a
-      // future producer cannot silently fall through as an unknown type.
-      continue;
+      // Dev-task-board delivery summary written at round finish; rows without
+      // a usable fileCount stay unpainted (defensive against old producers).
+      const fileCount = Number(payload.fileCount);
+      if (!Number.isFinite(fileCount) || fileCount <= 0) continue;
+      const changedPaths = Array.isArray(payload.changedPaths)
+        ? payload.changedPaths
+            .map((item) => {
+              if (typeof item === "string") return item.trim();
+              if (item && typeof item === "object") return text((item as Record<string, unknown>).path).trim();
+              return "";
+            })
+            .filter(Boolean)
+        : [];
+      items.push({
+        kind: "artifact",
+        row: {
+          key: text(event.eventId).trim() || `artifact:${event.seq}`,
+          seq: Number(event.seq) || 0,
+          createdAt,
+          fileCount,
+          changedPaths,
+          changedPathsTruncated: payload.changedPathsTruncated === true,
+        },
+      });
     }
     // Unknown types are ignored: the timeline is append-only and forward
     // compatible by contract.

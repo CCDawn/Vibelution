@@ -848,6 +848,35 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       expect(html).toContain("议题二");
     });
 
+    it("renders dev-board artifact deliveries as system rows between round sections", () => {
+      const items = [
+        { kind: "round", round: projectedRound("r1", "议题一") },
+        {
+          kind: "artifact",
+          row: {
+            key: "tle-4",
+            seq: 4,
+            createdAt: "2026-09-04T09:03:00Z",
+            fileCount: 3,
+            changedPaths: ["web/src/a.ts", "web/src/b.ts"],
+            changedPathsTruncated: true,
+          },
+        },
+        { kind: "round", round: projectedRound("r2", "议题二") },
+      ];
+      const html = renderToStaticMarkup(
+        <ChatGroupCenterSurface
+          {...baseProps({ activeGroupRoom: undefined })}
+          {...({ groupTimeline: projectionOf(items) } as never)}
+        />,
+      );
+      expect(html).toContain("交付了 3 个文件变更");
+      expect(html).toContain("web/src/a.ts、web/src/b.ts…");
+      expect(html).toContain("第 1 轮");
+      expect(html).toContain("第 2 轮");
+      expect(html).toContain("议题二");
+    });
+
     it("offers the cursor load-more affordance only while the timeline has more pages", () => {
       const loadMore = vi.fn();
       const items = [{ kind: "round", round: projectedRound("r1", "议题") }];
