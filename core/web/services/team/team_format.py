@@ -7,7 +7,9 @@ that all four team systems (通用 / 科研 / 进化 / 金融) converge on:
 - Team = manifest (``teamId``/``name``/``purpose``/``status``/
   ``linkedChatRoomId`` + member rows). Member rows are written by
   ``canvas_normalize._normalize_members`` and that shape is authoritative.
-- Role = declarative definition following ``team_template_service._dev_role``.
+- Role = declarative definition (``ROLE_DEFINITION_FIELDS``) carried by the
+  workspace role file layer (``role_definition_service``: one markdown file
+  per role under ``workspace/roles/``).
 - Model / prompt configuration is NEVER stored in team or role records:
   ``workspace/agents/agents.json`` (``llmBindings``, ``promptTemplateId``)
   is the sole authority. Team projections may surface a read-only
@@ -63,7 +65,7 @@ MAX_MEMBER_ROWS = 120  # matches canvas_normalize._normalize_members cap
 MAX_MEMBER_ID_LENGTH = 96  # matches s._safe_token(max_length=96)
 MAX_RESPONSIBILITIES_PER_MEMBER = 8  # matches _normalize_members slice
 
-# --- canonical role definition (team_template_service._dev_role) ----------
+# --- canonical role definition (role file layer golden shape) --------------
 
 ROLE_DEFINITION_FIELDS = frozenset(
     {
@@ -327,7 +329,7 @@ def validate_team_record(
 
 
 def validate_role_definition(role: Any) -> dict[str, Any]:
-    """Validate a role definition against the ``_dev_role`` field set.
+    """Validate a role definition against the role file layer field set.
 
     Model semantics: a role may optionally carry ``modelRef`` pointing at an
     agents.json ``llmBindings`` slot (reference). Any resolved model or

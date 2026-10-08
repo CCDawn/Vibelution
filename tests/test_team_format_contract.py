@@ -4,7 +4,8 @@ Freezes the authoritative shapes documented in
 ``docs/standards/unified-team-format.md``:
 
 - ``canvas_normalize._normalize_members`` member-row golden shape;
-- ``team_template_service._dev_role`` role-definition golden shape;
+- role-definition golden shape from the declarative role file layer
+  (``role_definition_service`` + ``core/web/services/team/role_definitions/*.md``);
 - model projection reads agents.json only (no model values in stored rows);
 - ``team_format`` validators accept canonical records and reject malformed
   ones (missing agentId, unknown agentId, model literals, non-slot modelRef).
@@ -23,7 +24,7 @@ from core.web.services import (
     team_service,
     team_template_service,
 )
-from core.web.services.team import canvas_normalize, team_format, team_projection
+from core.web.services.team import canvas_normalize, role_definition_service, team_format, team_projection
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
@@ -35,6 +36,10 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    # Team templates read the role file layer through this root; pin it so
+    # template access never seeds the real operator workspace.
+    monkeypatch.setattr(team_template_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(role_definition_service, "PROJECT_ROOT", tmp_path)
 
     def list_direct_agent_sessions(*args, **kwargs):
         sessions = []
@@ -59,25 +64,36 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
 
 
 def _canonical_role() -> dict:
-    return team_template_service._dev_role(
-        role_key="dev_team_planner",
-        role="规划师",
-        purpose="把需求拆成可并行任务并派发。",
-        responsibilities=["拆解需求", "派发任务"],
-        agent_name="规划师 Agent",
-        style="沉稳克制",
-        communication_style="结论先行",
-        expertise=["任务规划"],
-        identity_notes="只做规划，不代写实现。",
-        preferred_tasks="拆解需求、派发任务",
-        avoid_tasks="不直接实现代码",
-        success_criteria="每项任务可并行、可验证",
-        constraints="写操作限定在任务 worktree",
-        deliverables="任务清单",
-        allowed_tools=["agent_message_tool"],
-        preferred_tools=["agent_message_tool"],
-        write_scopes=["private"],
-    )
+    # Standalone canonical sample for validator rejection tests: same shape as
+    # the golden role file, independent of the shipped builtin content.
+    return {
+        "roleKey": "dev_team_planner",
+        "role": "规划师",
+        "purpose": "把需求拆成可并行任务并派发。",
+        "responsibilities": ["拆解需求", "派发任务"],
+        "agentName": "规划师 Agent",
+        "personaProfile": {
+            "personality": "沉稳克制",
+            "communicationStyle": "结论先行",
+            "background": "开发团队成员，按规划、开发、评审流水线分工协作。",
+            "identityNotes": "只做规划，不代写实现。",
+            "expertise": ["任务规划"],
+        },
+        "taskProfile": {
+            "mission": "把需求拆成可并行任务并派发。",
+            "responsibilities": "拆解需求；派发任务",
+            "preferredTasks": "拆解需求、派发任务",
+            "avoidTasks": "不直接实现代码",
+            "successCriteria": "每项任务可并行、可验证",
+            "constraints": "写操作限定在任务 worktree",
+            "deliverables": "任务清单",
+        },
+        "toolPolicy": {
+            "allowedTools": ["agent_message_tool"],
+            "preferredTools": ["agent_message_tool"],
+            "writeScopes": ["private"],
+        },
+    }
 
 
 def _member_row(agent_id: str) -> dict:
@@ -148,11 +164,11 @@ def test_normalize_members_drops_unknown_agent_without_active_requirement(tmp_pa
     assert canvas_normalize._normalize_members([{"agentId": "agent-missing"}], require_active=False) == []
 
 
-# --- role definition golden shape (team_template_service._dev_role) --------
+# --- role definition golden shape (declarative role file layer) ------------
 
 
-def test_dev_role_golden_shape_matches_contract():
-    role = _canonical_role()
+def test_builtin_role_file_golden_shape_matches_contract():
+    role = role_definition_service.builtin_role_definition("dev_team_planner")
 
     assert set(role) == set(team_format.ROLE_DEFINITION_FIELDS)
     assert set(role["personaProfile"]) == set(team_format.PERSONA_PROFILE_FIELDS)
@@ -162,12 +178,26 @@ def test_dev_role_golden_shape_matches_contract():
     assert result["valid"], result["issues"]
 
 
-def test_shipped_dev_template_roles_satisfy_role_contract():
+def test_shipped_dev_template_roles_satisfy_role_contract(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
     template = team_template_service.get_team_template(team_template_service.DEV_TEAM_TEMPLATE_ID)
     assert template["roles"]
     for role in template["roles"]:
         result = team_format.validate_role_definition(role)
         assert result["valid"], (role.get("roleKey"), result["issues"])
+
+
+def test_shipped_dev_template_roles_come_from_role_file_layer(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    template = team_template_service.get_team_template(team_template_service.DEV_TEAM_TEMPLATE_ID)
+
+    # The template reads the workspace role library in DEV_TEAM_ROLE_KEYS
+    # order; the shipped files and the template view must not drift.
+    layered = role_definition_service.load_role_definitions(
+        team_template_service.DEV_TEAM_ROLE_KEYS, project_root=tmp_path
+    )
+    assert [role["roleKey"] for role in template["roles"]] == list(team_template_service.DEV_TEAM_ROLE_KEYS)
+    assert template["roles"] == layered
 
 
 # --- model reference semantics (agents.json is the sole authority) ---------
