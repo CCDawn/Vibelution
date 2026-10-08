@@ -655,6 +655,40 @@ def test_review_reads_the_task_worktree_and_hides_a_missing_one(tmp_path, monkey
     assert empty["changes"] == []
 
 
+def test_change_list_uses_merge_base_so_advanced_main_stays_out(tmp_path, monkeypatch):
+    _seed_main_repo(tmp_path, monkeypatch)
+    opened = ensure_dev_task_workspace(
+        team_id="team-1",
+        task_id="task-1",
+        member_id="m-a",
+        project_root=tmp_path,
+    )
+    worktree = tmp_path / opened["workspacePath"]
+
+    # 认领之后 main 前进：提交一个与任务无关的文件。
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    (tmp_path / "UNRELATED.md").write_text("主线自己的前进\n", encoding="utf-8")
+    _git(tmp_path, ["add", "UNRELATED.md"], env=env)
+    _git(tmp_path, ["commit", "-m", "advance main"], env=env)
+
+    # 任务 worktree 自己的改动：一个 tracked 修改 + 一个 untracked 新文件。
+    (worktree / "README.md").write_text("changed\n", encoding="utf-8")
+    (worktree / "task_notes.md").write_text("任务自己的\n", encoding="utf-8")
+
+    payload = read_dev_task_changes(
+        tmp_path,
+        workspace_path=opened["workspacePath"],
+        workspace_branch=opened["workspaceBranch"],
+    )
+    found = {item["path"]: item["status"] for item in payload["changes"]}
+    assert "UNRELATED.md" not in found
+    assert found["README.md"] == "modified"
+    assert found["task_notes.md"] == "untracked"
+    assert payload["baseCommit"]
+    assert payload["baseCommit"] != _git(tmp_path, ["rev-parse", "main"], env=env).strip()
+
+
 def _seed_main_repo(path: Path, monkeypatch) -> None:
     _seed_repo(path, monkeypatch, branch="main")
 

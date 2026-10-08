@@ -444,13 +444,34 @@ def read_dev_task_changes(
     try:
         with _without_pinned_git_env():
             directory = _checked_task_worktree(project_root, workspace_path, workspace_branch)
-            diff = _git_at(directory, ["diff", "--name-status", "-z", "--no-renames", "main", "--"])
+            base = _task_diff_base(directory)
+            diff = _git_at(directory, ["diff", "--name-status", "-z", "--no-renames", base, "--"])
             untracked = _git_at(directory, ["ls-files", "-z", "-o", "--exclude-standard"])
     except (OSError, BranchWorkspaceError, DevTaskBoardError):
         return _changes_unavailable()
     if diff.returncode != 0 or untracked.returncode != 0:
         return _changes_unavailable()
-    return parse_dev_task_change_output(str(diff.stdout or ""), str(untracked.stdout or ""))
+    payload = parse_dev_task_change_output(str(diff.stdout or ""), str(untracked.stdout or ""))
+    if payload.get("available"):
+        payload["baseCommit"] = base
+    return payload
+
+
+def _task_diff_base(directory: Path) -> str:
+    """Diff base for one task worktree: merge-base(main, HEAD), else literal main.
+
+    Comparing against main's HEAD shows unrelated main commits as task
+    changes once main moves ahead of the branch point (reverse-patch
+    artifacts); the merge-base pins the fork point instead. Worktrees share
+    refs with the main checkout, so this resolves without a fetch.
+    """
+
+    result = _git_at(directory, ["merge-base", "main", "HEAD"])
+    if result.returncode == 0:
+        base = str(result.stdout or "").strip()
+        if base:
+            return base
+    return "main"
 
 
 def parse_dev_task_change_output(name_status: str, untracked: str) -> dict[str, Any]:
