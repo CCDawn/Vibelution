@@ -945,21 +945,41 @@ def test_submit_acceptance_window_failure_survives_settlement_step_errors(tmp_pa
         _reset_seeded_session_runtime(session_id)
 
 
-def test_steer_guidance_after_turn_terminal_is_dropped_gracefully(tmp_path: Path, monkeypatch) -> None:
-    """A guidance write losing the terminal race must drop, not raise."""
+def test_steer_guidance_after_turn_terminal_is_queued(tmp_path: Path, monkeypatch) -> None:
+    """A guide that loses the terminal race is queued, not dropped."""
 
-    from core.chat.turn_journal import TurnJournalPostTerminalWriteError
+    from core.chat.conversation_ledger import EVENT_TURN_COMPLETED, EVENT_TURN_STEER
+    from core.chat.turn_journal import model_visible_messages_from_events
 
     session_id = "session-guidance-late"
+    turn_id = "turn-already-settled"
+    guidance = "focus on the failing test"
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_queued_turn_drain", lambda _session_id: None)
     _seed_submittable_sessions(tmp_path, [session_id])
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_STARTED,
+        status="running",
+        visible_in_model=False,
+    )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TURN_COMPLETED,
+        status="completed",
+        visible_in_model=False,
+    )
 
     class _SettledTurnControl:
         turn_id = "turn-already-settled"
 
         def snapshot(self) -> dict:
             return {
-                "turnId": "turn-already-settled",
+                "turnId": turn_id,
                 "releasedToUser": False,
                 "stopRequested": False,
                 "stopRequestedAt": "",
@@ -973,29 +993,30 @@ def test_steer_guidance_after_turn_terminal_is_dropped_gracefully(tmp_path: Path
     )
     monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
 
-    def raise_post_terminal_write(*args, **kwargs):
-        raise TurnJournalPostTerminalWriteError("turn already has a terminal event")
-
-    monkeypatch.setattr(session_service, "_append_session_conversation_event", raise_post_terminal_write)
-    scene_events: list[dict] = []
-    monkeypatch.setattr(
-        session_service,
-        "record_runtime_scene_event",
-        lambda component, phase, event_code, **kwargs: scene_events.append(
-            {"component": component, "phase": phase, "event_code": event_code, **kwargs}
-        ),
-    )
-
-    detail = submit.submit_session_guidance(session_id, "focus on the failing test", mode="safe")
+    detail = submit.submit_session_guidance(session_id, guidance, mode="safe")
 
     assert str(detail.get("id") or detail.get("sessionId") or "") == session_id
-    dropped_events = [
-        event for event in scene_events if event["event_code"] == "chat.guidance.write_dropped"
+    events = load_conversation_events(tmp_path, session_id)
+    steer_events = [event for event in events if event.event_type == EVENT_TURN_STEER]
+    assert [event.payload.get("disposition") for event in steer_events] == [
+        "admitted",
+        "delivery_changed",
     ]
-    assert len(dropped_events) == 1
-    assert dropped_events[0]["fields"]["reason"] == "post_terminal_write"
-    assert dropped_events[0]["fields"]["turnId"] == "turn-already-settled"
-    assert dropped_events[0]["fields"]["sessionId"] == session_id
+    assert steer_events[0].payload["delivery"] == "guide"
+    assert steer_events[1].payload["delivery"] == "queue"
+    assert steer_events[1].payload["fromDelivery"] == "guide"
+    assert steer_events[0].payload["steerId"] == steer_events[1].payload["steerId"]
+    assert all(event.visible_in_model is False for event in steer_events)
+    assert not [
+        event
+        for event in events
+        if event.event_type == EVENT_USER_MESSAGE and event.payload.get("content") == guidance
+    ]
+    queued = session_service.list_session_queued_turns(session_id)
+    assert [row["id"] for row in queued] == [steer_events[0].payload["steerId"]]
+    assert queued[0]["content"] == guidance
+    visible = model_visible_messages_from_events(events)
+    assert guidance not in [str(item.get("content") or "") for item in visible]
 
 
 

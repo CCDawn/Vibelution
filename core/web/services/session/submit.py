@@ -458,6 +458,62 @@ def _require_positive_context_limit(service: Any, conversation: dict[str, Any], 
     return context_limit_payload
 
 
+def _append_turn_steer_promotion(
+    *,
+    session_id: str,
+    turn_id: str,
+    client_submission_id: str,
+    promotion: dict[str, Any] | None,
+    matching_events,
+) -> None:
+    """Close a queued steer in the same journal append as its user message.
+
+    A missing promotion must not fail the turn: the user message is already
+    the transcript. A later retry with the same submission id writes the
+    promotion once the user message is already present.
+    """
+
+    if not isinstance(promotion, dict):
+        return
+    steer_id = str(promotion.get("steerId") or "").strip()
+    if not steer_id:
+        return
+    from core.chat.turn_journal import EVENT_TURN_STEER
+
+    from . import turn_steer
+
+    s = _service()
+    if client_submission_id and matching_events(EVENT_TURN_STEER):
+        return
+    delivery = str(promotion.get("delivery") or "").strip() or turn_steer.DELIVERY_QUEUE
+    try:
+        turn_steer.record_promoted(
+            session_id,
+            steer_id=steer_id,
+            turn_id=turn_id,
+            delivery=delivery,
+            correlation_id=client_submission_id,
+        )
+    except Exception as exc:
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "turn_steer_promotion_failed",
+                "conversation.turn_steer.promotion_failed",
+                level="warning",
+                outcome="failed",
+                message="The queued input was journaled, but its promotion event was not.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "steerId": steer_id,
+                    "errorType": type(exc).__name__,
+                },
+            )
+        except Exception:
+            pass
+
+
 def _append_initial_session_journal_markers(
     *,
     session_id: str,
@@ -468,6 +524,7 @@ def _append_initial_session_journal_markers(
     source: str,
     leases: list[str],
     user_payload: dict[str, Any],
+    turn_steer_promotion: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Append/recover one journal-backed user submission.
 
@@ -539,6 +596,13 @@ def _append_initial_session_journal_markers(
                 correlation_id=normalized_submission_id,
             )
             timings["userMessageJournalMs"] = s._elapsed_ms(user_message_started_at)
+        _append_turn_steer_promotion(
+            session_id=normalized_session_id,
+            turn_id=record_turn_id,
+            client_submission_id=normalized_submission_id,
+            promotion=turn_steer_promotion,
+            matching_events=matching_events,
+        )
         return {
             "journalSequence": int(getattr(user_event, "sequence", 0) or 0),
             "journalEventId": str(getattr(user_event, "event_id", "") or "").strip(),
@@ -642,6 +706,19 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
 
     guidance_kind = "user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance"
     if active_turn_id:
+        from . import turn_steer
+
+        steer_id = turn_steer.new_steer_id()
+        try:
+            turn_steer.record_admitted(
+                conversation_id,
+                steer_id=steer_id,
+                delivery=turn_steer.DELIVERY_GUIDE,
+                turn_id=active_turn_id,
+                content=guidance_text,
+            )
+        except Exception:
+            steer_id = ""
         try:
             s._append_session_conversation_event(
                 conversation_id,
@@ -657,6 +734,7 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
                         "source": "steer",
                         "guidanceMode": normalized_mode,
                         "turnId": active_turn_id,
+                        **({"steerId": steer_id} if steer_id else {}),
                     },
                     "source": "steer",
                 },
@@ -664,29 +742,78 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
                 visible_in_model=True,
             )
         except TurnJournalPostTerminalWriteError:
-            # The turn settled (stop request / restart reconciliation) while the
-            # guidance was being journaled. That arrival is a race, not a caller
-            # bug: drop the late write and keep the guidance response graceful
-            # (same contract as the capture late-write drop in stream_capture).
-            try:
-                s.record_runtime_scene_event(
-                    "conversation",
-                    "guidance_write_dropped",
-                    "chat.guidance.write_dropped",
-                    level="warning",
-                    outcome="discarded",
-                    message="Guidance write arrived after the turn terminal event and was dropped.",
-                    fields={
-                        "reason": "post_terminal_write",
-                        "sessionId": conversation_id,
-                        "turnId": active_turn_id,
-                        "eventType": s.EVENT_USER_MESSAGE,
-                        "guidanceMode": normalized_mode,
-                        "source": "submit_session_guidance",
-                    },
-                )
-            except Exception:
-                pass
+            # The turn settled while the guide was being journaled. The text
+            # must not disappear: retarget the same steer id onto the next-turn
+            # queue. Only a retarget that itself fails keeps the old drop trace.
+            retargeted = False
+            if steer_id:
+                try:
+                    turn_steer.retarget_unjournaled_guide(
+                        conversation_id,
+                        steer_id=steer_id,
+                        turn_id=active_turn_id,
+                        content=guidance_text,
+                        lang=lang,
+                    )
+                    retargeted = True
+                except Exception as exc:
+                    try:
+                        s.record_runtime_scene_event(
+                            "conversation",
+                            "guidance_retarget_failed",
+                            "chat.guidance.retarget_failed",
+                            level="warning",
+                            outcome="failed",
+                            message="Guide missed the running turn and could not be moved onto the queue.",
+                            fields={
+                                "reason": "post_terminal_write",
+                                "sessionId": conversation_id,
+                                "turnId": active_turn_id,
+                                "steerId": steer_id,
+                                "errorType": type(exc).__name__,
+                            },
+                        )
+                    except Exception:
+                        pass
+            if retargeted:
+                try:
+                    s.record_runtime_scene_event(
+                        "conversation",
+                        "guidance_retargeted",
+                        "chat.guidance.retargeted_to_queue",
+                        level="info",
+                        outcome="queued",
+                        message="Guide missed the running turn and was queued for the next turn.",
+                        fields={
+                            "reason": "post_terminal_write",
+                            "sessionId": conversation_id,
+                            "turnId": active_turn_id,
+                            "steerId": steer_id,
+                            "guidanceMode": normalized_mode,
+                        },
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    s.record_runtime_scene_event(
+                        "conversation",
+                        "guidance_write_dropped",
+                        "chat.guidance.write_dropped",
+                        level="warning",
+                        outcome="discarded",
+                        message="Guidance write arrived after the turn terminal event and was dropped.",
+                        fields={
+                            "reason": "post_terminal_write",
+                            "sessionId": conversation_id,
+                            "turnId": active_turn_id,
+                            "eventType": s.EVENT_USER_MESSAGE,
+                            "guidanceMode": normalized_mode,
+                            "source": "submit_session_guidance",
+                        },
+                    )
+                except Exception:
+                    pass
 
     if normalized_mode == "interrupt" and running:
         return s.request_stop_session_turn(conversation_id, fast_ack=True)
@@ -811,6 +938,7 @@ def submit_session_message(
     queue_if_busy: bool = False,
     model_selection: Mapping[str, Any] | None = None,
     trace_context_carrier: Mapping[str, Any] | None = None,
+    turn_steer_promotion: dict[str, Any] | None = None,
 ) -> dict:
     """Persist a user message and start a single web chat turn.
 
@@ -1298,6 +1426,7 @@ def submit_session_message(
                 "metadata": persisted_message_metadata,
                 "source": normalized_message_source,
             },
+            turn_steer_promotion=turn_steer_promotion,
         )
         admitted_turn_id = str(journal_receipt.get("turnId") or "").strip()
         if admitted_turn_id and admitted_turn_id != turn_control.turn_id:

@@ -192,6 +192,8 @@ def enqueue_session_queued_turn(
     client_submission_id: str,
     model_selection: dict[str, Any] | None = None,
     lang: str = "",
+    steer_id: str = "",
+    record_steer_admission: bool = True,
 ) -> dict[str, Any]:
     """Append one validated user turn to the session queue (idempotent per submission id)."""
 
@@ -203,6 +205,8 @@ def enqueue_session_queued_turn(
             s.text_for(lang, zh="未找到当前会话。", en="Session not found.")
         )
     normalized_client_submission_id = str(client_submission_id or "").strip()
+    requested_steer_id = str(steer_id or "").strip()
+    created = False
     with s._CHAT_STATE_LOCK:
         conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
@@ -215,6 +219,10 @@ def enqueue_session_queued_turn(
             for row in rows:
                 if str(row.get("clientSubmissionId") or "").strip() == normalized_client_submission_id:
                     return row
+        if requested_steer_id:
+            for row in rows:
+                if str(row.get("id") or "").strip() == requested_steer_id:
+                    return row
         user_count = sum(1 for row in rows if _row_kind(row) == KIND_USER)
         if user_count >= MAX_QUEUED_TURNS_PER_SESSION:
             raise s.SessionValidationError(
@@ -225,7 +233,7 @@ def enqueue_session_queued_turn(
                 )
             )
         row = {
-            "id": _new_queued_turn_id(),
+            "id": requested_steer_id or _new_queued_turn_id(),
             "kind": KIND_USER,
             "clientSubmissionId": normalized_client_submission_id,
             "content": str(content or ""),
@@ -247,10 +255,53 @@ def enqueue_session_queued_turn(
             "updatedAt": s._now_timestamp(),
         }
         _write_queued_turn_rows(s, normalized_session_id, conversation, [*rows, row])
+        created = True
+    if created and record_steer_admission and _row_kind(row) == KIND_USER:
+        _record_queued_turn_steer_admission(s, normalized_session_id, row)
     s._publish_session_detail_snapshot(normalized_session_id)
     s._schedule_session_queued_turn_drain(normalized_session_id)
     row["position"] = len(rows) + 1
     return row
+
+
+def _record_queued_turn_steer_admission(s: Any, session_id: str, row: dict[str, Any]) -> None:
+    """Journal the queue admission. A journal failure leaves the row in place."""
+
+    from . import turn_steer
+
+    target_turn_id = ""
+    try:
+        controller = s._get_session_turn_control(session_id)
+        if controller is not None:
+            target_turn_id = str(getattr(controller, "turn_id", "") or "").strip()
+    except Exception:
+        target_turn_id = ""
+    try:
+        turn_steer.record_admitted(
+            session_id,
+            steer_id=str(row.get("id") or "").strip(),
+            delivery=turn_steer.DELIVERY_QUEUE,
+            turn_id=target_turn_id or str(row.get("id") or "").strip(),
+            target_turn_id=target_turn_id,
+            content=str(row.get("content") or ""),
+        )
+    except Exception as exc:
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "turn_steer_admission_failed",
+                "conversation.turn_steer.admission_failed",
+                level="warning",
+                outcome="failed",
+                message="The queued turn was stored, but its admission event was not.",
+                fields={
+                    "sessionId": session_id,
+                    "steerId": str(row.get("id") or "").strip(),
+                    "errorType": type(exc).__name__,
+                },
+            )
+        except Exception:
+            pass
 
 
 def _clear_send_now_flag(row: dict[str, Any]) -> dict[str, Any]:
@@ -1230,6 +1281,10 @@ def drain_session_queued_turns(session_id: str) -> bool:
                     if isinstance(drained_model_selection, dict) and drained_model_selection
                     else None
                 ),
+                "turn_steer_promotion": {
+                    "steerId": str(head.get("id") or "").strip(),
+                    "delivery": "queue",
+                },
             }
         try:
             s.submit_session_message(

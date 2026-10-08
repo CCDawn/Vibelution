@@ -49,6 +49,13 @@ EVENT_COMPRESSION_ATTEMPT = "context_compression_attempt"
 # degraded retry, stuck-loop detection, answer-channel leak). Written by
 # core.chat.llm_resilience_journal; never model-visible, never audit-only.
 EVENT_LLM_RESILIENCE = "llm_resilience"
+# Admission fact for input that arrives while a turn is still running.
+# ``delivery`` is ``guide`` (inject into the running turn) or ``queue``
+# (wait for the next turn). A guide that loses the terminal race is
+# retargeted with ``disposition=delivery_changed``; promotion into the
+# next user message is a sibling event, not a second transcript.
+# Never model-visible. Out of band, so it may follow a settled turn.
+EVENT_TURN_STEER = "turn_steer"
 EVENT_BRANCH_REBASE = "branch_rebase"
 
 TERMINAL_EVENTS = {
@@ -197,6 +204,7 @@ TURN_EVENT_PHASES: dict[str, str] = {
     EVENT_TURN_FAILED: TURN_PHASE_TERMINAL,
     EVENT_TURN_INTERRUPTED: TURN_PHASE_TERMINAL,
     EVENT_LLM_RESILIENCE: TURN_PHASE_OUT_OF_BAND,
+    EVENT_TURN_STEER: TURN_PHASE_OUT_OF_BAND,
     EVENT_BRANCH_REBASE: TURN_PHASE_OUT_OF_BAND,
     EVENT_SESSION_RECOVERY_RESUMED: TURN_PHASE_OUT_OF_BAND,
     _EVENT_INTERNAL_TURN_TRIGGER: TURN_PHASE_OUT_OF_BAND,
@@ -352,6 +360,7 @@ _LATEST_PREVIEW_IGNORED_EVENT_TYPES = {
     # treating them as unknown would force every preview read onto the
     # canonical full replay.
     EVENT_LLM_RESILIENCE,
+    EVENT_TURN_STEER,
 }
 _LATEST_PREVIEW_KNOWN_EVENT_TYPES = (
     _LATEST_PREVIEW_PARSED_EVENT_TYPES
@@ -3340,6 +3349,7 @@ __all__ = [
     "EVENT_TURN_FAILED",
     "EVENT_TURN_INTERRUPTED",
     "EVENT_TURN_STARTED",
+    "EVENT_TURN_STEER",
     "EVENT_USER_MESSAGE",
     "TURN_INTERRUPTED_MARKER",
     "TurnJournalEvent",
