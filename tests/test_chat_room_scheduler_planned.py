@@ -342,6 +342,50 @@ def test_planned_prompt_instructs_mention_dispatch_lexicon():
     assert "@成员角色名" in prompt
     assert "@开发工程师 A" in prompt
     assert "被指派成员发言后，下一轮回到规划角色汇总并决定后续指派" in prompt
+    assert "共享任务板" not in prompt
+
+
+def test_dev_team_prompt_includes_the_readonly_board_and_keeps_mentions(monkeypatch):
+    monkeypatch.setattr(
+        chat_room_service,
+        "_dev_task_board_prompt",
+        lambda team_id: f"BOARD:{team_id}",
+    )
+
+    prompt = chat_room_service._build_participant_prompt(
+        room={
+            "roomId": "room-planned",
+            "title": "开发团队",
+            "mode": "planned",
+            "config": {"teamTemplateId": "dev-team"},
+        },
+        round_payload={"topic": "开发登录页", "mode": "planned", "purpose": "meeting"},
+        participant={"participantId": "p-planner", "teamRole": "规划师", "teamId": "team-9"},
+        prior_messages=[],
+    )
+
+    assert "BOARD:team-9" in prompt
+    assert "@开发工程师 A" in prompt
+
+
+def test_other_team_prompts_do_not_read_the_dev_task_board(monkeypatch):
+    def unexpected(team_id: str) -> str:
+        raise AssertionError(team_id)
+
+    monkeypatch.setattr(chat_room_service, "_dev_task_board_prompt", unexpected)
+    prompt = chat_room_service._build_participant_prompt(
+        room={
+            "roomId": "room-research",
+            "title": "研究团队",
+            "mode": "planned",
+            "config": {"teamTemplateId": "research", "teamId": "team-research"},
+        },
+        round_payload={"topic": "选题", "mode": "planned", "purpose": "meeting"},
+        participant={"participantId": "p-a", "teamRole": "研究员", "teamId": "team-research"},
+        prior_messages=[],
+    )
+
+    assert "共享任务板" not in prompt
 
 
 def test_round_robin_prompt_stays_free_of_planned_dispatch_line():
