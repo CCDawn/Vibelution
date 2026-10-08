@@ -76,7 +76,7 @@ modelRef?        可选；llmBindings 槽位引用（见 §4）
 | --- | --- | --- |
 | registry | `workspace/agent_config/role_definitions.json` | 每角色一行：`roleKey` / `sourcePath` / `status` / `metadata{builtin, builtinContentVersion, updatedAt}`；**不存角色内容**，md 文件是唯一内容权威 |
 | 角色文件 | `workspace/roles/<roleKey>.md` | frontmatter（YAML 子集）放上述结构化字段，markdown 正文放 persona/task 叙述（operator 可读可编辑，不参与结构化校验） |
-| builtin 角色文件 | `core/web/services/team/role_definitions/*.md` | 随产品发布；当前为 dev-team 四角色（`dev_team_planner` / `dev_team_developer_a` / `dev_team_developer_b` / `dev_team_reviewer`） |
+| builtin 角色文件 | `core/web/services/team/role_definitions/*.md` | 随产品发布；dev-team 四角色（`dev_team_planner` / `dev_team_developer_a` / `dev_team_developer_b` / `dev_team_reviewer`）与金融五研究员（`financial_market` / `financial_fundamental` / `financial_news` / `financial_bull` / `financial_bear`） |
 
 ### 5.2 加载与 repair 语义
 
@@ -84,16 +84,16 @@ modelRef?        可选；llmBindings 槽位引用（见 §4）
 - repair 照抄 prompt 模板 registry 语义：workspace 缺文件时从 builtin 内容 seed；`builtinContentVersion` 升级时**覆盖**对应 builtin 条目的 workspace 文件；用户新建/编辑的非 builtin 条目永不覆盖。
 - `sourcePath` 只允许 `workspace/roles/<roleKey>.md` 且必须落在路由后的 workspace 内（防目录逃逸，与 prompt 模板 sourcePath 守卫同源）；角色正文属 operator_controlled 信任级（与 prompt 模板角色提示词同源），**不得进入 knowledge / 不可信通道**。
 - 无文件监听：沿用 stat 签名 + 显式失效 + metadata 版本 + repair 的既有模式；dev-team 模板实例化时从角色文件层读取（`team_template_service.DEV_TEAM_ROLE_KEYS` 顺序即成员行/画布节点顺序），`workspace/agents/agents.json` 仍是运行时模型与提示词唯一权威，instantiate 单向物化。
-- 系统托管团队由 team spec 的 managed 标记声明（批次2 落地）。
+- 系统托管由单一谓词 `kind_helpers.team_is_system_managed` 判定（managed spec id ∪ managed teamSource ∪ legacy kind 推断兜底），行为分支（PATCH 409 锁/级联归档拒绝/derived prune/建队隐藏/会话索引排除）一律读谓词，投影以 `systemManaged` 标记暴露；`teamKind` 是展示值。进化系统团队 spec 声明 `managed: true`，金融团队经 kind/source 注册获得同等托管，`systemTeamKind` 已停写（读侧透传保留一轮兼容）。
 
 ## 6. 四体系收敛路线
 
 | 体系 | 现状 | 收敛动作 |
 | --- | --- | --- |
 | 通用（自定义/模板团队） | **已合规**：`team_crud` + `_normalize_members` 就是格式权威 | 保持；格式变更必须先改本文与门禁测试 |
-| 科研（挑战杯） | `bootstrap_challenge_cup_research_team` 仍直接写 3 字段成员行，未走 `_normalize_members`。组织同步已不再写成员 | 挑战杯收尾已停止，不沿这条启动路径补字段。新增系统团队必须复用 `_normalize_members` |
-| 进化（Gym/自进化） | `ensure_evolution_system_teams` 的成员行经 `_normalize_members` 落成 8 字段 | 保持；不另建成员存储。角色声明仍不在本行展开 |
-| 金融 | 阶段 3 迁移目标 | 迁移时以本文为格式基准：成员行 8 字段、角色走角色文件层字段集、模型只留 agents.json 引用 |
+| 科研（挑战杯） | `bootstrap_challenge_cup_research_team` 仍直接写 3 字段成员行，未走 `_normalize_members`。组织同步已不再写成员。读侧对 3 字段存量行完整容忍（投影 fail-open、修复不动存量行、消费方只读 agentId/role，回归锁死） | 挑战杯收尾已停止，不沿这条启动路径补字段。新增系统团队必须复用 `_normalize_members` |
+| 进化（Gym/自进化） | **已闭环**：`ensure_evolution_system_teams` 成员行经 `_normalize_members` 落成 8 字段；missing 探针查 ID/kind/source/成员齐全性（存量空 roster 下次 bootstrap 自愈），物化失败不落空成员；spec 声明 `managed: true` | 保持；不另建成员存储。角色声明仍不在本行展开 |
+| 金融 | **已迁移**：`teamKind/teamSource=financial` 显式记录（purpose 前缀保留为业务身份与识别 legacy 兜底），成员行 8 字段，角色声明走角色文件层（五个 `financial_*.md`），托管谓词覆盖（PATCH 409/级联归档拒绝），存量团队由 `backfill_financial_team_identities` 幂等补齐 | 保持；成员补齐走 workflow-owned 锁内直写 `_append_missing_team_members`，不经 operator PATCH 路径 |
 | 开发团队模板 | 唯一可新建模板。实例化走 `create_team`，成员行经 `_normalize_members`；角色声明从角色文件层读取（§5） | 保持。医疗问诊与妇幼数字健康模板已移除，不再作为格式先例 |
 
 ## 7. 禁止事项
