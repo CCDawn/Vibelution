@@ -16,6 +16,8 @@ export type DevTeamTask = {
   reviewNote: string;
   ready: boolean;
   writeScopeWarnings: string[];
+  workspacePath?: string;
+  workspaceBranch?: string;
   updatedAt: string;
 };
 

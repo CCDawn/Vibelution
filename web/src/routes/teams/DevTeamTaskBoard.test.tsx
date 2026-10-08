@@ -109,6 +109,22 @@ describe("DevTeamTaskBoard", () => {
       action: "claim",
       expectedRevision: 1,
     });
+    expect(host?.textContent).not.toContain("工作区");
+  });
+
+  it("shows the opened workspace branch on the task card", async () => {
+    listDevTeamTasks.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      tasks: [{ ...readyTask, status: "in_progress", ready: false, workspaceBranch: "codex/dev-team-1", workspacePath: ".worktrees/dev-team-1" }],
+      updatedAt: "",
+    });
+    await renderBoard();
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(host?.textContent).toContain("工作区 codex/dev-team-1");
+      });
+    });
   });
 
   it("lets the planner add a task without writing it into the room", async () => {

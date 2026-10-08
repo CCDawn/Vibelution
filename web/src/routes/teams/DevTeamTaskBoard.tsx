@@ -237,6 +237,7 @@ function TaskCard({
       <strong>{task.subject}</strong>
       <span>{lang === "zh" ? status.zh : status.en}</span>
       <span>{task.ownerRole || text("未指定", "Unassigned")}</span>
+      {task.workspaceBranch ? <span>{text("工作区", "Workspace")} {task.workspaceBranch}</span> : null}
       {task.description ? <p>{task.description}</p> : null}
       {task.writeScopes.length > 0 ? <p>{task.writeScopes.join("、")}</p> : null}
       {task.blockedBy.length > 0 ? <p>{text("依赖", "Blocked by")} {task.blockedBy.join("、")}</p> : null}
