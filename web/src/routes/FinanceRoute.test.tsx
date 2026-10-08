@@ -278,18 +278,28 @@ describe("financial assistant page", () => {
     expect(container.querySelector("output")?.textContent).toBe("/finance?session=replacement-direct");
     expect(container.textContent).toContain("finance-workspace");
   });
-  it("offers native recovery for an archived direct session while keeping the assistant active", async () => {
-    vi.mocked(listFinancialAssistants).mockResolvedValueOnce([{ ...row, directSessionArchived: true }]).mockResolvedValue([{ ...row, directSessionArchived: false }]);
-    vi.mocked(unarchiveChatSession).mockResolvedValue({ sessionId: row.directSessionId, status: "active", changed: true });
+  it("opens an archived direct session without restoring it or cloning the assistant", async () => {
+    vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, directSessionArchived: true }]);
     await render("/finance?session=native-session");
-    expect(container.textContent).toContain("这条研究已归档");
+    expect(container.textContent).toContain("finance-workspace");
+    expect(container.textContent).not.toContain("这条研究已归档");
     expect(container.textContent).not.toContain("金融助手已归档");
     expect(createFinancialAssistant).not.toHaveBeenCalled();
-    await act(async () => { button("恢复研究")!.click(); button("恢复研究")!.click(); });
-    expect(unarchiveChatSession).toHaveBeenCalledTimes(1);
+    expect(unarchiveChatSession).not.toHaveBeenCalled();
     expect(createChatSession).not.toHaveBeenCalled();
-    await settle();
+  });
+  it("opens an archived research owned by this assistant", async () => {
+    vi.mocked(fetchSessionDetail).mockResolvedValue({
+      ...nativeSession("archived-research"),
+      hiddenFromIndex: true,
+      archiveState: { status: "archived", source: "session_archive" },
+    });
+    await render("/finance?session=archived-research");
     expect(container.textContent).toContain("finance-workspace");
+    expect(container.textContent).not.toContain("不属于这个金融助手");
+    expect(container.textContent).not.toContain("这条研究已归档");
+    expect(unarchiveChatSession).not.toHaveBeenCalled();
+    expect(createFinancialAssistant).not.toHaveBeenCalled();
   });
   it("blocks topic execution when the assistant model has no valid context window", async () => {
     modelContextWindow = 0;
@@ -540,6 +550,18 @@ describe("financial assistant page", () => {
     expect(listArchivedChatSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
     expect(container.textContent).toContain("已归档复盘");
     expect(container.querySelector('[aria-label="管理研究：已归档复盘"]')).not.toBeNull();
+    vi.mocked(fetchSessionDetail).mockImplementation(async (id) => ({
+      ...nativeSession(id),
+      ...(id === "archived-topic" ? { hiddenFromIndex: true, archiveState: { status: "archived", source: "session_archive" } } : {}),
+    }));
+    await act(async () => button("已归档复盘")!.click());
+    await settle();
+    const opened = container.querySelector("output")?.textContent ?? "";
+    const openedQuery = new URLSearchParams(opened.split("?")[1] ?? "");
+    expect(opened.startsWith("/finance?")).toBe(true);
+    expect(openedQuery.get("session")).toBe("archived-topic");
+    expect(container.textContent).toContain("finance-workspace");
+    expect(container.textContent).not.toContain("这条研究已归档");
   });
 
   it("searches all native research bodies without changing the recent-history rail", async () => {
