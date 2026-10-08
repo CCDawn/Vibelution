@@ -2,6 +2,7 @@ import json
 import threading
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
@@ -41,6 +42,39 @@ from core.web.services.team_workflow.source_collection import (
 )
 
 
+def _route_test_serving_metadata(_project_root: object, **_kwargs: object) -> dict:
+    """Fixed serving identity. These tests do not read the checkout fingerprint."""
+    return {
+        "schemaVersion": 1,
+        "apiContractVersion": "v1",
+        "frontend": {
+            "buildKey": "",
+            "release": "",
+            "dist": "",
+            "builtFromCommit": "",
+        },
+        "backend": {
+            "schemaVersion": 1,
+            "head": "test-head",
+            "dirty": False,
+            "dirtyTreeDigest": "0" * 64,
+            "pid": 0,
+            "createTime": None,
+            "executable": "",
+            "startedAt": "",
+        },
+    }
+
+
+@pytest.fixture(autouse=True)
+def _skip_checkout_git_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """create_app status-scans the real checkout. Serving identity stays in test_serving_version.py."""
+    monkeypatch.setattr(
+        "core.web.app.build_serving_metadata",
+        _route_test_serving_metadata,
+    )
+
+
 def _client() -> TestClient:
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
@@ -64,7 +98,8 @@ def test_challenge_question_package_fields_survive_route_models_and_response(
         "register_challenge_question_output",
         fake_register,
     )
-    response = _client().post(
+    client = _client()
+    response = client.post(
         "/api/teams/research-team/workflow-orchestration/challenge-program/question-runs",
         json={
             "output": {},
@@ -104,7 +139,7 @@ def test_challenge_question_package_fields_survive_route_models_and_response(
         "get_challenge_question_run_detail",
         lambda _team_id, _question_id, *, run_id="": detail,
     )
-    detail_response = _client().get(
+    detail_response = client.get(
         "/api/teams/research-team/workflow-orchestration/challenge-program/questions/SCI-096"
     )
 
