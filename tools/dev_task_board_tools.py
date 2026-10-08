@@ -151,11 +151,47 @@ def _dispatch(
             review_note=review_note,
         )
     target_id = _newest_task_id(payload) if normalized_action == "create_task" else task_id
-    return {
+    result = {
         "action": normalized_action,
         "teamId": team_id,
         "taskId": target_id,
         **_task_summary(payload, target_id),
+    }
+    if normalized_action == "claim_task":
+        result.update(
+            _claim_workspace_guidance(
+                str(result.get("workspacePath") or ""),
+                str(result.get("workspaceBranch") or ""),
+            )
+        )
+    return result
+
+
+def _claim_workspace_guidance(workspace_path: str, workspace_branch: str) -> dict:
+    """Claim-turn write routing: the board stores ``.worktrees/<slug>`` relative,
+    but the claiming engineer's tools resolve relative paths against the agent's
+    private workspace for the rest of this turn (workspace binding only re-runs
+    at next turn start), so writes would land in a parallel private tree. The
+    absolute worktree path is inside PROJECT_ROOT and therefore within the
+    agent-tool write boundary, so routing the model to absolute paths fixes the
+    claim turn without widening any permission."""
+
+    directory = _resolve_task_worktree(workspace_path, workspace_branch)
+    if directory is None:
+        return {
+            "message": (
+                "任务已认领，但任务工作区目录尚未就绪；本轮不要写任何文件，"
+                "下一回合工作区会自动绑定。"
+            )
+        }
+    return {
+        "workspaceAbsolutePath": str(directory),
+        "message": (
+            "任务已认领，任务工作区已打开。本任务的读写都必须落在这个绝对路径下："
+            f"{directory}。apply_patch_tool 的 cwd、apply_diff_edit_tool 的 file_path、"
+            "run_test_for_tool 的 source_path 都用该目录下的绝对路径；"
+            "相对路径会解析到别的根目录，属于写错位置。"
+        ),
     }
 
 

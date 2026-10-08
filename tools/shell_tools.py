@@ -2499,11 +2499,14 @@ def run_test_for(source_path: str, timeout: int = 120) -> str:
     """
     根据源文件路径自动查找对应测试文件并运行 pytest。
 
-    映射规则：<dir>/xxx.py → tests/test_xxx.py
+    映射规则：<dir>/xxx.py → tests/test_xxx.py（先按源文件所在项目根推导，
+    找不到时回落主仓 PROJECT_ROOT/tests，保持旧行为）
+    相对 source_path 优先按当前 workspace override（如任务 worktree）解析，
+    使任务工作区内的源码能在同一个 worktree 里跑测试。
     修改代码后调用此函数验证。
 
     Args:
-        source_path: 源文件相对路径（如 "tools/shell_tools.py"）
+        source_path: 源文件路径（相对或绝对，如 "tools/shell_tools.py"）
         timeout: 超时时间（秒），默认 120
 
     Returns:
@@ -2514,14 +2517,20 @@ def run_test_for(source_path: str, timeout: int = 120) -> str:
 
     source = Path(source_path)
     if not source.is_absolute():
-        source = PROJECT_ROOT / source
+        base = get_workspace_root_override()
+        source = (base or PROJECT_ROOT) / source
 
     if not source.exists():
         return f"[运行测试] 错误: 源文件不存在 - {source}"
 
-    # 推导测试文件路径：tools/xxx.py → tests/test_xxx.py
+    # 推导测试文件路径：tools/xxx.py → tests/test_xxx.py，根取源文件的上两级
+    # （worktree 里的 scripts/xxx.py → 该 worktree 的 tests/test_xxx.py）。
     test_name = f"test_{source.stem}{source.suffix}"
-    test_path = PROJECT_ROOT / "tests" / test_name
+    candidate_roots = [source.parent.parent, PROJECT_ROOT]
+    test_path = next(
+        (root / "tests" / test_name for root in candidate_roots if (root / "tests" / test_name).exists()),
+        candidate_roots[0] / "tests" / test_name,
+    )
 
     if not test_path.exists():
         return (
