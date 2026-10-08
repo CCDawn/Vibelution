@@ -25,10 +25,19 @@ Default risk policy is explicit and editable: long-only A-share cash account, ma
 ## Verification and progress
 
 - Baseline: AI single-stock backtest merged and isolated runtime accepted; this does not prove portfolio or full research parity.
-- First delivery: in progress. Accounting conservation, failed-batch rollback, stale-account rejection, approval replay, ownership isolation, T+1 and bounded market data tests are required.
+- First delivery: implemented; final validation and local integration pending. Accounting conservation, failed-batch rollback, stale-account rejection, approval replay, ownership isolation, T+1 and bounded market data have targeted regression coverage.
+- Isolated runtime acceptance on 2026-10-08: an owned native research Turn generated a real two-bank report and model allocation. A manually increased single-stock target was blocked, restoring the permitted target passed, and explicit approval created two simulated fills. The account retained cash 704320.32 and charged fees 88.68 from initial cash 1000000.00; replaying approval did not change cash or the two orders. Page reload and official Launcher restart preserved the holdings, proposal history and trade-review totals. Exact Session/Turn JSON source export was verified.
+- Runtime-discovered repairs: guidance no longer hides the original research report; pending creation no longer reads a nonexistent proposal; long source previews use one line with expansion; executed history does not request an impossible expiry recheck. A second model call exposed invented account arithmetic in prose, which must be constrained before this delivery closes.
 - Frontend: VUI contracts, API contract, TypeScript/build, same-line controls and 1280/1920 browser acceptance.
 - Integration: self-review each stable delivery, managed closeout and local fast-forward integration; official shared runtime is refreshed only through the authorized Launcher flow.
+- Version/refresh decision: additive finance APIs and UI, with compatible paper-account data; no release or remote publication is part of this task. The shared runtime needs a later Launcher rebuild/restart to consume the change. Isolated runtime verification does not establish deployment to that shared instance.
 
 ## Reuse decision
 
 Adapt the local paper ledger, report export, stateless LLM adapter and task primitives. Reference TradingAgents-CN risk-manager separation at pinned commit `51060a7682cf51810b4bc3a704829438d18cd8dc`; no restricted application source is copied and no additional dependency is required. Public descriptions of other projects guide capability comparison, not verified performance claims.
+
+## Portfolio backtest contract for the next delivery
+
+Keep the existing frozen-data worker, one model call per decision date, budget fences and stop/resume semantics. Add a versioned basket snapshot with normalized symbols, per-asset hashes and an identical explicit session calendar; missing bars remain a hard failure. Simulate one shared cash account, next-open execution, sells before buys, then buys in canonical symbol order with the same cash constraint and disclosed ordering. Retain the existing per-position cap semantics and add a separate gross-exposure limit if needed.
+
+Use the same frozen basket as an equal-weight buy-and-hold benchmark, with identical fees, slippage and lot rules. A constituent that cannot fill retains its cash allocation and records the failed order; never silently drop it. Freeze the optional out-of-sample start date before a run. Report the continuous account before and after that boundary, using the previous close as the out-of-sample starting equity; do not reset capital or tune on that period. Preserve old single-stock inputs and stored runs through explicit adapters.

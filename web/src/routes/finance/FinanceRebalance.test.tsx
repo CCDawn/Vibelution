@@ -266,6 +266,31 @@ describe("FinanceRebalance", () => {
     expect(api.create.mock.calls[0]).toEqual(api.create.mock.calls[1]);
   });
 
+  it("refreshes proposal history after a successful create readback", async () => {
+    const recovered = readyProposal();
+    const responses = [
+      { items: [] },
+      { items: [] },
+      { items: [recovered] },
+    ];
+    api.fetchProposals.mockImplementation(async () => responses.shift() ?? { items: [recovered] });
+    api.create.mockRejectedValueOnce(new Error("network disconnected"));
+    await render();
+    await act(async () => node.querySelector<HTMLInputElement>(`input[aria-label="选择报告 ${report.title}"]`)!.click());
+    await setValue(input("组合目标"), "按证据降低集中度");
+    await act(async () => button("生成建议").click());
+    await settle();
+
+    const fetchCountBeforeReadback = api.fetchProposals.mock.calls.length;
+    expect(fetchCountBeforeReadback).toBeGreaterThanOrEqual(1);
+    await act(async () => button("查询结果").click());
+    await settle();
+
+    expect(api.fetchProposals).toHaveBeenCalledTimes(fetchCountBeforeReadback + 1);
+    expect(client.getQueryData(["financial-portfolio", "agent-1", "proposals"])).toEqual({ items: [recovered] });
+    expect(node.textContent).toContain("建议详情");
+  });
+
   it("keeps expired and blocked plans from reaching the approval dialog", async () => {
     const blocked = readyProposal({ status: "blocked", riskChecks: [{ code: "cash", label: "现金储备", passed: false, detail: "现金低于下限" }] });
     api.fetchProposals.mockResolvedValue({ items: [blocked] });
@@ -297,6 +322,23 @@ describe("FinanceRebalance", () => {
     expect(button("核对订单").disabled).toBe(false);
   });
 
+  it("does not show an expired warning or review action for an executed proposal", async () => {
+    const executed = readyProposal({
+      status: "executed",
+      expiresAt: "2000-01-01T00:00:00Z",
+      execution: { batchId: "batch-3", executedAt: "2026-10-08T08:40:00Z" },
+    });
+    api.fetchProposals.mockResolvedValue({ items: [executed] });
+    api.fetchProposal.mockResolvedValue(executed);
+    await render();
+    await act(async () => button("已模拟执行").click());
+    await settle();
+
+    expect(node.textContent).not.toContain("建议已过期");
+    expect(node.textContent).toContain("模拟成交");
+    expect(Array.from(node.querySelectorAll("button")).some((item) => item.textContent?.includes("核对订单"))).toBe(false);
+  });
+
   it("reads back an uncertain approval and invalidates the paper account if it executed", async () => {
     const proposal = readyProposal();
     const executed = readyProposal({ status: "executed", execution: { batchId: "batch-2", executedAt: "2026-10-08T08:35:00Z" } });
@@ -322,6 +364,112 @@ describe("FinanceRebalance", () => {
     expect(client.getQueryState(["financial-paper", "agent-1", "account"])?.isInvalidated).toBe(true);
     expect(client.getQueryState(["financial-paper", "agent-1", "review", "2026-10"])?.isInvalidated).toBe(true);
     expect(client.getQueryState(["financial-portfolio", "agent-1", "research"])?.isInvalidated).toBe(true);
+  });
+
+  it("invalidates only the previous Agent's caches when an approval succeeds after switching", async () => {
+    const proposal = readyProposal();
+    const executed = readyProposal({ status: "executed", execution: { batchId: "batch-4", executedAt: "2026-10-08T08:45:00Z" } });
+    let resolveApproval!: (value: FinancialPortfolioProposal) => void;
+    api.fetchProposals.mockResolvedValue({ items: [proposal] });
+    api.approve.mockImplementation(() => new Promise<FinancialPortfolioProposal>((resolve) => { resolveApproval = resolve; }));
+    client.setDefaultOptions({ queries: { retry: false, gcTime: 60_000 } });
+    await act(async () => {
+      for (const agentId of ["agent-1", "agent-2"]) {
+        client.setQueryData(["financial-paper", agentId, "account"], { cashYuan: "100" });
+        client.setQueryData(["financial-paper", agentId, "review", "2026-10"], { summary: {} });
+        client.setQueryData(["financial-portfolio", agentId, "research"], { positions: [] });
+        client.setQueryData(["financial-portfolio", agentId, "proposals"], { items: agentId === "agent-1" ? [proposal] : [] });
+        client.setQueryData(["financial-portfolio", agentId, "proposal", proposal.proposalId], agentId === "agent-1" ? proposal : readyProposal({ agentId }));
+      }
+    });
+
+    await render();
+    await act(async () => button("待批准").click());
+    await settle();
+    await act(async () => button("核对订单").click());
+    await act(async () => button("确认模拟成交").click());
+    await settle();
+    expect(api.approve).toHaveBeenCalledTimes(1);
+
+    await render("agent-2");
+    await act(async () => resolveApproval(executed));
+    await settle();
+
+    for (const key of [
+      ["financial-paper", "agent-1", "account"],
+      ["financial-paper", "agent-1", "review", "2026-10"],
+      ["financial-portfolio", "agent-1", "research"],
+      ["financial-portfolio", "agent-1", "proposals"],
+      ["financial-portfolio", "agent-1", "proposal", proposal.proposalId],
+    ]) {
+      expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+    }
+    for (const key of [
+      ["financial-paper", "agent-2", "account"],
+      ["financial-paper", "agent-2", "review", "2026-10"],
+      ["financial-portfolio", "agent-2", "research"],
+      ["financial-portfolio", "agent-2", "proposals"],
+      ["financial-portfolio", "agent-2", "proposal", proposal.proposalId],
+    ]) {
+      expect(client.getQueryState(key)?.isInvalidated).not.toBe(true);
+    }
+    expect(api.fetchProposals.mock.calls.some(([agentId]) => agentId === "agent-2")).toBe(false);
+    expect(node.querySelector('[aria-label="模拟订单"]')).toBeNull();
+    expect(node.textContent).not.toContain("已模拟执行");
+  });
+
+  it("invalidates only the old Agent's caches when an approval readback confirms execution after switching", async () => {
+    const proposal = readyProposal();
+    const executed = readyProposal({ status: "executed", execution: { batchId: "batch-5", executedAt: "2026-10-08T08:50:00Z" } });
+    let resolveReadback!: (value: FinancialPortfolioProposal) => void;
+    api.fetchProposals.mockResolvedValue({ items: [proposal] });
+    api.fetchProposal.mockResolvedValueOnce(proposal).mockImplementationOnce(() => new Promise<FinancialPortfolioProposal>((resolve) => { resolveReadback = resolve; }));
+    api.approve.mockRejectedValueOnce(new Error("network disconnected"));
+    client.setDefaultOptions({ queries: { retry: false, gcTime: 60_000 } });
+    await act(async () => {
+      for (const agentId of ["agent-1", "agent-2"]) {
+        client.setQueryData(["financial-paper", agentId, "account"], { cashYuan: "100" });
+        client.setQueryData(["financial-paper", agentId, "review", "2026-10"], { summary: {} });
+        client.setQueryData(["financial-portfolio", agentId, "research"], { positions: [] });
+        client.setQueryData(["financial-portfolio", agentId, "proposals"], { items: agentId === "agent-1" ? [proposal] : [] });
+        client.setQueryData(["financial-portfolio", agentId, "proposal", proposal.proposalId], agentId === "agent-1" ? proposal : readyProposal({ agentId }));
+      }
+    });
+
+    await render();
+    await act(async () => button("待批准").click());
+    await settle();
+    await act(async () => button("核对订单").click());
+    await act(async () => button("确认模拟成交").click());
+    await settle();
+    expect(api.approve).toHaveBeenCalledTimes(1);
+    expect(api.fetchProposal).toHaveBeenCalledTimes(2);
+
+    await render("agent-2");
+    await act(async () => resolveReadback(executed));
+    await settle();
+
+    for (const key of [
+      ["financial-paper", "agent-1", "account"],
+      ["financial-paper", "agent-1", "review", "2026-10"],
+      ["financial-portfolio", "agent-1", "research"],
+      ["financial-portfolio", "agent-1", "proposals"],
+      ["financial-portfolio", "agent-1", "proposal", proposal.proposalId],
+    ]) {
+      expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+    }
+    for (const key of [
+      ["financial-paper", "agent-2", "account"],
+      ["financial-paper", "agent-2", "review", "2026-10"],
+      ["financial-portfolio", "agent-2", "research"],
+      ["financial-portfolio", "agent-2", "proposals"],
+      ["financial-portfolio", "agent-2", "proposal", proposal.proposalId],
+    ]) {
+      expect(client.getQueryState(key)?.isInvalidated).not.toBe(true);
+    }
+    expect(api.fetchProposals.mock.calls.some(([agentId]) => agentId === "agent-2")).toBe(false);
+    expect(node.querySelector('[aria-label="模拟订单"]')).toBeNull();
+    expect(node.textContent).not.toContain("已模拟执行");
   });
 
   it("does not let a late create response from one Agent replace the next Agent's view", async () => {

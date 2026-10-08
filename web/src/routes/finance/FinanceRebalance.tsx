@@ -263,12 +263,24 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
       queryClient.setQueryData(financialPortfolioKeys.proposal(agentId, outcome.value.proposalId), outcome.value);
       setSelectedProposalId(outcome.value.proposalId);
       setCreateAttempt(null);
+      void queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.proposals(agentId) });
       return;
     }
     if (isFinancialPortfolioProposalNotFound(outcome.error)) {
       setCreateAttempt({ request, retryAllowed: true });
       setError(zh ? "暂未找到结果，可以重试生成。" : "No result was found. You can retry generation.");
     }
+  }
+
+  function invalidateApprovalQueries(targetAgentId: string, proposalId?: string) {
+    const invalidations = [
+      queryClient.invalidateQueries({ queryKey: financialPaperKeys.account(targetAgentId) }),
+      queryClient.invalidateQueries({ queryKey: ["financial-paper", targetAgentId, "review"] }),
+      queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.research(targetAgentId) }),
+      queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.proposals(targetAgentId) }),
+    ];
+    if (proposalId) invalidations.push(queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.proposal(targetAgentId, proposalId) }));
+    void Promise.all(invalidations);
   }
 
   async function previewEditedPlan() {
@@ -291,21 +303,22 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
       confirmSimulation: true,
     }));
     if (!outcome.ok) {
-      if (outcome.stale) return;
+      if (outcome.stale) {
+        invalidateApprovalQueries(agentId, proposal.proposalId);
+        return;
+      }
       setPlanDirty(true);
       try {
         const readback = await fetchFinancialPortfolioProposal(agentId, proposal.proposalId);
-        if (agentRef.current !== agentId || agentEpoch.current !== requestedEpoch) return;
+        if (agentRef.current !== agentId || agentEpoch.current !== requestedEpoch) {
+          if (readback.status === "executed") invalidateApprovalQueries(agentId, proposal.proposalId);
+          return;
+        }
         queryClient.setQueryData(financialPortfolioKeys.proposal(agentId, proposal.proposalId), readback);
         if (readback.status === "executed") {
           setPlanDirty(false);
           setApprovalOpen(false);
-          void Promise.all([
-            queryClient.invalidateQueries({ queryKey: financialPaperKeys.account(agentId) }),
-            queryClient.invalidateQueries({ queryKey: ["financial-paper", agentId, "review"] }),
-            queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.research(agentId) }),
-            queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.proposals(agentId) }),
-          ]);
+          invalidateApprovalQueries(agentId);
         }
       } catch {
         // Keep approval disabled until the user can recheck or reload this exact proposal.
@@ -314,12 +327,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     }
     setApprovalOpen(false);
     queryClient.setQueryData(financialPortfolioKeys.proposal(agentId, proposal.proposalId), outcome.value);
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: financialPaperKeys.account(agentId) }),
-      queryClient.invalidateQueries({ queryKey: ["financial-paper", agentId, "review"] }),
-      queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.research(agentId) }),
-      queryClient.invalidateQueries({ queryKey: financialPortfolioKeys.proposals(agentId) }),
-    ]);
+    invalidateApprovalQueries(agentId);
   }
 
   function editTarget(symbol: string, key: "weightPct" | "reason", value: string) {
@@ -341,6 +349,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
   const isExpired = !Number.isFinite(parsedExpiry) || parsedExpiry <= Date.now();
   const canPreview = !pending && (planDirty || isExpired) && validTargets(editedTargets) && validPolicy(editedPolicy);
   const allRiskChecksPassed = Boolean(proposal?.riskChecks.length && proposal.riskChecks.every((check) => check.passed));
+  const canRecheck = proposal?.status === "ready" || proposal?.status === "blocked";
   const canApprove = Boolean(proposal && proposal.status === "ready" && proposal.orders.length > 0 && proposal.planHash
     && !planDirty && !isExpired && allRiskChecksPassed && !pending);
 
@@ -463,10 +472,10 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
       {proposal.riskChecks.length ? <ul className={styles.risk} aria-label={zh ? "确定性风险检查" : "Deterministic risk checks"}>{proposal.riskChecks.map((check) => <li key={check.code} className={check.passed ? styles.passed : styles.failed}><strong>{check.passed ? "✓" : "!"} {check.label}：</strong>{check.detail}</li>)}</ul> : null}
       <div className={styles.controls}><span className={styles.note}>{zh ? "净值" : "Equity"} {money(proposal.metrics.equityYuan, zh)} · {zh ? "预计现金" : "Cash after"} {money(proposal.metrics.cashAfterYuan, zh)} · {zh ? "换手" : "Turnover"} {proposal.metrics.turnoverPct}% · {zh ? "费用" : "Fees"} {money(proposal.metrics.feesYuan, zh)}</span>
         {planDirty ? <span className={styles.error}>{zh ? "目标或风控已修改，请重新检查后确认。" : "Targets or risk settings changed. Recheck before confirming."}</span> : null}
-        {isExpired ? <span className={styles.error}>{zh ? "建议已过期，请重新检查行情与风控。" : "Proposal expired; recheck quotes and risk."}</span> : null}
+        {isExpired && canRecheck ? <span className={styles.error}>{zh ? "建议已过期，请重新检查行情与风控。" : "Proposal expired; recheck quotes and risk."}</span> : null}
         {proposal.status === "ready" && !allRiskChecksPassed ? <span className={styles.error}>{zh ? "风控检查未完成，暂不能确认。" : "Risk checks are incomplete; confirmation is disabled."}</span> : null}
         {proposal.status === "blocked" ? <span className={styles.error}>{zh ? "风控未通过，不能确认。" : "Risk checks failed; confirmation is disabled."}</span> : null}
-        <VButton variant="primary" isDisabled={!canApprove} onPress={() => setApprovalOpen(true)}>{zh ? "核对订单" : "Review orders"}</VButton>
+        {proposal.status !== "executed" ? <VButton variant="primary" isDisabled={!canApprove} onPress={() => setApprovalOpen(true)}>{zh ? "核对订单" : "Review orders"}</VButton> : null}
       </div>
       <div className={styles.table}><VDenseTable ariaLabel={zh ? "模拟订单" : "Simulated orders"} rows={proposal.orders} getRowKey={(row) => `${row.side}:${row.symbol}`} emptyText={zh ? "没有可执行订单" : "No executable orders"} columns={orderColumns} /></div>
       {proposal.execution ? <p className={styles.note}>{zh ? "模拟成交" : "Simulated trades"} · {formatTime(proposal.execution.executedAt, zh)}</p> : null}
