@@ -32,7 +32,12 @@ Analyst opinions, news prose and public fundamentals summaries do not authorize
 numbers. Truncated excerpts whose original hash cannot be verified are rejected.
 Each tool output is bounded to 32,000 characters and combined borrowed
 records to 60. Duplicate observations are folded; conflicting page excerpts or
-market snapshots cannot authorize either version's numbers. All export formats
+quote observations cannot authorize either version's numbers. Quote conflicts
+compare the full quote and stock/source/market/currency/unit metadata; different
+K-line request windows, candle errors, transport status and fetch times do not
+erase an otherwise identical quote. The original candle records remain separate:
+calculations still require one unambiguous complete snapshot, with no merging or
+selection of a preferred analyst's candle window. All export formats
 and report catalog previews use the same projection. No external project code
 is copied and no second evidence/report store is created.
 

@@ -206,8 +206,9 @@ def test_duplicate_submission_mapping_and_after_summary_tools_fail_closed(team_r
     assert "200.00" not in exported()
 
 
-@pytest.mark.parametrize("conflict", [False, True])
-def test_original_market_quote_is_reused_but_conflicting_quotes_are_not(team_report, conflict):
+@pytest.mark.parametrize("query_difference", [False, True])
+@pytest.mark.parametrize("conflict", [None, "price", "pbRatio", "timestamp", "currency", "sourceUrl", "source", "priceUnit"])
+def test_original_market_quote_is_reused_but_conflicting_quotes_are_not(team_report, conflict, query_difference):
     run, _, journals, states = team_report
     source = "https://gu.qq.com/sh600519/gp"
     payload = {"ok": True, "status": "ok", "ticker": "sh600519", "source": "腾讯财经",
@@ -219,11 +220,54 @@ def test_original_market_quote_is_reused_but_conflicting_quotes_are_not(team_rep
     analyst = turn("analyst-session", "at", "as", "opinion", payload)
     analyst[1] = replace(analyst[1], payload={"toolCall": {"callId": "tc", "name": "financial_market_snapshot_tool", "result": json.dumps(payload), "status": "completed"}})
     journals["analyst-session"] = analyst
-    if conflict:
-        run["analysts"]["market"] = {"agentId": "market", "sessionId": "market-session", "turnId": "mt", "clientSubmissionId": "ms"}
-        states["market-session"] = {"agentId": "market"}
-        payload["quote"]["price"] = 300
-        other = turn("market-session", "mt", "ms", "opinion", payload)
-        other[1] = replace(other[1], payload={"toolCall": {"callId": "tc", "name": "financial_market_snapshot_tool", "result": json.dumps(payload), "status": "completed"}})
-        journals["market-session"] = other
-    assert ("200.00 元" in exported()) is not conflict
+    run["analysts"]["market"] = {"agentId": "market", "sessionId": "market-session", "turnId": "mt", "clientSubmissionId": "ms"}
+    states["market-session"] = {"agentId": "market"}
+    if query_difference:
+        payload.update(period="week", requestedLimit=5, returnedCandleCount=0,
+            omittedCandleCount=20, candles={"columns": [], "rows": []},
+            candleError="requested candles unavailable", status="partial",
+            fetchedAt="2026-10-06T04:00:00Z")
+    if conflict in {"price", "pbRatio", "timestamp"}:
+        payload["quote"][conflict] = {"price": 300, "pbRatio": 0.5,
+            "timestamp": "2026-09-30T16:14:00+08:00"}[conflict]
+    elif conflict:
+        payload[conflict] = {"currency": "USD", "sourceUrl": source + ".evil",
+            "source": "other provider", "priceUnit": "USD/share"}[conflict]
+    other = turn("market-session", "mt", "ms", "opinion", payload)
+    other[1] = replace(other[1], payload={"toolCall": {"callId": "tc", "name": "financial_market_snapshot_tool", "result": json.dumps(payload), "status": "completed"}})
+    journals["market-session"] = other
+    assert ("200.00 元" in exported()) is (conflict is None)
+
+
+def test_candle_conflict_cannot_ground_a_calculation_even_when_the_quote_agrees(team_report):
+    run, _, journals, states = team_report
+    source = "https://gu.qq.com/sh600519/gp"
+    payload = {"ok": True, "status": "ok", "ticker": "sh600519", "source": "腾讯财经",
+        "sourceUrl": source, "marketCode": "CN", "currency": "CNY", "priceUnit": "元",
+        "quote": {"symbol": "sh600519", "ticker": "600519", "marketCode": "CN",
+            "currency": "CNY", "priceUnit": "CNY/share", "marketTimeZone": "Asia/Shanghai",
+            "price": 200, "timestamp": "2026-09-30T16:15:00+08:00"},
+        "period": "day", "adjustment": "qfq", "candleError": "",
+        "requestedLimit": 5, "availableCandleCount": 5, "returnedCandleCount": 5,
+        "omittedCandleCount": 0, "candles": {
+            "columns": ["date", "open", "close", "high", "low", "volumeLots"],
+            "rows": [[day, close, close, close, close, 100] for day, close in zip(
+                ["2026-09-24", "2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30"],
+                [190, 195, 196, 198, 200])]}}
+    answer = f"## 结论\n贵州茅台 sh600519 股价 200.00 元，MA5 195.80 元。\n## 证据来源\n行情日期 2026-09-30，腾讯财经 {source}。"
+    journals["summary-session"] = turn("summary-session", "st", "ss", answer)
+    for role, sid, tid, submission in [("fundamental", "analyst-session", "at", "as"),
+        ("market", "market-session", "mt", "ms")]:
+        run["analysts"][role] = {"agentId": role, "sessionId": sid, "turnId": tid, "clientSubmissionId": submission}
+        states[sid] = {"agentId": role}
+        if role == "market":
+            payload["candles"]["rows"][1] = ["2026-09-25", 194, 194, 194, 194, 100]
+        journal = turn(sid, tid, submission, "opinion", payload)
+        journal[1] = replace(journal[1], payload={"toolCall": {"callId": "tc",
+            "name": "financial_market_snapshot_tool", "result": json.dumps(payload), "status": "completed"}})
+        journals[sid] = journal
+        if role == "fundamental":
+            assert "195.80 元" in exported()
+    text = exported()
+    assert "200.00 元" in text
+    assert "195.80" not in text

@@ -146,7 +146,11 @@ def _without_conflicts(own: list, cross: list) -> list:
         except (TypeError, ValueError):
             continue
         if name == "financial_market_snapshot_tool":
-            market_variants.add(json.dumps({k: v for k, v in payload.items() if k != "fetchedAt"}, sort_keys=True))
+            # Query windows and candle failures do not change the quote observation.
+            # Keep the full records: calculations still reject ambiguous candle data.
+            market_variants.add(json.dumps({key: payload.get(key) for key in (
+                "ticker", "source", "sourceUrl", "marketCode", "currency", "priceUnit", "quote",
+            )}, sort_keys=True))
         elif name == "financial_evidence_search_tool":
             rows = {r.get("knowledgeItemId"): r for r in payload.get("results", []) if isinstance(r, dict)}
             for citation in payload.get("citations", []):
