@@ -14,6 +14,7 @@ import type { SessionDetail, SessionLlmModelOption, SessionModelSelection, Sessi
 import { fetchFinancialStock, searchFinancialStocks } from "../api/financialMarket";
 import { listArchivedChatSessions, unarchiveChatSession } from "../api/sessionArchive";
 import { fetchFinancialReportText } from "../api/financialReports";
+import { fetchFinancialReflection } from "../api/financialEvaluation";
 
 const nativeSubmit = vi.fn();
 let nativeMessages: SessionDetail["messages"] = [];
@@ -31,6 +32,7 @@ vi.mock("../api/financialPreferences", async (original) => ({
   updateFinancialWorkspace: vi.fn(async (agentId: string, revision: number, patch: object) => ({ schemaVersion: 1, agentId, revision: revision + 1, updatedAt: "", selectedStock: null, watchlist: [], profiles: [], manualPositions: [], reviewCases: [], ...patch })),
 }));
 vi.mock("../api/financialReports", async (original) => ({ ...await original<typeof import("../api/financialReports")>(), fetchFinancialReportText: vi.fn(), fetchFinancialReports: vi.fn(async () => ({ items: [], nextCursor: "", totalEstimate: 0 })) }));
+vi.mock("../api/financialEvaluation", async (original) => ({ ...await original<typeof import("../api/financialEvaluation")>(), fetchFinancialReflection: vi.fn() }));
 vi.mock("./finance/FinanceDashboard", () => ({ FinanceDashboard: () => <div>市场概览</div> }));
 vi.mock("./finance/FinancePaperTrading", () => ({ FinancePaperTrading: () => <div>模拟账户</div> }));
 vi.mock("../api/sessionArchive", () => ({ unarchiveChatSession: vi.fn(), archiveChatSession: vi.fn(), listArchivedChatSessions: vi.fn() }));
@@ -80,6 +82,7 @@ beforeEach(() => {
   vi.mocked(querySessions).mockResolvedValue({ items: [nativeSession("native-session"), { ...nativeSession("history-session"), title: "年度研究" }], nextCursor: "" } as SessionQueryResponse);
   vi.mocked(createChatSession).mockResolvedValue(nativeSession("new-session"));
   vi.mocked(fetchFinancialStock).mockRejectedValue(new Error("行情暂不可用"));
+  vi.mocked(fetchFinancialReflection).mockResolvedValue({ items: [] });
   vi.mocked(searchFinancialStocks).mockResolvedValue([{ symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" }]);
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); vi.clearAllMocks(); });
@@ -121,6 +124,26 @@ async function input(label: string, value: string) {
 }
 
 describe("financial assistant page", () => {
+  it("includes confirmed lessons in the native research request", async () => {
+    vi.mocked(fetchFinancialReflection).mockResolvedValue({ items: [{ id: "lesson-a", text: "判断方向前补充可核验依据", createdAt: "2026-01-01T00:00:00Z", refs: [{ type: "item", id: "validation-a" }] }] });
+    await render("/finance?session=native-session&finance_tab=overview");
+    await act(async () => { button("开始研究")!.click(); });
+    await settle();
+    expect(nativeSubmit).toHaveBeenCalledTimes(1);
+    expect(nativeSubmit.mock.calls[0][0]).toContain("判断方向前补充可核验依据");
+    expect(nativeSubmit.mock.calls[0][0]).toContain("validation-a");
+  });
+  it("blocks stock research and offers retry when lesson context cannot be read", async () => {
+    vi.mocked(fetchFinancialReflection).mockRejectedValue(new Error("context unavailable"));
+    await render("/finance?session=native-session&finance_tab=overview");
+    expect(container.textContent).toContain("复盘参考读取失败");
+    expect(button("开始研究")?.disabled).toBe(true);
+    expect(nativeSubmit).not.toHaveBeenCalled();
+    vi.mocked(fetchFinancialReflection).mockResolvedValue({ items: [] });
+    await act(async () => { button("重试")!.click(); });
+    await settle();
+    expect(button("开始研究")?.disabled).toBe(false);
+  });
   it("prepares research without creating a blank session, then starts once through native submission", async () => {
     await render("/finance?session=native-session");
     const nativeDraft = container.querySelector('textarea[aria-label="native draft"]');

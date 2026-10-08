@@ -226,5 +226,6 @@
 | `FinanceResearchProfiles` | [product/financial-assistant.md](./product/financial-assistant.md#financeresearchprofiles) |
 | `FinanceManualPositions` | [product/financial-assistant.md](./product/financial-assistant.md#financemanualpositions) |
 | `FinanceReportsCenter` | [product/financial-assistant.md](./product/financial-assistant.md#financereportscenter) |
+| `FinanceBacktest` / `FinanceOutcomeReview` / `FinanceClaimRegistration` | [product/financial-assistant.md](./product/financial-assistant.md#financebacktest--financeoutcomereview--financeclaimregistration) |
 | `FinanceReportExport` | [product/financial-assistant.md](./product/financial-assistant.md#financereportexport) |
 | `FinanceGroundedReportBody` / `FinanceReportReadState` / `FinanceReportEvidenceNotice` | [product/financial-assistant.md](./product/financial-assistant.md#financegroundedreportbody--financereportreadstate--financereportevidencenotice) |

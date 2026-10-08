@@ -59,6 +59,41 @@ _EXPLICIT_REPORT_PROMPT = re.compile(
 )
 
 
+def list_report_validations(agent_id: str) -> dict:
+    from .financial_report.validation import list_validations
+    return list_validations(agent_id)
+
+
+def create_report_validation(agent_id: str, payload: dict) -> dict:
+    from .financial_report.validation import create_validation
+    return create_validation(agent_id, payload)
+
+
+def check_report_validation(agent_id: str, validation_id: str) -> dict:
+    from .financial_report.validation import check_validation
+    return check_validation(agent_id, validation_id)
+
+
+def report_feedback_prompt(agent_id: str, validation_id: str) -> dict:
+    from .financial_report.validation import feedback_prompt
+    return feedback_prompt(agent_id, validation_id)
+
+
+def save_report_lesson(agent_id: str, validation_id: str, text: str, request_id: str) -> dict:
+    from .financial_report.validation import save_lesson
+    return save_lesson(agent_id, validation_id, text, request_id)
+
+
+def report_reflection_context(agent_id: str, symbol: str, analysis_cutoff: str) -> dict:
+    from .financial_report.validation import reflection_context
+    return {"items": reflection_context(agent_id, symbol, analysis_cutoff=analysis_cutoff)}
+
+
+def backtest_research_strategy(agent_id: str, payload: dict) -> dict:
+    from .financial_report.backtest import run_backtest
+    return run_backtest(agent_id, payload)
+
+
 class FinancialReportExportError(ValueError):
     """Base error for an invalid or unavailable report export."""
 

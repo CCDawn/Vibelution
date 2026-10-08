@@ -266,6 +266,23 @@ class FinancialResearchJobsWorker:
         self._worker_id = worker_id or str(uuid4())
         self._held_leases: set[tuple[str, str]] = set()
         self._assistant_cache: tuple[float, list[str]] = (float("-inf"), [])
+        self._next_report_check_at = float("-inf")
+
+    def _check_report_outcomes(self, *, should_stop: Callable[[], bool]) -> None:
+        """Reuse the managed lifecycle, with a separate bounded report owner."""
+        now = parse_now(self._now_provider()).timestamp()
+        if should_stop() or now < self._next_report_check_at:
+            return
+        self._next_report_check_at = now + 60
+        from core.web.services.financial_report.validation import process_due_for_agent
+        remaining = 2
+        for agent_id in self._assistant_ids(now):
+            if should_stop() or remaining <= 0:
+                break
+            try:
+                remaining -= process_due_for_agent(agent_id, max_checks=remaining, stop_requested=should_stop)
+            except Exception as exc:  # noqa: BLE001 - isolate unavailable owner data
+                _log_scheduler_error("report-outcome-check", exc)
 
     def process_pending_once(
         self, *, stop_requested: Callable[[], bool] | None = None
@@ -336,6 +353,7 @@ class FinancialResearchJobsWorker:
             while not stop_requested():
                 try:
                     self.process_pending_once(stop_requested=stop_requested)
+                    self._check_report_outcomes(should_stop=stop_requested)
                 except Exception as exc:  # noqa: BLE001 - keep the lifecycle-owned scheduler alive
                     _log_scheduler_error("worker-tick", exc)
                 remaining = self._poll_interval_seconds

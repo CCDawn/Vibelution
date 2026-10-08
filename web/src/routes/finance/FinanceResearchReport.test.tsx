@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +32,7 @@ describe("FinanceResearchReport research metadata", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    await act(async () => root?.render(<FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-1" zh onCitation={() => {}} onResearch={() => {}} {...props} />));
+    await act(async () => root?.render(<QueryClientProvider client={new QueryClient()}><FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-1" zh onCitation={() => {}} onResearch={() => {}} {...props} /></QueryClientProvider>));
     return container;
   }
 
@@ -124,7 +125,7 @@ describe("FinanceResearchReport research metadata", () => {
     const container = await render();
     expect(container.textContent).toContain("读取核验正文");
     vi.mocked(fetchFinancialReportText).mockRejectedValueOnce(new Error("Unavailable"));
-    await act(async () => root?.render(<FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-2" zh onCitation={() => {}} onResearch={() => {}} />));
+    await act(async () => root?.render(<QueryClientProvider client={new QueryClient()}><FinanceResearchReport report={report} assistantAgentId="agent-1" sessionId="session-2" zh onCitation={() => {}} onResearch={() => {}} /></QueryClientProvider>));
     await act(async () => resolveOld("Other session private result"));
     expect(container.textContent).toContain("报告读取失败");
     expect(container.textContent).not.toContain("Other session");

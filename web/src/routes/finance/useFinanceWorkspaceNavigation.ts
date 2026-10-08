@@ -7,7 +7,7 @@ const options = {
   tab: ["research", "overview", "news", "fundamentals", "report"],
   asideTab: ["process", "evidence"],
   portfolioSource: ["manual", "paper"],
-  reviewTab: ["trades", "history", "cases"],
+  reviewTab: ["trades", "validation", "backtest", "history", "cases"],
   taskTab: ["records", "batches", "schedules"],
   reportCollection: ["completed", "active", "archived"],
 } as const;

@@ -7,6 +7,7 @@ import { LazyConversationMarkdownRenderer } from "../../components/conversation/
 import { VButton, VCheckbox, VDenseTable, VDialog, VInput, VSelect, VStateSurface, VSurface, VTextarea, type VDenseTableColumn } from "../../components/vui";
 import { isSessionDeleteTombstoned } from "../sessionDeleteTombstone";
 import { FinanceReportExport } from "./FinanceReportExport";
+import { FinanceClaimRegistration } from "./FinanceClaimRegistration";
 import styles from "./FinanceReportsCenter.styles";
 
 export type FinanceReportSelection = Pick<FinancialReportSummary, "sessionId" | "turnId">;
@@ -130,6 +131,7 @@ export function FinanceReportsCenter({ agentId, cases, onSaveCases, onOpenSessio
             <VButton variant="secondary" onPress={returnToList}>{zh ? "返回报告列表" : "Back to reports"}</VButton>
             {!viewingReportMissing ? <>
               <FinanceReportExport assistantAgentId={agentId} sessionId={viewing.sessionId} turnId={viewing.turnId} zh={zh} />
+              <FinanceClaimRegistration key={`${agentId}:${viewing.sessionId}:${viewing.turnId}`} initialSymbol={selectedSummary?.marketCode === "CN" ? selectedSummary.ticker ?? "" : ""} agentId={agentId} sessionId={viewing.sessionId} turnId={viewing.turnId} zh={zh} />
               <VButton onPress={() => onOpenSession(viewing.sessionId)}>{zh ? "打开原会话 / 追问" : "Open session / follow up"}</VButton>
             </> : null}
             {casesOnly && selectedCase ? <>

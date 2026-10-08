@@ -32,6 +32,11 @@ const productSharedParentStyleConsumers = [
   // screening share one market table map rather than duplicate visual classes.
   "routes/finance/FinanceGeneralResearch.tsx",
   "routes/finance/FinanceWatchlistTable.tsx",
+  // Outcome registration, review and backtesting share their evaluation
+  // surface map, keeping evidence and form geometry consistent.
+  "routes/finance/FinanceBacktest.tsx",
+  "routes/finance/FinanceClaimRegistration.tsx",
+  "routes/finance/FinanceOutcomeReview.tsx",
   "components/layout/PersistedHeightListShell.tsx",
   "components/conversation/ConversationFollowupQueueBar.tsx",
   "components/conversation/ConversationToolActivityPills.tsx",

@@ -996,6 +996,8 @@ def test_financial_team_final_answer_does_not_use_item_from_another_turn_or_sess
 
 
 def _stub_primary_financial_team_submission(monkeypatch, *, execution_policy=None):
+    from core.web.services.financial_report import validation
+    monkeypatch.setattr(validation, "reflection_context", lambda *_args, **_kwargs: [])
     run = {
         "schemaVersion": 2,
         "runId": "run-1",
