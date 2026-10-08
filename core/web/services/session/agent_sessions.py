@@ -2614,6 +2614,8 @@ def create_child_session(
     switch_to_child: bool = False,
     source: str = "agent_auto_split",
     experiment_binding: dict[str, Any] | None = None,
+    announce_on_parent: bool = True,
+    track_active_child: bool = True,
 ) -> dict[str, Any]:
     s = _service()
     lang = s.get_web_language()
@@ -2784,7 +2786,8 @@ def create_child_session(
         if child_id not in child_ids:
             child_ids.append(child_id)
         parent["child_session_ids"] = child_ids
-        parent["active_child_session_id"] = child_id
+        if track_active_child:
+            parent["active_child_session_id"] = child_id
         parent.pop("messages", None)
         parent["updated_at"] = now
         dirty_rows = [parent, child]
@@ -2825,22 +2828,23 @@ def create_child_session(
         )
     except Exception:
         pass
-    s._append_session_conversation_event(
-        root_id,
-        f"child-session-{child_id}",
-        s.EVENT_ASSISTANT_MESSAGE,
-        status="completed",
-        payload={
-            "content": s._child_session_created_card(child_id=child_id, title=title, auto_start=auto_start),
-            "metadata": {
-                "kind": "child_session_card",
-                "childSessionId": child_id,
-                "childStatus": "queued" if auto_start else "idle",
-                "taskTitle": title,
+    if announce_on_parent:
+        s._append_session_conversation_event(
+            root_id,
+            f"child-session-{child_id}",
+            s.EVENT_ASSISTANT_MESSAGE,
+            status="completed",
+            payload={
+                "content": s._child_session_created_card(child_id=child_id, title=title, auto_start=auto_start),
+                "metadata": {
+                    "kind": "child_session_card",
+                    "childSessionId": child_id,
+                    "childStatus": "queued" if auto_start else "idle",
+                    "taskTitle": title,
+                },
             },
-        },
-        source="s.create_child_session",
-    )
+            source="s.create_child_session",
+        )
     s._invalidate_session_list_cache()
     s._record_child_session_event(
         "created",

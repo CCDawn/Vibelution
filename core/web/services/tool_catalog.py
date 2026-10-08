@@ -537,6 +537,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["background_agent"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "send_message_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["subagent", "agent_message"],
+        "riskTags": ["session_state_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "agent_message_tool": {
         "category": "agent_collaboration",
         "capabilityTags": ["agent_message", "wake"],
@@ -1266,6 +1272,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "agent_messages_consume_all_tool",
             "knowledge_base_acl_grant_tool",
             "spawn_agent_tool",
+            "send_message_tool",
             "agent_tool_permission_request_tool",
             "research_agent_creation_proposal_tool",
             "research_communication_edge_proposal_tool",

@@ -2,9 +2,9 @@
 """Durable Session Journal authority for LLM resilience decisions.
 
 LLM resilience decisions — explicit route fallback switches, same-profile
-degraded retries, stuck-loop detection, and answer-channel leak handling —
-are persisted as ``llm_resilience`` journal events so they survive process
-restarts. This module is the single owner for that event: the scene-event
+degraded retries, stuck-loop detection, answer-channel leak handling, and
+stream recovery from the last committed tool result — are persisted as
+``llm_resilience`` journal events so they survive process restarts. This module is the single owner for that event: the scene-event
 name mapping, the payload schema, the append path, and the read projection
 used by the web session turn DTO (``routeFallback``).
 
@@ -50,6 +50,7 @@ STAGE_FALLBACK_SWITCH = "fallback_switch"
 STAGE_DEGRADED_RETRY = "degraded_retry"
 STAGE_STUCK_DETECTED = "stuck_detected"
 STAGE_ANSWER_CHANNEL_LEAK = "answer_channel_leak"
+STAGE_STREAM_RECOVERY = "stream_recovery"
 
 # Scene event code -> journal stage. The turn LLM adapter never touches the
 # journal directly; the agent runtime binding layer mirrors these scene
@@ -66,6 +67,7 @@ _PROJECTION_KIND = "llm_resilience_marker"
 _SOURCE_KIND = "llm_resilience"
 
 _BOUNDED_LIST_MAX_ITEMS = 8
+_STREAM_RECOVERY_LIST_MAX_ITEMS = 32
 _BOUNDED_TEXT_MAX_CHARS = 500
 
 
@@ -255,6 +257,21 @@ def _resilience_payload(stage: str, *, attempt: int, fields: Mapping[str, Any]) 
         reason = _text(fields.get("reason"))
         if reason:
             payload["reason"] = reason
+    if stage == STAGE_STREAM_RECOVERY:
+        payload["anchorId"] = _text(fields.get("anchorId"))
+        payload["reason"] = _text(fields.get("reason"))
+        payload["failureKind"] = _text(fields.get("failureKind"))
+        payload["assistantMessageId"] = _text(fields.get("assistantMessageId"))
+        payload["discardedTextBytes"] = _coerce_nonnegative_int(fields.get("discardedTextBytes"))
+        payload["discardedReasoningBytes"] = _coerce_nonnegative_int(fields.get("discardedReasoningBytes"))
+        payload["maxRetries"] = _coerce_nonnegative_int(fields.get("maxRetries"))
+        payload["committedToolCallIds"] = _bounded_text_list(
+            fields.get("committedToolCallIds"),
+            max_items=_STREAM_RECOVERY_LIST_MAX_ITEMS,
+        )
+        # Unfinished calls are not a second anchor. The retry starts from
+        # the last committed tool result, including a tool error.
+        payload["discardedToolCallIds"] = []
     return payload
 
 
@@ -311,6 +328,7 @@ __all__ = [
     "STAGE_ANSWER_CHANNEL_LEAK",
     "STAGE_DEGRADED_RETRY",
     "STAGE_FALLBACK_SWITCH",
+    "STAGE_STREAM_RECOVERY",
     "STAGE_STUCK_DETECTED",
     "latest_route_fallback_from_events",
     "record_llm_resilience_event",

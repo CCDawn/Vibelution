@@ -56,6 +56,10 @@ EVENT_LLM_RESILIENCE = "llm_resilience"
 # next user message is a sibling event, not a second transcript.
 # Never model-visible. Out of band, so it may follow a settled turn.
 EVENT_TURN_STEER = "turn_steer"
+# Status-only progress for an addressable subagent. The child session
+# journal is the transcript; this event must not carry the message body.
+# Never model-visible. Out of band, so it may follow a settled turn.
+EVENT_SUBAGENT_PROGRESS = "subagent_progress"
 EVENT_BRANCH_REBASE = "branch_rebase"
 
 TERMINAL_EVENTS = {
@@ -162,9 +166,10 @@ class TurnJournalIllegalTransitionError(TurnJournalPostTerminalWriteError):
 #   (chat-room rounds journal these under synthetic round ids).
 # - terminal (turn_completed, turn_failed, turn_interrupted): settles the
 #   turn, exactly once. A second terminal is the classic double-settle race.
-# - out_of_band (llm_resilience, branch_rebase, internal_turn_trigger, and any
-#   unknown type): diagnostics and markers that never participate in the turn
-#   state machine. llm_resilience is documented to never trip the post-terminal
+# - out_of_band (llm_resilience, turn_steer, subagent_progress, branch_rebase,
+#   internal_turn_trigger, and any unknown type): diagnostics and markers that
+#   never participate in the turn state machine. llm_resilience is documented
+#   to never trip the post-terminal
 #   guard, branch_rebase markers legitimately reference already-settled turns
 #   (head_select), and unknown types must stay forward-compatible with newer
 #   writers.
@@ -205,6 +210,7 @@ TURN_EVENT_PHASES: dict[str, str] = {
     EVENT_TURN_INTERRUPTED: TURN_PHASE_TERMINAL,
     EVENT_LLM_RESILIENCE: TURN_PHASE_OUT_OF_BAND,
     EVENT_TURN_STEER: TURN_PHASE_OUT_OF_BAND,
+    EVENT_SUBAGENT_PROGRESS: TURN_PHASE_OUT_OF_BAND,
     EVENT_BRANCH_REBASE: TURN_PHASE_OUT_OF_BAND,
     EVENT_SESSION_RECOVERY_RESUMED: TURN_PHASE_OUT_OF_BAND,
     _EVENT_INTERNAL_TURN_TRIGGER: TURN_PHASE_OUT_OF_BAND,
@@ -361,6 +367,7 @@ _LATEST_PREVIEW_IGNORED_EVENT_TYPES = {
     # canonical full replay.
     EVENT_LLM_RESILIENCE,
     EVENT_TURN_STEER,
+    EVENT_SUBAGENT_PROGRESS,
 }
 _LATEST_PREVIEW_KNOWN_EVENT_TYPES = (
     _LATEST_PREVIEW_PARSED_EVENT_TYPES
@@ -2353,11 +2360,17 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
     have a single, protocol-valid source.
     """
 
-    event_list = fold_active_events(events)
+    raw_events = list(events or [])
+    event_list = fold_active_events(raw_events)
     event_by_id = {event.event_id: event for event in event_list if event.event_id}
     lifecycle_tool_identities = _lifecycle_resolved_tool_identities(event_list)
+    visible_messages = _model_visible_messages_from_events(event_list)
+    # Local import: stream recovery reads events and must not import this module.
+    from core.chat.stream_recovery import omit_discarded_stream_tail
+
+    visible_messages = omit_discarded_stream_tail(visible_messages, raw_events)
     messages: list[dict[str, Any]] = []
-    for message in _filter_recoverable_status_messages(_model_visible_messages_from_events(event_list)):
+    for message in _filter_recoverable_status_messages(visible_messages):
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         if metadata.get("kind") == "context_compression_marker":
             checkpoint_message = _checkpoint_model_message_from_event(

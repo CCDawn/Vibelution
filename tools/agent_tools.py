@@ -645,6 +645,111 @@ def _extract_structured_result(stdout: str, stderr: str, exit_code: int, task_ty
     }
 
 
+def _stamp_subagent_payload(payload: Dict[str, Any], agent_id: str, child_session_id: str = "") -> Dict[str, Any]:
+    payload["agentId"] = str(agent_id or "").strip()
+    child_id = str(child_session_id or "").strip()
+    if child_id:
+        payload["childSessionId"] = child_id
+    return payload
+
+
+def _abort_resume_claim(resume_claim: Dict[str, Any] | None, agent_id: str) -> None:
+    if not resume_claim:
+        return
+    try:
+        from core.orchestration.subagent_address import restore_subagent_status
+
+        restore_subagent_status(agent_id)
+    except Exception as exc:
+        _debug_logger.warning(f"[子代理] 恢复续聊状态失败: {type(exc).__name__}: {exc}")
+
+
+def _open_subagent_address_record(
+    agent_id: str,
+    *,
+    task: str,
+    task_type: str,
+    status: str,
+) -> Dict[str, Any]:
+    try:
+        from core.orchestration.subagent_address import open_subagent_address
+
+        opened = open_subagent_address(
+            agent_id=agent_id,
+            task=task,
+            task_type=task_type,
+            status=status,
+        )
+    except Exception as exc:
+        _debug_logger.warning(f"[子代理] 登记子代理编号失败: {type(exc).__name__}: {exc}")
+        return {}
+    return dict(opened or {})
+
+
+def _settle_subagent_address_record(
+    agent_id: str,
+    *,
+    status: str,
+    summary: str = "",
+    user_text: str = "",
+    assistant_text: str = "",
+) -> None:
+    try:
+        from core.orchestration.subagent_address import settle_subagent_address
+
+        settle_subagent_address(
+            agent_id,
+            status=status,
+            summary=summary,
+            user_text=user_text,
+            assistant_text=assistant_text,
+        )
+    except Exception as exc:
+        _debug_logger.warning(f"[子代理] 写回子代理会话失败: {type(exc).__name__}: {exc}")
+
+
+def continue_subagent(to: str = "", message: str = "", summary: str = "") -> str:
+    """Continue an existing subagent by id. Does not allocate a new session."""
+
+    agent_id = str(to or "").strip()
+    text = str(message or "").strip()
+    if not agent_id:
+        return json.dumps(
+            {
+                "status": "error",
+                "code": "NO_ACTIVE_AGENT",
+                "message": "没有找到这个子代理。",
+                "agentId": "",
+            },
+            ensure_ascii=False,
+        )
+    if not text:
+        return json.dumps(
+            {
+                "status": "error",
+                "code": "MISSING_TASK",
+                "message": "要发给子代理的内容不能为空。",
+                "agentId": agent_id,
+            },
+            ensure_ascii=False,
+        )
+
+    def _resume(resume_message: str) -> str:
+        return spawn_agent(
+            task=resume_message,
+            goal=str(summary or "").strip(),
+            resume_agent_id=agent_id,
+            _resume_ready=True,
+        )
+
+    from core.orchestration.subagent_address import continue_addressed
+
+    result = continue_addressed(agent_id, text, summary=summary, resume=_resume)
+    if isinstance(result, str):
+        return result
+    return json.dumps(result, ensure_ascii=False)
+
+
 def spawn_agent(
     task: str = "",
     timeout: int = 120,
@@ -655,6 +760,8 @@ def spawn_agent(
     deliverables: Any = None,
     context_pack: Any = None,
     _cancel_checker: Optional[Callable[[], str]] = None,
+    resume_agent_id: str = "",
+    _resume_ready: bool = False,
 ) -> str:
     """启动子 Agent 执行指定任务并返回结构化结果。"""
     normalized_constraints = _normalize_constraints(constraints)
@@ -663,9 +770,31 @@ def spawn_agent(
     normalized_context_pack = _normalize_context_pack(context_pack)
     normalized_task_type = (task_type or "").strip().lower()
     effective_task_type = normalized_task_type or "inspect"
-    sub_run_id = _new_subagent_run_id(effective_task_type, _get_recursion_depth() + 1)
+    resume_id = str(resume_agent_id or "").strip()
+    resume_claim: Dict[str, Any] | None = None
+    if resume_id:
+        from core.orchestration.subagent_address import begin_resume
+
+        resume_text = str(task or "").strip()
+        resume_summary = str(goal or "").strip()
+        if not resume_text:
+            resume_text = resume_summary
+            resume_summary = ""
+        decision = begin_resume(
+            resume_id,
+            ready=bool(_resume_ready),
+            message=resume_text,
+            summary=resume_summary,
+        )
+        if str(decision.get("delivery") or "") != "resume":
+            return json.dumps(decision, ensure_ascii=False)
+        resume_claim = decision
+        sub_run_id = str(decision.get("agentId") or resume_id)
+    else:
+        sub_run_id = _new_subagent_run_id(effective_task_type, _get_recursion_depth() + 1)
     parent_session_id = ""
     parent_turn = ""
+    child_session_id = str((resume_claim or {}).get("childSessionId") or "")
     fast_result = None
     if normalized_task_type and normalized_task_type not in ALLOWED_SUBAGENT_TASK_TYPES:
         _record_subagent_scene_event(
@@ -679,13 +808,18 @@ def spawn_agent(
             level="warning",
             fields={"reason": "unsupported_task_type"},
         )
+        _abort_resume_claim(resume_claim, sub_run_id)
         return json.dumps(
-            {
-                "status": "error",
-                "code": "UNSUPPORTED_SUBAGENT_TASK_TYPE",
-                "message": f"子 agent 仅支持固定模式: {', '.join(sorted(ALLOWED_SUBAGENT_TASK_TYPES))}",
-                "subRunId": sub_run_id,
-            },
+            _stamp_subagent_payload(
+                {
+                    "status": "error",
+                    "code": "UNSUPPORTED_SUBAGENT_TASK_TYPE",
+                    "message": f"子 agent 仅支持固定模式: {', '.join(sorted(ALLOWED_SUBAGENT_TASK_TYPES))}",
+                    "subRunId": sub_run_id,
+                },
+                sub_run_id,
+                child_session_id,
+            ),
             ensure_ascii=False,
         )
     if normalized_task_type == "diagnose" and (normalized_constraints or {}).get("readonly"):
@@ -693,6 +827,29 @@ def spawn_agent(
     if fast_result:
         fast_result["subRunId"] = sub_run_id
         fast_result["depth"] = _get_recursion_depth() + 1
+        if resume_claim is None:
+            opened = _open_subagent_address_record(
+                sub_run_id,
+                task=goal or task,
+                task_type=effective_task_type,
+                status="completed",
+            )
+            child_session_id = str(opened.get("childSessionId") or child_session_id)
+        _stamp_subagent_payload(fast_result, sub_run_id, child_session_id)
+        claimed_user = ""
+        if resume_claim is not None:
+            claimed_user = "\n\n".join(
+                str(item or "").strip()
+                for item in list(resume_claim.get("messages") or [])
+                if str(item or "").strip()
+            )
+        _settle_subagent_address_record(
+            sub_run_id,
+            status=str(fast_result.get("status") or "completed"),
+            summary=str(fast_result.get("summary") or ""),
+            user_text=claimed_user or str(task or goal or ""),
+            assistant_text=str(fast_result.get("summary") or ""),
+        )
         _record_subagent_scene_event(
             sub_run_id=sub_run_id,
             event_code="subagent.run.fast_path_completed",
@@ -728,8 +885,13 @@ def spawn_agent(
             level="warning",
             fields={"reason": "missing_task"},
         )
+        _abort_resume_claim(resume_claim, sub_run_id)
         return json.dumps(
-            {"status": "error", "code": "MISSING_TASK", "message": "任务描述不能为空", "subRunId": sub_run_id},
+            _stamp_subagent_payload(
+                {"status": "error", "code": "MISSING_TASK", "message": "任务描述不能为空", "subRunId": sub_run_id},
+                sub_run_id,
+                child_session_id,
+            ),
             ensure_ascii=False,
         )
 
@@ -746,13 +908,18 @@ def spawn_agent(
             level="warning",
             fields={"reason": "max_recursion", "depth": depth, "maxDepth": _MAX_RECURSION_DEPTH},
         )
+        _abort_resume_claim(resume_claim, sub_run_id)
         return json.dumps(
-            {
-                "status": "error",
-                "code": "MAX_RECURSION",
-                "message": "子 agent 不允许继续派发子 agent；请回到主 agent 收束。",
-                "subRunId": sub_run_id,
-            },
+            _stamp_subagent_payload(
+                {
+                    "status": "error",
+                    "code": "MAX_RECURSION",
+                    "message": "子 agent 不允许继续派发子 agent；请回到主 agent 收束。",
+                    "subRunId": sub_run_id,
+                },
+                sub_run_id,
+                child_session_id,
+            ),
             ensure_ascii=False,
         )
 
@@ -769,18 +936,45 @@ def spawn_agent(
             level="error",
             fields={"reason": "agent_not_found", "agentPath": str(agent_path)},
         )
+        _abort_resume_claim(resume_claim, sub_run_id)
         return json.dumps(
-            {
-                "status": "error",
-                "code": "AGENT_NOT_FOUND",
-                "message": f"找不到 agent.py: {agent_path}",
-                "subRunId": sub_run_id,
-            },
+            _stamp_subagent_payload(
+                {
+                    "status": "error",
+                    "code": "AGENT_NOT_FOUND",
+                    "message": f"找不到 agent.py: {agent_path}",
+                    "subRunId": sub_run_id,
+                },
+                sub_run_id,
+                child_session_id,
+            ),
             ensure_ascii=False,
         )
 
+    prompt_task = task
+    resume_user_text = str(goal or task or "")
+    if resume_claim is not None:
+        resume_messages = [
+            str(item or "").strip()
+            for item in list(resume_claim.get("messages") or [])
+            if str(item or "").strip()
+        ]
+        if resume_messages:
+            resume_user_text = "\n\n".join(resume_messages)
+        preamble = ""
+        resume_root = str(resume_claim.get("projectRoot") or "").strip()
+        if resume_root and child_session_id:
+            try:
+                from core.orchestration.subagent_address import child_history_preamble
+
+                preamble = child_history_preamble(resume_root, child_session_id)
+            except Exception as exc:
+                _debug_logger.warning(f"[子代理] 读取子会话历史失败: {type(exc).__name__}: {exc}")
+                preamble = ""
+        prompt_task = f"{preamble}\n\n{resume_user_text}".strip() if preamble else resume_user_text
+
     prompt = _build_subagent_prompt(
-        task=task,
+        task=prompt_task,
         task_type=normalized_task_type,
         goal=goal,
         scope=normalized_scope,
@@ -848,13 +1042,27 @@ def spawn_agent(
             fields={"errorType": type(e).__name__},
             child_payload={"errorType": type(e).__name__, "error": _truncate_scene_text(str(e), 600)},
         )
+        if resume_claim is not None:
+            _abort_resume_claim(resume_claim, sub_run_id)
+        else:
+            failed_address = _open_subagent_address_record(
+                sub_run_id,
+                task=goal or task,
+                task_type=effective_task_type,
+                status="failed",
+            )
+            child_session_id = str(failed_address.get("childSessionId") or child_session_id)
         return json.dumps(
-            {
-                "status": "error",
-                "code": "SPAWN_FAILED",
-                "message": f"无法启动子 Agent: {type(e).__name__}: {e}",
-                "subRunId": sub_run_id,
-            },
+            _stamp_subagent_payload(
+                {
+                    "status": "error",
+                    "code": "SPAWN_FAILED",
+                    "message": f"无法启动子 Agent: {type(e).__name__}: {e}",
+                    "subRunId": sub_run_id,
+                },
+                sub_run_id,
+                child_session_id,
+            ),
             ensure_ascii=False,
         )
 
@@ -882,6 +1090,14 @@ def spawn_agent(
             "pid": getattr(process, "pid", None),
         },
     )
+    if resume_claim is None:
+        opened = _open_subagent_address_record(
+            sub_run_id,
+            task=str(goal or task or ""),
+            task_type=effective_task_type,
+            status="running",
+        )
+        child_session_id = str(opened.get("childSessionId") or child_session_id)
 
     output_queue: queue.Queue[tuple[str, Optional[str]]] = queue.Queue()
     stdout_parts: List[str] = []
@@ -986,7 +1202,7 @@ def spawn_agent(
                 "rawOutputPreview": _truncate_scene_text(raw_output),
             },
         )
-        return json.dumps(
+        cancelled_payload = _stamp_subagent_payload(
             {
                 "status": "cancelled",
                 "task_type": task_type or "inspect",
@@ -1000,8 +1216,17 @@ def spawn_agent(
                 "raw_output": raw_output[:8000],
                 "process_output": process_output[:8000],
             },
-            ensure_ascii=False,
+            sub_run_id,
+            child_session_id,
         )
+        _settle_subagent_address_record(
+            sub_run_id,
+            status="cancelled",
+            summary=str(cancelled_payload.get("summary") or ""),
+            user_text=resume_user_text,
+            assistant_text=str(cancelled_payload.get("summary") or ""),
+        )
+        return json.dumps(cancelled_payload, ensure_ascii=False)
 
     if timed_out:
         stdout = "".join(stdout_parts).strip()
@@ -1029,7 +1254,7 @@ def spawn_agent(
                 "rawOutputPreview": _truncate_scene_text(raw_output),
             },
         )
-        return json.dumps(
+        timeout_payload = _stamp_subagent_payload(
             {
                 "status": "timeout",
                 "task_type": task_type or "inspect",
@@ -1042,8 +1267,17 @@ def spawn_agent(
                 "raw_output": raw_output[:8000],
                 "process_output": process_output[:8000],
             },
-            ensure_ascii=False,
+            sub_run_id,
+            child_session_id,
         )
+        _settle_subagent_address_record(
+            sub_run_id,
+            status="timeout",
+            summary=str(timeout_payload.get("summary") or ""),
+            user_text=resume_user_text,
+            assistant_text=str(timeout_payload.get("summary") or ""),
+        )
+        return json.dumps(timeout_payload, ensure_ascii=False)
 
     try:
         returncode = process.wait(timeout=5)
@@ -1071,6 +1305,7 @@ def spawn_agent(
     )
     payload["subRunId"] = sub_run_id
     payload["depth"] = depth + 1
+    _stamp_subagent_payload(payload, sub_run_id, child_session_id)
     final_status = str(payload.get("status") or "").strip().lower() or "unknown"
     success_statuses = {"completed", "success", "ok", "partial"}
     _record_subagent_scene_event(
@@ -1098,5 +1333,12 @@ def spawn_agent(
             "processOutputPreview": _truncate_scene_text(payload.get("process_output")),
             "rawOutputPreview": _truncate_scene_text(payload.get("raw_output")),
         },
+    )
+    _settle_subagent_address_record(
+        sub_run_id,
+        status=final_status,
+        summary=str(payload.get("summary") or ""),
+        user_text=resume_user_text,
+        assistant_text=str(payload.get("summary") or ""),
     )
     return json.dumps(payload, ensure_ascii=False)

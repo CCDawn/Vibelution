@@ -1550,6 +1550,8 @@ def _readonly_subagent_block_reason(tool_name: str) -> str:
         return ""
     if normalized == "spawn_agent_tool":
         return "[只读子代理] 当前子 agent 运行在只读模式，禁止继续派发子 agent。"
+    if normalized == "send_message_tool":
+        return "[只读子代理] 当前子 agent 运行在只读模式，禁止给其他子代理发消息。"
     return f"[只读子代理] 当前子 agent 运行在只读模式，禁止调用 `{normalized}`。"
 
 

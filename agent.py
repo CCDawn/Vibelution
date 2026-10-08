@@ -2135,6 +2135,116 @@ class AgentRuntime:
             return None
         return Path(project_root_raw), session_id, turn_id
 
+    def _recover_failed_model_stream(self) -> bool:
+        """Start a new model request from the last committed tool result.
+
+        A user stop never recovers. The uncommitted assistant tail is dropped
+        only after the plan accepts the failure. Committed tool results,
+        including tool errors, stay and are not executed again. Context-length
+        failures are the caller's concern and must not reach this method.
+        """
+
+        if self._current_turn_stop_reason():
+            return False
+        identity = self._chat_ledger_identity()
+        events: list = []
+        project_root: Path | None = None
+        session_id = ""
+        turn_id = ""
+        if identity is not None:
+            project_root, session_id, turn_id = identity
+            try:
+                from core.chat.conversation_ledger import load_conversation_events
+
+                events = [
+                    event
+                    for event in load_conversation_events(project_root, session_id)
+                    if str(getattr(event, "turn_id", "") or "") == turn_id
+                ]
+            except Exception as exc:
+                _record_agent_scene_event(
+                    "llm",
+                    "agent.stream_recovery.load_failed",
+                    message="Stream recovery could not read the turn journal.",
+                    level="warning",
+                    fields={
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "errorType": type(exc).__name__,
+                    },
+                )
+                events = []
+        discarded_text = ""
+        discarded_reasoning = ""
+        try:
+            from core.web.services.session.stream_capture import peek_uncommitted_live_stream_tail
+
+            discarded_text, discarded_reasoning = peek_uncommitted_live_stream_tail()
+        except Exception:
+            discarded_text, discarded_reasoning = "", ""
+        from core.chat.stream_recovery import bind_committed_tool_results, plan_stream_recovery
+
+        plan = plan_stream_recovery(
+            events,
+            assistant_message_id=str(turn_id or "").strip() or "assistant",
+            discarded_text=discarded_text,
+            discarded_reasoning=discarded_reasoning,
+            retryable=bool(getattr(self, "_last_llm_error_retryable", False)),
+            retry_count=int(getattr(self, "_stream_recovery_retry_count", 0) or 0),
+            user_stopped=False,
+            category=str(getattr(self, "_last_llm_error_category", "") or ""),
+            message=str(getattr(self, "_last_llm_error_message", "") or ""),
+        )
+        if plan is None:
+            return False
+        self._stream_recovery_retry_count = int(plan.get("retryNumber") or 0)
+        if identity is not None and project_root is not None:
+            try:
+                from core.chat.llm_resilience_journal import (
+                    STAGE_STREAM_RECOVERY,
+                    record_llm_resilience_event,
+                )
+
+                record_llm_resilience_event(
+                    project_root,
+                    session_id,
+                    turn_id,
+                    stage=STAGE_STREAM_RECOVERY,
+                    attempt=int(plan.get("retryNumber") or 0),
+                    fields={
+                        "anchorId": plan.get("anchorId"),
+                        "reason": plan.get("reason"),
+                        "failureKind": plan.get("failureKind"),
+                        "assistantMessageId": plan.get("assistantMessageId"),
+                        "discardedTextBytes": plan.get("discardedTextBytes"),
+                        "discardedReasoningBytes": plan.get("discardedReasoningBytes"),
+                        "maxRetries": plan.get("maxRetries"),
+                        "committedToolCallIds": list(plan.get("committedToolCallIds") or []),
+                        "discardedToolCallIds": [],
+                    },
+                )
+            except Exception as exc:
+                _record_agent_scene_event(
+                    "llm",
+                    "agent.stream_recovery.journal_failed",
+                    message="Stream recovery continued without a durable anchor event.",
+                    level="warning",
+                    fields={
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "errorType": type(exc).__name__,
+                    },
+                )
+        self._last_visible_response_text = ""
+        try:
+            from core.web.services.session.stream_capture import discard_uncommitted_live_stream_tail
+
+            discard_uncommitted_live_stream_tail()
+        except Exception:
+            pass
+        bind_committed_tool_results(plan.get("committedResults") or {})
+        return True
+
     def _persist_hidden_tool_block_to_ledger(self, tool_call: Dict[str, Any], result: Any) -> None:
         """Journal a hidden/hallucinated tool call and its blocked placeholder result.
 
@@ -2524,6 +2634,7 @@ class AgentRuntime:
         self._core_prompt_snapshot_seeded_by_host = False
         self._last_turn_metadata = {}
         self._last_visible_response_text = ""
+        self._stream_recovery_retry_count = 0
         self._last_response_tool_calls = 0
         self._recent_tool_outputs = []
         self._recent_tool_records = []
@@ -3062,6 +3173,13 @@ class AgentRuntime:
         self._compression_count_this_turn = 0
         self._last_compression_iteration = 0
         self._context_compression_retry_used = False
+        self._stream_recovery_retry_count = 0
+        try:
+            from core.chat.stream_recovery import bind_committed_tool_results
+
+            bind_committed_tool_results({})
+        except Exception:
+            pass
         reset_verify_on_stop_turn()
         round_state = self._create_round_state()
         lifecycle_action: Optional[str] = None
@@ -3310,6 +3428,12 @@ class AgentRuntime:
                             "请开启新会话或减少输入后重试。",
                             "ERROR",
                         )
+                    elif self._recover_failed_model_stream():
+                        ui.add_log(
+                            "模型输出中断，没提交的半截已经丢掉，正在重新请求。",
+                            "WARN",
+                        )
+                        continue
                     consecutive_failures = round_state.note_llm_failure()
                     self._last_turn_failed = True
                     ui.update_status(

@@ -133,6 +133,25 @@ def _tool_call_id(call: Mapping[str, Any]) -> str:
     ).strip()
 
 
+def _history_has_tool_result(messages: list, call_id: str) -> bool:
+    """True when this message list already carries a result for the call id."""
+
+    key = str(call_id or "").strip()
+    if not key:
+        return False
+    for message in list(messages or []):
+        existing = ""
+        if isinstance(message, Mapping):
+            existing = _coerce_text(
+                message.get("tool_call_id") or message.get("toolCallId") or ""
+            ).strip()
+        else:
+            existing = _coerce_text(getattr(message, "tool_call_id", "") or "").strip()
+        if existing == key:
+            return True
+    return False
+
+
 def _tool_call_args(call: Mapping[str, Any]) -> dict:
     raw = call.get("args")
     if raw in (None, ""):
@@ -741,6 +760,8 @@ class ToolLifecycleBridge:
                 # Protocol safety: bind short denials for already-declared tool_calls,
                 # then stop the turn without more real tool work.
                 for tool_call in batch:
+                    if self._replay_committed_tool_call(tool_call, messages):
+                        continue
                     self.handle_tool_result(
                         tool_call,
                         budget_stop_message,
@@ -750,6 +771,8 @@ class ToolLifecycleBridge:
                 continue
             if len(batch) == 1:
                 tool_call = batch[0]
+                if self._replay_committed_tool_call(tool_call, messages):
+                    continue
                 try:
                     result, action = self.execute_tool(tool_call, messages)
                 except Exception as exc:
@@ -770,8 +793,15 @@ class ToolLifecycleBridge:
                     if action != "tool_budget_exhausted":
                         break
                 continue
-            results = self._execute_readonly_batch(batch, messages, workers=workers_cap)
-            for tool_call, (result, action) in zip(batch, results):
+            executable = [
+                tool_call
+                for tool_call in batch
+                if not self._replay_committed_tool_call(tool_call, messages)
+            ]
+            if not executable:
+                continue
+            results = self._execute_readonly_batch(executable, messages, workers=workers_cap)
+            for tool_call, (result, action) in zip(executable, results):
                 self.handle_tool_result(tool_call, result, action, messages)
                 if action in ("restart", "hibernated", "turn_complete", "tool_budget_exhausted"):
                     lifecycle_action = action
@@ -781,6 +811,27 @@ class ToolLifecycleBridge:
             if lifecycle_action == "tool_budget_exhausted" and batch_index + 1 >= len(remaining_batches):
                 break
         return lifecycle_action
+
+    def _replay_committed_tool_call(self, tool_call: Dict[str, Any], messages: list) -> bool:
+        """Bind a stream-recovery result and skip a second execution.
+
+        An empty stored result still counts. When the history already has
+        this call id, skip both execution and another ToolMessage.
+        """
+
+        call = tool_call if isinstance(tool_call, Mapping) else {}
+        call_id = _tool_call_id(call)
+        if not call_id:
+            return False
+        from core.chat.stream_recovery import committed_tool_result
+
+        stored = committed_tool_result(call_id)
+        if stored is None:
+            return False
+        if _history_has_tool_result(messages, call_id):
+            return True
+        self.handle_tool_result(tool_call, stored, None, messages)
+        return True
 
     def _partition_tool_calls(
         self,
