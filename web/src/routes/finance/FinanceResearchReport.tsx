@@ -35,7 +35,7 @@ export function FinanceResearchReport({ report: projectedReport, assistantAgentI
   const parameters = report.researchParameters;
   const parameterText = (zhLabel: string, enLabel: string, value: string) => `${zh ? zhLabel : enLabel}${zh ? "：" : ": "}${value}`;
   const parameterItems = [
-    parameters?.stock ? { id: "stock", text: parameterText("标的", "Stock", `${parameters.stock.name} ${parameters.stock.ticker}`) } : null,
+    parameters?.stock ? { id: "stock", text: parameterText("标的", "Stock", parameters.stock.name === parameters.stock.ticker ? parameters.stock.ticker : `${parameters.stock.name} ${parameters.stock.ticker}`) } : null,
     parameters?.analysisDate ? { id: "date", text: parameterText("分析日期", "As of", parameters.analysisDate) } : null,
     parameters?.reportPeriod ? { id: "period", text: parameterText("报告期", "Report period", parameters.reportPeriod) } : null,
     parameters?.scope && researchScopeLabels[parameters.scope] ? { id: "scope", text: parameterText("范围", "Scope", researchScopeLabels[parameters.scope][zh ? "zh" : "en"]) } : null,
@@ -48,7 +48,7 @@ export function FinanceResearchReport({ report: projectedReport, assistantAgentI
     {summaryOnly && report.summary ? <p className={styles.summary}>{report.summary}</p> : null}
     {summaryOnly && !report.summary && researchTablePreview(report.text) ? <div className={styles.body}><LazyConversationMarkdownRenderer content={researchTablePreview(report.text)} language={zh ? "zh" : "en"} /></div> : null}
     {!summaryOnly ? <>
-      {report.sections.length ? <VTabs value={tab} onValueChange={setTab} aria-label={zh ? "报告章节" : "Report chapters"} items={[{ id: "all", label: zh ? "完整报告" : "Full report" }, ...report.sections.map((section) => ({ id: section.id, label: section.title }))]} className={styles.chapters} /> : null}
+      {report.sections.length ? <VTabs value={tab} onValueChange={setTab} aria-label={zh ? "报告章节" : "Report chapters"} items={[{ id: "all", label: zh ? "完整报告" : "Full report" }, ...report.sections.map((section) => ({ id: section.id, label: section.title, title: section.title }))]} className={styles.chapters} listClassName={styles.chapterList} triggerClassName={styles.chapterTrigger} /> : null}
       <div className={styles.body} data-finance-report-body><LazyConversationMarkdownRenderer content={selected?.text ?? report.text} language={zh ? "zh" : "en"} /></div>
     </> : <VButton variant="secondary" onPress={onResearch}>{zh ? "查看报告与追问" : "Read and follow up"}</VButton>}
     {report.citations.length ? <div className={styles.citations}><span className={styles.timestamp}>{zh ? "引用" : "Sources"}</span>{report.citations.map((citation) => <VButton key={`${citation.url}#${citation.page}`} variant="ghost" density="compact" onPress={() => onCitation(citation)}>{citation.label}</VButton>)}</div> : null}

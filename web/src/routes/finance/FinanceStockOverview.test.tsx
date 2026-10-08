@@ -34,6 +34,26 @@ afterEach(async () => {
 });
 
 describe("FinanceStockOverview cached refresh failure", () => {
+  it("keeps compact report quotes and provenance without losing refresh or follow actions", async () => {
+    const refetch = vi.fn().mockResolvedValue({});
+    const follow = vi.fn();
+    const query = { data: snapshot, isPending: false, isFetching: false, refetch } as unknown as UseQueryResult<StockSnapshot, Error>;
+    node = document.createElement("div");
+    document.body.appendChild(node);
+    root = createRoot(node);
+    await act(async () => root?.render(<FinanceStockHeader stock={stock} query={query} starred={false} onToggleStar={follow} zh compact />));
+    expect(node.querySelector("dl")).toBeNull();
+    expect(node.textContent).toContain("1,258.62");
+    expect(node.textContent).toContain("腾讯财经");
+    expect(node.textContent).toContain("可能延迟");
+    expect(node.textContent).toContain(snapshot.stock.timestamp);
+    expect(node.textContent).toContain(snapshot.fetchedAt);
+    await act(async () => node.querySelector<HTMLButtonElement>('button[aria-label="刷新行情"]')!.click());
+    await act(async () => [...node.querySelectorAll("button")].find(button => button.textContent === "加入自选")!.click());
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(follow).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the quote and chart, shows source timestamps, and retries", async () => {
     const refetch = vi.fn().mockResolvedValue({});
     const query = {

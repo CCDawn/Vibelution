@@ -58,6 +58,25 @@ describe("FinanceResearchReport research metadata", () => {
     expect(legacy.querySelector("[data-finance-research-metadata]")).toBeNull();
   });
 
+  it("does not repeat a ticker used as the unresolved company name", async () => {
+    const container = await render({ report: { ...report, researchParameters: { stock: { ...stock, ticker: "000001", name: "000001" } } } });
+    expect(container.querySelector("[data-finance-research-metadata]")?.textContent).toBe("标的：000001");
+  });
+
+  it("keeps full chapter titles and switches between exact grounded sections", async () => {
+    const title = "二、本轮我已直接核验的部分（行情，可回链）";
+    const text = `## 一、结论（先给判断）\n结论原文。\n\n## ${title}\n行情来源原文。`;
+    vi.mocked(fetchFinancialReportText).mockResolvedValue(text);
+    const container = await render();
+    const section = container.querySelector<HTMLElement>(`[role="tab"][title="${title}"]`)!;
+    expect(section).toBeTruthy();
+    await act(async () => section.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    expect(container.querySelector("[data-finance-report-body]")?.textContent).toContain("行情来源原文。");
+    expect(container.querySelector("[data-finance-report-body]")?.textContent).not.toContain("结论原文。");
+    await act(async () => [...container.querySelectorAll<HTMLElement>('[role="tab"]')].find(tab => tab.textContent === "完整报告")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    expect(container.querySelector("[data-finance-report-body]")?.textContent).toBe(text);
+  });
+
   it("replaces the truncated-tool projection with the server-grounded preview", async () => {
     const canonical = "## 结论\nsz000001 最新报价11.57元/股，行情日期2026-09-30，<https://gu.qq.com/sz000001/gp>。";
     vi.mocked(fetchFinancialReportText).mockResolvedValue(canonical);

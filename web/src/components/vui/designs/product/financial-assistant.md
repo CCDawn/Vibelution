@@ -150,6 +150,9 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 
 ## FinanceResearchReport / financialReports
 
+### 桌面阅读密度
+研究报告页使用现有 `FinanceStockHeader compact`：股票身份、价格、涨跌和自选/刷新操作在同一行；来源、可能延迟、行情时点与抓取时点在下一条单行来源栏保留，超出可见宽度时通过 title 读取完整内容。六项行情指标仍在股票概览使用完整头部。报告章节沿用 `VTabs` 的 listClassName/triggerClassName，在桌面宽度内单行横向滚动，长标题省略并保留完整 title，Radix 键盘导航不变；原始研究参数保持单行可滚动，不重复代码形式的公司名。正文与精确 Turn 的核验读取、导出不变。
+
 ### 报告交付
 报告标题区使用下方 `FinanceReportExport` 的共用导出菜单，支持 PDF、Markdown、JSON、Word 和打印。导出只接受报告自身精确完成 Turn，保留 pending/error，正在研究或缺少最终回答不显示可交付报告。打印在当前页面的无脚本 sandbox iframe 内隔离展示；PDF 生成失败后可下载独立打印版 HTML。HTML 下载仍是 HTML，不标记为已生成 PDF。
 打印内容使用有界 `srcdoc`，加载失败或未收到打印完成确认时尝试下载单份报告 HTML，并说明需要在浏览器打开后打印；不打印整个工作台。
@@ -186,6 +189,8 @@ GET 无自动创建；菜单或 `/finance` 这一下才会 POST。POST 幂等且
 侧栏“新研究”进入股票搜索与原有配置表单，不提前创建空 Session；点击开始后才创建并通过原生 bridge 提交。概览将配置放在 K 线前，1280px 桌面首屏可见开始操作。页面与子页以及精确报告的 Session/Turn 通过 finance 查询参数恢复，原生 session 查询参数继续由 Chat route writer 管理。
 
 ## FinanceWorkspaceInspector
+
+报告阅读状态附加当前报告的引用列表，使用带独立图标槽的 `VButton` 单行显示来源及页码，点击交给现有引用定位，未列引用时明确显示空态。这里只投影来源引用，不把列出引用视为报告数字已核验；主题报告和股票报告均使用当前对象的引用，其他工作区不显示旧报告引用。
 
 ### 功能
 复用 `VSurface` 和 `VStateSurface` 展示当前股票或精确报告摘要；标题和元数据单行截断。研究对话保留原生 `FinanceResearchProcess`，其他页面不显示已完成旧会话的过程。若原生研究仍在运行，另以明确“正在运行的研究”标题保留原生进度和停止入口；不生成新的 transcript 或进度权威。

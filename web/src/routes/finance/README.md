@@ -43,6 +43,8 @@ Public fundamentals are source snapshots, not verified PDF evidence. A figure is
 
 ## Desktop collections
 
+Report reading uses the existing stock header in compact mode: identity, quote and actions share a row while source, delay and both timestamps remain in a single provenance line with full text in its title. Full quote metrics stay in Overview. Chapters and original research parameters use single scrolling rows; chapter titles retain full hints and native Radix navigation. The context inspector exposes the current stock/topic report's sources and exact pages through the existing citation focus callback, without declaring them verified or storing another report.
+
 Research model options are published only for the matching finance Agent and Session. The current assistant default and any selected per-turn model must have a positive context window, healthy provider, credentials and runtime availability. A new research Session revalidates the selected model and maps depth onto its supported reasoning levels; unknown capability blocks automatic submission with an assistant-settings link. Screening requests state the filters directly instead of using an industry-topic template.
 
 The overview reuses watch quotes, native research records, batches and schedules. Screening combines native natural-language research with bounded A-share price, change, PE, PB, volume and turnover filters; provider coverage is explicit. Screen presets remain local to the Agent/browser.
