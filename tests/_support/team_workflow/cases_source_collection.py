@@ -853,6 +853,72 @@ def test_start_source_collection_run_maps_roles_to_team_members(tmp_path, monkey
         "source_extractor": extractor["agentId"],
     }
 
+def test_start_source_collection_run_owner_derives_from_contract_roles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+
+    def _member(agent, role):
+        return {"agentId": agent["agentId"], "role": role, "agentName": agent["displayName"]}
+
+    search = agent_directory_service.create_agent_instance(
+        display_name="Search Agent", direct_session_id="session-owner-contract-search"
+    )
+    extractor = agent_directory_service.create_agent_instance(
+        display_name="Extract Agent", direct_session_id="session-owner-contract-extract"
+    )
+    legacy_finder = agent_directory_service.create_agent_instance(
+        display_name="Legacy Finder", direct_session_id="session-owner-contract-legacy"
+    )
+    legacy_coordinator = agent_directory_service.create_agent_instance(
+        display_name="Legacy Coordinator", direct_session_id="session-owner-contract-coord"
+    )
+    coordinator_team_search = agent_directory_service.create_agent_instance(
+        display_name="Coordinator Team Search", direct_session_id="session-owner-contract-coord-search"
+    )
+
+    # v2 bootstrap shape: members carry canonical contract product role ids and
+    # no coordinator member exists at all.
+    v2_team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[_member(search, "challenge_cup_search"), _member(extractor, "challenge_cup_extractor")],
+    )
+    # Legacy read-mode shape: member rows may still carry contract aliases.
+    legacy_alias_team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[_member(legacy_finder, "source_finder")],
+    )
+    # Legacy coordination rows still outrank contract roles.
+    legacy_coordinator_team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            _member(legacy_coordinator, "research_coordination"),
+            _member(coordinator_team_search, "challenge_cup_search"),
+        ],
+    )
+
+    v2_response = team_workflow_orchestration_service.start_source_collection_run(
+        v2_team["teamId"], {"topic": "predictive coding"}
+    )
+    legacy_response = team_workflow_orchestration_service.start_source_collection_run(
+        legacy_alias_team["teamId"], {"topic": "predictive coding"}
+    )
+    coordinator_response = team_workflow_orchestration_service.start_source_collection_run(
+        legacy_coordinator_team["teamId"], {"topic": "predictive coding"}
+    )
+
+    # v2 research teams materialize no coordinator member, so the owner must
+    # derive from the contract role set instead of degrading to the non-member
+    # DEFAULT_OWNER_AGENT_ID placeholder.
+    assert v2_response["run"]["metadata"]["ownerAgentId"] == search["agentId"]
+    assert (
+        v2_response["run"]["metadata"]["ownerAgentId"]
+        != team_workflow_orchestration_service.DEFAULT_OWNER_AGENT_ID
+    )
+    # Legacy alias member rows resolve through the contract alias table.
+    assert legacy_response["run"]["metadata"]["ownerAgentId"] == legacy_finder["agentId"]
+    # A legacy coordination member still outranks contract roles.
+    assert coordinator_response["run"]["metadata"]["ownerAgentId"] == legacy_coordinator["agentId"]
+
 def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

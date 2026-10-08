@@ -362,6 +362,53 @@ def test_generic_team_repair_preserves_existing_challenge_cup_membership(
     ]
 
 
+def test_research_team_three_field_member_rows_stay_sufficient_for_reads(tmp_path, monkeypatch):
+    # The Challenge Cup bootstrap write shape is frozen at three member fields
+    # (unified-team-format.md §6 research row): projection and repair must keep
+    # accepting it and must never grow a read requirement on the 8-field golden
+    # member shape.
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_challenge_cup_agent_assets()
+    team_service.bootstrap_challenge_cup_research_team()
+
+    stored_team = next(
+        team
+        for team in team_service._load_index()["teams"]
+        if str(team.get("teamId") or "") == "research-team"
+    )
+    assert stored_team["members"], "bootstrap must materialize members"
+    for member in stored_team["members"]:
+        # Exactly the frozen bootstrap write shape, untouched by repair.
+        assert set(member) == {"memberId", "agentId", "role"}
+
+    projected = team_service.get_team("research-team")
+    assert projected["memberCount"] == len(stored_team["members"])
+    projected_by_id = {member["agentId"]: member for member in projected["members"]}
+    for member in stored_team["members"]:
+        row = projected_by_id[member["agentId"]]
+        # The projection always emits the seven scalar fields; empty
+        # ``responsibilities`` is omitted rather than defaulted.
+        assert MEMBER_ROW_FIELDS - {"responsibilities"} <= set(row)
+        assert row.get("responsibilities", []) == []
+        assert row["memberId"] == member["memberId"]
+        assert row["role"] == member["role"]
+        assert row["agentStatus"] == "active"
+        assert row["agentCode"] == ""
+        assert row["purpose"] == ""
+
+    # A repair round-trip over the stored index leaves the 3-field rows intact.
+    state = team_service._load_index()
+    team_service._repair_index_state(state, agent_refs={"by_id": {}, "active_by_id": {}})
+    repaired_team = next(
+        team
+        for team in state["teams"]
+        if str(team.get("teamId") or "") == "research-team"
+    )
+    assert [dict(member) for member in repaired_team["members"]] == [
+        dict(member) for member in stored_team["members"]
+    ]
+
+
 def test_research_team_read_repair_cannot_override_agent_instance_configuration(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     finder = agent_directory_service.create_agent_instance(display_name="Finder", direct_session_id="session-finder")
@@ -1035,7 +1082,10 @@ def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, 
 
     assert team["teamId"] == team_service.AI_SEARCH_TEAM_ID
     assert team["name"] == "AI 搜索范围团队"
-    assert team["systemTeamKind"] == "ai_search"
+    # Managed materialization no longer writes the retired systemTeamKind
+    # field; managed-ness is projected via the systemManaged flag instead.
+    assert "systemTeamKind" not in team
+    assert team["systemManaged"] is True
     assert team["teamKind"] == "ai_search"
     assert team["teamCategory"] == "AI 搜索系统团队"
     assert team["teamSource"] == "ai_search"

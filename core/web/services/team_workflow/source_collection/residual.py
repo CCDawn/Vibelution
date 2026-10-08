@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from core.logging import debug as _debug_logger
+from core.research.workflow.contracts.research_team_role_contract import (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT,
+)
 
 from .writeback_materialize import FINDING_REQUIRED_PERSPECTIVES
 
@@ -2620,7 +2623,24 @@ def _source_collection_owner_agent_id(team: dict[str, Any], payload: dict[str, A
     # Team.members (teams.json, written only via the PATCH team aggregation
     # entrypoint) is the sole membership fact source; the canvas is a projection.
     members = team.get("members") if isinstance(team.get("members"), list) else []
-    preferred_roles = ("research_coordination", "data_intake_coordinator", "ceo", "organization_coordinator")
+    # Cross-team coordinator shapes first (legacy ``research_coordination`` rows
+    # included), then the research role contract: canonical product role ids in
+    # contract order followed by their legacy aliases.  A v2-contract research
+    # team materializes no coordinator member at all, so without the contract
+    # tail every run degraded to the non-member ``DEFAULT_OWNER_AGENT_ID``
+    # placeholder (a display label, not a real member agentId).
+    preferred_roles = (
+        "research_coordination",
+        "data_intake_coordinator",
+        "ceo",
+        "organization_coordinator",
+        *CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_role_ids,
+        *(
+            alias
+            for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents
+            for alias in role.legacy_role_aliases
+        ),
+    )
     for preferred_role in preferred_roles:
         for member in members:
             if not isinstance(member, dict):
