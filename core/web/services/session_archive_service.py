@@ -1,21 +1,22 @@
 """Session-level archive/unarchive (ZCode-style lightweight archive).
 
-Archive is a pure metadata flip on the conversation row: ``archive_state``
-(status ``archived`` + timestamp) plus the read-only/index-hidden flags the
-Agent-archive path already uses. Session data files are never moved or
-deleted, and the flip is fully reversible by ``unarchive``.
+Archive is a metadata flip on the conversation row: ``archive_state``
+(status ``archived`` + timestamp) plus index-hidden flags. Session data files
+are never moved or deleted, and the flip is fully reversible by ``unarchive``.
+
+User archive does not force read-only. A session that was already manually
+read-only keeps that flag (snapshotted as ``previousConversationReadOnly``).
+Agent archive (``source=agent_archive``) is a separate seal and stays
+read-only; this module will not unseal it.
 
 Index sync reuses the existing directory bridge:
 
-- archive seals the directory row (``archived_at_ms``) and re-syncs it with
-  ``hidden_from_index`` so default listings exclude it even if a later
-  directory upsert resurrects the row;
+- archive clears a directory pin, seals the directory row (``archived_at_ms``)
+  and re-syncs it with ``hidden_from_index`` so default listings exclude it
+  even if a later directory upsert resurrects the row;
 - unarchive re-derives the conversation index kind/visibility from the owning
   Agent and upserts the directory row, which clears ``archived_at_ms`` and
-  restores default visibility.
-
-Messaging stays blocked on archived sessions through the existing
-``_ensure_session_mutable`` guard, so no submit-path change is needed here.
+  restores default visibility. The pin stays cleared.
 """
 
 from __future__ import annotations
@@ -56,13 +57,14 @@ def _archive_state_source(conversation: dict[str, Any]) -> str:
 
 
 def _response(session_id: str, conversation: dict[str, Any], *, changed: bool) -> dict[str, Any]:
+    s = _service()
     archive_state = _conversation_archive_state(conversation)
     return {
         "sessionId": session_id,
         "status": str(archive_state.get("status") or ""),
         "changed": changed,
         "archivedAt": str(archive_state.get("archivedAt") or ""),
-        "readOnly": bool(conversation.get("read_only") or conversation.get("readOnly")),
+        "readOnly": s._conversation_is_read_only(conversation),
     }
 
 
@@ -105,8 +107,6 @@ def _apply_archive_flags(conversation: dict[str, Any], timestamp: str) -> None:
     }
     conversation["archive_state"] = dict(archive_state)
     conversation["archiveState"] = dict(archive_state)
-    conversation["read_only"] = True
-    conversation["readOnly"] = True
     conversation["hidden_from_index"] = True
     conversation["hiddenFromIndex"] = True
     conversation["conversation_index_kind"] = ads.CONVERSATION_INDEX_KIND_HIDDEN
@@ -146,6 +146,27 @@ def _clear_archive_flags(conversation: dict[str, Any], timestamp: str) -> None:
     conversation["updated_at"] = timestamp
 
 
+def _unpin_directory_session(session_id: str) -> None:
+    """Drop a directory pin before the archive seal hides the row.
+
+    ``set_session_pinned`` only sees rows that are not yet archived. A missing
+    directory store or a session that was never pinned must not fail archive.
+    """
+
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return
+    try:
+        from core.web.services.session import session_pin_ops
+
+        session_pin_ops.set_chat_session_pinned(normalized, pinned=False)
+    except Exception as exc:
+        logger.info(
+            "Session archive pin clear skipped (%s).",
+            type(exc).__name__,
+        )
+
+
 def _sync_directory(conversation: dict[str, Any], *, archive: bool) -> None:
     s = _service()
     session_id = str(
@@ -158,6 +179,7 @@ def _sync_directory(conversation: dict[str, Any], *, archive: bool) -> None:
         # seal the directory row (archived_at_ms). A later unrelated upsert may
         # clear archived_at_ms but keeps hidden_from_index until unarchive.
         directory_bridge.sync_conversation_record(conversation, touch_recency=False)
+        _unpin_directory_session(session_id)
         directory_bridge.archive_directory_session_safe(session_id, wait=True)
     else:
         # Upsert clears archived_at_ms and re-derives hidden_from_index=False,

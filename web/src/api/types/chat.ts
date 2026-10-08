@@ -41,7 +41,7 @@ export type SessionSummary = {
   pinnedAtMs?: number | null;
   /** Match-centered transcript snippets attached when a search hit the body. */
   searchSnippets?: string[];
-  /** Archive metadata is authoritative when a session must not be reopened. */
+  /** User archive hides the row. Agent archive (source agent_archive) stays sealed. */
   archiveState?: {
     status?: string;
     source?: string;

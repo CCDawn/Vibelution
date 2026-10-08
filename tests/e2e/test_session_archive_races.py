@@ -74,7 +74,7 @@ def _arrange_archived(page, instance):
     _ready_composer(page, instance, sid).press_sequentially(draft, delay=2)
     post_json(instance.port, f"/api/sessions/{sid}/archive")
     page.reload(wait_until="domcontentloaded")
-    expect(page.locator(COMPOSER).first).to_be_disabled(timeout=15000)
+    expect(page.locator(COMPOSER).first).to_be_enabled(timeout=15000)
     expect(page.locator(COMPOSER).first).to_have_value(draft)
     _show_archived(page)
     return title, sid, draft
@@ -94,7 +94,7 @@ def test_unarchive_retry_clears_previous_error_and_preserves_draft(page, e2e_ins
         _open_action(page, title, "取消归档").click()
         error = page.get_by_text(marker, exact=False).first
         expect(error).to_be_visible(timeout=15000)
-        expect(page.locator(COMPOSER).first).to_be_disabled()
+        expect(page.locator(COMPOSER).first).to_be_enabled()
         # Retry the same menu action against the real backend after the fault.
         page.unroute(f"**/api/sessions/{sid}/unarchive", fail_command)
         _command(page, sid, title, False)
@@ -120,12 +120,9 @@ def test_repeated_archive_unarchive_keeps_draft_and_correct_input_state(page, e2
     try:
         for archive in (True, False, True, False):
             _command(page, sid, title, archive)
-            if archive:
-                expect(composer).to_be_disabled(timeout=15000)
-            else:
-                expect(composer).to_be_enabled(timeout=15000)
+            expect(composer).to_be_enabled(timeout=15000)
             expect(composer).to_have_value(draft)
-            assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["readOnly"] is archive
+            assert fetch_json(e2e_instance.port, f"/api/sessions/{sid}")["readOnly"] is False
             expect(page).to_have_url(f"{e2e_instance.base_url}/chat?session={sid}")
         composer.press("Control+End")
         composer.press_sequentially("，继续编辑", delay=2)
@@ -149,7 +146,7 @@ def test_late_archive_command_does_not_steal_another_session_or_its_draft(page, 
     if not archive:
         post_json(e2e_instance.port, f"/api/sessions/{sessions[0]}/archive")
         page.reload(wait_until="domcontentloaded")
-        expect(page.locator(COMPOSER).first).to_be_disabled(timeout=15000)
+        expect(page.locator(COMPOSER).first).to_be_enabled(timeout=15000)
     _show_archived(page)
     endpoint = "archive" if archive else "unarchive"
     pending = []
@@ -176,10 +173,7 @@ def test_late_archive_command_does_not_steal_another_session_or_its_draft(page, 
         expect(composer_b).to_be_enabled()
         expect(composer_b).to_have_value(drafts[1])
         composer_a = _switch(page, titles[0], sessions[0])
-        if archive:
-            expect(composer_a).to_be_disabled(timeout=15000)
-        else:
-            expect(composer_a).to_be_enabled(timeout=15000)
+        expect(composer_a).to_be_enabled(timeout=15000)
         expect(composer_a).to_have_value(drafts[0])
         _assert_no_turns(e2e_instance, sessions, drafts)
     finally:
@@ -209,7 +203,7 @@ def test_unarchive_cancels_old_detail_get_and_late_body_cannot_restore_readonly(
         held_once = True
         parts = urlsplit(request.url)
         response = fetch_json(e2e_instance.port, f"{parts.path}?{parts.query}")
-        assert response["readOnly"] is True
+        assert response["readOnly"] is False
         pending.append((route, response))
 
     pattern = f"**/api/sessions/{sid}?*"

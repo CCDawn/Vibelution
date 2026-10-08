@@ -15,6 +15,7 @@ import {
 const workbenchSource = readFileSync(resolve(import.meta.dirname, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
 const railSource = readFileSync(resolve(import.meta.dirname, "chat/ChatConversationIndexRail.tsx"), "utf8");
 const menuSource = readFileSync(resolve(import.meta.dirname, "SessionContextMenu.tsx"), "utf8");
+const archiveCopySource = readFileSync(resolve(import.meta.dirname, "../i18n/domains/dictionarySessionArchive.ts"), "utf8");
 
 function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -111,27 +112,16 @@ describe("session archive visibility", () => {
     expect(isVisibleConversation(row, sessionsById, { includeArchivedSessions: true })).toBe(true);
   });
 
-  it("renders a dedicated archived group only when the archived view is on", () => {
+  it("keeps archived rows out of the live directory groups", () => {
     const archived = archivedSession();
     const withArchived = buildModel({}, [archived]);
-    const archivedGroup = withArchived.groupedConversations.find((group) => group.groupKey === "archived");
-    expect(archivedGroup).toBeDefined();
-    expect(archivedGroup?.items.map((item) => item.directSessionId || item.conversationId)).toContain(archived.id);
+    const groupedIds = withArchived.groupedConversations.flatMap((group) =>
+      group.items.map((item) => item.directSessionId || item.conversationId),
+    );
+    expect(withArchived.groupedConversations.find((group) => group.groupKey === "archived")).toBeUndefined();
+    expect(groupedIds).not.toContain(archived.id);
     expect(conversationGroupLabel("archived", "zh")).toBe("已归档");
     expect(conversationGroupLabel("archived", "en")).toBe("Archived");
-
-    const defaultModel = buildConversationIndexModel({
-      agents: [],
-      conversations: [],
-      lang: "zh",
-      linkedTeamRoomIds: new Set<string>(),
-      rawSessions: [archived],
-      rightIndexSessions: [archived],
-      sessionFilter: "",
-      sessionsById: new Map([[archived.id, archived]]),
-      teams: [],
-    });
-    expect(defaultModel.groupedConversations.find((group) => group.groupKey === "archived")).toBeUndefined();
   });
 
   it("drops archived rows from the model when the archived view is off", () => {
@@ -158,10 +148,13 @@ describe("session archive UI wiring", () => {
     expect(railSource).toContain('data-vui="session-archive-toggle"');
     expect(railSource).toContain("aria-pressed={showArchivedSessions}");
     expect(railSource).toContain("onToggleShowArchivedSessions");
-    expect(railSource).toContain("显示已归档会话");
+    expect(railSource).toContain('t("showArchivedSessions")');
+    expect(railSource).toContain('t("closeArchivedSessions")');
+    expect(archiveCopySource).toContain("显示已归档会话");
+    expect(archiveCopySource).toContain("关闭归档");
   });
 
-  it("routes archive actions and archived data through the workbench", () => {
+  it("replaces the live directory with a flat archived rail", () => {
     expect(workbenchSource).toContain("sessionArchiveMutation");
     expect(workbenchSource).toContain("archiveChatSession");
     expect(workbenchSource).toContain("unarchiveChatSession");
@@ -170,5 +163,9 @@ describe("session archive UI wiring", () => {
     expect(workbenchSource).toContain("rawSessionsWithArchived");
     expect(workbenchSource).toContain("onArchive={handleArchiveSession}");
     expect(workbenchSource).toContain('queryKey: queryKeys.sessionArchive()');
+    expect(workbenchSource).toContain("<ArchivedSessionRail");
+    expect(workbenchSource).toContain("showArchivedSessions ? null : <>");
+    expect(workbenchSource).not.toContain("readOnly: variables.archive");
+    expect(workbenchSource).toContain('data-vui="chat-session-timeline-toggle"');
   });
 });

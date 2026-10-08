@@ -1281,7 +1281,7 @@ def _normalize_conversation(
             agent,
             hidden_team_member_agent_ids=hidden_team_member_agent_ids,
         ),
-        "readOnly": bool(raw.get("read_only") or raw.get("readOnly") or archive_state),
+        "readOnly": s._conversation_is_read_only(raw),
         "archiveState": dict(archive_state),
         "conversationIndexVisibility": conversation_index_visibility,
         "conversationIndexKind": conversation_index_kind,

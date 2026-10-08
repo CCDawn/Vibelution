@@ -43,24 +43,18 @@ def test_archive_unarchive_round_trip(tmp_path, monkeypatch):
     assert payload["sessionId"] == session_id
     assert payload["status"] == "archived"
     assert payload["changed"] is True
-    assert payload["readOnly"] is True
+    assert payload["readOnly"] is False
     assert payload["archivedAt"]
 
     detail = _detail(session_id)
     assert detail["archiveState"]["status"] == "archived"
     assert detail["archiveState"]["source"] == "session_archive"
     assert detail["archiveState"]["archivedAt"] == payload["archivedAt"]
-    assert detail["readOnly"] is True
+    assert detail["readOnly"] is False
 
-    # Archived sessions accept no new turns (existing read-only guard).
-    write_response = client.post(
-        f"/api/sessions/{session_id}/messages",
-        json={"content": "归档后不应继续写入"},
-    )
-    assert write_response.status_code == 422, write_response.text
-    assert "归档" in str(write_response.json()["detail"]) or "archived" in str(
-        write_response.json()["detail"]
-    ).lower()
+    # User archive hides the row and leaves the session writable.
+    session_service.update_chat_session_title(session_id, "归档后仍可改名")
+    assert _detail(session_id)["title"] == "归档后仍可改名"
 
     # Archived rows leave the canonical default list entirely (backend-level
     # exclusion, same contract as the Agent-archive lifecycle).
@@ -196,6 +190,9 @@ def test_unarchive_restores_manual_read_only_state(tmp_path, monkeypatch):
 
     archived = client.post(f"/api/sessions/{session_id}/archive")
     assert archived.status_code == 200, archived.text
+    assert _detail(session_id)["readOnly"] is True
+    with pytest.raises(session_service.SessionValidationError):
+        session_service.update_chat_session_title(session_id, "只读仍不能改")
     unarchived = client.post(f"/api/sessions/{session_id}/unarchive")
     assert unarchived.status_code == 200, unarchived.text
 
@@ -262,6 +259,9 @@ def test_store_directory_row_leaves_default_index_and_is_restored(
         assert store is not None
         assert store.repository.get_session(session_id) is not None
 
+        store.repository.set_session_pinned(session_id, pinned=True).result(timeout=5)
+        assert store.repository.get_session(session_id).get("pinnedAtMs")
+
         result = session_archive_service.archive_session(session_id)
         assert result["changed"] is True
         # The sealed row leaves the default directory listing (hidden + archived).
@@ -277,7 +277,9 @@ def test_store_directory_row_leaves_default_index_and_is_restored(
 
         restored = session_archive_service.unarchive_session(session_id)
         assert restored["changed"] is True
-        assert store.repository.get_session(session_id) is not None
+        restored_row = store.repository.get_session(session_id)
+        assert restored_row is not None
+        assert not restored_row.get("pinnedAtMs")
         listed_ids = {
             item["sessionId"]
             for item in store.repository.list_sessions(agent_id="agent-archive-store")

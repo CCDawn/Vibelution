@@ -1,5 +1,5 @@
 import { Bot, Check, CheckSquare, LoaderCircle, MessageCircle, Square, X } from "lucide-react";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary, Team } from "../api/types";
@@ -280,6 +280,7 @@ type DirectSessionIndexItemProps = {
   bulkSelectionEnabled?: boolean;
   bulkSelectLabel?: string;
   onToggleBulk?: (sessionId: string, selected: boolean, shiftKey?: boolean) => void;
+  trailingActions?: ReactNode;
 };
 
 function renderSessionAvatar(className: string, imageUrl: string | undefined, fallback: string) {
@@ -323,6 +324,7 @@ export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
   bulkSelectionEnabled = false,
   bulkSelectLabel = "",
   onToggleBulk,
+  trailingActions,
 }: DirectSessionIndexItemProps) {
   const sessionIsChild = isChildSession(session);
   const sessionStatus = sessionStatusValue(session);
@@ -348,10 +350,11 @@ export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
     styles.sessionItem,
     styles.directSessionItem,
     bulkSelectionEnabled ? styles.sessionItemWithBulkSelect : "",
+    !editing && trailingActions ? styles.sessionItemWithTrailingActions : "",
     sessionIsChild ? styles.childTopLevelSessionItem : "",
     active ? styles.sessionItemActive : "",
     contextMenuActive && !active ? styles.sessionItemContextTarget : "",
-    isSessionRowArchived(session) ? styles.sessionItemArchived : "",
+    isSessionRowArchived(session) && !trailingActions ? styles.sessionItemArchived : "",
   ].filter(Boolean).join(" ");
   const avatarClassName = `${styles.conversationAvatar} ${styles.conversationAvatarDirect}`;
   const renameLabel = t(sessionIsChild ? "renameTask" : isAgentRootSession(session) ? "renameAgent" : "renameSession");
@@ -536,9 +539,21 @@ export const DirectSessionIndexItem = memo(function DirectSessionIndexItem({
           </VNativeButton>
         </VTooltip>
       )}
-      <div className={styles.sessionTeamBindingSlot} onClick={(event) => event.stopPropagation()}>
-        <SessionTeamBindingTag session={session} lang={lang} teams={teams} />
-      </div>
+      {!editing && trailingActions ? (
+        <div
+          className={styles.sessionActionStack}
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.stopPropagation()}
+        >
+          {trailingActions}
+        </div>
+      ) : null}
+      {trailingActions ? null : (
+        <div className={styles.sessionTeamBindingSlot} onClick={(event) => event.stopPropagation()}>
+          <SessionTeamBindingTag session={session} lang={lang} teams={teams} />
+        </div>
+      )}
       {editing ? (
         <div className={styles.sessionActionStack}>
           <VIconButton

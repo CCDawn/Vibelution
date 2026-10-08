@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { DragEvent, MouseEvent } from "react";
 
 import type { AgentInstance, ConversationSummary, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
@@ -6,7 +6,7 @@ import type { TranslationKey } from "../i18n/dictionary";
 import type { ModelLabelResolver } from "./agentDisplay";
 import { DirectSessionIndexItem, buildDirectSessionIndexViewModel } from "./DirectSessionIndexItem";
 
-type DirectSessionIndexListProps = {
+export type DirectSessionIndexListProps = {
   activeSessionId: string | null;
   addToReviewSucceededLabel: string;
   agentsById: Map<string, AgentInstance>;
@@ -49,6 +49,7 @@ type DirectSessionIndexListProps = {
   selectedBulkSessionIds?: ReadonlySet<string>;
   bulkSelectLabel?: string;
   onToggleBulk?: (sessionId: string, selected: boolean, shiftKey?: boolean) => void;
+  renderTrailingActions?: (session: SessionSummary) => ReactNode;
 };
 
 export function conversationToSessionSummary(
@@ -176,6 +177,7 @@ export function DirectSessionIndexList({
   selectedBulkSessionIds,
   bulkSelectLabel = "",
   onToggleBulk,
+  renderTrailingActions,
 }: DirectSessionIndexListProps) {
   const approvalSessionIds = useMemo(
     () =>
@@ -280,6 +282,7 @@ export function DirectSessionIndexList({
             bulkSelected={Boolean(selectedBulkSessionIds?.has(session.id))}
             bulkSelectLabel={bulkSelectLabel}
             onToggleBulk={onToggleBulk}
+            trailingActions={renderTrailingActions?.(session)}
           />
         );
       })}
