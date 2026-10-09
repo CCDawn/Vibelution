@@ -21,4 +21,8 @@ export default {
   table: "w-full border-collapse text-left text-xs [&_th]:pb-3 [&_th]:font-medium [&_th]:text-[var(--fg-tertiary)] [&_td]:border-t [&_td]:border-[var(--vui-border-subtle)] [&_td]:py-3 [&_td]:pr-3 [&_td]:align-top",
   stockCell: "whitespace-nowrap font-medium text-[var(--fg-primary)]",
   reason: "max-w-72 whitespace-pre-wrap break-words text-[var(--fg-tertiary)]",
+  proposalPicker: "grid max-h-[min(65vh,36rem)] min-w-0 gap-3 overflow-y-auto",
+  proposalCandidate: "flex min-w-0 items-start gap-3 rounded-md border border-[var(--vui-border-subtle)] p-3",
+  proposalCandidateText: "flex min-w-0 items-center gap-3 text-sm text-[var(--fg-primary)] [&_strong]:shrink-0 [&_small]:truncate [&_small]:text-xs [&_small]:text-[var(--fg-tertiary)]",
+  proposalCandidateUnavailable: "grid min-w-0 gap-1 rounded-md border border-[var(--vui-border-subtle)] p-3 text-sm text-[var(--fg-tertiary)] [&_small]:text-xs",
 } as const;

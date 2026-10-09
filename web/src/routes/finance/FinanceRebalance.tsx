@@ -10,7 +10,7 @@ import {
   previewFinancialPortfolioProposal,
 } from "../../api/financialPortfolio";
 import { financialPaperKeys } from "../../api/financialPaper";
-import { fetchFinancialReports, financialReportKeys, type FinancialReportSummary } from "../../api/financialReports";
+import { fetchFinancialReportDocument, fetchFinancialReports, financialReportKeys, type FinancialReportSummary } from "../../api/financialReports";
 import type {
   FinancialPortfolioPosition,
   FinancialPortfolioProposal,
@@ -20,6 +20,8 @@ import type {
 } from "../../api/types/financialPortfolio";
 import { VButton, VCheckbox, VDenseTable, VDialog, VInput, VStateSurface, VSurface, VTextarea, type VDenseTableColumn } from "../../components/vui";
 import { FinanceReportExport } from "./FinanceReportExport";
+import { normalizeFinancialBatchAShareSymbol } from "./financialJobModel";
+import type { FinanceProposalBatchImport } from "./financeProposalImportModel";
 import styles from "./FinanceRebalance.styles";
 
 const DEFAULT_POLICY: FinancialPortfolioRebalancePolicy = {
@@ -76,12 +78,18 @@ function validTargets(targets: FinancialPortfolioRebalanceTarget[]): boolean {
     && target.weightPct >= 0 && target.weightPct <= 100 && target.reason.trim().length > 0 && target.reason.length <= 500);
 }
 
-export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; positions: FinancialPortfolioPosition[]; zh: boolean }) {
+export function FinanceRebalance({ agentId, positions, zh, batchImport, onBatchImportHandled }: {
+  agentId: string; positions: FinancialPortfolioPosition[]; zh: boolean;
+  batchImport?: FinanceProposalBatchImport | null;
+  onBatchImportHandled?: (importId: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [symbolsText, setSymbolsText] = useState(() => positions.map((position) => position.symbol).join(", "));
   const [instruction, setInstruction] = useState("");
   const [policy, setPolicy] = useState<FinancialPortfolioRebalancePolicy>(() => ({ ...DEFAULT_POLICY }));
   const [selectedReports, setSelectedReports] = useState<Map<string, FinancialReportSummary>>(() => new Map());
+  const [importedBatchReports, setImportedBatchReports] = useState<FinancialReportSummary[]>([]);
+  const [importedBatchSource, setImportedBatchSource] = useState<{ batchId: string; researchDate: string } | null>(null);
   const [selectedProposalId, setSelectedProposalId] = useState("");
   const [editedTargets, setEditedTargets] = useState<FinancialPortfolioRebalanceTarget[]>([]);
   const [editedPolicy, setEditedPolicy] = useState<FinancialPortfolioRebalancePolicy>(() => ({ ...DEFAULT_POLICY }));
@@ -109,6 +117,8 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     setInstruction("");
     setPolicy({ ...DEFAULT_POLICY });
     setSelectedReports(new Map());
+    setImportedBatchReports([]);
+    setImportedBatchSource(null);
     setSelectedProposalId("");
     setEditedTargets([]);
     setEditedPolicy({ ...DEFAULT_POLICY });
@@ -130,7 +140,41 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     retry: false,
   });
   const reports = reportCatalog.data?.pages.flatMap((page) => page.items) ?? [];
-  const reportsByRef = useMemo(() => new Map(reports.map((report) => [reportKey(report), report])), [reports]);
+  const batchImportQuery = useQuery({
+    queryKey: ["finance", "portfolio-proposal-batch-import", agentId, batchImport?.importId ?? ""],
+    enabled: Boolean(batchImport),
+    queryFn: async ({ signal }) => {
+      if (!batchImport) return [];
+      if (batchImport.assistantAgentId !== agentId) throw new Error("研究批次所属助手已切换，请重新选择批次");
+      if (!batchImport.reports.length || batchImport.reports.length > 5) throw new Error("批次报告数量无效，请重新选择1至5份报告");
+      const batchSymbols = batchImport.reports.map((reference) => normalizeFinancialBatchAShareSymbol(reference.symbol));
+      if (batchSymbols.some((symbol) => !symbol)) throw new Error("组合建议仅支持沪、深、北交所 A 股；请重新选择批次报告");
+      const documents = await Promise.all(batchImport.reports.map((reference) => fetchFinancialReportDocument({ assistantAgentId: agentId, sessionId: reference.sessionId, turnId: reference.turnId }, { signal })));
+      return documents.map((document, index): FinancialReportSummary => {
+        const reference = batchImport.reports[index];
+        const symbol = batchSymbols[index];
+        if (document.assistantAgentId !== agentId || document.sessionId !== reference.sessionId || document.turnId !== reference.turnId) {
+          throw new Error("研究报告身份与批次引用不一致");
+        }
+        if (!symbol) throw new Error("批次报告股票代码无效");
+        const preview = document.content.replace(/https?:\/\/\S+/g, " ").replace(/[#*_`>|]/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
+        return {
+          sessionId: document.sessionId, turnId: document.turnId,
+          title: `${symbol} · ${zh ? "批次汇总报告" : "Batch synthesis report"}`,
+          sessionTitle: `${batchImport.batchId} · ${batchImport.researchDate}`,
+          ticker: null, marketCode: null, completedAt: document.completedAt,
+          preview, chars: document.content.length, kind: "research",
+        };
+      });
+    },
+    retry: false,
+  });
+  const displayReports = useMemo(() => {
+    const items = new Map(importedBatchReports.map((report) => [reportKey(report), report]));
+    for (const report of reports) items.set(reportKey(report), report);
+    return [...items.values()];
+  }, [importedBatchReports, reports]);
+  const reportsByRef = useMemo(() => new Map(displayReports.map((report) => [reportKey(report), report])), [displayReports]);
   const proposalList = useQuery({
     queryKey: financialPortfolioKeys.proposals(agentId),
     queryFn: ({ signal }) => fetchFinancialPortfolioProposals(agentId, { signal }),
@@ -148,7 +192,28 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
   const proposal = proposalDetail.data?.proposalId === selectedProposalId ? proposalDetail.data : null;
   const symbols = useMemo(() => parseSymbols(symbolsText), [symbolsText]);
   const selectedReportRows = [...selectedReports.values()];
+  const batchImportPending = Boolean(batchImport && batchImportQuery.isPending);
+  const batchImportFailed = Boolean(batchImport && batchImportQuery.isError);
   const frozenCreateForm = Boolean(createAttempt) || pending === "create" || pending === "readback";
+
+  useEffect(() => {
+    if (!batchImport || !batchImportQuery.data) return;
+    const batchSymbols = [...new Set(batchImport.reports.map((reference) => normalizeFinancialBatchAShareSymbol(reference.symbol)).filter((symbol): symbol is string => Boolean(symbol)))];
+    setSymbolsText(batchSymbols.join(", "));
+    setImportedBatchReports(batchImportQuery.data);
+    setImportedBatchSource({ batchId: batchImport.batchId, researchDate: batchImport.researchDate });
+    setSelectedReports(new Map(batchImportQuery.data.map((report) => [reportKey(report), report])));
+    setSelectedProposalId("");
+    setEditedTargets([]);
+    setPlanDirty(false);
+    setCreateAttempt(null);
+    setError("");
+    onBatchImportHandled?.(batchImport.importId);
+  }, [batchImport?.importId, batchImport?.batchId, batchImport?.researchDate, batchImportQuery.data, onBatchImportHandled]);
+
+  useEffect(() => {
+    if (batchImport && batchImportQuery.isError) setError(errorText(batchImportQuery.error));
+  }, [batchImport?.importId, batchImportQuery.error, batchImportQuery.isError]);
 
   useEffect(() => {
     if (!proposal) return;
@@ -198,6 +263,18 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
       } else next.delete(key);
       return next;
     });
+  }
+
+  function clearImportedBatchReports() {
+    const importedKeys = new Set(importedBatchReports.map(reportKey));
+    setSelectedReports((current) => new Map([...current].filter(([key]) => !importedKeys.has(key))));
+    setImportedBatchReports([]);
+    setImportedBatchSource(null);
+  }
+
+  function dismissBatchImport() {
+    if (batchImport) onBatchImportHandled?.(batchImport.importId);
+    setError("");
   }
 
   function toggleReportPreview(key: string) {
@@ -343,7 +420,7 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
     setPlanDirty(true);
   }
 
-  const canCreate = !pending && !createAttempt && symbols.length > 0 && symbols.length <= 10
+  const canCreate = !pending && !createAttempt && !batchImportPending && !batchImportFailed && symbols.length > 0 && symbols.length <= 10
     && selectedReportRows.length > 0 && instruction.trim().length > 0 && instruction.length <= 2_000 && validPolicy(policy);
   const parsedExpiry = proposal?.expiresAt ? Date.parse(proposal.expiresAt) : Number.NaN;
   const isExpired = !Number.isFinite(parsedExpiry) || parsedExpiry <= Date.now();
@@ -384,10 +461,16 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
             <h4 className={styles.panelTitle}>{zh ? "研究报告与风控" : "Reports and risk"}</h4>
             <p className={styles.note}>{zh ? "最多选5份已完成报告。" : "Select up to five completed reports."}</p>
           </div>
-          <VButton variant="ghost" isPending={reportCatalog.isFetching} onPress={() => void reportCatalog.refetch()}>{zh ? "刷新报告" : "Refresh reports"}</VButton>
+          <div className={styles.headerActions}>
+            {importedBatchSource ? <><span className={styles.note} title={importedBatchSource.batchId}>{zh ? `研究批次 · ${importedBatchSource.researchDate}` : `Research batch · ${importedBatchSource.researchDate}`}</span><VButton variant="ghost" isDisabled={frozenCreateForm} onPress={clearImportedBatchReports}>{zh ? "清除批次来源" : "Clear batch source"}</VButton></> : null}
+            <VButton variant="ghost" isPending={reportCatalog.isFetching} onPress={() => void reportCatalog.refetch()}>{zh ? "刷新报告" : "Refresh reports"}</VButton>
+          </div>
         </div>
-        {reportCatalog.isPending ? <VStateSurface tone="loading" density="compact" busy title={zh ? "读取研究报告" : "Loading reports"} /> : reportCatalog.isError ? <VStateSurface tone="error" density="compact" title={errorText(reportCatalog.error)} actions={<VButton onPress={() => void reportCatalog.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : !reports.length ? <VStateSurface tone="empty" density="compact" title={zh ? "暂无已完成研究报告" : "No completed reports yet"} /> : <div className={styles.reports}>
-          {reports.map((report) => {
+        {batchImportPending ? <VStateSurface tone="loading" density="compact" busy title={zh ? "正在核验批次报告" : "Validating batch reports"}>{zh ? "正在读取每个精确的研究回合；核验完成前不能生成建议。" : "Reading each exact research Turn. Proposal generation stays disabled until validation completes."}</VStateSurface> : null}
+        {batchImportFailed ? <VStateSurface tone="error" density="compact" title={errorText(batchImportQuery.error)} actions={<div className={styles.headerActions}><VButton isPending={batchImportQuery.isFetching} onPress={() => void batchImportQuery.refetch()}>{zh ? "重试核验" : "Retry validation"}</VButton><VButton variant="secondary" onPress={dismissBatchImport}>{zh ? "取消导入" : "Cancel import"}</VButton></div>} /> : null}
+        {reportCatalog.isError ? <VStateSurface tone="error" density="compact" title={errorText(reportCatalog.error)} actions={<VButton onPress={() => void reportCatalog.refetch()}>{zh ? "重试目录" : "Retry catalog"}</VButton>} /> : null}
+        {reportCatalog.isPending && !displayReports.length ? <VStateSurface tone="loading" density="compact" busy title={zh ? "读取研究报告" : "Loading reports"} /> : !displayReports.length ? <VStateSurface tone="empty" density="compact" title={zh ? "暂无已完成研究报告" : "No completed research reports"} /> : <div className={styles.reports}>
+          {displayReports.map((report) => {
             const key = reportKey(report);
             const checked = selectedReports.has(key);
             const previewExpanded = expandedReportPreviews.has(key);
@@ -453,10 +536,10 @@ export function FinanceRebalance({ agentId, positions, zh }: { agentId: string; 
           const source = reportsByRef.get(reportKey(ref));
           const sourceLabel = source
             ? `${source.title} · ${formatTime(source.completedAt, zh)}`
-            : (zh ? "报告暂不可用" : "Report temporarily unavailable");
+            : (zh ? "原始研究报告" : "Original research report");
           return <div key={reportKey(ref)} className={styles.sourceRow}>
-            <span className={styles.sourceLabel} title={sourceLabel}>{sourceLabel}</span>
-            {source ? <FinanceReportExport assistantAgentId={agentId} sessionId={ref.sessionId} turnId={ref.turnId} zh={zh} /> : null}
+            <span className={styles.sourceLabel} title={`${sourceLabel}\nSession ${ref.sessionId}\nTurn ${ref.turnId}`}>{sourceLabel}</span>
+            <FinanceReportExport assistantAgentId={agentId} sessionId={ref.sessionId} turnId={ref.turnId} zh={zh} />
           </div>;
         })}
       </div> : <p className={styles.note}>{zh ? "没有参考报告" : "No source reports"}</p>}

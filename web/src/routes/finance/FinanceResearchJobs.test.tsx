@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FinanceResearchJobs } from "./FinanceResearchJobs";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 import type { FinancialResearchBatch } from "../../api/financialJobs";
+import type { FinanceProposalBatchImport } from "./financeProposalImportModel";
 
 const api = vi.hoisted(() => ({ schedules: vi.fn(), batches: vi.fn(), create: vi.fn(), patch: vi.fn(), stop: vi.fn(), retry: vi.fn() }));
 vi.mock("../../api/financialJobs", () => ({ fetchFinancialResearchSchedules: api.schedules, fetchFinancialResearchBatches: api.batches, createFinancialResearchSchedule: api.create, updateFinancialResearchSchedule: api.patch, stopFinancialResearchBatch: api.stop, retryFinancialResearchBatch: api.retry }));
@@ -16,8 +17,8 @@ const open = vi.fn(); let root: Root, client: QueryClient, node: HTMLDivElement;
 function batch(status: FinancialResearchBatch["status"]): FinancialResearchBatch {
   return { batchId: "batch", scheduleId: "schedule", assistantAgentId: "finance", status, triggeredAt: "2026-10-06T12:00:00+08:00", updatedAt: "2026-10-06T12:00:00+08:00", researchDate: "2026-10-06", periodDays: 30, depth: "brief", symbols: ["sh600519", "sz000001"], terminalReason: null, items: [{ symbol: "sh600519", status: "completed", runId: "earlier-run", startedAt: null, completedAt: null, terminalReason: null, turnRefs: [] }, { symbol: "sz000001", status: status === "blocked" ? "blocked" : "skipped", runId: null, startedAt: null, completedAt: null, terminalReason: "尚未启动", turnRefs: [] }] };
 }
-async function render(mode: "batches" | "schedules" = "batches") { await act(async () => root.render(<QueryClientProvider client={client}><FinanceResearchJobs assistant={assistant} stock={stock} watchlist={[stock]} mode={mode} zh onOpenRun={open} /></QueryClientProvider>)); await act(async () => new Promise((done) => setTimeout(done, 15))); }
-function button(label: string) { return [...node.querySelectorAll("button")].find((item) => item.textContent?.includes(label))!; }
+async function render(mode: "batches" | "schedules" = "batches", onProposalImport?: (source: FinanceProposalBatchImport) => void) { await act(async () => root.render(<QueryClientProvider client={client}><FinanceResearchJobs assistant={assistant} stock={stock} watchlist={[stock]} mode={mode} zh onOpenRun={open} onProposalImport={onProposalImport} /></QueryClientProvider>)); await act(async () => new Promise((done) => setTimeout(done, 15))); }
+function button(label: string) { return [...document.body.querySelectorAll("button")].find((item) => item.textContent?.includes(label))!; }
 beforeEach(() => { vi.resetAllMocks(); node = document.createElement("div"); document.body.appendChild(node); root = createRoot(node); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); api.schedules.mockResolvedValue({ assistantAgentId: "finance", schedules: [] }); api.batches.mockResolvedValue({ assistantAgentId: "finance", batches: [] }); });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
 
@@ -38,6 +39,83 @@ it("opens the exact completed stock run while keeping stopped items distinct", a
 it("does not offer retry for blocked or already completed batches", async () => {
   api.batches.mockResolvedValue({ assistantAgentId: "finance", batches: [batch("blocked")] }); await render();
   expect(node.textContent).toContain("需处理"); expect(button("重试未完成")).toBeUndefined();
+});
+
+it("requires an explicit capped selection of exact synthesis reports before handing off", async () => {
+  const source = batch("completed");
+  source.items = Array.from({ length: 6 }, (_, index) => ({
+    symbol: `sh60000${index}`, status: "completed", runId: `run-${index}`, startedAt: null, completedAt: null, terminalReason: null,
+    turnRefs: [
+      { role: "market" as const, sessionId: `analyst-session-${index}`, turnId: `analyst-turn-${index}` },
+      { role: "synthesis" as const, sessionId: `synthesis-session-${index}`, turnId: `synthesis-turn-${index}` },
+    ],
+  }));
+  source.symbols = source.items.map((item) => item.symbol);
+  api.batches.mockResolvedValue({ assistantAgentId: "finance", batches: [source] });
+  const onProposalImport = vi.fn();
+  await render("batches", onProposalImport);
+
+  await act(async () => button("用于组合建议").click());
+  await act(async () => new Promise((done) => setTimeout(done, 0)));
+  const checkboxes = [...document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+  expect(checkboxes).toHaveLength(6);
+  expect(checkboxes.some((checkbox) => checkbox.checked)).toBe(false);
+  expect(button("带入组合建议（0）").disabled).toBe(true);
+
+  for (const checkbox of checkboxes.slice(0, 5)) await act(async () => checkbox.click());
+  expect(checkboxes.slice(0, 5).every((checkbox) => checkbox.checked)).toBe(true);
+  expect(checkboxes[5].disabled).toBe(true);
+  await act(async () => button("带入组合建议（5）").click());
+
+  expect(onProposalImport).toHaveBeenCalledOnce();
+  const imported = onProposalImport.mock.calls[0][0];
+  expect(imported).toMatchObject({ assistantAgentId: "finance", batchId: "batch", researchDate: "2026-10-06" });
+  expect(imported.reports).toEqual(Array.from({ length: 5 }, (_, index) => ({ symbol: `sh60000${index}`, sessionId: `synthesis-session-${index}`, turnId: `synthesis-turn-${index}` })));
+  expect(imported.reports.some((report: { turnId: string }) => report.turnId.startsWith("analyst"))).toBe(false);
+  expect(api.create).not.toHaveBeenCalled();
+});
+
+it("requires the user to choose A-share reports explicitly and disables HK reports in mixed batches", async () => {
+  const source = batch("completed");
+  source.items = [
+    { symbol: "sh600000", status: "completed", runId: "cn-run", startedAt: null, completedAt: null, terminalReason: null, turnRefs: [{ role: "synthesis", sessionId: "cn-session", turnId: "cn-turn" }] },
+    { symbol: "hk00700", status: "completed", runId: "hk-run", startedAt: null, completedAt: null, terminalReason: null, turnRefs: [{ role: "synthesis", sessionId: "hk-session", turnId: "hk-turn" }] },
+  ];
+  source.symbols = source.items.map((item) => item.symbol);
+  api.batches.mockResolvedValue({ assistantAgentId: "finance", batches: [source] });
+  const onProposalImport = vi.fn();
+  await render("batches", onProposalImport);
+
+  await act(async () => button("用于组合建议").click());
+  const checkboxes = [...document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+  expect(checkboxes).toHaveLength(2);
+  expect(checkboxes.every((checkbox) => !checkbox.checked)).toBe(true);
+  expect(checkboxes[0].disabled).toBe(false);
+  expect(checkboxes[1].disabled).toBe(true);
+  expect(document.body.textContent).toContain("组合建议仅支持沪、深、北交所 A 股");
+  await act(async () => checkboxes[1].click());
+  expect(checkboxes[1].checked).toBe(false);
+
+  await act(async () => checkboxes[0].click());
+  await act(async () => button("带入组合建议（1）").click());
+  expect(onProposalImport).toHaveBeenCalledOnce();
+  expect(onProposalImport.mock.calls[0][0].reports).toEqual([{ symbol: "sh600000", sessionId: "cn-session", turnId: "cn-turn" }]);
+});
+
+it("shows a disabled proposal action with a reason for batches containing only HK and US results", async () => {
+  const source = batch("partial");
+  source.items = ["hk00700", "usAAPL"].map((symbol, index) => ({
+    symbol, status: "completed", runId: `run-${index}`, startedAt: null, completedAt: null, terminalReason: null,
+    turnRefs: [{ role: "synthesis" as const, sessionId: `session-${index}`, turnId: `turn-${index}` }],
+  }));
+  source.symbols = source.items.map((item) => item.symbol);
+  api.batches.mockResolvedValue({ assistantAgentId: "finance", batches: [source] });
+  const onProposalImport = vi.fn();
+  await render("batches", onProposalImport);
+
+  expect(button("用于组合建议").disabled).toBe(true);
+  expect(node.textContent).toContain("此批次不含可导入的 A 股结果");
+  expect(onProposalImport).not.toHaveBeenCalled();
 });
 
 it("labels weekday scheduling honestly and pauses only future runs", async () => {

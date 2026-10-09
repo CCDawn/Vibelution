@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FetchJsonHttpError, resetControlTokenForTests, seedControlTokenForTests } from "./client";
-import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, exportFinancialReport, fetchFinancialReportText, isFinancialReportNotFoundError, MAX_FINANCIAL_REPORT_EXPORT_CHARS, printFinancialReportExport } from "./financialReports";
+import { downloadFinancialReportExport, downloadFinancialReportPrintHtml, exportFinancialReport, fetchFinancialReportDocument, fetchFinancialReportText, isFinancialReportNotFoundError, MAX_FINANCIAL_REPORT_EXPORT_CHARS, printFinancialReportExport } from "./financialReports";
 
 let cleanupPrintMocks = () => {};
 
@@ -60,6 +60,46 @@ describe("canonical report preview", () => {
     seedControlTokenForTests("test-token");
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(result), { status: 200 })));
     await expect(fetchFinancialReportText(target)).rejects.toThrow();
+  });
+});
+
+describe("exact financial report document", () => {
+  const target = { assistantAgentId: "agent-1", sessionId: "session-1", turnId: "turn-1" };
+  const document = { schemaVersion: 1, ...target, completedAt: "2026-10-08T10:00:00+08:00", content: "# 完成研究\n结论" };
+  const jsonResponse = (value: unknown) => ({
+    sessionId: target.sessionId, turnId: target.turnId, format: "json" as const,
+    fileName: "stock-research.json", mediaType: "application/json; charset=utf-8", encoding: "utf8" as const,
+    content: typeof value === "string" ? value : JSON.stringify(value),
+  });
+
+  it("returns a bounded document only when the export matches the exact Agent/Session/Turn", async () => {
+    seedControlTokenForTests("test-token");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(jsonResponse(document)), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchFinancialReportDocument(target)).resolves.toEqual(document);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ sessionId: target.sessionId, turnId: target.turnId, format: "json" });
+  });
+
+  it.each([
+    { ...document, assistantAgentId: "another-agent" },
+    { ...document, sessionId: "another-session" },
+    { ...document, turnId: "another-turn" },
+    { ...document, schemaVersion: 2 },
+    { ...document, content: " " },
+    { ...document, content: "x".repeat(MAX_FINANCIAL_REPORT_EXPORT_CHARS + 1) },
+  ])("rejects an invalid or mismatched exact report document", async (value) => {
+    seedControlTokenForTests("test-token");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(jsonResponse(value)), { status: 200 })));
+    await expect(fetchFinancialReportDocument(target)).rejects.toThrow();
+  });
+
+  it("rejects malformed JSON and unexpected media types", async () => {
+    seedControlTokenForTests("test-token");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(jsonResponse("{")), { status: 200 })));
+    await expect(fetchFinancialReportDocument(target)).rejects.toThrow("研究报告 JSON 内容无效");
+    const wrongType = { ...jsonResponse(document), mediaType: "text/markdown" };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(wrongType), { status: 200 })));
+    await expect(fetchFinancialReportDocument(target)).rejects.toThrow();
   });
 });
 

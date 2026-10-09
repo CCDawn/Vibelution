@@ -14,6 +14,7 @@ import type { StockIdentity } from "../../api/types/financialMarket";
 import { VButton, VDenseTable, VMetricStrip, VStateSurface, VSurface, type VDenseTableColumn } from "../../components/vui";
 import styles from "./FinancePortfolioResearch.styles";
 import { FinanceRebalance } from "./FinanceRebalance";
+import type { FinanceProposalBatchImport } from "./financeProposalImportModel";
 
 export type FinancePortfolioResearchProps = {
   assistant: FinancialAssistant;
@@ -21,6 +22,8 @@ export type FinancePortfolioResearchProps = {
   onSelectStock: (stock: StockIdentity) => void;
   onResearchPrompt: (text: string) => void;
   onOpenAccount?: () => void;
+  proposalBatchImport?: FinanceProposalBatchImport | null;
+  onProposalBatchImportHandled?: (importId: string) => void;
 };
 
 function formatYuan(value: string | null, zh: boolean): string {
@@ -101,7 +104,7 @@ function buildPortfolioPrompt(data: PortfolioResearchData, zh: boolean): string 
   return [heading, account, scope, correlation, "持仓：", positions.join("\n"), "可用相关性样本：", pairs.length ? pairs.join("\n") : zh ? "没有达到样本门槛的配对。" : "No pairs met the sample threshold.", `来源与口径：${data.source} ${data.sourceUrl}；${data.adjustment} ${data.period}；${data.notice}`, instruction].join("\n\n");
 }
 
-export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResearchPrompt, onOpenAccount }: FinancePortfolioResearchProps) {
+export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResearchPrompt, onOpenAccount, proposalBatchImport, onProposalBatchImportHandled }: FinancePortfolioResearchProps) {
   const query = useQuery({
     queryKey: financialPortfolioKeys.research(assistant.agentId),
     queryFn: ({ signal }) => fetchFinancialPortfolioResearch(assistant.agentId, { signal }),
@@ -111,7 +114,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
 
   const positionColumns = useMemo<VDenseTableColumn<FinancialPortfolioPosition>[]>(() => [
     {
-      id: "stock", header: zh ? "持仓" : "Holding", fill: true, minWidth: 156,
+      id: "stock", header: zh ? "持仓" : "Holding", width: 240, minWidth: 156,
       render: (row) => <VButton variant="ghost" className={styles.stockButton} onPress={() => onSelectStock({ symbol: row.symbol, ticker: row.ticker, name: row.name, market: row.market })}>
         <span className={styles.stockIdentity}><strong>{row.name}</strong><small>{row.ticker} · {row.market}</small><small>{valuationStatusText(row, zh)} · {formatTimestamp(row.quoteTimestamp, zh)}</small></span>
       </VButton>,
@@ -132,7 +135,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
 
   const correlationColumns = useMemo<VDenseTableColumn<FinancialPortfolioCorrelation>[]>(() => [
     {
-      id: "pair", header: zh ? "股票配对" : "Pair", fill: true, minWidth: 200,
+      id: "pair", header: zh ? "股票配对" : "Pair", width: 240, minWidth: 200,
       render: (row) => <span className={styles.pairNames}>{row.firstName} <small>{row.firstSymbol}</small> · {row.secondName} <small>{row.secondSymbol}</small></span>,
     },
     { id: "coefficient", header: zh ? "Pearson r" : "Pearson r", width: 96, minWidth: 88, align: "right", render: (row) => formatCorrelation(row.correlation) },
@@ -179,7 +182,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
 
     <VMetricStrip ariaLabel={zh ? "模拟组合摘要" : "Simulated portfolio summary"} metrics={metrics} />
 
-    <FinanceRebalance agentId={assistant.agentId} positions={data.positions} zh={zh} />
+    <FinanceRebalance agentId={assistant.agentId} positions={data.positions} zh={zh} batchImport={proposalBatchImport} onBatchImportHandled={onProposalBatchImportHandled} />
 
     {!data.summary.valuationComplete ? <VStateSurface tone="unavailable" density="compact" title={zh ? "估值不完整，组合权重暂不可用" : "Valuation is partial; portfolio weights are unavailable"}>
       {zh ? `已估值 ${data.summary.valuedPositionCount} / ${data.summary.positionCount} 只持仓。缺失估值的仓位不会被当作零值参与权重计算。` : `${data.summary.valuedPositionCount} of ${data.summary.positionCount} holdings are valued. Missing marks are not treated as zero when calculating weights.`}
@@ -192,6 +195,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
           <span className={styles.meta}>{data.summary.positionCount} {zh ? "只" : "positions"} · {zh ? `已估值 ${data.summary.valuedPositionCount}` : `${data.summary.valuedPositionCount} valued`}</span>
         </div>
         <VDenseTable<FinancialPortfolioPosition>
+          className={styles.table}
           ariaLabel={zh ? "模拟持仓及账户权重" : "Simulated holdings and account weights"}
           columns={positionColumns}
           rows={data.positions}
@@ -209,6 +213,7 @@ export function FinancePortfolioResearch({ assistant, zh, onSelectStock, onResea
         </div>
         <p className={styles.helper}>{zh ? `以 ${data.source} ${data.adjustment} 日线收盘收益的 Pearson 相关系数计算；至少 ${data.coverage.minimumCorrelationObservations} 个共同交易日才展示。` : `Pearson correlation of ${data.source} ${data.adjustment} daily close returns; pairs require at least ${data.coverage.minimumCorrelationObservations} common sessions.`}</p>
         <VDenseTable<FinancialPortfolioCorrelation>
+          className={styles.table}
           ariaLabel={zh ? "样本充分的持仓相关性配对" : "Holding correlation pairs with sufficient samples"}
           columns={correlationColumns}
           rows={data.correlations}

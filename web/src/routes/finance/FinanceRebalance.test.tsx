@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   fetchProposals: vi.fn(),
   preview: vi.fn(),
   fetchReports: vi.fn(),
+  fetchReportDocument: vi.fn(),
 }));
 
 vi.mock("../../api/financialPortfolio", async (importOriginal) => ({
@@ -27,6 +28,7 @@ vi.mock("../../api/financialPortfolio", async (importOriginal) => ({
 }));
 vi.mock("../../api/financialReports", () => ({
   fetchFinancialReports: api.fetchReports,
+  fetchFinancialReportDocument: api.fetchReportDocument,
   financialReportKeys: { catalog: (agentId: string, filters: unknown) => ["finance", "report-catalog", agentId, filters] },
 }));
 vi.mock("./FinanceReportExport", () => ({
@@ -34,6 +36,7 @@ vi.mock("./FinanceReportExport", () => ({
 }));
 
 import { FinanceRebalance } from "./FinanceRebalance";
+import type { FinanceProposalBatchImport } from "./financeProposalImportModel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -80,8 +83,8 @@ async function settle() {
   await act(async () => { await Promise.resolve(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
-async function render(agentId = "agent-1") {
-  await act(async () => root.render(<QueryClientProvider client={client}><FinanceRebalance agentId={agentId} positions={[position]} zh /></QueryClientProvider>));
+async function render(agentId = "agent-1", batchImport?: FinanceProposalBatchImport, onBatchImportHandled?: (importId: string) => void, positions: FinancialPortfolioPosition[] = [position]) {
+  await act(async () => root.render(<QueryClientProvider client={client}><FinanceRebalance agentId={agentId} positions={positions} zh batchImport={batchImport} onBatchImportHandled={onBatchImportHandled} /></QueryClientProvider>));
   await settle();
 }
 
@@ -128,6 +131,58 @@ describe("FinanceRebalance", () => {
     expect(api.fetchReports).toHaveBeenCalledTimes(2);
   });
 
+  it("hydrates selected batch reports from exact owned Turn exports before enabling proposal generation", async () => {
+    const batchImport: FinanceProposalBatchImport = {
+      importId: "batch-2:session-2:turn-2",
+      assistantAgentId: "agent-1", batchId: "batch-2", researchDate: "2026-10-08",
+      reports: [{ symbol: "sh600000", sessionId: "session-2", turnId: "turn-2" }],
+    };
+    api.fetchReportDocument.mockResolvedValue({ schemaVersion: 1, assistantAgentId: "agent-1", sessionId: "session-2", turnId: "turn-2", completedAt: "2026-10-08T09:00:00+08:00", content: "# 精确汇总报告\n盈利能力改善，关注风险。" });
+    const consumed = vi.fn();
+    await render("agent-1", batchImport, consumed, []);
+
+    expect(api.fetchReportDocument).toHaveBeenCalledWith({ assistantAgentId: "agent-1", sessionId: "session-2", turnId: "turn-2" }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(node.textContent).toContain("研究批次 · 2026-10-08");
+    expect(node.querySelector('[title="batch-2"]')).not.toBeNull();
+    expect(node.textContent).toContain("盈利能力改善，关注风险。");
+    expect(node.querySelector<HTMLInputElement>('input[aria-label="选择报告 sh600000 · 批次汇总报告"]')?.checked).toBe(true);
+    expect(input("候选股票代码").value).toBe("sh600000");
+    await setValue(input("候选股票代码"), "SH600000, SZ000001");
+    expect(input("候选股票代码").value).toBe("SH600000, SZ000001");
+    expect(consumed).toHaveBeenCalledWith(batchImport.importId);
+    expect(button("生成建议").disabled).toBe(true);
+    expect(api.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unexpected non-A-share batch import before reading its report", async () => {
+    const batchImport: FinanceProposalBatchImport = {
+      importId: "hk-batch:session-hk:turn-hk", assistantAgentId: "agent-1", batchId: "hk-batch", researchDate: "2026-10-08",
+      reports: [{ symbol: "hk00700", sessionId: "session-hk", turnId: "turn-hk" }],
+    };
+    await render("agent-1", batchImport);
+
+    expect(node.textContent).toContain("组合建议仅支持沪、深、北交所 A 股");
+    expect(api.fetchReportDocument).not.toHaveBeenCalled();
+    expect(input("候选股票代码").value).toBe("sh600519");
+    expect(button("生成建议").disabled).toBe(true);
+  });
+
+  it("blocks generation on a stale batch source and allows the import to be cancelled", async () => {
+    const batchImport: FinanceProposalBatchImport = {
+      importId: "stale-batch:session-2:turn-2", assistantAgentId: "agent-1", batchId: "stale-batch", researchDate: "2026-10-08",
+      reports: [{ symbol: "sh600000", sessionId: "session-2", turnId: "turn-2" }],
+    };
+    api.fetchReportDocument.mockRejectedValue(new Error("报告已删除"));
+    const handled = vi.fn();
+    await render("agent-1", batchImport, handled);
+
+    expect(node.textContent).toContain("报告已删除");
+    expect(button("生成建议").disabled).toBe(true);
+    await act(async () => button("取消导入").click());
+    expect(handled).toHaveBeenCalledWith(batchImport.importId);
+    expect(api.create).not.toHaveBeenCalled();
+  });
+
   it("uses the exact selected completed report and current holdings to create an idempotent proposal", async () => {
     await render();
     expect(input("候选股票代码").value).toBe("sh600519");
@@ -172,19 +227,31 @@ describe("FinanceRebalance", () => {
     expect(node.textContent).toContain("建议详情");
   });
 
-  it("shows a source as unavailable instead of substituting another report from the same session", async () => {
-    const missingSource = readyProposal({ reportRefs: [{ sessionId: report.sessionId, turnId: "turn-older", contentHash: "older-hash" }] });
-    api.fetchProposals.mockResolvedValue({ items: [missingSource] });
-    api.fetchProposal.mockResolvedValue(missingSource);
-    await render();
+  it("keeps exact exports for saved proposal sources after clearing imported batch metadata", async () => {
+    const proposal = readyProposal({ reportRefs: [{ sessionId: report.sessionId, turnId: "turn-older", contentHash: "older-hash" }] });
+    const batchImport: FinanceProposalBatchImport = {
+      importId: "batch-older:session-1:turn-older", assistantAgentId: "agent-1", batchId: "batch-older", researchDate: "2026-10-08",
+      reports: [{ symbol: "sh600000", sessionId: report.sessionId, turnId: "turn-older" }],
+    };
+    api.fetchReportDocument.mockResolvedValue({ schemaVersion: 1, assistantAgentId: "agent-1", sessionId: report.sessionId, turnId: "turn-older", completedAt: "2026-10-08T09:00:00+08:00", content: "历史汇总报告。" });
+    api.fetchProposals.mockResolvedValue({ items: [proposal] });
+    api.fetchProposal.mockResolvedValue(proposal);
+    await render("agent-1", batchImport);
     await act(async () => button("待批准").click());
     await settle();
 
+    expect(node.textContent).toContain("研究批次 · 2026-10-08");
+    expect(node.querySelector('[title="batch-older"]')).not.toBeNull();
+    expect(node.querySelector<HTMLSpanElement>("[data-export-session]")?.dataset).toMatchObject({ exportSession: report.sessionId, exportTurn: "turn-older" });
+    await act(async () => button("清除批次来源").click());
+    await settle();
+
     const sourceList = node.querySelector('[aria-label="参考报告"]');
-    expect(sourceList?.textContent).toContain("报告暂不可用");
+    expect(sourceList?.textContent).toContain("原始研究报告");
+    expect(sourceList?.querySelector('[title*="Turn turn-older"]')).not.toBeNull();
     expect(sourceList?.textContent).not.toContain("浦发银行研究");
     expect(node.textContent).toContain("模型 model-1");
-    expect(node.querySelector("[data-export-session]")).toBeNull();
+    expect(node.querySelector<HTMLSpanElement>("[data-export-session]")?.dataset).toMatchObject({ exportSession: report.sessionId, exportTurn: "turn-older" });
   });
 
   it("clamps long report previews and model summaries while preserving their source text", async () => {

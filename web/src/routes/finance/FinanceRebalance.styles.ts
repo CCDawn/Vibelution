@@ -5,6 +5,7 @@ export default {
   root: "grid min-w-0 content-start gap-3",
   section: `grid min-w-0 content-start gap-3 border-t ${border} pt-3`,
   heading: "flex min-w-0 flex-wrap items-center justify-between gap-2 [&>h3]:m-0 [&>h3]:text-sm [&>p]:m-0",
+  headerActions: "flex min-w-0 flex-wrap items-center justify-end gap-2",
   layout: "grid min-w-0 grid-cols-1 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.85fr)]",
   panel: "grid min-w-0 content-start gap-2 overflow-hidden",
   panelTitle: "m-0 text-xs font-semibold",

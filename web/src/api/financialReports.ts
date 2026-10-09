@@ -1,8 +1,8 @@
 import { fetchJson, isFetchJsonHttpError } from "./client";
-import type { FinancialReportExportRequest, FinancialReportExportResponse } from "./types/financialReports";
+import type { FinancialReportDocument, FinancialReportExportRequest, FinancialReportExportResponse } from "./types/financialReports";
 import type { FinancialReportFilters, FinancialReportPage, FinancialReportsExportResponse } from "./types/financialReports";
 
-export type { FinancialReportExportRequest, FinancialReportExportResponse, FinancialReportFormat } from "./types/financialReports";
+export type { FinancialReportDocument, FinancialReportExportRequest, FinancialReportExportResponse, FinancialReportFormat } from "./types/financialReports";
 export type { FinancialReportFilters, FinancialReportPage, FinancialReportSummary } from "./types/financialReports";
 
 export function isFinancialReportNotFoundError(error: unknown): boolean {
@@ -43,6 +43,43 @@ export function exportFinancialReport(target: FinancialReportExportTarget, optio
       signal: options?.signal,
     },
   );
+}
+
+/** Reads one exact owned research Turn as a bounded, identity-checked document. */
+export async function fetchFinancialReportDocument(
+  target: Omit<FinancialReportExportTarget, "format">,
+  options?: { signal?: AbortSignal },
+): Promise<FinancialReportDocument> {
+  const request = { ...target, format: "json" as const };
+  const response = await exportFinancialReport(request, options);
+  throwIfAborted(options?.signal);
+  assertBoundedExport(response, request);
+  if (response.encoding !== "utf8" || !response.mediaType.toLowerCase().startsWith("application/json")) {
+    throw new Error("研究报告 JSON 响应格式无效");
+  }
+
+  let document: unknown;
+  try {
+    document = JSON.parse(response.content);
+  } catch {
+    throw new Error("研究报告 JSON 内容无效");
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) throw new Error("研究报告 JSON 内容无效");
+  const value = document as Partial<FinancialReportDocument>;
+  if (
+    value.schemaVersion !== 1
+    || value.assistantAgentId !== target.assistantAgentId
+    || value.sessionId !== target.sessionId
+    || value.turnId !== target.turnId
+    || typeof value.completedAt !== "string"
+    || !value.completedAt
+    || typeof value.content !== "string"
+    || !value.content.trim()
+    || value.content.length > MAX_FINANCIAL_REPORT_EXPORT_CHARS
+  ) {
+    throw new Error("研究报告身份、完成时间或内容无效");
+  }
+  return value as FinancialReportDocument;
 }
 
 /** Read the same exact-turn, server-grounded body used by every export format. */

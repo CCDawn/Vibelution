@@ -13,6 +13,14 @@ export function parseFinancialBatchSymbols(value: string): { symbols: string[]; 
   return { symbols: [...symbols], invalid };
 }
 
+export function normalizeFinancialBatchAShareSymbol(value: string): string | null {
+  const token = value.trim();
+  if (!token || /[\s,，;；]/.test(token)) return null;
+  const parsed = parseFinancialBatchSymbols(token);
+  if (parsed.invalid.length || parsed.symbols.length !== 1) return null;
+  return /^(?:sh|sz|bj)\d{6}$/.test(parsed.symbols[0]) ? parsed.symbols[0] : null;
+}
+
 function normalizeFinancialBatchSymbol(value: string): string | null {
   const token = String(value || "").trim();
   const cn = /^(?:(sh|sz|bj))?(\d{6})$/i.exec(token);

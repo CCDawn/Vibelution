@@ -13,6 +13,15 @@ export type FinancialReportExportResponse = FinancialReportExportRequest & {
   content: string;
 };
 
+export type FinancialReportDocument = {
+  schemaVersion: 1;
+  assistantAgentId: string;
+  sessionId: string;
+  turnId: string;
+  completedAt: string;
+  content: string;
+};
+
 export type FinancialReportSummary = {
   sessionId: string; turnId: string; title: string; sessionTitle: string;
   ticker: string | null; marketCode: "CN" | "HK" | "US" | null;

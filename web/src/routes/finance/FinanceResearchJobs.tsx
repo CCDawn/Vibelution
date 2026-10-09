@@ -3,9 +3,10 @@ import { CalendarClock, Play, RefreshCw } from "lucide-react";
 import type { FinancialAssistant } from "../../api/financialAssistant";
 import type { StockIdentity } from "../../api/financialMarket";
 import type { FinancialJobDepth, FinancialJobExecutionKind, FinancialJobPeriod, FinancialResearchBatch, FinancialResearchScheduleCreateRequest } from "../../api/financialJobs";
-import { VButton, VChip, VInput, VSelect, VStateSurface, VSurface, VTextarea } from "../../components/vui";
+import { VButton, VCheckbox, VChip, VDialog, VInput, VSelect, VStateSurface, VSurface, VTextarea } from "../../components/vui";
 import { useFinanceResearchJobs } from "./useFinanceResearchJobs";
 import { ACTIVE_FINANCIAL_BATCH_STATUSES, MAX_BATCH_SYMBOLS, beijingScheduledTime, financialBatchStatusLabel, financialBatchStatusTone, financialJobTime, financialScheduleLabel, parseFinancialBatchSymbols } from "./financialJobModel";
+import { buildFinanceProposalBatchImport, financeProposalBatchCandidates, financeProposalBatchImportAvailability, MAX_PROPOSAL_BATCH_REPORTS, type FinanceProposalBatchImport } from "./financeProposalImportModel";
 import { isValidResearchDate, localResearchDate } from "./stockResearchModel";
 import styles from "./FinanceResearchJobs.styles";
 import { FinanceResearchApprovals } from "./FinanceResearchApprovals";
@@ -13,9 +14,10 @@ import { FinanceResearchApprovals } from "./FinanceResearchApprovals";
 type Props = {
   assistant: FinancialAssistant; stock: StockIdentity; watchlist: StockIdentity[];
   mode: "batches" | "schedules"; zh: boolean; onOpenRun: (runId: string, symbol: string) => void;
+  onProposalImport?: (source: FinanceProposalBatchImport) => void;
 };
 
-export function FinanceResearchJobs({ assistant, stock, watchlist, mode, zh, onOpenRun }: Props) {
+export function FinanceResearchJobs({ assistant, stock, watchlist, mode, zh, onOpenRun, onProposalImport }: Props) {
   const jobs = useFinanceResearchJobs(assistant.agentId, zh);
   const [codes, setCodes] = useState(stock.symbol);
   const [periodDays, setPeriodDays] = useState<FinancialJobPeriod>(30);
@@ -25,6 +27,9 @@ export function FinanceResearchJobs({ assistant, stock, watchlist, mode, zh, onO
   const [scheduledAt, setScheduledAt] = useState("");
   const [timeOfDay, setTimeOfDay] = useState("18:00");
   const [submitted, setSubmitted] = useState(false);
+  const [proposalBatch, setProposalBatch] = useState<FinancialResearchBatch | null>(null);
+  const [proposalReportKeys, setProposalReportKeys] = useState<Set<string>>(() => new Set());
+  const [proposalImportError, setProposalImportError] = useState("");
   useEffect(() => { setCodes(stock.symbol); setSubmitted(false); }, [assistant.agentId]);
   useEffect(() => { setExecution(mode === "batches" ? "now" : "weekdays"); setSubmitted(false); jobs.clearFeedback(); }, [mode, jobs.clearFeedback]);
   const parsed = parseFinancialBatchSymbols(codes);
@@ -50,6 +55,23 @@ export function FinanceResearchJobs({ assistant, stock, watchlist, mode, zh, onO
     void jobs.create(payload);
   }
 
+  function openProposalImport(batch: FinancialResearchBatch) {
+    setProposalReportKeys(new Set());
+    setProposalImportError("");
+    setProposalBatch(batch);
+  }
+
+  function continueToProposal() {
+    if (!proposalBatch || !onProposalImport) return;
+    try {
+      onProposalImport(buildFinanceProposalBatchImport(proposalBatch, proposalReportKeys));
+      setProposalBatch(null);
+      setProposalImportError("");
+    } catch (error) {
+      setProposalImportError(error instanceof Error ? error.message : (zh ? "批次报告选择无效" : "Invalid batch report selection"));
+    }
+  }
+
   return <div className={styles.page} data-finance-research-jobs>
     <FinanceResearchApprovals assistantAgentId={assistant.agentId} zh={zh} turns={batchRows
       .filter((batch) => ACTIVE_FINANCIAL_BATCH_STATUSES.has(batch.status) || batch.status === "blocked")
@@ -71,20 +93,44 @@ export function FinanceResearchJobs({ assistant, stock, watchlist, mode, zh, onO
     {jobs.error ? <VStateSurface tone="error" title={jobs.error} /> : null}
     {jobs.notice ? <p className={styles.success} role="status">{jobs.notice}</p> : null}
     <div className={styles.header}><h2 className={styles.heading}>{zh ? (mode === "batches" ? "最近批次" : "已有计划") : (mode === "batches" ? "Recent batches" : "Schedules")}</h2><VButton variant="ghost" icon={<RefreshCw size={14} />} isPending={query.isFetching} onPress={() => void jobs.refresh()}>{zh ? "刷新" : "Refresh"}</VButton></div>
-    {query.isError ? <VStateSurface tone="error" title={zh ? "任务读取失败" : "Could not load jobs"} actions={<VButton onPress={() => void jobs.refresh()}>{zh ? "重试" : "Retry"}</VButton>} /> : query.isPending && !hasRows ? <VStateSurface tone="loading" busy title={zh ? "读取研究任务" : "Loading jobs"} /> : !hasRows ? <VStateSurface tone="empty" title={zh ? (mode === "batches" ? "暂无批量研究" : "暂无定时计划") : "No jobs yet"} /> : mode === "batches" ? <div className={styles.list}>{batchRows.map((batch) => <ResearchBatchCard key={batch.batchId} batch={batch} zh={zh} pending={jobs.pendingAction} onStop={() => void jobs.stop(batch.batchId)} onRetry={() => void jobs.retry(batch.batchId)} onOpenRun={onOpenRun} />)}</div> : <div className={styles.list}>{scheduleRows.map((schedule) => {
+    {query.isError ? <VStateSurface tone="error" title={zh ? "任务读取失败" : "Could not load jobs"} actions={<VButton onPress={() => void jobs.refresh()}>{zh ? "重试" : "Retry"}</VButton>} /> : query.isPending && !hasRows ? <VStateSurface tone="loading" busy title={zh ? "读取研究任务" : "Loading jobs"} /> : !hasRows ? <VStateSurface tone="empty" title={zh ? (mode === "batches" ? "暂无批量研究" : "暂无定时计划") : "No jobs yet"} /> : mode === "batches" ? <div className={styles.list}>{batchRows.map((batch) => <ResearchBatchCard key={batch.batchId} batch={batch} zh={zh} pending={jobs.pendingAction} onStop={() => void jobs.stop(batch.batchId)} onRetry={() => void jobs.retry(batch.batchId)} onOpenRun={onOpenRun} onProposalImport={onProposalImport ? () => openProposalImport(batch) : undefined} />)}</div> : <div className={styles.list}>{scheduleRows.map((schedule) => {
       const firedOnce = schedule.execution.kind === "once" && Boolean(schedule.lastTriggeredAt);
       return <VSurface padding="normal" key={schedule.scheduleId} className={styles.card}><div className={styles.header}><div className={styles.identity}><strong className={styles.title}>{schedule.symbols.join(" · ")}</strong><span className={styles.hint}>{financialScheduleLabel(schedule, zh)} · {zh ? "北京时间" : "Beijing time"}</span></div><VChip tone={schedule.enabled && schedule.nextRunAt ? "success" : "neutral"}>{firedOnce ? (zh ? "已触发" : "Triggered") : schedule.enabled ? (zh ? "已启用" : "Enabled") : (zh ? "已暂停" : "Paused")}</VChip></div><div className={styles.footer}><span className={styles.hint}>{zh ? "下次执行：" : "Next: "}{financialJobTime(schedule.nextRunAt, zh)}</span>{!firedOnce ? <VButton variant="secondary" isDisabled={Boolean(jobs.pendingAction)} isPending={jobs.pendingAction === schedule.scheduleId} onPress={() => void jobs.setEnabled(schedule.scheduleId, !schedule.enabled)}>{schedule.enabled ? (zh ? "暂停计划" : "Pause") : (zh ? "恢复计划" : "Resume")}</VButton> : null}</div></VSurface>;
     })}</div>}
+    <VDialog
+      open={Boolean(proposalBatch)}
+      onOpenChange={(open) => { if (!open) { setProposalBatch(null); setProposalImportError(""); } }}
+      title={zh ? "选择批次研究报告" : "Choose batch reports"}
+      description={zh ? "选择 1–5 份已完成的 A 股汇总报告。" : "Choose 1–5 completed A-share synthesis reports."}
+      footer={<>
+        <VButton variant="secondary" onPress={() => setProposalBatch(null)}>{zh ? "取消" : "Cancel"}</VButton>
+        <VButton variant="primary" isDisabled={!proposalReportKeys.size || proposalReportKeys.size > MAX_PROPOSAL_BATCH_REPORTS} onPress={continueToProposal}>{zh ? `带入组合建议（${proposalReportKeys.size}）` : `Continue to proposal (${proposalReportKeys.size})`}</VButton>
+      </>}
+    >
+      {proposalBatch ? <div className={styles.proposalPicker}>
+        <p className={styles.hint} title={proposalBatch.batchId}>{zh ? `分析日期 ${proposalBatch.researchDate}` : `Research date ${proposalBatch.researchDate}`}</p>
+        {financeProposalBatchCandidates(proposalBatch).map((candidate) => candidate.report
+          ? <VCheckbox key={candidate.key} className={styles.proposalCandidate} aria-label={`${zh ? "选择" : "Select"} ${candidate.symbol} ${candidate.report.turnId}`} isSelected={proposalReportKeys.has(candidate.key)} isDisabled={Boolean(candidate.unavailableReason) || (!proposalReportKeys.has(candidate.key) && proposalReportKeys.size >= MAX_PROPOSAL_BATCH_REPORTS)} onChange={(checked) => setProposalReportKeys((current) => { if (candidate.unavailableReason) return current; const next = new Set(current); if (checked) next.add(candidate.key); else next.delete(candidate.key); return next; })}>
+            <span className={styles.proposalCandidateText} title={candidate.unavailableReason ?? candidate.report.turnId}><strong>{candidate.symbol}</strong><small>{candidate.unavailableReason ?? (zh ? "汇总报告" : "Synthesis report")}</small></span>
+          </VCheckbox>
+          : <div key={candidate.key} className={styles.proposalCandidateUnavailable}><span>{candidate.symbol}</span><small>{candidate.unavailableReason}</small></div>)}
+        {proposalImportError ? <p className={styles.error} role="alert">{proposalImportError}</p> : null}
+        <p className={styles.hint}>{zh ? "带入后可编辑组合，再生成建议。" : "Review the imported portfolio before generating a proposal."}</p>
+      </div> : null}
+    </VDialog>
   </div>;
 }
 
-function ResearchBatchCard({ batch, zh, pending, onStop, onRetry, onOpenRun }: {
+function ResearchBatchCard({ batch, zh, pending, onStop, onRetry, onOpenRun, onProposalImport }: {
   batch: FinancialResearchBatch; zh: boolean; pending: string; onStop: () => void; onRetry: () => void; onOpenRun: Props["onOpenRun"];
+  onProposalImport?: () => void;
 }) {
   const completed = batch.items.filter((item) => item.status === "completed").length;
   const retryable = ["partial", "failed", "stopped"].includes(batch.status) && batch.items.some((item) => ["failed", "cancelled", "skipped"].includes(item.status));
+  const importAvailability = financeProposalBatchImportAvailability(batch);
+  const canOfferProposalImport = batch.status === "completed" || batch.status === "partial";
   return <VSurface padding="normal" className={styles.card} data-finance-batch-id={batch.batchId}>
-    <div className={styles.header}><div className={styles.identity}><strong className={styles.title}>{batch.researchDate} · {zh ? `${batch.symbols.length} 只股票` : `${batch.symbols.length} stocks`}</strong><span className={styles.hint}>{financialJobTime(batch.triggeredAt, zh)} · {zh ? `已完成 ${completed}/${batch.items.length}` : `${completed}/${batch.items.length} completed`}</span></div><VChip tone={financialBatchStatusTone(batch.status)}>{financialBatchStatusLabel(batch.status, zh)}</VChip><div className={styles.actions}>{ACTIVE_FINANCIAL_BATCH_STATUSES.has(batch.status) && batch.status !== "stop_requested" ? <VButton variant="secondary" isDisabled={Boolean(pending)} isPending={pending === batch.batchId} onPress={onStop}>{zh ? "停止批次" : "Stop batch"}</VButton> : retryable ? <VButton variant="secondary" isDisabled={Boolean(pending)} isPending={pending === batch.batchId} onPress={onRetry}>{zh ? "重试未完成" : "Retry unfinished"}</VButton> : null}</div></div>
+    <div className={styles.header}><div className={styles.identity}><strong className={styles.title}>{batch.researchDate} · {zh ? `${batch.symbols.length} 只股票` : `${batch.symbols.length} stocks`}</strong><span className={styles.hint}>{financialJobTime(batch.triggeredAt, zh)} · {zh ? `已完成 ${completed}/${batch.items.length}` : `${completed}/${batch.items.length} completed`}</span></div><VChip tone={financialBatchStatusTone(batch.status)}>{financialBatchStatusLabel(batch.status, zh)}</VChip><div className={styles.actions}>{onProposalImport && canOfferProposalImport ? <><VButton variant="secondary" isDisabled={Boolean(pending) || !importAvailability.available} onPress={() => { if (importAvailability.available) onProposalImport(); }}>{zh ? "用于组合建议" : "Use for proposal"}</VButton>{!importAvailability.available ? <span className={styles.reason}>{importAvailability.reason}</span> : null}</> : null}{ACTIVE_FINANCIAL_BATCH_STATUSES.has(batch.status) && batch.status !== "stop_requested" ? <VButton variant="secondary" isDisabled={Boolean(pending)} isPending={pending === batch.batchId} onPress={onStop}>{zh ? "停止批次" : "Stop batch"}</VButton> : retryable ? <VButton variant="secondary" isDisabled={Boolean(pending)} isPending={pending === batch.batchId} onPress={onRetry}>{zh ? "重试未完成" : "Retry unfinished"}</VButton> : null}</div></div>
     {batch.terminalReason ? <p className={styles.errorBox}>{batch.terminalReason}</p> : null}
     <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>{zh ? "股票" : "Stock"}</th><th>{zh ? "状态" : "Status"}</th><th>{zh ? "详情" : "Details"}</th></tr></thead><tbody>{batch.items.map((item) => <tr key={item.symbol}><td className={styles.stockCell}>{item.symbol}</td><td><VChip tone={financialBatchStatusTone(item.status)}>{financialBatchStatusLabel(item.status, zh)}</VChip>{item.terminalReason ? <p className={styles.reason}>{item.terminalReason}</p> : null}</td><td>{item.runId ? <VButton variant="ghost" onPress={() => onOpenRun(item.runId!, item.symbol)}>{item.status === "completed" ? (zh ? "查看结果" : "View result") : (zh ? "查看过程" : "View activity")}</VButton> : "—"}</td></tr>)}</tbody></table></div>
   </VSurface>;
