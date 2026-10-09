@@ -9,8 +9,10 @@ apply_* role gates (the tool layer never widens them). Claims reuse
 failed open rolls the claim back.
 
 ``read_task_changes`` extends the board's file list with bounded per-file
-diff bodies against ``main`` (untracked files read their first lines and
-are labelled as such). The board service file is imported read-only here.
+diff bodies against the merge-base of ``main`` and the task branch, so
+commits main gains after the task branched do not show up as task changes
+(untracked files read their first lines and are labelled as such). The
+board service file is imported read-only here.
 """
 
 from __future__ import annotations
@@ -339,6 +341,7 @@ def _read_changes(team_id: str, task_id: str) -> dict[str, Any]:
         workspace_branch=workspace_branch,
     )
     changes = list(changes_payload.get("changes") or [])
+    base_commit = str(changes_payload.get("baseCommit") or "main")
     if not changes_payload.get("available"):
         return {
             **base,
@@ -369,7 +372,7 @@ def _read_changes(team_id: str, task_id: str) -> dict[str, Any]:
     for item in changes:
         path = str(item.get("path") or "")
         status = str(item.get("status") or "")
-        body, truncated, note = _bounded_diff(directory, path, status, budget)
+        body, truncated, note = _bounded_diff(directory, path, status, budget, base_commit)
         entry: dict[str, Any] = {"path": path, "status": status}
         if note:
             entry["note"] = note
@@ -406,7 +409,7 @@ def _resolve_task_worktree(workspace_path: str, workspace_branch: str):
         return None
 
 
-def _bounded_diff(directory: Path, path: str, status: str, budget: dict) -> tuple[str, bool, str]:
+def _bounded_diff(directory: Path, path: str, status: str, budget: dict, base: str = "main") -> tuple[str, bool, str]:
     """One file's diff body within the line budget. Never raises."""
 
     if budget["exhausted"]:
@@ -420,7 +423,7 @@ def _bounded_diff(directory: Path, path: str, status: str, budget: dict) -> tupl
     if status == "untracked":
         lines, truncated, note = _untracked_head(directory, path, allowed)
     else:
-        lines, truncated, note = _git_diff_lines(directory, path, allowed)
+        lines, truncated, note = _git_diff_lines(directory, path, allowed, base)
     taken = len(lines)
     budget["used"] += taken
     if budget["used"] >= _MAX_DIFF_LINES_TOTAL:
@@ -430,12 +433,12 @@ def _bounded_diff(directory: Path, path: str, status: str, budget: dict) -> tupl
     return "\n".join(lines), truncated, note
 
 
-def _git_diff_lines(directory: Path, path: str, allowed: int) -> tuple[list[str], bool, str]:
+def _git_diff_lines(directory: Path, path: str, allowed: int, base: str = "main") -> tuple[list[str], bool, str]:
     from core.web.services.team.dev_task_board import _git_at, _without_pinned_git_env
 
     try:
         with _without_pinned_git_env():
-            result = _git_at(directory, ["diff", "main", "--", path], timeout=30.0)
+            result = _git_at(directory, ["diff", base, "--", path], timeout=30.0)
     except Exception as exc:  # pragma: no cover - git 崩溃时降级为无内容
         return [], True, f"diff 读取失败：{exc}"
     if result.returncode != 0:

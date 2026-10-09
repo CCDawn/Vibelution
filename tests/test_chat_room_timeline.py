@@ -1,5 +1,7 @@
 """Chat room append-only timeline log: store, write points and endpoint."""
 
+import json
+
 import pytest
 
 from fastapi.testclient import TestClient
@@ -277,3 +279,132 @@ def test_member_change_write_points_append_timeline_events(tmp_path, monkeypatch
     assert agent_member_events[0]["payload"]["agentId"] == gamma["agentId"]
     assert agent_member_events[0]["from"] == gamma["agentId"]
     assert agent_member_events[0]["payload"]["selected"] is True
+
+
+def _seed_dev_board(tmp_path, monkeypatch, *, template_id: str) -> None:
+    """Pin a fake team + board so round finish exercises the real dev-team gate.
+
+    ``dev_task_board`` binds ``get_team`` at import time, so patch it in the
+    board module's namespace; the board file itself is written through the real
+    store path (team_service.PROJECT_ROOT pinned to tmp_path).
+    """
+
+    from core.web.services import team_service
+    from core.web.services.team import dev_task_board, team_store
+
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        dev_task_board,
+        "get_team",
+        lambda team_id: {"teamId": str(team_id), "teamTemplateId": template_id, "members": []},
+    )
+    board_path = team_store._dev_task_board_path("team-dev")
+    board_path.parent.mkdir(parents=True, exist_ok=True)
+    board_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": dev_task_board.SCHEMA_VERSION,
+                "nextNumber": 3,
+                "updatedAt": "2026-10-09T00:00:00+00:00",
+                "tasks": [
+                    {
+                        "id": "task-1",
+                        "revision": 2,
+                        "subject": "改按钮文案",
+                        "description": "",
+                        "status": "in_progress",
+                        "ownerMemberId": "m-a",
+                        "workspacePath": ".worktrees/dev-task-1",
+                        "workspaceBranch": "codex/dev-task-1",
+                        "updatedAt": "2026-10-09T00:00:00+00:00",
+                    },
+                    {
+                        "id": "task-2",
+                        "revision": 1,
+                        "subject": "没有工作区的任务",
+                        "description": "",
+                        "status": "pending",
+                        "ownerMemberId": "",
+                        "workspacePath": "",
+                        "workspaceBranch": "",
+                        "updatedAt": "2026-10-09T00:00:00+00:00",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        dev_task_board,
+        "read_dev_task_changes",
+        lambda project_root, *, workspace_path, workspace_branch: {
+            "available": True,
+            "workspace": True,
+            "truncated": 0,
+            "changes": [
+                {"path": "web/src/a.ts", "status": "modified"},
+                {"path": "web/src/b.ts", "status": "untracked"},
+            ],
+        },
+    )
+
+
+def _run_room_round_and_wait(room_id: str, topic: str) -> dict:
+    response = client.post(f"/api/chat-rooms/{room_id}/rounds", json={"topic": topic})
+    assert response.status_code == 202
+    from tests.helpers.chat_turn_harness import wait_for_chat_room_round_completed
+
+    return wait_for_chat_room_round_completed(client, room_id, timeout_s=8.0)
+
+
+@pytest.mark.slow
+def test_dev_board_room_round_finish_appends_artifact_event(tmp_path, monkeypatch):
+    from core.web.services.team import dev_task_board
+
+    _seed_chat_sessions(tmp_path)
+    _stub_round_runner(monkeypatch)
+    _seed_dev_board(tmp_path, monkeypatch, template_id="dev-team")
+
+    room = chat_room_service.create_chat_room(
+        title="开发团队群聊",
+        participant_session_ids=["session-a"],
+        config={"teamId": "team-dev", "teamTemplateId": "dev-team"},
+    )
+    detail = _run_room_round_and_wait(room["roomId"], "交付验证")
+    round_id = detail["rounds"][-1]["roundId"]
+
+    payload = client.get(f"/api/chat-rooms/{room['roomId']}/timeline").json()
+    artifact_events = [item for item in payload["events"] if item["type"] == "artifact"]
+    assert len(artifact_events) == 1
+    event = artifact_events[0]
+    assert event["roundId"] == round_id
+    assert event["payload"]["source"] == "dev_task_board"
+    assert event["payload"]["taskIds"] == ["task-1"], "only tasks with a workspace are aggregated"
+    assert event["payload"]["fileCount"] == 2
+    assert event["payload"]["changedPaths"] == [
+        {"path": "web/src/a.ts", "status": "modified"},
+        {"path": "web/src/b.ts", "status": "untracked"},
+    ]
+    assert event["payload"]["changedPathsTruncated"] is False
+    assert dev_task_board.SCHEMA_VERSION == 1  # sanity: board schema stays v1
+
+
+@pytest.mark.slow
+def test_non_dev_room_round_finish_appends_no_artifact_event(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    _stub_round_runner(monkeypatch)
+    _seed_dev_board(tmp_path, monkeypatch, template_id="research")
+
+    room = chat_room_service.create_chat_room(
+        title="研究团队群聊",
+        participant_session_ids=["session-a"],
+        config={"teamId": "team-dev", "teamTemplateId": "research"},
+    )
+    _run_room_round_and_wait(room["roomId"], "研究讨论")
+
+    payload = client.get(f"/api/chat-rooms/{room['roomId']}/timeline").json()
+    assert [item for item in payload["events"] if item["type"] == "artifact"] == []
+    assert any(item["type"] == "round_state" for item in payload["events"])
+    finished = [item for item in payload["events"] if item["type"] == "round_state"][-1]
+    assert finished["payload"]["status"] == "completed"

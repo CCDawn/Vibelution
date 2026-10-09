@@ -20,6 +20,10 @@ from core.web.routes.teams_write_models import (
     TeamMessageResponse,
     TeamRepairResponse,
 )
+from core.web.services.team.ephemeral_team_service import (
+    EphemeralTeamError,
+    create_ephemeral_team,
+)
 from core.web.services.team_service import (
     TeamLockedError,
     TeamNotFoundError,
@@ -65,6 +69,21 @@ class TeamUpdatePayload(BaseModel):
     purpose: str | None = Field(default=None, max_length=1000)
     status: str | None = Field(default=None, max_length=32)
     members: list[TeamMemberPayload] | None = Field(default=None, max_length=120)
+
+
+class TeamEphemeralCreatePayload(BaseModel):
+    topic: str = Field(..., min_length=1, max_length=2000)
+    name: str = Field("", max_length=160)
+
+
+class TeamEphemeralCreateResponse(BaseModel):
+    schemaVersion: int = 1
+    topic: str = ""
+    team: dict[str, Any] = Field(default_factory=dict)
+    roomId: str = ""
+    taskId: str = ""
+    board: dict[str, Any] = Field(default_factory=dict)
+    updatedAt: str = ""
 
 
 class TeamCanvasPayload(BaseModel):
@@ -133,6 +152,21 @@ def team_create(payload: TeamCreatePayload) -> dict:
             purpose=payload.purpose,
             members=[item.model_dump() for item in payload.members],
         )
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/teams/ephemeral",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamEphemeralCreateResponse,
+    response_model_exclude_unset=True,
+)
+def team_ephemeral_create(payload: TeamEphemeralCreatePayload) -> dict:
+    try:
+        return create_ephemeral_team(None, topic=payload.topic, name=payload.name)
+    except EphemeralTeamError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except TeamServiceError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

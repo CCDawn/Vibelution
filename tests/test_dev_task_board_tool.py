@@ -294,6 +294,41 @@ def test_read_changes_returns_bounded_diffs_with_untracked_label(dev_team):
     assert read["diffBudget"]["perFileLines"] == 200
 
 
+def test_read_changes_diffs_against_merge_base_not_moved_main(dev_team):
+    env = dev_team
+    _create_task(env, env["teamId"])
+    claimed = _claim(env, env["teamId"], "task-1", 1)
+    worktree = env["root"] / claimed["workspacePath"]
+
+    # 认领之后 main 前进：提交一个与任务无关的文件，不得混进任务改动。
+    git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    git_env["GIT_CONFIG_NOSYSTEM"] = "1"
+    (env["root"] / "UNRELATED.md").write_text("主线自己的前进\n", encoding="utf-8")
+    _git(env["root"], ["add", "UNRELATED.md"], env=git_env)
+    _git(env["root"], ["commit", "-m", "advance main"], env=git_env)
+
+    # 工程师自己的改动：一个 tracked 修改 + 一个 untracked 新文件。
+    (worktree / "README.md").write_text("task edit\n", encoding="utf-8")
+    (worktree / "notes.md").write_text("任务便签\n", encoding="utf-8")
+
+    _as("评审员", env)
+    read = _call(action="read_task_changes", team_id=env["teamId"], task_id="task-1")
+    assert read["status"] == "ok"
+    assert read["available"] is True
+    by_path = {item["path"]: item for item in read["changes"]}
+    assert "UNRELATED.md" not in by_path
+
+    readme = by_path["README.md"]
+    assert readme["status"] == "modified"
+    assert "-seed" in readme["diff"]
+    assert "+task edit" in readme["diff"]
+
+    notes = by_path["notes.md"]
+    assert notes["status"] == "untracked"
+    assert notes["note"].startswith("未跟踪")
+    assert notes["diff"] == "任务便签"
+
+
 def test_read_changes_budget_caps_total_lines_across_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for key in list(os.environ):
         if key.startswith("GIT_"):

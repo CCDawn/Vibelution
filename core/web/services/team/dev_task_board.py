@@ -25,6 +25,7 @@ from core.infrastructure.branch_workspace import (
     allocate_worktree_path,
     resolve_branch_workspace,
 )
+from core.logging import debug as _debug_logger
 from core.web.services.team import team_store
 from core.web.services.team_service import (
     TeamServiceError,
@@ -73,6 +74,10 @@ _PINNED_GIT_ENV = frozenset(
 )
 _STORED_BRANCH = re.compile(r"^codex/(?P<slug>[A-Za-z0-9][A-Za-z0-9._-]{0,78})$")
 _SLUG_BREAK = re.compile(r"[^A-Za-z0-9]+")
+# Task-scoped ephemeral teams dissolve (archive) once every task on the board
+# is closed; deleted tasks count as closed, an empty board does not trigger.
+EPHEMERAL_TEAM_KIND = "ephemeral"
+_DISSOLVE_READY_TASK_STATUSES = frozenset({"completed", "deleted"})
 
 
 class DevTaskBoardError(TeamServiceError):
@@ -444,13 +449,34 @@ def read_dev_task_changes(
     try:
         with _without_pinned_git_env():
             directory = _checked_task_worktree(project_root, workspace_path, workspace_branch)
-            diff = _git_at(directory, ["diff", "--name-status", "-z", "--no-renames", "main", "--"])
+            base = _task_diff_base(directory)
+            diff = _git_at(directory, ["diff", "--name-status", "-z", "--no-renames", base, "--"])
             untracked = _git_at(directory, ["ls-files", "-z", "-o", "--exclude-standard"])
     except (OSError, BranchWorkspaceError, DevTaskBoardError):
         return _changes_unavailable()
     if diff.returncode != 0 or untracked.returncode != 0:
         return _changes_unavailable()
-    return parse_dev_task_change_output(str(diff.stdout or ""), str(untracked.stdout or ""))
+    payload = parse_dev_task_change_output(str(diff.stdout or ""), str(untracked.stdout or ""))
+    if payload.get("available"):
+        payload["baseCommit"] = base
+    return payload
+
+
+def _task_diff_base(directory: Path) -> str:
+    """Diff base for one task worktree: merge-base(main, HEAD), else literal main.
+
+    Comparing against main's HEAD shows unrelated main commits as task
+    changes once main moves ahead of the branch point (reverse-patch
+    artifacts); the merge-base pins the fork point instead. Worktrees share
+    refs with the main checkout, so this resolves without a fetch.
+    """
+
+    result = _git_at(directory, ["merge-base", "main", "HEAD"])
+    if result.returncode == 0:
+        base = str(result.stdout or "").strip()
+        if base:
+            return base
+    return "main"
 
 
 def parse_dev_task_change_output(name_status: str, untracked: str) -> dict[str, Any]:
@@ -692,6 +718,11 @@ def _with_board(team_id: str, mutator: Any) -> dict[str, Any]:
             board["schemaVersion"] = SCHEMA_VERSION
             board["updatedAt"] = utc_now_iso()
             team_store._write_json(path, board)
+    if mutator is not None:
+        # Runs after the board write and outside _TEAM_LOCK: the dissolve takes
+        # the team lock itself inside archive_team, so it must never run while
+        # this function still holds it.
+        _maybe_dissolve_ephemeral_team(team, board)
     return _public_payload(team, board)
 
 
@@ -702,6 +733,45 @@ def _public_payload(team: dict[str, Any], board: dict[str, Any]) -> dict[str, An
         "tasks": dev_task_views(team, board),
         "updatedAt": str(board.get("updatedAt") or ""),
     }
+
+
+def _maybe_dissolve_ephemeral_team(team: dict[str, Any], board: dict[str, Any]) -> None:
+    """Archive one task-scoped ephemeral team whose board has no open task.
+
+    Called after a successful board write, outside the team lock. Idempotent:
+    a non-ephemeral team or an already-archived team is skipped, so repeated
+    triggers neither re-archive nor raise. Fail-soft: a failed dissolve is
+    logged and never fails the board mutation that triggered it.
+    """
+
+    tasks = _tasks(board)
+    if not tasks:
+        return
+    if any(str(task.get("status") or "") not in _DISSOLVE_READY_TASK_STATUSES for task in tasks):
+        return
+    team_id = str(team.get("teamId") or "").strip()
+    if not team_id:
+        return
+    try:
+        from core.web.services import team_service
+        from core.web.services.team.kind_helpers import infer_team_kind
+        from core.web.services.team.team_logging import _record_team_event
+
+        # Stored record, not the in-call team copy: the status check must see a
+        # team archived by an earlier dissolve so repeat triggers stay no-ops.
+        record = team_service._get_team_record(team_id)
+        if infer_team_kind(record) != EPHEMERAL_TEAM_KIND:
+            return
+        if str(record.get("status") or "") == "archived":
+            return
+        archived = team_service.archive_team(team_id)
+        _record_team_event(
+            "team.ephemeral_dissolved",
+            archived,
+            fields={"reason": "dev_task_board_all_completed", "boardTaskCount": len(tasks)},
+        )
+    except Exception as exc:
+        _debug_logger.warning(f"Ephemeral team auto-dissolve failed for team={team_id}. error={exc}")
 
 
 def _read_board(path: Any) -> dict[str, Any]:

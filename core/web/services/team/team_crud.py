@@ -526,7 +526,7 @@ def _reject_system_or_unsupported_team_archive(team: dict[str, Any]) -> None:
         s._record_team_archive_rejected(team, reason="system_team")
         raise s.TeamServiceError("System Team cannot be archived with cascade Agent deletion.")
     team_kind = str(team.get("teamKind") or s._infer_team_kind(team)).strip() or "custom"
-    if team_kind not in {"custom", "template_demo"}:
+    if team_kind not in {"custom", "template_demo", "ephemeral"}:
         s._record_team_archive_rejected(team, reason="unsupported_team_kind")
         raise s.TeamServiceError(f"Team kind cannot be archived with cascade Agent deletion: {team_kind}")
 

@@ -1362,7 +1362,9 @@ def get_real_batch_status(team_id: str, plan_id: str) -> dict[str, Any]:
 # of a second scheduler.  Batch START stays a gated decision (operator route
 # or the batch_gate policy executor); the sweep only advances envelopes that
 # already exist.
-REAL_BATCH_SWEEP_INTERVAL_MS = 30_000
+# The main advance path is event-driven (pump.wake); this sweep is only a
+# crash-recovery backstop, so its default cadence stays low-frequency.
+REAL_BATCH_SWEEP_INTERVAL_MS = 300_000
 REAL_BATCH_SWEEP_INTERVAL_ENV = "VIBELUTION_REAL_BATCH_SWEEP_INTERVAL_MS"
 _LAST_REAL_BATCH_SWEEP_MS: int | None = None
 _REAL_BATCH_SWEEP_LOCK = threading.Lock()

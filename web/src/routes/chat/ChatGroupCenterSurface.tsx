@@ -22,6 +22,7 @@ import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy } from "./c
 import type { GroupSpeakerProgressMap, GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
 import type {
   GroupRoomTimelineProjection,
+  GroupTimelineArtifactRow,
   GroupTimelineItem,
   GroupTimelineMemberChangeRow,
 } from "./useGroupRoomTimeline";
@@ -155,6 +156,30 @@ function GroupMemberChangeRow({
   );
 }
 
+function GroupArtifactChangeRow({
+  row,
+  lang,
+  formatTime,
+}: {
+  row: GroupTimelineArtifactRow;
+  lang: "zh" | "en";
+  formatTime: (value: string) => string;
+}) {
+  const separator = lang === "zh" ? "、" : ", ";
+  const pathSummary = row.changedPaths.slice(0, 3).join(separator);
+  const detail = pathSummary
+    ? (lang === "zh" ? `：${pathSummary}${row.changedPathsTruncated ? "…" : ""}` : `: ${pathSummary}${row.changedPathsTruncated ? "…" : ""}`)
+    : "";
+  return (
+    <div className={styles.groupRoundDivider} data-group-artifact-change={row.key}>
+      <span>
+        {lang === "zh" ? `交付了 ${row.fileCount} 个文件变更${detail}` : `Delivered ${row.fileCount} file changes${detail}`}
+      </span>
+      <time>{formatTime(row.createdAt)}</time>
+    </div>
+  );
+}
+
 function GroupRoundsTimeline({
   items,
   purposeFallback,
@@ -231,6 +256,16 @@ function GroupRoundsTimeline({
               formatTime={formatTime}
               activeGroupParticipantById={activeGroupParticipantById}
               groupParticipantIdentity={groupParticipantIdentity}
+            />
+          );
+        }
+        if (item.kind === "artifact") {
+          return (
+            <GroupArtifactChangeRow
+              key={item.row.key}
+              row={item.row}
+              lang={lang}
+              formatTime={formatTime}
             />
           );
         }

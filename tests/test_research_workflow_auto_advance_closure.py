@@ -246,7 +246,7 @@ def test_recovery_tick_sweep_is_self_throttled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two consecutive ticks run the sweep exactly once; a throttle reset
-    (the 30s cadence passing) lets the next tick sweep again."""
+    (the sweep cadence passing) lets the next tick sweep again."""
     _sweep_env(tmp_path, monkeypatch)
     sweep_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(

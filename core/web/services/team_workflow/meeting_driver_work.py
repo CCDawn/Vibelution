@@ -725,7 +725,9 @@ def _run_challenge_meeting_driver_recovery() -> dict[str, Any]:
 # only for actionable runs: a no-op scan every interval would otherwise grow
 # the scene-event store without bound.  The startup entry keeps its
 # unthrottled, always-recording contract.
-DRIVER_RECOVERY_SWEEP_INTERVAL_MS = 30_000
+# The main advance path is event-driven (pump.wake); this sweep is only a
+# crash-recovery backstop, so its default cadence stays low-frequency.
+DRIVER_RECOVERY_SWEEP_INTERVAL_MS = 300_000
 DRIVER_RECOVERY_SWEEP_INTERVAL_ENV = "VIBELUTION_DRIVER_RECOVERY_SWEEP_INTERVAL_MS"
 # Throttle stamp for the periodic sweep; touched only under _LOCK.
 _LAST_DRIVER_RECOVERY_SWEEP_MS: int | None = None
@@ -931,7 +933,9 @@ def _recover_one_digest(
 STUCK_DIGEST_PROBLEM = "digest_draft_stuck_past_bounded_window"
 # In-process watchdog cadence: the production maintenance tick calls
 # ``sweep_stuck_digest_works`` far more often than the scan needs to run.
-DIGEST_STUCK_SWEEP_INTERVAL_MS = 30_000
+# The main advance path is event-driven (pump.wake); this sweep is only a
+# crash-recovery backstop, so its default cadence stays low-frequency.
+DIGEST_STUCK_SWEEP_INTERVAL_MS = 300_000
 DIGEST_STUCK_SWEEP_INTERVAL_ENV = "VIBELUTION_DIGEST_STUCK_SWEEP_INTERVAL_MS"
 # Structured summaryDraftError written for a fenced stuck digest so the
 # meeting projection exposes a working retry entry without a restart.
@@ -993,7 +997,9 @@ def reset_digest_stuck_sweep_throttle_for_tests() -> None:
 # progress-gated heartbeat fence stays the sole wedge authority.  It lives on
 # the resident maintenance tick (same minimal-intrusion host as
 # :func:`sweep_stuck_digest_works`) — no second scheduler.
-QUEUE_SWEEP_INTERVAL_MS = 30_000
+# The main advance path is event-driven (pump.wake); this sweep is only a
+# crash-recovery backstop, so its default cadence stays low-frequency.
+QUEUE_SWEEP_INTERVAL_MS = 300_000
 QUEUE_SWEEP_INTERVAL_ENV = "VIBELUTION_MEETING_QUEUE_SWEEP_INTERVAL_MS"
 # Renew strictly inside the projection's 15-minute stale window with slack
 # for missed sweeps: a queued meeting whose last activity is older than this

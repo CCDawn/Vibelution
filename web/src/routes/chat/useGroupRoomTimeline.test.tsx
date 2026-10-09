@@ -235,12 +235,29 @@ describe("foldGroupTimelineEvents", () => {
     expect(items[2]?.kind === "round" && items[2].round.messages).toHaveLength(1);
   });
 
-  it("ignores artifact events (schema-only today) and messages without an id", () => {
+  it("folds dev-board artifact events into system rows and drops empty deliveries", () => {
     const items = foldGroupTimelineEvents([
-      eventOf(1, "artifact", { artifactId: "a1" }),
-      eventOf(2, "message", { content: "no id" }, "r1"),
+      roundStart(1, "r1", "议题一"),
+      eventOf(2, "artifact", { artifactId: "a-empty", fileCount: 0, changedPaths: [] }),
+      eventOf(3, "artifact", {
+        source: "dev_task_board",
+        taskIds: ["task-1"],
+        fileCount: 3,
+        changedPaths: [
+          { path: "web/src/a.ts", status: "modified" },
+          { path: "web/src/b.ts", status: "untracked" },
+        ],
+        changedPathsTruncated: true,
+      }),
+      eventOf(4, "message", { content: "no id" }, "r1"),
     ]);
-    expect(items).toEqual([]);
+    expect(items).toHaveLength(2);
+    expect(items[0]?.kind).toBe("round");
+    const row = items[1]?.kind === "artifact" ? items[1].row : null;
+    expect(row?.key).toBe("tle-3");
+    expect(row?.fileCount).toBe(3);
+    expect(row?.changedPaths).toEqual(["web/src/a.ts", "web/src/b.ts"]);
+    expect(row?.changedPathsTruncated).toBe(true);
   });
 });
 
