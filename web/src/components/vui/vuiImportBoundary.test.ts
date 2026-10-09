@@ -37,6 +37,7 @@ const productSharedParentStyleConsumers = [
   "routes/finance/FinanceBacktest.tsx",
   "routes/finance/FinanceBacktestComparison.tsx",
   "routes/finance/FinanceBacktestForkDialog.tsx",
+  "routes/finance/FinanceBacktestRobustness.tsx",
   "routes/finance/FinanceClaimRegistration.tsx",
   "routes/finance/FinanceOutcomeReview.tsx",
   "components/layout/PersistedHeightListShell.tsx",
