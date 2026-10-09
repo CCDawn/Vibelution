@@ -37,3 +37,20 @@ or after the period end and on or before the analysis date). Any other
 period, year, or missing filing is 没有这一项 beside the figure. The figure
 stays labeled as a snapshot. The read reuses the one-code screen lookup
 and does not download the PDF.
+
+## Historical research cutoff
+
+An explicit analysis date is captured before stock-research loaders are sent to
+the thread pool and is passed to each source adapter. News and announcement
+items are shown only when `publishedAt` is parseable and on or before that date;
+current and dated results use separate cache keys. The cutoff also reaches the
+cninfo query's `seDate` range, so future reports are excluded at the source as
+well as in the final projection. The projection copies the item list and never
+removes rows from a shared cached response.
+
+Eastmoney's A-share and HK/US F10 summaries do not provide a trustworthy
+point-in-time version history, so historical requests return those
+fundamentals as unavailable instead of showing today's summary. US fundamentals
+remain available only from SEC filings submitted on or before the cutoff and
+facts tied to the selected filing accession. If SEC cannot provide those
+historical fundamentals, the current Eastmoney fallback is not used.

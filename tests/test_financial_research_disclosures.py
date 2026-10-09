@@ -1,5 +1,6 @@
 """Public disclosure adapters keep source, period, and units verifiable."""
 
+from datetime import date
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -64,6 +65,145 @@ def test_hkex_uses_internal_stock_id_and_returns_official_pdf(monkeypatch):
     search = next(url for url in requested_urls if "titleSearchServlet.do" in url)
     assert parse_qs(urlparse(search).query)["stockId"] == ["7609"]
     assert result["items"][0]["url"].endswith("/202601010001.pdf")
+
+
+def test_hkex_announcements_exclude_after_cutoff_and_unknown_dates(monkeypatch):
+    monkeypatch.setattr(
+        disclosures,
+        "_load_cached",
+        lambda _key, _ttl, loader: loader(),
+    )
+
+    def read_json(url, **_kwargs):
+        if "activestock_sehk_e.json" in url:
+            return [{"c": "00700", "i": "7609"}]
+        return {
+            "result": [
+                {
+                    "LONG_TEXT": "Cutoff day filing",
+                    "FILE_LINK": "/listedco/listconews/sehk/2026/0101/cutoff.pdf",
+                    "DATE_TIME": "01/01/2026 18:30",
+                    "NEWS_ID": "12345",
+                },
+                {
+                    "LONG_TEXT": "Future filing",
+                    "FILE_LINK": "/listedco/listconews/sehk/2026/0102/future.pdf",
+                    "DATE_TIME": "02/01/2026 18:30",
+                    "NEWS_ID": "12346",
+                },
+                {
+                    "LONG_TEXT": "Unknown date filing",
+                    "FILE_LINK": "/listedco/listconews/sehk/2026/0103/unknown.pdf",
+                    "DATE_TIME": "not a date",
+                    "NEWS_ID": "12347",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(disclosures, "_read_json", read_json)
+
+    result = disclosures._load_hk_announcements(
+        {"symbol": "hk00700"}, cutoff=date(2026, 1, 1)
+    )
+
+    assert [item["title"] for item in result["items"]] == ["Cutoff day filing"]
+
+
+def test_sec_announcements_exclude_filings_after_cutoff():
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K", "10-Q", "10-K"],
+                "filingDate": ["2026-04-17", "2026-04-18", ""],
+                "reportDate": ["2026-04-15", "2026-03-31", "2025-12-31"],
+                "accessionNumber": [
+                    "0000320193-26-000001",
+                    "0000320193-26-000002",
+                    "0000320193-26-000003",
+                ],
+                "primaryDocument": ["event.htm", "quarter.htm", "annual.htm"],
+                "primaryDocDescription": ["Event", "Quarterly", "Annual"],
+            }
+        }
+    }
+
+    result = disclosures._load_us_announcements(
+        "AAPL", "0000320193", submissions, cutoff=date(2026, 4, 17)
+    )
+
+    assert [item["publishedAt"] for item in result["items"]] == ["2026-04-17"]
+    assert "event.htm" in result["items"][0]["url"]
+
+
+def test_sec_fundamentals_select_latest_filing_available_at_cutoff():
+    old_accession = "0000320193-26-000001"
+    future_accession = "0000320193-26-000002"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["10-Q", "10-Q"],
+                "filingDate": ["2026-03-01", "2026-04-17"],
+                "reportDate": ["2025-12-31", "2026-03-31"],
+                "accessionNumber": [old_accession, future_accession],
+                "primaryDocument": ["old.htm", "new.htm"],
+                "primaryDocDescription": ["Old Quarter", "New Quarter"],
+            }
+        }
+    }
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": old_accession,
+                                "form": "10-Q",
+                                "end": "2025-12-31",
+                                "val": 100,
+                            },
+                            {
+                                "accn": future_accession,
+                                "form": "10-Q",
+                                "end": "2026-03-31",
+                                "val": 200,
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    result = disclosures._load_us_fundamentals(
+        "0000320193", facts, submissions, cutoff=date(2026, 3, 15)
+    )
+
+    assert result["reportDate"] == "2025-12-31"
+    assert result["publishedAt"] == "2026-03-01"
+    assert result["items"] == [
+        {
+            "key": "assets",
+            "label": "总资产",
+            "value": 100.0,
+            "unit": "USD",
+            "reportDate": "2025-12-31",
+            "publishedAt": "2026-03-01",
+        }
+    ]
+
+
+def test_hk_fundamentals_are_unavailable_for_historical_cutoff(monkeypatch):
+    monkeypatch.setattr(
+        disclosures,
+        "_load_hk_indicator_rows",
+        lambda _code: pytest.fail("Do not use the current HK financial summary"),
+    )
+
+    with pytest.raises(disclosures.FinancialDisclosureDataError, match="历史时点"):
+        disclosures._load_hk_fundamentals(
+            {"symbol": "hk00700"}, cutoff=date(2026, 4, 17)
+        )
 
 
 def test_hk_fundamentals_uses_report_list_currency_for_the_matching_period(
@@ -352,6 +492,37 @@ def test_us_sec_failure_uses_eastmoney_and_keeps_sec_announcement_entry(monkeypa
     assert "PC_USF10" in fundamentals["sourceUrl"]
     assert "SEC EDGAR 主源失败" in fundamentals["error"]
     assert "未经 SEC 核验" in fundamentals["error"]
+
+
+def test_us_sec_failure_does_not_use_eastmoney_for_historical_fundamentals(monkeypatch):
+    monkeypatch.setattr(
+        disclosures,
+        "_sec_ticker_ids",
+        lambda: {"NVDA": ("0001045810", "NVIDIA")},
+    )
+    monkeypatch.setattr(
+        disclosures,
+        "_read_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            disclosures.FinancialDisclosureDataError("SEC temporarily unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        disclosures,
+        "_load_us_eastmoney_fundamentals",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Current Eastmoney fallback must not enter historical research"
+        ),
+    )
+
+    facets = disclosures.fetch_international_facets(
+        {"symbol": "usNVDA"}, cutoff=date(2026, 4, 17)
+    )
+
+    assert facets["announcements"]["status"] == "unavailable"
+    assert facets["fundamentals"]["status"] == "unavailable"
+    assert "历史时点" in facets["fundamentals"]["error"]
+    assert facets["fundamentals"]["items"] == []
 
 
 def test_fallback_note_reports_both_sources_when_eastmoney_is_unavailable():

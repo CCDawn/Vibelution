@@ -20,6 +20,10 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from core.web.services import financial_market_service as market
+from core.web.services.financial_research.as_of import (
+    on_or_before,
+    published_items_as_of,
+)
 
 HKEX_SOURCE = "香港交易所披露易"
 HKEX_BASE_URL = "https://www1.hkexnews.hk"
@@ -295,7 +299,9 @@ def _hk_pdf_url(value: Any) -> str | None:
     return HKEX_BASE_URL + path
 
 
-def _load_hk_announcements(stock: dict[str, Any]) -> dict[str, Any]:
+def _load_hk_announcements(
+    stock: dict[str, Any], *, cutoff: date | None = None
+) -> dict[str, Any]:
     code = _hk_code(stock)
     stock_id = _hk_stock_ids().get(code)
     if not stock_id:
@@ -357,10 +363,13 @@ def _load_hk_announcements(stock: dict[str, Any]) -> dict[str, Any]:
                 "articleCode": article_code,
             }
         )
-    return _available(
-        HKEX_SOURCE,
-        _hk_title_search_url(stock_id),
-        items,
+    return published_items_as_of(
+        _available(
+            HKEX_SOURCE,
+            _hk_title_search_url(stock_id),
+            items,
+        ),
+        cutoff,
     )
 
 
@@ -470,7 +479,13 @@ _HK_METRICS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _load_hk_fundamentals(stock: dict[str, Any]) -> dict[str, Any]:
+def _load_hk_fundamentals(
+    stock: dict[str, Any], *, cutoff: date | None = None
+) -> dict[str, Any]:
+    if cutoff is not None:
+        raise FinancialDisclosureDataError(
+            f"历史时点 {cutoff.isoformat()} 无法验证东方财富港股当前财务汇总"
+        )
     code = _hk_code(stock)
     rows = _load_hk_indicator_rows(code)
     if not rows:
@@ -634,7 +649,11 @@ def _sec_document_url(cik: str, accession: str, document: str) -> str:
 
 
 def _load_us_announcements(
-    ticker: str, cik: str, submissions: Any
+    ticker: str,
+    cik: str,
+    submissions: Any,
+    *,
+    cutoff: date | None = None,
 ) -> dict[str, Any]:
     source_url = SEC_BROWSE_URL.format(cik=str(int(cik)))
     rows = _filing_rows(submissions)
@@ -643,7 +662,11 @@ def _load_us_announcements(
         form = str(row.get("form") or "").strip().upper()
         filing_date = _date(row.get("filingDate"))
         accession = str(row.get("accessionNumber") or "").strip()
-        if form not in _SEC_PUBLIC_FORMS or not filing_date:
+        if (
+            form not in _SEC_PUBLIC_FORMS
+            or not filing_date
+            or not on_or_before(filing_date, cutoff)
+        ):
             continue
         if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
             continue
@@ -665,7 +688,7 @@ def _load_us_announcements(
         )
         if len(items) >= _MAX_ANNOUNCEMENTS:
             break
-    return _available(SEC_SOURCE, source_url, items)
+    return published_items_as_of(_available(SEC_SOURCE, source_url, items), cutoff)
 
 
 def _facts_root(payload: Any) -> dict[str, Any]:
@@ -760,12 +783,15 @@ _SEC_METRICS: tuple[tuple[str, str, tuple[str, ...], bool], ...] = (
 )
 
 
-def _latest_financial_filing(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _latest_financial_filing(
+    rows: list[dict[str, Any]], *, cutoff: date | None = None
+) -> dict[str, Any] | None:
     candidates = [
         row
         for row in rows
         if str(row.get("form") or "").upper() in _SEC_FINANCIAL_FORMS
         and _date(row.get("reportDate"))
+        and on_or_before(_date(row.get("filingDate")), cutoff)
         and re.fullmatch(r"\d{10}-\d{2}-\d{6}", str(row.get("accessionNumber") or ""))
     ]
     candidates.sort(
@@ -779,7 +805,11 @@ def _latest_financial_filing(rows: list[dict[str, Any]]) -> dict[str, Any] | Non
 
 
 def _load_us_fundamentals(
-    cik: str, facts_payload: Any, submissions: Any
+    cik: str,
+    facts_payload: Any,
+    submissions: Any,
+    *,
+    cutoff: date | None = None,
 ) -> dict[str, Any]:
     us_gaap = _facts_root(facts_payload)
     rows = _filing_rows(submissions)
@@ -790,6 +820,7 @@ def _load_us_fundamentals(
             for row in rows
             if str(row.get("form") or "").upper() in _SEC_FINANCIAL_FORMS
             and _date(row.get("reportDate"))
+            and on_or_before(_date(row.get("filingDate")), cutoff)
             and re.fullmatch(
                 r"\d{10}-\d{2}-\d{6}", str(row.get("accessionNumber") or "")
             )
@@ -812,7 +843,7 @@ def _load_us_fundamentals(
             selected = candidate
             break
     if selected is None:
-        selected = _latest_financial_filing(rows)
+        selected = _latest_financial_filing(rows, cutoff=cutoff)
     if selected is None:
         raise FinancialDisclosureDataError("SEC Submissions 未找到财报申报期")
 
@@ -1134,7 +1165,9 @@ def _safe_facet(loader, source: str, source_url: str, *, fundamentals: bool = Fa
         return _unavailable(source, source_url, exc, fundamentals=fundamentals)
 
 
-def fetch_international_facets(stock: dict[str, Any]) -> dict[str, Any]:
+def fetch_international_facets(
+    stock: dict[str, Any], *, cutoff: date | None = None
+) -> dict[str, Any]:
     """Return independent announcements and fundamentals facets for HK or US."""
     symbol = str(stock.get("symbol") or "").strip()
     if symbol.lower().startswith("hk"):
@@ -1151,10 +1184,12 @@ def fetch_international_facets(stock: dict[str, Any]) -> dict[str, Any]:
             fundamentals_url = HK_EASTMONEY_FUNDAMENTALS_URL
         return {
             "announcements": _safe_facet(
-                lambda: _load_hk_announcements(stock), HKEX_SOURCE, announcement_url
+                lambda: _load_hk_announcements(stock, cutoff=cutoff),
+                HKEX_SOURCE,
+                announcement_url,
             ),
             "fundamentals": _safe_facet(
-                lambda: _load_hk_fundamentals(stock),
+                lambda: _load_hk_fundamentals(stock, cutoff=cutoff),
                 EASTMONEY_SOURCE,
                 fundamentals_url,
                 fundamentals=True,
@@ -1220,7 +1255,9 @@ def fetch_international_facets(stock: dict[str, Any]) -> dict[str, Any]:
                 )
             else:
                 announcements = _safe_facet(
-                    lambda: _load_us_announcements(ticker, cik, submissions),
+                    lambda: _load_us_announcements(
+                        ticker, cik, submissions, cutoff=cutoff
+                    ),
                     SEC_SOURCE,
                     source_url,
                 )
@@ -1233,6 +1270,7 @@ def fetch_international_facets(stock: dict[str, Any]) -> dict[str, Any]:
                             max_bytes=_SEC_JSON_MAX_BYTES,
                         ),
                         submissions,
+                        cutoff=cutoff,
                     ),
                     SEC_SOURCE,
                     SEC_COMPANY_FACTS_URL.format(cik=cik),
@@ -1242,7 +1280,15 @@ def fetch_international_facets(stock: dict[str, Any]) -> dict[str, Any]:
                 sec_error = str(
                     fundamentals.get("error") or "SEC 财务数据暂不可用"
                 )
-        if sec_error:
+        if sec_error and cutoff is not None:
+            fundamentals = _unavailable(
+                SEC_SOURCE,
+                SEC_TICKERS_URL,
+                f"SEC EDGAR 历史财务数据不可用：{sec_error}；"
+                "历史时点不使用未提供历史版本保证的东方财富 USF10 当前摘要",
+                fundamentals=True,
+            )
+        elif sec_error:
             ticker_candidates = _us_eastmoney_ticker_candidates(stock)
             fallback_ticker = ticker_candidates[0] if ticker_candidates else ""
             fallback = _safe_facet(
