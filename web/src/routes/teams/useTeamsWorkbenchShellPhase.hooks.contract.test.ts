@@ -31,4 +31,17 @@ describe("useTeamsWorkbenchShellPhase hook order", () => {
     );
     expect(shellSource).toContain("suppressOuterShellChrome: suppressOuterTeamShellChrome");
   });
+
+  it("gates challenge-cup canonicalization on team-owned URLs only", () => {
+    // A URL naming another team is a switch in flight (pushed before
+    // selectedTeamId commits); canonicalizing it would snap the switch back.
+    expect(shellSource).toContain(
+      "if (!isChallengeCupCanonicalizationTeamOwned(effectiveTeamId, searchParams)) {",
+    );
+    // The guard must run before the canonical route is built or navigated.
+    const guardIndex = shellSource.indexOf("isChallengeCupCanonicalizationTeamOwned(effectiveTeamId, searchParams)) {");
+    const navigateIndex = shellSource.indexOf("navigate(canonicalHref, { replace: true })");
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(navigateIndex).toBeGreaterThan(guardIndex);
+  });
 });

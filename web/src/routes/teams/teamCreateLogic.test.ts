@@ -106,6 +106,17 @@ describe("route picker visibility (fixed boards ∪ user-created)", () => {
     )).toBe(true);
   });
 
+  it("shows task-scoped ephemeral dev teams while they are alive", () => {
+    expect(isVisibleRouteTeam(
+      makeTeam({ teamId: "team-ephemeral-1", teamSource: "ephemeral_task", teamKind: "ephemeral" }),
+      TEAM_PICKER_TEAM_IDS,
+    )).toBe(true);
+    expect(isVisibleRouteTeam(
+      makeTeam({ teamId: "team-ephemeral-2", teamSource: "ephemeral_task", teamKind: "ephemeral", status: "archived" }),
+      TEAM_PICKER_TEAM_IDS,
+    )).toBe(true);
+  });
+
   it("hides evolution system teams even with a manual-looking shape", () => {
     expect(isVisibleRouteTeam(
       makeTeam({ teamId: "self-evolution-team", teamSource: "manual", teamKind: "custom" }),
