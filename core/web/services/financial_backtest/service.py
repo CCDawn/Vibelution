@@ -62,19 +62,121 @@ def create_financial_backtest_preview(
     selected_store = store or default_store()
     request = normalize_preview_request(payload)
     _agent, bound_model_id = _require_owner_and_model(agent_id, request.get("modelId"))
-    request["modelId"] = bound_model_id
-    model_fingerprint = _model_fingerprint(bound_model_id)
+    return _create_preview(
+        agent_id,
+        request,
+        selected_store,
+        model_id=bound_model_id,
+        data_loader=data_loader,
+        now_provider=now_provider,
+    )
+
+
+def create_financial_backtest_fork_preview(
+    agent_id: str,
+    source_run_id: str,
+    payload: Mapping[str, Any],
+    *,
+    store: FinancialBacktestStore | None = None,
+    now_provider: Callable[[], datetime] | None = None,
+) -> dict[str, Any]:
+    """Create a new preview using only the source run's owner-frozen snapshot."""
+    selected_store = store or default_store()
+    _require_owner(agent_id)
+    source_run = selected_store.load_run(agent_id, source_run_id)
+    snapshot = _load_run_snapshot(agent_id, source_run, selected_store)
+    overrides = dict(payload or {})
+    if set(overrides) - {"strategy", "modelId", "maxTokens"}:
+        raise FinancialBacktestConflict("派生预览只允许覆盖strategy、modelId或maxTokens")
+
+    source_params = dict(source_run.get("params") or {})
+    source_model_id = str(source_run.get("modelId") or "").strip()
+    if not source_model_id:
+        raise FinancialBacktestConflict("来源回测缺少冻结模型，无法派生预览")
+    request_payload: dict[str, Any] = {
+        "symbol": snapshot.symbol if isinstance(snapshot, data.BacktestSnapshot) else None,
+        "symbols": list(snapshot.symbols) if isinstance(snapshot, basket_data.BasketSnapshot) else None,
+        "startDate": snapshot.start_date,
+        "endDate": snapshot.end_date,
+        "outOfSampleStartDate": source_run.get("outOfSampleStartDate") or source_params.get("outOfSampleStartDate"),
+        "strategy": (
+            source_params.get("strategy")
+            if overrides.get("strategy") is None
+            else overrides["strategy"]
+        ),
+        "initialCash": source_params.get("initialCash", 100_000),
+        "maxPositionPct": source_params.get("maxPositionPct", 100),
+        "decisionInterval": source_params.get("decisionInterval", 5),
+        "commissionBps": source_params.get("commissionBps", 3),
+        "minimumCommission": source_params.get("minimumCommission", 5),
+        "slippageBps": source_params.get("slippageBps", 5),
+        "maxDecisions": source_params.get("maxDecisions", 500),
+        "maxTokens": (
+            source_run.get("maxTokens", source_params.get("maxTokens", DEFAULT_MAX_TOKENS))
+            if overrides.get("maxTokens") is None
+            else overrides["maxTokens"]
+        ),
+        "modelId": source_model_id if overrides.get("modelId") is None else overrides["modelId"],
+    }
+    request = normalize_preview_request(request_payload)
+    model_id = str(request.get("modelId") or "").strip()
+    if not model_id:
+        raise FinancialBacktestConflict("派生预览必须选择对话模型")
+    candidate_source = _validate_candidate_model(model_id)
+    source_schedule = tuple(str(item) for item in source_run.get("decisionSchedule", []))
+    expected_schedule = _build_schedule(snapshot, request)
+    if not source_schedule or source_schedule != expected_schedule:
+        raise FinancialBacktestConflict("来源回测决策计划与冻结行情或参数不匹配，无法安全派生")
+    preview = _create_preview(
+        agent_id,
+        request,
+        selected_store,
+        model_id=model_id,
+        snapshot=snapshot,
+        schedule=source_schedule,
+        now_provider=now_provider,
+        source_run_id=str(source_run.get("runId") or source_run_id),
+        model_candidate_source=candidate_source,
+    )
+    from core.web.services.financial_backtest.runtime import _record_event
+
+    _record_event(
+        agent_id,
+        str(source_run.get("runId") or source_run_id),
+        "financial_backtest.preview.forked",
+        "previewed",
+        "",
+    )
+    return preview
+
+
+def _create_preview(
+    agent_id: str,
+    request: Mapping[str, Any],
+    selected_store: FinancialBacktestStore,
+    *,
+    model_id: str,
+    data_loader: Callable[[Mapping[str, Any]], data.BacktestSnapshot | basket_data.BasketSnapshot] | None = None,
+    snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot | None = None,
+    schedule: tuple[str, ...] | None = None,
+    now_provider: Callable[[], datetime] | None = None,
+    source_run_id: str | None = None,
+    model_candidate_source: str | None = None,
+) -> dict[str, Any]:
+    model_fingerprint = _model_fingerprint(model_id)
     if request["mode"] == "basket":
-        loader = data_loader or (
-            lambda value: basket_data.prepare_basket_data(
-                value["symbols"], value["startDate"], value["endDate"]
+        if snapshot is None:
+            loader = data_loader or (
+                lambda value: basket_data.prepare_basket_data(
+                    value["symbols"], value["startDate"], value["endDate"]
+                )
             )
-        )
-        snapshot = loader(request)
+            snapshot = loader(request)
         asset_snapshots = [snapshot.assets[symbol] for symbol in snapshot.symbols]
         if any(asset.actions_status not in _ALLOWED_ACTION_STATUSES for asset in asset_snapshots):
             raise FinancialBacktestConflict("组合中有股票未通过公司行动/复权完整性检查，当前行情不能用于AI回测")
-        schedule = portfolio_engine.build_decision_schedule(snapshot, {**request["params"], "maxDecisions": request["params"]["maxDecisions"]})
+        if schedule is None:
+            schedule = portfolio_engine.build_decision_schedule(snapshot, {**request["params"], "maxDecisions": request["params"]["maxDecisions"]})
         symbols = list(snapshot.symbols)
         selected_symbol = None
         action_dates = sorted({day for asset in asset_snapshots for day in asset.action_dates})
@@ -87,11 +189,13 @@ def create_financial_backtest_preview(
         source_url = ""
         fetched_at = max(asset.fetched_at for asset in asset_snapshots)
     else:
-        snapshot = (data_loader or data.prepare_data)(request)
+        if snapshot is None:
+            snapshot = (data_loader or data.prepare_data)(request)
         if snapshot.actions_status not in _ALLOWED_ACTION_STATUSES:
             raise FinancialBacktestConflict("公司行动/复权完整性检查未通过，当前行情不能用于AI回测")
-        schedule = engine.build_decision_schedule(snapshot, request["params"])
-        engine.validate_benchmark(snapshot, request["params"])
+        if schedule is None:
+            schedule = engine.build_decision_schedule(snapshot, request["params"])
+            engine.validate_benchmark(snapshot, request["params"])
         symbols = [snapshot.symbol]
         selected_symbol = snapshot.symbol
         action_dates = list(snapshot.action_dates)
@@ -119,7 +223,7 @@ def create_financial_backtest_preview(
             "strategy": request["strategy"],
             "params": request["params"],
             "maxTokens": request["maxTokens"],
-            "modelId": bound_model_id,
+            "modelId": model_id,
         }
     )
     selected_store.save_snapshot(agent_id, snapshot_payload)
@@ -147,7 +251,7 @@ def create_financial_backtest_preview(
         "maxTokens": max_tokens,
         "estimatedTokens": estimated_tokens,
         "reservedOutputTokens": reserved_output_tokens,
-        "modelId": bound_model_id,
+        "modelId": model_id,
         "modelConfigHash": model_fingerprint,
         "paramsHash": params_hash,
         "dataHash": snapshot.data_hash,
@@ -163,11 +267,181 @@ def create_financial_backtest_preview(
         "notice": "\n".join(snapshot.notice),
         "params": public_params,
         "_modelFingerprint": model_fingerprint,
+        "_modelCandidateSource": model_candidate_source,
         "_reservationPlan": reservation_plan,
         "createdAt": _iso(now),
     }
+    preview["comparisonProvenance"] = _build_comparison_provenance(
+        preview,
+        source_run_id=source_run_id,
+    )
     selected_store.save_preview(agent_id, preview)
-    return {key: value for key, value in preview.items() if key not in {"createdAt", "_reservationPlan", "_modelFingerprint", "mode"}}
+    return {key: value for key, value in preview.items() if key not in {"createdAt", "_reservationPlan", "_modelFingerprint", "_modelCandidateSource", "mode"}}
+
+
+def _build_schedule(
+    snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot,
+    request: Mapping[str, Any],
+) -> tuple[str, ...]:
+    if isinstance(snapshot, basket_data.BasketSnapshot):
+        return portfolio_engine.build_decision_schedule(
+            snapshot,
+            {**dict(request["params"]), "maxDecisions": request["params"]["maxDecisions"]},
+        )
+    schedule = engine.build_decision_schedule(snapshot, request["params"])
+    engine.validate_benchmark(snapshot, request["params"])
+    return schedule
+
+
+def _build_comparison_provenance(
+    record: Mapping[str, Any],
+    *,
+    source_run_id: str | None = None,
+) -> dict[str, Any]:
+    from core.web.services.financial_backtest.comparisons import (
+        build_comparison_provenance,
+    )
+
+    provenance_record = {
+        "params": dict(record.get("params") or {}),
+        "symbol": record.get("symbol"),
+        "symbols": list(record.get("symbols") or []),
+        "dataHash": str(record.get("dataHash") or ""),
+        "decisionSchedule": list(record.get("decisionSchedule") or []),
+        "dateCoverage": dict(record.get("dateCoverage") or {}),
+        "outOfSampleStartDate": record.get("outOfSampleStartDate"),
+        "adjustment": str(record.get("adjustment") or "raw"),
+        "maxTokens": int(record.get("maxTokens") or 0),
+    }
+    if source_run_id:
+        provenance_record["sourceRunId"] = source_run_id
+    return build_comparison_provenance(provenance_record)
+
+
+def _load_run_snapshot(
+    agent_id: str,
+    run: Mapping[str, Any],
+    selected_store: FinancialBacktestStore,
+) -> data.BacktestSnapshot | basket_data.BasketSnapshot:
+    data_hash = str(run.get("dataHash") or "")
+    payload = selected_store.load_snapshot(agent_id, data_hash)
+    from core.web.services.financial_backtest.runtime import _restore_snapshot
+
+    snapshot = _restore_snapshot(payload)
+    if snapshot.data_hash != data_hash:
+        raise FinancialBacktestStoreError("回测运行记录与冻结行情摘要不匹配")
+    run_symbols = _run_symbols(run)
+    if isinstance(snapshot, basket_data.BasketSnapshot):
+        expected_symbols = list(snapshot.symbols)
+        if not _is_basket_run(run) or run_symbols != expected_symbols:
+            raise FinancialBacktestStoreError("组合回测运行记录与冻结行情标的列表不匹配")
+    elif _is_basket_run(run) or run_symbols != [snapshot.symbol]:
+        raise FinancialBacktestStoreError("单股回测运行记录与冻结行情标的不匹配")
+    expected_coverage = (
+        snapshot.assets[snapshot.symbols[0]].coverage.to_dict()
+        if isinstance(snapshot, basket_data.BasketSnapshot)
+        else snapshot.coverage.to_dict()
+    )
+    if isinstance(snapshot, basket_data.BasketSnapshot):
+        expected_asset_coverage = {
+            symbol: snapshot.assets[symbol].coverage.to_dict()
+            for symbol in snapshot.symbols
+        }
+        expected_asset_hashes = {
+            symbol: snapshot.assets[symbol].data_hash
+            for symbol in snapshot.symbols
+        }
+        expected_action_dates = sorted(
+            {day for asset in snapshot.assets.values() for day in asset.action_dates}
+        )
+        expected_actions_status = (
+            "factor_check_passed"
+            if any(
+                asset.actions_status == "factor_check_passed"
+                for asset in snapshot.assets.values()
+            )
+            else "clear"
+        )
+    else:
+        expected_asset_coverage = {snapshot.symbol: snapshot.coverage.to_dict()}
+        expected_asset_hashes = {snapshot.symbol: snapshot.data_hash}
+        expected_action_dates = list(snapshot.action_dates)
+        expected_actions_status = snapshot.actions_status
+    coverage = run.get("dateCoverage") if isinstance(run.get("dateCoverage"), Mapping) else {}
+    if dict(coverage) != expected_coverage:
+        raise FinancialBacktestStoreError("回测运行记录与冻结行情日期范围不匹配")
+    asset_coverage = run.get("assetCoverage") if isinstance(run.get("assetCoverage"), Mapping) else {}
+    asset_hashes = run.get("assetDataHashes") if isinstance(run.get("assetDataHashes"), Mapping) else {}
+    if dict(asset_coverage) != expected_asset_coverage or dict(asset_hashes) != expected_asset_hashes:
+        raise FinancialBacktestStoreError("回测运行记录与冻结行情资产覆盖或摘要不匹配")
+    if (
+        list(run.get("actionDates") or []) != expected_action_dates
+        or str(run.get("actionsStatus") or "") != expected_actions_status
+        or str(run.get("adjustment") or "") != "raw"
+    ):
+        raise FinancialBacktestStoreError("回测运行记录与冻结行情复权或公司行动证据不匹配")
+    params = run.get("params") if isinstance(run.get("params"), Mapping) else {}
+    stored_schedule = tuple(str(item) for item in run.get("decisionSchedule", []))
+    try:
+        expected_schedule = _build_schedule(snapshot, {"params": params})
+    except Exception as exc:
+        raise FinancialBacktestStoreError("回测运行参数无法由冻结行情复核") from exc
+    if stored_schedule != expected_schedule or int(run.get("decisionCount") or 0) != len(expected_schedule):
+        raise FinancialBacktestStoreError("回测决策计划与冻结行情或运行参数不匹配")
+    out_of_sample = run.get("outOfSampleStartDate") or params.get("outOfSampleStartDate")
+    try:
+        verified_oos = _out_of_sample_start_date(snapshot, out_of_sample)
+    except Exception as exc:
+        raise FinancialBacktestStoreError("回测样本外边界无法由冻结行情复核") from exc
+    if verified_oos != out_of_sample:
+        raise FinancialBacktestStoreError("回测样本外边界与冻结行情不匹配")
+    return snapshot
+
+
+def _validate_candidate_model(model_id: str) -> str:
+    from core.web.services.agent_model_candidate_service import (
+        list_agent_model_candidates,
+    )
+
+    try:
+        candidate_payload = list_agent_model_candidates()
+    except Exception as exc:
+        raise FinancialBacktestConflict("当前无法校验派生回测的模型候选资格") from exc
+    candidates = candidate_payload.get("candidates") if isinstance(candidate_payload, Mapping) else None
+    candidate = next(
+        (
+            item
+            for item in candidates or []
+            if isinstance(item, Mapping)
+            and str(item.get("modelId") or item.get("modelRef") or "").strip() == model_id
+        ),
+        None,
+    )
+    compatibility = candidate.get("slotCompatibility") if isinstance(candidate, Mapping) else None
+    dialogue = compatibility.get("dialogue") if isinstance(compatibility, Mapping) else None
+    if (
+        not isinstance(candidate, Mapping)
+        or candidate.get("runtimeSelectable") is not True
+        or not isinstance(dialogue, Mapping)
+        or dialogue.get("allowed") is not True
+    ):
+        raise FinancialBacktestConflict("所选模型当前不可作为对话模型运行派生回测")
+    return sha256_json(
+        {
+            "operatorConfigHash": str(candidate_payload.get("operatorConfigHash") or ""),
+            "modelId": model_id,
+            "source": str(candidate.get("source") or ""),
+            "providerId": str(candidate.get("providerId") or ""),
+            "model": str(candidate.get("model") or ""),
+            "runtimeSelectable": True,
+            "dialogueAllowed": True,
+        }
+    )
+
+
+def _source_run_id(run_or_preview: Mapping[str, Any]) -> str:
+    provenance = run_or_preview.get("comparisonProvenance")
+    return str(provenance.get("sourceRunId") or "").strip() if isinstance(provenance, Mapping) else ""
 
 
 def start_financial_backtest_run(
@@ -185,7 +459,18 @@ def start_financial_backtest_run(
     preview = selected_store.load_preview(agent_id, normalized_preview_id)
     now = _now(now_provider)
     run_id = deterministic_run_id(str(agent_id), request_id)
-    request_hash = sha256_json({"paramsHash": preview["paramsHash"], "dataHash": preview["dataHash"], "modelFingerprint": preview.get("_modelFingerprint")})
+    request_inputs = {
+        "paramsHash": preview["paramsHash"],
+        "dataHash": preview["dataHash"],
+        "modelFingerprint": preview.get("_modelFingerprint"),
+    }
+    # Old previews retain their original idempotency identity after upgrades.
+    if "comparisonProvenance" in preview or "_modelCandidateSource" in preview:
+        request_inputs.update(
+            comparisonProvenance=preview.get("comparisonProvenance"),
+            modelCandidateSource=preview.get("_modelCandidateSource"),
+        )
+    request_hash = sha256_json(request_inputs)
     existing_run_id = deterministic_run_id(str(agent_id), request_id)
     try:
         existing = selected_store.load_run(agent_id, existing_run_id)
@@ -198,9 +483,15 @@ def start_financial_backtest_run(
         ):
             raise FinancialBacktestConflict("clientRequestId已用于不同的回测预览")
         return project_run(existing)
-    if str(_require_owner_and_model(agent_id)[1]) != str(preview.get("modelId") or ""):
+    model_id = str(preview.get("modelId") or "")
+    source_run_id = _source_run_id(preview)
+    if source_run_id:
+        candidate_source = _validate_candidate_model(model_id)
+        if candidate_source != str(preview.get("_modelCandidateSource") or ""):
+            raise FinancialBacktestConflict("派生回测模型候选来源已变化，请重新生成预览")
+    elif str(_require_owner_and_model(agent_id)[1]) != model_id:
         raise FinancialBacktestConflict("炒股智能体的绑定模型已变化，请重新生成回测预览")
-    if _model_fingerprint(str(preview.get("modelId") or "")) != str(preview.get("_modelFingerprint") or ""):
+    if _model_fingerprint(model_id) != str(preview.get("_modelFingerprint") or ""):
         raise FinancialBacktestConflict("回测模型路由已变化，请重新生成预览以冻结当前模型配置")
     expires_at = _parse_iso(str(preview.get("expiresAt") or ""))
     if expires_at <= now:
@@ -232,6 +523,8 @@ def start_financial_backtest_run(
         "maxTokens": int(preview["maxTokens"]),
         "modelId": str(preview["modelId"]),
         "modelFingerprint": str(preview.get("_modelFingerprint") or ""),
+        "comparisonProvenance": dict(preview.get("comparisonProvenance") or {}),
+        "sourceRunId": _source_run_id(preview) or None,
         "paramsHash": str(preview["paramsHash"]),
         "dataHash": str(preview["dataHash"]),
         "params": dict(preview["params"]),
@@ -298,6 +591,28 @@ def list_financial_backtest_runs(
     }
 
 
+def compare_financial_backtest_runs(
+    agent_id: str,
+    run_ids: list[str],
+    axis: str,
+    *,
+    store: FinancialBacktestStore | None = None,
+) -> dict[str, Any]:
+    _require_owner(agent_id)
+    selected_store = store or default_store()
+    normalized_ids = [canonical_uuid(value, "回测标识") for value in run_ids]
+    records: list[dict[str, Any]] = []
+    for run_id in normalized_ids:
+        run = selected_store.load_run(agent_id, run_id)
+        _load_run_snapshot(agent_id, run, selected_store)
+        compare_record = dict(run)
+        compare_record["sourceRunId"] = _source_run_id(run) or None
+        records.append(compare_record)
+    from core.web.services.financial_backtest.comparisons import compare_runs
+
+    return compare_runs(records, axis)
+
+
 def get_financial_backtest_run(
     agent_id: str,
     run_id: str,
@@ -343,7 +658,16 @@ def resume_financial_backtest_run(
     store: FinancialBacktestStore | None = None,
 ) -> dict[str, Any]:
     selected_store = store or default_store()
-    _agent, current_model_id = _require_owner_and_model(agent_id)
+    _require_owner(agent_id)
+    initial_run = selected_store.load_run(agent_id, run_id)
+    model_id = str(initial_run.get("modelId") or "")
+    if _source_run_id(initial_run):
+        _validate_candidate_model(model_id)
+        if _model_fingerprint(model_id) != str(initial_run.get("modelFingerprint") or ""):
+            raise FinancialBacktestConflict("派生回测的冻结模型路由已变化，不能安全恢复")
+        current_model_id = model_id
+    else:
+        _agent, current_model_id = _require_owner_and_model(agent_id)
     def mutate(run: dict[str, Any]) -> None:
         status = project_status(run.get("status"))
         if status == "paused_unknown":
@@ -522,6 +846,7 @@ def project_summary(run: Mapping[str, Any]) -> dict[str, Any]:
         "modelId": str(run.get("modelId") or ""),
         "paramsHash": str(run.get("paramsHash") or ""),
         "dataHash": str(run.get("dataHash") or ""),
+        "comparisonProvenance": dict(run["comparisonProvenance"]) if isinstance(run.get("comparisonProvenance"), Mapping) else None,
         "totalReturnPct": metrics.get("totalReturnPct"),
         "maxDrawdownPct": metrics.get("maxDrawdownPct"),
         "benchmarkStatus": run.get("benchmarkStatus"),
@@ -577,6 +902,7 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "decisions": decisions,
         "metrics": dict(run["metrics"]) if isinstance(run.get("metrics"), Mapping) else None,
         "evaluation": dict(run["evaluation"]) if isinstance(run.get("evaluation"), Mapping) else None,
+        "comparisonProvenance": dict(run["comparisonProvenance"]) if isinstance(run.get("comparisonProvenance"), Mapping) else None,
         "equity": list(run.get("equity") or []),
         "trades": list(run.get("trades") or []),
         "orders": list(run.get("orders") or []),
@@ -896,6 +1222,8 @@ def _parse_iso(value: str) -> datetime:
 
 
 __all__ = [
+    "compare_financial_backtest_runs",
+    "create_financial_backtest_fork_preview",
     "create_financial_backtest_preview",
     "export_financial_backtest_run",
     "get_financial_backtest_run",

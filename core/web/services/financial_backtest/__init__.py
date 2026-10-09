@@ -2,6 +2,8 @@
 
 from .runtime import FinancialBacktestWorker, run_forever
 from .service import (
+    compare_financial_backtest_runs,
+    create_financial_backtest_fork_preview,
     create_financial_backtest_preview,
     export_financial_backtest_run,
     get_financial_backtest_run,
@@ -13,6 +15,8 @@ from .service import (
 
 __all__ = [
     "FinancialBacktestWorker",
+    "compare_financial_backtest_runs",
+    "create_financial_backtest_fork_preview",
     "create_financial_backtest_preview",
     "export_financial_backtest_run",
     "get_financial_backtest_run",

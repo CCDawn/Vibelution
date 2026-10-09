@@ -1,6 +1,8 @@
 """Public facade for the financial AI backtest API."""
 
 from .financial_backtest.service import (
+    compare_financial_backtest_runs,
+    create_financial_backtest_fork_preview,
     create_financial_backtest_preview,
     export_financial_backtest_run,
     get_financial_backtest_run,
@@ -11,6 +13,8 @@ from .financial_backtest.service import (
 )
 
 __all__ = [
+    "compare_financial_backtest_runs",
+    "create_financial_backtest_fork_preview",
     "create_financial_backtest_preview",
     "export_financial_backtest_run",
     "get_financial_backtest_run",

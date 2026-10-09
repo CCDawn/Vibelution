@@ -1,10 +1,12 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Download, Play, RefreshCw, Square, X } from "lucide-react";
+import { Download, GitCompareArrows, Play, RefreshCw, Square, X } from "lucide-react";
 import { downloadAIBacktest, fetchAIBacktest, fetchAIBacktests, financialBacktestKeys, previewAIBacktest, resumeAIBacktest, startAIBacktest, stopAIBacktest } from "../../api/financialBacktests";
 import type { AIBacktestDateCoverage, AIBacktestParams, AIBacktestPreview, AIBacktestRequest, AIBacktestRun } from "../../api/types/financialBacktests";
 import type { StockIdentity } from "../../api/types/financialMarket";
 import { VButton, VChip, VDenseTable, VDialog, VInput, VSelect, VStateSurface, VSurface, VTextarea } from "../../components/vui";
+import { FinanceBacktestComparison } from "./FinanceBacktestComparison";
+import { FinanceBacktestForkDialog } from "./FinanceBacktestForkDialog";
 import { parseFinancialBatchSymbols } from "./financialJobModel";
 import styles from "./FinanceAIBacktest.styles";
 
@@ -26,7 +28,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   const [form, setForm] = useState<BacktestForm>({ startDate: ago(90), endDate: ago(1), strategy: "只根据已完成的历史日线分析趋势和风险，控制回撤，选择下一交易日的目标仓位；证据不足时保持现金。", initialCash: 100000, maxPositionPct: 80, decisionInterval: 5, commissionBps: 3, minimumCommission: 5, slippageBps: 5, maxDecisions: 30, maxTokens: 500000 });
   const [scope, setScope] = useState<"single" | "portfolio">("single");
   const [symbolsText, setSymbolsText] = useState(stock.symbol);
-  const [preview, setPreview] = useState<AIBacktestPreview | null>(null), [selected, setSelected] = useState(""), [pending, setPending] = useState(""), [error, setError] = useState(""), [confirmRetry, setConfirmRetry] = useState(false);
+  const [preview, setPreview] = useState<AIBacktestPreview | null>(null), [selected, setSelected] = useState(""), [pending, setPending] = useState(""), [error, setError] = useState(""), [confirmRetry, setConfirmRetry] = useState(false), [forkOpen, setForkOpen] = useState(false);
   const gate = useRef(false), generation = useRef(0), mounted = useRef(true), startRequest = useRef({ previewId: "", id: "" }), portfolioEdited = useRef(false), previousStock = useRef(stock.symbol);
   const parsed = parseFinancialBatchSymbols(symbolsText);
   const inputTokens = symbolsText.trim().split(/[\s,，;；]+/).filter(Boolean);
@@ -150,11 +152,13 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
     {error ? <VStateSurface tone="error" density="compact" title={error} /> : null}
     <div className={styles.row}><h3 className={styles.title}>{zh ? "回测记录 · 当前智能体" : "Backtest history · this agent"}</h3><VButton variant="ghost" icon={<RefreshCw size={14} />} isDisabled={list.isFetching} onPress={() => void list.refetch()}>{zh ? "刷新" : "Refresh"}</VButton></div>
     {list.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取回测记录" : "Loading backtests"} /> : list.isError ? <VStateSurface tone="error" title={list.error.message} /> : !listed.length ? <VStateSurface tone="empty" density="compact" title={zh ? "当前智能体还没有AI回测" : "No AI backtests for this agent"} /> : <div className={styles.history}>{listed.map(run => <VButton key={run.runId} variant={selected === run.runId ? "secondary" : "ghost"} onPress={() => { setSelected(run.runId); setError(""); }}>{statusLabel(run.status, zh)} · {assetLabel(symbolsForRun(run), zh)} · {new Date(run.startedAt || run.updatedAt).toLocaleString(zh ? "zh-CN" : "en-US")} · {run.completedDecisionCount}/{run.decisionCount}</VButton>)}</div>}
+    {listed.length > 1 ? <FinanceBacktestComparison agentId={agentId} runs={listed} zh={zh} /> : null}
     {list.hasNextPage ? <VButton isPending={list.isFetchingNextPage} onPress={() => void list.fetchNextPage()}>{zh ? "更早的记录" : "Earlier runs"}</VButton> : null}
     {selected && detail.isPending ? <VStateSurface tone="loading" busy title={zh ? "读取回测详情" : "Loading run"} /> : detail.isError ? <VStateSurface tone="error" title={detail.error.message} actions={<VButton onPress={() => void detail.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : null}
     {shown ? <VSurface tone="panel" padding="normal" className={styles.panel}>
       <div className={styles.row}><strong>{statusLabel(shown.status, zh)} · {assetLabel(symbolsForRun(shown), zh)}</strong><span>{shown.completedDecisionCount}/{shown.decisionCount} · {shown.currentDecisionDate || "—"}</span><span className={styles.note}>{zh ? "调用" : "Calls"} {shown.callsUsed} · {shown.tokenAccounting === "estimated" ? (zh ? "Token估算" : "Estimated tokens") : shown.tokenAccounting === "reserved" ? (zh ? "Token预留" : "Reserved tokens") : "Token"} {shown.tokensUsed.toLocaleString()}/{shown.maxTokens.toLocaleString()}</span>
         {active.has(shown.status) ? <VButton icon={<Square size={14} />} isDisabled={busy || shown.status === "stop_requested"} isPending={pending === "stop"} onPress={() => void perform("stop", async () => reconcile(await stopAIBacktest(agentId, shown.runId)))}>{zh ? "停止" : "Stop"}</VButton> : ["stopped", "paused_unknown"].includes(shown.status) ? <VButton icon={<Play size={14} />} isDisabled={busy} onPress={() => { if (shown.status === "paused_unknown") setConfirmRetry(true); else void perform("resume", async () => reconcile(await resumeAIBacktest(agentId, shown.runId))); }}>{zh ? "继续未完成部分" : "Resume unfinished"}</VButton> : null}
+        <VButton variant="ghost" icon={<GitCompareArrows size={14} />} isDisabled={busy || !shown.dataHash} onPress={() => setForkOpen(true)}>{zh ? "创建同数据副本" : "Fork same data"}</VButton>
         <VButton variant="ghost" icon={<Download size={14} />} isDisabled={busy} onPress={() => void perform("export", () => downloadAIBacktest(agentId, shown.runId, "json"))}>JSON</VButton><VButton variant="ghost" icon={<Download size={14} />} isDisabled={busy} onPress={() => void perform("export", () => downloadAIBacktest(agentId, shown.runId, "csv"))}>CSV</VButton>
       </div>
       {active.has(shown.status) ? <progress className={styles.progress} aria-label="AI回测进度" value={shown.completedDecisionCount} max={Math.max(1, shown.decisionCount)} /> : null}
@@ -166,6 +170,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       <p className={styles.note}>{shown.modelId} · {zh ? "参数" : "Params"} {shown.paramsHash.slice(0, 12)} · {zh ? "数据" : "Data"} {shown.dataHash.slice(0, 12)}</p>
       {shown.notice ? <p className={styles.note}>{shown.notice}</p> : null}{shown.warnings?.map((warning, index) => <p key={index} className={styles.note}>{warning}</p>)}
     </VSurface> : null}
+    {shown ? <FinanceBacktestForkDialog agentId={agentId} source={shown} open={forkOpen} disabled={disabled} zh={zh} onOpenChange={setForkOpen} onStarted={reconcile} /> : null}
     <VDialog open={confirmRetry} onOpenChange={setConfirmRetry} title={zh ? "确认重试未落盘的模型调用" : "Retry an uncertain model call"} footer={<VButton variant="primary" isPending={pending === "resume"} isDisabled={busy || !shown?.currentDecisionDate} onPress={() => { if (!shown?.currentDecisionDate) return; void perform("resume", async () => { await reconcile(await resumeAIBacktest(agentId, shown.runId, { retryUnknownDecisionDate: shown.currentDecisionDate!, confirmPossibleDuplicateCharge: true })); setConfirmRetry(false); }); }}>{zh ? "确认可能重复计费并重试" : "Accept possible duplicate charge and retry"}</VButton>}><p className={styles.note}>{zh ? `${shown?.currentDecisionDate || ""} 的模型调用没有可靠结果，可能已经计费。继续将只重试这一时点，保留已成功决策。` : "This invocation has no reliable result and may already have been billed. Retry only this date; accepted decisions stay unchanged."}</p></VDialog>
   </div>;
 }

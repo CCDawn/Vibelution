@@ -8,8 +8,11 @@ from core.web.services.financial_backtest.data import BacktestDataError
 from core.web.services.financial_preferences_service import FinancialPreferenceError
 
 from .financial_backtest_models import (
+    FinancialBacktestCompareRequest,
+    FinancialBacktestComparison,
     FinancialBacktestExport,
     FinancialBacktestExportRequest,
+    FinancialBacktestForkPreviewRequest,
     FinancialBacktestPreview,
     FinancialBacktestPreviewRequest,
     FinancialBacktestResumeRequest,
@@ -38,6 +41,36 @@ def preview(agent_id: str, payload: FinancialBacktestPreviewRequest) -> dict:
 def start(agent_id: str, payload: FinancialBacktestStartRequest) -> dict:
     try:
         return service.start_financial_backtest_run(agent_id, payload.clientRequestId, payload.previewId)
+    except _ERRORS as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post(
+    "/financial-backtests/{agent_id}/runs/{run_id}/fork-preview",
+    response_model=FinancialBacktestPreview,
+)
+def fork_preview(
+    agent_id: str,
+    run_id: str,
+    payload: FinancialBacktestForkPreviewRequest,
+) -> dict:
+    try:
+        return service.create_financial_backtest_fork_preview(
+            agent_id, run_id, payload.model_dump(exclude_unset=True)
+        )
+    except _ERRORS as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post(
+    "/financial-backtests/{agent_id}/runs/compare",
+    response_model=FinancialBacktestComparison,
+)
+def compare(agent_id: str, payload: FinancialBacktestCompareRequest) -> dict:
+    try:
+        return service.compare_financial_backtest_runs(
+            agent_id, payload.runIds, payload.axis
+        )
     except _ERRORS as exc:
         raise _http_error(exc) from exc
 

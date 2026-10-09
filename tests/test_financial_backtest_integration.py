@@ -264,6 +264,9 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     assert json_body["status"] == "completed"
     assert len(json_body["decisions"]) == 2
     assert json_body["benchmarkOrders"] == persisted["benchmarkOrders"]
+    assert json_body["comparisonProvenance"] == persisted["comparisonProvenance"]
+    summary = api.list_financial_backtest_runs(_AGENT_ID, store=store)["items"][0]
+    assert summary["comparisonProvenance"] == persisted["comparisonProvenance"]
 
     csv_export = api.export_financial_backtest_run(_AGENT_ID, first_start["runId"], "csv", store=store)
     rows = list(csv.reader(StringIO(csv_export["content"])))

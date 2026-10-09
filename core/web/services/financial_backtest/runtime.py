@@ -346,11 +346,33 @@ class FinancialBacktestWorker:
 
     def _validate_frozen_model(self, agent_id: str, run: Mapping[str, Any]) -> None:
         from core.web.services import agent_directory_service as directory
+        from core.web.services.financial_backtest.service import (
+            _source_run_id,
+            _validate_candidate_model,
+        )
+
+        run_model_id = str(run.get("modelId") or "").strip()
+        derived = bool(_source_run_id(run))
+        if derived:
+            try:
+                _validate_candidate_model(run_model_id)
+                fingerprint = _model_fingerprint(run_model_id) if run_model_id else ""
+            except Exception:  # noqa: BLE001 - candidate authority failure blocks derived runs
+                fingerprint = ""
+            if not run_model_id or fingerprint != str(run.get("modelFingerprint") or ""):
+                self._mark_blocked(
+                    agent_id,
+                    str(run.get("runId") or ""),
+                    "model_candidate_changed",
+                    "派生回测模型候选资格或冻结路由已变化，回测已暂停",
+                )
+                raise _AlreadySettled()
+            return
 
         agent = directory.get_agent(agent_id)
         selected = str(directory.agent_dialogue_model_id(agent) if isinstance(agent, dict) else "").strip()
         fingerprint = _model_fingerprint(selected) if selected else ""
-        if not selected or selected != str(run.get("modelId") or "") or fingerprint != str(run.get("modelFingerprint") or ""):
+        if not selected or selected != run_model_id or fingerprint != str(run.get("modelFingerprint") or ""):
             self._mark_blocked(agent_id, str(run.get("runId") or ""), "model_binding_changed", "炒股智能体模型绑定已变化，回测已暂停")
             raise _AlreadySettled()
 
