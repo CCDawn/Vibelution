@@ -26,6 +26,7 @@ class FinancialBacktestRequest(BaseModel):
     strategy: StrictStr = Field(min_length=1, max_length=4_000)
     initialCash: StrictFloat | StrictInt = Field(default=100_000, ge=1_000, le=100_000_000, allow_inf_nan=False)
     maxPositionPct: StrictFloat | StrictInt = Field(default=100, ge=0, le=100, allow_inf_nan=False)
+    maxParticipationPct: StrictFloat | StrictInt = Field(default=1, ge=0.1, le=100, allow_inf_nan=False)
     decisionInterval: StrictInt = Field(default=5, ge=1, le=252)
     commissionBps: StrictFloat | StrictInt = Field(default=3, ge=0, le=100, allow_inf_nan=False)
     minimumCommission: StrictFloat | StrictInt = Field(default=5, ge=0, le=10_000, allow_inf_nan=False)
@@ -33,6 +34,8 @@ class FinancialBacktestRequest(BaseModel):
     maxDecisions: StrictInt = Field(default=500, ge=1, le=500)
     maxTokens: StrictInt = Field(default=500_000, ge=512, le=2_000_000)
     modelId: StrictStr | None = Field(default=None, max_length=160)
+    dataSource: Literal["tencent", "eastmoney", "auto"] = "tencent"
+    researchInput: Literal["price_only", "announcements"] = "price_only"
 
     @model_validator(mode="after")
     def require_one_symbol_selector(self) -> FinancialBacktestRequest:
@@ -51,18 +54,53 @@ class FinancialBacktestForkPreviewRequest(BaseModel):
     strategy: StrictStr | None = Field(default=None, min_length=1, max_length=4_000)
     modelId: StrictStr | None = Field(default=None, max_length=160)
     maxTokens: StrictInt | None = Field(default=None, ge=512, le=2_000_000)
+    maxPositionPct: StrictFloat | StrictInt | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    decisionInterval: StrictInt | None = Field(default=None, ge=1, le=252)
+    commissionBps: StrictFloat | StrictInt | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    minimumCommission: StrictFloat | StrictInt | None = Field(default=None, ge=0, le=10_000, allow_inf_nan=False)
+    slippageBps: StrictFloat | StrictInt | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    maxParticipationPct: StrictFloat | StrictInt | None = Field(default=None, ge=0.1, le=100, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def require_one_parameter_override(self) -> FinancialBacktestForkPreviewRequest:
+        parameter_fields = (
+            "maxPositionPct",
+            "decisionInterval",
+            "commissionBps",
+            "minimumCommission",
+            "slippageBps",
+            "maxParticipationPct",
+        )
+        selected = [key for key in parameter_fields if key in self.model_fields_set]
+        if any(getattr(self, key) is None for key in selected):
+            raise ValueError("回测参数覆盖值不能为空")
+        if len(selected) > 1:
+            raise ValueError("单次派生预览最多更改一项回测参数")
+        return self
 
 
 class FinancialBacktestCompareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     runIds: list[StrictStr] = Field(min_length=2, max_length=4)
-    axis: Literal["strategy", "model"]
+    axis: Literal["strategy", "model", "parameter"]
+    parameterKey: Literal[
+        "maxPositionPct",
+        "decisionInterval",
+        "commissionBps",
+        "minimumCommission",
+        "slippageBps",
+        "maxParticipationPct",
+    ] | None = None
 
     @model_validator(mode="after")
     def require_unique_run_ids(self) -> FinancialBacktestCompareRequest:
         if len(set(self.runIds)) != len(self.runIds):
             raise ValueError("runIds不能重复")
+        if self.axis == "parameter" and self.parameterKey is None:
+            raise ValueError("参数比较必须指定parameterKey")
+        if self.axis != "parameter" and self.parameterKey is not None:
+            raise ValueError("策略或模型比较不能指定parameterKey")
         return self
 
 
@@ -119,6 +157,7 @@ class FinancialBacktestParams(BaseModel):
     strategy: str
     initialCash: float
     maxPositionPct: float = Field(ge=0, le=100, description="仓位百分比，0到100")
+    maxParticipationPct: float | None = Field(default=None, ge=0.1, le=100)
     decisionInterval: int
     commissionBps: float
     minimumCommission: float
@@ -135,6 +174,18 @@ class FinancialBacktestComparisonProvenance(BaseModel):
     commonParamsHash: str
     strategyHash: str
     sourceRunId: str | None = None
+
+
+class FinancialBacktestResearchCoverage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["available", "partial"]
+    groupCount: int
+    availableGroupCount: int
+    partialGroupCount: int
+    failedGroupCount: int
+    itemCount: int
+    notice: str
+    warnings: list[str]
 
 
 class FinancialBacktestPreview(BaseModel):
@@ -160,6 +211,9 @@ class FinancialBacktestPreview(BaseModel):
     modelConfigHash: str = ""
     paramsHash: str
     dataHash: str
+    researchInput: Literal["price_only", "announcements"] = "price_only"
+    researchHash: str | None = None
+    researchCoverage: FinancialBacktestResearchCoverage | None = None
     actionsStatus: Literal["clear", "factor_check_passed", "blocked", "unavailable"]
     actionDates: list[str]
     canStart: bool
@@ -237,7 +291,7 @@ class FinancialBacktestOrder(BaseModel):
     signalDate: str
     date: str
     side: Literal["buy", "sell", "hold"]
-    status: Literal["filled", "rejected", "no_action"]
+    status: Literal["filled", "partial_fill", "rejected", "no_action"]
     reason: str
     requestedShares: int
     filledShares: int
@@ -333,6 +387,75 @@ class FinancialBacktestRobustness(BaseModel):
     notice: str
 
 
+class FinancialBacktestAdvancedMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    totalReturnPct: StrictFloat | StrictInt | None = None
+    benchmarkReturnPct: StrictFloat | StrictInt | None = None
+    excessReturnPct: StrictFloat | StrictInt | None = None
+    maxDrawdownPct: StrictFloat | StrictInt | None = None
+    tradeCount: StrictInt | None = None
+    fees: StrictFloat | StrictInt | None = None
+    commissionFees: StrictFloat | StrictInt | None = None
+    stampDuty: StrictFloat | StrictInt | None = None
+    slippageCost: StrictFloat | StrictInt | None = None
+    benchmarkFees: StrictFloat | StrictInt | None = None
+    benchmarkSlippageCost: StrictFloat | StrictInt | None = None
+    grossTurnover: StrictFloat | StrictInt | None = None
+
+
+class FinancialBacktestCostScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    id: Literal["baseline", "cost_1_5x", "cost_2x"]
+    status: Literal["available", "unavailable"]
+    costMultiplier: StrictFloat | StrictInt
+    commissionBps: StrictFloat | StrictInt
+    minimumCommission: StrictFloat | StrictInt
+    slippageBps: StrictFloat | StrictInt
+    metrics: FinancialBacktestAdvancedMetrics | None
+    outOfSampleMetrics: FinancialBacktestAdvancedMetrics | None
+    error: str | None
+
+
+class FinancialBacktestCostStress(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    status: Literal["available", "partial", "unavailable"]
+    scenarios: list[FinancialBacktestCostScenario]
+    error: str | None = None
+    notice: str
+
+
+class FinancialBacktestReturnUncertainty(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    status: Literal["available", "insufficient_sample", "unavailable"]
+    method: Literal["newey_west_hac"]
+    metric: Literal["annualized_log_excess_return_pct"]
+    confidenceLevel: StrictFloat | StrictInt
+    observations: StrictInt
+    lag: StrictInt | None
+    pointEstimatePct: StrictFloat | StrictInt | None
+    lowerPct: StrictFloat | StrictInt | None
+    upperPct: StrictFloat | StrictInt | None
+    error: str | None
+    notice: str
+
+
+class FinancialBacktestAdvancedEvaluation(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    schemaVersion: Literal[1]
+    basis: Literal["frozen_decisions"]
+    status: Literal["available", "unavailable"]
+    outOfSampleStartDate: str | None
+    costStress: FinancialBacktestCostStress
+    returnUncertainty: FinancialBacktestReturnUncertainty
+    error: str | None = None
+    notice: str
+
+
 class FinancialBacktestRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -355,6 +478,9 @@ class FinancialBacktestRun(BaseModel):
     modelConfigHash: str = ""
     paramsHash: str
     dataHash: str
+    researchInput: Literal["price_only", "announcements"] = "price_only"
+    researchHash: str | None = None
+    researchCoverage: FinancialBacktestResearchCoverage | None = None
     comparisonProvenance: FinancialBacktestComparisonProvenance | None = None
     params: FinancialBacktestParams
     dateCoverage: FinancialBacktestCoverage
@@ -374,6 +500,7 @@ class FinancialBacktestRun(BaseModel):
     metrics: dict[str, Any] | None
     evaluation: dict[str, Any] | None = None
     robustness: FinancialBacktestRobustness | None = None
+    advancedEvaluation: FinancialBacktestAdvancedEvaluation | None = None
     equity: list[FinancialBacktestEquityPoint]
     trades: list[FinancialBacktestTrade]
     orders: list[FinancialBacktestOrder]
@@ -460,13 +587,14 @@ class FinancialBacktestComparisonRow(BaseModel):
     maxTokens: int | None
     metrics: FinancialBacktestComparisonMetrics | None
     evaluation: FinancialBacktestEvaluation | None
+    parameterValue: float | None = None
 
 
 class FinancialBacktestComparison(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     comparisonId: str
-    axis: Literal["strategy", "model"]
+    axis: Literal["strategy", "model", "parameter"]
     status: Literal["comparable", "incomplete", "incompatible"]
     reasons: list[FinancialBacktestComparisonReason]
     dataHash: str | None
@@ -474,6 +602,14 @@ class FinancialBacktestComparison(BaseModel):
     outOfSampleStartDate: str | None
     rows: list[FinancialBacktestComparisonRow]
     notice: str
+    parameterKey: Literal[
+        "maxPositionPct",
+        "decisionInterval",
+        "commissionBps",
+        "minimumCommission",
+        "slippageBps",
+        "maxParticipationPct",
+    ] | None = None
 
 
 class FinancialBacktestExport(BaseModel):

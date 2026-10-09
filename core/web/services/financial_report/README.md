@@ -44,6 +44,24 @@ selection of a preferred analyst's candle window. All export formats
 and report catalog previews use the same projection. No external project code
 is copied and no second evidence/report store is created.
 
+Before an A-share team synthesis is submitted, that same pack also projects
+bounded source references from the exact market, fundamental, and news analyst
+Turns into the synthesis prompt. It requires a completed active-branch Turn,
+the bound Agent and submission ID, and the run's exact A-share code and research
+date. Market quotes must be for that code and on or before the cutoff. News is
+passed only when the rendered result has a structured `news` source, a parseable
+publication date on or before the cutoff, and the issuer name matches the title
+or snippet; mentioning a six-digit code alone is insufficient. Financial report
+query output must carry the exact ticker and report period, but remains marked
+untrusted because it supplies no publication date and only checks citation
+structure. The run's public-fundamentals snapshot is a separate, explicitly
+unverified reference; its same-period CNINFO link does not establish that the
+displayed value matches the PDF or that the value was preserved point in time.
+All references stay inside the existing untrusted-materials JSON boundary,
+carry truncation notices, and are read-only. This prompt context does not expand
+the export rule: conclusion amounts still require a cited original-PDF excerpt
+or a deterministic calculation, and the stored Session/Journal is unchanged.
+
 Same-Turn `financial_market_snapshot_tool` results also verify raw share-price,
 signed change-percent and PE/PB occurrences by their exact fields. A report with
 one unambiguous stock and quote observation may reuse its labelled quote date

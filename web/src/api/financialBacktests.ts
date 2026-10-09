@@ -1,5 +1,5 @@
 import { fetchJson } from "./client";
-import type { AIBacktestComparisonResult, AIBacktestExport, AIBacktestPage, AIBacktestPreview, AIBacktestRequest, AIBacktestRun } from "./types/financialBacktests";
+import type { AIBacktestComparisonRequest, AIBacktestComparisonResult, AIBacktestExport, AIBacktestForkPreviewRequest, AIBacktestPage, AIBacktestPreview, AIBacktestRequest, AIBacktestRun } from "./types/financialBacktests";
 
 export const financialBacktestKeys = {
   list: (agentId: string) => ["finance", "ai-backtests", agentId] as const,
@@ -9,11 +9,11 @@ const base = (agentId: string) => `/api/financial-backtests/${encodeURIComponent
 const runPath = (agentId: string, runId: string) => `${base(agentId)}/runs/${encodeURIComponent(runId)}`;
 const post = <T>(url: string, payload?: unknown, signal?: AbortSignal) => fetchJson<T>(url, { method: "POST", signal, headers: { "Content-Type": "application/json" }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) });
 export const previewAIBacktest = (agentId: string, payload: AIBacktestRequest, signal?: AbortSignal) => post<AIBacktestPreview>(`${base(agentId)}/preview`, payload, signal);
-export const previewForkAIBacktest = (agentId: string, runId: string, payload: { strategy?: string; modelId?: string; maxTokens?: number }, signal?: AbortSignal) => post<AIBacktestPreview>(`${runPath(agentId, runId)}/fork-preview`, payload, signal);
+export const previewForkAIBacktest = (agentId: string, runId: string, payload: AIBacktestForkPreviewRequest, signal?: AbortSignal) => post<AIBacktestPreview>(`${runPath(agentId, runId)}/fork-preview`, payload, signal);
 export const startAIBacktest = (agentId: string, previewId: string, clientRequestId: string) => post<AIBacktestRun>(`${base(agentId)}/runs`, { previewId, clientRequestId });
 export const fetchAIBacktests = (agentId: string, cursor?: string, signal?: AbortSignal) => fetchJson<AIBacktestPage>(`${base(agentId)}/runs?${new URLSearchParams({ limit: "20", ...(cursor ? { cursor } : {}) })}`, { signal });
 export const fetchAIBacktest = (agentId: string, runId: string, signal?: AbortSignal) => fetchJson<AIBacktestRun>(runPath(agentId, runId), { signal });
-export const compareAIBacktests = (agentId: string, payload: { runIds: string[]; axis: "strategy" | "model" }, signal?: AbortSignal) => post<AIBacktestComparisonResult>(`${base(agentId)}/runs/compare`, payload, signal);
+export const compareAIBacktests = (agentId: string, payload: AIBacktestComparisonRequest, signal?: AbortSignal) => post<AIBacktestComparisonResult>(`${base(agentId)}/runs/compare`, payload, signal);
 export const stopAIBacktest = (agentId: string, runId: string) => post<AIBacktestRun>(`${runPath(agentId, runId)}/stop`);
 export const resumeAIBacktest = (agentId: string, runId: string, retry?: { retryUnknownDecisionDate: string; confirmPossibleDuplicateCharge: boolean }) => post<AIBacktestRun>(`${runPath(agentId, runId)}/resume`, retry ?? {});
 export async function downloadAIBacktest(agentId: string, runId: string, format: "json" | "csv") {

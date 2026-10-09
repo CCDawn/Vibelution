@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FinanceAIBacktest } from "./FinanceAIBacktest";
+import { FinanceBacktest } from "./FinanceBacktest";
 import type { AIBacktestDateCoverage, AIBacktestPreview, AIBacktestRun } from "../../api/types/financialBacktests";
 import * as api from "../../api/financialBacktests";
 import * as agentsApi from "../../api/agents";
@@ -33,7 +34,20 @@ const selectableModels = {
 } as unknown as AgentConfigWorkspace;
 const basketPreview: AIBacktestPreview = { ...preview, previewId: "basket-preview", symbol: null, symbols: basketSymbols, dateCoverage: coverage, assetCoverage: { "sh600519": coverage, "sz000001": { ...coverage, actualStartDate: "2026-07-02", tradingDays: 39 } }, assetSources: { "sh600519": { source: "Tencent", fetchedAt: "2026-10-08T15:00:00+08:00" }, "sz000001": { source: "Tencent", fetchedAt: "2026-10-08T15:00:00+08:00" } } };
 const evaluationWindow = { startDate: "2026-07-01", endDate: "2026-07-30", baselineDate: null, startingEquity: 100000, startingBenchmarkEquity: 100000, tradingDays: 20, metrics: { ...metrics, tradeCount: 1, fees: 5 } };
-const basketRun: AIBacktestRun = { ...run, runId: "basket-run", symbol: null, symbols: basketSymbols, status: "completed", decisionCount: 2, completedDecisionCount: 2, metrics, benchmarkStatus: "partial_cash_sleeves", unfilledBenchmarkSymbols: ["sz000001"], evaluation: { outOfSampleStartDate: "2026-08-01", inSample: evaluationWindow, outOfSample: { ...evaluationWindow, startDate: "2026-08-01", endDate: "2026-09-01", baselineDate: "2026-07-30", startingEquity: 104000, startingBenchmarkEquity: 102000 }, notice: "样本外以前一交易日收盘净值为基准。" }, dateCoverage: coverage, assetCoverage: basketPreview.assetCoverage, assetSources: basketPreview.assetSources, decisions: [{ date: "2026-08-01", reason: "风险适中", targetWeights: { "sh600519": 60, "sz000001": 20 }, inputHash: "input", decisionHash: "decision", modelId: "model", attempts: 1, tokens: 500 }], equity: [{ date: "2026-09-01", equity: 104000, benchmarkEquity: 102000, cash: 20000, positions: { "sh600519": 100, "sz000001": 200 } }], orders: [{ date: "2026-08-02", symbol: "sh600519", side: "buy", status: "filled", reason: "next_session_open" }, { date: "2026-08-02", symbol: "sz000001", side: "buy", status: "filled", reason: "next_session_open" }], trades: [{ signalDate: "2026-08-01", date: "2026-08-02", symbol: "sh600519", side: "buy", price: 100, units: 100, fee: 5 }, { signalDate: "2026-08-01", date: "2026-08-02", symbol: "sz000001", side: "buy", price: 20, units: 200, fee: 5 }] };
+const advancedEvaluation = {
+  schemaVersion: 1 as const,
+  basis: "frozen_decisions" as const,
+  status: "available" as const,
+  outOfSampleStartDate: "2026-08-01",
+  costStress: { status: "available" as const, scenarios: [
+    { id: "baseline" as const, status: "available" as const, costMultiplier: 1, commissionBps: 3, minimumCommission: 5, slippageBps: 5, metrics: { totalReturnPct: 4, benchmarkReturnPct: 2, excessReturnPct: 2, maxDrawdownPct: -1, tradeCount: 1, fees: 5 }, outOfSampleMetrics: null, error: null },
+    { id: "cost_1_5x" as const, status: "available" as const, costMultiplier: 1.5, commissionBps: 4.5, minimumCommission: 7.5, slippageBps: 7.5, metrics: { totalReturnPct: 3, benchmarkReturnPct: 2, excessReturnPct: 1, maxDrawdownPct: -2, tradeCount: 1, fees: 7.5 }, outOfSampleMetrics: null, error: null },
+    { id: "cost_2x" as const, status: "available" as const, costMultiplier: 2, commissionBps: 6, minimumCommission: 10, slippageBps: 10, metrics: { totalReturnPct: 2, benchmarkReturnPct: 1, excessReturnPct: 1, maxDrawdownPct: -3, tradeCount: 1, fees: 10 }, outOfSampleMetrics: null, error: null },
+  ], notice: "冻结决策费用重放。" },
+  returnUncertainty: { status: "insufficient_sample" as const, method: "newey_west_hac" as const, metric: "annualized_log_excess_return_pct" as const, confidenceLevel: 0.95, observations: 1, lag: null, pointEstimatePct: null, lowerPct: null, upperPct: null, error: "样本不足", notice: "只描述冻结历史序列。" },
+  notice: "费用情景沿用已保存决策。",
+};
+const basketRun: AIBacktestRun = { ...run, runId: "basket-run", symbol: null, symbols: basketSymbols, status: "completed", decisionCount: 2, completedDecisionCount: 2, metrics, benchmarkStatus: "partial_cash_sleeves", unfilledBenchmarkSymbols: ["sz000001"], evaluation: { outOfSampleStartDate: "2026-08-01", inSample: evaluationWindow, outOfSample: { ...evaluationWindow, startDate: "2026-08-01", endDate: "2026-09-01", baselineDate: "2026-07-30", startingEquity: 104000, startingBenchmarkEquity: 102000 }, notice: "样本外以前一交易日收盘净值为基准。" }, advancedEvaluation, dateCoverage: coverage, assetCoverage: basketPreview.assetCoverage, assetSources: basketPreview.assetSources, decisions: [{ date: "2026-08-01", reason: "风险适中", targetWeights: { "sh600519": 60, "sz000001": 20 }, inputHash: "input", decisionHash: "decision", modelId: "model", attempts: 1, tokens: 500 }], equity: [{ date: "2026-09-01", equity: 104000, benchmarkEquity: 102000, cash: 20000, positions: { "sh600519": 100, "sz000001": 200 } }], orders: [{ date: "2026-08-02", symbol: "sh600519", side: "buy", status: "filled", reason: "next_session_open" }, { date: "2026-08-02", symbol: "sz000001", side: "buy", status: "filled", reason: "next_session_open" }], trades: [{ signalDate: "2026-08-01", date: "2026-08-02", symbol: "sh600519", side: "buy", price: 100, units: 100, fee: 5 }, { signalDate: "2026-08-01", date: "2026-08-02", symbol: "sz000001", side: "buy", price: 20, units: 200, fee: 5 }] };
 const button = (text: string) => [...document.querySelectorAll("button")].find(item => item.textContent?.trim() === text)!;
 const setInputValue = (label: string, value: string) => {
   const input = node.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
@@ -53,6 +67,18 @@ async function chooseScope(label: string) {
   if (!option) throw new Error(`Scope option not found: ${label}`);
   await act(async () => option!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
+async function chooseSelectOption(ariaLabel: string, label: string) {
+  const trigger = document.body.querySelector<HTMLElement>(`[data-vui-select-trigger="true"][aria-label="${ariaLabel}"]`);
+  if (!trigger) throw new Error(`Select not found: ${ariaLabel}`);
+  await act(async () => trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  let option = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find(item => item.textContent?.includes(label));
+  if (!option) {
+    await act(async () => trigger.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    option = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find(item => item.textContent?.includes(label));
+  }
+  if (!option) throw new Error(`Select option not found: ${label}`);
+  await act(async () => option!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
 async function render(currentStock = stock) {
   await act(async () => root.render(<QueryClientProvider client={client}><FinanceAIBacktest agentId="a" stock={currentStock} zh disabled={false} /></QueryClientProvider>));
   await act(async () => new Promise(resolve => setTimeout(resolve, 15)));
@@ -64,6 +90,17 @@ it("previews without a model call and refuses to start blocked corporate-action 
   vi.mocked(api.previewAIBacktest).mockResolvedValue({ ...preview, canStart: false, actionsStatus: "blocked", blockReason: "区间内含公司行动" });
   await render(); await act(async () => button("检查数据与预算").click());
   expect(node.textContent).toContain("区间内含公司行动"); expect(button("开始AI回测").disabled).toBe(true); expect(api.startAIBacktest).not.toHaveBeenCalled();
+});
+
+it("allows independent backtest preflight when the native research session is unavailable", async () => {
+  vi.mocked(api.previewAIBacktest).mockRejectedValue(new Error("回测模型配置需要检查"));
+  const research = vi.fn();
+  await act(async () => root.render(<QueryClientProvider client={client}><FinanceBacktest agentId="a" stock={stock} zh disabled onResearchPrompt={research} /></QueryClientProvider>));
+  await act(async () => button("检查数据与预算").click());
+  expect(api.previewAIBacktest).toHaveBeenCalledTimes(1);
+  expect(node.textContent).toContain("回测模型配置需要检查");
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
+  expect(research).not.toHaveBeenCalled();
 });
 
 it("deduplicates a double click and retains the idempotency key after an ambiguous start failure", async () => {
@@ -94,6 +131,10 @@ it("runs a two-stock basket, displays frozen holdout and per-asset audit, and ke
   expect(api.startAIBacktest).toHaveBeenCalledWith("a", "basket-preview", expect.any(String));
   expect(node.textContent).toContain("样本内外评估"); expect(node.textContent).toContain("sh600519 60.00%"); expect(node.textContent).toContain("sz000001 20.00%");
   expect(node.textContent).toContain("期末股数"); expect(node.textContent).toContain("样本外以前一交易日收盘净值为基准。"); expect(node.textContent).toContain("基准有 1 只未成交，保留现金：sz000001");
+  expect(button("查看成本与统计评估")).toBeTruthy();
+  await act(async () => button("查看成本与统计评估").click());
+  expect(node.textContent).toContain("冻结决策重放");
+  expect(node.textContent).toContain("费用 1.5×");
 });
 
 it("keeps portfolio history available after the current stock changes", async () => {
@@ -104,6 +145,32 @@ it("keeps portfolio history available after the current stock changes", async ()
   await act(async () => historyEntry!.click()); await act(async () => new Promise(resolve => setTimeout(resolve, 15)));
   await render({ symbol: "sh600519", ticker: "600519", name: "贵州茅台", market: "上交所" });
   expect(node.textContent).toContain("已完成 · 组合"); expect(node.textContent).toContain("sh600519 60.00%");
+});
+
+it("renders explicit advanced-evaluation unavailability for a legacy result without metrics", async () => {
+  const reason = "没有可校验的冻结行情快照";
+  const legacy: AIBacktestRun = {
+    ...run,
+    status: "completed",
+    metrics: null,
+    advancedEvaluation: {
+      ...advancedEvaluation,
+      status: "unavailable",
+      error: reason,
+      costStress: { ...advancedEvaluation.costStress, status: "unavailable", scenarios: [], error: reason },
+      returnUncertainty: { ...advancedEvaluation.returnUncertainty, status: "unavailable", observations: 0, lag: null, pointEstimatePct: null, lowerPct: null, upperPct: null, error: reason },
+    },
+  };
+  vi.mocked(api.fetchAIBacktests).mockResolvedValue({ items: [legacy], nextCursor: null });
+  vi.mocked(api.fetchAIBacktest).mockResolvedValue(legacy);
+  await render();
+  const historyEntry = [...node.querySelectorAll("button")].find(item => item.textContent?.startsWith("已完成 ·"));
+  expect(historyEntry).toBeTruthy();
+  await act(async () => historyEntry!.click());
+  await act(async () => new Promise(resolve => setTimeout(resolve, 15)));
+  expect(button("查看成本与统计评估")).toBeTruthy();
+  await act(async () => button("查看成本与统计评估").click());
+  expect(node.textContent).toContain(reason);
 });
 
 it("invalidates a preview when its form changes", async () => {
@@ -155,6 +222,48 @@ it("creates a same-data fork from the selected run and starts only after a match
   expect(api.startAIBacktest).toHaveBeenCalledWith("a", "fork-preview", expect.any(String));
   expect(api.fetchAIBacktest).toHaveBeenCalledWith("a", "fork-run", expect.any(AbortSignal));
   expect(node.textContent).toContain("排队中");
+});
+
+it("previews a one-parameter A-share fork while preserving every other frozen input", async () => {
+  const params = { strategy: "Source strategy", initialCash: 100000, maxPositionPct: 80, maxParticipationPct: 1, decisionInterval: 5, commissionBps: 3, minimumCommission: 5, slippageBps: 5, maxDecisions: 30, maxTokens: 60000 };
+  const source = { ...run, runId: "source-run", status: "completed" as const, dataHash: "frozen-data", params, researchInput: "price_only" as const, researchHash: null, outOfSampleStartDate: "2026-08-01" };
+  const forkPreview: AIBacktestPreview = {
+    ...preview,
+    previewId: "parameter-preview",
+    dataHash: "frozen-data",
+    maxTokens: 60000,
+    modelId: "model",
+    params: { ...params, maxPositionPct: 70 },
+    researchInput: "price_only",
+    researchHash: null,
+    outOfSampleStartDate: "2026-08-01",
+  };
+  const forkRun = { ...source, runId: "parameter-run", status: "queued" as const, params: forkPreview.params };
+  vi.mocked(api.fetchAIBacktests).mockResolvedValue({ items: [source], nextCursor: null });
+  vi.mocked(api.fetchAIBacktest).mockImplementation(async (_agentId, runId) => runId === "parameter-run" ? forkRun : source);
+  vi.mocked(api.previewForkAIBacktest).mockResolvedValue(forkPreview);
+  vi.mocked(api.startAIBacktest).mockResolvedValue(forkRun);
+  await render();
+  await act(async () => [...node.querySelectorAll("button")].find(item => item.textContent?.startsWith("已完成 ·"))!.click());
+  await act(async () => new Promise(resolve => setTimeout(resolve, 15)));
+  await act(async () => button("创建同数据副本").click());
+  await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
+  await chooseSelectOption("回测副本用途", "单参数敏感性");
+  expect(document.body.textContent).toContain("沿用源策略、模型与 Token 预算");
+  await chooseSelectOption("参数敏感性目标", "持仓上限");
+  const parameterInput = document.body.querySelector<HTMLInputElement>('input[aria-label="参数敏感性取值"]');
+  expect(parameterInput).toBeTruthy();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(parameterInput, "70");
+    parameterInput!.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(button("同数据预检").disabled).toBe(false);
+  await act(async () => button("同数据预检").click());
+  expect(api.previewForkAIBacktest).toHaveBeenCalledWith("a", "source-run", { maxPositionPct: 70 });
+  expect(api.previewAIBacktest).not.toHaveBeenCalled();
+  expect(button("开始对照回测").disabled).toBe(false);
+  await act(async () => button("开始对照回测").click());
+  expect(api.startAIBacktest).toHaveBeenCalledWith("a", "parameter-preview", expect.any(String));
 });
 
 it("requires an explicit eligible model when the source model is no longer selectable", async () => {
@@ -214,6 +323,43 @@ it("compares selected history and only exposes metrics for a comparable response
   await act(async () => button("生成比较").click());
   expect(document.body.textContent).toContain("冻结数据不同");
   expect(document.body.textContent).not.toContain("7.00%");
+});
+
+it("compares A-share runs on one parameter and labels each run's actual value", async () => {
+  const params = { strategy: "Same strategy", initialCash: 100000, maxPositionPct: 80, decisionInterval: 5, commissionBps: 3, minimumCommission: 5, slippageBps: 5, maxDecisions: 30, maxTokens: 60000 };
+  const records = [
+    { ...run, runId: "parameter-1", status: "completed" as const, dataHash: "frozen-data", params },
+    { ...run, runId: "parameter-2", status: "completed" as const, dataHash: "frozen-data", params: { ...params, maxPositionPct: 70 } },
+  ];
+  const comparison = {
+    comparisonId: "parameter-comparison",
+    axis: "parameter" as const,
+    parameterKey: "maxPositionPct" as const,
+    status: "comparable" as const,
+    reasons: [],
+    dataHash: "frozen-data",
+    commonParamsHash: "same-inputs",
+    outOfSampleStartDate: "2026-08-01",
+    rows: [
+      { runId: "parameter-1", status: "completed", modelId: "model", modelConfigHash: null, strategy: "Same strategy", strategyHash: "same", callsUsed: 1, tokensUsed: 50, maxTokens: 60000, parameterValue: 80, metrics, evaluation: null },
+      { runId: "parameter-2", status: "completed", modelId: "model", modelConfigHash: null, strategy: "Same strategy", strategyHash: "same", callsUsed: 1, tokensUsed: 60, maxTokens: 60000, parameterValue: 70, metrics: { ...metrics, totalReturnPct: 2 }, evaluation: null },
+    ],
+    notice: "单参数历史对照，不作胜者判断。",
+  };
+  vi.mocked(api.fetchAIBacktests).mockResolvedValue({ items: records, nextCursor: null });
+  vi.mocked(api.compareAIBacktests).mockResolvedValue(comparison);
+  await render();
+  await act(async () => button("对照历史结果").click());
+  await act(async () => document.body.querySelector<HTMLInputElement>('input[aria-label="选择回测 parameter-1"]')!.click());
+  await act(async () => document.body.querySelector<HTMLInputElement>('input[aria-label="选择回测 parameter-2"]')!.click());
+  await chooseSelectOption("回测比较维度", "单参数");
+  await chooseSelectOption("回测比较参数", "持仓上限");
+  await act(async () => button("生成比较").click());
+  expect(api.compareAIBacktests).toHaveBeenCalledWith("a", { runIds: ["parameter-1", "parameter-2"], axis: "parameter", parameterKey: "maxPositionPct" });
+  expect(document.body.textContent).toContain("持仓上限（%）");
+  expect(document.body.textContent).toContain("80");
+  expect(document.body.textContent).toContain("70");
+  expect(document.body.textContent).toContain("4.00%");
 });
 
 it("locks comparison inputs during a request and unlocks them after failure", async () => {

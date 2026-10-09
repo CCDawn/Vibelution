@@ -426,6 +426,7 @@ def test_execution_uses_next_open_fees_slippage_lots_and_realized_trade_win_rate
     assert result["metrics"]["commissionFees"] == pytest.approx(62.37)
     assert result["metrics"]["stampDuty"] == pytest.approx(54.4)
     assert result["metrics"]["slippageCost"] == pytest.approx(198.0)
+    assert "maxParticipationPct" not in result["parameters"]
 
 
 def test_minimum_commission_and_cash_limit_reduce_fill_by_whole_lots():
@@ -446,6 +447,108 @@ def test_minimum_commission_and_cash_limit_reduce_fill_by_whole_lots():
 
     assert result["trades"][0]["shares"] == 400
     assert result["trades"][0]["commission"] == 5
+
+
+@pytest.mark.parametrize("value", [0, 0.09, 100.01, True, "not-a-number"])
+def test_max_participation_pct_requires_a_number_between_point_one_and_one_hundred(value):
+    with pytest.raises(BacktestInputError, match="maxParticipationPct"):
+        engine._normalize_params({"maxParticipationPct": value})
+
+
+@pytest.mark.parametrize("value", [0.1, 1, 100])
+def test_max_participation_pct_accepts_inclusive_bounds(value):
+    assert engine._normalize_params({"maxParticipationPct": value})[
+        "maxParticipationPct"
+    ] == Decimal(str(value))
+
+
+def test_daily_volume_cap_partially_fills_one_strategy_and_benchmark_order():
+    snapshot = _trading_snapshot(
+        [10, 10, 10],
+        volumes=[100_000, 100_000, 100_000],
+    )
+    result = engine.simulate(
+        snapshot,
+        {
+            "decisionInterval": 1,
+            "initialCash": 100_000,
+            "commissionBps": 0,
+            "minimumCommission": 0,
+            "slippageBps": 0,
+            "maxParticipationPct": 1,
+        },
+        _decisions(snapshot, [1, 0.1]),
+    )
+
+    strategy_order = result["orders"][0]
+    assert strategy_order["status"] == "partial_fill"
+    assert strategy_order["reason"] == "daily_volume_participation_limit"
+    assert strategy_order["requestedShares"] == 10_000
+    assert strategy_order["filledShares"] == 1_000
+    assert result["trades"][0]["shares"] == 1_000
+    assert result["parameters"]["maxParticipationPct"] == 1
+    assert result["orders"][1]["status"] == "no_action"
+    assert len(result["trades"]) == 1
+
+    benchmark_order = result["benchmarkOrders"][0]
+    assert benchmark_order["status"] == "partial_fill"
+    assert benchmark_order["requestedShares"] == 10_000
+    assert benchmark_order["filledShares"] == 1_000
+    assert result["equity"][1]["benchmarkShares"] == 1_000
+    assert "日线容量仅为近似" in " ".join(result["notice"])
+    assert "开盘真实可成交" in " ".join(result["notice"])
+
+
+def test_volume_cap_below_one_board_lot_rejects_without_losing_requested_shares():
+    snapshot = _trading_snapshot(
+        [10, 10, 10],
+        volumes=[100_000, 9_999, 100_000],
+    )
+    result = engine.simulate(
+        snapshot,
+        {
+            "decisionInterval": 1,
+            "initialCash": 100_000,
+            "commissionBps": 0,
+            "minimumCommission": 0,
+            "slippageBps": 0,
+            "maxParticipationPct": 1,
+        },
+        _decisions(snapshot, [1, 0.1]),
+    )
+
+    order = result["orders"][0]
+    assert order["status"] == "rejected"
+    assert order["reason"] == "volume_participation_below_one_lot"
+    assert order["requestedShares"] == 10_000
+    assert order["filledShares"] == 0
+
+
+def test_volume_limited_sell_is_partial_and_not_carried_as_a_pending_order():
+    snapshot = _trading_snapshot(
+        [10, 10, 10, 10],
+        volumes=[100_000, 100_000, 50_000, 100_000],
+    )
+    result = engine.simulate(
+        snapshot,
+        {
+            "decisionInterval": 1,
+            "initialCash": 10_000,
+            "commissionBps": 0,
+            "minimumCommission": 0,
+            "slippageBps": 0,
+            "maxParticipationPct": 1,
+        },
+        _decisions(snapshot, [1, 0, 0.51]),
+    )
+
+    sell_order = next(order for order in result["orders"] if order["side"] == "sell")
+    assert sell_order["status"] == "partial_fill"
+    assert sell_order["reason"] == "daily_volume_participation_limit"
+    assert sell_order["requestedShares"] == 1_000
+    assert sell_order["filledShares"] == 500
+    assert result["orders"][-1]["status"] == "no_action"
+    assert sum(trade["shares"] for trade in result["trades"] if trade["side"] == "sell") == 500
 
 
 @pytest.mark.parametrize(

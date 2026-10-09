@@ -98,9 +98,19 @@ def prepare_basket_data(
     *,
     warmup_bars: int = 252,
     today: date | datetime | str | None = None,
+    data_source: str = "tencent",
 ) -> BasketSnapshot:
     """Prepare and freeze every asset through the existing single-stock gate."""
     canonical = _canonical_symbols(symbols)
+    if data_source == "auto":
+        try:
+            return prepare_basket_data(canonical, start_date, end_date, warmup_bars=warmup_bars, today=today, data_source="tencent")
+        except (single_data.BacktestInputError, single_data.CorporateActionUnsupported):
+            raise
+        except single_data.BacktestDataError:
+            from dataclasses import replace
+            alternate = prepare_basket_data(canonical, start_date, end_date, warmup_bars=warmup_bars, today=today, data_source="eastmoney")
+            return replace(alternate, notice=alternate.notice + ("主来源未通过，整个组合改用东方财富重新取得完整快照；未跨来源拼接。",))
     assets: dict[str, single_data.BacktestSnapshot] = {}
     shared_dates: tuple[str, ...] | None = None
     for symbol in canonical:
@@ -110,6 +120,7 @@ def prepare_basket_data(
                 "startDate": start_date,
                 "endDate": end_date,
                 "warmupBars": warmup_bars,
+                "dataSource": data_source,
             },
             today=today,
         )

@@ -173,6 +173,13 @@ class FinancialBacktestWorker:
         is_basket = isinstance(snapshot, basket_data.BasketSnapshot)
         params = dict(run.get("params") or {})
         schedule = tuple(str(item) for item in run.get("decisionSchedule", []))
+        research_snapshot = _load_research_snapshot_for_run(
+            self._store,
+            agent_id,
+            run,
+            snapshot,
+            schedule,
+        )
         decisions = [dict(item) for item in run.get("decisions", []) if isinstance(item, Mapping)]
         by_date = {str(item.get("date") or ""): item for item in decisions}
         if run.get("resumeUnknownDecisionDate"):
@@ -211,12 +218,50 @@ class FinancialBacktestWorker:
                 previous.append(prior)
             if is_basket:
                 portfolio = portfolio_engine.portfolio_at(snapshot, params, previous, decision_date)
-                decision_input = build_basket_decision_input(
-                    snapshot, params, as_of_date=decision_date, portfolio=portfolio
-                )
+                if research_snapshot is not None:
+                    from core.web.services.financial_backtest.research_snapshot import (
+                        decision_research_material,
+                    )
+
+                    research_material = decision_research_material(
+                        research_snapshot,
+                        symbols=list(snapshot.symbols),
+                        decision_date=decision_date,
+                    )
+                    decision_input = build_basket_decision_input(
+                        snapshot,
+                        params,
+                        as_of_date=decision_date,
+                        portfolio=portfolio,
+                        research_material=research_material,
+                    )
+                else:
+                    decision_input = build_basket_decision_input(
+                        snapshot, params, as_of_date=decision_date, portfolio=portfolio
+                    )
             else:
                 portfolio = engine.portfolio_at(snapshot, params, previous, decision_date)
-                decision_input = build_decision_input(snapshot, params, as_of_date=decision_date, portfolio=portfolio)
+                if research_snapshot is not None:
+                    from core.web.services.financial_backtest.research_snapshot import (
+                        decision_research_material,
+                    )
+
+                    research_material = decision_research_material(
+                        research_snapshot,
+                        symbols=[snapshot.symbol],
+                        decision_date=decision_date,
+                    )
+                    decision_input = build_decision_input(
+                        snapshot,
+                        params,
+                        as_of_date=decision_date,
+                        portfolio=portfolio,
+                        research_material=research_material,
+                    )
+                else:
+                    decision_input = build_decision_input(
+                        snapshot, params, as_of_date=decision_date, portfolio=portfolio
+                    )
             input_hash = sha256_json(decision_input)
             reserved_call_tokens = reserve_decision_call(build_messages(decision_input))
             plan = run.get("reservationPlan") if isinstance(run.get("reservationPlan"), Mapping) else {}
@@ -801,6 +846,43 @@ def _restore_snapshot(payload: Mapping[str, Any]) -> data.BacktestSnapshot | bas
         return snapshot
     except (KeyError, TypeError, ValueError) as exc:
         raise FinancialBacktestConflict("已冻结回测行情快照格式无效") from exc
+
+
+def _load_research_snapshot_for_run(
+    store: FinancialBacktestStore,
+    agent_id: str,
+    run: Mapping[str, Any],
+    snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot,
+    schedule: tuple[str, ...],
+) -> dict[str, Any] | None:
+    """Restore only owner-local frozen research; never fetch during replay."""
+    mode = str(run.get("researchInput") or "price_only")
+    research_hash = str(run.get("researchHash") or "").strip()
+    if mode == "price_only":
+        if research_hash:
+            raise FinancialBacktestConflict("纯行情回测包含不匹配的公告摘要")
+        return None
+    if mode != "announcements" or not research_hash:
+        raise FinancialBacktestConflict("回测研究输入或公告快照引用无效")
+    if len(research_hash) != 64 or any(
+        char not in "0123456789abcdef" for char in research_hash
+    ):
+        raise FinancialBacktestConflict("回测公告快照摘要无效")
+    payload = store.load_research_snapshot(agent_id, research_hash)
+    from core.web.services.financial_backtest.research_snapshot import (
+        validate_research_snapshot,
+    )
+
+    symbols = list(snapshot.symbols) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot.symbol]
+    try:
+        return validate_research_snapshot(
+            payload,
+            expected_hash=research_hash,
+            symbols=symbols,
+            decision_dates=schedule,
+        )
+    except data.BacktestInputError as exc:
+        raise FinancialBacktestConflict("回测公告快照与冻结标的或决策计划不匹配") from exc
 
 
 def _safe_error_code(exc: Exception) -> str:

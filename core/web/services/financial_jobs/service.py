@@ -91,6 +91,13 @@ def create_financial_research_schedule(
     }
     if enabled:
         schedule["nextRunAt"] = schedule_next_run(schedule, now=normalized_now)
+    schedule["calendarStatus"] = (
+        "available"
+        if execution["kind"] == "trading_days" and schedule["nextRunAt"]
+        else "unavailable"
+        if execution["kind"] == "trading_days" and enabled
+        else None
+    )
 
     if execution["kind"] == "now":
         occurrence_time = normalized_now.astimezone(
@@ -103,6 +110,8 @@ def create_financial_research_schedule(
             "batchId": batch_id,
             "scheduledAt": occurrence_time.isoformat(timespec="seconds"),
             "triggeredAt": created_at,
+            "triggerReason": "immediate",
+            "skippedOccurrenceCount": 0,
             "researchDate": occurrence_research_date(
                 schedule, scheduled_at=occurrence_time, triggered_at=normalized_now
             ),
@@ -202,6 +211,10 @@ def update_financial_research_schedule(
             )
         schedule["enabled"] = bool(enabled)
         schedule["nextRunAt"] = next_run if enabled else None
+        if kind == "trading_days":
+            schedule["calendarStatus"] = (
+                "available" if enabled and next_run else "unavailable" if enabled else None
+            )
         schedule["updatedAt"] = iso_beijing(normalized_now)
         return schedule
 
@@ -270,6 +283,13 @@ def retry_financial_research_batch(
 
 def project_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
     execution = schedule.get("execution") if isinstance(schedule.get("execution"), dict) else {}
+    occurrence = schedule.get("lastOccurrence") if isinstance(schedule.get("lastOccurrence"), dict) else {}
+    kind = str(execution.get("kind") or "")
+    enabled = bool(schedule.get("enabled"))
+    next_run = schedule.get("nextRunAt")
+    calendar_status = None
+    if kind == "trading_days" and enabled:
+        calendar_status = "available" if next_run else "unavailable"
     return {
         "scheduleId": str(schedule.get("scheduleId") or ""),
         "assistantAgentId": str(schedule.get("assistantAgentId") or ""),
@@ -283,12 +303,16 @@ def project_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
             "timezone": "Asia/Shanghai",
         },
         "researchDate": schedule.get("researchDate"),
-        "enabled": bool(schedule.get("enabled")),
+        "enabled": enabled,
         "createdAt": str(schedule.get("createdAt") or ""),
         "updatedAt": str(schedule.get("updatedAt") or ""),
-        "nextRunAt": schedule.get("nextRunAt"),
+        "nextRunAt": next_run,
         "lastBatchId": schedule.get("lastBatchId"),
         "lastTriggeredAt": schedule.get("lastTriggeredAt"),
+        "calendarStatus": calendar_status,
+        "lastScheduledAt": occurrence.get("scheduledAt"),
+        "lastTriggerReason": occurrence.get("triggerReason"),
+        "lastSkippedOccurrenceCount": occurrence.get("skippedOccurrenceCount"),
     }
 
 
@@ -323,6 +347,9 @@ def project_batch(batch: dict[str, Any]) -> dict[str, Any]:
         "assistantAgentId": str(batch.get("assistantAgentId") or ""),
         "status": str(batch.get("status") or "queued"),
         "triggeredAt": str(batch.get("triggeredAt") or ""),
+        "scheduledAt": batch.get("scheduledAt"),
+        "triggerReason": batch.get("triggerReason"),
+        "skippedOccurrenceCount": batch.get("skippedOccurrenceCount"),
         "updatedAt": str(batch.get("updatedAt") or ""),
         "researchDate": str(batch.get("researchDate") or ""),
         "periodDays": int(batch.get("periodDays") or 0),

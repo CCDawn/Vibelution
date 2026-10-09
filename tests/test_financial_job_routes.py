@@ -130,6 +130,47 @@ def test_http_create_get_and_patch_use_private_schedule_service_without_get_prov
     assert provision_calls == [ASSISTANT_ID]
 
 
+def test_http_create_exposes_a_share_trading_calendar_schedule(tmp_path, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    store = FinancialResearchJobStore(
+        path_resolver=lambda owner: tmp_path / f"{owner}-jobs.json"
+    )
+    monkeypatch.setattr(financial_jobs_impl, "default_store", lambda: store)
+    monkeypatch.setattr(
+        financial_jobs_impl,
+        "parse_now",
+        lambda _now=None: datetime(2026, 10, 10, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+    monkeypatch.setattr(
+        financial_team_service, "get_financial_team", lambda _assistant_id: {"teamId": "team"}
+    )
+    monkeypatch.setattr(
+        financial_team_service, "provision_financial_team", lambda _assistant_id: None
+    )
+    payload = _daily_request(
+        symbols=["600000", "000001", "830001"],
+        execution={
+            "kind": "trading_days",
+            "timezone": "Asia/Shanghai",
+            "timeOfDay": "18:00",
+        },
+    )
+    response = _client().post(
+        f"/api/financial-jobs/{ASSISTANT_ID}/schedules",
+        headers={"Idempotency-Key": "http-trading-days-schedule-01"},
+        json=payload,
+    )
+
+    assert response.status_code == 200, response.text
+    schedule = response.json()["schedule"]
+    assert schedule["symbols"] == ["sh600000", "sz000001", "bj830001"]
+    assert schedule["execution"]["kind"] == "trading_days"
+    assert schedule["nextRunAt"] == "2026-10-12T18:00:00+08:00"
+    assert schedule["calendarStatus"] == "available"
+
+
 @pytest.mark.parametrize(
     "payload,headers",
     [

@@ -103,7 +103,7 @@ def test_fill_fees_are_attributed_to_their_fixed_window_only():
         },
         {
             "date": tail_date,
-            "status": "filled",
+            "status": "partial_fill",
             "filledShares": 100,
             "notional": 110,
             "fee": 7,

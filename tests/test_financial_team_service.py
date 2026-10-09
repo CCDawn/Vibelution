@@ -15,6 +15,7 @@ from core.web.services import (
     session_service,
     team_service,
 )
+from core.web.services.financial_report import team_evidence
 from core.web.services.financial_team import provisioning, runs
 from core.web.services.session import directory_runtime
 from core.web.services.team import role_definition_service, team_format
@@ -1164,12 +1165,18 @@ def test_team_synthesis_submission_passes_its_model_selection(monkeypatch):
         run["analysts"][role]["turnId"] = f"turn-{role}"
     monkeypatch.setattr(runs, "_final_answer_for_turn", lambda _session, _turn: "已完成分析")
     monkeypatch.setattr(runs, "require_current_financial_team_run_bindings", lambda *_args: None)
+    monkeypatch.setattr(team_evidence, "synthesis_tool_references", lambda owner, selected: [{
+        "source": "新闻分析师", "type": "native_financial_tool_result",
+        "content": json.dumps({"toolName": "news_search_tool", "ticker": "sh600519"}),
+        "truncated": False,
+    }])
 
     runs.submit_financial_team_synthesis("owner-1", "run-1")
 
     assert captured["submissions"] == [
         {"session_id": "session-owner", "model_selection": selection}
     ]
+    assert "news_search_tool" in str(captured["prompt"])
 
 
 def test_fundamental_primary_prompt_carries_sourced_public_metrics_as_untrusted_quotes(

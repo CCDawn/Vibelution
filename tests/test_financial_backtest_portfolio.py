@@ -151,6 +151,80 @@ def test_shared_cash_competition_applies_fees_and_orders_buys_canonically():
     assert all(trade["symbol"] in snapshot.symbols for trade in result["trades"])
 
 
+def test_volume_cap_limits_strategy_and_fixed_benchmark_sleeves_without_carryover():
+    symbol = "sh600000"
+    snapshot = _basket(
+        {symbol: [10, 10, 10]},
+        volumes={symbol: [10_000, 10_000, 10_000]},
+    )
+    weights = [{symbol: 1.0}, {symbol: 0.1}]
+    decisions = _decisions(snapshot, weights)
+
+    result = portfolio_engine.simulate(
+        snapshot,
+        _params(
+            initialCash=10_000,
+            commissionBps=0,
+            minimumCommission=0,
+            slippageBps=0,
+            maxParticipationPct=1,
+        ),
+        decisions,
+    )
+
+    strategy_order = result["orders"][0]
+    assert strategy_order["status"] == "partial_fill"
+    assert strategy_order["reason"] == "daily_volume_participation_limit"
+    assert strategy_order["requestedShares"] == 1_000
+    assert strategy_order["filledShares"] == 100
+    assert result["orders"][1]["status"] == "no_action"
+    assert len(result["trades"]) == 1
+
+    benchmark_order = result["benchmarkOrders"][0]
+    assert benchmark_order["status"] == "partial_fill"
+    assert benchmark_order["requestedShares"] == 1_000
+    assert benchmark_order["filledShares"] == 100
+    assert result["benchmarkStatus"] == "invested"
+    assert result["unfilledBenchmarkSymbols"] == []
+    assert result["equity"][1]["benchmarkPositions"][symbol] == 100
+    assert result["equity"][1]["benchmarkCash"] == 9_000
+
+
+def test_volume_cap_partially_fills_portfolio_sell_without_carrying_remainder():
+    symbol = "sh600000"
+    snapshot = _basket(
+        {symbol: [10, 10, 10, 10]},
+        volumes={symbol: [100_000, 100_000, 50_000, 100_000]},
+    )
+    decisions = _decisions(
+        snapshot,
+        [{symbol: 1.0}, {symbol: 0.0}, {symbol: 0.51}],
+    )
+
+    result = portfolio_engine.simulate(
+        snapshot,
+        _params(
+            initialCash=10_000,
+            commissionBps=0,
+            minimumCommission=0,
+            slippageBps=0,
+            maxParticipationPct=1,
+        ),
+        decisions,
+    )
+
+    assert result["orders"][0]["status"] == "filled"
+    sell_order = result["orders"][1]
+    assert sell_order["side"] == "sell"
+    assert sell_order["status"] == "partial_fill"
+    assert sell_order["reason"] == "daily_volume_participation_limit"
+    assert sell_order["requestedShares"] == 1_000
+    assert sell_order["filledShares"] == 500
+    assert result["orders"][2]["status"] == "no_action"
+    assert result["trades"][-1]["side"] == "sell"
+    assert result["trades"][-1]["shares"] == 500
+
+
 def test_benchmark_starts_at_same_next_open_and_holdout_baseline_as_strategy():
     snapshot = _basket({"sh600000": [10, 10, 10], "sh600001": [10, 10, 10]})
     assets = dict(snapshot.assets)

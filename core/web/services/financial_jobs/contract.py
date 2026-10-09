@@ -2,20 +2,34 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo
 
 from core.web.services import financial_market_service as market
+from core.web.services.financial_market.trading_calendar import (
+    TradingCalendarUnavailable,
+    is_a_share_trading_day,
+)
 
 from .errors import FinancialJobValidationError
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 ALLOWED_PERIODS = frozenset({7, 30, 90})
 ALLOWED_DEPTHS = frozenset({"brief", "basic", "standard", "detailed", "exhaustive"})
-EXECUTION_KINDS = frozenset({"now", "once", "daily", "weekdays"})
+EXECUTION_KINDS = frozenset({"now", "once", "daily", "weekdays", "trading_days"})
 MAX_SYMBOLS = 10
+_A_SHARE_SYMBOL = re.compile(r"^(?:sh|sz|bj)\d{6}$")
+
+
+@dataclass(frozen=True)
+class DueOccurrence:
+    scheduled_at: datetime
+    trigger_reason: str = "scheduled"
+    skipped_occurrence_count: int = 0
 
 
 def normalize_create_request(
@@ -55,6 +69,8 @@ def normalize_create_request(
     kind = str(raw_execution.get("kind") or "").strip().lower()
     if kind not in EXECUTION_KINDS:
         raise FinancialJobValidationError("执行方式无效")
+    if kind == "trading_days" and any(not _A_SHARE_SYMBOL.fullmatch(item) for item in symbols):
+        raise FinancialJobValidationError("A股交易日计划仅支持沪、深、北交所 A 股")
     if str(raw_execution.get("timezone") or "").strip() != "Asia/Shanghai":
         raise FinancialJobValidationError("执行时区必须是 Asia/Shanghai")
 
@@ -133,6 +149,19 @@ def schedule_next_run(
     hour, minute = (int(part) for part in time_of_day.split(":"))
     local_now = now.astimezone(BEIJING)
     start_day = local_now.date()
+    if kind == "trading_days":
+        for offset in range(370):
+            candidate_day = start_day + timedelta(days=offset)
+            try:
+                is_trading_day = is_a_share_trading_day(candidate_day)
+            except TradingCalendarUnavailable:
+                return None
+            if not is_trading_day:
+                continue
+            candidate = datetime.combine(candidate_day, time(hour, minute), tzinfo=BEIJING)
+            if candidate > local_now if strictly_future else candidate >= local_now:
+                return _iso_beijing(candidate)
+        return None
     for offset in range(8):
         candidate_day = start_day + timedelta(days=offset)
         if kind == "weekdays" and candidate_day.weekday() >= 5:
@@ -144,6 +173,13 @@ def schedule_next_run(
 
 
 def due_occurrence(schedule: dict[str, Any], *, now: datetime) -> datetime | None:
+    result = due_occurrence_details(schedule, now=now)
+    return result.scheduled_at if result is not None else None
+
+
+def due_occurrence_details(
+    schedule: dict[str, Any], *, now: datetime
+) -> DueOccurrence | None:
     if not bool(schedule.get("enabled")):
         return None
     execution = schedule.get("execution") if isinstance(schedule.get("execution"), dict) else {}
@@ -158,13 +194,54 @@ def due_occurrence(schedule: dict[str, Any], *, now: datetime) -> datetime | Non
         if parsed_candidate.tzinfo is None:
             return None
         candidate = parsed_candidate.astimezone(BEIJING)
-    elif kind in {"daily", "weekdays"}:
+    elif kind in {"daily", "weekdays", "trading_days"}:
         time_of_day = str(execution.get("timeOfDay") or "")
         if not _valid_time_of_day(time_of_day):
             return None
+        hour, minute = (int(part) for part in time_of_day.split(":"))
+        if kind == "trading_days":
+            raw_next_run = str(schedule.get("nextRunAt") or "").strip()
+            if not raw_next_run:
+                return None
+            try:
+                next_run = datetime.fromisoformat(raw_next_run.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if next_run.tzinfo is None:
+                return None
+            next_run = next_run.astimezone(BEIJING)
+            if next_run > local_now:
+                return None
+            first_day = next_run.date()
+            candidate = None
+            due_count = 0
+            day = first_day
+            while day <= local_now.date():
+                try:
+                    is_trading_day = is_a_share_trading_day(day)
+                except TradingCalendarUnavailable:
+                    return None
+                if is_trading_day:
+                    planned = datetime.combine(day, time(hour, minute), tzinfo=BEIJING)
+                    if planned >= next_run and planned <= local_now:
+                        candidate = planned
+                        due_count += 1
+                day += timedelta(days=1)
+            if candidate is None:
+                return None
+            last = schedule.get("lastOccurrence") if isinstance(schedule.get("lastOccurrence"), dict) else {}
+            last_scheduled = str(last.get("scheduledAt") or "").strip()
+            if last_scheduled and _same_instant(last_scheduled, candidate):
+                return None
+            missed = max(0, due_count - 1)
+            late_calendar_day = candidate.date() < local_now.date()
+            return DueOccurrence(
+                scheduled_at=candidate,
+                trigger_reason=("downtime_catch_up" if missed or late_calendar_day else "scheduled"),
+                skipped_occurrence_count=missed,
+            )
         if kind == "weekdays" and local_now.weekday() >= 5:
             return None
-        hour, minute = (int(part) for part in time_of_day.split(":"))
         candidate = datetime.combine(local_now.date(), time(hour, minute), tzinfo=BEIJING)
     else:
         return None
@@ -183,7 +260,7 @@ def due_occurrence(schedule: dict[str, Any], *, now: datetime) -> datetime | Non
     last_scheduled = str(last.get("scheduledAt") or "").strip()
     if last_scheduled and _same_instant(last_scheduled, candidate):
         return None
-    return candidate
+    return DueOccurrence(scheduled_at=candidate)
 
 
 def occurrence_batch_id(schedule_id: str, scheduled_at: datetime) -> str:
@@ -200,7 +277,11 @@ def occurrence_research_date(
     fixed = str(schedule.get("researchDate") or "").strip()
     if fixed:
         return fixed
-    # Recurring jobs always use the date actually triggered in Beijing time.
+    # Exchange-calendar jobs replay the date that was actually scheduled. They
+    # must not silently use today's sources for a missed historical run.
+    if str((schedule.get("execution") or {}).get("kind") or "") == "trading_days":
+        return scheduled_at.astimezone(BEIJING).date().isoformat()
+    # Legacy recurring jobs continue to use the actual trigger date.
     if str((schedule.get("execution") or {}).get("kind") or "") in {"daily", "weekdays"}:
         return triggered_at.astimezone(BEIJING).date().isoformat()
     return triggered_at.astimezone(BEIJING).date().isoformat()
@@ -287,6 +368,7 @@ __all__ = [
     "canonical_batch_id",
     "canonical_schedule_id",
     "due_occurrence",
+    "due_occurrence_details",
     "iso_beijing",
     "iso_utc",
     "normalize_create_request",

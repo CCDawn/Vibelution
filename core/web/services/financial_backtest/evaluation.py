@@ -36,7 +36,7 @@ def _window(
         order
         for order in orders
         if first <= str(order.get("date", "")) <= last
-        and order.get("status") == "filled"
+        and order.get("status") in {"filled", "partial_fill"}
         and int(order.get("filledShares", 0)) > 0
     ]
 

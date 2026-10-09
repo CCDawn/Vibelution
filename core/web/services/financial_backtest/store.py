@@ -60,7 +60,7 @@ class FinancialBacktestStore:
             raw = str(root)
             root = Path("\\\\?\\UNC\\" + raw[2:] if raw.startswith("\\\\") else "\\\\?\\" + raw)
         if create:
-            for name in ("snapshots", "previews", "runs"):
+            for name in ("snapshots", "research-snapshots", "previews", "runs"):
                 (root / name).mkdir(parents=True, exist_ok=True)
         return root
 
@@ -96,6 +96,68 @@ class FinancialBacktestStore:
         except Exception as exc:
             raise FinancialBacktestStoreError("回测历史行情内容校验失败") from exc
         return snapshot
+
+    def save_research_snapshot(
+        self, agent_id: str, payload: Mapping[str, Any]
+    ) -> str:
+        """Persist one immutable announcement snapshot by verified content hash."""
+        from core.web.services.financial_backtest.research_snapshot import (
+            validate_research_snapshot,
+        )
+
+        try:
+            snapshot = validate_research_snapshot(payload)
+        except Exception as exc:  # Invalid evidence must not be persisted.
+            raise FinancialBacktestStoreError("历史公告快照无法通过完整性校验") from exc
+        research_hash = str(snapshot["researchHash"])
+        path = (
+            self.root_for(agent_id, create=True)
+            / "research-snapshots"
+            / f"{research_hash}.json"
+        )
+        lock = self._lock_for(path)
+        with lock, cross_process_file_lock(
+            path, lock_path=self._lock_path(path), timeout=30.0
+        ):
+            if path.exists():
+                try:
+                    existing = validate_research_snapshot(
+                        self._read(path, "历史公告快照"),
+                        expected_hash=research_hash,
+                        symbols=snapshot["symbols"],
+                        decision_dates=snapshot["decisionDates"],
+                    )
+                except Exception as exc:  # Never overwrite corrupt immutable evidence.
+                    raise FinancialBacktestStoreError(
+                        "已冻结历史公告快照与摘要不匹配"
+                    ) from exc
+                if existing != snapshot:
+                    raise FinancialBacktestStoreError(
+                        "同一历史公告摘要对应不同快照内容"
+                    )
+                return research_hash
+            self._write(path, snapshot, "历史公告快照")
+        return research_hash
+
+    def load_research_snapshot(
+        self, agent_id: str, research_hash: str
+    ) -> dict[str, Any]:
+        """Load and rehash a frozen announcement snapshot without source reads."""
+        from core.web.services.financial_backtest.research_snapshot import (
+            validate_research_snapshot,
+        )
+
+        canonical = str(research_hash or "").strip()
+        if len(canonical) != 64 or any(
+            char not in "0123456789abcdef" for char in canonical
+        ):
+            raise FinancialBacktestNotFound("历史公告快照不存在")
+        path = self.root_for(agent_id) / "research-snapshots" / f"{canonical}.json"
+        payload = self._read(path, "历史公告快照")
+        try:
+            return validate_research_snapshot(payload, expected_hash=canonical)
+        except Exception as exc:  # Corrupt or mismatched history fails closed.
+            raise FinancialBacktestStoreError("历史公告快照摘要校验失败") from exc
 
     def save_preview(self, agent_id: str, preview: Mapping[str, Any]) -> dict[str, Any]:
         owner_id = str(agent_id or "").strip()

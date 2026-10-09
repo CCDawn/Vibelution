@@ -15,7 +15,9 @@ export function FinanceBacktest(props: BacktestProps) {
   const [mode, setMode] = useState("ai");
   return <div className={styles.panel}>
     <div className={styles.modeRow}><h3 className={styles.title}>{props.zh ? "历史回测" : "Backtest"}</h3><VSelect aria-label="回测模式" className={styles.modeSelect} selectedKey={mode} options={[{ id: "ai", label: props.zh ? "AI策略回测" : "AI strategy" }, { id: "ma", label: props.zh ? "均线策略对照" : "MA reference" }]} onSelectionChange={key => setMode(String(key))} /></div>
-    {mode === "ai" ? <FinanceAIBacktest key={props.agentId} {...props} /> : <FinanceMABacktest key={`${props.agentId}:${props.stock.symbol}`} {...props} />}
+    {/* Native research readiness only gates the MA result's research action.
+        AI backtests own their model/budget checks and do not submit a chat turn. */}
+    {mode === "ai" ? <FinanceAIBacktest key={props.agentId} {...props} disabled={false} /> : <FinanceMABacktest key={`${props.agentId}:${props.stock.symbol}`} {...props} />}
   </div>;
 }
 export function FinanceMABacktest({ agentId, stock, zh, onResearchPrompt, disabled, availableDates }: BacktestProps) {

@@ -158,6 +158,7 @@ def _execute_target(
     commission_rate: Decimal,
     minimum_commission: Decimal,
     slippage_rate: Decimal,
+    max_participation_pct: Decimal | None = None,
 ) -> tuple[
     Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal
 ]:
@@ -193,7 +194,47 @@ def _execute_target(
         return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
 
     if side == "buy":
-        filled = (requested // _LOT_SIZE) * _LOT_SIZE
+        executable_requested = (requested // _LOT_SIZE) * _LOT_SIZE
+    else:
+        executable_requested = (min(shares, requested) // _LOT_SIZE) * _LOT_SIZE
+        if not executable_requested:
+            order = _symbol_order(
+                symbol=symbol,
+                signal_date=signal_date,
+                candle=execution,
+                side=side,
+                status="rejected",
+                reason="no_sellable_board_lot",
+                requested_shares=requested,
+            )
+            return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
+
+    participation_cap = single_engine._max_participation_shares(
+        execution, max_participation_pct
+    )
+    volume_limited = (
+        participation_cap is not None
+        and participation_cap < executable_requested
+    )
+    fill_limit = (
+        executable_requested
+        if participation_cap is None
+        else min(executable_requested, participation_cap)
+    )
+    if executable_requested and fill_limit == 0:
+        order = _symbol_order(
+            symbol=symbol,
+            signal_date=signal_date,
+            candle=execution,
+            side=side,
+            status="rejected",
+            reason="volume_participation_below_one_lot",
+            requested_shares=requested,
+        )
+        return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
+
+    if side == "buy":
+        filled = fill_limit
         while filled:
             notional = Decimal(filled) * fill_price
             commission = single_engine._fee(
@@ -215,7 +256,7 @@ def _execute_target(
             )
             return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
     else:
-        filled = min(shares, requested)
+        filled = min(shares, fill_limit)
         filled = (filled // _LOT_SIZE) * _LOT_SIZE
         if not filled:
             order = _symbol_order(
@@ -261,9 +302,15 @@ def _execute_target(
         signal_date=signal_date,
         candle=execution,
         side=side,
-        status="filled",
+        status="partial_fill" if volume_limited else "filled",
         reason=(
-            "next_session_open" if filled == requested else "cash_limited_board_lots"
+            "daily_volume_participation_limit"
+            if volume_limited
+            else (
+                "next_session_open"
+                if filled == requested
+                else "cash_limited_board_lots"
+            )
         ),
         requested_shares=requested,
         filled_shares=filled,
@@ -304,6 +351,7 @@ def _execute_benchmark_sleeve(
     commission_rate: Decimal,
     minimum_commission: Decimal,
     slippage_rate: Decimal,
+    max_participation_pct: Decimal | None = None,
 ) -> tuple[Decimal, int, dict[str, Any]]:
     """Buy one equal-weight sleeve, reserving cash for every applicable fee."""
     fill_price, per_share_slippage = single_engine._execution_price(
@@ -325,7 +373,32 @@ def _execute_benchmark_sleeve(
             ),
         )
     requested = single_engine._shares_for_target(cash, fill_price)
-    filled = requested
+    participation_cap = single_engine._max_participation_shares(
+        execution, max_participation_pct
+    )
+    volume_limited = (
+        participation_cap is not None and participation_cap < requested
+    )
+    fill_limit = (
+        requested
+        if participation_cap is None
+        else min(requested, participation_cap)
+    )
+    if requested and fill_limit == 0:
+        return (
+            cash,
+            0,
+            _symbol_order(
+                symbol=symbol,
+                signal_date=execution.date,
+                candle=execution,
+                side="buy",
+                status="rejected",
+                reason="volume_participation_below_one_lot",
+                requested_shares=requested,
+            ),
+        )
+    filled = fill_limit
     while filled:
         notional = Decimal(filled) * fill_price
         commission = single_engine._fee(notional, commission_rate, minimum_commission)
@@ -356,8 +429,12 @@ def _execute_benchmark_sleeve(
         signal_date=execution.date,
         candle=execution,
         side="buy",
-        status="filled",
-        reason="same_cost_buy_and_hold_benchmark",
+        status="partial_fill" if volume_limited else "filled",
+        reason=(
+            "daily_volume_participation_limit"
+            if volume_limited
+            else "same_cost_buy_and_hold_benchmark"
+        ),
         requested_shares=requested,
         filled_shares=filled,
         fill_price=fill_price,
@@ -429,6 +506,7 @@ def _simulate_prefix(
     commission_rate: Decimal = normalized["commissionBps"] / _BPS
     minimum_commission: Decimal = normalized["minimumCommission"]
     slippage_rate: Decimal = normalized["slippageBps"] / _BPS
+    max_participation_pct: Decimal | None = normalized.get("maxParticipationPct")
     cash = initial_cash
     shares = {symbol: 0 for symbol in symbols}
     cost_basis = {symbol: Decimal(0) for symbol in symbols}
@@ -473,11 +551,12 @@ def _simulate_prefix(
                     commission_rate=commission_rate,
                     minimum_commission=minimum_commission,
                     slippage_rate=slippage_rate,
+                    max_participation_pct=max_participation_pct,
                     symbol=symbol,
                 )
             )
             benchmark_orders.append(order)
-            if order.get("status") == "filled":
+            if order.get("status") in {"filled", "partial_fill"}:
                 benchmark_filled.add(symbol)
                 benchmark_commission += Decimal(str(order.get("commission") or 0))
                 benchmark_stamp += Decimal(str(order.get("stampDuty") or 0))
@@ -515,6 +594,7 @@ def _simulate_prefix(
                         commission_rate=commission_rate,
                         minimum_commission=minimum_commission,
                         slippage_rate=slippage_rate,
+                        max_participation_pct=max_participation_pct,
                     )
                 )
                 session_orders.append(order)
@@ -554,6 +634,7 @@ def _simulate_prefix(
                         commission_rate=commission_rate,
                         minimum_commission=minimum_commission,
                         slippage_rate=slippage_rate,
+                        max_participation_pct=max_participation_pct,
                     )
                 )
                 session_orders.append(order)
@@ -573,6 +654,7 @@ def _simulate_prefix(
                         commission_rate=commission_rate,
                         minimum_commission=minimum_commission,
                         slippage_rate=slippage_rate,
+                        max_participation_pct=max_participation_pct,
                     )
                 )
                 session_orders.append(order)
@@ -674,6 +756,16 @@ def _simulate_prefix(
         if not unfilled_benchmark
         else ("partial_cash_sleeves" if benchmark_filled else "cash_only")
     )
+    notices = [
+        "A股组合使用共享现金，按100股整手买卖、禁止做空；收盘信号下一共同交易日开盘执行。",
+        "同一开盘先按交易前组合权益计算全部目标股数，再卖后买；买单按规范股票代码顺序竞争现金。",
+        "基准为每只股票预留等额固定现金份额；无成交的拒单日可在后续交易日重试，首笔完整或部分成交即固定买持，剩余现金保留。",
+        "期末持仓按收盘价估值，不假设强制平仓；回测不代表真实订单可成交或未来收益。",
+    ]
+    if max_participation_pct is not None:
+        notices.append(
+            f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%并下取整至100股；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
+        )
     return {
         "status": "completed",
         "symbols": list(symbols),
@@ -701,13 +793,7 @@ def _simulate_prefix(
             key: float(value) if isinstance(value, Decimal) else value
             for key, value in normalized.items()
         },
-        "notice": list(snapshot.notice)
-        + [
-            "A股组合使用共享现金，按100股整手买卖、禁止做空；收盘信号下一共同交易日开盘执行。",
-            "同一开盘先按交易前组合权益计算全部目标股数，再卖后买；买单按规范股票代码顺序竞争现金。",
-            "基准将初始资金等分为固定股票现金份额，从首个信号的下一交易日开盘起尝试买入；未成交份额保留现金并逐日重试。",
-            "期末持仓按收盘价估值，不假设强制平仓；回测不代表真实订单可成交或未来收益。",
-        ],
+        "notice": list(snapshot.notice) + notices,
     }
 
 

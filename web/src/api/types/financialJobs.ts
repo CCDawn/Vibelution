@@ -1,6 +1,6 @@
 import type { FinancialTeamRunCreateRequest } from "./financialTeam";
 
-export type FinancialJobExecutionKind = "now" | "once" | "daily" | "weekdays";
+export type FinancialJobExecutionKind = "now" | "once" | "daily" | "weekdays" | "trading_days";
 export type FinancialJobDepth = FinancialTeamRunCreateRequest["depth"];
 export type FinancialJobPeriod = FinancialTeamRunCreateRequest["periodDays"];
 
@@ -38,6 +38,10 @@ export type FinancialResearchSchedule = {
   nextRunAt: string | null;
   lastBatchId: string | null;
   lastTriggeredAt: string | null;
+  calendarStatus?: "available" | "unavailable" | null;
+  lastScheduledAt?: string | null;
+  lastTriggerReason?: "scheduled" | "downtime_catch_up" | "immediate" | null;
+  lastSkippedOccurrenceCount?: number | null;
 };
 
 export type FinancialResearchBatchStatus = "queued" | "running" | "stop_requested" | "completed" | "partial" | "failed" | "stopped" | "blocked";
@@ -65,6 +69,9 @@ export type FinancialResearchBatch = {
   assistantAgentId: string;
   status: FinancialResearchBatchStatus;
   triggeredAt: string;
+  scheduledAt?: string | null;
+  triggerReason?: "scheduled" | "downtime_catch_up" | "immediate" | null;
+  skippedOccurrenceCount?: number | null;
   updatedAt: string;
   researchDate: string;
   periodDays: FinancialJobPeriod;

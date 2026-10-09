@@ -87,8 +87,26 @@ def create_financial_backtest_fork_preview(
     source_run = selected_store.load_run(agent_id, source_run_id)
     snapshot = _load_run_snapshot(agent_id, source_run, selected_store)
     overrides = dict(payload or {})
-    if set(overrides) - {"strategy", "modelId", "maxTokens"}:
-        raise FinancialBacktestConflict("派生预览只允许覆盖strategy、modelId或maxTokens")
+    parameter_override_keys = {
+        "maxPositionPct",
+        "decisionInterval",
+        "commissionBps",
+        "minimumCommission",
+        "slippageBps",
+        "maxParticipationPct",
+    }
+    allowed_override_keys = {"strategy", "modelId", "maxTokens", *parameter_override_keys}
+    if set(overrides) - allowed_override_keys:
+        raise FinancialBacktestConflict("派生预览包含不支持的覆盖字段")
+    selected_parameter_overrides = {
+        key: overrides[key]
+        for key in parameter_override_keys
+        if key in overrides
+    }
+    if any(value is None for value in selected_parameter_overrides.values()):
+        raise FinancialBacktestConflict("回测参数覆盖值不能为空")
+    if len(selected_parameter_overrides) > 1:
+        raise FinancialBacktestConflict("单次派生预览最多更改一项回测参数")
 
     source_params = dict(source_run.get("params") or {})
     source_model_id = str(source_run.get("modelId") or "").strip()
@@ -107,6 +125,7 @@ def create_financial_backtest_fork_preview(
         ),
         "initialCash": source_params.get("initialCash", 100_000),
         "maxPositionPct": source_params.get("maxPositionPct", 100),
+        "maxParticipationPct": source_params.get("maxParticipationPct", 1),
         "decisionInterval": source_params.get("decisionInterval", 5),
         "commissionBps": source_params.get("commissionBps", 3),
         "minimumCommission": source_params.get("minimumCommission", 5),
@@ -118,15 +137,31 @@ def create_financial_backtest_fork_preview(
             else overrides["maxTokens"]
         ),
         "modelId": source_model_id if overrides.get("modelId") is None else overrides["modelId"],
+        "researchInput": source_run.get("researchInput", "price_only"),
     }
+    request_payload.update(selected_parameter_overrides)
     request = normalize_preview_request(request_payload)
+    # A fork preserves the source execution contract, including old uncapped runs.
+    if (
+        "maxParticipationPct" not in source_params
+        and "maxParticipationPct" not in selected_parameter_overrides
+    ):
+        request["params"].pop("maxParticipationPct", None)
     model_id = str(request.get("modelId") or "").strip()
     if not model_id:
         raise FinancialBacktestConflict("派生预览必须选择对话模型")
     candidate_source = _validate_candidate_model(model_id)
+    # _load_run_snapshot above revalidated this source schedule against its original persisted params.
     source_schedule = tuple(str(item) for item in source_run.get("decisionSchedule", []))
     expected_schedule = _build_schedule(snapshot, request)
-    if not source_schedule or source_schedule != expected_schedule:
+    research_input = source_run.get("researchInput", "price_only")
+    source_interval = int(source_params.get("decisionInterval", 5))
+    requested_interval = int(request["params"].get("decisionInterval", 5))
+    if research_input == "announcements" and requested_interval != source_interval:
+        raise FinancialBacktestConflict(
+            "公告研究快照绑定源回测决策日程；更改决策频率不能重新联网补取公告"
+        )
+    if research_input == "announcements" and source_schedule != expected_schedule:
         raise FinancialBacktestConflict("来源回测决策计划与冻结行情或参数不匹配，无法安全派生")
     preview = _create_preview(
         agent_id,
@@ -134,10 +169,11 @@ def create_financial_backtest_fork_preview(
         selected_store,
         model_id=model_id,
         snapshot=snapshot,
-        schedule=source_schedule,
+        schedule=expected_schedule,
         now_provider=now_provider,
         source_run_id=str(source_run.get("runId") or source_run_id),
         model_candidate_source=candidate_source,
+        frozen_research=_load_research_snapshot(agent_id, source_run, selected_store),
     )
     from core.web.services.financial_backtest.runtime import _record_event
 
@@ -163,13 +199,15 @@ def _create_preview(
     now_provider: Callable[[], datetime] | None = None,
     source_run_id: str | None = None,
     model_candidate_source: str | None = None,
+    frozen_research: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     model_fingerprint = _model_fingerprint(model_id)
     if request["mode"] == "basket":
         if snapshot is None:
             loader = data_loader or (
                 lambda value: basket_data.prepare_basket_data(
-                    value["symbols"], value["startDate"], value["endDate"]
+                    value["symbols"], value["startDate"], value["endDate"],
+                    data_source=value.get("dataSource", "tencent"),
                 )
             )
             snapshot = loader(request)
@@ -209,6 +247,24 @@ def _create_preview(
         source_url = snapshot.source_url
         fetched_at = snapshot.fetched_at
 
+    research_mode = request.get("researchInput", "price_only")
+    research_hash = None
+    research_coverage = None
+    if research_mode == "announcements":
+        from .research_snapshot import (
+            freeze_announcement_research_snapshot,
+            research_coverage_summary,
+            validate_research_snapshot,
+        )
+        frozen_research = validate_research_snapshot(
+            frozen_research, symbols=symbols, decision_dates=schedule,
+        ) if frozen_research is not None else freeze_announcement_research_snapshot(symbols, schedule)
+        research_hash = frozen_research["researchHash"]
+        research_coverage = research_coverage_summary(frozen_research)
+        selected_store.save_research_snapshot(agent_id, frozen_research)
+    elif frozen_research is not None:
+        raise FinancialBacktestConflict("纯行情回测不能混入历史公告快照")
+
     params = {**request["params"], "strategy": request["strategy"], "maxTokens": request["maxTokens"]}
     out_of_sample_start_date = _out_of_sample_start_date(
         snapshot, request.get("outOfSampleStartDate")
@@ -225,12 +281,16 @@ def _create_preview(
             "params": request["params"],
             "maxTokens": request["maxTokens"],
             "modelId": model_id,
+            "researchInput": research_mode,
+            "researchHash": research_hash,
         }
     )
     selected_store.save_snapshot(agent_id, snapshot_payload)
     now = _now(now_provider)
     expires_at = now + timedelta(seconds=PREVIEW_TTL_SECONDS)
-    estimated_tokens, reserved_output_tokens, reservation_plan = _estimate_budget(snapshot, params, schedule)
+    estimated_tokens, reserved_output_tokens, reservation_plan = _estimate_budget(
+        snapshot, params, schedule, research_snapshot=frozen_research,
+    )
     max_tokens = int(request["maxTokens"])
     can_start = estimated_tokens <= max_tokens
     block_reason = None if can_start else f"預估需要約{estimated_tokens:,} tokens，超出本次预算{max_tokens:,} tokens"
@@ -256,6 +316,9 @@ def _create_preview(
         "modelConfigHash": model_fingerprint,
         "paramsHash": params_hash,
         "dataHash": snapshot.data_hash,
+        "researchInput": research_mode,
+        "researchHash": research_hash,
+        "researchCoverage": research_coverage,
         "actionsStatus": actions_status,
         "actionDates": action_dates,
         "canStart": can_start,
@@ -265,7 +328,7 @@ def _create_preview(
         "sourceUrl": source_url,
         "fetchedAt": fetched_at,
         "adjustment": "raw",
-        "notice": "\n".join(snapshot.notice),
+        "notice": "\n".join(snapshot.notice) + ("\n" + research_coverage["notice"] if research_coverage else ""),
         "params": public_params,
         "_modelFingerprint": model_fingerprint,
         "_modelCandidateSource": model_candidate_source,
@@ -276,6 +339,9 @@ def _create_preview(
         preview,
         source_run_id=source_run_id,
     )
+    if research_coverage:
+        preview["warnings"][0] = "AI决策使用冻结行情、既往模拟账户、策略及决策日前公告标题；不读取普通会话、记忆或实时工具。"
+        preview["warnings"].extend(research_coverage["warnings"])
     selected_store.save_preview(agent_id, preview)
     return {key: value for key, value in preview.items() if key not in {"createdAt", "_reservationPlan", "_modelFingerprint", "_modelCandidateSource", "mode"}}
 
@@ -308,6 +374,8 @@ def _build_comparison_provenance(
         "symbol": record.get("symbol"),
         "symbols": list(record.get("symbols") or []),
         "dataHash": str(record.get("dataHash") or ""),
+        "researchInput": record.get("researchInput", "price_only"),
+        "researchHash": record.get("researchHash"),
         "decisionSchedule": list(record.get("decisionSchedule") or []),
         "dateCoverage": dict(record.get("dateCoverage") or {}),
         "outOfSampleStartDate": record.get("outOfSampleStartDate"),
@@ -319,11 +387,30 @@ def _build_comparison_provenance(
     return build_comparison_provenance(provenance_record)
 
 
+def _load_research_snapshot(
+    agent_id: str, record: Mapping[str, Any], selected_store: FinancialBacktestStore,
+) -> dict[str, Any] | None:
+    mode = record.get("researchInput", "price_only")
+    if mode == "price_only":
+        if record.get("researchHash"):
+            raise FinancialBacktestStoreError("纯行情回测包含不匹配的公告摘要")
+        return None
+    if mode != "announcements" or not record.get("researchHash"):
+        raise FinancialBacktestStoreError("回测研究输入或公告快照引用无效")
+    from .research_snapshot import validate_research_snapshot
+    return validate_research_snapshot(
+        selected_store.load_research_snapshot(agent_id, str(record["researchHash"])),
+        expected_hash=str(record["researchHash"]), symbols=_run_symbols(record),
+        decision_dates=record.get("decisionSchedule", []),
+    )
+
+
 def _load_run_snapshot(
     agent_id: str,
     run: Mapping[str, Any],
     selected_store: FinancialBacktestStore,
 ) -> data.BacktestSnapshot | basket_data.BasketSnapshot:
+    _load_research_snapshot(agent_id, run, selected_store)
     data_hash = str(run.get("dataHash") or "")
     payload = selected_store.load_snapshot(agent_id, data_hash)
     from core.web.services.financial_backtest.runtime import _restore_snapshot
@@ -502,6 +589,7 @@ def start_financial_backtest_run(
     if preview.get("actionsStatus") not in _ALLOWED_ACTION_STATUSES:
         raise FinancialBacktestConflict("公司行动/复权完整性检查未通过，不能启动回测")
     selected_store.load_snapshot(agent_id, str(preview.get("dataHash") or ""))
+    _load_research_snapshot(agent_id, preview, selected_store)
     timestamp = _iso(now)
     run = {
         "agentId": str(agent_id),
@@ -528,6 +616,9 @@ def start_financial_backtest_run(
         "sourceRunId": _source_run_id(preview) or None,
         "paramsHash": str(preview["paramsHash"]),
         "dataHash": str(preview["dataHash"]),
+        "researchInput": preview.get("researchInput", "price_only"),
+        "researchHash": preview.get("researchHash"),
+        "researchCoverage": preview.get("researchCoverage"),
         "params": dict(preview["params"]),
         "dateCoverage": dict(preview["dateCoverage"]),
         "assetCoverage": dict(preview.get("assetCoverage") or {}),
@@ -597,6 +688,7 @@ def compare_financial_backtest_runs(
     run_ids: list[str],
     axis: str,
     *,
+    parameter_key: str | None = None,
     store: FinancialBacktestStore | None = None,
 ) -> dict[str, Any]:
     _require_owner(agent_id)
@@ -611,7 +703,7 @@ def compare_financial_backtest_runs(
         records.append(compare_record)
     from core.web.services.financial_backtest.comparisons import compare_runs
 
-    return compare_runs(records, axis)
+    return compare_runs(records, axis, parameter_key=parameter_key)
 
 
 def get_financial_backtest_run(
@@ -621,7 +713,106 @@ def get_financial_backtest_run(
     store: FinancialBacktestStore | None = None,
 ) -> dict[str, Any]:
     _require_owner(agent_id)
-    return project_run((store or default_store()).load_run(agent_id, run_id))
+    selected_store = store or default_store()
+    run = selected_store.load_run(agent_id, run_id)
+    projected = project_run(run)
+    projected["advancedEvaluation"] = _project_advanced_evaluation(
+        agent_id, run, selected_store
+    )
+    return projected
+
+
+def _project_advanced_evaluation(
+    agent_id: str,
+    run: Mapping[str, Any],
+    selected_store: FinancialBacktestStore,
+) -> dict[str, Any] | None:
+    """Calculate detail-only projections from this store's frozen evidence."""
+    if project_status(run.get("status")) != "completed":
+        return None
+
+    params = run.get("params") if isinstance(run.get("params"), Mapping) else {}
+    boundary = run.get("outOfSampleStartDate") or params.get("outOfSampleStartDate")
+    try:
+        snapshot = _load_run_snapshot(agent_id, run, selected_store)
+        schedule = [str(item) for item in run.get("decisionSchedule", [])]
+        decisions = run.get("decisions")
+        if not isinstance(decisions, list) or [
+            str(item.get("date") or "")
+            for item in decisions
+            if isinstance(item, Mapping)
+        ] != schedule or len(decisions) != len(schedule):
+            raise data.BacktestInputError("已保存决策与冻结决策计划不一致")
+
+        equity = run.get("equity")
+        coverage = run.get("dateCoverage")
+        if (
+            not isinstance(equity, list)
+            or not equity
+            or not isinstance(coverage, Mapping)
+            or coverage.get("complete") is not True
+            or coverage.get("tradingDays") != len(equity)
+            or not isinstance(equity[0], Mapping)
+            or not isinstance(equity[-1], Mapping)
+            or coverage.get("actualStartDate") != equity[0].get("date")
+            or coverage.get("actualEndDate") != equity[-1].get("date")
+        ):
+            raise data.BacktestInputError("已保存净值与完整行情覆盖不一致")
+
+        from core.web.services.financial_backtest import advanced_evaluation
+
+        result = advanced_evaluation.evaluate_advanced_evaluation(
+            snapshot,
+            params,
+            decisions,
+            equity,
+            out_of_sample_start_date=str(boundary) if boundary else None,
+        )
+        return {"status": "available", **result}
+    except FinancialBacktestNotFound:
+        return _unavailable_advanced_evaluation(
+            boundary, "没有可校验的冻结行情快照；旧版或缺少快照的回测不生成高级评估。"
+        )
+    except (
+        FinancialBacktestConflict,
+        FinancialBacktestStoreError,
+        data.BacktestDataError,
+    ) as exc:
+        return _unavailable_advanced_evaluation(
+            boundary, f"冻结回测证据无法通过校验，高级评估不可用：{exc}"
+        )
+
+
+def _unavailable_advanced_evaluation(
+    boundary: Any, reason: str
+) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "basis": "frozen_decisions",
+        "status": "unavailable",
+        "outOfSampleStartDate": str(boundary) if boundary else None,
+        "costStress": {
+            "status": "unavailable",
+            "scenarios": [],
+            "error": reason,
+            "notice": "无法确认冻结行情与决策来源，不会补造压力测试结果。",
+        },
+        "returnUncertainty": {
+            "status": "unavailable",
+            "method": "newey_west_hac",
+            "metric": "annualized_log_excess_return_pct",
+            "confidenceLevel": 0.95,
+            "observations": 0,
+            "lag": None,
+            "pointEstimatePct": None,
+            "lowerPct": None,
+            "upperPct": None,
+            "error": reason,
+            "notice": "只有通过校验且预先冻结的样本外收益序列才计算统计区间。",
+        },
+        "error": reason,
+        "notice": "原始回测结果仍可读取；高级评估不会替缺失或无效的冻结证据补造数据。",
+    }
 
 
 def request_financial_backtest_stop(
@@ -711,9 +902,17 @@ def export_financial_backtest_run(
     if normalized_format not in {"json", "csv"}:
         raise FinancialBacktestConflict("导出格式仅支持json或csv")
     projected = project_run(run)
+    projected["advancedEvaluation"] = _project_advanced_evaluation(
+        agent_id, run, selected_store
+    )
     schema_version = 2 if _is_basket_run(run) else 1
+    frozen_research = _load_research_snapshot(agent_id, run, selected_store)
+    if frozen_research is not None:
+        schema_version = 3
     if normalized_format == "json":
         export_payload = {"schemaVersion": schema_version, **projected}
+        if frozen_research is not None:
+            export_payload["researchSnapshot"] = frozen_research
         if _is_basket_run(run):
             snapshot_payload = selected_store.load_snapshot(agent_id, str(run.get("dataHash") or ""))
             basket_snapshot = snapshot_payload.get("basketSnapshot")
@@ -816,6 +1015,39 @@ def export_financial_backtest_run(
                                 writer.writerow([label, metric, _csv_safe(metric_value)])
                         else:
                             writer.writerow([label, key, _csv_safe(value)])
+        advanced = projected.get("advancedEvaluation")
+        if isinstance(advanced, Mapping):
+            writer.writerow([])
+            writer.writerow(["advancedEvaluation", "field", "value"])
+            for key in ("status", "basis", "outOfSampleStartDate", "error", "notice"):
+                if key in advanced:
+                    writer.writerow(["summary", key, _csv_safe(advanced.get(key))])
+            cost_stress = advanced.get("costStress")
+            if isinstance(cost_stress, Mapping):
+                for key in ("status", "error", "notice"):
+                    if key in cost_stress:
+                        writer.writerow(["costStress", key, _csv_safe(cost_stress.get(key))])
+                for scenario in cost_stress.get("scenarios", []):
+                    if not isinstance(scenario, Mapping):
+                        continue
+                    label = f"costStress:{scenario.get('id') or 'unknown'}"
+                    for key, value in scenario.items():
+                        if key == "metrics" or key == "outOfSampleMetrics":
+                            if isinstance(value, Mapping):
+                                for metric, metric_value in value.items():
+                                    writer.writerow([label, f"{key}.{metric}", _csv_safe(metric_value)])
+                        else:
+                            writer.writerow([label, key, _csv_safe(value)])
+            uncertainty = advanced.get("returnUncertainty")
+            if isinstance(uncertainty, Mapping):
+                for key, value in uncertainty.items():
+                    writer.writerow(["returnUncertainty", key, _csv_safe(value)])
+        if frozen_research is not None:
+            writer.writerow([])
+            writer.writerow(["researchInput", "researchHash", "status", "groups", "items"])
+            coverage = projected.get("researchCoverage") or {}
+            writer.writerow(["announcements", _csv_safe(run.get("researchHash")), _csv_safe(coverage.get("status")), coverage.get("groupCount"), coverage.get("itemCount")])
+            writer.writerow(["researchNotice", _csv_safe(coverage.get("notice"))])
         content = output.getvalue()
         media_type = "text/csv"
         filename = f"backtest-{run['runId']}.csv"
@@ -902,6 +1134,9 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "modelConfigHash": str(run.get("modelFingerprint") or ""),
         "paramsHash": str(run.get("paramsHash") or ""),
         "dataHash": str(run.get("dataHash") or ""),
+        "researchInput": run.get("researchInput", "price_only"),
+        "researchHash": run.get("researchHash"),
+        "researchCoverage": run.get("researchCoverage"),
         "params": dict(run.get("params") or {}),
         "dateCoverage": dict(run.get("dateCoverage") or {}),
         "assetCoverage": dict(run.get("assetCoverage") or {}),
@@ -1073,13 +1308,17 @@ def _public_params(params: Mapping[str, Any]) -> dict[str, Any]:
         "maxTokens",
         "outOfSampleStartDate",
     )
-    return {key: params[key] for key in keys}
+    result = {key: params[key] for key in keys}
+    if "maxParticipationPct" in params:
+        result["maxParticipationPct"] = params["maxParticipationPct"]
+    return result
 
 
 def _estimate_budget(
     snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot,
     params: Mapping[str, Any],
     schedule: tuple[str, ...],
+    *, research_snapshot: Mapping[str, Any] | None = None,
 ) -> tuple[int, int, dict[str, int]]:
     cash = float(params["initialCash"])
     reservation_plan: dict[str, int] = {}
@@ -1121,6 +1360,17 @@ def _estimate_budget(
             decision_input = build_decision_input(
                 snapshot, params, as_of_date=decision_date, portfolio=portfolio
             )
+        if research_snapshot is not None:
+            from .research_snapshot import decision_research_material
+            material = decision_research_material(
+                research_snapshot,
+                symbols=list(snapshot.symbols) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot.symbol],
+                decision_date=decision_date,
+            )
+            if isinstance(snapshot, basket_data.BasketSnapshot):
+                decision_input = build_basket_decision_input(snapshot, params, as_of_date=decision_date, portfolio=portfolio, research_material=material)
+            else:
+                decision_input = build_decision_input(snapshot, params, as_of_date=decision_date, portfolio=portfolio, research_material=material)
         messages = build_messages(decision_input)
         # Runtime reserve_decision_call also includes wire-wrapper room. Add a
         # separate account margin: filled positions and the five recent orders

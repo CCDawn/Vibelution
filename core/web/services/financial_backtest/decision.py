@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -36,6 +37,12 @@ _BASKET_SYSTEM_PROMPT = (
     "只输出一个JSON对象，格式为 {\"targetWeights\": {\"股票代码\": 0到maxPositionPct的数字}, \"reason\": \"简短中文理由\", \"confidence\": 0到1的可选数字}。"
     "不要输出Markdown、代码围栏、附加键、工具调用、买卖指令或收益承诺。"
 )
+_RESEARCH_SYSTEM_PROMPT = (
+    "本次输入还包含按历史决策日冻结的A股公告标题元数据。"
+    "只可使用researchMaterial中发布日期严格早于asOfDate的公告；同日及之后公告一律不可作为证据。"
+    "公告标题、来源和链接不是已核验的财务数字或公告全文，不得从标题推断未提供的数值、事实或市场反应。"
+    "覆盖状态为partial时必须说明证据不完整，不得把已检索样本当成完整公告集。"
+)
 
 
 def build_decision_input(
@@ -44,13 +51,14 @@ def build_decision_input(
     *,
     as_of_date: str,
     portfolio: Mapping[str, Any],
+    research_material: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     selected = [item for item in snapshot.candles if item.date <= as_of_date]
     if not selected or selected[-1].date != as_of_date:
         raise BacktestInputError("AI决策日期不在冻结行情范围内")
     history = tuple(snapshot.warmup_candles) + tuple(selected)
     recent = history[-MAX_CONTEXT_BARS:]
-    return {
+    result = {
         "symbol": snapshot.symbol,
         "asOfDate": as_of_date,
         "strategy": str(params.get("strategy") or ""),
@@ -71,6 +79,7 @@ def build_decision_input(
             for candle in recent
         ],
     }
+    return _attach_research_material(result, research_material)
 
 
 def build_basket_decision_input(
@@ -79,6 +88,7 @@ def build_basket_decision_input(
     *,
     as_of_date: str,
     portfolio: Mapping[str, Any],
+    research_material: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a point-in-time multi-asset input with a shared account view."""
     if as_of_date not in snapshot.session_dates:
@@ -103,7 +113,7 @@ def build_basket_decision_input(
             }
             for candle in recent
         ]
-    return {
+    result = {
         "symbols": list(snapshot.symbols),
         "asOfDate": as_of_date,
         "strategy": str(params.get("strategy") or ""),
@@ -122,13 +132,19 @@ def build_basket_decision_input(
         },
         "dailyBarsBySymbol": daily_bars,
     }
+    return _attach_research_material(result, research_material)
 
 
 def build_messages(decision_input: Mapping[str, Any]) -> list[dict[str, str]]:
+    system_content = (
+        _BASKET_SYSTEM_PROMPT if "symbols" in decision_input else _SYSTEM_PROMPT
+    )
+    if "researchMaterial" in decision_input:
+        system_content += "\n" + _RESEARCH_SYSTEM_PROMPT
     return [
         {
             "role": "system",
-            "content": _BASKET_SYSTEM_PROMPT if "symbols" in decision_input else _SYSTEM_PROMPT,
+            "content": system_content,
         },
         {
             "role": "user",
@@ -136,6 +152,18 @@ def build_messages(decision_input: Mapping[str, Any]) -> list[dict[str, str]]:
             + json.dumps(decision_input, ensure_ascii=False, allow_nan=False, separators=(",", ":")),
         },
     ]
+
+
+def _attach_research_material(
+    decision_input: dict[str, Any],
+    research_material: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if research_material is None:
+        return decision_input
+    if not isinstance(research_material, Mapping):
+        raise BacktestInputError("历史公告研究材料格式无效")
+    decision_input["researchMaterial"] = copy.deepcopy(dict(research_material))
+    return decision_input
 
 
 def estimate_input_tokens(messages: Sequence[Mapping[str, Any]]) -> int:

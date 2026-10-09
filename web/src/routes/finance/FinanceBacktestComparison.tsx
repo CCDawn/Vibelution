@@ -5,9 +5,11 @@ import type {
   AIBacktestComparisonAxis,
   AIBacktestComparisonResult,
   AIBacktestComparisonRow,
+  AIBacktestParameterKey,
   AIBacktestSummary,
 } from "../../api/types/financialBacktests";
 import { VButton, VCheckbox, VChip, VDenseTable, VSelect, VStateSurface, VSurface } from "../../components/vui";
+import { AI_BACKTEST_PARAMETER_OPTIONS, formatAIBacktestParameterValue } from "./financialBacktestParameters";
 import styles from "./FinanceAIBacktest.styles";
 
 type Props = {
@@ -32,6 +34,7 @@ const runStatuses: Record<AIBacktestSummary["status"], { zh: string; en: string 
   failed: { zh: "失败", en: "Failed" },
   completed: { zh: "已完成", en: "Completed" },
 };
+const NO_PARAMETER_SELECTION = "__choose_parameter__";
 
 function symbolsForRun(run: Pick<AIBacktestSummary, "symbol" | "symbols">) {
   return run.symbols?.length ? run.symbols : run.symbol ? [run.symbol] : [];
@@ -68,6 +71,7 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [axis, setAxis] = useState<AIBacktestComparisonAxis>("strategy");
+  const [parameterKey, setParameterKey] = useState<AIBacktestParameterKey | typeof NO_PARAMETER_SELECTION>(NO_PARAMETER_SELECTION);
   const [result, setResult] = useState<AIBacktestComparisonResult | null>(null);
   const [pending, setPending] = useState<"compare" | "download" | "">("");
   const [error, setError] = useState("");
@@ -90,6 +94,7 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
     gate.current = false;
     setPending("");
     setSelectedIds([]);
+    setParameterKey(NO_PARAMETER_SELECTION);
     setResult(null);
     setError("");
   }, [agentId]);
@@ -107,6 +112,13 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
   function changeAxis(value: AIBacktestComparisonAxis) {
     generation.current += 1;
     setAxis(value);
+    setResult(null);
+    setError("");
+  }
+
+  function changeParameterKey(value: AIBacktestParameterKey | typeof NO_PARAMETER_SELECTION) {
+    generation.current += 1;
+    setParameterKey(value);
     setResult(null);
     setError("");
   }
@@ -136,7 +148,10 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
 
   const runById = new Map(runs.map((run) => [run.runId, run]));
   const visibleSelected = selectedIds.filter((runId) => runById.has(runId));
-  const validSelection = visibleSelected.length >= 2 && visibleSelected.length <= 4;
+  const validSelection = visibleSelected.length >= 2
+    && visibleSelected.length <= 4
+    && (axis !== "parameter" || parameterKey !== NO_PARAMETER_SELECTION);
+  const selectedParameter = AI_BACKTEST_PARAMETER_OPTIONS.find((item) => item.id === parameterKey);
 
   return (
     <div className={styles.comparisonShell}>
@@ -151,8 +166,10 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
       {expanded ? (
         <VSurface tone="panel" padding="compact" className={styles.panel}>
           <div className={styles.row}>
-            <strong>{zh ? "历史结果对照" : "Historical comparison"}</strong>
-            <span className={styles.note}>{zh ? "选择 2–4 条；服务端核对冻结数据与共同参数。" : "Choose 2–4 runs; the server verifies frozen data and shared assumptions."}</span>
+            <strong>{axis === "parameter" ? (zh ? "单参数敏感性" : "Single-parameter sensitivity") : (zh ? "历史结果对照" : "Historical comparison")}</strong>
+            <span className={styles.note}>{axis === "parameter"
+              ? (zh ? "选2–4条回测；只允许目标参数不同。未完成或口径不一致时不显示收益指标。" : "Choose 2–4 runs; only the selected parameter may differ. Incomplete or mismatched runs show no return metrics.")
+              : (zh ? "选择 2–4 条；服务端核对冻结数据与共同参数。" : "Choose 2–4 runs; the server verifies frozen data and shared assumptions.")}</span>
             <label className={styles.field}>
               {zh ? "比较维度" : "Compare by"}
               <VSelect
@@ -162,10 +179,26 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
                 options={[
                   { id: "strategy", label: zh ? "策略" : "Strategy" },
                   { id: "model", label: zh ? "模型" : "Model" },
+                  { id: "parameter", label: zh ? "单参数" : "Parameter" },
                 ]}
                 onSelectionChange={(key) => changeAxis(String(key ?? "strategy") as AIBacktestComparisonAxis)}
               />
             </label>
+            {axis === "parameter" ? (
+              <label className={styles.field}>
+                {zh ? "比较参数" : "Parameter"}
+                <VSelect
+                  aria-label={zh ? "回测比较参数" : "Backtest comparison parameter"}
+                  isDisabled={pending !== ""}
+                  selectedKey={parameterKey}
+                  options={[
+                    { id: NO_PARAMETER_SELECTION, label: zh ? "选择一个参数" : "Choose one parameter" },
+                    ...AI_BACKTEST_PARAMETER_OPTIONS.map((item) => ({ id: item.id, label: item.label[zh ? "zh" : "en"] })),
+                  ]}
+                  onSelectionChange={(key) => changeParameterKey(String(key ?? NO_PARAMETER_SELECTION) as AIBacktestParameterKey | typeof NO_PARAMETER_SELECTION)}
+                />
+              </label>
+            ) : null}
             <VButton
               variant="primary"
               icon={<GitCompareArrows size={14} aria-hidden="true" />}
@@ -173,10 +206,19 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
               isDisabled={pending !== "" || !validSelection}
               onPress={() => void perform("compare", async () => {
                 const requestGeneration = generation.current;
-                const response = await compareAIBacktests(agentId, { runIds: visibleSelected, axis });
+                const request = axis === "parameter"
+                  ? { runIds: visibleSelected, axis, parameterKey: parameterKey as AIBacktestParameterKey }
+                  : { runIds: visibleSelected, axis };
+                const response = await compareAIBacktests(agentId, request);
                 if (!mounted.current || generation.current !== requestGeneration) return;
                 const actualIds = response.rows.map((row) => row.runId);
-                if (response.axis !== axis || actualIds.length !== visibleSelected.length || actualIds.some((id, index) => id !== visibleSelected[index])) {
+                const expectedParameterKey = axis === "parameter" ? parameterKey : null;
+                if (
+                  response.axis !== axis
+                  || (response.parameterKey ?? null) !== expectedParameterKey
+                  || actualIds.length !== visibleSelected.length
+                  || actualIds.some((id, index) => id !== visibleSelected[index])
+                ) {
                   throw new Error(zh ? "比较响应与所选回测不匹配" : "Comparison response does not match selected runs");
                 }
                 setResult(response);
@@ -233,8 +275,17 @@ export function FinanceBacktestComparison({ agentId, runs, zh }: Props) {
                       emptyText={zh ? "没有可比较结果" : "No comparable runs"}
                       columns={[
                         { id: "run", width: 115, header: zh ? "回测" : "Run", render: (row) => <span title={row.runId}>{row.runId.slice(0, 12)}</span> },
-                        { id: "model", width: 160, header: zh ? "模型" : "Model", render: (row) => row.modelId ? <span title={row.modelId}>{row.modelId.split("/").at(-1)}</span> : "—" },
-                        { id: "strategy", width: 200, header: zh ? "策略" : "Strategy", render: (row) => row.strategy ? <span title={row.strategy}>{row.strategy}</span> : "—" },
+                        ...(result.axis === "parameter" ? [
+                          {
+                            id: "parameter",
+                            width: 160,
+                            header: selectedParameter?.label[zh ? "zh" : "en"] ?? (zh ? "参数值" : "Parameter value"),
+                            render: (row: AIBacktestComparisonRow) => formatAIBacktestParameterValue(row.parameterValue, zh),
+                          },
+                        ] : [
+                          { id: "model", width: 160, header: zh ? "模型" : "Model", render: (row: AIBacktestComparisonRow) => row.modelId ? <span title={row.modelId}>{row.modelId.split("/").at(-1)}</span> : "—" },
+                          { id: "strategy", width: 200, header: zh ? "策略" : "Strategy", render: (row: AIBacktestComparisonRow) => row.strategy ? <span title={row.strategy}>{row.strategy}</span> : "—" },
+                        ]),
                         { id: "return", header: zh ? "全区间收益" : "Total return", render: (row) => pct(row.metrics?.totalReturnPct) },
                         { id: "oos-return", header: zh ? "样本外收益" : "Holdout return", render: (row) => pct(metricsFor(row)?.totalReturnPct) },
                         { id: "oos-excess", header: zh ? "样本外超额" : "Holdout excess", render: (row) => pct(metricsFor(row)?.excessReturnPct) },

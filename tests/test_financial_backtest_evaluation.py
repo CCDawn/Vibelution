@@ -47,7 +47,7 @@ def test_costs_and_fills_are_attributed_only_to_their_execution_window():
         },
         {
             "date": "2026-09-03",
-            "status": "filled",
+            "status": "partial_fill",
             "filledShares": 100,
             "notional": 110,
             "fee": 6,

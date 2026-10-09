@@ -3,7 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
+from pydantic import ValidationError
 
+from core.web.routes.financial_backtest_models import (
+    FinancialBacktestCompareRequest,
+    FinancialBacktestForkPreviewRequest,
+)
 from core.web.services.financial_backtest.comparisons import (
     COMPARISON_CONTRACT_VERSION,
     build_comparison_provenance,
@@ -71,6 +76,161 @@ def _record(
 
 def _reason_codes(result: dict) -> set[str]:
     return {reason["code"] for reason in result["reasons"]}
+
+
+def test_participation_limit_is_frozen_without_changing_legacy_fingerprint() -> None:
+    legacy = _record()
+    legacy_fingerprint = build_comparison_provenance(legacy)
+    capped = deepcopy(legacy)
+    capped["runId"] = "run-2"
+    capped["params"]["maxParticipationPct"] = 1
+    capped["comparisonProvenance"] = build_comparison_provenance(capped)
+    assert capped["comparisonProvenance"]["commonParamsHash"] != legacy_fingerprint["commonParamsHash"]
+    assert compare_runs([legacy, capped], "strategy")["status"] == "incompatible"
+    capped["params"].pop("maxParticipationPct")
+    assert build_comparison_provenance(capped) == legacy_fingerprint
+
+
+def test_parameter_comparison_runs_are_independent_but_require_one_shared_axis() -> None:
+    first = _record("run-1")
+    second = deepcopy(first)
+    second["runId"] = "run-2"
+    first["sourceRunId"] = "source-run"
+    second["sourceRunId"] = "source-run"
+    second["params"]["maxPositionPct"] = 60
+    first["comparisonProvenance"] = build_comparison_provenance(first)
+    second["comparisonProvenance"] = build_comparison_provenance(second)
+
+    result = compare_runs([first, second], "parameter", "maxPositionPct")
+
+    assert result["status"] == "comparable"
+    assert result["axis"] == "parameter"
+    assert result["parameterKey"] == "maxPositionPct"
+    assert [row["parameterValue"] for row in result["rows"]] == [80.0, 60.0]
+    assert result["commonParamsHash"]
+    assert "LLM" in result["notice"]
+    assert "试参偏差" in result["notice"]
+    assert "winner" not in result["notice"].lower()
+
+
+def test_parameter_comparison_accepts_different_lineage_only_when_frozen_inputs_match() -> None:
+    first = _record("run-1")
+    second = deepcopy(first)
+    second["runId"] = "run-2"
+    first["sourceRunId"] = "source-a"
+    second["sourceRunId"] = "source-b"
+    second["params"]["commissionBps"] = 4
+    first["comparisonProvenance"] = build_comparison_provenance(first)
+    second["comparisonProvenance"] = build_comparison_provenance(second)
+
+    same_data = compare_runs([first, second], "parameter", "commissionBps")
+    assert same_data["status"] == "comparable"
+    assert [row["parameterValue"] for row in same_data["rows"]] == [3.0, 4.0]
+
+    second["dataHash"] = "e" * 64
+    second["comparisonProvenance"] = build_comparison_provenance(second)
+    different_data = compare_runs([first, second], "parameter", "commissionBps")
+    assert different_data["status"] == "incompatible"
+    assert "data_hash_mismatch" in _reason_codes(different_data)
+
+
+def test_parameter_comparison_requires_distinct_values_and_same_strategy_and_model() -> None:
+    first = _record("run-1")
+    same_value = _record("run-same-value")
+    unchanged = compare_runs([first, same_value], "parameter", "maxPositionPct")
+    assert unchanged["status"] == "incompatible"
+    assert "parameter_not_varied" in _reason_codes(unchanged)
+
+    changed_param = _record("run-2")
+    changed_param["params"]["maxPositionPct"] = 60
+    changed_param["params"]["commissionBps"] = 4
+    changed_param["comparisonProvenance"] = build_comparison_provenance(changed_param)
+    different_parameter = compare_runs([first, changed_param], "parameter", "maxPositionPct")
+    assert different_parameter["status"] == "incompatible"
+    assert "cost_model_mismatch" in _reason_codes(different_parameter)
+
+    different_strategy = _record("run-strategy", strategy="Different strategy")
+    different_strategy["params"]["maxPositionPct"] = 60
+    different_strategy["comparisonProvenance"] = build_comparison_provenance(different_strategy)
+    strategy_result = compare_runs([first, different_strategy], "parameter", "maxPositionPct")
+    assert strategy_result["status"] == "incompatible"
+    assert "strategy_mismatch" in _reason_codes(strategy_result)
+
+    different_model = _record("run-model", model_id="different-model")
+    different_model["params"]["maxPositionPct"] = 60
+    different_model["comparisonProvenance"] = build_comparison_provenance(different_model)
+    model_result = compare_runs([first, different_model], "parameter", "maxPositionPct")
+    assert model_result["status"] == "incompatible"
+    assert "model_id_mismatch" in _reason_codes(model_result)
+
+
+def test_parameter_comparison_exposes_legacy_uncapped_value_and_preserves_old_hash() -> None:
+    legacy = _record("run-legacy")
+    legacy_fingerprint = build_comparison_provenance(legacy)
+    capped = deepcopy(legacy)
+    capped["runId"] = "run-capped"
+    capped["params"]["maxParticipationPct"] = 2
+    capped["comparisonProvenance"] = build_comparison_provenance(capped)
+
+    result = compare_runs([legacy, capped], "parameter", "maxParticipationPct")
+
+    assert result["status"] == "comparable"
+    assert result["rows"][0]["parameterValue"] is None
+    assert result["rows"][1]["parameterValue"] == 2.0
+    assert build_comparison_provenance(legacy) == legacy_fingerprint
+
+
+def test_decision_interval_comparison_allows_price_only_schedule_change_but_blocks_announcement_drift() -> None:
+    first = _record("run-1")
+    second = deepcopy(first)
+    second["runId"] = "run-2"
+    second["params"]["decisionInterval"] = 4
+    second["decisionSchedule"] = ["2024-01-02", "2024-01-09"]
+    second["comparisonProvenance"] = build_comparison_provenance(second)
+
+    price_only = compare_runs([first, second], "parameter", "decisionInterval")
+    assert price_only["status"] == "comparable"
+    assert [row["parameterValue"] for row in price_only["rows"]] == [3.0, 4.0]
+
+    for record in (first, second):
+        record["researchInput"] = "announcements"
+        record["researchHash"] = "a" * 64
+        record["comparisonProvenance"] = build_comparison_provenance(record)
+    announcement_drift = compare_runs([first, second], "parameter", "decisionInterval")
+    assert announcement_drift["status"] == "incompatible"
+    assert "research_schedule_mismatch" in _reason_codes(announcement_drift)
+
+
+def test_parameter_compare_and_fork_requests_validate_the_single_parameter_contract() -> None:
+    compare = FinancialBacktestCompareRequest.model_validate(
+        {
+            "runIds": ["run-1", "run-2"],
+            "axis": "parameter",
+            "parameterKey": "commissionBps",
+        }
+    )
+    assert compare.parameterKey == "commissionBps"
+    with pytest.raises(ValidationError, match="parameterKey"):
+        FinancialBacktestCompareRequest.model_validate(
+            {"runIds": ["run-1", "run-2"], "axis": "parameter"}
+        )
+    with pytest.raises(ValidationError, match="parameterKey"):
+        FinancialBacktestCompareRequest.model_validate(
+            {
+                "runIds": ["run-1", "run-2"],
+                "axis": "strategy",
+                "parameterKey": "commissionBps",
+            }
+        )
+
+    fork = FinancialBacktestForkPreviewRequest.model_validate(
+        {"maxPositionPct": 60}
+    )
+    assert fork.maxPositionPct == 60
+    with pytest.raises(ValidationError, match="最多更改一项"):
+        FinancialBacktestForkPreviewRequest.model_validate(
+            {"maxPositionPct": 60, "commissionBps": 4}
+        )
 
 
 @pytest.mark.parametrize("axis", ["strategy", "model"])

@@ -21,7 +21,7 @@ from core.web.services.financial_team import runs as financial_runs
 
 from . import service
 from .contract import (
-    due_occurrence,
+    due_occurrence_details,
     iso_beijing,
     occurrence_batch_id,
     occurrence_research_date,
@@ -70,6 +70,9 @@ def ensure_occurrence_batch(
         "assistantAgentId": assistant_agent_id,
         "status": "queued",
         "triggeredAt": triggered_at,
+        "scheduledAt": occurrence.get("scheduledAt"),
+        "triggerReason": occurrence.get("triggerReason"),
+        "skippedOccurrenceCount": occurrence.get("skippedOccurrenceCount"),
         "updatedAt": triggered_at,
         "researchDate": str(occurrence.get("researchDate") or ""),
         "periodDays": int(schedule.get("periodDays") or 0),
@@ -389,7 +392,7 @@ class FinancialResearchJobsWorker:
                 if not bool(schedule.get("enabled")):
                     continue
                 try:
-                    due = due_occurrence(schedule, now=now)
+                    due = due_occurrence_details(schedule, now=now)
                 except Exception as exc:  # noqa: BLE001 - one corrupt schedule cannot stop other schedules
                     _log_scheduler_error("schedule-due-check", exc)
                     continue
@@ -399,7 +402,10 @@ class FinancialResearchJobsWorker:
                     except Exception as exc:  # noqa: BLE001 - one corrupt plan cannot stop the scan
                         _log_scheduler_error("schedule-next-run", exc)
                         continue
-                    if expected_next and expected_next != schedule.get("nextRunAt"):
+                    kind = str((schedule.get("execution") or {}).get("kind") or "")
+                    if expected_next != schedule.get("nextRunAt") and (
+                        expected_next is not None or kind == "trading_days"
+                    ):
                         try:
                             self._refresh_next_run(assistant_agent_id, schedule_id, expected_next)
                         except Exception as exc:  # noqa: BLE001 - retry refresh on a later poll
@@ -409,7 +415,9 @@ class FinancialResearchJobsWorker:
                     reserved = self._reserve_occurrence(
                         assistant_agent_id,
                         schedule_id,
-                        due=due,
+                        due=due.scheduled_at,
+                        trigger_reason=due.trigger_reason,
+                        skipped_occurrence_count=due.skipped_occurrence_count,
                         now=now,
                     )
                 except Exception as exc:  # noqa: BLE001 - preserve other scheduled owners
@@ -437,6 +445,8 @@ class FinancialResearchJobsWorker:
         schedule_id: str,
         *,
         due: datetime,
+        trigger_reason: str,
+        skipped_occurrence_count: int,
         now: datetime,
     ) -> dict[str, Any] | None:
         occurrence: dict[str, Any] | None = None
@@ -446,8 +456,8 @@ class FinancialResearchJobsWorker:
             schedule = state["schedules"].get(schedule_id)
             if not isinstance(schedule, dict) or not schedule.get("enabled"):
                 return
-            refreshed_due = due_occurrence(schedule, now=now)
-            if refreshed_due is None or refreshed_due != due:
+            refreshed_due = due_occurrence_details(schedule, now=now)
+            if refreshed_due is None or refreshed_due.scheduled_at != due:
                 return
             triggered_at = iso_beijing(now)
             batch_id = occurrence_batch_id(schedule_id, due)
@@ -455,6 +465,8 @@ class FinancialResearchJobsWorker:
                 "batchId": batch_id,
                 "scheduledAt": due.isoformat(timespec="seconds"),
                 "triggeredAt": triggered_at,
+                "triggerReason": trigger_reason,
+                "skippedOccurrenceCount": skipped_occurrence_count,
                 "researchDate": occurrence_research_date(
                     schedule, scheduled_at=due, triggered_at=now
                 ),
@@ -468,18 +480,24 @@ class FinancialResearchJobsWorker:
                 schedule["nextRunAt"] = None
             else:
                 schedule["nextRunAt"] = schedule_next_run(schedule, now=now)
+                if str((schedule.get("execution") or {}).get("kind") or "") == "trading_days":
+                    schedule["calendarStatus"] = (
+                        "available" if schedule["nextRunAt"] else "unavailable"
+                    )
             schedule["updatedAt"] = triggered_at
 
         self._store.update(assistant_agent_id, _mutate)
         return occurrence
 
     def _refresh_next_run(
-        self, assistant_agent_id: str, schedule_id: str, next_run: str
+        self, assistant_agent_id: str, schedule_id: str, next_run: str | None
     ) -> None:
         def _mutate(state: dict[str, Any]) -> None:
             schedule = state["schedules"].get(schedule_id)
             if isinstance(schedule, dict) and schedule.get("enabled"):
                 schedule["nextRunAt"] = next_run
+                if str((schedule.get("execution") or {}).get("kind") or "") == "trading_days":
+                    schedule["calendarStatus"] = "available" if next_run else "unavailable"
                 schedule["updatedAt"] = _now_iso()
 
         self._store.update(assistant_agent_id, _mutate)

@@ -12,7 +12,10 @@ from uuid import uuid4
 
 import pytest
 
-from core.web.routes.financial_backtest_models import FinancialBacktestRun
+from core.web.routes.financial_backtest_models import (
+    FinancialBacktestAdvancedEvaluation,
+    FinancialBacktestRun,
+)
 from core.web.services import agent_directory_service
 from core.web.services import financial_backtest_service as api
 from core.web.services.financial_backtest import data, runtime, service
@@ -235,6 +238,11 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     )
     assert worker.process_pending_once(stop_requested=lambda: False) == 1
 
+    monkeypatch.setattr(
+        service,
+        "default_store",
+        lambda: pytest.fail("detail and export must reuse the explicitly selected store"),
+    )
     completed = api.get_financial_backtest_run(_AGENT_ID, first_start["runId"], store=store)
     assert completed["status"] == "completed", (
         completed.get("errorCode"),
@@ -257,10 +265,22 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     assert run_dto.benchmarkOrders
     assert run_dto.robustness.status == "insufficient_sample"
     assert run_dto.robustness.outperformingWindowRatePct is None
+    assert run_dto.advancedEvaluation is not None
+    assert run_dto.advancedEvaluation.status == "available"
+    assert run_dto.advancedEvaluation.costStress.status == "available"
+    assert [scenario.id for scenario in run_dto.advancedEvaluation.costStress.scenarios] == [
+        "baseline", "cost_1_5x", "cost_2x"
+    ]
+    assert run_dto.advancedEvaluation.returnUncertainty.status in {
+        "unavailable", "insufficient_sample"
+    }
+    assert run_dto.advancedEvaluation.returnUncertainty.lowerPct is None
 
     persisted = store.load_run(_AGENT_ID, first_start["runId"])
     assert persisted["benchmarkOrders"]
     assert "robustness" not in persisted  # Read-only projection, never a second result store.
+    assert "advancedEvaluation" not in persisted
+    assert "advancedEvaluation" not in service.project_run(persisted)
     json_export = api.export_financial_backtest_run(_AGENT_ID, first_start["runId"], "json", store=store)
     json_body = json.loads(json_export["content"])
     assert json_export["mediaType"] == "application/json"
@@ -269,14 +289,22 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     assert json_body["benchmarkOrders"] == persisted["benchmarkOrders"]
     assert json_body["comparisonProvenance"] == persisted["comparisonProvenance"]
     assert json_body["robustness"] == completed["robustness"]
+    assert json_body["advancedEvaluation"] == completed["advancedEvaluation"]
     summary = api.list_financial_backtest_runs(_AGENT_ID, store=store)["items"][0]
     assert summary["comparisonProvenance"] == persisted["comparisonProvenance"]
+    assert "advancedEvaluation" not in summary
 
     csv_export = api.export_financial_backtest_run(_AGENT_ID, first_start["runId"], "csv", store=store)
     rows = list(csv.reader(StringIO(csv_export["content"])))
     assert csv_export["mediaType"] == "text/csv"
     assert ["periodEvaluation", "field", "value"] in rows
     assert ["summary", "status", "insufficient_sample"] in rows
+    assert ["advancedEvaluation", "field", "value"] in rows
+    assert ["costStress:cost_2x", "commissionBps", "6.0"] in rows
+    assert [
+        "returnUncertainty", "status",
+        completed["advancedEvaluation"]["returnUncertainty"]["status"],
+    ] in rows
     segment = completed["robustness"]["fixedWindows"][0]
     assert [f"fixedWindows:{segment['startDate']}", "totalReturnPct", str(segment["metrics"]["totalReturnPct"])] in rows
     assert rows[0] == ["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"]
@@ -285,6 +313,46 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     assert any(row and row[0] == "benchmark" for row in rows)
     assert any(row[:2] == ["date", "targetWeight"] for row in rows)
     assert any(row[:2] == ["metric", "value"] for row in rows)
+
+
+def test_completed_legacy_run_without_snapshot_stays_readable_and_marks_advanced_evaluation_unavailable(
+    monkeypatch, tmp_path
+):
+    store, _snapshot_value, _prepared_requests = _install_scenario(monkeypatch, tmp_path)
+    run_id = str(uuid4())
+    legacy = {
+        "agentId": _AGENT_ID,
+        "runId": run_id,
+        "clientRequestId": str(uuid4()),
+        "symbol": "sh600000",
+        "symbols": ["sh600000"],
+        "status": "completed",
+        "decisionCount": 0,
+        "completedDecisionCount": 0,
+        "decisionSchedule": [],
+        "dataHash": "0" * 64,
+        "params": {"initialCash": 100_000},
+        "equity": [],
+        "decisions": [],
+        "metrics": None,
+    }
+    store.create_run_if_absent(_AGENT_ID, legacy, max_runs=20)
+
+    detail = api.get_financial_backtest_run(_AGENT_ID, run_id, store=store)
+    assert detail["status"] == "completed"
+    assert detail["advancedEvaluation"]["status"] == "unavailable"
+    assert detail["advancedEvaluation"]["costStress"]["scenarios"] == []
+    assert detail["advancedEvaluation"]["returnUncertainty"]["status"] == "unavailable"
+    assert "没有可校验的冻结行情快照" in detail["advancedEvaluation"]["error"]
+    assert FinancialBacktestAdvancedEvaluation.model_validate(
+        detail["advancedEvaluation"]
+    ).status == "unavailable"
+
+    exported = api.export_financial_backtest_run(_AGENT_ID, run_id, "json", store=store)
+    assert json.loads(exported["content"])["advancedEvaluation"]["status"] == "unavailable"
+    assert "advancedEvaluation" not in api.list_financial_backtest_runs(
+        _AGENT_ID, store=store
+    )["items"][0]
 
 
 def test_stop_then_resume_keeps_successful_decision_and_skips_rebilling(monkeypatch, tmp_path):
@@ -368,7 +436,9 @@ def test_benchmark_retries_after_zero_volume_rejection_and_passes_real_dto(monke
     completed = api.get_financial_backtest_run(_AGENT_ID, started["runId"], store=store)
     dto = FinancialBacktestRun.model_validate(completed)
     assert dto.status == "completed"
-    assert [order.status for order in dto.benchmarkOrders] == ["rejected", "filled"]
+    assert [order.status for order in dto.benchmarkOrders] == ["rejected", "partial_fill"]
+    assert dto.benchmarkOrders[-1].filledShares == 1000
+    assert completed["params"]["maxParticipationPct"] == 1
     assert [order.date for order in dto.benchmarkOrders] == [_DAY_TWO, _DAY_THREE]
 
 

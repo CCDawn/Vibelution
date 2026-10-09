@@ -17,7 +17,7 @@ router = APIRouter(tags=["financial-jobs"])
 
 class FinancialJobExecutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["now", "once", "daily", "weekdays"]
+    kind: Literal["now", "once", "daily", "weekdays", "trading_days"]
     timezone: Literal["Asia/Shanghai"]
     scheduledAt: str | None = None
     timeOfDay: str | None = None
@@ -34,7 +34,7 @@ class FinancialResearchScheduleCreateRequest(BaseModel):
 
 class FinancialJobExecutionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["now", "once", "daily", "weekdays"]
+    kind: Literal["now", "once", "daily", "weekdays", "trading_days"]
     scheduledAt: str | None
     timeOfDay: str | None
     timezone: Literal["Asia/Shanghai"]
@@ -55,6 +55,10 @@ class FinancialResearchScheduleResponse(BaseModel):
     nextRunAt: str | None
     lastBatchId: str | None
     lastTriggeredAt: str | None
+    calendarStatus: Literal["available", "unavailable"] | None = None
+    lastScheduledAt: str | None = None
+    lastTriggerReason: Literal["scheduled", "downtime_catch_up", "immediate"] | None = None
+    lastSkippedOccurrenceCount: int | None = None
 
 
 class FinancialResearchTurnRefResponse(BaseModel):
@@ -101,6 +105,9 @@ class FinancialResearchBatchResponse(BaseModel):
         "blocked",
     ]
     triggeredAt: str
+    scheduledAt: str | None = None
+    triggerReason: Literal["scheduled", "downtime_catch_up", "immediate"] | None = None
+    skippedOccurrenceCount: int | None = None
     updatedAt: str
     researchDate: str
     periodDays: Literal[7, 30, 90]

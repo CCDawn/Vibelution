@@ -2,6 +2,7 @@ export type AIBacktestParams = {
   strategy: string;
   initialCash: number;
   maxPositionPct: number;
+  maxParticipationPct?: number | null;
   decisionInterval: number;
   commissionBps: number;
   minimumCommission: number;
@@ -15,6 +16,8 @@ type AIBacktestRequestBase = AIBacktestParams & {
   startDate: string;
   endDate: string;
   modelId?: string;
+  dataSource?: "tencent" | "eastmoney" | "auto";
+  researchInput?: "price_only" | "announcements";
 };
 
 export type AIBacktestRequest = AIBacktestRequestBase &
@@ -100,6 +103,61 @@ export type AIBacktestRobustness = {
   notice: string;
 };
 
+export type AIBacktestAdvancedMetrics = Partial<Pick<AIBacktestMetrics,
+  "totalReturnPct" | "benchmarkReturnPct" | "excessReturnPct" | "maxDrawdownPct" | "tradeCount" | "fees"
+>> & {
+  commissionFees?: number | null;
+  stampDuty?: number | null;
+  slippageCost?: number | null;
+  benchmarkFees?: number | null;
+  benchmarkSlippageCost?: number | null;
+  grossTurnover?: number | null;
+};
+
+export type AIBacktestCostScenario = {
+  id: "baseline" | "cost_1_5x" | "cost_2x";
+  status: "available" | "unavailable";
+  costMultiplier: number;
+  commissionBps: number;
+  minimumCommission: number;
+  slippageBps: number;
+  metrics: AIBacktestAdvancedMetrics | null;
+  outOfSampleMetrics: AIBacktestAdvancedMetrics | null;
+  error: string | null;
+};
+
+export type AIBacktestCostStress = {
+  status: "available" | "partial" | "unavailable";
+  scenarios: AIBacktestCostScenario[];
+  error?: string | null;
+  notice: string;
+};
+
+export type AIBacktestReturnUncertainty = {
+  status: "available" | "insufficient_sample" | "unavailable";
+  method: "newey_west_hac";
+  metric: "annualized_log_excess_return_pct";
+  confidenceLevel: number;
+  observations: number;
+  lag: number | null;
+  pointEstimatePct: number | null;
+  lowerPct: number | null;
+  upperPct: number | null;
+  error: string | null;
+  notice: string;
+};
+
+export type AIBacktestAdvancedEvaluation = {
+  schemaVersion: 1;
+  basis: "frozen_decisions";
+  status: "available" | "unavailable";
+  outOfSampleStartDate: string | null;
+  costStress: AIBacktestCostStress;
+  returnUncertainty: AIBacktestReturnUncertainty;
+  error?: string | null;
+  notice: string;
+};
+
 export type AIBacktestBenchmarkStatus = "invested" | "partial_cash_sleeves" | "cash_only";
 
 export type AIBacktestComparisonProvenance = {
@@ -109,7 +167,28 @@ export type AIBacktestComparisonProvenance = {
   sourceRunId?: string;
 };
 
-export type AIBacktestComparisonAxis = "strategy" | "model";
+export type AIBacktestParameterKey =
+  | "maxPositionPct"
+  | "decisionInterval"
+  | "commissionBps"
+  | "minimumCommission"
+  | "slippageBps"
+  | "maxParticipationPct";
+export type AIBacktestForkPreviewRequest = {
+  strategy?: string;
+  modelId?: string;
+  maxTokens?: number;
+  maxPositionPct?: number;
+  decisionInterval?: number;
+  commissionBps?: number;
+  minimumCommission?: number;
+  slippageBps?: number;
+  maxParticipationPct?: number;
+};
+export type AIBacktestComparisonAxis = "strategy" | "model" | "parameter";
+export type AIBacktestComparisonRequest =
+  | { runIds: string[]; axis: "strategy" | "model"; parameterKey?: never }
+  | { runIds: string[]; axis: "parameter"; parameterKey: AIBacktestParameterKey };
 export type AIBacktestComparisonStatus = "comparable" | "incomplete" | "incompatible";
 export type AIBacktestComparisonReason = { code: string; runIds: string[]; message: string };
 
@@ -160,6 +239,7 @@ export type AIBacktestComparisonRow = {
   maxTokens: number | null;
   metrics: AIBacktestComparisonMetrics | null;
   evaluation: AIBacktestComparisonEvaluation | null;
+  parameterValue?: number | null;
 };
 
 export type AIBacktestComparisonResult = {
@@ -172,6 +252,7 @@ export type AIBacktestComparisonResult = {
   outOfSampleStartDate: string | null;
   rows: AIBacktestComparisonRow[];
   notice: string;
+  parameterKey?: AIBacktestParameterKey | null;
 };
 
 type AIBacktestDecisionBase = {
@@ -214,6 +295,17 @@ export type AIBacktestTrade = {
   fee: number;
 };
 
+export type AIBacktestResearchCoverage = {
+  status: "available" | "partial";
+  groupCount: number;
+  availableGroupCount: number;
+  partialGroupCount: number;
+  failedGroupCount: number;
+  itemCount: number;
+  notice: string;
+  warnings: string[];
+};
+
 export type AIBacktestPreview = {
   agentId: string;
   previewId: string;
@@ -236,6 +328,9 @@ export type AIBacktestPreview = {
   estimatedTokens?: number;
   paramsHash: string;
   dataHash: string;
+  researchInput?: "price_only" | "announcements";
+  researchHash?: string | null;
+  researchCoverage?: AIBacktestResearchCoverage | null;
   modelConfigHash?: string;
   actionsStatus: string;
   warnings: string[];
@@ -272,6 +367,9 @@ export type AIBacktestRun = {
   modelId: string;
   paramsHash: string;
   dataHash: string;
+  researchInput?: "price_only" | "announcements";
+  researchHash?: string | null;
+  researchCoverage?: AIBacktestResearchCoverage | null;
   modelConfigHash?: string;
   params?: AIBacktestParams;
   outOfSampleStartDate?: string | null;
@@ -287,6 +385,7 @@ export type AIBacktestRun = {
   metrics: AIBacktestMetrics | null;
   evaluation?: AIBacktestEvaluation | null;
   robustness?: AIBacktestRobustness | null;
+  advancedEvaluation?: AIBacktestAdvancedEvaluation | null;
   equity: Array<{
     date: string;
     equity: number;

@@ -19,6 +19,10 @@ function batch(status: FinancialResearchBatch["status"]): FinancialResearchBatch
 }
 async function render(mode: "batches" | "schedules" = "batches", onProposalImport?: (source: FinanceProposalBatchImport) => void) { await act(async () => root.render(<QueryClientProvider client={client}><FinanceResearchJobs assistant={assistant} stock={stock} watchlist={[stock]} mode={mode} zh onOpenRun={open} onProposalImport={onProposalImport} /></QueryClientProvider>)); await act(async () => new Promise((done) => setTimeout(done, 15))); }
 function button(label: string) { return [...document.body.querySelectorAll("button")].find((item) => item.textContent?.includes(label))!; }
+async function chooseFrequency(label: string) {
+  await act(async () => node.querySelector<HTMLButtonElement>('button[aria-label="执行频率"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent?.includes(label))!.click());
+}
 beforeEach(() => { vi.resetAllMocks(); node = document.createElement("div"); document.body.appendChild(node); root = createRoot(node); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); api.schedules.mockResolvedValue({ assistantAgentId: "finance", schedules: [] }); api.batches.mockResolvedValue({ assistantAgentId: "finance", batches: [] }); });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
 
@@ -122,7 +126,23 @@ it("labels weekday scheduling honestly and pauses only future runs", async () =>
   const schedule = { scheduleId: "daily", assistantAgentId: "finance", symbols: [stock.symbol], periodDays: 30, depth: "brief", execution: { kind: "weekdays", scheduledAt: null, timeOfDay: "18:00", timezone: "Asia/Shanghai" }, researchDate: null, enabled: true, nextRunAt: "2026-10-06T18:00:00+08:00", lastTriggeredAt: null, lastBatchId: null, createdAt: "2026-10-06T12:00:00+08:00", updatedAt: "2026-10-06T12:00:00+08:00" };
   api.schedules.mockImplementation(async () => ({ assistantAgentId: "finance", schedules: [schedule] }));
   api.patch.mockImplementation(async () => { schedule.enabled = false; return { ...schedule, nextRunAt: null }; });
-  await render("schedules"); expect(node.textContent).toContain("节假日照常研究"); expect(node.textContent).toContain("北京时间");
+  await render("schedules");
+  expect(node.textContent).toContain("周一至五 18:00"); expect(node.textContent).toContain("北京时间");
+  await chooseFrequency("周一至周五");
+  expect(node.textContent).toContain("周一至五执行，节假日照常研究");
   await act(async () => button("暂停计划").click());
   expect(api.patch).toHaveBeenCalledWith("finance", "daily", false); expect(api.stop).not.toHaveBeenCalled(); expect(button("恢复计划")).toBeDefined();
+});
+
+it("shows calendar coverage gaps and the persisted downtime catch-up record", async () => {
+  const schedule = { scheduleId: "a-share", assistantAgentId: "finance", symbols: [stock.symbol], periodDays: 30, depth: "brief", execution: { kind: "trading_days", scheduledAt: null, timeOfDay: "18:00", timezone: "Asia/Shanghai" }, researchDate: null, enabled: true, nextRunAt: null, lastTriggeredAt: "2026-10-06T19:00:00+08:00", lastBatchId: "batch", lastScheduledAt: "2026-10-06T18:00:00+08:00", lastTriggerReason: "downtime_catch_up", lastSkippedOccurrenceCount: 2, calendarStatus: "unavailable", createdAt: "2026-10-06T12:00:00+08:00", updatedAt: "2026-10-06T12:00:00+08:00" };
+  api.schedules.mockResolvedValue({ assistantAgentId: "finance", schedules: [schedule] });
+
+  await render("schedules");
+
+  expect(node.textContent).toContain("A股交易日");
+  expect(node.textContent).toContain("日历未覆盖");
+  expect(node.textContent).toContain("未知年份不会触发");
+  expect(node.textContent).toContain("最近停机补跑");
+  expect(node.textContent).toContain("跳过 2 次");
 });

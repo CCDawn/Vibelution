@@ -65,6 +65,7 @@ export function financialScheduleLabel(schedule: FinancialResearchSchedule, zh: 
   const execution = schedule.execution;
   if (execution.kind === "now") return zh ? "立即研究" : "Immediate";
   if (execution.kind === "once") return zh ? "执行一次" : "Once";
+  if (execution.kind === "trading_days") return `${zh ? "A股交易日" : "A-share trading days"} ${execution.timeOfDay ?? ""}`.trim();
   return `${execution.kind === "weekdays" ? (zh ? "周一至五" : "Mon–Fri") : (zh ? "每天" : "Daily")} ${execution.timeOfDay ?? ""}`.trim();
 }
 

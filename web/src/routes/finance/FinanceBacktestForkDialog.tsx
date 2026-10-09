@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAgentConfigWorkspace } from "../../api/agents";
 import { previewForkAIBacktest, startAIBacktest } from "../../api/financialBacktests";
 import { queryKeys } from "../../api/queryKeys";
-import type { AIBacktestPreview, AIBacktestRun } from "../../api/types/financialBacktests";
+import type { AIBacktestForkPreviewRequest, AIBacktestParameterKey, AIBacktestPreview, AIBacktestRun } from "../../api/types/financialBacktests";
 import type { AgentModelChoice } from "../../api/types/agents";
 import { VButton, VDialog, VInput, VSelect, VStateSurface, VTextarea, VSurface } from "../../components/vui";
+import { AI_BACKTEST_PARAMETER_OPTIONS, readAIBacktestParameterValue } from "./financialBacktestParameters";
 import styles from "./FinanceAIBacktest.styles";
 
 type Props = {
@@ -21,6 +22,9 @@ type Props = {
 const eligibleModels = (choices: AgentModelChoice[]) =>
   choices.filter((choice) => choice.runtimeSelectable && choice.slotCompatibility?.dialogue?.allowed === true);
 const NO_MODEL_SELECTION = "__choose_model__";
+const NO_PARAMETER_SELECTION = "__choose_parameter__";
+
+type ForkMode = "strategy_model" | "parameter";
 
 function symbolsForRun(run: Pick<AIBacktestRun, "symbol" | "symbols">) {
   return run.symbols?.length ? run.symbols : run.symbol ? [run.symbol] : [];
@@ -49,6 +53,9 @@ export function FinanceBacktestForkDialog({ agentId, source, open, disabled, zh,
   const [strategy, setStrategy] = useState("");
   const [modelId, setModelId] = useState(NO_MODEL_SELECTION);
   const [maxTokens, setMaxTokens] = useState(source.maxTokens);
+  const [forkMode, setForkMode] = useState<ForkMode>("strategy_model");
+  const [parameterKey, setParameterKey] = useState<AIBacktestParameterKey | typeof NO_PARAMETER_SELECTION>(NO_PARAMETER_SELECTION);
+  const [parameterValue, setParameterValue] = useState("");
   const [preview, setPreview] = useState<AIBacktestPreview | null>(null);
   const [pending, setPending] = useState<"preview" | "start" | "">("");
   const [error, setError] = useState("");
@@ -59,10 +66,22 @@ export function FinanceBacktestForkDialog({ agentId, source, open, disabled, zh,
   const startRequest = useRef({ previewId: "", id: "" });
   const mounted = useRef(true);
   const sourceSymbols = symbolsForRun(source);
+  const selectedParameter = AI_BACKTEST_PARAMETER_OPTIONS.find((item) => item.id === parameterKey);
+  const selectedParameterValue = Number(parameterValue);
+  const sourceParameterValue = parameterKey === NO_PARAMETER_SELECTION ? null : readAIBacktestParameterValue(source.params, parameterKey);
+  const parameterValueValid = Boolean(
+    selectedParameter
+    && parameterValue.trim() !== ""
+    && Number.isFinite(selectedParameterValue)
+    && selectedParameterValue >= selectedParameter.min
+    && selectedParameterValue <= selectedParameter.max
+    && (!selectedParameter.choices || selectedParameter.choices.includes(selectedParameterValue))
+    && (sourceParameterValue === null || selectedParameterValue !== sourceParameterValue),
+  );
   const valid = Boolean(
-    strategy.trim()
-    && strategy.length <= 4000
-    && candidates.some((model) => model.modelId === modelId)
+    (forkMode === "parameter"
+      ? parameterValueValid && Boolean(source.params?.strategy?.trim()) && candidates.some((model) => model.modelId === source.modelId)
+      : strategy.trim() && strategy.length <= 4000 && candidates.some((model) => model.modelId === modelId))
     && Number.isInteger(maxTokens)
     && maxTokens >= 1000
     && maxTokens <= 2_000_000,
@@ -86,6 +105,9 @@ export function FinanceBacktestForkDialog({ agentId, source, open, disabled, zh,
     setStrategy(source.params?.strategy ?? "");
     setModelId(NO_MODEL_SELECTION);
     setMaxTokens(source.maxTokens);
+    setForkMode("strategy_model");
+    setParameterKey(NO_PARAMETER_SELECTION);
+    setParameterValue("");
     setPreview(null);
     setError("");
     modelChosen.current = false;
@@ -119,6 +141,36 @@ export function FinanceBacktestForkDialog({ agentId, source, open, disabled, zh,
     setError("");
   }
 
+  function editForkMode(value: ForkMode) {
+    generation.current += 1;
+    setForkMode(value);
+    if (value === "parameter") {
+      setStrategy(source.params?.strategy ?? "");
+      setModelId(candidates.some((model) => model.modelId === source.modelId) ? source.modelId : NO_MODEL_SELECTION);
+      setParameterKey(NO_PARAMETER_SELECTION);
+      setParameterValue("");
+    }
+    setPreview(null);
+    setError("");
+  }
+
+  function editParameterKey(value: AIBacktestParameterKey | typeof NO_PARAMETER_SELECTION) {
+    generation.current += 1;
+    setParameterKey(value);
+    const metadata = AI_BACKTEST_PARAMETER_OPTIONS.find((item) => item.id === value);
+    const sourceValue = metadata ? readAIBacktestParameterValue(source.params, metadata.id) : null;
+    setParameterValue(metadata ? String(sourceValue ?? (metadata.id === "maxParticipationPct" ? 1 : metadata.choices?.[0] ?? metadata.min)) : "");
+    setPreview(null);
+    setError("");
+  }
+
+  function editParameterValue(value: string) {
+    generation.current += 1;
+    setParameterValue(value);
+    setPreview(null);
+    setError("");
+  }
+
   async function perform(kind: "preview" | "start", work: () => Promise<void>) {
     if (gate.current) return;
     gate.current = true;
@@ -142,17 +194,36 @@ export function FinanceBacktestForkDialog({ agentId, source, open, disabled, zh,
   async function createPreview() {
     if (!valid || disabled || workspace.isPending) return;
     const expectedGeneration = generation.current;
-    const data = await previewForkAIBacktest(agentId, source.runId, {
-      strategy: strategy.trim(),
-      modelId,
-      maxTokens,
-    });
+    const override: AIBacktestForkPreviewRequest = forkMode === "parameter"
+      ? { [parameterKey]: selectedParameterValue } as AIBacktestForkPreviewRequest
+      : { strategy: strategy.trim(), modelId, maxTokens };
+    const data = await previewForkAIBacktest(agentId, source.runId, override);
     if (!mounted.current || generation.current !== expectedGeneration) return;
     if (data.agentId !== agentId || !sameSymbols(symbolsForRun(data), sourceSymbols)) {
       throw new Error(zh ? "副本预检返回了不匹配的智能体或股票组合" : "Fork preview returned a different agent or asset set");
     }
     if (!source.dataHash || data.dataHash !== source.dataHash) {
       throw new Error(zh ? "副本没有复用源回测的冻结行情数据，不能继续" : "Fork preview did not reuse the source run's frozen market data");
+    }
+    if (forkMode === "parameter") {
+      const sourceParams = source.params;
+      const previewParams = data.params;
+      const otherParameterMismatch = AI_BACKTEST_PARAMETER_OPTIONS.some((item) => item.id !== parameterKey
+        && readAIBacktestParameterValue(sourceParams, item.id) !== readAIBacktestParameterValue(previewParams, item.id));
+      if (
+        !sourceParams
+        || !previewParams
+        || data.modelId !== source.modelId
+        || data.maxTokens !== source.maxTokens
+        || previewParams.strategy !== sourceParams.strategy
+        || data.researchInput !== (source.researchInput ?? "price_only")
+        || (data.researchHash ?? null) !== (source.researchHash ?? null)
+        || (data.outOfSampleStartDate ?? null) !== (source.outOfSampleStartDate ?? null)
+        || otherParameterMismatch
+        || readAIBacktestParameterValue(previewParams, parameterKey as AIBacktestParameterKey) !== selectedParameterValue
+      ) {
+        throw new Error(zh ? "参数预检改变了模型、策略或其他冻结输入，不能作为单参数对照" : "Parameter preview changed the model, strategy, or another frozen input");
+      }
     }
     setPreview(data);
   }
@@ -196,7 +267,9 @@ export function FinanceBacktestForkDialog({ agentId, source, open, disabled, zh,
         onOpenChange(next);
       }}
       title={zh ? "用同一份数据创建对照回测" : "Create a same-data comparison run"}
-      description={zh ? "复制源任务冻结的行情、区间、样本外边界、资金、费用和频率；策略、模型与 Token 预算可单独调整。预检不调用模型。" : "Reuse frozen market data, dates, holdout boundary, capital, fees and frequency. Strategy, model and token budget can change. Preview makes no model call."}
+      description={forkMode === "parameter"
+        ? (zh ? "每次只改一个参数；策略与模型保持源值。每条候选单独预检，并由你逐条点击开始，不会批量调用模型。" : "Change one parameter while preserving strategy and model. Preview and explicitly start each candidate one at a time; runs never auto-call in a batch.")
+        : (zh ? "复制源任务冻结的行情、区间、样本外边界、资金、费用和频率；策略、模型与 Token 预算可单独调整。预检不调用模型。" : "Reuse frozen market data, dates, holdout boundary, capital, fees and frequency. Strategy, model and token budget can change. Preview makes no model call.")}
       footer={
         <>
           <VButton variant="secondary" isDisabled={busy} onPress={() => onOpenChange(false)}>{zh ? "关闭" : "Close"}</VButton>
@@ -222,27 +295,91 @@ export function FinanceBacktestForkDialog({ agentId, source, open, disabled, zh,
       <div className={styles.panel}>
         <p className={styles.note}>{zh ? "源回测" : "Source run"} {source.runId} · {sourceSymbols.join(" / ") || "—"} · {zh ? "冻结数据" : "Frozen data"} {source.dataHash?.slice(0, 12) || "—"}</p>
         <label className={styles.field}>
-          {zh ? "新策略指令" : "Strategy instruction"}
-          <VTextarea aria-label="对照回测策略指令" value={strategy} maxLength={4000} disabled={busy} onChange={(event) => editStrategy(event.target.value)} />
+          {zh ? "副本用途" : "Fork purpose"}
+          <VSelect
+            aria-label={zh ? "回测副本用途" : "Fork purpose"}
+            selectedKey={forkMode}
+            isDisabled={busy}
+            options={[
+              { id: "strategy_model", label: zh ? "策略 / 模型对照" : "Strategy / model comparison" },
+              { id: "parameter", label: zh ? "单参数敏感性" : "Single-parameter sensitivity" },
+            ]}
+            onSelectionChange={(key) => editForkMode(String(key ?? "strategy_model") as ForkMode)}
+          />
         </label>
-        <div className={styles.row}>
-          <label className={styles.field}>
-            {zh ? "执行模型" : "Execution model"}
-            <VSelect
-              aria-label="对照回测模型"
-              placeholder={zh ? "明确选择可用模型" : "Choose an available model"}
-              selectedKey={modelId}
-              isDisabled={busy || workspace.isPending || candidates.length === 0}
-              options={modelOptions}
-              onSelectionChange={(key) => editModel(String(key ?? ""))}
-            />
-          </label>
-          <label className={styles.field}>
-            {zh ? "Token 预算" : "Token budget"}
-            <VInput aria-label="对照回测Token预算" type="number" min={1000} max={2_000_000} step={1000} value={String(maxTokens)} disabled={busy} onChange={(event) => editMaxTokens(Number(event.target.value))} />
-          </label>
-        </div>
-        {maxTokens !== source.maxTokens ? <VStateSurface tone="info" density="compact" title={zh ? "Token预算与源回测不同；共同参数校验会判为不可比。" : "A different token budget changes shared assumptions, so this run will not pass the same-parameter comparison check."} /> : null}
+        {forkMode === "parameter" ? (
+          <div className={styles.row}>
+            <label className={styles.field}>
+              {zh ? "变化参数" : "Parameter to vary"}
+              <VSelect
+                aria-label={zh ? "参数敏感性目标" : "Parameter sensitivity target"}
+                selectedKey={parameterKey}
+                isDisabled={busy}
+                options={[
+                  { id: NO_PARAMETER_SELECTION, label: zh ? "选择一个参数" : "Choose one parameter" },
+                  ...AI_BACKTEST_PARAMETER_OPTIONS.map((item) => ({ id: item.id, label: item.label[zh ? "zh" : "en"] })),
+                ]}
+                onSelectionChange={(key) => editParameterKey(String(key ?? NO_PARAMETER_SELECTION) as AIBacktestParameterKey | typeof NO_PARAMETER_SELECTION)}
+              />
+            </label>
+            {selectedParameter ? (
+              <label className={styles.field}>
+                {selectedParameter.label[zh ? "zh" : "en"]}
+                {selectedParameter.choices ? (
+                  <VSelect
+                    aria-label={zh ? "参数敏感性取值" : "Parameter sensitivity value"}
+                    selectedKey={parameterValue}
+                    isDisabled={busy}
+                    options={selectedParameter.choices.map((item) => ({ id: String(item), label: zh ? `${item} 个交易日` : `${item} sessions` }))}
+                    onSelectionChange={(key) => editParameterValue(String(key ?? ""))}
+                  />
+                ) : (
+                  <VInput
+                    aria-label={zh ? "参数敏感性取值" : "Parameter sensitivity value"}
+                    type="number"
+                    min={selectedParameter.min}
+                    max={selectedParameter.max}
+                    step={selectedParameter.step}
+                    value={parameterValue}
+                    disabled={busy}
+                    onChange={(event) => editParameterValue(event.target.value)}
+                  />
+                )}
+              </label>
+            ) : null}
+            {parameterKey === "maxParticipationPct" && sourceParameterValue === null ? (
+              <span className={styles.note}>{zh ? "源记录未设成交量参与率上限；填写数值会为新运行新增该限制。" : "The legacy source has no volume cap; a numeric value adds one to the new run."}</span>
+            ) : null}
+          </div>
+        ) : null}
+        {forkMode === "strategy_model" ? (
+          <>
+            <label className={styles.field}>
+              {zh ? "新策略指令" : "Strategy instruction"}
+              <VTextarea aria-label="对照回测策略指令" value={strategy} maxLength={4000} disabled={busy} onChange={(event) => editStrategy(event.target.value)} />
+            </label>
+            <div className={styles.row}>
+              <label className={styles.field}>
+                {zh ? "执行模型" : "Execution model"}
+                <VSelect
+                  aria-label="对照回测模型"
+                  placeholder={zh ? "明确选择可用模型" : "Choose an available model"}
+                  selectedKey={modelId}
+                  isDisabled={busy || workspace.isPending || candidates.length === 0}
+                  options={modelOptions}
+                  onSelectionChange={(key) => editModel(String(key ?? ""))}
+                />
+              </label>
+              <label className={styles.field}>
+                {zh ? "Token 预算" : "Token budget"}
+                <VInput aria-label="对照回测Token预算" type="number" min={1000} max={2_000_000} step={1000} value={String(maxTokens)} disabled={busy} onChange={(event) => editMaxTokens(Number(event.target.value))} />
+              </label>
+            </div>
+            {maxTokens !== source.maxTokens ? <VStateSurface tone="info" density="compact" title={zh ? "Token预算与源回测不同；共同参数校验会判为不可比。" : "A different token budget changes shared assumptions, so this run will not pass the same-parameter comparison check."} /> : null}
+          </>
+        ) : (
+          <p className={styles.note}>{zh ? `沿用源策略、模型与 Token 预算；模型：${source.modelId}。` : `Source strategy, model and token budget are preserved; model: ${source.modelId}.`}</p>
+        )}
         {workspace.isPending ? <VStateSurface tone="loading" density="compact" busy title={zh ? "读取当前智能体可用模型" : "Loading models available to this agent"} /> : null}
         {workspace.isError ? <VStateSurface tone="error" density="compact" title={workspace.error.message} actions={<VButton onPress={() => void workspace.refetch()}>{zh ? "重试" : "Retry"}</VButton>} /> : null}
         {workspace.data && !sourceModelAvailable ? (

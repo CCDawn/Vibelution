@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -397,7 +397,7 @@ def validate_snapshot(snapshot: BacktestSnapshot) -> None:
     if coverage.complete is not True:
         raise BacktestDataError("回测快照数据覆盖不完整")
     if (
-        coverage.tradingCalendarStatus != "tencent_index_checked"
+        coverage.tradingCalendarStatus not in {"tencent_index_checked", "eastmoney_index_checked"}
         or coverage.calendarSymbol != _CALENDAR_SYMBOL
     ):
         raise BacktestDataError("回测快照未通过交易日历交叉检查")
@@ -501,6 +501,36 @@ def validate_snapshot(snapshot: BacktestSnapshot) -> None:
 def prepare_data(
     payload: Mapping[str, Any], *, today: date | datetime | str | None = None
 ) -> BacktestSnapshot:
+    """Select one whole provider snapshot; never splice sources into a series."""
+    from dataclasses import replace
+
+    from .eastmoney import fetch_window
+
+    source = payload.get("dataSource", "tencent")
+    if source not in {"tencent", "eastmoney", "auto"}:
+        raise BacktestInputError("dataSource必须是tencent、eastmoney或auto")
+    if source == "tencent":
+        return _prepare_data(payload, today=today)
+    if source == "eastmoney":
+        try:
+            return _prepare_data(payload, today=today, fetcher=fetch_window, provider="eastmoney")
+        except (BacktestInputError, CorporateActionUnsupported):
+            raise
+        except BacktestDataError as exc:
+            raise BacktestDataError(str(exc).replace("腾讯", "东方财富"), metadata=exc.metadata) from exc
+    try:
+        return _prepare_data(payload, today=today)
+    except (BacktestInputError, CorporateActionUnsupported):
+        raise
+    except BacktestDataError:
+        alternative = prepare_data({**payload, "dataSource": "eastmoney"}, today=today)
+        return replace(alternative, notice=alternative.notice + ("腾讯历史数据未通过读取或覆盖检查，本次全部行情改用东方财富重新验证；未混用两个来源。",))
+
+
+def _prepare_data(
+    payload: Mapping[str, Any], *, today: date | datetime | str | None = None,
+    fetcher: Callable | None = None, provider: str = "tencent",
+) -> BacktestSnapshot:
     """Fetch and freeze multi-year raw daily candles, without any quote fallback."""
     if today is None:
         cutoff = datetime.now(_BEIJING).date()
@@ -512,15 +542,17 @@ def prepare_data(
         cutoff = _parse_date(today, "today")
 
     symbol, requested_start, requested_end, warmup_bars = _request_values(payload, cutoff)
+    selected_fetch = fetcher or _fetch_window
+    source_name = "腾讯财经" if provider == "tencent" else "东方财富"
     raw_by_date: dict[str, dict[str, Any]] = {}
     qfq_by_date: dict[str, dict[str, Any]] = {}
     calendar_dates: set[str] = set()
     provider_windows: list[dict[str, Any]] = []
 
     def fetch_year(window_start: date, window_end: date) -> None:
-        raw_rows = _fetch_window(symbol, window_start, window_end, "none")
-        qfq_rows = _fetch_window(symbol, window_start, window_end, "qfq")
-        calendar_rows = _fetch_window(_CALENDAR_SYMBOL, window_start, window_end, "none")
+        raw_rows = selected_fetch(symbol, window_start, window_end, "none")
+        qfq_rows = selected_fetch(symbol, window_start, window_end, "qfq")
+        calendar_rows = selected_fetch(_CALENDAR_SYMBOL, window_start, window_end, "none")
         raw_window, qfq_window = _validate_pair(raw_rows, qfq_rows, symbol, window_start.year)
         index_dates = _calendar_window(calendar_rows, window_start.year)
         if set(raw_window) & set(raw_by_date):
@@ -665,15 +697,15 @@ def prepare_data(
         tradingDays=len(candles),
         warmupBars=len(warmup),
         providerWindows=tuple(provider_windows),
-        tradingCalendarStatus="tencent_index_checked",
+        tradingCalendarStatus=f"{provider}_index_checked",
         calendarSymbol=_CALENDAR_SYMBOL,
         complete=True,
     )
     notice = (
-        "使用腾讯 A 股 raw 日线；当日收盘生成决策，下一条已完成交易日开盘撮合。",
+        f"使用{source_name} A 股 raw 日线；当日收盘生成决策，下一条已完成交易日开盘撮合。",
         "回测最多20年、5000个区间交易日、252根预热K线；AI决策最多500次。",
-        "逐日覆盖已与腾讯上证指数 raw 日K日期比对；该指数日历不是交易所官方停牌/复牌审计源。",
-        "qfq/raw OHLC量化区间检查复权变换是否变化；腾讯未提供公司行动清单，细小或复杂行动仍可能无法识别。",
+        f"逐日覆盖已与{source_name}上证指数 raw 日K日期比对；该指数日历不是交易所官方停牌/复牌审计源。",
+        "qfq/raw OHLC量化区间检查复权变换是否变化；此行情接口未提供完整公司行动清单，细小或复杂行动仍可能无法识别。",
     )
     snapshot = BacktestSnapshot(
         symbol=symbol,
@@ -681,8 +713,8 @@ def prepare_data(
         end_date=actual_end_text,
         candles=candles,
         warmup_candles=warmup,
-        source=_SOURCE,
-        source_url=_QUOTE_URL.format(symbol=symbol),
+        source=source_name,
+        source_url=_QUOTE_URL.format(symbol=symbol) if provider == "tencent" else f"https://quote.eastmoney.com/{symbol}.html",
         fetched_at=datetime.now(_BEIJING).isoformat(timespec="seconds"),
         data_hash=_stable_hash(all_snapshot_rows, symbol, actual_start_text, actual_end_text),
         coverage=coverage,

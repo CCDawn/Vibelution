@@ -106,6 +106,19 @@ def _normalize_params(params: Mapping[str, Any]) -> dict[str, Any]:
         minimum=Decimal(0),
         maximum=Decimal(100),
     )
+    raw_participation_pct = _param(
+        params, "maxParticipationPct", "max_participation_pct", None
+    )
+    max_participation_pct = (
+        None
+        if raw_participation_pct is None
+        else _decimal(
+            raw_participation_pct,
+            "maxParticipationPct",
+            minimum=Decimal("0.1"),
+            maximum=Decimal(100),
+        )
+    )
     max_decisions = _integer(
         _param(params, "maxDecisions", "max_decisions", _MAX_DECISIONS),
         "maxDecisions",
@@ -114,7 +127,7 @@ def _normalize_params(params: Mapping[str, Any]) -> dict[str, Any]:
     )
     if params.get("stampDutyBps") is not None or params.get("stamp_duty_bps") is not None:
         raise BacktestInputError("印花税按历史成交日期自动计取，不接受固定税率覆盖")
-    return {
+    normalized = {
         "initialCash": initial_cash,
         "maxPositionPct": max_position_pct,
         "decisionInterval": decision_interval,
@@ -123,6 +136,9 @@ def _normalize_params(params: Mapping[str, Any]) -> dict[str, Any]:
         "slippageBps": slippage_bps,
         "maxDecisions": max_decisions,
     }
+    if max_participation_pct is not None:
+        normalized["maxParticipationPct"] = max_participation_pct
+    return normalized
 
 
 def build_decision_schedule(
@@ -282,6 +298,21 @@ def _shares_for_target(value: Decimal, price: Decimal) -> int:
     return max(0, lots * _LOT_SIZE)
 
 
+def _max_participation_shares(
+    execution: Candle, max_participation_pct: Decimal | None
+) -> int | None:
+    """Return the per-symbol daily share cap rounded down to board lots.
+
+    Missing participation limits preserve the legacy unlimited-volume behavior.
+    Candle volume is already normalized to shares by the frozen-data layer.
+    """
+    if max_participation_pct is None:
+        return None
+    allowed = Decimal(str(execution.volume)) * max_participation_pct / Decimal(100)
+    whole_shares = int(allowed.to_integral_value(rounding=ROUND_FLOOR))
+    return (whole_shares // _LOT_SIZE) * _LOT_SIZE
+
+
 def _make_order(
     *,
     signal_date: str,
@@ -334,6 +365,7 @@ def _execute_target(
     minimum_commission: Decimal,
     slippage_rate: Decimal,
     symbol: str,
+    max_participation_pct: Decimal | None = None,
 ) -> tuple[Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal]:
     if target_weight > max_position_pct / Decimal(100):
         raise BacktestDecisionError("AI目标仓位超过本次最大仓位上限")
@@ -372,7 +404,45 @@ def _execute_target(
 
     if side == "buy":
         requested = max(0, (requested // _LOT_SIZE) * _LOT_SIZE)
-        filled = requested
+        executable_requested = requested
+    else:
+        executable_requested = (min(shares, requested) // _LOT_SIZE) * _LOT_SIZE
+        if not executable_requested:
+            order = _make_order(
+                signal_date=signal_date,
+                candle=execution,
+                side=side,
+                status="rejected",
+                reason="no_sellable_board_lot",
+                requested_shares=requested,
+            )
+            return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
+
+    participation_cap = _max_participation_shares(
+        execution, max_participation_pct
+    )
+    volume_limited = (
+        participation_cap is not None
+        and participation_cap < executable_requested
+    )
+    fill_limit = (
+        executable_requested
+        if participation_cap is None
+        else min(executable_requested, participation_cap)
+    )
+    if executable_requested and fill_limit == 0:
+        order = _make_order(
+            signal_date=signal_date,
+            candle=execution,
+            side=side,
+            status="rejected",
+            reason="volume_participation_below_one_lot",
+            requested_shares=requested,
+        )
+        return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
+
+    if side == "buy":
+        filled = fill_limit
         while filled:
             notional = Decimal(filled) * fill_price
             commission = _fee(notional, commission_rate, minimum_commission)
@@ -411,7 +481,7 @@ def _execute_target(
             "tPlusOne": True,
         }
     else:
-        filled = min(shares, requested)
+        filled = min(shares, fill_limit)
         filled = (filled // _LOT_SIZE) * _LOT_SIZE
         if not filled:
             order = _make_order(
@@ -447,8 +517,12 @@ def _execute_target(
         signal_date=signal_date,
         candle=execution,
         side=side,
-        status="filled",
-        reason="next_session_open",
+        status="partial_fill" if volume_limited else "filled",
+        reason=(
+            "daily_volume_participation_limit"
+            if volume_limited
+            else "next_session_open"
+        ),
         requested_shares=requested,
         filled_shares=filled,
         fill_price=fill_price,
@@ -469,6 +543,7 @@ def _execute_benchmark(
     minimum_commission: Decimal,
     slippage_rate: Decimal,
     symbol: str,
+    max_participation_pct: Decimal | None = None,
 ) -> tuple[Decimal, int, dict[str, Any]]:
     fill_price, per_share_slippage = _execution_price(execution, "buy", slippage_rate)
     rejection = _is_locked(execution, previous_close, "buy", symbol)
@@ -478,7 +553,27 @@ def _execute_benchmark(
             status="rejected", reason=rejection, requested_shares=0,
         )
     requested = _shares_for_target(Decimal(initial_cash), fill_price)
-    filled = requested
+    participation_cap = _max_participation_shares(
+        execution, max_participation_pct
+    )
+    volume_limited = (
+        participation_cap is not None and participation_cap < requested
+    )
+    fill_limit = (
+        requested
+        if participation_cap is None
+        else min(requested, participation_cap)
+    )
+    if requested and fill_limit == 0:
+        return initial_cash, 0, _make_order(
+            signal_date=execution.date,
+            candle=execution,
+            side="buy",
+            status="rejected",
+            reason="volume_participation_below_one_lot",
+            requested_shares=requested,
+        )
+    filled = fill_limit
     while filled:
         notional = Decimal(filled) * fill_price
         fee = _fee(notional, commission_rate, minimum_commission)
@@ -500,8 +595,12 @@ def _execute_benchmark(
         signal_date=execution.date,
         candle=execution,
         side="buy",
-        status="filled",
-        reason="same_cost_buy_and_hold_benchmark",
+        status="partial_fill" if volume_limited else "filled",
+        reason=(
+            "daily_volume_participation_limit"
+            if volume_limited
+            else "same_cost_buy_and_hold_benchmark"
+        ),
         requested_shares=requested,
         filled_shares=filled,
         fill_price=fill_price,
@@ -573,6 +672,7 @@ def _simulate_prefix(
     commission_rate: Decimal = normalized["commissionBps"] / _BPS
     minimum_commission: Decimal = normalized["minimumCommission"]
     slippage_rate: Decimal = normalized["slippageBps"] / _BPS
+    max_participation_pct: Decimal | None = normalized.get("maxParticipationPct")
     cash = initial_cash
     shares = 0
     benchmark_cash = initial_cash
@@ -601,9 +701,10 @@ def _simulate_prefix(
                 minimum_commission=minimum_commission,
                 slippage_rate=slippage_rate,
                 symbol=snapshot.symbol,
+                max_participation_pct=max_participation_pct,
             )
             benchmark_orders.append(candidate_order)
-            if candidate_order.get("status") == "filled":
+            if candidate_order.get("status") in {"filled", "partial_fill"}:
                 benchmark_cash = candidate_cash
                 benchmark_shares = candidate_shares
                 benchmark_order = candidate_order
@@ -621,6 +722,7 @@ def _simulate_prefix(
                 minimum_commission=minimum_commission,
                 slippage_rate=slippage_rate,
                 symbol=snapshot.symbol,
+                max_participation_pct=max_participation_pct,
             )
             orders.append(order)
             total_commission += commission
@@ -691,6 +793,16 @@ def _simulate_prefix(
     metrics["benchmarkFees"] = float(benchmark_commission + benchmark_stamp)
     metrics["slippageCost"] = float(_money(total_slippage))
     metrics["benchmarkSlippageCost"] = float(benchmark_order.get("slippageCost") or 0)
+    notices = [
+        "A股按100股整手买卖，现金账户，禁止做空；收盘信号下一交易日开盘执行，买入股份执行后至少持有至下一个交易日。",
+        "滑点成交价限制在当日OHLC区间内；零成交量拒单。触及常见涨跌幅的单一价格日线会保守拒单，但腾讯不提供历史ST、上市初期及逐日涨跌幅状态，故limitStatus不是权威判定。",
+        "佣金按用户输入的固定费率和最低佣金；印花税按成交日历史税率自动计取。未建模过户费、监管费、分红现金入账与送转股；检测到公司行动会阻断。",
+        "这是历史行情上的模拟研究，不代表可成交的真实订单或未来收益。",
+    ]
+    if max_participation_pct is not None:
+        notices.append(
+            f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%并下取整至100股；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
+        )
     return {
         "status": "completed",
         "symbol": snapshot.symbol,
@@ -715,13 +827,7 @@ def _simulate_prefix(
             key: float(value) if isinstance(value, Decimal) else value
             for key, value in normalized.items()
         },
-        "notice": list(snapshot.notice)
-        + [
-            "A股按100股整手买卖，现金账户，禁止做空；收盘信号下一交易日开盘执行，买入股份执行后至少持有至下一个交易日。",
-            "滑点成交价限制在当日OHLC区间内；零成交量拒单。触及常见涨跌幅的单一价格日线会保守拒单，但腾讯不提供历史ST、上市初期及逐日涨跌幅状态，故limitStatus不是权威判定。",
-            "佣金按用户输入的固定费率和最低佣金；印花税按成交日历史税率自动计取。未建模过户费、监管费、分红现金入账与送转股；检测到公司行动会阻断。",
-            "这是历史行情上的模拟研究，不代表可成交的真实订单或未来收益。",
-        ],
+        "notice": list(snapshot.notice) + notices,
     }
 
 
@@ -766,8 +872,9 @@ def validate_benchmark(
             minimum_commission=minimum_commission,
             slippage_rate=slippage_rate,
             symbol=snapshot.symbol,
+            max_participation_pct=normalized.get("maxParticipationPct"),
         )
-        if order.get("status") == "filled":
+        if order.get("status") in {"filled", "partial_fill"}:
             return
         attempts.append(order)
     raise _benchmark_unavailable_error(attempts)

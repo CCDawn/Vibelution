@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -49,7 +50,7 @@ def _schedule(*, kind="daily", time_of_day="18:00", next_run="2026-10-07T18:00:0
         "execution": {
             "kind": kind,
             "scheduledAt": None,
-            "timeOfDay": time_of_day if kind in {"daily", "weekdays"} else None,
+            "timeOfDay": time_of_day if kind in {"daily", "weekdays", "trading_days"} else None,
             "timezone": "Asia/Shanghai",
         },
         "nextRunAt": next_run,
@@ -176,6 +177,169 @@ def test_due_occurrence_after_offline_day_fires_only_current_valid_occurrence():
     assert contract.due_occurrence(schedule, now=now) == datetime(
         2026, 10, 6, 18, 0, tzinfo=BEIJING
     )
+
+
+@pytest.mark.parametrize(
+    ("kind", "enabled", "next_run", "expected_status"),
+    [
+        ("daily", True, "2026-10-12T18:00:00+08:00", None),
+        ("weekdays", True, "2026-10-12T18:00:00+08:00", None),
+        ("trading_days", True, "2026-10-12T18:00:00+08:00", "available"),
+        ("trading_days", True, None, "unavailable"),
+        ("trading_days", False, None, None),
+    ],
+)
+def test_project_schedule_reports_calendar_status_only_for_trading_days(
+    kind, enabled, next_run, expected_status
+):
+    schedule = _schedule(kind=kind, next_run=next_run)
+    schedule["enabled"] = enabled
+
+    assert service.project_schedule(schedule)["calendarStatus"] == expected_status
+
+
+def test_trading_day_schedule_uses_official_calendar_and_requires_a_share_symbols():
+    now = datetime(2026, 10, 10, 12, 0, tzinfo=BEIJING)
+    normalized = contract.normalize_create_request(
+        {
+            **_request(symbols=["600000", "000001", "830001"]),
+            "execution": {
+                "kind": "trading_days",
+                "timeOfDay": "18:00",
+                "timezone": "Asia/Shanghai",
+            },
+        },
+        now=now,
+    )
+    schedule = {
+        "enabled": True,
+        "execution": normalized["execution"],
+    }
+
+    assert normalized["symbols"] == ["sh600000", "sz000001", "bj830001"]
+    assert contract.schedule_next_run(schedule, now=now) == "2026-10-12T18:00:00+08:00"
+    with pytest.raises(FinancialJobValidationError, match="A股交易日计划"):
+        contract.normalize_create_request(
+            {
+                **_request(symbols=["600000", "hk700"]),
+                "execution": {
+                    "kind": "trading_days",
+                    "timeOfDay": "18:00",
+                    "timezone": "Asia/Shanghai",
+                },
+            },
+            now=now,
+        )
+
+
+def test_trading_day_downtime_catch_up_is_one_auditable_latest_occurrence(tmp_path):
+    selected_store = _store(tmp_path)
+    schedule_id = str(uuid4())
+    schedule = {
+        "scheduleId": schedule_id,
+        "assistantAgentId": ASSISTANT_ID,
+        "symbols": ["sh600000"],
+        "periodDays": 30,
+        "depth": "standard",
+        "execution": {
+            "kind": "trading_days",
+            "scheduledAt": None,
+            "timeOfDay": "18:00",
+            "timezone": "Asia/Shanghai",
+        },
+        "enabled": True,
+        "nextRunAt": "2024-01-05T18:00:00+08:00",
+        "lastOccurrence": None,
+        "calendarStatus": "available",
+    }
+    selected_store.update(
+        ASSISTANT_ID, lambda state: state["schedules"].update({schedule_id: schedule})
+    )
+    task_store = runtime_task_registry.RuntimeTaskStore(
+        tmp_path / "tasks", branch_generation_reader=lambda _session_id: 0
+    )
+    worker = runtime.FinancialResearchJobsWorker(
+        store=selected_store,
+        task_store=task_store,
+        assistant_loader=lambda: [ASSISTANT_ID],
+    )
+    now = datetime(2024, 1, 9, 20, 0, tzinfo=BEIJING)
+
+    due = contract.due_occurrence_details(schedule, now=now)
+    assert due is not None
+    assert due.scheduled_at == datetime(2024, 1, 9, 18, 0, tzinfo=BEIJING)
+    assert due.trigger_reason == "downtime_catch_up"
+    assert due.skipped_occurrence_count == 2
+    reserved = worker._reserve_occurrence(
+        ASSISTANT_ID,
+        schedule_id,
+        due=due.scheduled_at,
+        trigger_reason=due.trigger_reason,
+        skipped_occurrence_count=due.skipped_occurrence_count,
+        now=now,
+    )
+
+    assert reserved is not None
+    assert reserved["triggerReason"] == "downtime_catch_up"
+    assert reserved["skippedOccurrenceCount"] == 2
+    assert reserved["researchDate"] == "2024-01-09"
+    saved = selected_store.load(ASSISTANT_ID)["schedules"][schedule_id]
+    batch = runtime.ensure_occurrence_batch(
+        saved, reserved, store=selected_store, task_store=task_store
+    )
+    assert batch["scheduledAt"] == "2024-01-09T18:00:00+08:00"
+    assert batch["triggerReason"] == "downtime_catch_up"
+    assert batch["skippedOccurrenceCount"] == 2
+    assert saved["nextRunAt"] == "2024-01-10T18:00:00+08:00"
+    projected_schedule = service.project_schedule(saved)
+    assert projected_schedule["lastTriggerReason"] == "downtime_catch_up"
+    assert projected_schedule["lastSkippedOccurrenceCount"] == 2
+    assert contract.due_occurrence_details(saved, now=now) is None
+    assert worker._reserve_occurrence(
+        ASSISTANT_ID,
+        schedule_id,
+        due=due.scheduled_at,
+        trigger_reason=due.trigger_reason,
+        skipped_occurrence_count=due.skipped_occurrence_count,
+        now=now,
+    ) is None
+
+
+def test_trading_day_schedule_does_not_guess_uncovered_year_after_restart(tmp_path):
+    selected_store = _store(tmp_path)
+    schedule_id = str(uuid4())
+    schedule = {
+        "scheduleId": schedule_id,
+        "assistantAgentId": ASSISTANT_ID,
+        "symbols": ["sh600000"],
+        "periodDays": 30,
+        "depth": "standard",
+        "execution": {
+            "kind": "trading_days",
+            "scheduledAt": None,
+            "timeOfDay": "18:00",
+            "timezone": "Asia/Shanghai",
+        },
+        "enabled": True,
+        "nextRunAt": "2026-12-31T18:00:00+08:00",
+        "lastOccurrence": None,
+        "calendarStatus": "available",
+    }
+    selected_store.update(
+        ASSISTANT_ID, lambda state: state["schedules"].update({schedule_id: schedule})
+    )
+    worker = runtime.FinancialResearchJobsWorker(
+        store=selected_store,
+        assistant_loader=lambda: [ASSISTANT_ID],
+    )
+    now = datetime(2027, 1, 4, 20, 0, tzinfo=BEIJING)
+
+    worker._trigger_due_schedules(now=now, should_stop=lambda: False)
+
+    saved = selected_store.load(ASSISTANT_ID)["schedules"][schedule_id]
+    assert saved["lastOccurrence"] is None
+    assert saved["nextRunAt"] is None
+    assert service.project_schedule(saved)["calendarStatus"] == "unavailable"
 
 
 def test_expired_one_time_schedule_cannot_be_restored():

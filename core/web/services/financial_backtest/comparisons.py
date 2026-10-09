@@ -18,8 +18,27 @@ COMPARISON_NOTICE = (
     "样本外结果是回顾性检验，不代表未来收益。"
 )
 
-ComparisonAxis = Literal["strategy", "model"]
+ComparisonAxis = Literal["strategy", "model", "parameter"]
+ParameterKey = Literal[
+    "maxPositionPct",
+    "decisionInterval",
+    "commissionBps",
+    "minimumCommission",
+    "slippageBps",
+    "maxParticipationPct",
+]
 ComparisonStatus = Literal["comparable", "incomplete", "incompatible"]
+
+_PARAMETER_KEYS = frozenset(
+    {
+        "maxPositionPct",
+        "decisionInterval",
+        "commissionBps",
+        "minimumCommission",
+        "slippageBps",
+        "maxParticipationPct",
+    }
+)
 
 
 class ComparisonProvenance(TypedDict):
@@ -47,6 +66,7 @@ class ComparisonRow(TypedDict):
     maxTokens: int | None
     metrics: dict[str, Any] | None
     evaluation: dict[str, Any] | None
+    parameterValue: NotRequired[float | None]
 
 
 class ComparisonResult(TypedDict):
@@ -59,6 +79,7 @@ class ComparisonResult(TypedDict):
     outOfSampleStartDate: str | None
     rows: list[ComparisonRow]
     notice: str
+    parameterKey: NotRequired[str]
 
 
 _COVERAGE_FIELDS = (
@@ -106,7 +127,9 @@ def build_comparison_provenance(record: Mapping[str, Any]) -> ComparisonProvenan
 
 
 def compare_runs(
-    records: Sequence[Mapping[str, Any]], axis: ComparisonAxis
+    records: Sequence[Mapping[str, Any]],
+    axis: ComparisonAxis,
+    parameter_key: str | None = None,
 ) -> ComparisonResult:
     """Return an in-memory comparison manifest; never ranks or writes runs."""
     if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
@@ -115,7 +138,15 @@ def compare_runs(
         selected = list(records)
 
     run_ids = [_run_id(record, index) for index, record in enumerate(selected)]
-    rows = [_comparison_row(record, run_id) for record, run_id in zip(selected, run_ids)]
+    selected_parameter_key = (
+        parameter_key
+        if axis == "parameter" and parameter_key in _PARAMETER_KEYS
+        else None
+    )
+    rows = [
+        _comparison_row(record, run_id, parameter_key=selected_parameter_key)
+        for record, run_id in zip(selected, run_ids)
+    ]
     reasons: list[ComparisonReason] = []
     reason_indexes: dict[str, int] = {}
     reason_codes: set[str] = set()
@@ -137,8 +168,12 @@ def compare_runs(
             run_ids,
             "一次比较需要选择2到4条不同的回测记录。",
         )
-    if axis not in {"strategy", "model"}:
-        add_reason("invalid_axis", run_ids, "比较维度无效，只支持策略或模型。")
+    if axis not in {"strategy", "model", "parameter"}:
+        add_reason("invalid_axis", run_ids, "比较维度无效，只支持策略、模型或单参数。")
+    if axis == "parameter" and selected_parameter_key is None:
+        add_reason("invalid_parameter_key", run_ids, "参数比较必须指定支持的单一回测参数。")
+    elif axis != "parameter" and parameter_key is not None:
+        add_reason("invalid_parameter_key", run_ids, "策略或模型比较不能携带参数键。")
     nonempty_ids = [item for item in run_ids if item]
     if len(nonempty_ids) != len(set(nonempty_ids)):
         duplicated = {item for item in nonempty_ids if nonempty_ids.count(item) > 1}
@@ -206,11 +241,15 @@ def compare_runs(
         provenance_rows,
         reason_codes,
         add_reason,
+        parameter_key=selected_parameter_key,
     )
     if axis == "strategy":
         _compare_model_identity(records_as_mappings, run_ids, add_reason)
     elif axis == "model":
         _compare_model_identity(records_as_mappings, run_ids, add_reason, require_equal=False)
+        _compare_strategy_identity(run_ids, provenance_rows, add_reason)
+    elif axis == "parameter":
+        _compare_model_identity(records_as_mappings, run_ids, add_reason)
         _compare_strategy_identity(run_ids, provenance_rows, add_reason)
 
     incomplete_ids: list[str] = []
@@ -269,6 +308,14 @@ def compare_runs(
     )
     if not provenance_verified:
         common_hash = None
+    elif selected_parameter_key is not None:
+        shared_hashes = [
+            _parameter_shared_hash(inputs, selected_parameter_key)
+            if inputs is not None
+            else None
+            for inputs in common_inputs_rows
+        ]
+        common_hash = _same_value(shared_hashes)
     oos_start = _same_value(
         [
             inputs.get("outOfSampleStartDate") if inputs is not None else None
@@ -286,9 +333,14 @@ def compare_runs(
         for run_id, row, record in zip(run_ids, rows, records_as_mappings)
     ]
     comparison_id = "comparison-" + sha256_json(
-        {"axis": str(axis), "orderedRunIds": run_ids, "evidence": evidence}
+        {
+            "axis": str(axis),
+            "parameterKey": selected_parameter_key,
+            "orderedRunIds": run_ids,
+            "evidence": evidence,
+        }
     )
-    return {
+    result: ComparisonResult = {
         "comparisonId": comparison_id,
         "axis": str(axis),
         "status": status,
@@ -297,8 +349,15 @@ def compare_runs(
         "commonParamsHash": common_hash,
         "outOfSampleStartDate": oos_start,
         "rows": rows,
-        "notice": COMPARISON_NOTICE,
+        "notice": (
+            "参数对照仅展示每条独立完成回测的样本外指标，不排序或选胜者；LLM调用随机性仍存在，事后选择参数会产生试参偏差，结果不等于预先注册实验。"
+            if axis == "parameter"
+            else COMPARISON_NOTICE
+        ),
     }
+    if selected_parameter_key is not None:
+        result["parameterKey"] = selected_parameter_key
+    return result
 
 
 def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -332,6 +391,13 @@ def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
         parameters[key] = _canonical_decimal(params.get(key), f"params.{key}")
     for key in _INTEGER_PARAMETER_KEYS:
         parameters[key] = _canonical_integer(params.get(key), f"params.{key}")
+    # Optional extension: omitting it preserves fingerprints of legacy uncapped runs.
+    if params.get("maxParticipationPct") is not None:
+        participation = _canonical_decimal(params["maxParticipationPct"], "params.maxParticipationPct")
+        if not Decimal("0.1") <= Decimal(participation) <= Decimal(100):
+            raise ValueError("maxParticipationPct outside range")
+        parameters["maxParticipationPct"] = participation
+        parameters["participationRule"] = "daily_volume_board_lots_v1"
     max_tokens = _canonical_integer(record.get("maxTokens"), "maxTokens")
     params_max_tokens = params.get("maxTokens")
     if params_max_tokens is not None and max_tokens != _canonical_integer(params_max_tokens, "params.maxTokens"):
@@ -345,6 +411,16 @@ def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
         **parameters,
         "maxTokens": max_tokens,
     }
+    research_mode = record.get("researchInput", "price_only")
+    if research_mode == "announcements":
+        research_hash = record.get("researchHash")
+        if not isinstance(research_hash, str) or len(research_hash) != 64 or any(c not in "0123456789abcdef" for c in research_hash):
+            raise ValueError("researchHash")
+        common_parameters["researchInput"] = research_mode
+        common_parameters["researchHash"] = research_hash
+        common_parameters["researchContract"] = "prior_day_announcement_metadata_v1"
+    elif research_mode != "price_only" or record.get("researchHash"):
+        raise ValueError("researchInput mismatch")
     return {
         "contractVersion": COMPARISON_CONTRACT_VERSION,
         "dataHash": data_hash.strip(),
@@ -549,7 +625,9 @@ def _run_id(record: Any, index: int) -> str:
     return value.strip()
 
 
-def _comparison_row(record: Any, run_id: str) -> ComparisonRow:
+def _comparison_row(
+    record: Any, run_id: str, *, parameter_key: str | None = None
+) -> ComparisonRow:
     if not isinstance(record, Mapping):
         return {
             "runId": run_id,
@@ -573,7 +651,7 @@ def _comparison_row(record: Any, run_id: str) -> ComparisonRow:
         strategy_hash = build_comparison_provenance(record).get("strategyHash")
     except (TypeError, ValueError, InvalidOperation, OverflowError):
         strategy_hash = None
-    return {
+    row: ComparisonRow = {
         "runId": run_id,
         "status": str(record.get("status") or "unknown").strip().lower(),
         "modelId": model_id,
@@ -588,6 +666,16 @@ def _comparison_row(record: Any, run_id: str) -> ComparisonRow:
         "metrics": dict(record["metrics"]) if isinstance(record.get("metrics"), Mapping) else None,
         "evaluation": dict(record["evaluation"]) if isinstance(record.get("evaluation"), Mapping) else None,
     }
+    if parameter_key in _PARAMETER_KEYS:
+        raw_parameter_value = params.get(parameter_key)
+        if raw_parameter_value is None:
+            row["parameterValue"] = None
+        else:
+            try:
+                row["parameterValue"] = float(raw_parameter_value)
+            except (TypeError, ValueError, OverflowError):
+                row["parameterValue"] = None
+    return row
 
 
 def _compare_shared_evidence(
@@ -597,6 +685,8 @@ def _compare_shared_evidence(
     provenance_rows: Sequence[ComparisonProvenance | None],
     reason_codes: set[str],
     add_reason: Any,
+    *,
+    parameter_key: str | None = None,
 ) -> None:
     usable = [
         (record, run_id, inputs, provenance)
@@ -621,13 +711,37 @@ def _compare_shared_evidence(
 
     _compare_component(usable, base_inputs, "symbols", "symbols_mismatch", "组合股票范围不同，不能直接比较。", add_reason, base_id)
     _compare_component(usable, base_inputs, "dateCoverage", "date_coverage_mismatch", "实际行情覆盖区间或交易日历不同，不能直接比较。", add_reason, base_id)
-    _compare_component(usable, base_inputs, "decisionSchedule", "decision_schedule_mismatch", "模型决策交易日程不同，不能直接比较。", add_reason, base_id)
+    schedule_changed_by_parameter = parameter_key == "decisionInterval"
+    schedule_mismatched = any(
+        inputs.get("decisionSchedule") != base_inputs.get("decisionSchedule")
+        for _record, _run_id, inputs, _provenance in usable
+    )
+    has_announcement_input = any(
+        inputs["params"].get("researchInput", "price_only") == "announcements"
+        for _record, _run_id, inputs, _provenance in usable
+    )
+    if not schedule_changed_by_parameter:
+        _compare_component(usable, base_inputs, "decisionSchedule", "decision_schedule_mismatch", "模型决策交易日程不同，不能直接比较。", add_reason, base_id)
+    elif schedule_mismatched and has_announcement_input:
+        add_reason(
+            "research_schedule_mismatch",
+            [
+                base_id,
+                *[
+                    run_id
+                    for _record, run_id, inputs, _provenance in usable
+                    if inputs.get("decisionSchedule") != base_inputs.get("decisionSchedule")
+                ],
+            ],
+            "公告研究快照绑定原决策日程；频率变化造成日程不匹配，不能重新联网补取公告。",
+        )
     _compare_component(usable, base_inputs, "adjustment", "adjustment_mismatch", "行情复权口径不同，不能直接比较。", add_reason, base_id)
 
     base_params = base_inputs["params"]
     param_codes = (
         ("initialCash", "initial_cash_mismatch", "初始现金不同，不能直接比较。"),
         ("maxPositionPct", "position_limit_mismatch", "仓位上限不同，不能直接比较。"),
+        ("maxParticipationPct", "participation_limit_mismatch", "成交量参与率上限不同，不能直接比较。"),
         ("commissionBps", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
         ("minimumCommission", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
         ("slippageBps", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
@@ -636,6 +750,8 @@ def _compare_shared_evidence(
         ("maxTokens", "token_budget_mismatch", "模型 token 预算不同，不能直接比较。"),
     )
     for key, code, message in param_codes:
+        if key == parameter_key:
+            continue
         affected = [
             run_id
             for _record, run_id, inputs, _provenance in usable
@@ -644,11 +760,29 @@ def _compare_shared_evidence(
         if affected:
             add_reason(code, [base_id, *affected], message)
 
-    provenance_mismatch_ids = [
-        run_id
-        for _record, run_id, _inputs, provenance in usable
-        if provenance.get("commonParamsHash") != base_provenance.get("commonParamsHash")
-    ]
+    if parameter_key is None:
+        provenance_mismatch_ids = [
+            run_id
+            for _record, run_id, _inputs, provenance in usable
+            if provenance.get("commonParamsHash") != base_provenance.get("commonParamsHash")
+        ]
+    else:
+        shared_hashes = [
+            _parameter_shared_hash(inputs, parameter_key)
+            for _record, _run_id, inputs, _provenance in usable
+        ]
+        if len(set(shared_hashes)) == 1:
+            provenance_mismatch_ids = []
+        else:
+            provenance_mismatch_ids = [run_id for _record, run_id, *_ in usable[1:]]
+
+        parameter_values = [inputs["params"].get(parameter_key) for _, _, inputs, _ in usable]
+        if len(set(parameter_values)) < 2:
+            add_reason(
+                "parameter_not_varied",
+                [run_id for _record, run_id, *_ in usable],
+                "所选回测参数没有变化，无法形成参数敏感性对照。",
+            )
     already_explained_common_mismatch = bool(
         reason_codes
         & {
@@ -660,10 +794,26 @@ def _compare_shared_evidence(
             "position_limit_mismatch",
             "cost_model_mismatch",
             "token_budget_mismatch",
+            "research_schedule_mismatch",
         }
     )
     if provenance_mismatch_ids and not already_explained_common_mismatch:
         add_reason("common_params_mismatch", [base_id, *provenance_mismatch_ids], "冻结回测共同参数指纹不同，不能直接比较。")
+
+
+def _parameter_shared_hash(inputs: Mapping[str, Any], parameter_key: str) -> str:
+    shared = dict(inputs)
+    params = dict(inputs["params"])
+    params.pop(parameter_key, None)
+    if parameter_key == "maxParticipationPct":
+        params.pop("participationRule", None)
+    shared["params"] = params
+    if (
+        parameter_key == "decisionInterval"
+        and params.get("researchInput", "price_only") == "price_only"
+    ):
+        shared.pop("decisionSchedule", None)
+    return sha256_json(shared)
 
 
 def _compare_component(

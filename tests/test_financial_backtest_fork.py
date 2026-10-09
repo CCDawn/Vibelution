@@ -149,6 +149,94 @@ def test_fork_preview_reuses_frozen_snapshot_and_source_schedule(monkeypatch, tm
     assert stored["dataHash"] == fork["dataHash"]
 
 
+def test_price_only_fork_can_change_decision_interval_after_source_schedule_is_verified(
+    monkeypatch, tmp_path
+):
+    store, _snapshot, prepared = _install_scenario(monkeypatch, tmp_path)
+    source_preview = _new_preview(store, data_loader=service.data.prepare_data)
+    source_run = api.start_financial_backtest_run(
+        _AGENT_ID, str(uuid4()), source_preview["previewId"], store=store, now_provider=lambda: _NOW
+    )
+    source_record = store.load_run(_AGENT_ID, source_run["runId"])
+    _install_candidate(monkeypatch, _candidate_payload(_MODEL_ID))
+
+    fork = api.create_financial_backtest_fork_preview(
+        _AGENT_ID,
+        source_run["runId"],
+        {"decisionInterval": 5},
+        store=store,
+        now_provider=lambda: _NOW,
+    )
+
+    assert len(prepared) == 1
+    assert fork["dataHash"] == source_run["dataHash"]
+    assert fork["params"]["decisionInterval"] == 5
+    assert fork["decisionSchedule"] != source_record["decisionSchedule"]
+    assert fork["decisionSchedule"] == ["2024-01-02"]
+
+    store.update_run(
+        _AGENT_ID,
+        source_run["runId"],
+        lambda run: run.update(decisionSchedule=["2024-01-03"]),
+    )
+    with pytest.raises(FinancialBacktestStoreError, match="决策计划"):
+        api.create_financial_backtest_fork_preview(
+            _AGENT_ID, source_run["runId"], {"decisionInterval": 5}, store=store
+        )
+
+
+def test_announcement_fork_rejects_any_decision_interval_change_without_refetching(
+    monkeypatch, tmp_path
+):
+    from core.web.services.financial_backtest import research_snapshot
+
+    store, _snapshot_value, _prepared = _install_scenario(monkeypatch, tmp_path)
+    original_freeze = research_snapshot.freeze_announcement_research_snapshot
+
+    def loader(_stock, *, cutoff):
+        return {
+            "status": "available",
+            "source": "东方财富",
+            "fetchedAt": _NOW.isoformat(),
+            "items": [{
+                "title": "董事会决议公告",
+                "publishedAt": "2023-12-29",
+                "articleCode": "AN202312290001",
+                "source": "东方财富",
+                "url": "https://data.eastmoney.com/notices/detail/600000/AN202312290001.html",
+            }],
+        }
+
+    monkeypatch.setattr(
+        research_snapshot,
+        "freeze_announcement_research_snapshot",
+        lambda symbols, dates: original_freeze(
+            symbols, dates, announcement_loader=loader, now_provider=lambda: _NOW
+        ),
+    )
+    source_preview = service.create_financial_backtest_preview(
+        _AGENT_ID,
+        {**_preview_payload(), "researchInput": "announcements"},
+        store=store,
+        data_loader=service.data.prepare_data,
+        now_provider=lambda: _NOW,
+    )
+    source_run = api.start_financial_backtest_run(
+        _AGENT_ID, str(uuid4()), source_preview["previewId"], store=store, now_provider=lambda: _NOW
+    )
+    _install_candidate(monkeypatch, _candidate_payload(_MODEL_ID))
+    monkeypatch.setattr(
+        research_snapshot,
+        "freeze_announcement_research_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("derived announcement input must not refetch"),
+    )
+
+    with pytest.raises(FinancialBacktestConflict, match="更改决策频率"):
+        api.create_financial_backtest_fork_preview(
+            _AGENT_ID, source_run["runId"], {"decisionInterval": 5}, store=store
+        )
+
+
 @pytest.mark.parametrize(
     ("selectable", "dialogue_allowed"),
     [(False, True), (True, False)],

@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { FinanceBacktestAdvancedEvaluation } from "./FinanceBacktestAdvancedEvaluation";
 import { FinanceBacktestRobustness } from "./FinanceBacktestRobustness";
 import { Download, GitCompareArrows, Play, RefreshCw, Square, X } from "lucide-react";
 import { downloadAIBacktest, fetchAIBacktest, fetchAIBacktests, financialBacktestKeys, previewAIBacktest, resumeAIBacktest, startAIBacktest, stopAIBacktest } from "../../api/financialBacktests";
@@ -15,18 +16,18 @@ const ago = (days: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia
 const active = new Set(["queued", "running", "stop_requested"]);
 const labels: Record<AIBacktestRun["status"], string> = { queued: "排队中", running: "运行中", stop_requested: "正在停止", stopped: "已停止", blocked: "条件不满足", paused_unknown: "调用结果待确认", failed: "失败", completed: "已完成" };
 const pct = (value: number | null | undefined) => typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}%` : "—";
-const orderLabels: Record<string, string> = { filled: "已成交", rejected: "未成交", no_action: "无需调仓", next_session_open: "下日开盘成交", zero_volume_or_suspended: "零成交量或停牌", one_price_at_candidate_limit_up: "疑似一字涨停", one_price_at_candidate_limit_down: "疑似一字跌停", one_price_bar_unverified: "一字行情，无法核验成交", insufficient_cash_for_one_lot: "资金不足一手", no_sellable_board_lot: "没有可卖整手", target_shares_unchanged: "目标仓位未变", cash_limited_board_lots: "可用资金限制成交股数", same_cost_buy_and_hold_benchmark: "同成本买入持有" };
+const orderLabels: Record<string, string> = { filled: "已成交", partial_fill: "部分成交", daily_volume_participation_limit: "日成交量上限", volume_participation_below_one_lot: "日成交量额度不足一手", rejected: "未成交", no_action: "无需调仓", next_session_open: "下日开盘成交", zero_volume_or_suspended: "零成交量或停牌", one_price_at_candidate_limit_up: "疑似一字涨停", one_price_at_candidate_limit_down: "疑似一字跌停", one_price_bar_unverified: "一字行情，无法核验成交", insufficient_cash_for_one_lot: "资金不足一手", no_sellable_board_lot: "没有可卖整手", target_shares_unchanged: "目标仓位未变", cash_limited_board_lots: "可用资金限制成交股数", same_cost_buy_and_hold_benchmark: "同成本买入持有" };
 const message = (cause: unknown) => cause instanceof Error ? cause.message : "操作失败，请重试";
 const isAShare = (symbol: string) => /^(?:sh|sz|bj)\d{6}$/i.test(symbol);
 const statusLabel = (status: AIBacktestRun["status"], zh: boolean) => zh ? labels[status] : ({ queued: "Queued", running: "Running", stop_requested: "Stopping", stopped: "Stopped", blocked: "Blocked", paused_unknown: "Uncertain call", failed: "Failed", completed: "Completed" } satisfies Record<AIBacktestRun["status"], string>)[status];
 const symbolsForRun = (run: Pick<AIBacktestRun, "symbol" | "symbols">) => run.symbols?.length ? run.symbols : run.symbol ? [run.symbol] : [];
 const assetLabel = (symbols: string[], zh: boolean) => symbols.length > 1 ? `${zh ? "组合" : "Basket"} · ${symbols.length} ${zh ? "只" : "stocks"} · ${symbols.slice(0, 3).join(" / ")}${symbols.length > 3 ? " …" : ""}` : symbols[0] || (zh ? "未知标的" : "Unknown asset");
 
-type BacktestForm = AIBacktestParams & { startDate: string; endDate: string };
+type BacktestForm = AIBacktestParams & { startDate: string; endDate: string; dataSource?: "tencent" | "eastmoney" | "auto"; researchInput?: "price_only" | "announcements" };
 
 export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: string; stock: StockIdentity; zh: boolean; disabled: boolean }) {
   const client = useQueryClient();
-  const [form, setForm] = useState<BacktestForm>({ startDate: ago(90), endDate: ago(1), strategy: "只根据已完成的历史日线分析趋势和风险，控制回撤，选择下一交易日的目标仓位；证据不足时保持现金。", initialCash: 100000, maxPositionPct: 80, decisionInterval: 5, commissionBps: 3, minimumCommission: 5, slippageBps: 5, maxDecisions: 30, maxTokens: 500000 });
+  const [form, setForm] = useState<BacktestForm>({ startDate: ago(90), endDate: ago(1), strategy: "只根据已完成的历史日线分析趋势和风险，控制回撤，选择下一交易日的目标仓位；证据不足时保持现金。", initialCash: 100000, maxPositionPct: 80, maxParticipationPct: 1, researchInput: "price_only", decisionInterval: 5, commissionBps: 3, minimumCommission: 5, slippageBps: 5, maxDecisions: 30, maxTokens: 500000 });
   const [scope, setScope] = useState<"single" | "portfolio">("single");
   const [symbolsText, setSymbolsText] = useState(stock.symbol);
   const [preview, setPreview] = useState<AIBacktestPreview | null>(null), [selected, setSelected] = useState(""), [pending, setPending] = useState(""), [error, setError] = useState(""), [confirmRetry, setConfirmRetry] = useState(false), [forkOpen, setForkOpen] = useState(false);
@@ -38,7 +39,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   const invalidMarketSymbols = parsed.symbols.filter(symbol => !isAShare(symbol));
   const portfolioError = parsed.invalid.length ? `${zh ? "无法识别代码" : "Invalid codes"}: ${parsed.invalid.slice(0, 3).join("、")}` : invalidMarketSymbols.length ? (zh ? "AI组合回测仅支持沪、深、北交所 A 股" : "AI basket backtests support Shanghai, Shenzhen and Beijing A-shares only") : hasDuplicateSymbols ? (zh ? "组合内不能重复选择同一股票" : "A basket cannot contain a symbol twice") : parsed.symbols.length < 2 ? (zh ? "组合回测至少选择 2 只 A 股" : "Choose at least 2 A-shares") : parsed.symbols.length > 10 ? (zh ? "组合回测最多选择 10 只 A 股" : "Choose no more than 10 A-shares") : "";
   const busy = Boolean(pending);
-  const numericValid = form.initialCash >= 1000 && form.initialCash <= 100_000_000 && form.maxPositionPct >= 0 && form.maxPositionPct <= 100 && [1, 5, 20].includes(form.decisionInterval) && form.commissionBps >= 0 && form.commissionBps <= 100 && form.minimumCommission >= 0 && form.minimumCommission <= 100 && form.slippageBps >= 0 && form.slippageBps <= 100 && Number.isInteger(form.maxDecisions) && form.maxDecisions >= 1 && form.maxDecisions <= 500 && Number.isInteger(form.maxTokens) && form.maxTokens >= 1000 && form.maxTokens <= 2_000_000;
+  const numericValid = (form.maxParticipationPct ?? 1) >= 0.1 && (form.maxParticipationPct ?? 1) <= 100 && form.initialCash >= 1000 && form.initialCash <= 100_000_000 && form.maxPositionPct >= 0 && form.maxPositionPct <= 100 && [1, 5, 20].includes(form.decisionInterval) && form.commissionBps >= 0 && form.commissionBps <= 100 && form.minimumCommission >= 0 && form.minimumCommission <= 100 && form.slippageBps >= 0 && form.slippageBps <= 100 && Number.isInteger(form.maxDecisions) && form.maxDecisions >= 1 && form.maxDecisions <= 500 && Number.isInteger(form.maxTokens) && form.maxTokens >= 1000 && form.maxTokens <= 2_000_000;
   const valid = Boolean(form.startDate && form.endDate && form.startDate < form.endDate && form.endDate < ago(0)) && (!form.outOfSampleStartDate || (form.outOfSampleStartDate > form.startDate && form.outOfSampleStartDate <= form.endDate)) && form.strategy.trim().length > 0 && form.strategy.length <= 2000 && numericValid && (scope === "single" ? isAShare(stock.symbol) : !portfolioError);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; generation.current += 1; }; }, []);
@@ -102,6 +103,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   return <div className={styles.page}>
     <p className={styles.note}>{zh ? "历史日线 → AI目标仓位 → 下日开盘撮合。独立模拟账户，不连接券商；支持单股或组合、停止续跑和结果导出。" : "Historical bars → AI target weights → next-open execution. Independent simulation, no broker connection; single-stock or basket runs can be stopped, resumed and exported."}</p>
     <div className={styles.row}>
+      <label className={styles.field}>{zh ? "历史行情源" : "Historical source"}<VSelect aria-label="AI回测历史行情源" selectedKey={form.dataSource ?? "tencent"} isDisabled={busy} className={styles.scopeSelect} options={[{ id: "tencent", label: "腾讯财经" }, { id: "eastmoney", label: "东方财富" }, { id: "auto", label: zh ? "自动备用（整段切换）" : "Whole-snapshot fallback" }]} onSelectionChange={key => edit("dataSource", String(key) as "tencent" | "eastmoney" | "auto")} /></label>
       <label className={styles.field}>{zh ? "回测范围" : "Scope"}<VSelect aria-label={zh ? "AI回测范围" : "AI backtest scope"} selectedKey={scope} isDisabled={busy} className={styles.scopeSelect} options={[{ id: "single", label: zh ? "单股" : "Single stock" }, { id: "portfolio", label: zh ? "组合" : "Portfolio" }]} onSelectionChange={key => changeScope(String(key ?? "single") as "single" | "portfolio")} /></label>
       {scope === "single" ? <span className={styles.note}>{stock.name} · {stock.symbol}</span> : <span className={styles.note}>{zh ? "按同一交易日历并行组合；每次决策需给全部股票分配目标仓位。" : "Assets share a trading calendar; each decision allocates a target weight to every stock."}</span>}
     </div>
@@ -124,6 +126,8 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       {number("commissionBps", zh ? "佣金 bps" : "Commission bps", 0, 100, 0.1)}
       {number("minimumCommission", zh ? "最低佣金" : "Minimum fee", 0, 100)}
       {number("slippageBps", zh ? "滑点 bps" : "Slippage bps", 0, 100, 0.1)}
+      {number("maxParticipationPct", zh ? "日成交量上限 %" : "Daily volume cap %", 0.1, 100, 0.1)}
+      <label className={styles.field}>{zh ? "研究输入" : "Research input"}<VSelect aria-label="AI回测研究输入" selectedKey={form.researchInput ?? "price_only"} isDisabled={busy} options={[{ id: "price_only", label: zh ? "仅行情" : "Prices only" }, { id: "announcements", label: zh ? "行情 + 历史公告" : "Prices + historical announcements" }]} onSelectionChange={key => edit("researchInput", String(key) as "price_only" | "announcements")} /></label>
       {number("maxDecisions", zh ? "最多决策" : "Decision limit", 1, 500)}
       {number("maxTokens", zh ? "Token预算" : "Token budget", 1000, 2000000, 1000)}
     </div>
@@ -140,6 +144,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       <div className={styles.row}><strong>{assetLabel(symbolsForRun(preview), zh)}</strong><span>{zh ? "共同区间" : "Common period"} {preview.dateCoverage.actualStartDate} — {preview.dateCoverage.actualEndDate}</span><span>{zh ? `${preview.dateCoverage.tradingDays} 个交易日 · ${preview.decisionCount} 次决策` : `${preview.dateCoverage.tradingDays} sessions · ${preview.decisionCount} decisions`}</span></div>
       <div className={styles.row}><span>{zh ? "样本外起点" : "Holdout starts"} {preview.outOfSampleStartDate || "—"}</span><span>{zh ? "模型" : "Model"} {preview.modelId}</span><span>{zh ? "预计 Token" : "Estimated tokens"} {typeof preview.estimatedTokens === "number" ? preview.estimatedTokens.toLocaleString() : "—"} / {preview.maxTokens.toLocaleString()}</span><span>{zh ? "数据哈希" : "Data hash"} {preview.dataHash.slice(0, 12)}</span></div>
       <AssetCoverageTable coverage={preview.assetCoverage} fallback={preview.dateCoverage} sources={preview.assetSources} symbols={symbolsForRun(preview)} zh={zh} />
+      {preview.researchCoverage ? <p className={styles.note}>{zh ? `历史公告 · ${preview.researchCoverage.itemCount} 条 · ${preview.researchCoverage.groupCount} 组 · ${preview.researchCoverage.status === "partial" ? "覆盖不完整" : "已冻结"}` : `Historical announcements · ${preview.researchCoverage.itemCount} items · ${preview.researchCoverage.status}`}</p> : null}
       {preview.warnings.map((warning, index) => <p key={index} className={styles.note}>{warning}</p>)}
       {!preview.canStart ? <VStateSurface tone="error" density="compact" title={preview.blockReason || (zh ? "当前数据不满足回测条件" : "Data requirements not met")} /> : null}
       <VButton variant="primary" icon={<Play size={14} />} isPending={pending === "start"} isDisabled={busy || disabled || !preview.canStart || Date.parse(preview.expiresAt) <= Date.now()} onPress={() => void perform("start", async () => {
@@ -148,7 +153,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
         if (run.agentId !== agentId || !resultMatchesSymbols(run, symbolsForRun(preview))) throw new Error(zh ? "回测启动结果标的或归属不匹配" : "Started run asset or owner mismatch");
         await reconcile(run); setPreview(null);
       })}>{zh ? "开始AI回测" : "Start AI backtest"}</VButton>
-      <p className={styles.note}>{zh ? "启动会使用当前模型额度。模型只接收当时可见的行情与账户；训练知识的历史回溯偏差无法消除。" : "Starting consumes model quota. The model receives contemporaneous bars and portfolio; training-data hindsight cannot be removed."}</p>
+      <p className={styles.note}>{zh ? "启动会使用当前模型额度。模型使用冻结行情、账户及所选历史公告；训练知识的历史回溯偏差无法消除。" : "Starting consumes model quota. The model receives frozen bars, portfolio and selected historical announcements; training-data hindsight cannot be removed."}</p>
     </VSurface> : null}
     {error ? <VStateSurface tone="error" density="compact" title={error} /> : null}
     <div className={styles.row}><h3 className={styles.title}>{zh ? "回测记录 · 当前智能体" : "Backtest history · this agent"}</h3><VButton variant="ghost" icon={<RefreshCw size={14} />} isDisabled={list.isFetching} onPress={() => void list.refetch()}>{zh ? "刷新" : "Refresh"}</VButton></div>
@@ -165,6 +170,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       {active.has(shown.status) ? <progress className={styles.progress} aria-label="AI回测进度" value={shown.completedDecisionCount} max={Math.max(1, shown.decisionCount)} /> : null}
       {shown.terminalReason ? <VStateSurface tone={shown.status === "completed" ? "empty" : "error"} density="compact" title={shown.terminalReason} /> : null}
       {shown.metrics ? <BacktestResult run={shown} zh={zh} /> : null}
+      {shown.advancedEvaluation ? <FinanceBacktestAdvancedEvaluation key={`${shown.runId}:advanced`} result={shown.advancedEvaluation} zh={zh} /> : null}
       <AssetCoverageTable coverage={shown.assetCoverage} fallback={shown.dateCoverage} sources={shown.assetSources} symbols={symbolsForRun(shown)} zh={zh} />
       <div className={styles.table}><VDenseTable ariaLabel="AI回测历史决策" rows={shown.decisions} getRowKey={row => row.date} emptyText={zh ? "还没有成功的模型决策" : "No accepted decisions yet"} columns={[{ id: "date", header: zh ? "决策日" : "Decision date", render: row => row.date }, { id: "weight", header: zh ? "目标仓位" : "Target weights", render: row => row.targetWeights ? Object.entries(row.targetWeights).map(([symbol, weight]) => `${symbol} ${pct(weight)}`).join(" · ") : `${shown.symbol || symbolsForRun(shown)[0] || ""} ${pct(row.targetWeight)}` }, { id: "reason", header: zh ? "依据" : "Reason", render: row => <span className={styles.reason}>{row.reason}</span> }]} /></div>
       <div className={styles.table}><VDenseTable ariaLabel="AI回测订单审计" rows={[...shown.orders.map((row, index) => ({ ...row, account: "strategy", rowKey: `strategy:${row.date}:${row.symbol || ""}:${row.side || ""}:${index}` })), ...(shown.benchmarkOrders ?? []).map((row, index) => ({ ...row, account: "benchmark", rowKey: `benchmark:${row.date}:${row.symbol || ""}:${row.side || ""}:${index}` }))]} getRowKey={row => row.rowKey} emptyText={zh ? "没有订单" : "No orders"} columns={[{ id: "date", header: zh ? "执行日" : "Execution", render: row => row.date }, { id: "symbol", header: zh ? "股票" : "Symbol", render: row => row.symbol || (shown.symbol ?? "—") }, { id: "account", header: zh ? "账户" : "Account", render: row => row.account === "benchmark" ? (zh ? "持有基准" : "Benchmark") : (zh ? "AI策略" : "Strategy") }, { id: "side", header: zh ? "方向" : "Side", render: row => row.side === "buy" ? (zh ? "买入" : "Buy") : row.side === "sell" ? (zh ? "卖出" : "Sell") : "—" }, { id: "status", header: zh ? "状态" : "Status", render: row => zh ? (orderLabels[row.status] || row.status) : row.status }, { id: "reason", header: zh ? "执行说明" : "Reason", render: row => row.reason ? (zh ? (orderLabels[row.reason] || row.reason) : row.reason) : "—" }]} /></div>

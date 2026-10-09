@@ -101,6 +101,7 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     params = {
         "initialCash": _number(payload.get("initialCash", 100_000), "initialCash", 1_000, 100_000_000),
         "maxPositionPct": _number(payload.get("maxPositionPct", 100), "maxPositionPct", 0, 100),
+        "maxParticipationPct": _number(payload.get("maxParticipationPct", 1), "maxParticipationPct", 0.1, 100),
         "decisionInterval": _integer(payload.get("decisionInterval", 5), "decisionInterval", 1, 252),
         "commissionBps": _number(payload.get("commissionBps", 3), "commissionBps", 0, 100),
         "minimumCommission": _number(payload.get("minimumCommission", 5), "minimumCommission", 0, 10_000),
@@ -109,6 +110,12 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
     max_tokens = _integer(payload.get("maxTokens", DEFAULT_MAX_TOKENS), "maxTokens", MIN_MAX_TOKENS, MAX_TOKENS)
     model_id = str(payload.get("modelId") or "").strip()
+    data_source = payload.get("dataSource", "tencent")
+    if data_source not in {"tencent", "eastmoney", "auto"}:
+        raise BacktestInputError("dataSource必须是tencent、eastmoney或auto")
+    research_input = payload.get("researchInput", "price_only")
+    if research_input not in {"price_only", "announcements"}:
+        raise BacktestInputError("researchInput必须是price_only或announcements")
     if len(model_id) > 160:
         raise BacktestInputError("modelId无效")
     return {
@@ -122,6 +129,8 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "params": params,
         "maxTokens": max_tokens,
         "modelId": model_id or None,
+        "dataSource": data_source,
+        "researchInput": research_input,
     }
 
 

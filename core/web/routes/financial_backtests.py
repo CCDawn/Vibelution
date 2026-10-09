@@ -69,7 +69,10 @@ def fork_preview(
 def compare(agent_id: str, payload: FinancialBacktestCompareRequest) -> dict:
     try:
         return service.compare_financial_backtest_runs(
-            agent_id, payload.runIds, payload.axis
+            agent_id,
+            payload.runIds,
+            payload.axis,
+            parameter_key=payload.parameterKey,
         )
     except _ERRORS as exc:
         raise _http_error(exc) from exc

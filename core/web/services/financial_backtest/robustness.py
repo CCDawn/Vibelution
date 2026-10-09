@@ -185,7 +185,7 @@ def _validate_orders(
     for order in rows:
         if not isinstance(order, Mapping):
             raise BacktestInputError("评估委托行必须是对象")
-        if order.get("status") != "filled":
+        if order.get("status") not in {"filled", "partial_fill"}:
             continue
         raw_shares = order.get("filledShares", 0)
         if isinstance(raw_shares, bool):
