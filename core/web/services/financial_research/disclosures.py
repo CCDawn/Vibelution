@@ -314,7 +314,8 @@ def _load_hk_announcements(
         "stockId": stock_id,
         "documentType": "-1",
         "fromDate": "",
-        "toDate": "",
+        # HKEX applies this source-side date ceiling before its row limit.
+        "toDate": cutoff.strftime("%d/%m/%Y") if cutoff is not None else "",
         "title": "",
         "searchType": "0",
         "t1code": "-2",
@@ -342,6 +343,12 @@ def _load_hk_announcements(
         rows = result
     if not isinstance(rows, list):
         raise FinancialDisclosureDataError("HKEX 未返回有效公告列表")
+    source_total = _source_total(payload)
+    truncated = cutoff is not None and (
+        (source_total is not None and source_total > _MAX_ANNOUNCEMENTS)
+        or (source_total is None and len(rows) >= _MAX_ANNOUNCEMENTS)
+    )
+    unknown_dates = False
     items: list[dict[str, Any]] = []
     for row in rows[:_MAX_ANNOUNCEMENTS]:
         if not isinstance(row, dict):
@@ -351,6 +358,7 @@ def _load_hk_announcements(
         if not link or not title:
             continue
         published_at, notice_date = _hk_date_time(row.get("DATE_TIME"))
+        unknown_dates = unknown_dates or (cutoff is not None and published_at is None)
         article_code = str(row.get("NEWS_ID") or "").strip()
         if not re.fullmatch(r"\d{1,24}", article_code):
             article_code = link.rsplit("/", 1)[-1]
@@ -368,6 +376,15 @@ def _load_hk_announcements(
             HKEX_SOURCE,
             _hk_title_search_url(stock_id),
             items,
+            error=(
+                (
+                    "历史公告覆盖不完整：部分 HKEX 公告日期无法解析。"
+                    if unknown_dates
+                    else "历史公告覆盖不完整：HKEX 公告结果达到 12 条上限，仍可能存在更早记录。"
+                )
+                if truncated or unknown_dates
+                else None
+            ),
         ),
         cutoff,
     )
@@ -633,7 +650,43 @@ def _filing_rows(submissions: Any) -> list[dict[str, Any]]:
 
 
 _SEC_PUBLIC_FORMS = {"8-K", "8-K/A", "10-K", "10-K/A", "10-Q", "10-Q/A", "6-K", "6-K/A", "20-F", "20-F/A"}
-_SEC_FINANCIAL_FORMS = {"10-K", "10-Q", "20-F", "40-F", "6-K"}
+_SEC_FINANCIAL_BASE_FORMS = {"10-K", "10-Q", "20-F", "40-F", "6-K"}
+_SEC_FINANCIAL_FORMS = _SEC_FINANCIAL_BASE_FORMS | {
+    f"{form}/A" for form in _SEC_FINANCIAL_BASE_FORMS
+}
+
+
+def _sec_base_form(form: Any) -> str:
+    normalized = str(form or "").strip().upper()
+    return normalized.removesuffix("/A")
+
+
+def _source_total(payload: Any) -> int | None:
+    containers = [payload]
+    if isinstance(payload, dict):
+        containers.extend((payload.get("result"), payload.get("data")))
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in (
+            "total",
+            "totalCount",
+            "total_count",
+            "totalHits",
+            "total_hits",
+            "recordCount",
+            "recordsTotal",
+        ):
+            raw = container.get(key)
+            if isinstance(raw, bool):
+                continue
+            try:
+                count = int(raw)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if count >= 0:
+                return count
+    return None
 
 
 def _sec_document_url(cik: str, accession: str, document: str) -> str:
@@ -657,19 +710,20 @@ def _load_us_announcements(
 ) -> dict[str, Any]:
     source_url = SEC_BROWSE_URL.format(cik=str(int(cik)))
     rows = _filing_rows(submissions)
-    items: list[dict[str, Any]] = []
+    eligible: list[tuple[dict[str, Any], str, str, str]] = []
     for row in rows:
         form = str(row.get("form") or "").strip().upper()
         filing_date = _date(row.get("filingDate"))
         accession = str(row.get("accessionNumber") or "").strip()
         if (
-            form not in _SEC_PUBLIC_FORMS
-            or not filing_date
-            or not on_or_before(filing_date, cutoff)
+            form in _SEC_PUBLIC_FORMS
+            and filing_date
+            and on_or_before(filing_date, cutoff)
+            and re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession)
         ):
-            continue
-        if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
-            continue
+            eligible.append((row, form, filing_date, accession))
+    items: list[dict[str, Any]] = []
+    for row, form, filing_date, accession in eligible[:_MAX_ANNOUNCEMENTS]:
         report_date = _date(row.get("reportDate"))
         description = _plain_text(row.get("primaryDocDescription"), 180)
         if not description:
@@ -686,9 +740,31 @@ def _load_us_announcements(
                 "articleCode": accession,
             }
         )
-        if len(items) >= _MAX_ANNOUNCEMENTS:
-            break
-    return published_items_as_of(_available(SEC_SOURCE, source_url, items), cutoff)
+    incomplete_reasons: list[str] = []
+    if cutoff is not None and len(eligible) > _MAX_ANNOUNCEMENTS:
+        incomplete_reasons.append(
+            f"SEC 仅显示最新 {_MAX_ANNOUNCEMENTS} 条匹配申报"
+        )
+    if cutoff is not None:
+        recent_dates = [
+            filed
+            for row in rows
+            if (filed := _date(row.get("filingDate"))) is not None
+        ]
+        filings = submissions.get("filings") if isinstance(submissions, dict) else None
+        archive_files = filings.get("files") if isinstance(filings, dict) else None
+        if archive_files and (not recent_dates or cutoff.isoformat() < min(recent_dates)):
+            incomplete_reasons.append(
+                "SEC Submissions 当前片段未覆盖该日期，未读取更早归档"
+            )
+    error = (
+        "历史公告覆盖不完整：" + "；".join(incomplete_reasons) + "。"
+        if incomplete_reasons
+        else None
+    )
+    return published_items_as_of(
+        _available(SEC_SOURCE, source_url, items, error=error), cutoff
+    )
 
 
 def _facts_root(payload: Any) -> dict[str, Any]:
@@ -708,6 +784,8 @@ def _fact_records(
     report_date: str,
     duration: bool,
 ) -> tuple[float, str] | None:
+    base_form = _sec_base_form(form)
+    accepted_forms = {str(form or "").strip().upper(), base_form}
     for tag in tags:
         fact = us_gaap.get(tag)
         units = fact.get("units") if isinstance(fact, dict) else None
@@ -723,7 +801,7 @@ def _fact_records(
                 for row in rows
                 if isinstance(row, dict)
                 and str(row.get("accn") or "") == accession
-                and str(row.get("form") or "").upper() == form.upper()
+                and str(row.get("form") or "").strip().upper() in accepted_forms
                 and _date(row.get("end")) == report_date
             ]
             if duration:
@@ -741,10 +819,10 @@ def _fact_records(
 
                     bounded = [item for item in matching if 45 <= period_days(item) <= 400]
                     if bounded:
-                        if form.upper() in {"10-K", "20-F", "40-F"}:
+                        if base_form in {"10-K", "20-F", "40-F"}:
                             annual = [item for item in bounded if period_days(item) >= 300]
                             matching = annual
-                        elif form.upper() == "10-Q":
+                        elif base_form == "10-Q":
                             matching = [
                                 item for item in bounded if period_days(item) <= 140
                             ]
@@ -885,7 +963,7 @@ def _load_us_fundamentals(
         if len(items) == len(_SEC_METRICS)
         else "SEC CompanyFacts 未包含部分标准指标，仅显示该申报期可核实字段"
     )
-    if form.upper() == "10-Q" and error:
+    if _sec_base_form(form) == "10-Q" and error:
         error += "；缺少独立季度值的项目已隐藏，未用年初至今累计值替代"
     return _available(
         SEC_SOURCE,

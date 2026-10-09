@@ -74,7 +74,10 @@ def test_hkex_announcements_exclude_after_cutoff_and_unknown_dates(monkeypatch):
         lambda _key, _ttl, loader: loader(),
     )
 
+    requested_urls = []
+
     def read_json(url, **_kwargs):
+        requested_urls.append(url)
         if "activestock_sehk_e.json" in url:
             return [{"c": "00700", "i": "7609"}]
         return {
@@ -107,6 +110,45 @@ def test_hkex_announcements_exclude_after_cutoff_and_unknown_dates(monkeypatch):
     )
 
     assert [item["title"] for item in result["items"]] == ["Cutoff day filing"]
+    search_query = parse_qs(urlparse(requested_urls[-1]).query)
+    assert search_query["toDate"] == ["01/01/2026"]
+    assert "历史公告覆盖不完整" in result["error"]
+
+
+def test_hkex_announcements_warn_when_historical_result_cap_is_reached(monkeypatch):
+    monkeypatch.setattr(
+        disclosures,
+        "_load_cached",
+        lambda _key, _ttl, loader: loader(),
+    )
+
+    def read_json(url, **_kwargs):
+        if "activestock_sehk_e.json" in url:
+            return [{"c": "00700", "i": "7609"}]
+        return {
+            "total": disclosures._MAX_ANNOUNCEMENTS + 1,
+            "result": [
+                {
+                    "LONG_TEXT": f"Filing {index}",
+                    "FILE_LINK": (
+                        "/listedco/listconews/sehk/2026/0101/"
+                        f"filing-{index}.pdf"
+                    ),
+                    "DATE_TIME": "01/01/2026 18:30",
+                    "NEWS_ID": str(index),
+                }
+                for index in range(disclosures._MAX_ANNOUNCEMENTS)
+            ],
+        }
+
+    monkeypatch.setattr(disclosures, "_read_json", read_json)
+
+    result = disclosures._load_hk_announcements(
+        {"symbol": "hk00700"}, cutoff=date(2026, 1, 1)
+    )
+
+    assert len(result["items"]) == disclosures._MAX_ANNOUNCEMENTS
+    assert "历史公告覆盖不完整" in result["error"]
 
 
 def test_sec_announcements_exclude_filings_after_cutoff():
@@ -133,6 +175,60 @@ def test_sec_announcements_exclude_filings_after_cutoff():
 
     assert [item["publishedAt"] for item in result["items"]] == ["2026-04-17"]
     assert "event.htm" in result["items"][0]["url"]
+
+
+def test_sec_historical_announcements_warn_when_latest_twelve_are_truncated():
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"] * 13,
+                "filingDate": ["2026-04-01"] * 13,
+                "reportDate": [""] * 13,
+                "accessionNumber": [
+                    f"0000320193-26-{index:06d}" for index in range(1, 14)
+                ],
+                "primaryDocument": ["event.htm"] * 13,
+                "primaryDocDescription": ["Event"] * 13,
+            }
+        }
+    }
+
+    result = disclosures._load_us_announcements(
+        "AAPL", "0000320193", submissions, cutoff=date(2026, 4, 17)
+    )
+
+    assert len(result["items"]) == disclosures._MAX_ANNOUNCEMENTS
+    assert "历史公告覆盖不完整" in result["error"]
+    assert "最新 12 条" in result["error"]
+
+
+def test_sec_historical_announcements_disclose_cutoff_outside_recent_window():
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2026-05-01"],
+                "reportDate": [""],
+                "accessionNumber": ["0000320193-26-000001"],
+                "primaryDocument": ["event.htm"],
+                "primaryDocDescription": ["Event"],
+            },
+            "files": [
+                {
+                    "name": "CIK0000320193-submissions-001.json",
+                    "filingFrom": "2025-01-01",
+                    "filingTo": "2025-12-31",
+                }
+            ],
+        }
+    }
+
+    result = disclosures._load_us_announcements(
+        "AAPL", "0000320193", submissions, cutoff=date(2026, 4, 17)
+    )
+
+    assert result["items"] == []
+    assert "未覆盖该日期" in result["error"]
 
 
 def test_sec_fundamentals_select_latest_filing_available_at_cutoff():
@@ -191,6 +287,108 @@ def test_sec_fundamentals_select_latest_filing_available_at_cutoff():
             "publishedAt": "2026-03-01",
         }
     ]
+
+
+@pytest.mark.parametrize("base_form", ["10-Q", "10-K"])
+def test_sec_fundamentals_uses_pre_cutoff_amendment_and_ignores_future_revision(
+    base_form,
+):
+    original_accession = "0000320193-26-000001"
+    pre_cutoff_amendment = "0000320193-26-000002"
+    future_amendment = "0000320193-26-000003"
+    if base_form == "10-Q":
+        report_date = "2026-03-31"
+        filing_dates = ["2026-05-01", "2026-05-10", "2026-05-20"]
+        cutoff = date(2026, 5, 15)
+        revenue_start = "2026-01-01"
+    else:
+        report_date = "2025-12-31"
+        filing_dates = ["2026-03-01", "2026-03-10", "2026-03-20"]
+        cutoff = date(2026, 3, 15)
+        revenue_start = "2025-01-01"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": [base_form, f"{base_form}/A", f"{base_form}/A"],
+                "filingDate": filing_dates,
+                "reportDate": [report_date, report_date, report_date],
+                "accessionNumber": [
+                    original_accession,
+                    pre_cutoff_amendment,
+                    future_amendment,
+                ],
+                "primaryDocument": ["original.htm", "amendment.htm", "future.htm"],
+                "primaryDocDescription": ["Original", "Amendment", "Future amendment"],
+            }
+        }
+    }
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": original_accession,
+                                "form": base_form,
+                                "end": report_date,
+                                "filed": filing_dates[0],
+                                "val": 50,
+                            },
+                            {
+                                "accn": pre_cutoff_amendment,
+                                # SEC CompanyFacts may retain the base form here.
+                                "form": base_form,
+                                "end": report_date,
+                                "filed": filing_dates[1],
+                                "val": 100,
+                            },
+                            {
+                                "accn": future_amendment,
+                                "form": base_form,
+                                "end": report_date,
+                                "filed": filing_dates[2],
+                                "val": 999,
+                            },
+                        ]
+                    }
+                },
+                "Revenues": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": pre_cutoff_amendment,
+                                "form": base_form,
+                                "start": revenue_start,
+                                "end": report_date,
+                                "filed": filing_dates[1],
+                                "val": 100,
+                            },
+                            {
+                                "accn": future_amendment,
+                                "form": base_form,
+                                "start": revenue_start,
+                                "end": report_date,
+                                "filed": filing_dates[2],
+                                "val": 999,
+                            },
+                        ]
+                    }
+                },
+            }
+        }
+    }
+
+    result = disclosures._load_us_fundamentals(
+        "0000320193", facts, submissions, cutoff=cutoff
+    )
+
+    assert result["reportDate"] == report_date
+    assert result["publishedAt"] == filing_dates[1]
+    assert {item["key"]: item["value"] for item in result["items"]} == {
+        "assets": 100,
+        "revenue": 100,
+    }
 
 
 def test_hk_fundamentals_are_unavailable_for_historical_cutoff(monkeypatch):
