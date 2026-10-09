@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date, datetime
 from typing import Any
@@ -35,6 +36,8 @@ LOOKUP_DEADLINE_SECONDS = 8
 MAX_RESPONSE_BYTES = 256 * 1024
 MAX_FILING_LOOKUPS = 20
 MAX_PERIODIC_LOOKUPS = 4
+MAX_ANNOUNCEMENT_PAGES = 4
+ANNOUNCEMENT_PAGE_SIZE = 30
 _PERIODIC_CATEGORIES = (
     ("annual", ANNUAL_CATEGORY),
     ("semiannual", SEMIANNUAL_CATEGORY),
@@ -257,8 +260,8 @@ def lookup_periodic_filings(tickers: list[object], *, cutoff: date | None = None
 def lookup_screen_filings(tickers: list[object], *, cutoff: date | None = None) -> dict[str, list[dict[str, str]]]:
     """Look up one latest full report of each periodic kind for a screen.
 
-    At most 20 codes share one deadline. Each code uses one announcement
-    query. The first page is newest-first, so older pages are not requested.
+    At most 20 codes share one deadline. Each code begins with one announcement
+    query and reads at most four pages when a periodic report kind is missing.
     Missing kinds and failed codes are absent.
     """
 
@@ -292,20 +295,72 @@ def _lookup_screen_one(code: str, cutoff: date | None) -> list[dict[str, str]]:
         if located is None:
             return []
         org_id, column = located
-        payload = _post_json(
-            "/new/hisAnnouncement/query",
-            _announcement_fields(code, org_id, column, cutoff, _SCREEN_CATEGORY),
+        rows = _paged_announcement_select(
+            code,
+            org_id,
+            column,
+            cutoff,
+            _SCREEN_CATEGORY,
+            lambda payload: _select_screen_filings(payload, code, cutoff),
+            lambda selected: len(selected) >= len(_PERIODIC_CATEGORIES),
         )
     except Exception:
         return []
-    return _select_screen_filings(payload, code, cutoff)
+    return rows
+
+
+def _has_more_announcement_pages(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    value = payload.get("hasMore")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value > 0
+    return str(value or "").strip().lower() in {"true", "1", "yes"}
+
+
+def _paged_announcement_select(
+    code: str,
+    org_id: str,
+    column: str,
+    cutoff: date | None,
+    category: str,
+    select: Callable[[object], Any],
+    complete: Callable[[Any], bool],
+) -> Any:
+    announcements: list[object] = []
+    selected = select({"announcements": announcements})
+    for page_num in range(1, MAX_ANNOUNCEMENT_PAGES + 1):
+        try:
+            payload = _post_json(
+                "/new/hisAnnouncement/query",
+                _announcement_fields(
+                    code,
+                    org_id,
+                    column,
+                    cutoff,
+                    category,
+                    page_num=page_num,
+                ),
+            )
+        except OfficialFilingLookupError:
+            return selected
+        page_rows = payload.get("announcements") if isinstance(payload, dict) else None
+        if not isinstance(page_rows, list) or not page_rows:
+            break
+        announcements.extend(page_rows)
+        selected = select({"announcements": announcements})
+        if complete(selected) or not _has_more_announcement_pages(payload):
+            break
+    return selected
 
 
 def _select_screen_filings(payload: object, code: str, cutoff: date | None) -> list[dict[str, str]]:
     if not isinstance(payload, dict) or not isinstance(payload.get("announcements"), list):
         return []
     best: dict[str, tuple[date, str, str]] = {}
-    for row in payload["announcements"][:30]:
+    for row in payload["announcements"]:
         if not isinstance(row, dict) or str(row.get("secCode") or "").strip() != code:
             continue
         announced = _epoch_day(row.get("announcementTime"))
@@ -354,10 +409,18 @@ def _lookup_one(code: str, cutoff: date | None) -> dict[str, str] | None:
         if located is None:
             return None
         org_id, column = located
-        payload = _post_json("/new/hisAnnouncement/query", _announcement_fields(code, org_id, column, cutoff))
+        filing = _paged_announcement_select(
+            code,
+            org_id,
+            column,
+            cutoff,
+            ANNUAL_CATEGORY,
+            lambda payload: _select_filing(payload, code, cutoff),
+            lambda selected: selected is not None,
+        )
     except Exception:
         return None
-    return _select_filing(payload, code, cutoff)
+    return filing
 
 
 def _lookup_periodic_one(code: str, cutoff: date | None) -> list[dict[str, str]]:
@@ -401,13 +464,17 @@ def _lookup_category(
     category: str,
 ) -> dict[str, str] | None:
     try:
-        payload = _post_json(
-            "/new/hisAnnouncement/query",
-            _announcement_fields(code, org_id, column, cutoff, category),
+        return _paged_announcement_select(
+            code,
+            org_id,
+            column,
+            cutoff,
+            category,
+            lambda payload: _select_periodic(payload, code, cutoff, kind),
+            lambda selected: selected is not None,
         )
     except Exception:
         return None
-    return _select_periodic(payload, code, cutoff, kind)
 
 
 def _announcement_fields(
@@ -416,12 +483,20 @@ def _announcement_fields(
     column: str,
     cutoff: date | None,
     category: str = ANNUAL_CATEGORY,
+    *,
+    page_num: int = 1,
 ) -> dict[str, str]:
     if category != _SCREEN_CATEGORY and category not in _ALLOWED_CATEGORIES:
         raise OfficialFilingLookupError("unexpected category")
+    if (
+        not isinstance(page_num, int)
+        or isinstance(page_num, bool)
+        or not 1 <= page_num <= MAX_ANNOUNCEMENT_PAGES
+    ):
+        raise OfficialFilingLookupError("unexpected page")
     return {
-        "pageNum": "1",
-        "pageSize": "30",
+        "pageNum": str(page_num),
+        "pageSize": str(ANNOUNCEMENT_PAGE_SIZE),
         "column": column,
         "tabName": "fulltext",
         "plate": "",
@@ -464,7 +539,7 @@ def _select_filing(payload: object, code: str, cutoff: date | None) -> dict[str,
     if not isinstance(payload, dict) or not isinstance(payload.get("announcements"), list):
         return None
     best: tuple[date, str, str] | None = None
-    for row in payload["announcements"][:30]:
+    for row in payload["announcements"]:
         if not isinstance(row, dict) or str(row.get("secCode") or "").strip() != code:
             continue
         title = _filing_title(row.get("announcementTitle"))
@@ -488,7 +563,7 @@ def _select_periodic(payload: object, code: str, cutoff: date | None, kind: str)
     if not isinstance(payload, dict) or not isinstance(payload.get("announcements"), list):
         return None
     best: tuple[date, str, str] | None = None
-    for row in payload["announcements"][:30]:
+    for row in payload["announcements"]:
         if not isinstance(row, dict) or str(row.get("secCode") or "").strip() != code:
             continue
         title = _periodic_title(row.get("announcementTitle"), kind)

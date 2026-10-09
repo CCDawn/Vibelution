@@ -231,6 +231,599 @@ def test_sec_historical_announcements_disclose_cutoff_outside_recent_window():
     assert "未覆盖该日期" in result["error"]
 
 
+
+def test_sec_recent_boundary_reads_archive_for_standard_financial_filing(monkeypatch):
+    cik = "0000320193"
+    cutoff = date(2026, 1, 15)
+    archive_name = f"CIK{cik}-submissions-001.json"
+    forms = ["4", *["8-K" for _ in range(13)]]
+    filing_dates = ["2026-01-01", *[f"2026-01-{day:02d}" for day in range(2, 15)]]
+    accessions = [f"{cik}-26-{index:06d}" for index in range(1, len(forms) + 1)]
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": forms,
+                "filingDate": filing_dates,
+                "reportDate": [""] * len(forms),
+                "accessionNumber": accessions,
+            },
+            "files": [
+                {
+                    "name": archive_name,
+                    "filingFrom": "2025-01-01",
+                    "filingTo": "2026-01-31",
+                }
+            ],
+        }
+    }
+    archived_accession = "0001193125-25-000101"
+    archive = {
+        "form": ["10-K"],
+        "filingDate": ["2025-02-15"],
+        "reportDate": ["2024-12-31"],
+        "accessionNumber": [archived_accession],
+    }
+    requested = []
+
+    def read_json(url, **_kwargs):
+        requested.append(url)
+        return archive
+
+    monkeypatch.setattr(disclosures, "_read_json", read_json)
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=cutoff
+    )
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": archived_accession,
+                                "form": "10-K",
+                                "end": "2024-12-31",
+                                "val": 100,
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    fundamentals = disclosures._load_us_fundamentals(
+        cik, facts, merged, cutoff=cutoff, archive_error=error
+    )
+
+    assert requested == [disclosures.SEC_SUBMISSIONS_ARCHIVE_URL.format(name=archive_name)]
+    assert error is None
+    assert fundamentals["reportDate"] == "2024-12-31"
+    assert fundamentals["publishedAt"] == "2025-02-15"
+    assert {item["key"] for item in fundamentals["items"]} == {"assets"}
+    assert "历史财务覆盖不完整" not in str(fundamentals["error"])
+
+
+def test_sec_recent_financial_filing_remains_available_without_archive(monkeypatch):
+    cik = "0000320193"
+    accession = f"{cik}-25-000101"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["10-K"],
+                "filingDate": ["2025-02-15"],
+                "reportDate": ["2024-12-31"],
+                "accessionNumber": [accession],
+            },
+            "files": [],
+        }
+    }
+    monkeypatch.setattr(
+        disclosures,
+        "_read_json",
+        lambda *_args, **_kwargs: pytest.fail("No archive index means no archive read"),
+    )
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2025, 12, 31)
+    )
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accession,
+                                "form": "10-K",
+                                "end": "2024-12-31",
+                                "val": 100,
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    fundamentals = disclosures._load_us_fundamentals(
+        cik, facts, merged, cutoff=date(2025, 12, 31), archive_error=error
+    )
+
+    assert error is not None
+    assert "未覆盖该日期" in error
+    assert fundamentals["reportDate"] == "2024-12-31"
+    assert fundamentals["publishedAt"] == "2025-02-15"
+    assert {item["key"] for item in fundamentals["items"]} == {"assets"}
+    assert "历史财务覆盖不完整" in fundamentals["error"]
+
+def test_sec_historical_archives_supply_pre_cutoff_announcements_and_fundamentals(
+    monkeypatch,
+):
+    cik = "0000320193"
+    archive_name = "CIK0000320193-submissions-001.json"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": ["2024-01-08"],
+                "accessionNumber": [f"{cik}-24-000001"],
+                "primaryDocument": ["recent.htm"],
+                "primaryDocDescription": ["Recent"],
+            },
+            "files": [
+                {
+                    "name": archive_name,
+                    "filingFrom": "2023-01-01",
+                    "filingTo": "2023-12-31",
+                }
+            ],
+        }
+    }
+    archive = {
+        "form": ["10-K", "8-K"],
+        "filingDate": ["2023-02-01", "2023-11-01"],
+        "reportDate": ["2022-12-31", "2023-10-30"],
+        "accessionNumber": [f"{cik}-23-000101", f"{cik}-23-000102"],
+        "primaryDocument": ["annual.htm", "event.htm"],
+        "primaryDocDescription": ["Annual report", "Event"],
+    }
+    calls = []
+
+    def read_json(url, **kwargs):
+        calls.append((url, kwargs))
+        assert url == disclosures.SEC_SUBMISSIONS_ARCHIVE_URL.format(name=archive_name)
+        return archive
+
+    monkeypatch.setattr(disclosures, "_read_json", read_json)
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2023, 4, 1)
+    )
+
+    announcements = disclosures._load_us_announcements(
+        "AAPL", cik, merged, cutoff=date(2023, 4, 1), archive_error=error
+    )
+    assert error is None
+    assert len(calls) == 1
+    assert calls[0][1]["max_bytes"] == disclosures._SEC_JSON_MAX_BYTES
+    assert [item["publishedAt"] for item in announcements["items"]] == [
+        "2023-02-01"
+    ]
+    assert "annual.htm" in announcements["items"][0]["url"]
+
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": f"{cik}-23-000101",
+                                "form": "10-K",
+                                "end": "2022-12-31",
+                                "val": 100,
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    fundamentals = disclosures._load_us_fundamentals(
+        cik,
+        facts,
+        merged,
+        cutoff=date(2023, 4, 1),
+        archive_error=error,
+    )
+    assert fundamentals["reportDate"] == "2022-12-31"
+    assert fundamentals["publishedAt"] == "2023-02-01"
+    assert {item["key"] for item in fundamentals["items"]} == {"assets"}
+
+
+def test_fetch_international_facets_uses_sec_archives_for_historical_cutoff(monkeypatch):
+    cik = "0000320193"
+    accession = "0001193125-23-000101"
+    archive_name = f"CIK{cik}-submissions-001.json"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": ["2024-01-08"],
+                "accessionNumber": [f"{cik}-24-000001"],
+                "primaryDocument": ["recent.htm"],
+                "primaryDocDescription": ["Recent"],
+            },
+            "files": [
+                {
+                    "name": archive_name,
+                    "filingFrom": "2023-01-01",
+                    "filingTo": "2023-12-31",
+                }
+            ],
+        }
+    }
+    archive = {
+        "form": ["10-K"],
+        "filingDate": ["2023-02-01"],
+        "reportDate": ["2022-12-31"],
+        "accessionNumber": [accession],
+        "primaryDocument": ["annual.htm"],
+        "primaryDocDescription": ["Annual report"],
+    }
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accession,
+                                "form": "10-K",
+                                "end": "2022-12-31",
+                                "val": 100,
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    calls = []
+
+    def read_json(url, **_kwargs):
+        calls.append(url)
+        if url == disclosures.SEC_SUBMISSIONS_URL.format(cik=cik):
+            return submissions
+        if url == disclosures.SEC_SUBMISSIONS_ARCHIVE_URL.format(name=archive_name):
+            return archive
+        if url == disclosures.SEC_COMPANY_FACTS_URL.format(cik=cik):
+            return facts
+        pytest.fail(f"Unexpected SEC request: {url}")
+
+    monkeypatch.setattr(
+        disclosures, "_sec_ticker_ids", lambda: {"AAPL": (cik, "Apple")}
+    )
+    monkeypatch.setattr(disclosures, "_read_json", read_json)
+
+    facets = disclosures.fetch_international_facets(
+        {"symbol": "usAAPL"}, cutoff=date(2023, 4, 1)
+    )
+
+    assert any(archive_name in url for url in calls)
+    assert [item["publishedAt"] for item in facets["announcements"]["items"]] == [
+        "2023-02-01"
+    ]
+    assert facets["announcements"]["items"][0]["url"].startswith(
+        "https://www.sec.gov/Archives/edgar/data/320193/000119312523000101/"
+    )
+    assert facets["fundamentals"]["reportDate"] == "2022-12-31"
+    assert facets["fundamentals"]["publishedAt"] == "2023-02-01"
+    assert "历史覆盖不完整" not in str(facets["announcements"]["error"])
+    assert "历史财务覆盖不完整" not in str(facets["fundamentals"]["error"])
+
+
+def test_sec_historical_archive_rejects_wrong_cik_in_filename_and_body(monkeypatch):
+    cik = "0000320193"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": [""],
+                "accessionNumber": [f"{cik}-24-000001"],
+            },
+            "files": [
+                {
+                    "name": "CIK0001045810-submissions-001.json",
+                    "filingFrom": "2023-01-01",
+                    "filingTo": "2023-12-31",
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        disclosures,
+        "_read_json",
+        lambda *_args, **_kwargs: pytest.fail("A mismatched CIK path must not be read"),
+    )
+
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2023, 4, 1)
+    )
+    assert disclosures._filing_rows(merged)[0]["accessionNumber"] == f"{cik}-24-000001"
+    assert "未覆盖该日期" in error
+
+
+def test_sec_historical_archive_rejects_invalid_accession_format(monkeypatch):
+    cik = "0000320193"
+    archive_name = "CIK0000320193-submissions-001.json"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": [""],
+                "accessionNumber": [f"{cik}-24-000001"],
+            },
+            "files": [
+                {
+                    "name": archive_name,
+                    "filingFrom": "2023-01-01",
+                    "filingTo": "2023-12-31",
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        disclosures,
+        "_read_json",
+        lambda *_args, **_kwargs: {
+            "form": ["10-K"],
+            "filingDate": ["2023-02-01"],
+            "reportDate": ["2022-12-31"],
+            "accessionNumber": ["not-a-valid-accession"],
+        },
+    )
+
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2023, 4, 1)
+    )
+    assert merged["_historicalArchiveRows"] == []
+    assert "身份或日期不匹配" in error
+
+
+def test_sec_historical_archive_accepts_third_party_filing_agent_accession_prefix(
+    monkeypatch,
+):
+    cik = "0000320193"
+    archive_name = f"CIK{cik}-submissions-001.json"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": [""],
+                "accessionNumber": [f"{cik}-24-000001"],
+            },
+            "files": [
+                {
+                    "name": archive_name,
+                    "filingFrom": "2023-01-01",
+                    "filingTo": "2023-12-31",
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        disclosures,
+        "_read_json",
+        lambda *_args, **_kwargs: {
+            "form": ["10-K"],
+            "filingDate": ["2023-02-01"],
+            "reportDate": ["2022-12-31"],
+            "accessionNumber": ["0001193125-23-000101"],
+        },
+    )
+
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2023, 4, 1)
+    )
+
+    assert error is None
+    assert merged["_historicalArchiveRows"][0]["accessionNumber"] == (
+        "0001193125-23-000101"
+    )
+    assert disclosures._sec_document_url(
+        cik, merged["_historicalArchiveRows"][0]["accessionNumber"], "annual.htm"
+    ) == (
+        "https://www.sec.gov/Archives/edgar/data/320193/"
+        "000119312523000101/annual.htm"
+    )
+
+
+def test_sec_historical_archive_rejects_conflicting_top_level_cik(monkeypatch):
+    cik = "0000320193"
+    archive_name = f"CIK{cik}-submissions-001.json"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": [""],
+                "accessionNumber": [f"{cik}-24-000001"],
+            },
+            "files": [
+                {
+                    "name": archive_name,
+                    "filingFrom": "2023-01-01",
+                    "filingTo": "2023-12-31",
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr(
+        disclosures,
+        "_read_json",
+        lambda *_args, **_kwargs: {
+            "cik": 1045810,
+            "form": ["10-K"],
+            "filingDate": ["2023-02-01"],
+            "reportDate": ["2022-12-31"],
+            "accessionNumber": ["0001193125-23-000101"],
+        },
+    )
+
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2023, 4, 1)
+    )
+
+    assert merged["_historicalArchiveRows"] == []
+    assert "身份无效" in error
+
+
+def test_sec_archive_search_continues_after_form4_and_6k_only_segments(monkeypatch):
+    cik = "0000320193"
+    recent_archive = f"CIK{cik}-submissions-001.json"
+    older_archive = f"CIK{cik}-submissions-002.json"
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": ["2024-01-08"],
+                "accessionNumber": [f"{cik}-24-000001"],
+            },
+            "files": [
+                {
+                    "name": recent_archive,
+                    "filingFrom": "2023-01-01",
+                    "filingTo": "2023-12-31",
+                },
+                {
+                    "name": older_archive,
+                    "filingFrom": "2021-01-01",
+                    "filingTo": "2022-12-31",
+                },
+            ],
+        }
+    }
+    archive_payloads = {
+        recent_archive: {
+            "form": ["4", "6-K"],
+            "filingDate": ["2023-03-01", "2023-03-15"],
+            "reportDate": ["", "2022-12-31"],
+            "accessionNumber": [
+                "0001193125-23-000201",
+                "0001193125-23-000202",
+            ],
+        },
+        older_archive: {
+            "form": ["10-K"],
+            "filingDate": ["2022-02-01"],
+            "reportDate": ["2021-12-31"],
+            "accessionNumber": ["0001193125-22-000101"],
+        },
+    }
+    requested = []
+
+    def read_json(url, **_kwargs):
+        name = url.rsplit("/", 1)[-1]
+        requested.append(name)
+        return archive_payloads[name]
+
+    monkeypatch.setattr(disclosures, "_read_json", read_json)
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2023, 4, 1)
+    )
+    facts = {
+        "facts": {
+            "us-gaap": {
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": "0001193125-22-000101",
+                                "form": "10-K",
+                                "end": "2021-12-31",
+                                "val": 100,
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    fundamentals = disclosures._load_us_fundamentals(
+        cik, facts, merged, cutoff=date(2023, 4, 1), archive_error=error
+    )
+
+    assert requested == [recent_archive, older_archive]
+    assert error is None
+    assert fundamentals["reportDate"] == "2021-12-31"
+    assert fundamentals["publishedAt"] == "2022-02-01"
+
+
+def test_sec_historical_archive_reads_at_most_the_configured_file_budget(monkeypatch):
+    cik = "0000320193"
+    files = [
+        {
+            "name": f"CIK{cik}-submissions-{index:03d}.json",
+            "filingFrom": "2023-01-01",
+            "filingTo": "2023-12-31",
+        }
+        for index in range(1, disclosures._SEC_SUBMISSIONS_ARCHIVE_MAX_FILES + 2)
+    ]
+    submissions = {
+        "filings": {
+            "recent": {
+                "form": ["8-K"],
+                "filingDate": ["2024-01-10"],
+                "reportDate": [""],
+                "accessionNumber": [f"{cik}-24-000001"],
+            },
+            "files": files,
+        }
+    }
+    calls = []
+
+    def read_json(url, **_kwargs):
+        calls.append(url)
+        return {
+            "form": ["10-K"],
+            "filingDate": ["2023-02-01"],
+            "reportDate": ["2022-12-31"],
+            "accessionNumber": ["not-a-valid-accession"],
+        }
+
+    monkeypatch.setattr(disclosures, "_read_json", read_json)
+    merged, error = disclosures._load_sec_historical_archives(
+        submissions, cik, cutoff=date(2023, 4, 1)
+    )
+
+    assert len(calls) == disclosures._SEC_SUBMISSIONS_ARCHIVE_MAX_FILES
+    assert merged["_historicalArchiveRows"] == []
+    assert "达到数量上限" in error
+
+
+def test_sec_ticker_normalization_rejects_conflicting_cik_mappings(monkeypatch):
+    monkeypatch.setattr(
+        disclosures,
+        "_read_json",
+        lambda *_args, **_kwargs: {
+            "0": {"ticker": "BRK.B", "cik_str": 1, "title": "First"},
+            "1": {"ticker": "BRK-B", "cik_str": 2, "title": "Second"},
+            "2": {"ticker": "AAPL", "cik_str": 3, "title": "Apple"},
+            "3": {"ticker": "AAPL", "cik_str": 3, "title": "Apple Inc."},
+        },
+    )
+
+    mappings = disclosures._load_sec_ticker_ids()
+
+    assert "BRK-B" not in mappings
+    assert mappings["AAPL"] == ("0000000003", "Apple")
+
+
 def test_sec_fundamentals_select_latest_filing_available_at_cutoff():
     old_accession = "0000320193-26-000001"
     future_accession = "0000320193-26-000002"

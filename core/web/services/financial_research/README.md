@@ -36,7 +36,9 @@ dated public figure and adds the cninfo original for that same period
 or after the period end and on or before the analysis date). Any other
 period, year, or missing filing is 没有这一项 beside the figure. The figure
 stays labeled as a snapshot. The read reuses the one-code screen lookup
-and does not download the PDF.
+and does not download the PDF. When a query page lacks one of the four
+periodic report kinds and CNINFO says more results exist, the lookup reads
+additional pages up to a four-page limit.
 
 ## Historical research cutoff
 
@@ -58,10 +60,15 @@ that the source contains every item published by the analysis date. HKEX
 announcements receive the cutoff as the source-side `toDate`; reaching HKEX's
 12-row result limit is also reported as incomplete coverage.
 
-US announcement search uses the SEC Submissions `recent` block. A cutoff older
-than that block's range is marked incomplete because archived submission files
-were not loaded; when more than 12 matching filings are returned, the response
-also warns that only the latest 12 are shown.
+US announcement and financial-filing search use SEC Submissions `recent` plus
+applicable `filings.files` archives until enough eligible filings are found. Archive paths, CIKs, accession
+numbers, filing dates, response size, and the cutoff are checked before rows
+are used. Archive reads are bounded to four files; a missing, invalid, failed,
+or insufficient archive read is reported as incomplete coverage. More than 12
+matching announcements also warns that only the latest 12 are shown.
+The accession prefix may identify a third-party filing agent. Issuer identity
+comes from the official archive index/path and an optional payload CIK, not
+from requiring that prefix to equal the issuer's CIK.
 
 Eastmoney's A-share and HK/US F10 summaries do not provide a trustworthy
 point-in-time version history, so historical requests return those

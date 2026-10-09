@@ -35,6 +35,29 @@ def run():
     return {**kept, "runId": str(uuid4()), "clientRequestId": str(uuid4()), "status": "paused_unknown", "progress": 0, "currentDecisionDate": "2026-09-01", "decisionCount": 1, "completedDecisionCount": 0, "callsUsed": 1, "tokensUsed": 1000, "tokensReserved": 1000, "decisions": [], "metrics": None, "equity": [], "trades": [], "orders": [], "startedAt": "2026-10-08", "updatedAt": "2026-10-08", "completedAt": None, "terminalReason": "结果不明", "errorCode": "unknown", "uncertainDecisionDate": "2026-09-01", "tokenAccounting": "reserved"}
 
 
+def test_http_preserves_typed_segmented_results_and_legacy_null(monkeypatch):
+    from core.web.services.financial_backtest.robustness import evaluate_robustness
+
+    response = run()
+    monkeypatch.setattr(routes.service, "get_financial_backtest_run", lambda *_: response)
+    transport = client()
+    endpoint = f"/api/financial-backtests/a/runs/{response['runId']}"
+    assert transport.get(endpoint).json()["robustness"] is None
+    response["robustness"] = evaluate_robustness(
+        [{"date": "2026-09-01", "equity": 100000, "benchmarkEquity": 100000},
+         {"date": "2026-09-02", "equity": 101000, "benchmarkEquity": 100500}],
+        [], initial_cash=100000, out_of_sample_start_date="2026-09-02",
+    )
+    result = transport.get(endpoint)
+    assert result.status_code == 200
+    assert result.json()["robustness"] == response["robustness"]
+    assert result.json()["robustness"]["fixedWindows"][0]["baselineDate"] == "2026-09-01"
+    schema = transport.get("/openapi.json").json()["components"]["schemas"]
+    assert schema["FinancialBacktestRobustnessWindow"]["properties"]["complete"]["anyOf"] == [
+        {"type": "boolean"}, {"type": "null"},
+    ]
+
+
 def test_preview_response_preserves_calendar_evidence_and_never_starts_a_model(monkeypatch):
     response = preview()
     calls = []

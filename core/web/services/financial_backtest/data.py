@@ -183,10 +183,10 @@ def _request_values(payload: Mapping[str, Any], today: date) -> tuple[str, date,
 
 
 def _query_years(start: date, end: date) -> tuple[tuple[date, date], ...]:
-    first_year = max(1990, start.year - 2)
     windows: list[tuple[date, date]] = []
+    first_year = max(1990, start.year)
     for year in range(first_year, end.year + 1):
-        left = max(start.replace(year=first_year, month=1, day=1), date(year, 1, 1))
+        left = date(year, 1, 1)
         right = min(end, date(year, 12, 31))
         if left <= right:
             windows.append((left, right))
@@ -507,7 +507,8 @@ def prepare_data(
     qfq_by_date: dict[str, dict[str, Any]] = {}
     calendar_dates: set[str] = set()
     provider_windows: list[dict[str, Any]] = []
-    for window_start, window_end in _query_years(requested_start, requested_end):
+
+    def fetch_year(window_start: date, window_end: date) -> None:
         raw_rows = _fetch_window(symbol, window_start, window_end, "none")
         qfq_rows = _fetch_window(symbol, window_start, window_end, "qfq")
         calendar_rows = _fetch_window(_CALENDAR_SYMBOL, window_start, window_end, "none")
@@ -529,6 +530,29 @@ def prepare_data(
                 "calendarBars": len(calendar_rows),
             }
         )
+
+    def has_warmup_and_qfq_baseline() -> bool:
+        requested_start_text = requested_start.isoformat()
+        warmup_count = sum(day < requested_start_text for day in raw_by_date)
+        has_paired_baseline = any(
+            day < requested_start_text and day in qfq_by_date for day in raw_by_date
+        )
+        return warmup_count >= warmup_bars and has_paired_baseline
+
+    # Fetch every year intersecting the requested backtest range first. The
+    # first year's January-through-requested-start rows can also serve as
+    # warm-up data and the pre-start qfq baseline.
+    for window_start, window_end in _query_years(requested_start, requested_end):
+        fetch_year(window_start, window_end)
+
+    # Only fetch older, warm-up-only years if the requested years do not yet
+    # contain enough raw bars and an explicit pre-start raw/qfq pair. Keep the
+    # existing two-year history bound and validate every fetched pair strictly.
+    first_warmup_year = max(1990, requested_start.year - 2)
+    for year in range(requested_start.year - 1, first_warmup_year - 1, -1):
+        if has_warmup_and_qfq_baseline():
+            break
+        fetch_year(date(year, 1, 1), date(year, 12, 31))
 
     today_text = cutoff.isoformat()
     completed_dates = sorted(
@@ -591,6 +615,11 @@ def prepare_data(
         raise BacktestDataError(
             f"所选起始日之前只有{len(warmup_dates)}根完整预热日K，需要{warmup_bars}根"
         )
+    if not any(
+        candle_date < actual_start.isoformat() and candle_date in qfq_by_date
+        for candle_date in raw_by_date
+    ):
+        raise BacktestDataError("所选起始日之前缺少 raw/qfq 成对基准，无法核验公司行动")
 
     action_dates = _action_dates(
         raw_by_date, qfq_by_date, actual_start, actual_end
@@ -616,6 +645,7 @@ def prepare_data(
     actual_end_text = candles[-1].date
     available_start = all_snapshot_rows[0].date
     available_end = all_snapshot_rows[-1].date
+    provider_windows.sort(key=lambda item: (item["startDate"], item["endDate"]))
     coverage = BacktestCoverage(
         requestedStartDate=requested_start.isoformat(),
         requestedEndDate=requested_end.isoformat(),

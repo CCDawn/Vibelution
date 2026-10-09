@@ -72,6 +72,34 @@ export type AIBacktestEvaluation = {
   notice: string;
 };
 
+export type AIBacktestRobustnessWindow = {
+  label: string;
+  startDate: string;
+  endDate: string;
+  baselineDate: string | null;
+  tradingDays: number;
+  complete: boolean | null;
+  metrics: Pick<AIBacktestMetrics, "totalReturnPct" | "benchmarkReturnPct" | "excessReturnPct" | "maxDrawdownPct" | "fees" | "tradeCount">;
+};
+
+export type AIBacktestRobustness = {
+  schemaVersion: 1;
+  status: "available" | "insufficient_sample" | "unavailable";
+  scope: "out_of_sample" | "full_period";
+  windowSize: 63;
+  minCompleteWindows: 4;
+  completeWindowCount: number;
+  partialWindowCount: number;
+  outperformingWindowRatePct: number | null;
+  evaluatedStartDate: string | null;
+  evaluatedEndDate: string | null;
+  tradingDays: number;
+  annualWindows: AIBacktestRobustnessWindow[];
+  fixedWindows: AIBacktestRobustnessWindow[];
+  error: string | null;
+  notice: string;
+};
+
 export type AIBacktestBenchmarkStatus = "invested" | "partial_cash_sleeves" | "cash_only";
 
 export type AIBacktestComparisonProvenance = {
@@ -258,6 +286,7 @@ export type AIBacktestRun = {
   decisions: AIBacktestDecision[];
   metrics: AIBacktestMetrics | null;
   evaluation?: AIBacktestEvaluation | null;
+  robustness?: AIBacktestRobustness | null;
   equity: Array<{
     date: string;
     equity: number;

@@ -182,9 +182,101 @@ def test_prepare_data_fetches_year_windows_and_keeps_complete_calendar_coverage(
     assert snapshot.coverage.complete is True
     assert snapshot.coverage.tradingDays == 4
     assert snapshot.coverage.calendarSymbol == "sh000001"
-    assert [window["calendarBars"] for window in snapshot.coverage.providerWindows] == [0, 0, 3, 3]
+    assert [window["calendarBars"] for window in snapshot.coverage.providerWindows] == [3, 3]
+    assert len(requests) == 6
+    assert [window["startDate"] for window in snapshot.coverage.providerWindows] == [
+        "2023-01-01",
+        "2024-01-01",
+    ]
     assert {request[0] for request in requests} == {"sh600000", "sh000001"}
     assert snapshot.actions_status == "factor_check_passed"
+
+
+def test_prepare_data_fetches_range_years_first_and_skips_unused_older_warmup_years(
+    monkeypatch,
+):
+    days = _weekdays("2023-01-02", "2026-10-08")
+    stock, calendar = _prepared_rows(days)
+    requests = _install_provider(monkeypatch, stock_rows=stock, calendar_rows=calendar)
+
+    snapshot = backtest_data.prepare_data(
+        {
+            "symbol": "600000",
+            "startDate": "2024-10-09",
+            "endDate": "2026-10-08",
+            "warmupBars": 252,
+        },
+        today="2026-10-09",
+    )
+
+    assert len(snapshot.warmup_candles) == 252
+    assert len(requests) == 12
+    assert [request[1][:4] for request in requests] == [
+        "2024",
+        "2024",
+        "2024",
+        "2025",
+        "2025",
+        "2025",
+        "2026",
+        "2026",
+        "2026",
+        "2023",
+        "2023",
+        "2023",
+    ]
+    assert [
+        (symbol, adjustment) for symbol, _start, _end, adjustment in requests
+    ] == [(symbol, adjustment) for _ in range(4) for symbol, adjustment in (
+        ("sh600000", "none"),
+        ("sh600000", "qfq"),
+        ("sh000001", "none"),
+    )]
+    assert [window["startDate"] for window in snapshot.coverage.providerWindows] == [
+        "2023-01-01",
+        "2024-01-01",
+        "2025-01-01",
+        "2026-01-01",
+    ]
+
+
+def test_prepare_data_still_blocks_missing_qfq_in_requested_year(monkeypatch):
+    days = ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]
+    stock, calendar = _prepared_rows(days)
+    _install_provider(
+        monkeypatch, stock_rows=stock, calendar_rows=calendar, qfq_rows=[]
+    )
+
+    with pytest.raises(BacktestDataError, match="raw/qfq 历史日期覆盖不一致"):
+        backtest_data.prepare_data(
+            {
+                "symbol": "600000",
+                "startDate": "2024-01-03",
+                "endDate": "2024-01-05",
+                "warmupBars": 1,
+            },
+            today="2024-01-08",
+        )
+
+
+def test_prepare_data_still_blocks_missing_qfq_in_required_warmup_year(monkeypatch):
+    days = _weekdays("2023-01-02", "2024-10-11")
+    stock, calendar = _prepared_rows(days)
+    qfq = [row for row in stock if row[0].startswith("2024-")]
+    _install_provider(
+        monkeypatch, stock_rows=stock, calendar_rows=calendar, qfq_rows=qfq
+    )
+
+    with pytest.raises(BacktestDataError, match="raw/qfq 历史日期覆盖不一致"):
+        backtest_data.prepare_data(
+            {
+                "symbol": "600000",
+                "startDate": "2024-10-09",
+                "endDate": "2024-10-11",
+                "warmupBars": 252,
+            },
+            today="2024-10-14",
+        )
 
 
 def test_prepare_data_blocks_a_missing_stock_bar_in_the_middle(monkeypatch):

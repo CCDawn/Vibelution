@@ -20,6 +20,8 @@ Lifecycle logs record only stable Agent/run/date identifiers, state, reason code
 
 ## Shared-cash portfolios and held-out windows
 
+Historical requests load intersecting calendar years first, then up to two earlier years only if required for warm-up and a pre-start raw/qfq baseline. All fetched pairs retain the same strict validation; an absent explicit qfq series is never relabeled from raw. The coverage audit is sorted chronologically independent of request order.
+
 `basket_data.py` freezes at most ten canonical A-share symbols as a version-2 snapshot. Each constituent passes the existing coverage, calendar, corporate-action and hash checks; all assets must share exactly the same sessions. Restoration rechecks every asset and the basket digest. Single-stock snapshots remain compatible.
 
 `portfolio_engine.py` uses one cash balance, values all target positions from the same pre-trade account equity, then sells before buying in canonical symbol order. Model targets cover the full basket; each position remains bounded and their sum cannot exceed 100%. The benchmark splits initial cash into equal fixed allocations, starts at the same next-open boundary and retains unfilled allocations as cash with an audit trail. It uses the same lots, commission, historical stamp duty and slippage; it never drops an untradeable constituent. Portfolio-at-date inputs exclude later prices and report same-day purchases as unsellable.
@@ -27,6 +29,8 @@ Lifecycle logs record only stable Agent/run/date identifiers, state, reason code
 `evaluation.py` divides the continuous account at a date frozen before execution. The held-out period starts from the previous close, with separate starting equity for the strategy and its benchmark. Costs belong to their actual execution window. Window metrics omit realized win rates because a sale may close a lot opened before the window. A held-out result is a retrospective check, not protection against model-training hindsight or proof of future returns.
 
 ## Fixed-data candidate runs and comparisons
+
+`robustness.py` adds a read-only descriptive projection of completed, coverage-verified curves: natural years and non-overlapping 63-session windows. Frozen holdout boundaries restrict all segments to the held-out period; absent holdout is explicitly retrospective. Positions carry across boundaries, returns use the previous close, and fees belong to fill dates. Partial tails remain visible but are excluded from the outperformance fraction. Four complete windows are a display threshold, not statistical significance. Annual windows do not certify full-year coverage. Missing or malformed legacy evidence produces an unavailable state. UI, JSON and CSV share this projection; nothing is persisted as a second result authority.
 
 A fork preview restores an owned run's frozen snapshot and keeps its dates, universe, holdout boundary and accounting assumptions. It never reloads current market data. Strategy, eligible configured model and the individual run's token cap may change; the existing explicit start and ordinary run lifecycle still apply. Candidate eligibility and the effective model fingerprint are checked before execution and on resume. This does not modify the Agent's bound model or relax the ordinary preview's bound-model rule.
 

@@ -290,6 +290,49 @@ class FinancialBacktestRunPage(BaseModel):
     limit: int
 
 
+class FinancialBacktestRobustnessMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    totalReturnPct: float
+    benchmarkReturnPct: float
+    excessReturnPct: float
+    maxDrawdownPct: float
+    fees: float
+    tradeCount: int
+
+
+class FinancialBacktestRobustnessWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    startDate: str
+    endDate: str
+    baselineDate: str | None
+    tradingDays: int
+    complete: bool | None
+    metrics: FinancialBacktestRobustnessMetrics
+
+
+class FinancialBacktestRobustness(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    schemaVersion: Literal[1]
+    status: Literal["available", "insufficient_sample", "unavailable"]
+    scope: Literal["out_of_sample", "full_period"]
+    windowSize: Literal[63]
+    minCompleteWindows: Literal[4]
+    completeWindowCount: int
+    partialWindowCount: int
+    outperformingWindowRatePct: float | None
+    evaluatedStartDate: str | None
+    evaluatedEndDate: str | None
+    tradingDays: int
+    annualWindows: list[FinancialBacktestRobustnessWindow]
+    fixedWindows: list[FinancialBacktestRobustnessWindow]
+    error: str | None
+    notice: str
+
+
 class FinancialBacktestRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -330,6 +373,7 @@ class FinancialBacktestRun(BaseModel):
     decisions: list[FinancialBacktestDecision]
     metrics: dict[str, Any] | None
     evaluation: dict[str, Any] | None = None
+    robustness: FinancialBacktestRobustness | None = None
     equity: list[FinancialBacktestEquityPoint]
     trades: list[FinancialBacktestTrade]
     orders: list[FinancialBacktestOrder]

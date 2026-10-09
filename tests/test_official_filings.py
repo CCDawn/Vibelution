@@ -321,3 +321,137 @@ def test_lookup_screen_filings_uses_one_joined_query_per_code(monkeypatch):
     assert {fields["category"] for fields in queries} == {joined}
     assert {fields["column"] for fields in queries} == {"sse", "bj"}
     assert all(fields["seDate"] == "1990-01-01~2026-10-06" for fields in queries)
+
+
+def test_lookup_screen_filings_pages_until_all_periodic_kinds_are_found(monkeypatch):
+    calls = []
+
+    def fake(path, fields):
+        calls.append((path, dict(fields)))
+        if path.endswith("topSearch/query"):
+            return [
+                {
+                    "code": "600519",
+                    "category": "A股",
+                    "orgId": "gssh0600519",
+                    "delisted": "false",
+                }
+            ]
+        if fields["pageNum"] == "1":
+            return {
+                "announcements": [
+                    _announcement("6005192025年年度报告", "finalpage/2026-04-17/a.pdf", LIVE_ANNOUNCED_MS),
+                    _announcement("6005192026年半年度报告", "finalpage/2026-08-15/b.pdf", _ms(date(2026, 8, 15))),
+                    _announcement("6005192026年一季度报告", "finalpage/2026-04-25/c.pdf", _ms(date(2026, 4, 25))),
+                    *[
+                        _announcement(
+                            f"600519关于股东大会的通知{index}",
+                            f"finalpage/2026-04-17/other-{index}.pdf",
+                            LIVE_ANNOUNCED_MS,
+                        )
+                        for index in range(27)
+                    ],
+                ],
+                "hasMore": True,
+            }
+        return {
+            "announcements": [
+                _announcement("6005192025年第三季度报告", "finalpage/2025-10-30/d.pdf", _ms(date(2025, 10, 30)))
+            ],
+            "hasMore": False,
+        }
+
+    monkeypatch.setattr(official_filings, "_post_json", fake)
+    found = lookup_screen_filings(["600519"], cutoff=date(2026, 10, 6))
+
+    assert {row["kind"] for row in found["600519"]} == {
+        "annual",
+        "semiannual",
+        "q1",
+        "q3",
+    }
+    pages = [
+        fields["pageNum"]
+        for path, fields in calls
+        if path.endswith("hisAnnouncement/query")
+    ]
+    assert pages == ["1", "2"]
+    assert all(fields["pageSize"] == str(official_filings.ANNOUNCEMENT_PAGE_SIZE) for path, fields in calls if path.endswith("hisAnnouncement/query"))
+
+
+def test_lookup_screen_filings_stops_at_the_page_budget(monkeypatch):
+    calls = []
+
+    def fake(path, fields):
+        calls.append((path, dict(fields)))
+        if path.endswith("topSearch/query"):
+            return [
+                {
+                    "code": "600519",
+                    "category": "A股",
+                    "orgId": "gssh0600519",
+                    "delisted": "false",
+                }
+            ]
+        return {
+            "announcements": [
+                _announcement("600519关于召开股东大会的通知", "finalpage/2026-04-17/a.pdf", LIVE_ANNOUNCED_MS)
+            ],
+            "hasMore": True,
+        }
+
+    monkeypatch.setattr(official_filings, "_post_json", fake)
+    assert lookup_screen_filings(["600519"], cutoff=date(2026, 10, 6)) == {}
+    pages = [
+        fields["pageNum"]
+        for path, fields in calls
+        if path.endswith("hisAnnouncement/query")
+    ]
+    assert pages == [str(page) for page in range(1, official_filings.MAX_ANNOUNCEMENT_PAGES + 1)]
+
+
+def test_lookup_annual_filings_pages_past_unusable_rows(monkeypatch):
+    calls = []
+
+    def fake(path, fields):
+        calls.append((path, dict(fields)))
+        if path.endswith("topSearch/query"):
+            return [
+                {
+                    "code": "600519",
+                    "category": "A股",
+                    "orgId": "gssh0600519",
+                    "delisted": "false",
+                }
+            ]
+        if fields["pageNum"] == "1":
+            return {
+                "announcements": [
+                    *[
+                        _announcement(
+                            f"6005192025年年度报告摘要{index}",
+                            f"finalpage/2026-04-17/summary-{index}.pdf",
+                            LIVE_ANNOUNCED_MS,
+                        )
+                        for index in range(30)
+                    ]
+                ],
+                "hasMore": "true",
+            }
+        return {
+            "announcements": [
+                _announcement("6005192024年年度报告", "finalpage/2025-04-03/b.pdf", _ms(date(2025, 4, 3)))
+            ],
+            "hasMore": False,
+        }
+
+    monkeypatch.setattr(official_filings, "_post_json", fake)
+    found = lookup_annual_filings(["600519"], cutoff=date(2026, 10, 6))
+
+    assert found["600519"]["title"] == "6005192024年年度报告"
+    pages = [
+        fields["pageNum"]
+        for path, fields in calls
+        if path.endswith("hisAnnouncement/query")
+    ]
+    assert pages == ["1", "2"]

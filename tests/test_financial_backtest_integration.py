@@ -255,9 +255,12 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     assert decision_inputs[1]["portfolio"]["cash"] < 100_000
     run_dto = FinancialBacktestRun.model_validate(completed)
     assert run_dto.benchmarkOrders
+    assert run_dto.robustness.status == "insufficient_sample"
+    assert run_dto.robustness.outperformingWindowRatePct is None
 
     persisted = store.load_run(_AGENT_ID, first_start["runId"])
     assert persisted["benchmarkOrders"]
+    assert "robustness" not in persisted  # Read-only projection, never a second result store.
     json_export = api.export_financial_backtest_run(_AGENT_ID, first_start["runId"], "json", store=store)
     json_body = json.loads(json_export["content"])
     assert json_export["mediaType"] == "application/json"
@@ -265,12 +268,17 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     assert len(json_body["decisions"]) == 2
     assert json_body["benchmarkOrders"] == persisted["benchmarkOrders"]
     assert json_body["comparisonProvenance"] == persisted["comparisonProvenance"]
+    assert json_body["robustness"] == completed["robustness"]
     summary = api.list_financial_backtest_runs(_AGENT_ID, store=store)["items"][0]
     assert summary["comparisonProvenance"] == persisted["comparisonProvenance"]
 
     csv_export = api.export_financial_backtest_run(_AGENT_ID, first_start["runId"], "csv", store=store)
     rows = list(csv.reader(StringIO(csv_export["content"])))
     assert csv_export["mediaType"] == "text/csv"
+    assert ["periodEvaluation", "field", "value"] in rows
+    assert ["summary", "status", "insufficient_sample"] in rows
+    segment = completed["robustness"]["fixedWindows"][0]
+    assert [f"fixedWindows:{segment['startDate']}", "totalReturnPct", str(segment["metrics"]["totalReturnPct"])] in rows
     assert rows[0] == ["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"]
     assert any(row and row[0] == first_start["runId"] for row in rows)
     assert any(row[:2] == ["account", "signalDate"] for row in rows)

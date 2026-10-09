@@ -17,6 +17,7 @@ from core.web.services.financial_backtest import (
     data,
     engine,
     portfolio_engine,
+    robustness,
 )
 from core.web.services.financial_backtest.contract import (
     DEFAULT_MAX_TOKENS,
@@ -799,6 +800,22 @@ def export_financial_backtest_run(
                             writer.writerow([window, metric, _csv_safe(metric_value)])
                     else:
                         writer.writerow([window, key, _csv_safe(value)])
+        segmented = projected.get("robustness")
+        if isinstance(segmented, Mapping):
+            writer.writerow([])
+            writer.writerow(["periodEvaluation", "field", "value"])
+            for key, value in segmented.items():
+                if key not in {"annualWindows", "fixedWindows"}:
+                    writer.writerow(["summary", key, _csv_safe(value)])
+            for grouping in ("annualWindows", "fixedWindows"):
+                for window in segmented.get(grouping, []):
+                    label = f"{grouping}:{window['startDate']}"
+                    for key, value in window.items():
+                        if key == "metrics":
+                            for metric, metric_value in value.items():
+                                writer.writerow([label, metric, _csv_safe(metric_value)])
+                        else:
+                            writer.writerow([label, key, _csv_safe(value)])
         content = output.getvalue()
         media_type = "text/csv"
         filename = f"backtest-{run['runId']}.csv"
@@ -902,6 +919,7 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "decisions": decisions,
         "metrics": dict(run["metrics"]) if isinstance(run.get("metrics"), Mapping) else None,
         "evaluation": dict(run["evaluation"]) if isinstance(run.get("evaluation"), Mapping) else None,
+        "robustness": _project_robustness(run),
         "comparisonProvenance": dict(run["comparisonProvenance"]) if isinstance(run.get("comparisonProvenance"), Mapping) else None,
         "equity": list(run.get("equity") or []),
         "trades": list(run.get("trades") or []),
@@ -917,6 +935,45 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "uncertainDecisionDate": run.get("uncertainDecisionDate"),
         "tokenAccounting": str(run.get("tokenAccounting") or "reserved"),
     }
+
+
+def _project_robustness(run: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Describe completed frozen results without rewriting or certifying old runs."""
+    if run.get("status") != "completed":
+        return None
+    params = run.get("params") if isinstance(run.get("params"), Mapping) else {}
+    boundary = params.get("outOfSampleStartDate") or run.get("outOfSampleStartDate")
+    try:
+        rows = run.get("equity") or []
+        coverage = run.get("dateCoverage") if isinstance(run.get("dateCoverage"), Mapping) else {}
+        if (
+            not isinstance(rows, (list, tuple))
+            or coverage.get("complete") is not True
+            or not rows
+            or not isinstance(rows[0], Mapping)
+            or not isinstance(rows[-1], Mapping)
+            or coverage.get("tradingDays") != len(rows)
+            or coverage.get("actualStartDate") != rows[0].get("date")
+            or coverage.get("actualEndDate") != rows[-1].get("date")
+        ):
+            raise data.BacktestInputError("已保存净值与完整行情覆盖不一致，无法评估分段表现")
+        if run.get("outOfSampleStartDate") and params.get("outOfSampleStartDate") and run["outOfSampleStartDate"] != params["outOfSampleStartDate"]:
+            raise data.BacktestInputError("已保存的样本外边界不一致")
+        return robustness.evaluate_robustness(
+            rows, run.get("orders") or [], initial_cash=params.get("initialCash"),
+            out_of_sample_start_date=boundary,
+        )
+    except data.BacktestInputError as exc:
+        return {
+            "schemaVersion": 1, "status": "unavailable",
+            "scope": "out_of_sample" if boundary else "full_period",
+            "windowSize": 63, "minCompleteWindows": 4,
+            "completeWindowCount": 0, "partialWindowCount": 0,
+            "outperformingWindowRatePct": None,
+            "evaluatedStartDate": None, "evaluatedEndDate": None, "tradingDays": 0,
+            "annualWindows": [], "fixedWindows": [], "error": str(exc),
+            "notice": "原始回测仍可读取；缺失或无效的评估依据不会被补造成完整结果。",
+        }
 
 
 def _require_owner(agent_id: str) -> dict[str, Any]:

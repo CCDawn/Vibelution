@@ -46,6 +46,7 @@ US_EASTMONEY_SOURCE = "东方财富 USF10"
 SEC_SOURCE = "SEC EDGAR"
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SEC_SUBMISSIONS_ARCHIVE_URL = "https://data.sec.gov/submissions/{name}"
 SEC_COMPANY_FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
 SEC_BROWSE_URL = "https://www.sec.gov/edgar/browse/?CIK={cik}"
 
@@ -53,6 +54,10 @@ _REQUEST_TIMEOUT_SECONDS = 8
 _REQUEST_INTERVAL_SECONDS = 0.25
 _HKEX_STOCK_LIST_MAX_BYTES = 1_200_000
 _SEC_JSON_MAX_BYTES = 8_000_000
+_SEC_SUBMISSIONS_ARCHIVE_MAX_FILES = 4
+_SEC_SUBMISSIONS_ARCHIVE_NAME_RE = re.compile(
+    r"^CIK(?P<cik>\d{10})-submissions-(?P<sequence>\d{3,})\.json$"
+)
 _DEFAULT_JSON_MAX_BYTES = 1_000_000
 _CACHE_DAY_SECONDS = 24 * 60 * 60
 _US_FUNDAMENTALS_CACHE_SECONDS = 60 * 60
@@ -595,6 +600,7 @@ def _load_sec_ticker_ids() -> dict[str, tuple[str, str]]:
     if not isinstance(values, (list, type({}.values()))):
         raise FinancialDisclosureDataError("SEC 交易代码表格式无效")
     result: dict[str, tuple[str, str]] = {}
+    ambiguous: set[str] = set()
     for row in values:
         if not isinstance(row, dict):
             continue
@@ -606,7 +612,15 @@ def _load_sec_ticker_ids() -> dict[str, tuple[str, str]]:
         except (TypeError, ValueError, OverflowError):
             continue
         if ticker and cik_number > 0 and len(ticker) <= 10:
-            result.setdefault(ticker, (f"{cik_number:010d}", title[:160]))
+            if ticker in ambiguous:
+                continue
+            entry = (f"{cik_number:010d}", title[:160])
+            existing = result.get(ticker)
+            if existing is not None and existing[0] != entry[0]:
+                result.pop(ticker, None)
+                ambiguous.add(ticker)
+                continue
+            result.setdefault(ticker, entry)
     if not result:
         raise FinancialDisclosureDataError("SEC 交易代码表没有有效证券")
     return result
@@ -646,7 +660,195 @@ def _filing_rows(submissions: Any) -> list[dict[str, Any]]:
                 "primaryDocDescription": descriptions[index] if isinstance(descriptions, list) and index < len(descriptions) else "",
             }
         )
+    archived_rows = (
+        submissions.get("_historicalArchiveRows")
+        if isinstance(submissions, dict)
+        else None
+    )
+    if isinstance(archived_rows, list):
+        rows.extend(row for row in archived_rows if isinstance(row, dict))
     return rows
+
+
+def _sec_has_standard_financial_filing(
+    rows: list[dict[str, Any]], cutoff: date
+) -> bool:
+    return any(
+        _sec_base_form(row.get("form")) in {"10-K", "10-Q", "20-F", "40-F"}
+        and _date(row.get("reportDate")) is not None
+        and on_or_before(_date(row.get("filingDate")), cutoff)
+        and re.fullmatch(
+            r"\d{10}-\d{2}-\d{6}", str(row.get("accessionNumber") or "")
+        )
+        for row in rows
+    )
+
+
+def _sec_history_coverage_sufficient(
+    rows: list[dict[str, Any]], cutoff: date
+) -> bool:
+    eligible_public = sum(
+        str(row.get("form") or "").strip().upper() in _SEC_PUBLIC_FORMS
+        and on_or_before(_date(row.get("filingDate")), cutoff)
+        for row in rows
+    )
+    return eligible_public > _MAX_ANNOUNCEMENTS and _sec_has_standard_financial_filing(
+        rows, cutoff
+    )
+
+
+def _sec_archive_candidates(
+    submissions: Any, cik: str, cutoff: date
+) -> tuple[list[tuple[str, date, date]], bool]:
+    filings = submissions.get("filings") if isinstance(submissions, dict) else None
+    files = filings.get("files") if isinstance(filings, dict) else None
+    if not isinstance(files, list):
+        return [], True
+    expected_cik = f"{int(cik):010d}"
+    candidates: list[tuple[str, date, date]] = []
+    invalid_entry = False
+    for entry in files:
+        if not isinstance(entry, dict):
+            invalid_entry = True
+            continue
+        name = str(entry.get("name") or "").strip()
+        match = _SEC_SUBMISSIONS_ARCHIVE_NAME_RE.fullmatch(name)
+        filing_from = _date(entry.get("filingFrom"))
+        filing_to = _date(entry.get("filingTo"))
+        if (
+            match is None
+            or match.group("cik") != expected_cik
+            or filing_from is None
+            or filing_to is None
+            or filing_from > filing_to
+        ):
+            invalid_entry = True
+            continue
+        start = date.fromisoformat(filing_from)
+        end = date.fromisoformat(filing_to)
+        if start <= cutoff:
+            candidates.append((name, start, end))
+    candidates.sort(key=lambda item: (item[2], item[0]), reverse=True)
+    return candidates, invalid_entry
+
+
+def _sec_archive_rows(
+    payload: Any,
+    *,
+    cik: str,
+    name: str,
+    filing_from: date,
+    filing_to: date,
+) -> list[dict[str, Any]]:
+    match = _SEC_SUBMISSIONS_ARCHIVE_NAME_RE.fullmatch(name)
+    expected_cik = f"{int(cik):010d}"
+    if match is None or match.group("cik") != expected_cik:
+        raise FinancialDisclosureDataError("SEC 历史归档身份无效")
+    if isinstance(payload, dict) and "cik" in payload:
+        try:
+            payload_cik = f"{int(payload.get('cik')):010d}"
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise FinancialDisclosureDataError("SEC 历史归档身份无效") from exc
+        if payload_cik != expected_cik:
+            raise FinancialDisclosureDataError("SEC 历史归档身份无效")
+    block = payload
+    if isinstance(payload, dict):
+        nested = payload.get("filings")
+        if isinstance(nested, dict) and isinstance(nested.get("recent"), dict):
+            block = nested["recent"]
+    if not isinstance(block, dict):
+        raise FinancialDisclosureDataError("SEC 历史归档格式无效")
+    required = ("form", "filingDate", "reportDate", "accessionNumber")
+    arrays = {key: block.get(key) for key in required}
+    if not all(isinstance(value, list) for value in arrays.values()):
+        raise FinancialDisclosureDataError("SEC 历史归档申报列表格式无效")
+    size = len(arrays["form"])
+    if any(len(value) != size for value in arrays.values()):
+        raise FinancialDisclosureDataError("SEC 历史归档申报列表长度不一致")
+    if not size:
+        raise FinancialDisclosureDataError("SEC 历史归档没有申报记录")
+    rows = _filing_rows({"filings": {"recent": block}})
+    for row in rows:
+        accession = str(row.get("accessionNumber") or "")
+        filed = _date(row.get("filingDate"))
+        if (
+            re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession) is None
+            or filed is None
+            or not filing_from <= date.fromisoformat(filed) <= filing_to
+        ):
+            raise FinancialDisclosureDataError("SEC 历史归档申报身份或日期不匹配")
+    return rows
+
+
+def _load_sec_historical_archives(
+    submissions: Any, cik: str, *, cutoff: date | None
+) -> tuple[Any, str | None]:
+    if cutoff is None:
+        return submissions, None
+    try:
+        recent_rows = _filing_rows(submissions)
+    except FinancialDisclosureDataError:
+        return submissions, "SEC 历史申报范围无法核实"
+    recent_dates = [
+        date.fromisoformat(value)
+        for row in recent_rows
+        if (value := _date(row.get("filingDate"))) is not None
+    ]
+    recent_covers_cutoff = bool(recent_dates and cutoff >= min(recent_dates))
+    if _sec_history_coverage_sufficient(recent_rows, cutoff):
+        return submissions, None
+    candidates, invalid_entry = _sec_archive_candidates(submissions, cik, cutoff)
+    reasons: list[str] = []
+    if invalid_entry:
+        reasons.append("SEC 历史归档索引含无效条目")
+    if not candidates:
+        reasons.append("SEC 历史归档未覆盖该日期")
+    loaded_rows: list[dict[str, Any]] = []
+    attempted = 0
+    archive_covers_cutoff = False
+    for name, filing_from, filing_to in candidates:
+        if attempted >= _SEC_SUBMISSIONS_ARCHIVE_MAX_FILES:
+            break
+        attempted += 1
+        url = SEC_SUBMISSIONS_ARCHIVE_URL.format(name=name)
+        try:
+            payload = _read_json(url, source=SEC_SOURCE, max_bytes=_SEC_JSON_MAX_BYTES)
+            archive_rows = _sec_archive_rows(
+                payload,
+                cik=cik,
+                name=name,
+                filing_from=filing_from,
+                filing_to=filing_to,
+            )
+            loaded_rows.extend(archive_rows)
+            archive_covers_cutoff = archive_covers_cutoff or (
+                filing_from <= cutoff <= filing_to
+            )
+            combined_rows = recent_rows + loaded_rows
+            if _sec_history_coverage_sufficient(combined_rows, cutoff):
+                break
+        except (FinancialDisclosureDataError, TypeError, ValueError) as exc:
+            reasons.append(str(exc) or "SEC 历史归档读取失败")
+    coverage_sufficient = False
+    if loaded_rows:
+        combined_rows = recent_rows + loaded_rows
+        coverage_sufficient = _sec_history_coverage_sufficient(combined_rows, cutoff)
+    if (
+        attempted >= _SEC_SUBMISSIONS_ARCHIVE_MAX_FILES
+        and len(candidates) > attempted
+        and not coverage_sufficient
+    ):
+        reasons.append("SEC 历史归档读取达到数量上限")
+    if loaded_rows and not archive_covers_cutoff and not recent_covers_cutoff:
+        reasons.append("SEC 历史归档日期范围未覆盖目标日期")
+    if attempted and not loaded_rows and not reasons:
+        reasons.append("SEC 历史归档没有可用申报")
+    if isinstance(submissions, dict):
+        merged = dict(submissions)
+        merged["_historicalArchiveRows"] = loaded_rows
+    else:
+        merged = submissions
+    return merged, "；".join(dict.fromkeys(reasons)) or None
 
 
 _SEC_PUBLIC_FORMS = {"8-K", "8-K/A", "10-K", "10-K/A", "10-Q", "10-Q/A", "6-K", "6-K/A", "20-F", "20-F/A"}
@@ -707,6 +909,7 @@ def _load_us_announcements(
     submissions: Any,
     *,
     cutoff: date | None = None,
+    archive_error: str | None = None,
 ) -> dict[str, Any]:
     source_url = SEC_BROWSE_URL.format(cik=str(int(cik)))
     rows = _filing_rows(submissions)
@@ -722,6 +925,7 @@ def _load_us_announcements(
             and re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession)
         ):
             eligible.append((row, form, filing_date, accession))
+    eligible.sort(key=lambda item: (item[2], item[3]), reverse=True)
     items: list[dict[str, Any]] = []
     for row, form, filing_date, accession in eligible[:_MAX_ANNOUNCEMENTS]:
         report_date = _date(row.get("reportDate"))
@@ -753,10 +957,16 @@ def _load_us_announcements(
         ]
         filings = submissions.get("filings") if isinstance(submissions, dict) else None
         archive_files = filings.get("files") if isinstance(filings, dict) else None
-        if archive_files and (not recent_dates or cutoff.isoformat() < min(recent_dates)):
+        if (
+            archive_files
+            and not archive_error
+            and (not recent_dates or cutoff.isoformat() < min(recent_dates))
+        ):
             incomplete_reasons.append(
                 "SEC Submissions 当前片段未覆盖该日期，未读取更早归档"
             )
+        if archive_error:
+            incomplete_reasons.append(archive_error)
     error = (
         "历史公告覆盖不完整：" + "；".join(incomplete_reasons) + "。"
         if incomplete_reasons
@@ -888,6 +1098,7 @@ def _load_us_fundamentals(
     submissions: Any,
     *,
     cutoff: date | None = None,
+    archive_error: str | None = None,
 ) -> dict[str, Any]:
     us_gaap = _facts_root(facts_payload)
     rows = _filing_rows(submissions)
@@ -958,20 +1169,20 @@ def _load_us_fundamentals(
         raise FinancialDisclosureDataError(
             "SEC CompanyFacts 未包含该申报期可验证的标准指标"
         )
-    error = (
-        None
-        if len(items) == len(_SEC_METRICS)
-        else "SEC CompanyFacts 未包含部分标准指标，仅显示该申报期可核实字段"
-    )
-    if _sec_base_form(form) == "10-Q" and error:
-        error += "；缺少独立季度值的项目已隐藏，未用年初至今累计值替代"
+    error_parts: list[str] = []
+    if len(items) != len(_SEC_METRICS):
+        error_parts.append("SEC CompanyFacts 未包含部分标准指标，仅显示该申报期可核实字段")
+    if cutoff is not None and archive_error:
+        error_parts.append("历史财务覆盖不完整：" + archive_error)
+    if _sec_base_form(form) == "10-Q" and len(items) != len(_SEC_METRICS):
+        error_parts.append("缺少独立季度值的项目已隐藏，未用年初至今累计值替代")
     return _available(
         SEC_SOURCE,
         SEC_COMPANY_FACTS_URL.format(cik=cik),
         items,
         report_date=report_date,
         published_at=filing_date,
-        error=error,
+        error="；".join(error_parts) or None,
     )
 
 
@@ -1332,9 +1543,16 @@ def fetch_international_facets(
                     fundamentals=True,
                 )
             else:
+                submissions, archive_error = _load_sec_historical_archives(
+                    submissions, cik, cutoff=cutoff
+                )
                 announcements = _safe_facet(
                     lambda: _load_us_announcements(
-                        ticker, cik, submissions, cutoff=cutoff
+                        ticker,
+                        cik,
+                        submissions,
+                        cutoff=cutoff,
+                        archive_error=archive_error,
                     ),
                     SEC_SOURCE,
                     source_url,
@@ -1349,6 +1567,7 @@ def fetch_international_facets(
                         ),
                         submissions,
                         cutoff=cutoff,
+                        archive_error=archive_error,
                     ),
                     SEC_SOURCE,
                     SEC_COMPANY_FACTS_URL.format(cik=cik),
