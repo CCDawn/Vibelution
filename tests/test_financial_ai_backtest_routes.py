@@ -142,10 +142,11 @@ def test_fork_preview_route_forwards_only_allowed_overrides(monkeypatch):
     assert calls == [("a", run_id, {"strategy": "新策略", "modelId": "provider/new", "maxTokens": 25_000})]
 
 
-def test_compare_static_route_is_not_captured_by_run_id_route(monkeypatch):
+@pytest.mark.parametrize(("axis", "parameter_key"), [("strategy", None), ("parameter", "commissionBps")])
+def test_compare_static_route_is_not_captured_by_run_id_route(monkeypatch, axis, parameter_key):
     response = {
         "comparisonId": str(uuid4()),
-        "axis": "strategy",
+        "axis": axis,
         "status": "incompatible",
         "reasons": [{"code": "model_id_mismatch", "runIds": ["r1", "r2"], "message": "模型不同"}],
         "dataHash": None,
@@ -158,18 +159,18 @@ def test_compare_static_route_is_not_captured_by_run_id_route(monkeypatch):
     monkeypatch.setattr(
         routes.service,
         "compare_financial_backtest_runs",
-        lambda *args: (calls.append(args) or response),
+        lambda *args, **kwargs: (calls.append((args, kwargs)) or response),
     )
     first, second = str(uuid4()), str(uuid4())
 
     result = client().post(
         "/api/financial-backtests/a/runs/compare",
-        json={"runIds": [first, second], "axis": "strategy"},
+        json={"runIds": [first, second], "axis": axis, **({"parameterKey": parameter_key} if parameter_key else {})},
     )
 
     assert result.status_code == 200
     assert result.json()["reasons"][0]["message"] == "模型不同"
-    assert calls == [("a", [first, second], "strategy")]
+    assert calls == [(("a", [first, second], axis), {"parameter_key": parameter_key})]
 
 
 @pytest.mark.parametrize(
