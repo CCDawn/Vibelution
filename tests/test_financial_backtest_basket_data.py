@@ -80,6 +80,11 @@ def test_prepare_basket_data_canonicalizes_and_round_trips_all_asset_coverage(
         ],
     }
     calendar_rows = [_wire_row(day, 3_000 + index) for index, day in enumerate(days)]
+    # Even with zero model warm-up bars, the source must provide a preceding
+    # raw/qfq pair to check an action on the first simulated trading day.
+    stock_rows["sh600000"].insert(0, _wire_row("2023-12-29", 10))
+    stock_rows["sh600001"].insert(0, _wire_row("2023-12-29", 20))
+    calendar_rows.insert(0, _wire_row("2023-12-29", 3_000))
 
     def fetch(symbol: str, start: date, end: date, adjustment: str) -> list[list[str]]:
         rows = calendar_rows if symbol == "sh000001" else stock_rows[symbol]
