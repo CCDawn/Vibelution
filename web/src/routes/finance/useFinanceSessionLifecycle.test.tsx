@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider, type Router } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteChatSession, fetchSessionDetail, querySessions } from "../../api/chat";
+import { queryKeys } from "../../api/queryKeys";
 import { archiveChatSession, unarchiveChatSession } from "../../api/sessionArchive";
 import { createFinancialAssistant, listFinancialAssistants, type FinancialAssistant } from "../../api/financialAssistant";
 import type { SessionDetail, SessionSummary } from "../../api/types";
@@ -47,9 +48,11 @@ function indexedIds() { return (client.getQueryData(indexKey) as { pages: { item
 
 describe("native financial research lifecycle", () => {
   it("archives once and selects only a surviving owned native research", async () => {
+    client.setQueryData(queryKeys.sessionArchive(), { items: [], nextCursor: "" });
     await act(async () => { state.requestAction(current, "archive"); state.requestAction(current, "archive"); }); await settle();
     expect(archiveChatSession).toHaveBeenCalledTimes(1);
     expect(indexedIds()).toEqual(["next"]);
+    expect(client.getQueryState(queryKeys.sessionArchive())?.isInvalidated).toBe(true);
     expect(router.state.location.search).toBe("?session=next");
     expect(fetchSessionDetail).toHaveBeenCalledWith("next", expect.objectContaining({ transcriptScope: "none" }));
     expect(client.getQueryState(catalogKey)?.isInvalidated).toBe(true);
@@ -76,11 +79,15 @@ describe("native financial research lifecycle", () => {
     expect((client.getQueryData(catalogKey) as { pages: { items: { sessionId: string }[] }[] }).pages[0].items.map((row) => row.sessionId)).toEqual(["next"]);
   });
   it("restores an archive through the existing native endpoint", async () => {
+    client.setQueryData(queryKeys.sessionArchive(), { items: [current], nextCursor: "" });
     vi.mocked(fetchSessionDetail).mockResolvedValue({ ...current, messages: [], hiddenFromIndex: true, archiveState: { status: "archived" } } as SessionDetail);
     await act(async () => state.requestAction({ ...current, archiveState: { status: "archived" } }, "restore")); await settle();
     expect(unarchiveChatSession).toHaveBeenCalledTimes(1);
     expect(archiveChatSession).not.toHaveBeenCalled();
     expect(deleteChatSession).not.toHaveBeenCalled();
+    expect(indexedIds()).toEqual(["current", "next"]);
+    expect(client.getQueryState(indexKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(queryKeys.sessionArchive())?.isInvalidated).toBe(true);
     expect(router.state.location.search).toBe("?session=current");
     expect(client.getQueryState(catalogKey)?.isInvalidated).toBe(true);
   });

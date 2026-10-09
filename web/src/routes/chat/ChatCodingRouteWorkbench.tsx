@@ -1270,6 +1270,9 @@ export function ChatCodingRouteWorkbench() {
       await Promise.all([
         chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessionArchive() }),
+        queryClient.invalidateQueries({ queryKey: ["sessions", "finance"] }),
+        queryClient.invalidateQueries({ queryKey: ["sessions", "finance-archived"] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.financialAssistants() }),
       ]);
     },
   });
@@ -3257,6 +3260,9 @@ export function ChatCodingRouteWorkbench() {
   }, [sessionArchiveMutation, setSessionContextMenu]);
   const refreshArchivedSessions = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.sessionArchive() });
+    void queryClient.invalidateQueries({ queryKey: ["sessions", "finance"] });
+    void queryClient.invalidateQueries({ queryKey: ["sessions", "finance-archived"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.financialAssistants() });
   }, [queryClient]);
   const handleDeleteArchivedSession = useCallback((session: SessionSummary) => {
     deleteSessionMutation.mutate(

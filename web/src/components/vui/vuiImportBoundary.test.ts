@@ -35,6 +35,8 @@ const productSharedParentStyleConsumers = [
   // Outcome registration, review and backtesting share their evaluation
   // surface map, keeping evidence and form geometry consistent.
   "routes/finance/FinanceBacktest.tsx",
+  "routes/finance/FinanceBacktestComparison.tsx",
+  "routes/finance/FinanceBacktestForkDialog.tsx",
   "routes/finance/FinanceClaimRegistration.tsx",
   "routes/finance/FinanceOutcomeReview.tsx",
   "components/layout/PersistedHeightListShell.tsx",

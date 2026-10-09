@@ -45,6 +45,27 @@ class FinancialBacktestPreviewRequest(FinancialBacktestRequest):
     pass
 
 
+class FinancialBacktestForkPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: StrictStr | None = Field(default=None, min_length=1, max_length=4_000)
+    modelId: StrictStr | None = Field(default=None, max_length=160)
+    maxTokens: StrictInt | None = Field(default=None, ge=512, le=2_000_000)
+
+
+class FinancialBacktestCompareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    runIds: list[StrictStr] = Field(min_length=2, max_length=4)
+    axis: Literal["strategy", "model"]
+
+    @model_validator(mode="after")
+    def require_unique_run_ids(self) -> FinancialBacktestCompareRequest:
+        if len(set(self.runIds)) != len(self.runIds):
+            raise ValueError("runIds不能重复")
+        return self
+
+
 class FinancialBacktestStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -107,6 +128,15 @@ class FinancialBacktestParams(BaseModel):
     outOfSampleStartDate: str | None = None
 
 
+class FinancialBacktestComparisonProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contractVersion: str
+    commonParamsHash: str
+    strategyHash: str
+    sourceRunId: str | None = None
+
+
 class FinancialBacktestPreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -141,6 +171,7 @@ class FinancialBacktestPreview(BaseModel):
     adjustment: str
     notice: str
     params: FinancialBacktestParams
+    comparisonProvenance: FinancialBacktestComparisonProvenance
 
 
 class FinancialBacktestDecision(BaseModel):
@@ -240,6 +271,7 @@ class FinancialBacktestRunSummary(BaseModel):
     modelId: str
     paramsHash: str
     dataHash: str
+    comparisonProvenance: FinancialBacktestComparisonProvenance | None = None
     totalReturnPct: float | None = None
     maxDrawdownPct: float | None = None
     benchmarkStatus: Literal["invested", "partial_cash_sleeves", "cash_only"] | None = None
@@ -280,6 +312,7 @@ class FinancialBacktestRun(BaseModel):
     modelConfigHash: str = ""
     paramsHash: str
     dataHash: str
+    comparisonProvenance: FinancialBacktestComparisonProvenance | None = None
     params: FinancialBacktestParams
     dateCoverage: FinancialBacktestCoverage
     assetCoverage: dict[str, FinancialBacktestCoverage] = Field(default_factory=dict)
@@ -310,6 +343,93 @@ class FinancialBacktestRun(BaseModel):
     errorCode: str | None
     uncertainDecisionDate: str | None
     tokenAccounting: Literal["measured", "estimated", "reserved"]
+
+
+class FinancialBacktestComparisonReason(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    runIds: list[str]
+    message: str
+
+
+class FinancialBacktestComparisonMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    totalReturnPct: StrictFloat | StrictInt | None = None
+    benchmarkReturnPct: StrictFloat | StrictInt | None = None
+    excessReturnPct: StrictFloat | StrictInt | None = None
+    annualizedReturnPct: StrictFloat | StrictInt | None = None
+    benchmarkAnnualizedReturnPct: StrictFloat | StrictInt | None = None
+    maxDrawdownPct: StrictFloat | StrictInt | None = None
+    maxDrawdownSessions: StrictInt | None = None
+    volatilityAnnualizedPct: StrictFloat | StrictInt | None = None
+    sharpeRatio: StrictFloat | StrictInt | None = None
+    benchmarkMaxDrawdownPct: StrictFloat | StrictInt | None = None
+    tradeCount: StrictInt | None = None
+    closedTradeCount: StrictInt | None = None
+    winningTradeCount: StrictInt | None = None
+    winRatePct: StrictFloat | StrictInt | None = None
+    grossTurnover: StrictFloat | StrictInt | None = None
+    fees: StrictFloat | StrictInt | None = None
+    commissionFees: StrictFloat | StrictInt | None = None
+    stampDuty: StrictFloat | StrictInt | None = None
+    benchmarkFees: StrictFloat | StrictInt | None = None
+    slippageCost: StrictFloat | StrictInt | None = None
+    benchmarkSlippageCost: StrictFloat | StrictInt | None = None
+    finalEquity: StrictFloat | StrictInt | None = None
+    benchmarkFinalEquity: StrictFloat | StrictInt | None = None
+
+
+class FinancialBacktestEvaluationWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    startDate: str
+    endDate: str
+    baselineDate: str | None
+    startingEquity: StrictFloat | StrictInt
+    startingBenchmarkEquity: StrictFloat | StrictInt
+    tradingDays: StrictInt
+    metrics: FinancialBacktestComparisonMetrics
+
+
+class FinancialBacktestEvaluation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outOfSampleStartDate: str
+    inSample: FinancialBacktestEvaluationWindow
+    outOfSample: FinancialBacktestEvaluationWindow
+    notice: str
+
+
+class FinancialBacktestComparisonRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    runId: str
+    status: str
+    modelId: str | None
+    modelConfigHash: str | None
+    strategy: str | None
+    strategyHash: str | None
+    callsUsed: int | None
+    tokensUsed: int | None
+    maxTokens: int | None
+    metrics: FinancialBacktestComparisonMetrics | None
+    evaluation: FinancialBacktestEvaluation | None
+
+
+class FinancialBacktestComparison(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    comparisonId: str
+    axis: Literal["strategy", "model"]
+    status: Literal["comparable", "incomplete", "incompatible"]
+    reasons: list[FinancialBacktestComparisonReason]
+    dataHash: str | None
+    commonParamsHash: str | None
+    outOfSampleStartDate: str | None
+    rows: list[FinancialBacktestComparisonRow]
+    notice: str
 
 
 class FinancialBacktestExport(BaseModel):

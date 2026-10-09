@@ -25,6 +25,7 @@ def preview():
         "agentId": "a", "previewId": str(uuid4()), "expiresAt": "2099-01-01T00:00:00Z", "symbol": "sz000001",
         "dateCoverage": {"requestedStartDate": "2026-09-01", "requestedEndDate": "2026-09-03", "actualStartDate": "2026-09-01", "actualEndDate": "2026-09-03", "availableStartDate": "2026-08-01", "availableEndDate": "2026-09-03", "tradingDays": 3, "warmupBars": 20, "providerWindows": [{"startDate": "2026-01-01", "endDate": "2026-12-31", "rawBars": 40, "qfqBars": 40, "calendarBars": 40}], "complete": True, "tradingCalendarStatus": "tencent_index_checked"},
         "decisionSchedule": ["2026-09-01"], "decisionCount": 1, "maxDecisions": 10, "maxTokens": 20000, "estimatedTokens": 1000, "reservedOutputTokens": 256, "modelId": "provider/model", "paramsHash": "a" * 64, "dataHash": "b" * 64, "actionsStatus": "clear", "actionDates": [], "canStart": True, "blockReason": None, "warnings": [], "source": "腾讯财经", "sourceUrl": "https://gu.qq.com/sz000001/gp", "fetchedAt": "2026-10-08", "adjustment": "raw", "notice": "模拟研究", "params": {"strategy": "趋势", "initialCash": 100000, "maxPositionPct": 80, "decisionInterval": 5, "commissionBps": 3, "minimumCommission": 5, "slippageBps": 5, "maxDecisions": 10, "maxTokens": 20000},
+        "comparisonProvenance": {"contractVersion": "finance-ai-backtest-v1", "commonParamsHash": "c" * 64, "strategyHash": "d" * 64},
     }
 
 
@@ -98,6 +99,72 @@ def test_start_and_resume_forward_exact_immutable_identifiers(monkeypatch):
     assert resumed.status_code == 200
     assert resumed.json()["status"] == "paused_unknown"
     assert calls[1] == (("a", response["runId"]), {"retry_unknown_decision_date": "2026-09-01", "confirm_possible_duplicate_charge": True})
+
+
+def test_fork_preview_route_forwards_only_allowed_overrides(monkeypatch):
+    response = preview()
+    calls = []
+    monkeypatch.setattr(
+        routes.service,
+        "create_financial_backtest_fork_preview",
+        lambda *args: (calls.append(args) or response),
+    )
+    run_id = str(uuid4())
+    result = client().post(
+        f"/api/financial-backtests/a/runs/{run_id}/fork-preview",
+        json={"strategy": "新策略", "modelId": "provider/new", "maxTokens": 25_000},
+    )
+    assert result.status_code == 200
+    assert result.json()["comparisonProvenance"]["strategyHash"] == "d" * 64
+    assert calls == [("a", run_id, {"strategy": "新策略", "modelId": "provider/new", "maxTokens": 25_000})]
+
+
+def test_compare_static_route_is_not_captured_by_run_id_route(monkeypatch):
+    response = {
+        "comparisonId": str(uuid4()),
+        "axis": "strategy",
+        "status": "incompatible",
+        "reasons": [{"code": "model_id_mismatch", "runIds": ["r1", "r2"], "message": "模型不同"}],
+        "dataHash": None,
+        "commonParamsHash": None,
+        "outOfSampleStartDate": None,
+        "rows": [],
+        "notice": "仅供离线比较",
+    }
+    calls = []
+    monkeypatch.setattr(
+        routes.service,
+        "compare_financial_backtest_runs",
+        lambda *args: (calls.append(args) or response),
+    )
+    first, second = str(uuid4()), str(uuid4())
+
+    result = client().post(
+        "/api/financial-backtests/a/runs/compare",
+        json={"runIds": [first, second], "axis": "strategy"},
+    )
+
+    assert result.status_code == 200
+    assert result.json()["reasons"][0]["message"] == "模型不同"
+    assert calls == [("a", [first, second], "strategy")]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"runIds": [str(uuid4())] * 2, "axis": "strategy"},
+        {"runIds": [str(uuid4()), str(uuid4())], "axis": "automatic"},
+        {"runIds": [str(uuid4()), str(uuid4())], "axis": "model", "extra": True},
+    ],
+)
+def test_compare_route_rejects_invalid_axis_duplicate_ids_and_extra_fields(monkeypatch, payload):
+    monkeypatch.setattr(
+        routes.service,
+        "compare_financial_backtest_runs",
+        lambda *args: pytest.fail("invalid comparison request reached service"),
+    )
+    result = client().post("/api/financial-backtests/a/runs/compare", json=payload)
+    assert result.status_code == 422
 
 
 @pytest.mark.parametrize("error,status", [(FinancialBacktestNotFound("不存在"), 404), (FinancialBacktestConflict("需确认"), 409), (BacktestDataError("数据缺口"), 422)])

@@ -16,8 +16,13 @@ export function financialResearchPrompt(company: string, period: string, kind: F
   return `请研究 ${target}${scope ? `，报告期 ${scope}` : ""}：${task}。注明资料来源、日期和页码，区分事实与判断，并列出缺失的证据。`;
 }
 
+/** This assistant owns the session and it has not been deleted. Archive does not change ownership. */
+export function isOwnedFinancialSession(row: SessionSummary, agentId: string) {
+  return row.agentId === agentId && !isSessionDeleteTombstoned(row.id);
+}
+
 export function isFinancialSession(row: SessionSummary, agentId: string) {
-  return row.agentId === agentId && !row.hiddenFromIndex && row.archiveState?.status !== "archived" && !isSessionDeleteTombstoned(row.id);
+  return isOwnedFinancialSession(row, agentId) && !row.hiddenFromIndex && row.archiveState?.status !== "archived";
 }
 
 export function activeFinancialItems(items: KnowledgeItem[], knowledgeBaseId: string) {

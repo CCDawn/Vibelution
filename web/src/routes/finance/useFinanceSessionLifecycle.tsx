@@ -56,7 +56,8 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         client.cancelQueries({ queryKey: ["finance", "report-catalog", agentId] }),
         ...(action === "delete" ? [client.cancelQueries({ queryKey: ["finance", "exact-report", agentId, record.id] })] : []),
       ]);
-      client.setQueriesData<InfiniteData<SessionQueryResponse>>({ queryKey: ["sessions", "finance", agentId] }, (data) => data ? ({ ...data, pages: data.pages.map((page) => ({ ...page, items: page.items.filter((row) => row.id !== record.id) })) }) : data);
+      if (action === "restore") void client.invalidateQueries({ queryKey: ["sessions", "finance", agentId] });
+      else client.setQueriesData<InfiniteData<SessionQueryResponse>>({ queryKey: ["sessions", "finance", agentId] }, (data) => data ? ({ ...data, pages: data.pages.map((page) => ({ ...page, items: page.items.filter((row) => row.id !== record.id) })) }) : data);
       if (action !== "restore") client.setQueriesData<InfiniteData<FinancialReportPage>>({ queryKey: ["finance", "report-catalog", agentId] }, (data) => data ? ({ ...data, pages: data.pages.map((page) => ({ ...page, items: page.items.filter((row) => row.sessionId !== record.id) })) }) : data);
       if (action === "delete") client.removeQueries({ queryKey: ["finance", "exact-report", agentId, record.id] });
       client.removeQueries({ queryKey: ["finance", "session-binding", agentId, record.id], exact: true });
@@ -75,6 +76,7 @@ export function useFinanceSessionLifecycle(agentId: string, zh: boolean) {
         }
       }
       void client.invalidateQueries({ queryKey: ["sessions", "finance-archived", agentId] });
+      void client.invalidateQueries({ queryKey: queryKeys.sessionArchive() });
       if (mounted.current && action !== "restore" && expected.kind === "session" && expected.sessionId === record.id && routeRef.current.matchesSelection(expected)) {
         // The native deletion response may point to another Agent. Pick only a
         // verified surviving research owned by this financial assistant.

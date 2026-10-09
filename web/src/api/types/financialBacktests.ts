@@ -74,6 +74,78 @@ export type AIBacktestEvaluation = {
 
 export type AIBacktestBenchmarkStatus = "invested" | "partial_cash_sleeves" | "cash_only";
 
+export type AIBacktestComparisonProvenance = {
+  contractVersion: string;
+  commonParamsHash: string;
+  strategyHash: string;
+  sourceRunId?: string;
+};
+
+export type AIBacktestComparisonAxis = "strategy" | "model";
+export type AIBacktestComparisonStatus = "comparable" | "incomplete" | "incompatible";
+export type AIBacktestComparisonReason = { code: string; runIds: string[]; message: string };
+
+export type AIBacktestComparisonMetrics = {
+  totalReturnPct?: number | null;
+  benchmarkReturnPct?: number | null;
+  excessReturnPct?: number | null;
+  annualizedReturnPct?: number | null;
+  benchmarkAnnualizedReturnPct?: number | null;
+  maxDrawdownPct?: number | null;
+  maxDrawdownSessions?: number | null;
+  volatilityAnnualizedPct?: number | null;
+  sharpeRatio?: number | null;
+  benchmarkMaxDrawdownPct?: number | null;
+  tradeCount?: number | null;
+  closedTradeCount?: number | null;
+  winningTradeCount?: number | null;
+  winRatePct?: number | null;
+  grossTurnover?: number | null;
+  fees?: number | null;
+  commissionFees?: number | null;
+  stampDuty?: number | null;
+  benchmarkFees?: number | null;
+  slippageCost?: number | null;
+  benchmarkSlippageCost?: number | null;
+  finalEquity?: number | null;
+  benchmarkFinalEquity?: number | null;
+};
+
+export type AIBacktestComparisonEvaluationWindow = Omit<AIBacktestEvaluationWindow, "metrics"> & {
+  metrics: AIBacktestComparisonMetrics;
+};
+
+export type AIBacktestComparisonEvaluation = Omit<AIBacktestEvaluation, "inSample" | "outOfSample"> & {
+  inSample: AIBacktestComparisonEvaluationWindow;
+  outOfSample: AIBacktestComparisonEvaluationWindow;
+};
+
+export type AIBacktestComparisonRow = {
+  runId: string;
+  status: string;
+  modelId: string | null;
+  modelConfigHash: string | null;
+  strategy: string | null;
+  strategyHash: string | null;
+  callsUsed: number | null;
+  tokensUsed: number | null;
+  maxTokens: number | null;
+  metrics: AIBacktestComparisonMetrics | null;
+  evaluation: AIBacktestComparisonEvaluation | null;
+};
+
+export type AIBacktestComparisonResult = {
+  comparisonId: string;
+  axis: AIBacktestComparisonAxis;
+  status: AIBacktestComparisonStatus;
+  reasons: AIBacktestComparisonReason[];
+  dataHash: string | null;
+  commonParamsHash: string | null;
+  outOfSampleStartDate: string | null;
+  rows: AIBacktestComparisonRow[];
+  notice: string;
+};
+
 type AIBacktestDecisionBase = {
   date: string;
   reason: string;
@@ -145,6 +217,7 @@ export type AIBacktestPreview = {
   source?: string;
   sourceUrl?: string;
   notice?: string;
+  comparisonProvenance?: AIBacktestComparisonProvenance | null;
 };
 
 export type AIBacktestRun = {
@@ -198,6 +271,7 @@ export type AIBacktestRun = {
   benchmarkOrders?: AIBacktestOrder[];
   benchmarkStatus?: AIBacktestBenchmarkStatus;
   unfilledBenchmarkSymbols?: string[];
+  comparisonProvenance?: AIBacktestComparisonProvenance | null;
   startedAt: string | null;
   updatedAt: string;
   completedAt: string | null;

@@ -17,12 +17,18 @@ import re
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from core.web.services import financial_market_service as market
+from core.web.services.financial_research.as_of import (
+    active_cutoff,
+    on_or_before,
+    published_date,
+    published_items_as_of,
+)
 from core.web.services.financial_research.official_filings import (
     FILING_SOURCE,
     accepted_periodic_filing,
@@ -54,6 +60,9 @@ SCREEN_CACHE_SECONDS = 600
 RESEARCH_NEWS_CACHE_SECONDS = 180
 RESEARCH_ANNOUNCEMENT_CACHE_SECONDS = 900
 RESEARCH_FUNDAMENTALS_CACHE_SECONDS = 1_800
+RESEARCH_NEWS_PAGE_SIZE = 8
+EASTMONEY_NOTICE_PAGE_SIZE = 10
+RESEARCH_HISTORICAL_MAX_PAGES = 8
 
 _SCREEN_SORT_FIELDS = {
     "changePercent": "changePercent",
@@ -585,7 +594,12 @@ def _safe_eastmoney_url(value: Any) -> str:
     return urlunparse(("https", host, parsed.path, "", parsed.query, ""))
 
 
-def _news_url(keyword: str) -> str:
+def _news_url(
+    keyword: str,
+    *,
+    page_index: int = 1,
+    page_size: int = RESEARCH_NEWS_PAGE_SIZE,
+) -> str:
     params = {
         "uid": "",
         "keyword": keyword,
@@ -597,8 +611,8 @@ def _news_url(keyword: str) -> str:
             "cmsArticleWebOld": {
                 "searchScope": "default",
                 "sort": "default",
-                "pageIndex": 1,
-                "pageSize": 8,
+                "pageIndex": page_index,
+                "pageSize": page_size,
                 "preTag": "<em>",
                 "postTag": "</em>",
             }
@@ -613,52 +627,146 @@ def _news_url(keyword: str) -> str:
     return "https://search-api-web.eastmoney.com/search/jsonp?" + query
 
 
-def _load_news(stock: dict[str, str]) -> dict[str, Any]:
-    keyword = stock["name"] if stock["name"] != stock["ticker"] else stock["ticker"]
-    payload = _read_json(_news_url(keyword))
-    rows = (
-        (payload.get("result") or {}).get("cmsArticleWebOld")
-        if isinstance(payload, dict)
-        else None
-    )
-    if not isinstance(rows, list):
-        raise FinancialResearchDataError("东方财富未返回股票新闻")
-    items = []
-    for row in rows[:8]:
-        if not isinstance(row, dict):
+def _source_total(payload: Any) -> int | None:
+    containers = [payload]
+    if isinstance(payload, dict):
+        containers.extend((payload.get("result"), payload.get("data")))
+    for container in containers:
+        if not isinstance(container, dict):
             continue
-        code = str(row.get("code") or "").strip()
-        link = _safe_eastmoney_url(row.get("url"))
-        if not link and re.fullmatch(r"\d{12,20}", code):
-            link = f"https://finance.eastmoney.com/a/{code}.html"
-        title = _strip_markup(row.get("title"))
-        if title:
-            items.append(
-                {
-                    "title": title,
-                    "publishedAt": str(row.get("date") or "").strip() or None,
-                    "publisher": _strip_markup(row.get("mediaName"))
-                    or EASTMONEY_SOURCE,
-                    "url": link or None,
-                }
+        for key in (
+            "total",
+            "totalCount",
+            "total_count",
+            "totalHits",
+            "total_hits",
+            "recordCount",
+            "recordsTotal",
+        ):
+            raw = container.get(key)
+            if isinstance(raw, bool):
+                continue
+            try:
+                count = int(raw)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if count >= 0:
+                return count
+    return None
+
+
+def _coverage_warning(label: str, *, reason: str = "分页未能穷尽") -> str:
+    return f"历史{label}覆盖不完整：{reason}；结果仅代表已检索样本。"
+
+
+def _load_news(
+    stock: dict[str, str], *, cutoff: date | None = None
+) -> dict[str, Any]:
+    keyword = stock["name"] if stock["name"] != stock["ticker"] else stock["ticker"]
+    page_size = RESEARCH_NEWS_PAGE_SIZE
+    max_pages = RESEARCH_HISTORICAL_MAX_PAGES if cutoff is not None else 1
+    items: list[dict[str, Any]] = []
+    fetched_rows = 0
+    source_total: int | None = None
+    exhausted = False
+    unknown_dates = False
+    page_error: str | None = None
+    for page_index in range(1, max_pages + 1):
+        try:
+            payload = _read_json(
+                _news_url(keyword, page_index=page_index, page_size=page_size)
             )
-    return {
-        "status": "available",
-        "source": EASTMONEY_SOURCE,
-        "sourceUrl": "https://so.eastmoney.com/news/s?"
-        + urlencode({"keyword": stock["ticker"]}),
-        "fetchedAt": _utc_now(),
-        "error": None,
-        "items": items,
-    }
+        except (
+            FinancialResearchDataError,
+            market.MarketDataError,
+            OSError,
+            UnicodeError,
+            ValueError,
+            TypeError,
+        ) as exc:
+            if page_index == 1:
+                raise
+            page_error = str(exc).strip() or "东方财富历史搜索分页失败"
+            break
+        result = payload.get("result") if isinstance(payload, dict) else None
+        rows = result.get("cmsArticleWebOld") if isinstance(result, dict) else None
+        if not isinstance(rows, list):
+            raise FinancialResearchDataError("东方财富未返回股票新闻")
+        fetched_rows += len(rows)
+        if source_total is None:
+            source_total = _source_total(payload)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            published_at = str(row.get("date") or "").strip() or None
+            if cutoff is not None and not on_or_before(published_at, cutoff):
+                unknown_dates = unknown_dates or published_date(published_at) is None
+                continue
+            code = str(row.get("code") or "").strip()
+            link = _safe_eastmoney_url(row.get("url"))
+            if not link and re.fullmatch(r"\d{12,20}", code):
+                link = f"https://finance.eastmoney.com/a/{code}.html"
+            title = _strip_markup(row.get("title"))
+            if title:
+                items.append(
+                    {
+                        "title": title,
+                        "publishedAt": published_at,
+                        "publisher": _strip_markup(row.get("mediaName"))
+                        or EASTMONEY_SOURCE,
+                        "url": link or None,
+                    }
+                )
+        if source_total is not None and fetched_rows >= source_total:
+            exhausted = True
+            break
+        if len(rows) < page_size:
+            exhausted = source_total is None or fetched_rows >= source_total
+            break
+    items.sort(
+        key=lambda item: (published_date(item.get("publishedAt")) or date.min),
+        reverse=True,
+    )
+    items = items[:page_size]
+    error = None
+    if cutoff is not None and (not exhausted or unknown_dates or page_error):
+        if page_error:
+            reason = "东方财富历史搜索分页失败"
+        elif unknown_dates:
+            reason = "部分新闻发布日期无法解析"
+        else:
+            reason = "东方财富历史搜索分页未能穷尽"
+        error = _coverage_warning("新闻", reason=reason)
+    return published_items_as_of(
+        {
+            "status": "available",
+            "source": EASTMONEY_SOURCE,
+            "sourceUrl": "https://so.eastmoney.com/news/s?"
+            + urlencode({"keyword": stock["ticker"]}),
+            "fetchedAt": _utc_now(),
+            "error": error,
+            "items": items,
+        },
+        cutoff,
+    )
 
 
-def _load_announcements(stock: dict[str, str]) -> dict[str, Any]:
+def _load_announcements(
+    stock: dict[str, str], *, cutoff: date | None = None
+) -> dict[str, Any]:
     """A-share notices. Periodic reports are cninfo PDFs, not reprints."""
 
-    notices, notice_error = _eastmoney_notice_items(stock)
-    filings = _official_periodic_notices(stock["ticker"])
+    notices, notice_error, notice_incomplete = _eastmoney_notice_items(
+        stock, cutoff=cutoff
+    )
+    filings = _official_periodic_notices(stock["ticker"], cutoff=cutoff)
     if not filings and notice_error is not None and not notices:
+        if notice_incomplete:
+            raise FinancialResearchDataError(
+                notice_error
+                + "；"
+                + _coverage_warning("公告", reason="东方财富历史公告分页失败")
+            )
         raise FinancialResearchDataError(notice_error)
     items: list[dict[str, Any]] = [item for _kind, item in filings]
     for item in notices:
@@ -672,21 +780,29 @@ def _load_announcements(stock: dict[str, str]) -> dict[str, Any]:
         parts = []
         if notice_error is not None:
             parts.append(_OTHER_NOTICES_UNAVAILABLE)
+        if notice_incomplete:
+            parts.append(_coverage_warning("公告", reason="东方财富历史公告分页未能穷尽"))
         if missing:
             parts.append(missing)
         error = "".join(parts) or None
     else:
         source = EASTMONEY_SOURCE
         source_url = EASTMONEY_NOTICES_URL
-        error = missing
-    return {
-        "status": "available",
-        "source": source,
-        "sourceUrl": source_url,
-        "fetchedAt": _utc_now(),
-        "error": error,
-        "items": items,
-    }
+        parts = [missing] if missing else []
+        if notice_incomplete:
+            parts.insert(0, _coverage_warning("公告", reason="东方财富历史公告分页未能穷尽"))
+        error = "".join(parts) or None
+    return published_items_as_of(
+        {
+            "status": "available",
+            "source": source,
+            "sourceUrl": source_url,
+            "fetchedAt": _utc_now(),
+            "error": error,
+            "items": items,
+        },
+        cutoff,
+    )
 
 
 def _missing_periodic_error(present: set[str]) -> str | None:
@@ -698,74 +814,106 @@ def _missing_periodic_error(present: set[str]) -> str | None:
 
 def _eastmoney_notice_items(
     stock: dict[str, str],
-) -> tuple[list[dict[str, Any]], str | None]:
-    query = urlencode(
-        {
-            "page_size": 10,
-            "page_index": 1,
-            "ann_type": "A",
-            "client_source": "web",
-            "stock_list": stock["ticker"],
-        }
-    )
-    try:
-        payload = _read_json(
-            "https://np-anotice-stock.eastmoney.com/api/security/ann?" + query
-        )
-        data = payload.get("data") if isinstance(payload, dict) else None
-        rows = data.get("list") if isinstance(data, dict) else None
-        if not isinstance(rows, list):
-            raise FinancialResearchDataError("东方财富未返回公司公告")
-    except (
-        FinancialResearchDataError,
-        market.MarketDataError,
-        OSError,
-        UnicodeError,
-        ValueError,
-        TypeError,
-        KeyError,
-        IndexError,
-    ) as exc:
-        message = str(exc).strip() or "数据源暂时不可用，请重试"
-        return [], message[:160]
+    *,
+    cutoff: date | None = None,
+) -> tuple[list[dict[str, Any]], str | None, bool]:
+    page_size = EASTMONEY_NOTICE_PAGE_SIZE
+    max_pages = RESEARCH_HISTORICAL_MAX_PAGES if cutoff is not None else 1
     items: list[dict[str, Any]] = []
-    for row in rows[:10]:
-        if not isinstance(row, dict):
-            continue
-        codes = row.get("codes") if isinstance(row.get("codes"), list) else []
-        if codes and not any(
-            str(code.get("stock_code") or "") == stock["ticker"]
-            for code in codes
-            if isinstance(code, dict)
-        ):
-            continue
-        code = str(row.get("art_code") or "").strip()
-        if not re.fullmatch(r"AN\d{10,24}", code):
-            continue
-        title = _strip_markup(row.get("title_ch") or row.get("title"))
-        if not title:
-            continue
-        items.append(
+    source_error: str | None = None
+    source_total: int | None = None
+    fetched_rows = 0
+    exhausted = False
+    unknown_dates = False
+    seen_codes: set[str] = set()
+    for page_index in range(1, max_pages + 1):
+        query = urlencode(
             {
-                "title": title,
-                "publishedAt": str(
-                    row.get("display_time") or row.get("notice_date") or ""
-                ).strip()
-                or None,
-                "noticeDate": _date(row.get("notice_date")),
-                "url": (
-                    "https://data.eastmoney.com/notices/detail/"
-                    f"{stock['ticker']}/{code}.html"
-                ),
-                "articleCode": code,
+                "page_size": page_size,
+                "page_index": page_index,
+                "ann_type": "A",
+                "client_source": "web",
+                "stock_list": stock["ticker"],
             }
         )
-    return items, None
+        try:
+            payload = _read_json(
+                "https://np-anotice-stock.eastmoney.com/api/security/ann?" + query
+            )
+            data = payload.get("data") if isinstance(payload, dict) else None
+            rows = data.get("list") if isinstance(data, dict) else None
+            if not isinstance(rows, list):
+                raise FinancialResearchDataError("东方财富未返回公司公告")
+        except (
+            FinancialResearchDataError,
+            market.MarketDataError,
+            OSError,
+            UnicodeError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+        ) as exc:
+            message = str(exc).strip() or "数据源暂时不可用，请重试"
+            source_error = message[:160]
+            break
+        fetched_rows += len(rows)
+        if source_total is None:
+            source_total = _source_total(payload)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            codes = row.get("codes") if isinstance(row.get("codes"), list) else []
+            if codes and not any(
+                str(code.get("stock_code") or "") == stock["ticker"]
+                for code in codes
+                if isinstance(code, dict)
+            ):
+                continue
+            code = str(row.get("art_code") or "").strip()
+            if not re.fullmatch(r"AN\d{10,24}", code) or code in seen_codes:
+                continue
+            title = _strip_markup(row.get("title_ch") or row.get("title"))
+            if not title:
+                continue
+            published_at = str(
+                row.get("display_time") or row.get("notice_date") or ""
+            ).strip() or None
+            if cutoff is not None and not on_or_before(published_at, cutoff):
+                unknown_dates = unknown_dates or published_date(published_at) is None
+                continue
+            seen_codes.add(code)
+            items.append(
+                {
+                    "title": title,
+                    "publishedAt": published_at,
+                    "noticeDate": _date(row.get("notice_date")),
+                    "url": (
+                        "https://data.eastmoney.com/notices/detail/"
+                        f"{stock['ticker']}/{code}.html"
+                    ),
+                    "articleCode": code,
+                }
+            )
+        if source_total is not None and fetched_rows >= source_total:
+            exhausted = True
+            break
+        if len(rows) < page_size:
+            exhausted = source_total is None or fetched_rows >= source_total
+            break
+    items.sort(
+        key=lambda item: (published_date(item.get("publishedAt")) or date.min),
+        reverse=True,
+    )
+    items = items[:page_size]
+    return items, source_error, cutoff is not None and (not exhausted or unknown_dates)
 
 
-def _official_periodic_notices(ticker: str) -> list[tuple[str, dict[str, str]]]:
+def _official_periodic_notices(
+    ticker: str, *, cutoff: date | None = None
+) -> list[tuple[str, dict[str, str]]]:
     try:
-        found = lookup_periodic_filings([ticker], cutoff=None)
+        found = lookup_periodic_filings([ticker], cutoff=cutoff)
         code = annual_filing_code(ticker)
         rows = found.get(code) if isinstance(found, dict) and code else None
     except Exception:
@@ -775,7 +923,7 @@ def _official_periodic_notices(ticker: str) -> list[tuple[str, dict[str, str]]]:
     notices: list[tuple[str, dict[str, str]]] = []
     seen: set[str] = set()
     for raw in rows:
-        accepted = accepted_periodic_filing(raw, cutoff=None)
+        accepted = accepted_periodic_filing(raw, cutoff=cutoff)
         if accepted is None:
             continue
         kind = accepted["kind"]
@@ -801,7 +949,14 @@ def _official_periodic_notices(ticker: str) -> list[tuple[str, dict[str, str]]]:
     return notices
 
 
-def _load_fundamentals(stock: dict[str, str]) -> dict[str, Any]:
+def _load_fundamentals(
+    stock: dict[str, str], *, cutoff: date | None = None
+) -> dict[str, Any]:
+    if cutoff is not None:
+        raise FinancialResearchDataError(
+            f"历史时点 {cutoff.isoformat()} 无法验证东方财富当前财务摘要，"
+            "未将其作为历史证据"
+        )
     exchange = {"sh": "SH", "sz": "SZ", "bj": "BJ"}[stock["symbol"][:2]]
     secucode = stock["ticker"] + "." + exchange
     columns = (
@@ -874,34 +1029,45 @@ def stock_research(symbol: str) -> dict[str, Any]:
         normalized = market.normalize_symbol(symbol)
     except market.MarketDataError as exc:
         raise FinancialResearchInputError(str(exc)) from exc
+    cutoff = active_cutoff()
+    cutoff_key = cutoff.isoformat() if cutoff is not None else "current"
     stock = _eastmoney_stock(normalized)
     if normalized.startswith(("hk", "us")):
         # News search is keyword based; mainland security identifiers are
         # never reused for international announcements or financial metrics.
         try:
-            news = market._cached(("finance-research-v1", "news", normalized), RESEARCH_NEWS_CACHE_SECONDS, lambda: _load_news(stock))
+            news = market._cached(
+                ("finance-research-v1", "news", normalized, cutoff_key),
+                RESEARCH_NEWS_CACHE_SECONDS,
+                lambda: _load_news(stock, cutoff=cutoff),
+            )
+            news = published_items_as_of(news, cutoff)
         except (FinancialResearchDataError, market.MarketDataError, OSError, ValueError, TypeError, KeyError):
             news = _unavailable("https://so.eastmoney.com/news/", FinancialResearchDataError("股票新闻源暂不可用，可让研究助手继续查证"))
         from core.web.services.financial_research import fetch_international_facets
 
-        return {"stock": stock, "news": news, **fetch_international_facets(stock)}
+        return {
+            "stock": stock,
+            "news": news,
+            **fetch_international_facets(stock, cutoff=cutoff),
+        }
     readers = (
         (
             "news",
             RESEARCH_NEWS_CACHE_SECONDS,
-            lambda: _load_news(stock),
+            lambda: _load_news(stock, cutoff=cutoff),
             "https://so.eastmoney.com/news/",
         ),
         (
             "announcements",
             RESEARCH_ANNOUNCEMENT_CACHE_SECONDS,
-            lambda: _load_announcements(stock),
+            lambda: _load_announcements(stock, cutoff=cutoff),
             "https://data.eastmoney.com/notices/",
         ),
         (
             "fundamentals",
             RESEARCH_FUNDAMENTALS_CACHE_SECONDS,
-            lambda: _load_fundamentals(stock),
+            lambda: _load_fundamentals(stock, cutoff=cutoff),
             "https://data.eastmoney.com/bbsj/",
         ),
     )
@@ -911,7 +1077,10 @@ def stock_research(symbol: str) -> dict[str, Any]:
     ) as pool:
         futures = {
             pool.submit(
-                market._cached, ("finance-research-v1", key, normalized), ttl, reader
+                market._cached,
+                ("finance-research-v1", key, normalized, cutoff_key),
+                ttl,
+                reader,
             ): (key, source_url)
             for key, ttl, reader, source_url in readers
         }
@@ -919,7 +1088,7 @@ def stock_research(symbol: str) -> dict[str, Any]:
             (future, item) for future, item in futures.items()
         ):
             try:
-                projected[key] = future.result()
+                projected[key] = published_items_as_of(future.result(), cutoff)
             except (
                 FinancialResearchDataError,
                 market.MarketDataError,

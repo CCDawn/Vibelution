@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 
-import { createChatSession, fetchSessionDetail, querySessions } from "../api/chat";
-import { unarchiveChatSession } from "../api/sessionArchive";
+import { fetchSessionDetail, querySessions } from "../api/chat";
 import { createFinancialAssistant, type FinancialAssistant } from "../api/financialAssistant";
 import { queryKeys } from "../api/queryKeys";
 import { VButton, VRouteLinkButton, VStateSurface } from "../components/vui";
@@ -12,7 +11,7 @@ import { useChatRouteSelection } from "./chat/useChatRouteSelection";
 import { FinanceResearchFrame, FinanceResearchLoading } from "./finance/FinanceResearchFrame";
 import { FinanceResearchWorkspace } from "./finance/FinanceResearchWorkspace";
 import { planFinancialAssistantEntry } from "./finance/financialAssistantEntry";
-import { isFinancialSession } from "./finance/financialResearchModel";
+import { isFinancialSession, isOwnedFinancialSession } from "./finance/financialResearchModel";
 import { useFinancialAssistants } from "./finance/useFinancialAssistants";
 import { useFinanceSessionLifecycle } from "./finance/useFinanceSessionLifecycle";
 import styles from "./FinanceRoute.styles";
@@ -30,15 +29,11 @@ export function FinanceRoute() {
   const queryClient = useQueryClient();
   const assistants = useFinancialAssistants();
   const creationRef = useRef<ReturnType<typeof createFinancialAssistant> | null>(null);
-  const recoveryGate = useRef(false), recoveryKey = useRef("");
-  const mounted = useRef(false);
-  const [recovering, setRecovering] = useState(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const plan = assistants.data ? planFinancialAssistantEntry(assistants.data, lang) : null;
   const assistant = assistants.data?.find((row) => row.status === "active" && row.setupStatus === "ready" && row.directSessionId === sessionId)
     ?? assistants.data?.find((row) => row.status === "active" && row.setupStatus === "ready");
-  // Keep native lifecycle reconciliation mounted while deleting or archiving
-  // the current direct binding temporarily replaces the workspace with a guard.
+  // Keep native lifecycle reconciliation mounted while the viewed research
+  // is archived, restored, or deleted. Archive does not replace the workspace.
   const lifecycle = useFinanceSessionLifecycle(assistant?.agentId ?? "", zh);
   const direct = Boolean(sessionId && assistant?.directSessionId === sessionId);
   const binding = useQuery({
@@ -89,40 +84,14 @@ export function FinanceRoute() {
 
   const invalidRoute = route.selection.kind !== "bare" && route.selection.kind !== "session"
     || new URLSearchParams(location.search).has("companion");
-  const bindingMismatch = binding.isSuccess && (!binding.data || binding.data.id !== sessionId || !isFinancialSession(binding.data, assistant?.agentId ?? ""));
-  const archivedSession = direct && assistant?.directSessionArchived === true || binding.data?.agentId === assistant?.agentId && binding.data?.archiveState?.status === "archived";
+  const bindingMismatch = binding.isSuccess && (!binding.data || binding.data.id !== sessionId || !isOwnedFinancialSession(binding.data, assistant?.agentId ?? ""));
   const error = invalidRoute ? (zh ? "请选择金融助手的研究会话" : "Select an investment research session")
     : assistants.isError ? (zh ? "助手加载失败，请重试" : "Could not load assistant")
     : plan?.kind === "blocked" ? plan.message
     : sessionId && assistants.isSuccess && !assistant ? (zh ? "金融助手尚未就绪" : "Assistant not ready")
-    : archivedSession ? failure || (zh ? "这条研究已归档，恢复后可以继续" : "This research is archived. Restore it to continue")
     : binding.isError ? (zh ? "会话验证失败，请重试" : "Could not verify session")
     : bindingMismatch ? (zh ? "当前会话不属于这个金融助手" : "This session belongs to another agent")
     : failure;
-  async function recoverResearch(restore: boolean) {
-    if (recoveryGate.current || !assistant) return;
-    recoveryGate.current = true; setRecovering(true); setFailure("");
-    const expected = routeRef.current.selection;
-    try {
-      if (restore) {
-        const result = await unarchiveChatSession(sessionId);
-        if (result.sessionId !== sessionId) throw new Error(zh ? "恢复结果身份不匹配" : "Restore identity mismatch");
-        queryClient.setQueryData<FinancialAssistant[]>(queryKeys.financialAssistants(), (rows) => rows?.map((row) => row.agentId === assistant.agentId && row.directSessionId === sessionId ? { ...row, directSessionArchived: false } : row));
-        queryClient.removeQueries({ queryKey: ["finance", "session-binding", assistant.agentId, sessionId], exact: true });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.financialAssistants() });
-      } else {
-        recoveryKey.current ||= crypto.randomUUID();
-        const created = await createChatSession({ agentId: assistant.agentId, title: zh ? "新研究" : "New research" }, recoveryKey.current);
-        if (!isFinancialSession(created, assistant.agentId)) throw new Error(zh ? "新研究身份不匹配" : "New research identity mismatch");
-        recoveryKey.current = "";
-        queryClient.setQueryData(["finance", "session-binding", assistant.agentId, created.id], created);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-        if (mounted.current) routeRef.current.replaceIfStillViewing(expected, { kind: "session", sessionId: created.id });
-      }
-    } catch (cause) { if (mounted.current) setFailure(cause instanceof Error ? cause.message : (zh ? "操作失败，请重试" : "Could not complete action")); }
-    finally { recoveryGate.current = false; if (mounted.current) setRecovering(false); }
-  }
   if (!error && sessionId && assistant && (direct || binding.isSuccess)) {
     return <FinanceResearchWorkspace key={assistant.agentId} assistant={assistant} sessionId={sessionId} zh={zh} lifecycle={lifecycle} />;
   }
@@ -135,7 +104,6 @@ export function FinanceRoute() {
         tone={error ? "error" : "loading"}
         busy={!error}
         actions={error ? <div className={styles.actions}>
-          {archivedSession ? <><VButton isPending={recovering} onPress={() => void recoverResearch(true)}>{zh ? "恢复研究" : "Restore research"}</VButton><VButton isDisabled={recovering} onPress={() => void recoverResearch(false)}>{zh ? "新建研究" : "New research"}</VButton></> : null}
           <VButton onPress={() => {
             setFailure("");
             if (binding.isError) void binding.refetch();

@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from datetime import date, datetime
 from email.utils import parsedate_to_datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
 _ANALYSIS_DATE = re.compile(
@@ -73,6 +74,23 @@ def on_or_before(value: object, cutoff: date | None) -> bool:
         return True
     published = published_date(value)
     return published is not None and published <= cutoff
+
+
+def published_items_as_of(payload: Any, cutoff: date | None) -> Any:
+    """Return a copied item projection without mutating a cached source result."""
+    if cutoff is None or not isinstance(payload, dict):
+        return payload
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return payload
+    return {
+        **payload,
+        "items": [
+            item
+            for item in items
+            if isinstance(item, dict) and on_or_before(item.get("publishedAt"), cutoff)
+        ],
+    }
 
 
 def resolve_analysis_date(user_message: object = None, history: object = None) -> date | None:
