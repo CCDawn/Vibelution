@@ -22,6 +22,8 @@ from zoneinfo import ZoneInfo
 
 from core.web.services import financial_market_service as market
 
+from .transport import HistoricalReadError, read_historical
+
 _SOURCE = "腾讯财经"
 _SOURCE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 _QUOTE_URL = "https://gu.qq.com/{symbol}/gp"
@@ -196,26 +198,33 @@ def _query_years(start: date, end: date) -> tuple[tuple[date, date], ...]:
 def _fetch_window(symbol: str, start: date, end: date, adjustment: str) -> list[list[str]]:
     param = f"{symbol},day,{start.isoformat()},{end.isoformat()},{_PROVIDER_LIMIT},{adjustment}"
     url = _SOURCE_URL + "?" + urlencode({"param": param})
+    kind = "交易日历" if symbol == _CALENDAR_SYMBOL else ("前复权校验" if adjustment == "qfq" else "原始价格")
+    context = f"{symbol} {start.isoformat()}至{end.isoformat()} · {kind}"
     try:
-        raw = market._read(url)
+        raw = read_historical(url)
         payload = json.loads(raw)
-    except (market.MarketDataError, json.JSONDecodeError, TypeError) as exc:
-        raise BacktestDataError(f"腾讯历史日K读取失败（{start.year}）：{exc}") from exc
-    if not isinstance(payload, dict) or payload.get("code") != 0:
-        raise BacktestDataError(f"腾讯历史日K返回无效状态（{start.year}）")
-    stock = (payload.get("data") or {}).get(symbol)
+    except HistoricalReadError as exc:
+        raise BacktestDataError(f"腾讯历史日K读取失败（{context}）：{exc}") from exc
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise BacktestDataError(f"腾讯历史日K格式无效（{context}）") from exc
+    if not isinstance(payload, dict) or type(payload.get("code")) is not int or payload["code"] != 0:
+        raise BacktestDataError(f"腾讯历史日K返回无效状态（{context}）")
+    stocks = payload.get("data")
+    if not isinstance(stocks, dict):
+        raise BacktestDataError(f"腾讯历史日K股票映射格式无效（{context}）")
+    stock = stocks.get(symbol)
     if stock is None:
         return []
     if not isinstance(stock, dict):
-        raise BacktestDataError(f"腾讯历史日K缺少请求股票（{start.year}）")
+        raise BacktestDataError(f"腾讯历史日K缺少请求股票（{context}）")
     key = "qfqday" if adjustment == "qfq" else "day"
     rows = stock.get(key)
     if rows is None:
         return []
     if not isinstance(rows, list) or len(rows) > _PROVIDER_MAX_ROWS:
-        raise BacktestDataError(f"腾讯历史日K超出单窗上限或格式无效（{start.year}）")
+        raise BacktestDataError(f"腾讯历史日K超出单窗上限或格式无效（{context}）")
     if any(not isinstance(row, list) or len(row) < 6 for row in rows):
-        raise BacktestDataError(f"腾讯历史日K行格式无效（{start.year}）")
+        raise BacktestDataError(f"腾讯历史日K行格式无效（{context}）")
     return rows
 
 
