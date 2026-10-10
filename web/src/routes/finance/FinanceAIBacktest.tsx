@@ -1,4 +1,4 @@
-import { isFetchJsonHttpError } from "../../api/client";
+import { financialBacktestErrorMessage } from "../../api/financialBacktestErrors";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { FinanceBacktestAdvancedEvaluation } from "./FinanceBacktestAdvancedEvaluation";
@@ -20,20 +20,7 @@ const active = new Set(["queued", "running", "stop_requested"]);
 const labels: Record<AIBacktestRun["status"], string> = { queued: "排队中", running: "运行中", stop_requested: "正在停止", stopped: "已停止", blocked: "条件不满足", paused_unknown: "调用结果待确认", failed: "失败", completed: "已完成" };
 const pct = (value: number | null | undefined) => typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}%` : "—";
 const orderLabels: Record<string, string> = { open_at_supplied_limit_up: "开盘触及导入涨停价", open_at_supplied_limit_down: "开盘触及导入跌停价", below_board_minimum_buy: "不足板块最低买入量", volume_participation_below_minimum_order: "成交量额度不足最低申报量", order_quantity_below_minimum: "申报额度不足最低数量", insufficient_cash_for_minimum_order: "资金不足最低申报量", volume_participation_below_sell_increment: "成交量额度不足卖出单位", order_quantity_below_sell_increment: "申报额度不足卖出单位", below_minimum_sell_order: "不足最低卖出量", no_sellable_quantity: "没有可卖数量", order_and_volume_quantity_limit: "申报与成交量上限", order_quantity_limit: "单笔申报数量上限", board_sell_increment_limit: "卖出数量单位限制", filled: "已成交", partial_fill: "部分成交", daily_volume_participation_limit: "日成交量上限", volume_participation_below_one_lot: "日成交量额度不足一手", rejected: "未成交", no_action: "无需调仓", next_session_open: "下日开盘成交", zero_volume_or_suspended: "零成交量或停牌", one_price_at_candidate_limit_up: "疑似一字涨停", one_price_at_candidate_limit_down: "疑似一字跌停", one_price_bar_unverified: "一字行情，无法核验成交", insufficient_cash_for_one_lot: "资金不足一手", no_sellable_board_lot: "没有可卖整手", target_shares_unchanged: "目标仓位未变", cash_limited_board_lots: "可用资金限制成交股数", same_cost_buy_and_hold_benchmark: "同成本买入持有" };
-function message(cause: unknown, zh: boolean) {
-  if (isFetchJsonHttpError(cause) && cause.status === 422 && cause.details && typeof cause.details === "object") {
-    const detail = (cause.details as { detail?: unknown }).detail;
-    if (Array.isArray(detail)) {
-      const names: Record<string, string> = zh
-        ? { dailyPriceLimits: "逐日限价文件", source: "来源", url: "网址", sha256: "摘要", fetchedAt: "采集时间", records: "每日记录", date: "日期", upper: "涨停价", lower: "跌停价", symbol: "股票代码", schemaVersion: "文件版本" }
-        : { dailyPriceLimits: "Daily limit file", source: "source", url: "URL", sha256: "hash", fetchedAt: "fetch time", records: "daily records", date: "date", upper: "upper limit", lower: "lower limit", symbol: "stock code", schemaVersion: "file version" };
-      const first = detail.find(item => item && typeof item === "object" && Array.isArray(item.loc));
-      const field = first?.loc.filter((part: unknown) => typeof part === "string" && part !== "body").map((part: string) => names[part] ?? (zh ? "参数" : "field")).join(" · ");
-      return zh ? `${field || "回测参数"}缺失或格式不正确，请修改后重试。` : `${field || "Backtest input"} is missing or invalid. Correct it and retry.`;
-    }
-  }
-  return cause instanceof Error ? cause.message : (zh ? "操作失败，请重试" : "Operation failed. Please retry.");
-}
+
 const isAShare = (symbol: string) => /^(?:sh|sz|bj)\d{6}$/i.test(symbol);
 const statusLabel = (status: AIBacktestRun["status"], zh: boolean) => zh ? labels[status] : ({ queued: "Queued", running: "Running", stop_requested: "Stopping", stopped: "Stopped", blocked: "Blocked", paused_unknown: "Uncertain call", failed: "Failed", completed: "Completed" } satisfies Record<AIBacktestRun["status"], string>)[status];
 const symbolsForRun = (run: Pick<AIBacktestRun, "symbol" | "symbols">) => run.symbols?.length ? run.symbols : run.symbol ? [run.symbol] : [];
@@ -98,7 +85,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   async function perform(kind: string, work: () => Promise<void>) {
     if (gate.current) return;
     gate.current = true; setPending(kind); setError("");
-    try { await work(); } catch (cause) { if (mounted.current) setError(message(cause, zh)); }
+    try { await work(); } catch (cause) { if (mounted.current) setError(financialBacktestErrorMessage(cause, zh)); }
     finally { gate.current = false; if (mounted.current) setPending(""); }
   }
   async function reconcile(run: AIBacktestRun) {
@@ -128,7 +115,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       if (!Array.isArray(parsedFile) || !parsedFile.length || parsedFile.length > 10 || parsedFile.some(item => !item || typeof item !== "object" || item.schemaVersion !== 1 || typeof item.symbol !== "string" || !item.source || !Array.isArray(item.records) || !item.records.length || item.records.length > 5000)) throw new Error(zh ? "限价文件格式错误，需要逐股票的来源和每日限价记录" : "Invalid file: supply per-stock sources and daily limit records");
       if (mounted.current && generation.current === expectedGeneration) setLimitDrafts(parsedFile as AIBacktestDailyPriceLimits[]);
     } catch (cause) {
-      if (mounted.current && generation.current === expectedGeneration) setError(message(cause, zh));
+      if (mounted.current && generation.current === expectedGeneration) setError(financialBacktestErrorMessage(cause, zh));
     }
   }
   return <div className={styles.page}>
