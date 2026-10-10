@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Download, Play, Square } from "lucide-react";
 import { actWalkForward, exportWalkForward, listWalkForward, previewWalkForward, type WalkForwardWorkflow } from "../../api/financialWalkForward";
 import { VButton, VDenseTable, VInput, VSelect, VStateSurface, VSurface } from "../../components/vui";
-import styles from "./FinanceAIBacktest.styles";
+import styles from "./FinanceWalkForward.styles";
 
 const active = new Set(["queued", "running", "stop_requested"]);
 const labels: Record<WalkForwardWorkflow["status"], string> = { preview: "待启动", queued: "排队中", running: "运行中", stop_requested: "正在停止", stopped: "已停止", paused_unknown: "调用待确认", completed: "已完成", failed: "失败", blocked: "条件不满足" };
@@ -33,7 +33,7 @@ export function FinanceWalkForward({ agentId, sourceRunId, zh, onSelectRun }: { 
     await client.invalidateQueries({ queryKey: key });
   }
   return <section className={styles.panel}>
-    <VButton variant="ghost" className="justify-start" aria-expanded={open} icon={open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setOpen(value => !value)}>{zh ? "滚动样本外验证" : "Walk-forward validation"}</VButton>
+    <VButton variant="ghost" className={styles.toggle} aria-expanded={open} icon={open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setOpen(value => !value)}>{zh ? "滚动样本外验证" : "Walk-forward validation"}</VButton>
     {open ? <VSurface tone="panel" padding="normal" className={styles.panel}>
       <p className={styles.note}>{zh ? "每轮先用训练区间比较 40% / 60% / 80% 仓位上限，再独立测试胜出参数。复用已选记录的冻结行情，每段重新调用模型。" : "Each fold selects a 40% / 60% / 80% position cap on training data, then tests the winner independently. Uses the selected run’s frozen prices with new model calls."}</p>
       <div className={styles.row}>
@@ -48,7 +48,7 @@ export function FinanceWalkForward({ agentId, sourceRunId, zh, onSelectRun }: { 
       {items.length > 1 ? <VSelect aria-label="滚动验证记录" selectedKey={shown?.workflowId} options={items.map(item => ({ id: item.workflowId, label: `${zh ? labels[item.status] : item.status} · ${new Date(item.createdAt).toLocaleString()}` }))} onSelectionChange={value => setSelectedId(String(value))} /> : null}
       {shown ? <>
         <div className={styles.row}>
-          <strong className="whitespace-nowrap text-xs">{zh ? labels[shown.status] : shown.status} · {shown.folds.length} {zh ? "轮" : "folds"}</strong>
+          <strong className={styles.status}>{zh ? labels[shown.status] : shown.status} · {shown.folds.length} {zh ? "轮" : "folds"}</strong>
           <span className={styles.note}>{zh ? "预留 Token（含重试）" : "Reserved tokens (incl. retries)"} {shown.estimatedTokens.toLocaleString()} / {shown.maxTokens.toLocaleString()}</span>
           <span className={styles.note}>{zh ? "已占用预算" : "Committed budget"} {(shown.budgetTokensCommitted ?? 0).toLocaleString()}</span>
           {shown.status === "preview" ? <VButton icon={<Play size={14} />} isDisabled={pending} onPress={() => void perform(async () => accept(await actWalkForward(agentId, shown.workflowId, "start")))}>{zh ? "按冻结预算启动" : "Start frozen plan"}</VButton> : active.has(shown.status) ? <VButton icon={<Square size={14} />} isDisabled={pending || shown.status === "stop_requested"} onPress={() => void perform(async () => accept(await actWalkForward(agentId, shown.workflowId, "stop")))}>{zh ? "停止" : "Stop"}</VButton> : ["stopped", "paused_unknown", "failed"].includes(shown.status) ? <VButton icon={<Play size={14} />} isDisabled={pending} onPress={() => void perform(async () => accept(await actWalkForward(agentId, shown.workflowId, "resume")))}>{zh ? "继续计划" : "Resume"}</VButton> : null}
