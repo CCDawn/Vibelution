@@ -94,7 +94,9 @@ def test_catalog_describes_network_cost_and_explicit_assignment():
     )
     assert NAME in bundle["toolNames"]
     assert "financial_market_screen_tool" in bundle["toolNames"]
-    assert bundle["explicitAllowToolCount"] == 6
+    assert "financial_index_context_tool" in bundle["toolNames"]
+    assert "financial_index_context_tool" in bundle["preferredToolNames"]
+    assert bundle["explicitAllowToolCount"] == 7
 
 
 @pytest.mark.parametrize(
