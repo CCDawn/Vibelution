@@ -221,6 +221,7 @@
 | --- | --- |
 | `SpecialistAgentMenu` / `FinanceRoute` | [product/financial-assistant.md](./product/financial-assistant.md) |
 | `FinanceWorkspaceSidebar` | [product/financial-assistant.md](./product/financial-assistant.md#financeworkspacesidebar) |
+| `FinanceResearchOverview` | [product/financial-assistant.md](./product/financial-assistant.md#financeresearchoverview) |
 | `FinanceWorkspaceInspector` | [product/financial-assistant.md](./product/financial-assistant.md#financeworkspaceinspector) |
 | `FinanceDashboard` | [product/financial-assistant.md](./product/financial-assistant.md#financedashboard) |
 | `FinanceScreenWorkspace` | [product/financial-assistant.md](./product/financial-assistant.md#financescreenworkspace) |

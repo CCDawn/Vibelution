@@ -29,19 +29,20 @@ function toolState(item: ToolCallTurnItem, zh: boolean) {
   return { tone, label };
 }
 
-export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEnableMarket, marketPending, marketDisabled }: {
-  view: FinancialSessionView | null;
-  activeTurn: AssistantConversationTurn | null;
-  zh: boolean;
-  onOpenChat: () => void;
-  onEnableMarket?: () => void;
-  marketPending?: boolean;
-  marketDisabled?: boolean;
-}) {
+export function financeResearchProcessSummary(
+  view: FinancialSessionView | null,
+  activeTurn: AssistantConversationTurn | null,
+  zh: boolean,
+) {
   const turn = activeTurn ?? latestResearchTurn(view?.messages ?? []);
-  const tools = turn?.turnItems.filter((item) => item.type === "tool_call") ?? [];
+  const tools = turn?.turnItems.filter((item): item is ToolCallTurnItem => item.type === "tool_call") ?? [];
+  const attentionTools = tools.filter((item) => {
+    const tone = toolState(item, zh).tone;
+    return tone === "failed" || tone === "degraded";
+  });
+  const failedTools = attentionTools.filter((item) => toolState(item, zh).tone === "failed");
+  const reviewTools = attentionTools.filter((item) => toolState(item, zh).tone === "degraded");
   const error = view?.error || turn?.turnItems.find((item) => item.type === "error")?.text;
-  const report = projectStockReport(view?.messages ?? [], view);
   const running = Boolean(view?.busy || view?.submitPending);
   const stopping = Boolean(view?.stopping);
   const outcome = view ? researchRecordStatus(view, false) : "";
@@ -49,17 +50,52 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEna
   const stopped = outcome === "Stopped";
   const needsContinue = outcome === "Needs continuation";
   const failed = !stopped && !needsContinue && Boolean(error || outcome === "Failed" || turn?.status === "failed");
-  const completed = !stopped && !needsContinue && !failed && Boolean(report || outcome === "Completed");
-  const degraded = tools.some((item) => toolState(item, zh).tone === "degraded");
-  const status = view?.stopping ? (zh ? "正在停止" : "Stopping")
-    : approvalPending ? (zh ? "等待授权" : "Awaiting approval")
-    : running ? (zh ? "研究中" : "Research running")
-    : failed ? (zh ? "研究未完成" : "Research incomplete")
-    : stopped ? (zh ? "已停止" : "Stopped")
-    : needsContinue ? (zh ? "待继续" : "Needs continuation")
-    : completed ? (degraded ? (zh ? "已完成 · 结果需核对" : "Completed · Review results") : (zh ? "已完成" : "Completed"))
+  const completed = !stopped && !needsContinue && !failed && Boolean(projectStockReport(view?.messages ?? [], view) || outcome === "Completed");
+  const degraded = reviewTools.length > 0;
+  const state = stopping ? "stopping" : approvalPending ? "approval" : running ? "running"
+    : failed ? "failed" : stopped ? "stopped" : needsContinue ? "needs_continue" : completed ? "completed" : "ready";
+  const status = state === "stopping" ? (zh ? "正在停止" : "Stopping")
+    : state === "approval" ? (zh ? "等待授权" : "Awaiting approval")
+    : state === "running" ? (zh ? "研究中" : "Research running")
+    : state === "failed" ? (zh ? "研究未完成" : "Research incomplete")
+    : state === "stopped" ? (zh ? "已停止" : "Stopped")
+    : state === "needs_continue" ? (zh ? "待继续" : "Needs continuation")
+    : state === "completed" ? (degraded ? (zh ? "已完成 · 结果需核对" : "Completed · Review results") : (zh ? "已完成" : "Completed"))
     : (zh ? "待开始" : "Ready");
-  const errorPreview = !stopped ? error : "";
+
+  return {
+    turn,
+    tools,
+    attentionTools,
+    failedTools,
+    reviewTools,
+    error,
+    errorPreview: stopped ? "" : error,
+    running,
+    stopping,
+    approvalPending,
+    failed,
+    completed,
+    degraded,
+    state,
+    status,
+  };
+}
+
+export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEnableMarket, marketPending, marketDisabled, attentionOnly = false, onAttentionOnlyChange }: {
+  view: FinancialSessionView | null;
+  activeTurn: AssistantConversationTurn | null;
+  zh: boolean;
+  onOpenChat: () => void;
+  onEnableMarket?: () => void;
+  marketPending?: boolean;
+  marketDisabled?: boolean;
+  attentionOnly?: boolean;
+  onAttentionOnlyChange?: (attentionOnly: boolean) => void;
+}) {
+  const summary = financeResearchProcessSummary(view, activeTurn, zh);
+  const { turn, error, errorPreview, running, stopping, approvalPending, failed, completed, degraded, status } = summary;
+  const tools = attentionOnly ? summary.attentionTools : summary.tools;
 
   return (
     <div className={styles.panel} data-finance-research-process>
@@ -99,7 +135,14 @@ export function FinanceResearchProcess({ view, activeTurn, zh, onOpenChat, onEna
             </li>
           ); })}
         </ol>
-      ) : <p className={styles.empty}>{running ? (zh ? "正在分析…" : "Analyzing…") : turn ? (zh ? "本轮未调用外部工具" : "No external tools used this turn") : (zh ? "尚未开始研究" : "No research started")}</p>}
+      ) : <p className={styles.empty}>{attentionOnly
+        ? (zh ? "当前没有待核验或失败的工具事件" : "No tool events need review")
+        : running ? (zh ? "正在分析…" : "Analyzing…")
+          : turn ? (zh ? "本轮未调用外部工具" : "No external tools used this turn")
+            : (zh ? "尚未开始研究" : "No research started")}</p>}
+      {attentionOnly && onAttentionOnlyChange ? <VButton className={styles.action} variant="ghost" onPress={() => onAttentionOnlyChange(false)}>
+        {zh ? "查看全部工具事件" : "Show all tool events"}
+      </VButton> : null}
       {errorPreview ? (
         <VStateSurface density="compact" tone="error" title={zh ? "需要处理" : "Needs attention"}>
           <span className={styles.errorText}>{errorPreview}</span>

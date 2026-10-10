@@ -25,7 +25,7 @@ const catalogKey = ["finance", "report-catalog", "finance-a", {}];
 const exactKey = ["finance", "exact-report", "finance-a", "current", "report-turn"];
 let state: ReturnType<typeof useFinanceSessionLifecycle>;
 let client: QueryClient, router: Router, root: Root, container: HTMLElement;
-function Host() { state = useFinanceSessionLifecycle("finance-a", true); return <>{state.dialog}<output>{state.error}</output></>; }
+function Host() { state = useFinanceSessionLifecycle("finance-a", true); return <>{state.dialog}<output aria-label="lifecycle error">{state.error}</output><output aria-label="lifecycle notice">{state.notice}</output><output aria-label="batch undo available">{String(state.canUndoBatchArchive)}</output></>; }
 async function settle() { await act(async () => new Promise((resolve) => setTimeout(resolve, 15))); }
 beforeEach(async () => {
   vi.resetAllMocks(); resetSessionDeleteTombstonesForTests();
@@ -33,7 +33,7 @@ beforeEach(async () => {
   vi.mocked(querySessions).mockResolvedValue({ items: [next], nextCursor: "" });
   vi.mocked(archiveChatSession).mockResolvedValue({ sessionId: current.id, status: "archived", changed: true });
   vi.mocked(unarchiveChatSession).mockResolvedValue({ sessionId: current.id, status: "active", changed: true });
-  vi.mocked(deleteChatSession).mockResolvedValue({ deleted: true, deletedSessionId: current.id, nextActiveSessionId: "foreign-agent-session" });
+  vi.mocked(deleteChatSession).mockImplementation(async (id) => ({ deleted: true, deletedSessionId: id, nextActiveSessionId: "foreign-agent-session" }));
   vi.mocked(listFinancialAssistants).mockResolvedValue([{ agentId: "finance-a", status: "active", setupStatus: "ready", directSessionId: "direct" } as FinancialAssistant]);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(indexKey, { pages: [{ items: [current, next], nextCursor: "" }], pageParams: [""] });
@@ -121,6 +121,24 @@ describe("native financial research lifecycle", () => {
     expect(state.error).toContain("不属于当前助手");
     expect(indexedIds()).toContain("current");
   });
+  it("rechecks the latest running status before single and batch mutations", async () => {
+    const completedSummary = { ...current, status: "completed" } as SessionSummary;
+    vi.mocked(fetchSessionDetail).mockImplementation(async (id) => ({ ...completedSummary, id, status: "running", messages: [] }) as SessionDetail);
+    await act(async () => state.requestAction(completedSummary, "archive")); await settle();
+    expect(archiveChatSession).not.toHaveBeenCalled();
+    expect(state.notice).toContain("运行");
+
+    await act(async () => state.requestBatchAction([{ ...next, status: "completed" } as SessionSummary], "archive")); await settle();
+    expect(archiveChatSession).not.toHaveBeenCalled();
+    expect(state.notice).toContain("1");
+    expect(state.notice).toContain("运行");
+
+    await act(async () => state.requestAction(completedSummary, "delete"));
+    const confirm = [...document.querySelectorAll("[role=dialog] button")].find((button) => button.textContent === "删除研究") as HTMLButtonElement;
+    await act(async () => confirm.click()); await settle();
+    expect(deleteChatSession).not.toHaveBeenCalled();
+    expect(state.notice).toContain("跳过删除");
+  });
   it("does not navigate after leaving while native archiving is pending", async () => {
     let finish!: (value: Awaited<ReturnType<typeof archiveChatSession>>) => void;
     vi.mocked(archiveChatSession).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
@@ -130,5 +148,90 @@ describe("native financial research lifecycle", () => {
     expect(querySessions).not.toHaveBeenCalled();
     expect(router.state.location.search).toBe("?session=current");
     expect(container.textContent).toBe("another page");
+  });
+  it("confirms a batch delete once, skips running sessions, and selects the next same-assistant session", async () => {
+    const running = { ...current, id: "running", status: "running" } as SessionSummary;
+    const survivor = { ...next, id: "survivor" };
+    client.setQueryData(indexKey, { pages: [{ items: [current, next, running, survivor], nextCursor: "" }], pageParams: [""] });
+    vi.mocked(querySessions).mockResolvedValue({ items: [survivor, running], nextCursor: "" });
+    const returnFocus = document.createElement("button");
+    document.body.appendChild(returnFocus);
+    await act(async () => state.requestBatchAction([current, next, running], "delete", returnFocus));
+    expect(deleteChatSession).not.toHaveBeenCalled();
+    const dialog = document.querySelector("[role=dialog]");
+    expect(dialog?.textContent).toContain("运行中");
+    const confirm = [...document.querySelectorAll("[role=dialog] button")].find((button) => button.textContent === "删除研究") as HTMLButtonElement;
+    expect(confirm).toBeTruthy();
+    await act(async () => { confirm.click(); confirm.click(); });
+    await settle();
+    expect(deleteChatSession).toHaveBeenCalledTimes(2);
+    expect(deleteChatSession).toHaveBeenNthCalledWith(1, "current");
+    expect(deleteChatSession).toHaveBeenNthCalledWith(2, "next");
+    expect(state.notice).toContain("2");
+    expect(state.notice).toContain("1");
+    expect(state.notice).toContain("运行");
+    expect(router.state.location.search).toBe("?session=survivor");
+    expect(indexedIds()).not.toContain("current");
+    expect(indexedIds()).not.toContain("next");
+    expect(indexedIds()).toContain("running");
+    returnFocus.remove();
+  });
+  it("verifies each batch archive identity, reports partial failures, and undoes only this batch's successes", async () => {
+    const running = { ...current, id: "running", status: "running" } as SessionSummary;
+    const foreignSummary = { ...current, id: "foreign-summary" };
+    const survivor = { ...next, id: "survivor" };
+    client.setQueryData(indexKey, { pages: [{ items: [current, next, foreignSummary, running, survivor], nextCursor: "" }], pageParams: [""] });
+    vi.mocked(querySessions).mockResolvedValue({ items: [survivor], nextCursor: "" });
+    vi.mocked(fetchSessionDetail).mockImplementation(async (id) => ({
+      ...current,
+      id,
+      agentId: id === "foreign-summary" ? "other-agent" : "finance-a",
+      messages: [],
+    }) as SessionDetail);
+    vi.mocked(archiveChatSession).mockImplementation(async (id) => {
+      if (id === "next") throw new Error("归档请求失败");
+      return { sessionId: id, status: "archived", changed: true };
+    });
+    await act(async () => state.requestBatchAction([current, next, foreignSummary, running], "archive"));
+    await settle();
+    expect(archiveChatSession).toHaveBeenCalledTimes(2);
+    expect(archiveChatSession).toHaveBeenCalledWith("current");
+    expect(archiveChatSession).toHaveBeenCalledWith("next");
+    expect(archiveChatSession).not.toHaveBeenCalledWith("foreign-summary");
+    expect(archiveChatSession).not.toHaveBeenCalledWith("running");
+    expect(state.notice).toContain("1");
+    expect(state.notice).toContain("运行");
+    expect(state.error).toContain("归档请求失败");
+    expect(state.error).toContain("不属于当前助手");
+    expect(state.canUndoBatchArchive).toBe(true);
+    vi.mocked(unarchiveChatSession).mockClear();
+    await act(async () => state.undoBatchArchive());
+    await settle();
+    expect(unarchiveChatSession).toHaveBeenCalledTimes(1);
+    expect(unarchiveChatSession).toHaveBeenCalledWith("current");
+    expect(unarchiveChatSession).not.toHaveBeenCalledWith("next");
+    expect(state.canUndoBatchArchive).toBe(false);
+  });
+  it("does not offer undo when the native archive endpoint reports no state change", async () => {
+    vi.mocked(archiveChatSession).mockImplementation(async (id) => ({ sessionId: id, status: "archived", changed: false }));
+    await act(async () => state.requestBatchAction([current], "archive")); await settle();
+    expect(archiveChatSession).toHaveBeenCalledWith("current");
+    expect(indexedIds()).not.toContain("current");
+    expect(state.notice).toContain("1");
+    expect(state.canUndoBatchArchive).toBe(false);
+    await act(async () => state.undoBatchArchive()); await settle();
+    expect(unarchiveChatSession).not.toHaveBeenCalled();
+  });
+  it("returns focus to the invoking batch control when delete confirmation is canceled", async () => {
+    const returnFocus = document.createElement("button");
+    document.body.appendChild(returnFocus);
+    returnFocus.focus();
+    await act(async () => state.requestBatchAction([current, next], "delete", returnFocus));
+    const cancel = [...document.querySelectorAll("[role=dialog] button")].find((button) => button.textContent === "取消") as HTMLButtonElement;
+    await act(async () => cancel.click());
+    await settle();
+    expect(document.activeElement).toBe(returnFocus);
+    expect(deleteChatSession).not.toHaveBeenCalled();
+    returnFocus.remove();
   });
 });

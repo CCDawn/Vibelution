@@ -5,13 +5,13 @@ import { FINANCE_WORKSPACE_GROUPS } from "./financeWorkspaceNavigation";
 const options = {
   area: FINANCE_WORKSPACE_GROUPS.flatMap(group => group.areas.map(area => area.id)),
   tab: ["research", "overview", "news", "fundamentals", "report"],
-  asideTab: ["process", "evidence"],
+  asideTab: ["overview", "process", "evidence"],
   portfolioSource: ["manual", "paper"],
   reviewTab: ["trades", "validation", "backtest", "history", "cases"],
   taskTab: ["records", "batches", "schedules"],
   reportCollection: ["completed", "active", "archived"],
 } as const;
-const defaults = { area: "workspace", tab: "research", asideTab: "process", portfolioSource: "manual", reviewTab: "trades", taskTab: "records", reportCollection: "completed" };
+const defaults = { area: "workspace", tab: "research", asideTab: "overview", portfolioSource: "manual", reviewTab: "trades", taskTab: "records", reportCollection: "completed" };
 export type FinanceWorkspaceNavigation = typeof defaults & {
   preparing: boolean;
   selectedReport: { sessionId: string; turnId: string } | null;
@@ -74,7 +74,7 @@ export function useFinanceWorkspaceNavigation() {
     if (new URLSearchParams(location.search).get("session") === pending.sessionId) update(pending.patch, true);
   }, [location.key, location.search]);
   function showSession(sessionId: string) {
-    const patch = { area: "workspace", tab: "research", asideTab: "process", preparing: false, selectedReport: null };
+    const patch = { area: "workspace", tab: "research", asideTab: "overview", preparing: false, selectedReport: null };
     if (new URLSearchParams(latest.current.search).get("session") === sessionId) update(patch);
     else pendingSession.current = { sessionId, patch };
   }

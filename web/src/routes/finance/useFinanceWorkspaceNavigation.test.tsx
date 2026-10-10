@@ -8,6 +8,14 @@ import { useChatRouteSelection } from "../chat/useChatRouteSelection";
 vi.mock("../../app/userActionTelemetry", () => ({ postUserActionObservation: vi.fn() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+it("opens the compact inspector overview by default and preserves explicit process deep links", () => {
+  expect(parseFinanceWorkspaceNavigation("?session=native").asideTab).toBe("overview");
+  expect(parseFinanceWorkspaceNavigation("?session=native&finance_asideTab=process").asideTab).toBe("process");
+  const view = parseFinanceWorkspaceNavigation("?session=native&finance_asideTab=evidence");
+  const params = new URLSearchParams(serializeFinanceWorkspaceNavigation("?session=native", view));
+  expect(params.get("session")).toBe("native");
+  expect(params.get("finance_asideTab")).toBe("evidence");
+});
 it("normalizes unknown view keys without changing native session or unrelated query parameters", () => {
   const search = "?session=native&returnTo=%2Fagents&finance_area=invalid&finance_tab=bad&finance_prepare=1&finance_report_session=s";
   const value = parseFinanceWorkspaceNavigation(search);

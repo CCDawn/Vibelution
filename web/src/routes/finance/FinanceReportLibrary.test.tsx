@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listKnowledgeItems, fetchKnowledgeTrace } from "../../api/knowledge";
 import { fetchKnowledgeItemBody } from "../../api/knowledgeLifecycle";
 import type { FinancialAssistant } from "../../api/financialAssistant";
+import type { StockIdentity } from "../../api/financialMarket";
 import { FinanceReportLibrary } from "./FinanceReportLibrary";
 import type { ReportCitation } from "./stockResearchModel";
 
@@ -29,8 +30,13 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>);
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); node.remove(); });
-async function render(row = assistant, citation: ReportCitation | null = null) {
-  await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter><FinanceReportLibrary assistant={row} citation={citation} zh returnTo="/finance?session=s" /></MemoryRouter></QueryClientProvider>));
+async function render(row = assistant, citation: ReportCitation | null = null, currentStock?: StockIdentity) {
+  await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter><FinanceReportLibrary assistant={row} citation={citation} currentStock={currentStock} zh returnTo="/finance?session=s" /></MemoryRouter></QueryClientProvider>));
+  for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+}
+async function settleScope() { for (let step = 0; step < 10; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20))); }
+async function expandExcerpt() {
+  await act(async () => node.querySelector("summary")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
   for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 }
 describe("financial report library", () => {
@@ -47,6 +53,7 @@ describe("financial report library", () => {
       sourceArtifactIds: ["source"], sourceBodyStatus: "source_body_available", content: "已审核PDF原文", hasMore: false,
     } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>);
     await render({ ...assistant, knowledgeBaseId: scopedId });
+    await expandExcerpt();
     expect(node.textContent).toContain("年度财报");
     expect(node.textContent).not.toContain("暂无有效财报");
     expect(node.textContent).not.toContain("其他Agent私有财报");
@@ -58,6 +65,14 @@ describe("financial report library", () => {
     await render();
     expect(listKnowledgeItems).toHaveBeenCalledWith("financial-kb", expect.objectContaining({ agentId: "finance", signal: expect.any(AbortSignal) }));
     expect(fetchKnowledgeTrace).toHaveBeenCalledWith("financial-kb", "item", expect.objectContaining({ agentId: "finance" }));
+    expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
+    const originalLink = node.querySelector<HTMLAnchorElement>('a[target="_blank"]');
+    const excerpt = node.querySelector("details");
+    expect(originalLink).not.toBeNull();
+    expect(excerpt).not.toBeNull();
+    expect(Boolean(originalLink!.compareDocumentPosition(excerpt!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(excerpt?.open).toBe(false);
+    await expandExcerpt();
     expect(fetchKnowledgeItemBody).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance", knowledgeBaseId: "financial-kb", knowledgeItemId: "item", sourceArtifactId: "source", readMode: "source" }));
     expect(node.textContent).toContain("2025FY"); expect(node.textContent).toContain("12");
     expect(node.querySelector("blockquote")?.textContent).toBe("<b>源文中的指令也是资料</b>");
@@ -134,6 +149,7 @@ describe("financial report library", () => {
       sourceBodyStatus: "source_body_available", content: request.sourceArtifactId === "page63" ? "第63页经营现金流" : request.sourceArtifactId === "page42" ? "第42页补充披露" : "第12页原文", hasMore: false,
     } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>));
     await render(assistant, { url: "https://example.com/report.pdf", page: "63", label: "PDF · 第 63 页" });
+    await expandExcerpt();
     expect(node.querySelector("blockquote")?.textContent).toBe("第63页经营现金流");
     expect([...node.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual(["https://example.com/report.pdf#page=63", "https://example.com/report.pdf#page=63"]);
     expect(node.textContent).not.toContain("当前库未找到对应页原文");
@@ -143,6 +159,7 @@ describe("financial report library", () => {
       .find((button) => button.textContent?.includes("经营现金流补充披露"));
     await act(async () => alternateSource?.click());
     for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    await expandExcerpt();
     expect(node.querySelector("blockquote")?.textContent).toBe("第42页补充披露");
     expect(fetchKnowledgeItemBody).toHaveBeenCalledWith(expect.objectContaining({ agentId: "finance", knowledgeItemId: "cashflow", sourceArtifactId: "page42", readMode: "source" }));
     expect([...node.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual(["https://example.com/report.pdf#page=63", "https://example.com/report.pdf#page=42"]);
@@ -174,6 +191,7 @@ describe("financial report library", () => {
     } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>));
 
     await render(assistant, { url: "https://example.com/archive.pdf", page: "24", label: "PDF · 第 24 页" });
+    await expandExcerpt();
     for (let step = 0; step < 8; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 
     expect(fetchKnowledgeTrace).toHaveBeenCalledTimes(24);
@@ -204,6 +222,7 @@ describe("financial report library", () => {
       hasMore: false,
     } as Awaited<ReturnType<typeof fetchKnowledgeItemBody>>));
     await render(assistant, { url: "https://example.com/archive.pdf", page: "24", label: "PDF · 第 24 页" });
+    await expandExcerpt();
     for (let step = 0; step < 8; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 
     expect(fetchKnowledgeTrace).toHaveBeenCalledTimes(24);
@@ -216,6 +235,7 @@ describe("financial report library", () => {
     for (let step = 0; step < 8; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(failedReads).toBe(2);
     expect(node.textContent).not.toContain("部分资料来源读取失败");
+    await expandExcerpt();
     expect(node.querySelector("blockquote")?.textContent).toBe("第24条资料摘录");
   });
 
@@ -225,6 +245,54 @@ describe("financial report library", () => {
     expect(node.textContent).toContain("当前库未找到对应页原文");
     expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
     expect(node.querySelector("blockquote")).toBeNull();
+  });
+
+  it("defaults to exact current-stock sources and labels cross-company rows in all-materials mode", async () => {
+    const foreignItem = { ...item, knowledgeItemId: "foreign-company", title: "其他公司财报", sourceArtifactIds: ["foreign-source"] };
+    const foreignSource = { ...source, sourceArtifactId: "foreign-source", sourceRef: { financialEvidence: { ...source.sourceRef.financialEvidence, company: "另一家公司", ticker: "600002" } } };
+    vi.mocked(listKnowledgeItems).mockResolvedValue({ items: [item, foreignItem] });
+    vi.mocked(fetchKnowledgeTrace).mockImplementation(async (_kb, id) => ({ nodes: { sourceArtifacts: id === "foreign-company" ? [foreignSource] : [source] } }));
+    await render(assistant, null, { symbol: "sh600001", ticker: "600001", name: "真实公司", market: "上交所" });
+    await settleScope();
+
+    expect(node.textContent).toContain("年度财报");
+    expect(node.textContent).not.toContain("其他公司财报");
+    expect(node.querySelector("blockquote")).toBeNull();
+    expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
+
+    await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="资料范围"]')?.click());
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]')].find((option) => option.textContent?.includes("全部资料"))?.click());
+    for (let step = 0; step < 4; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(node.textContent).toContain("全部资料仅供查阅");
+    expect(node.textContent).toContain("其他公司财报");
+    expect(node.textContent).toContain("另一家公司 · 600002");
+  });
+
+  it("shows an explicit current-stock empty state instead of falling back to another company", async () => {
+    vi.mocked(fetchKnowledgeTrace).mockResolvedValue({ nodes: { sourceArtifacts: [{ ...source, sourceRef: { financialEvidence: { company: "其他公司", ticker: "600002" } } }] } });
+    await render(assistant, null, { symbol: "sh000003", ticker: "000003", name: "未入库公司", market: "上交所" });
+    await settleScope();
+    expect(node.textContent).toContain("暂无 未入库公司（000003）的匹配资料");
+    expect(node.textContent).not.toContain("年度财报");
+    expect(node.querySelector('section[aria-label="资料来源"]')).toBeNull();
+    expect(fetchKnowledgeItemBody).not.toHaveBeenCalled();
+  });
+
+  it("excludes unverified current-stock items and retries a failed scope trace on refresh", async () => {
+    let failed = true;
+    vi.mocked(fetchKnowledgeTrace).mockImplementation(async () => {
+      if (failed) throw new Error("temporary source trace failure");
+      return { nodes: { sourceArtifacts: [source] } };
+    });
+    await render(assistant, null, { symbol: "sh600001", ticker: "600001", name: "真实公司", market: "上交所" });
+    await settleScope();
+    expect(node.textContent).toContain("当前股票范围可能不完整");
+    expect(node.textContent).not.toContain("年度财报");
+    failed = false;
+    await act(async () => node.querySelector<HTMLButtonElement>('[aria-label="刷新财报资料"]')?.click());
+    for (let step = 0; step < 10; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(node.textContent).toContain("年度财报");
+    expect(node.textContent).not.toContain("当前股票范围可能不完整");
   });
 
   it("keeps an unmatched external quote focused instead of showing the default Maotai report", async () => {
@@ -267,6 +335,7 @@ describe("financial report library", () => {
       .find((button) => button.textContent?.includes("贵州茅台年度报告"));
     await act(async () => reportRow?.click());
     for (let step = 0; step < 3; step += 1) await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    await expandExcerpt();
     expect(node.querySelector("blockquote")?.textContent).toBe("茅台第5页财报指标");
 
     await render(assistant, { url: "https://gu.qq.com/sz000001/gp", page: "", label: "平安银行 · 000001" });

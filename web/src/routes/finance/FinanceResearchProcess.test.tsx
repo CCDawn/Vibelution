@@ -96,4 +96,26 @@ describe("native financial process outcomes", () => {
     expect(node.querySelector("ol")?.textContent).toContain("失败");
     expect(node.textContent).not.toContain("启用行情查询");
   });
+
+  it("filters to failed and degraded tool events when attention-only mode is selected", async () => {
+    const turn = view.messages[0];
+    if (turn.role !== "assistant") throw new Error("Expected assistant fixture");
+    const node = await render(view, { attentionOnly: true, activeTurn: { ...turn, turnItems: [
+      { type: "tool_call", id: "failed", itemId: "failed", version: 3, sessionId: "finance", turnId: "native-turn", revision: 1, sequence: 1, toolName: "news_search_tool", status: "failed" },
+      { type: "tool_call", id: "partial", itemId: "partial", version: 3, sessionId: "finance", turnId: "native-turn", revision: 1, sequence: 2, toolName: "financial_report_query_tool", status: "completed", semanticStatus: "partial" },
+      { type: "tool_call", id: "done", itemId: "done", version: 3, sessionId: "finance", turnId: "native-turn", revision: 1, sequence: 3, toolName: "financial_market_snapshot_tool", status: "completed" },
+    ] } });
+    expect(node.querySelector("ol")?.textContent).toContain("失败");
+    expect(node.querySelector("ol")?.textContent).toContain("部分结果");
+    expect(node.querySelector("ol")?.textContent).not.toContain("查询行情与K线");
+  });
+
+  it("returns from attention-only filtering to the full event list", async () => {
+    const onChange = vi.fn();
+    const node = await render(view, { attentionOnly: true, onAttentionOnlyChange: onChange });
+    const allEvents = [...node.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("查看全部工具事件"));
+    expect(allEvents).not.toBeUndefined();
+    await act(async () => allEvents?.click());
+    expect(onChange).toHaveBeenCalledWith(false);
+  });
 });
