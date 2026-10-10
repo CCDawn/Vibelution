@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { AIBacktestFeePolicyAudit, AIBacktestRun } from "../../api/types/financialBacktests";
 import { VButton, VDenseTable, VSurface } from "../../components/vui";
-import styles from "./FinanceAIBacktest.styles";
+import styles from "./FinanceBacktestFees.styles";
 
 const amount = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
 const officialSource = (value: string) => {
@@ -16,7 +16,7 @@ export function FinanceBacktestFees({ audit, run, zh }: { audit?: AIBacktestFeeP
   const [open, setOpen] = useState(false);
   if (!audit) return null;
   const rows = ([ ["strategy", run?.orders], ["benchmark", run?.benchmarkOrders] ] as const).flatMap(([account, orders]) => (orders ?? []).filter(row => (row.filledShares ?? 0) > 0).map((row, index) => ({ ...row, account, key: `${account}:${row.date}:${row.symbol || ""}:${index}` })));
-  return <VSurface tone="panel" padding="compact" className={styles.dividendDetails}>
+  return <VSurface tone="panel" padding="compact" className={styles.panel}>
     <div className={styles.row}><strong>{zh ? "沪深历史费用" : "Historical Shanghai / Shenzhen fees"}</strong><span className={styles.note}>{zh ? "佣金含规费 · 过户费另计" : "Regulatory fees included in commission · transfer fee separate"}</span></div>
     <VButton variant="ghost" aria-expanded={open} icon={open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setOpen(value => !value)}>{zh ? "费用明细与依据" : "Fee ledger and sources"}</VButton>
     {open ? <>
@@ -33,7 +33,7 @@ export function FinanceBacktestFees({ audit, run, zh }: { audit?: AIBacktestFeeP
         { id: "total", header: zh ? "总扣费" : "Total fee", render: row => amount(row.fee) },
       ]} /></div> : null}
       <p className={styles.note}>{audit.startDate} — {audit.endDate} · {zh ? (audit.notice || "每个模拟订单计一次最低佣金；四舍五入到分，券商实际结算未核实。") : "One minimum commission per simulated order; round half up to cents, broker settlement unverified."}</p>
-      <div className={styles.row}>{audit.sourceURLs.filter(officialSource).map((url, index) => <a key={url} href={url} className={styles.dividendLink} target="_blank" rel="noreferrer">{zh ? "官方依据" : "Official source"} {index + 1}</a>)}</div>
+      <div className={styles.row}>{audit.sourceURLs.filter(officialSource).map((url, index) => <a key={url} href={url} className={styles.sourceLink} target="_blank" rel="noreferrer">{zh ? "官方依据" : "Official source"} {index + 1}</a>)}</div>
     </> : null}
   </VSurface>;
 }
