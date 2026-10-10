@@ -145,6 +145,21 @@ rules:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_index_context.py tests/test_financial_index_tools.py tests/test_financial_index_evidence.py tests/test_official_filings.py tests/test_financial_team_report_evidence.py -q -n 3 --dist loadfile"
     notes:
       - "No model calls. Public-source availability, native tool execution, team/report integration and live product loading are distinct evidence."
+  - id: finance-current-sector-context
+    description: "Opt-in current A-share sector context, bounded public sources and exact-run synthesis references."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/financial_market/sectors.py"
+      - "core/web/services/financial_report/sector_evidence.py"
+      - "tests/test_financial_sector_context.py"
+      - "tests/test_financial_sector_tools.py"
+      - "tests/test_financial_sector_evidence.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_sector_context.py tests/test_financial_sector_tools.py tests/test_financial_sector_evidence.py tests/test_financial_market_tools.py tests/test_financial_market_registry.py tests/test_financial_team_report_evidence.py -q -n 3 --dist loadfile"
+    notes:
+      - "No new permission or model call; current classification is never a historical backtest universe. Missing sources remain partial/unavailable."
   - id: finance-job-report-delivery
     description: "Native financial batch/schedule ownership, exact completed Turn export and managed cold startup."
     executionLayers:

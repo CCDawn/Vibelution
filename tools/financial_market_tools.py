@@ -160,7 +160,7 @@ def _candle_row(value, volume_column: str) -> list:
 
 
 def financial_market_snapshot_tool(
-    ticker: str, period: str = "day", limit: int = 20
+    ticker: str, period: str = "day", limit: int = 20, include_sector: bool = False
 ) -> str:
     """Return a bounded public CN/HK/US quote and its latest K lines.
 
@@ -177,6 +177,8 @@ def financial_market_snapshot_tool(
     forward-adjusted candles. HK/US prices are HKD/USD per share and volume
     is shares, with unadjusted candles. No account, portfolio, or order data
     is accessed.
+    ``include_sector`` optionally adds current A-share industry references from
+    Eastmoney; historical sector membership and rotation are not supported.
     """
     # "USD" is a bare currency code, not an explicit US stock request. The
     # actual one-letter stock D remains addressable as canonical "usD".
@@ -206,6 +208,8 @@ def financial_market_snapshot_tool(
             error_code="invalid_limit",
             ticker=symbol,
         )
+    if type(include_sector) is not bool:
+        return _invalid_request("include_sector 必须为布尔值。", error_code="invalid_include_sector", ticker=symbol)
 
     try:
         snapshot = market.get_stock_snapshot(symbol, period)
@@ -258,6 +262,20 @@ def financial_market_snapshot_tool(
 
     available = len(raw_candles) if isinstance(raw_candles, list) else 0
     cutoff = active_cutoff()
+    sector_context = None
+    if include_sector:
+        if metadata["marketCode"] != "CN":
+            sector_context = {"status": "unavailable", "reasonCode": "a_share_only"}
+        else:
+            try:
+                sector_context = market.get_sector_context(symbol, cutoff=cutoff)
+                sector_encoded = _encode(sector_context)
+                if not isinstance(sector_context, dict) or len(sector_encoded) > 1600:
+                    raise ValueError("invalid sector context")
+                sector_context = json.loads(sector_encoded)
+            except Exception:
+                # This optional provider must never discard the primary quote.
+                sector_context = {"status": "unavailable", "reasonCode": "sector_source_unavailable"}
     quote_for_result = stock
     as_of_message = ""
     if cutoff is not None:
@@ -301,6 +319,8 @@ def financial_market_snapshot_tool(
         omitted = max(0, available - returned)
         clipped = omitted > 0
         status = "partial" if candle_error or clipped or as_of_message else "ok"
+        if sector_context is not None and sector_context.get("status") != "available":
+            status = "partial"
         if candle_error:
             message = reported_candle_error
         elif clipped:
@@ -327,11 +347,28 @@ def financial_market_snapshot_tool(
             "candles": {"columns": columns, "rows": rows},
             "candleError": reported_candle_error,
             "notice": notice,
+            **({"sectorContext": sector_context} if sector_context is not None else {}),
         }
 
     try:
         payload = make_payload(chosen)
         encoded = _encode(payload)
+        # Optional references yield to the requested primary candle window.
+        if len(encoded) > MAX_RESULT_CHARS and sector_context is not None:
+            peers = sector_context.get("peers")
+            while len(encoded) > MAX_RESULT_CHARS and isinstance(peers, list) and peers:
+                peers.pop()
+                sector_context["peerCoverage"] = {"status": "partial", "reasonCode": "tool_output_budget"}
+                sector_context["status"] = "partial"
+                encoded = _encode(make_payload(chosen))
+            if len(encoded) > MAX_RESULT_CHARS and sector_context.get("board") is not None:
+                sector_context["board"] = None
+                sector_context["reasonCode"] = "tool_output_budget"
+                sector_context["status"] = "partial"
+                encoded = _encode(make_payload(chosen))
+            if len(encoded) > MAX_RESULT_CHARS:
+                sector_context = {"status": "unavailable", "reasonCode": "sector_output_budget_exceeded"}
+                encoded = _encode(make_payload(chosen))
         # Remove only the oldest selected rows; the newest provider candles
         # remain visible as the result is reduced to the character budget.
         while len(encoded) > MAX_RESULT_CHARS and chosen:
