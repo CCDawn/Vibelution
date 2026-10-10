@@ -75,7 +75,7 @@ export function ChatCenterTabStrip({
   return (
     <div className={styles.tabStrip}>
       {conversationIndexControl}
-      {chatReturnTarget ? (
+      {chatReturnTarget && !groupPanelActive ? (
         <Link
           className={styles.chatReturnLink}
           to={chatReturnTarget}
@@ -88,13 +88,9 @@ export function ChatCenterTabStrip({
       ) : null}
       <div className={styles.tabStripSessions}>
         {companionHeader ?? (groupPanelActive ? (
-          <VButton
-            type="button"
-            className={`${styles.tab} ${styles.tabActive}`}
-            onClick={() => undefined}
-          >
+          <span className={`${styles.tab} ${styles.tabActive}`}>
             {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
-          </VButton>
+          </span>
         ) : showSessionTabs ? (
           sessionTabs
         ) : showAgentFallbackTab ? (

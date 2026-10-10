@@ -102,6 +102,39 @@
 - 禁止绕过 context 直接在 `ConversationView` 加第二份连接状态 prop。
 - 禁止重连按钮旁开第二条 `/api/sessions/:id/events` 连接；手动重连必须走唯一拥有者的硬关+重取路径。
 
+## ConversationProgressCommentary
+
+### 功能
+按时间顺序呈现 assistant 的用户可见进展。长内容在运行中和结束后都默认收成三行预览；需要时可手动展开或收起。短内容保持静态，不显示多余开关。
+
+### 适用范围
+- **适用**：直连会话 transcript 中 `phase=commentary` 的进展单元。
+- **不适用**：内部 reasoning、最终回答、群聊消息；这些沿用各自的呈现契约。
+
+### 状态与边界
+- 长进展用现有 `VButton` 作为展开控制，保留运行 spinner 与 live `status` 语义。
+- 展开后的 live 文本在内部滚动区跟随流末尾，最大高度为 `min(24rem, 50vh)`；默认折叠态只展示三行。
+- 只改变显示，不改写 transcript 原文、顺序、去重、错误或最终回答。
+- 通过稳定 `sourceItemId` 保留流式更新期间的用户选择；默认值变化不能覆盖显式展开/折叠。
+
+### 实现落点
+- 渲染：`web/src/components/conversation/ConversationView.tsx` 的 `renderCodexProgressCell`
+- 样式：`ConversationView.styles.ts` 的 `codexTranscriptProgress*`
+- 默认展开策略：`conversationExpansionDefaults.ts`
+
+## ChatToolApprovalDialog 文案密度
+
+### 功能
+审批卡只保留一处快捷键说明和明确的按钮标签；不重复显示按钮含义映射。命令预览、风险、范围及“始终允许”的实际授权范围继续可见。
+
+### 适用范围
+- **适用**：会话 composer 上方的待审批工具卡。
+- **不适用**：普通工具时间线行；审批卡不因工具名称相似而移动或关联到某一工具行。
+
+### 状态与边界
+- 卡片继续固定在 composer 附近；当前待审批 `requestId` 与 transcript 的 `toolCallId`/`operationId` 没有可靠映射，不以工具名猜测精确关联。
+- 保留一次、始终授权、拒绝的操作按钮及可用快捷键提示。
+
 ## ConversationFollowupQueueBar
 
 ### 功能
@@ -388,6 +421,8 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 | --- | --- | --- |
 | 消息流 | 左对齐连续文本；同说话人合并头像/名字 | 不要每条 `vuiOpaqueRowClass` |
 | 长文 | `line-clamp` 约 5 行 +「展开全文」 | 禁止用 `hidden` 整段藏正文 |
+| 正文富文本 | 复用 `LazyConversationMarkdownRenderer` 的列表、表格、代码、链接、图片与安全处理 | @成员只装饰散文文本；代码、链接标签（含嵌套强调）、公式保持字面值 |
+| 返回入口 | 有 `returnTo` 时只保留 AppShell 的返回；直接打开团队房间时保留标题返回团队 | 群聊标签为静态标签，不提供无作用按钮 |
 | 内部讨论 | 操作员时间线默认可读 | `collapsed_by_default` 不表示房间里看不见 |
 | 结论 | 轮次末尾展示实际结论；纯发言计数进入「轮次结果」disclosure | 不把送达统计当作结论 |
 | 并行发言进度 | 每个未落位成员各占一行 | 仅 `running` 显示“正在输入”；`settled` 显示“已完成，等待前序发言”且不提前展示正文 |
@@ -996,3 +1031,17 @@ import { ConversationTurnModelControl } from "../../conversation/ConversationTur
 
 ### 实现与边界
 React Virtual 限制挂载数量；当前位置变化和容器恢复时滚动到当前标记。原有时间线跳转、减少动态效果滚动、消息投影及会话数据保持不变。
+
+## ChatGroupArtifactDialog
+
+### 功能
+群聊交付系统行的「查看改动」入口。用 VDialog 展示交付任务的当前改动，复用任务板查询、现有 files API 和 `ChatFilePreviewPanel` 的文件预览。
+
+### 适用范围
+仅服务于拥有开发团队归属且时间线来源为 `dev_task_board`、携带 taskIds 的交付记录。历史路径摘要与普通消息中的文件名均不授予打开权限。
+
+### 使用方式
+传入已确认的 teamId、taskIds、lang、open 与 onOpenChange。先从同团队任务板查 workspacePath 与 workspaceBranch，再由 changes API 确认工作区有效；仅匹配 `.worktrees/<slug>` 与 `codex/<slug>` 的当前非删除文件提供预览。文件相对路径不得包含绝对路径或向上跳转；files API 再做项目路径约束。任务已移除、工作区缺失、加载失败、空改动和截断均有对应状态。
+
+### 实现与边界
+`ChatGroupArtifactDialog.tsx` 只读查询当前任务，不读取历史版本，不改文件、不提交审批；界面明确标为当前改动。正文 Markdown 不传群聊猜测的工作区。预览可返回列表，弹窗关闭回到来源按钮，窄屏内容自行滚动；不新建第二套文件预览组件。

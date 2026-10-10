@@ -62,13 +62,12 @@ export function ChatToolApprovalDialog({
 }: ChatToolApprovalDialogProps) {
   const dialogId = useId();
   const titleId = `${dialogId}-title`;
-  const descriptionId = `${dialogId}-description`;
   const scopeId = `${dialogId}-scope`;
   const riskId = `${dialogId}-risk`;
   const toolListId = `${dialogId}-tools`;
   const previewId = `${dialogId}-preview`;
   const grantId = `${dialogId}-grant`;
-  const descriptionIds = `${descriptionId} ${riskId} ${scopeId} ${toolListId} ${previewId} ${grantId}`;
+  const descriptionIds = `${riskId} ${scopeId} ${toolListId} ${previewId} ${grantId}`;
   const buttons = toolApprovalCodexButtonLabels(lang);
   const primaryToolName = toolName || toolLabels[0]?.id || "";
   const displayName = toolLabels.find((item) => item.id === primaryToolName)?.label || toolApprovalDisplayName(primaryToolName, lang);
@@ -136,11 +135,6 @@ export function ChatToolApprovalDialog({
             {scopeText ? <span className={styles.scopeBadge} id={scopeId}>{scopeText}</span> : <span id={scopeId} className="sr-only" />}
             {displayName ? <span className={styles.scopeBadge}>{displayName}</span> : null}
           </div>
-          <p id={descriptionId} className={styles.lead}>
-            {lang === "zh"
-              ? onApproveForSession ? "是=本次 · 始终=下列范围 · 否=拒绝" : "是=本次 · 否=拒绝"
-              : onApproveForSession ? "Yes=once · Always=scope · No=decline" : "Yes=once · No=decline"}
-          </p>
           <pre id={previewId} className={styles.commandPreview} title={preview}>
             {preview || (lang === "zh" ? "（无命令预览）" : "(no command preview)")}
           </pre>

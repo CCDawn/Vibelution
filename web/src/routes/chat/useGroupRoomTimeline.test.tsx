@@ -258,6 +258,31 @@ describe("foldGroupTimelineEvents", () => {
     expect(row?.fileCount).toBe(3);
     expect(row?.changedPaths).toEqual(["web/src/a.ts", "web/src/b.ts"]);
     expect(row?.changedPathsTruncated).toBe(true);
+    expect(row?.taskIds).toEqual(["task-1"]);
+  });
+
+  it("keeps task ids only for dev-task-board artifact payloads", () => {
+    const items = foldGroupTimelineEvents([
+      eventOf(1, "artifact", {
+        source: "dev_task_board",
+        fileCount: 1,
+        taskIds: [" task-1 ", "task-1", "task-2"],
+      }),
+      eventOf(2, "artifact", {
+        source: "other",
+        fileCount: 1,
+        taskIds: ["do-not-open"],
+      }),
+      eventOf(3, "artifact", {
+        fileCount: 1,
+        taskIds: ["legacy-without-source"],
+      }),
+    ]);
+
+    expect(items).toHaveLength(3);
+    expect(items[0]?.kind === "artifact" ? items[0].row.taskIds : null).toEqual(["task-1", "task-2"]);
+    expect(items[1]?.kind === "artifact" ? items[1].row.taskIds : null).toBeUndefined();
+    expect(items[2]?.kind === "artifact" ? items[2].row.taskIds : null).toBeUndefined();
   });
 });
 

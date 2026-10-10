@@ -36,6 +36,9 @@ const previewExemptDesignSections = new Set([
   // and the selected team's current round supply its meaningful state. Covered
   // by TeamHomeSurface interaction tests and the isolated team/chat preview.
   "TeamHomeSurface",
+  // Route-owned dialog: team task-board, workspace changes and file-content queries
+  // supply its states. Covered by dialog interaction tests and the isolated chat preview.
+  "ChatGroupArtifactDialog",
 ]);
 
 function collectPreviewSources(directory: string): string {

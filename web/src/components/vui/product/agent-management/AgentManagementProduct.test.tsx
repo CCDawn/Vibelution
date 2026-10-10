@@ -196,6 +196,43 @@ describe("Agent Management VUI product components", () => {
     expect(markup).not.toContain('type="checkbox"');
   });
 
+  it("hides a role label that only repeats the Agent name", () => {
+    const renderAgent = (name: string, roleLabel: string) => renderToStaticMarkup(
+      <VuiProvider>
+        <AgentDenseList
+          columns={[{
+            id: "research",
+            label: "科研执行",
+            count: 1,
+            rows: [{
+              id: "evidence",
+              name,
+              roleLabel,
+              roleTone: "research",
+              avatarInitials: "证",
+              modelLabel: "model-x",
+              promptLabel: "核验证据",
+              runtimeLabel: "空闲",
+              runtimeTone: "idle",
+              modes: [],
+              issueLabel: "正常",
+              issueTone: "ok",
+              active: false,
+              bulkSelected: false,
+              selectLabel: "选择证据 Agent",
+            }],
+          }]}
+          columnLabels={{ agent: "Agent", model: "模型", prompt: "提示词", runtime: "运行", modes: "模式", reminders: "提醒" }}
+          onSelectRow={() => undefined}
+          onToggleBulk={() => undefined}
+        />
+      </VuiProvider>,
+    );
+
+    expect(renderAgent(" Evidence Agent ", "evidence")).not.toContain(">evidence</em>");
+    expect(renderAgent("Evidence Agent", "evidence reviewer")).toContain("evidence reviewer</em>");
+  });
+
   it("shows row checkboxes only after the caller enters bulk selection", () => {
     const markup = renderToStaticMarkup(
       <VuiProvider>

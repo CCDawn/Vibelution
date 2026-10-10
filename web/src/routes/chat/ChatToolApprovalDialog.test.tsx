@@ -59,6 +59,8 @@ describe("ChatToolApprovalDialog", () => {
     expect(markup).toContain("python.exe -c");
     expect(markup).toContain("C:\\workspace\\repo");
     expect(markup).toContain("参数完全相同");
+    expect(markup).not.toContain("是=本次");
+    expect(markup.match(/Y 是 · A 始终 · N 否/g)?.length).toBe(1);
     expect(markup).toContain('role="list"');
     expect(markup.match(/role="listitem"/g)?.length).toBe(2);
     expect(markup).toContain("shell_command");

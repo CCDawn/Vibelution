@@ -1,4 +1,5 @@
-import { useId } from "react";
+import { useCallback, useId } from "react";
+import { LazyConversationMarkdownRenderer } from "../../components/conversation/LazyConversationMarkdownRenderer";
 
 import { VButton, VErrorSummary, VSurface } from "../../components/vui";
 import type {
@@ -259,6 +260,10 @@ export function ChatGroupMessageBody({
   onOpenMentionTarget,
   onToggleExpanded,
 }: ChatGroupMessageBodyProps) {
+  const bodyId = useId();
+  const renderMentionText = useCallback((text: string) => (
+    <ChatMentionedText content={text} lang={lang} mentionTargets={mentionTargets} onOpenMentionTarget={onOpenMentionTarget} />
+  ), [lang, mentionTargets, onOpenMentionTarget]);
   const structuredPayload = structuredChallengePayload(message);
   if (message.messagePayload?.kind === "challenge_meeting_message"
     && message.messagePayload.audit?.parseStatus === "invalid") {
@@ -297,21 +302,21 @@ export function ChatGroupMessageBody({
     : "";
   return (
     <>
-      <p className={collapsed ? `${styles.groupBubbleBody} ${styles.groupBubbleBodyCollapsed}` : styles.groupBubbleBody}>
-        <ChatMentionedText
-          content={content}
-          fallback={failureReason
+      <div id={bodyId} className={collapsed ? `${styles.groupBubbleBody} ${styles.groupBubbleBodyCollapsed}` : styles.groupBubbleBody}>
+        <LazyConversationMarkdownRenderer
+          content={content || (failureReason
             ? (lang === "zh" ? `发言未完成：${failureReason}` : `Message incomplete: ${failureReason}`)
-            : (lang === "zh" ? "暂无内容" : "No content yet")}
-          lang={lang}
-          mentionTargets={mentionTargets}
-          onOpenMentionTarget={onOpenMentionTarget}
+            : (lang === "zh" ? "暂无内容" : "No content yet"))}
+          language={lang}
+          renderText={renderMentionText}
         />
-      </p>
+      </div>
       {collapsible ? (
         <VButton
           type="button"
           className={styles.groupBubbleToggle}
+          aria-expanded={expanded}
+          aria-controls={bodyId}
           onClick={() => onToggleExpanded(message.messageId)}
         >
           {expanded ? (lang === "zh" ? "收起" : "Collapse") : collapseLabel}

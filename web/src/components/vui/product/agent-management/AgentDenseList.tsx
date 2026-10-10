@@ -74,6 +74,19 @@ function issueToneClass(tone: string): string {
   return "border-[color-mix(in_srgb,var(--fg-tertiary)_24%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_8%,transparent)] text-[var(--fg-secondary)]";
 }
 
+function normalizedAgentIdentity(value: string) {
+  return value.trim().replace(/\s+agent$/i, "").trim().toLowerCase();
+}
+
+function shouldShowRoleLabel(name: string, roleLabel: ReactNode) {
+  if (typeof roleLabel !== "string") {
+    return true;
+  }
+  const normalizedName = normalizedAgentIdentity(name);
+  const normalizedRole = normalizedAgentIdentity(roleLabel);
+  return !normalizedName || normalizedName !== normalizedRole;
+}
+
 function AgentRow({
   row,
   bulkSelectionVisible,
@@ -128,6 +141,7 @@ function AgentRow({
   );
 
   const showIssue = row.issueTone !== "ok";
+  const showRole = shouldShowRoleLabel(row.name, row.roleLabel);
   const agentCard = (
     <VNativeButton
       type="button"
@@ -152,7 +166,7 @@ function AgentRow({
               <em className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</em>
             ) : null}
           </span>
-          <em data-tone={row.roleTone} className={ROLE_TAG_BASE}>{row.roleLabel}</em>
+          {showRole ? <em data-tone={row.roleTone} className={ROLE_TAG_BASE}>{row.roleLabel}</em> : null}
         </span>
       </span>
     </VNativeButton>

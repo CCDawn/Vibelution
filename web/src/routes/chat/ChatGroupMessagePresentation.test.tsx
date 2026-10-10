@@ -1,10 +1,14 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ChatRoomMessage } from "../../api/types";
 import { ChatGroupMessageBody } from "./ChatGroupMessagePresentation";
 import styles from "./ChatGroupMessagePresentation.styles";
+vi.mock("../../components/conversation/LazyConversationMarkdownRenderer", async () => {
+  const { ConversationMarkdownRenderer } = await import("../../components/conversation/ConversationMarkdownRenderer");
+  return { LazyConversationMarkdownRenderer: ConversationMarkdownRenderer };
+});
 
 function message(patch: Partial<ChatRoomMessage> = {}): ChatRoomMessage {
   return {
@@ -30,6 +34,23 @@ const bodyProps = {
 };
 
 describe("ChatGroupMessageBody", () => {
+  it("renders rich prose and mentions while leaving code and link labels literal", () => {
+    const html = renderToStaticMarkup(<ChatGroupMessageBody {...bodyProps}
+      mentionTargets={[{ kind: "all", displayName: "全体成员", label: "@all" }]}
+      expandedMessageIds={["msg-1"]}
+      message={message({ content: [
+        "## 结论", "", "- **@all** 看结果", "", "| 成员 | 状态 |", "| --- | --- |", "| @all | 就绪 |", "",
+        "`@all` [**@all**](https://example.com)", "", "```text", "@all", "```", "",
+        "[unsafe](javascript:alert(1))", "<script>alert(1)</script>",
+      ].join("\n") })} />);
+    expect(html).toContain("<ul");
+    expect(html).toContain("<table");
+    expect(html).toContain('href="https://example.com"');
+    expect(html.match(/aria-label="打开 全体成员 的索引"/g)).toHaveLength(2);
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("<script");
+    expect(html).not.toMatch(/<p[^>]*>\s*<div/);
+  });
   it("labels invalid research output and keeps its raw protocol collapsed", () => {
     const html = renderToStaticMarkup(<ChatGroupMessageBody {...bodyProps} message={message({
       content: "RAW-INVALID-PROTOCOL",

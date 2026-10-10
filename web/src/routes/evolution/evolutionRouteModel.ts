@@ -182,6 +182,24 @@ export function supervisedWorkflowStepLabel(step: SupervisedWorkflowDefinition |
   return lang === "zh" ? definition?.zh ?? step.id : definition?.en ?? step.id;
 }
 
+export function supervisedWorkflowStepOptionLabel(
+  stepLabel: string,
+  roleLabel: string | null | undefined,
+  isCurrent: boolean,
+  lang: "zh" | "en",
+) {
+  const normalizedStepLabel = stepLabel.trim().replace(/\s+/g, " ").toLowerCase();
+  const normalizedRoleLabel = String(roleLabel || "").trim().replace(/\s+/g, " ").toLowerCase();
+  const labels = [stepLabel.trim()];
+  if (normalizedRoleLabel && normalizedRoleLabel !== normalizedStepLabel) {
+    labels.push(String(roleLabel).trim());
+  }
+  if (isCurrent) {
+    labels.push(lang === "zh" ? "当前" : "Current");
+  }
+  return labels.filter(Boolean).join(" · ");
+}
+
 export function activeSupervisedWorkflowStep(
   run: EvolutionActiveRun | null | undefined,
 ): SupervisedWorkflowStepId | null {

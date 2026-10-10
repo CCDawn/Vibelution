@@ -53,6 +53,8 @@ export type GroupTimelineArtifactRow = {
   changedPaths: string[];
   /** True when the backend trimmed the path list below fileCount. */
   changedPathsTruncated: boolean;
+  /** Task IDs are actionable only for dev-task-board deliveries. */
+  taskIds?: string[];
 };
 
 export type GroupTimelineItem =
@@ -207,6 +209,7 @@ export function foldGroupTimelineEvents(events: ChatRoomTimelineEvent[]): GroupT
             })
             .filter(Boolean)
         : [];
+      const taskIds = payload.source === "dev_task_board" ? [...new Set(idList(payload.taskIds))] : [];
       items.push({
         kind: "artifact",
         row: {
@@ -216,6 +219,7 @@ export function foldGroupTimelineEvents(events: ChatRoomTimelineEvent[]): GroupT
           fileCount,
           changedPaths,
           changedPathsTruncated: payload.changedPathsTruncated === true,
+          ...(taskIds.length ? { taskIds } : {}),
         },
       });
     }

@@ -17,6 +17,7 @@ import type { ChatMentionTarget } from "../chatMentionTokens";
 import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
+import { ChatGroupArtifactDialog } from "./ChatGroupArtifactDialog";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
 import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy, isAvailableGroupParticipant } from "./chatRoutePresentation";
 import type { GroupSpeakerProgressMap, GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
@@ -128,6 +129,7 @@ export type ChatGroupCenterSurfaceProps = {
   onToggleExpandedGroupMessage: (messageId: string) => void;
   onOpenGroupTeam?: () => void;
   onManageGroupRoom?: () => void;
+  artifactTeamId?: string;
 };
 
 function GroupMemberChangeRow({
@@ -170,10 +172,12 @@ function GroupArtifactChangeRow({
   row,
   lang,
   formatTime,
+  onOpenArtifacts,
 }: {
   row: GroupTimelineArtifactRow;
   lang: "zh" | "en";
   formatTime: (value: string) => string;
+  onOpenArtifacts?: (taskIds: string[], trigger: HTMLElement) => void;
 }) {
   const separator = lang === "zh" ? "、" : ", ";
   const pathSummary = row.changedPaths.slice(0, 3).join(separator);
@@ -186,6 +190,11 @@ function GroupArtifactChangeRow({
         {lang === "zh" ? `交付了 ${row.fileCount} 个文件变更${detail}` : `Delivered ${row.fileCount} file changes${detail}`}
       </span>
       <time>{formatTime(row.createdAt)}</time>
+      {onOpenArtifacts && row.taskIds?.length ? (
+        <VButton variant="ghost" onClick={(event) => onOpenArtifacts(row.taskIds!, event.currentTarget)}>
+          {lang === "zh" ? "查看改动" : "View changes"}
+        </VButton>
+      ) : null}
     </div>
   );
 }
@@ -208,6 +217,7 @@ function GroupRoundsTimeline({
   groupSpeakerProgress,
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
+  onOpenArtifacts,
 }: {
   items: GroupTimelineItem[];
   purposeFallback: string;
@@ -226,6 +236,7 @@ function GroupRoundsTimeline({
   groupSpeakerProgress?: GroupSpeakerProgressMap;
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpandedGroupMessage: (messageId: string) => void;
+  onOpenArtifacts?: (taskIds: string[], trigger: HTMLElement) => void;
 }) {
   const transcriptPrefix = useId();
   const [expandedResults, setExpandedResults] = useState<Record<string, boolean>>({});
@@ -275,6 +286,7 @@ function GroupRoundsTimeline({
               row={item.row}
               lang={lang}
               formatTime={formatTime}
+              onOpenArtifacts={onOpenArtifacts}
             />
           );
         }
@@ -611,7 +623,15 @@ export function ChatGroupCenterSurface({
   onToggleExpandedGroupMessage,
   onOpenGroupTeam,
   onManageGroupRoom,
+  artifactTeamId,
 }: ChatGroupCenterSurfaceProps) {
+  const [artifactSelection, setArtifactSelection] = useState<{
+    roomId: string; teamId: string; taskIds: string[];
+  } | null>(null);
+  const artifactTaskIds = artifactSelection?.roomId === activeGroupRoomId
+    && artifactSelection.teamId === artifactTeamId ? artifactSelection.taskIds : [];
+  const artifactTriggerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => setArtifactSelection(null), [activeGroupRoomId, artifactTeamId]);
   const [membersOpen, setMembersOpen] = useState(false);
   const [confirmStopOpen, setConfirmStopOpen] = useState(false);
   const membersTriggerRef = useRef<HTMLElement | null>(null);
@@ -910,6 +930,10 @@ export function ChatGroupCenterSurface({
               groupSpeakerProgress={groupSpeakerProgress}
               onOpenMentionTarget={onOpenMentionTarget}
               onToggleExpandedGroupMessage={onToggleExpandedGroupMessage}
+              onOpenArtifacts={artifactTeamId ? (taskIds, trigger) => {
+                artifactTriggerRef.current = trigger;
+                setArtifactSelection({ roomId: activeGroupRoomId, teamId: artifactTeamId, taskIds });
+              } : undefined}
             />
             {groupTimeline?.hasMore ? (
               <div className={styles.groupRoundActions}>
@@ -1011,6 +1035,14 @@ export function ChatGroupCenterSurface({
         confirmDisabled={groupStopDisabled || !groupRoundActive || groupRoundStopping}
         onCloseAutoFocus={(event) => { event.preventDefault(); (stopTriggerRef.current?.isConnected ? stopTriggerRef.current : composerRef.current)?.focus({ preventScroll: true }); }}
         onConfirm={() => { setConfirmStopOpen(false); if (!groupStopDisabled && groupRoundActive && !groupRoundStopping) onStopGroupRound(); }} />
+      {artifactTeamId && artifactTaskIds.length > 0 ? (
+        <ChatGroupArtifactDialog teamId={artifactTeamId} taskIds={artifactTaskIds} lang={lang}
+          open onOpenChange={(open) => { if (!open) setArtifactSelection(null); }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            artifactTriggerRef.current?.focus({ preventScroll: true });
+          }} />
+      ) : null}
     </div>
   );
 }

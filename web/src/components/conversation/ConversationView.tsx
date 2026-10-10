@@ -5025,8 +5025,8 @@ export const ConversationView = React.memo(function ConversationView({
 
   /**
    * Progress narration lane (commentary): user-facing updates stay visible in
-   * chronological order. Live text streams open; settled text keeps a clamped
-   * preview with an expand toggle instead of collapsing into a one-line stub.
+   * chronological order. Long updates start at the three-line preview while
+   * live and settled; users can expand them when they need the full text.
    */
   function renderCodexProgressCell(
     messageId: string,
@@ -5035,7 +5035,7 @@ export const ConversationView = React.memo(function ConversationView({
   ) {
     const sectionId = reasoningExpansionSectionId(cell);
     const isLive = cell.status === "running" || cell.status === "pending";
-    const defaultExpanded = isLive;
+    const defaultExpanded = false;
     const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
     const canExpand = progressTextExceedsClamp(text);
     const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";

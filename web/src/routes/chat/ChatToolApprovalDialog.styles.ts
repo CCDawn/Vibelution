@@ -19,8 +19,6 @@ const styles = {
     "m-0 line-clamp-2 [font-size:10px] leading-snug text-[var(--fg-tertiary)]",
   icon:
     "min-w-0 shrink-0 self-center text-[var(--state-warning)]",
-  lead:
-    "m-0 [font-size:11px] leading-snug text-[var(--fg-tertiary)]",
   noButton:
     "!h-7 !min-h-7 border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] !px-2 !text-vui-micro-11 text-[var(--fg-secondary)]",
   overlay:

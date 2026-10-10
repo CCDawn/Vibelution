@@ -97,6 +97,7 @@ import {
   supervisedRoleConversationSession,
   supervisedRunBucketLabel,
   supervisedWorkflowStepLabel,
+  supervisedWorkflowStepOptionLabel,
   toLimitInput,
   type ProposalEditDraft,
   type SupervisedClosedLoopRecord,
@@ -2363,7 +2364,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               ? `agent:${selectedSupervisedAgentRole}` : supervisedSelectedWorkflowStepId || "baseline_eval"}
             steps={[...supervisedWorkflowCards.map((step) => ({
               id: step.id,
-              label: `${step.label}${step.role ? ` · ${runRoleLabel(step.role)}` : ""}${step.current ? (lang === "zh" ? " · 当前" : " · Current") : ""}`,
+              label: supervisedWorkflowStepOptionLabel(
+                step.label,
+                step.role ? runRoleLabel(step.role) : null,
+                step.current,
+                lang,
+              ),
               disabled: !step.current && step.status === "pending" && !step.conversationSessionId,
             })), ...supervisedRunMembers.filter((member) => !SUPERVISED_WORKFLOW_STEPS.some((step) => step.role === member.role)).map((member) => ({
               id: `agent:${member.role}`, label: runRoleLabel(member.role), disabled: !member.agentId && !member.conversationSession?.conversationSessionId,

@@ -16,6 +16,7 @@ import {
   supervisedProposalStatusLabel,
   supervisedRoleConversationSession,
   supervisedWorkflowStepLabel,
+  supervisedWorkflowStepOptionLabel,
   toLimitInput,
   SUPERVISED_WORKFLOW_STEPS,
   SUPERVISED_RUN_MEMBER_ROLES,
@@ -104,6 +105,11 @@ describe("evolutionRouteModel", () => {
     expect(activeSupervisedWorkflowStep({ currentRole: "judge", currentPhase: "baseline_judge" } as EvolutionActiveRun)).toBe("baseline_judge");
     expect(activeSupervisedWorkflowStep({ currentRole: "judge", currentPhase: "candidate_judge" } as EvolutionActiveRun)).toBe("rerun_judge");
     expect(activeSupervisedWorkflowStep({ currentPhase: "reflection" } as EvolutionActiveRun)).toBe("improve");
+  });
+
+  it("does not repeat a role already present in the workflow step label", () => {
+    expect(supervisedWorkflowStepOptionLabel("独立复跑", "独立复跑", false, "zh")).toBe("独立复跑");
+    expect(supervisedWorkflowStepOptionLabel("Baseline run", "Baseline", true, "en")).toBe("Baseline run · Baseline · Current");
   });
 
   it("maps proposal draft and self-evolution source display", () => {

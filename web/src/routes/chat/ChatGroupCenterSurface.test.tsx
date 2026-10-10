@@ -5,6 +5,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { ChatGroupCenterSurface, type ChatGroupCenterSurfaceProps } from "./ChatGroupCenterSurface";
+const artifactRenderCalls = vi.hoisted(() => [] as Array<{ teamId: string; taskIds: string[] }>);
+vi.mock("./ChatGroupArtifactDialog", () => ({
+  ChatGroupArtifactDialog: (props: { teamId: string; taskIds: string[] }) => {
+    artifactRenderCalls.push({ teamId: props.teamId, taskIds: props.taskIds });
+    return null;
+  },
+}));
 
 function baseProps(patch: Partial<ChatGroupCenterSurfaceProps> = {}): ChatGroupCenterSurfaceProps {
   return {
@@ -70,6 +77,27 @@ function baseProps(patch: Partial<ChatGroupCenterSurfaceProps> = {}): ChatGroupC
 }
 
 describe("ChatGroupCenterSurface hand-test substitutes", () => {
+  it("drops artifact selection before rendering another room or team's dialog", async () => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    artifactRenderCalls.length = 0;
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    const props = baseProps({ artifactTeamId: "team-a" });
+    const timeline = { items: [{ kind: "artifact", row: {
+      key: "delivery", seq: 1, createdAt: "", fileCount: 1,
+      changedPaths: ["file.md"], changedPathsTruncated: false, taskIds: ["shared-task"],
+    } }], hasMore: false, loading: false, loadingMore: false, legacyFromDetail: false, loadMore: () => {} } as never;
+    try {
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} groupTimeline={timeline} />));
+      const trigger = [...host.querySelectorAll("button")].find((button) => button.textContent === "查看改动")!;
+      await act(async () => trigger.click());
+      expect(artifactRenderCalls.at(-1)?.teamId).toBe("team-a");
+      artifactRenderCalls.length = 0;
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} groupTimeline={timeline}
+        artifactTeamId="team-b" activeGroupRoomId="room-b" />));
+      expect(artifactRenderCalls).toEqual([]);
+    } finally { await act(async () => root.unmount()); host.remove(); }
+  });
   it("keeps following a large stream burst until the reader scrolls away", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const host = document.createElement("div"); document.body.append(host);
@@ -934,6 +962,20 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       expect(html).toContain("第 2 轮");
       expect(html).toContain("议题一");
       expect(html).toContain("议题二");
+    });
+
+    it("offers artifact actions only with a trusted team and task identity", () => {
+      const items = [{ kind: "artifact", row: {
+        key: "delivery", seq: 1, createdAt: "", fileCount: 1,
+        changedPaths: ["untrusted/path.ts"], changedPathsTruncated: false, taskIds: ["task-1"],
+      } }];
+      const render = (artifactTeamId?: string) => renderToStaticMarkup(
+        <ChatGroupCenterSurface {...baseProps({ artifactTeamId })}
+          {...({ groupTimeline: projectionOf(items) } as never)} />,
+      );
+      expect(render()).not.toContain("查看改动");
+      expect(render("team-1")).toContain("查看改动");
+      expect(render("team-1")).not.toContain('href="untrusted/path.ts"');
     });
 
     it("renders dev-board artifact deliveries as system rows between round sections", () => {

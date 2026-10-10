@@ -637,6 +637,45 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(longSection).not.toContain('data-codex-progress-static="true"');
   });
 
+  it("starts long live progress commentary at the three-line preview", () => {
+    const longText = "先检查本地配置与缓存，再运行定向回归测试，确认没有新的回归，并补齐证据。".repeat(7);
+    const html = renderConversation([
+      {
+        id: "assistant-live-progress",
+        role: "assistant",
+        timestamp: "2026-09-11T06:20:00Z",
+        turnId: "turn-live-progress",
+        status: "running",
+        turnItems: [
+          {
+            id: "progress-live:0",
+            itemId: "progress-live",
+            version: 3,
+            sessionId: "session-1",
+            turnId: "turn-live-progress",
+            type: "agent_message",
+            phase: "commentary",
+            status: "running",
+            revision: 0,
+            sequence: 1,
+            terminal: false,
+            text: longText,
+          },
+        ],
+      },
+    ]);
+
+    const textIndex = html.indexOf(longText);
+    const progressSection = html.slice(
+      html.lastIndexOf("<section", textIndex),
+      html.indexOf("</section>", textIndex),
+    );
+    expect(progressSection).toContain('data-progress-expanded="false"');
+    expect(progressSection).toContain('data-codex-progress-clamped="true"');
+    expect(progressSection).toContain("line-clamp-3");
+    expect(progressSection).not.toContain('data-codex-progress-body="true"');
+  });
+
   it("renders context compression outcomes in their canonical event order", () => {
     const marker = (
       turnId: string,

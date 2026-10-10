@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { Check, Copy, WrapText } from "lucide-react";
 import ReactMarkdown, { type Options as ReactMarkdownOptions } from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -49,6 +49,8 @@ export type ConversationMarkdownRendererProps = {
   workspaceRoot?: string;
   /** Bilingual chrome text for workspace-file menus and mermaid blocks. */
   language?: "zh" | "en";
+  /** Decorate prose text without changing code, link labels/URLs or math. */
+  renderText?: (text: string) => React.ReactNode;
 };
 
 // Order matters: GFM first, then math, so tables/task lists resolve before
@@ -70,7 +72,7 @@ const markdownRehypePlugins: NonNullable<ReactMarkdownOptions["rehypePlugins"]> 
 
 /**
  * Content-memoized: completed messages never re-parse; a re-render with the
- * same content/classNames/renderImage short-circuits before the normalize +
+ * same rendering props short-circuits before the normalize +
  * react-markdown AST pass. During streaming only the live message (whose
  * content actually grows) re-parses; its stable prefix is additionally split
  * out by ConversationStreamingResponseContent.
@@ -82,6 +84,7 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
   renderImage,
   workspaceRoot,
   language = "zh",
+  renderText,
 }: ConversationMarkdownRendererProps) {
   const normalized = normalizeConversationMarkdown(content);
   if (!normalized.trim()) {
@@ -95,7 +98,7 @@ export const ConversationMarkdownRenderer = React.memo(function ConversationMark
         remarkPlugins={markdownPlugins}
         rehypePlugins={markdownRehypePlugins}
         skipHtml
-        components={markdownComponents(classNames, duplicateImageUrls, renderImage, workspaceRoot, language)}
+        components={markdownComponents(classNames, duplicateImageUrls, renderImage, workspaceRoot, language, renderText)}
       >
         {guarded}
       </ReactMarkdown>
@@ -165,15 +168,31 @@ function normalizeConversationMarkdownLine(line: string) {
   return line;
 }
 
+const MarkdownLiteralContext = createContext(false);
+
+function MarkdownProse({ children, renderText }: {
+  children: React.ReactNode;
+  renderText: (text: string) => React.ReactNode;
+}) {
+  const literal = useContext(MarkdownLiteralContext);
+  return <>{literal ? children : React.Children.map(children, (child) =>
+    typeof child === "string" ? renderText(child) : child)}</>;
+}
+
 function markdownComponents(
   classNames: ConversationMarkdownClassNames,
   duplicateImageUrls?: Set<string>,
   renderImage?: (alt: string, url: string, duplicateImageUrls?: Set<string>) => React.ReactNode,
   workspaceRoot?: string,
   language: "zh" | "en" = "zh",
+  renderText?: (text: string) => React.ReactNode,
 ) {
+  const prose = (children: React.ReactNode) => renderText
+    ? <MarkdownProse renderText={renderText}>{children}</MarkdownProse>
+    : children;
   return {
     a({ href, children }: ComponentPropsWithoutRef<"a">) {
+      const literalChildren = <MarkdownLiteralContext.Provider value={true}>{children}</MarkdownLiteralContext.Provider>;
       const rawHref = href ?? "";
       // Workspace-file links resolve against the caller-provided session
       // workspace root and open through the desktop bridge; without a root the
@@ -186,37 +205,53 @@ function markdownComponents(
             className={classNames.inlineLink}
             language={language}
           >
-            {children}
+            {literalChildren}
           </ConversationMarkdownWorkspaceFileLink>
         );
       }
       const safeHref = safeConversationMarkdownUrl(rawHref);
       if (!safeHref) {
-        return <>{children}</>;
+        return <>{literalChildren}</>;
       }
       return (
         <a className={classNames.inlineLink} href={safeHref}>
-          {children}
+          {literalChildren}
         </a>
       );
     },
     blockquote({ children }: ComponentPropsWithoutRef<"blockquote">) {
-      return <blockquote className={classNames.markdownBlockquote}>{children}</blockquote>;
+      return <blockquote className={classNames.markdownBlockquote}>{prose(children)}</blockquote>;
     },
     code({ children }: ComponentPropsWithoutRef<"code">) {
       return <code className={classNames.inlineCode}>{children}</code>;
     },
     h1({ children }: ComponentPropsWithoutRef<"h1">) {
-      return <h3 className={`${classNames.markdownHeading} ${classNames.markdownHeading1}`}>{children}</h3>;
+      return <h3 className={`${classNames.markdownHeading} ${classNames.markdownHeading1}`}>{prose(children)}</h3>;
     },
     h2({ children }: ComponentPropsWithoutRef<"h2">) {
-      return <h3 className={`${classNames.markdownHeading} ${classNames.markdownHeading2}`}>{children}</h3>;
+      return <h3 className={`${classNames.markdownHeading} ${classNames.markdownHeading2}`}>{prose(children)}</h3>;
     },
     h3({ children }: ComponentPropsWithoutRef<"h3">) {
-      return <h4 className={`${classNames.markdownHeading} ${classNames.markdownHeading3}`}>{children}</h4>;
+      return <h4 className={`${classNames.markdownHeading} ${classNames.markdownHeading3}`}>{prose(children)}</h4>;
     },
     h4({ children }: ComponentPropsWithoutRef<"h4">) {
-      return <h4 className={`${classNames.markdownHeading} ${classNames.markdownHeading4}`}>{children}</h4>;
+      return <h4 className={`${classNames.markdownHeading} ${classNames.markdownHeading4}`}>{prose(children)}</h4>;
+    },
+    h5({ children }: ComponentPropsWithoutRef<"h5">) { return <h5>{prose(children)}</h5>; },
+    h6({ children }: ComponentPropsWithoutRef<"h6">) { return <h6>{prose(children)}</h6>; },
+    em({ children }: ComponentPropsWithoutRef<"em">) { return <em>{prose(children)}</em>; },
+    del({ children }: ComponentPropsWithoutRef<"del">) { return <del>{prose(children)}</del>; },
+    li({ children, ...props }: ComponentPropsWithoutRef<"li"> & { node?: unknown }) {
+      const { node: _node, ...attributes } = props;
+      return <li {...attributes}>{prose(children)}</li>;
+    },
+    td({ children, ...props }: ComponentPropsWithoutRef<"td"> & { node?: unknown }) {
+      const { node: _node, ...attributes } = props;
+      return <td {...attributes}>{prose(children)}</td>;
+    },
+    th({ children, ...props }: ComponentPropsWithoutRef<"th"> & { node?: unknown }) {
+      const { node: _node, ...attributes } = props;
+      return <th {...attributes}>{prose(children)}</th>;
     },
     hr() {
       return <hr className={classNames.markdownDivider} />;
@@ -238,7 +273,7 @@ function markdownComponents(
       return <ol className={classNames.responseSegmentList}>{children}</ol>;
     },
     p({ children }: ComponentPropsWithoutRef<"p">) {
-      return <p className={classNames.messageBody}>{children}</p>;
+      return <p className={classNames.messageBody}>{prose(children)}</p>;
     },
     pre({ children, node }: ComponentPropsWithoutRef<"pre"> & { node?: unknown }) {
       // Block-scope guard (ZCode-aligned granularity): a crash while rendering
@@ -266,7 +301,7 @@ function markdownComponents(
       );
     },
     strong({ children }: ComponentPropsWithoutRef<"strong">) {
-      return <strong className={classNames.inlineStrong}>{children}</strong>;
+      return <strong className={classNames.inlineStrong}>{prose(children)}</strong>;
     },
     table({ children, node }: ComponentPropsWithoutRef<"table"> & { node?: unknown }) {
       // Same block-scope guard as `pre`: table truncation/rendering runs

@@ -6,7 +6,7 @@ const styles = {
   agentMention:
     `vui-routes-chatcodingroute agentMention min-w-0 ${vuiStateCoolInfoClass}`,
   groupBubbleBody:
-    "vui-routes-chatcodingroute groupBubbleBody m-0 min-w-0 whitespace-pre-wrap [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute groupBubbleBody m-0 min-w-0 max-w-full [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [&_.markdownBody]:text-[length:var(--vui-font-chat)] [&_.messageBody]:text-[length:var(--vui-font-chat)] [&_.responseSegmentList]:text-[length:var(--vui-font-chat)] [&_.markdownBody>p:first-child]:mt-0 [&_.markdownBody>p:last-child]:mb-0 [&_img]:max-w-full [&_img]:rounded-[var(--radius-control)]",
   groupBubbleBodyCollapsed:
     "vui-routes-chatcodingroute groupBubbleBodyCollapsed min-w-0 overflow-hidden [overflow-wrap:anywhere] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:5]",
   groupBubbleToggle: "vui-routes-chatcodingroute groupBubbleToggle min-w-0 justify-self-start !px-0 !text-[var(--fg-tertiary)] max-[600px]:!min-h-11",
