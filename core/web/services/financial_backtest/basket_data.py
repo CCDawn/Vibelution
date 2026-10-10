@@ -290,6 +290,7 @@ def _restore_asset_snapshot(payload: Mapping[str, Any]) -> single_data.BacktestS
             action_dates=tuple(payload["actionDates"]),
             notice=tuple(payload["notice"]),
             corporate_actions=payload.get("corporateActions"),
+            price_limits=payload.get("priceLimits"),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise single_data.BacktestDataError("组合快照序列化资产格式无效") from exc

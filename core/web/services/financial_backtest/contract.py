@@ -18,6 +18,10 @@ from core.web.services.financial_backtest.fees import (
     VERIFIED_FEE_MODEL,
     normalize_fee_model,
 )
+from core.web.services.financial_backtest.price_limits import (
+    SUPPLIED_LIMIT_MODEL,
+    normalize_limit_model,
+)
 
 PREVIEW_TTL_SECONDS = 60 * 60
 MAX_STRATEGY_CHARS = 4_000
@@ -117,6 +121,14 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "slippageBps": _number(payload.get("slippageBps", 5), "slippageBps", 0, 100),
         "maxDecisions": _integer(payload.get("maxDecisions", MAX_DECISIONS), "maxDecisions", 1, MAX_DECISIONS),
     }
+    limit_model = normalize_limit_model(payload)
+    supplied_limits = payload.get("dailyPriceLimits")
+    if limit_model == SUPPLIED_LIMIT_MODEL:
+        if not isinstance(supplied_limits, list) or not 1 <= len(supplied_limits) <= 10:
+            raise BacktestInputError("导入限价模式需要dailyPriceLimits，逐一覆盖全部回测股票")
+        params["priceLimitModel"] = limit_model
+    elif supplied_limits is not None:
+        raise BacktestInputError("提供逐日限价时必须显式选择导入限价模型")
     fee_model = normalize_fee_model(payload)
     # Omission remains the exact pre-fee legacy contract and hash. Only the
     # opt-in model is persisted as a parameter; an explicit legacy selection
@@ -154,6 +166,7 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "dataSource": data_source,
         "researchInput": research_input,
         "corporateActionPolicy": action_policy,
+        **({"dailyPriceLimits": supplied_limits} if limit_model == SUPPLIED_LIMIT_MODEL else {}),
     }
 
 

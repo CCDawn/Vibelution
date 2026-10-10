@@ -928,6 +928,7 @@ def _restore_snapshot(payload: Mapping[str, Any]) -> data.BacktestSnapshot | bas
             action_dates=tuple(str(item) for item in payload.get("actionDates", [])),
             notice=tuple(str(item) for item in payload.get("notice", [])),
             corporate_actions=payload.get("corporateActions"),
+            price_limits=payload.get("priceLimits"),
         )
         validator = getattr(data, "validate_snapshot", None)
         if callable(validator):

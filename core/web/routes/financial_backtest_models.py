@@ -21,6 +21,31 @@ from core.web.services.financial_backtest.fees import (
 )
 
 
+class DailyPriceLimitSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: StrictStr = Field(min_length=1, max_length=2000)
+    sha256: StrictStr = Field(min_length=64, max_length=64)
+    fetchedAt: StrictStr = Field(min_length=20, max_length=40)
+
+
+class DailyPriceLimitRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date: StrictStr = Field(min_length=10, max_length=10)
+    upper: StrictStr | None = Field(max_length=24)
+    lower: StrictStr | None = Field(max_length=24)
+
+
+class DailyPriceLimitInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemaVersion: StrictInt = Field(ge=1, le=1)
+    symbol: StrictStr = Field(min_length=8, max_length=8)
+    source: DailyPriceLimitSource
+    records: list[DailyPriceLimitRecord] = Field(min_length=1, max_length=5000)
+
+
 class FinancialBacktestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -35,6 +60,8 @@ class FinancialBacktestRequest(BaseModel):
     maxParticipationPct: StrictFloat | StrictInt = Field(default=1, ge=0.1, le=100, allow_inf_nan=False)
     quantityRuleVersion: Literal["ashare_quantity_v2", "legacy_100_v1"] = "ashare_quantity_v2"
     feeModel: Literal[LEGACY_FEE_MODEL, VERIFIED_FEE_MODEL] | None = None
+    priceLimitModel: Literal["candidate_bands_v1", "supplied_daily_limits_v1"] | None = None
+    dailyPriceLimits: list[DailyPriceLimitInput] | None = Field(default=None, min_length=1, max_length=10)
     decisionInterval: StrictInt = Field(default=5, ge=1, le=252)
     commissionBps: StrictFloat | StrictInt = Field(default=3, ge=0, le=100, allow_inf_nan=False)
     minimumCommission: StrictFloat | StrictInt = Field(default=5, ge=0, le=10_000, allow_inf_nan=False)
@@ -169,6 +196,7 @@ class FinancialBacktestParams(BaseModel):
     maxParticipationPct: float | None = Field(default=None, ge=0.1, le=100)
     quantityRuleVersion: Literal["ashare_quantity_v2", "legacy_100_v1"] | None = None
     feeModel: Literal[LEGACY_FEE_MODEL, VERIFIED_FEE_MODEL] | None = None
+    priceLimitModel: Literal["candidate_bands_v1", "supplied_daily_limits_v1"] | None = None
     corporateActionPolicy: Literal["block", "verified_cash_dividends"] | None = None
     decisionInterval: int
     commissionBps: float
@@ -773,7 +801,7 @@ class FinancialBacktestExport(BaseModel):
     agentId: str
     runId: str
     format: Literal["json", "csv"]
-    schemaVersion: Literal[1, 2, 3, 4, 5] = 1
+    schemaVersion: Literal[1, 2, 3, 4, 5, 6] = 1
     fileName: str
     mediaType: str
     encoding: Literal["utf8", "base64"]

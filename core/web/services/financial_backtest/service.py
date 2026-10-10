@@ -52,6 +52,9 @@ from core.web.services.financial_backtest.store import (
     default_store,
 )
 
+from .limit_snapshot import bind_price_limits, validate_limit_binding
+from .price_limits import SUPPLIED_LIMIT_MODEL, normalize_limit_model
+
 _PROFILE_ID = "financial_ai_backtest"
 _ALLOWED_ACTION_STATUSES = {"clear", "factor_check_passed", "verified_cash_dividends"}
 _TERMINAL_STATUSES = {"stopped", "paused_unknown", "completed", "failed", "blocked"}
@@ -268,6 +271,13 @@ def create_financial_backtest_fork_preview(
     }
     if "feeModel" in source_params:
         request_payload["feeModel"] = source_params["feeModel"]
+    if "priceLimitModel" in source_params:
+        request_payload["priceLimitModel"] = source_params["priceLimitModel"]
+        assets = list(snapshot.assets.values()) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot]
+        request_payload["dailyPriceLimits"] = [
+            {key: value for key, value in asset.price_limits.items() if key != "artifactHash"}
+            for asset in assets if asset.price_limits is not None
+        ]
     request_payload.update(selected_parameter_overrides)
     request = normalize_preview_request(request_payload)
     # New previews use current board rules; forks must retain the exact source contract.
@@ -353,6 +363,7 @@ def _create_preview(
                 )
             )
             snapshot = loader(request)
+        snapshot = bind_price_limits(snapshot, request)
         asset_snapshots = [snapshot.assets[symbol] for symbol in snapshot.symbols]
         if any(asset.actions_status not in _ALLOWED_ACTION_STATUSES for asset in asset_snapshots):
             raise FinancialBacktestConflict("组合中有股票未通过公司行动/复权完整性检查，当前行情不能用于AI回测")
@@ -372,6 +383,7 @@ def _create_preview(
     else:
         if snapshot is None:
             snapshot = (data_loader or data.prepare_data)(request)
+        snapshot = bind_price_limits(snapshot, request)
         if snapshot.actions_status not in _ALLOWED_ACTION_STATUSES:
             raise FinancialBacktestConflict("公司行动/复权完整性检查未通过，当前行情不能用于AI回测")
         if schedule is None:
@@ -570,6 +582,7 @@ def _validate_action_binding(
 ) -> None:
     assets = list(snapshot.assets.values()) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot]
     params = record.get("params") if isinstance(record.get("params"), Mapping) else {}
+    validate_limit_binding(snapshot, params)
     policy = params.get("corporateActionPolicy", "block")
     if policy not in {"block", "verified_cash_dividends"}:
         raise FinancialBacktestStoreError("回测公司行动策略无效")
@@ -1088,8 +1101,9 @@ def export_financial_backtest_run(
         run.get("params", {}).get("corporateActionPolicy")
         == "verified_cash_dividends"
     )
+    supplied_limits = normalize_limit_model(run.get("params") or {}) == SUPPLIED_LIMIT_MODEL
     include_single_snapshot = not _is_basket_run(run) and (
-        verified_fee_model or verified_cash_dividends
+        verified_fee_model or verified_cash_dividends or supplied_limits
     )
     frozen_research = _load_research_snapshot(agent_id, run, selected_store)
     if frozen_research is not None:
@@ -1098,6 +1112,12 @@ def export_financial_backtest_run(
         schema_version = 5 if verified_fee_model else 4
     if verified_fee_model:
         schema_version = 5
+    if supplied_limits:
+        schema_version = 6
+    limit_assets = []
+    if supplied_limits:
+        limit_snapshot = _load_run_snapshot(agent_id, run, selected_store)
+        limit_assets = list(limit_snapshot.assets.values()) if isinstance(limit_snapshot, basket_data.BasketSnapshot) else [limit_snapshot]
     if normalized_format == "json":
         export_payload = {"schemaVersion": schema_version, **projected}
         if frozen_research is not None:
@@ -1280,7 +1300,19 @@ def export_financial_backtest_run(
                 audit = projected.get(field)
                 if audit is not None:
                     writer.writerow([account, "", "audit", _csv_safe(json.dumps(audit, ensure_ascii=False, sort_keys=True))])
+        if limit_assets:
+            writer.writerow([])
+            writer.writerow(["priceLimitModel", SUPPLIED_LIMIT_MODEL])
+            writer.writerow(["dailyPriceLimits", "symbol", "date", "upper", "lower", "artifactHash", "sourceUrl", "sourceHash", "fetchedAt", "verification"])
+            for asset in limit_assets:
+                artifact = asset.price_limits
+                for row in artifact["records"]:
+                    writer.writerow(["dailyPriceLimits", asset.symbol, row["date"], row["upper"], row["lower"], artifact["artifactHash"], _csv_safe(artifact["source"]["url"]), artifact["source"]["sha256"], artifact["source"]["fetchedAt"], "supplied_not_independently_verified"])
+                    if output.tell() > MAX_RESULT_CHARS:
+                        raise FinancialBacktestConflict("回测CSV导出超过安全大小限制，未生成截断文件")
         content = output.getvalue()
+        if supplied_limits and len(content) > MAX_RESULT_CHARS:
+            raise FinancialBacktestConflict("回测CSV导出超过安全大小限制，未生成截断文件")
         media_type = "text/csv"
         filename = f"backtest-{run['runId']}.csv"
     return {
@@ -1558,6 +1590,8 @@ def _public_params(params: Mapping[str, Any]) -> dict[str, Any]:
         result["corporateActionPolicy"] = params["corporateActionPolicy"]
     if "feeModel" in params:
         result["feeModel"] = params["feeModel"]
+    if "priceLimitModel" in params:
+        result["priceLimitModel"] = params["priceLimitModel"]
     return result
 
 

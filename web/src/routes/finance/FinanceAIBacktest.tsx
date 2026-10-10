@@ -1,3 +1,4 @@
+import { isFetchJsonHttpError } from "../../api/client";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { FinanceBacktestAdvancedEvaluation } from "./FinanceBacktestAdvancedEvaluation";
@@ -6,7 +7,7 @@ import { FinanceBacktestRobustness } from "./FinanceBacktestRobustness";
 import { FinanceWalkForward } from "./FinanceWalkForward";
 import { ChevronDown, ChevronRight, Download, GitCompareArrows, Play, RefreshCw, Square, X } from "lucide-react";
 import { downloadAIBacktest, fetchAIBacktest, fetchAIBacktests, financialBacktestKeys, previewAIBacktest, resumeAIBacktest, startAIBacktest, stopAIBacktest } from "../../api/financialBacktests";
-import type { AIBacktestDateCoverage, AIBacktestDividendAudit, AIBacktestParams, AIBacktestPreview, AIBacktestRequest, AIBacktestRun } from "../../api/types/financialBacktests";
+import type { AIBacktestDailyPriceLimits, AIBacktestDateCoverage, AIBacktestDividendAudit, AIBacktestParams, AIBacktestPreview, AIBacktestRequest, AIBacktestRun } from "../../api/types/financialBacktests";
 import type { StockIdentity } from "../../api/types/financialMarket";
 import { VButton, VChip, VDenseTable, VDialog, VInput, VSelect, VStateSurface, VSurface, VTextarea } from "../../components/vui";
 import { FinanceBacktestComparison } from "./FinanceBacktestComparison";
@@ -18,8 +19,21 @@ const ago = (days: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia
 const active = new Set(["queued", "running", "stop_requested"]);
 const labels: Record<AIBacktestRun["status"], string> = { queued: "排队中", running: "运行中", stop_requested: "正在停止", stopped: "已停止", blocked: "条件不满足", paused_unknown: "调用结果待确认", failed: "失败", completed: "已完成" };
 const pct = (value: number | null | undefined) => typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)}%` : "—";
-const orderLabels: Record<string, string> = { below_board_minimum_buy: "不足板块最低买入量", volume_participation_below_minimum_order: "成交量额度不足最低申报量", order_quantity_below_minimum: "申报额度不足最低数量", insufficient_cash_for_minimum_order: "资金不足最低申报量", volume_participation_below_sell_increment: "成交量额度不足卖出单位", order_quantity_below_sell_increment: "申报额度不足卖出单位", below_minimum_sell_order: "不足最低卖出量", no_sellable_quantity: "没有可卖数量", order_and_volume_quantity_limit: "申报与成交量上限", order_quantity_limit: "单笔申报数量上限", board_sell_increment_limit: "卖出数量单位限制", filled: "已成交", partial_fill: "部分成交", daily_volume_participation_limit: "日成交量上限", volume_participation_below_one_lot: "日成交量额度不足一手", rejected: "未成交", no_action: "无需调仓", next_session_open: "下日开盘成交", zero_volume_or_suspended: "零成交量或停牌", one_price_at_candidate_limit_up: "疑似一字涨停", one_price_at_candidate_limit_down: "疑似一字跌停", one_price_bar_unverified: "一字行情，无法核验成交", insufficient_cash_for_one_lot: "资金不足一手", no_sellable_board_lot: "没有可卖整手", target_shares_unchanged: "目标仓位未变", cash_limited_board_lots: "可用资金限制成交股数", same_cost_buy_and_hold_benchmark: "同成本买入持有" };
-const message = (cause: unknown) => cause instanceof Error ? cause.message : "操作失败，请重试";
+const orderLabels: Record<string, string> = { open_at_supplied_limit_up: "开盘触及导入涨停价", open_at_supplied_limit_down: "开盘触及导入跌停价", below_board_minimum_buy: "不足板块最低买入量", volume_participation_below_minimum_order: "成交量额度不足最低申报量", order_quantity_below_minimum: "申报额度不足最低数量", insufficient_cash_for_minimum_order: "资金不足最低申报量", volume_participation_below_sell_increment: "成交量额度不足卖出单位", order_quantity_below_sell_increment: "申报额度不足卖出单位", below_minimum_sell_order: "不足最低卖出量", no_sellable_quantity: "没有可卖数量", order_and_volume_quantity_limit: "申报与成交量上限", order_quantity_limit: "单笔申报数量上限", board_sell_increment_limit: "卖出数量单位限制", filled: "已成交", partial_fill: "部分成交", daily_volume_participation_limit: "日成交量上限", volume_participation_below_one_lot: "日成交量额度不足一手", rejected: "未成交", no_action: "无需调仓", next_session_open: "下日开盘成交", zero_volume_or_suspended: "零成交量或停牌", one_price_at_candidate_limit_up: "疑似一字涨停", one_price_at_candidate_limit_down: "疑似一字跌停", one_price_bar_unverified: "一字行情，无法核验成交", insufficient_cash_for_one_lot: "资金不足一手", no_sellable_board_lot: "没有可卖整手", target_shares_unchanged: "目标仓位未变", cash_limited_board_lots: "可用资金限制成交股数", same_cost_buy_and_hold_benchmark: "同成本买入持有" };
+function message(cause: unknown, zh: boolean) {
+  if (isFetchJsonHttpError(cause) && cause.status === 422 && cause.details && typeof cause.details === "object") {
+    const detail = (cause.details as { detail?: unknown }).detail;
+    if (Array.isArray(detail)) {
+      const names: Record<string, string> = zh
+        ? { dailyPriceLimits: "逐日限价文件", source: "来源", url: "网址", sha256: "摘要", fetchedAt: "采集时间", records: "每日记录", date: "日期", upper: "涨停价", lower: "跌停价", symbol: "股票代码", schemaVersion: "文件版本" }
+        : { dailyPriceLimits: "Daily limit file", source: "source", url: "URL", sha256: "hash", fetchedAt: "fetch time", records: "daily records", date: "date", upper: "upper limit", lower: "lower limit", symbol: "stock code", schemaVersion: "file version" };
+      const first = detail.find(item => item && typeof item === "object" && Array.isArray(item.loc));
+      const field = first?.loc.filter((part: unknown) => typeof part === "string" && part !== "body").map((part: string) => names[part] ?? (zh ? "参数" : "field")).join(" · ");
+      return zh ? `${field || "回测参数"}缺失或格式不正确，请修改后重试。` : `${field || "Backtest input"} is missing or invalid. Correct it and retry.`;
+    }
+  }
+  return cause instanceof Error ? cause.message : (zh ? "操作失败，请重试" : "Operation failed. Please retry.");
+}
 const isAShare = (symbol: string) => /^(?:sh|sz|bj)\d{6}$/i.test(symbol);
 const statusLabel = (status: AIBacktestRun["status"], zh: boolean) => zh ? labels[status] : ({ queued: "Queued", running: "Running", stop_requested: "Stopping", stopped: "Stopped", blocked: "Blocked", paused_unknown: "Uncertain call", failed: "Failed", completed: "Completed" } satisfies Record<AIBacktestRun["status"], string>)[status];
 const symbolsForRun = (run: Pick<AIBacktestRun, "symbol" | "symbols">) => run.symbols?.length ? run.symbols : run.symbol ? [run.symbol] : [];
@@ -32,6 +46,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   const client = useQueryClient();
   const [form, setForm] = useState<BacktestForm>({ startDate: ago(90), endDate: ago(1), strategy: "只根据已完成的历史日线分析趋势和风险，控制回撤，选择下一交易日的目标仓位；证据不足时保持现金。", initialCash: 100000, maxPositionPct: 80, maxParticipationPct: 1, researchInput: "price_only", decisionInterval: 5, commissionBps: 3, minimumCommission: 5, slippageBps: 5, maxDecisions: 30, maxTokens: 500000 });
   const [scope, setScope] = useState<"single" | "portfolio">("single");
+  const [limitDrafts, setLimitDrafts] = useState<AIBacktestDailyPriceLimits[]>([]);
   const [symbolsText, setSymbolsText] = useState(stock.symbol);
   const [preview, setPreview] = useState<AIBacktestPreview | null>(null), [selected, setSelected] = useState(""), [pending, setPending] = useState(""), [error, setError] = useState(""), [confirmRetry, setConfirmRetry] = useState(false), [forkOpen, setForkOpen] = useState(false);
   const gate = useRef(false), generation = useRef(0), mounted = useRef(true), startRequest = useRef({ previewId: "", id: "" }), portfolioEdited = useRef(false), previousStock = useRef(stock.symbol);
@@ -49,7 +64,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   useEffect(() => {
     if (previousStock.current === stock.symbol) return;
     previousStock.current = stock.symbol;
-    generation.current += 1; setPreview(null); setError("");
+    generation.current += 1; setPreview(null); setError(""); setLimitDrafts([]);
     if (!portfolioEdited.current) setSymbolsText(stock.symbol);
   }, [stock.symbol]);
 
@@ -70,7 +85,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   }
   function buildRequest(): AIBacktestRequest {
     const { startDate, endDate, outOfSampleStartDate, ...params } = form;
-    const request = { ...params, startDate, endDate, ...(outOfSampleStartDate ? { outOfSampleStartDate } : {}) };
+    const request = { ...params, startDate, endDate, ...(outOfSampleStartDate ? { outOfSampleStartDate } : {}), ...(params.priceLimitModel === "supplied_daily_limits_v1" ? { dailyPriceLimits: limitDrafts } : {}) };
     return scope === "single" ? { ...request, symbol: stock.symbol } : { ...request, symbols: parsed.symbols };
   }
   function requestSymbols(request: AIBacktestRequest): string[] {
@@ -83,7 +98,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   async function perform(kind: string, work: () => Promise<void>) {
     if (gate.current) return;
     gate.current = true; setPending(kind); setError("");
-    try { await work(); } catch (cause) { if (mounted.current) setError(message(cause)); }
+    try { await work(); } catch (cause) { if (mounted.current) setError(message(cause, zh)); }
     finally { gate.current = false; if (mounted.current) setPending(""); }
   }
   async function reconcile(run: AIBacktestRun) {
@@ -102,6 +117,19 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
   function addCurrentStock() {
     if (!isAShare(stock.symbol) || parsed.symbols.includes(stock.symbol)) return;
     editSymbols([...parsed.symbols, stock.symbol].join(", "));
+  }
+  async function importLimits(file: File | undefined) {
+    const expectedGeneration = ++generation.current;
+    setPreview(null); setError(""); setLimitDrafts([]);
+    if (!file) return;
+    try {
+      if (file.size > 4_000_000) throw new Error(zh ? "限价文件不能超过 4 MB" : "Limit file must be under 4 MB");
+      const parsedFile: unknown = JSON.parse(await file.text());
+      if (!Array.isArray(parsedFile) || !parsedFile.length || parsedFile.length > 10 || parsedFile.some(item => !item || typeof item !== "object" || item.schemaVersion !== 1 || typeof item.symbol !== "string" || !item.source || !Array.isArray(item.records) || !item.records.length || item.records.length > 5000)) throw new Error(zh ? "限价文件格式错误，需要逐股票的来源和每日限价记录" : "Invalid file: supply per-stock sources and daily limit records");
+      if (mounted.current && generation.current === expectedGeneration) setLimitDrafts(parsedFile as AIBacktestDailyPriceLimits[]);
+    } catch (cause) {
+      if (mounted.current && generation.current === expectedGeneration) setError(message(cause, zh));
+    }
   }
   return <div className={styles.page}>
     <p className={styles.note}>{zh ? "历史日线 → AI目标仓位 → 下日开盘撮合。独立模拟账户，不连接券商；支持单股或组合、停止续跑和结果导出。" : "Historical bars → AI target weights → next-open execution. Independent simulation, no broker connection; single-stock or basket runs can be stopped, resumed and exported."}</p>
@@ -128,6 +156,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       {number("maxPositionPct", scope === "portfolio" ? (zh ? "单股上限 %" : "Per-stock cap %") : (zh ? "仓位上限 %" : "Max position %"), 0, 100)}
       <label className={styles.field}>{zh ? "决策频率" : "Frequency"}<VSelect aria-label="AI回测决策频率" selectedKey={String(form.decisionInterval)} isDisabled={busy} className={styles.frequency} options={[{ id: "1", label: zh ? "每个交易日" : "Daily" }, { id: "5", label: zh ? "每5个交易日" : "Every 5 bars" }, { id: "20", label: zh ? "每20个交易日" : "Every 20 bars" }]} onSelectionChange={key => edit("decisionInterval", Number(key))} /></label>
       <label className={styles.field}>{zh ? "费用口径" : "Fee policy"}<VSelect aria-label="AI回测费用口径" selectedKey={form.feeModel ?? "legacy_commission_stamp_v1"} isDisabled={busy} options={[{ id: "legacy_commission_stamp_v1", label: zh ? "原有简化费用" : "Legacy simplified fees" }, { id: "verified_ashare_fees_v1", label: zh ? "沪深历史分项" : "Historical SH / SZ fees" }]} onSelectionChange={key => edit("feeModel", String(key) as "legacy_commission_stamp_v1" | "verified_ashare_fees_v1")} /></label>
+      <label className={styles.field}>{zh ? "限价规则" : "Price limits"}<VSelect aria-label="AI回测限价规则" selectedKey={form.priceLimitModel ?? "candidate_bands_v1"} isDisabled={busy} options={[{ id: "candidate_bands_v1", label: zh ? "常见幅度估算" : "Candidate bands" }, { id: "supplied_daily_limits_v1", label: zh ? "导入逐日限价" : "Import daily limits" }]} onSelectionChange={key => edit("priceLimitModel", String(key) as "candidate_bands_v1" | "supplied_daily_limits_v1")} /></label>
       {number("commissionBps", form.feeModel === "verified_ashare_fees_v1" ? (zh ? "含规费佣金 bps" : "All-in commission bps") : (zh ? "佣金 bps" : "Commission bps"), 0, 100, 0.1)}
       {number("minimumCommission", zh ? "最低佣金" : "Minimum fee", 0, 100)}
       {number("slippageBps", zh ? "滑点 bps" : "Slippage bps", 0, 100, 0.1)}
@@ -137,8 +166,12 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       {number("maxTokens", zh ? "Token预算" : "Token budget", 1000, 2000000, 1000)}
     </div>
     <p className={styles.note}>{zh ? "样本外日期留空时按 80/20 切分；预检会冻结实际交易日边界。" : "Leave the holdout date empty for an 80/20 split; preview freezes the actual trading-day boundary."}</p>
+    {form.priceLimitModel === "supplied_daily_limits_v1" ? <div className={styles.panel}>
+      <label className={styles.field}>{zh ? "逐日限价文件" : "Daily limit file"}<VInput aria-label="AI回测逐日限价文件" type="file" accept=".json,application/json" disabled={busy} onChange={event => void importLimits(event.target.files?.[0])} /></label>
+      <span className={styles.note}>{zh ? `已载入 ${limitDrafts.length} 只股票；须覆盖全部回测日期，导入来源未经独立核验。` : `${limitDrafts.length} assets loaded; every session is required. Imported sources are not independently verified.`}</span>
+    </div> : null}
     <label className={styles.panel}><span className={styles.status}>{zh ? "策略指令" : "Strategy instruction"}</span><VTextarea aria-label="AI回测策略指令" value={form.strategy} maxLength={2000} disabled={busy} onChange={event => edit("strategy", event.target.value)} /></label>
-    <div className={styles.row}><VButton variant="secondary" isPending={pending === "preview"} isDisabled={busy || disabled || !valid} onPress={() => void perform("preview", async () => {
+    <div className={styles.row}><VButton variant="secondary" isPending={pending === "preview"} isDisabled={busy || disabled || !valid || (form.priceLimitModel === "supplied_daily_limits_v1" && !limitDrafts.length)} onPress={() => void perform("preview", async () => {
       const expectedGeneration = generation.current, request = buildRequest(), expectedSymbols = requestSymbols(request);
       const data = await previewAIBacktest(agentId, request);
       if (!mounted.current || generation.current !== expectedGeneration) return;

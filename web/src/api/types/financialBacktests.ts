@@ -6,6 +6,7 @@ export type AIBacktestParams = {
   quantityRuleVersion?: "ashare_quantity_v2" | "legacy_100_v1" | null;
   corporateActionPolicy?: "block" | "verified_cash_dividends" | null;
   feeModel?: "legacy_commission_stamp_v1" | "verified_ashare_fees_v1" | null;
+  priceLimitModel?: "candidate_bands_v1" | "supplied_daily_limits_v1" | null;
   decisionInterval: number;
   commissionBps: number;
   minimumCommission: number;
@@ -15,12 +16,20 @@ export type AIBacktestParams = {
   outOfSampleStartDate?: string;
 };
 
+export type AIBacktestDailyPriceLimits = {
+  schemaVersion: 1;
+  symbol: string;
+  source: { url: string; sha256: string; fetchedAt: string };
+  records: Array<{ date: string; upper: string | null; lower: string | null }>;
+};
+
 type AIBacktestRequestBase = AIBacktestParams & {
   startDate: string;
   endDate: string;
   modelId?: string;
   dataSource?: "tencent" | "eastmoney" | "sina" | "auto";
   researchInput?: "price_only" | "announcements" | "financial_reports";
+  dailyPriceLimits?: AIBacktestDailyPriceLimits[];
 };
 
 export type AIBacktestRequest = AIBacktestRequestBase &
@@ -526,7 +535,7 @@ export type AIBacktestSummary = {
 
 export type AIBacktestPage = { items: AIBacktestSummary[]; nextCursor: string | null };
 export type AIBacktestExport = {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
   fileName: string;
   mediaType: string;
   encoding: "utf8" | "base64";

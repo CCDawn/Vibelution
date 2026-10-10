@@ -18,6 +18,8 @@ from core.web.services.financial_backtest.fees import (
     normalize_fee_model,
 )
 
+from .price_limits import SUPPLIED_LIMIT_MODEL, normalize_limit_model
+
 COMPARISON_CONTRACT_VERSION = "finance-ai-backtest-v1"
 COMPARISON_NOTICE = (
     "本清单仅比较同一冻结数据、共同参数与回测契约下的历史结果；"
@@ -442,6 +444,9 @@ def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
         parameters["feePolicyAudit"] = dict(fee_audit)
     elif fee_model != LEGACY_FEE_MODEL or fee_audit is not None:
         raise ValueError("feePolicyAudit mismatch")
+    limit_model = normalize_limit_model(params)
+    if limit_model == SUPPLIED_LIMIT_MODEL:
+        parameters["priceLimitModel"] = limit_model
     max_tokens = _canonical_integer(record.get("maxTokens"), "maxTokens")
     params_max_tokens = params.get("maxTokens")
     if params_max_tokens is not None and max_tokens != _canonical_integer(params_max_tokens, "params.maxTokens"):
@@ -802,6 +807,11 @@ def _compare_shared_evidence(
             "corporateActionPolicy",
             "corporate_action_policy_mismatch",
             "公司行动记账规则不同，不能直接比较。",
+        ),
+        (
+            "priceLimitModel",
+            "price_limit_model_mismatch",
+            "逐日限价模型不同，不能直接比较。",
         ),
         (
             "feeModel",

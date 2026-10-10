@@ -28,6 +28,9 @@ from core.web.services.financial_backtest.quantity_rules import (
     sell_target_shares,
 )
 
+from .limit_snapshot import LIMIT_NOTICE, limit_record, validate_limit_binding
+from .price_limits import SUPPLIED_LIMIT_MODEL, locked_reason, normalize_limit_model
+
 _MAX_TRADING_DAYS = 5_000
 _MAX_DECISIONS = 500
 _LOT_SIZE = 100
@@ -140,6 +143,7 @@ def _normalize_params(params: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise BacktestInputError("quantityRuleVersion不是支持的撮合股数规则")
     fee_model = fees.normalize_fee_model(params)
+    limit_model = normalize_limit_model(params)
     normalized = {
         "initialCash": initial_cash,
         "maxPositionPct": max_position_pct,
@@ -154,6 +158,8 @@ def _normalize_params(params: Mapping[str, Any]) -> dict[str, Any]:
         normalized["maxParticipationPct"] = max_participation_pct
     if fee_model == fees.VERIFIED_FEE_MODEL:
         normalized["feeModel"] = fee_model
+    if limit_model == SUPPLIED_LIMIT_MODEL:
+        normalized["priceLimitModel"] = limit_model
     return normalized
 
 
@@ -166,6 +172,7 @@ def build_decision_schedule(
         raise BacktestInputError("回测区间需要1到5000根完整交易日K线")
     supplied_params = {} if params is None else params
     normalized = _normalize_params(supplied_params)
+    validate_limit_binding(snapshot, supplied_params)
     _validate_fee_window(
         snapshot.symbol, snapshot.start_date, snapshot.end_date, supplied_params
     )
@@ -365,10 +372,13 @@ def _limit_rates(symbol: str) -> tuple[Decimal, ...]:
 
 
 def _is_locked(
-    candle: Candle, previous_close: float | Decimal | None, side: str, symbol: str
+    candle: Candle, previous_close: float | Decimal | None, side: str, symbol: str,
+    price_limit_record: Mapping[str, Any] | None = None,
 ) -> str | None:
     if candle.volume <= 0:
         return "zero_volume_or_suspended"
+    if price_limit_record is not None:
+        return locked_reason(candle, side, price_limit_record)
     if previous_close is None or previous_close <= 0:
         return None
     flat = max(candle.open, candle.high, candle.low, candle.close) - min(
@@ -545,7 +555,9 @@ def _make_order(
         "slippageCost": float(_money(Decimal(filled_shares) * slippage_cost)),
         "tPlusOne": True,
         "limitStatus": (
-            "candidate_only_unverified"
+            "supplied_bounds_unverified"
+            if reason.startswith("open_at_supplied_limit_")
+            else "candidate_only_unverified"
             if reason.startswith("one_price_at_candidate_limit_")
             else "unverified"
         ),
@@ -569,6 +581,7 @@ def _execute_target(
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
     fee_model: str = fees.LEGACY_FEE_MODEL,
+    price_limit_record: Mapping[str, Any] | None = None,
 ) -> tuple[Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal]:
     if target_weight > max_position_pct / Decimal(100):
         raise BacktestDecisionError("AI目标仓位超过本次最大仓位上限")
@@ -615,7 +628,7 @@ def _execute_target(
 
     side = "buy" if delta > 0 else "sell"
     fill_price, per_share_slippage = _execution_price(execution, side, slippage_rate)
-    rejection = _is_locked(execution, previous_close, side, symbol)
+    rejection = _is_locked(execution, previous_close, side, symbol, price_limit_record)
     requested = abs(delta)
     if rejection:
         order = _make_order(
@@ -836,9 +849,10 @@ def _execute_benchmark(
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
     fee_model: str = fees.LEGACY_FEE_MODEL,
+    price_limit_record: Mapping[str, Any] | None = None,
 ) -> tuple[Decimal, int, dict[str, Any]]:
     fill_price, per_share_slippage = _execution_price(execution, "buy", slippage_rate)
-    rejection = _is_locked(execution, previous_close, "buy", symbol)
+    rejection = _is_locked(execution, previous_close, "buy", symbol, price_limit_record)
     if rejection:
         return initial_cash, 0, _make_order(
             signal_date=execution.date, candle=execution, side="buy",
@@ -1106,6 +1120,7 @@ def _simulate_prefix(
                 max_participation_pct=max_participation_pct,
                 quantity_rule_version=quantity_rule_version,
                 fee_model=fee_model,
+                price_limit_record=limit_record(snapshot, candle.date),
             )
             benchmark_orders.append(candidate_order)
             if candidate_order.get("status") in {"filled", "partial_fill"}:
@@ -1132,6 +1147,7 @@ def _simulate_prefix(
                 max_participation_pct=max_participation_pct,
                 quantity_rule_version=quantity_rule_version,
                 fee_model=fee_model,
+                price_limit_record=limit_record(snapshot, candle.date),
             )
             orders.append(order)
             total_commission += commission
@@ -1278,6 +1294,10 @@ def _simulate_prefix(
         notices.append(
             f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%，并按板块数量规则向下调整；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
         )
+    if snapshot.price_limits is not None:
+        notices[2] = LIMIT_NOTICE
+        if LIMIT_NOTICE in snapshot.notice:
+            notices.pop(2)
     result = {
         "status": "completed",
         "symbol": snapshot.symbol,
@@ -1360,6 +1380,7 @@ def validate_benchmark(
             max_participation_pct=normalized.get("maxParticipationPct"),
             quantity_rule_version=normalized["quantityRuleVersion"],
             fee_model=normalized.get("feeModel", fees.LEGACY_FEE_MODEL),
+            price_limit_record=limit_record(snapshot, execution.date),
         )
         if order.get("status") in {"filled", "partial_fill"}:
             return

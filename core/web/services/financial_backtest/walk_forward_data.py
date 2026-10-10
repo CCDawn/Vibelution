@@ -74,6 +74,10 @@ def _slice_single_snapshot(
     end_date = rows[-1].date
     all_rows = tuple(warmup) + tuple(rows)
     actions = None
+    limits = None
+    if snapshot.price_limits is not None:
+        from .price_limits import slice_price_limits
+        limits = slice_price_limits(snapshot.price_limits, tuple(row.date for row in rows))
     action_dates = snapshot.action_dates
     if snapshot.corporate_actions is not None:
         from .cash_action_snapshot import slice_action_snapshot
@@ -96,9 +100,10 @@ def _slice_single_snapshot(
         end_date=end_date,
         candles=tuple(rows),
         warmup_candles=tuple(warmup),
-        data_hash=data._stable_hash(all_rows, snapshot.symbol, start_date, end_date, actions),
+        data_hash=data._stable_hash(all_rows, snapshot.symbol, start_date, end_date, actions, limits),
         coverage=coverage,
         corporate_actions=actions,
+        price_limits=limits,
         action_dates=action_dates,
     )
     data.validate_snapshot(sliced)

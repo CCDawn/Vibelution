@@ -1,3 +1,4 @@
+import { FetchJsonHttpError } from "../../api/client";
 // @vitest-environment happy-dom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -99,6 +100,45 @@ it("submits the selected free Sina source without starting the model", async () 
   await act(async () => button("检查数据与预算").click());
   expect(api.previewAIBacktest).toHaveBeenCalledWith("a", expect.objectContaining({ dataSource: "sina" }));
   expect(api.startAIBacktest).not.toHaveBeenCalled();
+});
+
+it("requires a bounded daily limit file and submits it only after explicit selection", async () => {
+  vi.mocked(api.previewAIBacktest).mockResolvedValue(preview);
+  await render();
+  await chooseSelectOption("AI回测限价规则", "导入逐日限价");
+  expect(button("检查数据与预算").disabled).toBe(true);
+  expect(api.previewAIBacktest).not.toHaveBeenCalled();
+  const draft = [{ schemaVersion: 1, symbol: stock.symbol, source: { url: "https://www.sse.com.cn/market/", sha256: "a".repeat(64), fetchedAt: "2026-09-01T00:00:00Z" }, records: [{ date: "2026-08-31", upper: "11.00", lower: "9.00" }] }];
+  const input = node.querySelector<HTMLInputElement>('input[aria-label="AI回测逐日限价文件"]')!;
+  const file = new File([JSON.stringify(draft)], "daily-limits.json", { type: "application/json" });
+  Object.defineProperty(file, "text", { value: async () => JSON.stringify(draft) });
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(node.textContent).toContain("已载入 1 只股票");
+  expect(node.textContent).toContain("导入来源未经独立核验");
+  await act(async () => button("检查数据与预算").click());
+  expect(api.previewAIBacktest).toHaveBeenCalledWith("a", expect.objectContaining({ priceLimitModel: "supplied_daily_limits_v1", dailyPriceLimits: draft }));
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
+  await chooseSelectOption("AI回测限价规则", "常见幅度估算");
+  expect(node.textContent).not.toContain("开始AI回测");
+  await act(async () => button("检查数据与预算").click());
+  expect(vi.mocked(api.previewAIBacktest).mock.lastCall?.[1]).not.toHaveProperty("dailyPriceLimits");
+});
+
+it("rejects an oversized limit file without reading or preflighting it", async () => {
+  await render();
+  await chooseSelectOption("AI回测限价规则", "导入逐日限价");
+  const input = node.querySelector<HTMLInputElement>('input[aria-label="AI回测逐日限价文件"]')!;
+  const file = new File(["{}"], "huge.json");
+  const read = vi.fn(async () => "{}");
+  Object.defineProperty(file, "size", { value: 4_000_001 });
+  Object.defineProperty(file, "text", { value: read });
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+  expect(node.textContent).toContain("限价文件不能超过 4 MB");
+  expect(read).not.toHaveBeenCalled();
+  expect(api.previewAIBacktest).not.toHaveBeenCalled();
+  expect(button("检查数据与预算").disabled).toBe(true);
 });
 
 it("submits a separate historical fee policy and invalidates its preview when changed", async () => {
@@ -430,4 +470,16 @@ it("locks comparison inputs during a request and unlocks them after failure", as
   expect(axis.disabled).toBe(false);
   expect(button("生成比较").disabled).toBe(false);
   expect(document.body.textContent).toContain("比较服务暂时不可用");
+});
+
+
+it("explains invalid imported fields without echoing backend payload or source metadata", async () => {
+  const details = { detail: [{ type: "missing", loc: ["body", "dailyPriceLimits", 0, "source", "url"], msg: "Field required", input: { sha256: "private-source-metadata" } }] };
+  vi.mocked(api.previewAIBacktest).mockRejectedValue(new FetchJsonHttpError(JSON.stringify(details), { status: 422, details }));
+  await render();
+  await act(async () => button("检查数据与预算").click());
+  expect(node.textContent).toContain("逐日限价文件 · 来源 · 网址缺失或格式不正确，请修改后重试。");
+  expect(node.textContent).not.toContain("private-source-metadata");
+  expect(node.textContent).not.toContain("Field required");
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
 });

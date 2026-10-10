@@ -1020,6 +1020,13 @@ def _stage_request(
     }
     if "feeModel" in params:
         payload["feeModel"] = params["feeModel"]
+    if "priceLimitModel" in params:
+        payload["priceLimitModel"] = params["priceLimitModel"]
+        assets = list(snapshot.assets.values()) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot]
+        payload["dailyPriceLimits"] = [
+            {key: value for key, value in asset.price_limits.items() if key != "artifactHash"}
+            for asset in assets if asset.price_limits is not None
+        ]
     if "maxParticipationPct" in params:
         payload["maxParticipationPct"] = params["maxParticipationPct"]
     if "quantityRuleVersion" in params:

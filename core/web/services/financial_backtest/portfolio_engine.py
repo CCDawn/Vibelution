@@ -27,6 +27,8 @@ from core.web.services.financial_backtest.quantity_rules import (
     sell_target_shares,
 )
 
+from .limit_snapshot import LIMIT_NOTICE, limit_record, validate_limit_binding
+
 _BPS = single_engine._BPS
 
 
@@ -35,6 +37,7 @@ def build_decision_schedule(
 ) -> tuple[str, ...]:
     """Return the complete close-time schedule with an in-range next open."""
     validate_basket_snapshot(snapshot)
+    validate_limit_binding(snapshot, {} if params is None else params)
     first_asset = snapshot.assets[snapshot.symbols[0]]
     supplied_params = {} if params is None else params
     schedule = single_engine.build_decision_schedule(first_asset, supplied_params)
@@ -179,6 +182,7 @@ def _execute_target(
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
     fee_model: str = single_engine.fees.LEGACY_FEE_MODEL,
+    price_limit_record: Mapping[str, Any] | None = None,
 ) -> tuple[
     Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal
 ]:
@@ -217,7 +221,7 @@ def _execute_target(
     fill_price, per_share_slippage = single_engine._execution_price(
         execution, side, slippage_rate
     )
-    rejection = single_engine._is_locked(execution, previous_close, side, symbol)
+    rejection = single_engine._is_locked(execution, previous_close, side, symbol, price_limit_record)
     if rejection:
         order = _symbol_order(
             symbol=symbol,
@@ -441,12 +445,13 @@ def _execute_benchmark_sleeve(
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
     fee_model: str = single_engine.fees.LEGACY_FEE_MODEL,
+    price_limit_record: Mapping[str, Any] | None = None,
 ) -> tuple[Decimal, int, dict[str, Any]]:
     """Buy one equal-weight sleeve, reserving cash for every applicable fee."""
     fill_price, per_share_slippage = single_engine._execution_price(
         execution, "buy", slippage_rate
     )
-    rejection = single_engine._is_locked(execution, previous_close, "buy", symbol)
+    rejection = single_engine._is_locked(execution, previous_close, "buy", symbol, price_limit_record)
     if rejection:
         return (
             cash,
@@ -776,6 +781,7 @@ def _simulate_prefix(
                     symbol=symbol,
                     quantity_rule_version=quantity_rule_version,
                     fee_model=fee_model,
+                    price_limit_record=limit_record(snapshot.assets[symbol], candles[symbol].date),
                 )
             )
             benchmark_orders.append(order)
@@ -842,6 +848,7 @@ def _simulate_prefix(
                         max_participation_pct=max_participation_pct,
                         quantity_rule_version=quantity_rule_version,
                         fee_model=fee_model,
+                        price_limit_record=limit_record(snapshot.assets[symbol], candles[symbol].date),
                     )
                 )
                 session_orders.append(order)
@@ -896,6 +903,7 @@ def _simulate_prefix(
                         max_participation_pct=max_participation_pct,
                         quantity_rule_version=quantity_rule_version,
                         fee_model=fee_model,
+                        price_limit_record=limit_record(snapshot.assets[symbol], candles[symbol].date),
                     )
                 )
                 session_orders.append(order)
@@ -919,6 +927,7 @@ def _simulate_prefix(
                         max_participation_pct=max_participation_pct,
                         quantity_rule_version=quantity_rule_version,
                         fee_model=fee_model,
+                        price_limit_record=limit_record(snapshot.assets[symbol], candles[symbol].date),
                     )
                 )
                 session_orders.append(order)
@@ -1103,6 +1112,8 @@ def _simulate_prefix(
         notices.append(
             f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%，并按板块数量规则向下调整；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
         )
+    if any(asset.price_limits is not None for asset in snapshot.assets.values()) and LIMIT_NOTICE not in snapshot.notice:
+        notices.append(LIMIT_NOTICE)
     result = {
         "status": "completed",
         "symbols": list(symbols),

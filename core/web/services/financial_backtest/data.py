@@ -127,6 +127,7 @@ class BacktestSnapshot:
     action_dates: tuple[str, ...]
     notice: tuple[str, ...]
     corporate_actions: Mapping[str, Any] | None = None
+    price_limits: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a detached JSON-safe projection for job persistence and review."""
@@ -149,6 +150,9 @@ class BacktestSnapshot:
         if self.corporate_actions is not None:
             from copy import deepcopy
             result["corporateActions"] = deepcopy(dict(self.corporate_actions))
+        if self.price_limits is not None:
+            from copy import deepcopy
+            result["priceLimits"] = deepcopy(dict(self.price_limits))
         return result
 
 
@@ -391,6 +395,7 @@ def _boundary(rows: list[dict[str, Any]], requested: date, side: str) -> dict[st
 def _stable_hash(
     rows: tuple[Candle, ...], symbol: str, start: str, end: str,
     corporate_actions: Mapping[str, Any] | None = None,
+    price_limits: Mapping[str, Any] | None = None,
 ) -> str:
     payload = {
         "symbol": symbol,
@@ -401,6 +406,8 @@ def _stable_hash(
     }
     if corporate_actions is not None:
         payload["corporateActions"] = dict(corporate_actions)
+    if price_limits is not None:
+        payload["priceLimits"] = dict(price_limits)
     canonical = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
@@ -411,6 +418,12 @@ def validate_snapshot(snapshot: BacktestSnapshot) -> None:
     """Fail closed if a frozen snapshot is incomplete, corrupt, or out of order."""
     if not isinstance(snapshot, BacktestSnapshot):
         raise BacktestDataError("回测数据快照类型无效")
+    if snapshot.price_limits is not None:
+        from .price_limits import validate_price_limits
+        validate_price_limits(
+            snapshot.price_limits, snapshot.symbol,
+            tuple(row.date for row in snapshot.candles), snapshot.candles,
+        )
     if snapshot.corporate_actions is None:
         if snapshot.actions_status != "factor_check_passed" or snapshot.action_dates:
             raise BacktestDataError("回测快照公司行动状态未通过")
@@ -519,7 +532,7 @@ def validate_snapshot(snapshot: BacktestSnapshot) -> None:
     ):
         raise BacktestDataError("回测快照覆盖边界与K线不一致")
 
-    expected_hash = _stable_hash(all_rows, snapshot.symbol, snapshot.start_date, snapshot.end_date, snapshot.corporate_actions)
+    expected_hash = _stable_hash(all_rows, snapshot.symbol, snapshot.start_date, snapshot.end_date, snapshot.corporate_actions, snapshot.price_limits)
     if snapshot.data_hash != expected_hash:
         raise BacktestDataError("回测快照行情摘要校验失败")
 
