@@ -1210,9 +1210,29 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
     existing_graph_summary = writeback.get("materializedCandidateGraph") if isinstance(writeback.get("materializedCandidateGraph"), dict) else {}
     existing_graph_status = s._trim_text(existing_graph_summary.get("status"), max_length=80).lower()
     existing_graph_edge_count = s._source_collection_count(existing_graph_summary.get("edgeCount"))
-    agent_graph = s._source_collection_stage_writeback_agent_graph_payload(
-        result if isinstance(result, dict) else {}
-    )
+    try:
+        agent_graph = s._source_collection_stage_writeback_agent_graph_payload(
+            result if isinstance(result, dict) else {}
+        )
+    except s.TeamWorkflowOrchestrationError as exc:
+        # Stored-replay contract: a historical non-array graph collection in an
+        # already-persisted task result degrades to an empty graph so the
+        # status/reconcile projection stays usable; live writeback keeps the
+        # strict ``evidence_relation_graph_invalid`` guard unchanged.
+        agent_graph = {}
+        s._record_workflow_event(
+            "source_collection.stage_session_task_agent_graph_invalid",
+            team_id,
+            fields={
+                "runId": run_id,
+                "taskId": s._trim_text(task.get("taskId"), max_length=160),
+                "stageId": s._trim_text(task.get("stageId"), max_length=80),
+                "agentId": s._trim_text(task.get("agentId"), max_length=160),
+                "error": str(exc)[:200],
+            },
+            level="warning",
+            outcome="degraded",
+        )
     claimed_graph_edge_count = len(s._source_collection_agent_graph_edges(agent_graph))
     relation_edges_need_reconciliation = claimed_graph_edge_count > 0 and existing_graph_edge_count <= 0
     should_reconcile_graph = (

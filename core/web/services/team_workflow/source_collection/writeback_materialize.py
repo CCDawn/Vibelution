@@ -1344,9 +1344,28 @@ def _source_collection_stage_writeback_closure_summary(
         success_count = s._source_collection_count(materialized_candidate_graph.get("createdCandidateGraphCount")) or (
             1 if materialized_candidate_graph.get("candidateGraphId") else 0
         )
-        agent_graph = s._source_collection_stage_writeback_agent_graph_payload(
-            writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
-        )
+        try:
+            agent_graph = s._source_collection_stage_writeback_agent_graph_payload(
+                writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+            )
+        except s.TeamWorkflowOrchestrationError as exc:
+            # Stored-replay degrade contract (same as the reconcile projection):
+            # a historical non-array graph collection must not fail the closure
+            # summary. The strict guard stays on the live writeback path only.
+            agent_graph = {}
+            s._record_workflow_event(
+                "source_collection.stage_session_task_agent_graph_invalid",
+                s._trim_text(task.get("teamId"), max_length=128),
+                fields={
+                    "runId": s._trim_text(task.get("runId"), max_length=160),
+                    "taskId": s._trim_text(task.get("taskId"), max_length=160),
+                    "stageId": stage_id,
+                    "agentId": s._trim_text(task.get("agentId"), max_length=160),
+                    "error": str(exc)[:200],
+                },
+                level="warning",
+                outcome="degraded",
+            )
         relation_edge_claim_count = len(s._source_collection_agent_graph_edges(agent_graph))
         materialized_relation_edge_count = s._source_collection_count(materialized_candidate_graph.get("edgeCount"))
         relation_dangling_edge_count = s._source_collection_count(materialized_candidate_graph.get("danglingEdgeCount"))
@@ -1571,13 +1590,16 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
     if status not in s.SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
         return s._source_collection_stage_writeback_candidate_graph_summary(status="skipped_status")
     result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
-    agent_graph = s._source_collection_stage_writeback_agent_graph_payload(result)
-    created_by_agent = (
-        s._trim_text(writeback.get("recordedByAgent"), max_length=160)
-        or s._trim_text(task.get("agentId"), max_length=160)
-        or "Source Relation Mapper Agent"
-    )
     try:
+        # The agent-graph payload parse lives inside the guarded build path so
+        # a historical non-array graph collection produces the failed summary +
+        # workflow event below instead of aborting the reconcile/status call.
+        agent_graph = s._source_collection_stage_writeback_agent_graph_payload(result)
+        created_by_agent = (
+            s._trim_text(writeback.get("recordedByAgent"), max_length=160)
+            or s._trim_text(task.get("agentId"), max_length=160)
+            or "Source Relation Mapper Agent"
+        )
         graph_response = s.build_candidate_graph(
             team_id,
             {
