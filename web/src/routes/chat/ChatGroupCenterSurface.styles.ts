@@ -9,6 +9,10 @@ import {
 } from "../../design/vuiSurfaceRecipes";
 
 const styles = {
+  groupMemberCopy: "min-w-0 flex-1",
+  groupMemberName: "block truncate [font-size:var(--vui-font-sm)]",
+  groupManageAction: "mt-4",
+
   groupBubble: "vui-routes-chatcodingroute groupBubble min-w-0",
   groupBubbleAvatar:
     "vui-routes-chatcodingroute groupBubbleAvatar inline-grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-vui-micro-13 font-semibold text-[var(--fg-secondary)]",

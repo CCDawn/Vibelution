@@ -997,12 +997,12 @@ export function ChatGroupCenterSurface({
             const identity = groupParticipantIdentity(participant);
             return <div key={participant.participantId} className={styles.groupMemberRow}>
               {renderAgentAvatar(styles.groupBubbleAvatar, identity.avatarImageUrl || undefined, avatarInitials(participant.agentCode, identity.name, "AI"))}
-              <div className="min-w-0 flex-1"><strong className="block truncate [font-size:var(--vui-font-sm)]">{identity.name}</strong><span className={styles.groupMemberMeta}>{identity.functionLabel || identity.compactRole || identity.modelLabel}</span></div>
+              <div className={styles.groupMemberCopy}><strong className={styles.groupMemberName}>{identity.name}</strong><span className={styles.groupMemberMeta}>{identity.functionLabel || identity.compactRole || identity.modelLabel}</span></div>
               <span className={styles.groupMemberMeta}>{statusLabel(participant.status || "ready")}</span>
             </div>;
           })}
         </div>
-        {onManageGroupRoom ? <VButton variant="secondary" className="mt-4" onClick={() => { membersManagementHandoffRef.current = true; setMembersOpen(false); onManageGroupRoom(); }}>{lang === "zh" ? "管理群聊" : "Manage group"}</VButton> : null}
+        {onManageGroupRoom ? <VButton variant="secondary" className={styles.groupManageAction} onClick={() => { membersManagementHandoffRef.current = true; setMembersOpen(false); onManageGroupRoom(); }}>{lang === "zh" ? "管理群聊" : "Manage group"}</VButton> : null}
       </VDialog>
       <VConfirmDialog open={confirmStopOpen} onOpenChange={setConfirmStopOpen}
         title={lang === "zh" ? "停止本轮讨论？" : "Stop this round?"}

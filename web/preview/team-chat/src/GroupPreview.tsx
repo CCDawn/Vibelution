@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUp, Check, ChevronDown, ChevronRight, CircleAlert, FileCode2, FileText, LoaderCircle, MessageSquare, Paperclip, Square, RotateCcw } from "lucide-react";
-import { VButton, VConfirmDialog, VDialog, VIconButton, VSurface, VTextarea } from "../../components/vui";
+import { VButton, VConfirmDialog, VDialog, VIconButton, VSurface, VTextarea } from "../../../src/components/vui";
 import { Avatar, PageHeading, styles, usePreviewDialogFocus } from "./PreviewUi";
 import { getMember, messages, type PreviewMessage, type PreviewScene } from "./fixtures";
 

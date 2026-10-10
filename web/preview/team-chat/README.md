@@ -4,6 +4,8 @@
 入口为 `http://127.0.0.1:5192/preview/team-chat/index.html`。
 URL 参数 `view=team|chat` 切换页面，`scene=running|completed|error|empty` 切换状态。
 
+模拟源码位于本目录的 `src/`，由独立 HTML 入口加载，不进入产品路由或产品源码目录。
+
 此预览借用现有 VUI 产品 API、页面 recipe 和项目设计 token，独立维护模拟状态。
 没有引入聊天依赖，没有修改正式路由、会话存储或共享组件。
 成员、任务详情、产出、过程、停止、重试、新建和发送仅用于设计评审；API 请求不转发至产品后端。

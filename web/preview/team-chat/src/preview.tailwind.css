@@ -1,8 +1,8 @@
 @import "tailwindcss" source(none);
-@import "../theme.tailwind.css";
+@import "../../../src/design/theme.tailwind.css";
 @source "./*.{ts,tsx}";
-@source "../../components/vui/**/*.{ts,tsx}";
-@source "../../components/layout/**/*.{ts,tsx}";
+@source "../../../src/components/vui/**/*.{ts,tsx}";
+@source "../../../src/components/layout/**/*.{ts,tsx}";
 
 /* This isolated shell uses the product's tokens. No shared theme is changed. */
 :root {

@@ -8,7 +8,7 @@ import {
   Plus,
   RotateCw,
 } from "lucide-react";
-import { VButton, VDialog, VInput, VTextarea } from "../../components/vui";
+import { VButton, VDialog, VInput, VTextarea } from "../../../src/components/vui";
 import { members, taskRows, type PreviewScene } from "./fixtures";
 import { Avatar, PageHeading, styles, usePreviewDialogFocus } from "./PreviewUi";
 

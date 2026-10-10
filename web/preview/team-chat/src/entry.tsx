@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import "../base.css";
-import "../tokens.css";
-import "../vui-provider-theme.css";
-import "../vui-native-controls.css";
+import "../../../src/design/base.css";
+import "../../../src/design/tokens.css";
+import "../../../src/design/vui-provider-theme.css";
+import "../../../src/design/vui-native-controls.css";
 import "./preview.tailwind.css";
 import { TeamChatPreview } from "./App";
 

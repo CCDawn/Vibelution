@@ -452,7 +452,7 @@
 - 不直接写画布；members→canvas 投影由后端 `update_team` 完成。
 
 ### 实现落点
-- 源码：`web/src/routes/teams/TeamHomeSurface.tsx`；挂载与首页/组织结构切换在 `renderTeamsWorkbenchCanvasPage.tsx`。
+- 源码：`web/src/routes/teams/TeamHomeSurface.tsx`；样式归属同目录的 `TeamHomeSurface.styles.ts`；挂载与首页/组织结构切换在 `renderTeamsWorkbenchCanvasPage.tsx`。
 
 ### 视觉与状态
 - 读取中、读取失败、未关联群聊、空成员、运行与停止中均沿用现有状态和操作；失败原因保持可读。

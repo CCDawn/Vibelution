@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Boxes, ChevronDown, Code2, GitBranch, Hash, Menu, MessageSquare, Users } from "lucide-react";
-import { VButton, VDialog, VIconButton, VNativeSelect, VSessionWorkbenchPage, VuiProvider } from "../../components/vui";
-import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
+import { VButton, VDialog, VIconButton, VNativeSelect, VSessionWorkbenchPage, VuiProvider } from "../../../src/components/vui";
+import { WORKBENCH_LAYOUT_IDS } from "../../../src/components/layout/workbenchLayoutIds";
 import { GroupPreview } from "./GroupPreview";
 import { TeamPreview } from "./TeamPreview";
 import { MemberList, styles, usePreviewDialogFocus } from "./PreviewUi";

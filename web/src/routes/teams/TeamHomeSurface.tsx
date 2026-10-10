@@ -11,6 +11,7 @@ import { DevTeamTaskBoard, speakingTeamMemberIdFromRoom } from "./DevTeamTaskBoa
 import { formatTime } from "./source-collection/presentationModel";
 import { teamChatRoomRoute } from "./researchStageAgentPresentation";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
+import styles from "./TeamHomeSurface.styles";
 
 export type StartTeamRoundPayload = {
   roomId: string;
@@ -63,7 +64,7 @@ function RoundStatus({ status, lang }: { status: string; lang: "zh" | "en" }) {
     tone: "neutral",
   };
   return (
-    <VStatusChip className="shrink-0" tone={state.tone}>{lang === "zh" ? state.zh : state.en}</VStatusChip>
+    <VStatusChip className={styles.status} tone={state.tone}>{lang === "zh" ? state.zh : state.en}</VStatusChip>
   );
 }
 
@@ -116,7 +117,7 @@ function RoundMessages({
 
   if (!round) {
     return (
-      <p role={waitingForTimeline ? "status" : undefined} className="py-4 text-sm text-[var(--fg-tertiary)]">
+      <p role={waitingForTimeline ? "status" : undefined} className={styles.emptyMessages}>
         {waitingForTimeline
           ? (lang === "zh" ? "正在同步本轮发言…" : "Syncing messages for this round…")
           : (lang === "zh" ? "还没有团队任务记录。" : "No team task history yet.")}
@@ -124,19 +125,19 @@ function RoundMessages({
     );
   }
   if (!messages.length) {
-    return <p className="py-4 text-sm text-[var(--fg-tertiary)]">{lang === "zh" ? "本轮暂时没有可展示的发言。" : "No visible messages in this round yet."}</p>;
+    return <p className={styles.emptyMessages}>{lang === "zh" ? "本轮暂时没有可展示的发言。" : "No visible messages in this round yet."}</p>;
   }
 
   return (
     <>
-      <ol className="divide-y divide-[var(--vui-border-subtle)]">
+      <ol className={styles.messageList}>
         {messages.map((message) => (
-          <li key={message.messageId} className="py-3.5 first:pt-1">
-            <div className="flex min-w-0 items-baseline justify-between gap-3">
-              <strong className="truncate text-sm font-semibold">{messageLabel(message, selectedTeam, linkedRoomDetail, lang)}</strong>
-              <time className="shrink-0 text-xs text-[var(--fg-tertiary)]">{formatTime(message.timestamp, lang)}</time>
+          <li key={message.messageId} className={styles.messageRow}>
+            <div className={styles.messageHeader}>
+              <strong className={styles.speaker}>{messageLabel(message, selectedTeam, linkedRoomDetail, lang)}</strong>
+              <time className={styles.messageTime}>{formatTime(message.timestamp, lang)}</time>
             </div>
-            <div className="mt-1 min-w-0 break-words text-[15px] leading-6 text-[var(--fg-secondary)]">
+            <div className={styles.messageBody}>
               <ChatGroupMessageBody
                 message={message}
                 identityName={messageLabel(message, selectedTeam, linkedRoomDetail, lang)}
@@ -155,7 +156,7 @@ function RoundMessages({
         ))}
       </ol>
       {round.messagesTruncated && roomLink ? (
-        <VRouteLinkButton to={roomLink} variant="ghost" className="mt-2 !min-h-11 !px-0 text-sm" trailingIcon={<ArrowUpRight size={14} aria-hidden="true" />}>
+        <VRouteLinkButton to={roomLink} variant="ghost" className={styles.earlierLink} trailingIcon={<ArrowUpRight size={14} aria-hidden="true" />}>
           {lang === "zh" ? "查看更早发言" : "View earlier messages"}
         </VRouteLinkButton>
       ) : null}
@@ -260,34 +261,34 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
   };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col bg-[var(--vui-surface-panel)]" data-testid="team-home-surface">
-      <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-[var(--vui-border-subtle)] px-7 py-5 max-[600px]:flex-col max-[600px]:px-4 max-[600px]:py-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-[var(--fg-tertiary)]">{lang === "zh" ? "当前任务" : "Current task"}</p>
-          <h2 className="mt-1 break-words text-xl font-semibold leading-7 tracking-normal max-[600px]:text-lg">{currentTitle}</h2>
-          <div className="mt-2 flex flex-wrap items-center gap-2.5">
+    <div className={styles.frame} data-testid="team-home-surface">
+      <header className={styles.header}>
+        <div className={styles.headerCopy}>
+          <p className={styles.eyebrow}>{lang === "zh" ? "当前任务" : "Current task"}</p>
+          <h2 className={styles.title}>{currentTitle}</h2>
+          <div className={styles.statusRow}>
             <RoundStatus status={currentStatus} lang={lang} />
             {currentTeamRound?.updatedAt || currentTeamRound?.startedAt ? (
-              <time className="text-xs text-[var(--fg-tertiary)]">{lang === "zh" ? "更新于" : "Updated"} {formatTime(currentTeamRound.updatedAt || currentTeamRound.startedAt, lang)}</time>
+              <time className={styles.updatedTime}>{lang === "zh" ? "更新于" : "Updated"} {formatTime(currentTeamRound.updatedAt || currentTeamRound.startedAt, lang)}</time>
             ) : null}
           </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className={styles.headerActions}>
           {roomLink ? (
-            <VRouteLinkButton to={roomLink} variant="secondary" className="!min-h-11" icon={<MessageSquare size={15} aria-hidden="true" />}>
+            <VRouteLinkButton to={roomLink} variant="secondary" className={styles.touchAction} icon={<MessageSquare size={15} aria-hidden="true" />}>
               {lang === "zh" ? "打开群聊" : "Open room"}
             </VRouteLinkButton>
           ) : null}
-          <VButton variant="ghost" className="!min-h-11" icon={<GitBranch size={15} aria-hidden="true" />} onPress={onOpenOrganization}>
+          <VButton variant="ghost" className={styles.touchAction} icon={<GitBranch size={15} aria-hidden="true" />} onPress={onOpenOrganization}>
             {lang === "zh" ? "组织结构" : "Organization"}
           </VButton>
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto">
-        <div className="min-h-0 min-w-0 overflow-y-auto px-7 py-5 max-[900px]:min-h-max max-[900px]:overflow-visible max-[600px]:px-4 max-[600px]:py-4">
+      <main className={styles.content}>
+        <div className={styles.transcript}>
           {selectedTeam?.teamTemplateId === "dev-team" && selectedTeam.teamId ? (
-            <section className="mb-6 border-b border-[var(--vui-border-subtle)] pb-5" aria-label={lang === "zh" ? "共享任务板" : "Shared task board"}>
+            <section className={styles.taskBoard} aria-label={lang === "zh" ? "共享任务板" : "Shared task board"}>
               <DevTeamTaskBoard
                 lang={lang}
                 teamId={selectedTeam.teamId}
@@ -297,31 +298,31 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
             </section>
           ) : null}
           {currentSummary ? (
-            <section aria-labelledby="team-home-round-result" className="pb-5">
+            <section aria-labelledby="team-home-round-result" className={styles.result}>
               {deliveryOnlySummary ? (
-                <details className="text-sm">
-                  <summary className="cursor-pointer font-medium text-[var(--fg-tertiary)]">{lang === "zh" ? "轮次结果" : "Round result"}</summary>
-                  <p className="mt-2 whitespace-pre-wrap break-words leading-6 text-[var(--fg-secondary)]">{currentSummary}</p>
+                <details className={styles.deliveryDetails}>
+                  <summary className={styles.deliverySummary}>{lang === "zh" ? "轮次结果" : "Round result"}</summary>
+                  <p className={styles.deliveryBody}>{currentSummary}</p>
                 </details>
               ) : (
                 <>
-                  <h3 id="team-home-round-result" className="text-sm font-semibold text-[var(--fg-tertiary)]">{lang === "zh" ? "本轮结论" : "Round conclusion"}</h3>
-                  <p className="mt-2 whitespace-pre-wrap break-words text-base leading-7 text-[var(--fg-secondary)]">{currentSummary}</p>
+                  <h3 id="team-home-round-result" className={styles.resultTitle}>{lang === "zh" ? "本轮结论" : "Round conclusion"}</h3>
+                  <p className={styles.conclusionBody}>{currentSummary}</p>
                 </>
               )}
             </section>
           ) : null}
 
-          <section aria-labelledby="team-home-recent-messages" className={currentSummary ? "border-t border-[var(--vui-border-subtle)] pt-5" : ""}>
-            <div className="flex items-center gap-2">
-              <MessageSquare size={15} className="text-[var(--fg-tertiary)]" aria-hidden="true" />
-              <h3 id="team-home-recent-messages" className="text-base font-semibold">{lang === "zh" ? "近期发言" : "Recent messages"}</h3>
+          <section aria-labelledby="team-home-recent-messages" className={currentSummary ? styles.messagesAfterResult : undefined}>
+            <div className={styles.sectionHeader}>
+              <MessageSquare size={15} className={styles.sectionIcon} aria-hidden="true" />
+              <h3 id="team-home-recent-messages" className={styles.sectionTitle}>{lang === "zh" ? "近期发言" : "Recent messages"}</h3>
             </div>
 
             {linkedChatRoomPending && linkedChatRoomId ? (
-              <VStateSurface tone="loading" density="compact" title={lang === "zh" ? "正在读取群聊" : "Loading room"} skeletonLines={2} className="mt-3" />
+              <VStateSurface tone="loading" density="compact" title={lang === "zh" ? "正在读取群聊" : "Loading room"} skeletonLines={2} className={styles.spaceAbove} />
             ) : linkedChatRoomError ? (
-              <VStateSurface tone="error" density="compact" title={lang === "zh" ? "群聊读取失败" : "Could not load room"} className="mt-3">
+              <VStateSurface tone="error" density="compact" title={lang === "zh" ? "群聊读取失败" : "Could not load room"} className={styles.spaceAbove}>
                 {lang === "zh" ? "请稍后刷新团队。" : "Refresh the team and try again."}
               </VStateSurface>
             ) : (
@@ -337,17 +338,17 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
           </section>
         </div>
 
-        <aside className="min-w-0 border-l border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] px-5 py-5 max-[900px]:border-l-0 max-[900px]:border-t max-[600px]:px-4 max-[600px]:py-4">
+        <aside className={styles.actionRail}>
           <section aria-labelledby="team-home-round-action">
-            <h3 id="team-home-round-action" className="text-base font-semibold">
+            <h3 id="team-home-round-action" className={styles.sectionTitle}>
               {linkedRoomBusy ? (lang === "zh" ? "本轮正在运行" : "Round in progress") : (lang === "zh" ? "开始下一轮" : "Start next round")}
             </h3>
 
             {!linkedChatRoomId ? (
-              <div className="mt-3">
-                <p className="text-sm leading-6 text-[var(--fg-secondary)]">{lang === "zh" ? "还没有关联群聊" : "No linked room"}</p>
+              <div className={styles.spaceAbove}>
+                <p className={styles.actionCopy}>{lang === "zh" ? "还没有关联群聊" : "No linked room"}</p>
                 <VButton
-                  className="mt-3 !min-h-11"
+                  className={styles.spacedAction}
                   variant="secondary"
                   isPending={teamSyncPending}
                   isDisabled={!selectedTeam || activeTeamMemberCount === 0 || teamSyncPending}
@@ -358,13 +359,13 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
                 </VButton>
               </div>
             ) : linkedChatRoomPending ? (
-              <VStateSurface tone="loading" density="compact" title={lang === "zh" ? "正在读取关联群聊" : "Loading linked room"} skeletonLines={1} className="mt-3" />
+              <VStateSurface tone="loading" density="compact" title={lang === "zh" ? "正在读取关联群聊" : "Loading linked room"} skeletonLines={1} className={styles.spaceAbove} />
             ) : linkedRoomBusy ? (
-              <div className="mt-3">
-                <p className="text-sm leading-6 text-[var(--fg-secondary)]">{currentTeamRound?.topic || (lang === "zh" ? "团队正在执行当前任务。" : "The team is working on the current task.")}</p>
+              <div className={styles.spaceAbove}>
+                <p className={styles.actionCopy}>{currentTeamRound?.topic || (lang === "zh" ? "团队正在执行当前任务。" : "The team is working on the current task.")}</p>
                 <VButton
                   ref={stopTriggerRef}
-                  className="mt-3 !min-h-11"
+                  className={styles.spacedAction}
                   variant="secondary"
                   icon={<Square size={14} aria-hidden="true" />}
                   aria-label={lang === "zh" ? "停止当前团队讨论" : "Stop current team round"}
@@ -378,10 +379,10 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
                 </VButton>
               </div>
             ) : activeTeamMemberCount === 0 ? (
-              <p className="mt-3 text-sm leading-6 text-[var(--fg-secondary)]">{lang === "zh" ? "请先在团队设置中添加可用成员。" : "Add an active member in team settings first."}</p>
+              <p className={styles.spacedCopy}>{lang === "zh" ? "请先在团队设置中添加可用成员。" : "Add an active member in team settings first."}</p>
             ) : (
-              <form className="mt-3 grid gap-3" onSubmit={startRound}>
-                <label htmlFor="team-home-round-topic" className="grid gap-1.5 text-sm font-medium">
+              <form className={styles.form} onSubmit={startRound}>
+                <label htmlFor="team-home-round-topic" className={styles.label}>
                   {lang === "zh" ? "本轮任务" : "Round task"}
                   <VTextarea
                     id="team-home-round-topic"
@@ -392,14 +393,14 @@ export function TeamHomeSurface(props: TeamHomeSurfaceProps) {
                     onChange={(event) => onTeamTaskTopicChange(event.currentTarget.value)}
                   />
                 </label>
-                <VButton className="!min-h-11 justify-self-start" type="submit" isPending={startRoundPending} isDisabled={!canStartTeamRound || startRoundPending} icon={<Play size={14} aria-hidden="true" />}>
+                <VButton className={styles.startAction} type="submit" isPending={startRoundPending} isDisabled={!canStartTeamRound || startRoundPending} icon={<Play size={14} aria-hidden="true" />}>
                   {startRoundPending ? (lang === "zh" ? "启动中" : "Starting") : (selectedTeam?.teamTemplateId === "dev-team" ? (lang === "zh" ? "启动开发轮次" : "Start development round") : (lang === "zh" ? "启动团队讨论" : "Start team round"))}
                 </VButton>
               </form>
             )}
 
-            {startRoundError ? <p className="mt-3 text-sm text-[var(--state-error)]" role="alert">{startRoundError.message}</p> : null}
-            {stopRoundError ? <p className="mt-3 text-sm text-[var(--state-error)]" role="alert">{stopRoundError.message}</p> : null}
+            {startRoundError ? <p className={styles.error} role="alert">{startRoundError.message}</p> : null}
+            {stopRoundError ? <p className={styles.error} role="alert">{stopRoundError.message}</p> : null}
           </section>
         </aside>
       </main>

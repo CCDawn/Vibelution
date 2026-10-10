@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { CircleCheck, CircleAlert, LoaderCircle, Users } from "lucide-react";
-import { VButton } from "../../components/vui";
+import { VButton } from "../../../src/components/vui";
 import { getMember, members, type PreviewScene } from "./fixtures";
 
 export const styles = {
