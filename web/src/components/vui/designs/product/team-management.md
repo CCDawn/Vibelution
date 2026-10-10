@@ -453,6 +453,7 @@
 
 ### 实现落点
 - 源码：`web/src/routes/teams/TeamHomeSurface.tsx`；样式归属同目录的 `TeamHomeSurface.styles.ts`；挂载与首页/组织结构切换在 `renderTeamsWorkbenchCanvasPage.tsx`。
+- 预览边界：这是依赖当前团队与原生群聊 timeline 的路由组合，不在通用组件目录构造第二套静态会话；状态与交互由同目录 `TeamHomeSurface.test.tsx`、团队/群聊隔离预览及真实只读数据的浏览器检查覆盖。
 
 ### 视觉与状态
 - 读取中、读取失败、未关联群聊、空成员、运行与停止中均沿用现有状态和操作；失败原因保持可读。

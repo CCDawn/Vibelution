@@ -32,6 +32,10 @@ const previewExemptDesignSections = new Set([
   // authorization, policy drafts and native Session facts. Covered by panel,
   // Agent-selection/draft interaction tests and the formal runtime preview.
   "AgentPerceptionPanel",
+  // Route-owned composition of existing VUI APIs; native room timeline queries
+  // and the selected team's current round supply its meaningful state. Covered
+  // by TeamHomeSurface interaction tests and the isolated team/chat preview.
+  "TeamHomeSurface",
 ]);
 
 function collectPreviewSources(directory: string): string {
