@@ -71,20 +71,25 @@ describe("ConversationTurnModelControl", () => {
   it("follows the session default model when no override is pinned", () => {
     const html = renderControl();
     expect(html).toContain("Luna 5.6");
-    expect(html).toContain("本轮模型");
-    expect(html).toContain('aria-label="本轮模型: Luna 5.6"');
+    expect(html).not.toContain("本轮模型");
+    expect(html).toContain('aria-label="模型: Luna 5.6"');
     expect(html).not.toContain('data-override="true"');
   });
 
   it("marks a pinned non-default override with the ≠default chip state", () => {
     const html = renderControl({ selection: { modelId: "ai-pixel/sol-4" } });
     expect(html).toContain("Sol 4");
-    expect(html).toContain('aria-label="本轮模型: Sol 4"');
+    expect(html).toContain('aria-label="模型: Sol 4"');
     expect(html).toContain('data-override="true"');
   });
 
-  it("keeps the scope label visible and prefixes the existing follow or override tooltip", () => {
-    expect(controlSource).toContain('lang === "zh" ? "本轮模型" : "Model for this turn"');
+  it("shows the model name and keeps the follow or override tooltip", () => {
+    expect(controlSource).toContain('lang === "zh" ? "模型" : "Model"');
+    expect(controlSource).not.toContain("本轮模型");
+    expect(controlSource).not.toContain("effortSection");
+    expect(controlSource).not.toContain("turnModelEffortFollowSession");
+    expect(controlSource).toContain("groupComposerModelChoices");
+    expect(controlSource).toContain('onSelectionChange(isSessionDefault ? null : { modelId: choiceId })');
     expect(controlSource).toContain('t("turnModelOverrideTooltip").replace("{model}", effectiveLabel)');
     expect(controlSource).toContain('t("turnModelFollowTooltip").replace("{model}", effectiveLabel)');
     expect(controlSource).toContain("tooltip={turnModelTooltip}");

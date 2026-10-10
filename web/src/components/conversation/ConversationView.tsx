@@ -7506,8 +7506,8 @@ export const ConversationView = React.memo(function ConversationView({
               ) : null}
             </div>
             <div className={styles.composerToolbarEnd}>
-              {llmControl ? <ConversationInferenceControl {...llmControl} openSignal={modelMenuOpenSignal} /> : null}
-              {turnModelControl ? <ConversationTurnModelControl {...turnModelControl} /> : null}
+              {turnModelControl ? <ConversationTurnModelControl {...turnModelControl} openSignal={modelMenuOpenSignal} /> : null}
+              {llmControl ? <ConversationInferenceControl {...llmControl} openSignal={turnModelControl ? "" : modelMenuOpenSignal} /> : null}
               {composerContextRing ? (
                 <ComposerContextRing
                   model={composerContextRing}

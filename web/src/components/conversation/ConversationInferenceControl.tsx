@@ -85,9 +85,9 @@ export function ConversationInferenceControl({
     () => resolveConversationInferenceEffort(model, currentReasoningEffort),
     [currentReasoningEffort, model],
   );
-  const reasoningEffortLabel = lang === "zh" ? "推理强度" : "Reasoning effort";
-  const currentEffortLabel = current.option?.label || current.effort || (lang === "zh" ? "不支持调节" : "Not configurable");
-  const selectReasoningEffortLabel = lang === "zh" ? "选择推理强度" : "Select reasoning effort";
+  const reasoningEffortLabel = lang === "zh" ? "思考强度" : "Reasoning effort";
+  const currentEffortLabel = current.option?.label || current.effort;
+  const selectReasoningEffortLabel = lang === "zh" ? "选择思考强度" : "Select reasoning effort";
 
   // Avoid applying effort clicks from a menu opened on a previous session.
   useEffect(() => {
@@ -100,17 +100,14 @@ export function ConversationInferenceControl({
     }
   }, [disabled, pending]);
 
-  // /模型 builtin: a new openSignal value pops the menu when usable.
+  // Fallback when the composer has no model menu: a new openSignal pops this menu.
   useEffect(() => {
     if (openSignal && !disabled && !pending) {
       setOpen(true);
     }
   }, [disabled, openSignal, pending]);
 
-  if (!model) return null;
-  if (!model.reasoningEffortValues?.length) {
-    return <span className={styles.fixedLabel}>{reasoningEffortLabel} · {currentEffortLabel}</span>;
-  }
+  if (!model?.reasoningEffortValues?.length) return null;
 
   return (
     <div className={styles.root} data-testid="conversation-inference-control">

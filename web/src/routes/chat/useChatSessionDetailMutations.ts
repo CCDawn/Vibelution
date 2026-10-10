@@ -95,7 +95,7 @@ export function useChatSessionDetailMutations({
     onError: (error, variables) => {
       setSessionComposerErrors((current) => ({
         ...current,
-        [variables.sessionId]: describeError(error, lang === "zh" ? "推理强度切换失败" : "Failed to change reasoning effort"),
+        [variables.sessionId]: describeError(error, lang === "zh" ? "思考强度切换失败" : "Failed to change reasoning effort"),
       }));
     },
   });

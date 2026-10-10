@@ -42,7 +42,7 @@ export type ConversationLlmControl = {
   onReasoningEffortChange: (reasoningEffort: string) => void;
 };
 
-/** Composer "send once with model" control state (ZCode per-turn modelSelection). */
+/** Composer model picker. Null selection follows the session default for later sends. */
 export type ConversationTurnModelControl = {
   choices: SessionLlmModelOption[];
   sessionDefaultModelId: string;

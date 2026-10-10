@@ -55,6 +55,15 @@ import { useChatChangePreview } from "./useChatChangePreview";
 import { useChatGitRail } from "./useChatGitRail";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
+import {
+  composerModelLeavesSessionDefault,
+  displayedComposerEffort,
+  EMPTY_COMPOSER_MODEL_CHOICES,
+  findComposerModelChoice,
+  normalizeStoredComposerModelSelection,
+  selectionAfterModelPick,
+  selectionsEqual,
+} from "../../components/conversation/composerModelEffort";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
 import type { ActiveTurnStreamState } from "../../components/conversation/activeTurnStreamState";
 import type { ComposerQueueItem } from "../../components/conversation/composerFollowupQueueModel";
@@ -708,9 +717,8 @@ export function ChatCodingRouteWorkbench() {
   // Per-session opt-in; the backend only holds the latest capture per session,
   // so remember the operator choice per session instead of globally.
   const [promptSuggestionEnabledBySession, setPromptSuggestionEnabledBySession] = useState<Record<string, boolean>>({});
-  // Sticky per-turn model override (ZCode modelSelection semantics): follows
-  // the session default until the user pins a model, then stays pinned across
-  // sends until changed or restored. Keyed per session.
+  // Sticky per-session model for later sends. Null follows the session
+  // default. A different model also carries a thinking level that model allows.
   const [turnModelSelections, setTurnModelSelections] = useState<Record<string, SessionModelSelection | null>>(storedDraftState.turnModelSelections);
   const setTurnModelSelectionForSession = useCallback((sessionId: string, selection: SessionModelSelection | null) => {
     setTurnModelSelections((current) => ({ ...current, [sessionId]: selection }));
@@ -2728,9 +2736,45 @@ export function ChatCodingRouteWorkbench() {
   }, [activeSessionId]);
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const turnModelSelection = activeSessionId ? turnModelSelections[activeSessionId] ?? null : null;
-  const turnModelControl = activeSessionId && sessionLlmOptions?.choices?.length ? {
-    choices: sessionLlmOptions.choices,
-    sessionDefaultModelId: sessionLlmOptions.currentModelId,
+  const sessionDefaultModelId = sessionLlmOptions?.currentModelId || "";
+  const sessionEffort = sessionLlmOptions?.currentReasoningEffort || detail?.reasoningEffort || "";
+  const modelChoices = sessionLlmOptions?.choices ?? EMPTY_COMPOSER_MODEL_CHOICES;
+  const followingSessionModel = !composerModelLeavesSessionDefault(sessionDefaultModelId, turnModelSelection);
+  const sessionModel = findComposerModelChoice(modelChoices, sessionDefaultModelId) ?? sessionLlmOptions?.model ?? null;
+  const overrideModel = followingSessionModel
+    ? null
+    : findComposerModelChoice(modelChoices, turnModelSelection?.modelId || "") ?? null;
+  const effectiveComposerModel = followingSessionModel ? sessionModel : overrideModel;
+  const shownComposerEffort = displayedComposerEffort({
+    sessionDefaultModelId,
+    sessionEffort,
+    selection: turnModelSelection,
+    model: effectiveComposerModel,
+  });
+  useEffect(() => {
+    if (!activeSessionId || !modelChoices.length || !turnModelSelection?.modelId) {
+      return;
+    }
+    const normalized = normalizeStoredComposerModelSelection({
+      sessionDefaultModelId,
+      sessionEffort,
+      selection: turnModelSelection,
+      choices: modelChoices,
+    });
+    if (selectionsEqual(turnModelSelection, normalized)) {
+      return;
+    }
+    setTurnModelSelections((current) => {
+      const latest = current[activeSessionId] ?? null;
+      if (selectionsEqual(latest, normalized)) {
+        return current;
+      }
+      return { ...current, [activeSessionId]: normalized };
+    });
+  }, [activeSessionId, modelChoices, sessionDefaultModelId, sessionEffort, turnModelSelection]);
+  const turnModelControl = activeSessionId && modelChoices.length ? {
+    choices: modelChoices,
+    sessionDefaultModelId,
     selection: turnModelSelection,
     disabled: (
       sessionLlmOptionsQuery.isLoading
@@ -2743,24 +2787,45 @@ export function ChatCodingRouteWorkbench() {
       }
       setTurnModelSelections((current) => ({
         ...current,
-        [activeSessionId]: selection,
+        [activeSessionId]: selectionAfterModelPick({
+          sessionDefaultModelId,
+          sessionEffort,
+          previousSelection: current[activeSessionId] ?? null,
+          previousModel: effectiveComposerModel,
+          next: selection,
+          choices: modelChoices,
+        }),
       }));
     },
   } : undefined;
   const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
-    model: sessionLlmOptions.model,
+    model: effectiveComposerModel,
     sessionId: activeSessionId,
-    currentReasoningEffort: sessionLlmOptions?.currentReasoningEffort || detail?.reasoningEffort || "",
+    currentReasoningEffort: shownComposerEffort,
     // Do not allow switching effort while options failed/loading for this session.
     disabled: (
       sessionBusy
       || sessionLlmOptionsQuery.isLoading
       || sessionLlmOptionsQuery.isError
-      || !sessionLlmOptions?.model
+      || !effectiveComposerModel
     ),
     pending: sessionReasoningEffortMutation.isPending,
     onReasoningEffortChange: (reasoningEffort: string) => {
       if (!activeSessionId || sessionLlmOptionsQuery.isError) {
+        return;
+      }
+      if (!followingSessionModel && overrideModel) {
+        const allowed = overrideModel.reasoningEffortValues ?? [];
+        if (allowed.length && !allowed.includes(reasoningEffort)) {
+          return;
+        }
+        setTurnModelSelections((current) => ({
+          ...current,
+          [activeSessionId]: {
+            modelId: overrideModel.modelRef || overrideModel.modelId,
+            ...(reasoningEffort ? { reasoningEffort } : {}),
+          },
+        }));
         return;
       }
       sessionReasoningEffortMutation.mutate({

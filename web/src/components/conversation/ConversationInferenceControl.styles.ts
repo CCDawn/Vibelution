@@ -4,7 +4,6 @@ import {
 
 const styles = {
   root: "relative flex min-w-0 max-w-full items-center",
-  fixedLabel: "inline-flex min-h-7 max-w-full items-center whitespace-nowrap px-1.5 text-vui-xs font-medium tracking-[-0.01em] text-[var(--fg-tertiary)]",
   // Model name stays fully visible; shrink only if the whole toolbar is actually overflowing.
   trigger: "!inline-flex !min-h-7 !h-7 !w-auto !max-w-full !items-center !gap-1 !rounded-full !border-0 !bg-transparent !px-1.5 !py-0 !text-vui-xs !font-medium !tracking-[-0.01em] !text-[var(--fg-tertiary)] !shadow-none hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[open=true]:!bg-[var(--vui-control-muted)] data-[open=true]:!text-[var(--fg-primary)]",
   triggerModel: "min-w-0 whitespace-nowrap",
