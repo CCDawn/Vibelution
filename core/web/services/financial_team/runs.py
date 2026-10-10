@@ -1243,6 +1243,7 @@ def _primary_role_prompt(
         "只调用本 Agent 当前已授权的工具；明确标注数据时间、来源、单位、事实与推断。无法核验的数据写明缺口，不编造报价、财报、新闻、工具结果、目标价或收益承诺，也不执行交易。",
     ]
     if role == "market":
+        lines.append("调用 financial_market_snapshot_tool 时设置 include_sector=true 取得当前 A 股行业/板块参考，保留其独立来源、分类口径和逐行时点。历史覆盖不足时明确缺口，不把当前行业成分或板块快照用于历史推断。未提供的资金流、轮动或概念归属不得编造。")
         lines.append("若当前工具面含 financial_index_context_tool，调用它查询上证、深证成指、创业板指、沪深300和中证500，结合个股说明大盘背景。历史研究只使用研究日期内日线；指数单位为点，不作股票前复权或成交量换算。工具未授权或来源失败时明确缺口，不补造板块表现。")
     owner_id = str(run.get("assistantAgentId") or "")
     if owner_id and run.get("researchDate"):

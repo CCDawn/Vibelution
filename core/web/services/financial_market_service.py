@@ -181,3 +181,10 @@ def get_index_context(*, cutoff=None, limit: int = 2) -> dict:
     from core.web.services.financial_market.indices import get_index_context as load
 
     return load(cutoff=cutoff, limit=limit, read=_read, cached=_cached)
+
+
+def get_sector_context(symbol: str, *, cutoff=None) -> dict:
+    """Optional current A-share sector references; no historical substitution."""
+    from core.web.services.financial_market.sectors import get_sector_context as load
+
+    return load(symbol, cutoff=cutoff, read=_read, cached=_cached)

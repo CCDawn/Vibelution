@@ -100,3 +100,13 @@ input closes, total, and unrounded mean are not independently authorized.
 Batch export reuses the same exact-Turn authorization and validation for every
 member. It accepts at most 20 distinct reports, limits uncompressed content to
 8 MB, and returns a ZIP in memory. Reports and ZIP packages are not persisted.
+
+`sector_evidence.py` whitelists optional current Eastmoney sector references
+from the same guarded market-role snapshot. Classification observation must be
+on the research day; a past stock quote never proves historical membership.
+Provider taxonomy, board points, peer CNY/share and independent source times
+remain separate. Exact stock/board source URLs, canonical identities and finite
+values are checked; malformed optional context leaves the stock reference
+intact. These are untrusted synthesis references, not verified filing values.
+Concepts and historical membership remain unavailable, and no synchronized
+close, fund flow or rotation is inferred. Session/Journal writing is unchanged.

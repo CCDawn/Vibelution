@@ -20,3 +20,12 @@ the parser does not synthesize quote values or relabel raw bars as adjusted.
 index parser. Index daily bars are raw index points, not stock qfq data. Its
 historical mode sends the requested end date upstream and rejects any later
 row locally; unverified index volume and turnover fields are never exposed.
+
+`sectors.py` adds current-only A-share sector context from Eastmoney public
+quotes. It exposes Eastmoney's vendor industry label, maps it to a board only
+when the complete industry directory has one exact name match, and validates
+the board timestamp (`f86`) and each peer timestamp (`f124`) independently.
+The label is observed at fetch time; the stock quote time (`f124`) is not
+historical industry-membership evidence. Non-current cutoffs make no request.
+Concept coverage and historical board/constituent coverage remain explicitly
+unavailable; current members must not be used as a backtest universe.

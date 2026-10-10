@@ -28,6 +28,7 @@ from core.web.services.financial_research.as_of import (
     published_date,
 )
 from core.web.services.financial_report.index_evidence import TOOL_NAME as INDEX_TOOL, index_reference
+from core.web.services.financial_report.sector_evidence import sector_reference
 
 _SUCCESS = {"completed", "success", "succeeded", "done"}
 _MAX_OUTPUT = 32_000
@@ -273,6 +274,9 @@ def _market_reference(output: str, status: str, symbol: str, cutoff) -> tuple[di
         "researchDate": cutoff.isoformat(),
         "verification": "original_tool_output; untrusted reference; separate from filing-page numeric validation",
     }
+    sector = sector_reference(payload.get("sectorContext"), symbol, cutoff)
+    if sector is not None:
+        projected["sectorContext"] = sector
     name = str(quote.get("name") or "").strip()
     if len(name) > 80 or any(ord(char) < 32 for char in name):
         name = ""
