@@ -261,6 +261,7 @@ ROLE_SPECS: dict[str, dict[str, Any]] = {
         "label": "行情分析",
         "teamRole": "行情分析师",
         "requiredTools": ["financial_market_snapshot_tool"],
+        "optionalTools": ["financial_index_context_tool"],
         "task": {
             "mission": "分析指定 A 股的公开行情与价格走势。",
             "responsibilities": "查询指定证券代码的最新公开行情和日、周或月 K 线；标明行情时间、来源、复权与单位；数据不可用时明确说明。",
@@ -532,7 +533,8 @@ def _role_tool_policy(owner_policy: dict[str, Any], role: str) -> dict[str, Any]
         raise FinancialTeamConflictError(
             f"主助手没有授权{ROLE_SPECS[role]['label']}所需的只读工具；团队不会自动扩权"
         )
-    allowed = sorted(required.intersection(allowed_by_owner))
+    optional = set(ROLE_SPECS[role].get("optionalTools", []))
+    allowed = sorted((required | optional).intersection(allowed_by_owner) - blocked_by_owner)
     preferred = sorted(
         _tool_names(owner_policy, "preferredTools").intersection(allowed)
     )
@@ -664,6 +666,12 @@ def _role_agent_configuration_is_current(
         else {}
     )
     expected_marker = expected_metadata[AGENT_MARKER]
+    policy_matches = _tool_policy_matches(actual_policy, expected_policy)
+    if role == "market" and not actual_marker.get("indexContextGranted") and not policy_matches:
+        legacy_policy = copy.deepcopy(expected_policy)
+        for key in ("allowedTools", "preferredTools", "blockedTools"):
+            legacy_policy[key] = sorted(_tool_names(legacy_policy, key) - {assistant_service.INDEX_TOOL})
+        policy_matches = _tool_policy_matches(actual_policy, legacy_policy)
     marker_team_id = str(actual_marker.get("teamId") or "").strip()
     normalized_team_id = str(expected_team_id or "").strip()
     team_marker_matches = marker_team_id == normalized_team_id or (
@@ -689,7 +697,7 @@ def _role_agent_configuration_is_current(
         and agent.get("taskProfile") == expected_task
         and directory.normalize_delegation_policy(metadata.get("delegationPolicy"))
         == expected_delegation
-        and _tool_policy_matches(actual_policy, expected_policy)
+        and policy_matches
         and _role_memory_policy_is_restricted(agent)
     )
 
@@ -839,6 +847,8 @@ def _new_role_agent(
         f"{str(owner.get('displayName') or '炒股智能体').strip()} · {spec['label']}"
     )
     metadata = _expected_role_metadata(owner, role, role_definition)
+    if role == "market" and assistant_service.INDEX_TOOL in policy["allowedTools"]:
+        metadata[AGENT_MARKER]["indexContextGranted"] = True
     agent = directory.create_agent_instance(
         display_name=display_name,
         llm_bindings=bindings,
@@ -943,16 +953,46 @@ def _append_missing_team_members(
     return team
 
 
+def _upgrade_legacy_index_role(owner: dict, agents: dict, definitions: dict, team_id: str) -> None:
+    agent = agents.get("market")
+    if not agent or (agent.get("metadata") or {}).get(AGENT_MARKER, {}).get("indexContextGranted"):
+        return
+    _, expected_policy = _expected_role_config(owner, "market")
+    if assistant_service.INDEX_TOOL not in expected_policy["allowedTools"]:
+        return
+    if not _role_agent_configuration_is_current(owner, "market", agent, definitions["market"], expected_team_id=team_id):
+        return  # The ordinary conflict check protects user-edited roles.
+    if session_service._is_session_running(str(agent.get("directSessionId") or "")):
+        raise FinancialTeamConflictError("行情分析师正在运行；本轮结束后再升级指数工具")
+    marker = dict((agent.get("metadata") or {}).get(AGENT_MARKER) or {})
+    marker["indexContextGranted"] = True
+    directory.update_agent_instance(
+        agent["agentId"], tool_policy=expected_policy,
+        expected_tool_policy_fingerprint=directory.tool_policy_fingerprint(agent["toolPolicy"]),
+        metadata={AGENT_MARKER: marker},
+    )
+    agents["market"] = _agent_config(agent["agentId"])
+
+
 def provision_financial_team(assistant_agent_id: str) -> dict[str, Any]:
     """Explicit, idempotent setup. Existing user-edited role Agents fail closed."""
     owner = _financial_assistant(assistant_agent_id)
     with _LOCK, _provision_lock(owner):
         owner = _financial_assistant(assistant_agent_id)
-        role_definitions = _financial_role_definitions()
         role_agents = _role_agents(str(owner["agentId"]))
+        owner_markers = (assistant_service._NEWS_REFERENCE_MARKER, assistant_service._MARKET_REFERENCE_MARKER,
+                         assistant_service._MARKET_SCREEN_REFERENCE_MARKER, assistant_service._INDEX_REFERENCE_MARKER)
+        if any(not (owner.get("metadata") or {}).get(marker) for marker in owner_markers):
+            busy_sessions = [owner.get("directSessionId"), (role_agents.get("market") or {}).get("directSessionId")]
+            if any(session_service._is_session_running(str(sid)) for sid in busy_sessions if sid):
+                raise FinancialTeamConflictError("金融助手或行情分析师正在运行；本轮结束后再升级指数工具")
+        assistant_service._grant_default_references(owner)
+        owner = _financial_assistant(assistant_agent_id)
+        role_definitions = _financial_role_definitions()
         backfill_financial_team_identities()
         raw_team = _find_team(str(owner["agentId"]))
         expected_team_id = str((raw_team or {}).get("teamId") or "").strip()
+        _upgrade_legacy_index_role(owner, role_agents, role_definitions, expected_team_id)
         owner_metadata = (
             owner.get("metadata") if isinstance(owner.get("metadata"), dict) else {}
         )

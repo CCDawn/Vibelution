@@ -26,8 +26,10 @@ _PREVIOUS_READ_TOOLS = (
 _NEWS_READ_TOOLS = (*_PREVIOUS_READ_TOOLS, "news_search_tool")
 MARKET_TOOL = "financial_market_snapshot_tool"
 MARKET_SCREEN_TOOL = "financial_market_screen_tool"
+INDEX_TOOL = "financial_index_context_tool"
 _LEGACY_MARKET_READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL)
-READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL, MARKET_SCREEN_TOOL)
+_LEGACY_SCREEN_READ_TOOLS = (*_NEWS_READ_TOOLS, MARKET_TOOL, MARKET_SCREEN_TOOL)
+READ_TOOLS = (*_LEGACY_SCREEN_READ_TOOLS, INDEX_TOOL)
 READ_POLICY = {
     "allowedTools": list(READ_TOOLS),
     "preferredTools": list(READ_TOOLS),
@@ -211,6 +213,7 @@ def _names(policy: dict, key: str) -> set[str]:
 _NEWS_REFERENCE_MARKER = "financialAssistantNewsReferenceGranted"
 _MARKET_REFERENCE_MARKER = "financialAssistantMarketReferenceGranted"
 _MARKET_SCREEN_REFERENCE_MARKER = "financialAssistantMarketScreenReferenceGranted"
+_INDEX_REFERENCE_MARKER = "financialAssistantIndexReferenceGranted"
 
 
 def _default_read_policy(policy: dict, tools: tuple[str, ...]) -> bool:
@@ -237,6 +240,10 @@ def _market_tool_status(agent: dict) -> str:
     blocked = _names(policy, "blockedTools")
     if MARKET_TOOL in allowed and MARKET_TOOL not in blocked:
         if MARKET_SCREEN_TOOL in allowed and MARKET_SCREEN_TOOL not in blocked:
+            if (INDEX_TOOL not in allowed and INDEX_TOOL not in blocked
+                and not metadata.get(_INDEX_REFERENCE_MARKER)
+                and _default_read_policy(policy, _LEGACY_SCREEN_READ_TOOLS)):
+                return "upgrade_available"
             return "assigned" if policy.get("networkAccess") != "none" else "not_assigned"
         if (
             MARKET_SCREEN_TOOL not in blocked
@@ -263,7 +270,8 @@ def _grant_default_references(agent: dict) -> bool:
     news_pending = not metadata.get(_NEWS_REFERENCE_MARKER)
     market_pending = not metadata.get(_MARKET_REFERENCE_MARKER)
     screen_pending = not metadata.get(_MARKET_SCREEN_REFERENCE_MARKER)
-    if not news_pending and not market_pending and not screen_pending:
+    index_pending = not metadata.get(_INDEX_REFERENCE_MARKER)
+    if not news_pending and not market_pending and not screen_pending and not index_pending:
         return False
     if agent.get("status") != "active":
         return False
@@ -271,6 +279,8 @@ def _grant_default_references(agent: dict) -> bool:
         return False
     if metadata.get("financialAssistantSetup") != "ready":
         return False
+    if session_service._is_session_running(str(agent.get("directSessionId") or "")):
+        raise directory.AgentStateConflictError("金融助手正在运行；本轮结束后再升级工具")
     policy = (
         agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
     )
@@ -287,10 +297,16 @@ def _grant_default_references(agent: dict) -> bool:
         and _default_read_policy(policy, _LEGACY_MARKET_READ_TOOLS)
         and MARKET_SCREEN_TOOL not in _names(policy, "blockedTools")
     )
-    if grant_news or grant_market or grant_market_screen:
-        tools = READ_TOOLS if grant_market else _NEWS_READ_TOOLS
-        if grant_market_screen:
-            tools = READ_TOOLS
+    grant_index = (
+        index_pending
+        and INDEX_TOOL not in _names(policy, "blockedTools")
+        and (_default_read_policy(policy, _LEGACY_SCREEN_READ_TOOLS)
+             or grant_market or grant_market_screen)
+    )
+    if grant_news or grant_market or grant_market_screen or grant_index:
+        tools = _LEGACY_SCREEN_READ_TOOLS if grant_market or grant_market_screen or grant_index else _NEWS_READ_TOOLS
+        if grant_index:
+            tools = (*tools, INDEX_TOOL)
         updates["tool_policy"] = {
             **policy,
             "allowedTools": list(tools),
@@ -334,6 +350,7 @@ def _grant_default_references(agent: dict) -> bool:
         **({_NEWS_REFERENCE_MARKER: True} if news_pending else {}),
         **({_MARKET_REFERENCE_MARKER: True} if market_pending else {}),
         **({_MARKET_SCREEN_REFERENCE_MARKER: True} if grant_market or grant_market_screen else {}),
+        **({_INDEX_REFERENCE_MARKER: True} if index_pending else {}),
     }
     directory.update_agent_instance(agent["agentId"], **updates)
     return migrated
@@ -427,6 +444,7 @@ def create_financial_assistant(display_name: str = "炒股智能体") -> dict:
                     _NEWS_REFERENCE_MARKER: True,
                     _MARKET_REFERENCE_MARKER: True,
                     _MARKET_SCREEN_REFERENCE_MARKER: True,
+                    _INDEX_REFERENCE_MARKER: True,
                 },
             )
         else:

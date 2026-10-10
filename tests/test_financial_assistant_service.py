@@ -473,6 +473,7 @@ def _rewind_stage_one(agent_id: str, *, max_calls: int = 8) -> None:
         metadata={
             "financialAssistantNewsReferenceGranted": False,
             "financialAssistantMarketReferenceGranted": False,
+            service._INDEX_REFERENCE_MARKER: False,
         },
     )
 
@@ -600,8 +601,46 @@ def _rewind_news_default(agent_id: str, **policy_changes) -> None:
         metadata={
             "financialAssistantNewsReferenceGranted": True,
             "financialAssistantMarketReferenceGranted": False,
+            service._INDEX_REFERENCE_MARKER: False,
         },
     )
+
+
+def test_index_upgrade_is_explicit_and_keeps_untouched_policy_limits(entry_env):
+    row = service.create_financial_assistant()["assistant"]
+    directory.update_agent_instance(
+        row["agentId"], tool_policy={**service.READ_POLICY,
+            "allowedTools": list(service._LEGACY_SCREEN_READ_TOOLS),
+            "preferredTools": list(service._LEGACY_SCREEN_READ_TOOLS), "maxCallsPerTurn": 3},
+        metadata={service._INDEX_REFERENCE_MARKER: False},
+    )
+    before = directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"]
+    assert service.list_financial_assistants()[0]["marketToolStatus"] == "upgrade_available"
+    assert directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before
+    service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])
+    assert service.INDEX_TOOL in after["toolPolicy"]["allowedTools"]
+    assert after["toolPolicy"]["maxCallsPerTurn"] == 3
+    assert after["toolPolicy"]["policyVersion"] == before + 1
+    service.create_financial_assistant()
+    assert directory.get_agent(row["agentId"])["toolPolicy"]["policyVersion"] == before + 1
+
+
+@pytest.mark.parametrize("changes", [{"blockedTools": [service.INDEX_TOOL]},
+                                     {"networkAccess": "none"}, {"allowedTools": []}])
+def test_index_upgrade_preserves_explicit_denial_or_custom_policy(entry_env, changes):
+    row = service.create_financial_assistant()["assistant"]
+    directory.update_agent_instance(
+        row["agentId"], tool_policy={**service.READ_POLICY,
+            "allowedTools": list(service._LEGACY_SCREEN_READ_TOOLS),
+            "preferredTools": list(service._LEGACY_SCREEN_READ_TOOLS), **changes},
+        metadata={service._INDEX_REFERENCE_MARKER: False},
+    )
+    before = directory.get_agent(row["agentId"])["toolPolicy"]
+    service.create_financial_assistant()
+    after = directory.get_agent(row["agentId"])["toolPolicy"]
+    assert service.INDEX_TOOL not in after["allowedTools"]
+    assert after == before
 
 
 def test_legacy_market_default_gains_screen_tool_only_on_explicit_write(entry_env, monkeypatch):
@@ -617,6 +656,7 @@ def test_legacy_market_default_gains_screen_tool_only_on_explicit_write(entry_en
             service._NEWS_REFERENCE_MARKER: True,
             service._MARKET_REFERENCE_MARKER: True,
             service._MARKET_SCREEN_REFERENCE_MARKER: False,
+            service._INDEX_REFERENCE_MARKER: False,
         },
     )
     before = directory.get_agent(row["agentId"])

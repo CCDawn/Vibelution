@@ -135,6 +135,30 @@ def test_freeze_uses_day_before_latest_decision_and_excludes_same_day_notices():
     )
 
 
+@pytest.mark.parametrize(("code", "org_id"), [("002656", "9900022094"), ("300750", "GD165627")])
+def test_modern_issuer_ids_reach_historical_pdf_directory_without_future_notices(monkeypatch, code, org_id):
+    calls = []
+
+    def provider(path, fields):
+        calls.append((path, dict(fields)))
+        if path.endswith("topSearch/query"):
+            return [{"code": code, "category": "A股", "orgId": org_id, "delisted": "false"}]
+        return {"hasMore": False, "announcements": [
+            {"secCode": code, "announcementId": str(index), "announcementTitle": "2024年年度报告",
+             "adjunctUrl": f"finalpage/{day}/{index}.pdf",
+             "announcementTime": int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp() * 1000)}
+            for index, day in enumerate(["2025-03-30", "2026-01-01"])
+        ]}
+
+    monkeypatch.setattr(official_pdf.official_filings, "_post_json", provider)
+    result = official_pdf.load_periodic_report_notices("sz" + code, cutoff=date(2025, 12, 31))
+    assert result["status"] == "available"
+    assert len(result["items"]) == 1 and result["items"][0]["publishedDate"] == "2025-03-30"
+    assert calls[1][1]["stock"] == f"{code},{org_id}"
+    assert calls[1][1]["column"] == "szse"
+    assert calls[1][1]["seDate"].endswith("2025-12-31")
+
+
 def test_revision_candidates_are_retained_with_uncertainty_warning():
     items = [
         _notice(published="2025-03-30", url=PDF_A, code="original"),

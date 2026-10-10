@@ -24,6 +24,8 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from core.web.services.financial_market import tencent
+
 CNINFO_ORIGIN = "https://www.cninfo.com.cn"
 CNINFO_PDF_ORIGIN = "https://static.cninfo.com.cn"
 ANNUAL_CATEGORY = "category_ndbg_szsh"
@@ -49,13 +51,16 @@ _ALLOWED_CATEGORIES = {category for _kind, category in _PERIODIC_CATEGORIES}
 _MIN_ANNOUNCED_MS = 631152000000
 _MAX_ANNOUNCED_MS = 4102444800000
 _A_SHARE = re.compile(r"(?<!\d)([036489]\d{5})(?!\d)")
-_ORG_ID = re.compile(r"^(?:g(?:ssh|ssz|fbj)|nssc)[0-9]{6,12}$")
+# CNINFO also returns opaque digit and GD identities (observed for 002656 and
+# 300750). Their bounds protect transport; they do not define a provider schema.
+_ORG_ID = re.compile(r"(?:(?:g(?:ssh|ssz|fbj)|nssc)[0-9]{6,12}|[0-9]{1,32}|GD[0-9]{1,30})")
 _ADJUNCT = re.compile(r"^finalpage/(\d{4}-\d{2}-\d{2})/[A-Za-z0-9][A-Za-z0-9._-]{0,64}\.pdf$", re.IGNORECASE)
 _PATHS = {
     "/new/information/topSearch/query",
     "/new/hisAnnouncement/query",
 }
-_COLUMNS = {"gssh": "sse", "gssz": "szse", "gfbj": "bj", "nssc": "sse"}
+_LEGACY_COLUMNS = {"gssh": "sse", "gssz": "szse", "gfbj": "bj"}
+_CODE_COLUMNS = {"sh": "sse", "sz": "szse", "bj": "bj"}
 _FILING_HOSTS = {
     "static.cninfo.com.cn",
     "www.cninfo.com.cn",
@@ -513,7 +518,11 @@ def _announcement_fields(
 
 
 def _org_and_column(payload: object, code: str) -> tuple[str, str] | None:
-    if not isinstance(payload, list):
+    if not isinstance(payload, list) or not isinstance(code, str) or not re.fullmatch(r"[036489][0-9]{5}", code):
+        return None
+    try:
+        column = _CODE_COLUMNS[tencent.normalize_a_share_symbol(code)[:2]]
+    except (tencent.MarketDataError, KeyError):
         return None
     matches: list[tuple[bool, str]] = []
     for row in payload:
@@ -524,15 +533,19 @@ def _org_and_column(payload: object, code: str) -> tuple[str, str] | None:
         org_id = row.get("orgId")
         if not isinstance(org_id, str) or _ORG_ID.fullmatch(org_id) is None:
             continue
+        legacy_column = _LEGACY_COLUMNS.get(org_id[:4])
+        if legacy_column is not None and legacy_column != column:
+            continue
         matches.append((_is_delisted(row), org_id))
     if not matches:
         return None
     matches.sort(key=lambda item: item[0])
-    org_id = matches[0][1]
-    column = _COLUMNS.get(org_id[:4])
-    if column is None:
+    # Prefer current listings, but never pick arbitrarily between conflicting
+    # identities at the same priority. Duplicate identical records are safe.
+    org_ids = {org_id for delisted, org_id in matches if delisted == matches[0][0]}
+    if len(org_ids) != 1:
         return None
-    return org_id, column
+    return next(iter(org_ids)), column
 
 
 def _select_filing(payload: object, code: str, cutoff: date | None) -> dict[str, str] | None:

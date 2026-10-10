@@ -26,6 +26,7 @@ taskProfile:
 toolPolicy:
   allowedTools:
     - financial_market_snapshot_tool
+    - financial_index_context_tool
   preferredTools: []
   writeScopes: []
 ---

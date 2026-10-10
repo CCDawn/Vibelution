@@ -505,28 +505,7 @@ def _normalize_notice(row: dict[str, Any], *, code: str, symbol: str) -> dict[st
 
 
 def _issuer_identity(payload: object, code: str) -> tuple[str, str] | None:
-    located = official_filings._org_and_column(payload, code)
-    if located is not None:
-        return located
-    # The shared filing identity helper predates BSE and accepts only gssh / gssz
-    # / gfbj. Keep its exact A-share/code checks and add the official nssc identity
-    # used by Beijing-listed A-shares, mapped by the same helper's column table.
-    if not isinstance(payload, list):
-        return None
-    matches: set[str] = set()
-    for row in payload:
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("code") or "").strip() != code or row.get("category") != "A股":
-            continue
-        org_id = row.get("orgId")
-        if isinstance(org_id, str) and re.fullmatch(r"nssc[0-9]{6,12}", org_id):
-            matches.add(org_id)
-    if len(matches) != 1:
-        return None
-    org_id = next(iter(matches))
-    column = official_filings._COLUMNS.get("nssc")
-    return (org_id, column) if column else None
+    return official_filings._org_and_column(payload, code)
 
 
 def _extract_all_pdf_pages(pdf_bytes: bytes) -> list[str]:

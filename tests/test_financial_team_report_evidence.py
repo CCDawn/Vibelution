@@ -432,3 +432,30 @@ def test_synthesis_reference_budget_emits_truncation_notice():
     notice = next(item for item in bounded if item["type"] == "source_evidence_truncation_notice")
     assert notice["truncated"] is True
     assert json.loads(notice["content"])["omittedItems"] == 1
+
+
+def test_index_context_uses_only_exact_market_turn_and_cutoff(monkeypatch):
+    from tests.test_financial_index_tools import NAME, index_payload
+
+    run, records, states = _synthesis_reference_fixture(monkeypatch)
+    payload = {**index_payload(), "ok": True}
+    payload["items"][0]["quote"]["date"] = "2026-10-07"
+    records["market-session"] = _native_tool_turn("market-session", "mt", "ms", [(NAME, payload)])
+    refs = synthesis_tool_references("owner", run)
+    observed = next(json.loads(item["content"]) for item in refs if json.loads(item["content"]).get("toolName") == NAME)
+    assert len(observed["items"]) == 4
+    assert observed["sectorCoverage"] == "unavailable"
+    assert observed["items"][0]["priceUnit"] == "points"
+    assert "untrusted" in observed["verification"]
+    states["market-session"]["agentId"] = "foreign-agent"
+    assert all(json.loads(item["content"]).get("toolName") != NAME for item in synthesis_tool_references("owner", run))
+
+
+def test_index_context_is_not_accepted_from_news_role_or_changed_turn(monkeypatch):
+    from tests.test_financial_index_tools import NAME, index_payload
+
+    run, records, _ = _synthesis_reference_fixture(monkeypatch)
+    payload = {**index_payload(), "ok": True}
+    records["news-session"] = _native_tool_turn("news-session", "nt", "ns", [(NAME, payload)])
+    records["market-session"] = _native_tool_turn("market-session", "other-turn", "ms", [(NAME, payload)])
+    assert all(json.loads(item["content"]).get("toolName") != NAME for item in synthesis_tool_references("owner", run))

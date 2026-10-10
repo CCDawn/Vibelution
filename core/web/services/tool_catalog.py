@@ -138,6 +138,7 @@ GENERATED_PERMISSION_TIER = "generated"
 EXPLICIT_ALLOW_TOOLS = {
     "financial_report_query_tool",
     "financial_market_snapshot_tool",
+    "financial_index_context_tool",
     "financial_market_screen_tool",
     "financial_evidence_search_tool",
     "financial_evidence_stage_tool",
@@ -873,6 +874,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["network_access"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "financial_index_context_tool": {
+        "category": "web_research",
+        "capabilityTags": ["financial_market", "index_context", "read_only", "network"],
+        "riskTags": ["network_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "financial_market_screen_tool": {
         "category": "web_research",
         "capabilityTags": ["financial_market", "stock_screening", "read_only", "network"],
@@ -1049,10 +1056,10 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "bundleId": "financial_reports",
         "label": "行情与财报研究包",
-        "description": "只读公开报价、日/周/月 K 线与 A 股条件筛选；检索财报证据并保留来源与页码。外部财报助手可能产生模型费用。",
+        "description": "只读公开报价、五大指数、日/周/月 K 线与 A 股条件筛选；检索财报证据并保留来源与页码。外部财报助手可能产生模型费用。",
         "category": "research",
-        "toolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_evidence_stage_tool", "financial_evidence_withdraw_tool", "financial_market_snapshot_tool", "financial_market_screen_tool"],
-        "preferredToolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_market_snapshot_tool", "financial_market_screen_tool"],
+        "toolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_evidence_stage_tool", "financial_evidence_withdraw_tool", "financial_market_snapshot_tool", "financial_market_screen_tool", "financial_index_context_tool"],
+        "preferredToolNames": ["financial_report_query_tool", "financial_evidence_search_tool", "financial_market_snapshot_tool", "financial_market_screen_tool", "financial_index_context_tool"],
     },
     {
         "bundleId": "virtual_human_life",

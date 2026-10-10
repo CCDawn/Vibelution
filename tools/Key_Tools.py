@@ -101,6 +101,7 @@ from tools.financial_memory_tools import (
 from tools.financial_report_tools import financial_report_query_tool as _financial_report_query_impl
 from tools.financial_market_tools import financial_market_screen_tool as _financial_market_screen_impl
 from tools.financial_market_tools import financial_market_snapshot_tool as _financial_market_snapshot_impl
+from tools.financial_index_tools import financial_index_context_tool as _financial_index_context_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.research_knowledge_request_tools import (
     research_knowledge_request_tool as _research_knowledge_request_impl,
@@ -2797,6 +2798,20 @@ def _build_key_tools() -> List[BaseTool]:
         return _financial_market_snapshot_impl(ticker=ticker, period=period, limit=limit)
 
     @tool
+    def financial_index_context_tool(
+        limit: Annotated[int, Field(strict=True, ge=2, le=20)] = 2,
+    ) -> str:
+        """【A股大盘】只读上证、深证成指、创业板指、沪深300和中证500。
+
+        只向公开源发送固定指数代码和日线数量，不发送用户问题、持仓或私人信息。
+        返回点位、行情源时间、查询时间和来源；指数单位为点，不套股票前复权或手数。
+        分析日期由本次原生Turn上下文确定；历史日期只查询截止日内日线，忽略当前报价。
+        limit=2-20，默认2；失败逐项可见，不补造缺失指数或行业/板块数据。
+        此工具提供公开延迟行情，不代表官方、实时、完整市场或未来收益保证。
+        """
+        return _financial_index_context_impl(limit=limit)
+
+    @tool
     def financial_market_screen_tool(
         min_price: Annotated[float | None, Field(strict=True, ge=0, le=100_000_000)] = None,
         max_price: Annotated[float | None, Field(strict=True, ge=0, le=100_000_000)] = None,
@@ -3641,6 +3656,7 @@ def _build_key_tools() -> List[BaseTool]:
         computer_use_session_tool,
         financial_report_query_tool,
         financial_market_snapshot_tool,
+        financial_index_context_tool,
         financial_market_screen_tool,
         financial_evidence_search_tool,
         financial_evidence_stage_tool,

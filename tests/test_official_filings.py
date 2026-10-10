@@ -156,6 +156,70 @@ def test_org_and_column_accepts_cninfo_nssc_for_the_matching_a_share():
 
 
 @pytest.mark.parametrize(
+    ("code", "org_id", "column"),
+    [("002656", "9900022094", "szse"), ("300750", "GD165627", "szse"),
+     ("920185", "nssc920185", "bj")],
+)
+def test_modern_issuer_ids_use_the_exact_a_share_code_for_exchange(code, org_id, column):
+    payload = [{"code": code, "category": "A股", "orgId": org_id}]
+    assert official_filings._org_and_column(payload, code) == (org_id, column)
+
+
+@pytest.mark.parametrize("org_id", ["9900022094", "GD165627"])
+def test_modern_issuer_ids_never_relax_code_or_category_checks(org_id):
+    assert official_filings._org_and_column(
+        [{"code": "002656", "category": "A股", "orgId": org_id}], "300750"
+    ) is None
+    assert official_filings._org_and_column(
+        [{"code": "300750", "category": "债券", "orgId": org_id}], "300750"
+    ) is None
+
+
+def test_identity_conflicts_fail_closed_and_duplicate_exact_records_are_safe():
+    active = {"code": "300750", "category": "A股", "orgId": "GD165627"}
+    conflicting = {**active, "orgId": "9900022094"}
+    assert official_filings._org_and_column([active, conflicting], "300750") is None
+    assert official_filings._org_and_column([active, active], "300750") == ("GD165627", "szse")
+    assert official_filings._org_and_column(
+        [{**conflicting, "delisted": "true"}, active], "300750"
+    ) == ("GD165627", "szse")
+    assert official_filings._org_and_column(
+        [{**active, "orgId": "gssh0300750"}], "300750"
+    ) is None
+
+
+@pytest.mark.parametrize("org_id", ["9900022094,other", "GD165627&column=sse", "GD165627\n",
+                                     "9" * 33, "GD" + "1" * 31, 9900022094])
+def test_modern_identity_rejects_transport_injection_and_unbounded_ids(org_id):
+    assert official_filings._org_and_column(
+        [{"code": "300750", "category": "A股", "orgId": org_id}], "300750"
+    ) is None
+
+
+@pytest.mark.parametrize(("code", "org_id"), [("002656", "9900022094"), ("300750", "GD165627")])
+def test_periodic_lookup_passes_modern_identity_to_the_official_directory(monkeypatch, code, org_id):
+    calls = []
+
+    def fake(path, fields):
+        if path.endswith("topSearch/query"):
+            return [{"code": code, "category": "A股", "orgId": org_id}]
+        calls.append(dict(fields))
+        return {"announcements": [
+            _announcement("2024年年度报告", "finalpage/2025-04-03/1223000001.PDF",
+                          _ms(date(2025, 4, 3)), code),
+            _announcement("2025年年度报告", "finalpage/2026-04-17/1225114741.PDF",
+                          LIVE_ANNOUNCED_MS, code),
+        ], "hasMore": False}
+
+    monkeypatch.setattr(official_filings, "_post_json", fake)
+    found = official_filings.lookup_periodic_filings([code], cutoff=date(2025, 12, 31))
+    assert found[code][0]["announcedOn"] == "2025-04-03"
+    assert calls
+    assert all(fields["stock"] == f"{code},{org_id}" and fields["column"] == "szse"
+               and fields["seDate"] == "1990-01-01~2025-12-31" for fields in calls)
+
+
+@pytest.mark.parametrize(
     "org_id",
     [
         None,

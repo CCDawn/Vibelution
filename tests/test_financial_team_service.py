@@ -227,6 +227,84 @@ def test_financial_team_provision_is_ready_and_idempotent(financial_team_env):
     } == {row["role"]: (row["agentId"], row["sessionId"]) for row in first["roles"]}
 
 
+def _rewind_team_index_tools(assistant_id, team):
+    owner = agent_directory_service.get_agent(assistant_id)
+    policy = dict(owner["toolPolicy"])
+    for key in ("allowedTools", "preferredTools"):
+        policy[key] = [name for name in policy[key] if name != financial_assistant_service.INDEX_TOOL]
+    agent_directory_service.update_agent_instance(assistant_id, tool_policy=policy,
+        metadata={financial_assistant_service._INDEX_REFERENCE_MARKER: False})
+    market = next(row for row in team["roles"] if row["role"] == "market")
+    agent = agent_directory_service.get_agent(market["agentId"])
+    role_policy = dict(agent["toolPolicy"])
+    for key in ("allowedTools", "preferredTools"):
+        role_policy[key] = [name for name in role_policy[key] if name != financial_assistant_service.INDEX_TOOL]
+    agent_directory_service.update_agent_instance(market["agentId"], tool_policy=role_policy,
+        metadata={provisioning.AGENT_MARKER: {**agent["metadata"][provisioning.AGENT_MARKER], "indexContextGranted": False}})
+    return market
+
+
+def test_existing_team_upgrades_only_untouched_market_role_on_explicit_setup(financial_team_env):
+    owner = financial_team_env["assistant"]["agentId"]
+    team = provisioning.provision_financial_team(owner)
+    market = _rewind_team_index_tools(owner, team)
+    upgraded = provisioning.provision_financial_team(owner)
+    assert upgraded["teamId"] == team["teamId"]
+    assert next(row for row in upgraded["roles"] if row["role"] == "market")["sessionId"] == market["sessionId"]
+    for member in upgraded["roles"]:
+        agent = agent_directory_service.get_agent(member["agentId"])
+        assert (financial_assistant_service.INDEX_TOOL in agent["toolPolicy"]["allowedTools"]) == (member["role"] == "market")
+    policy = agent_directory_service.get_agent(market["agentId"])["toolPolicy"]
+    provisioning.provision_financial_team(owner)
+    assert agent_directory_service.get_agent(market["agentId"])["toolPolicy"] == policy
+
+
+def test_busy_legacy_market_role_is_not_upgraded_during_native_turn(financial_team_env, monkeypatch):
+    owner = financial_team_env["assistant"]["agentId"]
+    team = provisioning.provision_financial_team(owner)
+    market = _rewind_team_index_tools(owner, team)
+    before = agent_directory_service.get_agent(owner)["toolPolicy"]
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: sid == market["sessionId"])
+    with pytest.raises(provisioning.FinancialTeamConflictError, match="正在运行"):
+        provisioning.provision_financial_team(owner)
+    assert agent_directory_service.get_agent(owner)["toolPolicy"] == before
+
+
+@pytest.mark.parametrize("version", ["screen", "market", "news"])
+@pytest.mark.parametrize("busy_role", ["owner", "market"])
+def test_all_legacy_defaults_reject_busy_setup_before_any_write(financial_team_env, monkeypatch, version, busy_role):
+    owner = financial_team_env["assistant"]["agentId"]
+    team = provisioning.provision_financial_team(owner)
+    market = _rewind_team_index_tools(owner, team)
+    agent = agent_directory_service.get_agent(owner)
+    tools = {"screen": financial_assistant_service._LEGACY_SCREEN_READ_TOOLS,
+             "market": financial_assistant_service._LEGACY_MARKET_READ_TOOLS,
+             "news": financial_assistant_service._NEWS_READ_TOOLS}[version]
+    agent_directory_service.update_agent_instance(owner,
+        tool_policy={**agent["toolPolicy"], "allowedTools": list(tools), "preferredTools": list(tools)},
+        metadata={financial_assistant_service._MARKET_REFERENCE_MARKER: version != "news",
+                  financial_assistant_service._MARKET_SCREEN_REFERENCE_MARKER: version == "screen"})
+    before_owner = agent_directory_service.get_agent(owner)
+    before_market = agent_directory_service.get_agent(market["agentId"])
+    busy_id = before_owner["directSessionId"] if busy_role == "owner" else market["sessionId"]
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: sid == busy_id)
+    with pytest.raises(provisioning.FinancialTeamConflictError, match="正在运行"):
+        provisioning.provision_financial_team(owner)
+    assert agent_directory_service.get_agent(owner) == before_owner
+    assert agent_directory_service.get_agent(market["agentId"]) == before_market
+
+
+def test_direct_assistant_upgrade_rejects_busy_native_turn(financial_team_env, monkeypatch):
+    owner = financial_team_env["assistant"]["agentId"]
+    team = provisioning.provision_financial_team(owner)
+    _rewind_team_index_tools(owner, team)
+    before = agent_directory_service.get_agent(owner)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda sid: sid == before["directSessionId"])
+    with pytest.raises(agent_directory_service.AgentStateConflictError, match="正在运行"):
+        financial_assistant_service.create_financial_assistant()
+    assert agent_directory_service.get_agent(owner) == before
+
+
 @pytest.mark.parametrize("unavailable_session", ["synthesis", "analyst"])
 def test_unexecutable_default_model_blocks_team_and_run_creation(
     financial_team_env, monkeypatch, tmp_path, unavailable_session
@@ -1861,7 +1939,7 @@ def test_financial_role_files_match_operational_specs():
         ):
             assert definition["taskProfile"][field] == task[field], (role, field)
         assert definition["toolPolicy"]["allowedTools"] == list(
-            spec["requiredTools"]
+            [*spec["requiredTools"], *spec.get("optionalTools", [])]
         )
         assert definition["toolPolicy"]["preferredTools"] == []
         assert definition["toolPolicy"]["writeScopes"] == []

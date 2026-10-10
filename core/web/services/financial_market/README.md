@@ -15,3 +15,8 @@ adjusted (`qfq`).
 The adapter only reads public Tencent endpoints. An endpoint response that is
 missing, malformed, or has an unrecognized time/currency format is unavailable;
 the parser does not synthesize quote values or relabel raw bars as adjusted.
+
+`indices.py` owns the fixed A-share benchmark set and its independent Tencent
+index parser. Index daily bars are raw index points, not stock qfq data. Its
+historical mode sends the requested end date upstream and rejects any later
+row locally; unverified index volume and turnover fields are never exposed.

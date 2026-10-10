@@ -126,6 +126,25 @@ rules:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_research_service.py tests/test_financial_research_disclosures.py tests/test_financial_paper_service.py tests/test_financial_preferences_service.py tests/test_financial_workspace_service.py tests/test_financial_workspace_routes.py tests/test_financial_team_service.py tests/test_financial_team_coordinator.py tests/test_financial_portfolio_service.py tests/test_financial_analysis_cutoff.py -q -n 3 --dist loadfile"
     notes:
       - "Provider and model fixtures prove contracts only; final desktop acceptance uses an isolated Launcher instance and real native turns."
+  - id: finance-index-and-issuer-context
+    description: "Dated fixed A-share indices, native explicit authorization and exact-run synthesis; modern CNINFO issuer directory identities."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+    paths:
+      - "core/web/services/financial_market/indices.py"
+      - "core/web/services/financial_report/index_evidence.py"
+      - "tools/financial_index_tools.py"
+      - "core/web/services/financial_research/official_filings.py"
+      - "tests/test_financial_index_context.py"
+      - "tests/test_financial_index_tools.py"
+      - "tests/test_financial_index_evidence.py"
+      - "tests/test_official_filings.py"
+      - "tests/test_financial_team_report_evidence.py"
+    commands:
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_financial_index_context.py tests/test_financial_index_tools.py tests/test_financial_index_evidence.py tests/test_official_filings.py tests/test_financial_team_report_evidence.py -q -n 3 --dist loadfile"
+    notes:
+      - "No model calls. Public-source availability, native tool execution, team/report integration and live product loading are distinct evidence."
   - id: finance-job-report-delivery
     description: "Native financial batch/schedule ownership, exact completed Turn export and managed cold startup."
     executionLayers:

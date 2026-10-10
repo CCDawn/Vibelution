@@ -113,7 +113,7 @@ def test_beijing_exchange_issuer_identity_requires_matching_a_share_code() -> No
 
     assert dividends._issuer_identity(identity, "920185") == (
         "nssc920185",
-        dividends.official_filings._COLUMNS["nssc"],
+        "bj",
     )
     assert dividends._issuer_identity(
         [{"code": "920185", "category": "B股", "orgId": "nssc920185"}],

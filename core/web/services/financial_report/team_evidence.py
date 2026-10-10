@@ -27,6 +27,7 @@ from core.web.services.financial_research.as_of import (
     on_or_before,
     published_date,
 )
+from core.web.services.financial_report.index_evidence import TOOL_NAME as INDEX_TOOL, index_reference
 
 _SUCCESS = {"completed", "success", "succeeded", "done"}
 _MAX_OUTPUT = 32_000
@@ -36,7 +37,7 @@ _MAX_SYNTHESIS_REFERENCE_ITEM_BYTES = 8_000
 _MAX_SYNTHESIS_REFERENCE_ITEMS = 24
 _MAX_SYNTHESIS_MARKET_ROWS = 16
 _SYNTHESIS_ROLE_TOOLS = {
-    "market": {"financial_market_snapshot_tool"},
+    "market": {"financial_market_snapshot_tool", INDEX_TOOL},
     "fundamental": {"financial_report_query_tool", "financial_evidence_search_tool"},
     "news": {"news_search_tool"},
 }
@@ -606,6 +607,11 @@ def synthesis_tool_references(owner: str, run: dict) -> list[dict]:
     issuer_names = []
     for name, output, status in role_records.get("market", [])[:_MAX_RECORDS]:
         if name not in _SYNTHESIS_ROLE_TOOLS["market"]:
+            continue
+        if name == INDEX_TOOL:
+            projected = index_reference(output, status, cutoff)
+            if projected is not None:
+                candidates.append(_reference_item("行情分析师", INDEX_TOOL, projected))
             continue
         result = _market_reference(output, status, symbol, cutoff)
         if result is None:

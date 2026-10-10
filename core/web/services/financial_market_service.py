@@ -174,3 +174,10 @@ def get_stock_snapshot(symbol: str, period: str = "day") -> dict:
         "candleError": candle_error,
         "notice": notice,
     }
+
+
+def get_index_context(*, cutoff=None, limit: int = 2) -> dict:
+    """Fixed A-share indices; share bounded transport/cache, not stock parsing."""
+    from core.web.services.financial_market.indices import get_index_context as load
+
+    return load(cutoff=cutoff, limit=limit, read=_read, cached=_cached)

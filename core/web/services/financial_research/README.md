@@ -40,6 +40,14 @@ and does not download the PDF. When a query page lacks one of the four
 periodic report kinds and CNINFO says more results exist, the lookup reads
 additional pages up to a four-page limit.
 
+The shared issuer resolver requires the exact six-digit A-share code and
+`A股` category. It accepts bounded CNINFO legacy, numeric, and `GD` identifiers;
+opaque IDs do not determine the exchange. The existing A-share symbol normalizer
+owns the `sse`/`szse`/`bj` directory selection. Conflicting legacy exchange prefixes
+and ambiguous same-priority identities fail closed. Current listings take
+precedence over delisted records. Historical PDF and cash-dividend queries reuse
+this resolver; old Beijing security codes are not silently aliased.
+
 ## Historical research cutoff
 
 An explicit analysis date is captured before stock-research loaders are sent to
