@@ -49,6 +49,7 @@ import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
 import { TeamSettingsToolbarAction } from "./TeamSettingsToolbarAction";
 import {
   canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
+  isChallengeCupCanonicalizationTeamOwned,
   isChallengeCupWorkspaceCanonicalizationEligible,
 } from "./researchWorkspaceModel";
 
@@ -261,6 +262,12 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       return;
     }
     if (!isChallengeCupWorkspaceCanonicalizationEligible(searchParams.get("researchView"))) {
+      return;
+    }
+    // URL focus is team-owned: while a switch to another team is in flight the
+    // URL names the new team while selectedTeamId still resolves to the
+    // challenge-cup team — canonicalizing here would snap the switch back.
+    if (!isChallengeCupCanonicalizationTeamOwned(effectiveTeamId, searchParams)) {
       return;
     }
     const canonicalHref = canonicalChallengeCupWorkspaceRouteForEffectiveTeam(effectiveTeamId, searchParams);

@@ -5,6 +5,7 @@ import { parseResearchProcessLocation } from "./research-workflow/researchProces
 import {
   canonicalChallengeCupWorkspaceRouteForEffectiveTeam,
   challengeQuestionDetailRoute,
+  isChallengeCupCanonicalizationTeamOwned,
   isSameChallengeCupWorkspaceTeam,
   parseResearchWorkspaceView,
   researchCanvasRoute,
@@ -12,6 +13,7 @@ import {
   researchWorkspaceStageRoute,
   researchWorkspaceViewLabel,
   teamWorkspaceRoute,
+  urlTeamParamIds,
 } from "./researchWorkspaceModel";
 
 describe("researchWorkspaceModel", () => {
@@ -95,6 +97,42 @@ describe("researchWorkspaceModel", () => {
       isSameChallengeCupWorkspaceTeam(
         RESEARCH_TEAM_ID,
         new URLSearchParams("teamId=research-team&teamId=other-team"),
+      ),
+    ).toBe(false);
+  });
+
+  it("collects team params across aliases, trimmed and non-empty", () => {
+    expect(urlTeamParamIds(new URLSearchParams("teamId=ai-search-team&teamMode=canvas")))
+      .toEqual(["ai-search-team"]);
+    expect(urlTeamParamIds(new URLSearchParams("team=research-team&team_id=research-team")))
+      .toEqual(["research-team", "research-team"]);
+    expect(urlTeamParamIds(new URLSearchParams("teamId=%20%20&teamId=x"))).toEqual(["x"]);
+    expect(urlTeamParamIds(new URLSearchParams("researchView=workflow"))).toEqual([]);
+  });
+
+  it("keeps canonicalization team-owned so an in-flight switch cannot snap back", () => {
+    // Bare landing (no team param): the challenge-cup redirect still fires.
+    expect(isChallengeCupCanonicalizationTeamOwned(RESEARCH_TEAM_ID, new URLSearchParams("")))
+      .toBe(true);
+    // URL names the effective team: retired-view cleanup still fires.
+    expect(
+      isChallengeCupCanonicalizationTeamOwned(
+        RESEARCH_TEAM_ID,
+        new URLSearchParams("teamId=research-team&researchView=overview"),
+      ),
+    ).toBe(true);
+    // URL names another team while selectedTeamId still resolves to the
+    // challenge-cup team (switch in flight): canonicalization must stand down.
+    expect(
+      isChallengeCupCanonicalizationTeamOwned(
+        RESEARCH_TEAM_ID,
+        new URLSearchParams("teamId=ai-search-team&teamMode=canvas"),
+      ),
+    ).toBe(false);
+    expect(
+      isChallengeCupCanonicalizationTeamOwned(
+        RESEARCH_TEAM_ID,
+        new URLSearchParams("teamId=research-team&team=ai-search-team"),
       ),
     ).toBe(false);
   });

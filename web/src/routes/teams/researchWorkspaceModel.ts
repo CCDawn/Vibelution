@@ -121,6 +121,31 @@ export function isChallengeCupWorkspaceCanonicalizationEligible(view: string | n
     || RETIRED_RESEARCH_WORKSPACE_VIEWS.has(normalized as ResearchWorkspaceView);
 }
 
+/**
+ * Team-param values present in the URL (`teamId` / `team` / `team_id` aliases).
+ */
+export function urlTeamParamIds(current: URLSearchParams): string[] {
+  return ["teamId", "team", "team_id"]
+    .flatMap((key) => current.getAll(key))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Canonicalization is team-owned: the challenge-cup repair may only rewrite a
+ * URL that names no team (bare landing) or names the effective team itself. A
+ * URL naming another team is a switch away from the board already in flight
+ * (`selectTeamRecord` pushes the new teamId before `selectedTeamId` commits);
+ * rewriting it would snap the switch back to the challenge-cup team.
+ */
+export function isChallengeCupCanonicalizationTeamOwned(
+  effectiveTeamId: string,
+  current: URLSearchParams,
+): boolean {
+  const urlTeamIds = urlTeamParamIds(current);
+  return urlTeamIds.length === 0 || urlTeamIds.every((value) => value === effectiveTeamId.trim());
+}
+
 /** Map stage workspace views onto fixed workflow node ids (ADR 0006). */
 export function researchStageViewToNodeId(view: ResearchStageWorkspaceView): string {
   if (view === "experiment") return "hypothesis_design";
@@ -260,11 +285,7 @@ export function isSameChallengeCupWorkspaceTeam(
   if (!normalizedTeamId) {
     return false;
   }
-  const teamIdentifiers = ["teamId", "team", "team_id"];
-  const currentTeamIds = teamIdentifiers
-    .flatMap((key) => current.getAll(key))
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const currentTeamIds = urlTeamParamIds(current);
   return currentTeamIds.length > 0 && currentTeamIds.every((value) => value === normalizedTeamId);
 }
 

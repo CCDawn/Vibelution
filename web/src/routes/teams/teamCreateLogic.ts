@@ -89,8 +89,9 @@ export function teamCreateReady(
 
 /**
  * Teams shown in the route picker: the three fixed board teams plus
- * user-created teams (manual/custom blank teams and template-instantiated
- * demo teams). Evolution and other workflow-owned teams stay hidden.
+ * user-created teams (manual/custom blank teams, template-instantiated demo
+ * teams, and task-scoped ephemeral dev teams that dissolve on completion).
+ * Evolution and other workflow-owned teams stay hidden.
  * Picker teams keep their fixed rail order; user teams follow list order.
  */
 export function isVisibleRouteTeam(team: Team, pickerTeamIds: readonly string[]): boolean {
@@ -105,6 +106,8 @@ export function isVisibleRouteTeam(team: Team, pickerTeamIds: readonly string[])
     || team.teamKind === "custom"
     || team.teamSource === "team_template"
     || team.teamKind === "template_demo"
+    || team.teamSource === "ephemeral_task"
+    || team.teamKind === "ephemeral"
   );
 }
 
