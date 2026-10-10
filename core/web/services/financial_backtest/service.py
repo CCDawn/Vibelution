@@ -42,6 +42,11 @@ from core.web.services.financial_backtest.decision import (
     reserve_decision_call,
     runtime_config_for_decision,
 )
+from core.web.services.financial_backtest.fees import (
+    VERIFIED_FEE_MODEL,
+    fee_model_audit,
+    normalize_fee_model,
+)
 from core.web.services.financial_backtest.store import (
     FinancialBacktestStore,
     default_store,
@@ -70,6 +75,107 @@ def _action_coverage(assets: list[data.BacktestSnapshot]) -> dict[str, Any]:
         }
         for asset in assets if asset.corporate_actions is not None
     }
+
+
+def _build_fee_policy_audit(
+    params: Mapping[str, Any],
+    symbols: list[str],
+    start_date: str,
+    end_date: str,
+) -> dict[str, Any] | None:
+    try:
+        return fee_model_audit(params, symbols, start_date, end_date)
+    except data.BacktestInputError as exc:
+        raise FinancialBacktestConflict(str(exc)) from exc
+
+
+def _validate_fee_binding(record: Mapping[str, Any]) -> None:
+    """Reject changed or missing fee provenance before a frozen run is used."""
+    params = record.get("params") if isinstance(record.get("params"), Mapping) else {}
+    try:
+        fee_model = normalize_fee_model(params)
+    except data.BacktestInputError as exc:
+        raise FinancialBacktestStoreError("回测费用模型记录无效") from exc
+
+    audit = record.get("feePolicyAudit")
+    provenance = record.get("comparisonProvenance")
+    fee_hash_is_bound = (
+        isinstance(provenance, Mapping)
+        and "feePolicyAuditHash" in provenance
+    )
+    if fee_model != VERIFIED_FEE_MODEL:
+        if audit is not None or fee_hash_is_bound:
+            raise FinancialBacktestStoreError("回测费用模型与冻结费用审计不匹配")
+        return
+
+    coverage = record.get("dateCoverage")
+    if not isinstance(coverage, Mapping):
+        raise FinancialBacktestStoreError("回测费用审计缺少冻结日期范围")
+    start_date = coverage.get("requestedStartDate")
+    end_date = coverage.get("requestedEndDate")
+    if not isinstance(start_date, str) or not isinstance(end_date, str):
+        raise FinancialBacktestStoreError("回测费用审计缺少冻结日期范围")
+    try:
+        expected_audit = fee_model_audit(
+            params, _run_symbols(record), start_date, end_date
+        )
+    except (data.BacktestInputError, TypeError, ValueError) as exc:
+        raise FinancialBacktestStoreError("回测费用模型与冻结日期范围不匹配") from exc
+    if not isinstance(audit, Mapping) or dict(audit) != expected_audit:
+        raise FinancialBacktestStoreError("回测冻结费用审计校验失败")
+
+    try:
+        expected_params_hash = _frozen_fee_params_hash(record, params, expected_audit)
+    except (TypeError, ValueError, KeyError, OverflowError) as exc:
+        raise FinancialBacktestStoreError("回测费用参数摘要无效") from exc
+    if record.get("paramsHash") != expected_params_hash:
+        raise FinancialBacktestStoreError("回测费用参数摘要校验失败")
+
+    if not isinstance(provenance, Mapping):
+        raise FinancialBacktestStoreError("回测缺少费用模型比较绑定")
+    try:
+        expected_provenance = _build_comparison_provenance(
+            record, source_run_id=_source_run_id(record) or None
+        )
+    except (TypeError, ValueError, KeyError, OverflowError) as exc:
+        raise FinancialBacktestStoreError("回测费用模型比较绑定无效") from exc
+    for key in (
+        "contractVersion",
+        "commonParamsHash",
+        "strategyHash",
+        "sourceRunId",
+        "feePolicyAuditHash",
+    ):
+        if provenance.get(key) != expected_provenance.get(key):
+            raise FinancialBacktestStoreError("回测费用模型比较绑定校验失败")
+
+
+def _frozen_fee_params_hash(
+    record: Mapping[str, Any],
+    params: Mapping[str, Any],
+    fee_policy_audit: Mapping[str, Any],
+) -> str:
+    """Rebuild the verified run's original parameter identity from its freeze."""
+    raw_params = dict(params)
+    for key in ("strategy", "maxTokens", "outOfSampleStartDate"):
+        raw_params.pop(key, None)
+    return sha256_json(
+        {
+            "symbol": record.get("symbol"),
+            "symbols": _run_symbols(record),
+            "startDate": record["dateCoverage"]["requestedStartDate"],
+            "endDate": record["dateCoverage"]["requestedEndDate"],
+            "outOfSampleStartDate": record.get("outOfSampleStartDate")
+            or params.get("outOfSampleStartDate"),
+            "strategy": params["strategy"],
+            "params": raw_params,
+            "maxTokens": record["maxTokens"],
+            "modelId": record["modelId"],
+            "researchInput": record.get("researchInput", "price_only"),
+            "researchHash": record.get("researchHash"),
+            "feePolicyAudit": fee_policy_audit,
+        }
+    )
 
 
 def create_financial_backtest_preview(
@@ -160,6 +266,8 @@ def create_financial_backtest_fork_preview(
         "researchInput": source_run.get("researchInput", "price_only"),
         "corporateActionPolicy": source_params.get("corporateActionPolicy", "block"),
     }
+    if "feeModel" in source_params:
+        request_payload["feeModel"] = source_params["feeModel"]
     request_payload.update(selected_parameter_overrides)
     request = normalize_preview_request(request_payload)
     # New previews use current board rules; forks must retain the exact source contract.
@@ -227,6 +335,13 @@ def _create_preview(
     model_candidate_source: str | None = None,
     frozen_research: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    fee_symbols = list(request.get("symbols") or ([request.get("symbol")] if request.get("symbol") else []))
+    fee_policy_audit = _build_fee_policy_audit(
+        request.get("params") if isinstance(request.get("params"), Mapping) else {},
+        fee_symbols,
+        str(request.get("startDate") or ""),
+        str(request.get("endDate") or ""),
+    )
     model_fingerprint = _model_fingerprint(model_id)
     if request["mode"] == "basket":
         if snapshot is None:
@@ -302,21 +417,22 @@ def _create_preview(
         snapshot, request.get("outOfSampleStartDate")
     )
     params["outOfSampleStartDate"] = out_of_sample_start_date
-    params_hash = sha256_json(
-        {
-            "symbol": selected_symbol,
-            "symbols": symbols,
-            "startDate": request["startDate"],
-            "endDate": request["endDate"],
-            "outOfSampleStartDate": out_of_sample_start_date,
-            "strategy": request["strategy"],
-            "params": request["params"],
-            "maxTokens": request["maxTokens"],
-            "modelId": model_id,
-            "researchInput": research_mode,
-            "researchHash": research_hash,
-        }
-    )
+    params_hash_input = {
+        "symbol": selected_symbol,
+        "symbols": symbols,
+        "startDate": request["startDate"],
+        "endDate": request["endDate"],
+        "outOfSampleStartDate": out_of_sample_start_date,
+        "strategy": request["strategy"],
+        "params": request["params"],
+        "maxTokens": request["maxTokens"],
+        "modelId": model_id,
+        "researchInput": research_mode,
+        "researchHash": research_hash,
+    }
+    if fee_policy_audit is not None:
+        params_hash_input["feePolicyAudit"] = fee_policy_audit
+    params_hash = sha256_json(params_hash_input)
     selected_store.save_snapshot(agent_id, snapshot_payload)
     now = _now(now_provider)
     expires_at = now + timedelta(seconds=PREVIEW_TTL_SECONDS)
@@ -369,6 +485,8 @@ def _create_preview(
     }
     if wants_actions:
         preview["corporateActionCoverage"] = _action_coverage(assets_for_actions)
+    if fee_policy_audit is not None:
+        preview["feePolicyAudit"] = fee_policy_audit
     preview["comparisonProvenance"] = _build_comparison_provenance(
         preview,
         source_run_id=source_run_id,
@@ -420,6 +538,8 @@ def _build_comparison_provenance(
         "adjustment": str(record.get("adjustment") or "raw"),
         "maxTokens": int(record.get("maxTokens") or 0),
     }
+    if isinstance(record.get("feePolicyAudit"), Mapping):
+        provenance_record["feePolicyAudit"] = dict(record["feePolicyAudit"])
     if source_run_id:
         provenance_record["sourceRunId"] = source_run_id
     return build_comparison_provenance(provenance_record)
@@ -466,6 +586,7 @@ def _load_run_snapshot(
     run: Mapping[str, Any],
     selected_store: FinancialBacktestStore,
 ) -> data.BacktestSnapshot | basket_data.BasketSnapshot:
+    _validate_fee_binding(run)
     _load_research_snapshot(agent_id, run, selected_store)
     data_hash = str(run.get("dataHash") or "")
     payload = selected_store.load_snapshot(agent_id, data_hash)
@@ -595,6 +716,7 @@ def start_financial_backtest_run(
     request_id = canonical_request_id(client_request_id)
     normalized_preview_id = canonical_uuid(preview_id, "预览标识")
     preview = selected_store.load_preview(agent_id, normalized_preview_id)
+    _validate_fee_binding(preview)
     now = _now(now_provider)
     run_id = deterministic_run_id(str(agent_id), request_id)
     request_inputs = {
@@ -703,6 +825,8 @@ def start_financial_backtest_run(
     }
     if "corporateActionCoverage" in preview:
         run["corporateActionCoverage"] = preview["corporateActionCoverage"]
+    if isinstance(preview.get("feePolicyAudit"), Mapping):
+        run["feePolicyAudit"] = dict(preview["feePolicyAudit"])
     state, _created = selected_store.create_run_if_absent(
         agent_id, run, max_runs=MAX_RUNS_PER_AGENT
     )
@@ -903,6 +1027,7 @@ def resume_financial_backtest_run(
     selected_store = store or default_store()
     _require_owner(agent_id)
     initial_run = selected_store.load_run(agent_id, run_id)
+    _validate_fee_binding(initial_run)
     model_id = str(initial_run.get("modelId") or "")
     if _source_run_id(initial_run):
         _validate_candidate_model(model_id)
@@ -949,6 +1074,7 @@ def export_financial_backtest_run(
     _require_owner(agent_id)
     selected_store = store or default_store()
     run = selected_store.load_run(agent_id, run_id)
+    _validate_fee_binding(run)
     normalized_format = str(export_format or "").strip().lower()
     if normalized_format not in {"json", "csv"}:
         raise FinancialBacktestConflict("导出格式仅支持json或csv")
@@ -957,16 +1083,26 @@ def export_financial_backtest_run(
         agent_id, run, selected_store
     )
     schema_version = 2 if _is_basket_run(run) else 1
+    verified_fee_model = normalize_fee_model(run.get("params") or {}) == VERIFIED_FEE_MODEL
+    verified_cash_dividends = (
+        run.get("params", {}).get("corporateActionPolicy")
+        == "verified_cash_dividends"
+    )
+    include_single_snapshot = not _is_basket_run(run) and (
+        verified_fee_model or verified_cash_dividends
+    )
     frozen_research = _load_research_snapshot(agent_id, run, selected_store)
     if frozen_research is not None:
         schema_version = 3
-    if run.get("params", {}).get("corporateActionPolicy") == "verified_cash_dividends":
-        schema_version = 4
+    if verified_cash_dividends:
+        schema_version = 5 if verified_fee_model else 4
+    if verified_fee_model:
+        schema_version = 5
     if normalized_format == "json":
         export_payload = {"schemaVersion": schema_version, **projected}
         if frozen_research is not None:
             export_payload["researchSnapshot"] = frozen_research
-        if schema_version == 4:
+        if include_single_snapshot:
             frozen_snapshot = _load_run_snapshot(agent_id, run, selected_store)
             export_payload["snapshot"] = frozen_snapshot.to_dict()
         if _is_basket_run(run):
@@ -994,12 +1130,15 @@ def export_financial_backtest_run(
     else:
         output = io.StringIO(newline="")
         writer = csv.writer(output)
+        fee_model_columns = ("feeModel",) if verified_fee_model else ()
         if _is_basket_run(run):
-            writer.writerow(["runId", "symbol", "symbols", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"])
-            writer.writerow([_csv_safe(projected.get("runId")), "", _csv_safe(",".join(projected.get("symbols") or [])), *[_csv_safe(projected.get(key)) for key in ("status", "modelId", "modelConfigHash", "paramsHash", "dataHash")]])
+            writer.writerow(["runId", "symbol", "symbols", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash", *fee_model_columns])
+            writer.writerow([_csv_safe(projected.get("runId")), "", _csv_safe(",".join(projected.get("symbols") or [])), *[_csv_safe(projected.get(key)) for key in ("status", "modelId", "modelConfigHash", "paramsHash", "dataHash")], *([_csv_safe(VERIFIED_FEE_MODEL)] if verified_fee_model else [])])
         else:
-            writer.writerow(["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"])
-            writer.writerow([_csv_safe(projected.get(key)) for key in ("runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash")])
+            writer.writerow(["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash", *fee_model_columns])
+            writer.writerow([*[_csv_safe(projected.get(key)) for key in ("runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash")], *([_csv_safe(VERIFIED_FEE_MODEL)] if verified_fee_model else [])])
+        if verified_fee_model:
+            writer.writerow(["feePolicyAudit", _csv_safe(json.dumps(projected.get("feePolicyAudit") or {}, ensure_ascii=False, sort_keys=True))])
         output.write("\n")
         dividend_columns = (
             "dividendReceivable", "dividendTaxPayable",
@@ -1032,10 +1171,25 @@ def export_financial_backtest_run(
             for row in projected["equity"]:
                 writer.writerow([_csv_safe(row.get(key)) for key in equity_columns])
         output.write("\n")
-        writer.writerow(["account", "symbol", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason"] if _is_basket_run(run) else ["account", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason"])
+        fee_detail_columns = (
+            "commission", "transferFee", "handlingFee", "regulatoryFee",
+            "brokerCommission", "stampDuty", "slippageCost",
+        ) if verified_fee_model else ()
+        base_order_columns = (
+            "signalDate", "date", "side", "status", "requestedShares",
+            "filledShares", "price", "fee", "notional", "reason",
+        )
+        writer.writerow([
+            "account",
+            *( ["symbol"] if _is_basket_run(run) else [] ),
+            *base_order_columns,
+            *fee_detail_columns,
+        ])
         for account, orders in (("strategy", projected["orders"]), ("benchmark", projected["benchmarkOrders"])):
             for row in orders:
-                keys = ("symbol", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason") if _is_basket_run(run) else ("signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason")
+                keys = (
+                    (*(("symbol",) if _is_basket_run(run) else ()), *base_order_columns, *fee_detail_columns)
+                )
                 writer.writerow([account, *[_csv_safe(row.get(key)) for key in keys]])
         output.write("\n")
         writer.writerow(["date", "targetWeight", "targetWeights", "reason", "confidence", "modelId", "decisionHash"] if _is_basket_run(run) else ["date", "targetWeight", "reason", "confidence", "modelId", "decisionHash"])
@@ -1216,6 +1370,11 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "researchHash": run.get("researchHash"),
         "researchCoverage": run.get("researchCoverage"),
         "corporateActionCoverage": run.get("corporateActionCoverage"),
+        **(
+            {"feePolicyAudit": dict(run["feePolicyAudit"])}
+            if isinstance(run.get("feePolicyAudit"), Mapping)
+            else {}
+        ),
         "dividendAccounting": run.get("dividendAccounting"),
         "benchmarkDividendAccounting": run.get("benchmarkDividendAccounting"),
         "executionFailure": run.get("executionFailure"),
@@ -1397,6 +1556,8 @@ def _public_params(params: Mapping[str, Any]) -> dict[str, Any]:
         result["quantityRuleVersion"] = params["quantityRuleVersion"]
     if "corporateActionPolicy" in params:
         result["corporateActionPolicy"] = params["corporateActionPolicy"]
+    if "feeModel" in params:
+        result["feeModel"] = params["feeModel"]
     return result
 
 

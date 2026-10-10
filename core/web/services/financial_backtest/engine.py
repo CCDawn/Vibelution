@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from datetime import date
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
+from core.web.services.financial_backtest import fees
 from core.web.services.financial_backtest.data import (
     BacktestDataError,
     BacktestInputError,
@@ -34,13 +34,6 @@ _LOT_SIZE = 100
 _PRICE_TICK = Decimal("0.01")
 _MONEY_QUANTUM = Decimal("0.01")
 _BPS = Decimal(10000)
-_STAMP_DUTY_CHANGES = (
-    (date(2023, 8, 28), Decimal("0.0005"), Decimal(0)),
-    (date(2008, 9, 19), Decimal("0.001"), Decimal(0)),
-    (date(2008, 4, 24), Decimal("0.001"), Decimal("0.001")),
-    (date(2007, 5, 30), Decimal("0.003"), Decimal("0.003")),
-    (date(2005, 1, 24), Decimal("0.001"), Decimal("0.001")),
-)
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -146,6 +139,7 @@ def _normalize_params(params: Mapping[str, Any]) -> dict[str, Any]:
         or quantity_rule_version not in SUPPORTED_QUANTITY_RULE_VERSIONS
     ):
         raise BacktestInputError("quantityRuleVersion不是支持的撮合股数规则")
+    fee_model = fees.normalize_fee_model(params)
     normalized = {
         "initialCash": initial_cash,
         "maxPositionPct": max_position_pct,
@@ -158,6 +152,8 @@ def _normalize_params(params: Mapping[str, Any]) -> dict[str, Any]:
     }
     if max_participation_pct is not None:
         normalized["maxParticipationPct"] = max_participation_pct
+    if fee_model == fees.VERIFIED_FEE_MODEL:
+        normalized["feeModel"] = fee_model
     return normalized
 
 
@@ -168,7 +164,11 @@ def build_decision_schedule(
     validate_snapshot(snapshot)
     if not snapshot.candles or len(snapshot.candles) > _MAX_TRADING_DAYS:
         raise BacktestInputError("回测区间需要1到5000根完整交易日K线")
-    normalized = _normalize_params({} if params is None else params)
+    supplied_params = {} if params is None else params
+    normalized = _normalize_params(supplied_params)
+    _validate_fee_window(
+        snapshot.symbol, snapshot.start_date, snapshot.end_date, supplied_params
+    )
     interval = normalized["decisionInterval"]
     schedule = tuple(
         snapshot.candles[index].date
@@ -282,17 +282,80 @@ def _fee(notional: Decimal, commission_rate: Decimal, minimum_commission: Decima
 
 
 def _stamp_duty_rate(execution_date: str, side: str) -> Decimal:
-    day = date.fromisoformat(execution_date)
-    for effective, seller_rate, buyer_rate in _STAMP_DUTY_CHANGES:
-        if day >= effective:
-            return seller_rate if side == "sell" else buyer_rate
-    # The configured 20-year maximum makes earlier effective rates unreachable
-    # for supported current-date runs; retain the rate in force from 2005.
-    return Decimal("0.001")
+    return fees.stamp_duty_rate(execution_date, side)
 
 
 def _stamp_duty(notional: Decimal, execution_date: str, side: str) -> Decimal:
     return _money(notional * _stamp_duty_rate(execution_date, side))
+
+
+def _validate_fee_window(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    params: Mapping[str, Any],
+) -> None:
+    if fees.normalize_fee_model(params) == fees.VERIFIED_FEE_MODEL:
+        fees.validate_fee_window(symbol, start_date, end_date, params)
+
+
+def _calculate_fees(
+    notional: Decimal,
+    trade_date: str,
+    side: str,
+    symbol: str,
+    commission_rate: Decimal,
+    minimum_commission: Decimal,
+    fee_model: str = fees.LEGACY_FEE_MODEL,
+) -> dict[str, Decimal]:
+    return fees.calculate_fees(
+        notional,
+        trade_date,
+        side,
+        symbol,
+        commission_rate,
+        minimum_commission,
+        fee_model,
+    )
+
+
+def _attach_fee_components(
+    record: dict[str, Any],
+    fee_breakdown: Mapping[str, Decimal],
+    fee_model: str,
+) -> None:
+    if fee_model != fees.VERIFIED_FEE_MODEL:
+        return
+    for field in ("transferFee", "handlingFee", "regulatoryFee", "brokerCommission"):
+        record[field] = float(fee_breakdown.get(field, Decimal(0)))
+
+
+def _ensure_fee_component_fields(
+    records: Sequence[dict[str, Any]], fee_model: str
+) -> None:
+    if fee_model != fees.VERIFIED_FEE_MODEL:
+        return
+    for record in records:
+        for field in ("transferFee", "handlingFee", "regulatoryFee", "brokerCommission"):
+            record.setdefault(field, 0.0)
+
+
+def _fee_component_totals(records: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+    fields = (
+        ("transferFee", "transferFees"),
+        ("handlingFee", "handlingFees"),
+        ("regulatoryFee", "regulatoryFees"),
+        ("brokerCommission", "brokerCommissionFees"),
+    )
+    return {
+        output: float(
+            sum(
+                (Decimal(str(record.get(source, 0))) for record in records),
+                Decimal(0),
+            )
+        )
+        for source, output in fields
+    }
 
 
 def _limit_rates(symbol: str) -> tuple[Decimal, ...]:
@@ -461,6 +524,7 @@ def _make_order(
     fill_price: Decimal | None = None,
     commission: Decimal = Decimal(0),
     stamp: Decimal = Decimal(0),
+    fee: Decimal | None = None,
     slippage_cost: Decimal = Decimal(0),
 ) -> dict[str, Any]:
     notional = Decimal(filled_shares) * fill_price if fill_price is not None else Decimal(0)
@@ -477,7 +541,7 @@ def _make_order(
         "notional": float(_money(notional)),
         "commission": float(commission),
         "stampDuty": float(stamp),
-        "fee": float(commission + stamp),
+        "fee": float(commission + stamp if fee is None else fee),
         "slippageCost": float(_money(Decimal(filled_shares) * slippage_cost)),
         "tPlusOne": True,
         "limitStatus": (
@@ -504,6 +568,7 @@ def _execute_target(
     extra_equity: Decimal = Decimal(0),
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
+    fee_model: str = fees.LEGACY_FEE_MODEL,
 ) -> tuple[Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal]:
     if target_weight > max_position_pct / Decimal(100):
         raise BacktestDecisionError("AI目标仓位超过本次最大仓位上限")
@@ -602,9 +667,16 @@ def _execute_target(
 
         def is_affordable(candidate: int) -> bool:
             notional = Decimal(candidate) * fill_price
-            commission = _fee(notional, commission_rate, minimum_commission)
-            stamp = _stamp_duty(notional, execution.date, side)
-            return notional + commission + stamp <= cash
+            fee_breakdown = _calculate_fees(
+                notional,
+                execution.date,
+                side,
+                symbol,
+                commission_rate,
+                minimum_commission,
+                fee_model,
+            )
+            return notional + fee_breakdown["fee"] <= cash
 
         filled = maximum_affordable_buy(fill_limit, rule, is_affordable)
         if not filled:
@@ -622,9 +694,18 @@ def _execute_target(
             )
             return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
         notional = Decimal(filled) * fill_price
-        commission = _fee(notional, commission_rate, minimum_commission)
-        stamp = _stamp_duty(notional, execution.date, side)
-        fee = commission + stamp
+        fee_breakdown = _calculate_fees(
+            notional,
+            execution.date,
+            side,
+            symbol,
+            commission_rate,
+            minimum_commission,
+            fee_model,
+        )
+        commission = fee_breakdown["commission"]
+        stamp = fee_breakdown["stampDuty"]
+        fee = fee_breakdown["fee"]
         cash -= notional + fee
         shares += filled
         trade = {
@@ -641,6 +722,7 @@ def _execute_target(
             "notional": float(_money(notional)),
             "tPlusOne": True,
         }
+        _attach_fee_components(trade, fee_breakdown, fee_model)
     else:
         filled = floor_sell_quantity(requested, shares, fill_limit, rule)
         sell_increment_limited = (
@@ -669,9 +751,31 @@ def _execute_target(
             )
             return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
         notional = Decimal(filled) * fill_price
-        commission = _fee(notional, commission_rate, minimum_commission)
-        stamp = _stamp_duty(notional, execution.date, side)
-        fee = commission + stamp
+        fee_breakdown = _calculate_fees(
+            notional,
+            execution.date,
+            side,
+            symbol,
+            commission_rate,
+            minimum_commission,
+            fee_model,
+        )
+        commission = fee_breakdown["commission"]
+        stamp = fee_breakdown["stampDuty"]
+        fee = fee_breakdown["fee"]
+        if (
+            fee_model == fees.VERIFIED_FEE_MODEL
+            and cash + notional < fee
+        ):
+            order = _make_order(
+                signal_date=signal_date,
+                candle=execution,
+                side=side,
+                status="rejected",
+                reason="insufficient_cash_for_sale_fees",
+                requested_shares=requested,
+            )
+            return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
         cash += notional - fee
         shares -= filled
         trade = {
@@ -688,6 +792,7 @@ def _execute_target(
             "notional": float(_money(notional)),
             "tPlusOne": True,
         }
+        _attach_fee_components(trade, fee_breakdown, fee_model)
     order = _make_order(
         signal_date=signal_date,
         candle=execution,
@@ -711,8 +816,10 @@ def _execute_target(
         fill_price=fill_price,
         commission=commission,
         stamp=stamp,
+        fee=fee,
         slippage_cost=per_share_slippage,
     )
+    _attach_fee_components(order, fee_breakdown, fee_model)
     slippage_cost = Decimal(filled) * per_share_slippage
     return cash, shares, order, trade, commission, stamp, slippage_cost
 
@@ -728,6 +835,7 @@ def _execute_benchmark(
     symbol: str,
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
+    fee_model: str = fees.LEGACY_FEE_MODEL,
 ) -> tuple[Decimal, int, dict[str, Any]]:
     fill_price, per_share_slippage = _execution_price(execution, "buy", slippage_rate)
     rejection = _is_locked(execution, previous_close, "buy", symbol)
@@ -792,9 +900,16 @@ def _execute_benchmark(
 
     def is_affordable(candidate: int) -> bool:
         notional = Decimal(candidate) * fill_price
-        fee = _fee(notional, commission_rate, minimum_commission)
-        stamp = _stamp_duty(notional, execution.date, "buy")
-        return notional + fee + stamp <= initial_cash
+        fee_breakdown = _calculate_fees(
+            notional,
+            execution.date,
+            "buy",
+            symbol,
+            commission_rate,
+            minimum_commission,
+            fee_model,
+        )
+        return notional + fee_breakdown["fee"] <= initial_cash
 
     filled = maximum_affordable_buy(fill_limit, rule, is_affordable)
     if not filled:
@@ -809,9 +924,18 @@ def _execute_benchmark(
             requested_shares=requested,
         )
     notional = Decimal(filled) * fill_price
-    commission = _fee(notional, commission_rate, minimum_commission)
-    stamp = _stamp_duty(notional, execution.date, "buy")
-    fee = commission + stamp
+    fee_breakdown = _calculate_fees(
+        notional,
+        execution.date,
+        "buy",
+        symbol,
+        commission_rate,
+        minimum_commission,
+        fee_model,
+    )
+    commission = fee_breakdown["commission"]
+    stamp = fee_breakdown["stampDuty"]
+    fee = fee_breakdown["fee"]
     remaining_cash = initial_cash - notional - fee
     order = _make_order(
         signal_date=execution.date,
@@ -832,8 +956,10 @@ def _execute_benchmark(
         fill_price=fill_price,
         commission=commission,
         stamp=stamp,
+        fee=fee,
         slippage_cost=per_share_slippage,
     )
+    _attach_fee_components(order, fee_breakdown, fee_model)
     order["slippageCost"] = float(_money(Decimal(filled) * per_share_slippage))
     return remaining_cash, filled, order
 
@@ -940,6 +1066,7 @@ def _simulate_prefix(
     slippage_rate: Decimal = normalized["slippageBps"] / _BPS
     max_participation_pct: Decimal | None = normalized.get("maxParticipationPct")
     quantity_rule_version: str = normalized["quantityRuleVersion"]
+    fee_model: str = normalized.get("feeModel", fees.LEGACY_FEE_MODEL)
     cash = initial_cash
     shares = 0
     benchmark_cash = initial_cash
@@ -952,6 +1079,7 @@ def _simulate_prefix(
     orders: list[dict[str, Any]] = []
     trades: list[dict[str, Any]] = []
     equity: list[dict[str, Any]] = []
+    total_fees = Decimal(0)
     total_commission = Decimal(0)
     total_stamp = Decimal(0)
     total_slippage = Decimal(0)
@@ -977,6 +1105,7 @@ def _simulate_prefix(
                 symbol=snapshot.symbol,
                 max_participation_pct=max_participation_pct,
                 quantity_rule_version=quantity_rule_version,
+                fee_model=fee_model,
             )
             benchmark_orders.append(candidate_order)
             if candidate_order.get("status") in {"filled", "partial_fill"}:
@@ -1002,6 +1131,7 @@ def _simulate_prefix(
                 extra_equity=_dividend_net_assets(dividend_ledger),
                 max_participation_pct=max_participation_pct,
                 quantity_rule_version=quantity_rule_version,
+                fee_model=fee_model,
             )
             orders.append(order)
             total_commission += commission
@@ -1010,8 +1140,9 @@ def _simulate_prefix(
             if trade is not None:
                 trades.append(trade)
                 turnover += Decimal(str(trade["notional"]))
+                total_fees += Decimal(str(trade["fee"]))
                 if trade["side"] == "buy":
-                    cost_basis += Decimal(str(trade["notional"])) + commission + stamp
+                    cost_basis += Decimal(str(trade["notional"])) + Decimal(str(trade["fee"]))
                     if dividend_ledger is not None:
                         dividend_ledger.buy(candle.date, int(trade["shares"]))
                 else:
@@ -1028,7 +1159,7 @@ def _simulate_prefix(
                         )
                     average_basis = cost_basis / prior_shares if prior_shares else Decimal(0)
                     removed_basis = average_basis * filled
-                    proceeds = Decimal(str(trade["notional"])) - commission - stamp
+                    proceeds = Decimal(str(trade["notional"])) - Decimal(str(trade["fee"]))
                     realized_roundtrips.append(proceeds - removed_basis)
                     cost_basis = max(Decimal(0), cost_basis - removed_basis)
             pending = None
@@ -1079,6 +1210,7 @@ def _simulate_prefix(
             }
         )
     if not complete:
+        _ensure_fee_component_fields(orders + trades, fee_model)
         result = {
             "currentPortfolio": current_portfolio,
             "orders": orders,
@@ -1100,16 +1232,23 @@ def _simulate_prefix(
         closed_trade_count=len(realized_roundtrips),
         winning_trade_count=sum(1 for item in realized_roundtrips if item > 0),
         gross_turnover=float(turnover),
-        total_fees=float(total_commission + total_stamp),
+        total_fees=float(total_fees),
         commission_fees=float(total_commission),
         stamp_duty=float(total_stamp),
     )
     _add_dividend_metrics(metrics, dividend_ledger, benchmark_dividend_ledger)
-    benchmark_commission = Decimal(str(benchmark_order.get("commission") or 0))
-    benchmark_stamp = Decimal(str(benchmark_order.get("stampDuty") or 0))
-    metrics["benchmarkFees"] = float(benchmark_commission + benchmark_stamp)
+    metrics["benchmarkFees"] = float(Decimal(str(benchmark_order.get("fee") or 0)))
     metrics["slippageCost"] = float(_money(total_slippage))
     metrics["benchmarkSlippageCost"] = float(benchmark_order.get("slippageCost") or 0)
+    if fee_model == fees.VERIFIED_FEE_MODEL:
+        metrics.update(_fee_component_totals(trades))
+        benchmark_fee_components = _fee_component_totals([benchmark_order])
+        metrics.update(
+            {
+                f"benchmark{key[0].upper()}{key[1:]}": value
+                for key, value in benchmark_fee_components.items()
+            }
+        )
     quantity_notice = (
         "按板块和成交日撮合A股数量：主板/创业板按100股递增；科创板买卖至少200股、北交所至少100股且1股递增，门槛以下余股只可整仓一次卖出。限价单上限为科创板10万股、创业板2020-08-24起30万股、主板/北交所100万股；未模拟市价单、集合竞价或盘口。"
         if quantity_rule_version == ASHARE_QUANTITY_V2
@@ -1118,7 +1257,11 @@ def _simulate_prefix(
     action_notice = (
         "现金分红按冻结的官方实施公告记入：登记日收盘确认权益，除权日确认为应收，派息日收盘转为可用现金；卖出时按FIFO持有期评估红利税。分币结算规则尚未核实。"
         if dividend_ledger is not None
-        else "佣金按用户输入的固定费率和最低佣金；印花税按成交日历史税率自动计取。未建模过户费、监管费、分红现金入账与送转股；检测到公司行动会阻断。"
+        else (
+            "未建模分红现金入账与送转股；检测到公司行动会阻断。"
+            if fee_model == fees.VERIFIED_FEE_MODEL
+            else "佣金按用户输入的固定费率和最低佣金；印花税按成交日历史税率自动计取。未建模过户费、监管费、分红现金入账与送转股；检测到公司行动会阻断。"
+        )
     )
     notices = [
         quantity_notice,
@@ -1127,6 +1270,10 @@ def _simulate_prefix(
         action_notice,
         "这是历史行情上的模拟研究，不代表可成交的真实订单或未来收益。",
     ]
+    if fee_model == fees.VERIFIED_FEE_MODEL:
+        notices.append(
+            "采用 verified_ashare_fees_v1：佣金包含经手费和证管费，过户费另计，印花税按成交日和方向计取；券商结算舍入与订单以下优惠未核实。"
+        )
     if max_participation_pct is not None:
         notices.append(
             f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%，并按板块数量规则向下调整；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
@@ -1157,6 +1304,12 @@ def _simulate_prefix(
         },
         "notice": list(snapshot.notice) + notices,
     }
+    _ensure_fee_component_fields(orders + trades + benchmark_orders, fee_model)
+    fee_audit = fees.fee_model_audit(
+        normalized, [snapshot.symbol], snapshot.start_date, snapshot.end_date
+    )
+    if fee_audit is not None:
+        result["feePolicyAudit"] = fee_audit
     if dividend_ledger is not None:
         result["dividendAccounting"] = dividend_ledger.audit()
         result["benchmarkDividendAccounting"] = benchmark_dividend_ledger.audit()
@@ -1206,6 +1359,7 @@ def validate_benchmark(
             symbol=snapshot.symbol,
             max_participation_pct=normalized.get("maxParticipationPct"),
             quantity_rule_version=normalized["quantityRuleVersion"],
+            fee_model=normalized.get("feeModel", fees.LEGACY_FEE_MODEL),
         )
         if order.get("status") in {"filled", "partial_fill"}:
             return

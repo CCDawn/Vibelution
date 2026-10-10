@@ -101,6 +101,19 @@ it("submits the selected free Sina source without starting the model", async () 
   expect(api.startAIBacktest).not.toHaveBeenCalled();
 });
 
+it("submits a separate historical fee policy and invalidates its preview when changed", async () => {
+  vi.mocked(api.previewAIBacktest).mockResolvedValue({ ...preview, feePolicyAudit: { feeModel: "verified_ashare_fees_v1", startDate: "2026-07-01", endDate: "2026-09-01", symbols: [stock.symbol], commissionIncludes: ["handlingFee", "regulatoryFee"], roundingStatus: "unverified_broker_settlement", minimumGranularity: "simulated_order", sourceURLs: [] } });
+  await render();
+  await chooseSelectOption("AI回测费用口径", "沪深历史分项");
+  expect(node.textContent).toContain("含规费佣金 bps");
+  await act(async () => button("检查数据与预算").click());
+  expect(api.previewAIBacktest).toHaveBeenCalledWith("a", expect.objectContaining({ feeModel: "verified_ashare_fees_v1", commissionBps: 3, minimumCommission: 5 }));
+  expect(node.textContent).toContain("佣金含规费 · 过户费另计");
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
+  await chooseSelectOption("AI回测费用口径", "原有简化费用");
+  expect(node.textContent).not.toContain("开始AI回测");
+});
+
 it("preflights the cash dividend policy and shows frozen coverage without starting a model", async () => {
   vi.mocked(api.previewAIBacktest).mockResolvedValue({ ...preview, corporateActionCoverage: { [stock.symbol]: { status: "complete", ruleVersion: "ashare_cash_dividend_v1", artifactHash: "a".repeat(64), startDate: "2026-07-01", endDate: "2026-09-01", eventCount: 2 } } });
   await render();

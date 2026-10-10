@@ -11,6 +11,12 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 from core.web.services import financial_market_service as market
 from core.web.services.financial_backtest.contract import sha256_json
+from core.web.services.financial_backtest.fees import (
+    LEGACY_FEE_MODEL,
+    VERIFIED_FEE_MODEL,
+    fee_model_audit,
+    normalize_fee_model,
+)
 
 COMPARISON_CONTRACT_VERSION = "finance-ai-backtest-v1"
 COMPARISON_NOTICE = (
@@ -46,6 +52,7 @@ class ComparisonProvenance(TypedDict):
     commonParamsHash: str
     strategyHash: str
     sourceRunId: NotRequired[str]
+    feePolicyAuditHash: NotRequired[str]
 
 
 class ComparisonReason(TypedDict):
@@ -120,6 +127,9 @@ def build_comparison_provenance(record: Mapping[str, Any]) -> ComparisonProvenan
             {"contractVersion": COMPARISON_CONTRACT_VERSION, "strategy": strategy}
         ),
     }
+    fee_audit = common_inputs["params"].get("feePolicyAudit")
+    if isinstance(fee_audit, Mapping):
+        result["feePolicyAuditHash"] = sha256_json(fee_audit)
     source_run_id = _source_run_id(record)
     if source_run_id:
         result["sourceRunId"] = source_run_id
@@ -225,7 +235,7 @@ def compare_runs(
             and stored.get("contractVersion") == COMPARISON_CONTRACT_VERSION
             and any(
                 stored.get(key) != expected.get(key)
-                for key in ("contractVersion", "commonParamsHash", "strategyHash", "sourceRunId")
+                for key in ("contractVersion", "commonParamsHash", "strategyHash", "sourceRunId", "feePolicyAuditHash")
             )
         ):
             add_reason(
@@ -302,7 +312,7 @@ def compare_runs(
         and provenance is not None
         and all(
             record["comparisonProvenance"].get(key) == provenance.get(key)
-            for key in ("contractVersion", "commonParamsHash", "strategyHash", "sourceRunId")
+            for key in ("contractVersion", "commonParamsHash", "strategyHash", "sourceRunId", "feePolicyAuditHash")
         )
         for record, provenance in zip(records_as_mappings, provenance_rows)
     )
@@ -408,6 +418,30 @@ def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
         if action_policy not in ("block", "verified_cash_dividends"):
             raise ValueError("corporateActionPolicy unsupported")
         parameters["corporateActionPolicy"] = action_policy
+    try:
+        fee_model = normalize_fee_model(params)
+    except ValueError as exc:
+        raise ValueError("feeModel unsupported") from exc
+    fee_audit = record.get("feePolicyAudit")
+    if fee_model == VERIFIED_FEE_MODEL:
+        raw_coverage = record.get("dateCoverage")
+        if not isinstance(raw_coverage, Mapping):
+            raise ValueError("fee audit date coverage")
+        start_date = _canonical_optional_date(
+            raw_coverage.get("requestedStartDate"), "feePolicyAudit.startDate"
+        )
+        end_date = _canonical_optional_date(
+            raw_coverage.get("requestedEndDate"), "feePolicyAudit.endDate"
+        )
+        if start_date is None or end_date is None or not isinstance(fee_audit, Mapping):
+            raise ValueError("feePolicyAudit missing")
+        expected_audit = fee_model_audit(params, symbols, start_date, end_date)
+        if dict(fee_audit) != expected_audit:
+            raise ValueError("feePolicyAudit mismatch")
+        parameters["feeModel"] = fee_model
+        parameters["feePolicyAudit"] = dict(fee_audit)
+    elif fee_model != LEGACY_FEE_MODEL or fee_audit is not None:
+        raise ValueError("feePolicyAudit mismatch")
     max_tokens = _canonical_integer(record.get("maxTokens"), "maxTokens")
     params_max_tokens = params.get("maxTokens")
     if params_max_tokens is not None and max_tokens != _canonical_integer(params_max_tokens, "params.maxTokens"):
@@ -770,6 +804,11 @@ def _compare_shared_evidence(
             "公司行动记账规则不同，不能直接比较。",
         ),
         (
+            "feeModel",
+            "fee_model_mismatch",
+            "交易费用模型版本不同，不能直接比较。",
+        ),
+        (
             "commissionBps",
             "cost_model_mismatch",
             "佣金、最低费用或滑点参数不同，不能直接比较。",
@@ -854,6 +893,28 @@ def _parameter_shared_hash(inputs: Mapping[str, Any], parameter_key: str) -> str
     params.pop(parameter_key, None)
     if parameter_key == "maxParticipationPct":
         params.pop("participationRule", None)
+    fee_audit = params.get("feePolicyAudit")
+    if isinstance(fee_audit, Mapping) and parameter_key in {
+        "commissionBps",
+        "minimumCommission",
+    }:
+        normalized_audit = dict(fee_audit)
+        rates = normalized_audit.get("rates")
+        if isinstance(rates, list):
+            normalized_rates = []
+            for row in rates:
+                if not isinstance(row, Mapping):
+                    normalized_rates.append(row)
+                    continue
+                normalized_row = dict(row)
+                if normalized_row.get("component") == "commission":
+                    if parameter_key == "commissionBps":
+                        normalized_row.pop("rateBps", None)
+                    if parameter_key == "minimumCommission":
+                        normalized_row.pop("minimumYuan", None)
+                normalized_rates.append(normalized_row)
+            normalized_audit["rates"] = normalized_rates
+        params["feePolicyAudit"] = normalized_audit
     shared["params"] = params
     if (
         parameter_key == "decisionInterval"

@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { FinanceBacktestAdvancedEvaluation } from "./FinanceBacktestAdvancedEvaluation";
+import { FinanceBacktestFees } from "./FinanceBacktestFees";
 import { FinanceBacktestRobustness } from "./FinanceBacktestRobustness";
 import { FinanceWalkForward } from "./FinanceWalkForward";
 import { ChevronDown, ChevronRight, Download, GitCompareArrows, Play, RefreshCw, Square, X } from "lucide-react";
@@ -126,7 +127,8 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       {number("initialCash", zh ? "初始资金" : "Initial cash", 1000, 100000000)}
       {number("maxPositionPct", scope === "portfolio" ? (zh ? "单股上限 %" : "Per-stock cap %") : (zh ? "仓位上限 %" : "Max position %"), 0, 100)}
       <label className={styles.field}>{zh ? "决策频率" : "Frequency"}<VSelect aria-label="AI回测决策频率" selectedKey={String(form.decisionInterval)} isDisabled={busy} className={styles.frequency} options={[{ id: "1", label: zh ? "每个交易日" : "Daily" }, { id: "5", label: zh ? "每5个交易日" : "Every 5 bars" }, { id: "20", label: zh ? "每20个交易日" : "Every 20 bars" }]} onSelectionChange={key => edit("decisionInterval", Number(key))} /></label>
-      {number("commissionBps", zh ? "佣金 bps" : "Commission bps", 0, 100, 0.1)}
+      <label className={styles.field}>{zh ? "费用口径" : "Fee policy"}<VSelect aria-label="AI回测费用口径" selectedKey={form.feeModel ?? "legacy_commission_stamp_v1"} isDisabled={busy} options={[{ id: "legacy_commission_stamp_v1", label: zh ? "原有简化费用" : "Legacy simplified fees" }, { id: "verified_ashare_fees_v1", label: zh ? "沪深历史分项" : "Historical SH / SZ fees" }]} onSelectionChange={key => edit("feeModel", String(key) as "legacy_commission_stamp_v1" | "verified_ashare_fees_v1")} /></label>
+      {number("commissionBps", form.feeModel === "verified_ashare_fees_v1" ? (zh ? "含规费佣金 bps" : "All-in commission bps") : (zh ? "佣金 bps" : "Commission bps"), 0, 100, 0.1)}
       {number("minimumCommission", zh ? "最低佣金" : "Minimum fee", 0, 100)}
       {number("slippageBps", zh ? "滑点 bps" : "Slippage bps", 0, 100, 0.1)}
       {number("maxParticipationPct", zh ? "日成交量上限 %" : "Daily volume cap %", 0.1, 100, 0.1)}
@@ -147,6 +149,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       <div className={styles.row}><strong>{assetLabel(symbolsForRun(preview), zh)}</strong><span>{zh ? "共同区间" : "Common period"} {preview.dateCoverage.actualStartDate} — {preview.dateCoverage.actualEndDate}</span><span>{zh ? `${preview.dateCoverage.tradingDays} 个交易日 · ${preview.decisionCount} 次决策` : `${preview.dateCoverage.tradingDays} sessions · ${preview.decisionCount} decisions`}</span></div>
       <div className={styles.row}><span>{zh ? "样本外起点" : "Holdout starts"} {preview.outOfSampleStartDate || "—"}</span><span>{zh ? "模型" : "Model"} {preview.modelId}</span><span>{zh ? "预计 Token" : "Estimated tokens"} {typeof preview.estimatedTokens === "number" ? preview.estimatedTokens.toLocaleString() : "—"} / {preview.maxTokens.toLocaleString()}</span><span>{zh ? "数据哈希" : "Data hash"} {preview.dataHash.slice(0, 12)}</span></div>
       <AssetCoverageTable coverage={preview.assetCoverage} fallback={preview.dateCoverage} sources={preview.assetSources} symbols={symbolsForRun(preview)} zh={zh} />
+      <FinanceBacktestFees audit={preview.feePolicyAudit} zh={zh} />
       {preview.researchCoverage ? <p className={styles.note}>{zh ? `${preview.researchInput === "financial_reports" ? "财报原文" : "历史公告"} · ${preview.researchCoverage.itemCount} 条 · ${preview.researchCoverage.groupCount} 组 · ${preview.researchCoverage.status === "partial" ? "覆盖不完整" : "已冻结"}` : `Historical evidence · ${preview.researchCoverage.itemCount} items · ${preview.researchCoverage.status}`}</p> : null}
       {preview.corporateActionCoverage ? <div className={styles.row}>{Object.entries(preview.corporateActionCoverage).map(([symbol, coverage]) => <span key={symbol} className={styles.note}>{symbol} · {zh ? `现金分红 ${coverage.eventCount} 次 · 官方公告已冻结` : `${coverage.eventCount} cash dividends · official notices frozen`}</span>)}</div> : null}
       {preview.warnings.map((warning, index) => <p key={index} className={styles.note}>{warning}</p>)}
@@ -213,6 +216,7 @@ function BacktestResult({ run, zh }: { run: AIBacktestRun; zh: boolean }) {
     { key: "outOfSample", name: zh ? "样本外" : "Out of sample", ...run.evaluation.outOfSample },
   ]) : [];
   return <>
+    <FinanceBacktestFees audit={run.feePolicyAudit} run={run} zh={zh} />
     {run.robustness ? <FinanceBacktestRobustness key={run.runId} result={run.robustness} zh={zh} /> : null}
     <div className={styles.row}><strong>{zh ? "策略收益" : "Return"} {pct(metrics.totalReturnPct)}</strong><span>{zh ? "持有基准" : "Benchmark"} {pct(metrics.benchmarkReturnPct)}</span><span>{zh ? "超额" : "Excess"} {pct(metrics.excessReturnPct)}</span><span>{zh ? "最大回撤" : "Drawdown"} {pct(metrics.maxDrawdownPct)}</span><span>{zh ? "年化" : "Annualized"} {pct(metrics.annualizedReturnPct)}</span><span>Sharpe {metrics.sharpeRatio?.toFixed(2) ?? "—"}</span><span>{zh ? "成交" : "Fills"} {metrics.tradeCount}</span><span>{zh ? "费用" : "Fees"} {metrics.fees.toFixed(2)}</span></div>
     {run.dividendAccounting ? <>

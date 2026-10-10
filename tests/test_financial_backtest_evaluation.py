@@ -74,6 +74,28 @@ def test_costs_and_fills_are_attributed_only_to_their_execution_window():
     assert "winRatePct" not in result["outOfSample"]["metrics"]
 
 
+def test_verified_fee_attribution_follows_fill_window_without_double_counting():
+    orders = [
+        {"date": "2026-09-02", "status": "filled", "filledShares": 100,
+         "notional": 1000, "fee": 5.01, "commission": 5, "stampDuty": 0,
+         "transferFee": 0.01, "handlingFee": 0.03, "regulatoryFee": 0.02,
+         "brokerCommission": 4.95},
+        {"date": "2026-09-03", "status": "filled", "filledShares": 100,
+         "notional": 1000, "fee": 5.51, "commission": 5, "stampDuty": 0.5,
+         "transferFee": 0.01, "handlingFee": 0.03, "regulatoryFee": 0.02,
+         "brokerCommission": 4.95},
+    ]
+    windows = evaluate_windows(curve(), orders, initial_cash=1000,
+                               out_of_sample_start_date="2026-09-03")
+    for name, expected in (("inSample", 5.01), ("outOfSample", 5.51)):
+        metrics = windows[name]["metrics"]
+        assert metrics["fees"] == pytest.approx(expected)
+        assert metrics["transferFees"] == pytest.approx(0.01)
+        assert metrics["handlingFees"] == pytest.approx(0.03)
+        assert metrics["regulatoryFees"] == pytest.approx(0.02)
+        assert metrics["brokerCommissionFees"] == pytest.approx(4.95)
+
+
 def test_future_curve_changes_do_not_change_in_sample_evaluation():
     original = curve()
     future_changed = copy.deepcopy(original)

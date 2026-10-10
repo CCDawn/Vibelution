@@ -11,7 +11,13 @@ from pydantic import (
     StrictFloat,
     StrictInt,
     StrictStr,
+    model_serializer,
     model_validator,
+)
+
+from core.web.services.financial_backtest.fees import (
+    LEGACY_FEE_MODEL,
+    VERIFIED_FEE_MODEL,
 )
 
 
@@ -28,6 +34,7 @@ class FinancialBacktestRequest(BaseModel):
     maxPositionPct: StrictFloat | StrictInt = Field(default=100, ge=0, le=100, allow_inf_nan=False)
     maxParticipationPct: StrictFloat | StrictInt = Field(default=1, ge=0.1, le=100, allow_inf_nan=False)
     quantityRuleVersion: Literal["ashare_quantity_v2", "legacy_100_v1"] = "ashare_quantity_v2"
+    feeModel: Literal[LEGACY_FEE_MODEL, VERIFIED_FEE_MODEL] | None = None
     decisionInterval: StrictInt = Field(default=5, ge=1, le=252)
     commissionBps: StrictFloat | StrictInt = Field(default=3, ge=0, le=100, allow_inf_nan=False)
     minimumCommission: StrictFloat | StrictInt = Field(default=5, ge=0, le=10_000, allow_inf_nan=False)
@@ -161,6 +168,7 @@ class FinancialBacktestParams(BaseModel):
     maxPositionPct: float = Field(ge=0, le=100, description="仓位百分比，0到100")
     maxParticipationPct: float | None = Field(default=None, ge=0.1, le=100)
     quantityRuleVersion: Literal["ashare_quantity_v2", "legacy_100_v1"] | None = None
+    feeModel: Literal[LEGACY_FEE_MODEL, VERIFIED_FEE_MODEL] | None = None
     corporateActionPolicy: Literal["block", "verified_cash_dividends"] | None = None
     decisionInterval: int
     commissionBps: float
@@ -178,6 +186,7 @@ class FinancialBacktestComparisonProvenance(BaseModel):
     commonParamsHash: str
     strategyHash: str
     sourceRunId: str | None = None
+    feePolicyAuditHash: str | None = None
 
 
 class FinancialBacktestResearchCoverage(BaseModel):
@@ -200,6 +209,56 @@ class FinancialBacktestActionCoverage(BaseModel):
     startDate: str
     endDate: str
     eventCount: int
+
+
+class FinancialBacktestFeeRate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    component: Literal[
+        "commission", "handlingFee", "regulatoryFee", "transferFee", "stampDuty"
+    ]
+    startDate: str
+    endDate: str
+    side: Literal["both", "by_side"]
+    rate: str | None = None
+    rateBps: str | None = None
+    minimumYuan: str | None = None
+    minimumRateBps: str | None = None
+    maximumRateBps: str | None = None
+    buyerRate: str | None = None
+    sellerRate: str | None = None
+
+    @model_serializer(mode="wrap")
+    def omit_unset_rate_fields(self, handler):
+        serialized = handler(self)
+        for field in (
+            "rate",
+            "rateBps",
+            "minimumYuan",
+            "minimumRateBps",
+            "maximumRateBps",
+            "buyerRate",
+            "sellerRate",
+        ):
+            if serialized.get(field) is None:
+                serialized.pop(field, None)
+        return serialized
+
+
+class FinancialBacktestFeeAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feeModel: Literal[VERIFIED_FEE_MODEL]
+    version: str
+    startDate: str
+    endDate: str
+    symbols: list[str]
+    commissionIncludes: list[str]
+    roundingStatus: Literal["unverified_broker_settlement"]
+    minimumGranularity: Literal["simulated_order"]
+    sourceURLs: list[str]
+    rates: list[FinancialBacktestFeeRate]
+    notice: str | None = None
 
 
 class FinancialBacktestDividendEvent(BaseModel):
@@ -273,6 +332,7 @@ class FinancialBacktestPreview(BaseModel):
     researchInput: Literal["price_only", "announcements", "financial_reports"] = "price_only"
     researchHash: str | None = None
     researchCoverage: FinancialBacktestResearchCoverage | None = None
+    feePolicyAudit: FinancialBacktestFeeAudit | None = None
     actionsStatus: Literal["clear", "factor_check_passed", "verified_cash_dividends", "blocked", "unavailable"]
     corporateActionCoverage: dict[str, FinancialBacktestActionCoverage] | None = None
     actionDates: list[str]
@@ -347,6 +407,10 @@ class FinancialBacktestTrade(BaseModel):
     notional: float
     tPlusOne: bool
     symbol: str | None = None
+    transferFee: float | None = None
+    handlingFee: float | None = None
+    regulatoryFee: float | None = None
+    brokerCommission: float | None = None
 
 
 class FinancialBacktestOrder(BaseModel):
@@ -369,6 +433,10 @@ class FinancialBacktestOrder(BaseModel):
     tPlusOne: bool
     limitStatus: str
     symbol: str | None = None
+    transferFee: float | None = None
+    handlingFee: float | None = None
+    regulatoryFee: float | None = None
+    brokerCommission: float | None = None
 
 
 class FinancialBacktestExecutionFailure(BaseModel):
@@ -474,9 +542,14 @@ class FinancialBacktestAdvancedMetrics(BaseModel):
     tradeCount: StrictInt | None = None
     fees: StrictFloat | StrictInt | None = None
     commissionFees: StrictFloat | StrictInt | None = None
+    transferFees: StrictFloat | StrictInt | None = None
+    handlingFees: StrictFloat | StrictInt | None = None
+    regulatoryFees: StrictFloat | StrictInt | None = None
+    brokerCommissionFees: StrictFloat | StrictInt | None = None
     stampDuty: StrictFloat | StrictInt | None = None
     slippageCost: StrictFloat | StrictInt | None = None
     benchmarkFees: StrictFloat | StrictInt | None = None
+    benchmarkTransferFees: StrictFloat | StrictInt | None = None
     benchmarkSlippageCost: StrictFloat | StrictInt | None = None
     grossTurnover: StrictFloat | StrictInt | None = None
 
@@ -558,6 +631,7 @@ class FinancialBacktestRun(BaseModel):
     researchInput: Literal["price_only", "announcements", "financial_reports"] = "price_only"
     researchHash: str | None = None
     researchCoverage: FinancialBacktestResearchCoverage | None = None
+    feePolicyAudit: FinancialBacktestFeeAudit | None = None
     comparisonProvenance: FinancialBacktestComparisonProvenance | None = None
     params: FinancialBacktestParams
     dateCoverage: FinancialBacktestCoverage
@@ -699,7 +773,7 @@ class FinancialBacktestExport(BaseModel):
     agentId: str
     runId: str
     format: Literal["json", "csv"]
-    schemaVersion: Literal[1, 2] = 1
+    schemaVersion: Literal[1, 2, 3, 4, 5] = 1
     fileName: str
     mediaType: str
     encoding: Literal["utf8", "base64"]

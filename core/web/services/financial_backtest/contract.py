@@ -13,6 +13,11 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from core.web.services import financial_market_service as market
 from core.web.services.financial_backtest.data import BacktestInputError
+from core.web.services.financial_backtest.fees import (
+    LEGACY_FEE_MODEL,
+    VERIFIED_FEE_MODEL,
+    normalize_fee_model,
+)
 
 PREVIEW_TTL_SECONDS = 60 * 60
 MAX_STRATEGY_CHARS = 4_000
@@ -112,6 +117,14 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "slippageBps": _number(payload.get("slippageBps", 5), "slippageBps", 0, 100),
         "maxDecisions": _integer(payload.get("maxDecisions", MAX_DECISIONS), "maxDecisions", 1, MAX_DECISIONS),
     }
+    fee_model = normalize_fee_model(payload)
+    # Omission remains the exact pre-fee legacy contract and hash. Only the
+    # opt-in model is persisted as a parameter; an explicit legacy selection
+    # has the same execution semantics as the historical default.
+    if fee_model == VERIFIED_FEE_MODEL:
+        params["feeModel"] = fee_model
+    elif fee_model != LEGACY_FEE_MODEL:
+        raise BacktestInputError("feeModel不是支持的交易费用模型")
     max_tokens = _integer(payload.get("maxTokens", DEFAULT_MAX_TOKENS), "maxTokens", MIN_MAX_TOKENS, MAX_TOKENS)
     model_id = str(payload.get("modelId") or "").strip()
     data_source = payload.get("dataSource", "tencent")

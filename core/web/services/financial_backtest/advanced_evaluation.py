@@ -35,6 +35,11 @@ _SCENARIO_METRIC_KEYS = (
     "benchmarkFees",
     "benchmarkSlippageCost",
     "grossTurnover",
+    "transferFees",
+    "handlingFees",
+    "regulatoryFees",
+    "brokerCommissionFees",
+    "benchmarkTransferFees",
 )
 
 

@@ -36,7 +36,13 @@ def build_decision_schedule(
     """Return the complete close-time schedule with an in-range next open."""
     validate_basket_snapshot(snapshot)
     first_asset = snapshot.assets[snapshot.symbols[0]]
-    return single_engine.build_decision_schedule(first_asset, params)
+    supplied_params = {} if params is None else params
+    schedule = single_engine.build_decision_schedule(first_asset, supplied_params)
+    for symbol in snapshot.symbols:
+        single_engine._validate_fee_window(
+            symbol, snapshot.start_date, snapshot.end_date, supplied_params
+        )
+    return schedule
 
 
 def _validate_decisions(
@@ -136,6 +142,7 @@ def _symbol_order(
     fill_price: Decimal | None = None,
     commission: Decimal = Decimal(0),
     stamp: Decimal = Decimal(0),
+    fee: Decimal | None = None,
     slippage_cost: Decimal = Decimal(0),
 ) -> dict[str, Any]:
     order = single_engine._make_order(
@@ -149,6 +156,7 @@ def _symbol_order(
         fill_price=fill_price,
         commission=commission,
         stamp=stamp,
+        fee=fee,
         slippage_cost=slippage_cost,
     )
     order["symbol"] = symbol
@@ -170,6 +178,7 @@ def _execute_target(
     slippage_rate: Decimal,
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
+    fee_model: str = single_engine.fees.LEGACY_FEE_MODEL,
 ) -> tuple[
     Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal
 ]:
@@ -261,11 +270,16 @@ def _execute_target(
 
         def is_affordable(candidate: int) -> bool:
             notional = Decimal(candidate) * fill_price
-            commission = single_engine._fee(
-                notional, commission_rate, minimum_commission
+            fee_breakdown = single_engine._calculate_fees(
+                notional,
+                execution.date,
+                side,
+                symbol,
+                commission_rate,
+                minimum_commission,
+                fee_model,
             )
-            stamp = single_engine._stamp_duty(notional, execution.date, side)
-            return notional + commission + stamp <= cash
+            return notional + fee_breakdown["fee"] <= cash
 
         filled = maximum_affordable_buy(fill_limit, rule, is_affordable)
         if not filled:
@@ -313,13 +327,33 @@ def _execute_target(
             return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
 
     notional = Decimal(filled) * fill_price
-    commission = single_engine._fee(notional, commission_rate, minimum_commission)
-    stamp = single_engine._stamp_duty(notional, execution.date, side)
-    fee = commission + stamp
+    fee_breakdown = single_engine._calculate_fees(
+        notional,
+        execution.date,
+        side,
+        symbol,
+        commission_rate,
+        minimum_commission,
+        fee_model,
+    )
+    commission = fee_breakdown["commission"]
+    stamp = fee_breakdown["stampDuty"]
+    fee = fee_breakdown["fee"]
     if side == "buy":
         cash -= notional + fee
         shares += filled
     else:
+        if fee_model == single_engine.fees.VERIFIED_FEE_MODEL and cash + notional < fee:
+            order = _symbol_order(
+                symbol=symbol,
+                signal_date=signal_date,
+                candle=execution,
+                side=side,
+                status="rejected",
+                reason="insufficient_cash_for_sale_fees",
+                requested_shares=requested,
+            )
+            return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
         cash += notional - fee
         shares -= filled
     trade = {
@@ -339,6 +373,7 @@ def _execute_target(
         "notional": float(single_engine._money(notional)),
         "tPlusOne": True,
     }
+    single_engine._attach_fee_components(trade, fee_breakdown, fee_model)
     order = _symbol_order(
         symbol=symbol,
         signal_date=signal_date,
@@ -367,8 +402,10 @@ def _execute_target(
         fill_price=fill_price,
         commission=commission,
         stamp=stamp,
+        fee=fee,
         slippage_cost=per_share_slippage,
     )
+    single_engine._attach_fee_components(order, fee_breakdown, fee_model)
     return (
         cash,
         shares,
@@ -403,6 +440,7 @@ def _execute_benchmark_sleeve(
     slippage_rate: Decimal,
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
+    fee_model: str = single_engine.fees.LEGACY_FEE_MODEL,
 ) -> tuple[Decimal, int, dict[str, Any]]:
     """Buy one equal-weight sleeve, reserving cash for every applicable fee."""
     fill_price, per_share_slippage = single_engine._execution_price(
@@ -488,9 +526,16 @@ def _execute_benchmark_sleeve(
         )
     def is_affordable(candidate: int) -> bool:
         notional = Decimal(candidate) * fill_price
-        commission = single_engine._fee(notional, commission_rate, minimum_commission)
-        stamp = single_engine._stamp_duty(notional, execution.date, "buy")
-        return notional + commission + stamp <= cash
+        fee_breakdown = single_engine._calculate_fees(
+            notional,
+            execution.date,
+            "buy",
+            symbol,
+            commission_rate,
+            minimum_commission,
+            fee_model,
+        )
+        return notional + fee_breakdown["fee"] <= cash
 
     filled = maximum_affordable_buy(fill_limit, rule, is_affordable)
     if not filled:
@@ -512,9 +557,19 @@ def _execute_benchmark_sleeve(
             ),
         )
     notional = Decimal(filled) * fill_price
-    commission = single_engine._fee(notional, commission_rate, minimum_commission)
-    stamp = single_engine._stamp_duty(notional, execution.date, "buy")
-    remaining_cash = cash - notional - commission - stamp
+    fee_breakdown = single_engine._calculate_fees(
+        notional,
+        execution.date,
+        "buy",
+        symbol,
+        commission_rate,
+        minimum_commission,
+        fee_model,
+    )
+    commission = fee_breakdown["commission"]
+    stamp = fee_breakdown["stampDuty"]
+    fee = fee_breakdown["fee"]
+    remaining_cash = cash - notional - fee
     order = _symbol_order(
         symbol=symbol,
         signal_date=execution.date,
@@ -535,8 +590,10 @@ def _execute_benchmark_sleeve(
         fill_price=fill_price,
         commission=commission,
         stamp=stamp,
+        fee=fee,
         slippage_cost=per_share_slippage,
     )
+    single_engine._attach_fee_components(order, fee_breakdown, fee_model)
     return remaining_cash, filled, order
 
 
@@ -652,6 +709,7 @@ def _simulate_prefix(
     slippage_rate: Decimal = normalized["slippageBps"] / _BPS
     max_participation_pct: Decimal | None = normalized.get("maxParticipationPct")
     quantity_rule_version: str = normalized["quantityRuleVersion"]
+    fee_model: str = normalized.get("feeModel", single_engine.fees.LEGACY_FEE_MODEL)
     cash = initial_cash
     shares = {symbol: 0 for symbol in symbols}
     cost_basis = {symbol: Decimal(0) for symbol in symbols}
@@ -673,11 +731,13 @@ def _simulate_prefix(
     benchmark_orders: list[dict[str, Any]] = []
     benchmark_commission = Decimal(0)
     benchmark_stamp = Decimal(0)
+    benchmark_fees = Decimal(0)
     benchmark_slippage = Decimal(0)
     pending: Mapping[str, Any] | None = None
     orders: list[dict[str, Any]] = []
     trades: list[dict[str, Any]] = []
     equity_rows: list[dict[str, Any]] = []
+    total_fees = Decimal(0)
     total_commission = Decimal(0)
     total_stamp = Decimal(0)
     total_slippage = Decimal(0)
@@ -715,6 +775,7 @@ def _simulate_prefix(
                     max_participation_pct=max_participation_pct,
                     symbol=symbol,
                     quantity_rule_version=quantity_rule_version,
+                    fee_model=fee_model,
                 )
             )
             benchmark_orders.append(order)
@@ -722,6 +783,7 @@ def _simulate_prefix(
                 benchmark_filled.add(symbol)
                 benchmark_commission += Decimal(str(order.get("commission") or 0))
                 benchmark_stamp += Decimal(str(order.get("stampDuty") or 0))
+                benchmark_fees += Decimal(str(order.get("fee") or 0))
                 benchmark_slippage += Decimal(str(order.get("slippageCost") or 0))
                 if symbol in benchmark_dividend_ledgers and benchmark_shares[symbol]:
                     benchmark_dividend_ledgers[symbol].buy(
@@ -779,6 +841,7 @@ def _simulate_prefix(
                         slippage_rate=slippage_rate,
                         max_participation_pct=max_participation_pct,
                         quantity_rule_version=quantity_rule_version,
+                        fee_model=fee_model,
                     )
                 )
                 session_orders.append(order)
@@ -788,6 +851,7 @@ def _simulate_prefix(
                 if trade is not None:
                     trades.append(trade)
                     turnover += Decimal(str(trade["notional"]))
+                    total_fees += Decimal(str(trade["fee"]))
                     filled = int(trade["shares"])
                     if symbol in dividend_ledgers:
                         cash = single_engine._deduct_dividend_sale_tax(
@@ -805,7 +869,7 @@ def _simulate_prefix(
                         else Decimal(0)
                     )
                     removed_basis = average_basis * filled
-                    proceeds = Decimal(str(trade["notional"])) - commission - stamp
+                    proceeds = Decimal(str(trade["notional"])) - Decimal(str(trade["fee"]))
                     realized_roundtrips.append(proceeds - removed_basis)
                     cost_basis[symbol] = max(
                         Decimal(0), cost_basis[symbol] - removed_basis
@@ -831,6 +895,7 @@ def _simulate_prefix(
                         slippage_rate=slippage_rate,
                         max_participation_pct=max_participation_pct,
                         quantity_rule_version=quantity_rule_version,
+                        fee_model=fee_model,
                     )
                 )
                 session_orders.append(order)
@@ -853,6 +918,7 @@ def _simulate_prefix(
                         slippage_rate=slippage_rate,
                         max_participation_pct=max_participation_pct,
                         quantity_rule_version=quantity_rule_version,
+                        fee_model=fee_model,
                     )
                 )
                 session_orders.append(order)
@@ -862,8 +928,9 @@ def _simulate_prefix(
                 if trade is not None:
                     trades.append(trade)
                     turnover += Decimal(str(trade["notional"]))
+                    total_fees += Decimal(str(trade["fee"]))
                     cost_basis[symbol] += (
-                        Decimal(str(trade["notional"])) + commission + stamp
+                        Decimal(str(trade["notional"])) + Decimal(str(trade["fee"]))
                     )
                     bought_this_session[symbol] += int(trade["shares"])
                     if symbol in dividend_ledgers:
@@ -951,6 +1018,9 @@ def _simulate_prefix(
         if decision is not None:
             pending = decision
 
+    single_engine._ensure_fee_component_fields(
+        orders + benchmark_orders + trades, fee_model
+    )
     current_portfolio = _current_portfolio(
         snapshot,
         through_date=through_date,
@@ -984,14 +1054,23 @@ def _simulate_prefix(
         closed_trade_count=len(realized_roundtrips),
         winning_trade_count=sum(1 for item in realized_roundtrips if item > 0),
         gross_turnover=float(turnover),
-        total_fees=float(total_commission + total_stamp),
+        total_fees=float(total_fees),
         commission_fees=float(total_commission),
         stamp_duty=float(total_stamp),
     )
     _add_dividend_metrics(metrics, dividend_ledgers, benchmark_dividend_ledgers)
-    metrics["benchmarkFees"] = float(benchmark_commission + benchmark_stamp)
+    metrics["benchmarkFees"] = float(benchmark_fees)
     metrics["slippageCost"] = float(single_engine._money(total_slippage))
     metrics["benchmarkSlippageCost"] = float(single_engine._money(benchmark_slippage))
+    if fee_model == single_engine.fees.VERIFIED_FEE_MODEL:
+        metrics.update(single_engine._fee_component_totals(trades))
+        benchmark_fee_components = single_engine._fee_component_totals(benchmark_orders)
+        metrics.update(
+            {
+                f"benchmark{key[0].upper()}{key[1:]}": value
+                for key, value in benchmark_fee_components.items()
+            }
+        )
     unfilled_benchmark = [
         symbol for symbol in symbols if symbol not in benchmark_filled
     ]
@@ -1012,6 +1091,10 @@ def _simulate_prefix(
         "基准为每只股票预留等额固定现金份额；无成交的拒单日可在后续交易日重试，首笔完整或部分成交即固定买持，剩余现金保留。",
         "期末持仓按收盘价估值，不假设强制平仓；回测不代表真实订单可成交或未来收益。",
     ]
+    if fee_model == single_engine.fees.VERIFIED_FEE_MODEL:
+        notices.append(
+            "采用 verified_ashare_fees_v1：佣金包含经手费和证管费，过户费另计，印花税按成交日和方向计取；券商结算舍入与订单以下优惠未核实。"
+        )
     if dividend_ledgers:
         notices.append(
             "现金分红按冻结的官方实施公告记入：登记日收盘确认权益，除权日确认为应收，派息日收盘转为可用现金；卖出时按FIFO持有期评估红利税。分币结算规则尚未核实。"
@@ -1054,6 +1137,11 @@ def _simulate_prefix(
         result["benchmarkDividendAccounting"] = _ledger_audits(
             benchmark_dividend_ledgers
         )
+    fee_audit = single_engine.fees.fee_model_audit(
+        normalized, list(symbols), snapshot.start_date, snapshot.end_date
+    )
+    if fee_audit is not None:
+        result["feePolicyAudit"] = fee_audit
     return result
 
 

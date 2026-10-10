@@ -284,6 +284,8 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     json_export = api.export_financial_backtest_run(_AGENT_ID, first_start["runId"], "json", store=store)
     json_body = json.loads(json_export["content"])
     assert json_export["mediaType"] == "application/json"
+    assert json_body["schemaVersion"] == 1
+    assert "snapshot" not in json_body
     assert json_body["status"] == "completed"
     assert len(json_body["decisions"]) == 2
     assert json_body["benchmarkOrders"] == persisted["benchmarkOrders"]
@@ -313,6 +315,56 @@ def test_preview_start_worker_complete_and_export_use_real_disk_store(monkeypatc
     assert any(row and row[0] == "benchmark" for row in rows)
     assert any(row[:2] == ["date", "targetWeight"] for row in rows)
     assert any(row[:2] == ["metric", "value"] for row in rows)
+
+
+def test_verified_fee_price_only_export_includes_frozen_market_snapshot(
+    monkeypatch, tmp_path
+):
+    store, snapshot, _prepared_requests = _install_scenario(monkeypatch, tmp_path)
+    payload = {**_preview_payload(), "feeModel": "verified_ashare_fees_v1"}
+    preview = api.create_financial_backtest_preview(
+        _AGENT_ID,
+        payload,
+        store=store,
+        data_loader=service.data.prepare_data,
+        now_provider=lambda: _NOW,
+    )
+    assert preview["canStart"] is True
+    assert preview["researchInput"] == "price_only"
+    assert preview["params"].get("feeModel") == "verified_ashare_fees_v1"
+
+    started = api.start_financial_backtest_run(
+        _AGENT_ID,
+        str(uuid4()),
+        preview["previewId"],
+        store=store,
+        now_provider=lambda: _NOW,
+    )
+
+    def infer_decision(**kwargs: Any) -> dict[str, Any]:
+        decision_input = dict(kwargs["decision_input"])
+        return _decision(
+            decision_input,
+            100 if decision_input["asOfDate"] == _DAY_ONE else 0,
+        )
+
+    worker = runtime.FinancialBacktestWorker(
+        store=store,
+        assistant_loader=lambda: [_AGENT_ID],
+        decision_runner=infer_decision,
+        worker_id="verified-fee-export-worker",
+    )
+    assert worker.process_pending_once(stop_requested=lambda: False) == 1
+
+    exported = api.export_financial_backtest_run(
+        _AGENT_ID, started["runId"], "json", store=store
+    )
+    body = json.loads(exported["content"])
+
+    assert body["schemaVersion"] == 5
+    assert body["params"]["feeModel"] == "verified_ashare_fees_v1"
+    assert body["researchInput"] == "price_only"
+    assert body["snapshot"]["dataHash"] == body["dataHash"] == snapshot.data_hash
 
 
 def test_completed_legacy_run_without_snapshot_stays_readable_and_marks_advanced_evaluation_unavailable(

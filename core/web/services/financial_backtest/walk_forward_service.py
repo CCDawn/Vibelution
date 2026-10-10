@@ -149,6 +149,10 @@ def create_walk_forward_preview(
         "retryReserveTokens": retry_reserve_tokens,
         "dataBoundaryRule": "训练窗终日收盘只作为观察边界，不生成越界到测试窗的训练成交",
     }
+    if isinstance(source_run.get("feePolicyAudit"), Mapping):
+        plan["sourceFeePolicyAudit"] = copy.deepcopy(
+            dict(source_run["feePolicyAudit"])
+        )
     plan_hash = sha256_json(plan)
     notice = _NOTICE_BASE
     if dropped_sessions:
@@ -1014,6 +1018,8 @@ def _stage_request(
         "researchInput": "price_only",
         "corporateActionPolicy": params.get("corporateActionPolicy", "block"),
     }
+    if "feeModel" in params:
+        payload["feeModel"] = params["feeModel"]
     if "maxParticipationPct" in params:
         payload["maxParticipationPct"] = params["maxParticipationPct"]
     if "quantityRuleVersion" in params:
@@ -1074,6 +1080,7 @@ def _stage_budget_with_retry_reserve(estimated_tokens: int) -> int:
 def _validate_source_run(
     agent_id: str, source_run: Mapping[str, Any], source_run_id: str
 ) -> None:
+    backtest_service._validate_fee_binding(source_run)
     if str(source_run.get("agentId") or "") != str(agent_id):
         raise FinancialBacktestNotFound("来源回测不存在")
     if str(source_run.get("runId") or "") != source_run_id:
@@ -1145,6 +1152,7 @@ def _verify_frozen_plan(
         str(source.get("dataHash") or "") != str(plan.get("sourceDataHash") or "")
         or str(source.get("paramsHash") or "") != str(plan.get("sourceParamsHash") or "")
         or dict(source.get("params") or {}) != dict(plan.get("sourceParams") or {})
+        or source.get("feePolicyAudit") != plan.get("sourceFeePolicyAudit")
     ):
         raise FinancialBacktestConflict("来源回测与冻结滚动计划不一致")
     payload = selected_store.load_snapshot(agent_id, str(plan.get("sourceDataHash") or ""))

@@ -5,6 +5,7 @@ export type AIBacktestParams = {
   maxParticipationPct?: number | null;
   quantityRuleVersion?: "ashare_quantity_v2" | "legacy_100_v1" | null;
   corporateActionPolicy?: "block" | "verified_cash_dividends" | null;
+  feeModel?: "legacy_commission_stamp_v1" | "verified_ashare_fees_v1" | null;
   decisionInterval: number;
   commissionBps: number;
   minimumCommission: number;
@@ -66,6 +67,14 @@ export type AIBacktestMetrics = {
   benchmarkDividendTaxPaid?: number;
   benchmarkDividendTaxPayable?: number;
   benchmarkNetDividendIncome?: number;
+  transferFees?: number;
+  handlingFees?: number;
+  regulatoryFees?: number;
+  brokerCommissionFees?: number;
+  benchmarkTransferFees?: number;
+  benchmarkHandlingFees?: number;
+  benchmarkRegulatoryFees?: number;
+  benchmarkBrokerCommissionFees?: number;
 };
 
 export type AIBacktestEvaluationWindow = {
@@ -115,6 +124,7 @@ export type AIBacktestRobustness = {
 
 export type AIBacktestAdvancedMetrics = Partial<Pick<AIBacktestMetrics,
   "totalReturnPct" | "benchmarkReturnPct" | "excessReturnPct" | "maxDrawdownPct" | "tradeCount" | "fees"
+  | "transferFees" | "handlingFees" | "regulatoryFees" | "brokerCommissionFees" | "benchmarkTransferFees"
 >> & {
   commissionFees?: number | null;
   stampDuty?: number | null;
@@ -175,6 +185,7 @@ export type AIBacktestComparisonProvenance = {
   commonParamsHash: string;
   strategyHash: string;
   sourceRunId?: string;
+  feePolicyAuditHash?: string;
 };
 
 export type AIBacktestParameterKey =
@@ -282,7 +293,28 @@ export type AIBacktestDecision = AIBacktestDecisionBase &
     | { targetWeight?: never; targetWeights: Record<string, number> }
   );
 
-export type AIBacktestOrder = {
+export type AIBacktestFeePolicyAudit = {
+  feeModel: "verified_ashare_fees_v1";
+  startDate: string;
+  endDate: string;
+  symbols: string[];
+  commissionIncludes: string[];
+  roundingStatus: "unverified_broker_settlement";
+  minimumGranularity: "simulated_order";
+  sourceURLs: string[];
+  notice?: string;
+};
+
+type AIBacktestFeeAmounts = {
+  commission?: number;
+  stampDuty?: number;
+  transferFee?: number;
+  handlingFee?: number;
+  regulatoryFee?: number;
+  brokerCommission?: number;
+};
+
+export type AIBacktestOrder = AIBacktestFeeAmounts & {
   signalDate?: string;
   date: string;
   symbol?: string;
@@ -295,7 +327,7 @@ export type AIBacktestOrder = {
   fee?: number;
 };
 
-export type AIBacktestTrade = {
+export type AIBacktestTrade = AIBacktestFeeAmounts & {
   signalDate: string;
   date: string;
   symbol?: string;
@@ -345,6 +377,7 @@ export type AIBacktestDividendAudit = {
 };
 
 export type AIBacktestPreview = {
+  feePolicyAudit?: AIBacktestFeePolicyAudit | null;
   agentId: string;
   previewId: string;
   expiresAt: string;
@@ -383,6 +416,7 @@ export type AIBacktestPreview = {
 };
 
 export type AIBacktestRun = {
+  feePolicyAudit?: AIBacktestFeePolicyAudit | null;
   runId: string;
   agentId: string;
   symbol: string | null;

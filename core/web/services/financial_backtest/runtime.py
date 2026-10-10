@@ -22,6 +22,7 @@ from core.web.services.financial_backtest import (
 from core.web.services.financial_backtest.contract import (
     MAX_OUTPUT_TOKENS_PER_DECISION,
     FinancialBacktestConflict,
+    FinancialBacktestStoreError,
     sha256_json,
 )
 from core.web.services.financial_backtest.decision import (
@@ -38,6 +39,7 @@ from core.web.services.financial_backtest.service import (
     _reserved_for_run,
     _sync_runtime_task,
     _validate_action_binding,
+    _validate_fee_binding,
 )
 from core.web.services.financial_backtest.store import (
     FinancialBacktestStore,
@@ -171,6 +173,16 @@ class FinancialBacktestWorker:
             self._mark_stopped(agent_id, run_id, "用户停止了回测")
             return
         if status not in {"queued", "running"}:
+            return
+        try:
+            _validate_fee_binding(run)
+        except FinancialBacktestStoreError:
+            self._mark_blocked(
+                agent_id,
+                run_id,
+                "fee_policy_mismatch",
+                "冻结费用模型或审计已变化，回测已阻断",
+            )
             return
         self._validate_frozen_model(agent_id, run)
         self._commit_legacy_unknown_reservation(agent_id, run_id, run)

@@ -59,6 +59,14 @@ def _window(
     # before this window, so do not invent a window-local realized win rate.
     for key in ("closedTradeCount", "winningTradeCount", "winRatePct"):
         metrics.pop(key)
+    if any("transferFee" in order for order in orders):
+        for source, metric in (
+            ("transferFee", "transferFees"),
+            ("handlingFee", "handlingFees"),
+            ("regulatoryFee", "regulatoryFees"),
+            ("brokerCommission", "brokerCommissionFees"),
+        ):
+            metrics[metric] = total(source)
     return {
         "startDate": first,
         "endDate": last,
