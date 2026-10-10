@@ -3,6 +3,7 @@ export type AIBacktestParams = {
   initialCash: number;
   maxPositionPct: number;
   maxParticipationPct?: number | null;
+  quantityRuleVersion?: "ashare_quantity_v2" | "legacy_100_v1" | null;
   decisionInterval: number;
   commissionBps: number;
   minimumCommission: number;
@@ -16,8 +17,8 @@ type AIBacktestRequestBase = AIBacktestParams & {
   startDate: string;
   endDate: string;
   modelId?: string;
-  dataSource?: "tencent" | "eastmoney" | "auto";
-  researchInput?: "price_only" | "announcements";
+  dataSource?: "tencent" | "eastmoney" | "sina" | "auto";
+  researchInput?: "price_only" | "announcements" | "financial_reports";
 };
 
 export type AIBacktestRequest = AIBacktestRequestBase &
@@ -328,7 +329,7 @@ export type AIBacktestPreview = {
   estimatedTokens?: number;
   paramsHash: string;
   dataHash: string;
-  researchInput?: "price_only" | "announcements";
+  researchInput?: "price_only" | "announcements" | "financial_reports";
   researchHash?: string | null;
   researchCoverage?: AIBacktestResearchCoverage | null;
   modelConfigHash?: string;
@@ -367,7 +368,7 @@ export type AIBacktestRun = {
   modelId: string;
   paramsHash: string;
   dataHash: string;
-  researchInput?: "price_only" | "announcements";
+  researchInput?: "price_only" | "announcements" | "financial_reports";
   researchHash?: string | null;
   researchCoverage?: AIBacktestResearchCoverage | null;
   modelConfigHash?: string;

@@ -20,8 +20,10 @@ from .financial_backtest_models import (
     FinancialBacktestRunPage,
     FinancialBacktestStartRequest,
 )
+from .financial_walk_forward import router as walk_forward_router
 
 router = APIRouter(tags=["financial-backtests"])
+router.include_router(walk_forward_router)
 _ERRORS = (FinancialBacktestError, BacktestDataError, FinancialPreferenceError)
 
 

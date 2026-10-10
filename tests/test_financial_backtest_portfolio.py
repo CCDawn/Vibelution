@@ -151,6 +151,44 @@ def test_shared_cash_competition_applies_fees_and_orders_buys_canonically():
     assert all(trade["symbol"] in snapshot.symbols for trade in result["trades"])
 
 
+def test_ashare_quantity_rules_apply_buy_steps_and_reject_subminimum_partial_sells():
+    snapshot = _basket({"bj430047": [10, 10, 10], "sh688001": [10, 10, 10]})
+    params = _params(
+        initialCash=100_000,
+        quantityRuleVersion="ashare_quantity_v2",
+        commissionBps=0,
+        minimumCommission=0,
+        slippageBps=0,
+    )
+    decisions = _decisions(
+        snapshot,
+        [
+            {"bj430047": 0.0125, "sh688001": 0.0205},
+            {"bj430047": 0.0124, "sh688001": 0.0200},
+        ],
+        params=params,
+    )
+
+    result = portfolio_engine.simulate(snapshot, params, decisions)
+
+    assert [
+        (trade["symbol"], trade["side"], trade["shares"])
+        for trade in result["trades"]
+    ] == [("bj430047", "buy", 125), ("sh688001", "buy", 205)]
+    assert [
+        (order["symbol"], order["status"], order["reason"])
+        for order in result["orders"][-2:]
+    ] == [
+        ("bj430047", "rejected", "below_minimum_sell_order"),
+        ("sh688001", "rejected", "below_minimum_sell_order"),
+    ]
+    assert result["equity"][-1]["positions"] == {
+        "bj430047": 125,
+        "sh688001": 205,
+    }
+    assert result["parameters"]["quantityRuleVersion"] == "ashare_quantity_v2"
+
+
 def test_volume_cap_limits_strategy_and_fixed_benchmark_sleeves_without_carryover():
     symbol = "sh600000"
     snapshot = _basket(

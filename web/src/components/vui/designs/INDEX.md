@@ -228,5 +228,6 @@
 | `FinanceReportsCenter` | [product/financial-assistant.md](./product/financial-assistant.md#financereportscenter) |
 | `FinanceBacktest` / `FinanceAIBacktest` / `FinanceOutcomeReview` / `FinanceClaimRegistration` | [product/financial-assistant.md](./product/financial-assistant.md#financebacktest--financeoutcomereview--financeclaimregistration) |
 | `FinanceBacktestAdvancedEvaluation` | [product/financial-assistant.md](./product/financial-assistant.md#financebacktestadvancedevaluation) |
+| `FinanceWalkForward` | [product/financial-assistant.md](./product/financial-assistant.md#financewalkforward) |
 | `FinanceReportExport` | [product/financial-assistant.md](./product/financial-assistant.md#financereportexport) |
 | `FinanceGroundedReportBody` / `FinanceReportReadState` / `FinanceReportEvidenceNotice` | [product/financial-assistant.md](./product/financial-assistant.md#financegroundedreportbody--financereportreadstate--financereportevidencenotice) |

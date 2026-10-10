@@ -101,7 +101,7 @@ class FinancialBacktestStore:
         self, agent_id: str, payload: Mapping[str, Any]
     ) -> str:
         """Persist one immutable announcement snapshot by verified content hash."""
-        from core.web.services.financial_backtest.research_snapshot import (
+        from core.web.services.financial_backtest.research_inputs import (
             validate_research_snapshot,
         )
 
@@ -143,7 +143,7 @@ class FinancialBacktestStore:
         self, agent_id: str, research_hash: str
     ) -> dict[str, Any]:
         """Load and rehash a frozen announcement snapshot without source reads."""
-        from core.web.services.financial_backtest.research_snapshot import (
+        from core.web.services.financial_backtest.research_inputs import (
             validate_research_snapshot,
         )
 

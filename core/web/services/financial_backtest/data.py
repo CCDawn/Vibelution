@@ -304,7 +304,7 @@ def _action_dates(
     end: date,
 ) -> tuple[str, ...]:
     dates = sorted(set(raw) & set(qfq))
-    transformations: list[tuple[str, str, Decimal, Decimal]] = []
+    transformations: list[tuple[str, dict[str, tuple[Decimal, Decimal]]]] = []
     for candle_date in dates:
         raw_prices = raw[candle_date].get("_providerPrices")
         qfq_prices = qfq[candle_date].get("_providerPrices")
@@ -332,10 +332,15 @@ def _action_dates(
                 break
             factor_low = max(factor_low, (qfq_value - rounding) / raw_value)
             factor_high = min(factor_high, (qfq_value + rounding) / raw_value)
+        # Rounded prices can satisfy both hypotheses on a quiet session. Keep
+        # both: choosing additive first can invent an action on the next bar.
+        hypotheses: dict[str, tuple[Decimal, Decimal]] = {}
         if additive_low <= additive_high:
-            transformations.append((candle_date, "additive", additive_low, additive_high))
-        elif factor_low <= factor_high:
-            transformations.append((candle_date, "multiplicative", factor_low, factor_high))
+            hypotheses["additive"] = (additive_low, additive_high)
+        if factor_low <= factor_high:
+            hypotheses["multiplicative"] = (factor_low, factor_high)
+        if hypotheses:
+            transformations.append((candle_date, hypotheses))
         else:
             parsed_date = date.fromisoformat(candle_date)
             if start <= parsed_date <= end:
@@ -343,13 +348,17 @@ def _action_dates(
 
     detected: list[str] = []
     for previous, current in pairwise(transformations):
-        _previous_date, previous_kind, previous_low, previous_high = previous
-        current_date, current_kind, current_low, current_high = current
+        _previous_date, previous_models = previous
+        current_date, current_models = current
         parsed_date = date.fromisoformat(current_date)
         if parsed_date < start or parsed_date > end:
             continue
-        overlap = max(previous_low, current_low) <= min(previous_high, current_high)
-        if previous_kind != current_kind or not overlap:
+        overlap = any(
+            max(previous_models[kind][0], current_models[kind][0])
+            <= min(previous_models[kind][1], current_models[kind][1])
+            for kind in previous_models.keys() & current_models.keys()
+        )
+        if not overlap:
             detected.append(current_date)
     return tuple(detected)
 
@@ -397,7 +406,7 @@ def validate_snapshot(snapshot: BacktestSnapshot) -> None:
     if coverage.complete is not True:
         raise BacktestDataError("回测快照数据覆盖不完整")
     if (
-        coverage.tradingCalendarStatus not in {"tencent_index_checked", "eastmoney_index_checked"}
+        coverage.tradingCalendarStatus not in {"tencent_index_checked", "eastmoney_index_checked", "sina_index_checked"}
         or coverage.calendarSymbol != _CALENDAR_SYMBOL
     ):
         raise BacktestDataError("回测快照未通过交易日历交叉检查")
@@ -504,27 +513,38 @@ def prepare_data(
     """Select one whole provider snapshot; never splice sources into a series."""
     from dataclasses import replace
 
-    from .eastmoney import fetch_window
+    from . import eastmoney, sina
 
     source = payload.get("dataSource", "tencent")
-    if source not in {"tencent", "eastmoney", "auto"}:
-        raise BacktestInputError("dataSource必须是tencent、eastmoney或auto")
+    if source not in {"tencent", "eastmoney", "sina", "auto"}:
+        raise BacktestInputError("dataSource必须是tencent、eastmoney、sina或auto")
     if source == "tencent":
         return _prepare_data(payload, today=today)
-    if source == "eastmoney":
+    if source in {"eastmoney", "sina"}:
+        name = "东方财富" if source == "eastmoney" else "新浪"
+        fetch_window = eastmoney.fetch_window if source == "eastmoney" else sina.fetch_window
         try:
-            return _prepare_data(payload, today=today, fetcher=fetch_window, provider="eastmoney")
+            return _prepare_data(payload, today=today, fetcher=fetch_window, provider=source)
         except (BacktestInputError, CorporateActionUnsupported):
             raise
         except BacktestDataError as exc:
-            raise BacktestDataError(str(exc).replace("腾讯", "东方财富"), metadata=exc.metadata) from exc
-    try:
-        return _prepare_data(payload, today=today)
-    except (BacktestInputError, CorporateActionUnsupported):
-        raise
-    except BacktestDataError:
-        alternative = prepare_data({**payload, "dataSource": "eastmoney"}, today=today)
-        return replace(alternative, notice=alternative.notice + ("腾讯历史数据未通过读取或覆盖检查，本次全部行情改用东方财富重新验证；未混用两个来源。",))
+            raise BacktestDataError(str(exc).replace("腾讯", name), metadata=exc.metadata) from exc
+    failures: dict[str, str] = {}
+    for provider in ("tencent", "eastmoney", "sina"):
+        try:
+            snapshot = prepare_data({**payload, "dataSource": provider}, today=today)
+        except (BacktestInputError, CorporateActionUnsupported):
+            raise
+        except BacktestDataError as exc:
+            failures[provider] = str(exc)[:500]
+            continue
+        if failures:
+            return replace(snapshot, notice=snapshot.notice + (f"主来源未通过，本次全部行情改用{snapshot.source}重新验证；未混用来源。",))
+        return snapshot
+    raise BacktestDataError(
+        "公开历史来源均未通过。" + "；".join(f"{name}：{reason}" for name, reason in failures.items()),
+        metadata={"sourceFailures": failures},
+    )
 
 
 def _prepare_data(
@@ -543,7 +563,10 @@ def _prepare_data(
 
     symbol, requested_start, requested_end, warmup_bars = _request_values(payload, cutoff)
     selected_fetch = fetcher or _fetch_window
-    source_name = "腾讯财经" if provider == "tencent" else "东方财富"
+    source_names = {"tencent": "腾讯财经", "eastmoney": "东方财富", "sina": "新浪财经"}
+    if provider not in source_names:
+        raise BacktestInputError("历史行情提供方无效")
+    source_name = source_names[provider]
     raw_by_date: dict[str, dict[str, Any]] = {}
     qfq_by_date: dict[str, dict[str, Any]] = {}
     calendar_dates: set[str] = set()
@@ -714,7 +737,12 @@ def _prepare_data(
         candles=candles,
         warmup_candles=warmup,
         source=source_name,
-        source_url=_QUOTE_URL.format(symbol=symbol) if provider == "tencent" else f"https://quote.eastmoney.com/{symbol}.html",
+        source_url=(
+            _QUOTE_URL.format(symbol=symbol) if provider == "tencent" else
+            f"https://quote.eastmoney.com/{symbol}.html" if provider == "eastmoney" else
+            "https://quotes.sina.cn/cn/api/jsonp_v2.php/=/CN_MarketDataService.getKLineData?"
+            + urlencode({"symbol": symbol, "scale": "240", "ma": "no", "datalen": "1023"})
+        ),
         fetched_at=datetime.now(_BEIJING).isoformat(timespec="seconds"),
         data_hash=_stable_hash(all_snapshot_rows, symbol, actual_start_text, actual_end_text),
         coverage=coverage,

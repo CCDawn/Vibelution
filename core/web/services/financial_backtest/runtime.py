@@ -82,6 +82,16 @@ class FinancialBacktestWorker:
         for agent_id in owners:
             if should_stop() or processed >= self._max_runs_per_tick:
                 break
+            # Plans only coordinate ordinary owned runs. No provider calls occur
+            # here: child execution remains fenced by this worker's run lease.
+            try:
+                from .walk_forward_service import advance_walk_forward_workflows
+
+                advance_walk_forward_workflows(
+                    agent_id, store=self._store, now_provider=self._now_provider, limit=1,
+                )
+            except Exception as exc:  # One corrupt plan must not starve ordinary runs.
+                _log_worker_error("walk-forward-advance", exc)
             try:
                 candidates = [
                     row
@@ -219,7 +229,7 @@ class FinancialBacktestWorker:
             if is_basket:
                 portfolio = portfolio_engine.portfolio_at(snapshot, params, previous, decision_date)
                 if research_snapshot is not None:
-                    from core.web.services.financial_backtest.research_snapshot import (
+                    from core.web.services.financial_backtest.research_inputs import (
                         decision_research_material,
                     )
 
@@ -242,7 +252,7 @@ class FinancialBacktestWorker:
             else:
                 portfolio = engine.portfolio_at(snapshot, params, previous, decision_date)
                 if research_snapshot is not None:
-                    from core.web.services.financial_backtest.research_snapshot import (
+                    from core.web.services.financial_backtest.research_inputs import (
                         decision_research_material,
                     )
 
@@ -862,14 +872,14 @@ def _load_research_snapshot_for_run(
         if research_hash:
             raise FinancialBacktestConflict("纯行情回测包含不匹配的公告摘要")
         return None
-    if mode != "announcements" or not research_hash:
+    if mode not in {"announcements", "financial_reports"} or not research_hash:
         raise FinancialBacktestConflict("回测研究输入或公告快照引用无效")
     if len(research_hash) != 64 or any(
         char not in "0123456789abcdef" for char in research_hash
     ):
         raise FinancialBacktestConflict("回测公告快照摘要无效")
     payload = store.load_research_snapshot(agent_id, research_hash)
-    from core.web.services.financial_backtest.research_snapshot import (
+    from core.web.services.financial_backtest.research_inputs import (
         validate_research_snapshot,
     )
 
@@ -880,6 +890,7 @@ def _load_research_snapshot_for_run(
             expected_hash=research_hash,
             symbols=symbols,
             decision_dates=schedule,
+            expected_kind=mode,
         )
     except data.BacktestInputError as exc:
         raise FinancialBacktestConflict("回测公告快照与冻结标的或决策计划不匹配") from exc

@@ -49,13 +49,13 @@ _ALLOWED_CATEGORIES = {category for _kind, category in _PERIODIC_CATEGORIES}
 _MIN_ANNOUNCED_MS = 631152000000
 _MAX_ANNOUNCED_MS = 4102444800000
 _A_SHARE = re.compile(r"(?<!\d)([036489]\d{5})(?!\d)")
-_ORG_ID = re.compile(r"^g(?:ssh|ssz|fbj)[0-9]{6,12}$")
+_ORG_ID = re.compile(r"^(?:g(?:ssh|ssz|fbj)|nssc)[0-9]{6,12}$")
 _ADJUNCT = re.compile(r"^finalpage/(\d{4}-\d{2}-\d{2})/[A-Za-z0-9][A-Za-z0-9._-]{0,64}\.pdf$", re.IGNORECASE)
 _PATHS = {
     "/new/information/topSearch/query",
     "/new/hisAnnouncement/query",
 }
-_COLUMNS = {"gssh": "sse", "gssz": "szse", "gfbj": "bj"}
+_COLUMNS = {"gssh": "sse", "gssz": "szse", "gfbj": "bj", "nssc": "sse"}
 _FILING_HOSTS = {
     "static.cninfo.com.cn",
     "www.cninfo.com.cn",

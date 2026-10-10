@@ -23,6 +23,7 @@ let modelContextWindow = 128_000;
 const researchModel: SessionLlmModelOption = { modelId: "research", modelRef: "provider/research", model: "research", label: "研究模型", providerId: "provider", providerLabel: "Provider", providerKind: "openai", apiKeyConfigured: true, missingApiKey: false, supportsReasoningEffort: true, reasoningEffortValues: ["low", "medium", "high"], reasoningEffortOptions: [], defaultReasoningEffort: "medium", isDefault: true };
 
 vi.mock("../api/financialAssistant", () => ({ createFinancialAssistant: vi.fn(), listFinancialAssistants: vi.fn() }));
+vi.mock("../api/financialBacktests", async original => ({ ...await original<typeof import("../api/financialBacktests")>(), fetchAIBacktests: vi.fn(async () => ({ items: [], nextCursor: null })) }));
 vi.mock("../api/chat", () => ({ deleteChatSession: vi.fn(), fetchSessionDetail: vi.fn(), createChatSession: vi.fn(), querySessions: vi.fn() }));
 vi.mock("../api/financialMarket", async (original) => ({ ...await original<typeof import("../api/financialMarket")>(), fetchFinancialStock: vi.fn(), searchFinancialStocks: vi.fn() }));
 vi.mock("../api/knowledge", () => ({ listKnowledgeItems: vi.fn(), fetchKnowledgeTrace: vi.fn() }));
@@ -309,6 +310,14 @@ describe("financial assistant page", () => {
     expect(button("开始研究")?.disabled).toBe(true);
     await act(async () => button("开始研究")!.click());
     expect(createChatSession).not.toHaveBeenCalled();
+    expect(nativeSubmit).not.toHaveBeenCalled();
+  });
+
+  it("keeps native research warnings out of the independently gated AI backtest workspace", async () => {
+    modelContextWindow = 0;
+    await render("/finance?session=native-session&finance_area=review&finance_reviewTab=backtest");
+    expect(container.textContent).not.toContain("研究模型暂不可用");
+    expect(button("检查数据与预算")?.disabled).toBe(false);
     expect(nativeSubmit).not.toHaveBeenCalled();
   });
 

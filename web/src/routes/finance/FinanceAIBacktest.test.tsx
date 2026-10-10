@@ -92,6 +92,15 @@ it("previews without a model call and refuses to start blocked corporate-action 
   expect(node.textContent).toContain("区间内含公司行动"); expect(button("开始AI回测").disabled).toBe(true); expect(api.startAIBacktest).not.toHaveBeenCalled();
 });
 
+it("submits the selected free Sina source without starting the model", async () => {
+  vi.mocked(api.previewAIBacktest).mockResolvedValue(preview);
+  await render();
+  await chooseSelectOption("AI回测历史行情源", "新浪财经");
+  await act(async () => button("检查数据与预算").click());
+  expect(api.previewAIBacktest).toHaveBeenCalledWith("a", expect.objectContaining({ dataSource: "sina" }));
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
+});
+
 it("allows independent backtest preflight when the native research session is unavailable", async () => {
   vi.mocked(api.previewAIBacktest).mockRejectedValue(new Error("回测模型配置需要检查"));
   const research = vi.fn();

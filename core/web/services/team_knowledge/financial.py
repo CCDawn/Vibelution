@@ -356,6 +356,7 @@ def eligible_financial_items(
         and row.get("ownerId") == owner["ownerId"]
     }
     now = _date(s.utc_now_iso())
+    cutoff = active_cutoff()
     candidates = {}
     superseded = set()
     for item in items:
@@ -395,9 +396,18 @@ def eligible_financial_items(
                 continue
         except (s.TeamKnowledgeError, TypeError, AttributeError):
             continue
-        # Supersession is a reviewed historical fact. Expiry/withdrawal of a
-        # replacement must not silently resurrect a superseded old report.
-        if meta["supersedesSha256"]:
+        # A replacement only supersedes an earlier version from its publication
+        # date onward. Apply the active source cutoff before pruning the older
+        # item, otherwise a replacement published after a historical cutoff
+        # removes the version that was current at that cutoff. This filters
+        # source-publication time only; it does not claim that a currently
+        # reviewed item was available to the Agent at that historical date.
+        published_at = _date(meta["publishedAt"])
+        if (
+            meta["supersedesSha256"]
+            and published_at <= now
+            and on_or_before(meta["publishedAt"], cutoff)
+        ):
             superseded.add(
                 (
                     meta["sourceId"],

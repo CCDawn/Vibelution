@@ -398,6 +398,11 @@ def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("maxParticipationPct outside range")
         parameters["maxParticipationPct"] = participation
         parameters["participationRule"] = "daily_volume_board_lots_v1"
+    if "quantityRuleVersion" in params:
+        quantity_rule = params["quantityRuleVersion"]
+        if quantity_rule not in ("ashare_quantity_v2", "legacy_100_v1"):
+            raise ValueError("quantityRuleVersion unsupported")
+        parameters["quantityRuleVersion"] = quantity_rule
     max_tokens = _canonical_integer(record.get("maxTokens"), "maxTokens")
     params_max_tokens = params.get("maxTokens")
     if params_max_tokens is not None and max_tokens != _canonical_integer(params_max_tokens, "params.maxTokens"):
@@ -412,13 +417,16 @@ def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
         "maxTokens": max_tokens,
     }
     research_mode = record.get("researchInput", "price_only")
-    if research_mode == "announcements":
+    if research_mode in {"announcements", "financial_reports"}:
         research_hash = record.get("researchHash")
         if not isinstance(research_hash, str) or len(research_hash) != 64 or any(c not in "0123456789abcdef" for c in research_hash):
             raise ValueError("researchHash")
         common_parameters["researchInput"] = research_mode
         common_parameters["researchHash"] = research_hash
-        common_parameters["researchContract"] = "prior_day_announcement_metadata_v1"
+        common_parameters["researchContract"] = (
+            "prior_day_financial_pdf_excerpts_v1"
+            if research_mode == "financial_reports" else "prior_day_announcement_metadata_v1"
+        )
     elif research_mode != "price_only" or record.get("researchHash"):
         raise ValueError("researchInput mismatch")
     return {
@@ -717,7 +725,7 @@ def _compare_shared_evidence(
         for _record, _run_id, inputs, _provenance in usable
     )
     has_announcement_input = any(
-        inputs["params"].get("researchInput", "price_only") == "announcements"
+        inputs["params"].get("researchInput", "price_only") != "price_only"
         for _record, _run_id, inputs, _provenance in usable
     )
     if not schedule_changed_by_parameter:
@@ -742,6 +750,7 @@ def _compare_shared_evidence(
         ("initialCash", "initial_cash_mismatch", "初始现金不同，不能直接比较。"),
         ("maxPositionPct", "position_limit_mismatch", "仓位上限不同，不能直接比较。"),
         ("maxParticipationPct", "participation_limit_mismatch", "成交量参与率上限不同，不能直接比较。"),
+        ("quantityRuleVersion", "quantity_rule_mismatch", "板块股数撮合规则不同，不能直接比较。"),
         ("commissionBps", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
         ("minimumCommission", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
         ("slippageBps", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),

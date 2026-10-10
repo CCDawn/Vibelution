@@ -265,9 +265,14 @@ def test_500_session_oos_robustness_and_exports_are_read_only(monkeypatch, tmp_p
     )
     csv_rows = list(csv.reader(StringIO(csv_export["content"])))
     assert ["periodEvaluation", "field", "value"] in csv_rows
+    # CSV contains separate tables; later advanced-evaluation summary rows
+    # must not overwrite the period-evaluation table being asserted here.
+    period_start = csv_rows.index(["periodEvaluation", "field", "value"]) + 1
+    period_end = next((index for index in range(period_start, len(csv_rows))
+                       if not csv_rows[index]), len(csv_rows))
     csv_values = {
         (row[0], row[1]): row[2]
-        for row in csv_rows
+        for row in csv_rows[period_start:period_end]
         if len(row) == 3 and row[0] and row[1]
     }
     assert csv_values[("summary", "status")] == "available"

@@ -142,13 +142,62 @@ def test_reader_accepts_cninfo_json_and_rejects_a_redirect_or_oversize_body(monk
         official_filings._post_json("/new/information/topSearch/query", {"keyWord": "600519"})
 
 
+def test_org_and_column_accepts_cninfo_nssc_for_the_matching_a_share():
+    payload = [
+        {"code": "688766", "category": "债券", "orgId": "nssc1000720"},
+        {"code": "688765", "category": "A股", "orgId": "nssc1000720"},
+        {"code": "688766", "category": "A股", "orgId": "nssc1000720"},
+    ]
+
+    assert official_filings._org_and_column(payload, "688766") == (
+        "nssc1000720",
+        "sse",
+    )
+
+
+@pytest.mark.parametrize(
+    "org_id",
+    [
+        None,
+        688766,
+        "nssc1000720&category=all",
+        "nssc1000720,other",
+        "nssc1000720/../",
+        'nssc1000720"><script>alert(1)</script>',
+        "nssc1000720\n",
+        "nssc12345",
+        "nssc" + "1" * 13,
+    ],
+)
+def test_org_and_column_rejects_malformed_or_injected_org_ids(org_id):
+    payload = [{"code": "688766", "category": "A股", "orgId": org_id}]
+
+    assert official_filings._org_and_column(payload, "688766") is None
+
+
+def test_org_and_column_rejects_nssc_for_another_security_code_or_market():
+    assert official_filings._org_and_column(
+        [{"code": "688765", "category": "A股", "orgId": "nssc1000720"}],
+        "688766",
+    ) is None
+    assert official_filings._org_and_column(
+        [{"code": "688766", "category": "债券", "orgId": "nssc1000720"}],
+        "688766",
+    ) is None
+
+
 def test_lookup_prefers_the_full_annual_report_and_the_exchange_column(monkeypatch):
     calls = []
 
     def fake(path, fields):
         calls.append((path, dict(fields)))
         if path.endswith("topSearch/query"):
-            orgs = {"600519": "gssh0600519", "000001": "gssz0000001", "830799": "gfbj0830799"}
+            orgs = {
+                "600519": "gssh0600519",
+                "000001": "gssz0000001",
+                "830799": "gfbj0830799",
+                "688766": "nssc1000720",
+            }
             code = fields["keyWord"]
             return [
                 {"code": "999999", "category": "A股", "orgId": "gssh0999999"},
@@ -167,9 +216,12 @@ def test_lookup_prefers_the_full_annual_report_and_the_exchange_column(monkeypat
         ]}
 
     monkeypatch.setattr(official_filings, "_post_json", fake)
-    found = lookup_annual_filings(["sh600519", "000001", "830799", "1600519", "600519"], cutoff=date(2026, 10, 6))
+    found = lookup_annual_filings(
+        ["sh600519", "000001", "830799", "688766", "1600519", "600519"],
+        cutoff=date(2026, 10, 6),
+    )
 
-    assert set(found) == {"600519", "000001", "830799"}
+    assert set(found) == {"600519", "000001", "830799", "688766"}
     assert found["600519"] == {
         "title": "6005192025年年度报告",
         "url": PDF,
@@ -177,7 +229,12 @@ def test_lookup_prefers_the_full_annual_report_and_the_exchange_column(monkeypat
         "source": FILING_SOURCE,
     }
     columns = {fields["stock"].split(",", 1)[0]: fields["column"] for path, fields in calls if path.endswith("hisAnnouncement/query")}
-    assert columns == {"600519": "sse", "000001": "szse", "830799": "bj"}
+    assert columns == {"600519": "sse", "000001": "szse", "830799": "bj", "688766": "sse"}
+    assert any(
+        fields["stock"] == "688766,nssc1000720"
+        for path, fields in calls
+        if path.endswith("hisAnnouncement/query")
+    )
     assert {fields["category"] for path, fields in calls if "category" in fields} == {ANNUAL_CATEGORY}
     assert all(fields["seDate"] == "1990-01-01~2026-10-06" for path, fields in calls if "seDate" in fields)
 

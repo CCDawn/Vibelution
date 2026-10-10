@@ -103,14 +103,23 @@ def prepare_basket_data(
     """Prepare and freeze every asset through the existing single-stock gate."""
     canonical = _canonical_symbols(symbols)
     if data_source == "auto":
-        try:
-            return prepare_basket_data(canonical, start_date, end_date, warmup_bars=warmup_bars, today=today, data_source="tencent")
-        except (single_data.BacktestInputError, single_data.CorporateActionUnsupported):
-            raise
-        except single_data.BacktestDataError:
-            from dataclasses import replace
-            alternate = prepare_basket_data(canonical, start_date, end_date, warmup_bars=warmup_bars, today=today, data_source="eastmoney")
-            return replace(alternate, notice=alternate.notice + ("主来源未通过，整个组合改用东方财富重新取得完整快照；未跨来源拼接。",))
+        from dataclasses import replace
+        failures: dict[str, str] = {}
+        for provider in ("tencent", "eastmoney", "sina"):
+            try:
+                snapshot = prepare_basket_data(canonical, start_date, end_date, warmup_bars=warmup_bars, today=today, data_source=provider)
+            except (single_data.BacktestInputError, single_data.CorporateActionUnsupported):
+                raise
+            except single_data.BacktestDataError as exc:
+                failures[provider] = str(exc)[:500]
+                continue
+            if failures:
+                return replace(snapshot, notice=snapshot.notice + (f"主来源未通过，整个组合改用{snapshot.source}重新取得完整快照；未跨来源拼接。",))
+            return snapshot
+        raise single_data.BacktestDataError(
+            "组合公开历史来源均未通过。" + "；".join(f"{name}：{reason}" for name, reason in failures.items()),
+            metadata={"sourceFailures": failures},
+        )
     assets: dict[str, single_data.BacktestSnapshot] = {}
     shared_dates: tuple[str, ...] | None = None
     for symbol in canonical:

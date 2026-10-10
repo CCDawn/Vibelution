@@ -10,6 +10,7 @@ import pytest
 
 from core.web.services.financial_backtest import data as backtest_data
 from core.web.services.financial_backtest import engine
+from core.web.services.financial_backtest import quantity_rules
 from core.web.services.financial_backtest.data import (
     BacktestCoverage,
     BacktestDataError,
@@ -34,6 +35,146 @@ def test_benchmark_reserves_historical_buy_stamp_duty() -> None:
     assert shares == 900
     assert cash == Decimal(973)
     assert order["stampDuty"] == 27
+
+
+def _snapshot_for_symbol(symbol: str, days: list[str]) -> BacktestSnapshot:
+    candles = tuple(_candle(day, 10) for day in days)
+    snapshot = _snapshot(candles)
+    return replace(
+        snapshot,
+        symbol=symbol,
+        source_url=f"https://example.invalid/quote/{symbol}",
+        data_hash=backtest_data._stable_hash(candles, symbol, days[0], days[-1]),
+    )
+
+
+def _simulate_quantity_rule(
+    symbol: str,
+    weights: list[float],
+    *,
+    quantity_rule_version: str | None = "ashare_quantity_v2",
+    days: list[str] | None = None,
+    initial_cash: int = 100_000,
+) -> dict[str, Any]:
+    days = days or ["2024-01-02", "2024-01-03", "2024-01-04"]
+    snapshot = _snapshot_for_symbol(symbol, days)
+    params: dict[str, Any] = {
+        "initialCash": initial_cash,
+        "maxPositionPct": 100,
+        "decisionInterval": 1,
+        "commissionBps": 0,
+        "minimumCommission": 0,
+        "slippageBps": 0,
+    }
+    if quantity_rule_version is not None:
+        params["quantityRuleVersion"] = quantity_rule_version
+    return engine.simulate(snapshot, params, _decisions(snapshot, weights))
+
+
+@pytest.mark.parametrize(
+    ("symbol", "weight", "expected_shares"),
+    [
+        ("sh600000", 0.0125, 100),
+        ("sz300001", 0.0125, 100),
+        ("sh688001", 0.0205, 205),
+        ("bj430047", 0.0125, 125),
+    ],
+)
+def test_ashare_quantity_rules_size_board_specific_buy_steps(
+    symbol: str, weight: float, expected_shares: int
+) -> None:
+    result = _simulate_quantity_rule(symbol, [weight, weight])
+
+    assert result["trades"][0]["shares"] == expected_shares
+
+
+def test_star_market_sells_in_single_share_steps_and_closes_subminimum_target() -> None:
+    partial = _simulate_quantity_rule("sh688001", [0.05, 0.0299])
+    liquidation = _simulate_quantity_rule("sh688001", [0.025, 0.0199])
+
+    assert [(trade["side"], trade["shares"]) for trade in partial["trades"]] == [
+        ("buy", 500),
+        ("sell", 201),
+    ]
+    assert [(trade["side"], trade["shares"]) for trade in liquidation["trades"]] == [
+        ("buy", 250),
+        ("sell", 250),
+    ]
+
+
+def test_missing_quantity_rule_version_preserves_legacy_100_share_replay() -> None:
+    legacy = _simulate_quantity_rule(
+        "sh688001", [0.0125, 0.0125], quantity_rule_version=None
+    )
+    current = _simulate_quantity_rule("sh688001", [0.0125, 0.0125])
+
+    assert legacy["trades"][0]["shares"] == 100
+    assert current["trades"] == []
+    assert current["orders"][0]["status"] == "rejected"
+    assert current["orders"][0]["reason"] == "below_board_minimum_buy"
+    assert current["orders"][0]["requestedShares"] == 125
+
+
+def test_current_quantity_contract_excludes_todays_buys_from_sellable_input() -> None:
+    snapshot = _snapshot_for_symbol("sh600000", ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"])
+    params = {"initialCash": 100000, "maxPositionPct": 100, "decisionInterval": 1,
+              "commissionBps": 0, "minimumCommission": 0, "slippageBps": 0,
+              "quantityRuleVersion": "ashare_quantity_v2"}
+    decisions = _decisions(snapshot, [0.4, 0.6, 0.6])
+    first_purchase = engine.portfolio_at(snapshot, params, decisions[:1], "2024-01-03")
+    assert first_purchase["shares"] == 4000
+    assert first_purchase["sellableShares"] == 0
+    added = engine.portfolio_at(snapshot, params, decisions[:2], "2024-01-04")
+    assert added["shares"] == 6000
+    assert added["sellableShares"] == 4000
+    legacy = engine.portfolio_at(snapshot, {**params, "quantityRuleVersion": "legacy_100_v1"},
+                                 decisions[:1], "2024-01-03")
+    assert legacy["sellableShares"] == legacy["shares"]
+
+
+@pytest.mark.parametrize(
+    ("symbol", "held", "requested", "cap", "expected"),
+    [
+        ("sh600000", 250, 150, 150, 100),
+        ("sh600000", 250, 250, 250, 250),
+        ("sh688001", 250, 50, 50, 0),
+        ("sh688001", 250, 250, 250, 250),
+        ("bj430047", 150, 50, 50, 0),
+        ("bj430047", 50, 50, 50, 50),
+        ("sh688001", 250, 250, 199, 0),
+    ],
+)
+def test_sell_residual_exception_requires_a_complete_sell_order(
+    symbol: str, held: int, requested: int, cap: int, expected: int
+) -> None:
+    rule = quantity_rules.resolve_quantity_rule(
+        symbol, "2024-01-03", "ashare_quantity_v2"
+    )
+
+    assert quantity_rules.floor_sell_quantity(requested, held, cap, rule) == expected
+
+
+@pytest.mark.parametrize(
+    ("execution_day", "expected_filled", "expected_reason"),
+    [
+        ("2020-08-21", 1_000_000, "next_session_open"),
+        ("2020-08-24", 300_000, "order_quantity_limit"),
+    ],
+)
+def test_chinext_limit_order_quantity_cap_uses_effective_date(
+    execution_day: str, expected_filled: int, expected_reason: str
+) -> None:
+    signal_day = "2020-08-20" if execution_day == "2020-08-21" else "2020-08-21"
+    next_day = "2020-08-24" if execution_day == "2020-08-21" else "2020-08-25"
+    result = _simulate_quantity_rule(
+        "sz300001",
+        [1, 1],
+        days=[signal_day, execution_day, next_day],
+        initial_cash=10_000_000,
+    )
+
+    assert result["orders"][0]["filledShares"] == expected_filled
+    assert result["orders"][0]["reason"] == expected_reason
 
 
 def _weekdays(start: str, end: str) -> list[str]:

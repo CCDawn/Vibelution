@@ -27,6 +27,7 @@ class FinancialBacktestRequest(BaseModel):
     initialCash: StrictFloat | StrictInt = Field(default=100_000, ge=1_000, le=100_000_000, allow_inf_nan=False)
     maxPositionPct: StrictFloat | StrictInt = Field(default=100, ge=0, le=100, allow_inf_nan=False)
     maxParticipationPct: StrictFloat | StrictInt = Field(default=1, ge=0.1, le=100, allow_inf_nan=False)
+    quantityRuleVersion: Literal["ashare_quantity_v2", "legacy_100_v1"] = "ashare_quantity_v2"
     decisionInterval: StrictInt = Field(default=5, ge=1, le=252)
     commissionBps: StrictFloat | StrictInt = Field(default=3, ge=0, le=100, allow_inf_nan=False)
     minimumCommission: StrictFloat | StrictInt = Field(default=5, ge=0, le=10_000, allow_inf_nan=False)
@@ -34,8 +35,8 @@ class FinancialBacktestRequest(BaseModel):
     maxDecisions: StrictInt = Field(default=500, ge=1, le=500)
     maxTokens: StrictInt = Field(default=500_000, ge=512, le=2_000_000)
     modelId: StrictStr | None = Field(default=None, max_length=160)
-    dataSource: Literal["tencent", "eastmoney", "auto"] = "tencent"
-    researchInput: Literal["price_only", "announcements"] = "price_only"
+    dataSource: Literal["tencent", "eastmoney", "sina", "auto"] = "tencent"
+    researchInput: Literal["price_only", "announcements", "financial_reports"] = "price_only"
 
     @model_validator(mode="after")
     def require_one_symbol_selector(self) -> FinancialBacktestRequest:
@@ -158,6 +159,7 @@ class FinancialBacktestParams(BaseModel):
     initialCash: float
     maxPositionPct: float = Field(ge=0, le=100, description="仓位百分比，0到100")
     maxParticipationPct: float | None = Field(default=None, ge=0.1, le=100)
+    quantityRuleVersion: Literal["ashare_quantity_v2", "legacy_100_v1"] | None = None
     decisionInterval: int
     commissionBps: float
     minimumCommission: float
@@ -211,7 +213,7 @@ class FinancialBacktestPreview(BaseModel):
     modelConfigHash: str = ""
     paramsHash: str
     dataHash: str
-    researchInput: Literal["price_only", "announcements"] = "price_only"
+    researchInput: Literal["price_only", "announcements", "financial_reports"] = "price_only"
     researchHash: str | None = None
     researchCoverage: FinancialBacktestResearchCoverage | None = None
     actionsStatus: Literal["clear", "factor_check_passed", "blocked", "unavailable"]
@@ -478,7 +480,7 @@ class FinancialBacktestRun(BaseModel):
     modelConfigHash: str = ""
     paramsHash: str
     dataHash: str
-    researchInput: Literal["price_only", "announcements"] = "price_only"
+    researchInput: Literal["price_only", "announcements", "financial_reports"] = "price_only"
     researchHash: str | None = None
     researchCoverage: FinancialBacktestResearchCoverage | None = None
     comparisonProvenance: FinancialBacktestComparisonProvenance | None = None

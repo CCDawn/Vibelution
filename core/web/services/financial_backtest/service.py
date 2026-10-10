@@ -141,6 +141,11 @@ def create_financial_backtest_fork_preview(
     }
     request_payload.update(selected_parameter_overrides)
     request = normalize_preview_request(request_payload)
+    # New previews use current board rules; forks must retain the exact source contract.
+    if "quantityRuleVersion" in source_params:
+        request["params"]["quantityRuleVersion"] = source_params["quantityRuleVersion"]
+    else:
+        request["params"].pop("quantityRuleVersion", None)
     # A fork preserves the source execution contract, including old uncapped runs.
     if (
         "maxParticipationPct" not in source_params
@@ -157,11 +162,11 @@ def create_financial_backtest_fork_preview(
     research_input = source_run.get("researchInput", "price_only")
     source_interval = int(source_params.get("decisionInterval", 5))
     requested_interval = int(request["params"].get("decisionInterval", 5))
-    if research_input == "announcements" and requested_interval != source_interval:
+    if research_input != "price_only" and requested_interval != source_interval:
         raise FinancialBacktestConflict(
             "公告研究快照绑定源回测决策日程；更改决策频率不能重新联网补取公告"
         )
-    if research_input == "announcements" and source_schedule != expected_schedule:
+    if research_input != "price_only" and source_schedule != expected_schedule:
         raise FinancialBacktestConflict("来源回测决策计划与冻结行情或参数不匹配，无法安全派生")
     preview = _create_preview(
         agent_id,
@@ -250,15 +255,15 @@ def _create_preview(
     research_mode = request.get("researchInput", "price_only")
     research_hash = None
     research_coverage = None
-    if research_mode == "announcements":
-        from .research_snapshot import (
-            freeze_announcement_research_snapshot,
+    if research_mode in {"announcements", "financial_reports"}:
+        from .research_inputs import (
+            freeze_research_snapshot,
             research_coverage_summary,
             validate_research_snapshot,
         )
         frozen_research = validate_research_snapshot(
-            frozen_research, symbols=symbols, decision_dates=schedule,
-        ) if frozen_research is not None else freeze_announcement_research_snapshot(symbols, schedule)
+            frozen_research, symbols=symbols, decision_dates=schedule, expected_kind=research_mode,
+        ) if frozen_research is not None else freeze_research_snapshot(research_mode, symbols, schedule)
         research_hash = frozen_research["researchHash"]
         research_coverage = research_coverage_summary(frozen_research)
         selected_store.save_research_snapshot(agent_id, frozen_research)
@@ -340,7 +345,11 @@ def _create_preview(
         source_run_id=source_run_id,
     )
     if research_coverage:
-        preview["warnings"][0] = "AI决策使用冻结行情、既往模拟账户、策略及决策日前公告标题；不读取普通会话、记忆或实时工具。"
+        preview["warnings"][0] = (
+            "AI决策使用冻结行情、既往模拟账户、策略及决策日前财报PDF页摘录；摘录不等于已认证财务数据。"
+            if research_mode == "financial_reports" else
+            "AI决策使用冻结行情、既往模拟账户、策略及决策日前公告标题；不读取普通会话、记忆或实时工具。"
+        )
         preview["warnings"].extend(research_coverage["warnings"])
     selected_store.save_preview(agent_id, preview)
     return {key: value for key, value in preview.items() if key not in {"createdAt", "_reservationPlan", "_modelFingerprint", "_modelCandidateSource", "mode"}}
@@ -395,13 +404,14 @@ def _load_research_snapshot(
         if record.get("researchHash"):
             raise FinancialBacktestStoreError("纯行情回测包含不匹配的公告摘要")
         return None
-    if mode != "announcements" or not record.get("researchHash"):
+    if mode not in {"announcements", "financial_reports"} or not record.get("researchHash"):
         raise FinancialBacktestStoreError("回测研究输入或公告快照引用无效")
-    from .research_snapshot import validate_research_snapshot
+    from .research_inputs import validate_research_snapshot
     return validate_research_snapshot(
         selected_store.load_research_snapshot(agent_id, str(record["researchHash"])),
         expected_hash=str(record["researchHash"]), symbols=_run_symbols(record),
         decision_dates=record.get("decisionSchedule", []),
+        expected_kind=mode,
     )
 
 
@@ -1046,7 +1056,7 @@ def export_financial_backtest_run(
             writer.writerow([])
             writer.writerow(["researchInput", "researchHash", "status", "groups", "items"])
             coverage = projected.get("researchCoverage") or {}
-            writer.writerow(["announcements", _csv_safe(run.get("researchHash")), _csv_safe(coverage.get("status")), coverage.get("groupCount"), coverage.get("itemCount")])
+            writer.writerow([_csv_safe(run.get("researchInput")), _csv_safe(run.get("researchHash")), _csv_safe(coverage.get("status")), coverage.get("groupCount"), coverage.get("itemCount")])
             writer.writerow(["researchNotice", _csv_safe(coverage.get("notice"))])
         content = output.getvalue()
         media_type = "text/csv"
@@ -1311,6 +1321,8 @@ def _public_params(params: Mapping[str, Any]) -> dict[str, Any]:
     result = {key: params[key] for key in keys}
     if "maxParticipationPct" in params:
         result["maxParticipationPct"] = params["maxParticipationPct"]
+    if "quantityRuleVersion" in params:
+        result["quantityRuleVersion"] = params["quantityRuleVersion"]
     return result
 
 
@@ -1361,7 +1373,7 @@ def _estimate_budget(
                 snapshot, params, as_of_date=decision_date, portfolio=portfolio
             )
         if research_snapshot is not None:
-            from .research_snapshot import decision_research_material
+            from .research_inputs import decision_research_material
             material = decision_research_material(
                 research_snapshot,
                 symbols=list(snapshot.symbols) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot.symbol],

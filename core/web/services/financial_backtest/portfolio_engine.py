@@ -16,8 +16,17 @@ from core.web.services.financial_backtest.data import (
     Candle,
 )
 from core.web.services.financial_backtest.metrics import calculate_metrics
+from core.web.services.financial_backtest.quantity_rules import (
+    ASHARE_QUANTITY_V2,
+    LEGACY_100_V1,
+    floor_buy_quantity,
+    floor_sell_quantity,
+    maximum_affordable_buy,
+    maximum_order_quantity,
+    resolve_quantity_rule,
+    sell_target_shares,
+)
 
-_LOT_SIZE = single_engine._LOT_SIZE
 _BPS = single_engine._BPS
 
 
@@ -153,17 +162,36 @@ def _execute_target(
     execution: Candle,
     previous_close: float | None,
     desired_shares: int,
+    raw_desired_shares: int | None = None,
     cash: Decimal,
     shares: int,
     commission_rate: Decimal,
     minimum_commission: Decimal,
     slippage_rate: Decimal,
     max_participation_pct: Decimal | None = None,
+    quantity_rule_version: str = LEGACY_100_V1,
 ) -> tuple[
     Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal
 ]:
+    rule = resolve_quantity_rule(symbol, execution.date, quantity_rule_version)
+    desired_shares = sell_target_shares(shares, desired_shares, rule)
     delta = desired_shares - shares
     if delta == 0:
+        if (
+            shares == 0
+            and (raw_desired_shares or 0) > 0
+            and quantity_rule_version == ASHARE_QUANTITY_V2
+        ):
+            order = _symbol_order(
+                symbol=symbol,
+                signal_date=signal_date,
+                candle=execution,
+                side="buy",
+                status="rejected",
+                reason="below_board_minimum_buy",
+                requested_shares=int(raw_desired_shares or 0),
+            )
+            return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
         order = _symbol_order(
             symbol=symbol,
             signal_date=signal_date,
@@ -193,57 +221,53 @@ def _execute_target(
         )
         return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
 
+    participation_cap = single_engine._max_participation_shares(
+        execution, max_participation_pct
+    )
+    order_cap = maximum_order_quantity(rule)
+    order_limited = order_cap is not None and requested > order_cap
+    volume_limited = participation_cap is not None and participation_cap < requested
+    fill_limit = min(
+        requested,
+        order_cap if order_cap is not None else requested,
+        participation_cap if participation_cap is not None else requested,
+    )
+
     if side == "buy":
-        executable_requested = (requested // _LOT_SIZE) * _LOT_SIZE
-    else:
-        executable_requested = (min(shares, requested) // _LOT_SIZE) * _LOT_SIZE
-        if not executable_requested:
+        filled = floor_buy_quantity(fill_limit, rule)
+        sell_increment_limited = False
+        if not filled:
+            reason = (
+                (
+                    "volume_participation_below_one_lot"
+                    if quantity_rule_version == LEGACY_100_V1
+                    else "volume_participation_below_minimum_order"
+                )
+                if volume_limited
+                else "order_quantity_below_minimum"
+                if order_limited
+                else "below_board_minimum_buy"
+            )
             order = _symbol_order(
                 symbol=symbol,
                 signal_date=signal_date,
                 candle=execution,
                 side=side,
                 status="rejected",
-                reason="no_sellable_board_lot",
+                reason=reason,
                 requested_shares=requested,
             )
             return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
 
-    participation_cap = single_engine._max_participation_shares(
-        execution, max_participation_pct
-    )
-    volume_limited = (
-        participation_cap is not None
-        and participation_cap < executable_requested
-    )
-    fill_limit = (
-        executable_requested
-        if participation_cap is None
-        else min(executable_requested, participation_cap)
-    )
-    if executable_requested and fill_limit == 0:
-        order = _symbol_order(
-            symbol=symbol,
-            signal_date=signal_date,
-            candle=execution,
-            side=side,
-            status="rejected",
-            reason="volume_participation_below_one_lot",
-            requested_shares=requested,
-        )
-        return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
-
-    if side == "buy":
-        filled = fill_limit
-        while filled:
-            notional = Decimal(filled) * fill_price
+        def is_affordable(candidate: int) -> bool:
+            notional = Decimal(candidate) * fill_price
             commission = single_engine._fee(
                 notional, commission_rate, minimum_commission
             )
             stamp = single_engine._stamp_duty(notional, execution.date, side)
-            if notional + commission + stamp <= cash:
-                break
-            filled -= _LOT_SIZE
+            return notional + commission + stamp <= cash
+
+        filled = maximum_affordable_buy(fill_limit, rule, is_affordable)
         if not filled:
             order = _symbol_order(
                 symbol=symbol,
@@ -251,21 +275,39 @@ def _execute_target(
                 candle=execution,
                 side=side,
                 status="rejected",
-                reason="insufficient_cash_for_one_lot",
+                reason=(
+                    "insufficient_cash_for_one_lot"
+                    if quantity_rule_version == LEGACY_100_V1
+                    else "insufficient_cash_for_minimum_order"
+                ),
                 requested_shares=requested,
             )
             return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
     else:
-        filled = min(shares, fill_limit)
-        filled = (filled // _LOT_SIZE) * _LOT_SIZE
+        filled = floor_sell_quantity(requested, shares, fill_limit, rule)
+        sell_increment_limited = (
+            filled > 0
+            and filled < min(requested, fill_limit)
+            and not order_limited
+            and not volume_limited
+        )
         if not filled:
+            reason = (
+                "volume_participation_below_sell_increment"
+                if volume_limited and fill_limit < rule.minimum_sell_shares
+                else "order_quantity_below_sell_increment"
+                if order_limited and fill_limit < rule.minimum_sell_shares
+                else "below_minimum_sell_order"
+                if requested < rule.minimum_sell_shares and requested < shares
+                else "no_sellable_quantity"
+            )
             order = _symbol_order(
                 symbol=symbol,
                 signal_date=signal_date,
                 candle=execution,
                 side=side,
                 status="rejected",
-                reason="no_sellable_board_lot",
+                reason=reason,
                 requested_shares=requested,
             )
             return cash, shares, order, None, Decimal(0), Decimal(0), Decimal(0)
@@ -302,10 +344,18 @@ def _execute_target(
         signal_date=signal_date,
         candle=execution,
         side=side,
-        status="partial_fill" if volume_limited else "filled",
+        status="partial_fill"
+        if volume_limited or order_limited or sell_increment_limited
+        else "filled",
         reason=(
-            "daily_volume_participation_limit"
+            "order_and_volume_quantity_limit"
+            if order_limited and volume_limited
+            else "order_quantity_limit"
+            if order_limited
+            else "daily_volume_participation_limit"
             if volume_limited
+            else "board_sell_increment_limit"
+            if sell_increment_limited
             else (
                 "next_session_open"
                 if filled == requested
@@ -352,6 +402,7 @@ def _execute_benchmark_sleeve(
     minimum_commission: Decimal,
     slippage_rate: Decimal,
     max_participation_pct: Decimal | None = None,
+    quantity_rule_version: str = LEGACY_100_V1,
 ) -> tuple[Decimal, int, dict[str, Any]]:
     """Buy one equal-weight sleeve, reserving cash for every applicable fee."""
     fill_price, per_share_slippage = single_engine._execution_price(
@@ -372,18 +423,45 @@ def _execute_benchmark_sleeve(
                 requested_shares=0,
             ),
         )
-    requested = single_engine._shares_for_target(cash, fill_price)
+    rule = resolve_quantity_rule(symbol, execution.date, quantity_rule_version)
+    requested = single_engine._shares_for_target(
+        cash,
+        fill_price,
+        symbol=symbol,
+        execution_date=execution.date,
+        quantity_rule_version=quantity_rule_version,
+    )
+    raw_requested = single_engine._raw_shares_for_target(cash, fill_price)
+    if (
+        quantity_rule_version == ASHARE_QUANTITY_V2
+        and raw_requested > 0
+        and requested == 0
+    ):
+        return (
+            cash,
+            0,
+            _symbol_order(
+                symbol=symbol,
+                signal_date=execution.date,
+                candle=execution,
+                side="buy",
+                status="rejected",
+                reason="below_board_minimum_buy",
+                requested_shares=raw_requested,
+            ),
+        )
     participation_cap = single_engine._max_participation_shares(
         execution, max_participation_pct
     )
-    volume_limited = (
-        participation_cap is not None and participation_cap < requested
+    order_cap = maximum_order_quantity(rule)
+    order_limited = order_cap is not None and requested > order_cap
+    volume_limited = participation_cap is not None and participation_cap < requested
+    fill_limit = min(
+        requested,
+        order_cap if order_cap is not None else requested,
+        participation_cap if participation_cap is not None else requested,
     )
-    fill_limit = (
-        requested
-        if participation_cap is None
-        else min(requested, participation_cap)
-    )
+    fill_limit = floor_buy_quantity(fill_limit, rule)
     if requested and fill_limit == 0:
         return (
             cash,
@@ -394,18 +472,27 @@ def _execute_benchmark_sleeve(
                 candle=execution,
                 side="buy",
                 status="rejected",
-                reason="volume_participation_below_one_lot",
+                reason=(
+                    (
+                        "volume_participation_below_one_lot"
+                        if quantity_rule_version == LEGACY_100_V1
+                        else "volume_participation_below_minimum_order"
+                    )
+                    if volume_limited
+                    else "order_quantity_below_minimum"
+                    if order_limited
+                    else "below_board_minimum_buy"
+                ),
                 requested_shares=requested,
             ),
         )
-    filled = fill_limit
-    while filled:
-        notional = Decimal(filled) * fill_price
+    def is_affordable(candidate: int) -> bool:
+        notional = Decimal(candidate) * fill_price
         commission = single_engine._fee(notional, commission_rate, minimum_commission)
         stamp = single_engine._stamp_duty(notional, execution.date, "buy")
-        if notional + commission + stamp <= cash:
-            break
-        filled -= _LOT_SIZE
+        return notional + commission + stamp <= cash
+
+    filled = maximum_affordable_buy(fill_limit, rule, is_affordable)
     if not filled:
         return (
             cash,
@@ -416,7 +503,11 @@ def _execute_benchmark_sleeve(
                 candle=execution,
                 side="buy",
                 status="rejected",
-                reason="insufficient_cash_for_one_lot",
+                reason=(
+                    "insufficient_cash_for_one_lot"
+                    if quantity_rule_version == LEGACY_100_V1
+                    else "insufficient_cash_for_minimum_order"
+                ),
                 requested_shares=requested,
             ),
         )
@@ -429,9 +520,13 @@ def _execute_benchmark_sleeve(
         signal_date=execution.date,
         candle=execution,
         side="buy",
-        status="partial_fill" if volume_limited else "filled",
+        status="partial_fill" if volume_limited or order_limited else "filled",
         reason=(
-            "daily_volume_participation_limit"
+            "order_and_volume_quantity_limit"
+            if order_limited and volume_limited
+            else "order_quantity_limit"
+            if order_limited
+            else "daily_volume_participation_limit"
             if volume_limited
             else "same_cost_buy_and_hold_benchmark"
         ),
@@ -507,6 +602,7 @@ def _simulate_prefix(
     minimum_commission: Decimal = normalized["minimumCommission"]
     slippage_rate: Decimal = normalized["slippageBps"] / _BPS
     max_participation_pct: Decimal | None = normalized.get("maxParticipationPct")
+    quantity_rule_version: str = normalized["quantityRuleVersion"]
     cash = initial_cash
     shares = {symbol: 0 for symbol in symbols}
     cost_basis = {symbol: Decimal(0) for symbol in symbols}
@@ -553,6 +649,7 @@ def _simulate_prefix(
                     slippage_rate=slippage_rate,
                     max_participation_pct=max_participation_pct,
                     symbol=symbol,
+                    quantity_rule_version=quantity_rule_version,
                 )
             )
             benchmark_orders.append(order)
@@ -570,10 +667,20 @@ def _simulate_prefix(
                 (Decimal(shares[symbol]) * open_prices[symbol] for symbol in symbols),
                 Decimal(0),
             )
+            raw_desired_shares = {
+                symbol: single_engine._raw_shares_for_target(
+                    pre_trade_equity * Decimal(str(pending["targetWeights"][symbol])),
+                    open_prices[symbol],
+                )
+                for symbol in symbols
+            }
             desired_shares = {
                 symbol: single_engine._shares_for_target(
                     pre_trade_equity * Decimal(str(pending["targetWeights"][symbol])),
                     open_prices[symbol],
+                    symbol=symbol,
+                    execution_date=candles[symbol].date,
+                    quantity_rule_version=quantity_rule_version,
                 )
                 for symbol in symbols
             }
@@ -589,12 +696,14 @@ def _simulate_prefix(
                         execution=candles[symbol],
                         previous_close=previous_closes[symbol],
                         desired_shares=desired_shares[symbol],
+                        raw_desired_shares=raw_desired_shares[symbol],
                         cash=cash,
                         shares=shares[symbol],
                         commission_rate=commission_rate,
                         minimum_commission=minimum_commission,
                         slippage_rate=slippage_rate,
                         max_participation_pct=max_participation_pct,
+                        quantity_rule_version=quantity_rule_version,
                     )
                 )
                 session_orders.append(order)
@@ -629,12 +738,14 @@ def _simulate_prefix(
                         execution=candles[symbol],
                         previous_close=previous_closes[symbol],
                         desired_shares=desired_shares[symbol],
+                        raw_desired_shares=raw_desired_shares[symbol],
                         cash=cash,
                         shares=shares[symbol],
                         commission_rate=commission_rate,
                         minimum_commission=minimum_commission,
                         slippage_rate=slippage_rate,
                         max_participation_pct=max_participation_pct,
+                        quantity_rule_version=quantity_rule_version,
                     )
                 )
                 session_orders.append(order)
@@ -649,12 +760,14 @@ def _simulate_prefix(
                         execution=candles[symbol],
                         previous_close=previous_closes[symbol],
                         desired_shares=desired_shares[symbol],
+                        raw_desired_shares=raw_desired_shares[symbol],
                         cash=cash,
                         shares=shares[symbol],
                         commission_rate=commission_rate,
                         minimum_commission=minimum_commission,
                         slippage_rate=slippage_rate,
                         max_participation_pct=max_participation_pct,
+                        quantity_rule_version=quantity_rule_version,
                     )
                 )
                 session_orders.append(order)
@@ -756,15 +869,21 @@ def _simulate_prefix(
         if not unfilled_benchmark
         else ("partial_cash_sleeves" if benchmark_filled else "cash_only")
     )
+    quantity_notice = (
+        "按板块和成交日撮合A股数量：主板/创业板按100股递增；科创板买卖至少200股、北交所至少100股且1股递增，门槛以下余股只可整仓一次卖出。限价单上限为科创板10万股、创业板2020-08-24起30万股、主板/北交所100万股；未模拟市价单、集合竞价或盘口。"
+        if quantity_rule_version == ASHARE_QUANTITY_V2
+        else "组合沿用 legacy_100_v1：所有股票均按100股整手计算，供旧回测回放。"
+    )
     notices = [
-        "A股组合使用共享现金，按100股整手买卖、禁止做空；收盘信号下一共同交易日开盘执行。",
+        quantity_notice,
+        "A股组合使用共享现金，禁止做空；收盘信号下一共同交易日开盘执行。",
         "同一开盘先按交易前组合权益计算全部目标股数，再卖后买；买单按规范股票代码顺序竞争现金。",
         "基准为每只股票预留等额固定现金份额；无成交的拒单日可在后续交易日重试，首笔完整或部分成交即固定买持，剩余现金保留。",
         "期末持仓按收盘价估值，不假设强制平仓；回测不代表真实订单可成交或未来收益。",
     ]
     if max_participation_pct is not None:
         notices.append(
-            f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%并下取整至100股；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
+            f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%，并按板块数量规则向下调整；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
         )
     return {
         "status": "completed",

@@ -294,9 +294,7 @@ def test_historical_search_drops_future_or_undated_payload_and_bypass_fields(
     assert secret not in json.dumps(result, ensure_ascii=False)
 
 
-def test_future_superseding_amendment_does_not_restore_old_evidence_as_of(
-    finance_env,
-):
+def test_historical_cutoff_selects_version_published_by_that_date(finance_env):
     env = finance_env
     original = stage(env, publishedAt="2025-05-01T00:00:00+00:00")
     review(env, original)
@@ -309,12 +307,26 @@ def test_future_superseding_amendment_does_not_restore_old_evidence_as_of(
     )
     review(env, amended)
 
+    # This searches the currently reviewed local evidence store. The cutoff
+    # selects the public source version; it does not claim when the Agent
+    # reviewed or could use that evidence.
     with research_analysis_date_context("研究日期：2025-12-31"):
-        result = search(env)
+        before_amendment = search(env)
 
-    assert result["status"] == "insufficient_evidence"
-    assert result["results"] == [] and result["citations"] == []
-    assert EXCERPT not in json.dumps(result, ensure_ascii=False)
+    assert before_amendment["status"] == "found"
+    assert (
+        before_amendment["citations"][0]["financialEvidence"][0]["reportVersion"]
+        == "original"
+    )
+
+    with research_analysis_date_context("研究日期：2026-04-01"):
+        after_amendment = search(env)
+
+    assert after_amendment["status"] == "found"
+    assert (
+        after_amendment["citations"][0]["financialEvidence"][0]["reportVersion"]
+        == "amended"
+    )
 
 
 @pytest.mark.parametrize(
