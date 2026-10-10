@@ -3,6 +3,10 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+// Load the renderer during suite collection so dependency startup does not
+// consume the unchanged behavior-test deadline. Vitest hoists vi.mock first.
+import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
+
 import styles from "./ConversationStreamingResponseContent.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
 
@@ -23,7 +27,6 @@ const classNames = {
 
 describe("ConversationStreamingResponseContent", () => {
   it("keeps live code inside shared chrome before the fence closes", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     const html = renderToStaticMarkup(
       <ConversationStreamingResponseContent content={'```python\nprint("hello")'} />,
     );
@@ -42,7 +45,6 @@ describe("ConversationStreamingResponseContent", () => {
   });
 
   it("renders streaming markdown through the shared conversation markdown renderer", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     const html = renderToStaticMarkup(
       <ConversationStreamingResponseContent
         content={"# 标题\n\n正文"}
@@ -58,7 +60,6 @@ describe("ConversationStreamingResponseContent", () => {
   });
 
   it("adds the table class only when the projected stream contains a table", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     const html = renderToStaticMarkup(
       <ConversationStreamingResponseContent
         content={"| A | B |\n| --- | --- |\n| 1 | 2 |"}
@@ -95,7 +96,6 @@ describe("ConversationStreamingResponseContent", () => {
   });
 
   it("keeps completed markdown in a memoized stable region while live tail is a separate instance", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     // Closed block is stable; incomplete line is live tail (Codex controller holdback).
     const html = renderToStaticMarkup(
       <ConversationStreamingResponseContent
@@ -110,7 +110,6 @@ describe("ConversationStreamingResponseContent", () => {
   });
 
   it("caps the streaming live code tail so an unclosed fence cannot grow the render unbounded", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     // An unclosed fence keeps its whole (growing) block in the live tail; the
     // live block must still paint only the newest lines every frame.
     const codeLines = Array.from({ length: 100 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
@@ -125,7 +124,6 @@ describe("ConversationStreamingResponseContent", () => {
   });
 
   it("caps the streaming live table while rows keep flowing in", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     const rows = Array.from({ length: 30 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);
     const html = renderToStaticMarkup(
       <ConversationStreamingResponseContent

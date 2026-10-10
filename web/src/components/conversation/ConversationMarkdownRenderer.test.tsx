@@ -4,6 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Load the renderer during suite collection so dependency startup does not
+// consume the unchanged behavior-test deadline. Vitest hoists vi.mock first.
+import { ConversationMarkdownRenderer } from "./ConversationMarkdownRenderer";
+
 import styles from "./ConversationView.styles";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -37,7 +41,6 @@ vi.mock("./conversationMarkdownMermaidBlock", () => ({
 
 describe("ConversationMarkdownRenderer", () => {
   it("normalizes common agent markdown glitches into readable blocks", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={[
@@ -63,7 +66,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("does not mistake bold text for a missing-space list item", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content="**我当前使用的模型档案 `primary` 不支持图像输入。**"
@@ -79,7 +81,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("renders GFM tables and task lists without relying on browser defaults", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={[
@@ -106,7 +107,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("keeps ordered and unordered lists visually distinct", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={[
@@ -125,7 +125,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("preserves unlabeled fenced directory trees as block code", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={[
@@ -150,7 +149,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("keeps labeled fenced code formatting in the block renderer", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={["```json", '{"status":"ok"}', "```"].join("\n")}
@@ -164,7 +162,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("folds an oversized fenced code block behind an expandable disclosure", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const codeLines = Array.from({ length: 260 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content={["```text", ...codeLines, "```"].join("\n")} classNames={styles} />,
@@ -183,7 +180,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("keeps a code block within the line budget unfolded", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const codeLines = Array.from({ length: 200 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content={["```text", ...codeLines, "```"].join("\n")} classNames={styles} />,
@@ -194,7 +190,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("renders a code block header with the lowercase language label and a text fallback", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={["```Ts", "const x = 1;", "```", "", "```", "纯目录树", "```"].join("\n")}
@@ -214,7 +209,6 @@ describe("ConversationMarkdownRenderer", () => {
 
   it("copies the block text from the header with a Copy→Check feedback window", async () => {
     vi.useFakeTimers();
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     const prototypeDescriptor = Object.getOwnPropertyDescriptor(Navigator.prototype, "clipboard");
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -266,7 +260,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("toggles soft wrap per code block from the header control", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const host = document.createElement("div");
     document.body.appendChild(host);
     const root = createRoot(host);
@@ -309,7 +302,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("keeps the code block header on the folded overflow path", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const codeLines = Array.from({ length: 260 }, (_, index) => `代码行 ${String(index + 1).padStart(3, "0")}`);
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content={["```text", ...codeLines, "```"].join("\n")} classNames={styles} />,
@@ -325,7 +317,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("truncates an oversized table behind an expandable disclosure", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const rows = Array.from({ length: 40 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
@@ -349,7 +340,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("keeps a table within the row budget unfolded", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const rows = Array.from({ length: 30 }, (_, index) => `| 行 ${String(index + 1).padStart(2, "0")} | 值 |`);
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
@@ -363,7 +353,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("keeps unsafe markdown inert while allowing safe links", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={[
@@ -416,7 +405,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("does not escape envelope tags inside fenced code blocks", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={["```text", "<summary>代码示例原文", "```"].join("\n")}
@@ -429,7 +417,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("renders default-path markdown images lazily and async-decoded", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer
         content={["![截图](https://example.com/screen.png)", "![bad](javascript:alert(1))"].join("\n\n")}
@@ -447,7 +434,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("skips re-parsing when the content is unchanged (completed messages never re-parse)", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     parseCalls.length = 0;
     let root: Root | null = null;
     let container: HTMLElement | null = null;
@@ -485,7 +471,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("renders single-dollar inline math and $$ block math through KaTeX", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     // Block math is the flow form ($$ on its own lines) — remark-math only
     // marks that as display; a single-line `$$…$$` stays inline.
     const html = renderToStaticMarkup(
@@ -502,7 +487,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("keeps dollar amounts as literal text instead of formulas", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content="套餐价格 $5-$10，月费 $100，年费 $1,200。" classNames={styles} />,
     );
@@ -514,7 +498,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("degrades a failed formula to its LaTeX source without breaking the message", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content="前文 $\notacommand$ 后文继续。" classNames={styles} />,
     );
@@ -529,7 +512,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("leaves a lone dollar sign as plain text without crashing", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content="成本合计约 $ 元。" classNames={styles} />,
     );
@@ -539,7 +521,6 @@ describe("ConversationMarkdownRenderer", () => {
   });
 
   it("skips the math pipeline inside fenced code blocks", async () => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     const html = renderToStaticMarkup(
       <ConversationMarkdownRenderer content={["```bash", "export PRICE=$5-$10", "echo $PATH", "```"].join("\n")} classNames={styles} />,
     );
@@ -555,7 +536,6 @@ describe("ConversationMarkdownRenderer block-level degradation", () => {
   let container: HTMLDivElement | null = null;
 
   const renderWith = async (content: string) => {
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -612,7 +592,6 @@ describe("ConversationMarkdownRenderer block-level degradation", () => {
 
     // Unchanged content re-render: stays degraded with the same source, no
     // state churn (idempotent fallback).
-    const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
     await act(async () => {
       root!.render(
         <ConversationMarkdownRenderer content={["```mermaid", "graph TD; A-->B;", "```"].join("\n")} classNames={styles} />,

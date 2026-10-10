@@ -4,6 +4,10 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+// Load the renderer during suite collection so dependency startup does not
+// consume the unchanged behavior-test deadline. Vitest hoists vi.mock first.
+import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
+
 import styles from "./ConversationStreamingResponseContent.styles";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -34,7 +38,6 @@ const classNames = {
 
 describe("ConversationStreamingResponseContent settle flip", () => {
   it("keeps the shared stable renderer mounted when the same message settles (no remount on the flip)", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     lazyRendererMountCount.value = 0;
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -72,7 +75,6 @@ describe("ConversationStreamingResponseContent settle flip", () => {
   });
 
   it("renders settled text without the live-tail pipeline when isStreaming is false", async () => {
-    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
     const html = renderToStaticMarkup(
       <ConversationStreamingResponseContent
         content={"完成的段落。\n\n未完成的尾"}
