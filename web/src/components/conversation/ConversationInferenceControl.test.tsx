@@ -58,8 +58,8 @@ describe("ConversationInferenceControl", () => {
       />,
     );
 
-    expect(html).toContain("推理强度");
-    expect(html).toContain('aria-label="推理强度: 高"');
+    expect(html).toContain("思考强度");
+    expect(html).toContain('aria-label="思考强度: 高"');
     expect(html).toContain("高");
     expect(html).toContain('aria-hidden="true">·</span>');
     expect(html).not.toContain("Luna 5.6");
@@ -89,12 +89,10 @@ describe("ConversationInferenceControl", () => {
     expect(styles.trigger).not.toContain("max-[719px]:!max-w-[min(148px");
     expect(styles.triggerModel).toContain("whitespace-nowrap");
     expect(styles.triggerModel).not.toContain("truncate");
-    expect(styles.fixedLabel).toContain("max-w-full");
-    expect(styles.fixedLabel).not.toContain("max-w-[200px]");
     expect(styles.triggerSeparator).toContain("opacity-55");
   });
 
-  it("keeps models without reasoning as a non-interactive label", () => {
+  it("hides the control when the model has no thinking levels", () => {
     const html = renderControl(
       <ConversationInferenceControl
         model={{ ...luna, reasoningEffortValues: [], reasoningEffortOptions: [] }}
@@ -105,15 +103,13 @@ describe("ConversationInferenceControl", () => {
       />,
     );
 
-    expect(html).toContain("推理强度 · 不支持调节");
-    expect(html).not.toContain("Luna 5.6");
-    expect(html).not.toContain('aria-haspopup="listbox"');
+    expect(html).toBe("");
   });
 
-  it("keeps the reasoning-effort role copy localized in the component", () => {
-    expect(controlSource).toContain('lang === "zh" ? "推理强度" : "Reasoning effort"');
-    expect(controlSource).toContain('lang === "zh" ? "不支持调节" : "Not configurable"');
-    expect(controlSource).toContain('lang === "zh" ? "选择推理强度" : "Select reasoning effort"');
+  it("keeps the thinking-level role copy localized in the component", () => {
+    expect(controlSource).toContain('lang === "zh" ? "思考强度" : "Reasoning effort"');
+    expect(controlSource).toContain('lang === "zh" ? "选择思考强度" : "Select reasoning effort"');
+    expect(controlSource).toContain("if (!model?.reasoningEffortValues?.length) return null;");
   });
 
   it("falls back to the declared model default", () => {

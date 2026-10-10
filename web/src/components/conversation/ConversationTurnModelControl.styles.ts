@@ -21,13 +21,10 @@ const styles = {
   followLabel: "text-vui-sm font-semibold leading-tight text-[var(--fg-primary)]",
   optionLabel: "text-vui-sm font-semibold leading-tight text-[var(--fg-primary)]",
   optionMeta: "line-clamp-1 whitespace-nowrap text-vui-xs leading-[1.35] text-[var(--fg-tertiary)]",
+  providerGroup: "grid gap-0.5",
+  providerLabel: "px-2 pb-0.5 pt-1.5 text-vui-xs font-medium text-[var(--fg-tertiary)]",
   check: "mt-0.5 shrink-0 text-[var(--accent-cool)]",
   checkSlot: "mt-0.5 block size-3.5 shrink-0",
-  // Reasoning-effort sub-section for the pinned model: indented quieter rows.
-  effortSection: "mt-0.5 grid gap-0.5 border-t border-[var(--vui-border-subtle)] pt-1",
-  effortOption: "!grid !h-auto !min-h-7 !w-full !grid-cols-[minmax(0,1fr)_0.75rem] !items-center !gap-x-2 !rounded-md !border-0 !bg-transparent !px-2 !py-1 !pl-4 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]",
-  effortLabel: "min-w-0 truncate text-vui-xs font-medium text-[var(--fg-secondary)]",
-  checkSlotSmall: "block size-3 shrink-0",
 };
 
 export default styles;

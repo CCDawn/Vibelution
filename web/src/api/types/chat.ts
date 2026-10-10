@@ -127,10 +127,10 @@ export type SessionLlmOptions = {
 };
 
 /**
- * One-shot per-turn model override (ZCode modelSelection parity): changes only
- * the turn being sent, never the session default. `modelId` accepts the
- * canonical modelRef; `reasoningEffort` is optional and validated against the
- * chosen model's supported values.
+ * Sticky per-session model for later sends. Null means follow the session
+ * default. `modelId` accepts the canonical modelRef. `reasoningEffort` is set
+ * only when that model has a level, and must be one of its supported values.
+ * It never rewrites the Agent's pinned model.
  */
 export type SessionModelSelection = {
   modelId: string;

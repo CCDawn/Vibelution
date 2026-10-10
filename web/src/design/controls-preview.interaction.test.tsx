@@ -38,11 +38,11 @@ describe("frontend UX controls preview", () => {
     expect(container.textContent).toContain("125");
     expect(container.textContent).toContain("明确允许：0");
     expect(container.textContent).toContain("不是全局注册总数");
-    expect(container.querySelector('button[aria-label="推理强度: 高"]')).not.toBeNull();
-    expect(container.querySelector('button[aria-label="本轮模型: Luna 5.6"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="思考强度: 高"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="模型: Luna 5.6"]')).not.toBeNull();
     expect(fetch).not.toHaveBeenCalled();
 
-    const effortTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="推理强度: 高"]');
+    const effortTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="思考强度: 高"]');
     await act(async () => {
       effortTrigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -52,19 +52,22 @@ describe("frontend UX controls preview", () => {
     await act(async () => {
       lowerEffortOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.querySelector('button[aria-label="推理强度: 低"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="思考强度: 低"]')).not.toBeNull();
 
-    const modelTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="本轮模型: Luna 5.6"]');
+    const modelTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="模型: Luna 5.6"]');
     await act(async () => {
       modelTrigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     const solOption = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="option"]'))
       .find((option) => option.textContent?.includes("Sol 4"));
     expect(solOption).toBeDefined();
+    expect(document.body.textContent).toContain("Other");
+    expect(document.body.textContent).not.toContain("跟随会话强度");
     await act(async () => {
       solOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(container.querySelector('button[aria-label="本轮模型: Sol 4"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="模型: Sol 4"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="思考强度: 低"]')).not.toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
 });

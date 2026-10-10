@@ -930,17 +930,19 @@ live 尾部段落（流式未落定的最后一段文本）经 `renderConversati
 ## ConversationTurnModelControl
 
 ### 功能
-composer 工具栏上的「本次发送模型」选择入口（ZCode per-turn modelSelection 语义）：为紧接着的这一次发送选择模型，不改会话默认。默认显示会话当前模型（跟随会话切换）；用户改选后粘性保持到再改；非会话默认时触发高亮 chip（accent 环 + 圆点）作为「≠会话默认」视觉标记；菜单第一行「跟随会话默认」一键恢复跟随。
+composer 工具栏上的模型按钮，和旁边的思考强度按钮指向同一个「下一条会用的模型」。默认显示会话当前模型；用户改选后粘在这个会话上，直到再改或选「跟随会话默认」。不改 Agent 钉住的默认模型。非会话默认时触发高亮 chip（accent 环 + 圆点）。菜单按服务商分组，只列模型，不再内嵌思考档位。
+
+思考强度按钮只列出当前这个模型的档位。模型没有档位时不显示该按钮。跟会话默认时，改强度写回会话；选了别的模型时，强度跟这条模型选择一起走。换模型时，旧档位这个模型也支持就留下，否则用它自己的默认档。
 
 ### 适用范围
-- **适用**：普通会话 composer 的工具栏尾部（推理强度控件旁）；仅当会话 llm-options 返回 `choices` 时渲染。
-- **不适用**：会话级默认模型/推理强度切换（`ConversationInferenceControl` + Agent 管理模型绑定）；虚拟人 Companion 模式（不渲染）。
+- **适用**：普通会话 composer 的工具栏尾部；模型按钮仅当会话 llm-options 返回 `choices` 时渲染。`/模型` 打开模型菜单。
+- **不适用**：Agent 管理里的默认模型绑定（`AgentModelPicker`）；虚拟人 Companion 与金融面（两个按钮都不渲染）。
 
 | 场景 | 选择 |
 | --- | --- |
-| 只想这一轮换模型 | `ConversationTurnModelControl` |
-| 改会话默认模型 | Agent 管理（`AgentModelPicker`） |
-| 改会话默认推理强度 | `ConversationInferenceControl` |
+| 这个会话接下来换模型 | `ConversationTurnModelControl` |
+| 改 Agent 默认模型 | Agent 管理（`AgentModelPicker`） |
+| 改当前模型的思考强度 | `ConversationInferenceControl`（跟会话默认时写回会话，否则写在模型选择上） |
 
 ### 使用方式
 ```tsx
@@ -964,11 +966,11 @@ import { ConversationTurnModelControl } from "../../conversation/ConversationTur
 
 ### 非职责
 - 不发送消息；覆盖值随下一次提交走 `POST /messages` 的 `modelSelection`，排队轮由后端队列行持久化。
-- 不改 Agent 绑定、会话默认模型或推理强度默认值。
+- 不改 Agent 绑定。跟会话默认时，思考强度仍是会话上的那一档。
 
 ### 视觉与状态
-- 默认态与推理强度控件同字号同灰阶；覆盖态用 `--accent-cool` 混色底 + 细环 + 圆点，禁止原始十六进制色。
-- 菜单：首行「跟随会话默认」；模型按 llm-options 顺序列出（provider 副标题、会话默认/未配置 Key 徽标）；选中覆盖模型后其推理强度子区（跟随会话强度 + 该模型 effort 选项）出现在菜单底部。
+- 触发器只显示模型名，与思考强度控件同字号同灰阶；覆盖态用 `--accent-cool` 混色底 + 细环 + 圆点，禁止原始十六进制色。
+- 菜单：首行「跟随会话默认」；其余按服务商分组，组内保持 llm-options 顺序。行上保留「会话默认」和「未配置 Key」，不再重复服务商名，也不再放思考档位。
 - 禁止把覆盖状态写成第二套配色体系；一切标记走 token。
 
 ### 实现落点
@@ -978,7 +980,7 @@ import { ConversationTurnModelControl } from "../../conversation/ConversationTur
 
 ### 反冗余
 - 不复制 `AgentModelPicker`（发现/添加模型、槽位兼容）能力；这里只消费 llm-options 的 `choices`。
-- 不与 `ConversationInferenceControl` 合并：一个管会话默认（强度），一个管单轮覆盖（模型+可选强度），语义不同。
+- 不把思考档位再做进模型菜单。强度只在 `ConversationInferenceControl`，候选项来自当前模型。
 ## ConversationTurnNavigator
 
 ### 功能
