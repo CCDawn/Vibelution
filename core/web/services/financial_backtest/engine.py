@@ -242,6 +242,34 @@ def _money(value: Decimal) -> Decimal:
     return value.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
+def _deduct_dividend_sale_tax(
+    *,
+    ledger: Any,
+    day: str,
+    shares: int,
+    cash: Decimal,
+    symbol: str,
+    order: Mapping[str, Any],
+    trade: Mapping[str, Any],
+) -> Decimal:
+    tax_due = ledger.sell(day, shares)
+    if tax_due > cash:
+        raise BacktestDecisionError(
+            "卖出后可用现金不足以支付已到账现金分红的递延税款，回测已阻断。",
+            metadata={
+                "failure": "insufficient_cash_for_dividend_tax",
+                "date": day,
+                "symbol": symbol,
+                "availableCash": str(cash),
+                "dividendTaxDue": str(tax_due),
+                "projectedCashAfterTax": str(cash - tax_due),
+                "order": dict(order),
+                "trade": dict(trade),
+            },
+        )
+    return cash - tax_due
+
+
 def _price(value: Decimal, side: str) -> Decimal:
     rounding = ROUND_CEILING if side == "buy" else ROUND_FLOOR
     return value.quantize(_PRICE_TICK, rounding=rounding)
@@ -273,7 +301,9 @@ def _limit_rates(symbol: str) -> tuple[Decimal, ...]:
     return (Decimal("0.10"), Decimal("0.05"), Decimal("0.20"), Decimal("0.30"))
 
 
-def _is_locked(candle: Candle, previous_close: float | None, side: str, symbol: str) -> str | None:
+def _is_locked(
+    candle: Candle, previous_close: float | Decimal | None, side: str, symbol: str
+) -> str | None:
     if candle.volume <= 0:
         return "zero_volume_or_suspended"
     if previous_close is None or previous_close <= 0:
@@ -293,6 +323,33 @@ def _is_locked(candle: Candle, previous_close: float | None, side: str, symbol: 
     return None
 
 
+def _execution_reference_close(
+    snapshot: BacktestSnapshot, index: int
+) -> float | Decimal | None:
+    """Use the ex-right reference price for execution checks, preserving raw marks."""
+    if index <= 0 or index >= len(snapshot.candles):
+        return None
+    previous_close = snapshot.candles[index - 1].close
+    artifact = getattr(snapshot, "corporate_actions", None)
+    if not isinstance(artifact, Mapping):
+        return previous_close
+    cash_per_share = sum(
+        (
+            Decimal(str(event["cashPerShare"]))
+            for event in artifact.get("events", ())
+            if isinstance(event, Mapping)
+            and event.get("exDate") == snapshot.candles[index].date
+        ),
+        Decimal(0),
+    )
+    if cash_per_share == 0:
+        return previous_close
+    reference = Decimal(str(previous_close)) - cash_per_share
+    if reference <= 0:
+        raise BacktestInputError("除息参考价必须大于0")
+    return reference
+
+
 def _execution_price(candle: Candle, side: str, slippage_rate: Decimal) -> tuple[Decimal, Decimal]:
     opening = Decimal(str(candle.open))
     high = Decimal(str(candle.high))
@@ -309,6 +366,50 @@ def _execution_price(candle: Candle, side: str, slippage_rate: Decimal) -> tuple
 
 def _account_equity(cash: Decimal, shares: int, price: Decimal) -> Decimal:
     return cash + Decimal(shares) * price
+
+
+def _new_dividend_ledger(snapshot: BacktestSnapshot) -> Any | None:
+    """Create a deterministic ledger only for snapshots frozen with actions."""
+    artifact = getattr(snapshot, "corporate_actions", None)
+    if artifact is None:
+        return None
+    from core.web.services.financial_backtest.corporate_actions import DividendLedger
+
+    return DividendLedger(snapshot.symbol, artifact)
+
+
+def _dividend_net_assets(ledger: Any | None) -> Decimal:
+    if ledger is None:
+        return Decimal(0)
+    return ledger.receivable - ledger.tax_payable
+
+
+def _add_dividend_metrics(
+    metrics: dict[str, Any], strategy_ledger: Any | None, benchmark_ledger: Any | None
+) -> None:
+    if strategy_ledger is None and benchmark_ledger is None:
+        return
+    for prefix, ledger in (("", strategy_ledger), ("benchmark", benchmark_ledger)):
+        if ledger is None:
+            gross = tax_total = tax_payable = Decimal(0)
+        else:
+            gross = ledger.dividends_total
+            tax_total = ledger.tax_total
+            tax_payable = ledger.tax_payable
+        if prefix:
+            metrics["benchmarkGrossDividends"] = float(gross)
+            metrics["benchmarkDividendTaxPaid"] = float(tax_total - tax_payable)
+            metrics["benchmarkDividendTaxPayable"] = float(tax_payable)
+            metrics["benchmarkNetDividendIncome"] = float(gross - tax_total)
+        else:
+            metrics["grossDividends"] = float(gross)
+            metrics["dividendTaxPaid"] = float(tax_total - tax_payable)
+            metrics["dividendTaxPayable"] = float(tax_payable)
+            metrics["netDividendIncome"] = float(gross - tax_total)
+    # Existing round-trip win rates exclude dividends and deferred dividend tax.
+    metrics["closedTradeCount"] = None
+    metrics["winningTradeCount"] = None
+    metrics["winRatePct"] = None
 
 
 def _raw_shares_for_target(value: Decimal, price: Decimal) -> int:
@@ -391,7 +492,7 @@ def _execute_target(
     *,
     signal_date: str,
     execution: Candle,
-    previous_close: float | None,
+    previous_close: float | Decimal | None,
     target_weight: Decimal,
     cash: Decimal,
     shares: int,
@@ -400,13 +501,14 @@ def _execute_target(
     minimum_commission: Decimal,
     slippage_rate: Decimal,
     symbol: str,
+    extra_equity: Decimal = Decimal(0),
     max_participation_pct: Decimal | None = None,
     quantity_rule_version: str = LEGACY_100_V1,
 ) -> tuple[Decimal, int, dict[str, Any], dict[str, Any] | None, Decimal, Decimal, Decimal]:
     if target_weight > max_position_pct / Decimal(100):
         raise BacktestDecisionError("AI目标仓位超过本次最大仓位上限")
     open_price = Decimal(str(execution.open))
-    pre_equity = _account_equity(cash, shares, open_price)
+    pre_equity = _account_equity(cash, shares, open_price) + extra_equity
     target_value = pre_equity * target_weight
     # Position sizing uses the observable next open. Slippage affects the fill
     # and cash constraint only, never the target percentage calculation.
@@ -618,7 +720,7 @@ def _execute_target(
 def _execute_benchmark(
     *,
     execution: Candle,
-    previous_close: float | None,
+    previous_close: float | Decimal | None,
     initial_cash: Decimal,
     commission_rate: Decimal,
     minimum_commission: Decimal,
@@ -743,11 +845,17 @@ def _equity_row(
     shares: int,
     benchmark_cash: Decimal,
     benchmark_shares: int,
+    dividend_ledger: Any | None = None,
+    benchmark_dividend_ledger: Any | None = None,
 ) -> dict[str, Any]:
     close = Decimal(str(candle.close))
-    equity = _account_equity(cash, shares, close)
-    benchmark_equity = _account_equity(benchmark_cash, benchmark_shares, close)
-    return {
+    equity = _account_equity(cash, shares, close) + _dividend_net_assets(
+        dividend_ledger
+    )
+    benchmark_equity = _account_equity(
+        benchmark_cash, benchmark_shares, close
+    ) + _dividend_net_assets(benchmark_dividend_ledger)
+    row = {
         "date": candle.date,
         "equity": float(_money(equity)),
         "benchmarkEquity": float(_money(benchmark_equity)),
@@ -758,6 +866,40 @@ def _equity_row(
         "benchmarkCash": float(_money(benchmark_cash)),
         "benchmarkShares": benchmark_shares,
     }
+    if dividend_ledger is not None or benchmark_dividend_ledger is not None:
+        row.update(
+            {
+                "dividendReceivable": float(
+                    _money(
+                        Decimal(0)
+                        if dividend_ledger is None
+                        else dividend_ledger.receivable
+                    )
+                ),
+                "dividendTaxPayable": float(
+                    _money(
+                        Decimal(0)
+                        if dividend_ledger is None
+                        else dividend_ledger.tax_payable
+                    )
+                ),
+                "benchmarkDividendReceivable": float(
+                    _money(
+                        Decimal(0)
+                        if benchmark_dividend_ledger is None
+                        else benchmark_dividend_ledger.receivable
+                    )
+                ),
+                "benchmarkDividendTaxPayable": float(
+                    _money(
+                        Decimal(0)
+                        if benchmark_dividend_ledger is None
+                        else benchmark_dividend_ledger.tax_payable
+                    )
+                ),
+            }
+        )
+    return row
 
 
 def _benchmark_unavailable_error(attempts: Sequence[Mapping[str, Any]]) -> BacktestDataError:
@@ -802,6 +944,8 @@ def _simulate_prefix(
     shares = 0
     benchmark_cash = initial_cash
     benchmark_shares = 0
+    dividend_ledger = _new_dividend_ledger(snapshot)
+    benchmark_dividend_ledger = _new_dividend_ledger(snapshot)
     benchmark_order: dict[str, Any] | None = None
     benchmark_orders: list[dict[str, Any]] = []
     pending: Mapping[str, Any] | None = None
@@ -817,7 +961,11 @@ def _simulate_prefix(
 
     for index, candle in enumerate(candles[: end_index + 1]):
         opening_shares = shares
-        previous_close = candles[index - 1].close if index > 0 else None
+        previous_close = _execution_reference_close(snapshot, index)
+        if dividend_ledger is not None:
+            dividend_ledger.open_session(candle.date)
+        if benchmark_dividend_ledger is not None:
+            benchmark_dividend_ledger.open_session(candle.date)
         if index > 0 and benchmark_order is None:
             candidate_cash, candidate_shares, candidate_order = _execute_benchmark(
                 execution=candle,
@@ -835,6 +983,8 @@ def _simulate_prefix(
                 benchmark_cash = candidate_cash
                 benchmark_shares = candidate_shares
                 benchmark_order = candidate_order
+                if benchmark_dividend_ledger is not None and candidate_shares:
+                    benchmark_dividend_ledger.buy(candle.date, candidate_shares)
         if pending is not None:
             prior_shares = shares
             cash, shares, order, trade, commission, stamp, slippage_cost = _execute_target(
@@ -849,6 +999,7 @@ def _simulate_prefix(
                 minimum_commission=minimum_commission,
                 slippage_rate=slippage_rate,
                 symbol=snapshot.symbol,
+                extra_equity=_dividend_net_assets(dividend_ledger),
                 max_participation_pct=max_participation_pct,
                 quantity_rule_version=quantity_rule_version,
             )
@@ -861,14 +1012,31 @@ def _simulate_prefix(
                 turnover += Decimal(str(trade["notional"]))
                 if trade["side"] == "buy":
                     cost_basis += Decimal(str(trade["notional"])) + commission + stamp
+                    if dividend_ledger is not None:
+                        dividend_ledger.buy(candle.date, int(trade["shares"]))
                 else:
                     filled = int(trade["shares"])
+                    if dividend_ledger is not None:
+                        cash = _deduct_dividend_sale_tax(
+                            ledger=dividend_ledger,
+                            day=candle.date,
+                            shares=filled,
+                            cash=cash,
+                            symbol=snapshot.symbol,
+                            order=order,
+                            trade=trade,
+                        )
                     average_basis = cost_basis / prior_shares if prior_shares else Decimal(0)
                     removed_basis = average_basis * filled
                     proceeds = Decimal(str(trade["notional"])) - commission - stamp
                     realized_roundtrips.append(proceeds - removed_basis)
                     cost_basis = max(Decimal(0), cost_basis - removed_basis)
             pending = None
+
+        if dividend_ledger is not None:
+            cash += dividend_ledger.close_session(candle.date)
+        if benchmark_dividend_ledger is not None:
+            benchmark_cash += benchmark_dividend_ledger.close_session(candle.date)
 
         equity.append(
             _equity_row(
@@ -877,6 +1045,8 @@ def _simulate_prefix(
                 shares=shares,
                 benchmark_cash=benchmark_cash,
                 benchmark_shares=benchmark_shares,
+                dividend_ledger=dividend_ledger,
+                benchmark_dividend_ledger=benchmark_dividend_ledger,
             )
         )
         decision = decision_rows.get(candle.date)
@@ -901,8 +1071,23 @@ def _simulate_prefix(
         ),
         "latestOrders": orders[-5:],
     }
+    if dividend_ledger is not None:
+        current_portfolio.update(
+            {
+                "dividendReceivable": float(_money(dividend_ledger.receivable)),
+                "dividendTaxPayable": float(_money(dividend_ledger.tax_payable)),
+            }
+        )
     if not complete:
-        return {"currentPortfolio": current_portfolio, "orders": orders, "trades": trades}
+        result = {
+            "currentPortfolio": current_portfolio,
+            "orders": orders,
+            "trades": trades,
+        }
+        if dividend_ledger is not None:
+            result["dividendAccounting"] = dividend_ledger.audit()
+            result["benchmarkDividendAccounting"] = benchmark_dividend_ledger.audit()
+        return result
 
     if benchmark_order is None:
         raise _benchmark_unavailable_error(benchmark_orders)
@@ -919,6 +1104,7 @@ def _simulate_prefix(
         commission_fees=float(total_commission),
         stamp_duty=float(total_stamp),
     )
+    _add_dividend_metrics(metrics, dividend_ledger, benchmark_dividend_ledger)
     benchmark_commission = Decimal(str(benchmark_order.get("commission") or 0))
     benchmark_stamp = Decimal(str(benchmark_order.get("stampDuty") or 0))
     metrics["benchmarkFees"] = float(benchmark_commission + benchmark_stamp)
@@ -929,18 +1115,23 @@ def _simulate_prefix(
         if quantity_rule_version == ASHARE_QUANTITY_V2
         else "沿用 legacy_100_v1：所有股票均按100股整手计算，供旧回测回放。"
     )
+    action_notice = (
+        "现金分红按冻结的官方实施公告记入：登记日收盘确认权益，除权日确认为应收，派息日收盘转为可用现金；卖出时按FIFO持有期评估红利税。分币结算规则尚未核实。"
+        if dividend_ledger is not None
+        else "佣金按用户输入的固定费率和最低佣金；印花税按成交日历史税率自动计取。未建模过户费、监管费、分红现金入账与送转股；检测到公司行动会阻断。"
+    )
     notices = [
         quantity_notice,
         "A股现金账户，禁止做空；收盘信号下一交易日开盘执行，买入股份执行后至少持有至下一个交易日。",
         "滑点成交价限制在当日OHLC区间内；零成交量拒单。触及常见涨跌幅的单一价格日线会保守拒单，但腾讯不提供历史ST、上市初期及逐日涨跌幅状态，故limitStatus不是权威判定。",
-        "佣金按用户输入的固定费率和最低佣金；印花税按成交日历史税率自动计取。未建模过户费、监管费、分红现金入账与送转股；检测到公司行动会阻断。",
+        action_notice,
         "这是历史行情上的模拟研究，不代表可成交的真实订单或未来收益。",
     ]
     if max_participation_pct is not None:
         notices.append(
             f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%，并按板块数量规则向下调整；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
         )
-    return {
+    result = {
         "status": "completed",
         "symbol": snapshot.symbol,
         "metrics": metrics,
@@ -966,6 +1157,10 @@ def _simulate_prefix(
         },
         "notice": list(snapshot.notice) + notices,
     }
+    if dividend_ledger is not None:
+        result["dividendAccounting"] = dividend_ledger.audit()
+        result["benchmarkDividendAccounting"] = benchmark_dividend_ledger.audit()
+    return result
 
 
 def simulate(
@@ -1000,7 +1195,7 @@ def validate_benchmark(
     attempts: list[dict[str, Any]] = []
     for index in range(1, len(snapshot.candles)):
         execution = snapshot.candles[index]
-        previous_close = snapshot.candles[index - 1].close
+        previous_close = _execution_reference_close(snapshot, index)
         _, _, order = _execute_benchmark(
             execution=execution,
             previous_close=previous_close,

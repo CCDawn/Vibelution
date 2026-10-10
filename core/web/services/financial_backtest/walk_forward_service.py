@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Mapping
-from datetime import datetime, timezone
-from typing import Any, Callable
+from collections.abc import Callable, Mapping
+from datetime import datetime
+from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from core.web.services import runtime_task_registry
@@ -22,13 +22,20 @@ from core.web.services.financial_backtest.contract import (
     normalize_preview_request,
     sha256_json,
 )
-from core.web.services.financial_backtest.store import FinancialBacktestStore, default_store
+from core.web.services.financial_backtest.store import (
+    FinancialBacktestStore,
+    default_store,
+)
 
 from .walk_forward import build_folds, normalize_walk_forward_request, select_candidate
 from .walk_forward_data import session_dates, slice_snapshot
 from .walk_forward_projection import (
     build_walk_forward_export as _build_walk_forward_export,
+)
+from .walk_forward_projection import (
     project_metrics as _project_metrics,
+)
+from .walk_forward_projection import (
     project_walk_forward,
 )
 from .walk_forward_store import WalkForwardStore, WalkForwardWorkflowCommitError
@@ -372,7 +379,7 @@ def advance_walk_forward_workflows(
             # create another child.
             _LOG.warning("A-share walk-forward transition will be reconciled on retry: %s", exc)
             changed = False
-        except Exception as exc:  # Keep the shared runtime worker alive; persist a bounded failure.
+        except Exception as exc:  # noqa: BLE001 - keep shared worker alive and persist a bounded failure
             _LOG.exception("A-share walk-forward advancement failed")
             changed = _record_advance_error(
                 agent_id,
@@ -604,7 +611,6 @@ def _start_child(
     *,
     now_provider: Callable[[], datetime] | None,
 ) -> None:
-    workflow_id = str(workflow.get("workflowId") or "")
     fold_id = str(fold.get("foldId") or "")
     candidate_id = str(candidate.get("candidateId") or "")
     candidate_index = candidate_id
@@ -915,7 +921,7 @@ def _apply_workflow_stop_intent(
                 backtest_service.request_financial_backtest_stop(
                     agent_id, child_id, store=selected_store
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 - durable stop intent is reconciled on the next tick
                 _LOG.exception("Could not stop an A-share walk-forward child after stop intent")
 
     refreshed: list[dict[str, Any]] = []
@@ -923,7 +929,7 @@ def _apply_workflow_stop_intent(
         child_id = str(row["run"].get("runId") or "")
         try:
             row = {**row, "run": selected_store.load_run(agent_id, child_id)}
-        except Exception:
+        except Exception:  # noqa: BLE001 - preserve the prior child row if reload fails
             _LOG.exception("Could not reload an A-share walk-forward child after stop intent")
         refreshed.append(row)
     active = [row for row in refreshed if str(row["run"].get("status") or "") in _RUN_ACTIVE]
@@ -1006,6 +1012,7 @@ def _stage_request(
         "maxTokens": max(512, int(max_tokens)),
         "modelId": model_id,
         "researchInput": "price_only",
+        "corporateActionPolicy": params.get("corporateActionPolicy", "block"),
     }
     if "maxParticipationPct" in params:
         payload["maxParticipationPct"] = params["maxParticipationPct"]
@@ -1419,7 +1426,7 @@ def _record_advance_error(
             workflow["updatedAt"] = backtest_service._iso(backtest_service._now(now_provider))
             _sync_runtime_task(agent_id, workflow)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - error reporting must not terminate the shared worker
         _LOG.exception("Could not persist A-share walk-forward failure")
         return False
 

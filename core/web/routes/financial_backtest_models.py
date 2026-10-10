@@ -36,6 +36,7 @@ class FinancialBacktestRequest(BaseModel):
     maxTokens: StrictInt = Field(default=500_000, ge=512, le=2_000_000)
     modelId: StrictStr | None = Field(default=None, max_length=160)
     dataSource: Literal["tencent", "eastmoney", "sina", "auto"] = "tencent"
+    corporateActionPolicy: Literal["block", "verified_cash_dividends"] = "block"
     researchInput: Literal["price_only", "announcements", "financial_reports"] = "price_only"
 
     @model_validator(mode="after")
@@ -160,6 +161,7 @@ class FinancialBacktestParams(BaseModel):
     maxPositionPct: float = Field(ge=0, le=100, description="仓位百分比，0到100")
     maxParticipationPct: float | None = Field(default=None, ge=0.1, le=100)
     quantityRuleVersion: Literal["ashare_quantity_v2", "legacy_100_v1"] | None = None
+    corporateActionPolicy: Literal["block", "verified_cash_dividends"] | None = None
     decisionInterval: int
     commissionBps: float
     minimumCommission: float
@@ -190,6 +192,61 @@ class FinancialBacktestResearchCoverage(BaseModel):
     warnings: list[str]
 
 
+class FinancialBacktestActionCoverage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["complete"]
+    ruleVersion: Literal["ashare_cash_dividend_v1"]
+    artifactHash: str
+    startDate: str
+    endDate: str
+    eventCount: int
+
+
+class FinancialBacktestDividendEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actionId: str
+    noticeId: str
+    publishedDate: str
+    title: str
+    sourceUrl: str
+    pdfSha256: str
+    recordDate: str
+    exDate: str
+    paymentDate: str
+    cashPerShare: str
+    recordCaptured: bool
+    ledgerApplied: bool
+    entitledShares: int
+    grossAmount: str
+    exRecognized: bool
+    paymentComplete: bool
+    taxPayable: str
+    taxTotal: str
+    taxPaid: str
+
+
+class FinancialBacktestDividendLot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    acquiredDate: str
+    shares: int
+    dividendRights: dict[str, int]
+
+
+class FinancialBacktestDividendAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schemaVersion: Literal[1]
+    ruleVersion: Literal["ashare_cash_dividend_v1"]
+    artifactHash: str
+    symbol: str
+    settlementRounding: Literal["unverified_decimal_exact"]
+    receivable: str
+    taxPayable: str
+    taxTotal: str
+    dividendsTotal: str
+    events: list[FinancialBacktestDividendEvent]
+    lots: list[FinancialBacktestDividendLot]
+
+
 class FinancialBacktestPreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -216,7 +273,8 @@ class FinancialBacktestPreview(BaseModel):
     researchInput: Literal["price_only", "announcements", "financial_reports"] = "price_only"
     researchHash: str | None = None
     researchCoverage: FinancialBacktestResearchCoverage | None = None
-    actionsStatus: Literal["clear", "factor_check_passed", "blocked", "unavailable"]
+    actionsStatus: Literal["clear", "factor_check_passed", "verified_cash_dividends", "blocked", "unavailable"]
+    corporateActionCoverage: dict[str, FinancialBacktestActionCoverage] | None = None
     actionDates: list[str]
     canStart: bool
     blockReason: str | None
@@ -267,6 +325,10 @@ class FinancialBacktestEquityPoint(BaseModel):
     marketValues: dict[str, float] | None = None
     sellablePositions: dict[str, int] | None = None
     benchmarkPositions: dict[str, int] | None = None
+    dividendReceivable: float | None = None
+    dividendTaxPayable: float | None = None
+    benchmarkDividendReceivable: float | None = None
+    benchmarkDividendTaxPayable: float | None = None
 
 
 class FinancialBacktestTrade(BaseModel):
@@ -307,6 +369,19 @@ class FinancialBacktestOrder(BaseModel):
     tPlusOne: bool
     limitStatus: str
     symbol: str | None = None
+
+
+class FinancialBacktestExecutionFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    failure: Literal["insufficient_cash_for_dividend_tax"]
+    date: str
+    symbol: str
+    availableCash: str
+    dividendTaxDue: str
+    projectedCashAfterTax: str
+    order: FinancialBacktestOrder
+    trade: FinancialBacktestTrade
 
 
 class FinancialBacktestRunSummary(BaseModel):
@@ -490,7 +565,10 @@ class FinancialBacktestRun(BaseModel):
     assetDataHashes: dict[str, str] = Field(default_factory=dict)
     assetSources: dict[str, dict[str, str]] = Field(default_factory=dict)
     outOfSampleStartDate: str | None = None
-    actionsStatus: Literal["clear", "factor_check_passed", "blocked", "unavailable"]
+    actionsStatus: Literal["clear", "factor_check_passed", "verified_cash_dividends", "blocked", "unavailable"]
+    corporateActionCoverage: dict[str, FinancialBacktestActionCoverage] | None = None
+    dividendAccounting: FinancialBacktestDividendAudit | dict[str, FinancialBacktestDividendAudit] | None = None
+    benchmarkDividendAccounting: FinancialBacktestDividendAudit | dict[str, FinancialBacktestDividendAudit] | None = None
     actionDates: list[str]
     source: str
     sourceUrl: str
@@ -514,6 +592,7 @@ class FinancialBacktestRun(BaseModel):
     completedAt: str | None
     terminalReason: str | None
     errorCode: str | None
+    executionFailure: FinancialBacktestExecutionFailure | None = None
     uncertainDecisionDate: str | None
     tokenAccounting: Literal["measured", "estimated", "reserved"]
 

@@ -37,6 +37,7 @@ from core.web.services.financial_backtest.service import (
     _now,
     _reserved_for_run,
     _sync_runtime_task,
+    _validate_action_binding,
 )
 from core.web.services.financial_backtest.store import (
     FinancialBacktestStore,
@@ -90,7 +91,7 @@ class FinancialBacktestWorker:
                 advance_walk_forward_workflows(
                     agent_id, store=self._store, now_provider=self._now_provider, limit=1,
                 )
-            except Exception as exc:  # One corrupt plan must not starve ordinary runs.
+            except Exception as exc:  # noqa: BLE001 - one corrupt plan must not starve ordinary runs
                 _log_worker_error("walk-forward-advance", exc)
             try:
                 candidates = [
@@ -127,7 +128,7 @@ class FinancialBacktestWorker:
                 self._process_run(agent_id, run_id, should_stop=should_stop)
             except Exception as exc:  # noqa: BLE001 - quarantine unexpected state, never retry unknown calls
                 _log_worker_error("run-process", exc)
-                self._fail_known_state(agent_id, run_id, type(exc).__name__)
+                self._fail_known_state(agent_id, run_id, type(exc).__name__, cause=exc)
             try:
                 latest = self._store.load_run(agent_id, run_id)
             except Exception:  # noqa: BLE001 - unreadable state retains its lease until expiry
@@ -180,6 +181,7 @@ class FinancialBacktestWorker:
         if isinstance(latest_submission, Mapping) and str(latest_submission.get("status") or "") == "submitting":
             return
         snapshot = _restore_snapshot(self._store.load_snapshot(agent_id, str(run.get("dataHash") or "")))
+        _validate_action_binding(snapshot, run)
         is_basket = isinstance(snapshot, basket_data.BasketSnapshot)
         params = dict(run.get("params") or {})
         schedule = tuple(str(item) for item in run.get("decisionSchedule", []))
@@ -609,20 +611,42 @@ class FinancialBacktestWorker:
         state, _ = self._store.update_run(agent_id, run_id, mutate)
         _sync_runtime_task(agent_id, state, "blocked")
 
-    def _mark_failed(self, agent_id: str, run_id: str, error_code: str, reason: str) -> None:
+    def _mark_failed(
+        self,
+        agent_id: str,
+        run_id: str,
+        error_code: str,
+        reason: str,
+        *,
+        execution_failure: dict[str, Any] | None = None,
+    ) -> None:
         def mutate(run: dict[str, Any]) -> None:
             run["status"] = "failed"
             run["errorCode"] = error_code[:100]
             run["terminalReason"] = reason[:500]
+            if execution_failure is not None:
+                run["executionFailure"] = execution_failure
             run["completedAt"] = _iso(_now(self._now_provider))
             run["tokensReserved"] = _reserved_for_run(run)
+
         state, _ = self._store.update_run(agent_id, run_id, mutate)
         _sync_runtime_task(agent_id, state, "failed")
 
-    def _fail_known_state(self, agent_id: str, run_id: str, error_code: str) -> None:
+    def _fail_known_state(
+        self,
+        agent_id: str,
+        run_id: str,
+        error_code: str,
+        *,
+        cause: Exception | None = None,
+    ) -> None:
         try:
             run = self._store.load_run(agent_id, run_id)
-            submission = run.get("decisionSubmission") if isinstance(run.get("decisionSubmission"), Mapping) else {}
+            submission = (
+                run.get("decisionSubmission")
+                if isinstance(run.get("decisionSubmission"), Mapping)
+                else {}
+            )
             if str(submission.get("status") or "") == "submitting":
                 self._mark_unknown(
                     agent_id,
@@ -631,8 +655,41 @@ class FinancialBacktestWorker:
                     "worker_failure_during_submit",
                     expected_attempt_id=str(submission.get("attemptId") or ""),
                 )
-            elif str(run.get("status") or "") in {"queued", "running", "stop_requested"}:
-                self._mark_failed(agent_id, run_id, error_code, "回测运行遇到内部错误，未继续发送后续模型调用")
+            elif str(run.get("status") or "") in {
+                "queued",
+                "running",
+                "stop_requested",
+            }:
+                evidence = None
+                if (
+                    isinstance(cause, engine.BacktestDecisionError)
+                    and cause.metadata.get("failure")
+                    == "insufficient_cash_for_dividend_tax"
+                ):
+                    # Only this locally generated accounting failure is retained; arbitrary
+                    # exceptions, provider responses and prompts never enter the artifact.
+                    evidence = {
+                        key: cause.metadata[key]
+                        for key in (
+                            "failure",
+                            "date",
+                            "symbol",
+                            "availableCash",
+                            "dividendTaxDue",
+                            "projectedCashAfterTax",
+                            "order",
+                            "trade",
+                        )
+                    }
+                self._mark_failed(
+                    agent_id,
+                    run_id,
+                    "insufficient_cash_for_dividend_tax" if evidence else error_code,
+                    "卖出后可用现金不足以支付现金分红递延税款，回测已阻断。"
+                    if evidence
+                    else "回测运行遇到内部错误，未继续发送后续模型调用",
+                    execution_failure=evidence,
+                )
         except Exception as exc:  # noqa: BLE001 - no secondary failure may cause a retry
             _log_worker_error("failure-quarantine", exc)
 
@@ -695,6 +752,9 @@ class FinancialBacktestWorker:
             state["completedDecisionCount"] = len(rows)
             state["progress"] = 1.0
             state["metrics"] = result["metrics"]
+            for key in ("dividendAccounting", "benchmarkDividendAccounting"):
+                if key in result:
+                    state[key] = result[key]
             state["evaluation"] = window_evaluation
             if out_of_sample_start:
                 state["outOfSampleStartDate"] = str(out_of_sample_start)
@@ -831,10 +891,16 @@ def _restore_snapshot(payload: Mapping[str, Any]) -> data.BacktestSnapshot | bas
                 raise ValueError("basket data hash mismatch")
             return snapshot
         coverage_payload = dict(payload["coverage"])
-        coverage_payload["providerWindows"] = tuple(coverage_payload.get("providerWindows") or [])
+        coverage_payload["providerWindows"] = tuple(
+            coverage_payload.get("providerWindows") or []
+        )
         coverage = data.BacktestCoverage(**coverage_payload)
-        candles = tuple(data.Candle(**dict(item)) for item in payload.get("candles", []))
-        warmup = tuple(data.Candle(**dict(item)) for item in payload.get("warmupCandles", []))
+        candles = tuple(
+            data.Candle(**dict(item)) for item in payload.get("candles", [])
+        )
+        warmup = tuple(
+            data.Candle(**dict(item)) for item in payload.get("warmupCandles", [])
+        )
         snapshot = data.BacktestSnapshot(
             symbol=str(payload["symbol"]),
             start_date=str(payload["startDate"]),
@@ -849,6 +915,7 @@ def _restore_snapshot(payload: Mapping[str, Any]) -> data.BacktestSnapshot | bas
             actions_status=str(payload["actionsStatus"]),
             action_dates=tuple(str(item) for item in payload.get("actionDates", [])),
             notice=tuple(str(item) for item in payload.get("notice", [])),
+            corporate_actions=payload.get("corporateActions"),
         )
         validator = getattr(data, "validate_snapshot", None)
         if callable(validator):

@@ -403,6 +403,11 @@ def _common_inputs(record: Mapping[str, Any]) -> dict[str, Any]:
         if quantity_rule not in ("ashare_quantity_v2", "legacy_100_v1"):
             raise ValueError("quantityRuleVersion unsupported")
         parameters["quantityRuleVersion"] = quantity_rule
+    if "corporateActionPolicy" in params:
+        action_policy = params["corporateActionPolicy"]
+        if action_policy not in ("block", "verified_cash_dividends"):
+            raise ValueError("corporateActionPolicy unsupported")
+        parameters["corporateActionPolicy"] = action_policy
     max_tokens = _canonical_integer(record.get("maxTokens"), "maxTokens")
     params_max_tokens = params.get("maxTokens")
     if params_max_tokens is not None and max_tokens != _canonical_integer(params_max_tokens, "params.maxTokens"):
@@ -749,13 +754,46 @@ def _compare_shared_evidence(
     param_codes = (
         ("initialCash", "initial_cash_mismatch", "初始现金不同，不能直接比较。"),
         ("maxPositionPct", "position_limit_mismatch", "仓位上限不同，不能直接比较。"),
-        ("maxParticipationPct", "participation_limit_mismatch", "成交量参与率上限不同，不能直接比较。"),
-        ("quantityRuleVersion", "quantity_rule_mismatch", "板块股数撮合规则不同，不能直接比较。"),
-        ("commissionBps", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
-        ("minimumCommission", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
-        ("slippageBps", "cost_model_mismatch", "佣金、最低费用或滑点参数不同，不能直接比较。"),
-        ("decisionInterval", "decision_schedule_mismatch", "决策频率或最大决策数不同，不能直接比较。"),
-        ("maxDecisions", "decision_schedule_mismatch", "决策频率或最大决策数不同，不能直接比较。"),
+        (
+            "maxParticipationPct",
+            "participation_limit_mismatch",
+            "成交量参与率上限不同，不能直接比较。",
+        ),
+        (
+            "quantityRuleVersion",
+            "quantity_rule_mismatch",
+            "板块股数撮合规则不同，不能直接比较。",
+        ),
+        (
+            "corporateActionPolicy",
+            "corporate_action_policy_mismatch",
+            "公司行动记账规则不同，不能直接比较。",
+        ),
+        (
+            "commissionBps",
+            "cost_model_mismatch",
+            "佣金、最低费用或滑点参数不同，不能直接比较。",
+        ),
+        (
+            "minimumCommission",
+            "cost_model_mismatch",
+            "佣金、最低费用或滑点参数不同，不能直接比较。",
+        ),
+        (
+            "slippageBps",
+            "cost_model_mismatch",
+            "佣金、最低费用或滑点参数不同，不能直接比较。",
+        ),
+        (
+            "decisionInterval",
+            "decision_schedule_mismatch",
+            "决策频率或最大决策数不同，不能直接比较。",
+        ),
+        (
+            "maxDecisions",
+            "decision_schedule_mismatch",
+            "决策频率或最大决策数不同，不能直接比较。",
+        ),
         ("maxTokens", "token_budget_mismatch", "模型 token 预算不同，不能直接比较。"),
     )
     for key, code, message in param_codes:

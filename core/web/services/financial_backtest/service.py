@@ -48,8 +48,28 @@ from core.web.services.financial_backtest.store import (
 )
 
 _PROFILE_ID = "financial_ai_backtest"
-_ALLOWED_ACTION_STATUSES = {"clear", "factor_check_passed"}
+_ALLOWED_ACTION_STATUSES = {"clear", "factor_check_passed", "verified_cash_dividends"}
 _TERMINAL_STATUSES = {"stopped", "paused_unknown", "completed", "failed", "blocked"}
+
+
+def _aggregate_action_status(assets: list[data.BacktestSnapshot]) -> str:
+    if all(asset.actions_status == "verified_cash_dividends" for asset in assets):
+        return "verified_cash_dividends"
+    return "factor_check_passed" if any(asset.actions_status == "factor_check_passed" for asset in assets) else "clear"
+
+
+def _action_coverage(assets: list[data.BacktestSnapshot]) -> dict[str, Any]:
+    return {
+        asset.symbol: {
+            "status": asset.corporate_actions["coverageStatus"],
+            "ruleVersion": asset.corporate_actions["ruleVersion"],
+            "artifactHash": asset.corporate_actions["artifactHash"],
+            "startDate": asset.start_date,
+            "endDate": asset.end_date,
+            "eventCount": len(asset.corporate_actions["events"]),
+        }
+        for asset in assets if asset.corporate_actions is not None
+    }
 
 
 def create_financial_backtest_preview(
@@ -138,6 +158,7 @@ def create_financial_backtest_fork_preview(
         ),
         "modelId": source_model_id if overrides.get("modelId") is None else overrides["modelId"],
         "researchInput": source_run.get("researchInput", "price_only"),
+        "corporateActionPolicy": source_params.get("corporateActionPolicy", "block"),
     }
     request_payload.update(selected_parameter_overrides)
     request = normalize_preview_request(request_payload)
@@ -213,6 +234,7 @@ def _create_preview(
                 lambda value: basket_data.prepare_basket_data(
                     value["symbols"], value["startDate"], value["endDate"],
                     data_source=value.get("dataSource", "tencent"),
+                    corporate_action_policy=value.get("corporateActionPolicy", "block"),
                 )
             )
             snapshot = loader(request)
@@ -224,7 +246,7 @@ def _create_preview(
         symbols = list(snapshot.symbols)
         selected_symbol = None
         action_dates = sorted({day for asset in asset_snapshots for day in asset.action_dates})
-        actions_status = "factor_check_passed" if any(asset.actions_status == "factor_check_passed" for asset in asset_snapshots) else "clear"
+        actions_status = _aggregate_action_status(asset_snapshots)
         date_coverage = snapshot.assets[snapshot.symbols[0]].coverage.to_dict()
         asset_coverage = {symbol: snapshot.assets[symbol].coverage.to_dict() for symbol in snapshot.symbols}
         asset_data_hashes = {symbol: snapshot.assets[symbol].data_hash for symbol in snapshot.symbols}
@@ -251,6 +273,11 @@ def _create_preview(
         snapshot_payload = snapshot.to_dict()
         source_url = snapshot.source_url
         fetched_at = snapshot.fetched_at
+
+    assets_for_actions = list(snapshot.assets.values()) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot]
+    wants_actions = request.get("corporateActionPolicy", request["params"].get("corporateActionPolicy", "block")) == "verified_cash_dividends"
+    if any((asset.corporate_actions is not None) != wants_actions for asset in assets_for_actions):
+        raise FinancialBacktestConflict("公司行动策略与冻结快照不一致")
 
     research_mode = request.get("researchInput", "price_only")
     research_hash = None
@@ -340,6 +367,8 @@ def _create_preview(
         "_reservationPlan": reservation_plan,
         "createdAt": _iso(now),
     }
+    if wants_actions:
+        preview["corporateActionCoverage"] = _action_coverage(assets_for_actions)
     preview["comparisonProvenance"] = _build_comparison_provenance(
         preview,
         source_run_id=source_run_id,
@@ -415,6 +444,23 @@ def _load_research_snapshot(
     )
 
 
+def _validate_action_binding(
+    snapshot: data.BacktestSnapshot | basket_data.BasketSnapshot,
+    record: Mapping[str, Any],
+) -> None:
+    assets = list(snapshot.assets.values()) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot]
+    params = record.get("params") if isinstance(record.get("params"), Mapping) else {}
+    policy = params.get("corporateActionPolicy", "block")
+    if policy not in {"block", "verified_cash_dividends"}:
+        raise FinancialBacktestStoreError("回测公司行动策略无效")
+    wants_actions = policy == "verified_cash_dividends"
+    if any((asset.corporate_actions is not None) != wants_actions for asset in assets):
+        raise FinancialBacktestStoreError("回测公司行动策略与冻结快照不匹配")
+    coverage = record.get("corporateActionCoverage")
+    if (wants_actions and coverage != _action_coverage(assets)) or (not wants_actions and coverage):
+        raise FinancialBacktestStoreError("回测公司行动覆盖与冻结快照不匹配")
+
+
 def _load_run_snapshot(
     agent_id: str,
     run: Mapping[str, Any],
@@ -426,6 +472,7 @@ def _load_run_snapshot(
     from core.web.services.financial_backtest.runtime import _restore_snapshot
 
     snapshot = _restore_snapshot(payload)
+    _validate_action_binding(snapshot, run)
     if snapshot.data_hash != data_hash:
         raise FinancialBacktestStoreError("回测运行记录与冻结行情摘要不匹配")
     run_symbols = _run_symbols(run)
@@ -452,14 +499,7 @@ def _load_run_snapshot(
         expected_action_dates = sorted(
             {day for asset in snapshot.assets.values() for day in asset.action_dates}
         )
-        expected_actions_status = (
-            "factor_check_passed"
-            if any(
-                asset.actions_status == "factor_check_passed"
-                for asset in snapshot.assets.values()
-            )
-            else "clear"
-        )
+        expected_actions_status = _aggregate_action_status(list(snapshot.assets.values()))
     else:
         expected_asset_coverage = {snapshot.symbol: snapshot.coverage.to_dict()}
         expected_asset_hashes = {snapshot.symbol: snapshot.data_hash}
@@ -598,8 +638,7 @@ def start_financial_backtest_run(
         raise FinancialBacktestConflict(str(preview.get("blockReason") or "该回测预览不可启动"))
     if preview.get("actionsStatus") not in _ALLOWED_ACTION_STATUSES:
         raise FinancialBacktestConflict("公司行动/复权完整性检查未通过，不能启动回测")
-    selected_store.load_snapshot(agent_id, str(preview.get("dataHash") or ""))
-    _load_research_snapshot(agent_id, preview, selected_store)
+    _load_run_snapshot(agent_id, preview, selected_store)
     timestamp = _iso(now)
     run = {
         "agentId": str(agent_id),
@@ -662,6 +701,8 @@ def start_financial_backtest_run(
         "reservationPlan": dict(preview.get("_reservationPlan") or {}),
         "budgetTokensCommitted": 0,
     }
+    if "corporateActionCoverage" in preview:
+        run["corporateActionCoverage"] = preview["corporateActionCoverage"]
     state, _created = selected_store.create_run_if_absent(
         agent_id, run, max_runs=MAX_RUNS_PER_AGENT
     )
@@ -919,10 +960,15 @@ def export_financial_backtest_run(
     frozen_research = _load_research_snapshot(agent_id, run, selected_store)
     if frozen_research is not None:
         schema_version = 3
+    if run.get("params", {}).get("corporateActionPolicy") == "verified_cash_dividends":
+        schema_version = 4
     if normalized_format == "json":
         export_payload = {"schemaVersion": schema_version, **projected}
         if frozen_research is not None:
             export_payload["researchSnapshot"] = frozen_research
+        if schema_version == 4:
+            frozen_snapshot = _load_run_snapshot(agent_id, run, selected_store)
+            export_payload["snapshot"] = frozen_snapshot.to_dict()
         if _is_basket_run(run):
             snapshot_payload = selected_store.load_snapshot(agent_id, str(run.get("dataHash") or ""))
             basket_snapshot = snapshot_payload.get("basketSnapshot")
@@ -955,8 +1001,12 @@ def export_financial_backtest_run(
             writer.writerow(["runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash"])
             writer.writerow([_csv_safe(projected.get(key)) for key in ("runId", "symbol", "status", "modelId", "modelConfigHash", "paramsHash", "dataHash")])
         output.write("\n")
+        dividend_columns = (
+            "dividendReceivable", "dividendTaxPayable",
+            "benchmarkDividendReceivable", "benchmarkDividendTaxPayable",
+        ) if run.get("params", {}).get("corporateActionPolicy") == "verified_cash_dividends" else ()
         if _is_basket_run(run):
-            writer.writerow(["date", "equity", "benchmarkEquity", "cash", "marketValue", "positions", "marketValues", "benchmarkPositions"])
+            writer.writerow(["date", "equity", "benchmarkEquity", "cash", "marketValue", "positions", "marketValues", "benchmarkPositions", *dividend_columns])
             for row in projected["equity"]:
                 writer.writerow([
                     _csv_safe(
@@ -973,12 +1023,14 @@ def export_financial_backtest_run(
                         "positions",
                         "marketValues",
                         "benchmarkPositions",
+                        *dividend_columns,
                     )
                 ])
         else:
-            writer.writerow(["date", "equity", "benchmarkEquity", "cash", "shares", "marketValue"])
+            equity_columns = ("date", "equity", "benchmarkEquity", "cash", "shares", "marketValue", *dividend_columns)
+            writer.writerow(equity_columns)
             for row in projected["equity"]:
-                writer.writerow([_csv_safe(row.get(key)) for key in ("date", "equity", "benchmarkEquity", "cash", "shares", "marketValue")])
+                writer.writerow([_csv_safe(row.get(key)) for key in equity_columns])
         output.write("\n")
         writer.writerow(["account", "symbol", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason"] if _is_basket_run(run) else ["account", "signalDate", "date", "side", "status", "requestedShares", "filledShares", "price", "fee", "notional", "reason"])
         for account, orders in (("strategy", projected["orders"]), ("benchmark", projected["benchmarkOrders"])):
@@ -996,6 +1048,12 @@ def export_financial_backtest_run(
         writer.writerow(["metric", "value"])
         for key, value in (projected["metrics"] or {}).items():
             writer.writerow([_csv_safe(key), _csv_safe(value)])
+        if isinstance(projected.get("executionFailure"), Mapping):
+            writer.writerow([])
+            writer.writerow(["executionFailure", "field", "value"])
+            for key, value in projected["executionFailure"].items():
+                serialized = json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, Mapping) else value
+                writer.writerow(["failure", _csv_safe(key), _csv_safe(serialized)])
         if isinstance(projected.get("evaluation"), Mapping):
             output.write("\n")
             writer.writerow(["window", "field", "value"])
@@ -1058,6 +1116,16 @@ def export_financial_backtest_run(
             coverage = projected.get("researchCoverage") or {}
             writer.writerow([_csv_safe(run.get("researchInput")), _csv_safe(run.get("researchHash")), _csv_safe(coverage.get("status")), coverage.get("groupCount"), coverage.get("itemCount")])
             writer.writerow(["researchNotice", _csv_safe(coverage.get("notice"))])
+        if projected.get("corporateActionCoverage"):
+            writer.writerow([])
+            writer.writerow(["corporateActions", "symbol", "field", "value"])
+            for symbol, coverage in projected["corporateActionCoverage"].items():
+                for key, value in coverage.items():
+                    writer.writerow(["coverage", symbol, key, _csv_safe(value)])
+            for account, field in (("strategy", "dividendAccounting"), ("benchmark", "benchmarkDividendAccounting")):
+                audit = projected.get(field)
+                if audit is not None:
+                    writer.writerow([account, "", "audit", _csv_safe(json.dumps(audit, ensure_ascii=False, sort_keys=True))])
         content = output.getvalue()
         media_type = "text/csv"
         filename = f"backtest-{run['runId']}.csv"
@@ -1147,6 +1215,10 @@ def project_run(run: Mapping[str, Any]) -> dict[str, Any]:
         "researchInput": run.get("researchInput", "price_only"),
         "researchHash": run.get("researchHash"),
         "researchCoverage": run.get("researchCoverage"),
+        "corporateActionCoverage": run.get("corporateActionCoverage"),
+        "dividendAccounting": run.get("dividendAccounting"),
+        "benchmarkDividendAccounting": run.get("benchmarkDividendAccounting"),
+        "executionFailure": run.get("executionFailure"),
         "params": dict(run.get("params") or {}),
         "dateCoverage": dict(run.get("dateCoverage") or {}),
         "assetCoverage": dict(run.get("assetCoverage") or {}),
@@ -1323,6 +1395,8 @@ def _public_params(params: Mapping[str, Any]) -> dict[str, Any]:
         result["maxParticipationPct"] = params["maxParticipationPct"]
     if "quantityRuleVersion" in params:
         result["quantityRuleVersion"] = params["quantityRuleVersion"]
+    if "corporateActionPolicy" in params:
+        result["corporateActionPolicy"] = params["corporateActionPolicy"]
     return result
 
 
@@ -1414,10 +1488,12 @@ def _out_of_sample_start_date(
 
 
 def _preview_warnings(snapshot: data.BacktestSnapshot, estimated_tokens: int, max_tokens: int) -> list[str]:
+    assets = snapshot.assets.values() if isinstance(snapshot, basket_data.BasketSnapshot) else (snapshot,)
+    has_dividends = any(asset.corporate_actions is not None for asset in assets)
     warnings = [
-        "AI决策仅接收截至对应收盘日的冻结行情、既往模拟持仓和用户策略；不读取普通会话、记忆或工具。",
+        "AI决策仅接收截至对应收盘日的冻结行情、既往模拟持仓、此前已公布的核验分红和用户策略；不读取普通会话、记忆或工具。" if has_dividends else "AI决策仅接收截至对应收盘日的冻结行情、既往模拟持仓和用户策略；不读取普通会话、记忆或工具。",
         "历史行情和模型训练知识可能包含区间之后形成的信息，不能宣称完全消除前视偏差。",
-        "仅模拟A股现金账户、整手、T+1与日线撮合；公司行动检查不是交易所公司行动清单认证。",
+        "仅模拟A股现金账户、板块股数规则、T+1与日线撮合；公司行动检查不是交易所公司行动清单认证。",
         "预算预检按提示词UTF-8字节数和输出上限做保守预留；有供应商用量时会另行显示实际用量。",
     ]
     if estimated_tokens > max_tokens:

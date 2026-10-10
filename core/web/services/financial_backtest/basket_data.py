@@ -99,6 +99,7 @@ def prepare_basket_data(
     warmup_bars: int = 252,
     today: date | datetime | str | None = None,
     data_source: str = "tencent",
+    corporate_action_policy: str = "block",
 ) -> BasketSnapshot:
     """Prepare and freeze every asset through the existing single-stock gate."""
     canonical = _canonical_symbols(symbols)
@@ -107,7 +108,7 @@ def prepare_basket_data(
         failures: dict[str, str] = {}
         for provider in ("tencent", "eastmoney", "sina"):
             try:
-                snapshot = prepare_basket_data(canonical, start_date, end_date, warmup_bars=warmup_bars, today=today, data_source=provider)
+                snapshot = prepare_basket_data(canonical, start_date, end_date, warmup_bars=warmup_bars, today=today, data_source=provider, corporate_action_policy=corporate_action_policy)
             except (single_data.BacktestInputError, single_data.CorporateActionUnsupported):
                 raise
             except single_data.BacktestDataError as exc:
@@ -130,6 +131,7 @@ def prepare_basket_data(
                 "endDate": end_date,
                 "warmupBars": warmup_bars,
                 "dataSource": data_source,
+                "corporateActionPolicy": corporate_action_policy,
             },
             today=today,
         )
@@ -287,6 +289,7 @@ def _restore_asset_snapshot(payload: Mapping[str, Any]) -> single_data.BacktestS
             actions_status=payload["actionsStatus"],
             action_dates=tuple(payload["actionDates"]),
             notice=tuple(payload["notice"]),
+            corporate_actions=payload.get("corporateActions"),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise single_data.BacktestDataError("组合快照序列化资产格式无效") from exc

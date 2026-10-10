@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
 
 from core.web.services.financial_backtest import basket_data, data
 
@@ -74,6 +73,12 @@ def _slice_single_snapshot(
     start_date = rows[0].date
     end_date = rows[-1].date
     all_rows = tuple(warmup) + tuple(rows)
+    actions = None
+    action_dates = snapshot.action_dates
+    if snapshot.corporate_actions is not None:
+        from .cash_action_snapshot import slice_action_snapshot
+        actions = slice_action_snapshot(snapshot.corporate_actions, start_date, end_date)
+        action_dates = tuple(actions["priceValidation"]["detectedDates"])
     coverage = replace(
         snapshot.coverage,
         requestedStartDate=start_date,
@@ -91,8 +96,10 @@ def _slice_single_snapshot(
         end_date=end_date,
         candles=tuple(rows),
         warmup_candles=tuple(warmup),
-        data_hash=data._stable_hash(all_rows, snapshot.symbol, start_date, end_date),
+        data_hash=data._stable_hash(all_rows, snapshot.symbol, start_date, end_date, actions),
         coverage=coverage,
+        corporate_actions=actions,
+        action_dates=action_dates,
     )
     data.validate_snapshot(sliced)
     return sliced

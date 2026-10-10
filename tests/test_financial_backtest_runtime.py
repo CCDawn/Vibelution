@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import Any
 
 from core.web.services.financial_backtest import runtime
@@ -180,7 +181,11 @@ def test_unknown_retry_is_blocked_when_old_and_new_reservations_exceed_budget(mo
 def test_legacy_unknown_attempt_is_charged_before_retry_budget_check(monkeypatch):
     monkeypatch.setattr(runtime, "_sync_runtime_task", lambda *args, **kwargs: None)
     monkeypatch.setattr(runtime, "_record_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr(runtime, "_restore_snapshot", lambda payload: object())
+    monkeypatch.setattr(
+        runtime,
+        "_restore_snapshot",
+        lambda payload: SimpleNamespace(corporate_actions=None),
+    )
     monkeypatch.setattr(runtime.engine, "portfolio_at", lambda *args, **kwargs: {})
     monkeypatch.setattr(runtime, "build_decision_input", lambda *args, **kwargs: {"asOfDate": _DATE})
     monkeypatch.setattr(runtime, "build_messages", lambda value: [])
@@ -264,7 +269,11 @@ def test_measured_retry_replaces_only_its_own_reservation(monkeypatch):
 def test_stop_racing_with_submission_never_calls_the_model(monkeypatch):
     monkeypatch.setattr(runtime, "_sync_runtime_task", lambda *args, **kwargs: None)
     monkeypatch.setattr(runtime, "_record_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr(runtime, "_restore_snapshot", lambda payload: object())
+    monkeypatch.setattr(
+        runtime,
+        "_restore_snapshot",
+        lambda payload: SimpleNamespace(corporate_actions=None),
+    )
     monkeypatch.setattr(runtime.engine, "portfolio_at", lambda *args, **kwargs: {})
     monkeypatch.setattr(runtime, "build_decision_input", lambda *args, **kwargs: {"asOfDate": _DATE})
     monkeypatch.setattr(runtime, "build_messages", lambda value: [])
@@ -292,7 +301,11 @@ def test_stop_racing_with_submission_never_calls_the_model(monkeypatch):
 def test_worker_does_not_call_model_after_lease_renewal_fails(monkeypatch):
     monkeypatch.setattr(runtime, "_sync_runtime_task", lambda *args, **kwargs: None)
     monkeypatch.setattr(runtime, "_record_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr(runtime, "_restore_snapshot", lambda payload: object())
+    monkeypatch.setattr(
+        runtime,
+        "_restore_snapshot",
+        lambda payload: SimpleNamespace(corporate_actions=None),
+    )
     monkeypatch.setattr(runtime.engine, "portfolio_at", lambda *args, **kwargs: {})
     monkeypatch.setattr(runtime, "build_decision_input", lambda *args, **kwargs: {"asOfDate": _DATE})
     monkeypatch.setattr(runtime, "build_messages", lambda value: [])
@@ -318,7 +331,11 @@ def test_model_fingerprint_is_rechecked_for_every_decision_submission(monkeypatc
     second_date = "2024-01-03"
     monkeypatch.setattr(runtime, "_sync_runtime_task", lambda *args, **kwargs: None)
     monkeypatch.setattr(runtime, "_record_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr(runtime, "_restore_snapshot", lambda payload: object())
+    monkeypatch.setattr(
+        runtime,
+        "_restore_snapshot",
+        lambda payload: SimpleNamespace(corporate_actions=None),
+    )
     monkeypatch.setattr(runtime.engine, "portfolio_at", lambda *args, **kwargs: {})
     monkeypatch.setattr(
         runtime,

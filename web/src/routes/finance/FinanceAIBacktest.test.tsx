@@ -101,6 +101,35 @@ it("submits the selected free Sina source without starting the model", async () 
   expect(api.startAIBacktest).not.toHaveBeenCalled();
 });
 
+it("preflights the cash dividend policy and shows frozen coverage without starting a model", async () => {
+  vi.mocked(api.previewAIBacktest).mockResolvedValue({ ...preview, corporateActionCoverage: { [stock.symbol]: { status: "complete", ruleVersion: "ashare_cash_dividend_v1", artifactHash: "a".repeat(64), startDate: "2026-07-01", endDate: "2026-09-01", eventCount: 2 } } });
+  await render();
+  await chooseSelectOption("AI回测公司行动", "核验现金分红");
+  await act(async () => button("检查数据与预算").click());
+  expect(api.previewAIBacktest).toHaveBeenCalledWith("a", expect.objectContaining({ corporateActionPolicy: "verified_cash_dividends" }));
+  expect(node.textContent).toContain("现金分红 2 次 · 官方公告已冻结");
+  expect(api.startAIBacktest).not.toHaveBeenCalled();
+});
+
+it("discloses strategy and benchmark dividend audit separately with an official source", async () => {
+  const audit = { schemaVersion: 1 as const, ruleVersion: "ashare_cash_dividend_v1" as const, artifactHash: "a".repeat(64), symbol: stock.symbol,
+    settlementRounding: "unverified_decimal_exact" as const, receivable: "50", taxPayable: "10", taxTotal: "10", dividendsTotal: "100", lots: [],
+    events: [{ actionId: "cash-1", noticeId: "123", title: "权益分派实施公告", publishedDate: "2026-07-01", sourceUrl: "https://static.cninfo.com.cn/finalpage/2026-07-01/123.PDF", pdfSha256: "b".repeat(64), recordDate: "2026-07-10", exDate: "2026-07-13", paymentDate: "2026-07-14", cashPerShare: "0.5", recordCaptured: true, ledgerApplied: true, entitledShares: 200, grossAmount: "100", exRecognized: true, paymentComplete: false, taxPayable: "10", taxTotal: "10", taxPaid: "0" }] };
+  const completed = { ...run, status: "completed" as const, metrics: { ...metrics, grossDividends: 100, dividendTaxPaid: 0, dividendTaxPayable: 10, benchmarkGrossDividends: 200 }, dividendAccounting: audit, benchmarkDividendAccounting: { ...audit, dividendsTotal: "200" }, equity: [{ date: "2026-07-13", equity: 104000, benchmarkEquity: 102000, cash: 20000, dividendReceivable: 50, dividendTaxPayable: 10 }] };
+  vi.mocked(api.fetchAIBacktests).mockResolvedValue({ agentId: "a", items: [{ ...run, status: "completed", totalReturnPct: 4 }], nextCursor: null });
+  vi.mocked(api.fetchAIBacktest).mockResolvedValue(completed);
+  await render();
+  await act(async () => button("已完成 · sz000001 · " + new Date(run.startedAt!).toLocaleString("zh-CN") + " · 0/8").click());
+  await act(async () => new Promise(resolve => setTimeout(resolve, 15)));
+  expect(node.textContent).toContain("待到账 50.00");
+  expect(node.textContent).toContain("待扣红利税 10.00");
+  expect(node.querySelector('[aria-label="AI回测分红审计"]')).toBeNull();
+  await act(async () => button("分红与红利税明细").click());
+  expect(node.textContent).toContain("AI策略");
+  expect(node.textContent).toContain("持有基准");
+  expect(node.querySelector<HTMLAnchorElement>(`a[href="${audit.events[0].sourceUrl}"]`)?.rel).toContain("noreferrer");
+});
+
 it("allows independent backtest preflight when the native research session is unavailable", async () => {
   vi.mocked(api.previewAIBacktest).mockRejectedValue(new Error("回测模型配置需要检查"));
   const research = vi.fn();

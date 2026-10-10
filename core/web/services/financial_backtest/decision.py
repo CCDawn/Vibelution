@@ -86,6 +86,7 @@ def build_decision_input(
             for candle in recent
         ],
     }
+    _attach_cash_actions(result, [snapshot], as_of_date, portfolio)
     return _attach_research_material(result, research_material)
 
 
@@ -139,7 +140,23 @@ def build_basket_decision_input(
         },
         "dailyBarsBySymbol": daily_bars,
     }
+    _attach_cash_actions(result, list(snapshot.assets.values()), as_of_date, portfolio)
     return _attach_research_material(result, research_material)
+
+
+def _attach_cash_actions(result: dict[str, Any], assets: list[BacktestSnapshot], as_of_date: str, portfolio: Mapping[str, Any]) -> None:
+    active = [asset for asset in assets if getattr(asset, "corporate_actions", None) is not None]
+    if not active:
+        return
+    for field in ("dividendReceivable", "dividendTaxPayable"):
+        result["portfolio"][field] = portfolio.get(field, 0.0)
+    result["cashDividends"] = {
+        asset.symbol: [
+            {key: event[key] for key in ("publishedDate", "recordDate", "exDate", "paymentDate", "cashPerShare")}
+            for event in asset.corporate_actions["events"] if event["publishedDate"] < as_of_date
+        ][-4:]
+        for asset in active
+    }
 
 
 def build_messages(decision_input: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -153,6 +170,8 @@ def build_messages(decision_input: Mapping[str, Any]) -> list[dict[str, str]]:
             if isinstance(material, Mapping) and material.get("researchKind") == "financial_reports"
             else _RESEARCH_SYSTEM_PROMPT
         )
+    if "cashDividends" in decision_input:
+        system_content += "\n现金分红来自冻结官方实施公告，仅列发布日期早于asOfDate的事件。应收股息不能用于买入；cash是可用现金，equity含应收减已确认待扣税。持仓未来卖出可能产生额外红利税。"
     return [
         {
             "role": "system",

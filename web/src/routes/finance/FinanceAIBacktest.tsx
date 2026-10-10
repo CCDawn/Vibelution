@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { FinanceBacktestAdvancedEvaluation } from "./FinanceBacktestAdvancedEvaluation";
 import { FinanceBacktestRobustness } from "./FinanceBacktestRobustness";
 import { FinanceWalkForward } from "./FinanceWalkForward";
-import { Download, GitCompareArrows, Play, RefreshCw, Square, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, GitCompareArrows, Play, RefreshCw, Square, X } from "lucide-react";
 import { downloadAIBacktest, fetchAIBacktest, fetchAIBacktests, financialBacktestKeys, previewAIBacktest, resumeAIBacktest, startAIBacktest, stopAIBacktest } from "../../api/financialBacktests";
-import type { AIBacktestDateCoverage, AIBacktestParams, AIBacktestPreview, AIBacktestRequest, AIBacktestRun } from "../../api/types/financialBacktests";
+import type { AIBacktestDateCoverage, AIBacktestDividendAudit, AIBacktestParams, AIBacktestPreview, AIBacktestRequest, AIBacktestRun } from "../../api/types/financialBacktests";
 import type { StockIdentity } from "../../api/types/financialMarket";
 import { VButton, VChip, VDenseTable, VDialog, VInput, VSelect, VStateSurface, VSurface, VTextarea } from "../../components/vui";
 import { FinanceBacktestComparison } from "./FinanceBacktestComparison";
@@ -106,6 +106,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
     <p className={styles.note}>{zh ? "历史日线 → AI目标仓位 → 下日开盘撮合。独立模拟账户，不连接券商；支持单股或组合、停止续跑和结果导出。" : "Historical bars → AI target weights → next-open execution. Independent simulation, no broker connection; single-stock or basket runs can be stopped, resumed and exported."}</p>
     <div className={styles.row}>
       <label className={styles.field}>{zh ? "历史行情源" : "Historical source"}<VSelect aria-label="AI回测历史行情源" selectedKey={form.dataSource ?? "tencent"} isDisabled={busy} className={styles.scopeSelect} options={[{ id: "tencent", label: "腾讯财经" }, { id: "eastmoney", label: "东方财富" }, { id: "sina", label: "新浪财经" }, { id: "auto", label: zh ? "自动备用（整段切换）" : "Whole-snapshot fallback" }]} onSelectionChange={key => edit("dataSource", String(key) as "tencent" | "eastmoney" | "sina" | "auto")} /></label>
+      <label className={styles.field}>{zh ? "公司行动" : "Corporate actions"}<VSelect aria-label="AI回测公司行动" selectedKey={form.corporateActionPolicy ?? "block"} isDisabled={busy} className={styles.actionSelect} options={[{ id: "block", label: zh ? "检测到即阻断" : "Block detected actions" }, { id: "verified_cash_dividends", label: zh ? "核验现金分红" : "Verify cash dividends" }]} onSelectionChange={key => edit("corporateActionPolicy", String(key) as "block" | "verified_cash_dividends")} /></label>
       <label className={styles.field}>{zh ? "回测范围" : "Scope"}<VSelect aria-label={zh ? "AI回测范围" : "AI backtest scope"} selectedKey={scope} isDisabled={busy} className={styles.scopeSelect} options={[{ id: "single", label: zh ? "单股" : "Single stock" }, { id: "portfolio", label: zh ? "组合" : "Portfolio" }]} onSelectionChange={key => changeScope(String(key ?? "single") as "single" | "portfolio")} /></label>
       {scope === "single" ? <span className={styles.note}>{stock.name} · {stock.symbol}</span> : <span className={styles.note}>{zh ? "按同一交易日历并行组合；每次决策需给全部股票分配目标仓位。" : "Assets share a trading calendar; each decision allocates a target weight to every stock."}</span>}
     </div>
@@ -147,6 +148,7 @@ export function FinanceAIBacktest({ agentId, stock, zh, disabled }: { agentId: s
       <div className={styles.row}><span>{zh ? "样本外起点" : "Holdout starts"} {preview.outOfSampleStartDate || "—"}</span><span>{zh ? "模型" : "Model"} {preview.modelId}</span><span>{zh ? "预计 Token" : "Estimated tokens"} {typeof preview.estimatedTokens === "number" ? preview.estimatedTokens.toLocaleString() : "—"} / {preview.maxTokens.toLocaleString()}</span><span>{zh ? "数据哈希" : "Data hash"} {preview.dataHash.slice(0, 12)}</span></div>
       <AssetCoverageTable coverage={preview.assetCoverage} fallback={preview.dateCoverage} sources={preview.assetSources} symbols={symbolsForRun(preview)} zh={zh} />
       {preview.researchCoverage ? <p className={styles.note}>{zh ? `${preview.researchInput === "financial_reports" ? "财报原文" : "历史公告"} · ${preview.researchCoverage.itemCount} 条 · ${preview.researchCoverage.groupCount} 组 · ${preview.researchCoverage.status === "partial" ? "覆盖不完整" : "已冻结"}` : `Historical evidence · ${preview.researchCoverage.itemCount} items · ${preview.researchCoverage.status}`}</p> : null}
+      {preview.corporateActionCoverage ? <div className={styles.row}>{Object.entries(preview.corporateActionCoverage).map(([symbol, coverage]) => <span key={symbol} className={styles.note}>{symbol} · {zh ? `现金分红 ${coverage.eventCount} 次 · 官方公告已冻结` : `${coverage.eventCount} cash dividends · official notices frozen`}</span>)}</div> : null}
       {preview.warnings.map((warning, index) => <p key={index} className={styles.note}>{warning}</p>)}
       <span className={styles.note}>{quantityLabel(preview.params, zh)}</span>
       {!preview.canStart ? <VStateSurface tone="error" density="compact" title={preview.blockReason || (zh ? "当前数据不满足回测条件" : "Data requirements not met")} /> : null}
@@ -213,6 +215,11 @@ function BacktestResult({ run, zh }: { run: AIBacktestRun; zh: boolean }) {
   return <>
     {run.robustness ? <FinanceBacktestRobustness key={run.runId} result={run.robustness} zh={zh} /> : null}
     <div className={styles.row}><strong>{zh ? "策略收益" : "Return"} {pct(metrics.totalReturnPct)}</strong><span>{zh ? "持有基准" : "Benchmark"} {pct(metrics.benchmarkReturnPct)}</span><span>{zh ? "超额" : "Excess"} {pct(metrics.excessReturnPct)}</span><span>{zh ? "最大回撤" : "Drawdown"} {pct(metrics.maxDrawdownPct)}</span><span>{zh ? "年化" : "Annualized"} {pct(metrics.annualizedReturnPct)}</span><span>Sharpe {metrics.sharpeRatio?.toFixed(2) ?? "—"}</span><span>{zh ? "成交" : "Fills"} {metrics.tradeCount}</span><span>{zh ? "费用" : "Fees"} {metrics.fees.toFixed(2)}</span></div>
+    {run.dividendAccounting ? <>
+      <div className={styles.row}><strong>{zh ? "现金分红" : "Cash dividends"} {metrics.grossDividends?.toFixed(2) ?? "—"}</strong><span>{zh ? "待到账" : "Receivable"} {last?.dividendReceivable?.toFixed(2) ?? "—"}</span><span>{zh ? "已扣红利税" : "Tax paid"} {metrics.dividendTaxPaid?.toFixed(2) ?? "—"}</span><span>{zh ? "待扣红利税" : "Tax payable"} {metrics.dividendTaxPayable?.toFixed(2) ?? "—"}</span><span>{zh ? "基准分红" : "Benchmark dividends"} {metrics.benchmarkGrossDividends?.toFixed(2) ?? "—"}</span></div>
+      <DividendAudit run={run} zh={zh} />
+      <p className={styles.note}>{zh ? "净值包含应收股息并扣已确认税款；到账日收盘后才可使用。期末持仓未来卖出可能产生额外红利税，未认证结算到分规则。" : "Equity includes receivables less assessed tax; dividends become spendable after payment-day close. Later sales may incur further tax; settlement rounding remains unverified."}</p>
+    </> : null}
     {run.benchmarkStatus && run.benchmarkStatus !== "invested" ? <p className={styles.note}>{zh ? `基准有 ${unfilledBenchmarkSymbols.length} 只未成交，保留现金：${unfilledBenchmarkSymbols.join("、") || "代码未提供"}` : `${unfilledBenchmarkSymbols.length} benchmark assets were not filled; their sleeves remain cash: ${unfilledBenchmarkSymbols.join(", ") || "symbols unavailable"}`}</p> : null}
     {run.evaluation ? <><div className={styles.row}><strong>{zh ? "样本内外评估" : "In-sample / out-of-sample evaluation"}</strong><span>{zh ? "冻结边界" : "Frozen boundary"} {run.evaluation.outOfSampleStartDate}</span></div><div className={styles.table}><VDenseTable ariaLabel={zh ? "样本内外评估" : "In-sample and out-of-sample evaluation"} rows={evaluationRows} getRowKey={row => row.key} emptyText={zh ? "暂无分段评估" : "No split evaluation"} columns={[{ id: "window", header: zh ? "窗口" : "Window", render: row => row.name }, { id: "dates", header: zh ? "区间" : "Dates", render: row => `${row.startDate} — ${row.endDate}` }, { id: "days", header: zh ? "交易日" : "Sessions", render: row => row.tradingDays }, { id: "return", header: zh ? "策略收益" : "Strategy", render: row => pct(row.metrics.totalReturnPct) }, { id: "benchmark", header: zh ? "基准收益" : "Benchmark", render: row => pct(row.metrics.benchmarkReturnPct) }, { id: "excess", header: zh ? "超额" : "Excess", render: row => pct(row.metrics.excessReturnPct) }, { id: "drawdown", header: zh ? "最大回撤" : "Drawdown", render: row => pct(row.metrics.maxDrawdownPct) }, { id: "fees", header: zh ? "费用" : "Fees", render: row => row.metrics.fees.toFixed(2) }]} /></div><p className={styles.note}>{run.evaluation.notice}</p></> : null}
     {run.equity.length ? <svg viewBox="0 0 600 170" className={styles.chart} role="img" aria-label={zh ? "AI回测净值与持有基准" : "AI backtest equity and buy-and-hold benchmark"}><polyline points={points("benchmarkEquity")} fill="none" stroke="currentColor" strokeDasharray="4 3" opacity="0.4" strokeWidth="2" /><polyline points={points("equity")} fill="none" stroke="currentColor" strokeWidth="2" /></svg> : null}
@@ -220,4 +227,24 @@ function BacktestResult({ run, zh }: { run: AIBacktestRun; zh: boolean }) {
     {holdings.length ? <div className={styles.table}><VDenseTable ariaLabel={zh ? "回测期末持仓" : "Ending backtest holdings"} rows={holdings} getRowKey={row => row.symbol} emptyText={zh ? "期末没有持仓" : "No ending holdings"} columns={[{ id: "symbol", header: zh ? "股票" : "Symbol", render: row => row.symbol }, { id: "units", header: zh ? "期末股数" : "Ending shares", render: row => row.units.toLocaleString() }]} /></div> : null}
     <div className={styles.table}><VDenseTable ariaLabel="AI回测成交" rows={run.trades} getRowKey={row => `${row.date}:${row.signalDate}:${row.symbol || run.symbol || ""}:${row.side}`} emptyText={zh ? "没有成交" : "No fills"} columns={[{ id: "signal", header: zh ? "信号日" : "Signal", render: row => row.signalDate }, { id: "date", header: zh ? "成交日" : "Fill", render: row => row.date }, { id: "symbol", header: zh ? "股票" : "Symbol", render: row => row.symbol || run.symbol || "—" }, { id: "side", header: zh ? "方向" : "Side", render: row => row.side === "buy" ? (zh ? "买入" : "Buy") : (zh ? "卖出" : "Sell") }, { id: "price", header: zh ? "成交价" : "Price", render: row => row.price.toFixed(3) }, { id: "units", header: zh ? "股数" : "Shares", render: row => row.units.toLocaleString() }, { id: "fee", header: zh ? "费用" : "Fees", render: row => row.fee.toFixed(2) }]} /></div>
   </>;
+}
+
+function DividendAudit({ run, zh }: { run: AIBacktestRun; zh: boolean }) {
+  const [open, setOpen] = useState(false);
+  const rows = ([ ["strategy", run.dividendAccounting], ["benchmark", run.benchmarkDividendAccounting] ] as const).flatMap(([account, value]) => {
+    if (!value) return [];
+    const audits: AIBacktestDividendAudit[] = typeof value.ruleVersion === "string" ? [value as AIBacktestDividendAudit] : Object.values(value as Record<string, AIBacktestDividendAudit>);
+    return audits.flatMap(audit => audit.events.map(event => ({ ...event, symbol: audit.symbol, account, key: `${account}:${audit.symbol}:${event.actionId}` })));
+  });
+  return <VSurface tone="panel" padding="compact" className={styles.dividendDetails}><VButton variant="ghost" aria-expanded={open} icon={open ? <ChevronDown size={14} /> : <ChevronRight size={14} />} onPress={() => setOpen(value => !value)}>{zh ? "分红与红利税明细" : "Dividend and tax ledger"}</VButton>{open ? <div className={styles.table}><VDenseTable ariaLabel="AI回测分红审计" resizable rows={rows} getRowKey={row => row.key} emptyText={zh ? "区间内没有适用现金分红" : "No applicable cash dividend"} columns={[
+    { id: "symbol", header: zh ? "股票" : "Symbol", render: row => row.symbol },
+    { id: "account", header: zh ? "账户" : "Account", render: row => row.account === "strategy" ? (zh ? "AI策略" : "Strategy") : (zh ? "持有基准" : "Benchmark") },
+    { id: "record", header: zh ? "登记日" : "Record", render: row => row.recordDate },
+    { id: "payment", header: zh ? "到账日" : "Payment", render: row => row.paymentDate },
+    { id: "shares", header: zh ? "权益股数" : "Entitled shares", render: row => row.entitledShares },
+    { id: "amount", header: zh ? "股息" : "Dividend", render: row => row.grossAmount },
+    { id: "tax", header: zh ? "已扣税" : "Tax paid", render: row => row.taxPaid },
+    { id: "status", header: zh ? "状态" : "Status", render: row => !row.ledgerApplied ? (zh ? "窗前登记 · 无权益" : "Pre-window record · no entitlement") : row.paymentComplete ? (zh ? "已到账" : "Paid") : row.exRecognized ? (zh ? "待到账" : "Receivable") : (zh ? "未除息" : "Before ex-date") },
+    { id: "source", header: zh ? "来源" : "Source", render: row => <a className={styles.dividendLink} href={row.sourceUrl} target="_blank" rel="noreferrer">{zh ? "实施公告" : "Official notice"}</a> },
+  ]} /></div> : null}</VSurface>;
 }

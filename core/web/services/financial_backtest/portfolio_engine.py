@@ -160,7 +160,7 @@ def _execute_target(
     symbol: str,
     signal_date: str,
     execution: Candle,
-    previous_close: float | None,
+    previous_close: float | Decimal | None,
     desired_shares: int,
     raw_desired_shares: int | None = None,
     cash: Decimal,
@@ -396,7 +396,7 @@ def _execute_benchmark_sleeve(
     *,
     symbol: str,
     execution: Candle,
-    previous_close: float | None,
+    previous_close: float | Decimal | None,
     cash: Decimal,
     commission_rate: Decimal,
     minimum_commission: Decimal,
@@ -548,6 +548,7 @@ def _current_portfolio(
     shares: Mapping[str, int],
     sellable_shares: Mapping[str, int],
     latest_orders: Sequence[Mapping[str, Any]],
+    dividend_ledgers: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     index = snapshot.session_dates.index(through_date)
     market_values: dict[str, Decimal] = {}
@@ -557,7 +558,15 @@ def _current_portfolio(
         market_value = Decimal(shares[symbol]) * close
         market_values[symbol] = market_value
     total_market_value = sum(market_values.values(), Decimal(0))
-    equity = cash + total_market_value
+    dividend_receivable = sum(
+        (ledger.receivable for ledger in (dividend_ledgers or {}).values()),
+        Decimal(0),
+    )
+    dividend_tax_payable = sum(
+        (ledger.tax_payable for ledger in (dividend_ledgers or {}).values()),
+        Decimal(0),
+    )
+    equity = cash + total_market_value + dividend_receivable - dividend_tax_payable
     for symbol in snapshot.symbols:
         candle = snapshot.assets[symbol].candles[index]
         market_value = market_values[symbol]
@@ -571,7 +580,7 @@ def _current_portfolio(
                 "close": candle.close,
             }
         )
-    return {
+    result = {
         "date": through_date,
         "cash": float(single_engine._money(cash)),
         "equity": float(single_engine._money(equity)),
@@ -582,6 +591,46 @@ def _current_portfolio(
         "positions": position_rows,
         "latestOrders": [dict(order) for order in latest_orders[-5:]],
     }
+    if dividend_ledgers:
+        result["dividendReceivable"] = float(single_engine._money(dividend_receivable))
+        result["dividendTaxPayable"] = float(single_engine._money(dividend_tax_payable))
+    return result
+
+
+def _ledger_total(ledgers: Mapping[str, Any], attribute: str) -> Decimal:
+    return sum(
+        (getattr(ledger, attribute) for ledger in ledgers.values()), Decimal(0)
+    )
+
+
+def _ledger_audits(ledgers: Mapping[str, Any]) -> dict[str, Any]:
+    return {symbol: ledger.audit() for symbol, ledger in ledgers.items()}
+
+
+def _add_dividend_metrics(
+    metrics: dict[str, Any],
+    strategy_ledgers: Mapping[str, Any],
+    benchmark_ledgers: Mapping[str, Any],
+) -> None:
+    if not strategy_ledgers and not benchmark_ledgers:
+        return
+    for prefix, ledgers in (("", strategy_ledgers), ("benchmark", benchmark_ledgers)):
+        gross = _ledger_total(ledgers, "dividends_total")
+        tax_total = _ledger_total(ledgers, "tax_total")
+        tax_payable = _ledger_total(ledgers, "tax_payable")
+        if prefix:
+            metrics["benchmarkGrossDividends"] = float(gross)
+            metrics["benchmarkDividendTaxPaid"] = float(tax_total - tax_payable)
+            metrics["benchmarkDividendTaxPayable"] = float(tax_payable)
+            metrics["benchmarkNetDividendIncome"] = float(gross - tax_total)
+        else:
+            metrics["grossDividends"] = float(gross)
+            metrics["dividendTaxPaid"] = float(tax_total - tax_payable)
+            metrics["dividendTaxPayable"] = float(tax_payable)
+            metrics["netDividendIncome"] = float(gross - tax_total)
+    metrics["closedTradeCount"] = None
+    metrics["winningTradeCount"] = None
+    metrics["winRatePct"] = None
 
 
 def _simulate_prefix(
@@ -606,6 +655,18 @@ def _simulate_prefix(
     cash = initial_cash
     shares = {symbol: 0 for symbol in symbols}
     cost_basis = {symbol: Decimal(0) for symbol in symbols}
+    dividend_ledgers = {
+        symbol: ledger
+        for symbol in symbols
+        if (ledger := single_engine._new_dividend_ledger(snapshot.assets[symbol]))
+        is not None
+    }
+    benchmark_dividend_ledgers = {
+        symbol: ledger
+        for symbol in symbols
+        if (ledger := single_engine._new_dividend_ledger(snapshot.assets[symbol]))
+        is not None
+    }
     benchmark_cash = _cash_sleeves(initial_cash, symbols)
     benchmark_shares = {symbol: 0 for symbol in symbols}
     benchmark_filled: set[str] = set()
@@ -626,11 +687,15 @@ def _simulate_prefix(
 
     for index, session_date in enumerate(snapshot.session_dates[: end_index + 1]):
         candles = {symbol: snapshot.assets[symbol].candles[index] for symbol in symbols}
+        for ledger in dividend_ledgers.values():
+            ledger.open_session(session_date)
+        for ledger in benchmark_dividend_ledgers.values():
+            ledger.open_session(session_date)
         bought_this_session = {symbol: 0 for symbol in symbols}
         previous_closes = {
-            symbol: snapshot.assets[symbol].candles[index - 1].close
-            if index > 0
-            else None
+            symbol: single_engine._execution_reference_close(
+                snapshot.assets[symbol], index
+            )
             for symbol in symbols
         }
         # Each benchmark ticker retains its original equal-weight cash sleeve.
@@ -658,6 +723,10 @@ def _simulate_prefix(
                 benchmark_commission += Decimal(str(order.get("commission") or 0))
                 benchmark_stamp += Decimal(str(order.get("stampDuty") or 0))
                 benchmark_slippage += Decimal(str(order.get("slippageCost") or 0))
+                if symbol in benchmark_dividend_ledgers and benchmark_shares[symbol]:
+                    benchmark_dividend_ledgers[symbol].buy(
+                        session_date, benchmark_shares[symbol]
+                    )
 
         if pending is not None:
             open_prices = {
@@ -665,6 +734,12 @@ def _simulate_prefix(
             }
             pre_trade_equity = cash + sum(
                 (Decimal(shares[symbol]) * open_prices[symbol] for symbol in symbols),
+                Decimal(0),
+            ) + sum(
+                (
+                    single_engine._dividend_net_assets(ledger)
+                    for ledger in dividend_ledgers.values()
+                ),
                 Decimal(0),
             )
             raw_desired_shares = {
@@ -714,6 +789,16 @@ def _simulate_prefix(
                     trades.append(trade)
                     turnover += Decimal(str(trade["notional"]))
                     filled = int(trade["shares"])
+                    if symbol in dividend_ledgers:
+                        cash = single_engine._deduct_dividend_sale_tax(
+                            ledger=dividend_ledgers[symbol],
+                            day=session_date,
+                            shares=filled,
+                            cash=cash,
+                            symbol=symbol,
+                            order=order,
+                            trade=trade,
+                        )
                     average_basis = (
                         cost_basis[symbol] / prior_shares
                         if prior_shares
@@ -781,8 +866,17 @@ def _simulate_prefix(
                         Decimal(str(trade["notional"])) + commission + stamp
                     )
                     bought_this_session[symbol] += int(trade["shares"])
+                    if symbol in dividend_ledgers:
+                        dividend_ledgers[symbol].buy(
+                            session_date, int(trade["shares"])
+                        )
             orders.extend(session_orders)
             pending = None
+
+        for symbol, ledger in dividend_ledgers.items():
+            cash += ledger.close_session(session_date)
+        for symbol, ledger in benchmark_dividend_ledgers.items():
+            benchmark_cash[symbol] += ledger.close_session(session_date)
 
         latest_sellable_shares = {
             symbol: shares[symbol] - bought_this_session[symbol] for symbol in symbols
@@ -794,7 +888,20 @@ def _simulate_prefix(
         market_values = {
             symbol: Decimal(shares[symbol]) * close_values[symbol] for symbol in symbols
         }
-        equity_value = cash + sum(market_values.values(), Decimal(0))
+        dividend_receivable = _ledger_total(dividend_ledgers, "receivable")
+        dividend_tax_payable = _ledger_total(dividend_ledgers, "tax_payable")
+        benchmark_dividend_receivable = _ledger_total(
+            benchmark_dividend_ledgers, "receivable"
+        )
+        benchmark_dividend_tax_payable = _ledger_total(
+            benchmark_dividend_ledgers, "tax_payable"
+        )
+        equity_value = (
+            cash
+            + sum(market_values.values(), Decimal(0))
+            + dividend_receivable
+            - dividend_tax_payable
+        )
         benchmark_equity = sum(
             (
                 benchmark_cash[symbol]
@@ -802,9 +909,8 @@ def _simulate_prefix(
                 for symbol in symbols
             ),
             Decimal(0),
-        )
-        equity_rows.append(
-            {
+        ) + benchmark_dividend_receivable - benchmark_dividend_tax_payable
+        row = {
                 "date": session_date,
                 "equity": float(single_engine._money(equity_value)),
                 "benchmarkEquity": float(single_engine._money(benchmark_equity)),
@@ -823,7 +929,24 @@ def _simulate_prefix(
                 ),
                 "benchmarkPositions": dict(benchmark_shares),
             }
-        )
+        if dividend_ledgers or benchmark_dividend_ledgers:
+            row.update(
+                {
+                    "dividendReceivable": float(
+                        single_engine._money(dividend_receivable)
+                    ),
+                    "dividendTaxPayable": float(
+                        single_engine._money(dividend_tax_payable)
+                    ),
+                    "benchmarkDividendReceivable": float(
+                        single_engine._money(benchmark_dividend_receivable)
+                    ),
+                    "benchmarkDividendTaxPayable": float(
+                        single_engine._money(benchmark_dividend_tax_payable)
+                    ),
+                }
+            )
+        equity_rows.append(row)
         decision = decision_rows.get(session_date)
         if decision is not None:
             pending = decision
@@ -835,13 +958,20 @@ def _simulate_prefix(
         shares=shares,
         sellable_shares=latest_sellable_shares,
         latest_orders=orders,
+        dividend_ledgers=dividend_ledgers,
     )
     if not complete:
-        return {
+        result = {
             "currentPortfolio": current_portfolio,
             "orders": orders,
             "trades": trades,
         }
+        if dividend_ledgers:
+            result["dividendAccounting"] = _ledger_audits(dividend_ledgers)
+            result["benchmarkDividendAccounting"] = _ledger_audits(
+                benchmark_dividend_ledgers
+            )
+        return result
     if pending is not None:
         raise single_engine.BacktestDecisionError(
             "区间末尾存在没有下一交易日可撮合的AI决策"
@@ -858,6 +988,7 @@ def _simulate_prefix(
         commission_fees=float(total_commission),
         stamp_duty=float(total_stamp),
     )
+    _add_dividend_metrics(metrics, dividend_ledgers, benchmark_dividend_ledgers)
     metrics["benchmarkFees"] = float(benchmark_commission + benchmark_stamp)
     metrics["slippageCost"] = float(single_engine._money(total_slippage))
     metrics["benchmarkSlippageCost"] = float(single_engine._money(benchmark_slippage))
@@ -881,11 +1012,15 @@ def _simulate_prefix(
         "基准为每只股票预留等额固定现金份额；无成交的拒单日可在后续交易日重试，首笔完整或部分成交即固定买持，剩余现金保留。",
         "期末持仓按收盘价估值，不假设强制平仓；回测不代表真实订单可成交或未来收益。",
     ]
+    if dividend_ledgers:
+        notices.append(
+            "现金分红按冻结的官方实施公告记入：登记日收盘确认权益，除权日确认为应收，派息日收盘转为可用现金；卖出时按FIFO持有期评估红利税。分币结算规则尚未核实。"
+        )
     if max_participation_pct is not None:
         notices.append(
             f"启用日成交量参与率上限：每只股票每个交易日的单笔成交量不超过日线成交股数的{max_participation_pct}%，并按板块数量规则向下调整；日线容量仅为近似，不代表开盘真实可成交。策略未成交部分不跨日续挂；基准首笔有成交（含部分成交）即固定买持，剩余现金保留。"
         )
-    return {
+    result = {
         "status": "completed",
         "symbols": list(symbols),
         "metrics": metrics,
@@ -914,6 +1049,12 @@ def _simulate_prefix(
         },
         "notice": list(snapshot.notice) + notices,
     }
+    if dividend_ledgers:
+        result["dividendAccounting"] = _ledger_audits(dividend_ledgers)
+        result["benchmarkDividendAccounting"] = _ledger_audits(
+            benchmark_dividend_ledgers
+        )
+    return result
 
 
 def simulate(

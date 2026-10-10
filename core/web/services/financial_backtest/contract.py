@@ -118,6 +118,11 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     if data_source not in {"tencent", "eastmoney", "sina", "auto"}:
         raise BacktestInputError("dataSource必须是tencent、eastmoney、sina或auto")
     research_input = payload.get("researchInput", "price_only")
+    action_policy = payload.get("corporateActionPolicy", "block")
+    if action_policy not in {"block", "verified_cash_dividends"}:
+        raise BacktestInputError("corporateActionPolicy不是支持的公司行动策略")
+    if action_policy != "block":
+        params["corporateActionPolicy"] = action_policy
     if research_input not in {"price_only", "announcements", "financial_reports"}:
         raise BacktestInputError("researchInput必须是price_only、announcements或financial_reports")
     if len(model_id) > 160:
@@ -135,6 +140,7 @@ def normalize_preview_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         "modelId": model_id or None,
         "dataSource": data_source,
         "researchInput": research_input,
+        "corporateActionPolicy": action_policy,
     }
 
 

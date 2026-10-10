@@ -78,6 +78,22 @@ def _reason_codes(result: dict) -> set[str]:
     return {reason["code"] for reason in result["reasons"]}
 
 
+def test_cash_dividend_policy_is_bound_without_changing_legacy_fingerprint() -> None:
+    legacy = _record()
+    original = build_comparison_provenance(legacy)
+    candidate = deepcopy(legacy)
+    candidate["runId"] = "run-2"
+    candidate["params"]["corporateActionPolicy"] = "verified_cash_dividends"
+    candidate["comparisonProvenance"] = build_comparison_provenance(candidate)
+    assert (
+        candidate["comparisonProvenance"]["commonParamsHash"]
+        != original["commonParamsHash"]
+    )
+    comparison = compare_runs([legacy, candidate], "strategy")
+    assert comparison["status"] == "incompatible"
+    assert "corporate_action_policy_mismatch" in _reason_codes(comparison)
+    candidate["params"].pop("corporateActionPolicy")
+    assert build_comparison_provenance(candidate) == original
 def test_participation_limit_is_frozen_without_changing_legacy_fingerprint() -> None:
     legacy = _record()
     legacy_fingerprint = build_comparison_provenance(legacy)

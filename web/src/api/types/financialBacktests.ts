@@ -4,6 +4,7 @@ export type AIBacktestParams = {
   maxPositionPct: number;
   maxParticipationPct?: number | null;
   quantityRuleVersion?: "ashare_quantity_v2" | "legacy_100_v1" | null;
+  corporateActionPolicy?: "block" | "verified_cash_dividends" | null;
   decisionInterval: number;
   commissionBps: number;
   minimumCommission: number;
@@ -57,6 +58,14 @@ export type AIBacktestMetrics = {
   annualizedReturnPct?: number | null;
   sharpeRatio?: number | null;
   winRatePct?: number | null;
+  grossDividends?: number;
+  dividendTaxPaid?: number;
+  dividendTaxPayable?: number;
+  netDividendIncome?: number;
+  benchmarkGrossDividends?: number;
+  benchmarkDividendTaxPaid?: number;
+  benchmarkDividendTaxPayable?: number;
+  benchmarkNetDividendIncome?: number;
 };
 
 export type AIBacktestEvaluationWindow = {
@@ -307,6 +316,34 @@ export type AIBacktestResearchCoverage = {
   warnings: string[];
 };
 
+export type AIBacktestActionCoverage = {
+  status: "complete";
+  ruleVersion: "ashare_cash_dividend_v1";
+  artifactHash: string;
+  startDate: string;
+  endDate: string;
+  eventCount: number;
+};
+
+export type AIBacktestDividendAudit = {
+  schemaVersion: 1;
+  ruleVersion: "ashare_cash_dividend_v1";
+  artifactHash: string;
+  symbol: string;
+  settlementRounding: "unverified_decimal_exact";
+  receivable: string;
+  taxPayable: string;
+  taxTotal: string;
+  dividendsTotal: string;
+  events: Array<{
+    actionId: string; noticeId: string; publishedDate: string; title: string; sourceUrl: string; pdfSha256: string;
+    recordDate: string; exDate: string; paymentDate: string; cashPerShare: string;
+    recordCaptured: boolean; ledgerApplied: boolean; entitledShares: number; grossAmount: string; exRecognized: boolean;
+    paymentComplete: boolean; taxPayable: string; taxTotal: string; taxPaid: string;
+  }>;
+  lots: Array<{ acquiredDate: string; shares: number; dividendRights: Record<string, number> }>;
+};
+
 export type AIBacktestPreview = {
   agentId: string;
   previewId: string;
@@ -334,6 +371,7 @@ export type AIBacktestPreview = {
   researchCoverage?: AIBacktestResearchCoverage | null;
   modelConfigHash?: string;
   actionsStatus: string;
+  corporateActionCoverage?: Record<string, AIBacktestActionCoverage> | null;
   warnings: string[];
   canStart: boolean;
   blockReason: string | null;
@@ -384,6 +422,9 @@ export type AIBacktestRun = {
   }>;
   decisions: AIBacktestDecision[];
   metrics: AIBacktestMetrics | null;
+  corporateActionCoverage?: Record<string, AIBacktestActionCoverage> | null;
+  dividendAccounting?: AIBacktestDividendAudit | Record<string, AIBacktestDividendAudit> | null;
+  benchmarkDividendAccounting?: AIBacktestDividendAudit | Record<string, AIBacktestDividendAudit> | null;
   evaluation?: AIBacktestEvaluation | null;
   robustness?: AIBacktestRobustness | null;
   advancedEvaluation?: AIBacktestAdvancedEvaluation | null;
@@ -394,6 +435,10 @@ export type AIBacktestRun = {
     cash?: number;
     units?: number;
     positions?: Record<string, number>;
+    dividendReceivable?: number;
+    dividendTaxPayable?: number;
+    benchmarkDividendReceivable?: number;
+    benchmarkDividendTaxPayable?: number;
   }>;
   trades: AIBacktestTrade[];
   orders: AIBacktestOrder[];
@@ -405,6 +450,16 @@ export type AIBacktestRun = {
   updatedAt: string;
   completedAt: string | null;
   terminalReason: string | null;
+  executionFailure?: {
+    failure: "insufficient_cash_for_dividend_tax";
+    date: string;
+    symbol: string;
+    availableCash: string;
+    dividendTaxDue: string;
+    projectedCashAfterTax: string;
+    order: AIBacktestOrder;
+    trade: AIBacktestTrade;
+  } | null;
   warnings?: string[];
   notice?: string;
   uncertainDecisionDate?: string | null;

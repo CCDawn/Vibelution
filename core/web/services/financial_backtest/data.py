@@ -2,8 +2,9 @@
 
 Tencent's CN ``day`` series contains unadjusted prices. Its qfq series is used
 only as an integrity signal: material changes in the qfq/raw factor inside the
-requested interval indicate a corporate action that this executor cannot model
-as cash and share transformations, so the run is blocked.
+requested interval block legacy price-only runs. Opt-in cash-dividend runs
+require a complete official-notice artifact and matching amount/date proof;
+unsupported or unresolved actions still block execution.
 """
 
 from __future__ import annotations
@@ -125,10 +126,11 @@ class BacktestSnapshot:
     actions_status: str
     action_dates: tuple[str, ...]
     notice: tuple[str, ...]
+    corporate_actions: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a detached JSON-safe projection for job persistence and review."""
-        return {
+        result = {
             "symbol": self.symbol,
             "startDate": self.start_date,
             "endDate": self.end_date,
@@ -144,6 +146,10 @@ class BacktestSnapshot:
             "notice": list(self.notice),
             "adjustment": "raw",
         }
+        if self.corporate_actions is not None:
+            from copy import deepcopy
+            result["corporateActions"] = deepcopy(dict(self.corporate_actions))
+        return result
 
 
 def _parse_date(value: Any, label: str) -> date:
@@ -297,6 +303,34 @@ def _calendar_window(rows: list[list[str]], year: int) -> tuple[str, ...]:
     return dates
 
 
+def _transformation_intervals(
+    raw_prices: Mapping[str, str], qfq_prices: Mapping[str, str],
+) -> dict[str, tuple[Decimal, Decimal]]:
+    additive_low, additive_high = Decimal("-Infinity"), Decimal("Infinity")
+    factor_low, factor_high = Decimal("-Infinity"), Decimal("Infinity")
+    for field in ("open", "high", "low", "close"):
+        try:
+            raw_value = Decimal(raw_prices[field])
+            qfq_text = qfq_prices[field]
+            qfq_value = Decimal(qfq_text)
+            if not raw_value.is_finite() or not qfq_value.is_finite() or raw_value <= 0 or qfq_value <= 0:
+                return {}
+            decimals = len(qfq_text.partition(".")[2]) if "." in qfq_text else 0
+            rounding = Decimal("0.5") * (Decimal(10) ** -decimals)
+            additive_low = max(additive_low, qfq_value - raw_value - rounding)
+            additive_high = min(additive_high, qfq_value - raw_value + rounding)
+            factor_low = max(factor_low, (qfq_value - rounding) / raw_value)
+            factor_high = min(factor_high, (qfq_value + rounding) / raw_value)
+        except (KeyError, InvalidOperation, TypeError, AttributeError):
+            return {}
+    result = {}
+    if additive_low <= additive_high:
+        result["additive"] = (additive_low, additive_high)
+    if factor_low <= factor_high:
+        result["multiplicative"] = (factor_low, factor_high)
+    return result
+
+
 def _action_dates(
     raw: Mapping[str, Mapping[str, Any]],
     qfq: Mapping[str, Mapping[str, Any]],
@@ -310,35 +344,9 @@ def _action_dates(
         qfq_prices = qfq[candle_date].get("_providerPrices")
         if not isinstance(raw_prices, Mapping) or not isinstance(qfq_prices, Mapping):
             continue
-        additive_low = Decimal("-Infinity")
-        additive_high = Decimal("Infinity")
-        factor_low = Decimal("-Infinity")
-        factor_high = Decimal("Infinity")
-        for field in ("open", "high", "low", "close"):
-            try:
-                raw_value = Decimal(raw_prices[field])
-                qfq_text = qfq_prices[field]
-                qfq_value = Decimal(qfq_text)
-            except (KeyError, InvalidOperation, TypeError):
-                additive_low = Decimal("Infinity")
-                factor_low = Decimal("Infinity")
-                break
-            decimals = len(qfq_text.partition(".")[2]) if "." in qfq_text else 0
-            rounding = Decimal("0.5") * (Decimal(10) ** -decimals)
-            additive_low = max(additive_low, qfq_value - raw_value - rounding)
-            additive_high = min(additive_high, qfq_value - raw_value + rounding)
-            if raw_value <= 0:
-                factor_low = Decimal("Infinity")
-                break
-            factor_low = max(factor_low, (qfq_value - rounding) / raw_value)
-            factor_high = min(factor_high, (qfq_value + rounding) / raw_value)
         # Rounded prices can satisfy both hypotheses on a quiet session. Keep
         # both: choosing additive first can invent an action on the next bar.
-        hypotheses: dict[str, tuple[Decimal, Decimal]] = {}
-        if additive_low <= additive_high:
-            hypotheses["additive"] = (additive_low, additive_high)
-        if factor_low <= factor_high:
-            hypotheses["multiplicative"] = (factor_low, factor_high)
+        hypotheses = _transformation_intervals(raw_prices, qfq_prices)
         if hypotheses:
             transformations.append((candle_date, hypotheses))
         else:
@@ -380,7 +388,10 @@ def _boundary(rows: list[dict[str, Any]], requested: date, side: str) -> dict[st
     return row
 
 
-def _stable_hash(rows: tuple[Candle, ...], symbol: str, start: str, end: str) -> str:
+def _stable_hash(
+    rows: tuple[Candle, ...], symbol: str, start: str, end: str,
+    corporate_actions: Mapping[str, Any] | None = None,
+) -> str:
     payload = {
         "symbol": symbol,
         "adjustment": "raw",
@@ -388,6 +399,8 @@ def _stable_hash(rows: tuple[Candle, ...], symbol: str, start: str, end: str) ->
         "endDate": end,
         "candles": [asdict(row) for row in rows],
     }
+    if corporate_actions is not None:
+        payload["corporateActions"] = dict(corporate_actions)
     canonical = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
@@ -398,8 +411,12 @@ def validate_snapshot(snapshot: BacktestSnapshot) -> None:
     """Fail closed if a frozen snapshot is incomplete, corrupt, or out of order."""
     if not isinstance(snapshot, BacktestSnapshot):
         raise BacktestDataError("回测数据快照类型无效")
-    if snapshot.actions_status != "factor_check_passed" or snapshot.action_dates:
-        raise BacktestDataError("回测快照公司行动状态未通过")
+    if snapshot.corporate_actions is None:
+        if snapshot.actions_status != "factor_check_passed" or snapshot.action_dates:
+            raise BacktestDataError("回测快照公司行动状态未通过")
+    else:
+        from .cash_action_snapshot import validate_action_snapshot
+        validate_action_snapshot(snapshot)
     if not isinstance(snapshot.coverage, BacktestCoverage):
         raise BacktestDataError("回测快照覆盖信息无效")
     coverage = snapshot.coverage
@@ -502,7 +519,7 @@ def validate_snapshot(snapshot: BacktestSnapshot) -> None:
     ):
         raise BacktestDataError("回测快照覆盖边界与K线不一致")
 
-    expected_hash = _stable_hash(all_rows, snapshot.symbol, snapshot.start_date, snapshot.end_date)
+    expected_hash = _stable_hash(all_rows, snapshot.symbol, snapshot.start_date, snapshot.end_date, snapshot.corporate_actions)
     if snapshot.data_hash != expected_hash:
         raise BacktestDataError("回测快照行情摘要校验失败")
 
@@ -688,7 +705,17 @@ def _prepare_data(
     action_dates = _action_dates(
         raw_by_date, qfq_by_date, actual_start, actual_end
     )
-    if action_dates:
+    policy = payload.get("corporateActionPolicy", "block")
+    if policy not in {"block", "verified_cash_dividends"}:
+        raise BacktestInputError("corporateActionPolicy不是支持的公司行动策略")
+    corporate_actions = None
+    if policy == "verified_cash_dividends":
+        from .cash_action_snapshot import prepare_action_snapshot
+        corporate_actions = prepare_action_snapshot(
+            symbol, actual_start.isoformat(), actual_end.isoformat(),
+            raw_by_date, qfq_by_date, action_dates,
+        )
+    elif action_dates:
         raise CorporateActionUnsupported(action_dates)
 
     def make_candle(candle_date: str) -> Candle:
@@ -730,6 +757,11 @@ def _prepare_data(
         f"逐日覆盖已与{source_name}上证指数 raw 日K日期比对；该指数日历不是交易所官方停牌/复牌审计源。",
         "qfq/raw OHLC量化区间检查复权变换是否变化；此行情接口未提供完整公司行动清单，细小或复杂行动仍可能无法识别。",
     )
+    if corporate_actions is not None:
+        notice += (
+            "现金分红使用冻结官方实施公告和raw/qfq价差双重核验；登记日收盘确定权益，到账日收盘后才增加可用现金。",
+            "红利税按FIFO及自然月/年持有期限记账；送转、配股和无法匹配的公司行动仍阻断。公开公告查询覆盖有界，不能替代中国结算账户记录。",
+        )
     snapshot = BacktestSnapshot(
         symbol=symbol,
         start_date=actual_start_text,
@@ -744,11 +776,12 @@ def _prepare_data(
             + urlencode({"symbol": symbol, "scale": "240", "ma": "no", "datalen": "1023"})
         ),
         fetched_at=datetime.now(_BEIJING).isoformat(timespec="seconds"),
-        data_hash=_stable_hash(all_snapshot_rows, symbol, actual_start_text, actual_end_text),
+        data_hash=_stable_hash(all_snapshot_rows, symbol, actual_start_text, actual_end_text, corporate_actions),
         coverage=coverage,
-        actions_status="factor_check_passed",
-        action_dates=(),
+        actions_status="verified_cash_dividends" if corporate_actions is not None else "factor_check_passed",
+        action_dates=action_dates if corporate_actions is not None else (),
         notice=notice,
+        corporate_actions=corporate_actions,
     )
     validate_snapshot(snapshot)
     return snapshot
