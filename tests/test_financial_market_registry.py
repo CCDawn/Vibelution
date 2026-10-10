@@ -45,7 +45,9 @@ def test_market_wrapper_schema_dispatch_and_unique_registration(monkeypatch):
     wrapper = registered_tool()
     schema = wrapper.args_schema.model_json_schema()
     assert schema["required"] == ["ticker"]
-    assert set(schema["properties"]) == {"ticker", "period", "limit"}
+    assert set(schema["properties"]) == {"ticker", "period", "limit", "include_sector"}
+    assert schema["properties"]["include_sector"]["type"] == "boolean"
+    assert schema["properties"]["include_sector"]["default"] is False
     assert schema["properties"]["period"]["default"] == "day"
     assert schema["properties"]["period"]["enum"] == ["day", "week", "month"]
     assert schema["properties"]["limit"]["default"] == 20
