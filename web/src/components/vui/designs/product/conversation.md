@@ -387,9 +387,9 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
 | 消息流 | 左对齐连续文本；同说话人合并头像/名字 | 不要每条 `vuiOpaqueRowClass` |
-| 长文 | `line-clamp` 约 8 行 +「展开全文」 | 禁止用 `hidden` 整段藏正文 |
+| 长文 | `line-clamp` 约 5 行 +「展开全文」 | 禁止用 `hidden` 整段藏正文 |
 | 内部讨论 | 操作员时间线默认可读 | `collapsed_by_default` 不表示房间里看不见 |
-| 纪要 | 轮次发丝分割线 + 末尾一块玻璃面板 | 唯一允许的卡片 |
+| 结论 | 轮次末尾展示实际结论；纯发言计数进入「轮次结果」disclosure | 不把送达统计当作结论 |
 | 并行发言进度 | 每个未落位成员各占一行 | 仅 `running` 显示“正在输入”；`settled` 显示“已完成，等待前序发言”且不提前展示正文 |
 | 历史翻页 | 时间线 cursor/nextCursor/hasMore 向前补页；页预算耗尽时尾部出「加载更多记录」 | 替代旧的 `messagesTruncated` 语义，不回退 detail 全量 |
 
@@ -402,6 +402,9 @@ composer 图片附件的上传生命周期与失败恢复：每个 chip 携带 `
 - 组内紧、组间松；失败/待发送才保留描边。
 - 头像与名字同一行（flex 横排，正文缩进对齐名字）；过程默认收起。
 - 超长正文截断可展开。
+- 历史轮次的发言默认可读，不再整轮隐藏；标题只保留轮次和状态，模式与用途按需查看。
+- 群聊标题、当前状态和成员入口组成简洁顶栏；成员 drawer 使用真实房间成员，团队入口与群聊管理仍走原有操作。
+- 议题使用 `VTextarea`；Enter 换行，Ctrl/Meta + Enter 启动一轮，输入法合成期间不发送。运行中只保留停止入口，`VConfirmDialog` 确认后才执行原有停止操作。
 - 正式消息始终按 `speakerOrder` 落位；成员状态来自同一群聊 SSE 的 `speakerProgress` 投影，不另开连接、不充当第二套 transcript。transcript 权威归 timeline 只读投影：SSE `chat_room_detail` 快照只触发 cursor 增量对账（失效/重拉 timeline），不再整块覆盖消息；时间线为空的老房间回退用 detail rounds 渲染（兼容模式，旧消息绝不消失），speaker_delta/state 通道原样驱动 typing/streaming 气泡。
 - 停滞只按该成员的状态更新时间与最近 delta 判断，不用整个轮次的更新时间替代成员活性。
 

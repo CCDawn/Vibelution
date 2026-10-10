@@ -868,6 +868,28 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       onNodePointerUp: finishNodeDrag,
       onNodePointerCancel: finishNodeDrag,
       canvasAuthoring,
+      teamHome: !researchWorkflowTeamSelected ? {
+        lang,
+        selectedTeam,
+        linkedChatRoomId: linkedChatRoomId || "",
+        linkedRoomDetail,
+        linkedRoomBusy,
+        linkedChatRoomPending: linkedChatRoomQuery.isPending,
+        linkedChatRoomError: linkedChatRoomQuery.error instanceof Error ? linkedChatRoomQuery.error : null,
+        latestTeamRound,
+        teamTaskTopic,
+        onTeamTaskTopicChange: setTeamTaskTopic,
+        canStartTeamRound,
+        startRoundPending: selectedTeamStartRoundPending,
+        startRoundError: selectedTeamStartRoundError,
+        onStartTeamRound: (payload) => startTeamRoundMutation.mutate(payload),
+        stopRoundPending: selectedTeamStopRoundPending,
+        stopRoundError: selectedTeamStopRoundError,
+        onStopTeamRound: (payload) => stopTeamRoundMutation.mutate(payload),
+        activeTeamMemberCount,
+        teamSyncPending: selectedTeamSyncPending,
+        onSyncRoom: () => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId),
+      } : undefined,
     });
   }
 

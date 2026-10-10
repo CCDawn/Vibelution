@@ -194,6 +194,7 @@
 | `TeamCandidateCard` | [product/team-management.md](./product/team-management.md#teamcandidatecard) |
 | `TeamCanvasNodeCard` | [product/team-management.md](./product/team-management.md#teamcanvasnodecard) |
 | `TeamSettingsDialog` | [product/team-management.md](./product/team-management.md#teamsettingsdialog) |
+| `TeamHomeSurface` | [product/team-management.md](./product/team-management.md#teamhomesurface) |
 
 ## 会话用量
 

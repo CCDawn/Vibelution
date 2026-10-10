@@ -148,6 +148,9 @@ import { VDialog } from "@/components/vui";
 | title / children | 标题与正文 | 正文内部可滚动 |
 | `data-vui` | 定位锚点，透传到 Content | 缺省 `dialog-content`；挂载面（如命令面板、会话搜索）传各自锚点覆盖，e2e 用 `data-vui` 定位，不另设第二套定位通道 |
 
+### 视觉与状态
+- 居中由 Content 的 `left/top` 与 Tailwind `translate` 定位；CSS 动效只过渡透明度和缩放，避免在 keyframes 写入 `translate()` 覆盖定位。抽屉 recipe 保留 `!transform-none`。
+
 ### 非职责
 - 不做抽屉；不做动作菜单（`VDropdownMenu`）。
 

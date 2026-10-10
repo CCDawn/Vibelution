@@ -15,6 +15,7 @@ export type TeamsCanvasComposerProps = {
   resize: any;
   ariaLabel: string;
   title: string;
+  responsiveRailLabel?: string;
   rail: ReactNode;
   toolbar: ReactNode;
   canvas: ReactNode;
@@ -39,6 +40,7 @@ export function TeamsCanvasComposer({
   resize,
   ariaLabel,
   title,
+  responsiveRailLabel = "Team list",
   rail,
   toolbar,
   canvas,
@@ -77,6 +79,11 @@ export function TeamsCanvasComposer({
       shellMode="canvas"
       ariaLabel={ariaLabel}
       title={title}
+      responsive={{
+        enabled: true,
+        rail: { label: responsiveRailLabel },
+        inspector: { label: inspectorTitle },
+      }}
       rail={rail}
       toolbar={toolbar}
       canvasClassName="!border-0 !rounded-none"

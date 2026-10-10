@@ -4250,6 +4250,9 @@ export function ChatCodingRouteWorkbench() {
               activeGroupRoom={activeGroupRoom}
               activeGroupRoomId={activeGroupRoomId}
               availableGroupParticipantCount={availableGroupParticipantCount}
+              visibleGroupParticipants={availableGroupParticipants}
+              onOpenGroupTeam={activeGroupTeam ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId)) : undefined}
+              onManageGroupRoom={() => setGroupManageDialogOpen(true)}
               activeGroupParticipantById={activeGroupParticipantById}
               projectBusTimeline={projectBusTimeline}
               projectBusEvents={projectBusEvents}

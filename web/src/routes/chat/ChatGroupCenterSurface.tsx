@@ -1,4 +1,4 @@
-import { BellRing, Square, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowUp, BellRing, ChevronDown, ChevronRight, Square, UsersRound } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -12,13 +12,13 @@ import type {
   ProjectAgentBusEvent,
   ProjectAgentBusTimeline,
 } from "../../api/types";
-import { VButton, VContextualHint, VNativeInput, VStateRow } from "../../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDialog, VNativeInput, VStateRow, VTextarea } from "../../components/vui";
 import type { ChatMentionTarget } from "../chatMentionTokens";
 import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
-import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy } from "./chatRoutePresentation";
+import { chatRoomModeLabel, chatRoomPurposeLabel, groupConsecutiveBy, isAvailableGroupParticipant } from "./chatRoutePresentation";
 import type { GroupSpeakerProgressMap, GroupSpeakerStreamEntry, GroupSpeakerStreamMap } from "./useGroupRoomStream";
 import type {
   GroupRoomTimelineProjection,
@@ -35,6 +35,13 @@ import { roundsToTimelineItems } from "./useGroupRoomTimeline";
 // snapshots arrive.
 const GROUP_TYPING_STALE_AFTER_MS = 150_000;
 const GROUP_TYPING_STALE_TICK_MS = 15_000;
+
+// The room service's delivery counters are useful diagnostics, but are not
+// a discussion conclusion. Keep them available behind the round result.
+function isDeliverySummary(summary: string) {
+  return /^本轮群聊完成：\d+\/\d+ 位参与者成功发言/.test(summary.trim())
+    || /^Chat room round finished: \d+\/\d+ participants responded successfully;/.test(summary.trim());
+}
 
 function useStalenessNow(enabled: boolean): number {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -65,6 +72,7 @@ export type ChatGroupCenterSurfaceProps = {
   activeGroupRoom: ChatRoomDetail | null | undefined;
   activeGroupRoomId: string;
   availableGroupParticipantCount: number;
+  visibleGroupParticipants?: readonly ChatRoomParticipant[];
   activeGroupParticipantById: Map<string, ChatRoomParticipant>;
   projectBusTimeline: ProjectAgentBusTimeline | null | undefined;
   projectBusEvents: ProjectAgentBusEvent[];
@@ -118,6 +126,8 @@ export type ChatGroupCenterSurfaceProps = {
   onStopGroupRound: () => void;
   onOpenMentionTarget: (target: ChatMentionTarget) => void;
   onToggleExpandedGroupMessage: (messageId: string) => void;
+  onOpenGroupTeam?: () => void;
+  onManageGroupRoom?: () => void;
 };
 
 function GroupMemberChangeRow({
@@ -218,10 +228,9 @@ function GroupRoundsTimeline({
   onToggleExpandedGroupMessage: (messageId: string) => void;
 }) {
   const transcriptPrefix = useId();
-  const [expandedRounds, setExpandedRounds] = useState<Record<string, boolean>>({});
+  const [expandedResults, setExpandedResults] = useState<Record<string, boolean>>({});
   const roundElements = useRef(new Map<string, HTMLElement>());
   const revealFailedMessage = (roundId: string) => {
-    setExpandedRounds((current) => ({ ...current, [roundId]: true }));
     requestAnimationFrame(() => {
       const message = roundElements.current.get(roundId)?.querySelector<HTMLElement>('[data-parse-invalid="true"]');
       message?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -277,8 +286,9 @@ function GroupRoundsTimeline({
           .filter((previous) => previous.kind === "round")
           .length;
         const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
-        const expanded = roundRunning || (expandedRounds[round.roundId] ?? roundIndex === viewRounds.length - 1);
         const transcriptId = `${transcriptPrefix}-${round.roundId}`;
+        const deliverySummary = isDeliverySummary(round.summary || "");
+        const resultOpen = expandedResults[round.roundId] ?? false;
         const challengeMessages = (round.messages ?? []).filter(
           (message) => message.messagePayload?.kind === "challenge_meeting_message",
         );
@@ -300,12 +310,8 @@ function GroupRoundsTimeline({
             else roundElements.current.delete(round.roundId);
           }}>
             <div className={styles.groupRoundDivider}>
-              <span>
+              <span title={`${chatRoomModeLabel({ id: round.mode, label: round.mode, status: "active" }, lang)} · ${chatRoomPurposeLabel({ id: round.purpose ?? purposeFallback, label: round.purpose ?? purposeFallback }, lang)}`}>
                 {lang === "zh" ? `第 ${roundIndex + 1} 轮` : `Round ${roundIndex + 1}`}
-                {" · "}
-                {chatRoomModeLabel({ id: round.mode, label: round.mode, status: "active" }, lang)}
-                {" · "}
-                {chatRoomPurposeLabel({ id: round.purpose ?? purposeFallback, label: round.purpose ?? purposeFallback }, lang)}
                 {" · "}
                 {round.status === "completed" ? (lang === "zh" ? "发言已结束" : "Speaking finished") : statusLabel(round.status)}
               </span>
@@ -316,22 +322,12 @@ function GroupRoundsTimeline({
                 {lang === "zh" ? `本轮结果待处理：${parsedCount}/${challengeMessages.length} 条科研发言解析成功，${invalidCount} 条解析失败。` : `Round needs attention: ${parsedCount}/${challengeMessages.length} research messages parsed, ${invalidCount} failed.`}
               </VStateRow>
             ) : null}
-            {round.summary && !roundRunning && invalidCount === 0 ? (
-              <article className={styles.groupRoundSummary}>
-                <strong>{lang === "zh" ? "本轮纪要" : "Round digest"}</strong>
-                <p>{round.summary}</p>
-              </article>
-            ) : null}
-            <div className={styles.groupRoundActions}>
-              {!roundRunning ? <VButton variant="secondary" aria-expanded={expanded} aria-controls={transcriptId}
-                onClick={() => setExpandedRounds((current) => ({ ...current, [round.roundId]: !expanded }))}>
-                {expanded ? (lang === "zh" ? "收起发言" : "Hide messages") : (lang === "zh" ? `展开 ${(round.messages ?? []).length} 条发言` : `Show ${(round.messages ?? []).length} messages`)}
-              </VButton> : null}
-              {invalidCount > 0 ? <VButton variant="secondary" onClick={() => revealFailedMessage(round.roundId)}>
+            {invalidCount > 0 ? <div className={styles.groupRoundActions}>
+              <VButton variant="secondary" onClick={() => revealFailedMessage(round.roundId)}>
                 {lang === "zh" ? "定位解析失败发言" : "Find failed message"}
-              </VButton> : null}
-            </div>
-            <div id={transcriptId} hidden={!expanded}>
+              </VButton>
+            </div> : null}
+            <div id={transcriptId}>
             <article className={styles.groupTopicMessage}>
               <div className={styles.groupTopicBubble}>
                 <div className={styles.groupStreamIdentity} data-testid="group-stream-topic-identity">
@@ -404,7 +400,6 @@ function GroupRoundsTimeline({
                           </div>
                         ) : null}
                         <div className={styles.groupStreamCopy}>
-                          {showIdentity ? null : <time className={styles.groupBubbleMeta}>{messageTime}</time>}
                           <ChatGroupMessageBody
                             message={message}
                             identityName={speakerIdentity.name}
@@ -538,6 +533,21 @@ function GroupRoundsTimeline({
               }) : null}
             </div>
             </div>
+            {round.summary && !roundRunning && invalidCount === 0 ? deliverySummary ? (
+              <div className={styles.groupRoundResult}>
+                <VButton variant="ghost" className={styles.groupResultToggle} aria-expanded={resultOpen} aria-controls={`${transcriptId}-result`}
+                  icon={resultOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  onClick={() => setExpandedResults((current) => ({ ...current, [round.roundId]: !resultOpen }))}>
+                  {lang === "zh" ? "轮次结果" : "Round result"}
+                </VButton>
+                {resultOpen ? <p id={`${transcriptId}-result`} className={styles.groupResultCopy}>{round.summary}</p> : null}
+              </div>
+            ) : (
+              <article className={styles.groupRoundSummary}>
+                <strong>{lang === "zh" ? "本轮结论" : "Round conclusion"}</strong>
+                <p>{round.summary}</p>
+              </article>
+            ) : null}
           </section>
         );
       })}
@@ -556,6 +566,7 @@ export function ChatGroupCenterSurface({
   activeGroupRoom,
   activeGroupRoomId,
   availableGroupParticipantCount,
+  visibleGroupParticipants,
   activeGroupParticipantById,
   projectBusTimeline,
   projectBusEvents,
@@ -598,7 +609,16 @@ export function ChatGroupCenterSurface({
   onStopGroupRound,
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
+  onOpenGroupTeam,
+  onManageGroupRoom,
 }: ChatGroupCenterSurfaceProps) {
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [confirmStopOpen, setConfirmStopOpen] = useState(false);
+  const membersTriggerRef = useRef<HTMLElement | null>(null);
+  const membersManagementHandoffRef = useRef(false);
+  const stopTriggerRef = useRef<HTMLElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => { setMembersOpen(false); setConfirmStopOpen(false); }, [activeGroupRoomId]);
   // Single render path: the timeline projection when present (message-list
   // authority, member-change system rows, cursor paging), otherwise the room
   // detail rounds rendered through the same view model (legacy hand-test path).
@@ -616,14 +636,16 @@ export function ChatGroupCenterSurface({
     ? `${chatRoomModeLabel({ id: activeGroupRoom.mode ?? "round_robin", label: "", status: "active" }, lang)} · ${chatRoomPurposeLabel({ id: activeGroupRoom.purpose ?? "discussion", label: "" }, lang)}`
     : (lang === "zh" ? "群聊状态" : "Group status");
   const groupRoomMeta = activeGroupRoom
-    ? `${availableGroupParticipantCount} ${lang === "zh" ? "位可用助手" : "available agents"} · ${statusLabel(activeGroupRoom.status ?? "ready")}`
+    ? (groupRoundStopping ? (lang === "zh" ? "停止中" : "Stopping") : groupRoundActive ? (lang === "zh" ? "讨论中" : "Running") : statusLabel(activeGroupRoom.status ?? "ready"))
     : groupRoomRefreshError
       ? (lang === "zh" ? "读取失败" : "Load failed")
       : (lang === "zh" ? "尚未关联群聊" : "No room linked");
   const lastRound = rounds[rounds.length - 1];
   const latestInvalidCount = (lastRound?.messages ?? []).filter((message) => message.messagePayload?.kind === "challenge_meeting_message" && message.messagePayload.audit?.parseStatus === "invalid").length;
   const lastMessageKey = `${lastRound?.roundId ?? ""}:${(lastRound?.messages ?? []).length}:${rounds.length}`;
+  const streamedLength = Object.values(groupSpeakerStreams ?? {}).reduce((sum, speakers) => sum + Object.values(speakers).reduce((length, speaker) => length + speaker.content.length, 0), 0);
   const groupTimelineRef = useRef<HTMLDivElement | null>(null);
+  const groupTimelineFollowingRef = useRef(true);
   const groupTimelineOpenedRoomIdRef = useRef<string | null>(null);
   const projectBusInitialLoading = projectBusRefreshing && !projectBusTimeline;
 
@@ -637,18 +659,20 @@ export function ChatGroupCenterSurface({
     const element = groupTimelineRef.current;
     if (!element) return;
     const firstOpen = groupTimelineOpenedRoomIdRef.current !== activeGroupRoomId;
-    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 180;
     const latestRound = element.querySelectorAll<HTMLElement>("[data-group-round-id]").item(rounds.length - 1);
     if (firstOpen && lastRound?.status !== "running" && latestRound) {
       element.scrollTop += latestRound.getBoundingClientRect().top - element.getBoundingClientRect().top;
-    } else if (firstOpen || nearBottom) {
+      groupTimelineFollowingRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 180;
+    } else if (firstOpen || groupTimelineFollowingRef.current) {
       element.scrollTop = element.scrollHeight;
+      groupTimelineFollowingRef.current = true;
     }
     groupTimelineOpenedRoomIdRef.current = activeGroupRoomId;
   }, [
     activeGroupRoomId,
     groupRoomInitialLoading,
     lastMessageKey,
+    streamedLength,
     lastRound?.status,
     rounds.length,
     projectBusActive,
@@ -839,12 +863,18 @@ export function ChatGroupCenterSurface({
       <ChatMessageChromeHeader
         className={styles.groupConversationHeader}
         density="surface"
-        eyebrow={<p>{groupRoomEyebrow}</p>}
+        eyebrow={<p>{lang === "zh" ? "团队讨论" : "Team discussion"}</p>}
         title={<h2>{groupRoomTitle}</h2>}
         meta={<span>{latestInvalidCount > 0 && lastRound?.status !== "running"
           ? (lang === "zh" ? `最近一轮有 ${latestInvalidCount} 条科研发言解析失败 · 结果待处理` : `Latest round: ${latestInvalidCount} research messages failed parsing · results need attention`)
           : groupRoomMeta}</span>}
         trailing={(
+          <div className={styles.groupHeaderActions}>
+          {onOpenGroupTeam ? <VButton variant="ghost" isIconOnly aria-label={lang === "zh" ? "返回团队工作台" : "Back to team"} icon={<ArrowLeft size={17} />} onClick={onOpenGroupTeam} /> : null}
+          <VButton variant="ghost" icon={<UsersRound size={16} />} isDisabled={!activeGroupRoom}
+            onClick={(event) => { membersManagementHandoffRef.current = false; membersTriggerRef.current = event.currentTarget; setMembersOpen(true); }}>
+            {lang === "zh" ? "成员" : "Members"}
+          </VButton>
           <VButton
             type="button"
             className={styles.groupRefreshButton}
@@ -853,17 +883,13 @@ export function ChatGroupCenterSurface({
           >
             {lang === "zh" ? "刷新" : "Refresh"}
           </VButton>
+          </div>
         )}
       />
-      {groupRoomRefreshError ? (
-        <div className={styles.inlineNotice} role="alert">{groupRoomRefreshError}</div>
-      ) : null}
-      {groupRoundStopping ? (
-        <div className={styles.inlineNotice} role="status" aria-live="polite">
-          {lang === "zh" ? "正在停止，等待收尾。请点击刷新查看最新状态。" : "Stopping; waiting for finalization. Refresh to check the latest status."}
-        </div>
-      ) : null}
-      <div ref={groupTimelineRef} className={styles.groupMessageTimeline} aria-live="polite">
+      <div ref={groupTimelineRef} className={styles.groupMessageTimeline} role="log" aria-label={lang === "zh" ? "团队发言" : "Team messages"} aria-live="polite" aria-relevant="additions text"
+        onScroll={(event) => { const element = event.currentTarget; groupTimelineFollowingRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 180; }}>
+        {groupRoomRefreshError ? <div className={styles.inlineNotice} role="alert">{groupRoomRefreshError}</div> : null}
+        {groupRoundStopping ? <p className={styles.groupTypingStaleNote} role="status">{lang === "zh" ? "正在停止，已有发言会保留。" : "Stopping. Existing messages will be kept."}</p> : null}
         {timelineItems.length ? (
           <>
             <GroupRoundsTimeline
@@ -913,21 +939,35 @@ export function ChatGroupCenterSurface({
           </div>
         )}
       </div>
-      <div className={styles.groupComposerBar}>
-        {composerLeadingControl}
-        <VNativeInput
+      <div className={styles.groupTopicComposer}>
+        {groupRoomActionError ? <div className={styles.inlineNotice} role="alert">{groupRoomActionError}</div> : null}
+        <div className={styles.groupTopicComposerField}>
+        <VTextarea
+          ref={composerRef}
           value={groupTopicDraft}
           onChange={(event) => onGroupTopicDraftChange(event.target.value)}
           disabled={startGroupRoundPending || groupRoundStopping}
+          rows={2}
+          className={styles.groupTopicInput}
+          aria-label={lang === "zh" ? "下一轮议题" : "Next round topic"}
           placeholder={lang === "zh" ? "输入下一轮群聊议题" : "Topic for the next group round"}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing
+              && groupTopicDraft.trim() && !groupRoundActive && !groupRoundStopping && !startGroupRoundPending && activeGroupRoom) {
               event.preventDefault();
               onStartGroupRound();
             }
           }}
         />
-        <VButton
+        <div className={styles.groupTopicComposerActions}>
+        <div>{composerLeadingControl}</div>
+        {groupRoundActive && !groupRoundStopping ? (
+          <VButton type="button" variant="secondary" className={styles.groupStopButton}
+            onClick={(event) => { stopTriggerRef.current = event.currentTarget; setConfirmStopOpen(true); }}
+            isDisabled={groupStopDisabled} icon={<Square size={14} />}>
+            {stopGroupRoundPending ? (lang === "zh" ? "停止中" : "Stopping") : (lang === "zh" ? "停止本轮" : "Stop round")}
+          </VButton>
+        ) : <VButton
           type="button"
           onClick={onStartGroupRound}
           isDisabled={
@@ -937,27 +977,40 @@ export function ChatGroupCenterSurface({
             || groupRoundStopping
             || !activeGroupRoom
           }
-                icon={<UsersRound size={15} />}><span>
+          icon={<ArrowUp size={15} />}><span>
             {groupRoundStopping
               ? (lang === "zh" ? "等待收尾" : "Waiting to finish")
               : startGroupRoundPending || groupRoundActive
                 ? (groupRoundActive ? (lang === "zh" ? "讨论中" : "Running") : (lang === "zh" ? "启动中" : "Starting"))
               : (lang === "zh" ? "启动一轮" : "Run round")}
-          </span></VButton>
-        {groupRoundActive && !groupRoundStopping ? (
-          <VButton
-            type="button"
-            className={styles.groupStopButton}
-            onClick={onStopGroupRound}
-            isDisabled={groupStopDisabled}
-            title={lang === "zh" ? "停止当前群聊轮次" : "Stop current group round"}
-                icon={<Square size={15} />}><span>
-              {stopGroupRoundPending
-                ? (lang === "zh" ? "停止中" : "Stopping")
-                : (lang === "zh" ? "停止" : "Stop")}
-            </span></VButton>
-        ) : null}
+          </span></VButton>}
+        </div>
+        </div>
+        <div className={styles.groupComposerFootnote}><span>{lang === "zh" ? "发送给团队" : "Send to team"}</span><span>{lang === "zh" ? "Ctrl + Enter 启动一轮" : "Ctrl + Enter to start"}</span></div>
       </div>
+      <VDialog open={membersOpen} onOpenChange={setMembersOpen} title={lang === "zh" ? "团队成员" : "Team members"}
+        contentClassName="!left-auto !right-0 !top-0 !h-[100dvh] !max-h-[100dvh] !w-[min(100%,380px)] !transform-none !translate-x-0 !translate-y-0 !rounded-none"
+        onCloseAutoFocus={(event) => { event.preventDefault(); if (!membersManagementHandoffRef.current) membersTriggerRef.current?.focus({ preventScroll: true }); }}>
+        <p className={styles.groupMemberMeta}>{availableGroupParticipantCount} {lang === "zh" ? "位成员" : "members"} · {groupRoomEyebrow}</p>
+        <div className={styles.groupMembers}>
+          {(visibleGroupParticipants ?? [...activeGroupParticipantById.values()].filter(isAvailableGroupParticipant)).map((participant) => {
+            const identity = groupParticipantIdentity(participant);
+            return <div key={participant.participantId} className={styles.groupMemberRow}>
+              {renderAgentAvatar(styles.groupBubbleAvatar, identity.avatarImageUrl || undefined, avatarInitials(participant.agentCode, identity.name, "AI"))}
+              <div className="min-w-0 flex-1"><strong className="block truncate [font-size:var(--vui-font-sm)]">{identity.name}</strong><span className={styles.groupMemberMeta}>{identity.functionLabel || identity.compactRole || identity.modelLabel}</span></div>
+              <span className={styles.groupMemberMeta}>{statusLabel(participant.status || "ready")}</span>
+            </div>;
+          })}
+        </div>
+        {onManageGroupRoom ? <VButton variant="secondary" className="mt-4" onClick={() => { membersManagementHandoffRef.current = true; setMembersOpen(false); onManageGroupRoom(); }}>{lang === "zh" ? "管理群聊" : "Manage group"}</VButton> : null}
+      </VDialog>
+      <VConfirmDialog open={confirmStopOpen} onOpenChange={setConfirmStopOpen}
+        title={lang === "zh" ? "停止本轮讨论？" : "Stop this round?"}
+        description={lang === "zh" ? "已有发言与产出会保留。" : "Existing messages and outputs will be kept."}
+        confirmLabel={lang === "zh" ? "停止本轮" : "Stop round"} cancelLabel={lang === "zh" ? "继续讨论" : "Keep discussing"}
+        confirmDisabled={groupStopDisabled || !groupRoundActive || groupRoundStopping}
+        onCloseAutoFocus={(event) => { event.preventDefault(); (stopTriggerRef.current?.isConnected ? stopTriggerRef.current : composerRef.current)?.focus({ preventScroll: true }); }}
+        onConfirm={() => { setConfirmStopOpen(false); if (!groupStopDisabled && groupRoundActive && !groupRoundStopping) onStopGroupRound(); }} />
     </div>
   );
 }

@@ -67,7 +67,7 @@ export function TeamBundleToolbarActions({ lang, selectedTeamId }: TeamBundleToo
             setOpen(true);
           }}
         >
-          {importLabel}
+          {lang === "zh" ? "导入" : "Import"}
         </VButton>
         {selectedTeamId ? (
           <VButton
@@ -83,7 +83,7 @@ export function TeamBundleToolbarActions({ lang, selectedTeamId }: TeamBundleToo
               void handleExport();
             }}
           >
-            {exportLabel}
+            {lang === "zh" ? "导出" : "Export"}
           </VButton>
         ) : null}
       </div>

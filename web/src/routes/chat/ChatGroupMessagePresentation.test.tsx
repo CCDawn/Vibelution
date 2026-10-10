@@ -174,7 +174,7 @@ describe("ChatGroupMessageBody", () => {
     expect(html).toContain("先看主诉。");
     expect(html).toContain("展开全文");
     expect(html).toContain(styles.groupBubbleBodyCollapsed);
-    expect(styles.groupBubbleBodyCollapsed).toContain("[-webkit-line-clamp:8]");
+    expect(styles.groupBubbleBodyCollapsed).toContain("[-webkit-line-clamp:5]");
     expect(styles.groupBubbleBodyCollapsed).not.toMatch(/(?:^|\s)hidden(?:\s|$)/);
   });
 });

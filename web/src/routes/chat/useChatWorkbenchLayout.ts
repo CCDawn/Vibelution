@@ -92,7 +92,12 @@ export function useChatWorkbenchLayout({
   const setChatPanelWidths = useShellStore((state) => state.setChatPanelWidths);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
+  const [ordinaryLeftRailCollapsed, setOrdinaryLeftRailCollapsed] = useState(false);
+  // The group already exposes members in its header. Keep the full directory
+  // reachable through the shell toggle without duplicating it on first open.
+  const [groupLeftRailCollapsed, setGroupLeftRailCollapsed] = useState(true);
+  const leftRailCollapsed = standardGroupRoomActive ? groupLeftRailCollapsed : ordinaryLeftRailCollapsed;
+  const setLeftRailCollapsed = standardGroupRoomActive ? setGroupLeftRailCollapsed : setOrdinaryLeftRailCollapsed;
   // Default expanded on wide layouts so the status rail is discoverable.
   const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
   const [responsiveLayout, setResponsiveLayout] = useState(() =>

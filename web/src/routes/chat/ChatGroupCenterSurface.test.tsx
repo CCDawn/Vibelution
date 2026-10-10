@@ -70,7 +70,93 @@ function baseProps(patch: Partial<ChatGroupCenterSurfaceProps> = {}): ChatGroupC
 }
 
 describe("ChatGroupCenterSurface hand-test substitutes", () => {
-  it("leads with the digest, folds history, and reveals the failed message without starting a round", async () => {
+  it("keeps following a large stream burst until the reader scrolls away", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    const props = baseProps({ groupRoundActive: true });
+    const streams = (content: string) => ({ round: { speaker: { content } } }) as never;
+    try {
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} />));
+      const timeline = host.querySelector<HTMLElement>('[role="log"]')!;
+      let height = 1000;
+      Object.defineProperty(timeline, "scrollHeight", { get: () => height });
+      Object.defineProperty(timeline, "clientHeight", { get: () => 500 });
+      timeline.scrollTop = 500;
+      await act(async () => timeline.dispatchEvent(new Event("scroll", { bubbles: true })));
+      height = 1500;
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} groupSpeakerStreams={streams("burst")} />));
+      expect(timeline.scrollTop).toBe(1500);
+      timeline.scrollTop = 200;
+      await act(async () => timeline.dispatchEvent(new Event("scroll", { bubbles: true })));
+      height = 2000;
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} groupSpeakerStreams={streams("next burst")} />));
+      expect(timeline.scrollTop).toBe(200);
+    } finally { await act(async () => root.unmount()); host.remove(); }
+  });
+
+  it("keeps delivery counters behind an explicit result disclosure", async () => {
+    const props = baseProps();
+    const summary = "本轮群聊完成：2/2 位参与者成功发言，0 位未成功（失败 0、受阻 0、停止 0、0 位部分完成）。";
+    const room = { ...props.activeGroupRoom!, rounds: [{ roundId: "delivery", status: "completed", topic: "验收反馈", summary, messages: [] }] } as never;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} activeGroupRoom={room} />));
+      expect(host.textContent).not.toContain(summary);
+      const result = [...host.querySelectorAll("button")].find((button) => button.textContent === "轮次结果")!;
+      expect(result.getAttribute("aria-expanded")).toBe("false");
+      await act(async () => result.click());
+      expect(host.textContent).toContain(summary);
+      expect(result.getAttribute("aria-expanded")).toBe("true");
+      await act(async () => result.click());
+      expect(host.textContent).not.toContain(summary);
+    } finally { await act(async () => root.unmount()); host.remove(); }
+  });
+
+  it("uses Ctrl+Enter for a new round and preserves Enter, IME and active-round guards", async () => {
+    const start = vi.fn();
+    const props = baseProps({ onStartGroupRound: start });
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} />));
+      const input = host.querySelector("textarea")!;
+      const press = (options: KeyboardEventInit) => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, ...options }));
+      await act(async () => { press({}); press({ ctrlKey: true, isComposing: true }); });
+      expect(start).not.toHaveBeenCalled();
+      await act(async () => { press({ ctrlKey: true }); });
+      expect(start).toHaveBeenCalledTimes(1);
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} groupRoundActive />));
+      await act(async () => { press({ ctrlKey: true }); });
+      expect(start).toHaveBeenCalledTimes(1);
+    } finally { await act(async () => root.unmount()); host.remove(); }
+  });
+
+  it("only stops an active round after confirmation and keeps cancellation reversible", async () => {
+    const stop = vi.fn();
+    const props = baseProps({ groupRoundActive: true, groupStopDisabled: false, onStopGroupRound: stop });
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(<ChatGroupCenterSurface {...props} />));
+      const trigger = [...host.querySelectorAll("button")].find((button) => button.textContent === "停止本轮")!;
+      await act(async () => trigger.click());
+      expect(stop).not.toHaveBeenCalled();
+      const cancel = [...document.querySelectorAll('[role="dialog"] button')].find((button) => button.textContent === "继续讨论") as HTMLButtonElement;
+      await act(async () => cancel.click());
+      expect(stop).not.toHaveBeenCalled();
+      await act(async () => trigger.click());
+      const confirm = [...document.querySelectorAll('[role="dialog"] button')].find((button) => button.textContent === "停止本轮") as HTMLButtonElement;
+      await act(async () => confirm.click());
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally { await act(async () => root.unmount()); host.remove(); }
+  });
+
+  it("keeps historical speech visible, puts conclusions after it, and locates failures without starting a round", async () => {
     const props = baseProps();
     const startRound = vi.fn();
     const room = { ...props.activeGroupRoom!, rounds: [
@@ -85,13 +171,13 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     const root = createRoot(host);
     try {
       await act(async () => root.render(<ChatGroupCenterSurface {...props} activeGroupRoom={room} onStartGroupRound={startRound} />));
-      const transcript = host.querySelector('[data-parse-invalid="true"]')!.closest('[hidden]') as HTMLElement;
-      expect(transcript.hidden).toBe(true);
+      const failedMessage = host.querySelector('[data-parse-invalid="true"]')!;
+      expect(failedMessage.closest('[hidden]')).toBeNull();
       const latestRound = [...host.querySelectorAll("section")].find((section) => section.textContent?.includes("可用纪要"))!;
-      expect(latestRound.innerHTML.indexOf("可用纪要")).toBeLessThan(latestRound.innerHTML.indexOf("新议题"));
+      expect(latestRound.innerHTML.indexOf("可用纪要")).toBeGreaterThan(latestRound.innerHTML.indexOf("新议题"));
       const jump = [...host.querySelectorAll("button")].find((button) => button.textContent === "定位解析失败发言")!;
       await act(async () => jump.click());
-      expect(transcript.hidden).toBe(false);
+      expect(failedMessage.closest('[hidden]')).toBeNull();
       expect(scroll).toHaveBeenCalled();
       expect(startRound).not.toHaveBeenCalled();
     } finally {
@@ -144,7 +230,7 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("研究组");
     expect(html).toContain("群聊已创建，输入议题后开始第一轮讨论。");
     expect(html).toContain("启动一轮");
-    expect(html).toContain("value=\"下一议题\"");
+    expect(html).toContain("下一议题</textarea>");
   });
 
   it("does not claim a room exists after a settled empty response", () => {
@@ -184,7 +270,8 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       />,
     );
     expect(html).toContain("更多操作");
-    expect(html.indexOf("更多操作")).toBeLessThan(html.indexOf("value=\"下一议题\""));
+    expect(html).toContain("下一议题</textarea>");
+    expect(html.indexOf("更多操作")).toBeLessThan(html.indexOf("启动一轮"));
   });
 
   it("renders project-bus empty notice stream and broadcast composer", () => {
@@ -285,11 +372,13 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).not.toContain("第 1 轮");
   });
 
-  it("keeps the standard group-room header on room mode and purpose labels", () => {
+  it("keeps the group header quiet and exposes member details on demand", () => {
     const html = renderToStaticMarkup(<ChatGroupCenterSurface {...baseProps()} />);
 
-    expect(html).toContain("轮询讨论");
-    expect(html).toContain("讨论");
+    expect(html).toContain("团队讨论");
+    expect(html).toContain("成员");
+    expect(html).not.toContain("位可用助手");
+    expect(html).not.toContain("轮询讨论");
     expect(html).not.toContain("全局广播");
   });
 
@@ -363,7 +452,7 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("请讨论拆分风险");
     expect(html).toContain("风险可控");
     expect(html).toContain("结论：可控");
-    expect(html).toContain("本轮纪要");
+    expect(html).toContain("本轮结论");
     expect(html).toContain("group-stream-identity");
     expect(html).toContain("group-stream-topic-identity");
     expect(html).not.toContain("!bg-vui-surface-row");
@@ -475,8 +564,7 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
       />,
     );
 
-    expect(html).toContain("正在停止，等待收尾");
-    expect(html).toContain("请点击刷新");
+    expect(html).toContain("正在停止，已有发言会保留。");
     expect(html).toContain("等待收尾");
     expect(html).not.toContain("停止当前群聊轮次");
   });

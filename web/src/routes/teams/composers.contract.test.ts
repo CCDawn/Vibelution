@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const routeShellSource = readFileSync(new URL("./TeamsRouteWorkbench.tsx", import.meta.url), "utf8");
 const routeModelSource = readFileSync(new URL("./useTeamsWorkbenchModel.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchFoundation.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./useTeamsWorkbenchScLayer.ts", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./buildTeamsWorkbenchResearchSurfacesFromBag.ts", import.meta.url), "utf8") + "\n" + readFileSync(new URL("./createTeamsWorkbenchResearchSurfaces.ts", import.meta.url), "utf8");
 const canvasPageSource = readFileSync(new URL("./renderTeamsWorkbenchCanvasPage.tsx", import.meta.url), "utf8");
+const teamsCanvasComposerSource = readFileSync(new URL("./TeamsCanvasComposer.tsx", import.meta.url), "utf8");
 const boardPageSource = readFileSync(new URL("./renderTeamsWorkbenchBoardPage.tsx", import.meta.url), "utf8");
 const routeSource = `${routeShellSource}\n${routeModelSource}\n${canvasPageSource}\n${boardPageSource}`;
 const shellPath = new URL("./ResearchStageWorkbenchShell.tsx", import.meta.url);
@@ -138,6 +139,19 @@ describe("Teams clarity composers (① shell + F1/F4 controllers)", () => {
     expect(syncRoom).toBeGreaterThan(editGate);
     expect(addNode).toBeGreaterThan(editGate);
     expect(archive).toBeGreaterThan(editGate);
+  });
+
+  it("opens ordinary teams on task home and offers a return from organization editing", () => {
+    expect(canvasPageSource).toContain('key={props.effectiveTeamId || "no-team"}');
+    expect(canvasPageSource).toContain("const [organizationOpen, setOrganizationOpen] = useState(false)");
+    expect(canvasPageSource).toContain("<TeamHomeSurface {...p.teamHome}");
+    expect(canvasPageSource).toContain("hideInspector={showTeamHome || p.hideInspector}");
+    expect(canvasPageSource).toContain("rail={showTeamHome ? undefined : p.teamShellRail}");
+    expect(canvasPageSource).toContain("toolbarLeadingAction={!p.researchWorkflowTeamSelected && p.teamHome && organizationOpen");
+    expect(canvasPageSource).toContain("返回任务首页");
+    expect(teamsCanvasComposerSource).toContain("responsive={{");
+    expect(teamsCanvasComposerSource).toContain("enabled: true");
+    expect(teamsCanvasComposerSource).toContain("rail: { label: responsiveRailLabel }");
   });
 
   it("F3 presentation metrics extracted from hook body", () => {

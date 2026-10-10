@@ -402,4 +402,58 @@
 - 与 `TeamCreateDialog` 的边界：创建向导管「从模板建队」，本面对「已存在团队」的聚合配置。
 - 与 `TeamNodeBindingPanel` 的边界：节点绑定面板服务画布选中节点，本面服务团队级聚合配置且不依赖画布。
 - 归档入口唯一：画布工具栏不保留第二个归档按钮；`updateTeam(` 仅允许 `useTeamSettingsActions` 调用（有 grep 契约测试锁定）。
+- 顶栏配置包按钮使用短可见标签「导入」「导出」，完整名称保留在 `aria-label` 中，避免窄屏换行。
 - 禁止再新建第二套团队编辑表单或成员管理面。
+
+---
+
+## TeamHomeSurface
+
+### 功能
+普通团队的任务首页：突出当前任务、该轮结论与近期发言，并提供启动/停止、群聊跳转和组织结构入口。
+
+### 适用范围
+- **适用**：普通团队工作台 canvas 模式的默认内容。
+- **不适用**：科研工作流团队。科研团队仍由其阶段工作区和团队沟通面承载。
+
+| 场景 | 选择 |
+| --- | --- |
+| 普通团队进入工作台 | 默认显示 `TeamHomeSurface` |
+| 查看/编辑成员组织关系 | 从首页进入 `TeamOrganizationCanvasSurface`，可返回任务首页 |
+| 查找完整群聊历史 | 用「打开群聊」进入关联房间 |
+
+### 使用方式
+```tsx
+// Teams canvas page 注入现有团队查询与 mutation；发言读取共享群聊 timeline 投影。
+<TeamHomeSurface
+  selectedTeam={selectedTeam}
+  latestTeamRound={latestTeamRound}
+  linkedChatRoomId={linkedChatRoomId}
+  linkedRoomDetail={linkedRoomDetail}
+  onStartTeamRound={startTeamRound}
+  onStopTeamRound={stopTeamRound}
+/>
+```
+
+| 内容 | 设计注意 |
+| --- | --- |
+| 当前任务 / 状态 / 更新时间 | 以详情中的 `latestTeamRound` 为当前轮元数据，避免 timeline 追赶时显示上一轮状态 |
+| 近期发言与结论 | 使用 `useGroupRoomTimeline` 投影；只展示与 `latestTeamRound.roundId` 相同的轮次。新轮详情先到时暂不挂载上一轮内容；投影处于 legacy fallback 时沿用详情轮次 |
+| timeline 刷新 | 房间首次详情不重复触发请求；后续 `updatedAt` 或当前轮更新时间变化时失效该房间 timeline 缓存 |
+| 发言内容 | 复用群聊 `ChatGroupMessageBody`，不解析协议 JSON、不另造消息过滤规则；最多显示当前轮末尾 4 条，完整历史留在群聊 |
+| 轮次摘要 | 结论直接展示；服务端“参与者成功发言”计数摘要放入折叠的轮次结果，不冒充讨论结论 |
+| 主动作 | 空闲时提交下一轮任务，运行时停止前确认且保留已有产出；群聊未关联时提供同步入口 |
+| 组织结构切换 | 页面局部切换，组织画布提供明确返回动作；切换团队时回到首页 |
+| 布局 | 桌面两栏显示发言与主动作；窄屏正文折为单列。首页不显示重复节点 rail 或 rail 抽屉按钮；顶栏团队选择器负责切换，组织结构视图恢复 rail |
+
+### 非职责
+- 不复制群聊时间线、消息发送/广播能力或团队历史列表。
+- 不自建轮次状态、不合成执行阶段；轮次元数据来自 `latestTeamRound`，发言内容复用群聊 timeline 投影。
+- 不直接写画布；members→canvas 投影由后端 `update_team` 完成。
+
+### 实现落点
+- 源码：`web/src/routes/teams/TeamHomeSurface.tsx`；挂载与首页/组织结构切换在 `renderTeamsWorkbenchCanvasPage.tsx`。
+
+### 视觉与状态
+- 读取中、读取失败、未关联群聊、空成员、运行与停止中均沿用现有状态和操作；失败原因保持可读。
+- 新轮次的消息投影未追上时显示同步提示；长发言沿用群聊的显式展开，桌面和窄屏均保留独立阅读滚动。

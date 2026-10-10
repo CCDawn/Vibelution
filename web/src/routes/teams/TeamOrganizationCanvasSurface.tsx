@@ -100,6 +100,7 @@ export type TeamOrganizationCanvasSurfaceProps = {
   nodeReadOnlyClassName: string;
   styles: Record<string, string>;
   completionFlowSlot?: ReactNode;
+  toolbarLeadingAction?: ReactNode;
   teamWorkspaceRoute: (teamId: string) => string;
   teamChatRoomRoute: (roomId: string, backHref: string, backLabel: string) => string;
   onSelectNode: (nodeId: string) => void;
@@ -160,6 +161,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
     nodeReadOnlyClassName,
     styles,
     completionFlowSlot,
+    toolbarLeadingAction,
     teamWorkspaceRoute,
     teamChatRoomRoute,
     onSelectNode,
@@ -205,7 +207,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
         <div className={styles.canvasToolbar} data-testid="team-canvas-toolbar">
           {/* View controls (edge layer, room link) stay reachable in read-only
               canvas mode; the edit cluster renders only for authoring surfaces. */}
-          <div className="min-w-0" />
+          <div className="min-w-0">{toolbarLeadingAction}</div>
           <VActionGroup
             className={styles.toolbarActions}
             ariaLabel={lang === "zh" ? "团队画布操作" : "Team canvas actions"}

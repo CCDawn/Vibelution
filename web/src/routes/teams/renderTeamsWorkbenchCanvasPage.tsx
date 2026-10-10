@@ -1,11 +1,14 @@
 /**
  * Canvas-mode shell return for Teams workbench (R2-q extract).
  */
-import type { CSSProperties, MutableRefObject, ReactNode } from "react";
+import { useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import type { Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
+import { ArrowLeft } from "lucide-react";
+import { VNativeButton } from "../../components/vui";
 import { TeamsCanvasComposer } from "./TeamsCanvasComposer";
 import { TeamOrganizationCanvasSurface, type TeamCanvasAuthoringProps } from "./TeamOrganizationCanvasSurface";
+import { TeamHomeSurface, type TeamHomeSurfaceProps } from "./TeamHomeSurface";
 import { TEAMS_LAYOUT_ID } from "./teamsWorkbenchChrome";
 import type { PaneSpec } from "../../components/layout/paneLayoutPersistence";
 import { teamWorkspaceRoute } from "./researchWorkspaceModel";
@@ -77,10 +80,17 @@ export type TeamsWorkbenchCanvasPageProps = {
   onNodePointerUp: any;
   onNodePointerCancel: any;
   canvasAuthoring?: TeamCanvasAuthoringProps;
+  teamHome?: Omit<TeamHomeSurfaceProps, "onOpenOrganization">;
 };
 
 export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPageProps) {
-  const p = props;
+  return <TeamsWorkbenchCanvasPage key={props.effectiveTeamId || "no-team"} {...props} />;
+}
+
+function TeamsWorkbenchCanvasPage(p: TeamsWorkbenchCanvasPageProps) {
+  const [organizationOpen, setOrganizationOpen] = useState(false);
+  const showTeamHome = Boolean(!p.researchWorkflowTeamSelected && p.teamHome && !organizationOpen);
+
   return (
     <TeamsCanvasComposer
       className={p.styles.route}
@@ -88,13 +98,14 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
       resize={p.teamsRailResize}
       ariaLabel={p.selectedTeamContextTitle}
       title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
-      rail={p.teamShellRail}
+      responsiveRailLabel={p.lang === "zh" ? "团队列表" : "Team list"}
+      rail={showTeamHome ? undefined : p.teamShellRail}
       toolbar={p.teamShellToolbar}
       styles={p.styles}
       researchWorkflowTeamSelected={p.researchWorkflowTeamSelected}
       researchCanvasReadOnly={p.researchCanvasReadOnly}
       researchFlowSlot={p.researchFlowSlot}
-      hideInspector={p.hideInspector}
+      hideInspector={showTeamHome || p.hideInspector}
       validationValid={p.validationValid}
       inspectorTitle={
         p.researchCanvasReadOnly
@@ -102,7 +113,9 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
           : (p.lang === "zh" ? "节点绑定" : "Node binding")
       }
       inspectorBody={p.inspectorBody}
-      canvas={(
+      canvas={showTeamHome && p.teamHome ? (
+        <TeamHomeSurface {...p.teamHome} onOpenOrganization={() => setOrganizationOpen(true)} />
+      ) : (
         <TeamOrganizationCanvasSurface
           lang={p.lang}
           selectedTeam={p.selectedTeam}
@@ -148,6 +161,12 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
           nodeReadOnlyClassName={p.styles.nodeReadOnly}
           styles={p.styles}
           completionFlowSlot={p.completionFlowSlot}
+          toolbarLeadingAction={!p.researchWorkflowTeamSelected && p.teamHome && organizationOpen ? (
+            <VNativeButton type="button" onClick={() => setOrganizationOpen(false)}>
+              <ArrowLeft size={14} aria-hidden="true" />
+              {p.lang === "zh" ? "返回任务首页" : "Back to team home"}
+            </VNativeButton>
+          ) : null}
           teamWorkspaceRoute={teamWorkspaceRoute}
           teamChatRoomRoute={teamChatRoomRoute}
           onSelectNode={p.onSelectNode}
@@ -161,7 +180,7 @@ export function renderTeamsWorkbenchCanvasPage(props: TeamsWorkbenchCanvasPagePr
           onNodePointerUp={p.onNodePointerUp}
           onNodePointerCancel={p.onNodePointerCancel}
           canvasAuthoring={p.canvasAuthoring}
-        />
+      />
       )}
     />
   );

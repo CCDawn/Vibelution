@@ -45,4 +45,21 @@ describe("VDialog", () => {
     expect(rendererSource).toContain('lg: "w-[min(100%,36rem)]"');
     expect(rendererSource).toContain("fixed left-1/2 top-1/2");
   });
+
+  it("keeps center positioning independent from dialog scale motion", () => {
+    const rendererSource = readFileSync(
+      resolve(import.meta.dirname, "../renderers/shadcn/ShadcnDialog.tsx"),
+      "utf8",
+    );
+    const motionSource = readFileSync(
+      resolve(import.meta.dirname, "../renderers/shadcn/shadcnDialogMotion.css"),
+      "utf8",
+    );
+    const animatedTransforms = [...motionSource.matchAll(/^\s*transform:\s*(.+);$/gm)].map(
+      ([, value]) => value.trim(),
+    );
+
+    expect(rendererSource).toContain("-translate-x-1/2 -translate-y-1/2");
+    expect(animatedTransforms).toEqual(["scale(0.96)", "scale(1)", "scale(1)", "scale(0.96)"]);
+  });
 });
