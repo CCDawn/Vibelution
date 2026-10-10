@@ -24,7 +24,7 @@ LIMIT_NOTICE = (
 def validate_limit_binding(snapshot: Any, params: Mapping[str, Any]) -> None:
     assets = list(snapshot.assets.values()) if isinstance(snapshot, basket_data.BasketSnapshot) else [snapshot]
     wants_limits = normalize_limit_model(params) == SUPPLIED_LIMIT_MODEL
-    if any((asset.price_limits is not None) != wants_limits for asset in assets):
+    if any((getattr(asset, "price_limits", None) is not None) != wants_limits for asset in assets):
         raise data.BacktestInputError("限价模型与冻结逐日限价不匹配")
 
 
