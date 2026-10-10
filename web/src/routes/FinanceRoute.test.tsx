@@ -106,7 +106,7 @@ async function chooseTab(label: string) {
   await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
 }
 async function chooseGroup(label: string) {
-  const group = [...container.querySelectorAll<HTMLButtonElement>('nav[aria-label="工作台功能分组"] button')].find(item => item.textContent === label)!;
+  const group = [...container.querySelectorAll<HTMLButtonElement>('nav[aria-label="工作台功能分组"] button')].find(item => item.getAttribute("aria-label") === label)!;
   await act(async () => group.click());
 }
 async function openResearchSettings() {
@@ -195,7 +195,7 @@ describe("financial assistant page", () => {
     await render("/finance?session=native-session&finance_tab=report");
     await settle();
     expect(container.querySelector("[data-finance-report-body]")?.textContent).toContain("11.57元/股");
-    expect(container.querySelector('[aria-label="当前研究主题"]')?.textContent).toContain(nativeTitle);
+    expect(container.querySelector('[aria-label="当前主题"]')?.textContent).toContain(nativeTitle);
     expect(container.querySelector('[aria-label="当前股票"]')).toBeNull();
     expect(createChatSession).not.toHaveBeenCalled();
     expect(nativeSubmit).not.toHaveBeenCalled();
@@ -356,6 +356,8 @@ describe("financial assistant page", () => {
     vi.mocked(createFinancialAssistant).mockReturnValue(new Promise((done) => { resolve = done; }));
     await render("/finance?session=native-session");
     expect(createFinancialAssistant).not.toHaveBeenCalled();
+    await chooseTab("过程");
+    const locationBeforeActivation = container.querySelector("output")?.textContent;
     const enable = button("启用行情查询")!;
     expect(enable).toBeTruthy();
     await act(async () => { enable.click(); enable.click(); });
@@ -364,7 +366,7 @@ describe("financial assistant page", () => {
     await act(async () => resolve({ created: false, assistant: { ...row, marketToolStatus: "assigned" } }));
     await settle();
     expect(button("启用行情查询")).toBeUndefined();
-    expect(container.querySelector("output")?.textContent).toBe("/finance?session=native-session");
+    expect(container.querySelector("output")?.textContent).toBe(locationBeforeActivation);
     expect(createChatSession).not.toHaveBeenCalled();
   });
 
@@ -372,6 +374,7 @@ describe("financial assistant page", () => {
     vi.mocked(listFinancialAssistants).mockResolvedValue([{ ...row, marketToolStatus: "upgrade_available" }]);
     vi.mocked(createFinancialAssistant).mockRejectedValue(new Error("启用未完成"));
     await render("/finance?session=native-session");
+    await chooseTab("过程");
     await act(async () => button("启用行情查询")!.click());
     await settle();
     expect(container.textContent).toContain("启用未完成");
@@ -419,8 +422,7 @@ describe("financial assistant page", () => {
     expect(createFinancialAssistant).not.toHaveBeenCalled();
     expect(fetchSessionDetail).not.toHaveBeenCalled();
     expect(container.textContent).toContain("finance-workspace");
-    const sourceTab = [...container.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent === "引用与资料");
-    await act(async () => sourceTab?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+    await chooseTab("资料");
     await settle();
     expect(listKnowledgeItems).toHaveBeenCalledWith(row.knowledgeBaseId, expect.objectContaining({ agentId: row.agentId, signal: expect.any(AbortSignal) }));
   });
@@ -476,12 +478,12 @@ describe("financial assistant page", () => {
     await render();
     expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"]')).not.toBeNull();
     expect(container.querySelector('[data-finance-entry-state="loading"]')).not.toBeNull();
-    expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"] header')).toBeNull();
+    expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"] > header')).toBeNull();
     await act(async () => resolve([row]));
     await settle();
     expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"]')).not.toBeNull();
     expect(container.textContent).toContain("finance-workspace");
-    expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"] header')).toBeNull();
+    expect(container.querySelector('[data-vui-domain-recipe="financial-assistant-workspace"] > header')).toBeNull();
     expect(container.querySelector('[data-vui="split-sidebar"] a[aria-label="模型与助手配置"]')).not.toBeNull();
   });
 
