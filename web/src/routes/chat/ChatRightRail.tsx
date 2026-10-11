@@ -397,6 +397,41 @@ function openKind(
   });
 }
 
+function ChatRightRailFileBody({
+  filePath,
+  copy,
+  onOpenFile,
+}: {
+  filePath: string;
+  copy: {
+    fileOpen: string;
+    fileLoading: string;
+    fileError: string;
+    fileEmpty: string;
+    fileTruncated: string;
+  };
+  onOpenFile: (path: string) => void;
+}) {
+  const fileQuery = useQuery({
+    queryKey: queryKeys.fileContent(filePath),
+    queryFn: () => fetchFileContent(filePath),
+    enabled: Boolean(filePath),
+  });
+  return (
+    <div className={styles.plain}>
+      <p className={styles.note}>{filePath}</p>
+      <VButton type="button" density="compact" onClick={() => onOpenFile(filePath)}>
+        {copy.fileOpen}
+      </VButton>
+      {fileQuery.isPending ? <p className={styles.note}>{copy.fileLoading}</p> : null}
+      {fileQuery.isError ? <p className={styles.error} role="alert">{copy.fileError}</p> : null}
+      {fileQuery.data?.truncated ? <p className={styles.note}>{copy.fileTruncated}</p> : null}
+      {fileQuery.data && !fileQuery.data.content ? <p className={styles.note}>{copy.fileEmpty}</p> : null}
+      {fileQuery.data?.content ? <pre className={styles.fileBody}>{fileQuery.data.content}</pre> : null}
+    </div>
+  );
+}
+
 export function ChatRightRail({
   className,
   lang,
@@ -484,12 +519,6 @@ export function ChatRightRail({
       directoryOpen: "Open the side-chat center",
     };
   const active = activeChatRightRailTab(model);
-  const filePath = active?.kind === "file" ? (active.filePath || "") : "";
-  const fileQuery = useQuery({
-    queryKey: queryKeys.fileContent(filePath),
-    queryFn: () => fetchFileContent(filePath),
-    enabled: Boolean(filePath),
-  });
   const launcher = chatRightRailLauncherKinds(sessionKind);
   const matches = searchChatRightRailTabs(model, searchQuery);
   const devtoolsView = projectChatRightRailDevtools(devtools);
@@ -913,17 +942,11 @@ export function ChatRightRail({
           )
         ) : null}
         {active?.kind === "file" && active.filePath ? (
-          <div className={styles.plain}>
-            <p className={styles.note}>{active.filePath}</p>
-            <VButton type="button" density="compact" onClick={() => onOpenFile(active.filePath || "")}>
-              {copy.fileOpen}
-            </VButton>
-            {fileQuery.isPending ? <p className={styles.note}>{copy.fileLoading}</p> : null}
-            {fileQuery.isError ? <p className={styles.error} role="alert">{copy.fileError}</p> : null}
-            {fileQuery.data?.truncated ? <p className={styles.note}>{copy.fileTruncated}</p> : null}
-            {fileQuery.data && !fileQuery.data.content ? <p className={styles.note}>{copy.fileEmpty}</p> : null}
-            {fileQuery.data?.content ? <pre className={styles.fileBody}>{fileQuery.data.content}</pre> : null}
-          </div>
+          <ChatRightRailFileBody
+            filePath={active.filePath}
+            copy={copy}
+            onOpenFile={onOpenFile}
+          />
         ) : null}
         {active?.kind === "directory" ? (
           <div className={styles.plain}>
